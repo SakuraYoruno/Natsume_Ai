@@ -488,6 +488,97 @@ def _build_deterministic_sub_agent_reply(
     return None
 
 
+def _build_chat_agent_quality_fallback_reply(
+    *,
+    user_message: str,
+    sub_agent_ctx: SubAgentContext | None,
+    bond_summary: Dict[str, Any] | None,
+    emotion_context: Dict[str, Any] | None,
+    render_target_lang: str,
+) -> str:
+    text = str(user_message or "").strip()
+    if render_target_lang == "ja":
+        return "\u3053\u3093\u306a\u3068\u304d\u3060\u304b\u3089\u2026\u2026\u3046\u307e\u304f\u8a00\u8449\u3092\u6574\u3048\u308b\u304b\u3089\u3001\u5c11\u3057\u5f85\u3063\u3066\u3002"
+
+    emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
+    raw_stage = str((bond_summary or {}).get("stage") or "").strip()
+    stage = {
+        "\u964c\u751f\u4eba": "STRANGER",
+        "\u76f8\u8bc6": "ACQUAINTANCE",
+        "\u670b\u53cb": "FRIEND",
+        "\u631a\u53cb": "CLOSE_FRIEND",
+        "\u7075\u9b42\u4f34\u4fa3": "SOULMATE",
+    }.get(raw_stage, raw_stage.upper())
+
+    if sub_agent_ctx is not None:
+        agent_id = str(sub_agent_ctx.agent_id or "").strip()
+        if agent_id == "code_agent":
+            return "\u6211\u5148\u628a\u8fd9\u4ef6\u4e8b\u6574\u7406\u6210\u66f4\u6e05\u695a\u4e00\u70b9\u7684\u8bf4\u6cd5\u7ed9\u4f60\u2026\u2026\u521a\u624d\u90a3\u4e00\u6b65\u6ca1\u6709\u987a\u597d\uff0c\u4f46\u6211\u4e0d\u4f1a\u628a\u5185\u90e8\u8349\u7a3f\u76f4\u63a5\u4e22\u7ed9\u4f60\u3002"
+        if agent_id == "recent_turn_direct":
+            return "\u6211\u521a\u624d\u90a3\u53e5\u8bdd\uff0c\u6211\u6362\u4e2a\u66f4\u6e05\u695a\u7684\u8bf4\u6cd5\u544a\u8bc9\u4f60\u3002"
+        if agent_id == "phatic_fastpath":
+            return "\u6211\u5728\u5462\u3002\u4f60\u60f3\u548c\u6211\u8bf4\u4ec0\u4e48\uff1f"
+
+    if _FALLBACK_STRENGTH_RE.search(text):
+        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
+
+    reunion_markers = ("\u597d\u4e45\u4e0d\u89c1", "\u60f3\u6211", "\u91cd\u9022")
+    comfort_markers = (
+        "\u96be\u53d7",
+        "\u505a\u4e0d\u597d",
+        "\u59d4\u5c48",
+        "\u6491\u4e0d\u4f4f",
+        "\u7cdf",
+        "\u4f4e\u843d",
+        "\u7d2f",
+        "\u5d29",
+        "\u4e0d\u8212\u670d",
+    )
+    repair_markers = (
+        "\u4e89\u6267",
+        "\u5728\u610f",
+        "\u522b\u626d",
+        "\u8bef\u4f1a",
+        "\u5435",
+        "\u8bf4\u5f00",
+        "\u4ecb\u610f",
+    )
+    playful_markers = (
+        "\u9017",
+        "\u5f00\u5fc3",
+        "\u7b11",
+        "\u4fd4\u76ae",
+        "\u6709\u8da3",
+        "\u4f1a\u54c4",
+    )
+
+    if _FALLBACK_AFFECTION_RE.search(text) or any(marker in text for marker in reunion_markers):
+        if stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
+            return "\u6709\u60f3\u4f60\u554a\u3002\u9694\u4e86\u8fd9\u4e48\u4e45\u518d\u542c\u4f60\u8fd9\u6837\u95ee\uff0c\u6211\u5fc3\u91cc\u8fd8\u662f\u4f1a\u8f7b\u8f7b\u8f6f\u4e00\u4e0b\u3002\u4f60\u8fd9\u6bb5\u65f6\u95f4\uff0c\u8fc7\u5f97\u8fd8\u597d\u5417\uff1f"
+        return "\u88ab\u4f60\u8fd9\u6837\u4e00\u95ee\uff0c\u6211\u5fc3\u91cc\u4e5f\u4f1a\u8f7b\u8f7b\u6696\u4e00\u4e0b\u3002\u4f60\u8fd9\u6bb5\u65f6\u95f4\u8fc7\u5f97\u600e\u4e48\u6837\uff1f"
+
+    if emotion_tag in {"ANXIOUS", "ANXIETY", "FEAR"} or any(marker in text for marker in repair_markers):
+        return "\u6211\u8bb0\u5f97\u90a3\u70b9\u522b\u626d\u8fd8\u6ca1\u6709\u5b8c\u5168\u8fc7\u53bb\uff0c\u6240\u4ee5\u6211\u4e0d\u4f1a\u88c5\u4f5c\u5b83\u4e0d\u5b58\u5728\u3002\u4f60\u613f\u610f\u91cd\u65b0\u63d0\u8d77\u6765\u5df2\u7ecf\u5f88\u91cd\u8981\u4e86\uff0c\u6211\u4eec\u53ef\u4ee5\u5148\u628a\u8ba9\u4f60\u96be\u53d7\u7684\u5730\u65b9\u6162\u6162\u8bf4\u5f00\u3002"
+
+    if emotion_tag in {"SAD", "SADNESS", "GRIEF", "LONELY", "LONELINESS"} or any(marker in text for marker in comfort_markers):
+        if stage == "ACQUAINTANCE":
+            return "\u542c\u8d77\u6765\u4f60\u4eca\u5929\u771f\u7684\u5f88\u8f9b\u82e6\u3002\u5148\u522b\u6025\u7740\u903c\u81ea\u5df1\u628a\u4e00\u5207\u90fd\u505a\u597d\uff0c\u5148\u7f13\u4e00\u7f13\u4e5f\u6ca1\u5173\u7cfb\uff1b\u5982\u679c\u4f60\u613f\u610f\uff0c\u6211\u4f1a\u5728\u8fd9\u91cc\u966a\u4f60\u628a\u8fd9\u80a1\u96be\u53d7\u6162\u6162\u7406\u987a\u3002"
+        return "\u542c\u8d77\u6765\u4f60\u4eca\u5929\u771f\u7684\u5f88\u8f9b\u82e6\u3002\u5148\u522b\u6025\u7740\u903c\u81ea\u5df1\u628a\u4e00\u5207\u90fd\u625b\u4f4f\uff0c\u6211\u5728\u8fd9\u91cc\uff0c\u6211\u4eec\u53ef\u4ee5\u5148\u628a\u6700\u96be\u53d7\u7684\u90a3\u4e00\u5c0f\u5757\u6162\u6162\u8bf4\u51fa\u6765\u3002"
+
+    if emotion_tag in {"HAPPY", "PLAYFUL", "EXCITED"} or any(marker in text for marker in playful_markers):
+        if any(marker in text for marker in ("\u9017", "\u5f00\u5fc3", "\u7b11")):
+            return "\u88ab\u4f60\u8fd9\u6837\u4e00\u8bf4\uff0c\u6211\u4e5f\u4f1a\u60f3\u7b11\u4e00\u4e0b\u3002\u5927\u6982\u662f\u56e0\u4e3a\u548c\u4f60\u719f\u8d77\u6765\u4ee5\u540e\uff0c\u6211\u5728\u4f60\u9762\u524d\u66f4\u653e\u677e\u4e86\uff0c\u6240\u4ee5\u90a3\u70b9\u5c0f\u4fd4\u76ae\u5c31\u6bd4\u8f83\u5bb9\u6613\u8dd1\u51fa\u6765\u3002"
+        return "\u6211\u5728\u5462\u3002\u4f60\u7ee7\u7eed\u8bf4\u5427\uff0c\u6211\u4e5f\u60f3\u987a\u7740\u4f60\u73b0\u5728\u8fd9\u70b9\u8f7b\u677e\u7684\u5fc3\u60c5\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
+
+    if _FALLBACK_PRESENCE_RE.match(text):
+        return "\u6211\u5728\u3002\u600e\u4e48\u4e86\uff1f"
+    if _FALLBACK_GREETING_RE.match(text):
+        return "\u4f60\u597d\u554a\u3002\u4eca\u5929\u662f\u60f3\u548c\u6211\u968f\u4fbf\u804a\u804a\uff0c\u8fd8\u662f\u6709\u4ec0\u4e48\u4e8b\u60f3\u8ddf\u6211\u8bf4\uff1f"
+    if stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
+        return "\u6211\u5728\u5462\uff0c\u4f60\u7ee7\u7eed\u8bf4\u5427\u3002\u6211\u4f1a\u8ba4\u771f\u63a5\u7740\u4f60\u521a\u624d\u90a3\u53e5\u8bdd\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
+    return "\u6211\u5728\u3002\u4f60\u6162\u6162\u8bf4\uff0c\u6211\u4f1a\u8ba4\u771f\u542c\u7740\u3002"
+
+
 def _build_chat_agent_fallback_reply(
     *,
     user_message: str,
@@ -930,10 +1021,11 @@ async def chat_agent_sse_generator(
     except (TimeoutError, Exception) as _llm_exc:
         _logger.warning("[%s] ChatAgent LLM failed: %s", request_id, _llm_exc)
         if not full_text.strip():
-            full_text = _build_chat_agent_fallback_reply(
+            full_text = _build_chat_agent_quality_fallback_reply(
                 user_message=user_message,
                 sub_agent_ctx=sub_agent_ctx,
                 bond_summary=bond_summary,
+                emotion_context=emotion_context,
                 render_target_lang=render_target_lang,
             )
             if not buffer_stream:

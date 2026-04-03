@@ -9,6 +9,7 @@ from host_brain.app.chat_agent import (
     SubAgentContext,
     _airlock_sanitize_output,
     _build_chat_agent_fallback_reply,
+    _build_chat_agent_quality_fallback_reply,
     _build_deterministic_sub_agent_reply,
     _build_installed_capabilities_reply,
     _build_plan_execution_reply_cn,
@@ -148,6 +149,9 @@ def test_chat_agent_greeting_fallback_is_not_generic_wait(monkeypatch) -> None:
     def _fake_build_top_agent_prompt(**_kwargs):  # noqa: ANN001
         return "PROMPT_TEXT", "SYSTEM_PROMPT", {"temperature": 0.2}
 
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs.get("narrative") or "", {"reflection": {"enabled": False}}
+
     async def _raising_chunks(**_kwargs):  # noqa: ANN001
         raise RuntimeError("llm unavailable")
         yield  # pragma: no cover
@@ -156,6 +160,7 @@ def test_chat_agent_greeting_fallback_is_not_generic_wait(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
     monkeypatch.setattr("host_brain.app.top_agent_prompt.build_top_agent_prompt", _fake_build_top_agent_prompt)
     monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _raising_chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
 
     agent_input = ChatAgentInput(
         request_id="req-chat-fallback-greet",
@@ -177,7 +182,7 @@ def test_chat_agent_greeting_fallback_is_not_generic_wait(monkeypatch) -> None:
     events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
     commit = [e for e in events if '"phase": "COMMIT"' in e][-1]
     assert "等一下呢" not in commit
-    assert "你好啊。今天是想和我随便聊聊，还是有事想和我说？" in commit
+    assert "你好啊。今天是想和我随便聊聊，还是有什么事想跟我说？" in commit
 
 
 def test_chat_agent_strength_fallback_answers_question(monkeypatch) -> None:
@@ -764,6 +769,50 @@ def test_chat_agent_helper_fallback_and_capability_replies(monkeypatch) -> None:
     assert "我现在能做的事不少" in _build_installed_capabilities_reply(render_target_lang="zh")
     assert _build_installed_capabilities_reply(render_target_lang="ja") == "今の私が使える能力を整理して伝えるね。少し待って。"
 
+
+def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy() -> None:
+    comfort = _build_chat_agent_quality_fallback_reply(
+        user_message="今天有点难受，感觉什么都做不好。",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "相识"},
+        emotion_context={"emotion_tag": "SAD"},
+        render_target_lang="zh",
+    )
+    assert "辛苦" in comfort
+    assert "陪你" in comfort
+    assert "草稿" not in comfort
+    assert "整理得更自然一点" not in comfort
+
+    repair = _build_chat_agent_quality_fallback_reply(
+        user_message="我还是有点在意之前那次争执。",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "朋友"},
+        emotion_context={"emotion_tag": "ANXIOUS"},
+        render_target_lang="zh",
+    )
+    assert "不会装作" in repair
+    assert "说开" in repair
+
+    playful = _build_chat_agent_quality_fallback_reply(
+        user_message="你最近是不是更会逗我开心了？",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "朋友"},
+        emotion_context={"emotion_tag": "HAPPY"},
+        render_target_lang="zh",
+    )
+    assert "笑" in playful
+    assert "放松" in playful
+    assert "草稿" not in playful
+    assert "整理得更自然一点" not in playful
+
+    close_default = _build_chat_agent_quality_fallback_reply(
+        user_message="那我们接着聊吧",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "挚友"},
+        emotion_context={},
+        render_target_lang="zh",
+    )
+    assert "陪你聊下去" in close_default
 
 def test_chat_agent_helper_reflection_buffer_and_sub_agent_prompt_variants(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "off")

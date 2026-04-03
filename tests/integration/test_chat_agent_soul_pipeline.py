@@ -663,6 +663,9 @@ def _capture_input_route_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[st
 def _patch_shared_host_ledger(monkeypatch: pytest.MonkeyPatch, ledger: Any) -> None:
     monkeypatch.setattr("host_brain.app.fastapi_app._ledger", ledger, raising=False)
     monkeypatch.setattr("host_brain.app.dependencies._ledger", ledger, raising=False)
+    from host_brain.app.obs_routes_core import set_ledger_provider as _set_obs_ledger_provider
+
+    _set_obs_ledger_provider(lambda: ledger)
 
 
 def _build_edge_events_transport(*, host_client: TestClient):
