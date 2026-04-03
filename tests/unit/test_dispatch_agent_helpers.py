@@ -299,16 +299,16 @@ def test_build_failure_recovery_plan_and_retry_paths(monkeypatch) -> None:
         error_text="NETWORK_UNAVAILABLE: offline",
     )
     assert network_plan is not None
-    assert network_plan["agent_id"] == "intent_agent"
+    assert network_plan["agent_id"] == "repair_agent"
 
-    assert (
-        _build_failure_recovery_plan(
-            target_id="noop",
-            user_message="do nothing",
-            error_text="UNKNOWN_REASON: skip",
-        )
-        is None
+    unknown_plan = _build_failure_recovery_plan(
+        target_id="noop",
+        user_message="do nothing",
+        error_text="UNKNOWN_REASON: skip",
     )
+    assert unknown_plan is not None
+    assert unknown_plan["agent_id"] == "repair_agent"
+    assert unknown_plan["reason_code"] == "UNKNOWN_REASON"
 
     async def _fake_dispatch_to_sub_agent(**_kwargs):
         return SubAgentContext(

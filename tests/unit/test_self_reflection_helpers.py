@@ -112,9 +112,17 @@ def test_time_context_buckets_and_trigger_reason_priority() -> None:
 
 
 def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> None:
-    monkeypatch.setattr(sr_mod, "build_self_awareness_text", lambda snapshot, time_context="": "aware")
-    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot: "mood")
-    monkeypatch.setattr(sr_mod, "build_growth_note_text", lambda snapshot: "grow")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_self_awareness_text",
+        lambda snapshot, time_context="", llm_fn=None, style_evolution=None: "aware",
+    )
+    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot, llm_fn=None: "mood")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_growth_note_text",
+        lambda snapshot, llm_fn=None, style_evolution=None: "grow",
+    )
     monkeypatch.setattr(
         sr_mod,
         "detect_contradictions",
