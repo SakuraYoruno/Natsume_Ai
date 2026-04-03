@@ -431,6 +431,35 @@ python -m pytest -q \
 - 如果把“灵魂系统”定义为人格自进化 + 好感度变化 + 自省 + 情绪持久化 + 关系叙事 + 注入到对话链的运行时整合，那么当前全量口径已经进一步提升到 `90.11%`。
 - 当前最大残余风险继续收敛，已经不再是 persona 进化链，而是少数仍偏低且控制流复杂的文件：`bond_stage_engine.py`、`chat_context_builder.py`、`self_model.py`。
 
+### 8.9 2026-04-03 跨会话人格演化场景验收
+
+在上一轮把“广义灵魂系统”聚合覆盖率拉到 `90.11%` 之后，本轮开始补“真实场景验收”，不再只看 helper / unit 覆盖，而是直接验证“关系变化 -> 情绪恢复 -> 人格注入 -> prompt 输出”的跨模块链路。
+
+本轮新增：
+- `tests/integration/test_soul_system_prompt_scenarios.py`
+
+覆盖的 3 组真实场景：
+- 关系升温：验证 `bond_stage / bond_texture / bond_style_instruction / self_reflection_pulse` 会一起进入 prompt，输出语气能体现关系更自然、更熟悉。
+- 久别重逢：验证 `EmotionPersistence.restore()` 的 `reunion_type`、`EvolutionOrchestrator` 的 `growth_awareness`、`SelfReflection.time_context` 会被完整注入到最终 prompt。
+- 裂痕修复：验证 `BondRiftState` 会让 prompt 保持谨慎、先修复安全感，而不是直接回到普通亲密语气。
+
+本轮修掉的真实运行时断链：
+- `host_brain/app/chat_context_builder.py`
+  - 修复 `bond_summary` 直接注入 `prompt_context` 时的 schema 失配；现在统一先经过 `normalize_bond_summary(...)`，避免再次触发 `PROMPT_CONTEXT_MINIMAL_FALLBACK`。
+  - 修复 `PersonaExpressionAdapter` 装配对不存在的 `PersonalityTraits.default()` 的调用；现在改为优先走 `PersonaEngine.get_instance().get_traits(user_id)`，拿不到再退回 `PersonalityTraits.from_baseline()`。
+  - 修复后，`EmotionPersistence -> emotion_reunion_type -> SelfReflection -> prompt_builder` 这条链已恢复为真实运行态可达，不再是静态 helper 覆盖。
+- `host_brain/app/prompt_builder.py`
+  - 补充渲染 `trigger_reason`、`time_context`、`contradiction_awareness`。
+  - 补充渲染 `emotion_reunion_type` 与 `emotion_reunion_guidance`，让“久别重逢 / 短暂分离后重逢”的语气约束真正体现在最终 prompt。
+
+本轮验证结果：
+- 定向场景 + 直接相关回归：`26 passed`
+- 扩展的人格 / Bond / Prompt 主链回归：`103 passed`
+
+当前结论：
+- 当前“灵魂系统”的主要剩余风险已不再是“这些模块有没有被调用到”，而是更细的场景质量问题，例如 `bond_stage_engine.py`、`chat_context_builder.py`、`self_model.py` 在极端关系演化条件下的行为是否足够稳定。
+- 从验收口径上看，`久别重逢 / 关系升温 / 裂痕修复` 这三类高价值人格场景，已经从“局部 helper 覆盖”提升到了“真实 prompt 组装链可验收”。
+
 ## 9. 建议阅读顺序
 
 如果你的目标是“快速搞懂系统”，建议按这个顺序读：

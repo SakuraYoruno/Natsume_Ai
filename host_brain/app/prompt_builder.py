@@ -1040,6 +1040,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _bt_texture_hint = str(bond_texture.get("texture_hint") or "").strip()
     _bt_rift_active = bool(bond_texture.get("rift_active", False))
     _bt_rift_hint = str(bond_texture.get("rift_hint") or "").strip()
+    _emotion_reunion_type = str(runtime_payload.get("emotion_reunion_type") or "").strip()
+    _REUNION_GUIDANCE = {
+        "reunion": "久别重逢，语气要更珍惜当下，也要让关心显得自然。",
+        "short_absence": "短暂分离后重逢，可以轻柔承接熟悉感，不要显得生硬。",
+    }
+    _emotion_reunion_guidance = _REUNION_GUIDANCE.get(_emotion_reunion_type, "")
 
     # bond_stage → 自然语言行为指令（中文）
     _STAGE_INSTRUCTION_MAP = {
@@ -1149,6 +1155,9 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             _sr_self = _truncate_for_prompt(_srp.get("self_awareness"), limit=200) or ""
             _sr_mood = _truncate_for_prompt(_srp.get("mood_awareness"), limit=200) or ""
             _sr_growth = _truncate_for_prompt(_srp.get("growth_note"), limit=200) or ""
+            _sr_trigger = _truncate_for_prompt(_srp.get("trigger_reason"), limit=160) or ""
+            _sr_time_context = _truncate_for_prompt(_srp.get("time_context"), limit=80) or ""
+            _sr_contradiction = _truncate_for_prompt(_srp.get("contradiction_awareness"), limit=200) or ""
             _sr_parts: list[str] = ["SELF_REFLECTION_PULSE:"]
             if _sr_self:
                 _sr_parts.append(f"- self_awareness: {_sr_self}")
@@ -1156,6 +1165,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 _sr_parts.append(f"- mood_awareness: {_sr_mood}")
             if _sr_growth:
                 _sr_parts.append(f"- growth_note: {_sr_growth}")
+            if _sr_trigger:
+                _sr_parts.append(f"- trigger_reason: {_sr_trigger}")
+            if _sr_time_context:
+                _sr_parts.append(f"- time_context: {_sr_time_context}")
+            if _sr_contradiction:
+                _sr_parts.append(f"- contradiction_awareness: {_sr_contradiction}")
             # ── Phase XVI：进化意识（growth_awareness）──────────────
             _sr_ga_raw = _srp.get("growth_awareness")
             _sr_ga = dict(_sr_ga_raw) if isinstance(_sr_ga_raw, Mapping) else {}
@@ -1255,6 +1270,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"- emotion_range_hint: {_truncate_for_prompt(merged_emotion_context.get('emotion_range_hint'), limit=220) or 'NONE'}\n"
         f"- pulse_style_hint: {pulse_style_hint or 'NONE'}\n"
         f"- memory_emotion_hint_json: {memory_emotion_hint_json}\n"
+        + (
+            f"- emotion_reunion_type: {_emotion_reunion_type}\n"
+            f"- emotion_reunion_guidance: {_emotion_reunion_guidance}\n"
+            if _emotion_reunion_type else
+            ""
+        )
         # Phase 3: 内心独白注入（替代机械 style_hint 的核心升级）
         + (f"- inner_monologue: {_inner_monologue}\n" if _inner_monologue else "")
         + (

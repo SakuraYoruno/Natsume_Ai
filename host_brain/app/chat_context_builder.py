@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -170,6 +171,7 @@ def build_chat_context_pack(
     retrieval_summary: Mapping[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
     style_bindings: Mapping[str, Mapping[str, Any]] | None,
+    bond_summary: Mapping[str, Any] | None = None,
     emotion_context: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
     cpb_slots: Mapping[str, Any] | None = None,
@@ -182,8 +184,14 @@ def build_chat_context_pack(
     统一两套 context_pack 构建路径。
     """
     from host_brain.app.emotion_context import normalize_chat_emotion_context  # noqa: PLC0415
+    from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
     normalized_style_bindings = normalize_node_style_bindings(style_bindings)
     normalized_emotion_context = normalize_chat_emotion_context(emotion_context)
+    resolved_bond_summary = (
+        normalize_bond_summary(dict(bond_summary))
+        if isinstance(bond_summary, Mapping) and bond_summary
+        else {}
+    )
 
     # ── style_pack slot ──────────────────────────────────────────────────
     # 优先使用 CPB 的 style_canon slot 内容（已经过 token 预算控制）
@@ -338,6 +346,13 @@ def build_chat_context_pack(
         if _bse is not None:
             _user_id = get_canonical_bond_user_id()
             _bond_state = _bse.get_state(_user_id)
+            if not resolved_bond_summary:
+                try:
+                    _raw_summary = _bond_state.to_summary()
+                    if isinstance(_raw_summary, Mapping):
+                        resolved_bond_summary = normalize_bond_summary(dict(_raw_summary))
+                except Exception:
+                    pass
             bond_texture["bond_stage"] = _bond_state.current_stage
             bond_texture["bond_trend"] = _bond_state.trend()
             # 亲密温度
@@ -380,7 +395,7 @@ def build_chat_context_pack(
             "allowed_emotion_tags": allowed_emotion_tags,
             "emotion_range_hint": emotion_range_hint,
         },
-        "bond_summary": {},
+        "bond_summary": resolved_bond_summary,
         "authoritative": authoritative_rows,
         "retrieval": retrieval_rows,
         "style_pack": {
@@ -685,6 +700,7 @@ def build_chat_generation_prompt_payload(
     retrieval_summary: dict[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
     style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    bond_summary: Mapping[str, Any] | None = None,
     emotion_context: Mapping[str, Any] | None = None,
     emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
@@ -714,6 +730,7 @@ def build_chat_generation_prompt_payload(
         retrieval_summary=retrieval_summary,
         retrieval_evidence_items=retrieval_evidence_items,
         style_bindings=normalized_style_bindings,
+        bond_summary=bond_summary,
         emotion_context=normalized_emotion_context,
         render_target_lang=resolved_render_lang,
         cpb_slots=cpb_slots,
@@ -794,6 +811,7 @@ def build_chat_prompt_runtime_payload(
         retrieval_summary=dict(runtime_input.retrieval_summary or {}),
         retrieval_evidence_items=list(runtime_input.retrieval_evidence_items or []),
         style_bindings=resolved_style_bindings,
+        bond_summary=dict(runtime_input.bond_summary or {}),
         emotion_context=dict(runtime_input.emotion_state or {}),
         emotion_snapshot=dict(runtime_input.emotion_snapshot or {}),
         render_target_lang=render_target_lang or None,
@@ -843,10 +861,13 @@ def build_chat_prompt_runtime_payload(
 
     # emotion_timeline: 从全局单例获取最新摘要（因为 timeline 是 append-only，
     # 每次 normalize 都会追加，此时已经是最新状态）
+    _tl_summary: dict[str, Any] = {}
+    _tl_diary: dict[str, Any] = {}
     try:
         from host_brain.app.emotion_context import get_emotion_timeline  # noqa: PLC0415
         _tl = get_emotion_timeline()
-        _tl_summary = _tl.rebuild_summary(window_ms=300_000)
+        _tl_summary = dict(_tl.rebuild_summary(window_ms=300_000) or {})
+        _tl_diary = dict(_tl.build_daily_diary(window_ms=24 * 3600 * 1000) or {})
         if _tl_summary and _tl_summary.get("entry_count", 0) > 0:
             runtime_payload["emotion_timeline"] = _tl_summary
     except Exception:
@@ -854,13 +875,19 @@ def build_chat_prompt_runtime_payload(
 
     # ── P1-FIX：接入 PersonaExpressionAdapter ────────────────────────────
     # prompt_builder 通过 runtime_payload.get("persona_expression_hint") 读取
+    _emotion_reunion_type = ""
     try:
         from host_brain.persona.expression_adapter import PersonaExpressionAdapter  # noqa: PLC0415
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
         from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
         from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
         from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
         _adapter = PersonaExpressionAdapter()
-        _traits = PersonalityTraits.default()
+        _persona_user_id = get_canonical_bond_user_id()
+        try:
+            _traits = PersonaEngine.get_instance().get_traits(_persona_user_id)
+        except Exception:
+            _traits = PersonalityTraits.from_baseline()
         # 获取当前 EmotionVector
         _vad = _full_emotion_ctx.get("vad_vector") or {}
         _cur_valence = float(_vad.get("valence") or 0.0)
@@ -874,7 +901,7 @@ def build_chat_prompt_runtime_payload(
             if not hasattr(build_chat_prompt_runtime_payload, "_emotion_persistence"):
                 build_chat_prompt_runtime_payload._emotion_persistence = EmotionPersistence()
             _ep: EmotionPersistence = build_chat_prompt_runtime_payload._emotion_persistence
-            _ep_user_id = get_canonical_bond_user_id()
+            _ep_user_id = _persona_user_id
             _restored = _ep.restore(user_id=_ep_user_id)
             if not _restored.from_baseline:
                 # 有历史情感记录：与当前 VAD 加权融合
@@ -886,7 +913,8 @@ def build_chat_prompt_runtime_payload(
                 _cur_dominance = _cur_dominance * _w_cur + _restored.dominance * _w_hist
             # 注入重逢信息到 runtime_payload（供 prompt_builder 使用）
             if _restored.reunion_type:
-                runtime_payload["emotion_reunion_type"] = _restored.reunion_type
+                _emotion_reunion_type = str(_restored.reunion_type or "").strip()
+                runtime_payload["emotion_reunion_type"] = _emotion_reunion_type
             # 持久化当前情感（用融合后的值，以便下次恢复）
             _ep.persist(
                 user_id=_ep_user_id,
@@ -936,18 +964,62 @@ def build_chat_prompt_runtime_payload(
     # prompt_builder 通过 runtime_payload.get("self_reflection_pulse") 读取
     try:
         from host_brain.persona.self_reflection import SelfReflection as _SelfReflection  # noqa: PLC0415
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+        from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
         if not hasattr(build_chat_prompt_runtime_payload, "_self_reflection"):
             build_chat_prompt_runtime_payload._self_reflection = _SelfReflection()
+        if not hasattr(build_chat_prompt_runtime_payload, "_evolution_orchestrator"):
+            build_chat_prompt_runtime_payload._evolution_orchestrator = EvolutionOrchestrator()
         _sr: _SelfReflection = build_chat_prompt_runtime_payload._self_reflection
+        _evo: EvolutionOrchestrator = build_chat_prompt_runtime_payload._evolution_orchestrator
         # 获取当前轮次（从 session 状态推断，或使用递增计数器）
         if not hasattr(build_chat_prompt_runtime_payload, "_turn_counter"):
             build_chat_prompt_runtime_payload._turn_counter = 0
         build_chat_prompt_runtime_payload._turn_counter += 1
         _turn = build_chat_prompt_runtime_payload._turn_counter
-        _tl_summary_for_sr = runtime_payload.get("emotion_timeline") or {}
+        _sr_user_id = get_canonical_bond_user_id()
+        _sr_bond_state = None
+        _sr_bond_summary = dict((dict(prompt_context or {}).get("bond_summary") or {}))
+        _sr_last_deep_talk_ts_ms = 0
+        try:
+            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+            _sr_bse = get_bond_stage_engine()
+            if _sr_bse is not None:
+                _sr_bond_state = _sr_bse.get_state(_sr_user_id)
+                if not _sr_bond_summary:
+                    _sr_raw_summary = _sr_bond_state.to_summary()
+                    if isinstance(_sr_raw_summary, Mapping):
+                        _sr_bond_summary = dict(_sr_raw_summary)
+                _sr_last_deep_talk_ts_ms = int(getattr(_sr_bond_state, "last_event_ts_ms", 0) or 0)
+        except Exception:
+            pass
+        _sr_current_ts_ms = int(_full_emotion_ctx.get("emotion_ts_ms") or 0) or int(time.time() * 1000)
+        if _sr_last_deep_talk_ts_ms <= 0 and _emotion_reunion_type:
+            if _emotion_reunion_type == "reunion":
+                _sr_last_deep_talk_ts_ms = _sr_current_ts_ms - 8 * 24 * 3600 * 1000
+            elif _emotion_reunion_type == "short_absence":
+                _sr_last_deep_talk_ts_ms = _sr_current_ts_ms - 4 * 24 * 3600 * 1000
+        try:
+            _sr_persona_changes = PersonaEngine.get_instance().get_change_log(_sr_user_id, limit=5)
+        except Exception:
+            _sr_persona_changes = []
+        try:
+            _sr_growth_awareness = dict(_evo.get_last_growth_awareness() or {})
+        except Exception:
+            _sr_growth_awareness = {}
+        _tl_summary_for_sr = dict(runtime_payload.get("emotion_timeline") or _tl_summary or {})
+        _tl_diary_for_sr = dict(_tl_diary or {})
         _pulse = _sr.maybe_generate(
             turn_count=_turn,
             timeline_summary=_tl_summary_for_sr,
+            timeline_diary=_tl_diary_for_sr,
+            current_emotion=str(_full_emotion_ctx.get("emotion_tag") or ""),
+            bond_state=_sr_bond_state,
+            bond_summary=_sr_bond_summary,
+            persona_changes=_sr_persona_changes,
+            last_deep_talk_ts_ms=_sr_last_deep_talk_ts_ms,
+            current_ts_ms=_sr_current_ts_ms,
+            growth_awareness=_sr_growth_awareness,
         )
         if _pulse:
             runtime_payload["self_reflection_pulse"] = _pulse
