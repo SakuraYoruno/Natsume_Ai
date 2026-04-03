@@ -1217,6 +1217,49 @@ def build_chat_prompt_runtime_payload(
     except (ImportError, AttributeError, Exception) as _bas_exc:
         logger.debug("BondAwareStyleEngine 接入降级: %s", _bas_exc)
 
+    # ── MotiveEngine + ResponsePolicyLayer 接入 ─────────────────────────────
+    # 在所有状态收集完成后，统一计算动机向量与行为约束策略，
+    # 注入 runtime_payload["motive_state"] 和 runtime_payload["response_policy"]
+    # 供 prompt_builder / post_processor / proactive_voice 消费。
+    try:
+        from host_brain.persona.motive_engine import compute_motive_state, MotiveInput  # noqa: PLC0415
+        from host_brain.persona.response_policy import decide_response_policy, ResponsePolicyInput  # noqa: PLC0415
+
+        _pending_topics = list(
+            (runtime_payload.get("offline_state") or {}).get("anticipation_topics") or []
+        )
+        _shared_count = int(
+            (runtime_payload.get("bond_summary") or {}).get("shared_memory_count") or 0
+        )
+
+        _motive_inp = MotiveInput(
+            silence_state=runtime_payload.get("silence_state"),
+            body_sense=runtime_payload.get("body_sense"),
+            offline_state=runtime_payload.get("offline_state"),
+            bond_summary=runtime_payload.get("bond_summary"),
+            self_reflection_pulse=runtime_payload.get("self_reflection_pulse"),
+            emotion_context=runtime_payload.get("triggered_emotions"),
+            pending_followup_topics=_pending_topics,
+            shared_memory_count=_shared_count,
+        )
+        _motive_state = compute_motive_state(_motive_inp)
+        runtime_payload["motive_state"] = _motive_state.as_dict()
+
+        _policy_inp = ResponsePolicyInput(
+            silence_state=runtime_payload.get("silence_state"),
+            body_sense=runtime_payload.get("body_sense"),
+            offline_state=runtime_payload.get("offline_state"),
+            bond_summary=runtime_payload.get("bond_summary"),
+            self_reflection_pulse=runtime_payload.get("self_reflection_pulse"),
+            emotion_context=runtime_payload.get("triggered_emotions"),
+            motive_state=runtime_payload.get("motive_state"),
+        )
+        _policy_decision = decide_response_policy(_policy_inp)
+        runtime_payload["response_policy"] = _policy_decision.as_dict()
+
+    except (ImportError, AttributeError, Exception) as _motive_exc:
+        logger.debug("MotiveEngine / ResponsePolicyLayer 接入降级: %s", _motive_exc)
+
     return runtime_payload
 
 
