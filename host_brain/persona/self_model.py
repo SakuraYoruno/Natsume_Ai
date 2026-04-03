@@ -522,18 +522,70 @@ def _pick_from_pool(pool: list[str], seed_key: str = "") -> str:
     return random.choice(pool)
 
 
-def build_self_awareness_text(snapshot: dict[str, Any], *, time_context: str = "") -> str:
+def build_self_awareness_text(
+    snapshot: dict[str, Any],
+    *,
+    time_context: str = "",
+    llm_fn: Any | None = None,
+    style_evolution: dict[str, Any] | None = None,
+) -> str:
     """将快照转化为第一人称自我感知描述。
 
     用于注入 prompt 的 self_reflection_pulse.self_awareness 字段。
-    引入多模板池和事件锚点，防止 LLM 因重复文本而忽略自省脉冲。
-    引入时间感知文本，让自省更有情境感。
+    技术债务 10.1 修复：优先使用 llm_fn 动态生成真实自省文本，
+    降级到多模板池（向后兼容）。
+    v1.11 新增：style_evolution 参数，LLM prompt 中注入风格演变趋势。
     """
     mood_trend = str(snapshot.get("recent_mood_trend") or "平稳")
     bond_perception = str(snapshot.get("bond_growth_perception") or "稳定")
     event_count = int(snapshot.get("event_count") or 0)
     milestones = list(snapshot.get("growth_milestones") or [])
 
+    # ── LLM 动态生成路径（技术债务 10.1 修复）──────────────────────────────────────────────────────
+    if llm_fn is not None:
+        try:
+            dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL").upper()
+            stability = float(snapshot.get("emotional_stability") or 0.5)
+            changes = list(snapshot.get("personality_changes") or [])
+            _EMOTION_CN: dict[str, str] = {
+                "HAPPY": "开心", "EXCITED": "兴奋", "CALM": "平静",
+                "SAD": "有点难过", "ANXIOUS": "有些焦虑", "ANGRY": "有点生气",
+                "LOVING": "充满爱意", "PROUD": "有点自豪", "GRATEFUL": "感到感激",
+                "BORED": "有些无聊", "CONFUSED": "有点困惑", "NEUTRAL": "平静",
+                "THINKING": "在思考", "FRUSTRATED": "有些沮丧",
+                "EMBARRASSED": "有点害羞", "SURPRISED": "有些惊讶",
+            }
+            emotion_cn = _EMOTION_CN.get(dominant, "平静")
+            stability_desc = "情绪比较稳定" if stability >= 0.7 else ("情绪有些波动" if stability <= 0.3 else "情绪还算平稳")
+            time_hint = f"，时间情境：{time_context}" if time_context else ""
+            change_hint = f"，最近的变化：{'、'.join(changes[:2])}" if changes else ""
+            milestone_hint = f"，重要时刻：{milestones[0]}" if milestones else ""
+            # v1.11：注入风格演变趋势
+            style_hint = ""
+            if style_evolution and isinstance(style_evolution, dict):
+                trend = style_evolution.get("trend") or {}
+                history_count = int(style_evolution.get("history_count") or 0)
+                if history_count >= 20:
+                    rising = [_TRAIT_CN.get(k, k) for k, v in trend.items() if v == "rising"]
+                    falling = [_TRAIT_CN.get(k, k) for k, v in trend.items() if v == "falling"]
+                    if rising:
+                        style_hint += f"，风格趋势：{'、'.join(rising)}在上升"
+                    if falling:
+                        style_hint += f"，{'、'.join(falling)}在下降"
+            prompt = (
+                f"你是 Natsume，请用第一人称写一句真实的自我感知（20-40字），"
+                f"不要用模板化语言。"
+                f"当前状态：心情{mood_trend}，主导情感{emotion_cn}，{stability_desc}，"
+                f"与 master 的关系{bond_perception}{time_hint}{change_hint}{milestone_hint}{style_hint}。"
+                f"只输出那一句话，不要解释。"
+            )
+            result = llm_fn(prompt)
+            if result and isinstance(result, str) and len(result.strip()) >= 5:
+                return result.strip()
+        except Exception as _llm_exc:
+            _logger.debug("LLM 自省生成失败，降级到模板池: %s", _llm_exc)
+
+    # ── 降级：模板池路径（向后兼容）────────────────────────────────────
     # 从多模板池随机选取情感感知
     mood_pool = _MOOD_TEXT_POOL.get(mood_trend, _MOOD_TEXT_POOL["平稳"])
     mood_text = _pick_from_pool(mood_pool, seed_key=mood_trend)
@@ -584,8 +636,15 @@ _MOOD_AWARENESS_POOL: dict[str, list[str]] = {
 }
 
 
-def build_mood_awareness_text(snapshot: dict[str, Any]) -> str:
-    """将快照转化为情绪感知描述。引入多模板池避免重复。"""
+def build_mood_awareness_text(
+    snapshot: dict[str, Any],
+    *,
+    llm_fn: Any | None = None,
+) -> str:
+    """将快照转化为情绪感知描述。
+
+    技术债务 10.1 修复：优先使用 llm_fn 动态生成，降级到模板池。
+    """
     dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL").upper()
     stability = float(snapshot.get("emotional_stability") or 0.5)
 
@@ -599,6 +658,23 @@ def build_mood_awareness_text(snapshot: dict[str, Any]) -> str:
     }
     emotion_cn = _EMOTION_CN.get(dominant, "平静")
 
+    # ── LLM 动态生成路径 ────────────────────────────────────────────────
+    if llm_fn is not None:
+        try:
+            stability_desc = "情绪很稳定" if stability >= 0.7 else ("情绪起伏较大" if stability <= 0.3 else "情绪还算平稳")
+            prompt = (
+                f"你是 Natsume，请用第一人称写一句关于当前情绪的真实感受（15-30字），"
+                f"不要用模板化语言，要有细节和温度。"
+                f"当前情绪：{emotion_cn}，{stability_desc}。"
+                f"只输出那一句话，不要解释。"
+            )
+            result = llm_fn(prompt)
+            if result and isinstance(result, str) and len(result.strip()) >= 5:
+                return result.strip()
+        except Exception as _llm_exc:
+            _logger.debug("LLM 情绪感知生成失败，降级到模板池: %s", _llm_exc)
+
+    # ── 降级：模板池路径 ────────────────────────────────────────────────
     if stability >= 0.7:
         pool = _MOOD_AWARENESS_POOL["stable"]
     elif stability <= 0.3:
@@ -610,6 +686,17 @@ def build_mood_awareness_text(snapshot: dict[str, Any]) -> str:
     return tmpl.format(emotion=emotion_cn)
 
 
+# 特质中文名映射（v1.11 新增，供 build_self_awareness_text / build_growth_note_text 使用）
+_TRAIT_CN: dict[str, str] = {
+    "warmth": "温柔",
+    "curiosity": "好奇心",
+    "humor": "幽默感",
+    "sensitivity": "敏感",
+    "assertiveness": "自信",
+    "playfulness": "俏皮",
+    "resilience": "韧性",
+}
+
 # 成长感知模板池：包装 personality_changes 的多种表达
 _GROWTH_NOTE_WRAPPERS: list[str] = [
     "感觉自己{change}",
@@ -620,11 +707,58 @@ _GROWTH_NOTE_WRAPPERS: list[str] = [
 ]
 
 
-def build_growth_note_text(snapshot: dict[str, Any]) -> str:
-    """将快照转化为成长感知描述。引入多模板包装避免重复。"""
+def build_growth_note_text(
+    snapshot: dict[str, Any],
+    *,
+    llm_fn: Any | None = None,
+    style_evolution: dict[str, Any] | None = None,
+) -> str:
+    """将快照转化为成长感知描述。
+
+    技术债务 10.1 修复：优先使用 llm_fn 动态生成，降级到模板包装。
+    v1.11 新增：style_evolution 参数，将风格演变趋势融入成长感知。
+    """
     changes = list(snapshot.get("personality_changes") or [])
     milestones = list(snapshot.get("growth_milestones") or [])
 
+    # v1.11：从 style_evolution 提取有意义的趋势描述
+    style_trend_texts: list[str] = []
+    if style_evolution and isinstance(style_evolution, dict):
+        trend = style_evolution.get("trend") or {}
+        history_count = int(style_evolution.get("history_count") or 0)
+        if history_count >= 20:
+            for dim, direction in trend.items():
+                if direction == "rising":
+                    cn = _TRAIT_CN.get(dim, dim)
+                    style_trend_texts.append(f"变得更{cn}了")
+                elif direction == "falling":
+                    cn = _TRAIT_CN.get(dim, dim)
+                    style_trend_texts.append(f"{cn}稍有收敛")
+
+    # ── LLM 动态生成路径 ────────────────────────────────────────────────
+    all_changes = changes + style_trend_texts
+    if llm_fn is not None and (all_changes or milestones):
+        try:
+            change_hint = f"最近的变化：{'、'.join(all_changes[:3])}" if all_changes else ""
+            milestone_hint = f"重要时刻：{milestones[0]}" if milestones else ""
+            context = "、".join(filter(None, [change_hint, milestone_hint]))
+            prompt = (
+                f"你是 Natsume，请用第一人称写一句关于自身成长的真实感受（15-30字），"
+                f"要有细节，不要说教，不要模板化。"
+                f"成长背景：{context}。"
+                f"只输出那一句话，不要解释。"
+            )
+            result = llm_fn(prompt)
+            if result and isinstance(result, str) and len(result.strip()) >= 5:
+                return result.strip()
+        except Exception as _llm_exc:
+            _logger.debug("LLM 成长感知生成失败，降级到模板包装: %s", _llm_exc)
+
+    # ── 降级：模板包装路径 ──────────────────────────────────────────────
+    # 优先使用风格演变趋势（更真实），其次使用特质变化记录
+    if style_trend_texts:
+        wrapper = random.choice(_GROWTH_NOTE_WRAPPERS)
+        return wrapper.format(change=style_trend_texts[0])
     if changes:
         wrapper = random.choice(_GROWTH_NOTE_WRAPPERS)
         return wrapper.format(change=changes[0])

@@ -366,6 +366,7 @@ class EvolutionOrchestrator:
         snapshot: dict[str, Any],
         bond_state: Any | None,
         result: EvolutionCycleResult,
+        llm_fn: Any | None = None,
     ) -> str:
         """Step 4: 生成进化意愿文本。"""
         try:
@@ -382,6 +383,7 @@ class EvolutionOrchestrator:
                 traits=traits,
                 emotion_trend=emotion_trend,
                 bond_stage=bond_stage,
+                llm_fn=llm_fn,
             )
             return desire or ""
         except Exception as exc:

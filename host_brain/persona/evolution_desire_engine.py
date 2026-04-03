@@ -365,12 +365,14 @@ class EvolutionDesireEngine:
         last_deep_talk_ts_ms: int = 0,
         is_weekend: bool = False,
         user_preference_hints: dict[str, float] | None = None,
+        llm_fn: Any | None = None,
     ) -> str:
         """生成进化意愿文本。
 
         优先级：
-          0. 意愿实现感知（特质刚提升时，优先生成"做到了"的感知）
+          0. 意愿实现感知（特质刚提升时，优先生成“做到了”的感知）
           0.5 用户偏好驱动意愿（用户明显偏好某风格时，50%概率优先触发）
+          LLM 动态生成（llm_fn 可用时，在模板库之前尝试）
           1. 基于最低特质维度生成（补短板意愿）
           2. 基于情感趋势生成（情感驱动意愿）
           3. 基于关系阶段生成（关系驱动意愿）
@@ -379,7 +381,7 @@ class EvolutionDesireEngine:
 
         Args:
             traits: PersonalityTraits 实例（可为 None）
-            emotion_trend: 情感趋势（"偏好" / "偏低" / "平稳"）
+            emotion_trend: 情感趋势（“偏好” / “偏低” / “平稳”）
             bond_stage: Bond 阶段字符串
             event_count: 累计互动次数（用于锚点意愿）
             recent_trait_deltas: 最近特质变化量 {trait_name: delta}（用于实现感知）
@@ -389,6 +391,9 @@ class EvolutionDesireEngine:
             user_preference_hints: 用户偏好信号 {trait_name: score}，
                 score 范围 [0, 1]，越高表示用户越偏好该风格。
                 例如 {"humor": 0.8} 表示用户明显喜欢幽默风格。
+            llm_fn: 可选的 LLM 调用函数 (prompt: str) -> str。
+                技术债务 10.2 修复：当 llm_fn 可用时，在模板库候选之前尝试
+                LLM 动态生成真实的第一人称意愿文本。失败时自动降级到模板库。
 
         Returns:
             意愿文本（第一人称），如果无法生成则返回空字符串
@@ -404,6 +409,20 @@ class EvolutionDesireEngine:
         pref_text = self._try_user_preference_desire(user_preference_hints, ts)
         if pref_text:
             return pref_text
+
+        # ── LLM 动态生成路径（技术债务 10.2 修复）──────────────────────────
+        if llm_fn is not None:
+            llm_desire = self._try_llm_desire(
+                llm_fn=llm_fn,
+                traits=traits,
+                emotion_trend=emotion_trend,
+                bond_stage=bond_stage,
+                event_count=event_count,
+                ts=ts,
+            )
+            if llm_desire:
+                self._used_ts[llm_desire] = ts
+                return llm_desire
 
         candidates: list[str] = []
 
@@ -446,6 +465,74 @@ class EvolutionDesireEngine:
         # 记录使用时间
         self._used_ts[chosen] = ts
         return chosen
+
+    def _try_llm_desire(
+        self,
+        *,
+        llm_fn: Any,
+        traits: Any | None,
+        emotion_trend: str,
+        bond_stage: str,
+        event_count: int,
+        ts: int,
+    ) -> str:
+        """尝试用 LLM 动态生成真实的进化意愿文本。
+
+        技术债务 10.2 修复：当 llm_fn 可用时，基于当前特质/情感/关系状态
+        生成真实的第一人称意愿文本，而非从模板库选取。
+        失败时返回空字符串，由调用方降级到模板库。
+        """
+        try:
+            # 构建特质描述
+            trait_hints: list[str] = []
+            if traits is not None:
+                trait_dict: dict[str, float] = {}
+                for attr in ("warmth", "curiosity", "humor", "sensitivity",
+                             "assertiveness", "playfulness", "resilience"):
+                    val = getattr(traits, attr, None)
+                    if val is not None:
+                        trait_dict[attr] = float(val)
+                # 找最低的两个特质
+                if trait_dict:
+                    sorted_traits = sorted(trait_dict.items(), key=lambda x: x[1])
+                    _TRAIT_CN = {
+                        "warmth": "温柔", "curiosity": "好奇心", "humor": "幽默感",
+                        "sensitivity": "敏感度", "assertiveness": "主动性",
+                        "playfulness": "活泼感", "resilience": "韧性",
+                    }
+                    for name, val in sorted_traits[:2]:
+                        cn = _TRAIT_CN.get(name, name)
+                        level = "偏低" if val < 0.4 else ("偏高" if val > 0.7 else "适中")
+                        trait_hints.append(f"{cn}{level}（{val:.2f}）")
+
+            _STAGE_CN = {
+                "STRANGER": "陌生人", "ACQUAINTANCE": "相识",
+                "FRIEND": "朋友", "CLOSE_FRIEND": "挚友",
+                "CONFIDANT": "知己", "SOULMATE": "灵魂伴侣",
+            }
+            stage_cn = _STAGE_CN.get(str(bond_stage).upper(), str(bond_stage))
+            trait_hint_str = f"，特质：{' / '.join(trait_hints)}" if trait_hints else ""
+            event_hint = f"，已互动 {event_count} 次" if event_count > 0 else ""
+            emotion_hint = f"，情绪趋势：{emotion_trend}" if emotion_trend else ""
+
+            prompt = (
+                f"你是 Natsume，请用第一人称写一句真实的成长意愿（15-35字），"
+                f"不要用模板化语言，要有具体细节和温度。"
+                f"当前状态：与 master 的关系是{stage_cn}{trait_hint_str}{event_hint}{emotion_hint}。"
+                f"只输出那一句话，不要解释。"
+            )
+            result = llm_fn(prompt)
+            if result and isinstance(result, str) and len(result.strip()) >= 8:
+                text = result.strip()
+                # 检查冷却（LLM 生成的文本也受冷却限制）
+                cooled = self._filter_cooled_down([text], ts)
+                if cooled:
+                    return text
+                # 冷却中则返回空，降级到模板库
+                return ""
+        except Exception as _exc:
+            _logger.debug("LLM 意愿生成失败，降级到模板库: %s", _exc)
+        return ""
 
     def _try_fulfilled_text(
         self,

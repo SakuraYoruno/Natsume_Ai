@@ -47,3 +47,159 @@ def test_repair_agent_handler_returns_success_summary(monkeypatch) -> None:
 
     assert out['react_scratchpad']['final_answer'] == '浏览器后端已经补齐，可以重试原任务。'
     assert out['repair_agent_trace']['success'] is True
+
+
+def test_build_repair_result_uses_llm_planner_for_unknown_error(monkeypatch) -> None:
+    """未知错误码时，LLM 规划器被调用并执行修复计划。"""
+    import os  # noqa: PLC0415
+
+    monkeypatch.setenv(mod._REPAIR_PLANNER_ENABLED_ENV, 'true')
+
+    fake_plan = {
+        'repair_type': 'pip_install',
+        'commands': [{'cmd': ['python', '-m', 'pip', 'install', 'requests'], 'timeout_s': 60, 'desc': '安装 requests'}],
+        'summary': '已安装缺失的 requests 包',
+        'can_retry': True,
+    }
+    monkeypatch.setattr(mod, '_call_repair_planner_llm', lambda **_kwargs: fake_plan)
+
+    executed_cmds = []
+
+    def fake_run_command(cmd, *, timeout_s=120):
+        executed_cmds.append(cmd)
+        return {'command': cmd, 'returncode': 0, 'stdout': 'ok', 'stderr': '', 'ok': True}
+
+    monkeypatch.setattr(mod, '_run_command', fake_run_command)
+
+    result = mod._build_repair_result(task_text='发送 HTTP 请求', previous_error='ModuleNotFoundError: requests')
+
+    assert result['success'] is True
+    assert result['ok_actions'] == 1
+    assert executed_cmds == [['python', '-m', 'pip', 'install', 'requests']]
+
+
+def test_build_repair_result_llm_planner_disabled_falls_back(monkeypatch) -> None:
+    """LLM 规划器被禁用时，返回不支持修复。"""
+    monkeypatch.setenv(mod._REPAIR_PLANNER_ENABLED_ENV, 'false')
+
+    result = mod._build_repair_result(task_text='某任务', previous_error='UNKNOWN_ERROR_XYZ')
+
+    assert result['success'] is False
+    assert 'unsupported' in result['detail']
+
+
+def test_build_repair_result_llm_planner_returns_none_falls_back(monkeypatch) -> None:
+    """LLM 规划器返回 None（API Key 缺失等）时，降级到规则兜底。"""
+    monkeypatch.setenv(mod._REPAIR_PLANNER_ENABLED_ENV, 'true')
+    monkeypatch.setattr(mod, '_call_repair_planner_llm', lambda **_kwargs: None)
+
+    result = mod._build_repair_result(task_text='某任务', previous_error='SOME_UNKNOWN_ERROR')
+
+    assert result['success'] is False
+    assert result['ok_actions'] == 0
+
+
+def test_is_safe_command_blocks_dangerous_commands() -> None:
+    """安全门控：危险命令被拒绝。"""
+    assert mod._is_safe_command(['python', '-m', 'pip', 'install', 'requests']) is True
+    assert mod._is_safe_command(['rm', '-rf', '/']) is False
+    assert mod._is_safe_command(['cmd', '/c', 'format', 'C:']) is False
+
+
+def test_execute_repair_plan_blocks_dangerous_command(monkeypatch) -> None:
+    """安全门控：LLM 生成的危险命令被 _execute_repair_plan 拦截。"""
+    plan = {
+        'repair_type': 'system_command',
+        'commands': [{'cmd': ['rm', '-rf', '/tmp/test'], 'timeout_s': 10, 'desc': '危险命令'}],
+        'summary': '危险操作',
+        'can_retry': False,
+    }
+    result = mod._execute_repair_plan(plan)
+    assert result['ok_actions'] == 0
+    assert result['actions'][0]['stderr'] == 'BLOCKED_BY_SAFETY_GATE'
+
+
+def test_call_repair_planner_llm_uses_cache_on_second_call(monkeypatch) -> None:
+    """修复历史缓存：相同错误指纹在 TTL 内不重复调用 LLM。"""
+    import time  # noqa: PLC0415
+
+    # 清空缓存，避免其他测试污染
+    mod._repair_plan_cache.clear()
+
+    call_count = [0]
+    fake_plan = {
+        'repair_type': 'pip_install',
+        'commands': [{'cmd': ['python', '-m', 'pip', 'install', 'foo'], 'timeout_s': 60}],
+        'summary': '安装 foo',
+        'can_retry': True,
+    }
+
+    def fake_llm_call(task_text, previous_error):
+        call_count[0] += 1
+        return fake_plan
+
+    monkeypatch.setattr(mod, '_call_repair_planner_llm', fake_llm_call)
+    monkeypatch.setenv(mod._REPAIR_PLANNER_ENABLED_ENV, 'true')
+    monkeypatch.setattr(mod, '_run_command', lambda cmd, **_: {'command': cmd, 'returncode': 0, 'stdout': '', 'stderr': '', 'ok': True})
+
+    # 第一次调用：触发 LLM，写入缓存
+    mod._build_repair_result(task_text='任务A', previous_error='ModuleNotFoundError: foo')
+    assert call_count[0] == 1, '第一次应调用 LLM'
+
+    # 第二次调用：相同错误，应命中缓存，不再调用 LLM
+    mod._build_repair_result(task_text='任务B', previous_error='ModuleNotFoundError: foo')
+    assert call_count[0] == 1, f'期望 LLM 只被调用 1 次，实际调用了 {call_count[0]} 次'
+
+    mod._repair_plan_cache.clear()
+
+
+def test_execute_repair_plan_partial_success_allows_retry(monkeypatch) -> None:
+    """部分成功策略：有命令成功执行时，success=True 且 can_retry 遵循 LLM 判断。"""
+    call_results = [True, False]  # 第一条成功，第二条失败
+    idx = [0]
+
+    def fake_run_command(cmd, *, timeout_s=120):
+        ok = call_results[idx[0]]
+        idx[0] += 1
+        return {'command': cmd, 'returncode': 0 if ok else 1, 'stdout': '', 'stderr': '', 'ok': ok}
+
+    monkeypatch.setattr(mod, '_run_command', fake_run_command)
+
+    plan = {
+        'repair_type': 'pip_install',
+        'commands': [
+            {'cmd': ['python', '-m', 'pip', 'install', 'pkg_a'], 'timeout_s': 60},
+            {'cmd': ['python', '-m', 'pip', 'install', 'pkg_b'], 'timeout_s': 60},
+        ],
+        'summary': '安装两个包',
+        'can_retry': True,
+    }
+    result = mod._execute_repair_plan(plan)
+
+    assert result['success'] is True, '部分成功时 success 应为 True'
+    assert result['all_success'] is False, '非全部成功时 all_success 应为 False'
+    assert result['ok_actions'] == 1
+    assert result['can_retry'] is True
+
+
+def test_repair_agent_handler_trace_contains_can_retry(monkeypatch) -> None:
+    """repair_agent_trace 应包含 can_retry 字段，供 dispatch_agent 判断是否重试。"""
+    monkeypatch.setattr(mod, '_build_repair_result', lambda **_kwargs: {
+        'success': True,
+        'all_success': True,
+        'summary': '修复完成，可以重试。',
+        'detail': 'llm_planner:pip_install ok=1/1',
+        'actions': [],
+        'ok_actions': 1,
+        'can_retry': True,
+    })
+
+    out = mod.repair_agent_handler(
+        {'user_input': '运行脚本', 'request_id': 'req-002'},
+        {'request_id': 'req-002', 'previous_agent_result': 'ModuleNotFoundError: requests'},
+    )
+
+    trace = out['repair_agent_trace']
+    assert 'can_retry' in trace, 'repair_agent_trace 必须包含 can_retry 字段'
+    assert trace['can_retry'] is True
+    assert trace['all_success'] is True

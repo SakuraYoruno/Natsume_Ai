@@ -1047,6 +1047,40 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     }
     _emotion_reunion_guidance = _REUNION_GUIDANCE.get(_emotion_reunion_type, "")
 
+    # ── Phase XVI：离线内心世界唤醒快照 ─────────────────────────────────
+    _offline_state_raw = runtime_payload.get("offline_state") or prompt_context.get("offline_state")
+    _offline_state: dict = dict(_offline_state_raw) if isinstance(_offline_state_raw, Mapping) else {}
+    _offline_hours = float(_offline_state.get("offline_hours") or 0.0)
+    _offline_loneliness = float(_offline_state.get("loneliness_level") or 0.0)
+    _offline_anticipation = float(_offline_state.get("anticipation_level") or 0.0)
+    _offline_awakening_hint = str(_offline_state.get("awakening_hint") or "").strip()
+    _offline_drift_summary = str(_offline_state.get("emotion_drift_summary") or "").strip()
+    _offline_topics = list(_offline_state.get("anticipation_topics") or [])
+    _offline_should_express = bool(_offline_state.get("should_express_waiting", False))
+    # 仅在有实质性离线状态时注入（离线 > 1 小时 或 有唤醒提示）
+    _offline_active = _offline_hours >= 1.0 or bool(_offline_awakening_hint)
+
+    # ── Phase XVIII：情绪驱动的沉默能力 ─────────────────────────────────
+    _silence_state_raw = runtime_payload.get("silence_state") or prompt_context.get("silence_state")
+    _silence_state: dict = dict(_silence_state_raw) if isinstance(_silence_state_raw, Mapping) else {}
+    _silence_willingness = float(_silence_state.get("response_willingness") or 1.0)
+    _silence_level = str(_silence_state.get("willingness_level") or "NORMAL").strip().upper()
+    _silence_hint = str(_silence_state.get("silence_hint") or "").strip()
+    _silence_topic_active = bool(_silence_state.get("topic_resistance_active", False))
+    _silence_topic_hint = str(_silence_state.get("topic_resistance_hint") or "").strip()
+    # 仅在非 NORMAL 状态或有话题抗拒时注入
+    _silence_active = _silence_level != "NORMAL" or _silence_topic_active
+
+    # ── v1.12：身体感知（body_sense）────────────────────────────────────
+    _body_sense_raw = runtime_payload.get("body_sense") or prompt_context.get("body_sense")
+    _body_sense: dict = dict(_body_sense_raw) if isinstance(_body_sense_raw, Mapping) else {}
+    _bs_fatigue_level = str(_body_sense.get("fatigue_level") or "FRESH").strip().upper()
+    _bs_drowsiness_level = str(_body_sense.get("drowsiness_level") or "ALERT").strip().upper()
+    _bs_loneliness_level = str(_body_sense.get("loneliness_level") or "FINE").strip().upper()
+    _bs_hint = str(_body_sense.get("body_sense_hint") or "").strip()
+    # 仅在有任何维度处于非基线状态时注入
+    _bs_active = bool(_body_sense.get("is_active", False)) or bool(_bs_hint)
+
     # bond_stage → 自然语言行为指令（中文）
     _STAGE_INSTRUCTION_MAP = {
         "STRANGER":     "初次见面，保持礼貌和适当的距离感。",
@@ -1320,6 +1354,35 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         + (
             f"- user_emotion_profile: {_up_hint}\n"
             if _up_active else
+            ""
+        )
+        # ── Phase XVI：离线内心世界唤醒状态 ──────────────────────────────
+        + (
+            f"- offline_hours: {_offline_hours:.1f}\n"
+            f"- offline_loneliness: {'高' if _offline_loneliness >= 0.7 else '中' if _offline_loneliness >= 0.4 else '低'}\n"
+            + (f"- offline_awakening_hint: {_offline_awakening_hint}\n" if _offline_awakening_hint else "")
+            + (f"- offline_drift_summary: {_offline_drift_summary}\n" if _offline_drift_summary else "")
+            + (f"- offline_anticipation_topics: {', '.join(_offline_topics)}\n" if _offline_topics else "")
+            + ("- offline_should_express_waiting: true\n" if _offline_should_express else "")
+            if _offline_active else
+            ""
+        )
+        # ── Phase XVIII：情绪驱动的沉默能力 ──────────────────────────────
+        + (
+            f"- response_willingness: {_silence_willingness:.2f}\n"
+            f"- willingness_level: {_silence_level}\n"
+            + (f"- silence_hint: {_silence_hint}\n" if _silence_hint else "")
+            + (f"- topic_resistance_hint: {_silence_topic_hint}\n" if _silence_topic_active and _silence_topic_hint else "")
+            if _silence_active else
+            ""
+        )
+        # ── v1.12：身体感知（疲劳/困倦/孤独）────────────────────────────
+        + (
+            f"- fatigue_level: {_bs_fatigue_level}\n"
+            f"- drowsiness_level: {_bs_drowsiness_level}\n"
+            f"- loneliness_level: {_bs_loneliness_level}\n"
+            + (f"- body_sense_hint: {_bs_hint}\n" if _bs_hint else "")
+            if _bs_active else
             ""
         )
         + "\n"

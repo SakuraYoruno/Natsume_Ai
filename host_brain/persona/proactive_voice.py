@@ -70,11 +70,15 @@ _ABSENT_LONG_MS = 30 * 24 * 60 * 60 * 1000    # 1个月
 @dataclass(frozen=True)
 class ProactiveExpression:
     """主动表达内容."""
-    scene_type: str       # 场景类型
-    content: str          # 表达内容
-    emotion_tag: str      # 建议情感标签
+    scene_type: str        # 场景类型
+    content: str           # 表达内容
+    emotion_tag: str       # 建议情感标签
     trait_influence: str   # 人格特质影响说明
     ts_ms: int
+    # ── 技术债务 10.2：等待感知字段（Phase XVI offline_state 注入）──────────
+    wait_duration_ms: int = 0    # 距上次互动的等待时长（毫秒），0 表示未知
+    loneliness_value: float = 0.0  # 孤独感 [0,1]，来自 LonelinessAccumulator
+    anticipation_value: float = 0.0  # 期待值 [0,1]，来自 AnticipationTracker
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +87,9 @@ class ProactiveExpression:
             "emotion_tag": self.emotion_tag,
             "trait_influence": self.trait_influence,
             "ts_ms": self.ts_ms,
+            "wait_duration_ms": self.wait_duration_ms,
+            "loneliness_value": self.loneliness_value,
+            "anticipation_value": self.anticipation_value,
         }
 
 
@@ -667,6 +674,8 @@ class PersonaProactiveVoice:
                 - bond_stage: 当前关系阶段
                 - pending_followup_topics: 待跟进话题列表（可选）
                     每项为 dict，含 topic_label(str) 和 topic_keywords(list[str])
+                - offline_state: OfflineStateSnapshot dict（Phase XVI，可选）
+                    含 offline_duration_ms / loneliness_value / anticipation_value
 
         Returns:
             ProactiveExpression 或 None（不触发）
@@ -674,6 +683,33 @@ class PersonaProactiveVoice:
         uid = str(user_id).strip()
         ctx = dict(context or {})
         now_ts = int(ctx.get("current_ts_ms") or _now_ms())
+
+        # ── 技术债务 10.2：读取 Phase XVI offline_state 快照 ─────────────────
+        offline_state: dict[str, Any] = {}
+        raw_offline = ctx.get("offline_state")
+        if isinstance(raw_offline, dict):
+            offline_state = raw_offline
+        # 从 offline_state 提取等待感知数据，回退到 context 字段
+        _offline_duration_ms = int(
+            offline_state.get("offline_duration_ms")
+            or offline_state.get("duration_ms")
+            or 0
+        )
+        _loneliness_value = float(
+            offline_state.get("loneliness_value")
+            or offline_state.get("loneliness")
+            or 0.0
+        )
+        _anticipation_value = float(
+            offline_state.get("anticipation_value")
+            or offline_state.get("anticipation")
+            or 0.0
+        )
+        # 将等待感知数据注入 ctx，供各 checker 和 template 使用
+        if _offline_duration_ms > 0 and not ctx.get("_offline_duration_ms"):
+            ctx["_offline_duration_ms"] = _offline_duration_ms
+        ctx["_loneliness_value"] = _loneliness_value
+        ctx["_anticipation_value"] = _anticipation_value
 
         # 按优先级检测场景
         scenes_to_check = [
@@ -692,11 +728,21 @@ class PersonaProactiveVoice:
                 style = self._select_style(traits)
                 bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
                 content = self._get_template(scene_type, style, ctx, now_ts, bond_stage)
-                emotion_tag = self._scene_emotion(scene_type)
+                emotion_tag = self._scene_emotion(
+                    scene_type,
+                    loneliness_value=_loneliness_value,
+                    anticipation_value=_anticipation_value,
+                )
                 trait_influence = self._describe_trait_influence(traits, style)
 
                 # 记录触发时间
                 self._record_trigger(uid, scene_type, now_ts)
+
+                # 计算实际等待时长（优先 offline_state，回退 last_interaction_ts_ms）
+                _wait_ms = _offline_duration_ms
+                if _wait_ms <= 0:
+                    _last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
+                    _wait_ms = (now_ts - _last_ts) if _last_ts > 0 else 0
 
                 expr = ProactiveExpression(
                     scene_type=scene_type,
@@ -704,10 +750,14 @@ class PersonaProactiveVoice:
                     emotion_tag=emotion_tag,
                     trait_influence=trait_influence,
                     ts_ms=now_ts,
+                    wait_duration_ms=_wait_ms,
+                    loneliness_value=_loneliness_value,
+                    anticipation_value=_anticipation_value,
                 )
                 _logger.info(
-                    "主动表达触发: user=%s scene=%s style=%s bond=%s",
+                    "主动表达触发: user=%s scene=%s style=%s bond=%s wait=%.1fh loneliness=%.2f",
                     uid, scene_type, style, bond_stage,
+                    _wait_ms / 3_600_000, _loneliness_value,
                 )
                 return expr
 
@@ -726,7 +776,17 @@ class PersonaProactiveVoice:
             return False
 
     def _check_long_absent(self, ctx: dict[str, Any], now_ts: int) -> bool:
-        """离线久归：用户 > 3 天未互动。"""
+        """离线久归：用户 > 3 天未互动。
+
+        技术债务 10.2 修复：优先使用 offline_state.offline_duration_ms（Phase XVI
+        InnerStateClock 精确计算），回退到 last_interaction_ts_ms 差值。
+        """
+        # 优先使用 offline_state 注入的精确离线时长
+        offline_duration_ms = int(ctx.get("_offline_duration_ms") or 0)
+        if offline_duration_ms > 0:
+            return offline_duration_ms >= self._long_absent_threshold_ms
+
+        # 回退：使用 last_interaction_ts_ms 差值
         last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
         if last_ts <= 0:
             return False
@@ -807,12 +867,23 @@ class PersonaProactiveVoice:
             return _pick_variant(variants, seed)
 
         elif scene_type == SCENE_LONG_ABSENT:
-            last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
-            elapsed = now_ts - last_ts if last_ts > 0 else _ABSENT_SHORT_MS
+            # 技术债务 10.2：优先使用 offline_state 精确时长，回退 last_interaction_ts_ms
+            offline_duration_ms = int(ctx.get("_offline_duration_ms") or 0)
+            if offline_duration_ms > 0:
+                elapsed = offline_duration_ms
+            else:
+                last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
+                elapsed = now_ts - last_ts if last_ts > 0 else _ABSENT_SHORT_MS
             level = _get_absent_level(elapsed)
             level_templates = _LONG_ABSENT_TEMPLATES.get(level, _LONG_ABSENT_TEMPLATES["short"])
             depth_templates = level_templates.get(depth, level_templates.get("mid", {}))
+            # 技术债务 10.2：高孤独感（>0.6）时优先选取更深情的变体（列表末尾）
+            loneliness = float(ctx.get("_loneliness_value") or 0.0)
             variants = depth_templates.get(style) or depth_templates.get("default", ["好久不见，你还好吗"])
+            if loneliness >= 0.6 and len(variants) > 1:
+                # 孤独感高时，从后半段变体中选取（通常更深情）
+                half = max(1, len(variants) // 2)
+                variants = variants[half:]
             return _pick_variant(variants, seed)
 
         elif scene_type == SCENE_POST_INTENSE:
@@ -871,9 +942,21 @@ class PersonaProactiveVoice:
                     return label
         return "那件事"
 
-    def _scene_emotion(self, scene_type: str) -> str:
-        """场景对应的情感标签。"""
-        emotion_map: dict[str, str] = {
+    def _scene_emotion(
+        self,
+        scene_type: str,
+        *,
+        loneliness_value: float = 0.0,
+        anticipation_value: float = 0.0,
+    ) -> str:
+        """场景对应的情感标签。
+
+        技术债务 10.2：根据 loneliness_value / anticipation_value 动态调整情感标签强度。
+        - LONG_ABSENT + 高孤独感（>0.7）→ LONGING（更强烈的思念）
+        - LONG_ABSENT + 高期待值（>0.6）→ ANTICIPATING（期待重逢）
+        - LATE_NIGHT + 高孤独感（>0.5）→ MELANCHOLY（深夜孤独）
+        """
+        base_map: dict[str, str] = {
             SCENE_LATE_NIGHT: "CARING",
             SCENE_LONG_ABSENT: "LOVING",
             SCENE_POST_INTENSE: "THINKING",
@@ -881,7 +964,19 @@ class PersonaProactiveVoice:
             SCENE_MORNING_GREET: "HAPPY",
             SCENE_HOLIDAY_GREET: "HAPPY",
         }
-        return emotion_map.get(scene_type, "NEUTRAL")
+        base = base_map.get(scene_type, "NEUTRAL")
+
+        # 根据等待感知数据动态升级情感标签
+        if scene_type == SCENE_LONG_ABSENT:
+            if loneliness_value >= 0.7:
+                return "LONGING"       # 强烈思念
+            if anticipation_value >= 0.6:
+                return "ANTICIPATING"  # 期待重逢
+        elif scene_type == SCENE_LATE_NIGHT:
+            if loneliness_value >= 0.5:
+                return "MELANCHOLY"    # 深夜孤独
+
+        return base
 
     def _describe_trait_influence(self, traits: Any, style: str) -> str:
         """描述人格特质对表达风格的影响。"""

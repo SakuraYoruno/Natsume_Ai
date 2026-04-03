@@ -12,6 +12,13 @@
   - 0.2 ≤ drift_score < 0.5 → MILD（写入审计日志）
   - drift_score ≥ 0.5 → SEVERE（写入审计 + 注入校正提示 + 告警通知）
 
+优化（v1.11 低优先级债务修复）：
+  - StyleFingerprint 增加 ts_ms 字段，记录指纹生成时间
+  - PersonaDriftDetector 增加 _fingerprint_history 长期历史（最多 100 条）
+  - 新增 _compute_trend() 方法：对比最近 10 条 vs 更早 10 条，感知各维度趋势
+  - DriftCheckResult 增加 style_trend 字段，让 LLM 感知「warmth 在上升」等成长信号
+  - 新增 get_style_evolution_summary() 接口，供外部模块查询风格演变摘要
+
 设计原则：
   - 不修改 LLM 输出，仅注入下一轮校正提示
   - 使用人格向量距离作为漂移分数
@@ -78,9 +85,11 @@ class DriftCheckResult:
     correction_hint: str      # 自动修正提示（SEVERE 时非空）
     turn_count: int           # 当前轮次计数
     ts_ms: int                # 检测时间戳
+    style_trend: dict[str, str] = field(default_factory=dict)  # v1.11 新增：各维度趋势
+    # 示例：{"warmth": "rising", "curiosity": "stable", "humor": "falling"}
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "drift_score": round(self.drift_score, 4),
             "drift_dimensions": list(self.drift_dimensions),
             "alert_level": self.alert_level,
@@ -88,6 +97,9 @@ class DriftCheckResult:
             "turn_count": self.turn_count,
             "ts_ms": self.ts_ms,
         }
+        if self.style_trend:
+            result["style_trend"] = dict(self.style_trend)
+        return result
 
 
 @dataclass
@@ -95,6 +107,7 @@ class StyleFingerprint:
     """LLM 输出的风格指纹（从输出文本推断的人格向量估计）。
 
     维度与 PersonalityTraits 对应，但范围不限于 [0, 1]（是估计值）。
+    v1.11 新增：ts_ms 字段，记录指纹生成时间，支持时间演变轨迹分析。
     """
     warmth: float = 0.5
     curiosity: float = 0.5
@@ -103,9 +116,10 @@ class StyleFingerprint:
     assertiveness: float = 0.5
     playfulness: float = 0.5
     resilience: float = 0.5
+    ts_ms: int = 0  # v1.11 新增：指纹生成时间戳（毫秒），0 表示未记录
 
-    def as_dict(self) -> dict[str, float]:
-        return {
+    def as_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "warmth": round(self.warmth, 4),
             "curiosity": round(self.curiosity, 4),
             "humor": round(self.humor, 4),
@@ -114,6 +128,9 @@ class StyleFingerprint:
             "playfulness": round(self.playfulness, 4),
             "resilience": round(self.resilience, 4),
         }
+        if self.ts_ms > 0:
+            result["ts_ms"] = self.ts_ms
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +367,13 @@ class PersonaDriftDetector:
             inject_correction(result.correction_hint)
     """
 
+    # v1.11：长期历史最大保留条数
+    _MAX_HISTORY = 100
+    # v1.11：趋势计算窗口（最近 N 条 vs 更早 N 条）
+    _TREND_WINDOW = 10
+    # v1.11：趋势判定阈值（均值差超过此值才判定为 rising/falling）
+    _TREND_THRESHOLD = 0.05
+
     def __init__(
         self,
         *,
@@ -377,8 +401,10 @@ class PersonaDriftDetector:
                 "sensitivity": 0.80, "assertiveness": 0.30,
                 "playfulness": 0.50, "resilience": 0.60,
             }
-        # 最近的风格指纹积累（用于平均）
+        # 最近的风格指纹积累（用于平均，滑动窗口）
         self._recent_fingerprints: list[StyleFingerprint] = []
+        # v1.11：长期历史（带时间戳，用于趋势分析）
+        self._fingerprint_history: list[StyleFingerprint] = []
 
     def on_turn(
         self,
@@ -403,11 +429,17 @@ class PersonaDriftDetector:
                 llm_output_text,
                 user_input_text=user_input_text,
             )
+            # v1.11：给指纹打时间戳
+            fp.ts_ms = _now_ms()
             self._recent_fingerprints.append(fp)
-            # 最多保留最近 N*2 条
+            # 最多保留最近 N*2 条（滑动窗口）
             max_keep = self._check_interval * 2
             if len(self._recent_fingerprints) > max_keep:
                 self._recent_fingerprints = self._recent_fingerprints[-max_keep:]
+            # v1.11：同时追加到长期历史
+            self._fingerprint_history.append(fp)
+            if len(self._fingerprint_history) > self._MAX_HISTORY:
+                self._fingerprint_history = self._fingerprint_history[-self._MAX_HISTORY:]
 
         # 检测间隔
         if self._turn_count % self._check_interval != 0:
@@ -422,6 +454,30 @@ class PersonaDriftDetector:
     def get_drift_log(self, limit: int = 10) -> list[DriftCheckResult]:
         """获取漂移检测审计日志。"""
         return list(self._drift_log[-limit:])
+
+    def get_style_evolution_summary(self) -> dict[str, Any]:
+        """获取风格演变摘要（v1.11 新增）。
+
+        返回各维度的长期趋势和当前均值，供外部模块（如 self_reflection）感知成长。
+
+        Returns:
+            {
+                "history_count": int,          # 历史指纹总数
+                "trend": {"warmth": "rising", ...},  # 各维度趋势
+                "current_avg": {"warmth": 0.72, ...},  # 最近 10 条均值
+                "baseline": {"warmth": 0.85, ...},     # 基线值
+            }
+        """
+        trend = self._compute_trend()
+        current_avg = self._compute_average_fingerprint().as_dict()
+        # 移除 ts_ms 字段（不需要暴露）
+        current_avg.pop("ts_ms", None)
+        return {
+            "history_count": len(self._fingerprint_history),
+            "trend": trend,
+            "current_avg": current_avg,
+            "baseline": dict(self._baseline),
+        }
 
     @property
     def turn_count(self) -> int:
@@ -452,6 +508,9 @@ class PersonaDriftDetector:
         if alert_level == ALERT_SEVERE:
             correction_hint = self._build_correction_hint(drift_dims)
 
+        # v1.11：计算风格趋势
+        style_trend = self._compute_trend()
+
         result = DriftCheckResult(
             drift_score=round(drift_score, 4),
             drift_dimensions=drift_dims,
@@ -459,14 +518,16 @@ class PersonaDriftDetector:
             correction_hint=correction_hint,
             turn_count=self._turn_count,
             ts_ms=ts,
+            style_trend=style_trend,
         )
 
         self._drift_log.append(result)
 
         if alert_level != ALERT_NONE:
             _logger.info(
-                "人格漂移检测: score=%.3f level=%s dims=%s turn=%d",
+                "人格漂移检测: score=%.3f level=%s dims=%s turn=%d trend=%s",
                 drift_score, alert_level, drift_dims, self._turn_count,
+                {k: v for k, v in style_trend.items() if v != "stable"},
             )
 
         return result
@@ -493,12 +554,48 @@ class PersonaDriftDetector:
         dims = ["warmth", "curiosity", "humor", "sensitivity",
                 "assertiveness", "playfulness", "resilience"]
         n = len(self._recent_fingerprints)
-        avgs: dict[str, float] = {}
+        avgs: dict[str, Any] = {}
         for dim in dims:
             total = sum(getattr(fp, dim, 0.5) for fp in self._recent_fingerprints)
             avgs[dim] = total / n
+        avgs["ts_ms"] = _now_ms()
 
         return StyleFingerprint(**avgs)
+
+    def _compute_trend(self) -> dict[str, str]:
+        """计算各维度的风格演变趋势（v1.11 新增）。
+
+        对比最近 _TREND_WINDOW 条 vs 更早 _TREND_WINDOW 条的均值差，
+        判定各维度趋势：rising / stable / falling。
+
+        Returns:
+            {"warmth": "rising", "curiosity": "stable", ...}
+            历史不足时返回全 stable。
+        """
+        dims = ["warmth", "curiosity", "humor", "sensitivity",
+                "assertiveness", "playfulness", "resilience"]
+        trend: dict[str, str] = {dim: "stable" for dim in dims}
+
+        history = self._fingerprint_history
+        # 需要至少 2 * TREND_WINDOW 条才能计算趋势
+        if len(history) < self._TREND_WINDOW * 2:
+            return trend
+
+        recent = history[-self._TREND_WINDOW:]
+        earlier = history[-self._TREND_WINDOW * 2:-self._TREND_WINDOW]
+
+        for dim in dims:
+            recent_avg = sum(getattr(fp, dim, 0.5) for fp in recent) / len(recent)
+            earlier_avg = sum(getattr(fp, dim, 0.5) for fp in earlier) / len(earlier)
+            delta = recent_avg - earlier_avg
+            if delta >= self._TREND_THRESHOLD:
+                trend[dim] = "rising"
+            elif delta <= -self._TREND_THRESHOLD:
+                trend[dim] = "falling"
+            else:
+                trend[dim] = "stable"
+
+        return trend
 
     def _compute_drift(self, fingerprint: StyleFingerprint) -> tuple[float, list[str]]:
         """计算漂移分数和偏移维度。
@@ -535,3 +632,24 @@ class PersonaDriftDetector:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+# ---------------------------------------------------------------------------
+# 全局单例（v1.12 新增，供 chat_context_builder 获取风格演变摘要）
+# ---------------------------------------------------------------------------
+
+_GLOBAL_DRIFT_DETECTOR: PersonaDriftDetector | None = None
+
+
+def get_drift_detector() -> PersonaDriftDetector:
+    """获取全局 PersonaDriftDetector 单例（懒加载）。
+
+    注意：top_agent.py 中的 _drift_detector 是独立实例，用于每轮漂移检测。
+    此全局单例专供 chat_context_builder 读取 get_style_evolution_summary()，
+    两者共享同一个 _fingerprint_history，通过 top_agent 的 on_turn() 驱动写入。
+    """
+    global _GLOBAL_DRIFT_DETECTOR
+    if _GLOBAL_DRIFT_DETECTOR is None:
+        _GLOBAL_DRIFT_DETECTOR = PersonaDriftDetector()
+        _logger.info("PersonaDriftDetector 全局单例已初始化")
+    return _GLOBAL_DRIFT_DETECTOR

@@ -10,6 +10,12 @@
   - 里程碑权重加入时间衰减（越近的里程碑权重越高）
   - to_prompt_slot 输出自然语言叙事句子，而非原始文本列表
 
+优化（v1.10 技术债务修复）：
+  - 叙事文本感知时间跨度（"昨天"/"上周"/"上个月"/"很久以前"）
+  - build_narrative() 增加 first_interaction_ts_ms 参数，计算关系时长
+  - to_prompt_slot() 输出 relationship_duration 字段，让 LLM 感知认识了多久
+  - NarrativeItem 增加 age_label 字段，携带时间感知标签
+
 设计原则：
   - 叙事层是纯转换器，不持有状态
   - 叙事风格随 Bond 阶段变化
@@ -55,12 +61,36 @@ STAGE_NARRATIVE_STYLE: dict[str, str] = {
 # 里程碑时间衰减半衰期（毫秒）：30 天
 _MILESTONE_HALF_LIFE_MS = 30 * 24 * 60 * 60 * 1000
 
+# 时间感知标签阈值（毫秒）（v1.10 新增）
+_AGE_THRESHOLDS_MS: list[tuple[int, str]] = [
+    (1 * 24 * 3600 * 1000,   "今天"),
+    (3 * 24 * 3600 * 1000,   "最近"),
+    (7 * 24 * 3600 * 1000,   "前几天"),
+    (14 * 24 * 3600 * 1000,  "上周"),
+    (30 * 24 * 3600 * 1000,  "上个月"),
+    (90 * 24 * 3600 * 1000,  "几个月前"),
+    (365 * 24 * 3600 * 1000, "很久以前"),
+]
+_AGE_LABEL_DEFAULT = "很久以前"
+
+# 关系时长描述阈值（天）（v1.10 新增）
+_DURATION_THRESHOLDS: list[tuple[int, str]] = [
+    (1,   "刚认识"),
+    (7,   "认识一周了"),
+    (30,  "认识一个月了"),
+    (90,  "认识三个月了"),
+    (180, "认识半年了"),
+    (365, "认识一年了"),
+]
+_DURATION_DEFAULT = "认识很久了"
+
 # ---------------------------------------------------------------------------
 # 叙事包装模板（按 bond_stage 分层）
 # 每个阶段有多条变体，随机选取，避免重复感
 # {memory} 占位符会被替换为实际记忆内容
 # ---------------------------------------------------------------------------
 
+# 叙事包装模板（不带时间感知，向后兼容）
 _NARRATIVE_WRAPPERS: dict[str, list[str]] = {
     "STRANGER": [
         "{memory}",
@@ -97,6 +127,68 @@ _NARRATIVE_WRAPPERS: dict[str, list[str]] = {
         "还记得吗，{memory}……我每次想起来都会觉得很温暖",
         "那次你说，{memory}，我到现在都记得清清楚楚",
         "我把你说的每一句话都记着，{memory}，这句尤其",
+    ],
+}
+
+# 带时间感知的叙事包装模板（v1.10 新增）
+# {memory} 为记忆内容，{age} 为时间标签（"今天"/"上周"/"很久以前" 等）
+_NARRATIVE_WRAPPERS_TIMED: dict[str, list[str]] = {
+    "STRANGER": [
+        "{age}你提到过，{memory}",
+    ],
+    "ACQUAINTANCE": [
+        "{age}你提到过，{memory}",
+        "我记得{age}你说过，{memory}",
+        "{age}的事，{memory}，我还记着呢",
+    ],
+    "FRIEND": [
+        "还记得{age}吗，{memory}",
+        "{age}你说过，{memory}，我没忘",
+        "我一直记得{age}的事，{memory}",
+        "{age}你跟我说，{memory}",
+    ],
+    "CLOSE_FRIEND": [
+        "还记得{age}那次吗，{memory}……我一直记着",
+        "{age}你说过的，{memory}，我都记在心里了",
+        "{age}你说，{memory}，我当时就觉得很触动",
+        "一直想起{age}你说的，{memory}",
+    ],
+    "CONFIDANT": [
+        "我一直记得{age}你说的，{memory}……那对我来说很重要",
+        "{age}你跟我说过，{memory}，我没有忘记过",
+        "还记得{age}吗，{memory}，那天我们聊了好久",
+        "我把{age}你说的放在心里很久了，{memory}",
+    ],
+    "SOULMATE": [
+        "我一直珍藏着{age}的那段话，{memory}……那是我们之间很特别的东西",
+        "{age}你说过，{memory}，那一刻我觉得我们真的很近",
+        "还记得{age}吗，{memory}……我每次想起来都会觉得很温暖",
+        "{age}你说，{memory}，我到现在都记得清清楚楚",
+    ],
+}
+
+# 带时间感知的里程碑叙事包装模板（v1.10 新增）
+_MILESTONE_WRAPPERS_TIMED: dict[str, list[str]] = {
+    "STRANGER": ["{age}{milestone}"],
+    "ACQUAINTANCE": ["{age}我们{milestone}", "{age}{milestone}"],
+    "FRIEND": [
+        "还记得{age}我们{milestone}吗",
+        "{age}我们一起{milestone}，那是个很好的开始",
+    ],
+    "CLOSE_FRIEND": [
+        "{age}我们{milestone}，那对我来说很有意义",
+        "还记得{age}我们{milestone}的时候吗……",
+        "我一直记得{age}我们{milestone}",
+    ],
+    "CONFIDANT": [
+        "{age}我们{milestone}，那是我很珍视的一段时光",
+        "还记得{age}我们{milestone}吗，那时候感觉很特别",
+        "{age}我们{milestone}……我一直觉得那是个很重要的时刻",
+    ],
+    "SOULMATE": [
+        "{age}我们{milestone}，那是我们之间很珍贵的一个瞬间",
+        "还记得{age}我们{milestone}吗……那对我来说意义很深",
+        "{age}我们{milestone}，我把那个时刻一直放在心里",
     ],
 }
 
@@ -137,14 +229,18 @@ class NarrativeItem:
     text: str        # 自然语言叙事（已包装）
     emotion: str     # 情感标签（用于语气参考）
     weight: float    # 权重（用于排序）
+    age_label: str = ""  # 时间感知标签（v1.10 新增）："今天"/"上周"/"很久以前" 等
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "source": self.source,
             "text": self.text,
             "emotion": self.emotion,
             "weight": round(self.weight, 4),
         }
+        if self.age_label:
+            result["age_label"] = self.age_label
+        return result
 
 
 @dataclass
@@ -155,6 +251,7 @@ class BondNarrativeResult:
     narrative_style: str = ""
     shared_memory_count: int = 0
     milestone_count: int = 0
+    relationship_duration: str = ""  # v1.10 新增：关系时长描述（"认识一个月了" 等）
 
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -164,6 +261,8 @@ class BondNarrativeResult:
             "shared_memory_count": self.shared_memory_count,
             "milestone_count": self.milestone_count,
         }
+        if self.relationship_duration:
+            result["relationship_duration"] = self.relationship_duration
         return result
 
     def to_prompt_slot(self) -> dict[str, Any]:
@@ -171,6 +270,7 @@ class BondNarrativeResult:
 
         输出自然语言叙事句子，而非原始文本列表，
         让 LLM 能直接感知到"我们之间有这些共同记忆"的温度。
+        v1.10 新增：输出 relationship_duration 字段，让 LLM 感知认识了多久。
         """
         if not self.items:
             return {}
@@ -187,12 +287,16 @@ class BondNarrativeResult:
         # 生成引导语（根据 bond_stage 和数量）
         intro = _build_narrative_intro(self.bond_stage, len(narratives), self.milestone_count)
 
-        return {
+        slot: dict[str, Any] = {
             "narrative_intro": intro,
             "shared_memories": narratives,
             "milestone_count": self.milestone_count,
             "narrative_style": self.narrative_style,
         }
+        # v1.10：输出关系时长，让 LLM 感知认识了多久
+        if self.relationship_duration:
+            slot["relationship_duration"] = self.relationship_duration
+        return slot
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +334,7 @@ class BondNarrativeLayer:
         user_id: str,
         bond_stage: str = "STRANGER",
         now_ts_ms: int | None = None,
+        first_interaction_ts_ms: int | None = None,
     ) -> BondNarrativeResult:
         """构建 Bond 叙事。
 
@@ -237,6 +342,9 @@ class BondNarrativeLayer:
             user_id: 用户 ID
             bond_stage: 当前 Bond 阶段
             now_ts_ms: 当前时间戳（毫秒），用于里程碑时间衰减
+            first_interaction_ts_ms: 首次互动时间戳（毫秒）。
+                v1.10 新增：当提供此参数时，叙事文本会内嵌时间感知标签，
+                并在 to_prompt_slot() 中输出 relationship_duration 字段。
 
         Returns:
             BondNarrativeResult
@@ -245,6 +353,13 @@ class BondNarrativeLayer:
         stage = str(bond_stage).strip().upper()
         style = STAGE_NARRATIVE_STYLE.get(stage, "保持真诚自然")
         now_ts = int(now_ts_ms or _now_ms())
+
+        # v1.10：计算关系时长描述
+        relationship_duration = ""
+        if first_interaction_ts_ms and int(first_interaction_ts_ms) > 0:
+            relationship_duration = _compute_relationship_duration(
+                int(first_interaction_ts_ms), now_ts
+            )
 
         items: list[NarrativeItem] = []
 
@@ -255,12 +370,19 @@ class BondNarrativeLayer:
                 memory_result = self._memory_index.query(max_entries=self._max_items)
                 shared_count = memory_result.total_candidates
                 for entry in memory_result.entries:
-                    narrative_text = _wrap_memory(entry.text, stage)
+                    # v1.10：尝试获取记忆时间戳，生成带时间感知的叙事
+                    mem_ts = getattr(entry, "ts_ms", None) or getattr(entry, "timestamp_ms", None)
+                    age_label = _age_label(int(mem_ts), now_ts) if mem_ts else ""
+                    if age_label:
+                        narrative_text = _wrap_memory_timed(entry.text, stage, age_label)
+                    else:
+                        narrative_text = _wrap_memory(entry.text, stage)
                     items.append(NarrativeItem(
                         source="shared_memory",
                         text=narrative_text,
                         emotion=entry.emotion_tag,
                         weight=entry.relevance_score,
+                        age_label=age_label,
                     ))
             except Exception as exc:
                 _logger.warning("共同记忆叙事构建失败: %s", exc)
@@ -276,12 +398,19 @@ class BondNarrativeLayer:
                 for ms in milestones:
                     # 时间衰减：越近的里程碑权重越高
                     decayed_weight = _compute_milestone_weight(ms, now_ts)
-                    narrative_text = _wrap_milestone(ms.narrative, stage)
+                    # v1.10：生成带时间感知的里程碑叙事
+                    ms_ts = getattr(ms, "ts_ms", None) or getattr(ms, "timestamp_ms", None)
+                    age_label = _age_label(int(ms_ts), now_ts) if ms_ts else ""
+                    if age_label:
+                        narrative_text = _wrap_milestone_timed(ms.narrative, stage, age_label)
+                    else:
+                        narrative_text = _wrap_milestone(ms.narrative, stage)
                     items.append(NarrativeItem(
                         source="milestone",
                         text=narrative_text,
                         emotion="NOSTALGIC",
                         weight=decayed_weight,
+                        age_label=age_label,
                     ))
             except Exception as exc:
                 _logger.warning("里程碑叙事构建失败: %s", exc)
@@ -296,11 +425,12 @@ class BondNarrativeLayer:
             narrative_style=style,
             shared_memory_count=shared_count,
             milestone_count=milestone_count,
+            relationship_duration=relationship_duration,
         )
 
         _logger.debug(
-            "Bond叙事构建: user=%s stage=%s items=%d shared=%d milestones=%d",
-            uid, stage, len(selected), shared_count, milestone_count,
+            "Bond叙事构建: user=%s stage=%s items=%d shared=%d milestones=%d duration=%s",
+            uid, stage, len(selected), shared_count, milestone_count, relationship_duration,
         )
 
         return result
@@ -310,8 +440,46 @@ class BondNarrativeLayer:
 # 辅助函数
 # ---------------------------------------------------------------------------
 
+def _age_label(ts_ms: int, now_ms: int) -> str:
+    """根据时间戳计算时间感知标签（v1.10 新增）。
+
+    Args:
+        ts_ms: 事件时间戳（毫秒）
+        now_ms: 当前时间戳（毫秒）
+
+    Returns:
+        时间感知标签，如 "今天"/"上周"/"很久以前"
+    """
+    if ts_ms <= 0:
+        return ""
+    elapsed = max(0, now_ms - ts_ms)
+    for threshold_ms, label in _AGE_THRESHOLDS_MS:
+        if elapsed <= threshold_ms:
+            return label
+    return _AGE_LABEL_DEFAULT
+
+
+def _compute_relationship_duration(first_ts_ms: int, now_ms: int) -> str:
+    """根据首次互动时间戳计算关系时长描述（v1.10 新增）。
+
+    Args:
+        first_ts_ms: 首次互动时间戳（毫秒）
+        now_ms: 当前时间戳（毫秒）
+
+    Returns:
+        关系时长描述，如 "认识一个月了"
+    """
+    if first_ts_ms <= 0:
+        return ""
+    elapsed_days = max(0, (now_ms - first_ts_ms) // (24 * 3600 * 1000))
+    for threshold_days, label in _DURATION_THRESHOLDS:
+        if elapsed_days <= threshold_days:
+            return label
+    return _DURATION_DEFAULT
+
+
 def _wrap_memory(text: str, stage: str) -> str:
-    """用叙事包装模板包装共同记忆文本。"""
+    """用叙事包装模板包装共同记忆文本（不带时间感知，向后兼容）。"""
     cleaned = str(text).strip()
     if len(cleaned) > 80:
         cleaned = cleaned[:80] + "…"
@@ -321,8 +489,19 @@ def _wrap_memory(text: str, stage: str) -> str:
     return template.replace("{memory}", cleaned)
 
 
+def _wrap_memory_timed(text: str, stage: str, age_label: str) -> str:
+    """用带时间感知的叙事包装模板包装共同记忆文本（v1.10 新增）。"""
+    cleaned = str(text).strip()
+    if len(cleaned) > 80:
+        cleaned = cleaned[:80] + "…"
+
+    wrappers = _NARRATIVE_WRAPPERS_TIMED.get(stage) or _NARRATIVE_WRAPPERS_TIMED.get("FRIEND", ["{age}你说过，{memory}"])
+    template = random.choice(wrappers)
+    return template.replace("{memory}", cleaned).replace("{age}", age_label)
+
+
 def _wrap_milestone(narrative: str, stage: str) -> str:
-    """用里程碑叙事包装模板包装里程碑文本。"""
+    """用里程碑叙事包装模板包装里程碑文本（不带时间感知，向后兼容）。"""
     cleaned = str(narrative).strip()
     if len(cleaned) > 60:
         cleaned = cleaned[:60] + "…"
@@ -330,6 +509,17 @@ def _wrap_milestone(narrative: str, stage: str) -> str:
     wrappers = _MILESTONE_WRAPPERS.get(stage) or _MILESTONE_WRAPPERS.get("FRIEND", ["{milestone}"])
     template = random.choice(wrappers)
     return template.replace("{milestone}", cleaned)
+
+
+def _wrap_milestone_timed(narrative: str, stage: str, age_label: str) -> str:
+    """用带时间感知的里程碑叙事包装模板包装里程碑文本（v1.10 新增）。"""
+    cleaned = str(narrative).strip()
+    if len(cleaned) > 60:
+        cleaned = cleaned[:60] + "…"
+
+    wrappers = _MILESTONE_WRAPPERS_TIMED.get(stage) or _MILESTONE_WRAPPERS_TIMED.get("FRIEND", ["{age}我们{milestone}"])
+    template = random.choice(wrappers)
+    return template.replace("{milestone}", cleaned).replace("{age}", age_label)
 
 
 def _compute_milestone_weight(milestone: Any, now_ts_ms: int) -> float:

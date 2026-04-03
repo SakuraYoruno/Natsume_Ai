@@ -134,70 +134,70 @@ def runtime_lifespan(
                         name, exc,
                         extra={"module": name, "error": str(exc)},
                     )
-    
+
             # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、StyleCanon、EpisodicStore）
             try:
                 from host_brain.app.dependencies import get_state_arbiter  # noqa: PLC0415
                 from host_brain.app.memory.state_arbiter import StateSource  # noqa: PLC0415
                 _arbiter = get_state_arbiter()
-    
+
                 # 注册 WorldCanonStore（最高优先级 SSOT）
                 try:
                     from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
-    
+
                     _world_store = WorldCanonStore()
-    
+
                     _world_get_fact = lambda fact_key, _store=_world_store: read_world_canon_fact(
                         _store,
                         fact_key,
                     )
-    
+
                     _arbiter.register_source(StateSource.WORLD_CANON, _world_get_fact)
                     logger.info("StateArbiter: WorldCanonStore 已注册")
                 except Exception as _exc:
                     logger.warning("StateArbiter: WorldCanonStore 注册失败（降级）: %s", _exc)
-    
+
                 # 注册 StyleCanonStore
                 try:
                     from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
-    
+
                     _style_store = StyleCanonStore()
-    
+
                     _style_get_fact = lambda fact_key, _store=_style_store: read_style_canon_fact(
                         _store,
                         fact_key,
                     )
-    
+
                     _arbiter.register_source(StateSource.STYLE_CANON, _style_get_fact)
                     logger.info("StateArbiter: StyleCanonStore 已注册")
                 except Exception as _exc:
                     logger.warning("StateArbiter: StyleCanonStore 注册失败（降级）: %s", _exc)
-    
+
                 # 注册 EpisodicStore（取最新记录）
                 try:
                     from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
-    
+
                     _ep_store = get_episodic_store()
-    
+
                     _episodic_get_fact = lambda fact_key, _store=_ep_store: read_episodic_latest_fact(
                         _store,
                         fact_key,
                     )
-    
+
                     _arbiter.register_source(StateSource.EPISODIC_STORE, _episodic_get_fact)
                     logger.info("StateArbiter: EpisodicStore 已注册")
                 except Exception as _exc:
                     logger.warning("StateArbiter: EpisodicStore 注册失败（降级）: %s", _exc)
-    
+
                 new_module_statuses["state_arbiter_sources"] = (
                     f"OK:{len(_arbiter._sources)} sources"
                 )
             except Exception as _sa_exc:
                 logger.warning("StateArbiter 状态源注册失败（降级）: %s", _sa_exc)
                 new_module_statuses["state_arbiter_sources"] = f"DEGRADED: {_sa_exc}"
-    
+
             _edge_health: dict[str, Any] | None = None
-    
+
             # [P1] Edge RPC 健康探测：启动时检查 Edge 是否可达
             try:
                 from host_brain.app.dependencies import (  # noqa: PLC0415
@@ -227,17 +227,17 @@ def runtime_lifespan(
             except Exception as _edge_exc:
                 new_module_statuses["edge_rpc"] = f"DEGRADED: {_edge_exc}"
                 logger.warning("Edge RPC 健康探测失败（降级）: %s", _edge_exc)
-    
+
             # [Ref #100] DistillationEngine 蒸馏定时任务注册到 HostTaskScheduler（P1，每 30 分钟）
             try:
                 from host_brain.app.dependencies import get_distillation_engine  # noqa: PLC0415
                 from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
                     ScheduledTask, TaskPriority, get_scheduler,
                 )
-    
+
                 _distill_engine = get_distillation_engine()
                 _scheduler = get_scheduler()
-    
+
                 async def _run_distillation_task() -> None:
                     """DistillationEngine 蒸馏定时任务执行体。"""
                     report = await _distill_engine.run_batch()
@@ -246,7 +246,7 @@ def runtime_lifespan(
                         report.total_candidates, report.distilled_count,
                         report.skipped_count, report.failed_count, report.duration_ms,
                     )
-    
+
                 _distill_task = ScheduledTask(
                     task_id="distillation_engine_periodic",
                     name="情节记忆蒸馏（每 10 分钟）",
@@ -268,12 +268,12 @@ def runtime_lifespan(
             except Exception as _distill_exc:
                 new_module_statuses["distillation_engine_scheduler"] = f"DEGRADED: {_distill_exc}"
                 logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
-    
+
             # [Ref #31] LongTermDistiller 蒸馏任务注册到调度器
             try:
                 from host_brain.memory.long_term_distiller import make_distillation_task_config  # noqa: PLC0415
                 from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-    
+
                 _distill_config = make_distillation_task_config()
                 _task_registry = SchedulerTaskRegistry.get_instance()
                 _task_registry.register(_distill_config)
@@ -288,12 +288,12 @@ def runtime_lifespan(
             except Exception as _distill_exc:
                 new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
                 logger.warning("LongTermDistiller 调度任务注册失败（降级）: %s", _distill_exc)
-    
+
             # [Ref #34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
             try:
                 from host_brain.audit.retention import RetentionPolicy  # noqa: PLC0415
                 from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
-    
+
                 _retention_policy = RetentionPolicy()
                 _retention_registry = SchedulerTaskRegistry.get_instance()
                 _retention_task = _build_audit_retention_task_config()
@@ -310,7 +310,7 @@ def runtime_lifespan(
             except Exception as _ret_exc:
                 new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
                 logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
-    
+
             # [proactive_talk] 主动对话任务注册 + NatsumeScheduler 启动
             try:
                 from host_brain.scheduler.task_registry import (  # noqa: PLC0415
@@ -318,9 +318,9 @@ def runtime_lifespan(
                 )
                 from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
                 from host_brain.app.vision.proactive_push_client import build_proactive_push_client  # noqa: PLC0415
-    
+
                 _proactive_registry = SchedulerTaskRegistry.get_instance()
-    
+
                 # 注册 proactive_talk 任务（每 3 分钟检查一次，空闲 45 分钟触发）
                 _proactive_task = SchedulerTaskConfig(
                     task_id="proactive_talk_periodic",
@@ -339,10 +339,10 @@ def runtime_lifespan(
                 # 避免重复注册（重启时可能已存在）
                 if _proactive_registry.get("proactive_talk_periodic") is None:
                     _proactive_registry.register(_proactive_task)
-    
+
                 # 构建 ui_pusher 回调（同步推送到 Edge）
                 _push_client = build_proactive_push_client()
-    
+
                 _ui_pusher = lambda message, _client=_push_client: _client.push(message)
 
                 _proactive_intent_dispatcher = (
@@ -361,7 +361,7 @@ def runtime_lifespan(
 
                 from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
                 from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
-    
+
                 _health_reporter = SchedulerHealthReporter(registry=_proactive_registry)
                 set_scheduler_providers(
                     registry=_proactive_registry,
@@ -373,7 +373,7 @@ def runtime_lifespan(
                     intent_dispatcher=_proactive_intent_dispatcher,
                 )
                 _natsume_scheduler.start()
-    
+
                 # ── 注册进化周期任务（Phase XVI）：每日凌晨 3:00 触发 ──────
                 try:
                     _evolution_task = SchedulerTaskConfig(
@@ -395,9 +395,97 @@ def runtime_lifespan(
                         logger.info("进化周期任务已注册: task_id=evolution_cycle_daily, cron=03:00")
                 except Exception as _evo_task_exc:
                     logger.warning("进化周期任务注册失败（降级）: %s", _evo_task_exc)
-    
-                new_module_statuses["proactive_talk_scheduler"] = (
-                    f"OK (task_id={_proactive_task.task_id}, interval=180s, idle_threshold=45min)"
+
+                # [Phase XVI] 注册 inner_world_tick 任务（每分钟驱动离线内心世界时钟）
+                try:
+                    _inner_world_task = SchedulerTaskConfig(
+                        task_id="inner_world_tick",
+                        trigger_mode=TriggerMode.INTERVAL,
+                        trigger_config={"seconds": 60},  # 每分钟 tick 一次
+                        intent_template={
+                            "skill_name": "inner_world_tick",
+                            "args": {"user_id": "user_1"},
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
+                        enabled=True,
+                        description="Phase XVI 离线内心世界时钟：每分钟驱动孤独感/期待值/情绪漂移积累",
+                    )
+                    if _proactive_registry.get("inner_world_tick") is None:
+                        _proactive_registry.register(_inner_world_task)
+                        logger.info("离线内心世界时钟任务已注册: task_id=inner_world_tick, interval=60s")
+                except Exception as _inner_world_exc:
+                    logger.warning("离线内心世界时钟任务注册失败（降级）: %s", _inner_world_exc)
+
+                # [Phase XVIII] 注册 silence_tick 任务（每分钟驱动沉默引擎意愿恢复）
+                try:
+                    _silence_task = SchedulerTaskConfig(
+                        task_id="silence_tick",
+                        trigger_mode=TriggerMode.INTERVAL,
+                        trigger_config={"seconds": 60},  # 每分钟 tick 一次
+                        intent_template={
+                            "skill_name": "silence_tick",
+                            "args": {"user_id": "user_1"},
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
+                        enabled=True,
+                        description="Phase XVIII 沉默引擎 tick：每分钟驱动回复意愿自然恢复和话题抗拒衰减",
+                    )
+                    if _proactive_registry.get("silence_tick") is None:
+                        _proactive_registry.register(_silence_task)
+                        logger.info("沉默引擎 tick 任务已注册: task_id=silence_tick, interval=60s")
+                except Exception as _silence_exc:
+                    logger.warning("沉默引擎 tick 任务注册失败（降级）: %s", _silence_exc)
+
+                # [v1.12] 注册 body_sense_tick 任务（每分钟驱动身体感知：困倦感时段更新 + 疲劳自然恢复）
+                try:
+                    _body_sense_task = SchedulerTaskConfig(
+                        task_id="body_sense_tick",
+                        trigger_mode=TriggerMode.INTERVAL,
+                        trigger_config={"seconds": 60},  # 每分钟 tick 一次
+                        intent_template={
+                            "skill_name": "body_sense_tick",
+                            "args": {"user_id": "user_1"},
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
+                        enabled=True,
+                        description="v1.12 身体感知 tick：每分钟更新困倦感（基于时段）和疲劳自然恢复",
+                    )
+                    if _proactive_registry.get("body_sense_tick") is None:
+                        _proactive_registry.register(_body_sense_task)
+                        logger.info("身体感知 tick 任务已注册: task_id=body_sense_tick, interval=60s")
+                except Exception as _body_sense_exc:
+                    logger.warning("身体感知 tick 任务注册失败（降级）: %s", _body_sense_exc)
+
+                # [GAP_ANALYSIS 14.2] 注册 gaming_companion_tick 任务（gaming 模式下每 5 分钟陪玩识图）
+                try:
+                    _gaming_task = SchedulerTaskConfig(
+                        task_id="gaming_companion_tick",
+                        trigger_mode=TriggerMode.INTERVAL,
+                        trigger_config={"seconds": 300},  # 每 5 分钟截图分析一次
+                        intent_template={
+                            "skill_name": "gaming_companion_tick",
+                            "args": {
+                                "user_id": "user_1",
+                                "monitor": 1,
+                            },
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["gaming"],  # 仅在 gaming 模式下运行
+                        enabled=True,
+                        description="gaming 陪玩识图 tick：每 5 分钟截图 → 多模态 LLM 分析 → 推送陪玩评论",
+                    )
+                    if _proactive_registry.get("gaming_companion_tick") is None:
+                        _proactive_registry.register(_gaming_task)
+                        logger.info("gaming 陪玩识图 tick 任务已注册: task_id=gaming_companion_tick, interval=300s, mode=gaming")
+                except Exception as _gaming_exc:
+                    logger.warning("gaming 陪玩识图 tick 任务注册失败（降级）: %s", _gaming_exc)
                 )
                 logger.info(
                     "proactive_talk 任务已注册并启动调度器: task_id=%s",
@@ -406,7 +494,7 @@ def runtime_lifespan(
             except Exception as _proactive_exc:
                 new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
                 logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)
-    
+
             # [builtin_tools_catalog] 将内置 READ 工具注册到 ToolCatalog / ToolBroker
             try:
                 from host_brain.app.dependencies import (  # noqa: PLC0415
@@ -415,11 +503,11 @@ def runtime_lifespan(
                 from host_brain.tools.catalog import ToolMeta  # noqa: PLC0415
                 import hashlib as _hashlib  # noqa: PLC0415
                 import json as _json_tools  # noqa: PLC0415
-    
+
                 _catalog = get_tool_catalog()
                 _broker = get_tool_broker()
                 _skill_reg = get_skill_registry()
-    
+
                 _BUILTIN_TOOL_DEFS = [
                     ("file_list",      "READ", "NONE", ["file"],   "列出目录内容（只读）"),
                     ("file_read",      "READ", "NONE", ["file"],   "读取文件内容（只读）"),
@@ -428,7 +516,7 @@ def runtime_lifespan(
                     ("network_status", "READ", "NONE", ["system"], "查询网络状态"),
                     ("web_search",     "READ", "NONE", ["web"],    "执行网络搜索"),
                 ]
-    
+
                 _registered_tools = 0
                 for _tid, _sel, _auth, _tags, _desc in _BUILTIN_TOOL_DEFS:
                     _skill_meta = _skill_reg.get(_tid)
@@ -453,13 +541,13 @@ def runtime_lifespan(
                         lambda args, ctx, _h=_skill_meta.handler: _h(args or {}, ctx or {}),
                     )
                     _registered_tools += 1
-    
+
                 new_module_statuses["builtin_tools_catalog"] = f"OK ({_registered_tools} tools registered)"
                 logger.info("内置工具已注册到 ToolCatalog: %d 项", _registered_tools)
             except Exception as _tool_exc:
                 new_module_statuses["builtin_tools_catalog"] = f"DEGRADED: {_tool_exc}"
                 logger.warning("内置工具注册失败（降级）: %s", _tool_exc)
-    
+
             # [personality_tools_catalog] 将 Personality / Scheduler Skills 注册到 ToolCatalog
             try:
                 from host_brain.app.dependencies import get_tool_catalog, get_tool_broker  # noqa: PLC0415
@@ -468,10 +556,10 @@ def runtime_lifespan(
                 from host_brain.skills.scheduler_registry import build_scheduler_skill_registry  # noqa: PLC0415
                 import hashlib as _hlib  # noqa: PLC0415
                 import json as _jtools  # noqa: PLC0415
-    
+
                 _cat = get_tool_catalog()
                 _brk = get_tool_broker()
-    
+
                 # Personality skills: diary_writer, dream_generator, desktop_note, focus_mode, proactive_talk
                 _personality_reg = build_personality_skill_registry()
                 _PERSONALITY_TOOL_DEFS = [
@@ -488,7 +576,7 @@ def runtime_lifespan(
                     ("scheduler_cancel", "WRITE", "MEDIUM", ["system"], "取消/删除调度任务（不可逆）"),
                     ("scheduler_list",   "READ",  "NONE",   ["system"], "列出当前所有调度任务"),
                 ]
-    
+
                 _personality_count = 0
                 for _reg, _defs in [(_personality_reg, _PERSONALITY_TOOL_DEFS), (_scheduler_reg, _SCHEDULER_TOOL_DEFS)]:
                     for _tid, _sel, _auth, _tags, _desc in _defs:
@@ -514,23 +602,23 @@ def runtime_lifespan(
                             lambda args, ctx, _h=_smeta.handler: _h(args or {}, ctx or {}),
                         )
                         _personality_count += 1
-    
+
                 new_module_statuses["personality_tools_catalog"] = f"OK ({_personality_count} tools registered)"
                 logger.info("Personality/Scheduler 工具已注册到 ToolCatalog: %d 项", _personality_count)
             except Exception as _pt_exc:
                 new_module_statuses["personality_tools_catalog"] = f"DEGRADED: {_pt_exc}"
                 logger.warning("Personality 工具注册失败（降级）: %s", _pt_exc)
-    
+
             # [long_term_distillation_catalog] 注册长期记忆蒸馏工具到 ToolCatalog
             try:
                 from host_brain.app.dependencies import get_tool_catalog, get_tool_broker, get_ledger as _get_ledger  # noqa: PLC0415
                 from host_brain.tools.catalog import ToolMeta  # noqa: PLC0415
                 import hashlib as _hlib2  # noqa: PLC0415
                 import json as _jtools2  # noqa: PLC0415
-    
+
                 _cat2 = get_tool_catalog()
                 _brk2 = get_tool_broker()
-    
+
                 _schema_lt = {"type": "object", "properties": {}}
                 _shash_lt = "sha256:" + _hlib2.sha256(
                     _jtools2.dumps(_schema_lt, sort_keys=True).encode()
@@ -547,7 +635,7 @@ def runtime_lifespan(
                     _cat2.register(_tmeta_lt)
                 except Exception:
                     pass
-    
+
                 _long_term_distillation_handler = (
                     lambda args, ctx: run_long_term_distillation_handler(args, ctx)
                 )
@@ -558,7 +646,7 @@ def runtime_lifespan(
             except Exception as _lt_exc:
                 new_module_statuses["long_term_distillation_catalog"] = f"DEGRADED: {_lt_exc}"
                 logger.warning("长期蒸馏工具注册失败（降级）: %s", _lt_exc)
-    
+
             dependency_probes = _edge_health
             if dependency_probes is None:
                 dependency_probes = await probe_edge_rpc_health()
@@ -571,7 +659,7 @@ def runtime_lifespan(
             )
             emit_runtime_bootstrap_logs(startup_report=report)
             logger.info("Startup probe completed", extra={"status": report.get("status", "UNKNOWN")})
-    
+
             # 新模块中有降级时，明显提示
             degraded_modules = [k for k, v in new_module_statuses.items() if _startup_status_is_degraded(v)]
             if degraded_modules:
@@ -580,7 +668,7 @@ def runtime_lifespan(
                     degraded_modules,
                     extra={"degraded_modules": degraded_modules},
                 )
-    
+
             # 注册主事件循环到 vts 模块，确保 asyncio.to_thread worker 线程能通过
             # run_coroutine_threadsafe 正确提交 VTS 驱动协程到主循环。
             try:
@@ -589,14 +677,14 @@ def runtime_lifespan(
                 logger.info("VTS 主事件循环已注册")
             except Exception as _vts_loop_exc:
                 logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
-    
+
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
             _activity_monitor = None
             try:
                 from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
                 from host_brain.app.dependencies import get_hard_state, set_sys_mode  # noqa: PLC0415
                 from host_brain.app.dependencies import set_activity_monitor  # noqa: PLC0415
-    
+
                 # 初始化 ModeTransitionService（obs_routes 也会延迟初始化，此处确保提前可用）
                 from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
                 _mode_service = ModeTransitionService(
@@ -604,11 +692,11 @@ def runtime_lifespan(
                     set_sys_mode=set_sys_mode,
                     ledger=ledger,
                 )
-    
+
                 _activity_monitor = ActivityMonitor(mode_transition_service=_mode_service)
                 _activity_monitor.start()
                 set_activity_monitor(_activity_monitor)  # 注册到 dependencies 供消息链路调用
-    
+
                 # 将 ModeTransitionService 实例注入到 obs_routes 模块，
                 # 确保 /obs/sys-mode API 端点和 ActivityMonitor 共享同一实例
                 # （避免历史记录/规则开关各自独立的问题）
@@ -619,7 +707,7 @@ def runtime_lifespan(
                     logger.info("ModeTransitionService 已注入 obs_routes（单例共享）")
                 except Exception as _inject_exc:
                     logger.warning("ModeTransitionService 注入 obs_routes 失败（降级）: %s", _inject_exc)
-    
+
                 new_module_statuses["activity_monitor"] = (
                     f"OK (gaming_check={_activity_monitor._gaming_interval}s, "
                     f"idle_check={_activity_monitor._idle_interval}s)"
@@ -632,7 +720,7 @@ def runtime_lifespan(
             except Exception as _am_exc:
                 new_module_statuses["activity_monitor"] = f"DEGRADED: {_am_exc}"
                 logger.warning("ActivityMonitor 启动失败（降级）: %s", _am_exc)
-    
+
             # 服务健康心跳：定时探测 Edge/Host，避免总览一直显示「未知」
             try:
                 from host_brain.observability.service_health_heartbeat import start_heartbeat
@@ -665,7 +753,7 @@ def runtime_lifespan(
         except Exception:
             pass
         logger.info("Natsume AI Host Brain shutting down ...")
-    
+
     return _lifespan()
 
 async def global_exception_handler(

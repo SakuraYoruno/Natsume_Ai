@@ -1,0 +1,11 @@
+{
+  "request_id": "req_vision_ocr_gaming_companion_001",
+  "intent_id": "intent_vision_ocr_gaming_companion_001",
+  "payload": {
+    "sys_mode": "gaming",
+    "trigger": "gaming_companion",
+    "source_ref": "evd://screen/frame_gaming_001",
+    "frame_text": "Boss HP: 30%  Player HP: 85%  Skill CD: 3s",
+    "timeout_ms": 500
+  }
+}

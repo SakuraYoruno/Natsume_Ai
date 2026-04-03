@@ -172,8 +172,17 @@ class SubAgentDispatcher:
                 elif isinstance(narrative_raw, str):
                     final_answer = narrative_raw.strip()
 
+            # repair_agent 的 success 语义特殊：
+            # 不能用 final_answer 是否非空来判断（修复失败时也会有 summary 文本），
+            # 必须读取 repair_agent_trace.can_retry 才能知道修复是否真正成功、是否允许重试。
+            if req.agent_id == AGENT_REPAIR:
+                repair_trace = result.get("repair_agent_trace") or {}
+                repair_success = bool(repair_trace.get("can_retry", repair_trace.get("success", bool(final_answer))))
+            else:
+                repair_success = bool(final_answer)
+
             resp = SubAgentResponse(
-                success=bool(final_answer),
+                success=repair_success,
                 agent_id=req.agent_id,
                 result=final_answer,
                 audit_refs={

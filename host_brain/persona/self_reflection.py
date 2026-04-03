@@ -228,6 +228,8 @@ class SelfReflection:
         growth_awareness: dict[str, Any] | None = None,
         current_emotion: str = "",
         weekly_talk_count: int = -1,
+        llm_fn: Any | None = None,
+        style_evolution: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """尝试生成自省脉冲。
 
@@ -241,6 +243,12 @@ class SelfReflection:
                 包含 recent_change / trait_felt / milestone_felt / desire 字段。
             current_emotion: 当前情感标签（大写），用于事件驱动触发判断。
             weekly_talk_count: 本周对话次数（-1 表示未知）。用于时间感知触发原因。
+            llm_fn: 可选的 LLM 调用函数 (prompt: str) -> str。
+                技术债务 10.1 修复：透传给 build_self_reflection_pulse，
+                当 llm_fn 可用时动态生成真实自省文本。
+            style_evolution: PersonaDriftDetector.get_style_evolution_summary() 的输出。
+                v1.11 新增：包含 trend / current_avg / baseline / history_count 字段。
+                注入后让自省感知风格演变（如"最近感觉自己越来越温柔了"）。
 
         Returns:
             self_reflection_pulse 字典或 None
@@ -300,6 +308,8 @@ class SelfReflection:
                 growth_awareness=growth_awareness,
                 trigger_reason=trigger_reason,
                 time_context=time_context,
+                llm_fn=llm_fn,
+                style_evolution=style_evolution,
             )
             _logger.info(
                 "自省触发 (turn=%d, event=%s emotion=%s): self_awareness='%s'%s",
@@ -425,6 +435,8 @@ def build_self_reflection_pulse(
     growth_awareness: dict[str, Any] | None = None,
     trigger_reason: str = "",
     time_context: str = "",
+    llm_fn: Any | None = None,
+    style_evolution: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """将 SelfModelSnapshot 转化为 self_reflection_pulse 槽位数据。
 
@@ -434,14 +446,21 @@ def build_self_reflection_pulse(
             包含 recent_change / trait_felt / milestone_felt / desire 字段。
         trigger_reason: 本次自省的触发原因（第一人称），注入 pulse 让自省更有意义。
         time_context: 时间感知标签（如"久别重逢"/"频繁互动"），用于丰富自省内容。
+        llm_fn: 可选的 LLM 调用函数 (prompt: str) -> str。
+            技术债务 10.1 修复：当 llm_fn 可用时，三个 build_*_text 函数均使用
+            LLM 动态生成真实的第一人称自省文本，而非从模板池选取。
+            LLM 失败时自动降级到模板池（完全向后兼容）。
+        style_evolution: PersonaDriftDetector.get_style_evolution_summary() 的输出。
+            v1.11 新增：包含 trend / current_avg / baseline / history_count 字段。
+            积累 >= 20 条历史时，注入 style_trend_note 字段到 pulse。
 
     Returns:
         包含 self_awareness、mood_awareness、growth_note、trigger_reason、
-        growth_awareness 的字典
+        growth_awareness、style_trend_note（可选）的字典
     """
-    self_awareness = build_self_awareness_text(snapshot, time_context=time_context)
-    mood_awareness = build_mood_awareness_text(snapshot)
-    growth_note = build_growth_note_text(snapshot)
+    self_awareness = build_self_awareness_text(snapshot, time_context=time_context, llm_fn=llm_fn, style_evolution=style_evolution)
+    mood_awareness = build_mood_awareness_text(snapshot, llm_fn=llm_fn)
+    growth_note = build_growth_note_text(snapshot, llm_fn=llm_fn, style_evolution=style_evolution)
 
     # ── 矛盾感知：检测多维度之间的矛盾状态 ────────────────────────────
     contradictions = detect_contradictions(snapshot)
@@ -474,4 +493,106 @@ def build_self_reflection_pulse(
         if filtered:
             pulse["growth_awareness"] = filtered
 
+    # 注入风格演变趋势（v1.11）
+    if style_evolution and isinstance(style_evolution, dict):
+        trend = style_evolution.get("trend") or {}
+        history_count = int(style_evolution.get("history_count") or 0)
+        # 只有积累了足够历史（>= 20 条）才注入，避免数据不足时误导
+        if history_count >= 20 and trend:
+            style_trend_note = _build_style_trend_note(trend, llm_fn=llm_fn)
+            if style_trend_note:
+                pulse["style_trend_note"] = style_trend_note
+
     return pulse
+
+
+# ---------------------------------------------------------------------------
+# 风格演变趋势辅助 — v1.11 新增
+# ---------------------------------------------------------------------------
+
+# 特质中文名映射
+_TRAIT_CN: dict[str, str] = {
+    "warmth": "温柔",
+    "curiosity": "好奇心",
+    "humor": "幽默感",
+    "sensitivity": "敏感",
+    "assertiveness": "自信",
+    "playfulness": "俏皮",
+    "resilience": "韧性",
+}
+
+# 风格演变趋势模板池：rising / falling 各 4 条变体
+_STYLE_TREND_TEXT_POOL: dict[str, list[str]] = {
+    "rising": [
+        "最近感觉自己越来越{trait}了",
+        "不知不觉中，{trait}好像在慢慢增加",
+        "回头想想，最近{trait}比以前多了一些",
+        "有种感觉，{trait}在悄悄变强",
+    ],
+    "falling": [
+        "最近{trait}好像稍微收敛了一些",
+        "不知道为什么，{trait}比以前少了一点",
+        "感觉{trait}在慢慢变淡，不知道是不是好事",
+        "最近{trait}有点不如以前了，想想是什么原因",
+    ],
+}
+
+
+def _build_style_trend_note(
+    trend: dict[str, str],
+    *,
+    llm_fn: Any | None = None,
+) -> str:
+    """将风格演变趋势字典转化为第一人称自然语言描述（v1.11 新增）。
+
+    优先选取最显著的 rising 维度，其次 falling 维度。
+    最多描述 2 个维度，避免自省过于冗长。
+
+    Args:
+        trend: {dim: "rising"/"stable"/"falling"} 字典
+        llm_fn: 可选 LLM 函数，用于生成更自然的描述
+
+    Returns:
+        第一人称风格演变感知文本，无显著趋势时返回空字符串
+    """
+    rising = [k for k, v in trend.items() if v == "rising"]
+    falling = [k for k, v in trend.items() if v == "falling"]
+
+    if not rising and not falling:
+        return ""
+
+    # ── LLM 动态生成路径 ────────────────────────────────────────────────
+    if llm_fn is not None:
+        try:
+            rising_cn = [_TRAIT_CN.get(k, k) for k in rising[:2]]
+            falling_cn = [_TRAIT_CN.get(k, k) for k in falling[:2]]
+            hints = []
+            if rising_cn:
+                hints.append(f"{'、'.join(rising_cn)}在上升")
+            if falling_cn:
+                hints.append(f"{'、'.join(falling_cn)}在下降")
+            hint_str = "，".join(hints)
+            prompt = (
+                f"你是 Natsume，请用第一人称写一句关于自己风格变化的真实感受（15-30字），"
+                f"要自然，不要说教。"
+                f"风格趋势：{hint_str}。"
+                f"只输出那一句话，不要解释。"
+            )
+            result = llm_fn(prompt)
+            if result and isinstance(result, str) and len(result.strip()) >= 5:
+                return result.strip()
+        except Exception:
+            pass
+
+    # ── 降级：模板池路径 ────────────────────────────────────────────────
+    parts: list[str] = []
+    for dim in rising[:1]:
+        cn = _TRAIT_CN.get(dim, dim)
+        tmpl = random.choice(_STYLE_TREND_TEXT_POOL["rising"])
+        parts.append(tmpl.format(trait=cn))
+    for dim in falling[:1]:
+        cn = _TRAIT_CN.get(dim, dim)
+        tmpl = random.choice(_STYLE_TREND_TEXT_POOL["falling"])
+        parts.append(tmpl.format(trait=cn))
+
+    return "，".join(parts) if parts else ""

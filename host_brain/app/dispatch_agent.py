@@ -640,7 +640,16 @@ def _build_failure_recovery_plan(
             "reason_code": result_code,
             "retry_original": True,
         }
-    if result_code in {"SKILL_EXECUTION_ERROR", "FAILED", "BOND_UNAVAILABLE", "NETWORK_UNAVAILABLE"}:
+    if result_code in {"NETWORK_UNAVAILABLE", "BOND_UNAVAILABLE"}:
+        return {
+            "strategy": "delegate",
+            "agent_id": "repair_agent",
+            "summary": "原技能失败，正在尝试自动修复网络或服务连接并重试。",
+            "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请自动检查并修复网络连接或服务可用性，然后返回是否可以重试。",
+            "reason_code": result_code,
+            "retry_original": True,
+        }
+    if result_code in {"SKILL_EXECUTION_ERROR", "FAILED"}:
         return {
             "strategy": "delegate",
             "agent_id": "intent_agent",
@@ -648,7 +657,17 @@ def _build_failure_recovery_plan(
             "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请分析失败原因，并给出最合适的下一步建议。",
             "reason_code": result_code,
         }
-    return None
+    # 兜底：所有未知错误码统一交给 repair_agent 的 LLM 规划器尝试自动修复
+    # repair_agent 内部会调用 LLM 分析错误并生成修复计划（pip/npm/系统命令等）
+    # 修复成功后 retry_original=True 会触发 dispatch_agent 自动重试原 Skill
+    return {
+        "strategy": "delegate",
+        "agent_id": "repair_agent",
+        "summary": "原技能失败，正在尝试自动分析并修复运行环境。",
+        "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请自动分析错误原因，修复运行环境依赖，然后返回是否可以重试。",
+        "reason_code": result_code,
+        "retry_original": True,
+    }
 
 
 async def _retry_after_repair(

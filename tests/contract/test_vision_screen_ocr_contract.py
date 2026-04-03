@@ -5,6 +5,7 @@ from pathlib import Path
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     VISION_GATE_GAMING_BLOCKED,
+    VISION_GATE_GAMING_POLL_BLOCKED,
     VISION_OCR_UNAVAILABLE,
 )
 from host_brain.vision.screen_ocr import (
@@ -48,10 +49,10 @@ class TestVisionScreenOcrContract(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertEqual(STATUS_DEGRADED, result.status)
-        self.assertEqual(VISION_GATE_GAMING_BLOCKED, result.reason_code)
+        self.assertEqual(VISION_GATE_GAMING_POLL_BLOCKED, result.reason_code)
         self.assertEqual(S_VISION_GATE, result.stage)
         self.assertEqual([], result.output["text_blocks"])
-        self.assertEqual(VISION_GATE_GAMING_BLOCKED, result.output["quality"]["reason_code"])
+        self.assertEqual(VISION_GATE_GAMING_POLL_BLOCKED, result.output["quality"]["reason_code"])
         self.assertEqual(S_VISION_GATE, result.output["quality"]["stage"])
         self.assertNotIn("saw", result.detail.lower())
         self.assertNotIn("looked", result.detail.lower())
@@ -62,9 +63,36 @@ class TestVisionScreenOcrContract(unittest.TestCase):
         self.assertEqual(fixture["request_id"], row["request_id"])
         self.assertEqual(EVENT_SCREEN_OCR, row["event_type"])
         self.assertEqual(STATUS_DEGRADED, row["status"])
-        self.assertEqual(VISION_GATE_GAMING_BLOCKED, row["reason_code"])
+        self.assertEqual(VISION_GATE_GAMING_POLL_BLOCKED, row["reason_code"])
         self.assertEqual(S_VISION_GATE, row["stage"])
         self.assertEqual(fixture["payload"]["source_ref"], row["source_ref"])
+
+    def test_t_vision_gate_02_gaming_companion_trigger_allowed(self) -> None:
+        """T-VisionGate-02：gaming 模式下 gaming_companion trigger 允许通过，可正常识图。"""
+        fixture = _load_json(FIXTURES / "good" / "ocr_gaming_companion_request.json")
+        svc = ScreenOcrServiceContract(ledger=self.ledger, available=True)
+
+        result = svc.recognize(
+            request_id=fixture["request_id"],
+            intent_id=fixture["intent_id"],
+            source_ref=fixture["payload"]["source_ref"],
+            frame_text=fixture["payload"]["frame_text"],
+            sys_mode=fixture["payload"]["sys_mode"],
+            trigger=fixture["payload"]["trigger"],
+            timeout_ms=fixture["payload"]["timeout_ms"],
+            ts_ms=self.now_ms,
+        )
+
+        # gaming_companion 触发类型应允许通过，返回成功结果
+        self.assertTrue(result.success)
+        self.assertEqual(STATUS_OK, result.status)
+        self.assertEqual(S_VISION_OCR, result.stage)
+        self.assertIsInstance(result.output["text_blocks"], list)
+        self.assertGreater(len(result.output["text_blocks"]), 0)
+
+        rows = [row for row in self.ledger.vision_event_log if row["request_id"] == fixture["request_id"]]
+        self.assertEqual(1, len(rows))
+        self.assertEqual(STATUS_OK, rows[0]["status"])
 
     def test_t_vision_01_non_gaming_ocr_output_is_structured_and_replayable(self) -> None:
         fixture = _load_json(FIXTURES / "good" / "ocr_non_gaming_request.json")

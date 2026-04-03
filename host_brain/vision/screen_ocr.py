@@ -10,6 +10,7 @@ from typing import Any, Callable
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
     VISION_GATE_GAMING_BLOCKED,
+    VISION_GATE_GAMING_POLL_BLOCKED,
     VISION_OCR_INPUT_INVALID,
     VISION_OCR_TIMEOUT,
     VISION_OCR_UNAVAILABLE,
@@ -76,20 +77,26 @@ class ScreenOcrServiceContract:
         trigger_value = str(trigger or "").strip() or "on_demand"
 
         if mode == "gaming":
-            return self._degrade(
-                request_id=request_id,
-                intent_id=intent_id,
-                stage=S_VISION_GATE,
-                reason_code=VISION_GATE_GAMING_BLOCKED,
-                detail="screen OCR blocked in gaming mode",
-                source_ref=source_value,
-                engine_id=OCR_ENGINE_ID,
-                text_blocks=[],
-                trigger=trigger_value,
-                sys_mode=mode,
-                latency_ms=0,
-                ts_ms=now_value,
-            )
+            # gaming 模式下区分触发类型：
+            #   - scheduled_poll（定时后台轮询）→ 拦截，防止无感知监控
+            #   - gaming_companion（陪玩主动识图）→ 允许，调用云端多模态提供攻略/分析
+            #   - on_demand（用户主动请求）→ 允许
+            if trigger_value == "scheduled_poll":
+                return self._degrade(
+                    request_id=request_id,
+                    intent_id=intent_id,
+                    stage=S_VISION_GATE,
+                    reason_code=VISION_GATE_GAMING_POLL_BLOCKED,
+                    detail="scheduled screen poll blocked in gaming mode; use gaming_companion trigger for companion vision",
+                    source_ref=source_value,
+                    engine_id=OCR_ENGINE_ID,
+                    text_blocks=[],
+                    trigger=trigger_value,
+                    sys_mode=mode,
+                    latency_ms=0,
+                    ts_ms=now_value,
+                )
+            # gaming_companion / on_demand → 允许通过，继续执行识图
 
         if not _valid_source_ref(source_value):
             return self._degrade(

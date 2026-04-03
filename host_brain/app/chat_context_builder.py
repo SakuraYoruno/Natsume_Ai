@@ -928,6 +928,71 @@ def build_chat_prompt_runtime_payload(
         except Exception as _ep_exc:
             logger.debug("EmotionPersistence 接入降级: %s", _ep_exc)
 
+        # ── Phase XVI：离线内心世界唤醒快照注入 ──────────────────────────
+        try:
+            from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+            _inner_world = get_inner_world()
+            _iw_snapshot = _inner_world.on_user_awaken(user_id=_persona_user_id)
+            if _iw_snapshot.offline_hours >= 1.0 or _iw_snapshot.awakening_hint:
+                runtime_payload["offline_state"] = _iw_snapshot.as_dict()
+                logger.debug(
+                    "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
+                    _persona_user_id,
+                    _iw_snapshot.offline_hours,
+                    _iw_snapshot.awakening_hint[:30] if _iw_snapshot.awakening_hint else "",
+                )
+        except Exception as _iw_exc:
+            logger.debug("OfflineInnerWorld 接入降级: %s", _iw_exc)
+
+        # ── Phase XVIII：沉默引擎状态快照注入 ────────────────────────────
+        try:
+            from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+            _silence_engine = get_silence_engine()
+            _silence_snapshot = _silence_engine.get_silence_state()
+            if _silence_snapshot.willingness_level != "NORMAL" or _silence_snapshot.topic_resistance_active:
+                runtime_payload["silence_state"] = _silence_snapshot.as_dict()
+                logger.debug(
+                    "EmotionalSilenceEngine 状态注入: user=%s willingness=%.2f level=%s",
+                    _persona_user_id,
+                    _silence_snapshot.response_willingness,
+                    _silence_snapshot.willingness_level,
+                )
+        except Exception as _silence_exc:
+            logger.debug("EmotionalSilenceEngine 接入降级: %s", _silence_exc)
+
+        # ── v1.12：身体感知状态快照注入 + 疲劳惩罚接入沉默引擎 ──────────
+        try:
+            from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+            _bs_model = get_body_sense_model()
+            # 注入孤独感（来自 OfflineInnerWorld.LonelinessAccumulator）
+            _iw_loneliness = float(
+                (runtime_payload.get("offline_state") or {}).get("loneliness_level") or 0.0
+            )
+            if _iw_loneliness > 0.0:
+                _bs_model.update_loneliness(_iw_loneliness)
+            # 对话开始：启动疲劳计时
+            _bs_model.on_conversation_start()
+            # 获取状态快照
+            _bs_state = _bs_model.get_state()
+            if _bs_state.is_active:
+                runtime_payload["body_sense"] = _bs_state.as_dict()
+                logger.debug(
+                    "BodySenseModel 状态注入: user=%s fatigue=%s drowsiness=%s loneliness=%s",
+                    _persona_user_id,
+                    _bs_state.fatigue_level,
+                    _bs_state.drowsiness_level,
+                    _bs_state.loneliness_level,
+                )
+            # 疲劳惩罚接入沉默引擎（断链6修复）
+            if _bs_state.willingness_penalty > 0.0:
+                try:
+                    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+                    get_silence_engine().apply_body_sense_penalty(_bs_state.willingness_penalty)
+                except Exception:
+                    pass
+        except Exception as _bs_exc:
+            logger.debug("BodySenseModel 接入降级: %s", _bs_exc)
+
         _emo_vec = EmotionVector(
             valence=_cur_valence,
             arousal=_cur_arousal,
@@ -1012,6 +1077,13 @@ def build_chat_prompt_runtime_payload(
             _sr_growth_awareness = {}
         _tl_summary_for_sr = dict(runtime_payload.get("emotion_timeline") or _tl_summary or {})
         _tl_diary_for_sr = dict(_tl_diary or {})
+        # ── 断链5修复（v1.12）：获取风格演变摘要，注入自省感知 ──────────
+        _sr_style_evolution: dict | None = None
+        try:
+            from host_brain.persona.drift_detector import get_drift_detector  # noqa: PLC0415
+            _sr_style_evolution = get_drift_detector().get_style_evolution_summary()
+        except Exception:
+            pass
         _pulse = _sr.maybe_generate(
             turn_count=_turn,
             timeline_summary=_tl_summary_for_sr,
@@ -1023,6 +1095,7 @@ def build_chat_prompt_runtime_payload(
             last_deep_talk_ts_ms=_sr_last_deep_talk_ts_ms,
             current_ts_ms=_sr_current_ts_ms,
             growth_awareness=_sr_growth_awareness,
+            style_evolution=_sr_style_evolution,
         )
         if _pulse:
             runtime_payload["self_reflection_pulse"] = _pulse

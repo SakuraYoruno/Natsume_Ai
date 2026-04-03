@@ -37,6 +37,13 @@ class EpisodicRecord:
     emotion_tag: str = "NEUTRAL"
     emotion_valence: float = 0.0
     emotion_arousal: float = 0.3
+    # Phase XVII：记忆人性化字段
+    emotion_color_tag: str = "NEUTRAL"
+    """回忆时的情绪染色标签——影响叙述方式（与写入时 emotion_tag 可不同，随当前情绪重新着色）"""
+    suppression_flag: bool = False
+    """压制标志——痛苦/高冲突记忆降低检索概率（不删除，仅降权）"""
+    distortion_level: float = 0.0
+    """失真度 [0.0, 1.0]——普通记忆随时间细节模糊；高情绪强度记忆豁免失真"""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +60,9 @@ class EpisodicRecord:
             "emotion_tag": self.emotion_tag,
             "emotion_valence": self.emotion_valence,
             "emotion_arousal": self.emotion_arousal,
+            "emotion_color_tag": self.emotion_color_tag,
+            "suppression_flag": self.suppression_flag,
+            "distortion_level": self.distortion_level,
         }
 
 
@@ -435,41 +445,96 @@ class EpisodicStore:
         # M29-B（OPT-3）：情感上下文加权召回
         emotion_context: str | None = None,
         emotion_boost_factor: float = 1.3,
+        # Phase XVII：人性化记忆召回控制
+        apply_decay: bool = True,
+        apply_suppression: bool = True,
+        apply_distortion: bool = True,
+        now_ts_ms: int | None = None,
     ) -> list[dict[str, Any]]:
-        """情感感知记忆召回（M29-B OPT-3）。
+        """情感感知记忆召回（M29-B OPT-3 + Phase XVII 人性化）。
+
+        Phase XVII 新增三层权重融合：
+        1. memory_decay_score：时间衰减，普通记忆随时间降权（高情绪强度豁免）
+        2. suppression_flag：压制标志，痛苦记忆降权至 0.3x
+        3. distortion_level：失真度，细节模糊的记忆轻微降权（1.0 - distortion * 0.2）
 
         emotion_context 匹配的记录分数加权 emotion_boost_factor（默认 1.3x）。
         emotion_filter 仍保留向后兼容（优先返回匹配情感的记录）。
         """
         embedding, _ = self._embed_text(query_text)
-        results = self.chroma.search(query_embedding=embedding, top_k=top_k)
+        # 多取一些候选，衰减后再截断到 top_k
+        fetch_k = max(top_k * 3, top_k + 10)
+        results = self.chroma.search(query_embedding=embedding, top_k=fetch_k)
+
+        # 过滤 LRU 已淘汰的幽灵记录（Chroma 中存在但内存中已移除）
+        results = [r for r in results if r.get("memory_id") in self._records]
+
+        # Phase XVII：三层权重融合
+        now_value = int(now_ts_ms if now_ts_ms is not None else now_ms())
+        processed: list[dict[str, Any]] = []
+        for r in results:
+            record = self._records.get(r.get("memory_id", ""))
+            score = float(r.get("score") or 0.0)
+
+            if record is not None:
+                # 层1：时间衰减
+                if apply_decay:
+                    decay_score = self.compute_memory_decay_score(record, now_ts_ms=now_value)
+                    # 衰减分作为乘法因子：score * decay_score（保留语义相关性的主导地位）
+                    score = score * (0.4 + 0.6 * decay_score)  # 衰减最多降至 40%
+
+                # 层2：压制标志
+                if apply_suppression and record.suppression_flag:
+                    score = score * 0.3  # 压制记忆降权至 30%
+
+                # 层3：失真度（轻微降权，不影响主要排序）
+                if apply_distortion and record.distortion_level > 0.0:
+                    distortion_factor = 1.0 - float(record.distortion_level) * 0.2
+                    score = score * distortion_factor
+
+            r = dict(r)
+            r["score"] = round(max(0.0, min(1.0, score)), 6)
+            # 注入人性化字段到 metadata，供上层感知
+            if record is not None:
+                meta = dict(r.get("metadata") or {})
+                meta["emotion_color_tag"] = record.emotion_color_tag
+                meta["suppression_flag"] = record.suppression_flag
+                meta["distortion_level"] = record.distortion_level
+                r["metadata"] = meta
+            processed.append(r)
 
         # M29-B：情感上下文加权
         if emotion_context:
             boosted: list[dict[str, Any]] = []
-            for r in results:
+            for r in processed:
                 meta = r.get("metadata") or {}
-                score = float(r.get("score") or r.get("distance") or 0.0)
+                score = float(r.get("score") or 0.0)
                 if meta.get("emotion_tag") == str(emotion_context).strip().upper():
                     # 使用加法偏移而非乘法，避免高分区间被压缩到 1.0 失去区分度
-                    # boost_delta = (factor - 1.0) * score，等价于在原分数基础上加一个比例增量
                     boost_delta = (float(emotion_boost_factor) - 1.0) * score
                     score = min(1.0, score + boost_delta)
                     r = dict(r)
                     r["score"] = round(score, 6)
                 boosted.append(r)
-            # 按加权后分数降序排列
-            results = sorted(boosted, key=lambda x: float(x.get("score") or 0.0), reverse=True)
+            processed = sorted(boosted, key=lambda x: float(x.get("score") or 0.0), reverse=True)
+        else:
+            processed = sorted(processed, key=lambda x: float(x.get("score") or 0.0), reverse=True)
 
-        # 过滤 LRU 已淘汰的幽灵记录（Chroma 中存在但内存中已移除）
-        results = [r for r in results if r.get("memory_id") in self._records]
+        # 截断到 top_k
+        processed = processed[:max(1, top_k)]
 
         if emotion_filter is not None:
             # 向后兼容：优先返回匹配情感标签的记录
-            matched = [r for r in results if (r.get("metadata") or {}).get("emotion_tag") == emotion_filter]
-            unmatched = [r for r in results if (r.get("metadata") or {}).get("emotion_tag") != emotion_filter]
+            matched = [r for r in processed if (r.get("metadata") or {}).get("emotion_tag") == emotion_filter]
+            unmatched = [r for r in processed if (r.get("metadata") or {}).get("emotion_tag") != emotion_filter]
             return matched + unmatched
-        return results
+        return processed
+
+    # Phase XVII：记忆衰减分计算
+    # 衰减分 [0.0, 1.0]：1.0 = 全新记忆，0.0 = 完全衰减
+    # 高情绪强度（|valence| > 0.6 或 arousal > 0.7）豁免衰减
+    _EMOTION_INTENSITY_EXEMPT_THRESHOLD_VALENCE: float = 0.6
+    _EMOTION_INTENSITY_EXEMPT_THRESHOLD_AROUSAL: float = 0.7
 
     # M29-I（OPT-?）：decay_profile_id 实装——FAST/SLOW/PERMANENT 三档
     _DECAY_PROFILES: dict[str, dict[str, Any]] = {
@@ -495,6 +560,76 @@ class EpisodicStore:
         now_value = int(now_ts_ms if now_ts_ms is not None else now_ms())
         age_days = (now_value - record.ts_ms) / (1000 * 86400)
         return age_days > ttl_days
+
+    def compute_memory_decay_score(
+        self,
+        record: "EpisodicRecord",
+        *,
+        now_ts_ms: int | None = None,
+    ) -> float:
+        """Phase XVII：计算记忆衰减分 [0.0, 1.0]。
+
+        规则：
+        - PERMANENT profile → 1.0（永不衰减）
+        - 高情绪强度（|valence| > 0.6 或 arousal > 0.7）→ 豁免衰减，返回 1.0
+        - 其余：基于 age_days / ttl_days 的指数衰减，decay_rate 越高衰减越快
+          score = exp(-decay_rate * age_days / ttl_days * 5)
+          保底 0.05（记忆不会完全消失，只是极难被检索到）
+        """
+        profile = self.get_decay_profile(record.decay_profile_id)
+        ttl_days = profile.get("ttl_days")
+        if ttl_days is None:
+            return 1.0  # PERMANENT
+
+        # 高情绪强度豁免
+        if (
+            abs(float(record.emotion_valence)) > self._EMOTION_INTENSITY_EXEMPT_THRESHOLD_VALENCE
+            or float(record.emotion_arousal) > self._EMOTION_INTENSITY_EXEMPT_THRESHOLD_AROUSAL
+        ):
+            return 1.0
+
+        now_value = int(now_ts_ms if now_ts_ms is not None else now_ms())
+        age_days = max(0.0, (now_value - record.ts_ms) / (1000.0 * 86400.0))
+        decay_rate = float(profile.get("decay_rate", 0.5))
+        # 指数衰减：age_days = ttl_days 时，score ≈ exp(-5 * decay_rate)
+        # FAST(0.9): score ≈ 0.011；SLOW(0.3): score ≈ 0.22；default(0.5): score ≈ 0.082
+        import math as _math
+        raw = _math.exp(-decay_rate * age_days / float(ttl_days) * 5.0)
+        return round(max(0.05, min(1.0, raw)), 4)
+
+    def update_emotion_color(
+        self,
+        memory_id: str,
+        *,
+        current_emotion_tag: str,
+    ) -> bool:
+        """Phase XVII：用当前情绪重新着色记忆的 emotion_color_tag。
+
+        在 recall() 时调用，使回忆时的叙述方式受当前情绪影响。
+        返回 True 表示成功更新，False 表示记忆不存在。
+        """
+        record = self._records.get(memory_id)
+        if record is None or record.deleted_at is not None:
+            return False
+        record.emotion_color_tag = str(current_emotion_tag).strip().upper() or record.emotion_tag
+        return True
+
+    def suppress_memory(
+        self,
+        memory_id: str,
+        *,
+        suppress: bool = True,
+    ) -> bool:
+        """Phase XVII：设置/解除记忆压制标志。
+
+        压制的记忆在检索时降权（乘以 0.3），但不删除。
+        Returns True 表示成功，False 表示记忆不存在。
+        """
+        record = self._records.get(memory_id)
+        if record is None or record.deleted_at is not None:
+            return False
+        record.suppression_flag = bool(suppress)
+        return True
 
     def get_memory(self, memory_id: str) -> EpisodicRecord | None:
         return self._records.get(memory_id)
@@ -536,6 +671,8 @@ class EpisodicStore:
         # 截断情感数值到合法范围
         valence = max(-1.0, min(1.0, float(emotion_valence)))
         arousal = max(0.0, min(1.0, float(emotion_arousal)))
+        # Phase XVII：计算初始失真度（写入时为 0，随时间由 tick 更新）
+        # 初始 emotion_color_tag 与 emotion_tag 相同（回忆时可被当前情绪重新着色）
         record = EpisodicRecord(
             memory_id=memory_id,
             text=normalized_text,
@@ -548,6 +685,9 @@ class EpisodicStore:
             emotion_tag=str(emotion_tag).strip().upper() or "NEUTRAL",
             emotion_valence=valence,
             emotion_arousal=arousal,
+            emotion_color_tag=str(emotion_tag).strip().upper() or "NEUTRAL",
+            suppression_flag=False,
+            distortion_level=0.0,
         )
         self._records[memory_id] = record
         self._records.move_to_end(memory_id)
@@ -568,6 +708,10 @@ class EpisodicStore:
                 "emotion_tag": record.emotion_tag,
                 "emotion_valence": record.emotion_valence,
                 "emotion_arousal": record.emotion_arousal,
+                # Phase XVII：人性化记忆字段
+                "emotion_color_tag": record.emotion_color_tag,
+                "suppression_flag": record.suppression_flag,
+                "distortion_level": record.distortion_level,
             },
         )
         return record
