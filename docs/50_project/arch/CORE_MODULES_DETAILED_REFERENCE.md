@@ -460,6 +460,44 @@ python -m pytest -q \
 - 当前“灵魂系统”的主要剩余风险已不再是“这些模块有没有被调用到”，而是更细的场景质量问题，例如 `bond_stage_engine.py`、`chat_context_builder.py`、`self_model.py` 在极端关系演化条件下的行为是否足够稳定。
 - 从验收口径上看，`久别重逢 / 关系升温 / 裂痕修复` 这三类高价值人格场景，已经从“局部 helper 覆盖”提升到了“真实 prompt 组装链可验收”。
 
+### 8.10 2026-04-03 Bond / SelfModel 低点补测
+
+在 8.9 之后，本轮继续专打上一版文档里剩余的两个明显低点：`bond_stage_engine.py` 和 `self_model.py`。这一轮没有改运行时代码，只新增 helper tests，把之前没被真实场景触发到的窄分支补齐。
+
+本轮新增：
+- `tests/unit/test_self_model_helpers_extra.py`
+- `tests/unit/test_bond_stage_engine_helpers_extra.py`
+
+本轮重点补到的分支：
+- `self_model.py`
+  - 情绪极性翻转计数与负向主导情绪持续时长对稳定性的影响
+  - 负向人格变化文案、`100+` 互动里程碑、`len(changes) >= 3` 的成长里程碑
+  - `detect_contradictions(...)` 的 6 条矛盾感知规则
+  - `build_contradiction_awareness_text(...)` 空输入 / 双文本拼接
+  - `build_self_awareness_text(...)` 的 `time_context` 优先分支
+  - `build_mood_awareness_text(...)` 的 `normal` 稳定度分支
+- `bond_stage_engine.py`
+  - `BondSummaryCount` 的 `1 shared memory` / `__int__` / 与字符串比较路径
+  - `BondEmotionalTexture.style_hint()` 的中温区提示
+  - `recent_scores` 的 trim 分支
+  - `PersonaGrowthTracker` / `MilestoneTracker` 的成功链与降级链
+  - `get_bond_state(session_id=...)`
+  - `_restore_state_from_log(...)` 的两条主恢复路径：
+    - 优先从 `bond_stage_transition_log` 恢复并叠加增量事件
+    - `STAGE_TRANSITION payload` 损坏时退回 `bond_update_log` 累加恢复
+  - `_log_transition(...)` 到 `log_system_event(...)` 的最后兜底
+
+本轮验证结果：
+- 新增 helper tests：`16 passed`
+- 扩展后的定向回归：`152 passed`
+- 针对这两个低点文件的覆盖结果：
+  - `host_brain/persona/self_model.py`：`199 / 199 = 100%`
+  - `host_brain/bond/bond_stage_engine.py`：`341 / 346 = 98.55%`
+
+当前结论：
+- 之前广义灵魂系统里最明显的两个低点已经不再成立，`self_model.py` 已被打满，`bond_stage_engine.py` 也已经接近满覆盖。
+- 下一轮如果还要继续提高“灵魂系统”的真实风险收敛度，优先级已经从这两个基础模块转移到更靠近运行时装配的文件，例如 `chat_context_builder.py` 与更大的跨模块 prod_env 场景。
+
 ## 9. 建议阅读顺序
 
 如果你的目标是“快速搞懂系统”，建议按这个顺序读：
