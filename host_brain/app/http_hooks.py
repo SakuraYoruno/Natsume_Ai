@@ -486,11 +486,7 @@ def runtime_lifespan(
                         logger.info("gaming 陪玩识图 tick 任务已注册: task_id=gaming_companion_tick, interval=300s, mode=gaming")
                 except Exception as _gaming_exc:
                     logger.warning("gaming 陪玩识图 tick 任务注册失败（降级）: %s", _gaming_exc)
-                )
-                logger.info(
-                    "proactive_talk 任务已注册并启动调度器: task_id=%s",
-                    _proactive_task.task_id,
-                )
+
             except Exception as _proactive_exc:
                 new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
                 logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)
