@@ -602,6 +602,7 @@ def test_chat_agent_helper_sanitize_preview_emotion_and_tts_extract() -> None:
 
     assert _infer_emotion_tag_for_tts("哈哈，太好了", "NEUTRAL") == "HAPPY"
     assert _infer_emotion_tag_for_tts("抱歉，刚才失败了", "NEUTRAL") == "SAD"
+    assert _infer_emotion_tag_for_tts("会いたかったし、大好きだよ。", "NEUTRAL") == "LOVING"
     assert _infer_emotion_tag_for_tts("whatever", "happy") == "HAPPY"
     assert _infer_emotion_tag_for_tts("", "") == "NEUTRAL"
 

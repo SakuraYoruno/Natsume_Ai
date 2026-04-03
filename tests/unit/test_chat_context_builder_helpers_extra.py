@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.app import chat_context_builder as ccb
+from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.core import prompt_context as pc
 
 
@@ -277,3 +278,57 @@ def test_build_chat_context_pack_degraded_and_minimal_fallback(
     assert minimal_meta["reason_code"] == "PROMPT_CONTEXT_MINIMAL_FALLBACK"
     assert minimal_pack["authoritative"] == []
     assert minimal_pack["style_pack"] == {}
+
+
+def test_build_chat_prompt_runtime_payload_carries_episodic_vector_recall_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "HAPPY",
+                "emotion_intensity": 0.7,
+                "emotion_range_hint": "warm",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-episodic-slot",
+        person_id="person-episodic-slot",
+        session_id="session-episodic-slot",
+        thread_id=None,
+        user_message="hello",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.7},
+        recall_slot_text={"episodic_vector": "shared memory came back through recall pack"},
+        bond_summary={},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    assert runtime_payload["prompt_context"]["payload"]["episodic_vector"] == (
+        "shared memory came back through recall pack"
+    )

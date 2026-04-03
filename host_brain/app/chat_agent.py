@@ -134,11 +134,11 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
     import re as _re
     _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
-        ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶"),
-        ("SAD", "难过|伤心|哭|呜|抱歉|对不起"),
-        ("ANGRY", "生气|气死|烦"),
-        ("LOVING", "谢谢|感谢|感动|喜欢|爱你"),
-        ("SURPRISED", "哇|真的吗|竟然"),
+        ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった"),
+        ("SAD", "难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん"),
+        ("ANGRY", "生气|气死|烦|腹立|むかつく"),
+        ("LOVING", "谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった"),
+        ("SURPRISED", "哇|真的吗|竟然|びっくり|えっ|本当"),
     ]
     if not narrative or str(current_tag or "").strip().upper() != "NEUTRAL":
         return str(current_tag or "NEUTRAL").strip().upper() or "NEUTRAL"

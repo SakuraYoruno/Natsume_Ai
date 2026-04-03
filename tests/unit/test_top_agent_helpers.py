@@ -553,6 +553,10 @@ def test_infer_emotion_tag_for_tts_uses_keyword_map(monkeypatch) -> None:
     assert _infer_emotion_tag_for_tts("sad", "ANGRY") == "ANGRY"
 
 
+def test_infer_emotion_tag_for_tts_supports_japanese_affection_keywords() -> None:
+    assert _infer_emotion_tag_for_tts("会いたかったし、大好きだよ。", "NEUTRAL") == "LOVING"
+
+
 def test_should_buffer_stream_output_honors_flag_and_reflection(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
     assert _should_buffer_stream_output(emotion_context={}, bond_summary={}) is False

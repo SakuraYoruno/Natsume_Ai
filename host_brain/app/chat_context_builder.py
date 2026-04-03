@@ -821,6 +821,9 @@ def build_chat_prompt_runtime_payload(
     prompt_context = dict(generation_payload.get("prompt_context") or {})
     prompt_context_validation = dict(generation_payload.get("prompt_context_validation") or {})
     prompt_context_observability = dict(generation_payload.get("prompt_context_observability") or {})
+    episodic_vector_slot_text = str(recall_slot_text.get("episodic_vector") or "").strip()
+    if episodic_vector_slot_text and not str(prompt_context.get("episodic_vector") or "").strip():
+        prompt_context["episodic_vector"] = episodic_vector_slot_text
 
     runtime_payload = runtime_input.to_runtime_payload(
         prompt_context=prompt_context,
