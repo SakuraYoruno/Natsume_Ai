@@ -1,16 +1,14 @@
-"""wxautox4 Bridge — drop-in replacement for wechat_uia_bridge.py.
+"""wxautox4 Bridge for Natsume_Ai.
 
-Uses the ``wxautox4`` Python package variant instead of raw
-comtypes UIAutomation COM calls.  The **external protocol is identical**
-to the legacy UIA bridge:
+Uses the ``wxautox4`` Python package variant and exposes the current
+Gateway bridge protocol:
 
   Inbound  → HTTP POST to Gateway webhook  ``/v1/gateway/wechat/webhook``
   Outbound → poll JSONL command queue → execute wxautox4 API → write result
 
-Switch between backends via a single env-var:
+Select this bridge with:
 
-    EDGE_WECHAT_BRIDGE_BACKEND=wxautox4   # use this bridge
-    EDGE_WECHAT_BRIDGE_BACKEND=uia        # use legacy UIA bridge
+    EDGE_WECHAT_BRIDGE_BACKEND=wxautox4
 
 Requires:
   - wxautox4 activated (``wxautox4 -a <activation_code>`` or vendor wheel equivalent)
@@ -59,7 +57,7 @@ from typing import Any
 logger = logging.getLogger("Natsume.wxautox4_bridge")
 
 # ---------------------------------------------------------------------------
-# Constants — kept in sync with wechat_uia_bridge.py
+# Constants
 # ---------------------------------------------------------------------------
 DEFAULT_EDGE_URL = "http://127.0.0.1:19000"
 CALLBACK_PATH = "/v1/gateway/wechat/webhook"
@@ -73,7 +71,7 @@ PHASE3_MSG_CACHE_TTL_S = float(         # Phase 3: message object cache TTL (def
     os.environ.get("EDGE_WECHAT_WXAUTOX4_MSG_CACHE_TTL_S") or 300
 )
 
-# Media type codes matching the UIA bridge convention
+# Media type codes matching the Gateway bridge convention
 MEDIA_TYPE_CODE_MAP: dict[str, int] = {
     "text": 1,
     "image": 3,
@@ -87,7 +85,7 @@ MEDIA_TYPE_CODE_MAP: dict[str, int] = {
 
 
 # ---------------------------------------------------------------------------
-# Helpers — identical to wechat_uia_bridge.py helpers
+# Helpers
 # ---------------------------------------------------------------------------
 
 def _normalize_optional_path(raw: str) -> str:
@@ -418,7 +416,7 @@ class InboundProcessor:
         # Phase 2: try to extract link URL from LinkMessage
         link_url = self._extract_link_url(msg)
 
-        # Build webhook body — format identical to wechat_uia_bridge.py
+        # Build the webhook body consumed by the Gateway WeChat webhook.
         body: dict[str, Any] = {
             "id": msg_id,
             "msg_id": msg_id,
@@ -1238,12 +1236,12 @@ class WxAutoX4Bridge:
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point — argument interface matches wechat_uia_bridge.py
+# CLI entry point
 # ---------------------------------------------------------------------------
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="wxautox4 Bridge for Natsume_Ai (drop-in replacement for UIA bridge) [Phase 1]",
+        description="wxautox4 Bridge for Natsume_Ai [Phase 1]",
     )
     parser.add_argument(
         "--edge-url",

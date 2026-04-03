@@ -72,21 +72,21 @@ class GatewayInstance:
         self.refresher = None
         self.reporter = None
         self.server_thread: threading.Thread | None = None
-        self.uia_bridge_process: subprocess.Popen | None = None
-        self.uia_bridge_watchdog: threading.Thread | None = None
+        self.wechat_bridge_process: subprocess.Popen | None = None
+        self.wechat_bridge_watchdog: threading.Thread | None = None
         self._shutdown = threading.Event()
 
     def stop(self) -> None:
         self._shutdown.set()
-        if self.uia_bridge_process is not None:
+        if self.wechat_bridge_process is not None:
             try:
-                self.uia_bridge_process.terminate()
-                self.uia_bridge_process.wait(timeout=5)
-                logger.info("Gateway: UIA Bridge 进程已停止")
+                self.wechat_bridge_process.terminate()
+                self.wechat_bridge_process.wait(timeout=5)
+                logger.info("Gateway: WeChat bridge process stopped")
             except Exception as exc:
-                logger.warning("Gateway: 停止 UIA Bridge 进程异常: %s", exc)
+                logger.warning("Gateway: failed to stop WeChat bridge process: %s", exc)
                 try:
-                    self.uia_bridge_process.kill()
+                    self.wechat_bridge_process.kill()
                 except Exception:
                     pass
         if self.watcher is not None:
@@ -126,41 +126,49 @@ def _parse_bool_env(raw: str | None, *, default: bool = False) -> bool:
 
 
 def _wechat_bridge_backend() -> str:
-    """Return the configured WeChat bridge backend name (normalized)."""
-    return str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND") or "uia").strip().lower() or "uia"
+    """Return the configured WeChat bridge backend after removing UIA support."""
+    backend = str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND") or "wxautox4").strip().lower() or "wxautox4"
+    if backend == "uia":
+        logger.warning(
+            "Gateway: legacy EDGE_WECHAT_BRIDGE_BACKEND=uia is no longer supported; falling back to wxautox4"
+        )
+        return "wxautox4"
+    if backend in {"wxautox4", "external"}:
+        return backend
+    if backend:
+        logger.warning("Gateway: invalid EDGE_WECHAT_BRIDGE_BACKEND=%s; falling back to wxautox4", backend)
+    return "wxautox4"
 
 
-def _wechat_uia_bridge_enabled() -> bool:
+def _wechat_bridge_enabled() -> bool:
     env = os.environ
     enabled = _parse_bool_env(env.get("EDGE_WECHAT_BRIDGE_ENABLED"), default=False)
     if not enabled:
         return False
-    return _wechat_bridge_backend() in {"uia", "wxautox4"}
+    return _wechat_bridge_backend() == "wxautox4"
 
 
-def _should_auto_start_uia_bridge() -> bool:
-    """Check whether bootstrap should auto-launch the UIA bridge subprocess."""
-    raw = os.environ.get("EDGE_WECHAT_UIA_BRIDGE_AUTO_START", "").strip().lower()
+def _should_auto_start_wechat_bridge() -> bool:
+    """Check whether bootstrap should auto-launch the WeChat bridge subprocess."""
+    raw = os.environ.get("EDGE_WECHAT_BRIDGE_AUTO_START", "").strip().lower()
+    if not raw:
+        legacy_raw = os.environ.get("EDGE_WECHAT_UIA_BRIDGE_AUTO_START", "").strip().lower()
+        if legacy_raw:
+            logger.warning(
+                "Gateway: EDGE_WECHAT_UIA_BRIDGE_AUTO_START is deprecated; use EDGE_WECHAT_BRIDGE_AUTO_START"
+            )
+            raw = legacy_raw
     if raw in {"0", "false", "no", "off"}:
         return False
     # Default to True when bridge mode is enabled
-    return _wechat_uia_bridge_enabled()
+    return _wechat_bridge_enabled()
 
 
-def _start_uia_bridge_process(instance: GatewayInstance) -> None:
-    """Launch the appropriate bridge subprocess and start a watchdog.
-
-    When ``EDGE_WECHAT_BRIDGE_BACKEND=wxautox4``, launches ``tools/wxautox4_bridge.py``.
-    Otherwise defaults to ``tools/wechat_uia_bridge.py``.
-    """
+def _start_wechat_bridge_process(instance: GatewayInstance) -> None:
+    """Launch the wxautox4 bridge subprocess and start a watchdog."""
     repo_root = Path(__file__).resolve().parents[2]
-    backend = _wechat_bridge_backend()
-    if backend == "wxautox4":
-        bridge_script = repo_root / "tools" / "wxautox4_bridge.py"
-        bridge_label = "wxautox4 Bridge"
-    else:
-        bridge_script = repo_root / "tools" / "wechat_uia_bridge.py"
-        bridge_label = "UIA Bridge"
+    bridge_script = repo_root / "tools" / "wxautox4_bridge.py"
+    bridge_label = "wxautox4 Bridge"
     if not bridge_script.exists():
         logger.warning("Gateway: %s 脚本不存在: %s，跳过自动启动", bridge_label, bridge_script)
         return
@@ -185,7 +193,7 @@ def _start_uia_bridge_process(instance: GatewayInstance) -> None:
             stderr=subprocess.PIPE,
             cwd=str(repo_root),
         )
-        instance.uia_bridge_process = proc
+        instance.wechat_bridge_process = proc
         logger.info("Gateway: %s 子进程已启动 pid=%d cmd=%s", bridge_label, proc.pid, " ".join(cmd))
     except Exception as exc:
         logger.error("Gateway: %s 子进程启动失败: %s", bridge_label, exc)
@@ -196,7 +204,7 @@ def _start_uia_bridge_process(instance: GatewayInstance) -> None:
         restart_count = 0
         max_restarts = 10
         while not instance._shutdown.is_set():
-            retcode = instance.uia_bridge_process.poll()
+            retcode = instance.wechat_bridge_process.poll()
             if retcode is not None:
                 if instance._shutdown.is_set():
                     break
@@ -219,16 +227,16 @@ def _start_uia_bridge_process(instance: GatewayInstance) -> None:
                         stderr=subprocess.PIPE,
                         cwd=str(repo_root),
                     )
-                    instance.uia_bridge_process = proc
+                    instance.wechat_bridge_process = proc
                     logger.info("Gateway: %s 子进程已重启 pid=%d", bridge_label, proc.pid)
                 except Exception as exc:
                     logger.error("Gateway: %s 重启失败: %s", bridge_label, exc)
                     break
             instance._shutdown.wait(timeout=5.0)
 
-    watchdog_thread = threading.Thread(target=_watchdog, name="uia-bridge-watchdog", daemon=True)
+    watchdog_thread = threading.Thread(target=_watchdog, name="wechat-bridge-watchdog", daemon=True)
     watchdog_thread.start()
-    instance.uia_bridge_watchdog = watchdog_thread
+    instance.wechat_bridge_watchdog = watchdog_thread
 
 
 def start_gateway(config: GatewayConfig) -> GatewayInstance:
@@ -259,7 +267,7 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     if "wechat" in enabled_platforms:
         from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
 
-        bridge_mode = _wechat_uia_bridge_enabled()
+        bridge_mode = _wechat_bridge_enabled()
         wx_svc = None
         if config.wx_decrypt_output_dir:
             from edge_client.services.wx_db_service import WxDbService
@@ -286,10 +294,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
 
             if bridge_mode:
                 logger.info(
-                    "Gateway: 微信 UIAutomation bridge mode enabled，使用 webhook + command queue，跳过 DB watcher"
+                    "Gateway: wechat bridge mode enabled; using webhook + command queue and skipping DB watcher"
                 )
-                if _should_auto_start_uia_bridge():
-                    _start_uia_bridge_process(instance)
+                if _should_auto_start_wechat_bridge():
+                    _start_wechat_bridge_process(instance)
             elif wx_svc is not None:
                 if config.wx_db_storage_dir:
                     from edge_client.services.wx_decrypt_refresher import WxDecryptRefresher

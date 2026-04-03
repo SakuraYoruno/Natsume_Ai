@@ -3,7 +3,7 @@
 This adapter keeps only the pieces required by the current architecture:
 - inbound webhook payload normalization
 - optional WxDbService -> UnifiedMessage conversion
-- outbound command queue dispatch to the pure UIA bridge
+- outbound command queue dispatch to the wxautox4 bridge
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return success
                 detail = "bridge_queue_not_enabled"
                 logger.warning(
-                    "WeChatAdapter: bridge queue not enabled — set EDGE_WECHAT_BRIDGE_ENABLED=true and EDGE_WECHAT_BRIDGE_BACKEND=uia|wxautox4"
+                    "WeChatAdapter: bridge queue not enabled — set EDGE_WECHAT_BRIDGE_ENABLED=true and EDGE_WECHAT_BRIDGE_BACKEND=wxautox4"
                 )
                 return False
             if reply.msg_type == MsgType.IMAGE:
@@ -281,7 +281,15 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     @staticmethod
     def _bridge_backend() -> str:
-        return str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "uia") or "uia").strip().lower() or "uia"
+        backend = str(os.environ.get("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4") or "wxautox4").strip().lower() or "wxautox4"
+        if backend == "uia":
+            logger.warning(
+                "WeChatAdapter: legacy EDGE_WECHAT_BRIDGE_BACKEND=uia is no longer supported; falling back to wxautox4"
+            )
+            return "wxautox4"
+        if backend in {"wxautox4", "external"}:
+            return backend
+        return "wxautox4"
 
     @staticmethod
     def _bridge_inbound_backend() -> str:
@@ -294,7 +302,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
     def _bridge_queue_enabled() -> bool:
         enabled = str(os.environ.get("EDGE_WECHAT_BRIDGE_ENABLED") or "true").strip().lower()
         backend = WeChatAdapter._bridge_backend()
-        return enabled not in {"0", "false", "no", "off"} and backend in {"uia", "wxautox4"}
+        return enabled not in {"0", "false", "no", "off"} and backend == "wxautox4"
 
     @staticmethod
     def _resolve_command_timeout_ms() -> int:
@@ -346,7 +354,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         return bool((result or {}).get("success"))
 
     def _send_image_via_bridge_queue(self, reply: UnifiedReply) -> bool:
-        """Send an image via the UIA bridge command queue.
+        """Send an image via the WeChat bridge command queue.
 
         The image file path is expected in ``reply.media_path``.
         Falls back to ``reply.content`` if ``media_path`` is not set.
@@ -383,7 +391,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         return bool((result or {}).get("success"))
 
     def _send_voice_via_bridge_queue(self, reply: UnifiedReply) -> bool:
-        """Send a voice message (.silk file) via the UIA bridge command queue.
+        """Send a voice message (.silk file) via the WeChat bridge command queue.
 
         The voice file path is expected in ``reply.media_path``.
         Falls back to ``reply.content`` if ``media_path`` is not set.
@@ -582,7 +590,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         return ok
 
     # NOTE: Legacy _send_via_pywinauto has been removed.
-    # All outbound messages go through the UIA Bridge command queue.
+    # All outbound messages go through the WeChat bridge command queue.
 
     @staticmethod
     def _is_placeholder_conversation_id(conversation_id: str) -> bool:

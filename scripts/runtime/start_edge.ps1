@@ -826,11 +826,8 @@ $wechatEnvOverrideKeys = @(
   "EDGE_WECHAT_CALLBACK_TIMEOUT_S",
   "EDGE_WECHAT_OCR_MIN_SCORE",
   "EDGE_WECHAT_OCR_INBOUND_X_RATIO_MAX",
-  "EDGE_WECHAT_UIA_SCAN_CHAT_LIST",
   "EDGE_WECHAT_FORCE_ACTIVE_CHAT_TARGET",
-  "EDGE_WECHAT_UIA_AUTO_RECOVER_ANCHOR_CLICK",
   "EDGE_WECHAT_SEND_TEXT_PREFER_ACTIVE_CHAT",
-  "EDGE_WECHAT_UIA_ACTIVE_INBOUND_X_RATIO_MAX",
   "EDGE_WECHAT_VISION_MODEL",
   "EDGE_WECHAT_VISION_API_URL",
   "EDGE_WECHAT_VISION_TIMEOUT_S",
@@ -1193,17 +1190,21 @@ if ($null -ne $wechatBridgeEnvRaw) {
   $wechatBridgeEnvRaw = $env:EDGE_WECHAT_BRIDGE_ENABLED
 }
 
-$wechatBridgeBackend = "uia"
+$wechatBridgeBackend = "wxautox4"
 $wechatBridgeBackendRaw = Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_BRIDGE_BACKEND"
 if ($null -eq $wechatBridgeBackendRaw -and $env:EDGE_WECHAT_BRIDGE_BACKEND) {
   $wechatBridgeBackendRaw = $env:EDGE_WECHAT_BRIDGE_BACKEND
 }
 if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
   $candidateBackend = ([string]$wechatBridgeBackendRaw).Trim().ToLowerInvariant()
-  if ($candidateBackend -in @("uia", "wxautox4", "external")) {
+  if ($candidateBackend -eq "uia") {
+    $wechatBridgeBackend = "wxautox4"
+    $wechatBridgeBackendRaw = "$wechatBridgeBackendRaw (auto->wxautox4)"
+    $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_UIA_REMOVED"
+  } elseif ($candidateBackend -in @("wxautox4", "external")) {
     $wechatBridgeBackend = $candidateBackend
   } else {
-    $wechatBridgeBackend = "uia"
+    $wechatBridgeBackend = "wxautox4"
     $startupPreWarnings += "WECHAT_BRIDGE_BACKEND_INVALID"
   }
 }
@@ -1218,16 +1219,16 @@ if ($null -ne $wechatAllowExternalRaw -and -not [string]::IsNullOrWhiteSpace([st
 }
 
 if ($wechatBridgeEnabled -and $wechatBridgeBackend -eq "external" -and -not $wechatAllowExternalCallbackOnly) {
-  $wechatBridgeBackend = "uia"
+  $wechatBridgeBackend = "wxautox4"
   if ($null -ne $wechatBridgeBackendRaw -and -not [string]::IsNullOrWhiteSpace([string]$wechatBridgeBackendRaw)) {
-    $wechatBridgeBackendRaw = "$wechatBridgeBackendRaw (auto->uia)"
+    $wechatBridgeBackendRaw = "$wechatBridgeBackendRaw (auto->wxautox4)"
   } else {
-    $wechatBridgeBackendRaw = "external(auto->uia)"
+    $wechatBridgeBackendRaw = "external(auto->wxautox4)"
   }
-  $envValues["EDGE_WECHAT_BRIDGE_BACKEND"] = "uia"
-  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_BACKEND", "uia", "Process")
-  if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_UIA")) {
-    $startupPreWarnings += "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_UIA"
+  $envValues["EDGE_WECHAT_BRIDGE_BACKEND"] = "wxautox4"
+  [Environment]::SetEnvironmentVariable("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4", "Process")
+  if (-not ($startupPreWarnings -contains "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_WXAUTOX4")) {
+    $startupPreWarnings += "WECHAT_BRIDGE_EXTERNAL_AUTO_FALLBACK_WXAUTOX4"
   }
 }
 $wechatBridgeEnabledText = if ($wechatBridgeEnabled) { "true" } else { "false" }
@@ -1272,7 +1273,7 @@ $wechatBridgeLog = Join-Path $LogDir "wechat_bridge.log"
 $wechatBridgeErrLog = Join-Path $LogDir "wechat_bridge.stderr.log"
 $wechatCommandQueueFile = Join-Path $runtimeRoot "wechat_command_queue.jsonl"
 $wechatCommandResultFile = Join-Path $runtimeRoot "wechat_command_result.jsonl"
-$wechatBridgeUsesCommandQueue = $wechatBridgeBackend -in @("uia", "wxautox4")
+$wechatBridgeUsesCommandQueue = $wechatBridgeBackend -eq "wxautox4"
 
 if ($wechatBridgeUsesCommandQueue) {
   $queuePathRaw = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key "EDGE_WECHAT_COMMAND_QUEUE_FILE")
@@ -1307,25 +1308,18 @@ if ($wechatBridgeUsesCommandQueue) {
   [Environment]::SetEnvironmentVariable("EDGE_WECHAT_COMMAND_RESULT_FILE", [string]$wechatCommandResultFile, "Process")
 }
 
-if ($wechatBridgeBackend -eq "uia") {
-  $uiaDefaultEnv = [ordered]@{
-    EDGE_WECHAT_INBOUND_BACKEND = "uia_hook"
-    EDGE_WECHAT_UIA_MAIN_WINDOW_CLASSES = "mmui::ChatSingleWindow,WeixinMainWndForPC,WeChatMainWndForPC,Qt51514QWindowIcon"
-    EDGE_WECHAT_UIA_CHAT_WINDOW_CLASSES = "mmui::ChatSingleWindow"
-    EDGE_WECHAT_UIA_MESSAGE_LIST_CLASSES = "mmui::ChatRecordListView,mmui::ChatRecordList"
-    EDGE_WECHAT_UIA_MESSAGE_ITEM_CLASSES = "mmui::ChatTextItemView"
-    EDGE_WECHAT_UIA_EDITOR_CLASSES = "mmui::ChatInputTextEdit,mmui::InputTextEdit,Edit"
-    EDGE_WECHAT_UIA_TITLE_CLASSES = "mmui::ChatHeaderTitle,Text"
-    EDGE_WECHAT_UIA_SEARCH_CLASSES = "Search,搜索,Edit"
+if ($wechatBridgeBackend -eq "wxautox4") {
+  $bridgeDefaultEnv = [ordered]@{
+    EDGE_WECHAT_INBOUND_BACKEND = "wxautox4_hook"
   }
-  foreach ($uiaKey in $uiaDefaultEnv.Keys) {
-    $currentUiaValue = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key $uiaKey)
-    if (-not [string]::IsNullOrWhiteSpace($currentUiaValue)) {
+  foreach ($bridgeKey in $bridgeDefaultEnv.Keys) {
+    $currentBridgeValue = [string](Get-EnvValueCaseInsensitive -Values $envValues -Key $bridgeKey)
+    if (-not [string]::IsNullOrWhiteSpace($currentBridgeValue)) {
       continue
     }
-    $defaultUiaValue = [string]$uiaDefaultEnv[$uiaKey]
-    $envValues[$uiaKey] = $defaultUiaValue
-    [Environment]::SetEnvironmentVariable($uiaKey, $defaultUiaValue, "Process")
+    $defaultBridgeValue = [string]$bridgeDefaultEnv[$bridgeKey]
+    $envValues[$bridgeKey] = $defaultBridgeValue
+    [Environment]::SetEnvironmentVariable($bridgeKey, $defaultBridgeValue, "Process")
   }
 }
 
@@ -1601,7 +1595,7 @@ if ($null -eq $vtsConn) {
 # ────────────────────────────────────────────────────────────────────────────
 
 # 微信桥接（可选）：
-#   EDGE_WECHAT_BRIDGE_BACKEND=uia|wxautox4|external
+#   EDGE_WECHAT_BRIDGE_BACKEND=wxautox4|external
 #   external: 不拉起本地桥接，外部插件可直接推送到 /v1/gateway/wechat/webhook
 $wechatBridgePid = $null
 $wechatBridgeStatus = "disabled"
@@ -1619,7 +1613,7 @@ if (Test-Path -Path $wechatBridgePidFile) {
   }
   Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
 }
-$bridgeScriptNeedles = @("wechat_uia_bridge.py", "wxautox4_bridge.py")
+$bridgeScriptNeedles = @("wxautox4_bridge.py")
 $existingBridgePids = @()
 foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
   $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
@@ -1648,7 +1642,7 @@ if ($wechatBridgeEnabled) {
     Remove-Item -Path $wechatBridgePidFile -Force -ErrorAction SilentlyContinue
   }
 
-  $bridgeScriptNeedles = @("wechat_uia_bridge.py", "wxautox4_bridge.py")
+  $bridgeScriptNeedles = @("wxautox4_bridge.py")
   $existingBridgePids = @()
   foreach ($bridgeScriptNeedle in $bridgeScriptNeedles) {
     $existingBridgePids += Get-ProcessIdsByCommandLine -ImageName "python.exe" -ContainsText $bridgeScriptNeedle
@@ -1742,16 +1736,10 @@ if ($wechatBridgeEnabled) {
     }
   } else {
     $bridgeScript = $null
-    $bridgeDependencyModules = @("comtypes")
-    $bridgeDependencyHint = "pip install comtypes pywin32"
+    $bridgeDependencyModules = @("wxautox4", "wxautox4_wechatbot")
+    $bridgeDependencyHint = "pip install wxautox4 or install the vendor wheel, then activate it"
     $bridgeExtraArgs = @()
-    if ($wechatBridgeBackend -eq "wxautox4") {
-      $bridgeDependencyModules = @("wxautox4", "wxautox4_wechatbot")
-      $bridgeDependencyHint = "pip install wxautox4 or install the vendor wheel, then activate it"
-      $bridgeScript = Join-Path $repoRoot "tools\wxautox4_bridge.py"
-    } else {
-      $bridgeScript = Join-Path $repoRoot "tools\wechat_uia_bridge.py"
-    }
+    $bridgeScript = Join-Path $repoRoot "tools\wxautox4_bridge.py"
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($wechatCommandQueueFile, "", $utf8NoBom)
     [System.IO.File]::WriteAllText($wechatCommandResultFile, "", $utf8NoBom)

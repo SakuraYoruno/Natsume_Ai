@@ -249,8 +249,8 @@ graph TD
 
 | 链路/模块组 | 当前覆盖层级 | 代表测试 | 当前判断 |
 |---|---|---|---|
-| `gateway/server.py` / `gateway/router.py` / `gateway/normalizer.py` / `gateway/outbound.py` | contract + unit | `tests/contract/test_gateway_contract.py`, `tests/unit/test_gateway_bootstrap_wechat_uia_mode.py` | 统一消息归一化、路由和回包分发都有直接契约测试；当前短板不在框架层，而在平台适配器细节。 |
-| `gateway/bootstrap.py` | unit | `tests/unit/test_gateway_bootstrap_wechat_uia_mode.py` | 有微信 UIA 模式装配测试，但跨平台启动变体覆盖仍偏薄。 |
+| `gateway/server.py` / `gateway/router.py` / `gateway/normalizer.py` / `gateway/outbound.py` | contract + unit | `tests/contract/test_gateway_contract.py`, `tests/unit/test_gateway_bootstrap_wechat_bridge_mode.py` | 统一消息归一化、路由和回包分发都有直接契约测试；当前短板不在框架层，而在平台适配器细节。 |
+| `gateway/bootstrap.py` | unit | `tests/unit/test_gateway_bootstrap_wechat_bridge_mode.py` | 有微信 bridge 装配测试，并显式防回归到已移除的 `uia` backend；跨平台启动变体覆盖仍偏薄。 |
 | 各平台 adapter | unit/contract 不均衡 | 微信相关用例分散在 `tests/contract/test_gateway_contract.py`、`tests/unit/test_wechat_channel*.py`、`tests/e2e/test_wechat_vts_voice_e2e.py` | 微信链路相对充分；QQ/Telegram/LINE/企微/飞书更多停留在框架接入层，平台特有失败语义仍弱于微信。 |
 
 ### 8.5 2026-04-02 抽样执行结果
@@ -897,6 +897,248 @@ python -m pytest -q \
 - 证明 8.17 / 8.18 新增的入口级退化恢复场景，和现有 `edge / prompt / persona evolution / emotion timeline / core chain / dispatch / bond growth` 生产态回归可以共存
 - 这不是新的覆盖率统计口径；它更像是“更大跨模块集”的稳定性验收
 - 到这一轮为止，灵魂链已经不只是单条入口能通，而是已经能在更大的 `prod_env` 组合回归下保持稳定
+
+### 8.20 2026-04-03 `edge gateway ingress -> host input -> soul pipeline` 入口验收
+
+在 8.19 已经确认 soul 场景和更大的 `prod_env` 回归可以共存之后，本轮继续把入口再往外推一层，不再只测 `/v1/chat`，而是直接接到 Host 的真实 gateway ingress：
+
+`edge gateway webhook -> /v1/host/input -> input_routes -> top_agent -> dispatch_agent -> chat_agent -> gateway reply`
+
+本轮继续扩展：
+- `tests/integration/test_chat_agent_soul_pipeline.py`
+
+新增的 2 条 ingress 场景：
+- `host input gateway route keeps retrieval/recall soul pipeline and delivers reply`
+  - 真实 `POST /v1/host/input`
+  - `source=GATEWAY`
+  - 入口层保留 `retrieval + state_arbiter + recall_pack` 三段邻接链
+  - 最终不只验证 `chat_agent` prompt 里保留：
+    - `SELF_REFLECTION_PULSE / growth_awareness`
+    - `emotion_reunion_type`
+    - `BOND_AWARE_STYLE`
+    - `world_canon`
+    - `EPISODIC_VECTOR_RECALL`
+    - `retrieval` 证据
+  - 还验证 `_deliver_gateway_reply -> post_gateway_reply` 真正收到最终回复文本，说明这条链已经穿过 Host input ingress 和 gateway delivery
+- `host input gateway route retrieval init failure still delivers soul reply`
+  - 同样是真实 `POST /v1/host/input`
+  - 人为命中 `retrieval init failed`
+  - `state_arbiter` 仍提供 `bond_graph`
+  - 最终验证：
+    - prompt 中仍保留 `SELF_REFLECTION_PULSE / growth_awareness / BOND_AWARE_STYLE`
+    - 检索状态为 `SKIPPED`
+    - gateway reply 仍能成功送出
+    - recall builder 只收到 `bond_graph`，说明这条场景确实打在“检索未成功启动”的早期失败路径上
+
+这轮变更性质：
+- 没有新增运行时代码修改
+- 纯新增更高跨模块的 ingress 集成场景
+- 相比前几轮，这次多穿过了 `input_routes` 和 `gateway reply delivery` 两段真实链路
+
+这轮验证结果：
+- `tests/integration/test_chat_agent_soul_pipeline.py` 全文件：`18 passed`
+- 更大 `prod_env` 组合回归（含新增 ingress 场景）：`56 passed`
+- warning：`2` 条，仍然都是 `test_core_chain_prod_env.py` 的 swig `DeprecationWarning`
+
+当前结论：
+- 灵魂链现在已经不只是 `/v1/chat` 入口可通，也已经能从 `edge gateway ingress -> /v1/host/input` 这条更靠近生产消息入口的路径进入
+- 这条 ingress 链的 happy path 和 `retrieval init failed` 退化路径都已经有真实验收
+- 如果继续，下一步最值得做的是把同样的场景再外扩到真正的 `edge gateway webhook -> host callback` 端到端桥接，或者接 `runtime_lifespan / http_hooks` 启停路径，把启动、消息入口、主链推理、gateway 出口四段连成完整生产验收闭环
+
+### 8.21 2026-04-03 `edge gateway webhook -> host callback -> gateway reply` 桥接闭环
+
+在 8.20 已经把 Host 的 `/v1/host/input` 入口纳入灵魂链验收之后，本轮继续把最外层的 edge gateway app 本体也接进来，不再只测 Host ingress，而是让同一个 edge gateway app 同时承担：
+
+- 入站：`POST /v1/gateway/wechat/webhook`
+- 桥接：`GatewayRouter -> reporter._send -> POST /v1/host/input`
+- 出站：`POST /v1/gateway/reply -> OutboundDispatcher -> adapter.send_reply`
+
+也就是：
+
+`edge gateway webhook -> GatewayRouter -> /v1/host/input -> input_routes -> top_agent -> dispatch_agent -> chat_agent -> /v1/gateway/reply -> OutboundDispatcher`
+
+本轮继续扩展：
+- `tests/integration/test_chat_agent_soul_pipeline.py`
+
+新增的 2 条 bridge 闭环场景：
+- `edge gateway webhook bridge keeps soul pipeline and sends reply`
+  - 真实 `create_gateway_app(...)`
+  - 真实 `POST /v1/gateway/wechat/webhook`
+  - 真实 `GatewayRouter`
+  - reporter 不再是空 mock，而是把 payload 真正发到 Host 的 `/v1/host/input`
+  - Host 侧跑完整 `top_agent -> chat_agent -> soul prompt`
+  - Host 回边缘侧时，不再直接 mock 成“成功”，而是把 `post_gateway_reply(...)` 真正接回同一个 gateway app 的 `/v1/gateway/reply`
+  - 最终由真实 `OutboundDispatcher -> adapter.send_reply(...)` 收到回复文本
+  - 验证结果：
+    - soul prompt 里的 `SELF_REFLECTION_PULSE / growth_awareness / BOND_AWARE_STYLE / world_canon / EPISODIC_VECTOR_RECALL / retrieval evidence` 都还在
+    - edge gateway adapter 最终真的收到了回复，而不是只停在 Host 内部
+- `edge gateway webhook bridge retrieval init failure still sends soul reply`
+  - 同样是真实 `webhook -> host callback -> gateway reply` 闭环
+  - 但命中 `retrieval init failed`
+  - 验证：
+    - prompt 中仍保留 `SELF_REFLECTION_PULSE / growth_awareness / BOND_AWARE_STYLE`
+    - 检索状态为 `SKIPPED`
+    - reply 仍能通过 edge gateway app 的出站口成功送到 adapter
+    - recall builder 只收到 `bond_graph`，证明这条闭环打在“检索未成功启动”的早期失败路径上
+
+这轮变更性质：
+- 没有新增运行时代码修改
+- 纯新增 bridge 闭环集成场景
+- 相比 8.20，这一轮多穿过了 edge 侧的 `create_gateway_app / GatewayRouter / OutboundDispatcher`
+
+这轮验证结果：
+- `tests/integration/test_chat_agent_soul_pipeline.py` 全文件：`20 passed`
+- 更大 `prod_env` 组合回归（含新增 bridge 场景）：`58 passed`
+- warning：`2` 条，仍然都是 `test_core_chain_prod_env.py` 的 swig `DeprecationWarning`
+
+当前结论：
+- 灵魂链现在已经不只是 Host 内部主链或 Host ingress 可通，而是已经穿过 edge gateway app 本体，形成了真实的 bridge 闭环
+- 到这一轮为止，已经覆盖了：
+  - `/v1/chat`
+  - `/v1/host/input`
+  - `/v1/gateway/{platform}/webhook`
+  - `/v1/gateway/reply`
+- 如果继续，下一步最值得做的是把启动阶段也并进来，补 `runtime_lifespan / http_hooks` 启停验收，把“启动 -> ingress -> soul runtime -> gateway egress”四段串成完整生产闭环
+
+### 8.22 2026-04-03 `runtime_lifespan / http_hooks` 启停闭环验收
+
+在 8.21 已经把 edge gateway app 的 webhook 入站和 reply 出站都接进 bridge 闭环之后，本轮继续把最前面的启动与最后面的关停也并进来，让整条生产路径第一次带着真实生命周期跑通：
+
+`runtime_lifespan startup -> /v1/gateway/wechat/webhook -> GatewayRouter -> /v1/host/input -> input_routes -> top_agent -> dispatch_agent -> chat_agent -> /v1/gateway/reply -> OutboundDispatcher -> runtime_lifespan shutdown`
+
+本轮继续扩展：
+- `tests/integration/test_chat_agent_soul_pipeline.py`
+
+新增的 2 条生命周期闭环场景：
+- `fastapi lifespan wraps edge gateway bridge soul pipeline`
+  - 用 `with TestClient(fastapi_app)` 真实触发 Host 的 startup / shutdown
+  - startup 期间验证：
+    - startup report 已生成并 emit
+    - heartbeat 已启动
+    - VTS main loop 已注册
+    - ActivityMonitor 已启动并注入 dependencies
+  - 生命周期打开后，再跑一条完整的：
+    - `edge gateway webhook -> host callback -> soul prompt -> gateway reply`
+  - shutdown 后验证：
+    - heartbeat 已停止
+    - ActivityMonitor 已停止
+    - BondUpdateQueue 已 drain + shutdown
+- `fastapi lifespan degraded startup still allows edge gateway bridge soul pipeline`
+  - 同样是真实 `with TestClient(fastapi_app)` 生命周期
+  - 但 startup probe 人为设为 `DEGRADED`（edge probe unavailable）
+  - 同时消息主链命中 `retrieval init failed`
+  - 验证结果：
+    - startup report 为 `DEGRADED`
+    - 但 `webhook -> host callback -> soul runtime -> gateway reply` 仍然能跑通
+    - shutdown 清理仍然发生
+
+这轮变更性质：
+- 没有新增运行时代码修改
+- 纯新增生命周期级集成场景
+- 相比 8.21，这一轮把启动和关停也纳入了真实闭环，不再只测“服务已启动后的消息路径”
+
+这轮验证结果：
+- `tests/integration/test_chat_agent_soul_pipeline.py` 全文件：`22 passed`
+- 更大 `prod_env` 组合回归（含 lifecycle 场景）：`60 passed`
+- warning：`2` 条，仍然是 `test_core_chain_prod_env.py` 的 swig `DeprecationWarning`
+
+当前结论：
+- 到这一轮为止，灵魂系统的生产态闭环已经首次覆盖了五段：
+  - startup
+  - edge gateway ingress
+  - host callback ingress
+  - soul runtime 推理主链
+  - gateway egress + shutdown
+- 这意味着当前已经不只是“主链能跑”，而是“服务从启动到关停，中间接入真实 edge bridge 消息入口时，灵魂链仍然不断”
+- 如果继续，下一步最值得做的是补真正的 `wxautox4 bridge / edge events bridge / runtime observability` 联动回归，并把遗留 `uia` 配置继续当作技术债扫描项
+
+### 8.23 2026-04-03 `/v1/edge/events` ASR bridge 闭环验收
+
+这一轮继续把灵魂系统入口往外扩，但不是再加一层 `gateway webhook`，而是把 `POST /v1/edge/events` 的 ASR bridge 也纳入真实主链验收：
+
+`/v1/edge/events -> system_handler.receive_edge_events_response -> _extract_edge_asr_bridge_candidate -> _schedule_edge_asr_bridge -> input_routes._dispatch_to_graph -> top_agent -> dispatch_agent -> chat_agent`
+
+本轮新增/扩展：
+- `tests/integration/test_chat_agent_soul_pipeline.py`
+
+新增的 2 条场景：
+- `edge events ASR bridge keeps retrieval/recall soul pipeline`
+  - 真实 `POST /v1/edge/events`
+  - 真实 `system_handler` event acceptance + ASR bridge scheduling
+  - 真实 `input_routes` fire-and-forget dispatch
+  - 保留 `retrieval + recall pack + state_arbiter + soul prompt`
+  - 验证 `world_canon / episodic_vector / bond_graph / SELF_REFLECTION_PULSE / growth_awareness` 都进入最终 LLM prompt
+- `edge events ASR bridge retrieval init failure still keeps soul pipeline`
+  - 同样从真实 `POST /v1/edge/events` 进入
+  - 命中 `retrieval init failed`
+  - 验证 ASR bridge 仍能穿过 `top_agent -> dispatch_agent -> chat_agent`
+  - recall 退化后只保留 `bond_graph`，但 `SELF_REFLECTION_PULSE / growth_awareness / BOND_AWARE_STYLE` 仍然存在
+
+这轮变更性质：
+- 没有新增运行时代码修复
+- 只新增入口级集成测试，并补了 test fixture 中对 edge ASR bridge dedup runtime state 的 reset
+
+这轮验证结果：
+- `tests/integration/test_chat_agent_soul_pipeline.py`：`24 passed`
+- 更大 `prod_env` 组合回归：`62 passed`
+- warning：`2` 条，仍然是 `tests/integration/test_core_chain_prod_env.py` 的 swig `DeprecationWarning`
+
+当前结论：
+- 入口级 soul runtime 闭环现在已经覆盖到：
+  - `/v1/chat`
+  - `/v1/host/input`
+  - `/v1/gateway/{platform}/webhook`
+  - `/v1/gateway/reply`
+  - `/v1/edge/events`
+  - `runtime_lifespan startup/shutdown`
+- 也就是说，灵魂系统现在不仅覆盖文本入口、gateway bridge 和 lifecycle，还覆盖了 edge ASR event bridge 这条生产相邻链路
+- 如果继续，下一步最值得做的是把这组场景再外扩到 `wxautox4 bridge / edge event observability / trace` 联动回归，并继续拦截残留 `uia` 引用
+
+### 8.24 2026-04-03 `EdgeEventReporter -> Host trace` 联动验收
+
+在 8.23 里，`/v1/edge/events` 的 ASR bridge 已经被纳入主链；这一轮继续往 edge 侧补一层，把真正的 `EdgeEventReporter` 也接进来，同时把 Host 侧两个 trace 端点一起纳入验收：
+
+`EdgeEventReporter.report -> POST /v1/edge/events -> system_handler -> ASR bridge -> input_routes -> top_agent -> dispatch_agent -> chat_agent -> POST /observability/trace + GET /obs/trace/{request_id}`
+
+本轮新增/扩展：
+- `tests/integration/test_chat_agent_soul_pipeline.py`
+
+新增的 2 条场景：
+- `edge event reporter ASR bridge exposes trace endpoints`
+  - 真实 `EdgeEventReporter`
+  - 真实 Host `/v1/edge/events`
+  - 真实 soul runtime 主链
+  - 然后再查询：
+    - `POST /observability/trace`
+    - `GET /obs/trace/{request_id}`
+  - 验证 `voice_event_log` 已进入 timeline，`/obs/trace` 节点里出现 `asr` 节点
+- `edge event reporter degraded ASR bridge still exposes trace endpoints`
+  - 同样是 `EdgeEventReporter -> Host`
+  - 命中 `retrieval init failed`
+  - 验证在退化路径里：
+    - soul prompt 仍然完整穿过主链
+    - trace 端点仍能按同一个 `request_id` 回放出 `voice_event_log` / `asr` 节点
+
+这轮变更性质：
+- 没有新增运行时代码修复
+- 只新增 trace 联动测试
+- 测试内补了共享内存 ledger patch 和 `EdgeEventReporter` 本地 transport 封装，用于把 edge 侧 reporter 真接到 host app
+
+这轮验证结果：
+- 新增的 2 条 trace 联动场景：`2 passed`
+- `tests/integration/test_chat_agent_soul_pipeline.py`：`26 passed`
+- 更大 `prod_env` 组合回归：`64 passed`
+- warning：`2` 条，仍然是 `tests/integration/test_core_chain_prod_env.py` 的 swig `DeprecationWarning`
+
+当前结论：
+- 入口级 soul runtime 链现在已经不只验证“消息能跑通”，也验证“同一个 request_id 在 edge reporter 进入后，Host trace 端点仍能完整回放”
+- 这意味着当前覆盖已经把：
+  - edge 侧 reporter
+  - host 侧 event ingress
+  - soul runtime 主链
+  - observability trace read path
+  串成了一条更完整的跨模块闭环
+- 如果继续，下一步最值得做的是把这组场景再外扩到 `wxautox4 bridge -> gateway bootstrap -> host trace live feed`
 
 ## 9. 建议阅读顺序
 

@@ -15,7 +15,7 @@
 | 方案 | 文件 | 核心问题 |
 |------|------|---------|
 | **A: WeChatFerry Hook（已移除）** | `edge_client/channels/wechat_listener.py` | wcferry 原仓库停更，新版微信兼容性差，注入失败率高 |
-| **B: UIA 桌面自动化** | `tools/wechat_uia_bridge.py`（215KB/5878行） | **当前微信 4.x 主路径**：负责 inbound webhook + outbound command queue，`uia_hook/uia_ocr/win_notify/vision_notify` 为可选后端 |
+| **B: 微信桌面桥接** | `tools/wxautox4_bridge.py` | **当前微信 4.x 主路径**：负责 inbound webhook + outbound command queue，`wxautox4_hook/win_notify/vision_notify` 为可选入站来源 |
 
 ### 1.2 具体问题根因
 
@@ -37,7 +37,7 @@
 | ✅ 历史 `WeChatListener._parse_raw()` 消息解析 | `channels/wechat_listener.py` | 已提炼为微信适配器基底 |
 | ✅ 历史 `_MessageDeduplicator` 去重器 | `channels/wechat_listener.py` | 已上移到 Gateway 公共层 |
 | ✅ 历史 `desensitize_content()` 脱敏函数 | `channels/wechat_listener.py` | 已上移到 Gateway 公共层 |
-| ✅ `wechat_uia_bridge.py` | `tools/wechat_uia_bridge.py` | **当前保留并接入 Gateway** |
+| ✅ `wxautox4_bridge.py` | `tools/wxautox4_bridge.py` | **当前保留并接入 Gateway** |
 
 ---
 
@@ -210,14 +210,14 @@ class AbstractPlatformAdapter(ABC):
 
 微信接入现为 **双模架构**：
 
-- **主路径：UIAutomation bridge** —— `tools/wechat_uia_bridge.py` 负责 inbound webhook（`/v1/gateway/wechat/webhook`）与 outbound command queue 执行，适配微信 4.x。
+- **主路径：wxautox4 bridge** —— `tools/wxautox4_bridge.py` 负责 inbound webhook（`/v1/gateway/wechat/webhook`）与 outbound command queue 执行，适配微信 4.x。
 - **可选增强：`wx4_decrypt.py` + `WxDbService`** —— 当配置 `WECHAT_DECRYPT_OUTPUT_DIR` 时，提供联系人映射、历史查询、增量 DB 监听与朋友圈读取能力。
 
 **两条数据通道**：
 
 | 通道 | 用途 | 实现 |
 |------|------|------|
-| **实时消息流（默认）** | 接收新消息 | `tools/wechat_uia_bridge.py` → `/v1/gateway/wechat/webhook` → `WeChatAdapter.parse_inbound()` |
+| **实时消息流（默认）** | 接收新消息 | `tools/wxautox4_bridge.py` → `/v1/gateway/wechat/webhook` → `WeChatAdapter.parse_inbound()` |
 | **实时消息流（可选增强）** | 接收新消息 | `WxDbService` 轮询 `message_*.db` 增量记录 → `UnifiedMessage` |
 | **历史数据查询** | 联系人/聊天记录/全文搜索 | Edge RPC Gateway `/v1/edge/wx/*` 端点 → Host MCP 工具 |
 
@@ -499,7 +499,7 @@ def open_chat_with(wxid_or_name: str) -> bool:
     return True
 ```
 
-**关键点**：`pywinauto` 走 Windows UIA Accessibility API，控件定位稳定；当前 `wechat_uia_bridge.py` 已作为 UIAutomation bridge 保留，其视觉/OCR 分支仅作为降级备选而非主路径。
+**关键点**：当前主路径已经收口到 `wxautox4_bridge.py`；视觉/OCR 分支仅作为降级备选而非主路径，旧 `wechat_uia_bridge.py` 已移除。
 
 ---
 
@@ -664,7 +664,7 @@ def send_voice_message(pcm_bytes: bytes, target_wxid: str) -> bool:
 - [x] `gateway/media/file_handler.py` — 文件信息读取 + CF_HDROP 剪贴板发送
 - [x] `gateway/adapters/wechat_adapter.py` — 撤回消息支持（`recall_message()`，`pywinauto` 右键菜单，2分钟内有效）
 - [ ] 语音消息发送（TTS + pysilk）— `encode_pcm_to_silk()` 已实现，发送路径待实测验证
-- [x] 保留 `tools/wechat_uia_bridge.py`，并切换到 Gateway webhook + command queue 主链路
+- [x] 收口到 `tools/wxautox4_bridge.py`，并切换到 Gateway webhook + command queue 主链路
 - [x] 删除 `edge_client/channels/wechat_listener.py`（历史逻辑已完成迁移）
 - [x] `gateway/bootstrap.py` — `start_gateway()` 一键启动，`bootstrap.py` 集成到 EdgeRuntime
 
@@ -713,7 +713,7 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 
 | 文件 | 废弃时间 | 替代方案 |
 |------|---------|------|
-| `tools/wechat_uia_bridge.py` | 保留 | 微信 4.x UIAutomation bridge（Gateway webhook + command queue） |
+| `tools/wxautox4_bridge.py` | 保留 | 微信 4.x wxautox4 bridge（Gateway webhook + command queue） |
 | `edge_client/channels/wechat_listener.py` | 已删除（历史逻辑已上移） | `gateway/adapters/wechat_adapter.py` + `gateway/normalizer.py` |
 
 ---

@@ -352,7 +352,6 @@ Natsume_Ai/
 │   ├── replay/              #    审计回放工具（请求回放 + 生产演练）
 │   ├── static_scan/         #    静态扫描工具（Bond SSOT 单写者检查）
 │   ├── wxautox4_bridge.py   #    wxautox4 微信自动化桥接（消息收发 + 语音/视频通话 + 37 种 action）
-│   ├── wechat_uia_bridge.py #    UIAutomation 微信桥接（legacy，已被 wxautox4 取代）
 │   ├── diag.py              #    统一诊断入口
 │   ├── diag_chat_ab.py      #    A/B 对比测试
 │   ├── diag_emotion_closed_loop.py  # 情感闭环验证（12 case corpus）
@@ -449,7 +448,7 @@ cp .env.example .env
 | `EDGE_RPC_HOST/PORT` | Edge RPC 通信地址 |
 | `EDGE_GATEWAY_ENABLED` | 统一消息网关开关 |
 | `EDGE_GATEWAY_PLATFORMS` | 启用平台列表（wechat,qq,telegram,...） |
-| `EDGE_WECHAT_BRIDGE_BACKEND` | 微信桥接后端（uia/wxautox4/external） |
+| `EDGE_WECHAT_BRIDGE_BACKEND` | 微信桥接后端（wxautox4/external） |
 | `HOST_SKILL_HUB_ENABLED` | Skills Hub 开关 |
 | `SANDBOX_ISOLATION_BACKEND` | 沙箱后端（subprocess/docker） |
 | `HOST_RATE_LIMIT_BACKEND` | 限流后端（memory/sqlite/redis） |
@@ -1111,7 +1110,7 @@ MCPToolRegistry（MCP 工具元数据）
 
 | 平台 | 适配器 | 协议 | 特色能力 |
 |------|--------|------|---------|
-| **微信** | `WeChatAdapter` | UIAutomation / wxautox4 | 语音/视频通话、朋友圈、群管理、文件发送 |
+| **微信** | `WeChatAdapter` | wxautox4 / external webhook | 语音/视频通话、朋友圈、群管理、文件发送 |
 | **QQ** | `QQAdapter` | OneBot v11 (HTTP) | 语音发送、@提醒检测、notice/request 事件 |
 | **Telegram** | `TelegramAdapter` | Telethon MTProto Userbot | 以普通用户身份通讯、打字模拟、代理支持 |
 | **LINE** | `LineAdapter` | Messaging API (Webhook) | 图片/贴纸/位置消息 |

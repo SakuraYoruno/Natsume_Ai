@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from unittest import mock
-
-from edge_client.gateway.bootstrap import GatewayConfig, start_gateway
+from edge_client.gateway.bootstrap import GatewayConfig, _wechat_bridge_backend, start_gateway
 
 
 class _FakeReporter:
@@ -36,9 +34,9 @@ class _FakeThread:
         self.started = True
 
 
-def test_start_gateway_registers_wechat_in_uia_bridge_mode(monkeypatch) -> None:
+def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> None:
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
 
     captured: dict[str, object] = {}
 
@@ -71,3 +69,11 @@ def test_start_gateway_registers_wechat_in_uia_bridge_mode(monkeypatch) -> None:
     assert instance.watcher is None
     assert instance.refresher is None
 
+
+def test_legacy_uia_backend_falls_back_to_wxautox4(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
+
+    caplog.set_level("WARNING")
+
+    assert _wechat_bridge_backend() == "wxautox4"
+    assert "no longer supported" in caplog.text

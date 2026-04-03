@@ -507,7 +507,7 @@ def main():
     if any_success:
         print("=== P0 方案验证成功！===")
         print("  至少一种方法恢复了 UI 树并找到了关键聊天控件！")
-        print("  下一步：修改 wechat_uia_bridge.py 集成持久化 UIA 客户端")
+        print("  下一步：修改 wxautox4_bridge.py 或对应桥接层，集成持久化微信客户端")
     elif any_partial:
         print("=== P0 方案部分成功 ===")
         print("  至少一种方法恢复了部分 UI 树（有子元素），但未找到关键聊天控件。")

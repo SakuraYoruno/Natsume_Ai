@@ -16,7 +16,7 @@ class _WxSvcStub:
 
 def test_wechat_adapter_uses_bridge_queue_for_text(monkeypatch) -> None:
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
     monkeypatch.setenv("EDGE_WECHAT_COMMAND_TIMEOUT_MS", "4321")
 
     adapter = WeChatAdapter(None, self_wxid=None)
@@ -72,8 +72,8 @@ def test_wechat_adapter_uses_bridge_queue_for_text(monkeypatch) -> None:
 
 def test_wechat_adapter_health_reports_bridge_mode_without_db(monkeypatch) -> None:
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
-    monkeypatch.setenv("EDGE_WECHAT_INBOUND_BACKEND", "uia_hook")
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
+    monkeypatch.setenv("EDGE_WECHAT_INBOUND_BACKEND", "wxautox4_hook")
 
     adapter = WeChatAdapter(None, self_wxid=None)
 
@@ -82,49 +82,49 @@ def test_wechat_adapter_health_reports_bridge_mode_without_db(monkeypatch) -> No
     assert snapshot["status"] == "ok"
     assert snapshot["bridge_mode"] is True
     assert snapshot["bridge_queue_enabled"] is True
-    assert snapshot["bridge_backend"] == "uia"
-    assert snapshot["bridge_inbound_backend"] == "uia_hook"
+    assert snapshot["bridge_backend"] == "wxautox4"
+    assert snapshot["bridge_inbound_backend"] == "wxautox4_hook"
     assert snapshot["outbound_mode"] == "bridge_queue"
     assert snapshot["inbound_mode"] == "webhook_only"
 
 
-def test_wechat_adapter_parse_uia_hook_payload_defaults_conversation_to_sender() -> None:
+def test_wechat_adapter_parse_wxautox4_hook_payload_defaults_conversation_to_sender() -> None:
     adapter = WeChatAdapter(None, self_wxid=None)
 
     message = adapter.parse_inbound(
         {
-            "msg_id": "uia-msg-001",
+            "msg_id": "wx-msg-001",
             "sender": "wxid_alice",
             "from_wxid": "wxid_alice",
             "receiver": "local_wechat",
             "to_wxid": "local_wechat",
-            "content": "hello from uia",
-            "text": "hello from uia",
+            "content": "hello from bridge",
+            "text": "hello from bridge",
             "msg_type": "1",
             "ts": 1774453000,
-            "bridge_backend": "uia_hook",
+            "bridge_backend": "wxautox4_hook",
         }
     )
 
     assert message is not None
     assert message.platform == Platform.WECHAT
-    assert message.msg_id == "uia-msg-001"
+    assert message.msg_id == "wx-msg-001"
     assert message.from_id == "wxid_alice"
     assert message.to_id == "local_wechat"
     assert message.conversation_id == "wxid_alice"
     assert message.msg_type == MsgType.TEXT
-    assert message.content == "hello from uia"
+    assert message.content == "hello from bridge"
     assert message.sender_name == "wxid_alice"
-    assert message.raw_extra["bridge_backend"] == "uia_hook"
+    assert message.raw_extra["bridge_backend"] == "wxautox4_hook"
     assert message.ts_ms == 1774453000000
 
 
-def test_wechat_adapter_parse_uia_hook_payload_prefers_roomid_for_group() -> None:
+def test_wechat_adapter_parse_wxautox4_hook_payload_prefers_roomid_for_group() -> None:
     adapter = WeChatAdapter(None, self_wxid=None)
 
     message = adapter.parse_inbound(
         {
-            "msg_id": "uia-msg-002",
+            "msg_id": "wx-msg-002",
             "sender": "wxid_member_01",
             "from_wxid": "wxid_member_01",
             "roomid": "12345@chatroom",
@@ -132,7 +132,7 @@ def test_wechat_adapter_parse_uia_hook_payload_prefers_roomid_for_group() -> Non
             "content": "群里来消息了",
             "msg_type": "1",
             "ts_ms": 1774453000123,
-            "bridge_backend": "uia_hook",
+            "bridge_backend": "wxautox4_hook",
         }
     )
 
@@ -145,15 +145,15 @@ def test_wechat_adapter_parse_uia_hook_payload_prefers_roomid_for_group() -> Non
 
 def test_wechat_adapter_health_reports_webhook_only_when_bridge_keeps_db_service(monkeypatch) -> None:
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
-    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
-    monkeypatch.setenv("EDGE_WECHAT_INBOUND_BACKEND", "uia_hook")
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
+    monkeypatch.setenv("EDGE_WECHAT_INBOUND_BACKEND", "wxautox4_hook")
 
     adapter = WeChatAdapter(
         _WxSvcStub(),
         self_wxid=None,
         bridge_mode=True,
         db_watch_enabled=False,
-        bridge_inbound_backend="uia_hook",
+        bridge_inbound_backend="wxautox4_hook",
     )
 
     snapshot = adapter.health()
@@ -163,3 +163,12 @@ def test_wechat_adapter_health_reports_webhook_only_when_bridge_keeps_db_service
     assert snapshot["db_stats"]["contact_db_exists"] is True
     assert snapshot["db_stats"]["db_watch_enabled"] is False
     assert snapshot["inbound_mode"] == "webhook_only"
+
+
+def test_wechat_adapter_legacy_uia_backend_falls_back_to_wxautox4(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "uia")
+
+    caplog.set_level("WARNING")
+
+    assert WeChatAdapter._bridge_backend() == "wxautox4"
+    assert "no longer supported" in caplog.text

@@ -22,6 +22,12 @@ except Exception:  # pragma: no cover - environment guard
 
 import host_brain.app.chat_context_builder as ccb
 import host_brain.app.dependencies as deps
+from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.normalizer import MessageNormalizer
+from edge_client.gateway.outbound import OutboundDispatcher
+from edge_client.gateway.router import GatewayRouter
+from edge_client.gateway.server import create_gateway_app
+from edge_client.rpc.event_reporter import EdgeEventReporter
 from host_brain.app.chat_agent import ChatAgentInput, chat_agent_sse_generator
 from host_brain.app.dispatch_agent import dispatch_agent_sse_generator
 from host_brain.app.top_agent import top_agent_sse_generator
@@ -64,6 +70,15 @@ def _parse_http_sse_commit(raw_text: str) -> dict[str, Any]:
         if payload.get("phase") == "COMMIT":
             return payload
     raise AssertionError("COMMIT event not found in HTTP SSE response")
+
+
+def _wait_for(condition, *, timeout_s: float = 1.0, interval_s: float = 0.02) -> None:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if condition():
+            return
+        time.sleep(interval_s)
+    raise AssertionError("condition not satisfied before timeout")
 
 
 def _load_env_file(path: str) -> dict[str, str]:
@@ -140,9 +155,13 @@ class _ApproveIntentEngine:
 
 @pytest.fixture(autouse=True)
 def _reset_runtime_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    import host_brain.app.system_handler as system_handler
+
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
     monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
     monkeypatch.setenv("HOST_DISPATCH_LLM_ROUTE_ENABLED", "false")
+    system_handler._EDGE_ASR_BRIDGE_RECENT.clear()
+    system_handler._EDGE_ASR_BRIDGE_LAST_TEXT.clear()
     PersonaEngine.reset_instance()
     for attr in (
         "_emotion_persistence",
@@ -153,6 +172,8 @@ def _reset_runtime_state(monkeypatch: pytest.MonkeyPatch) -> None:
         if hasattr(ccb.build_chat_prompt_runtime_payload, attr):
             delattr(ccb.build_chat_prompt_runtime_payload, attr)
     yield
+    system_handler._EDGE_ASR_BRIDGE_RECENT.clear()
+    system_handler._EDGE_ASR_BRIDGE_LAST_TEXT.clear()
     PersonaEngine.reset_instance()
     for attr in (
         "_emotion_persistence",
@@ -300,6 +321,281 @@ class _CapturingTopAgentRecallPackBuilder:
         return _StaticRecallPack(self._slots)
 
 
+class _GatewayWebhookAdapter:
+    platform_id = Platform.WECHAT
+
+    def __init__(self) -> None:
+        self.parsed_payloads: list[dict[str, Any]] = []
+        self.sent_replies: list[UnifiedReply] = []
+
+    def parse_inbound(self, raw_payload: dict[str, Any]) -> UnifiedMessage | None:
+        payload = dict(raw_payload)
+        self.parsed_payloads.append(payload)
+        return UnifiedMessage(
+            msg_id=str(payload.get("msg_id") or f"wx-msg-{uuid.uuid4().hex[:8]}"),
+            platform=Platform.WECHAT,
+            from_id=str(payload.get("from_id") or "wxid_user"),
+            to_id=str(payload.get("to_id") or "wxid_bot"),
+            conversation_id=str(payload.get("conversation_id") or "conv_default"),
+            msg_type=MsgType(str(payload.get("msg_type") or "text").strip().lower() or "text"),
+            content=str(payload.get("content") or ""),
+            ts_ms=int(payload.get("ts_ms") or time.time() * 1000),
+            is_group=bool(payload.get("is_group", False)),
+            sender_name=str(payload.get("sender_name") or "").strip() or None,
+            media_url=str(payload.get("media_url") or "").strip() or None,
+            reply_to_msg_id=str(payload.get("reply_to_msg_id") or "").strip() or None,
+            raw_extra=dict(payload.get("raw_extra") or {}),
+        )
+
+    def send_reply(self, reply: UnifiedReply) -> bool:
+        self.sent_replies.append(reply)
+        return True
+
+    def health(self) -> dict[str, Any]:
+        return {"platform": self.platform_id.value, "status": "ok"}
+
+
+class _HostInputReporterBridge:
+    def __init__(self, *, host_client: TestClient) -> None:
+        self._host_client = host_client
+        self.sent_payloads: list[dict[str, Any]] = []
+
+    def _send(self, payload: dict[str, Any], _source: Any) -> Any:
+        self.sent_payloads.append(dict(payload))
+        response = self._host_client.post("/v1/host/input", json=payload)
+        data = response.json()
+        return SimpleNamespace(
+            success=(response.status_code == 200 and bool(data.get("success"))),
+            cached=False,
+            status_code=response.status_code,
+            detail=data,
+        )
+
+
+def _patch_http_lifespan_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    ledger: Any,
+    degraded_startup: bool = False,
+) -> dict[str, Any]:
+    capture: dict[str, Any] = {
+        "startup_reports": [],
+        "bootstrap_logs": [],
+        "heartbeat_started": [],
+        "heartbeat_stopped": 0,
+        "registered_loops": [],
+        "activity_started": 0,
+        "activity_stopped": 0,
+        "activity_set": 0,
+        "bond_queue_drained": 0,
+        "bond_queue_shutdown": 0,
+        "world_sync_calls": 0,
+        "scheduler_started": 0,
+        "tool_registrations": 0,
+        "handler_registrations": 0,
+    }
+
+    class _FakeStateArbiter:
+        def __init__(self) -> None:
+            self._sources: dict[str, Any] = {}
+
+        def register_source(self, source: Any, provider: Any) -> None:
+            self._sources[str(source)] = provider
+
+    class _FakeRegistry:
+        def __init__(self) -> None:
+            self._tasks: dict[str, Any] = {}
+
+        def get(self, task_id: str) -> Any:
+            return self._tasks.get(task_id)
+
+        def register(self, task: Any) -> None:
+            self._tasks[str(getattr(task, "task_id", f"task_{len(self._tasks)}"))] = task
+
+    class _FakeScheduler:
+        def __init__(self) -> None:
+            self.tasks: list[Any] = []
+
+        def register(self, task: Any) -> None:
+            self.tasks.append(task)
+
+    class _FakeSchedulerHealthReporter:
+        def __init__(self, registry: Any) -> None:
+            self.registry = registry
+
+    class _FakeNatsumeScheduler:
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+        def start(self) -> None:
+            capture["scheduler_started"] += 1
+
+    class _FakeActivityMonitor:
+        def __init__(self, **_kwargs: Any) -> None:
+            self._gaming_interval = 30
+            self._idle_interval = 45
+
+        def start(self) -> None:
+            capture["activity_started"] += 1
+
+        def stop(self) -> None:
+            capture["activity_stopped"] += 1
+
+        def notify_user_interaction(self) -> None:
+            return None
+
+    class _FakeModeTransitionService:
+        def __init__(self, **_kwargs: Any) -> None:
+            return None
+
+    class _FakeBondQueue:
+        def drain(self, timeout_s: float = 0.0) -> bool:
+            _ = timeout_s
+            capture["bond_queue_drained"] += 1
+            return True
+
+        def shutdown(self) -> None:
+            capture["bond_queue_shutdown"] += 1
+
+    class _FakeToolCatalog:
+        def register(self, _tool_meta: Any) -> None:
+            capture["tool_registrations"] += 1
+
+    class _FakeToolBroker:
+        def register_handler(self, _tool_id: str, _handler: Any) -> None:
+            capture["handler_registrations"] += 1
+
+    class _FakeSkillRegistry:
+        def get(self, skill_id: str) -> Any:
+            return SimpleNamespace(handler=lambda _args, _ctx, _skill_id=skill_id: {"skill_id": _skill_id})
+
+    async def _probe_edge_rpc_health() -> dict[str, Any]:
+        if degraded_startup:
+            return {
+                "available": False,
+                "status": "DOWN",
+                "detail": "edge probe unavailable during startup test",
+                "latency_ms": 0,
+            }
+        return {
+            "available": True,
+            "status": "OK",
+            "detail": "edge probe ok",
+            "latency_ms": 7,
+            "base_url": "http://127.0.0.1:19000",
+        }
+
+    def _build_edge_dependency_probe_statuses(probe: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "edge.rpc.gateway": {
+                "available": bool(probe.get("available", False)),
+                "detail": str(probe.get("detail") or ""),
+            }
+        }
+
+    def _build_startup_report(**kwargs: Any) -> dict[str, Any]:
+        runtime_statuses = dict(kwargs.get("runtime_statuses") or {})
+        dependency_probes = dict(kwargs.get("dependency_probes") or {})
+        degraded = any(str(value).upper().startswith(("DEGRADED", "FAIL")) for value in runtime_statuses.values())
+        if any(not bool((row or {}).get("available", True)) for row in dependency_probes.values()):
+            degraded = True
+        report = {
+            "status": ("DEGRADED" if degraded else "OK"),
+            "summary": {"degraded": degraded},
+            "runtime_statuses": runtime_statuses,
+            "dependency_probes": dependency_probes,
+            "request_id": kwargs.get("request_id"),
+            "ts_ms": kwargs.get("ts_ms"),
+        }
+        capture["startup_reports"].append(report)
+        return report
+
+    def _emit_runtime_bootstrap_logs(*, startup_report: dict[str, Any]) -> None:
+        capture["bootstrap_logs"].append(dict(startup_report))
+
+    def _register_main_loop(loop: Any) -> None:
+        capture["registered_loops"].append(loop)
+
+    def _set_activity_monitor(monitor: Any) -> None:
+        capture["activity_set"] += 1
+        deps._activity_monitor_ref = monitor
+
+    def _start_heartbeat(interval_sec: float = 30.0) -> object:
+        capture["heartbeat_started"].append(interval_sec)
+        return object()
+
+    async def _stop_heartbeat() -> None:
+        capture["heartbeat_stopped"] += 1
+
+    def _sync_world_canon_index_on_startup(**_kwargs: Any) -> str:
+        capture["world_sync_calls"] += 1
+        return "OK (synced=0, changed=0)"
+
+    fake_state_arbiter = _FakeStateArbiter()
+    fake_registry = _FakeRegistry()
+    fake_scheduler = _FakeScheduler()
+    fake_tool_catalog = _FakeToolCatalog()
+    fake_tool_broker = _FakeToolBroker()
+    fake_skill_registry = _FakeSkillRegistry()
+    fake_bond_queue = _FakeBondQueue()
+
+    monkeypatch.setattr("host_brain.app.fastapi_app._ledger", ledger, raising=False)
+    monkeypatch.setattr("host_brain.app.dependencies._ledger", ledger, raising=False)
+    monkeypatch.setattr("host_brain.app.http_hooks._sync_world_canon_index_on_startup", _sync_world_canon_index_on_startup)
+    monkeypatch.setattr("host_brain.app.http_hooks.build_startup_report", _build_startup_report)
+    monkeypatch.setattr("host_brain.app.http_hooks.emit_runtime_bootstrap_logs", _emit_runtime_bootstrap_logs)
+    monkeypatch.setattr("host_brain.app.dependencies.get_recall_pack_builder", lambda: object())
+    monkeypatch.setattr("host_brain.app.dependencies.get_memory_guard", lambda: object())
+    monkeypatch.setattr("host_brain.app.dependencies.get_state_arbiter", lambda: fake_state_arbiter)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_distillation_engine",
+        lambda: SimpleNamespace(run_batch=lambda: None),
+    )
+    monkeypatch.setattr("host_brain.app.dependencies.get_semantic_recaller", lambda: object())
+    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: object())
+    monkeypatch.setattr("host_brain.app.dependencies.probe_edge_rpc_health", _probe_edge_rpc_health)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.build_edge_dependency_probe_statuses",
+        _build_edge_dependency_probe_statuses,
+    )
+    monkeypatch.setattr("host_brain.app.automation.task_scheduler.get_scheduler", lambda: fake_scheduler)
+    monkeypatch.setattr(
+        "host_brain.memory.long_term_distiller.make_distillation_task_config",
+        lambda: SimpleNamespace(task_id="long_term_distill_test", trigger_mode="CRON"),
+    )
+    monkeypatch.setattr(
+        "host_brain.scheduler.task_registry.SchedulerTaskRegistry.get_instance",
+        classmethod(lambda cls: fake_registry),
+    )
+    monkeypatch.setattr("host_brain.scheduler.health.SchedulerHealthReporter", _FakeSchedulerHealthReporter)
+    monkeypatch.setattr("host_brain.scheduler.scheduler.NatsumeScheduler", _FakeNatsumeScheduler)
+    monkeypatch.setattr(
+        "host_brain.app.vision.proactive_push_client.build_proactive_push_client",
+        lambda: SimpleNamespace(push=lambda _message: None),
+    )
+    monkeypatch.setattr("host_brain.audit.retention.RetentionPolicy", lambda: SimpleNamespace())
+    monkeypatch.setattr("host_brain.app.dependencies.get_tool_catalog", lambda: fake_tool_catalog)
+    monkeypatch.setattr("host_brain.app.dependencies.get_tool_broker", lambda: fake_tool_broker)
+    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: fake_skill_registry)
+    monkeypatch.setattr(
+        "host_brain.skills.personality_registry.build_personality_skill_registry",
+        lambda: fake_skill_registry,
+    )
+    monkeypatch.setattr(
+        "host_brain.skills.scheduler_registry.build_scheduler_skill_registry",
+        lambda: fake_skill_registry,
+    )
+    monkeypatch.setattr("host_brain.channels.vts.register_main_loop", _register_main_loop)
+    monkeypatch.setattr("host_brain.core.activity_monitor.ActivityMonitor", _FakeActivityMonitor)
+    monkeypatch.setattr("host_brain.core.mode_transition.ModeTransitionService", _FakeModeTransitionService)
+    monkeypatch.setattr("host_brain.app.dependencies.set_activity_monitor", _set_activity_monitor)
+    monkeypatch.setattr("host_brain.observability.service_health_heartbeat.start_heartbeat", _start_heartbeat)
+    monkeypatch.setattr("host_brain.observability.service_health_heartbeat.stop_heartbeat", _stop_heartbeat)
+    monkeypatch.setattr("host_brain.app.dependencies.get_bond_update_queue", lambda: fake_bond_queue)
+
+    return capture
+
+
 async def _fake_top_agent_runtime(**_kwargs):  # noqa: ANN001
     return _make_llm_runtime()
 
@@ -337,6 +633,45 @@ def _patch_top_agent_http_runtime(
         _fake_top_agent_runtime,
     )
     monkeypatch.setattr("host_brain.app.chat_handler.pre_intent_classifier", lambda _message: "CHAT")
+
+
+def _capture_input_route_pipeline(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    import host_brain.app.input_routes as input_routes
+
+    captured: dict[str, Any] = {}
+    original = input_routes._run_top_agent_pipeline
+
+    async def _wrapped(**kwargs):  # noqa: ANN001
+        result = await original(**kwargs)
+        captured.update(result)
+        return result
+
+    monkeypatch.setattr(input_routes, "_run_top_agent_pipeline", _wrapped)
+    return captured
+
+
+def _capture_input_route_events(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    captured: list[dict[str, Any]] = []
+
+    def _record(**kwargs):  # noqa: ANN001
+        captured.append(dict(kwargs))
+
+    monkeypatch.setattr("host_brain.app.input_routes._log_input_event", _record)
+    return captured
+
+
+def _patch_shared_host_ledger(monkeypatch: pytest.MonkeyPatch, ledger: Any) -> None:
+    monkeypatch.setattr("host_brain.app.fastapi_app._ledger", ledger, raising=False)
+    monkeypatch.setattr("host_brain.app.dependencies._ledger", ledger, raising=False)
+
+
+def _build_edge_events_transport(*, host_client: TestClient):
+    def _transport(events: list[dict[str, Any]]) -> dict[str, Any]:
+        response = host_client.post("/v1/edge/events", json={"events": events})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    return _transport
 
 
 @pytest.mark.asyncio
@@ -2374,6 +2709,1065 @@ def test_http_chat_prod_env_retrieval_init_failure_but_state_arbiter_keeps_soul_
 
 
 @pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_host_input_gateway_route_keeps_retrieval_recall_soul_pipeline_and_delivers_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+
+    user_id = get_canonical_bond_user_id()
+    now_ms = int(time.time() * 1000)
+    old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+    engine = BondStageEngine()
+    for index in range(3):
+        engine.apply_event(
+            user_id=user_id,
+            update_kind="DEEP_TALK",
+            evidence_refs=[f"evd://host-input-gateway/{index}"],
+            ts_ms=old_ts + index * 60_000,
+            emotion_intensity=0.9,
+        )
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=engine,
+        growth_awareness={
+            "recent_change": "more grounded when replying through the gateway ingress path",
+            "desire": "keep the gateway reply concise but still rooted in shared memory",
+        },
+    )
+    _disable_dispatch_plan(monkeypatch)
+
+    persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+    persistence.persist(
+        user_id=user_id,
+        valence=0.8,
+        arousal=0.41,
+        dominance=0.14,
+        ts_ms=old_ts,
+    )
+    PersonaEngine.get_instance().apply_growth_delta(
+        user_id,
+        TraitsDelta(warmth=0.03),
+        reason="host_input_gateway_growth",
+        ts_ms=old_ts,
+    )
+
+    async def _fake_retrieval_with_context(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "status": "OK",
+                "reason_code": "NONE",
+                "route_count": 2,
+                "candidate_count": 3,
+                "rerank_topk": 3,
+                "degraded": False,
+                "routes": [
+                    {"route_id": "route_episodic"},
+                    {"route_id": "route_world_canon"},
+                ],
+            },
+            [
+                {
+                    "kind": "episodic_vector",
+                    "content": "you once said my quiet words made you feel safe",
+                    "snippet": "you once said my quiet words made you feel safe",
+                    "evidence_ref": "evd://episodic/host-input/1",
+                    "source_ref": "memory://episodic/host-input/1",
+                    "score": 0.91,
+                    "confidence": 0.91,
+                },
+                {
+                    "kind": "world_canon",
+                    "content": "Gateway reunion replies should stay sincere and not overstate certainty.",
+                    "snippet": "Gateway reunion replies should stay sincere and not overstate certainty.",
+                    "citation": "canon://relationship/gateway-reunion",
+                    "evidence_ref": "evd://world/host-input/1",
+                    "source_ref": "canon://relationship/gateway-reunion",
+                    "score": 0.87,
+                    "confidence": 0.87,
+                },
+            ],
+        )
+
+    async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "bond_stage": "FRIEND",
+                "trend": "warming",
+                "capability_hint": "gentle_gateway_affection",
+            },
+            {
+                "kind": "bond_graph",
+                "content": "the relationship is warming and ready for a gentle gateway reply",
+                "snippet": "the relationship is warming and ready for a gentle gateway reply",
+                "evidence_ref": "evd://bond/host-input/1",
+                "source_ref": "bond://graph/host-input/1",
+                "score": 0.88,
+                "confidence": 0.88,
+            },
+        )
+
+    recall_capture: dict[str, Any] = {}
+    recall_builder = _CapturingTopAgentRecallPackBuilder(
+        slots={
+            "world_canon": "Gateway reunion replies should stay sincere and not overstate certainty.",
+            "episodic_vector": "shared gateway memory reached the final prompt",
+        },
+        capture=recall_capture,
+    )
+    _patch_top_agent_http_runtime(
+        monkeypatch,
+        retrieval_fn=_fake_retrieval_with_context,
+        state_arbiter_fn=_fake_state_arbiter_with_bond,
+        recall_pack_builder=recall_builder,
+    )
+
+    expected_narrative = "I still remember the quiet warmth between us, and I want to answer you gently."
+    captured = _patch_chat_agent_runtime(
+        monkeypatch,
+        expected_prompt_markers=[
+            "SELF_REFLECTION_PULSE:",
+            "growth_awareness:",
+            "recent_change: more grounded when replying through the gateway ingress path",
+            "desire: keep the gateway reply concise but still rooted in shared memory",
+            "emotion_reunion_type: reunion",
+            "BOND_AWARE_STYLE:",
+            "Gateway reunion replies should stay sincere and not overstate certainty.",
+            "EPISODIC_VECTOR_RECALL:",
+            "shared gateway memory reached the final prompt",
+            "you once said my quiet words made you feel safe",
+        ],
+        expected_narrative=expected_narrative,
+    )
+
+    gateway_replies: list[dict[str, Any]] = []
+
+    async def _fake_post_gateway_reply(**kwargs):  # noqa: ANN001
+        gateway_replies.append(dict(kwargs))
+        return SimpleNamespace(success=True, status="OK", latency_ms=18, reason_code=None, detail="")
+
+    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _fake_post_gateway_reply)
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/v1/host/input",
+        json={
+            "source": "GATEWAY",
+            "person_id": user_id,
+            "platform": "wechat",
+            "conversation_id": f"conv-host-input-{uuid.uuid4().hex[:8]}",
+            "from_id": "wxid_user_a",
+            "msg_id": f"msg-{uuid.uuid4().hex[:6]}",
+            "msg_type": "text",
+            "content": "I came back. Can you answer gently through this gateway?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["status"] == "ACCEPTED"
+    _wait_for(lambda: len(gateway_replies) == 1 and captured.get("model_id") == "mock-soul-runtime")
+
+    assert gateway_replies[0]["platform"] == "wechat"
+    assert gateway_replies[0]["conversation_id"].startswith("conv-host-input-")
+    assert gateway_replies[0]["content"] == expected_narrative
+    assert gateway_replies[0]["msg_type"] == "text"
+    assert recall_capture["task_type"] == "chat"
+    assert "world_canon" in recall_capture["recall_results"]
+    assert "bond_graph" in recall_capture["recall_results"]
+    assert "episodic_vector" in recall_capture["recall_results"]
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_host_input_gateway_route_retrieval_init_failure_still_delivers_soul_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+
+    user_id = get_canonical_bond_user_id()
+    now_ms = int(time.time() * 1000)
+    old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+    engine = BondStageEngine()
+    for index in range(3):
+        engine.apply_event(
+            user_id=user_id,
+            update_kind="DEEP_TALK",
+            evidence_refs=[f"evd://host-input-init-fail/{index}"],
+            ts_ms=old_ts + index * 60_000,
+            emotion_intensity=0.9,
+        )
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=engine,
+        growth_awareness={
+            "recent_change": "more stable when the gateway ingress path starts without retrieval",
+            "desire": "keep the answer soft even if retrieval initialization fails early",
+        },
+    )
+    _disable_dispatch_plan(monkeypatch)
+
+    persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+    persistence.persist(
+        user_id=user_id,
+        valence=0.79,
+        arousal=0.4,
+        dominance=0.14,
+        ts_ms=old_ts,
+    )
+    PersonaEngine.get_instance().apply_growth_delta(
+        user_id,
+        TraitsDelta(warmth=0.03),
+        reason="host_input_gateway_init_fail_growth",
+        ts_ms=old_ts,
+    )
+
+    def _bad_retrieval(**_kwargs):  # noqa: ANN001
+        raise RuntimeError("retrieval init boom")
+
+    async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "bond_stage": "FRIEND",
+                "trend": "warming",
+                "capability_hint": "steady_gateway_reunion",
+            },
+            {
+                "kind": "bond_graph",
+                "content": "the bond still feels safe even when retrieval never starts",
+                "snippet": "the bond still feels safe even when retrieval never starts",
+                "evidence_ref": "evd://bond/host-input/init-fail/1",
+                "source_ref": "bond://graph/host-input/init-fail/1",
+                "score": 0.86,
+                "confidence": 0.86,
+            },
+        )
+
+    recall_capture: dict[str, Any] = {}
+    recall_builder = _CapturingTopAgentRecallPackBuilder(
+        slots={},
+        capture=recall_capture,
+    )
+    _patch_top_agent_http_runtime(
+        monkeypatch,
+        retrieval_fn=_bad_retrieval,
+        state_arbiter_fn=_fake_state_arbiter_with_bond,
+        recall_pack_builder=recall_builder,
+    )
+
+    expected_narrative = "Even if remembering does not start right away, I still want to answer you gently."
+    captured = _patch_chat_agent_runtime(
+        monkeypatch,
+        expected_prompt_markers=[
+            "SELF_REFLECTION_PULSE:",
+            "growth_awareness:",
+            "recent_change: more stable when the gateway ingress path starts without retrieval",
+            "desire: keep the answer soft even if retrieval initialization fails early",
+            "emotion_reunion_type: reunion",
+            "BOND_AWARE_STYLE:",
+            "检索状态: SKIPPED",
+            "the bond still feels safe even when retrieval never starts",
+        ],
+        expected_narrative=expected_narrative,
+    )
+
+    gateway_replies: list[dict[str, Any]] = []
+
+    async def _fake_post_gateway_reply(**kwargs):  # noqa: ANN001
+        gateway_replies.append(dict(kwargs))
+        return SimpleNamespace(success=True, status="OK", latency_ms=21, reason_code=None, detail="")
+
+    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _fake_post_gateway_reply)
+
+    client = TestClient(fastapi_app)
+    response = client.post(
+        "/v1/host/input",
+        json={
+            "source": "GATEWAY",
+            "person_id": user_id,
+            "platform": "wechat",
+            "conversation_id": f"conv-host-input-init-fail-{uuid.uuid4().hex[:8]}",
+            "from_id": "wxid_user_b",
+            "msg_id": f"msg-{uuid.uuid4().hex[:6]}",
+            "msg_type": "text",
+            "content": "I came back. Can you still answer softly if remembering starts slowly?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["status"] == "ACCEPTED"
+    _wait_for(lambda: len(gateway_replies) == 1 and captured.get("model_id") == "mock-soul-runtime")
+
+    assert gateway_replies[0]["platform"] == "wechat"
+    assert gateway_replies[0]["conversation_id"].startswith("conv-host-input-init-fail-")
+    assert gateway_replies[0]["content"] == expected_narrative
+    assert gateway_replies[0]["msg_type"] == "text"
+    assert recall_capture["task_type"] == "chat"
+    assert recall_capture["recall_results"] == {
+        "bond_graph": "the bond still feels safe even when retrieval never starts",
+    }
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_edge_gateway_webhook_bridge_keeps_soul_pipeline_and_sends_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+
+    user_id = get_canonical_bond_user_id()
+    now_ms = int(time.time() * 1000)
+    old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+    engine = BondStageEngine()
+    for index in range(3):
+        engine.apply_event(
+            user_id=user_id,
+            update_kind="DEEP_TALK",
+            evidence_refs=[f"evd://edge-webhook-reunion/{index}"],
+            ts_ms=old_ts + index * 60_000,
+            emotion_intensity=0.9,
+        )
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=engine,
+        growth_awareness={
+            "recent_change": "more coherent when the reply begins from the edge gateway webhook",
+            "desire": "keep the wechat reply gentle, grounded, and memory-backed",
+        },
+    )
+    _disable_dispatch_plan(monkeypatch)
+
+    persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+    persistence.persist(
+        user_id=user_id,
+        valence=0.8,
+        arousal=0.41,
+        dominance=0.14,
+        ts_ms=old_ts,
+    )
+    PersonaEngine.get_instance().apply_growth_delta(
+        user_id,
+        TraitsDelta(warmth=0.03),
+        reason="edge_gateway_webhook_growth",
+        ts_ms=old_ts,
+    )
+
+    async def _fake_retrieval_with_context(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "status": "OK",
+                "reason_code": "NONE",
+                "route_count": 2,
+                "candidate_count": 3,
+                "rerank_topk": 3,
+                "degraded": False,
+                "routes": [
+                    {"route_id": "route_episodic"},
+                    {"route_id": "route_world_canon"},
+                ],
+            },
+            [
+                {
+                    "kind": "episodic_vector",
+                    "content": "you once said my calm voice made the chat feel like home",
+                    "snippet": "you once said my calm voice made the chat feel like home",
+                    "evidence_ref": "evd://episodic/edge-webhook/1",
+                    "source_ref": "memory://episodic/edge-webhook/1",
+                    "score": 0.92,
+                    "confidence": 0.92,
+                },
+                {
+                    "kind": "world_canon",
+                    "content": "WeChat reunion replies should stay sincere and softly grounded.",
+                    "snippet": "WeChat reunion replies should stay sincere and softly grounded.",
+                    "citation": "canon://relationship/wechat-reunion",
+                    "evidence_ref": "evd://world/edge-webhook/1",
+                    "source_ref": "canon://relationship/wechat-reunion",
+                    "score": 0.88,
+                    "confidence": 0.88,
+                },
+            ],
+        )
+
+    async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "bond_stage": "FRIEND",
+                "trend": "warming",
+                "capability_hint": "wechat_soft_reunion",
+            },
+            {
+                "kind": "bond_graph",
+                "content": "the relationship is warming and ready for a soft wechat reply",
+                "snippet": "the relationship is warming and ready for a soft wechat reply",
+                "evidence_ref": "evd://bond/edge-webhook/1",
+                "source_ref": "bond://graph/edge-webhook/1",
+                "score": 0.89,
+                "confidence": 0.89,
+            },
+        )
+
+    recall_capture: dict[str, Any] = {}
+    recall_builder = _CapturingTopAgentRecallPackBuilder(
+        slots={
+            "world_canon": "WeChat reunion replies should stay sincere and softly grounded.",
+            "episodic_vector": "shared wechat memory reached the final prompt",
+        },
+        capture=recall_capture,
+    )
+    _patch_top_agent_http_runtime(
+        monkeypatch,
+        retrieval_fn=_fake_retrieval_with_context,
+        state_arbiter_fn=_fake_state_arbiter_with_bond,
+        recall_pack_builder=recall_builder,
+    )
+
+    expected_narrative = "I still remember the calm warmth between us, and I want this WeChat reply to feel gentle."
+    captured = _patch_chat_agent_runtime(
+        monkeypatch,
+        expected_prompt_markers=[
+            "SELF_REFLECTION_PULSE:",
+            "growth_awareness:",
+            "recent_change: more coherent when the reply begins from the edge gateway webhook",
+            "desire: keep the wechat reply gentle, grounded, and memory-backed",
+            "emotion_reunion_type: reunion",
+            "BOND_AWARE_STYLE:",
+            "WeChat reunion replies should stay sincere and softly grounded.",
+            "EPISODIC_VECTOR_RECALL:",
+            "shared wechat memory reached the final prompt",
+            "you once said my calm voice made the chat feel like home",
+        ],
+        expected_narrative=expected_narrative,
+    )
+
+    host_client = TestClient(fastapi_app)
+    reporter = _HostInputReporterBridge(host_client=host_client)
+    adapter = _GatewayWebhookAdapter()
+    gateway_app = create_gateway_app(
+        router=GatewayRouter(reporter=reporter),
+        normalizer=MessageNormalizer(),
+        adapters={"wechat": adapter},
+        outbound=OutboundDispatcher({Platform.WECHAT: adapter}),
+    )
+    gateway_client = TestClient(gateway_app)
+
+    async def _post_gateway_reply_via_local_app(**kwargs):  # noqa: ANN001
+        response = gateway_client.post(
+            "/v1/gateway/reply",
+            json={
+                "platform": kwargs.get("platform"),
+                "conversation_id": kwargs.get("conversation_id"),
+                "content": kwargs.get("content"),
+                "msg_type": kwargs.get("msg_type", "text"),
+                "wait_result": kwargs.get("wait_result", True),
+                "timeout_ms": kwargs.get("timeout_ms", 12000),
+            },
+        )
+        body = response.json()
+        return SimpleNamespace(
+            success=(response.status_code == 200 and str(body.get("status") or "").lower() == "sent"),
+            status=str(body.get("status") or "failed").upper(),
+            reason_code=None,
+            detail=str(body.get("detail") or ""),
+            latency_ms=0,
+        )
+
+    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply_via_local_app)
+
+    webhook_payload = {
+        "msg_id": f"wx-msg-{uuid.uuid4().hex[:8]}",
+        "from_id": "wxid_user_a",
+        "to_id": "wxid_bot",
+        "conversation_id": f"conv-edge-webhook-{uuid.uuid4().hex[:8]}",
+        "content": "I came back through WeChat. Can you answer me gently?",
+        "msg_type": "text",
+        "sender_name": "Alice",
+        "ts_ms": now_ms,
+    }
+    response = gateway_client.post("/v1/gateway/wechat/webhook", json=webhook_payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    _wait_for(lambda: len(adapter.sent_replies) == 1 and captured.get("model_id") == "mock-soul-runtime")
+
+    assert reporter.sent_payloads[0]["source"] == "GATEWAY"
+    assert reporter.sent_payloads[0]["platform"] == "wechat"
+    assert reporter.sent_payloads[0]["conversation_id"] == webhook_payload["conversation_id"]
+    assert recall_capture["task_type"] == "chat"
+    assert "world_canon" in recall_capture["recall_results"]
+    assert "bond_graph" in recall_capture["recall_results"]
+    assert "episodic_vector" in recall_capture["recall_results"]
+    assert adapter.sent_replies[0].content == expected_narrative
+    assert adapter.sent_replies[0].msg_type is MsgType.TEXT
+    assert adapter.sent_replies[0].conversation_id == webhook_payload["conversation_id"]
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_edge_gateway_webhook_bridge_retrieval_init_failure_still_sends_soul_reply(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+
+    user_id = get_canonical_bond_user_id()
+    now_ms = int(time.time() * 1000)
+    old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+    engine = BondStageEngine()
+    for index in range(3):
+        engine.apply_event(
+            user_id=user_id,
+            update_kind="DEEP_TALK",
+            evidence_refs=[f"evd://edge-webhook-init-fail/{index}"],
+            ts_ms=old_ts + index * 60_000,
+            emotion_intensity=0.9,
+        )
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=engine,
+        growth_awareness={
+            "recent_change": "more stable when the gateway bridge starts without retrieval",
+            "desire": "keep the reply soft even if retrieval fails before the bridge settles",
+        },
+    )
+    _disable_dispatch_plan(monkeypatch)
+
+    persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+    persistence.persist(
+        user_id=user_id,
+        valence=0.79,
+        arousal=0.4,
+        dominance=0.14,
+        ts_ms=old_ts,
+    )
+    PersonaEngine.get_instance().apply_growth_delta(
+        user_id,
+        TraitsDelta(warmth=0.03),
+        reason="edge_gateway_webhook_init_fail_growth",
+        ts_ms=old_ts,
+    )
+
+    def _bad_retrieval(**_kwargs):  # noqa: ANN001
+        raise RuntimeError("retrieval init boom")
+
+    async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "bond_stage": "FRIEND",
+                "trend": "warming",
+                "capability_hint": "steady_bridge_reunion",
+            },
+            {
+                "kind": "bond_graph",
+                "content": "the bond still feels gentle even when the bridge starts without retrieval",
+                "snippet": "the bond still feels gentle even when the bridge starts without retrieval",
+                "evidence_ref": "evd://bond/edge-webhook/init-fail/1",
+                "source_ref": "bond://graph/edge-webhook/init-fail/1",
+                "score": 0.87,
+                "confidence": 0.87,
+            },
+        )
+
+    recall_capture: dict[str, Any] = {}
+    recall_builder = _CapturingTopAgentRecallPackBuilder(
+        slots={},
+        capture=recall_capture,
+    )
+    _patch_top_agent_http_runtime(
+        monkeypatch,
+        retrieval_fn=_bad_retrieval,
+        state_arbiter_fn=_fake_state_arbiter_with_bond,
+        recall_pack_builder=recall_builder,
+    )
+
+    expected_narrative = "Even if remembering does not start yet, I still want to answer you softly."
+    captured = _patch_chat_agent_runtime(
+        monkeypatch,
+        expected_prompt_markers=[
+            "SELF_REFLECTION_PULSE:",
+            "growth_awareness:",
+            "recent_change: more stable when the gateway bridge starts without retrieval",
+            "desire: keep the reply soft even if retrieval fails before the bridge settles",
+            "emotion_reunion_type: reunion",
+            "BOND_AWARE_STYLE:",
+            "检索状态: SKIPPED",
+            "the bond still feels gentle even when the bridge starts without retrieval",
+        ],
+        expected_narrative=expected_narrative,
+    )
+
+    host_client = TestClient(fastapi_app)
+    reporter = _HostInputReporterBridge(host_client=host_client)
+    adapter = _GatewayWebhookAdapter()
+    gateway_app = create_gateway_app(
+        router=GatewayRouter(reporter=reporter),
+        normalizer=MessageNormalizer(),
+        adapters={"wechat": adapter},
+        outbound=OutboundDispatcher({Platform.WECHAT: adapter}),
+    )
+    gateway_client = TestClient(gateway_app)
+
+    async def _post_gateway_reply_via_local_app(**kwargs):  # noqa: ANN001
+        response = gateway_client.post(
+            "/v1/gateway/reply",
+            json={
+                "platform": kwargs.get("platform"),
+                "conversation_id": kwargs.get("conversation_id"),
+                "content": kwargs.get("content"),
+                "msg_type": kwargs.get("msg_type", "text"),
+                "wait_result": kwargs.get("wait_result", True),
+                "timeout_ms": kwargs.get("timeout_ms", 12000),
+            },
+        )
+        body = response.json()
+        return SimpleNamespace(
+            success=(response.status_code == 200 and str(body.get("status") or "").lower() == "sent"),
+            status=str(body.get("status") or "failed").upper(),
+            reason_code=None,
+            detail=str(body.get("detail") or ""),
+            latency_ms=0,
+        )
+
+    monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply_via_local_app)
+
+    webhook_payload = {
+        "msg_id": f"wx-msg-{uuid.uuid4().hex[:8]}",
+        "from_id": "wxid_user_b",
+        "to_id": "wxid_bot",
+        "conversation_id": f"conv-edge-webhook-init-fail-{uuid.uuid4().hex[:8]}",
+        "content": "I came back through WeChat. Can you still answer softly if remembering starts slowly?",
+        "msg_type": "text",
+        "sender_name": "Bob",
+        "ts_ms": now_ms,
+    }
+    response = gateway_client.post("/v1/gateway/wechat/webhook", json=webhook_payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    _wait_for(lambda: len(adapter.sent_replies) == 1 and captured.get("model_id") == "mock-soul-runtime")
+
+    assert reporter.sent_payloads[0]["source"] == "GATEWAY"
+    assert reporter.sent_payloads[0]["platform"] == "wechat"
+    assert reporter.sent_payloads[0]["conversation_id"] == webhook_payload["conversation_id"]
+    assert adapter.sent_replies[0].content == expected_narrative
+    assert adapter.sent_replies[0].msg_type is MsgType.TEXT
+    assert adapter.sent_replies[0].conversation_id == webhook_payload["conversation_id"]
+    assert recall_capture["task_type"] == "chat"
+    assert recall_capture["recall_results"] == {
+        "bond_graph": "the bond still feels gentle even when the bridge starts without retrieval",
+    }
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_fastapi_lifespan_wraps_edge_gateway_bridge_soul_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    capture_lifespan = _patch_http_lifespan_runtime(
+        monkeypatch,
+        ledger=ledger,
+        degraded_startup=False,
+    )
+    try:
+        user_id = get_canonical_bond_user_id()
+        now_ms = int(time.time() * 1000)
+        old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+        engine = BondStageEngine()
+        for index in range(3):
+            engine.apply_event(
+                user_id=user_id,
+                update_kind="DEEP_TALK",
+                evidence_refs=[f"evd://lifespan-webhook/{index}"],
+                ts_ms=old_ts + index * 60_000,
+                emotion_intensity=0.9,
+            )
+
+        _install_runtime_chain(
+            monkeypatch,
+            tmp_path=tmp_path,
+            bond_engine=engine,
+            growth_awareness={
+                "recent_change": "more reliable when the full app lifecycle wraps the gateway bridge",
+                "desire": "keep the startup-to-reply path gentle and memory-backed",
+            },
+        )
+        _disable_dispatch_plan(monkeypatch)
+
+        persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+        persistence.persist(
+            user_id=user_id,
+            valence=0.8,
+            arousal=0.41,
+            dominance=0.14,
+            ts_ms=old_ts,
+        )
+        PersonaEngine.get_instance().apply_growth_delta(
+            user_id,
+            TraitsDelta(warmth=0.03),
+            reason="lifespan_gateway_bridge_growth",
+            ts_ms=old_ts,
+        )
+
+        async def _fake_retrieval_with_context(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "status": "OK",
+                    "reason_code": "NONE",
+                    "route_count": 2,
+                    "candidate_count": 3,
+                    "rerank_topk": 3,
+                    "degraded": False,
+                    "routes": [
+                        {"route_id": "route_episodic"},
+                        {"route_id": "route_world_canon"},
+                    ],
+                },
+                [
+                    {
+                        "kind": "episodic_vector",
+                        "content": "you once said my calm replies made the whole bridge feel safe",
+                        "snippet": "you once said my calm replies made the whole bridge feel safe",
+                        "evidence_ref": "evd://episodic/lifespan/1",
+                        "source_ref": "memory://episodic/lifespan/1",
+                        "score": 0.92,
+                        "confidence": 0.92,
+                    },
+                    {
+                        "kind": "world_canon",
+                        "content": "Lifecycle-wrapped gateway replies should stay sincere and grounded.",
+                        "snippet": "Lifecycle-wrapped gateway replies should stay sincere and grounded.",
+                        "citation": "canon://relationship/lifecycle-gateway",
+                        "evidence_ref": "evd://world/lifespan/1",
+                        "source_ref": "canon://relationship/lifecycle-gateway",
+                        "score": 0.88,
+                        "confidence": 0.88,
+                    },
+                ],
+            )
+
+        async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "bond_stage": "FRIEND",
+                    "trend": "warming",
+                    "capability_hint": "lifecycle_soft_reunion",
+                },
+                {
+                    "kind": "bond_graph",
+                    "content": "the bond stays warm across startup, ingress, and reply delivery",
+                    "snippet": "the bond stays warm across startup, ingress, and reply delivery",
+                    "evidence_ref": "evd://bond/lifespan/1",
+                    "source_ref": "bond://graph/lifespan/1",
+                    "score": 0.89,
+                    "confidence": 0.89,
+                },
+            )
+
+        recall_capture: dict[str, Any] = {}
+        recall_builder = _CapturingTopAgentRecallPackBuilder(
+            slots={
+                "world_canon": "Lifecycle-wrapped gateway replies should stay sincere and grounded.",
+                "episodic_vector": "shared lifecycle memory reached the prompt",
+            },
+            capture=recall_capture,
+        )
+        _patch_top_agent_http_runtime(
+            monkeypatch,
+            retrieval_fn=_fake_retrieval_with_context,
+            state_arbiter_fn=_fake_state_arbiter_with_bond,
+            recall_pack_builder=recall_builder,
+        )
+
+        expected_narrative = "I still remember the calm warmth between us, and I want this full-path reply to feel gentle."
+        captured = _patch_chat_agent_runtime(
+            monkeypatch,
+            expected_prompt_markers=[
+                "SELF_REFLECTION_PULSE:",
+                "growth_awareness:",
+                "recent_change: more reliable when the full app lifecycle wraps the gateway bridge",
+                "desire: keep the startup-to-reply path gentle and memory-backed",
+                "emotion_reunion_type: reunion",
+                "BOND_AWARE_STYLE:",
+                "Lifecycle-wrapped gateway replies should stay sincere and grounded.",
+                "EPISODIC_VECTOR_RECALL:",
+                "shared lifecycle memory reached the prompt",
+                "you once said my calm replies made the whole bridge feel safe",
+            ],
+            expected_narrative=expected_narrative,
+        )
+
+        with TestClient(fastapi_app) as host_client:
+            assert capture_lifespan["startup_reports"][-1]["status"] == "OK"
+            assert capture_lifespan["heartbeat_started"] == [30.0]
+            assert capture_lifespan["activity_started"] == 1
+            assert capture_lifespan["activity_set"] == 1
+            assert len(capture_lifespan["registered_loops"]) == 1
+
+            reporter = _HostInputReporterBridge(host_client=host_client)
+            adapter = _GatewayWebhookAdapter()
+            gateway_app = create_gateway_app(
+                router=GatewayRouter(reporter=reporter),
+                normalizer=MessageNormalizer(),
+                adapters={"wechat": adapter},
+                outbound=OutboundDispatcher({Platform.WECHAT: adapter}),
+            )
+            gateway_client = TestClient(gateway_app)
+
+            async def _post_gateway_reply_via_local_app(**kwargs):  # noqa: ANN001
+                response = gateway_client.post(
+                    "/v1/gateway/reply",
+                    json={
+                        "platform": kwargs.get("platform"),
+                        "conversation_id": kwargs.get("conversation_id"),
+                        "content": kwargs.get("content"),
+                        "msg_type": kwargs.get("msg_type", "text"),
+                        "wait_result": kwargs.get("wait_result", True),
+                        "timeout_ms": kwargs.get("timeout_ms", 12000),
+                    },
+                )
+                body = response.json()
+                return SimpleNamespace(
+                    success=(response.status_code == 200 and str(body.get("status") or "").lower() == "sent"),
+                    status=str(body.get("status") or "failed").upper(),
+                    reason_code=None,
+                    detail=str(body.get("detail") or ""),
+                    latency_ms=0,
+                )
+
+            monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply_via_local_app)
+
+            response = gateway_client.post(
+                "/v1/gateway/wechat/webhook",
+                json={
+                    "msg_id": f"wx-msg-{uuid.uuid4().hex[:8]}",
+                    "from_id": "wxid_user_lifecycle",
+                    "to_id": "wxid_bot",
+                    "conversation_id": f"conv-lifecycle-{uuid.uuid4().hex[:8]}",
+                    "content": "I came back. Can this full bridge still answer gently?",
+                    "msg_type": "text",
+                    "sender_name": "LifecycleUser",
+                    "ts_ms": now_ms,
+                },
+            )
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "accepted"
+            _wait_for(lambda: len(adapter.sent_replies) == 1 and captured.get("model_id") == "mock-soul-runtime")
+            assert reporter.sent_payloads[0]["source"] == "GATEWAY"
+            assert adapter.sent_replies[0].content == expected_narrative
+            assert recall_capture["task_type"] == "chat"
+
+        assert capture_lifespan["heartbeat_stopped"] == 1
+        assert capture_lifespan["activity_stopped"] == 1
+        assert capture_lifespan["bond_queue_drained"] == 1
+        assert capture_lifespan["bond_queue_shutdown"] == 1
+        assert capture_lifespan["bootstrap_logs"]
+    finally:
+        ledger.close()
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_fastapi_lifespan_degraded_startup_still_allows_edge_gateway_bridge_soul_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    capture_lifespan = _patch_http_lifespan_runtime(
+        monkeypatch,
+        ledger=ledger,
+        degraded_startup=True,
+    )
+    try:
+        user_id = get_canonical_bond_user_id()
+        now_ms = int(time.time() * 1000)
+        old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+        engine = BondStageEngine()
+        for index in range(3):
+            engine.apply_event(
+                user_id=user_id,
+                update_kind="DEEP_TALK",
+                evidence_refs=[f"evd://lifespan-degraded/{index}"],
+                ts_ms=old_ts + index * 60_000,
+                emotion_intensity=0.9,
+            )
+
+        _install_runtime_chain(
+            monkeypatch,
+            tmp_path=tmp_path,
+            bond_engine=engine,
+            growth_awareness={
+                "recent_change": "more stable even when startup already begins degraded",
+                "desire": "keep the answer soft when startup probes and retrieval both wobble",
+            },
+        )
+        _disable_dispatch_plan(monkeypatch)
+
+        persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+        persistence.persist(
+            user_id=user_id,
+            valence=0.79,
+            arousal=0.4,
+            dominance=0.14,
+            ts_ms=old_ts,
+        )
+        PersonaEngine.get_instance().apply_growth_delta(
+            user_id,
+            TraitsDelta(warmth=0.03),
+            reason="lifespan_degraded_gateway_growth",
+            ts_ms=old_ts,
+        )
+
+        def _bad_retrieval(**_kwargs):  # noqa: ANN001
+            raise RuntimeError("retrieval init boom")
+
+        async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "bond_stage": "FRIEND",
+                    "trend": "warming",
+                    "capability_hint": "degraded_lifecycle_reunion",
+                },
+                {
+                    "kind": "bond_graph",
+                    "content": "the bond stays gentle even when startup is degraded and retrieval never starts",
+                    "snippet": "the bond stays gentle even when startup is degraded and retrieval never starts",
+                    "evidence_ref": "evd://bond/lifespan/degraded/1",
+                    "source_ref": "bond://graph/lifespan/degraded/1",
+                    "score": 0.87,
+                    "confidence": 0.87,
+                },
+            )
+
+        recall_capture: dict[str, Any] = {}
+        recall_builder = _CapturingTopAgentRecallPackBuilder(
+            slots={},
+            capture=recall_capture,
+        )
+        _patch_top_agent_http_runtime(
+            monkeypatch,
+            retrieval_fn=_bad_retrieval,
+            state_arbiter_fn=_fake_state_arbiter_with_bond,
+            recall_pack_builder=recall_builder,
+        )
+
+        expected_narrative = "Even when startup and remembering both wobble, I still want to answer you softly."
+        captured = _patch_chat_agent_runtime(
+            monkeypatch,
+            expected_prompt_markers=[
+                "SELF_REFLECTION_PULSE:",
+                "growth_awareness:",
+                "recent_change: more stable even when startup already begins degraded",
+                "desire: keep the answer soft when startup probes and retrieval both wobble",
+                "emotion_reunion_type: reunion",
+                "BOND_AWARE_STYLE:",
+                "检索状态: SKIPPED",
+                "the bond stays gentle even when startup is degraded and retrieval never starts",
+            ],
+            expected_narrative=expected_narrative,
+        )
+
+        with TestClient(fastapi_app) as host_client:
+            assert capture_lifespan["startup_reports"][-1]["status"] == "DEGRADED"
+            reporter = _HostInputReporterBridge(host_client=host_client)
+            adapter = _GatewayWebhookAdapter()
+            gateway_app = create_gateway_app(
+                router=GatewayRouter(reporter=reporter),
+                normalizer=MessageNormalizer(),
+                adapters={"wechat": adapter},
+                outbound=OutboundDispatcher({Platform.WECHAT: adapter}),
+            )
+            gateway_client = TestClient(gateway_app)
+
+            async def _post_gateway_reply_via_local_app(**kwargs):  # noqa: ANN001
+                response = gateway_client.post(
+                    "/v1/gateway/reply",
+                    json={
+                        "platform": kwargs.get("platform"),
+                        "conversation_id": kwargs.get("conversation_id"),
+                        "content": kwargs.get("content"),
+                        "msg_type": kwargs.get("msg_type", "text"),
+                        "wait_result": kwargs.get("wait_result", True),
+                        "timeout_ms": kwargs.get("timeout_ms", 12000),
+                    },
+                )
+                body = response.json()
+                return SimpleNamespace(
+                    success=(response.status_code == 200 and str(body.get("status") or "").lower() == "sent"),
+                    status=str(body.get("status") or "failed").upper(),
+                    reason_code=None,
+                    detail=str(body.get("detail") or ""),
+                    latency_ms=0,
+                )
+
+            monkeypatch.setattr("host_brain.channels.edge_rpc_client.post_gateway_reply", _post_gateway_reply_via_local_app)
+
+            response = gateway_client.post(
+                "/v1/gateway/wechat/webhook",
+                json={
+                    "msg_id": f"wx-msg-{uuid.uuid4().hex[:8]}",
+                    "from_id": "wxid_user_degraded",
+                    "to_id": "wxid_bot",
+                    "conversation_id": f"conv-lifecycle-degraded-{uuid.uuid4().hex[:8]}",
+                    "content": "I came back. Can you still answer softly when startup is already shaky?",
+                    "msg_type": "text",
+                    "sender_name": "DegradedUser",
+                    "ts_ms": now_ms,
+                },
+            )
+
+            assert response.status_code == 200
+            assert response.json()["status"] == "accepted"
+            _wait_for(lambda: len(adapter.sent_replies) == 1 and captured.get("model_id") == "mock-soul-runtime")
+            assert reporter.sent_payloads[0]["source"] == "GATEWAY"
+            assert adapter.sent_replies[0].content == expected_narrative
+            assert recall_capture["recall_results"] == {
+                "bond_graph": "the bond stays gentle even when startup is degraded and retrieval never starts",
+            }
+
+        assert capture_lifespan["heartbeat_stopped"] == 1
+        assert capture_lifespan["activity_stopped"] == 1
+        assert capture_lifespan["bond_queue_drained"] == 1
+        assert capture_lifespan["bond_queue_shutdown"] == 1
+        assert any(
+            str(value).upper().startswith("DEGRADED")
+            for value in capture_lifespan["startup_reports"][-1]["runtime_statuses"].values()
+        )
+    finally:
+        ledger.close()
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
 def test_http_chat_prod_env_asr_route_streams_sentence_tts_from_soul_reply(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
@@ -2483,3 +3877,746 @@ def test_http_chat_prod_env_asr_route_streams_sentence_tts_from_soul_reply(
     assert captured_tts[0]["text"] == "会いたかったし、大好きだよ。"
     assert captured_tts[0]["emotion_tag"] == "LOVING"
     assert captured_tts[0]["utterance_id"].startswith("utt_")
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_edge_events_asr_bridge_keeps_retrieval_recall_soul_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+    monkeypatch.setenv("HOST_STREAM_VTS_EMOTION_ENABLED", "false")
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", "0")
+
+    user_id = get_canonical_bond_user_id()
+    now_ms = int(time.time() * 1000)
+    old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+    engine = BondStageEngine()
+    for index in range(3):
+        engine.apply_event(
+            user_id=user_id,
+            update_kind="DEEP_TALK",
+            evidence_refs=[f"evd://edge-events-asr/{index}"],
+            ts_ms=old_ts + index * 60_000,
+            emotion_intensity=0.9,
+        )
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=engine,
+        growth_awareness={
+            "recent_change": "more coherent when the soul pipeline begins from edge ASR events",
+            "desire": "keep ASR reunion answers warm, grounded, and memory-backed",
+        },
+    )
+    _disable_dispatch_plan(monkeypatch)
+
+    persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+    persistence.persist(
+        user_id=user_id,
+        valence=0.8,
+        arousal=0.41,
+        dominance=0.14,
+        ts_ms=old_ts,
+    )
+    PersonaEngine.get_instance().apply_growth_delta(
+        user_id,
+        TraitsDelta(warmth=0.03),
+        reason="edge_events_asr_growth",
+        ts_ms=old_ts,
+    )
+
+    async def _fake_retrieval_with_context(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "status": "OK",
+                "reason_code": "NONE",
+                "route_count": 2,
+                "candidate_count": 3,
+                "rerank_topk": 3,
+                "degraded": False,
+                "routes": [
+                    {"route_id": "route_episodic"},
+                    {"route_id": "route_world_canon"},
+                ],
+            },
+            [
+                {
+                    "kind": "episodic_vector",
+                    "content": "you once said hearing my voice again felt like coming home",
+                    "snippet": "you once said hearing my voice again felt like coming home",
+                    "evidence_ref": "evd://episodic/edge-events/1",
+                    "source_ref": "memory://episodic/edge-events/1",
+                    "score": 0.93,
+                    "confidence": 0.93,
+                },
+                {
+                    "kind": "world_canon",
+                    "content": "ASR reunion replies should stay sincere and avoid overstating certainty.",
+                    "snippet": "ASR reunion replies should stay sincere and avoid overstating certainty.",
+                    "citation": "canon://relationship/asr-reunion",
+                    "evidence_ref": "evd://world/edge-events/1",
+                    "source_ref": "canon://relationship/asr-reunion",
+                    "score": 0.88,
+                    "confidence": 0.88,
+                },
+            ],
+        )
+
+    async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "bond_stage": "FRIEND",
+                "trend": "warming",
+                "capability_hint": "voice_reunion",
+            },
+            {
+                "kind": "bond_graph",
+                "content": "the relationship is warming and ready for a careful spoken reunion",
+                "snippet": "the relationship is warming and ready for a careful spoken reunion",
+                "evidence_ref": "evd://bond/edge-events/1",
+                "source_ref": "bond://graph/edge-events/1",
+                "score": 0.89,
+                "confidence": 0.89,
+            },
+        )
+
+    recall_capture: dict[str, Any] = {}
+    recall_builder = _CapturingTopAgentRecallPackBuilder(
+        slots={
+            "world_canon": "ASR reunion replies should stay sincere and avoid overstating certainty.",
+            "episodic_vector": "shared ASR memory reached the final prompt",
+        },
+        capture=recall_capture,
+    )
+    _patch_top_agent_http_runtime(
+        monkeypatch,
+        retrieval_fn=_fake_retrieval_with_context,
+        state_arbiter_fn=_fake_state_arbiter_with_bond,
+        recall_pack_builder=recall_builder,
+    )
+
+    expected_narrative = "I still remember the warmth in your voice, and I want to answer you gently."
+    captured = _patch_chat_agent_runtime(
+        monkeypatch,
+        expected_prompt_markers=[
+            "SELF_REFLECTION_PULSE:",
+            "growth_awareness:",
+            "recent_change: more coherent when the soul pipeline begins from edge ASR events",
+            "desire: keep ASR reunion answers warm, grounded, and memory-backed",
+            "emotion_reunion_type: reunion",
+            "BOND_AWARE_STYLE:",
+            "ASR reunion replies should stay sincere and avoid overstating certainty.",
+            "EPISODIC_VECTOR_RECALL:",
+            "shared ASR memory reached the final prompt",
+            "you once said hearing my voice again felt like coming home",
+        ],
+        expected_narrative=expected_narrative,
+    )
+
+    pipeline_capture = _capture_input_route_pipeline(monkeypatch)
+    input_events = _capture_input_route_events(monkeypatch)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_bond_update_queue",
+        lambda: SimpleNamespace(enqueue=lambda _payload: {"status": "QUEUED"}),
+    )
+
+    client = TestClient(fastapi_app)
+    suffix = uuid.uuid4().hex[:8]
+    response = client.post(
+        "/v1/edge/events",
+        json={
+            "events": [
+                {
+                    "event_type": "ASR_FINAL",
+                    "source": "edge_client",
+                    "request_id": f"req-edge-events-{suffix}",
+                    "session_id": f"session-edge-events-{suffix}",
+                    "ts_ms": now_ms,
+                    "payload": {
+                        "text": "I came back. Can you answer gently from the ASR path?",
+                        "is_final": True,
+                        "final": True,
+                        "confidence": 0.95,
+                        "seq": 7,
+                        "platform": "wechat",
+                        "conversation_id": f"conv-edge-events-{suffix}",
+                        "from_id": "wxid_asr_user",
+                        "msg_type": "text",
+                        "emotion_tag": "LOVING",
+                        "emotion_intensity": 0.82,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["accepted"] == 1
+    assert body["rejected"] == 0
+    _wait_for(
+        lambda: captured.get("model_id") == "mock-soul-runtime"
+        and pipeline_capture.get("narrative") == expected_narrative
+        and any(item.get("phase") == "COMPLETED" and item.get("source") == "ASR" for item in input_events)
+    )
+
+    assert pipeline_capture["decision"] == "APPROVE"
+    assert pipeline_capture["commit_event"]["audit_refs"]["path"] == "chat_agent:direct"
+    assert recall_capture["task_type"] == "chat"
+    assert "world_canon" in recall_capture["recall_results"]
+    assert "bond_graph" in recall_capture["recall_results"]
+    assert "episodic_vector" in recall_capture["recall_results"]
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_edge_events_asr_bridge_retrieval_init_failure_still_keeps_soul_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+    monkeypatch.setenv("HOST_STREAM_VTS_EMOTION_ENABLED", "false")
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", "0")
+
+    user_id = get_canonical_bond_user_id()
+    now_ms = int(time.time() * 1000)
+    old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+    engine = BondStageEngine()
+    for index in range(3):
+        engine.apply_event(
+            user_id=user_id,
+            update_kind="DEEP_TALK",
+            evidence_refs=[f"evd://edge-events-init-fail/{index}"],
+            ts_ms=old_ts + index * 60_000,
+            emotion_intensity=0.9,
+        )
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=engine,
+        growth_awareness={
+            "recent_change": "more stable when edge ASR bridge starts without retrieval",
+            "desire": "keep the spoken reunion answer soft even if retrieval initialization fails",
+        },
+    )
+    _disable_dispatch_plan(monkeypatch)
+
+    persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+    persistence.persist(
+        user_id=user_id,
+        valence=0.79,
+        arousal=0.4,
+        dominance=0.14,
+        ts_ms=old_ts,
+    )
+    PersonaEngine.get_instance().apply_growth_delta(
+        user_id,
+        TraitsDelta(warmth=0.03),
+        reason="edge_events_init_fail_growth",
+        ts_ms=old_ts,
+    )
+
+    def _bad_retrieval(**_kwargs):  # noqa: ANN001
+        raise RuntimeError("retrieval init boom")
+
+    async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+        return (
+            {
+                "bond_stage": "FRIEND",
+                "trend": "warming",
+                "capability_hint": "steady_voice_reunion",
+            },
+            {
+                "kind": "bond_graph",
+                "content": "the bond still feels gentle even when spoken retrieval never starts",
+                "snippet": "the bond still feels gentle even when spoken retrieval never starts",
+                "evidence_ref": "evd://bond/edge-events/init-fail/1",
+                "source_ref": "bond://graph/edge-events/init-fail/1",
+                "score": 0.86,
+                "confidence": 0.86,
+            },
+        )
+
+    recall_capture: dict[str, Any] = {}
+    recall_builder = _CapturingTopAgentRecallPackBuilder(
+        slots={},
+        capture=recall_capture,
+    )
+    _patch_top_agent_http_runtime(
+        monkeypatch,
+        retrieval_fn=_bad_retrieval,
+        state_arbiter_fn=_fake_state_arbiter_with_bond,
+        recall_pack_builder=recall_builder,
+    )
+
+    expected_narrative = "Even if remembering does not start, I still want to answer you softly."
+    captured = _patch_chat_agent_runtime(
+        monkeypatch,
+        expected_prompt_markers=[
+            "SELF_REFLECTION_PULSE:",
+            "growth_awareness:",
+            "recent_change: more stable when edge ASR bridge starts without retrieval",
+            "desire: keep the spoken reunion answer soft even if retrieval initialization fails",
+            "emotion_reunion_type: reunion",
+            "BOND_AWARE_STYLE:",
+            "the bond still feels gentle even when spoken retrieval never starts",
+        ],
+        expected_narrative=expected_narrative,
+    )
+
+    pipeline_capture = _capture_input_route_pipeline(monkeypatch)
+    input_events = _capture_input_route_events(monkeypatch)
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_bond_update_queue",
+        lambda: SimpleNamespace(enqueue=lambda _payload: {"status": "QUEUED"}),
+    )
+
+    client = TestClient(fastapi_app)
+    suffix = uuid.uuid4().hex[:8]
+    response = client.post(
+        "/v1/edge/events",
+        json={
+            "events": [
+                {
+                    "event_type": "ASR_FINAL",
+                    "source": "edge_client",
+                    "request_id": f"req-edge-events-init-fail-{suffix}",
+                    "session_id": f"session-edge-events-init-fail-{suffix}",
+                    "ts_ms": now_ms,
+                    "payload": {
+                        "text": "I came back. Can you still answer softly if remembering starts slowly?",
+                        "is_final": True,
+                        "final": True,
+                        "confidence": 0.93,
+                        "seq": 9,
+                        "platform": "wechat",
+                        "conversation_id": f"conv-edge-events-init-fail-{suffix}",
+                        "from_id": "wxid_asr_user_b",
+                        "msg_type": "text",
+                        "emotion_tag": "LOVING",
+                        "emotion_intensity": 0.8,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["accepted"] == 1
+    assert body["rejected"] == 0
+    _wait_for(
+        lambda: captured.get("model_id") == "mock-soul-runtime"
+        and pipeline_capture.get("narrative") == expected_narrative
+        and any(item.get("phase") == "COMPLETED" and item.get("source") == "ASR" for item in input_events)
+    )
+
+    assert pipeline_capture["decision"] == "APPROVE"
+    assert pipeline_capture["commit_event"]["audit_refs"]["path"] == "chat_agent:direct"
+    assert recall_capture["task_type"] == "chat"
+    assert recall_capture["recall_results"] == {
+        "bond_graph": "the bond still feels gentle even when spoken retrieval never starts",
+    }
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_edge_event_reporter_asr_bridge_exposes_trace_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+    monkeypatch.setenv("HOST_STREAM_VTS_EMOTION_ENABLED", "false")
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", "0")
+
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    _patch_shared_host_ledger(monkeypatch, ledger)
+    reporter: EdgeEventReporter | None = None
+
+    try:
+        user_id = get_canonical_bond_user_id()
+        now_ms = int(time.time() * 1000)
+        old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+        engine = BondStageEngine()
+        for index in range(3):
+            engine.apply_event(
+                user_id=user_id,
+                update_kind="DEEP_TALK",
+                evidence_refs=[f"evd://edge-reporter-trace/{index}"],
+                ts_ms=old_ts + index * 60_000,
+                emotion_intensity=0.9,
+            )
+
+        _install_runtime_chain(
+            monkeypatch,
+            tmp_path=tmp_path,
+            bond_engine=engine,
+            growth_awareness={
+                "recent_change": "more coherent when edge reporter and host trace stay aligned",
+                "desire": "keep reported ASR reunion answers warm, grounded, and traceable",
+            },
+        )
+        _disable_dispatch_plan(monkeypatch)
+
+        persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+        persistence.persist(
+            user_id=user_id,
+            valence=0.8,
+            arousal=0.41,
+            dominance=0.14,
+            ts_ms=old_ts,
+        )
+        PersonaEngine.get_instance().apply_growth_delta(
+            user_id,
+            TraitsDelta(warmth=0.03),
+            reason="edge_reporter_trace_growth",
+            ts_ms=old_ts,
+        )
+
+        async def _fake_retrieval_with_context(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "status": "OK",
+                    "reason_code": "NONE",
+                    "route_count": 2,
+                    "candidate_count": 3,
+                    "rerank_topk": 3,
+                    "degraded": False,
+                    "routes": [
+                        {"route_id": "route_episodic"},
+                        {"route_id": "route_world_canon"},
+                    ],
+                },
+                [
+                    {
+                        "kind": "episodic_vector",
+                        "content": "you once said hearing from me again felt like a reunion worth keeping gentle",
+                        "snippet": "you once said hearing from me again felt like a reunion worth keeping gentle",
+                        "evidence_ref": "evd://episodic/edge-reporter/1",
+                        "source_ref": "memory://episodic/edge-reporter/1",
+                        "score": 0.91,
+                        "confidence": 0.91,
+                    },
+                    {
+                        "kind": "world_canon",
+                        "content": "Reporter-driven reunion replies should stay sincere and softly grounded.",
+                        "snippet": "Reporter-driven reunion replies should stay sincere and softly grounded.",
+                        "citation": "canon://relationship/reporter-reunion",
+                        "evidence_ref": "evd://world/edge-reporter/1",
+                        "source_ref": "canon://relationship/reporter-reunion",
+                        "score": 0.88,
+                        "confidence": 0.88,
+                    },
+                ],
+            )
+
+        async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "bond_stage": "FRIEND",
+                    "trend": "warming",
+                    "capability_hint": "traceable_voice_reunion",
+                },
+                {
+                    "kind": "bond_graph",
+                    "content": "the relationship is warming and stays traceable through the ASR bridge",
+                    "snippet": "the relationship is warming and stays traceable through the ASR bridge",
+                    "evidence_ref": "evd://bond/edge-reporter/1",
+                    "source_ref": "bond://graph/edge-reporter/1",
+                    "score": 0.89,
+                    "confidence": 0.89,
+                },
+            )
+
+        recall_capture: dict[str, Any] = {}
+        recall_builder = _CapturingTopAgentRecallPackBuilder(
+            slots={
+                "world_canon": "Reporter-driven reunion replies should stay sincere and softly grounded.",
+                "episodic_vector": "shared reporter memory reached the final prompt",
+            },
+            capture=recall_capture,
+        )
+        _patch_top_agent_http_runtime(
+            monkeypatch,
+            retrieval_fn=_fake_retrieval_with_context,
+            state_arbiter_fn=_fake_state_arbiter_with_bond,
+            recall_pack_builder=recall_builder,
+        )
+
+        expected_narrative = "I still remember the gentle way we found each other again, and I want to answer softly."
+        captured = _patch_chat_agent_runtime(
+            monkeypatch,
+            expected_prompt_markers=[
+                "SELF_REFLECTION_PULSE:",
+                "growth_awareness:",
+                "recent_change: more coherent when edge reporter and host trace stay aligned",
+                "desire: keep reported ASR reunion answers warm, grounded, and traceable",
+                "emotion_reunion_type: reunion",
+                "BOND_AWARE_STYLE:",
+                "Reporter-driven reunion replies should stay sincere and softly grounded.",
+                "EPISODIC_VECTOR_RECALL:",
+                "shared reporter memory reached the final prompt",
+            ],
+            expected_narrative=expected_narrative,
+        )
+
+        pipeline_capture = _capture_input_route_pipeline(monkeypatch)
+        input_events = _capture_input_route_events(monkeypatch)
+        monkeypatch.setattr(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            lambda: SimpleNamespace(enqueue=lambda _payload: {"status": "QUEUED"}),
+        )
+
+        host_client = TestClient(fastapi_app)
+        reporter = EdgeEventReporter(
+            transport_fn=_build_edge_events_transport(host_client=host_client),
+            max_retry=1,
+        )
+        request_id = f"req-edge-reporter-trace-{uuid.uuid4().hex[:8]}"
+        session_id = f"session-edge-reporter-trace-{uuid.uuid4().hex[:8]}"
+        report = reporter.report(
+            [
+                {
+                    "event_type": "ASR_FINAL",
+                    "ts_ms": now_ms,
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "source": "edge_client",
+                    "direction": "EDGE_TO_HOST",
+                    "seq": 1,
+                    "status": "RECEIVED",
+                    "stage": "S_ASR_CAPTURE",
+                    "payload": {
+                        "text": "I came back. Can you answer me gently and keep the trace coherent?",
+                        "is_final": True,
+                        "final": True,
+                        "confidence": 0.94,
+                        "platform": "wechat",
+                        "conversation_id": session_id,
+                        "from_id": "wxid_reporter_user",
+                        "msg_type": "text",
+                        "emotion_tag": "LOVING",
+                        "emotion_intensity": 0.83,
+                    },
+                }
+            ]
+        )
+
+        assert report.success is True
+        assert report.accepted == 1
+        _wait_for(
+            lambda: captured.get("model_id") == "mock-soul-runtime"
+            and pipeline_capture.get("narrative") == expected_narrative
+            and any(item.get("phase") == "COMPLETED" and item.get("source") == "ASR" for item in input_events)
+        )
+
+        trace_resp = host_client.post("/observability/trace", json={"request_id": request_id})
+        assert trace_resp.status_code == 200
+        trace_payload = trace_resp.json()
+        assert trace_payload["request_id"] == request_id
+        assert trace_payload["timeline_total"] >= 1
+        assert trace_payload["sources"].get("voice_event_log", 0) >= 1
+
+        detailed_trace_resp = host_client.get(f"/obs/trace/{request_id}")
+        assert detailed_trace_resp.status_code == 200
+        detailed_trace = detailed_trace_resp.json()
+        assert detailed_trace["request_id"] == request_id
+        assert detailed_trace["node_count"] >= 1
+        assert any(node.get("node_type") == "asr" for node in detailed_trace["nodes"])
+        assert recall_capture["task_type"] == "chat"
+        assert "world_canon" in recall_capture["recall_results"]
+        assert "bond_graph" in recall_capture["recall_results"]
+        assert "episodic_vector" in recall_capture["recall_results"]
+    finally:
+        if reporter is not None:
+            reporter._retry_executor.shutdown(wait=False, cancel_futures=True)
+        ledger.close()
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_edge_event_reporter_degraded_asr_bridge_still_exposes_trace_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+
+    _enable_prod_edge_env(monkeypatch)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+    monkeypatch.setenv("HOST_STREAM_VTS_EMOTION_ENABLED", "false")
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", "0")
+
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    _patch_shared_host_ledger(monkeypatch, ledger)
+    reporter: EdgeEventReporter | None = None
+
+    try:
+        user_id = get_canonical_bond_user_id()
+        now_ms = int(time.time() * 1000)
+        old_ts = now_ms - 8 * 24 * 3600 * 1000
+
+        engine = BondStageEngine()
+        for index in range(3):
+            engine.apply_event(
+                user_id=user_id,
+                update_kind="DEEP_TALK",
+                evidence_refs=[f"evd://edge-reporter-trace-degraded/{index}"],
+                ts_ms=old_ts + index * 60_000,
+                emotion_intensity=0.9,
+            )
+
+        _install_runtime_chain(
+            monkeypatch,
+            tmp_path=tmp_path,
+            bond_engine=engine,
+            growth_awareness={
+                "recent_change": "more stable when edge reporter starts before retrieval is ready",
+                "desire": "keep the traceable spoken reunion answer soft during degraded retrieval",
+            },
+        )
+        _disable_dispatch_plan(monkeypatch)
+
+        persistence: EmotionPersistence = ccb.build_chat_prompt_runtime_payload._emotion_persistence
+        persistence.persist(
+            user_id=user_id,
+            valence=0.79,
+            arousal=0.4,
+            dominance=0.14,
+            ts_ms=old_ts,
+        )
+        PersonaEngine.get_instance().apply_growth_delta(
+            user_id,
+            TraitsDelta(warmth=0.03),
+            reason="edge_reporter_trace_degraded_growth",
+            ts_ms=old_ts,
+        )
+
+        def _bad_retrieval(**_kwargs):  # noqa: ANN001
+            raise RuntimeError("retrieval init boom")
+
+        async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "bond_stage": "FRIEND",
+                    "trend": "warming",
+                    "capability_hint": "steady_traceable_reunion",
+                },
+                {
+                    "kind": "bond_graph",
+                    "content": "the bond still feels gentle and traceable even when retrieval never starts",
+                    "snippet": "the bond still feels gentle and traceable even when retrieval never starts",
+                    "evidence_ref": "evd://bond/edge-reporter/degraded/1",
+                    "source_ref": "bond://graph/edge-reporter/degraded/1",
+                    "score": 0.86,
+                    "confidence": 0.86,
+                },
+            )
+
+        recall_capture: dict[str, Any] = {}
+        recall_builder = _CapturingTopAgentRecallPackBuilder(
+            slots={},
+            capture=recall_capture,
+        )
+        _patch_top_agent_http_runtime(
+            monkeypatch,
+            retrieval_fn=_bad_retrieval,
+            state_arbiter_fn=_fake_state_arbiter_with_bond,
+            recall_pack_builder=recall_builder,
+        )
+
+        expected_narrative = "Even if remembering is not ready, I still want to answer you softly and stay here."
+        captured = _patch_chat_agent_runtime(
+            monkeypatch,
+            expected_prompt_markers=[
+                "SELF_REFLECTION_PULSE:",
+                "growth_awareness:",
+                "recent_change: more stable when edge reporter starts before retrieval is ready",
+                "desire: keep the traceable spoken reunion answer soft during degraded retrieval",
+                "emotion_reunion_type: reunion",
+                "BOND_AWARE_STYLE:",
+                "the bond still feels gentle and traceable even when retrieval never starts",
+            ],
+            expected_narrative=expected_narrative,
+        )
+
+        pipeline_capture = _capture_input_route_pipeline(monkeypatch)
+        input_events = _capture_input_route_events(monkeypatch)
+        monkeypatch.setattr(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            lambda: SimpleNamespace(enqueue=lambda _payload: {"status": "QUEUED"}),
+        )
+
+        host_client = TestClient(fastapi_app)
+        reporter = EdgeEventReporter(
+            transport_fn=_build_edge_events_transport(host_client=host_client),
+            max_retry=1,
+        )
+        request_id = f"req-edge-reporter-trace-degraded-{uuid.uuid4().hex[:8]}"
+        session_id = f"session-edge-reporter-trace-degraded-{uuid.uuid4().hex[:8]}"
+        report = reporter.report(
+            [
+                {
+                    "event_type": "ASR_FINAL",
+                    "ts_ms": now_ms,
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "source": "edge_client",
+                    "direction": "EDGE_TO_HOST",
+                    "seq": 1,
+                    "status": "RECEIVED",
+                    "stage": "S_ASR_CAPTURE",
+                    "payload": {
+                        "text": "I came back. Can you still answer softly if remembering is slow?",
+                        "is_final": True,
+                        "final": True,
+                        "confidence": 0.92,
+                        "platform": "wechat",
+                        "conversation_id": session_id,
+                        "from_id": "wxid_reporter_user_b",
+                        "msg_type": "text",
+                        "emotion_tag": "LOVING",
+                        "emotion_intensity": 0.8,
+                    },
+                }
+            ]
+        )
+
+        assert report.success is True
+        assert report.accepted == 1
+        _wait_for(
+            lambda: captured.get("model_id") == "mock-soul-runtime"
+            and pipeline_capture.get("narrative") == expected_narrative
+            and any(item.get("phase") == "COMPLETED" and item.get("source") == "ASR" for item in input_events)
+        )
+
+        trace_resp = host_client.post("/observability/trace", json={"request_id": request_id})
+        assert trace_resp.status_code == 200
+        trace_payload = trace_resp.json()
+        assert trace_payload["request_id"] == request_id
+        assert trace_payload["timeline_total"] >= 1
+        assert trace_payload["sources"].get("voice_event_log", 0) >= 1
+
+        detailed_trace_resp = host_client.get(f"/obs/trace/{request_id}")
+        assert detailed_trace_resp.status_code == 200
+        detailed_trace = detailed_trace_resp.json()
+        assert detailed_trace["request_id"] == request_id
+        assert detailed_trace["node_count"] >= 1
+        assert any(node.get("node_type") == "asr" for node in detailed_trace["nodes"])
+        assert recall_capture["task_type"] == "chat"
+        assert recall_capture["recall_results"] == {
+            "bond_graph": "the bond still feels gentle and traceable even when retrieval never starts",
+        }
+    finally:
+        if reporter is not None:
+            reporter._retry_executor.shutdown(wait=False, cancel_futures=True)
+        ledger.close()

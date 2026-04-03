@@ -7,7 +7,7 @@ param(
   [switch]$ForceRestart,
   [bool]$AutoDegradeOnAsrCrash = $false,
   [bool]$EnforceCnAsrJaTtsMode = $true,
-  [ValidateSet("", "uia_hook", "off")]
+  [ValidateSet("", "wxautox4_hook", "off")]
   [string]$WeChatInboundBackend = "",
   [string]$WeChatVisionModel = "",
   [string]$WeChatVisionApiUrl = "",
