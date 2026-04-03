@@ -11,7 +11,7 @@ from host_brain.retrieval.hybrid_fusion import (
     DEFAULT_FTS_WEIGHT,
 )
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
-from host_brain.memory.chroma_client import InMemoryChromaClient
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 # ── 测试夹具 ──────────────────────────────────────────────────────────────────
@@ -87,6 +87,7 @@ class TestHybridDisabled:
 
     def test_use_hybrid_false_no_fts(self):
         service = RecallFusionServiceContract(
+            chroma_client=FakeChromaClient(),
             use_hybrid=False,
             vector_weight=0.7,
             fts_weight=0.3,
@@ -96,7 +97,7 @@ class TestHybridDisabled:
 
     def test_use_hybrid_false_result_unchanged(self):
         """use_hybrid=False 时，recall 结果与纯向量检索一致（向后兼容）。"""
-        chroma = InMemoryChromaClient()
+        chroma = FakeChromaClient()
         # 默认维度为 16
         chroma.upsert(
             memory_id="mem_compat_001",
@@ -165,13 +166,14 @@ class TestFTS5Unavailable:
     def test_fts_searcher_init_failure_degrades(self):
         """FullTextSearcher 初始化失败时，RecallFusionServiceContract 降级为纯向量。"""
         service = RecallFusionServiceContract(
+            chroma_client=FakeChromaClient(),
             use_hybrid=True,
             fts_db_path=":memory:",  # 内存数据库，FTS5 应可用
         )
         # 手动将 _fts_searcher 设为 None 模拟不可用
         service._fts_searcher = None
 
-        chroma = InMemoryChromaClient()
+        chroma = FakeChromaClient()
         chroma.upsert(
             memory_id="mem_fts_fallback",
             text="fallback test content",

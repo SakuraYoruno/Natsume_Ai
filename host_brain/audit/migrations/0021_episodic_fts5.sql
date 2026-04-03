@@ -10,7 +10,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS episodic_fts USING fts5(
 );
 
 -- 触发器：当 chroma_memory（或 episodic 内存表）有新记录时自动同步到 FTS5
--- 注意：本项目 Episodic 记忆主要存储在 InMemoryChromaClient 中，
+-- 注意：本项目 Episodic 记忆统一存储在外部 Chroma 中，
 -- FTS5 表通过 FullTextSearcher.index_memory() 手动写入，无需触发器。
 
 -- 索引：按 memory_id 快速查找（用于去重融合）

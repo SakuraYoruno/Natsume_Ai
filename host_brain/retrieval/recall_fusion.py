@@ -24,7 +24,10 @@ from host_brain.core.errors import (
     RETR_RECALL_UNAVAILABLE,
 )
 from host_brain.core.ids import now_ms
-from host_brain.memory.chroma_client import InMemoryChromaClient
+from host_brain.memory.chroma_client import (
+    ChromaClientProtocol,
+    build_runtime_chroma_client,
+)
 from host_brain.retrieval.recall_schemas import (
     RecallConfigIssue,
     RecallConfigLoadResult,
@@ -96,7 +99,7 @@ class RecallFusionServiceContract:
         self,
         *,
         ledger: SQLiteLedger | None = None,
-        chroma_client: InMemoryChromaClient | None = None,
+        chroma_client: ChromaClientProtocol | None = None,
         neo4j_client: Any | None = None,
         style_store: Any | None = None,
         world_store: Any | None = None,
@@ -110,7 +113,7 @@ class RecallFusionServiceContract:
         fts_db_path: str | None = None,
     ) -> None:
         self.ledger = ledger
-        self.chroma = chroma_client or InMemoryChromaClient()
+        self.chroma = chroma_client or build_runtime_chroma_client()
         self.neo4j = neo4j_client
         self.style_store = style_store
         self.world_store = world_store

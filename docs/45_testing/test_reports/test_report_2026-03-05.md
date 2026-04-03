@@ -337,7 +337,7 @@ AssertionError: 2 != 3
 | `distilled` | 16 | ✅ 通过 |
 | `bond` | 16 | ✅ 通过 |
 
-六库全部初始化成功，`InMemoryChromaClient` 集合配置验证通过。
+六库全部初始化成功，Chroma 集合配置验证通过。
 
 ---
 

@@ -13,11 +13,11 @@ from host_brain.memory.chroma_client import (
     CHROMA_STATUS_UP,
     S_CHROMA_CONFIG,
     S_CHROMA_PROBE,
-    InMemoryChromaClient,
     build_chroma_dependency_status,
     build_chroma_probe_report,
     load_chroma_runtime_config,
 )
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -93,7 +93,7 @@ class TestChromaDeployContract(unittest.TestCase):
         self.assertEqual("dependency", dep_status["unavailable_kind"])
 
     def test_t_chroma_01_collection_governance_enforces_vector_dim(self) -> None:
-        client = InMemoryChromaClient(
+        client = FakeChromaClient(
             collection_profiles={"episodic": 16, "world": 32},
             default_collection="episodic",
         )

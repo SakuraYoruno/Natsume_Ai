@@ -9,6 +9,7 @@ from host_brain.retrieval.recall_fusion import (
     RecallFusionServiceContract,
     load_recall_runtime_config,
 )
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 def test_sqlite_ledger_route_recalls_dialogue_history_from_memory_ops() -> None:
@@ -55,6 +56,7 @@ def test_sqlite_ledger_route_recalls_dialogue_history_from_memory_ops() -> None:
         assert cfg_result.config is not None
 
         service = RecallFusionServiceContract(
+            chroma_client=FakeChromaClient(),
             ledger=ledger,
             runtime_config=cfg_result.config,
             node_id="host-01",

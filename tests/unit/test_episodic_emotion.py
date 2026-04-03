@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.memory.episodic import EpisodicRecord, EpisodicStore
 
 
@@ -11,7 +12,7 @@ class TestEpisodicEmotionFields:
 
     def test_save_and_recall_by_emotion_tag(self):
         """T-EPISODIC-EMO-01：保存含 emotion_tag="HAPPY" 的记录后，可按 emotion_tag 检索到"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         result = store.write_memory(
             text="今天很开心",
             evidence_refs=["ev-001"],
@@ -44,7 +45,7 @@ class TestEpisodicEmotionFields:
 
     def test_recall_with_emotion_filter(self):
         """T-EPISODIC-EMO-03：recall(emotion_filter="HAPPY") 只返回 emotion_tag="HAPPY" 的记录排在前列"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         store.write_memory(
             text="开心的事情",
             evidence_refs=["ev-001"],
@@ -61,7 +62,7 @@ class TestEpisodicEmotionFields:
 
     def test_emotion_valence_clamped(self):
         """T-EPISODIC-EMO-04：emotion_valence 超出 [-1.0, 1.0] 时被截断到合法范围"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         result = store.write_memory(
             text="测试截断",
             evidence_refs=["ev-001"],

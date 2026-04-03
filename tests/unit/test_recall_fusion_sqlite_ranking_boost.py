@@ -9,6 +9,7 @@ from host_brain.retrieval.recall_fusion import (
     RecallFusionServiceContract,
     load_recall_runtime_config,
 )
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 def _build_sqlite_only_service(ledger: SQLiteLedger) -> RecallFusionServiceContract:
@@ -31,6 +32,7 @@ def _build_sqlite_only_service(ledger: SQLiteLedger) -> RecallFusionServiceContr
     assert cfg_result.success, cfg_result.as_dict()
     assert cfg_result.config is not None
     return RecallFusionServiceContract(
+        chroma_client=FakeChromaClient(),
         ledger=ledger,
         runtime_config=cfg_result.config,
         node_id="host-01",

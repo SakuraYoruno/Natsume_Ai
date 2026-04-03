@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.memory.episodic import EpisodicStore
 
 
@@ -10,7 +11,7 @@ class TestEpisodicWeightedRecall:
     """T-EPISODIC-WR-01~03：情感记忆加权召回测试"""
 
     def _make_store(self) -> EpisodicStore:
-        return EpisodicStore()
+        return EpisodicStore(chroma_client=FakeChromaClient())
 
     def test_happy_emotion_context_boosts_happy_records(self):
         """T-EPISODIC-WR-01：当前情感为 HAPPY 时，emotion_tag="HAPPY" 的记录排名更高"""

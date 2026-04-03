@@ -438,12 +438,13 @@ class TestIntegration:
     def test_full_cycle_with_real_episodic_store(self, tmp_path):
         """使用真实组件执行完整蒸馏循环。"""
         from host_brain.memory.episodic import EpisodicStore
+        from tests.fakes.chroma_client import FakeChromaClient
         from host_brain.memory.distillation import MemoryDistillationEngine
         from host_brain.audit.sqlite_ledger import SQLiteLedger
 
         db_path = str(tmp_path / "test_distill.sqlite3")
         ledger = SQLiteLedger(db_path=db_path)
-        episodic = EpisodicStore(ledger=ledger)
+        episodic = EpisodicStore(ledger=ledger, chroma_client=FakeChromaClient())
         engine = MemoryDistillationEngine(episodic_store=episodic, ledger=ledger)
 
         # 写入一些 episodic 记忆
@@ -477,12 +478,13 @@ class TestIntegration:
     def test_cycle_with_no_episodic_memories(self, tmp_path):
         """无 episodic 记忆时蒸馏循环应优雅处理。"""
         from host_brain.memory.episodic import EpisodicStore
+        from tests.fakes.chroma_client import FakeChromaClient
         from host_brain.memory.distillation import MemoryDistillationEngine
         from host_brain.audit.sqlite_ledger import SQLiteLedger
 
         db_path = str(tmp_path / "test_empty.sqlite3")
         ledger = SQLiteLedger(db_path=db_path)
-        episodic = EpisodicStore(ledger=ledger)
+        episodic = EpisodicStore(ledger=ledger, chroma_client=FakeChromaClient())
         engine = MemoryDistillationEngine(episodic_store=episodic, ledger=ledger)
         canon_store = WorldCanonStore(
             world_root=str(tmp_path / "canon"),

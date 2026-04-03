@@ -16,7 +16,12 @@ from host_brain.core.errors import (
     MEMORY_NOT_FOUND,
 )
 from host_brain.core.ids import now_ms
-from host_brain.memory.chroma_client import InMemoryChromaClient, PersistentChromaClient, embed_text
+from host_brain.memory.chroma_client import (
+    ChromaClientProtocol,
+    build_runtime_chroma_client,
+    embed_text,
+    resolve_collection_vector_dim,
+)
 
 _logger = logging.getLogger("Natsume.episodic")
 
@@ -84,13 +89,13 @@ class EpisodicStore:
         self,
         *,
         ledger: SQLiteLedger | None = None,
-        chroma_client: InMemoryChromaClient | PersistentChromaClient | None = None,
+        chroma_client: ChromaClientProtocol | None = None,
         embedding_fn: Callable[[str], tuple[list[float], str]] | None = None,
         embedding_model_id_hint: str | None = None,
         embedding_provider_hint: str | None = None,
     ) -> None:
         self.ledger = ledger or SQLiteLedger()
-        self.chroma = chroma_client or InMemoryChromaClient()
+        self.chroma = chroma_client or build_runtime_chroma_client()
         self._embedding_fn = embedding_fn
         self.embedding_model_id_hint = str(embedding_model_id_hint or "").strip() or None
         self.embedding_provider_hint = str(embedding_provider_hint or "").strip() or None
@@ -104,15 +109,7 @@ class EpisodicStore:
         return embed_text(str(text or "").strip(), dim=self._resolve_embedding_dim())
 
     def _resolve_embedding_dim(self) -> int:
-        profiles = getattr(self.chroma, "_collection_profiles", {}) or {}
-        default_collection = str(getattr(self.chroma, "_default_collection", "episodic") or "episodic")
-        raw_dim = profiles.get(default_collection)
-        if raw_dim is None and profiles:
-            raw_dim = next(iter(profiles.values()))
-        try:
-            return max(1, int(raw_dim))
-        except (TypeError, ValueError):
-            return 16
+        return resolve_collection_vector_dim(self.chroma)
 
     def write_memory(
         self,

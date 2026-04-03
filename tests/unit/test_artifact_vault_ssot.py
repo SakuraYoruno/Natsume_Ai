@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.retrieval.recall_fusion import RecallFusionServiceContract
 
 
@@ -54,7 +55,7 @@ def test_vault_ssot_01_no_direct_ledger_access():
 
 def test_vault_ssot_02_none_vault_returns_empty():
     """T-VAULT-SSOT-02：self.artifact_vault=None 时，_search_artifact_vault() 返回空列表，不抛异常。"""
-    svc = RecallFusionServiceContract(artifact_vault=None)
+    svc = RecallFusionServiceContract(chroma_client=FakeChromaClient(), artifact_vault=None)
     result = svc._search_artifact_vault(query="test query", top_k=5)
     assert result == [], f"T-VAULT-SSOT-02 FAILED: 期望空列表，实际返回 {result}"
 
@@ -78,7 +79,7 @@ def test_vault_ssot_03_valid_vault_returns_candidates():
         }
     ]
 
-    svc = RecallFusionServiceContract(artifact_vault=mock_vault)
+    svc = RecallFusionServiceContract(chroma_client=FakeChromaClient(), artifact_vault=mock_vault)
     result = svc._search_artifact_vault(query="manifest_abc123", top_k=5)
 
     # 验证调用了 SSOT 接口

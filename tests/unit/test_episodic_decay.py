@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from tests.fakes.chroma_client import FakeChromaClient
 from host_brain.memory.episodic import EpisodicStore, EpisodicRecord
 
 
@@ -11,7 +12,7 @@ class TestEpisodicDecay:
 
     def test_high_intensity_uses_slow_decay(self):
         """T-EPISODIC-DECAY-01：emotion_arousal > 0.8 的记录 decay_profile_id 为 SLOW 或 PERMANENT"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         result = store.write_memory(
             text="高情感强度记忆",
             evidence_refs=["ev-high-001"],
@@ -29,7 +30,7 @@ class TestEpisodicDecay:
 
     def test_low_intensity_uses_fast_decay(self):
         """T-EPISODIC-DECAY-02：emotion_arousal < 0.3 的记录 decay_profile_id 为 FAST"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         result = store.write_memory(
             text="低情感强度记忆",
             evidence_refs=["ev-low-001"],
@@ -47,7 +48,7 @@ class TestEpisodicDecay:
 
     def test_decay_profiles_contain_required_keys(self):
         """T-EPISODIC-DECAY-03：DECAY_PROFILES 包含 fast/normal/slow/permanent 四种配置"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         # 验证各种衰减配置存在
         fast_profile = store.get_decay_profile("FAST")
         assert "decay_rate" in fast_profile
@@ -67,7 +68,7 @@ class TestEpisodicDecay:
 
     def test_permanent_record_never_expires(self):
         """PERMANENT 衰减配置的记忆永不过期"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         result = store.write_memory(
             text="永久记忆",
             evidence_refs=["ev-perm-001"],
@@ -82,7 +83,7 @@ class TestEpisodicDecay:
 
     def test_fast_decay_record_expires_quickly(self):
         """FAST 衰减配置的记忆在 TTL 后过期"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         result = store.write_memory(
             text="快速遗忘记忆",
             evidence_refs=["ev-fast-001"],
@@ -97,7 +98,7 @@ class TestEpisodicDecay:
 
     def test_unknown_decay_profile_uses_default(self):
         """未知 decay_profile_id 使用默认配置"""
-        store = EpisodicStore()
+        store = EpisodicStore(chroma_client=FakeChromaClient())
         profile = store.get_decay_profile("UNKNOWN_PROFILE")
         assert "decay_rate" in profile
         assert "ttl_days" in profile

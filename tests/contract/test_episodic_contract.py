@@ -6,6 +6,7 @@ from pathlib import Path
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import MEMORY_EVIDENCE_REQUIRED
 from host_brain.memory.episodic import EpisodicStore
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,7 +23,7 @@ class TestEpisodicContract(unittest.TestCase):
             db_path = Path(temp_dir) / "audit.sqlite3"
             ledger = SQLiteLedger(db_path=db_path)
             try:
-                store = EpisodicStore(ledger=ledger)
+                store = EpisodicStore(ledger=ledger, chroma_client=FakeChromaClient())
                 payload = _load_json(FIXTURES / "bad" / "no_evidence_write.json")
 
                 result = store.write_memory(
@@ -49,7 +50,7 @@ class TestEpisodicContract(unittest.TestCase):
             db_path = Path(temp_dir) / "audit.sqlite3"
             ledger = SQLiteLedger(db_path=db_path)
             try:
-                store = EpisodicStore(ledger=ledger)
+                store = EpisodicStore(ledger=ledger, chroma_client=FakeChromaClient())
                 fixture = _load_json(FIXTURES / "good" / "lifecycle_ops.json")
 
                 write_a = store.write_memory(

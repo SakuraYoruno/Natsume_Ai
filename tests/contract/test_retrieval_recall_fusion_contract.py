@@ -3,7 +3,7 @@ import unittest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import CHROMA_COLLECTION_MISSING
-from host_brain.memory.chroma_client import InMemoryChromaClient, embed_text
+from host_brain.memory.chroma_client import embed_text
 from host_brain.retrieval.recall_fusion import (
     RET_OP_RECALL,
     S_RET_RECALL,
@@ -12,6 +12,7 @@ from host_brain.retrieval.recall_fusion import (
     RecallFusionServiceContract,
     load_recall_runtime_config,
 )
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 def _embed_for_dim(text: str, dim: int) -> list[float]:
@@ -26,7 +27,7 @@ class TestRetrievalRecallFusionContract(unittest.TestCase):
     def setUp(self) -> None:
         self.now_ms = 1_800_180_000_000
         self.ledger = SQLiteLedger(db_path=":memory:")
-        self.chroma = InMemoryChromaClient(
+        self.chroma = FakeChromaClient(
             collection_profiles={"episodic": 16, "canon": 16},
             default_collection="episodic",
         )

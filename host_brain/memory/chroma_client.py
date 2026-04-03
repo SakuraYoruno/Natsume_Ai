@@ -1,4 +1,4 @@
-"""In-memory vector client used by episodic store contracts."""
+"""Chroma runtime config, client bindings, and embedding helpers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import hashlib
 import math
 import json
 import os
-from typing import Any, Mapping
+from pathlib import Path
+from typing import Any, Mapping, Protocol, runtime_checkable
 from urllib.parse import urlparse
 
 from host_brain.core.errors import (
@@ -90,17 +91,15 @@ class ChromaConfigLoadResult:
         }
 
 
-class InMemoryChromaClient:
+@runtime_checkable
+class ChromaClientProtocol(Protocol):
+    @property
+    def collection_profiles(self) -> Mapping[str, int]:
+        ...
 
-    def __init__(
-        self,
-        *,
-        collection_profiles: Mapping[str, int] | None = None,
-        default_collection: str = DEFAULT_COLLECTION,
-    ) -> None:
-        self._items: dict[str, ChromaEntry] = {}
-        self._collection_profiles: dict[str, int] = dict(collection_profiles or {default_collection: 16})
-        self._default_collection = str(default_collection or DEFAULT_COLLECTION)
+    @property
+    def default_collection(self) -> str:
+        ...
 
     def upsert(
         self,
@@ -111,24 +110,13 @@ class InMemoryChromaClient:
         metadata: dict[str, Any] | None = None,
         collection: str | None = None,
     ) -> None:
-        collection_name = str(collection or self._default_collection)
-        self._validate_collection_embedding(collection_name, embedding)
-        key = _row_key(collection_name, memory_id)
-        self._items[key] = ChromaEntry(
-            memory_id=memory_id,
-            text=text,
-            embedding=tuple(float(v) for v in embedding),
-            metadata=dict(metadata or {}),
-            collection=collection_name,
-        )
+        ...
 
     def delete(self, memory_id: str, *, collection: str | None = None) -> None:
-        key = _row_key(str(collection or self._default_collection), memory_id)
-        self._items.pop(key, None)
+        ...
 
     def get(self, memory_id: str, *, collection: str | None = None) -> ChromaEntry | None:
-        key = _row_key(str(collection or self._default_collection), memory_id)
-        return self._items.get(key)
+        ...
 
     def search(
         self,
@@ -137,48 +125,10 @@ class InMemoryChromaClient:
         top_k: int = 5,
         collection: str | None = None,
     ) -> list[dict[str, Any]]:
-        collection_name = str(collection or self._default_collection)
-        q = tuple(float(v) for v in query_embedding)
-        self._validate_collection_embedding(collection_name, q)
-        scored: list[tuple[float, ChromaEntry]] = []
-        for item in self._items.values():
-            if item.collection != collection_name:
-                continue
-            score = _cosine_similarity(q, item.embedding)
-            scored.append((score, item))
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-
-        results: list[dict[str, Any]] = []
-        for score, item in scored[: max(1, top_k)]:
-            results.append(
-                {
-                    "memory_id": item.memory_id,
-                    "text": item.text,
-                    "score": score,
-                    "metadata": dict(item.metadata),
-                    "collection": item.collection,
-                }
-            )
-        return results
+        ...
 
     def validate_collection(self, collection: str, *, vector_dim: int | None = None) -> tuple[bool, str | None]:
-        collection_name = str(collection or "").strip()
-        if not collection_name:
-            return False, CHROMA_COLLECTION_MISSING
-        expected_dim = self._collection_profiles.get(collection_name)
-        if expected_dim is None:
-            return False, CHROMA_COLLECTION_MISSING
-        if vector_dim is not None and int(vector_dim) != int(expected_dim):
-            return False, CHROMA_VECTOR_DIM_MISMATCH
-        return True, None
-
-    def _validate_collection_embedding(self, collection: str, embedding: list[float] | tuple[float, ...]) -> None:
-        ok, reason = self.validate_collection(collection, vector_dim=len(embedding))
-        if ok:
-            return
-        if reason == CHROMA_COLLECTION_MISSING:
-            raise ValueError(CHROMA_COLLECTION_MISSING)
-        raise ValueError(CHROMA_VECTOR_DIM_MISMATCH)
+        ...
 
 
 class PersistentChromaClient:
@@ -228,6 +178,14 @@ class PersistentChromaClient:
             collection_profiles=config.collection_profiles,
             default_collection=config.default_collection,
         )
+
+    @property
+    def collection_profiles(self) -> Mapping[str, int]:
+        return dict(self._collection_profiles)
+
+    @property
+    def default_collection(self) -> str:
+        return self._default_collection
 
     def upsert(
         self,
@@ -342,6 +300,33 @@ class PersistentChromaClient:
             raise ValueError(CHROMA_COLLECTION_MISSING)
         raise ValueError(CHROMA_VECTOR_DIM_MISMATCH)
 
+
+def build_runtime_chroma_client(
+    *,
+    env: Mapping[str, Any] | None = None,
+    local_overrides: Mapping[str, Any] | None = None,
+) -> PersistentChromaClient:
+    cfg_result = load_chroma_runtime_config(env=env, local_overrides=local_overrides)
+    if not cfg_result.success or cfg_result.config is None or not cfg_result.config.enabled:
+        raise RuntimeError(f"chroma runtime config invalid: {cfg_result.as_dict()}")
+    return PersistentChromaClient.from_runtime_config(cfg_result.config)
+
+
+def resolve_collection_vector_dim(
+    client: ChromaClientProtocol,
+    *,
+    fallback: int = 16,
+) -> int:
+    profiles = dict(getattr(client, "collection_profiles", {}) or {})
+    default_collection = str(getattr(client, "default_collection", DEFAULT_COLLECTION) or DEFAULT_COLLECTION)
+    raw_dim = profiles.get(default_collection)
+    if raw_dim is None and profiles:
+        raw_dim = next(iter(profiles.values()))
+    try:
+        return max(1, int(raw_dim))
+    except (TypeError, ValueError):
+        return max(1, int(fallback))
+
 def hash_embed_text(text: str, *, dim: int = 16) -> tuple[list[float], str]:
     normalized = str(text).strip()
     fallback_dim = int(dim) if dim is not None else 16
@@ -373,6 +358,13 @@ def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
         model = _get_sentence_transformer_model()
         embedding = model.encode(normalized, normalize_embeddings=True)
         values = [round(float(v), 6) for v in embedding]
+        if dim is not None:
+            requested_dim = max(1, int(dim))
+            if len(values) != requested_dim:
+                # Callers like EpisodicStore bind vectors to a governed collection dim.
+                # If the semantic model does not match that dim, fall back to the
+                # deterministic hash embedding instead of emitting a mismatched vector.
+                return hash_embed_text(normalized, dim=requested_dim)
         return values, _resolve_semantic_embedding_model_id()
     except Exception:
         pass
@@ -419,13 +411,18 @@ def load_chroma_runtime_config(
     env: Mapping[str, Any] | None = None,
     local_overrides: Mapping[str, Any] | None = None,
 ) -> ChromaConfigLoadResult:
-    merged: dict[str, Any] = dict(env or os.environ)
+    merged: dict[str, Any]
+    if env is None or env is os.environ:
+        merged = _load_project_dotenv_values()
+        merged.update(dict(os.environ))
+    else:
+        merged = dict(env)
     if local_overrides:
         merged.update(dict(local_overrides))
 
     issues: list[ChromaConfigIssue] = []
     enabled = _parse_bool(merged.get("CHROMA_ENABLED"), default=True)
-    endpoint = str(merged.get("CHROMA_ENDPOINT") or "http://127.0.0.1:8000").strip()
+    endpoint = _resolve_chroma_endpoint(merged)
     tenant = str(merged.get("CHROMA_TENANT") or "default_tenant").strip()
     database = str(merged.get("CHROMA_DATABASE") or "default_database").strip()
     default_collection = str(merged.get("CHROMA_DEFAULT_COLLECTION") or DEFAULT_COLLECTION).strip()
@@ -660,6 +657,36 @@ def _parse_bool(value: Any, *, default: bool) -> bool:
     if text in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _load_project_dotenv_values() -> dict[str, str]:
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    values: dict[str, str] = {}
+    if not env_path.exists():
+        return values
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def _resolve_chroma_endpoint(env: Mapping[str, Any]) -> str:
+    explicit = str(env.get("CHROMA_ENDPOINT") or "").strip()
+    if explicit:
+        return explicit
+    host = str(env.get("CHROMA_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    raw_port = env.get("CHROMA_PORT") or env.get("NATSUME_CHROMA_PORT") or 8000
+    try:
+        port = int(str(raw_port).strip())
+    except (TypeError, ValueError):
+        port = 8000
+    return f"http://{host}:{port}"
 
 
 def _row_key(collection: str, memory_id: str) -> str:

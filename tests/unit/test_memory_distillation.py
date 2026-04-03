@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.chroma_client import InMemoryChromaClient
 from host_brain.memory.distillation import MemoryDistillationEngine
 from host_brain.memory.episodic import EpisodicStore
 from host_brain.core.prompt_context import (
@@ -21,6 +20,7 @@ from host_brain.core.prompt_context import (
     build_semantic_slot,
     EXPECTED_SLOTS,
 )
+from tests.fakes.chroma_client import FakeChromaClient
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def ledger(tmp_path):
 
 @pytest.fixture()
 def episodic(ledger):
-    chroma = InMemoryChromaClient()
+    chroma = FakeChromaClient()
     return EpisodicStore(ledger=ledger, chroma_client=chroma)
 
 

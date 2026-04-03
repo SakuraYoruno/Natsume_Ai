@@ -272,7 +272,7 @@ python -m pytest -q \
 - 共 82 个用例，77 通过，5 失败。
 - 通过项覆盖 `chat_handler.py`、`dispatch_agent.py`、`state_arbiter.py`、`voice_pipeline.py`、`gateway/router.py`、`gateway/normalizer.py`、`gateway/outbound.py` 等主链与边缘核心层。
 - 5 个失败全部集中在 `tests/contract/test_retrieval_pipeline_contract.py`。
-- 失败直接触发点是 `InMemoryChromaClient.upsert()` 在种子数据写入阶段抛出 `CHROMA_VECTOR_DIM_MISMATCH`；从症状看，更像“fixture/embedding 维度与 `collection_profiles={"episodic":16,"canon":16}` 漂移”，而不是 pipeline 主流程断言本身失效。
+- 失败直接触发点是 Chroma 种子写入阶段抛出 `CHROMA_VECTOR_DIM_MISMATCH`；从症状看，更像“fixture/embedding 维度与 `collection_profiles={"episodic":16,"canon":16}` 漂移”，而不是 pipeline 主流程断言本身失效。
 
 ### 8.6 残余缺口与补测优先级
 

@@ -12,7 +12,7 @@ import json
 sys.path.insert(0, ".")
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.memory.chroma_client import InMemoryChromaClient, embed_text
+from host_brain.memory.chroma_client import build_runtime_chroma_client, embed_text
 from host_brain.retrieval.recall_fusion import (
     RecallFusionServiceContract,
     RecallRuntimeConfig,
@@ -96,7 +96,13 @@ SIX_COLLECTIONS = {
     "distilled": 16,
     "bond": 16,
 }
-chroma = InMemoryChromaClient(collection_profiles=SIX_COLLECTIONS, default_collection="episodic")
+chroma = build_runtime_chroma_client(
+    local_overrides={
+        "CHROMA_ENABLED": "true",
+        "CHROMA_COLLECTION_PROFILES_JSON": json.dumps(SIX_COLLECTIONS, ensure_ascii=False),
+        "CHROMA_DEFAULT_COLLECTION": "episodic",
+    }
+)
 
 for col, dim in SIX_COLLECTIONS.items():
     ok, reason = chroma.validate_collection(col, vector_dim=dim)
