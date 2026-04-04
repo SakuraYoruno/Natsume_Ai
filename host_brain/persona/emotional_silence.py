@@ -90,6 +90,36 @@ _DEFAULT_TOPIC_RESISTANCE = 0.7
 _TOPIC_RESISTANCE_PENALTY = 0.3
 
 
+def _resolve_absence_band(offline_state: dict[str, Any] | None) -> str:
+    raw = dict(offline_state or {}) if isinstance(offline_state, dict) else {}
+    raw_band = str(raw.get("absence_band") or "").strip()
+    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+        return raw_band
+    try:
+        offline_hours = float(raw.get("offline_hours") or 0.0)
+    except (TypeError, ValueError):
+        offline_hours = 0.0
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
+def _absence_recovery_factor(absence_band: str) -> float:
+    return {
+        "recent": 1.0,
+        "6h_plus": 1.03,
+        "24h_plus": 1.08,
+        "72h_plus": 1.14,
+        "7d_plus": 1.20,
+    }.get(absence_band, 1.0)
+
+
 # ---------------------------------------------------------------------------
 # 数据结构
 # ---------------------------------------------------------------------------
@@ -338,8 +368,19 @@ class EmotionalSilenceEngine:
         motive_state: dict[str, Any] = {}
         motive_recovery_factor = 1.0
         resistance_decay_factor = 1.0
+        absence_band = "recent"
+        absence_recovery_factor = 1.0
         try:
-            from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+            from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+            from host_brain.persona.motive_runtime import (  # noqa: PLC0415
+                build_offline_state_from_inner_state,
+                compute_runtime_motive_state,
+            )
+
+            inner_state = get_inner_world().get_state(str(user_id or "user_1").strip() or "user_1")
+            offline_state = build_offline_state_from_inner_state(inner_state, now_ms=now)
+            absence_band = _resolve_absence_band(offline_state)
+            absence_recovery_factor = _absence_recovery_factor(absence_band)
 
             runtime_emotion_context = dict(emotion_context or {})
             runtime_emotion_context.setdefault("emotion_tag", self._current_emotion_tag)
@@ -382,6 +423,8 @@ class EmotionalSilenceEngine:
                     - self_protect_drive * 0.20,
                 ),
             )
+            motive_recovery_factor = min(1.85, motive_recovery_factor * absence_recovery_factor)
+            resistance_decay_factor = min(1.65, resistance_decay_factor * max(1.0, absence_recovery_factor - 0.02))
         except Exception as motive_exc:
             _logger.debug("沉默引擎 motive tick skipped: %s", motive_exc)
 
@@ -420,6 +463,8 @@ class EmotionalSilenceEngine:
             "recovered": recovered,
             "decayed_topics": decayed_topics,
             "motive_state": motive_state,
+            "absence_band": absence_band,
+            "absence_recovery_factor": round(absence_recovery_factor, 3),
             "motive_recovery_factor": round(motive_recovery_factor, 3),
             "resistance_decay_factor": round(resistance_decay_factor, 3),
         }

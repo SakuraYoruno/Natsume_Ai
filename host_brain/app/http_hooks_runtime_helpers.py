@@ -96,6 +96,154 @@ def _record_snapshot_status(
         degraded_reasons.append(reason)
 
 
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
+    raw_band = str(offline_state.get("absence_band") or "").strip()
+    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+        return raw_band
+    offline_hours = _coerce_float(offline_state.get("offline_hours"), 0.0)
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
+def _derive_reply_posture(response_policy: dict[str, Any]) -> str:
+    should_be_withdrawn = bool(response_policy.get("should_be_withdrawn") or False)
+    allow_followup = bool(response_policy.get("allow_followup", True))
+    allow_topic_shift = bool(response_policy.get("allow_topic_shift", True))
+    max_chars = int(response_policy.get("max_chars") or 0)
+    warmth_floor = _coerce_float(response_policy.get("warmth_floor"), 0.0)
+
+    if should_be_withdrawn:
+        return "withdrawn"
+    if 0 < max_chars <= 80 and not allow_followup:
+        return "brief_guarded"
+    if warmth_floor >= 0.18:
+        return "warm_reconnect"
+    if not allow_topic_shift:
+        return "focused"
+    return "balanced"
+
+
+def _build_runtime_summary(
+    *,
+    current_topic: str,
+    sys_mode: str,
+    bond_state: dict[str, Any],
+    bond_summary: dict[str, Any],
+    offline_state: dict[str, Any],
+    silence_state: dict[str, Any],
+    body_sense: dict[str, Any],
+    self_reflection_pulse: dict[str, Any],
+    bond_narrative: dict[str, Any],
+    motive_state: dict[str, Any],
+    response_policy: dict[str, Any],
+    slot_status: dict[str, str],
+    degraded_reasons: list[str],
+) -> dict[str, Any]:
+    absence_band = _resolve_absence_band(offline_state)
+    bond_stage = str(
+        bond_state.get("current_stage")
+        or bond_summary.get("stage")
+        or "UNKNOWN"
+    ).strip() or "UNKNOWN"
+    willingness_level = str(silence_state.get("willingness_level") or "NORMAL").strip().upper() or "NORMAL"
+    fatigue_level = str(body_sense.get("fatigue_level") or "UNKNOWN").strip().upper() or "UNKNOWN"
+    dominant_motive = str(motive_state.get("dominant_motive") or "unknown").strip() or "unknown"
+    reply_posture = _derive_reply_posture(response_policy)
+
+    headline_parts: list[str] = [f"mode={sys_mode}"]
+    if bond_stage and bond_stage != "UNKNOWN":
+        headline_parts.append(f"bond={bond_stage}")
+    if absence_band != "recent":
+        headline_parts.append(f"offline={absence_band}")
+    if dominant_motive and dominant_motive != "unknown":
+        headline_parts.append(f"motive={dominant_motive}")
+    headline_parts.append(f"reply={reply_posture}")
+
+    why_reply: list[str] = []
+    for source in (
+        list(response_policy.get("policy_reason_tags") or []),
+        list(motive_state.get("motive_reason_tags") or []),
+    ):
+        for item in source:
+            label = str(item or "").strip()
+            if label and label not in why_reply:
+                why_reply.append(label)
+    fallback_reasons = [
+        f"mode:{sys_mode}",
+        f"offline:{absence_band}" if absence_band != "recent" else "",
+        f"motive:{dominant_motive}" if dominant_motive and dominant_motive != "unknown" else "",
+        "policy:withdrawn" if bool(response_policy.get("should_be_withdrawn") or False) else "",
+        "policy:no_followup" if response_policy.get("allow_followup") is False else "",
+        "policy:no_topic_shift" if response_policy.get("allow_topic_shift") is False else "",
+    ]
+    for item in fallback_reasons:
+        label = str(item or "").strip()
+        if label and label not in why_reply:
+            why_reply.append(label)
+
+    notable_signals: list[str] = []
+    if current_topic:
+        notable_signals.append(f"current_topic:{current_topic}")
+    awakening_hint = str(offline_state.get("awakening_hint") or "").strip()
+    if awakening_hint:
+        notable_signals.append(f"awakening_hint:{awakening_hint[:80]}")
+    growth_note = str(self_reflection_pulse.get("growth_note") or "").strip()
+    if growth_note:
+        notable_signals.append(f"growth_note:{growth_note[:80]}")
+    narratives = list(bond_narrative.get("narratives") or [])
+    if narratives:
+        first_narrative = str(narratives[0] or "").strip()
+        if first_narrative:
+            notable_signals.append(f"bond_narrative:{first_narrative[:80]}")
+
+    degraded_slots = [
+        f"{slot}:{status}"
+        for slot, status in dict(slot_status or {}).items()
+        if str(status or "").strip() != "live"
+    ]
+
+    return {
+        "headline": " | ".join(part for part in headline_parts if part),
+        "current_state": {
+            "sys_mode": sys_mode,
+            "bond_stage": bond_stage,
+            "absence_band": absence_band,
+            "willingness_level": willingness_level,
+            "fatigue_level": fatigue_level,
+            "dominant_motive": dominant_motive,
+        },
+        "reply_posture": {
+            "style": reply_posture,
+            "max_chars": int(response_policy.get("max_chars") or 0),
+            "max_sentences": int(response_policy.get("max_sentences") or 0),
+            "allow_followup": bool(response_policy.get("allow_followup", True)),
+            "allow_topic_shift": bool(response_policy.get("allow_topic_shift", True)),
+            "allow_proactive_after_reply": bool(response_policy.get("allow_proactive_after_reply", True)),
+            "should_be_withdrawn": bool(response_policy.get("should_be_withdrawn") or False),
+            "warmth_floor": _coerce_float(response_policy.get("warmth_floor"), 0.0),
+            "intimacy_ceiling": _coerce_float(response_policy.get("intimacy_ceiling"), 0.0),
+        },
+        "why_reply": why_reply,
+        "notable_signals": notable_signals,
+        "degraded_slots": degraded_slots,
+        "degraded_reasons": list(degraded_reasons or []),
+    }
+
+
 def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str, Any]:
     now_ms = int(_time.time() * 1000)
     normalized_topic = str(current_topic or "").strip()
@@ -458,6 +606,22 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             detail=str(exc)[:120],
         )
 
+    runtime_summary = _build_runtime_summary(
+        current_topic=normalized_topic,
+        sys_mode=sys_mode,
+        bond_state=bond_state,
+        bond_summary=bond_summary,
+        offline_state=offline_state,
+        silence_state=silence_state,
+        body_sense=body_sense,
+        self_reflection_pulse=self_reflection_pulse,
+        bond_narrative=bond_narrative,
+        motive_state=motive_state,
+        response_policy=response_policy,
+        slot_status=slot_status,
+        degraded_reasons=degraded_reasons,
+    )
+
     return {
         "persona_user_id": persona_user_id,
         "current_topic": normalized_topic,
@@ -477,6 +641,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         "bond_narrative": bond_narrative,
         "motive_state": motive_state,
         "response_policy": response_policy,
+        "runtime_summary": runtime_summary,
         "slot_status": slot_status,
         "degraded": bool(degraded_reasons),
         "degraded_reasons": degraded_reasons,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from host_brain.app import chat_context_builder as ccb
 from host_brain.persona.emotional_silence import EmotionalSilenceEngine
 from host_brain.persona.inner_world import InnerWorldState, OfflineInnerWorld
 from host_brain.persona.motive_runtime import build_offline_state_from_inner_state
+from host_brain.persona.motive_engine import MotiveInput, compute_motive_state
 from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_TOPIC_FOLLOWUP
 
 
@@ -251,3 +253,98 @@ def test_motive_behavior_matrix_changes_proactive_silence_and_expression_paths(m
     assert supportive_tick["willingness"] > retreat_tick["willingness"]
     assert supportive_tick["motive_recovery_factor"] > retreat_tick["motive_recovery_factor"]
     assert supportive_tick["resistance_decay_factor"] > retreat_tick["resistance_decay_factor"]
+
+
+
+def test_motive_engine_absence_band_semantics_promote_reconnect_drives() -> None:
+    base_kwargs = dict(
+        silence_state={"response_willingness": 0.92, "willingness_level": "NORMAL"},
+        body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+        bond_summary={"stage": "FRIEND", "shared_memory_count": 2},
+        emotion_context={"emotion_tag": "NEUTRAL", "emotion_intensity": 0.3},
+        pending_followup_topics=[{"topic_label": "project"}],
+        shared_memory_count=2,
+    )
+    short_gap = compute_motive_state(
+        MotiveInput(
+            **base_kwargs,
+            offline_state={
+                "offline_hours": 8.0,
+                "absence_band": "6h_plus",
+                "loneliness_level": 0.22,
+                "anticipation_level": 0.28,
+                "anticipation_topics": ["project"],
+            },
+        )
+    ).as_dict()
+    long_gap = compute_motive_state(
+        MotiveInput(
+            **base_kwargs,
+            offline_state={
+                "offline_hours": 8 * 24.0,
+                "absence_band": "7d_plus",
+                "loneliness_level": 0.22,
+                "anticipation_level": 0.28,
+                "anticipation_topics": ["project"],
+            },
+        )
+    ).as_dict()
+
+    assert long_gap["reach_out_drive"] > short_gap["reach_out_drive"]
+    assert long_gap["care_drive"] >= short_gap["care_drive"]
+    assert long_gap["continuity_drive"] > short_gap["continuity_drive"]
+    assert "reach_out:absence_band=7d_plus" in long_gap["motive_reason_tags"]
+    assert "continuity:absence_band=7d_plus" in long_gap["motive_reason_tags"]
+
+
+
+def test_emotional_silence_tick_uses_absence_band_to_speed_recovery(monkeypatch) -> None:
+    import host_brain.persona.emotional_silence as emotional_silence_module
+
+    monkeypatch.setattr(emotional_silence_module, "_now_ms", lambda: 60_000)
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.compute_runtime_motive_state",
+        lambda **_kwargs: {
+            "reach_out_drive": 0.82,
+            "continuity_drive": 0.66,
+            "withdraw_drive": 0.10,
+            "self_protect_drive": 0.08,
+            "dominant_motive": "reach_out",
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.inner_world.get_inner_world",
+        lambda: SimpleNamespace(get_state=lambda _user_id: {}),
+    )
+
+    long_engine = EmotionalSilenceEngine()
+    long_engine._response_willingness = 0.4
+    long_engine._last_tick_ms = 0
+    long_engine._topic_resistance_map = {"工作": 0.6}
+    long_engine._current_valence = -0.1
+    long_engine._current_arousal = 0.4
+
+    short_engine = EmotionalSilenceEngine()
+    short_engine._response_willingness = 0.4
+    short_engine._last_tick_ms = 0
+    short_engine._topic_resistance_map = {"工作": 0.6}
+    short_engine._current_valence = -0.1
+    short_engine._current_arousal = 0.4
+
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+        lambda _inner_state, now_ms=None: {"absence_band": "7d_plus", "offline_hours": 8 * 24.0},
+    )
+    long_result = long_engine.tick(user_id="user_1")
+
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+        lambda _inner_state, now_ms=None: {"absence_band": "recent", "offline_hours": 1.0},
+    )
+    short_result = short_engine.tick(user_id="user_1")
+
+    assert long_result["absence_band"] == "7d_plus"
+    assert short_result["absence_band"] == "recent"
+    assert long_result["absence_recovery_factor"] > short_result["absence_recovery_factor"]
+    assert long_result["motive_recovery_factor"] > short_result["motive_recovery_factor"]
+    assert long_result["willingness"] > short_result["willingness"]

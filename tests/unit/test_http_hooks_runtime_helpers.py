@@ -341,5 +341,10 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["bond_narrative"]["shared_memory_count"] == 2
     assert snapshot["motive_state"]["dominant_motive"] == "continuity"
     assert snapshot["response_policy"]["allow_topic_shift"] is False
+    assert snapshot["runtime_summary"]["current_state"]["sys_mode"] == "focus"
+    assert snapshot["runtime_summary"]["current_state"]["absence_band"] == "6h_plus"
+    assert snapshot["runtime_summary"]["reply_posture"]["allow_topic_shift"] is False
+    assert "mode:focus" in snapshot["runtime_summary"]["why_reply"]
+    assert "motive:continuity" in snapshot["runtime_summary"]["why_reply"]
     assert snapshot["slot_status"]["response_policy"] == "live"
     assert snapshot["degraded"] is False

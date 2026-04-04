@@ -102,6 +102,35 @@ def _resolve_activity_monitor(runtime_flags: dict[str, Any]) -> dict[str, Any]:
     return dict(activity_monitor) if isinstance(activity_monitor, dict) else {}
 
 
+def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
+    raw_band = str(offline_state.get("absence_band") or "").strip()
+    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+        return raw_band
+    try:
+        offline_hours = float(offline_state.get("offline_hours") or 0.0)
+    except (TypeError, ValueError):
+        offline_hours = 0.0
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
+def _absence_band_bonus(absence_band: str) -> dict[str, float]:
+    return {
+        "recent": {"reach_out": 0.0, "care": 0.0, "continuity": 0.0},
+        "6h_plus": {"reach_out": 0.18, "care": 0.0, "continuity": 0.04},
+        "24h_plus": {"reach_out": 0.34, "care": 0.06, "continuity": 0.08},
+        "72h_plus": {"reach_out": 0.48, "care": 0.10, "continuity": 0.12},
+        "7d_plus": {"reach_out": 0.60, "care": 0.14, "continuity": 0.16},
+    }.get(absence_band, {"reach_out": 0.0, "care": 0.0, "continuity": 0.0})
+
+
 # ── 数据类 ────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -173,6 +202,8 @@ class MotiveEngine:
         fatigue_level = str(body.get("fatigue_level") or "FRESH").upper()
         drowsy_level = str(body.get("drowsiness_level") or "AWAKE").upper()
         offline_hours = float(offline.get("offline_hours") or 0.0)
+        absence_band = _resolve_absence_band(offline)
+        absence_bonus = _absence_band_bonus(absence_band)
         loneliness = float(offline.get("loneliness_level") or 0.0)
         anticipation = float(offline.get("anticipation_level") or 0.0)
         anticipation_topics = list(offline.get("anticipation_topics") or [])
@@ -187,11 +218,10 @@ class MotiveEngine:
         # ── reach_out_drive ───────────────────────────────────────────────────
         reach = 0.0
 
-        # 离线时长加成
-        offline_bonus = _lookup_stepped(offline_hours, _OFFLINE_REACH_OUT_TABLE)
-        reach += offline_bonus
-        if offline_bonus > 0:
-            reasons.append(f"reach_out:offline={offline_hours:.1f}h")
+        # 长时段离线语义加成
+        reach += absence_bonus["reach_out"]
+        if absence_bonus["reach_out"] > 0:
+            reasons.append(f"reach_out:absence_band={absence_band}")
 
         # 孤独感加成
         if loneliness >= 0.6:
@@ -237,10 +267,10 @@ class MotiveEngine:
         # Bond 深度基础 care
         care += _BOND_CARE_BONUS.get(bond_stage, 0.0)
 
-        # 久别重逢
-        if offline_hours >= 24.0:
-            care += 0.10
-            reasons.append("care:long_reunion")
+        # 长时段离线语义
+        care += absence_bonus["care"]
+        if absence_bonus["care"] > 0:
+            reasons.append(f"care:absence_band={absence_band}")
 
         # 疲劳惩罚
         if fatigue_level in {"EXHAUSTED", "HIGH"}:
@@ -299,6 +329,10 @@ class MotiveEngine:
             continuity += 0.08
         elif shared_count >= 2:
             continuity += 0.04
+
+        continuity += absence_bonus["continuity"]
+        if absence_bonus["continuity"] > 0:
+            reasons.append(f"continuity:absence_band={absence_band}")
 
         # ── self_protect_drive ────────────────────────────────────────────────
         protect = 0.0

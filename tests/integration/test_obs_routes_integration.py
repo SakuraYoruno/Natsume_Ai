@@ -358,6 +358,12 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
             "bond_narrative": {"narratives": ["我还记得你说过那件事。"]},
             "motive_state": {"dominant_motive": "continuity"},
             "response_policy": {"allow_topic_shift": False},
+            "runtime_summary": {
+                "headline": "mode=focus | offline=6h_plus | motive=continuity | reply=focused",
+                "current_state": {"sys_mode": "focus", "absence_band": "6h_plus", "dominant_motive": "continuity"},
+                "reply_posture": {"allow_topic_shift": False},
+                "why_reply": ["mode:focus", "motive:continuity"],
+            },
             "slot_status": {"response_policy": "live"},
             "degraded": False,
             "degraded_reasons": [],
@@ -397,6 +403,8 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["hard_state"]["mood_state"] == "engaged"
     assert data["bond_summary_human"]["stage"] == "朋友"
     assert data["motive_state"]["dominant_motive"] == "continuity"
+    assert data["runtime_summary"]["current_state"]["sys_mode"] == "focus"
+    assert data["runtime_summary"]["why_reply"][0] == "mode:focus"
     assert data["slot_status"]["sys_mode_status"] == "live"
 
 

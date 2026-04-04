@@ -206,6 +206,7 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     bond_narrative: Dict[str, Any] = Field(default_factory=dict)
     motive_state: Dict[str, Any] = Field(default_factory=dict)
     response_policy: Dict[str, Any] = Field(default_factory=dict)
+    runtime_summary: Dict[str, Any] = Field(default_factory=dict)
     slot_status: Dict[str, str] = Field(default_factory=dict)
     degraded: bool = False
     degraded_reasons: List[str] = Field(default_factory=list)
