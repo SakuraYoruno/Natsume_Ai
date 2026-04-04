@@ -875,6 +875,79 @@ def _apply_offline_state_to_persona_expression_hint(
     return hint
 
 
+def _apply_activity_monitor_to_persona_expression_hint(
+    hint_raw: Mapping[str, Any] | None,
+    activity_monitor_raw: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
+    activity_monitor = dict(activity_monitor_raw or {}) if isinstance(activity_monitor_raw, Mapping) else {}
+    if not hint or not activity_monitor:
+        return hint
+
+    tone = str(hint.get("tone") or "gentle").strip() or "gentle"
+    style_hint = str(hint.get("style_hint") or "").strip()
+    follow_up_tendency = _coerce_optional_float(hint.get("follow_up_tendency")) or 0.0
+    echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
+    pace_hint = str(hint.get("pace_hint") or "").strip()
+    activity_guidance: list[str] = []
+
+    recent_event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
+    try:
+        recent_event_age_s = float(activity_monitor.get("recent_event_age_s"))
+    except (TypeError, ValueError):
+        recent_event_age_s = float("inf")
+    try:
+        idle_minutes = float(activity_monitor.get("idle_minutes") or 0.0)
+    except (TypeError, ValueError):
+        idle_minutes = 0.0
+    is_gaming = bool(activity_monitor.get("is_gaming"))
+
+    if recent_event_type == "wakeup" and recent_event_age_s <= 600.0:
+        tone = "gentle"
+        follow_up_tendency = min(follow_up_tendency, 0.02)
+        echo_weight_modifier = min(echo_weight_modifier, 0.03)
+        pace_hint = "slow"
+        activity_guidance.append("对方刚醒时先轻声接住，别连着追问，也不要一下子塞太多信息")
+    elif (is_gaming or recent_event_type == "gaming_detected") and recent_event_age_s <= 900.0:
+        if tone == "gentle":
+            tone = "playful"
+        follow_up_tendency = max(follow_up_tendency, 0.05)
+        echo_weight_modifier = max(echo_weight_modifier, 0.04)
+        if not pace_hint:
+            pace_hint = "brisk"
+        activity_guidance.append("对方正在游戏里时优先短句接球和陪玩，不突然切到复杂话题")
+    elif recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0:
+        tone = "caring" if tone == "gentle" else tone
+        follow_up_tendency = min(max(follow_up_tendency, 0.03), 0.08)
+        echo_weight_modifier = max(echo_weight_modifier, 0.05)
+        if not pace_hint:
+            pace_hint = "steady"
+        activity_guidance.append("对方刚从游戏里退出来时先轻轻接一下，再决定要不要展开")
+    elif idle_minutes >= 20.0:
+        if tone == "playful":
+            tone = "gentle"
+        follow_up_tendency = min(max(follow_up_tendency, 0.02), 0.06)
+        echo_weight_modifier = max(echo_weight_modifier, 0.04)
+        if not pace_hint:
+            pace_hint = "steady"
+        activity_guidance.append("对方空闲后重连时先轻轻接住，再慢慢进入正题，不要一上来推进太猛")
+
+    if activity_guidance:
+        guidance_text = "；".join(dict.fromkeys(part for part in activity_guidance if part))
+        style_hint = f"{style_hint}；{guidance_text}" if style_hint else guidance_text
+        hint["activity_guidance"] = guidance_text
+        if recent_event_type:
+            hint["activity_event_type"] = recent_event_type
+
+    hint["tone"] = tone
+    hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
+    hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
+    hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
+    if pace_hint:
+        hint["pace_hint"] = pace_hint
+    return hint
+
+
 def _apply_runtime_mode_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     runtime_flags_raw: Mapping[str, Any] | None,
@@ -1908,6 +1981,12 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["persona_expression_hint"] = _apply_memory_persona_signal_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("memory_persona_signal"),
+        )
+
+    if runtime_payload.get("persona_expression_hint") and runtime_payload.get("activity_monitor"):
+        runtime_payload["persona_expression_hint"] = _apply_activity_monitor_to_persona_expression_hint(
+            runtime_payload.get("persona_expression_hint"),
+            runtime_payload.get("activity_monitor"),
         )
 
     if runtime_payload.get("persona_expression_hint") and runtime_payload.get("runtime_mode"):

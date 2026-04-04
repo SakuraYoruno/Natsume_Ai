@@ -209,6 +209,8 @@
 - 重点模块：`host_brain/core/activity_monitor.py`、`host_brain/app/http_hooks.py`、`host_brain/persona/proactive_voice.py`。
 - 交付物：activity-aware 行为矩阵。
 - 验收标准：活动切换后，系统在主动表达频率、话题选择、语气上出现稳定差异。
+- 本轮进展（2026-04-04）：已在 `host_brain/app/chat_context_builder.py` 增加 activity-aware `persona_expression_hint` 收口，让 `wakeup / gaming_detected / gaming_exited / idle_minutes` 不只影响 `response_policy` 与 `proactive_voice`，也会直接调制主回复的 tone / follow_up_tendency / pace_hint / style guidance。
+- 验证记录：已补 `tests/unit/test_chat_context_builder_helpers_extra.py` 的 wakeup / gaming / idle 表达回归，并联跑 `tests/unit/test_mode_activity_scene_regression_matrix.py`、`tests/unit/test_scene_aware_proactive.py`、`tests/unit/test_mode_aware_policy_motive.py`、`tests/unit/test_prompt_builder_helpers_extra.py`，本轮聚焦验证 `57 passed`。
 
 ### N3-T03：补齐 screenshot scene awareness 的最小安全接线
 
