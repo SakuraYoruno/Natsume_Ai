@@ -200,6 +200,8 @@
 - 重点模块：`host_brain/core/mode_transition.py`、`host_brain/persona/response_policy.py`、`host_brain/persona/proactive_voice.py`。
 - 交付物：模式到行为参数的映射矩阵。
 - 验收标准：`focus` 更克制、`gaming` 更陪玩导向、`sleep` 更少主动打扰，且行为可解释。
+- 本轮进展（2026-04-04）：已在 `host_brain/app/chat_context_builder.py` 增加 `sys_mode / activity_monitor` 顶层 runtime 透传，并新增 mode-aware `persona_expression_hint` 收口，让 `focus / gaming / sleep` 不只影响 `motive_state` 与 `response_policy`，也会直接改变主回复的 tone / follow_up_tendency / pace_hint / style guidance。
+- 验证记录：已补 `tests/unit/test_mode_aware_policy_motive.py` 的模式矩阵，并补 `tests/unit/test_chat_context_builder_helpers_extra.py` 的 mode-aware expression hint 回归；联跑 `tests/unit/test_mode_activity_scene_regression_matrix.py`、`tests/unit/test_prompt_builder_helpers_extra.py`、`tests/unit/test_scene_aware_proactive.py` 通过，本轮聚焦验证 `53 passed`。
 
 ### N3-T02：让活动感知与主动表达形成最小闭环
 

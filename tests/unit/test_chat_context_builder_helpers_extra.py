@@ -803,6 +803,68 @@ def test_apply_motive_state_to_persona_expression_hint_suppresses_followup_when_
     assert "收缩和自我保护" in adjusted["style_hint"]
 
 
+def test_apply_runtime_mode_to_persona_expression_hint_focus_restrains_reply() -> None:
+    hint = {
+        "style_hint": "自然回应",
+        "tone": "playful",
+        "echo_weight_modifier": 0.12,
+        "follow_up_tendency": 0.16,
+        "pace_hint": "steady",
+    }
+
+    adjusted = ccb._apply_runtime_mode_to_persona_expression_hint(
+        hint,
+        {"sys_mode": "focus"},
+    )
+
+    assert adjusted["tone"] == "gentle"
+    assert adjusted["follow_up_tendency"] == 0.02
+    assert adjusted["echo_weight_modifier"] == 0.04
+    assert adjusted["sys_mode"] == "focus"
+    assert "focus 模式下先短句回应" in str(adjusted.get("mode_guidance") or "")
+
+
+def test_apply_runtime_mode_to_persona_expression_hint_gaming_promotes_companion_style() -> None:
+    hint = {
+        "style_hint": "自然回应",
+        "tone": "gentle",
+        "echo_weight_modifier": 0.0,
+        "follow_up_tendency": 0.0,
+    }
+
+    adjusted = ccb._apply_runtime_mode_to_persona_expression_hint(
+        hint,
+        {"sys_mode": "gaming"},
+    )
+
+    assert adjusted["tone"] == "playful"
+    assert adjusted["follow_up_tendency"] >= 0.06
+    assert adjusted["echo_weight_modifier"] >= 0.04
+    assert adjusted["pace_hint"] == "brisk"
+    assert "陪玩接球" in str(adjusted.get("mode_guidance") or "")
+
+
+def test_apply_runtime_mode_to_persona_expression_hint_sleep_clamps_followup() -> None:
+    hint = {
+        "style_hint": "自然回应",
+        "tone": "caring",
+        "echo_weight_modifier": 0.08,
+        "follow_up_tendency": 0.12,
+        "pace_hint": "steady",
+    }
+
+    adjusted = ccb._apply_runtime_mode_to_persona_expression_hint(
+        hint,
+        {"sys_mode": "sleep"},
+    )
+
+    assert adjusted["tone"] == "gentle"
+    assert adjusted["follow_up_tendency"] == 0.0
+    assert adjusted["echo_weight_modifier"] == 0.02
+    assert adjusted["pace_hint"] == "slow"
+    assert "轻声确认" in str(adjusted.get("mode_guidance") or "")
+
+
 def test_build_chat_prompt_runtime_payload_applies_motive_to_expression_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -891,6 +953,113 @@ def test_build_chat_prompt_runtime_payload_applies_motive_to_expression_hint(
     assert hint["tone"] == "caring"
     assert hint["follow_up_tendency"] >= 0.08
     assert "先接住对方情绪" in str(hint.get("style_hint") or "")
+
+
+def test_build_chat_prompt_runtime_payload_surfaces_sys_mode_and_applies_mode_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_SYS_MODE", "sleep")
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+                "hard_snapshot": {"sys_mode": "sleep"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "NEUTRAL",
+                "emotion_intensity": 0.3,
+                "emotion_range_hint": "calm",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(
+        deps,
+        "_activity_monitor_ref",
+        SimpleNamespace(get_status=lambda: {"recent_event_type": "wakeup", "recent_event_age_s": 30.0}),
+        raising=False,
+    )
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(
+                style_hint="自然回应",
+                tone="caring",
+                echo_weight_modifier=0.08,
+                追问倾向=0.14,
+                pace_hint="steady",
+            )
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace())
+
+    class _FakeMotiveState:
+        def as_dict(self):
+            return {
+                "care_drive": 0.74,
+                "reach_out_drive": 0.48,
+                "continuity_drive": 0.66,
+                "withdraw_drive": 0.1,
+                "self_protect_drive": 0.08,
+                "dominant_motive": "care",
+            }
+
+    class _FakePolicy:
+        def as_dict(self):
+            return {"allow_followup": False, "max_sentences": 2}
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", lambda _inp: _FakeMotiveState())
+    monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", lambda _inp: _FakePolicy())
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-mode-expression",
+        person_id="person-mode-expression",
+        session_id="session-mode-expression",
+        thread_id=None,
+        user_message="晚安前说一句",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "NEUTRAL", "emotion_intensity": 0.3},
+        recall_slot_text={},
+        bond_summary={},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    hint = dict(runtime_payload.get("persona_expression_hint") or {})
+    assert runtime_payload["sys_mode"] == "sleep"
+    assert dict(runtime_payload.get("activity_monitor") or {})["recent_event_type"] == "wakeup"
+    assert dict(runtime_payload.get("runtime_mode") or {})["sys_mode"] == "sleep"
+    assert hint["tone"] == "gentle"
+    assert hint["follow_up_tendency"] == 0.0
+    assert hint["echo_weight_modifier"] == 0.02
+    assert hint["pace_hint"] == "slow"
+    assert hint["sys_mode"] == "sleep"
+    assert "sleep 模式下只做轻声确认" in str(hint.get("mode_guidance") or "")
 
 
 

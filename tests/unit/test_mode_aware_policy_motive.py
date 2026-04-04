@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from host_brain.persona.motive_engine import MotiveInput, compute_motive_state
 from host_brain.persona.response_policy import ResponsePolicyInput, decide_response_policy
 
@@ -87,6 +89,101 @@ def test_motive_engine_idle_activity_gently_increases_reconnect() -> None:
     assert idle["reach_out_drive"] > baseline["reach_out_drive"]
     assert idle["continuity_drive"] > baseline["continuity_drive"]
     assert "activity:idle" in idle["motive_reason_tags"]
+
+
+@pytest.mark.parametrize(
+    ("sys_mode", "policy_expectations", "motive_expectations"),
+    [
+        (
+            "focus",
+            {
+                "max_sentences": 2,
+                "allow_topic_shift": False,
+                "allow_proactive_after_reply": False,
+                "reason_tag": "mode:focus",
+            },
+            {
+                "reach_compare": "lower",
+                "continuity_compare": "lower",
+                "protect_compare": "higher",
+                "reason_tag": "mode:focus",
+            },
+        ),
+        (
+            "gaming",
+            {
+                "max_sentences": 3,
+                "allow_topic_shift": False,
+                "warmth_floor_min": 0.12,
+                "reason_tag": "mode:gaming",
+            },
+            {
+                "reach_compare": "higher",
+                "continuity_compare": "higher",
+                "protect_compare": "lower",
+                "reason_tag": "mode:gaming",
+            },
+        ),
+        (
+            "sleep",
+            {
+                "max_sentences": 2,
+                "allow_followup": False,
+                "allow_proactive_after_reply": False,
+                "reason_tag": "mode:sleep",
+            },
+            {
+                "reach_compare": "lower",
+                "continuity_compare": "lower",
+                "protect_compare": "higher",
+                "reason_tag": "mode:sleep",
+            },
+        ),
+    ],
+)
+def test_mode_matrix_maps_sys_mode_to_policy_and_motive(
+    sys_mode: str,
+    policy_expectations: dict[str, object],
+    motive_expectations: dict[str, object],
+) -> None:
+    baseline = compute_motive_state(_base_motive_input()).as_dict()
+    motive = compute_motive_state(_base_motive_input(runtime_flags={"sys_mode": sys_mode})).as_dict()
+    policy = decide_response_policy(
+        ResponsePolicyInput(
+            silence_state={"response_willingness": 0.92, "willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+            bond_summary={"stage": "FRIEND"},
+            runtime_flags={"sys_mode": sys_mode},
+        )
+    ).as_dict()
+
+    assert policy_expectations["reason_tag"] in policy["policy_reason_tags"]
+    assert motive_expectations["reason_tag"] in motive["motive_reason_tags"]
+    assert policy["max_sentences"] == policy_expectations["max_sentences"]
+
+    if "allow_topic_shift" in policy_expectations:
+        assert policy["allow_topic_shift"] is policy_expectations["allow_topic_shift"]
+    if "allow_followup" in policy_expectations:
+        assert policy["allow_followup"] is policy_expectations["allow_followup"]
+    if "allow_proactive_after_reply" in policy_expectations:
+        assert policy["allow_proactive_after_reply"] is policy_expectations["allow_proactive_after_reply"]
+    if "warmth_floor_min" in policy_expectations:
+        assert policy["warmth_floor"] >= float(policy_expectations["warmth_floor_min"])
+
+    if motive_expectations["reach_compare"] == "higher":
+        assert motive["reach_out_drive"] > baseline["reach_out_drive"]
+    else:
+        assert motive["reach_out_drive"] < baseline["reach_out_drive"]
+
+    if motive_expectations["continuity_compare"] == "higher":
+        assert motive["continuity_drive"] > baseline["continuity_drive"]
+    else:
+        assert motive["continuity_drive"] < baseline["continuity_drive"]
+
+    if motive_expectations["protect_compare"] == "higher":
+        assert motive["self_protect_drive"] > baseline["self_protect_drive"]
+    else:
+        assert motive["self_protect_drive"] < baseline["self_protect_drive"]
 
 
 

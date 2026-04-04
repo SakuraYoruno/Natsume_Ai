@@ -875,6 +875,75 @@ def _apply_offline_state_to_persona_expression_hint(
     return hint
 
 
+def _apply_runtime_mode_to_persona_expression_hint(
+    hint_raw: Mapping[str, Any] | None,
+    runtime_flags_raw: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
+    runtime_flags = dict(runtime_flags_raw or {}) if isinstance(runtime_flags_raw, Mapping) else {}
+    if not hint or not runtime_flags:
+        return hint
+
+    activity_monitor_raw = runtime_flags.get("activity_monitor")
+    activity_monitor = dict(activity_monitor_raw) if isinstance(activity_monitor_raw, Mapping) else {}
+    sys_mode = str(runtime_flags.get("sys_mode") or "").strip().lower()
+    if sys_mode not in {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}:
+        sys_mode = "gaming" if bool(activity_monitor.get("is_gaming")) else "normal"
+    if sys_mode == "normal":
+        return hint
+
+    tone = str(hint.get("tone") or "gentle").strip() or "gentle"
+    style_hint = str(hint.get("style_hint") or "").strip()
+    follow_up_tendency = _coerce_optional_float(hint.get("follow_up_tendency")) or 0.0
+    echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
+    pace_hint = str(hint.get("pace_hint") or "").strip()
+    mode_guidance: list[str] = []
+
+    if sys_mode == "focus":
+        if tone == "playful":
+            tone = "gentle"
+        follow_up_tendency = min(follow_up_tendency, 0.02)
+        echo_weight_modifier = min(echo_weight_modifier, 0.04)
+        if not pace_hint:
+            pace_hint = "steady"
+        mode_guidance.append("focus 模式下先短句回应，少追问、不切话题，尽量不要打断当前专注")
+    elif sys_mode == "gaming":
+        if tone == "gentle":
+            tone = "playful"
+        follow_up_tendency = max(follow_up_tendency, 0.06)
+        echo_weight_modifier = max(echo_weight_modifier, 0.04)
+        if not pace_hint:
+            pace_hint = "brisk"
+        mode_guidance.append("gaming 模式下优先陪玩接球，用短句和临场回应跟住当前节奏")
+    elif sys_mode == "sleep":
+        tone = "gentle"
+        follow_up_tendency = min(follow_up_tendency, 0.0)
+        echo_weight_modifier = min(echo_weight_modifier, 0.02)
+        pace_hint = "slow"
+        mode_guidance.append("sleep 模式下只做轻声确认，不主动展开新话题，也不拉长回复")
+    elif sys_mode in {"maintenance", "locked"}:
+        tone = "gentle"
+        follow_up_tendency = min(follow_up_tendency, 0.0)
+        echo_weight_modifier = min(echo_weight_modifier, 0.02)
+        if not pace_hint:
+            pace_hint = "steady"
+        mode_guidance.append("当前模式以收口和稳定为主，只保留最小必要回应")
+
+    if mode_guidance:
+        guidance_text = "；".join(dict.fromkeys(part for part in mode_guidance if part))
+        style_hint = f"{style_hint}；{guidance_text}" if style_hint else guidance_text
+        hint["mode_guidance"] = guidance_text
+        hint["sys_mode"] = sys_mode
+
+    hint["tone"] = tone
+    hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
+    hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
+    hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
+    if pace_hint:
+        hint["pace_hint"] = pace_hint
+    return hint
+
+
 def _apply_memory_persona_signal_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     memory_signal_raw: Mapping[str, Any] | None,
@@ -1325,6 +1394,10 @@ def build_chat_prompt_runtime_payload(
     runtime_mode_flags = _build_runtime_mode_flags(prompt_context)
     if runtime_mode_flags:
         runtime_payload["runtime_mode"] = runtime_mode_flags
+        runtime_payload["sys_mode"] = str(runtime_mode_flags.get("sys_mode") or "normal").strip().lower() or "normal"
+        activity_monitor = runtime_mode_flags.get("activity_monitor")
+        if isinstance(activity_monitor, Mapping):
+            runtime_payload["activity_monitor"] = dict(activity_monitor)
     memory_persona_signal_raw = prompt_context.get("memory_emotion_hint")
     memory_persona_signal = (
         dict(memory_persona_signal_raw)
@@ -1835,6 +1908,12 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["persona_expression_hint"] = _apply_memory_persona_signal_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("memory_persona_signal"),
+        )
+
+    if runtime_payload.get("persona_expression_hint") and runtime_payload.get("runtime_mode"):
+        runtime_payload["persona_expression_hint"] = _apply_runtime_mode_to_persona_expression_hint(
+            runtime_payload.get("persona_expression_hint"),
+            runtime_payload.get("runtime_mode"),
         )
 
     return runtime_payload
