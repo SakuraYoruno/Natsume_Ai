@@ -207,6 +207,8 @@
 - 目标：验证 `sys_mode + activity + scene tag` 联合作用时，行为差异仍稳定可控。
 - 重点模块：`tests/unit/`、必要时 `tests/integration/`。
 - 验收标准：至少覆盖 `gaming`、`focus`、`sleep` 三种模式与 2 种 scene 对照。
+- 本轮进展（2026-04-04）：已新增 `tests/unit/test_mode_activity_scene_regression_matrix.py`，覆盖 `gaming + battle`、`focus + focus_work`、`sleep + wakeup`、`normal + idle` 四组联合矩阵。
+- 验证记录：`tests/unit/test_mode_activity_scene_regression_matrix.py` 定向通过，并与 `tests/unit/test_mode_aware_policy_motive.py`、`tests/unit/test_scene_aware_proactive.py` 联跑通过。
 
 ### N3 完成标志
 
