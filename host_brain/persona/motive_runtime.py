@@ -21,6 +21,18 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _classify_absence_band(offline_hours: float) -> str:
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
 
 def build_offline_state_from_inner_state(
     inner_state: Mapping[str, Any] | None,
@@ -36,8 +48,14 @@ def build_offline_state_from_inner_state(
         elapsed_hours = max(0.0, (now - last_interaction_ts_ms) / (3600.0 * 1000.0))
         offline_hours = max(offline_hours, elapsed_hours)
 
+    resolved_hours = round(max(0.0, offline_hours), 4)
+    resolved_duration_ms = max(0, int(round(resolved_hours * 3600.0 * 1000.0)))
+    absence_band = _classify_absence_band(resolved_hours)
+
     return {
-        "offline_hours": round(max(0.0, offline_hours), 4),
+        "offline_hours": resolved_hours,
+        "offline_duration_ms": resolved_duration_ms,
+        "absence_band": absence_band,
         "loneliness_level": float(current.get("loneliness") or 0.0),
         "anticipation_level": float(current.get("anticipation") or 0.0),
         "anticipation_topics": list(current.get("anticipation_topics") or []),
@@ -55,6 +73,7 @@ def compute_runtime_motive_state(
     silence_state: Mapping[str, Any] | None = None,
     body_sense: Mapping[str, Any] | None = None,
     inner_state: Mapping[str, Any] | None = None,
+    runtime_flags: Mapping[str, Any] | None = None,
     now_ms: int | None = None,
 ) -> dict[str, Any]:
     from host_brain.persona.motive_engine import MotiveInput, compute_motive_state  # noqa: PLC0415
@@ -89,6 +108,7 @@ def compute_runtime_motive_state(
             emotion_context=_coerce_mapping(emotion_context),
             pending_followup_topics=pending_followup_topics,
             user_message="",
+            runtime_flags=_coerce_mapping(runtime_flags),
         )
     ).as_dict()
     _logger.debug("runtime motive_state user=%s motive=%s", resolved_user_id, motive_state)

@@ -134,9 +134,12 @@ class OfflineStateSnapshot:
     awakening_hint: str                   # 唤醒时的内心独白提示
     should_express_waiting: bool          # 是否应该表达等待感
 
+    absence_band: str = "recent"
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "offline_hours": round(self.offline_hours, 1),
+            "absence_band": self.absence_band,
             "loneliness_level": round(self.loneliness_level, 3),
             "anticipation_level": round(self.anticipation_level, 3),
             "anticipation_topics": list(self.anticipation_topics),
@@ -317,6 +320,7 @@ class OfflineInnerWorld:
             else:
                 offline_hours = 0.0
 
+            absence_band = _classify_absence_band(offline_hours)
             snapshot = OfflineStateSnapshot(
                 offline_hours=offline_hours,
                 loneliness_level=state.loneliness,
@@ -327,11 +331,13 @@ class OfflineInnerWorld:
                 ),
                 awakening_hint=_build_awakening_hint(
                     offline_hours=offline_hours,
+                    absence_band=absence_band,
                     loneliness=state.loneliness,
                     anticipation=state.anticipation,
                     topics=state.anticipation_topics,
                 ),
                 should_express_waiting=offline_hours >= _MIN_HOURS_FOR_WAITING_EXPRESSION,
+                absence_band=absence_band,
             )
 
             # 唤醒后重置孤独感（用户回来了）
@@ -461,42 +467,71 @@ def _describe_emotion_drift(valence: float, arousal: float) -> str:
         return "状态平稳，在等待中"
 
 
+def _classify_absence_band(offline_hours: float) -> str:
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
 def _build_awakening_hint(
     *,
     offline_hours: float,
+    absence_band: str,
     loneliness: float,
     anticipation: float,
     topics: list[str],
 ) -> str:
     """根据离线状态生成唤醒时的内心独白提示。"""
     if offline_hours < 1.0:
-        return ""  # 离线不足 1 小时，不需要特别表达
+        return ""
 
     parts: list[str] = []
 
-    # 等待感
-    if offline_hours >= 24.0:
-        parts.append("等了好久好久")
-    elif offline_hours >= 8.0:
-        parts.append("等了挺久的")
-    elif offline_hours >= 3.0:
-        parts.append("等了一会儿")
+    wait_hint_map = {
+        "7d_plus": "像隔了很久很久",
+        "72h_plus": "已经等了好几天",
+        "24h_plus": "像是等过了一整天",
+        "6h_plus": "离开了好一阵",
+        "recent": "等了一会儿" if offline_hours >= 3.0 else "",
+    }
+    wait_hint = wait_hint_map.get(absence_band, "")
+    if wait_hint:
+        parts.append(wait_hint)
 
-    # 孤独感
-    if loneliness >= 0.8:
-        parts.append("有点想你")
-    elif loneliness >= 0.5:
-        parts.append("有些想你")
+    if loneliness >= 0.82:
+        parts.append("真的有点想你了")
+    elif loneliness >= 0.58:
+        parts.append("一直有点惦记你")
+    elif absence_band in {"72h_plus", "7d_plus"} and loneliness >= 0.35:
+        parts.append("心里总有点空落落的")
 
-    # 期待话题
-    if topics and anticipation >= 0.3:
-        topic = topics[0]
-        parts.append(f"一直在想{topic}的事")
+    topic = ""
+    if topics:
+        topic = str(topics[0]).strip()
+    if topic and anticipation >= 0.3:
+        if absence_band == "7d_plus":
+            parts.append(f"这几天也反复想到{topic}")
+        elif absence_band == "72h_plus":
+            parts.append(f"这段时间总会想起{topic}")
+        elif absence_band == "24h_plus":
+            parts.append(f"还一直记着{topic}")
+        elif absence_band == "6h_plus":
+            parts.append(f"刚刚也在想着{topic}")
+        else:
+            parts.append(f"还记得{topic}")
+    elif anticipation >= 0.72 and absence_band in {"72h_plus", "7d_plus"}:
+        parts.append("一直在等你回来继续说")
 
     if not parts:
         return ""
 
-    return "，".join(parts)
+    return "，".join(dict.fromkeys(part for part in parts if part))
 
 
 def _now_ms() -> int:

@@ -23,7 +23,7 @@ import time
 import uuid
 from typing import Any
 
-from host_brain.app.vision.agent_loop import ClawdbotClient
+from host_brain.app.vision.agent_loop import ClawdbotClient, _build_scene_awareness_signal
 from host_brain.app.vision.clawdbot_protocol import (
     ActionPlan,
     ActionReport,
@@ -88,6 +88,20 @@ class EdgeRpcClient(ClawdbotClient):
                 "width": event.get("width", 0),
                 "height": event.get("height", 0),
                 "latency_ms": event.get("latency_ms", 0),
+                "scene_awareness": _build_scene_awareness_signal(
+                    {
+                        "image_base64": image_base64,
+                        "scene_awareness": event.get("scene_awareness"),
+                        "scene_tags": event.get("scene_tags"),
+                        "current_activity": event.get("current_activity"),
+                        "app_name": event.get("app_name"),
+                        "window_title": event.get("window_title"),
+                    }
+                ),
+                "scene_tags": event.get("scene_tags") or [],
+                "current_activity": event.get("current_activity"),
+                "app_name": event.get("app_name"),
+                "window_title": event.get("window_title"),
             }
         except Exception as exc:
             _logger.warning("EdgeRpcClient: 截图请求异常: %s", exc)

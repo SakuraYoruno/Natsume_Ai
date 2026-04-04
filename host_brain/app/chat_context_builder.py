@@ -327,6 +327,9 @@ def build_chat_context_pack(
         "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
+    memory_persona_signal = _build_memory_persona_signal(retrieval_evidence_items)
+    if memory_persona_signal:
+        memory_emotion_hint.update(memory_persona_signal)
     emotion_recall_text = (
         str(dict(cpb_slots or {}).get("emotion_recall") or "").strip()
         or build_emotion_recall_text(
@@ -483,6 +486,124 @@ def _clamp_float(value: float, *, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, float(value)))
 
 
+def _build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[str, Any]:
+    context = dict(prompt_context or {}) if isinstance(prompt_context, Mapping) else {}
+    hard_snapshot_raw = context.get("hard_snapshot")
+    hard_snapshot = dict(hard_snapshot_raw) if isinstance(hard_snapshot_raw, Mapping) else {}
+
+    sys_mode = str(
+        hard_snapshot.get("sys_mode")
+        or os.environ.get("HOST_SYS_MODE")
+        or "normal"
+    ).strip().lower() or "normal"
+
+    runtime_flags: dict[str, Any] = {"sys_mode": sys_mode}
+    try:
+        from host_brain.app import dependencies as _deps  # noqa: PLC0415
+
+        monitor = getattr(_deps, "_activity_monitor_ref", None)
+        if monitor is not None and hasattr(monitor, "get_status"):
+            activity_status = monitor.get_status()
+            if isinstance(activity_status, Mapping):
+                runtime_flags["activity_monitor"] = dict(activity_status)
+    except Exception:
+        pass
+
+    return runtime_flags
+
+
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
+    warm_tags = {"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"}
+    fragile_tags = {"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"}
+
+    humanized_count = 0
+    suppressed_count = 0
+    distorted_count = 0
+    distortion_sum = 0.0
+    emotion_counts: dict[str, int] = {}
+
+    for row in list(retrieval_evidence_items or [])[:12]:
+        if not isinstance(row, Mapping):
+            continue
+        metadata_raw = row.get("metadata")
+        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+        if not metadata:
+            continue
+
+        emotion_color_tag = str(
+            metadata.get("emotion_color_tag") or metadata.get("emotion_tag") or ""
+        ).strip().upper()
+        suppression_flag = _coerce_optional_bool(metadata.get("suppression_flag")) is True
+        distortion_level = float(_coerce_optional_float(metadata.get("distortion_level")) or 0.0)
+        distortion_level = _clamp_float(distortion_level, minimum=0.0, maximum=1.0)
+
+        if not emotion_color_tag and not suppression_flag and distortion_level <= 0.0:
+            continue
+
+        humanized_count += 1
+        if emotion_color_tag:
+            emotion_counts[emotion_color_tag] = emotion_counts.get(emotion_color_tag, 0) + 1
+        if suppression_flag:
+            suppressed_count += 1
+        if distortion_level > 0.0:
+            distorted_count += 1
+            distortion_sum += distortion_level
+
+    if humanized_count <= 0:
+        return {}
+
+    dominant_emotion = ""
+    if emotion_counts:
+        dominant_emotion = max(emotion_counts.items(), key=lambda item: (item[1], item[0]))[0]
+
+    avg_distortion = distortion_sum / max(distorted_count, 1) if distorted_count > 0 else 0.0
+    guidance_parts: list[str] = []
+    recall_bias = "neutral"
+
+    if suppressed_count > 0:
+        recall_bias = "guarded"
+        guidance_parts.append("命中压制记忆时先轻触试探，不要直接掀开高压回忆")
+
+    if avg_distortion >= 0.35:
+        recall_bias = "uncertain"
+        guidance_parts.append("相关回忆细节可能有失真，不要把旧事说成绝对确定")
+    elif distorted_count > 0:
+        guidance_parts.append("涉及旧事时保留一点留白，避免把模糊细节说得过满")
+
+    if dominant_emotion in warm_tags and suppressed_count <= 0:
+        if recall_bias == "neutral":
+            recall_bias = "warm"
+        guidance_parts.append("可以顺着共同记忆自然承接情绪，但保持轻柔不过度沉浸")
+    elif dominant_emotion in fragile_tags:
+        if recall_bias == "neutral":
+            recall_bias = "fragile"
+        guidance_parts.append("若触及相关回忆，先确认对方是否愿意继续，不要追问过深")
+
+    guidance_text = "；".join(dict.fromkeys(part for part in guidance_parts if part))
+    return {
+        "humanized_memory_count": humanized_count,
+        "suppressed_memory_count": suppressed_count,
+        "distorted_memory_count": distorted_count,
+        "avg_distortion_level": round(avg_distortion, 4),
+        "dominant_memory_emotion": dominant_emotion or None,
+        "recall_bias": recall_bias,
+        "memory_persona_guidance": guidance_text or None,
+    }
+
+
 def _apply_motive_state_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     motive_state_raw: Mapping[str, Any] | None,
@@ -539,6 +660,157 @@ def _apply_motive_state_to_persona_expression_hint(
 
     hint["tone"] = tone
     hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
+    hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
+    hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
+    if pace_hint:
+        hint["pace_hint"] = pace_hint
+    return hint
+
+
+def _apply_offline_state_to_persona_expression_hint(
+    hint_raw: Mapping[str, Any] | None,
+    offline_state_raw: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
+    offline_state = dict(offline_state_raw or {}) if isinstance(offline_state_raw, Mapping) else {}
+    if not hint or not offline_state:
+        return hint
+
+    def _resolve_absence_band() -> str:
+        raw_band = str(offline_state.get("absence_band") or "").strip()
+        if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+            return raw_band
+        offline_hours = _coerce_optional_float(offline_state.get("offline_hours")) or 0.0
+        if offline_hours >= 7 * 24:
+            return "7d_plus"
+        if offline_hours >= 72:
+            return "72h_plus"
+        if offline_hours >= 24:
+            return "24h_plus"
+        if offline_hours >= 6:
+            return "6h_plus"
+        return "recent"
+
+    absence_band = _resolve_absence_band()
+    if absence_band == "recent":
+        return hint
+
+    loneliness = _coerce_optional_float(offline_state.get("loneliness_level")) or 0.0
+    anticipation = _coerce_optional_float(offline_state.get("anticipation_level")) or 0.0
+
+    tone = str(hint.get("tone") or "gentle").strip() or "gentle"
+    style_hint = str(hint.get("style_hint") or "").strip()
+    follow_up_tendency = _coerce_optional_float(hint.get("follow_up_tendency")) or 0.0
+    echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
+    pace_hint = str(hint.get("pace_hint") or "").strip()
+    offline_guidance: list[str] = []
+
+    if absence_band == "6h_plus":
+        follow_up_tendency = max(follow_up_tendency, 0.04)
+        echo_weight_modifier = max(echo_weight_modifier, 0.04)
+        if not pace_hint:
+            pace_hint = "steady"
+        offline_guidance.append("先轻轻接住重新连上的感觉，再自然进入当前话题")
+    elif absence_band == "24h_plus":
+        follow_up_tendency = max(follow_up_tendency, 0.08)
+        echo_weight_modifier = max(echo_weight_modifier, 0.06)
+        if max(loneliness, anticipation) >= 0.35:
+            tone = "caring"
+        if not pace_hint:
+            pace_hint = "steady"
+        offline_guidance.append("先回应一天未见后的重新连上，再顺势进入正文")
+    elif absence_band == "72h_plus":
+        tone = "caring"
+        follow_up_tendency = max(follow_up_tendency, 0.12)
+        echo_weight_modifier = max(echo_weight_modifier, 0.10)
+        if not pace_hint:
+            pace_hint = "slow"
+        offline_guidance.append("把回复写得像久别重逢后的接住与确认，再慢慢展开内容")
+    elif absence_band == "7d_plus":
+        tone = "caring"
+        follow_up_tendency = max(follow_up_tendency, 0.15)
+        echo_weight_modifier = max(echo_weight_modifier, 0.12)
+        if not pace_hint:
+            pace_hint = "slow"
+        offline_guidance.append("把这次对话当作久别后的重逢，先确认近况与状态，再自然续上话题")
+
+    if loneliness >= 0.55:
+        echo_weight_modifier = max(echo_weight_modifier, 0.08)
+        offline_guidance.append("先让对方感到被接住，不要一上来就推进信息")
+    elif anticipation >= 0.6 and absence_band in {"24h_plus", "72h_plus", "7d_plus"}:
+        offline_guidance.append("可以自然接回之前挂念的话题，但语气保持柔和")
+
+    if offline_guidance:
+        guidance_text = "；".join(dict.fromkeys(part for part in offline_guidance if part))
+        style_hint = f"{style_hint}；{guidance_text}" if style_hint else guidance_text
+        hint["offline_guidance"] = guidance_text
+
+    hint["tone"] = tone
+    hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
+    hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
+    hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
+    if pace_hint:
+        hint["pace_hint"] = pace_hint
+    return hint
+
+
+def _apply_memory_persona_signal_to_persona_expression_hint(
+    hint_raw: Mapping[str, Any] | None,
+    memory_signal_raw: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
+    memory_signal = dict(memory_signal_raw or {}) if isinstance(memory_signal_raw, Mapping) else {}
+    if not hint or not memory_signal:
+        return hint
+
+    tone = str(hint.get("tone") or "gentle").strip() or "gentle"
+    style_hint = str(hint.get("style_hint") or "").strip()
+    follow_up_tendency = _coerce_optional_float(hint.get("follow_up_tendency")) or 0.0
+    echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
+    pace_hint = str(hint.get("pace_hint") or "").strip()
+
+    suppressed_count = int(memory_signal.get("suppressed_memory_count") or 0)
+    distorted_count = int(memory_signal.get("distorted_memory_count") or 0)
+    avg_distortion = float(_coerce_optional_float(memory_signal.get("avg_distortion_level")) or 0.0)
+    dominant_emotion = str(memory_signal.get("dominant_memory_emotion") or "").strip().upper()
+    recall_bias = str(memory_signal.get("recall_bias") or "").strip().lower()
+
+    warm_tags = {"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"}
+    fragile_tags = {"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"}
+    memory_guidance: list[str] = []
+
+    if suppressed_count > 0 or recall_bias == "guarded":
+        follow_up_tendency = min(follow_up_tendency, 0.03)
+        echo_weight_modifier = min(echo_weight_modifier, 0.05)
+        if not pace_hint:
+            pace_hint = "steady"
+        memory_guidance.append("命中被压制的旧记忆时，先轻触试探，不要一下子追问太深")
+
+    if avg_distortion >= 0.35 or recall_bias == "uncertain":
+        follow_up_tendency = min(follow_up_tendency, 0.04)
+        memory_guidance.append("相关回忆可能有些模糊，措辞留一点余地，不要说得像完全确定")
+    elif distorted_count > 0:
+        memory_guidance.append("带一点回忆感可以，但别把模糊细节说得过满")
+
+    if dominant_emotion in warm_tags and suppressed_count <= 0 and avg_distortion < 0.35:
+        tone = "caring" if tone == "gentle" else tone
+        follow_up_tendency = max(follow_up_tendency, 0.04)
+        echo_weight_modifier = max(echo_weight_modifier, 0.05)
+        memory_guidance.append("这类回忆偏温暖，可以自然承接熟悉感，但保持克制")
+    elif dominant_emotion in fragile_tags:
+        follow_up_tendency = min(follow_up_tendency, 0.02)
+        memory_guidance.append("涉及脆弱回忆时先稳住情绪，再决定是否继续往下说")
+
+    guidance_text = str(memory_signal.get("memory_persona_guidance") or "").strip()
+    if guidance_text:
+        memory_guidance.append(guidance_text)
+    if memory_guidance:
+        final_guidance = "；".join(dict.fromkeys(part for part in memory_guidance if part))
+        style_hint = f"{style_hint}；{final_guidance}" if style_hint else final_guidance
+        hint["memory_guidance"] = final_guidance
+
+    hint["tone"] = tone
+    hint["style_hint"] = _truncate_for_prompt(style_hint, limit=260) or style_hint
     hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
     hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
     if pace_hint:
@@ -898,6 +1170,17 @@ def build_chat_prompt_runtime_payload(
         prompt_context_observability=prompt_context_observability,
     )
     runtime_payload["style_bindings"] = resolved_style_bindings
+    runtime_mode_flags = _build_runtime_mode_flags(prompt_context)
+    if runtime_mode_flags:
+        runtime_payload["runtime_mode"] = runtime_mode_flags
+    memory_persona_signal_raw = prompt_context.get("memory_emotion_hint")
+    memory_persona_signal = (
+        dict(memory_persona_signal_raw)
+        if isinstance(memory_persona_signal_raw, Mapping)
+        else {}
+    )
+    if memory_persona_signal:
+        runtime_payload["memory_persona_signal"] = memory_persona_signal
     try:
         from host_brain.app.intelligent_runtime import build_prompt_intelligence  # noqa: PLC0415
 
@@ -1308,6 +1591,7 @@ def build_chat_prompt_runtime_payload(
             emotion_context=runtime_payload.get("triggered_emotions"),
             pending_followup_topics=_pending_topics,
             shared_memory_count=_shared_count,
+            runtime_flags=runtime_payload.get("runtime_mode"),
         )
         _motive_state = compute_motive_state(_motive_inp)
         runtime_payload["motive_state"] = _motive_state.as_dict()
@@ -1320,6 +1604,7 @@ def build_chat_prompt_runtime_payload(
             self_reflection_pulse=runtime_payload.get("self_reflection_pulse"),
             emotion_context=runtime_payload.get("triggered_emotions"),
             motive_state=runtime_payload.get("motive_state"),
+            runtime_flags=runtime_payload.get("runtime_mode"),
         )
         _policy_decision = decide_response_policy(_policy_inp)
         runtime_payload["response_policy"] = _policy_decision.as_dict()
@@ -1330,6 +1615,18 @@ def build_chat_prompt_runtime_payload(
 
     except (ImportError, AttributeError, Exception) as _motive_exc:
         logger.debug("MotiveEngine / ResponsePolicyLayer 接入降级: %s", _motive_exc)
+
+    if runtime_payload.get("persona_expression_hint") and runtime_payload.get("offline_state"):
+        runtime_payload["persona_expression_hint"] = _apply_offline_state_to_persona_expression_hint(
+            runtime_payload.get("persona_expression_hint"),
+            runtime_payload.get("offline_state"),
+        )
+
+    if runtime_payload.get("persona_expression_hint") and runtime_payload.get("memory_persona_signal"):
+        runtime_payload["persona_expression_hint"] = _apply_memory_persona_signal_to_persona_expression_hint(
+            runtime_payload.get("persona_expression_hint"),
+            runtime_payload.get("memory_persona_signal"),
+        )
 
     return runtime_payload
 

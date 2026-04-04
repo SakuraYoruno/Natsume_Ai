@@ -20,7 +20,7 @@ from host_brain.app.vision.action_planner import (
     _make_fallback_plan,
     _parse_llm_response,
 )
-from host_brain.app.vision.agent_loop import MockClawdbotClient, run_agent_loop
+from host_brain.app.vision.agent_loop import ClawdbotClient, MockClawdbotClient, run_agent_loop
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +193,76 @@ class TestAgentLoop:
             result = await client.capture_screenshot("sess-001")
             assert "image_base64" in result
             assert result.get("mock") is True
+        anyio.run(_run)
+
+
+    def test_agent_loop_builds_structured_scene_awareness_from_screenshot_payload(self, monkeypatch):
+        captured: dict[str, object] = {}
+
+        class SceneAwareClient(ClawdbotClient):
+            async def capture_screenshot(self, session_id: str):
+                return {
+                    "image_base64": "abc123==",
+                    "image_mime": "image/png",
+                    "width": 2560,
+                    "height": 1440,
+                    "scene_tags": ["battle"],
+                    "current_activity": "gaming",
+                    "app_name": "Genshin Impact",
+                    "window_title": "Abyss Battle",
+                    "screen_description": "boss is almost defeated",
+                }
+
+            async def execute_plan(self, plan: ActionPlan):
+                return ActionReport(
+                    request_id=plan.request_id,
+                    session_id=plan.session_id,
+                    status=ActionStatus.SUCCESS,
+                    goal_achieved=True,
+                    total_actions=len(plan.actions),
+                    success_count=len(plan.actions),
+                )
+
+        async def _fake_generate_action_plan(**kwargs):
+            captured["vision_context"] = kwargs["vision_context"]
+            return ActionPlan(
+                request_id=kwargs["request_id"],
+                session_id=kwargs["session_id"],
+                goal=kwargs["goal"],
+                actions=[Action(type=ActionType.DONE, target_desc="done")],
+                extra={"goal_understood": "ok", "confidence": 0.88},
+            )
+
+        import host_brain.app.vision.action_planner as action_planner
+
+        monkeypatch.setattr(action_planner, "generate_action_plan", _fake_generate_action_plan)
+
+        async def _run():
+            llm_runtime = {"available": True, "llm_api_key": "test"}
+            events = []
+            async for sse_line in run_agent_loop(
+                request_id="req-scene-001",
+                session_id="sess-scene-001",
+                goal="check scene awareness",
+                llm_runtime=llm_runtime,
+                clawdbot_client=SceneAwareClient(),
+                max_rounds=1,
+            ):
+                if sse_line.startswith("data: "):
+                    events.append(json.loads(sse_line[6:]))
+
+            screenshot_done = next(e for e in events if e["phase"] == "SCREENSHOT_DONE")
+            scene_awareness = screenshot_done["scene_awareness"]
+            assert scene_awareness["scene_tags"][:2] == ["gaming", "battle"]
+            assert scene_awareness["app_name"] == "Genshin Impact"
+            assert scene_awareness["companion_suitable"] is True
+            assert "screen_description" not in json.dumps(screenshot_done, ensure_ascii=False)
+
+            vision_context = captured["vision_context"]
+            assert vision_context["scene_awareness"]["scene_tags"][:2] == ["gaming", "battle"]
+            assert vision_context["scene_awareness"]["has_screenshot"] is True
+            assert "screen_description" not in json.dumps(vision_context, ensure_ascii=False)
+
         anyio.run(_run)
 
     def test_mock_client_execute(self):

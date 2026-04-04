@@ -212,6 +212,62 @@ class TestVVIII3_LongAbsent:
         assert result is not None
         assert any(kw in result.content for kw in ("好久", "担心", "想", "不见"))
 
+    def test_day_level_reconnect_can_trigger_when_continuity_is_high(self):
+        """24h+ 且 reconnect drive 足够高时，可提前触发重连表达。"""
+        voice = PersonaProactiveVoice()
+        now_ts = _now_ms()
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": now_ts,
+                "user_online": False,
+                "bond_stage": "FRIEND",
+                "offline_state": {
+                    "offline_duration_ms": 26 * 3600 * 1000,
+                    "loneliness_level": 0.42,
+                    "anticipation_level": 0.46,
+                },
+                "motive_state": {
+                    "reach_out_drive": 0.58,
+                    "care_drive": 0.48,
+                    "withdraw_drive": 0.12,
+                    "continuity_drive": 0.78,
+                    "self_protect_drive": 0.08,
+                    "dominant_motive": "continuity",
+                },
+            },
+        )
+        assert result is not None
+        assert result.scene_type == SCENE_LONG_ABSENT
+
+    def test_six_hour_gap_still_does_not_trigger_long_absent(self):
+        """6h 级别仍只算短暂离开，不应触发久别重逢。"""
+        voice = PersonaProactiveVoice()
+        now_ts = _now_ms()
+        result = voice.evaluate_scene(
+            user_id="u1",
+            context={
+                "current_ts_ms": now_ts,
+                "user_online": False,
+                "bond_stage": "FRIEND",
+                "offline_state": {
+                    "offline_duration_ms": 6 * 3600 * 1000,
+                    "loneliness_level": 0.65,
+                    "anticipation_level": 0.7,
+                },
+                "motive_state": {
+                    "reach_out_drive": 0.82,
+                    "care_drive": 0.62,
+                    "withdraw_drive": 0.08,
+                    "continuity_drive": 0.88,
+                    "self_protect_drive": 0.05,
+                    "dominant_motive": "continuity",
+                },
+            },
+        )
+        if result is not None:
+            assert result.scene_type != SCENE_LONG_ABSENT
+
 
 # ---------------------------------------------------------------------------
 # V-VIII-4: 主动表达频率节制
@@ -627,3 +683,97 @@ class TestMotiveDrivenProactiveVoice:
             },
         )
         assert result is None
+
+
+class TestModeAwareProactiveVoice:
+    def test_focus_mode_blocks_topic_followup_scene(self):
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="mode-focus",
+            context={
+                "current_ts_ms": ts,
+                "sys_mode": "focus",
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "pending_followup_topics": [{"topic_label": "project", "topic_keywords": ["project"]}],
+                "motive_state": {
+                    "reach_out_drive": 0.82,
+                    "care_drive": 0.56,
+                    "continuity_drive": 0.88,
+                    "withdraw_drive": 0.08,
+                    "self_protect_drive": 0.06,
+                    "dominant_motive": "continuity",
+                },
+            },
+        )
+        assert result is None
+
+    def test_sleep_mode_blocks_long_absent_scene(self):
+        voice = PersonaProactiveVoice()
+        now_ts = _now_ms()
+        last_ts = now_ts - 5 * 24 * 60 * 60 * 1000
+        result = voice.evaluate_scene(
+            user_id="mode-sleep",
+            context={
+                "current_ts_ms": now_ts,
+                "sys_mode": "sleep",
+                "last_interaction_ts_ms": last_ts,
+                "user_online": False,
+                "motive_state": {
+                    "reach_out_drive": 0.82,
+                    "care_drive": 0.78,
+                    "continuity_drive": 0.8,
+                    "withdraw_drive": 0.06,
+                    "self_protect_drive": 0.08,
+                    "dominant_motive": "reach_out",
+                },
+            },
+        )
+        assert result is None
+
+    def test_gaming_mode_blocks_generic_morning_greet(self):
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(8, 0)
+        result = voice.evaluate_scene(
+            user_id="mode-gaming-morning",
+            context={
+                "current_ts_ms": ts,
+                "sys_mode": "gaming",
+                "user_online": True,
+                "motive_state": {
+                    "reach_out_drive": 0.92,
+                    "care_drive": 0.85,
+                    "continuity_drive": 0.4,
+                    "withdraw_drive": 0.05,
+                    "self_protect_drive": 0.04,
+                    "dominant_motive": "reach_out",
+                },
+            },
+        )
+        assert result is None
+
+    def test_gaming_mode_keeps_companion_followup_enabled(self):
+        voice = PersonaProactiveVoice()
+        ts = _make_ts_at_hour(15, 0)
+        result = voice.evaluate_scene(
+            user_id="mode-gaming-followup",
+            context={
+                "current_ts_ms": ts,
+                "sys_mode": "gaming",
+                "user_online": False,
+                "last_interaction_ts_ms": ts - 1000,
+                "pending_followup_topics": [{"topic_label": "project", "topic_keywords": ["project"]}],
+                "motive_state": {
+                    "reach_out_drive": 0.66,
+                    "care_drive": 0.52,
+                    "continuity_drive": 0.86,
+                    "withdraw_drive": 0.08,
+                    "self_protect_drive": 0.08,
+                    "dominant_motive": "continuity",
+                },
+            },
+        )
+        assert result is not None
+        assert result.scene_type == SCENE_TOPIC_FOLLOWUP
+        assert "mode=gaming" in result.motive_influence

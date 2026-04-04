@@ -334,6 +334,72 @@ def test_services_health_invalid_window(client):
     assert resp.status_code == 422
 
 
+def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
+    """T-OBS-ROUTE-INT-17: /obs/runtime-snapshot 返回统一数字生命状态摘要。"""
+
+    monkeypatch.setattr(
+        "host_brain.app.http_hooks_runtime_helpers.build_digital_life_runtime_snapshot",
+        lambda current_topic="": {
+            "persona_user_id": "persona-user-001",
+            "current_topic": current_topic,
+            "sys_mode": "focus",
+            "hard_state": {"sys_mode": "focus", "mood_state": "engaged"},
+            "activity_monitor": {"running": True, "idle_minutes": 3.5},
+            "emotion_context": {"emotion_tag": "NEUTRAL", "mood_state": "engaged"},
+            "bond_state": {"current_stage": "FRIEND"},
+            "bond_summary": {"stage": "FRIEND", "trend": "上升"},
+            "bond_summary_human": {"stage": "朋友", "capability_hint": "朋友，可深入交流"},
+            "inner_world_state": {"loneliness": 0.32},
+            "offline_state": {"offline_hours": 8.0},
+            "silence_state": {"response_willingness": 0.72},
+            "body_sense": {"fatigue_level": "FRESH"},
+            "self_model_snapshot": {"recent_mood_trend": "平稳"},
+            "self_reflection_pulse": {"growth_note": "最近更稳了。"},
+            "bond_narrative": {"narratives": ["我还记得你说过那件事。"]},
+            "motive_state": {"dominant_motive": "continuity"},
+            "response_policy": {"allow_topic_shift": False},
+            "slot_status": {"response_policy": "live"},
+            "degraded": False,
+            "degraded_reasons": [],
+            "timestamp": 1700000000000,
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
+        lambda: type(
+            "_FakeModeService",
+            (),
+            {
+                "get_current_status": lambda self: {
+                    "sys_mode": "focus",
+                    "auto_rules": {"gaming_detect": True},
+                    "idle_ms": 120000,
+                    "idle_minutes": 2.0,
+                    "last_interaction_ts_ms": 1700000000000,
+                    "is_night_time": False,
+                    "valid_transitions": ["normal", "gaming"],
+                    "ts_ms": 1700000000000,
+                    "degraded": False,
+                    "degraded_reason": None,
+                }
+            },
+        )(),
+    )
+
+    resp = client.get("/obs/runtime-snapshot?current_topic=%E9%82%A3%E4%B8%AA%E9%A1%B9%E7%9B%AE")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["persona_user_id"] == "persona-user-001"
+    assert data["current_topic"] == "那个项目"
+    assert data["sys_mode"] == "focus"
+    assert data["sys_mode_status"]["sys_mode"] == "focus"
+    assert data["hard_state"]["mood_state"] == "engaged"
+    assert data["bond_summary_human"]["stage"] == "朋友"
+    assert data["motive_state"]["dominant_motive"] == "continuity"
+    assert data["slot_status"]["sys_mode_status"] == "live"
+
+
 # ---------------------------------------------------------------------------
 # GET /obs/sessions
 # ---------------------------------------------------------------------------

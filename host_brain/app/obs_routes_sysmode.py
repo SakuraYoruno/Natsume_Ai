@@ -186,12 +186,65 @@ class AutoRulesUpdateRequest(BaseModel):
     rules: Dict[str, bool] = Field(..., description="自动切换规则开关")
 
 
+class DigitalLifeRuntimeSnapshotResponse(BaseModel):
+    persona_user_id: str
+    current_topic: str = ""
+    sys_mode: str
+    sys_mode_status: Dict[str, Any] = Field(default_factory=dict)
+    hard_state: Dict[str, Any] = Field(default_factory=dict)
+    activity_monitor: Dict[str, Any] = Field(default_factory=dict)
+    emotion_context: Dict[str, Any] = Field(default_factory=dict)
+    bond_state: Dict[str, Any] = Field(default_factory=dict)
+    bond_summary: Dict[str, Any] = Field(default_factory=dict)
+    bond_summary_human: Dict[str, Any] = Field(default_factory=dict)
+    inner_world_state: Dict[str, Any] = Field(default_factory=dict)
+    offline_state: Dict[str, Any] = Field(default_factory=dict)
+    silence_state: Dict[str, Any] = Field(default_factory=dict)
+    body_sense: Dict[str, Any] = Field(default_factory=dict)
+    self_model_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    self_reflection_pulse: Dict[str, Any] = Field(default_factory=dict)
+    bond_narrative: Dict[str, Any] = Field(default_factory=dict)
+    motive_state: Dict[str, Any] = Field(default_factory=dict)
+    response_policy: Dict[str, Any] = Field(default_factory=dict)
+    slot_status: Dict[str, str] = Field(default_factory=dict)
+    degraded: bool = False
+    degraded_reasons: List[str] = Field(default_factory=list)
+    timestamp: int
+
+
 @router.get("/sys-mode", response_model=SysModeStatusResponse)
 async def get_sys_mode():
     """获取当前系统运行模式 + 自动切换规则状态 + 空闲信息。"""
     service = _get_mode_transition_service()
     status = service.get_current_status()
     return SysModeStatusResponse(**status)
+
+
+@router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
+async def get_digital_life_runtime_snapshot(
+    current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
+):
+    """获取统一数字生命 runtime snapshot（只读观测面）。"""
+    from host_brain.app.http_hooks_runtime_helpers import build_digital_life_runtime_snapshot  # noqa: PLC0415
+
+    service = _get_mode_transition_service()
+    payload = build_digital_life_runtime_snapshot(current_topic=current_topic)
+    try:
+        payload["sys_mode_status"] = dict(service.get_current_status() or {})
+    except Exception as exc:
+        payload.setdefault("sys_mode_status", {})
+        payload["degraded"] = True
+        degraded_reasons = list(payload.get("degraded_reasons") or [])
+        degraded_reasons.append(f"sys_mode_status:degraded ({str(exc)[:120]})")
+        payload["degraded_reasons"] = degraded_reasons
+        slot_status = dict(payload.get("slot_status") or {})
+        slot_status["sys_mode_status"] = "degraded"
+        payload["slot_status"] = slot_status
+    else:
+        slot_status = dict(payload.get("slot_status") or {})
+        slot_status["sys_mode_status"] = "live"
+        payload["slot_status"] = slot_status
+    return DigitalLifeRuntimeSnapshotResponse(**payload)
 
 
 @router.post("/sys-mode", response_model=SysModeSwitchResponse)

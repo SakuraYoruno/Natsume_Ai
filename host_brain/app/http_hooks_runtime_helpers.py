@@ -61,6 +61,429 @@ def read_episodic_latest_fact(episodic_store: Any, fact_key: str) -> str | None:
     return text or None
 
 
+def _as_plain_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if value is None:
+        return {}
+    for attr_name in ("as_dict", "model_dump", "dict", "to_summary"):
+        method = getattr(value, attr_name, None)
+        if not callable(method):
+            continue
+        try:
+            payload = method()
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            return dict(payload)
+    return {}
+
+
+def _record_snapshot_status(
+    slot_status: dict[str, str],
+    degraded_reasons: list[str],
+    *,
+    slot: str,
+    status: str,
+    detail: str = "",
+) -> None:
+    normalized_status = str(status or "unknown").strip() or "unknown"
+    slot_status[slot] = normalized_status
+    if normalized_status != "live":
+        reason = f"{slot}:{normalized_status}"
+        if detail:
+            reason = f"{reason} ({detail})"
+        degraded_reasons.append(reason)
+
+
+def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str, Any]:
+    now_ms = int(_time.time() * 1000)
+    normalized_topic = str(current_topic or "").strip()
+    slot_status: dict[str, str] = {}
+    degraded_reasons: list[str] = []
+
+    persona_user_id = "default"
+    try:
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+
+        persona_user_id = str(get_canonical_bond_user_id() or "").strip() or "default"
+        slot_status["persona_user_id"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="persona_user_id",
+            status="fallback",
+            detail=str(exc)[:120],
+        )
+
+    hard_state: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
+
+        hard_state = _as_plain_dict(get_hard_state())
+        slot_status["hard_state"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="hard_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    sys_mode = str(
+        hard_state.get("sys_mode")
+        or _os.environ.get("HOST_SYS_MODE")
+        or "normal"
+    ).strip().lower() or "normal"
+
+    activity_monitor: dict[str, Any] = {}
+    try:
+        from host_brain.app import dependencies as _deps  # noqa: PLC0415
+
+        monitor = getattr(_deps, "_activity_monitor_ref", None)
+        if monitor is not None:
+            if hasattr(monitor, "get_status"):
+                activity_monitor = _as_plain_dict(monitor.get_status())
+            else:
+                activity_monitor = {
+                    "running": bool(getattr(monitor, "_running", False)),
+                    "gaming_check_interval_s": getattr(monitor, "_gaming_interval", None),
+                    "idle_check_interval_s": getattr(monitor, "_idle_interval", None),
+                }
+            slot_status["activity_monitor"] = "live"
+        else:
+            slot_status["activity_monitor"] = "unavailable"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="activity_monitor",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    emotion_context: dict[str, Any] = {
+        "mood_state": str(hard_state.get("mood_state") or "steady").strip().lower() or "steady",
+        "emotion_tag": "NEUTRAL",
+        "emotion_intensity": 0.0,
+    }
+    timeline_summary: dict[str, Any] = {}
+    timeline_diary: dict[str, Any] = {}
+    try:
+        from host_brain.app.emotion_context import _global_emotion_timeline, get_user_emotion_profile  # noqa: PLC0415
+
+        profile = get_user_emotion_profile()
+        profile_summary = _as_plain_dict(profile.to_summary() if hasattr(profile, "to_summary") else profile)
+        if profile_summary:
+            emotion_context["user_emotion_profile"] = profile_summary
+            top_emotions = list(profile_summary.get("top_emotions") or [])
+            if top_emotions and isinstance(top_emotions[0], dict):
+                emotion_context["emotion_tag"] = str(top_emotions[0].get("tag") or emotion_context["emotion_tag"]).upper()
+            try:
+                emotion_context["emotion_intensity"] = float(profile_summary.get("volatility") or 0.0)
+            except (TypeError, ValueError):
+                pass
+
+        timeline_summary = dict(_global_emotion_timeline.rebuild_summary(window_ms=6 * 3600 * 1000) or {})
+        if timeline_summary:
+            emotion_context["emotion_timeline_summary"] = timeline_summary
+            dominant_emotion = str(timeline_summary.get("dominant_emotion") or "").strip().upper()
+            if dominant_emotion:
+                emotion_context["emotion_tag"] = dominant_emotion
+            try:
+                emotion_context["emotion_intensity"] = float(
+                    timeline_summary.get("emotion_intensity")
+                    or timeline_summary.get("avg_intensity")
+                    or emotion_context.get("emotion_intensity")
+                    or 0.0
+                )
+            except (TypeError, ValueError):
+                pass
+
+        timeline_diary = dict(_global_emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000) or {})
+        if timeline_diary:
+            emotion_context["emotion_diary"] = {
+                "dominant_emotion": timeline_diary.get("dominant_emotion"),
+                "diary_text": str(timeline_diary.get("diary_text") or "")[:160],
+            }
+
+        slot_status["emotion_context"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="emotion_context",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    bond_state: dict[str, Any] = {}
+    bond_summary: dict[str, Any] = {}
+    bond_summary_human: dict[str, Any] = {}
+    bond_state_obj: Any = None
+    try:
+        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+        from host_brain.bond.summarizer import derive_bond_summary  # noqa: PLC0415
+
+        bond_engine = get_bond_stage_engine()
+        if bond_engine is not None:
+            bond_state_obj = bond_engine.get_state(persona_user_id)
+            bond_summary = derive_bond_summary(None, bond_score_state=bond_state_obj)
+            bond_summary_human = _as_plain_dict(bond_state_obj.to_summary() if hasattr(bond_state_obj, "to_summary") else bond_state_obj)
+            bond_state = {
+                "user_id": persona_user_id,
+                "current_stage": str(getattr(bond_state_obj, "current_stage", "") or "").strip() or "STRANGER",
+                "trend": (
+                    bond_state_obj.trend()
+                    if callable(getattr(bond_state_obj, "trend", None))
+                    else str((bond_summary or {}).get("trend") or "")
+                ),
+                "trend_intensity": (
+                    bond_state_obj.trend_intensity()
+                    if callable(getattr(bond_state_obj, "trend_intensity", None))
+                    else ""
+                ),
+                "capability_hint": (
+                    bond_state_obj.capability_hint()
+                    if callable(getattr(bond_state_obj, "capability_hint", None))
+                    else str((bond_summary or {}).get("capability_hint") or "")
+                ),
+                "event_count": int(getattr(bond_state_obj, "event_count", 0) or 0),
+                "last_event_ts_ms": int(getattr(bond_state_obj, "last_event_ts_ms", 0) or 0),
+            }
+            slot_status["bond_state"] = "live"
+        else:
+            slot_status["bond_state"] = "unavailable"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="bond_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    inner_world_state: dict[str, Any] = {}
+    offline_state: dict[str, Any] = {}
+    try:
+        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
+
+        inner_world_state = dict(get_inner_world().get_state(persona_user_id) or {})
+        offline_state = dict(build_offline_state_from_inner_state(inner_world_state) or {})
+        slot_status["inner_world_state"] = "live"
+        slot_status["offline_state"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="inner_world_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+        slot_status.setdefault("offline_state", "degraded")
+
+    silence_state: dict[str, Any] = {}
+    try:
+        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+
+        silence_state = _as_plain_dict(
+            get_silence_engine().get_silence_state(current_topic=normalized_topic)
+        )
+        slot_status["silence_state"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="silence_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    body_sense: dict[str, Any] = {}
+    try:
+        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+
+        body_sense = _as_plain_dict(get_body_sense_model().get_state())
+        slot_status["body_sense"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="body_sense",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    self_model_snapshot: dict[str, Any] = {}
+    self_reflection_pulse: dict[str, Any] = {}
+    try:
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+        from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
+
+        persona_engine = PersonaEngine.get_instance()
+        snapshot_obj = persona_engine.get_self_model_snapshot(
+            persona_user_id,
+            timeline_summary=timeline_summary,
+            timeline_diary=timeline_diary,
+            bond_state=bond_state_obj,
+            bond_summary=bond_summary,
+            last_deep_talk_ts_ms=int(getattr(bond_state_obj, "last_event_ts_ms", 0) or 0),
+            current_ts_ms=now_ms,
+        )
+        self_model_snapshot = _as_plain_dict(snapshot_obj)
+        if self_model_snapshot:
+            self_reflection_pulse = dict(
+                build_self_reflection_pulse(
+                    self_model_snapshot,
+                    trigger_reason="runtime_snapshot",
+                )
+                or {}
+            )
+        slot_status["self_model_snapshot"] = "live"
+        slot_status["self_reflection_pulse"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="self_reflection_pulse",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+        slot_status.setdefault("self_model_snapshot", "degraded")
+
+    bond_narrative: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+        from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
+        from host_brain.bond.milestone_tracker import MilestoneTracker  # noqa: PLC0415
+        from host_brain.bond.shared_memory_index import SharedMemoryIndex  # noqa: PLC0415
+
+        narrative_layer = BondNarrativeLayer(
+            memory_index=SharedMemoryIndex(store=get_episodic_store()),
+            milestone_tracker=MilestoneTracker(),
+        )
+        narrative_result = narrative_layer.build_narrative(
+            user_id=persona_user_id,
+            bond_stage=str(bond_state.get("current_stage") or "STRANGER").upper(),
+            now_ts_ms=now_ms,
+        )
+        bond_narrative = _as_plain_dict(
+            narrative_result.to_prompt_slot() if hasattr(narrative_result, "to_prompt_slot") else narrative_result
+        )
+        slot_status["bond_narrative"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="bond_narrative",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    shared_memory_count = 0
+    for candidate in (
+        bond_narrative.get("shared_memory_count"),
+        self_model_snapshot.get("shared_memory_count"),
+        bond_summary_human.get("shared_memory_count"),
+    ):
+        try:
+            shared_memory_count = int(candidate)
+            break
+        except (TypeError, ValueError):
+            continue
+
+    motive_state: dict[str, Any] = {}
+    try:
+        from host_brain.persona.motive_engine import MotiveInput, compute_motive_state  # noqa: PLC0415
+
+        motive_state = compute_motive_state(
+            MotiveInput(
+                silence_state=silence_state or None,
+                body_sense=body_sense or None,
+                offline_state=offline_state or None,
+                bond_summary=bond_summary or None,
+                self_reflection_pulse=self_reflection_pulse or None,
+                emotion_context=emotion_context or None,
+                pending_followup_topics=list(offline_state.get("anticipation_topics") or []),
+                shared_memory_count=shared_memory_count,
+                user_message=normalized_topic,
+                runtime_flags={
+                    "source": "obs_runtime_snapshot",
+                    "sys_mode": sys_mode,
+                    "activity_monitor": activity_monitor,
+                },
+            )
+        ).as_dict()
+        slot_status["motive_state"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="motive_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    response_policy: dict[str, Any] = {}
+    try:
+        from host_brain.persona.response_policy import ResponsePolicyInput, decide_response_policy  # noqa: PLC0415
+
+        response_policy = decide_response_policy(
+            ResponsePolicyInput(
+                silence_state=silence_state or None,
+                body_sense=body_sense or None,
+                offline_state=offline_state or None,
+                bond_summary=bond_summary or None,
+                self_reflection_pulse=self_reflection_pulse or None,
+                emotion_context=emotion_context or None,
+                motive_state=motive_state or None,
+                user_message=normalized_topic,
+                runtime_flags={
+                    "source": "obs_runtime_snapshot",
+                    "sys_mode": sys_mode,
+                    "activity_monitor": activity_monitor,
+                },
+            )
+        ).as_dict()
+        slot_status["response_policy"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="response_policy",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    return {
+        "persona_user_id": persona_user_id,
+        "current_topic": normalized_topic,
+        "sys_mode": sys_mode,
+        "hard_state": hard_state,
+        "activity_monitor": activity_monitor,
+        "emotion_context": emotion_context,
+        "bond_state": bond_state,
+        "bond_summary": bond_summary,
+        "bond_summary_human": bond_summary_human,
+        "inner_world_state": inner_world_state,
+        "offline_state": offline_state,
+        "silence_state": silence_state,
+        "body_sense": body_sense,
+        "self_model_snapshot": self_model_snapshot,
+        "self_reflection_pulse": self_reflection_pulse,
+        "bond_narrative": bond_narrative,
+        "motive_state": motive_state,
+        "response_policy": response_policy,
+        "slot_status": slot_status,
+        "degraded": bool(degraded_reasons),
+        "degraded_reasons": degraded_reasons,
+        "timestamp": now_ms,
+    }
+
+
 def run_proactive_intent_dispatch(
     system_intent: dict[str, Any],
     *,
@@ -179,6 +602,12 @@ def run_proactive_intent_dispatch(
     except Exception:
         persona_user_id = ""
 
+    resolved_sys_mode = str(
+        system_intent.get("sys_mode")
+        or system_intent.get("mood_state")
+        or "normal"
+    ).strip().lower() or "normal"
+
     motive_state: dict[str, Any] = {}
     try:
         from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
@@ -191,6 +620,7 @@ def run_proactive_intent_dispatch(
             bond_summary=bond_summary,
             emotion_context=emotion_context,
             pending_topics=pending_topics,
+            runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
         )
     except Exception as motive_exc:
         logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
@@ -217,14 +647,14 @@ def run_proactive_intent_dispatch(
                 emotion_context=emotion_context,
                 motive_state=motive_state,
                 user_message=current_topic,
-                runtime_flags={"source": "proactive_talk"},
+                runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
             )
         ).as_dict()
     except Exception as policy_exc:
         logger.debug("proactive response_policy compute failed（忽略）: %s", policy_exc)
 
     context = {
-        "sys_mode": system_intent.get("mood_state", "normal"),
+        "sys_mode": resolved_sys_mode,
         "request_id": system_intent.get("request_id"),
         "intent_id": system_intent.get("intent_id"),
         "ui_pusher": ui_pusher,
@@ -235,6 +665,7 @@ def run_proactive_intent_dispatch(
         "emotion_context": emotion_context,
         "motive_state": motive_state,
         "response_policy": response_policy,
+        "scene_awareness": system_intent.get("scene_awareness") or args.get("scene_awareness") or {},
     }
     return execute_proactive_talk(args=args, context=context)
 

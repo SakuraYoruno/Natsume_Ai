@@ -83,6 +83,25 @@ _FATIGUE_PROTECT: dict[str, float] = {
 }
 
 
+def _coerce_runtime_flags(raw: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _resolve_sys_mode(runtime_flags: dict[str, Any]) -> str:
+    mode = str(runtime_flags.get("sys_mode") or "").strip().lower()
+    if mode in {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}:
+        return mode
+    activity_monitor = runtime_flags.get("activity_monitor")
+    if isinstance(activity_monitor, dict) and bool(activity_monitor.get("is_gaming")):
+        return "gaming"
+    return "normal"
+
+
+def _resolve_activity_monitor(runtime_flags: dict[str, Any]) -> dict[str, Any]:
+    activity_monitor = runtime_flags.get("activity_monitor")
+    return dict(activity_monitor) if isinstance(activity_monitor, dict) else {}
+
+
 # ── 数据类 ────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -142,6 +161,9 @@ class MotiveEngine:
         bond = dict(inp.bond_summary or {})
         reflection = dict(inp.self_reflection_pulse or {})
         emotion = dict(inp.emotion_context or {})
+        runtime_flags = _coerce_runtime_flags(inp.runtime_flags)
+        sys_mode = _resolve_sys_mode(runtime_flags)
+        activity_monitor = _resolve_activity_monitor(runtime_flags)
 
         reasons: list[str] = []
 
@@ -303,6 +325,35 @@ class MotiveEngine:
         # 反思保护
         if withdraw_hint:
             protect += 0.12
+
+        try:
+            idle_minutes = float(activity_monitor.get("idle_minutes") or 0.0)
+        except (TypeError, ValueError):
+            idle_minutes = 0.0
+
+        if sys_mode == "focus":
+            reach -= 0.12
+            continuity -= 0.08
+            withdraw += 0.12
+            protect += 0.10
+            reasons.append("mode:focus")
+        elif sys_mode == "gaming":
+            reach += 0.08
+            care += 0.04
+            continuity += 0.10
+            protect -= 0.04
+            reasons.append("mode:gaming")
+        elif sys_mode == "sleep":
+            reach -= 0.18
+            continuity -= 0.10
+            withdraw += 0.16
+            protect += 0.18
+            reasons.append("mode:sleep")
+
+        if idle_minutes >= 20.0 and sys_mode == "normal":
+            reach += 0.06
+            continuity += 0.04
+            reasons.append("activity:idle")
 
         # ── 截断归一化 ────────────────────────────────────────────────────────
         reach = _clamp(reach)

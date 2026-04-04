@@ -334,6 +334,334 @@ def test_build_chat_prompt_runtime_payload_carries_episodic_vector_recall_slot(
     )
 
 
+def test_build_memory_persona_signal_summarizes_humanized_recall_metadata() -> None:
+    signal = ccb._build_memory_persona_signal(
+        [
+            {
+                "metadata": {
+                    "emotion_color_tag": "warm",
+                    "suppression_flag": True,
+                    "distortion_level": 0.6,
+                }
+            },
+            {"metadata": {"emotion_color_tag": "warm"}},
+            {
+                "metadata": {
+                    "emotion_color_tag": "happy",
+                    "distortion_level": 0.2,
+                }
+            },
+            {"snippet": "plain memory without humanized metadata"},
+        ]
+    )
+
+    assert signal["humanized_memory_count"] == 3
+    assert signal["suppressed_memory_count"] == 1
+    assert signal["distorted_memory_count"] == 2
+    assert signal["avg_distortion_level"] == pytest.approx(0.4, abs=1e-4)
+    assert signal["dominant_memory_emotion"] == "WARM"
+    assert signal["recall_bias"] == "uncertain"
+    assert signal["memory_persona_guidance"]
+
+
+def test_apply_memory_persona_signal_to_persona_expression_hint_softens_suppressed_memory() -> None:
+    hint = {
+        "style_hint": "respond naturally",
+        "tone": "caring",
+        "echo_weight_modifier": 0.12,
+        "follow_up_tendency": 0.16,
+    }
+    memory_signal = {
+        "suppressed_memory_count": 1,
+        "distorted_memory_count": 1,
+        "avg_distortion_level": 0.48,
+        "recall_bias": "uncertain",
+        "memory_persona_guidance": "keep the memory touch soft",
+    }
+
+    adjusted = ccb._apply_memory_persona_signal_to_persona_expression_hint(hint, memory_signal)
+
+    assert adjusted["tone"] == "caring"
+    assert adjusted["follow_up_tendency"] == 0.03
+    assert adjusted["echo_weight_modifier"] == 0.05
+    assert adjusted["pace_hint"] == "steady"
+    assert "memory_guidance" in adjusted
+    assert "keep the memory touch soft" in str(adjusted.get("memory_guidance") or "")
+
+
+def test_build_chat_context_pack_includes_memory_persona_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import host_brain.app.dependencies as deps
+    import host_brain.app.emotion_context as emotion_context
+
+    normalized_emotion = {
+        "mood_state": "engaged",
+        "emotion_tag": "HAPPY",
+        "emotion_range_hint": "gentle",
+        "allowed_emotion_tags": ["HAPPY", "NEUTRAL"],
+        "emotion_intensity": 0.7,
+    }
+    monkeypatch.setattr(emotion_context, "normalize_chat_emotion_context", lambda raw: normalized_emotion)
+    monkeypatch.setattr(deps, "get_bond_stage_engine", lambda: None)
+    monkeypatch.setattr(ccb, "validate_context_pack", lambda _pack: pc.PromptContextValidationResult())
+
+    prompt_context, meta = ccb.build_chat_context_pack(
+        request_id="req-memory-persona-context",
+        session_id="session-memory-persona-context",
+        thread_id=None,
+        retrieval_summary={"status": "OK", "reason_code": "NONE"},
+        retrieval_evidence_items=[
+            {
+                "snippet": "shared walk by the river",
+                "metadata": {
+                    "emotion_color_tag": "warm",
+                    "suppression_flag": True,
+                    "distortion_level": 0.4,
+                },
+            },
+            {
+                "snippet": "quiet afterglow",
+                "metadata": {
+                    "emotion_color_tag": "warm",
+                },
+            },
+        ],
+        style_bindings=None,
+        emotion_context={},
+        cpb_slots={"style_canon": "STYLE_SLOT", "world_canon": "WORLD_SLOT"},
+    )
+
+    memory_hint = dict(prompt_context.get("memory_emotion_hint") or {})
+    assert meta["valid"] is True
+    assert memory_hint["humanized_memory_count"] == 2
+    assert memory_hint["suppressed_memory_count"] == 1
+    assert memory_hint["dominant_memory_emotion"] == "WARM"
+    assert memory_hint["recall_bias"] == "uncertain"
+
+
+def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expression_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+                "memory_emotion_hint": {
+                    "mood_state": "steady",
+                    "emotion_tag": "HAPPY",
+                    "retrieval_status": "OK",
+                    "retrieval_reason_code": "NONE",
+                    "humanized_memory_count": 2,
+                    "suppressed_memory_count": 1,
+                    "distorted_memory_count": 1,
+                    "avg_distortion_level": 0.52,
+                    "dominant_memory_emotion": "WARM",
+                    "recall_bias": "uncertain",
+                    "memory_persona_guidance": "touch the memory gently and do not over-claim details",
+                },
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "SAD",
+                "emotion_intensity": 0.8,
+                "emotion_range_hint": "needs support",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            hint = SimpleNamespace(
+                style_hint="respond naturally",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                pace_hint="steady",
+            )
+            setattr(hint, "追问倾向", 0.0)
+            return hint
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace())
+
+    class _FakeMotiveState:
+        def as_dict(self):
+            return {
+                "care_drive": 0.81,
+                "reach_out_drive": 0.42,
+                "continuity_drive": 0.38,
+                "withdraw_drive": 0.14,
+                "self_protect_drive": 0.1,
+                "dominant_motive": "care",
+            }
+
+    class _FakePolicy:
+        def as_dict(self):
+            return {"allow_followup": True, "max_sentences": 3}
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", lambda _inp: _FakeMotiveState())
+    monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", lambda _inp: _FakePolicy())
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-memory-expression",
+        person_id="person-memory-expression",
+        session_id="session-memory-expression",
+        thread_id=None,
+        user_message="我想起以前的事了",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "SAD", "emotion_intensity": 0.8},
+        recall_slot_text={},
+        bond_summary={},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    memory_signal = dict(runtime_payload.get("memory_persona_signal") or {})
+    hint = dict(runtime_payload.get("persona_expression_hint") or {})
+
+    assert memory_signal["suppressed_memory_count"] == 1
+    assert memory_signal["avg_distortion_level"] == pytest.approx(0.52, abs=1e-4)
+    assert hint["tone"] == "caring"
+    assert hint["follow_up_tendency"] == 0.03
+    assert hint["echo_weight_modifier"] == 0.05
+    assert "motive_guidance" in hint
+    assert "memory_guidance" in hint
+
+
+def test_build_chat_prompt_runtime_payload_passes_runtime_mode_flags_to_motive_and_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_SYS_MODE", "focus")
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+                "hard_snapshot": {"sys_mode": "focus"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "NEUTRAL",
+                "emotion_intensity": 0.3,
+                "emotion_range_hint": "calm",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(
+        deps,
+        "_activity_monitor_ref",
+        SimpleNamespace(get_status=lambda: {"is_gaming": False, "idle_minutes": 25.0}),
+        raising=False,
+    )
+
+    captured: dict[str, dict] = {}
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            hint = SimpleNamespace(
+                style_hint="respond naturally",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                pace_hint="steady",
+            )
+            setattr(hint, "追问倾向", 0.0)
+            return hint
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace())
+
+    class _FakeMotiveState:
+        def as_dict(self):
+            return {
+                "care_drive": 0.32,
+                "reach_out_drive": 0.24,
+                "continuity_drive": 0.26,
+                "withdraw_drive": 0.22,
+                "self_protect_drive": 0.18,
+                "dominant_motive": "care",
+            }
+
+    class _FakePolicy:
+        def as_dict(self):
+            return {"allow_followup": False, "max_sentences": 2}
+
+    def _fake_compute_motive_state(inp):  # noqa: ANN001
+        captured["motive"] = dict(inp.runtime_flags or {})
+        return _FakeMotiveState()
+
+    def _fake_decide_response_policy(inp):  # noqa: ANN001
+        captured["policy"] = dict(inp.runtime_flags or {})
+        return _FakePolicy()
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", _fake_compute_motive_state)
+    monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", _fake_decide_response_policy)
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-runtime-mode-flags",
+        person_id="person-runtime-mode-flags",
+        session_id="session-runtime-mode-flags",
+        thread_id=None,
+        user_message="继续说吧",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "NEUTRAL", "emotion_intensity": 0.3},
+        recall_slot_text={},
+        bond_summary={},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    assert dict(runtime_payload.get("runtime_mode") or {})["sys_mode"] == "focus"
+    assert captured["motive"]["sys_mode"] == "focus"
+    assert captured["policy"]["sys_mode"] == "focus"
+    assert dict(captured["policy"].get("activity_monitor") or {})["idle_minutes"] == 25.0
+
+
 def test_apply_motive_state_to_persona_expression_hint_promotes_caring_tone() -> None:
     hint = {
         "style_hint": "自然回应",

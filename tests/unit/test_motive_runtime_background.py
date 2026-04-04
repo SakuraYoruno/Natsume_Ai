@@ -26,8 +26,28 @@ def test_build_offline_state_from_inner_state_uses_elapsed_hours() -> None:
     )
 
     assert offline_state["offline_hours"] == pytest.approx(4.0, abs=1e-4)
+    assert offline_state["offline_duration_ms"] == 4 * 3600 * 1000
+    assert offline_state["absence_band"] == "recent"
     assert offline_state["loneliness_level"] == pytest.approx(0.6, abs=1e-6)
     assert offline_state["anticipation_topics"] == ["上次没说完的话题"]
+
+
+def test_build_offline_state_from_inner_state_classifies_long_absence_bands() -> None:
+    now_ms = 10 * 24 * 3600 * 1000
+    offline_state = build_offline_state_from_inner_state(
+        {
+            "last_interaction_ts_ms": now_ms - 80 * 3600 * 1000,
+            "total_offline_hours": 12.0,
+            "loneliness": 0.4,
+            "anticipation": 0.3,
+            "anticipation_topics": ["久别的话题"],
+        },
+        now_ms=now_ms,
+    )
+
+    assert offline_state["offline_hours"] == pytest.approx(80.0, abs=1e-4)
+    assert offline_state["offline_duration_ms"] == 80 * 3600 * 1000
+    assert offline_state["absence_band"] == "72h_plus"
 
 
 def test_emotional_silence_tick_uses_motive_state_to_adjust_recovery(monkeypatch) -> None:

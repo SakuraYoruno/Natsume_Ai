@@ -63,6 +63,58 @@ _DEFAULT_MAX_SENTENCES = 6
 _DEFAULT_MIN_SENTENCES = 1
 
 
+def _coerce_runtime_flags(raw: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _resolve_sys_mode(runtime_flags: dict[str, Any]) -> str:
+    mode = str(runtime_flags.get("sys_mode") or "").strip().lower()
+    if mode in {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}:
+        return mode
+    activity_monitor = runtime_flags.get("activity_monitor")
+    if isinstance(activity_monitor, dict) and bool(activity_monitor.get("is_gaming")):
+        return "gaming"
+    return "normal"
+
+
+def _resolve_activity_monitor(runtime_flags: dict[str, Any]) -> dict[str, Any]:
+    activity_monitor = runtime_flags.get("activity_monitor")
+    return dict(activity_monitor) if isinstance(activity_monitor, dict) else {}
+
+
+def _classify_absence_band(offline_hours: float) -> str:
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
+def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
+    raw_band = str(offline_state.get("absence_band") or "").strip()
+    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+        return raw_band
+    try:
+        offline_hours = float(offline_state.get("offline_hours") or 0.0)
+    except (TypeError, ValueError):
+        offline_hours = 0.0
+    return _classify_absence_band(offline_hours)
+
+
+def _offline_warmth_floor_for_absence_band(absence_band: str) -> float:
+    return {
+        "recent": 0.0,
+        "6h_plus": 0.08,
+        "24h_plus": 0.15,
+        "72h_plus": 0.18,
+        "7d_plus": 0.22,
+    }.get(absence_band, 0.0)
+
+
 # ── 数据类 ────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -150,6 +202,9 @@ class ResponsePolicyLayer:
         reflection = dict(inp.self_reflection_pulse or {})
         emotion = dict(inp.emotion_context or {})
         motive = dict(inp.motive_state or {})
+        runtime_flags = _coerce_runtime_flags(inp.runtime_flags)
+        sys_mode = _resolve_sys_mode(runtime_flags)
+        activity_monitor = _resolve_activity_monitor(runtime_flags)
 
         reasons: list[str] = []
 
@@ -213,6 +268,40 @@ class ResponsePolicyLayer:
             reasons.append(f"body:fatigue={fatigue_level},drowsy={drowsy_level}")
 
         # ── 规则 D：Bond 阶段限制亲密度上限 ──────────────────────────────────
+        if sys_mode == "focus":
+            p.max_chars = min(p.max_chars, 120)
+            p.max_sentences = min(p.max_sentences, 2)
+            p.allow_topic_shift = False
+            p.allow_proactive_after_reply = False
+            p.should_be_brief = True
+            p.humor_ceiling = min(p.humor_ceiling, 0.18)
+            reasons.append("mode:focus")
+        elif sys_mode == "gaming":
+            p.max_chars = min(p.max_chars, 180)
+            p.max_sentences = min(p.max_sentences, 3)
+            p.allow_topic_shift = False
+            p.warmth_floor = max(p.warmth_floor, 0.12)
+            p.intimacy_ceiling = min(p.intimacy_ceiling, 0.60)
+            reasons.append("mode:gaming")
+        elif sys_mode == "sleep":
+            p.max_chars = min(p.max_chars, 80)
+            p.max_sentences = min(p.max_sentences, 2)
+            p.allow_followup = False
+            p.allow_topic_shift = False
+            p.allow_proactive_after_reply = False
+            p.should_be_brief = True
+            p.withdrawal_guard = True
+            p.humor_ceiling = min(p.humor_ceiling, 0.12)
+            reasons.append("mode:sleep")
+
+        try:
+            idle_minutes = float(activity_monitor.get("idle_minutes") or 0.0)
+        except (TypeError, ValueError):
+            idle_minutes = 0.0
+        if idle_minutes >= 20.0 and sys_mode == "normal" and not p.should_be_withdrawn:
+            p.warmth_floor = max(p.warmth_floor, 0.08)
+            reasons.append("activity:idle")
+
         bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
         bond_ceiling = _BOND_INTIMACY.get(bond_stage, _BOND_INTIMACY_DEFAULT)
         p.intimacy_ceiling = min(p.intimacy_ceiling, bond_ceiling)
@@ -224,12 +313,17 @@ class ResponsePolicyLayer:
             reasons.append("confession_guard:shallow_bond")
 
         # ── 规则 F：离线等待提升温度下限（但不突破现有上限）────────────────
-        offline_hours = float(offline.get("offline_hours") or 0.0)
+        try:
+            offline_hours = float(offline.get("offline_hours") or 0.0)
+        except (TypeError, ValueError):
+            offline_hours = 0.0
         loneliness = float(offline.get("loneliness_level") or 0.0)
+        absence_band = _resolve_absence_band(offline)
+        absence_warmth_floor = _offline_warmth_floor_for_absence_band(absence_band)
 
-        if offline_hours >= 12.0:
-            p.warmth_floor = max(p.warmth_floor, 0.15)
-            reasons.append("offline:long_wait")
+        if absence_warmth_floor > 0.0:
+            p.warmth_floor = max(p.warmth_floor, absence_warmth_floor)
+            reasons.append(f"offline:{absence_band}")
         if loneliness >= 0.6:
             p.warmth_floor = max(p.warmth_floor, 0.10)
             reasons.append("offline:loneliness_high")

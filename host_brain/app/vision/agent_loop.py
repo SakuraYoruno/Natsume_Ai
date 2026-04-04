@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, TYPE_CHECKING
 
@@ -46,6 +47,158 @@ DEFAULT_TOTAL_TIMEOUT_SEC = 120 # 总超时（秒）
 # ---------------------------------------------------------------------------
 # ClawdBot 客户端接口（抽象）
 # ---------------------------------------------------------------------------
+
+_BLOCKING_SCENE_TAGS = {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}
+_GAMING_SCENE_TAGS = {"gaming", "gameplay", "battle", "lobby"}
+
+
+def _normalize_scene_tags(raw_tags: Any) -> list[str]:
+    """Normalize raw screenshot scene tags into a compact structured tag list."""
+    candidates: list[str] = []
+
+    def _append(value: Any) -> None:
+        if isinstance(value, str):
+            parts = re.split(r"[,;|/]", value)
+            for part in parts:
+                normalized = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "_", part.strip().lower())
+                normalized = normalized.strip("_")
+                if normalized:
+                    candidates.append(normalized)
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                _append(item)
+
+    _append(raw_tags)
+
+    alias_map: dict[str, list[str]] = {
+        "focus": ["focus_work"],
+        "focused": ["focus_work"],
+        "working": ["focus_work"],
+        "study": ["focus_work"],
+        "studying": ["focus_work"],
+        "coding": ["focus_work"],
+        "editing": ["focus_work"],
+        "document": ["focus_work"],
+        "spreadsheet": ["focus_work"],
+        "presentation": ["focus_work"],
+        "focus_work": ["focus_work"],
+        "video": ["fullscreen_video"],
+        "movie": ["fullscreen_video"],
+        "streaming": ["fullscreen_video"],
+        "watching_video": ["fullscreen_video"],
+        "fullscreen": ["fullscreen_video"],
+        "fullscreen_video": ["fullscreen_video"],
+        "sleep": ["sleeping_screen"],
+        "sleeping": ["sleeping_screen"],
+        "screensaver": ["sleeping_screen"],
+        "screen_saver": ["sleeping_screen"],
+        "lock_screen": ["sleeping_screen"],
+        "locked": ["sleeping_screen"],
+        "sleeping_screen": ["sleeping_screen"],
+        "meeting": ["meeting"],
+        "video_call": ["meeting"],
+        "conference": ["meeting"],
+        "call": ["meeting"],
+        "gaming": ["gaming"],
+        "game": ["gaming"],
+        "gameplay": ["gaming", "gameplay"],
+        "battle": ["gaming", "battle"],
+        "combat": ["gaming", "battle"],
+        "lobby": ["gaming", "lobby"],
+        "matchmaking": ["gaming", "lobby"],
+    }
+
+    normalized: list[str] = []
+    for tag in candidates:
+        expanded = alias_map.get(tag, [tag])
+        for item in expanded:
+            if item not in normalized:
+                normalized.append(item)
+    return normalized
+
+
+def _build_scene_awareness_signal(screenshot_data: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Build a privacy-safe scene awareness payload from screenshot metadata only."""
+    payload = dict(screenshot_data or {})
+    raw_scene = payload.get("scene_awareness")
+
+    current_activity = ""
+    app_name = ""
+    companion_suitable: bool | None = None
+    confidence: float | None = None
+    source = "screenshot_only"
+    scene_tags: list[str] = []
+
+    if isinstance(raw_scene, dict):
+        scene_tags.extend(_normalize_scene_tags(raw_scene.get("scene_tags")))
+        current_activity = str(raw_scene.get("current_activity") or "").strip()
+        app_name = str(raw_scene.get("app_name") or "").strip()
+        if isinstance(raw_scene.get("companion_suitable"), bool):
+            companion_suitable = bool(raw_scene.get("companion_suitable"))
+        try:
+            if raw_scene.get("confidence") is not None:
+                confidence = float(raw_scene.get("confidence"))
+        except (TypeError, ValueError):
+            confidence = None
+        source = str(raw_scene.get("source") or "scene_awareness").strip() or "scene_awareness"
+    elif raw_scene is not None:
+        scene_tags.extend(_normalize_scene_tags(raw_scene))
+        source = "scene_awareness"
+
+    legacy_tags = _normalize_scene_tags(payload.get("scene_tags"))
+    if legacy_tags:
+        source = "legacy_fields" if source == "screenshot_only" else source
+        scene_tags.extend(tag for tag in legacy_tags if tag not in scene_tags)
+
+    if not current_activity:
+        current_activity = str(payload.get("current_activity") or "").strip()
+    if not app_name:
+        app_name = str(payload.get("app_name") or "").strip()
+
+    window_title = str(payload.get("window_title") or "").strip().lower()
+    activity_text = current_activity.lower()
+    app_text = app_name.lower()
+    combined_text = " ".join(part for part in (activity_text, app_text, window_title) if part)
+
+    def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
+        return any(needle in text for needle in needles)
+
+    inferred: list[str] = []
+    if _contains_any(combined_text, ("sleep", "lock screen", "locked", "screensaver", "休眠", "锁屏", "屏保")):
+        inferred.append("sleeping_screen")
+    if _contains_any(combined_text, ("meeting", "conference", "zoom", "teams", "飞书会议", "腾讯会议", "钉钉会议", "video call")):
+        inferred.append("meeting")
+    if _contains_any(activity_text, ("focus", "coding", "editing", "document", "spreadsheet", "presentation", "writing", "study", "办公", "编码", "写作", "文档")):
+        inferred.append("focus_work")
+    if _contains_any(combined_text, ("fullscreen video", "watching video", "video playback", "youtube", "bilibili", "netflix", "vlc", "player", "爱奇艺", "哔哩", "优酷")):
+        inferred.append("fullscreen_video")
+    if _contains_any(combined_text, ("gaming", "gameplay", "battle", "lobby", "steam", "epic", "游戏", "对战", "大厅", "排位")):
+        inferred.append("gaming")
+        if _contains_any(combined_text, ("battle", "combat", "对战", "战斗")):
+            inferred.append("battle")
+        if _contains_any(combined_text, ("lobby", "matchmaking", "大厅", "匹配")):
+            inferred.append("lobby")
+
+    for tag in inferred:
+        if tag not in scene_tags:
+            scene_tags.append(tag)
+
+    if companion_suitable is None:
+        if any(tag in _BLOCKING_SCENE_TAGS for tag in scene_tags):
+            companion_suitable = False
+        elif any(tag in _GAMING_SCENE_TAGS for tag in scene_tags):
+            companion_suitable = True
+
+    return {
+        "scene_tags": scene_tags,
+        "current_activity": current_activity or None,
+        "app_name": app_name or None,
+        "companion_suitable": companion_suitable,
+        "source": source,
+        "confidence": confidence,
+        "has_screenshot": bool(str(payload.get("image_base64") or "").strip()),
+    }
+
 
 class ClawdbotClient:
     """与 ClawdBot 通信的客户端。
@@ -243,6 +396,7 @@ async def run_agent_loop(
                     final_status = "SCREENSHOT_TIMEOUT"
                     break
 
+                scene_awareness = _build_scene_awareness_signal(screenshot_data)
                 screenshot_error = screenshot_data.get("error")
                 yield _sse({
                     "phase": "SCREENSHOT_DONE",
@@ -250,6 +404,7 @@ async def run_agent_loop(
                     "status": "FAILED" if screenshot_error else "OK",
                     "error": screenshot_error,
                     "mock": screenshot_data.get("mock", False),
+                    "scene_awareness": scene_awareness,
                     "request_id": request_id,
                 })
 
@@ -262,6 +417,7 @@ async def run_agent_loop(
                     "image_base64": screenshot_data.get("image_base64", ""),
                     "image_mime": screenshot_data.get("image_mime", "image/png"),
                     "resolution": f"{screenshot_data.get('width', 0)}x{screenshot_data.get('height', 0)}",
+                    "scene_awareness": scene_awareness,
                 }
 
                 # ── 步骤 2：生成 ActionPlan ───────────────────────────────

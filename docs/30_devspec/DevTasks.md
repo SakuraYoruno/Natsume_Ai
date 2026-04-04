@@ -7779,3 +7779,124 @@ TASK-XXXX 标题
   - 不依赖外部在线服务即可在单元测试中复现。
 - 涉及文件路径：`tests/unit/test_motive_runtime_background.py`。
 - 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_GAP_CHECKLIST_V2_20260403.md`；FR-PERSONA-001。
+
+---
+
+## M47：数字生命下一阶段（实测、长期连续性、场景联动）
+
+> **里程碑目标**：在 M46 完成 `response_policy` / `motive_state` 行为闭环后，把数字生命工程从“规则接线完成”推进到“真实运行可验收、长期连续性可体验、模式与场景可联动”的下一阶段。
+> **依据**：`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；`docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md`。
+
+### TASK-0455 M47-A：数字生命运行态人工验收与 findings 归档
+
+- 状态：PLANNED
+- 任务描述：按 `DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md` 对当前分支跑一轮数字生命运行态实测，确认 scheduler、personality tick、session_end、主动链、主回复链在真实环境中的持续生效情况，并形成正式 findings 文档。
+- 输入：`docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md`；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 中的 `N0-T01` / `N0-T03`。
+- 输出：
+  - `docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_FINDINGS_202604XX.md`（新增）；
+  - 必要时回填 `docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 的 remaining gaps 说明。
+- 验收标准：
+  - 至少覆盖 scheduler、personality ticks、session_end、主动消息、motive-driven 主回复五类验证项；
+  - 每项记录 commit、环境、观察输入、观测输出、PASS/FAIL/PARTIAL、修正建议；
+  - 最终形成 remaining Top 3 gaps 与建议优先级；
+  - findings 文档可被后续实现任务直接引用。
+- 涉及文件路径：`docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md`；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；`docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_FINDINGS_202604XX.md`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md`；FR-OBS-001；FR-PERSONA-001。
+
+---
+
+### TASK-0456 M47-B：统一数字生命 runtime snapshot 与观测面
+
+- 状态：PLANNED
+- 任务描述：把 `offline_state`、`silence_state`、`body_sense`、`bond_narrative`、`self_reflection_pulse`、`motive_state`、`response_policy`、`sys_mode` 收束到统一只读 runtime snapshot，方便实测、调参与回归时快速判断数字生命状态。
+- 输入：`host_brain/app/obs_routes.py`、`host_brain/app/http_hooks_runtime_helpers.py`、现有 trace / health 输出链；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 中的 `N0-T02`。
+- 输出：
+  - `host_brain/app/obs_routes.py`（修改）；
+  - `host_brain/app/http_hooks_runtime_helpers.py`（修改）；
+  - 相关单元/集成测试（补充）。
+- 验收标准：
+  - 至少一个统一接口或视图可查看核心生命状态摘要；
+  - 不读源码也能判断当前回复为何更克制、为何更主动或为何进入收缩；
+  - snapshot 仅提供只读观测，不引入额外副作用；
+  - 回归测试可守住字段存在性与兼容性。
+- 涉及文件路径：`host_brain/app/obs_routes.py`；`host_brain/app/http_hooks_runtime_helpers.py`；`tests/unit/test_http_hooks_runtime_helpers.py`；`tests/integration/test_obs_routes_integration.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；FR-OBS-001；FR-PERSONA-001。
+
+---
+
+### TASK-0457 M47-C：长间隔 offline continuity 分层校准
+
+- 状态：PLANNED
+- 任务描述：把当前离线连续性从“是否离线”推进到“离线多久、关系多深、当前多想靠近”的分层体验，让 `6h / 24h / 72h / 7d` 四档差异稳定影响主动、沉默恢复与主回复表达。
+- 输入：`host_brain/persona/inner_world.py`、`host_brain/persona/emotional_silence.py`、`host_brain/persona/proactive_voice.py`、`host_brain/app/chat_context_builder.py`；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 中的 `N1-T01` ~ `N1-T04`。
+- 输出：
+  - `host_brain/persona/inner_world.py`（修改）；
+  - `host_brain/persona/emotional_silence.py`（修改）；
+  - `host_brain/persona/proactive_voice.py`（修改）；
+  - 相关回归测试（补充）。
+- 验收标准：
+  - 至少覆盖 `6h / 24h / 72h / 7d` 四档离线差异；
+  - 久别重逢、轻度失联、短暂离开三类体验可稳定区分；
+  - 高 bond / 高 continuity 时更自然延续关系，高 self-protect / 低 bond 时不过度贴近；
+  - 自动化回归可守住长时段差异。
+- 涉及文件路径：`host_brain/persona/inner_world.py`；`host_brain/persona/emotional_silence.py`；`host_brain/persona/proactive_voice.py`；`host_brain/app/chat_context_builder.py`；`tests/unit/test_motive_runtime_background.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；FR-PERSONA-001；FR-PERSONA-002。
+
+---
+
+### TASK-0458 M47-D：记忆人格化进入主聊天行为链
+
+- 状态：PLANNED
+- 任务描述：把 `episodic` 中已有的 `emotion_color_tag`、`suppression_flag`、`distortion_level` 从“存储层元数据”推进到“主聊天与主动行为可消费的 runtime 信号”，让回忆内容随当前情绪、关系与动机出现可解释差异。
+- 输入：`host_brain/memory/episodic.py`、`host_brain/app/memory/episodic_store.py`、`host_brain/app/chat_context_builder.py`、`host_brain/persona/proactive_voice.py`；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 中的 `N2-T01` ~ `N2-T04`。
+- 输出：
+  - `host_brain/memory/episodic.py`（修改）；
+  - `host_brain/app/memory/episodic_store.py`（修改）；
+  - `host_brain/app/chat_context_builder.py`（修改）；
+  - 相关单元/集成测试（补充）。
+- 验收标准：
+  - recall 包能稳定透出记忆人格化元信息；
+  - mood / bond / motive 会影响 recall 排序与表达方式；
+  - 高压痛感记忆不会在轻聊场景被随意拉出；
+  - 端到端测试可验证“同一记忆、不同情绪染色”下的行为差异。
+- 涉及文件路径：`host_brain/memory/episodic.py`；`host_brain/app/memory/episodic_store.py`；`host_brain/app/chat_context_builder.py`；`tests/unit/`；`tests/integration/`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；FR-MEM-003~005；FR-PERSONA-001。
+
+---
+
+### TASK-0459 M47-E：模式切换与活动感知驱动行为矩阵
+
+- 状态：PLANNED
+- 任务描述：让 `sys_mode` 与 `ActivityMonitor` 的 gaming / idle / wakeup 事件真正改变 `response_policy`、主动表达与回复风格，使 `normal / focus / gaming / sleep` 下的数字生命体验稳定分化。
+- 输入：`host_brain/core/mode_transition.py`、`host_brain/core/activity_monitor.py`、`host_brain/app/http_hooks.py`、`host_brain/persona/response_policy.py`、`host_brain/persona/proactive_voice.py`；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 中的 `N3-T01` / `N3-T02`。
+- 输出：
+  - `host_brain/persona/response_policy.py`（修改）；
+  - `host_brain/persona/proactive_voice.py`（修改）；
+  - 必要的接线与回归测试（补充）。
+- 验收标准：
+  - `focus` 下更克制，`gaming` 下更陪玩导向，`sleep` 下更少主动打扰；
+  - 活动切换后，主动表达频率、话题选择、语气存在稳定差异；
+  - 模式变化可在 runtime snapshot 中观测；
+  - 行为矩阵可通过自动化样例回归。
+- 涉及文件路径：`host_brain/core/mode_transition.py`；`host_brain/core/activity_monitor.py`；`host_brain/app/http_hooks.py`；`host_brain/persona/response_policy.py`；`host_brain/persona/proactive_voice.py`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；FR-PERSONA-001；FR-OBS-001。
+
+---
+
+### TASK-0460 M47-F：screenshot scene-aware proactive 最小闭环
+
+- 状态：PLANNED
+- 任务描述：在不破坏现有主链稳定性的前提下，把 screenshot / scene awareness 以“结构化场景标签”的方式接入主动表达链，用于陪玩、当前活动感知与轻量情境追随。
+- 输入：`host_brain/app/vision/agent_loop.py`、`host_brain/app/vision/edge_rpc_client.py`、`host_brain/persona/proactive_voice.py`；`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md` 中的 `N3-T03` / `N3-T04`。
+- 输出：
+  - `host_brain/app/vision/agent_loop.py`（修改）；
+  - `host_brain/app/vision/edge_rpc_client.py`（修改）；
+  - `host_brain/persona/proactive_voice.py`（修改）；
+  - 相关测试（补充）。
+- 验收标准：
+  - 有 screenshot 时只产出结构化 scene tag，不把原始图像信息直接硬塞给回复链；
+  - 无 screenshot 或 vision 降级时，主动链可优雅回退；
+  - `sleep` 或高 `self_protect_drive` 场景下不会误触发多模态主动；
+  - 至少覆盖一组 gaming / desktop scene-aware 回归样例。
+- 涉及文件路径：`host_brain/app/vision/agent_loop.py`；`host_brain/app/vision/edge_rpc_client.py`；`host_brain/persona/proactive_voice.py`；`tests/unit/`；`tests/integration/`。
+- 关联需求：`docs/35_quality/audits/DIGITAL_LIFE_NEXT_PHASE_CHECKLIST_20260404.md`；FR-VISION-001~004；FR-PERSONA-001。

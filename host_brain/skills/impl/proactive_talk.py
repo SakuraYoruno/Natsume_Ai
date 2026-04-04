@@ -136,6 +136,129 @@ def _apply_response_policy_to_proactive_text(text: str, response_policy: Mapping
 
 # Skill 元数据常量
 SKILL_NAME = "proactive_talk"
+_SCENE_BLOCKING_TAGS = {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}
+_SCENE_GAMING_TAGS = {"gaming", "gameplay", "battle", "lobby"}
+
+
+def _normalize_scene_tag_values(raw_tags: Any) -> list[str]:
+    values: list[str] = []
+
+    def _push(value: Any) -> None:
+        if isinstance(value, str):
+            for part in str(value).replace(";", ",").replace("|", ",").split(","):
+                normalized = part.strip().lower().replace("-", "_").replace(" ", "_")
+                normalized = normalized.strip("_")
+                if normalized:
+                    values.append(normalized)
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                _push(item)
+
+    _push(raw_tags)
+
+    alias_map: dict[str, list[str]] = {
+        "focus": ["focus_work"],
+        "working": ["focus_work"],
+        "coding": ["focus_work"],
+        "editing": ["focus_work"],
+        "study": ["focus_work"],
+        "document": ["focus_work"],
+        "focus_work": ["focus_work"],
+        "video": ["fullscreen_video"],
+        "fullscreen": ["fullscreen_video"],
+        "fullscreen_video": ["fullscreen_video"],
+        "movie": ["fullscreen_video"],
+        "sleep": ["sleeping_screen"],
+        "screensaver": ["sleeping_screen"],
+        "lock_screen": ["sleeping_screen"],
+        "sleeping_screen": ["sleeping_screen"],
+        "meeting": ["meeting"],
+        "conference": ["meeting"],
+        "video_call": ["meeting"],
+        "gaming": ["gaming"],
+        "game": ["gaming"],
+        "gameplay": ["gaming", "gameplay"],
+        "battle": ["gaming", "battle"],
+        "combat": ["gaming", "battle"],
+        "lobby": ["gaming", "lobby"],
+    }
+
+    normalized: list[str] = []
+    for tag in values:
+        for item in alias_map.get(tag, [tag]):
+            if item not in normalized:
+                normalized.append(item)
+    return normalized
+
+
+def _coerce_scene_awareness(raw_scene: Any) -> dict[str, Any]:
+    if not isinstance(raw_scene, Mapping):
+        return {
+            "scene_tags": [],
+            "current_activity": None,
+            "app_name": None,
+            "companion_suitable": None,
+            "source": "",
+            "confidence": None,
+            "has_screenshot": False,
+        }
+
+    scene_tags = _normalize_scene_tag_values(raw_scene.get("scene_tags"))
+    current_activity = str(raw_scene.get("current_activity") or "").strip() or None
+    app_name = str(raw_scene.get("app_name") or "").strip() or None
+    companion_suitable = raw_scene.get("companion_suitable") if isinstance(raw_scene.get("companion_suitable"), bool) else None
+    confidence = raw_scene.get("confidence")
+    try:
+        if confidence is not None:
+            confidence = float(confidence)
+    except (TypeError, ValueError):
+        confidence = None
+
+    inferred_tags = _normalize_scene_tag_values(current_activity)
+    for tag in inferred_tags:
+        if tag not in scene_tags:
+            scene_tags.append(tag)
+
+    if companion_suitable is None:
+        if any(tag in _SCENE_BLOCKING_TAGS for tag in scene_tags):
+            companion_suitable = False
+        elif any(tag in _SCENE_GAMING_TAGS for tag in scene_tags):
+            companion_suitable = True
+
+    return {
+        "scene_tags": scene_tags,
+        "current_activity": current_activity,
+        "app_name": app_name,
+        "companion_suitable": companion_suitable,
+        "source": str(raw_scene.get("source") or "").strip(),
+        "confidence": confidence,
+        "has_screenshot": bool(raw_scene.get("has_screenshot")),
+    }
+
+
+def _scene_awareness_blocks_proactive(scene_awareness: Mapping[str, Any] | None) -> tuple[bool, str]:
+    scene = _coerce_scene_awareness(scene_awareness)
+    blocked_tags = [tag for tag in scene.get("scene_tags") or [] if tag in _SCENE_BLOCKING_TAGS]
+    if blocked_tags:
+        return True, f"scene_tags={','.join(blocked_tags)}"
+    if scene.get("companion_suitable") is False:
+        current_activity = str(scene.get("current_activity") or "")
+        return True, f"companion_suitable=false activity={current_activity or '-'}"
+    return False, ""
+
+
+def _build_scene_hint_for_proactive(scene_awareness: Mapping[str, Any] | None) -> str:
+    scene = _coerce_scene_awareness(scene_awareness)
+    scene_tags = scene.get("scene_tags") or []
+    if not scene_tags:
+        return ""
+    if any(tag in _SCENE_GAMING_TAGS for tag in scene_tags):
+        return "当前更像游戏中的陪伴场景，适合短句、轻陪伴、不打断操作。"
+    if any(tag in _SCENE_BLOCKING_TAGS for tag in scene_tags):
+        return "当前场景不适合主动打扰，应当避免发起额外对话。"
+    return f"当前场景标签：{', '.join(scene_tags[:4])}。主动表达保持轻一点。"
+
+
 SKILL_CLEARANCE = "LOW"
 SKILL_RISK_LEVEL = 1
 SKILL_SCOPE = "chat"
@@ -239,6 +362,8 @@ def execute_proactive_talk(
     motive_state: dict[str, Any] = dict(ctx.get("motive_state") or {})
     motive_hint = _build_motive_hint_for_proactive(motive_state)
     response_policy: dict[str, Any] = _coerce_response_policy(ctx.get("response_policy"))
+    scene_awareness: dict[str, Any] = _coerce_scene_awareness(ctx.get("scene_awareness"))
+    scene_hint = _build_scene_hint_for_proactive(scene_awareness)
 
     if _response_policy_blocks_proactive(response_policy):
         return {
@@ -278,6 +403,20 @@ def execute_proactive_talk(
                 "motive_state": motive_state,
             }
 
+    scene_blocked, scene_block_reason = _scene_awareness_blocks_proactive(scene_awareness)
+    if scene_blocked:
+        return {
+            "status": STATUS_REJECTED,
+            "event_id": event_id,
+            "reason_code": SCHED_CONDITION_UNMET,
+            "detail": f"scene_awareness blocked proactive_talk: {scene_block_reason}",
+            "request_id": request_id,
+            "ts_ms": ts,
+            "motive_state": motive_state,
+            "response_policy": response_policy,
+            "scene_awareness": scene_awareness,
+        }
+
     # LLM 生成主动问候
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     greeting: str = ""
@@ -297,6 +436,8 @@ def execute_proactive_talk(
                 "motive_state": motive_state,
                 "motive_hint": motive_hint,
                 "response_policy": response_policy,
+                "scene_awareness": scene_awareness,
+                "scene_hint": scene_hint,
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
@@ -320,6 +461,9 @@ def execute_proactive_talk(
         }
         greeting = templates.get(time_period, f"{user_name}，好久没聊了，在忙什么呢？")
 
+    if (not llm_generator) and any(tag in _SCENE_GAMING_TAGS for tag in scene_awareness.get("scene_tags") or []):
+        greeting = f"{user_name}，我先轻轻陪你一会儿，不打扰你操作。"
+
     greeting = _apply_response_policy_to_proactive_text(greeting, response_policy)
 
     if not greeting.strip():
@@ -342,6 +486,8 @@ def execute_proactive_talk(
         # 方向 B：携带情感上下文供 UI 渲染（如表情切换）
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
         "dominant_motive": motive_state.get("dominant_motive"),
+        "scene_tags": list(scene_awareness.get("scene_tags") or []),
+        "scene_activity": scene_awareness.get("current_activity"),
     }
 
     ui_pusher: UIPusher | None = ctx.get("ui_pusher")
@@ -369,4 +515,6 @@ def execute_proactive_talk(
         "motive_driven": bool(motive_hint),
         "motive_state": motive_state,
         "response_policy": response_policy,
+        "scene_driven": bool(scene_hint),
+        "scene_awareness": scene_awareness,
     }

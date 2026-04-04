@@ -54,13 +54,16 @@ DEFAULT_COOLDOWN_MS = 24 * 60 * 60 * 1000  # 24 小时
 # 离线久归阈值（毫秒）：3 天
 DEFAULT_LONG_ABSENT_THRESHOLD_MS = 3 * 24 * 60 * 60 * 1000
 
+# 强 reconnect 条件下的提前重连阈值：24 小时
+EARLY_RECONNECT_THRESHOLD_MS = 24 * 60 * 60 * 1000
+
 # 情感高潮阈值
 DEFAULT_INTENSE_THRESHOLD = 0.8
 
 # 离线时长分级（毫秒）
-_ABSENT_SHORT_MS = 3 * 24 * 60 * 60 * 1000    # 3天
-_ABSENT_MEDIUM_MS = 7 * 24 * 60 * 60 * 1000   # 1周
-_ABSENT_LONG_MS = 30 * 24 * 60 * 60 * 1000    # 1个月
+_ABSENT_SHORT_MS = 24 * 60 * 60 * 1000        # 24小时
+_ABSENT_MEDIUM_MS = 3 * 24 * 60 * 60 * 1000   # 72小时
+_ABSENT_LONG_MS = 7 * 24 * 60 * 60 * 1000     # 1周
 
 
 # ---------------------------------------------------------------------------
@@ -604,10 +607,11 @@ def _get_absent_level(elapsed_ms: int) -> str:
     """根据离线时长返回分级。"""
     if elapsed_ms >= _ABSENT_LONG_MS:
         return "long"
-    elif elapsed_ms >= _ABSENT_MEDIUM_MS:
+    if elapsed_ms >= _ABSENT_MEDIUM_MS:
         return "medium"
-    else:
+    if elapsed_ms >= _ABSENT_SHORT_MS:
         return "short"
+    return "short"
 
 
 def _pick_variant(variants: list[str], seed: int) -> str:
@@ -700,19 +704,36 @@ class PersonaProactiveVoice:
         )
         _loneliness_value = float(
             offline_state.get("loneliness_value")
+            or offline_state.get("loneliness_level")
             or offline_state.get("loneliness")
             or 0.0
         )
         _anticipation_value = float(
             offline_state.get("anticipation_value")
+            or offline_state.get("anticipation_level")
             or offline_state.get("anticipation")
             or 0.0
         )
-        # 将等待感知数据注入 ctx，供各 checker 和 template 使用
+        _absence_band = str(offline_state.get("absence_band") or "").strip()
+        if _absence_band not in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+            _offline_hours = float(offline_state.get("offline_hours") or 0.0)
+            if _offline_hours <= 0.0 and _offline_duration_ms > 0:
+                _offline_hours = _offline_duration_ms / 3_600_000.0
+            if _offline_hours >= 7 * 24:
+                _absence_band = "7d_plus"
+            elif _offline_hours >= 72:
+                _absence_band = "72h_plus"
+            elif _offline_hours >= 24:
+                _absence_band = "24h_plus"
+            elif _offline_hours >= 6:
+                _absence_band = "6h_plus"
+            else:
+                _absence_band = "recent"
         if _offline_duration_ms > 0 and not ctx.get("_offline_duration_ms"):
             ctx["_offline_duration_ms"] = _offline_duration_ms
         ctx["_loneliness_value"] = _loneliness_value
         ctx["_anticipation_value"] = _anticipation_value
+        ctx["_absence_band"] = _absence_band
 
         # 按优先级检测场景
         scenes_to_check = [
@@ -728,6 +749,24 @@ class PersonaProactiveVoice:
             if not self._check_cooldown(uid, scene_type, now_ts):
                 continue
             if checker(ctx, now_ts):
+                mode_allowed, mode_influence = self._mode_allows_scene(scene_type, ctx)
+                if not mode_allowed:
+                    _logger.debug(
+                        "主动表达被 runtime mode 拦截: user=%s scene=%s reason=%s",
+                        uid,
+                        scene_type,
+                        mode_influence,
+                    )
+                    continue
+                scene_allowed, scene_influence = self._scene_allows_scene(scene_type, ctx)
+                if not scene_allowed:
+                    _logger.debug(
+                        "主动表达被 scene awareness 拦截: user=%s scene=%s reason=%s",
+                        uid,
+                        scene_type,
+                        scene_influence,
+                    )
+                    continue
                 motive_allowed, motive_influence = self._motive_allows_scene(scene_type, motive_state)
                 if not motive_allowed:
                     _logger.debug(
@@ -738,6 +777,7 @@ class PersonaProactiveVoice:
                     )
                     continue
                 style = self._select_style(traits)
+                style = self._apply_mode_to_style(style, ctx)
                 bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
                 content = self._get_template(scene_type, style, ctx, now_ts, bond_stage)
                 emotion_tag = self._scene_emotion(
@@ -756,12 +796,18 @@ class PersonaProactiveVoice:
                     _last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
                     _wait_ms = (now_ts - _last_ts) if _last_ts > 0 else 0
 
+                absence_influence = ""
+                if scene_type == SCENE_LONG_ABSENT and _absence_band:
+                    absence_influence = f"absence_band={_absence_band}"
+
                 expr = ProactiveExpression(
                     scene_type=scene_type,
                     content=content,
                     emotion_tag=emotion_tag,
                     trait_influence=trait_influence,
-                    motive_influence=motive_influence,
+                    motive_influence=" | ".join(
+                        part for part in (absence_influence, mode_influence, scene_influence, motive_influence) if part
+                    ),
                     ts_ms=now_ts,
                     wait_duration_ms=_wait_ms,
                     loneliness_value=_loneliness_value,
@@ -835,6 +881,103 @@ class PersonaProactiveVoice:
             return True, f"dominant_motive={dominant_motive}"
         return True, ""
 
+    @staticmethod
+    def _resolve_runtime_mode(ctx: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        sys_mode = str(ctx.get("sys_mode") or "").strip().lower()
+        activity_monitor_raw = ctx.get("activity_monitor")
+        activity_monitor = dict(activity_monitor_raw) if isinstance(activity_monitor_raw, dict) else {}
+        if sys_mode in {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}:
+            return sys_mode, activity_monitor
+        if bool(activity_monitor.get("is_gaming")):
+            return "gaming", activity_monitor
+        return "normal", activity_monitor
+
+    def _mode_allows_scene(self, scene_type: str, ctx: dict[str, Any]) -> tuple[bool, str]:
+        sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)
+        if sys_mode == "sleep":
+            return False, "sys_mode=sleep suppresses proactive expression"
+        if sys_mode == "focus" and scene_type not in {SCENE_LONG_ABSENT, SCENE_POST_INTENSE}:
+            return False, "sys_mode=focus keeps proactive expression restrained"
+        if sys_mode == "gaming" and scene_type in {SCENE_LATE_NIGHT, SCENE_MORNING_GREET, SCENE_HOLIDAY_GREET}:
+            return False, "sys_mode=gaming prefers companion follow-up over generic greeting"
+        if bool(activity_monitor.get("is_gaming")) and scene_type == SCENE_LATE_NIGHT:
+            return False, "gaming activity suppresses generic late-night prompt"
+        return True, "" if sys_mode == "normal" else f"mode={sys_mode}"
+
+    @staticmethod
+    def _coerce_scene_awareness(ctx: dict[str, Any]) -> dict[str, Any]:
+        raw = ctx.get("scene_awareness")
+        if not isinstance(raw, dict):
+            return {"scene_tags": [], "current_activity": None, "companion_suitable": None}
+
+        values: list[str] = []
+        raw_tags = raw.get("scene_tags") or []
+        if isinstance(raw_tags, str):
+            raw_tags = [part.strip() for part in raw_tags.replace(";", ",").replace("|", ",").split(",")]
+        if isinstance(raw_tags, (list, tuple, set)):
+            for item in raw_tags:
+                normalized = str(item or "").strip().lower().replace("-", "_").replace(" ", "_")
+                normalized = normalized.strip("_")
+                if normalized and normalized not in values:
+                    values.append(normalized)
+
+        current_activity = str(raw.get("current_activity") or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if current_activity and current_activity not in values:
+            values.append(current_activity)
+
+        alias_map = {
+            "focus": "focus_work",
+            "working": "focus_work",
+            "coding": "focus_work",
+            "editing": "focus_work",
+            "study": "focus_work",
+            "video": "fullscreen_video",
+            "fullscreen": "fullscreen_video",
+            "movie": "fullscreen_video",
+            "sleep": "sleeping_screen",
+            "lock_screen": "sleeping_screen",
+            "screensaver": "sleeping_screen",
+            "conference": "meeting",
+            "video_call": "meeting",
+            "game": "gaming",
+            "combat": "battle",
+        }
+
+        scene_tags: list[str] = []
+        for tag in values:
+            resolved = alias_map.get(tag, tag)
+            if resolved not in scene_tags:
+                scene_tags.append(resolved)
+            if resolved in {"battle", "lobby", "gameplay"} and "gaming" not in scene_tags:
+                scene_tags.insert(0, "gaming")
+
+        return {
+            "scene_tags": scene_tags,
+            "current_activity": str(raw.get("current_activity") or "").strip() or None,
+            "companion_suitable": raw.get("companion_suitable") if isinstance(raw.get("companion_suitable"), bool) else None,
+        }
+
+    def _scene_allows_scene(self, scene_type: str, ctx: dict[str, Any]) -> tuple[bool, str]:
+        scene = self._coerce_scene_awareness(ctx)
+        scene_tags = set(scene.get("scene_tags") or [])
+        if scene.get("companion_suitable") is False:
+            return False, "scene companion_suitable=false"
+        if scene_tags & {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}:
+            return False, f"scene={','.join(sorted(scene_tags))} suppresses proactive"
+        if scene_tags & {"gaming", "gameplay", "battle", "lobby"}:
+            if scene_type in {SCENE_LATE_NIGHT, SCENE_MORNING_GREET, SCENE_HOLIDAY_GREET}:
+                return False, "scene=gaming prefers companion follow-up over generic greeting"
+            return True, "scene=gaming"
+        return True, ""
+
+    def _apply_mode_to_style(self, style: str, ctx: dict[str, Any]) -> str:
+        sys_mode, _activity_monitor = self._resolve_runtime_mode(ctx)
+        if sys_mode == "gaming" and style == "default":
+            return "playful"
+        if sys_mode in {"focus", "sleep"} and style == "playful":
+            return "warm"
+        return style
+
     # ── 场景检测 ──────────────────────────────────────────────────────────
 
     def _check_late_night(self, ctx: dict[str, Any], now_ts: int) -> bool:
@@ -856,14 +999,42 @@ class PersonaProactiveVoice:
         # 优先使用 offline_state 注入的精确离线时长
         offline_duration_ms = int(ctx.get("_offline_duration_ms") or 0)
         if offline_duration_ms > 0:
-            return offline_duration_ms >= self._long_absent_threshold_ms
+            elapsed = offline_duration_ms
+        else:
+            # 回退：使用 last_interaction_ts_ms 差值
+            last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
+            if last_ts <= 0:
+                return False
+            elapsed = now_ts - last_ts
 
-        # 回退：使用 last_interaction_ts_ms 差值
-        last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
-        if last_ts <= 0:
+        if elapsed >= self._long_absent_threshold_ms:
+            return True
+
+        if elapsed < EARLY_RECONNECT_THRESHOLD_MS:
             return False
-        elapsed = now_ts - last_ts
-        return elapsed >= self._long_absent_threshold_ms
+
+        loneliness = float(ctx.get("_loneliness_value") or 0.0)
+        anticipation = float(ctx.get("_anticipation_value") or 0.0)
+        bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
+        motive_state = dict(ctx.get("motive_state") or {})
+
+        def _score(key: str) -> float:
+            try:
+                return float(motive_state.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        reconnect_drive = max(
+            _score("reach_out_drive"),
+            _score("care_drive"),
+            _score("continuity_drive"),
+        )
+        deep_bond = bond_stage in {"FRIEND", "CLOSE", "INTIMATE", "SOULMATE", "CLOSE_FRIEND", "CONFIDANT"}
+        if reconnect_drive >= 0.75 and max(loneliness, anticipation) >= 0.45:
+            return True
+        if deep_bond and reconnect_drive >= 0.62 and max(loneliness, anticipation) >= 0.35:
+            return True
+        return False
 
     def _check_post_intense(self, ctx: dict[str, Any], now_ts: int) -> bool:
         """情感高潮后：前一次对话 emotion_intensity > 阈值。"""
