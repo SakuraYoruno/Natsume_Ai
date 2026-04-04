@@ -128,6 +128,8 @@
 - 目标：把长时段体验差异纳入自动化守护。
 - 重点模块：`tests/unit/`、必要时 `tests/integration/`。
 - 验收标准：不同离线时长对应的回复/主动/沉默差异可被稳定回归。
+- 本轮进展（2026-04-04）：已在 `tests/unit/test_http_hooks_runtime_helpers.py` 增加 runtime summary 离线矩阵，固定覆盖 `24h_plus / 72h_plus / 7d_plus` 对 `offline_reconnect_style / reply_posture / why_reply` 的差异。
+- 验证记录：`test_http_hooks_runtime_helpers.py` 与 `test_offline_continuity_regression_matrix.py`、`test_long_absent_behavior_matrix.py` 联跑通过，确保回复摘要、主动重连与沉默恢复三条链路对同一长时段语义保持一致。
 
 ### N1 完成标志
 

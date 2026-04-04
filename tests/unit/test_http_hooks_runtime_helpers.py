@@ -4,6 +4,7 @@ import logging
 from types import SimpleNamespace
 
 from host_brain.app.http_hooks_runtime_helpers import (
+    _build_runtime_summary,
     build_digital_life_runtime_snapshot,
     run_proactive_intent_dispatch,
 )
@@ -42,6 +43,68 @@ class _FakeHardState:
             "ts_ms": 1234567890,
             "energy_bucket": "HIGH",
         }
+
+
+def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week_differences() -> None:
+    cases = [
+        ("24h_plus", 26.0, "light_reconnect", "balanced", 0.15),
+        ("72h_plus", 80.0, "reunion", "warm_reconnect", 0.18),
+        ("7d_plus", 8 * 24.0, "deep_reunion", "warm_reconnect", 0.22),
+    ]
+
+    summaries = [
+        _build_runtime_summary(
+            current_topic="那个项目",
+            sys_mode="normal",
+            bond_state={"current_stage": "FRIEND"},
+            bond_summary={"stage": "FRIEND"},
+            offline_state={
+                "offline_hours": offline_hours,
+                "offline_duration_ms": int(offline_hours * 3600 * 1000),
+                "absence_band": absence_band,
+                "loneliness_level": 0.42,
+                "anticipation_level": 0.46,
+                "awakening_hint": "还记得那个项目",
+            },
+            silence_state={"willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH"},
+            self_reflection_pulse={"growth_note": "最近更会把对话接住了。"},
+            bond_narrative={"narratives": ["我还记得你说过那个项目。"]},
+            motive_state={
+                "dominant_motive": "continuity",
+                "motive_reason_tags": [f"continuity:absence_band={absence_band}"],
+            },
+            response_policy={
+                "max_chars": 220,
+                "max_sentences": 4,
+                "allow_followup": True,
+                "allow_topic_shift": True,
+                "allow_proactive_after_reply": True,
+                "should_be_withdrawn": False,
+                "warmth_floor": warmth_floor,
+                "intimacy_ceiling": 0.5,
+                "policy_reason_tags": [f"offline:{absence_band}"],
+            },
+            slot_status={"offline_state": "live", "response_policy": "live"},
+            degraded_reasons=[],
+        )
+        for absence_band, offline_hours, _style, _reply_posture, warmth_floor in cases
+    ]
+
+    reconnect_styles = [summary["current_state"]["offline_reconnect_style"] for summary in summaries]
+    reply_postures = [summary["reply_posture"]["style"] for summary in summaries]
+    warmth_floors = [summary["reply_posture"]["warmth_floor"] for summary in summaries]
+
+    assert reconnect_styles == ["light_reconnect", "reunion", "deep_reunion"]
+    assert reply_postures == ["balanced", "warm_reconnect", "warm_reconnect"]
+    assert warmth_floors == [0.15, 0.18, 0.22]
+
+    for summary, (absence_band, _offline_hours, reconnect_style, _reply_posture, _warmth_floor) in zip(summaries, cases):
+        assert summary["current_state"]["absence_band"] == absence_band
+        assert summary["current_state"]["offline_reconnect_style"] == reconnect_style
+        assert f"offline={absence_band}" in summary["headline"]
+        assert f"offline:{absence_band}" in summary["why_reply"]
+        assert "motive:continuity" in summary["why_reply"]
 
 
 def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypatch) -> None:
