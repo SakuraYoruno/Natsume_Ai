@@ -245,6 +245,12 @@ class ActivityMonitor:
         self._gaming_exit_count = 0
         self._idle_trigger_count = 0
 
+        # 最近活动事件 / 模式切换快照
+        self._recent_event_type: str = ""
+        self._recent_event_ts_ms: int = 0
+        self._recent_event_payload: dict[str, Any] = {}
+        self._last_mode_transition: dict[str, Any] = {}
+
         logger.info(
             "ActivityMonitor created (gaming_interval=%.1fs, idle_interval=%.1fs, platform=%s)",
             self._gaming_interval,
@@ -300,6 +306,27 @@ class ActivityMonitor:
     def running(self) -> bool:
         return self._running
 
+    def _remember_event(
+        self,
+        event_type: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        mode_transition: dict[str, Any] | None = None,
+    ) -> None:
+        compact_payload: dict[str, Any] = {}
+        for key in ("process_name", "window_title", "channel", "reason", "source"):
+            value = (payload or {}).get(key)
+            if value not in (None, ""):
+                compact_payload[key] = value
+
+        compact_transition = dict(mode_transition or {}) if isinstance(mode_transition, dict) else {}
+        with self._stats_lock:
+            self._recent_event_type = str(event_type or "").strip().lower()
+            self._recent_event_ts_ms = int(time.time() * 1000)
+            self._recent_event_payload = compact_payload
+            if compact_transition:
+                self._last_mode_transition = compact_transition
+
     # ── 游戏进程检测循环 ──────────────────────────────────────────────────
 
     def _gaming_check_loop(self) -> None:
@@ -335,12 +362,18 @@ class ActivityMonitor:
             # 进入游戏
             self._gaming_detect_count += 1
             logger.info("🎮 游戏进程检测到: %s (%s)", process_name, window_title)
+            _mode_transition = None
             if self._mode_service:
-                self._mode_service.on_event("gaming_process_detected", {
+                _mode_transition = self._mode_service.on_event("gaming_process_detected", {
                     "process_name": process_name,
                     "window_title": window_title,
                     "pid": info.get("pid"),
                 })
+            self._remember_event(
+                "gaming_detected",
+                payload={"process_name": process_name, "window_title": window_title},
+                mode_transition=_mode_transition,
+            )
             if self._on_activity:
                 self._on_activity({
                     "type": "gaming_detected",
@@ -352,10 +385,16 @@ class ActivityMonitor:
             # 退出游戏
             self._gaming_exit_count += 1
             logger.info("🎮 游戏进程退出，当前前台: %s", process_name)
+            _mode_transition = None
             if self._mode_service:
-                self._mode_service.on_event("gaming_process_exited", {
+                _mode_transition = self._mode_service.on_event("gaming_process_exited", {
                     "process_name": process_name,
                 })
+            self._remember_event(
+                "gaming_exited",
+                payload={"process_name": process_name},
+                mode_transition=_mode_transition,
+            )
             if self._on_activity:
                 self._on_activity({
                     "type": "gaming_exited",
@@ -382,12 +421,21 @@ class ActivityMonitor:
     def _check_idle(self) -> None:
         """空闲检测：通知 ModeTransitionService。"""
         if self._mode_service:
-            self._mode_service.on_event("idle_check")
+            result = self._mode_service.on_event("idle_check")
+            if isinstance(result, dict) and str(result.get("source") or "").strip().lower() == "auto_idle":
+                self._idle_trigger_count += 1
+                self._remember_event("idle_sleep", mode_transition=result)
 
     def _check_morning(self) -> None:
         """早间唤醒检查。"""
         if self._mode_service:
-            self._mode_service.on_event("morning_check")
+            result = self._mode_service.on_event("morning_check")
+            if isinstance(result, dict) and str(result.get("source") or "").strip().lower() == "auto_wakeup":
+                self._remember_event(
+                    "wakeup",
+                    payload={"channel": "morning_check", "reason": result.get("reason")},
+                    mode_transition=result,
+                )
 
     # ── 外部事件接口 ──────────────────────────────────────────────────────
 
@@ -397,9 +445,15 @@ class ActivityMonitor:
             self._last_activity_ts = time.time()
         if self._mode_service:
             self._mode_service.update_last_interaction()
-            self._mode_service.on_event("user_message_received", {
+            result = self._mode_service.on_event("user_message_received", {
                 "channel": "host_interaction",
             })
+            if isinstance(result, dict) and str(result.get("source") or "").strip().lower() == "auto_wakeup":
+                self._remember_event(
+                    "wakeup",
+                    payload={"channel": "host_interaction", "reason": result.get("reason")},
+                    mode_transition=result,
+                )
 
     # ── 查询接口 ──────────────────────────────────────────────────────────
 
@@ -407,6 +461,9 @@ class ActivityMonitor:
         """获取活动监控状态。"""
         with self._stats_lock:
             idle_seconds = time.time() - self._last_activity_ts
+            recent_event_age_s = None
+            if self._recent_event_ts_ms > 0:
+                recent_event_age_s = round(max(0.0, time.time() - (self._recent_event_ts_ms / 1000.0)), 1)
             return {
                 "running": self._running,
                 "platform": platform.system(),
@@ -415,6 +472,11 @@ class ActivityMonitor:
                 "gaming_process_name": self._gaming_process_name,
                 "idle_seconds": round(idle_seconds, 1),
                 "idle_minutes": round(idle_seconds / 60, 1),
+                "recent_event_type": self._recent_event_type or None,
+                "recent_event_ts_ms": self._recent_event_ts_ms or None,
+                "recent_event_age_s": recent_event_age_s,
+                "recent_event_payload": dict(self._recent_event_payload),
+                "last_mode_transition": dict(self._last_mode_transition),
                 "stats": {
                     "gaming_detect_count": self._gaming_detect_count,
                     "gaming_exit_count": self._gaming_exit_count,

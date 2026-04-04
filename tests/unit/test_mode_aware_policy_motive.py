@@ -87,3 +87,51 @@ def test_motive_engine_idle_activity_gently_increases_reconnect() -> None:
     assert idle["reach_out_drive"] > baseline["reach_out_drive"]
     assert idle["continuity_drive"] > baseline["continuity_drive"]
     assert "activity:idle" in idle["motive_reason_tags"]
+
+
+
+def test_response_policy_recent_wakeup_keeps_reply_brief() -> None:
+    policy = decide_response_policy(
+        ResponsePolicyInput(
+            silence_state={"response_willingness": 0.94, "willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+            bond_summary={"stage": "FRIEND"},
+            runtime_flags={
+                "sys_mode": "normal",
+                "activity_monitor": {
+                    "recent_event_type": "wakeup",
+                    "recent_event_age_s": 45.0,
+                },
+            },
+        )
+    ).as_dict()
+
+    assert policy["max_sentences"] == 2
+    assert policy["allow_topic_shift"] is False
+    assert policy["allow_proactive_after_reply"] is False
+    assert policy["should_be_brief"] is True
+    assert policy["warmth_floor"] >= 0.12
+    assert "activity:wakeup" in policy["policy_reason_tags"]
+
+
+def test_response_policy_recent_gaming_detected_adds_companion_bias() -> None:
+    policy = decide_response_policy(
+        ResponsePolicyInput(
+            silence_state={"response_willingness": 0.94, "willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+            bond_summary={"stage": "FRIEND"},
+            runtime_flags={
+                "activity_monitor": {
+                    "is_gaming": True,
+                    "recent_event_type": "gaming_detected",
+                    "recent_event_age_s": 30.0,
+                },
+            },
+        )
+    ).as_dict()
+
+    assert policy["max_sentences"] == 3
+    assert policy["allow_topic_shift"] is False
+    assert policy["warmth_floor"] >= 0.14
+    assert "mode:gaming" in policy["policy_reason_tags"]
+    assert "activity:gaming_detected" in policy["policy_reason_tags"]

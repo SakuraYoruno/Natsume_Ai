@@ -7,7 +7,7 @@ import anyio
 from host_brain.app.vision.agent_loop import ClawdbotClient, run_agent_loop
 from host_brain.app.vision.clawdbot_protocol import Action, ActionPlan, ActionReport, ActionStatus, ActionType
 from host_brain.core.errors import SCHED_CONDITION_UNMET
-from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_TOPIC_FOLLOWUP
+from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_MORNING_GREET, SCENE_TOPIC_FOLLOWUP
 from host_brain.skills.impl.proactive_talk import STATUS_EXECUTED, STATUS_REJECTED, execute_proactive_talk
 
 
@@ -211,3 +211,70 @@ def _make_ts_at_hour(hour: int, minute: int = 0) -> int:
     now = datetime.datetime.now()
     target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     return int(target.timestamp() * 1000)
+
+
+def test_gaming_activity_prefers_topic_followup_over_long_absent_reconnect() -> None:
+    voice = PersonaProactiveVoice()
+    ts = _make_ts_at_hour(15, 30)
+    result = voice.evaluate_scene(
+        user_id="scene-gaming-priority",
+        context={
+            "current_ts_ms": ts,
+            "last_interaction_ts_ms": ts - 5 * 24 * 60 * 60 * 1000,
+            "pending_followup_topics": [{"topic_label": "副本"}],
+            "activity_monitor": {
+                "is_gaming": True,
+                "recent_event_type": "gaming_detected",
+                "recent_event_age_s": 30.0,
+            },
+            "scene_awareness": {
+                "scene_tags": ["battle"],
+                "current_activity": "gaming",
+                "companion_suitable": True,
+            },
+            "motive_state": {
+                "reach_out_drive": 0.64,
+                "care_drive": 0.52,
+                "withdraw_drive": 0.12,
+                "continuity_drive": 0.84,
+                "self_protect_drive": 0.08,
+                "dominant_motive": "continuity",
+            },
+        },
+    )
+
+    assert result is not None
+    assert result.scene_type == SCENE_TOPIC_FOLLOWUP
+    assert "你先专心打" in result.content
+    assert "activity:gaming_detected" in result.motive_influence
+    assert "activity:gaming_companion_followup" in result.motive_influence
+
+
+def test_recent_wakeup_prefers_gentle_morning_greet_over_followup() -> None:
+    voice = PersonaProactiveVoice()
+    ts = _make_ts_at_hour(7, 30)
+    result = voice.evaluate_scene(
+        user_id="scene-wakeup-morning",
+        context={
+            "current_ts_ms": ts,
+            "pending_followup_topics": [{"topic_label": "项目"}],
+            "activity_monitor": {
+                "recent_event_type": "wakeup",
+                "recent_event_age_s": 20.0,
+            },
+            "motive_state": {
+                "reach_out_drive": 0.42,
+                "care_drive": 0.66,
+                "withdraw_drive": 0.08,
+                "continuity_drive": 0.74,
+                "self_protect_drive": 0.08,
+                "dominant_motive": "continuity",
+            },
+        },
+    )
+
+    assert result is not None
+    assert result.scene_type == SCENE_MORNING_GREET
+    assert result.content == "醒啦？先慢慢清醒一下，我在。"
+    assert "activity:wakeup" in result.motive_influence
+    assert "activity:wakeup_gentle_morning" in result.motive_influence

@@ -82,6 +82,15 @@ def _resolve_activity_monitor(runtime_flags: dict[str, Any]) -> dict[str, Any]:
     return dict(activity_monitor) if isinstance(activity_monitor, dict) else {}
 
 
+def _resolve_recent_activity_event(activity_monitor: dict[str, Any]) -> tuple[str, float]:
+    event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
+    try:
+        event_age_s = float(activity_monitor.get("recent_event_age_s"))
+    except (TypeError, ValueError):
+        event_age_s = float("inf")
+    return event_type, event_age_s
+
+
 def _classify_absence_band(offline_hours: float) -> str:
     if offline_hours >= 7 * 24:
         return "7d_plus"
@@ -330,9 +339,28 @@ class ResponsePolicyLayer:
             idle_minutes = float(activity_monitor.get("idle_minutes") or 0.0)
         except (TypeError, ValueError):
             idle_minutes = 0.0
+        recent_event_type, recent_event_age_s = _resolve_recent_activity_event(activity_monitor)
         if idle_minutes >= 20.0 and sys_mode == "normal" and not p.should_be_withdrawn:
             p.warmth_floor = max(p.warmth_floor, 0.08)
             reasons.append("activity:idle")
+
+        if recent_event_type == "wakeup" and recent_event_age_s <= 600.0:
+            p.max_chars = min(p.max_chars, 120)
+            p.max_sentences = min(p.max_sentences, 2)
+            p.allow_topic_shift = False
+            p.allow_proactive_after_reply = False
+            p.should_be_brief = True
+            p.humor_ceiling = min(p.humor_ceiling, 0.18)
+            p.warmth_floor = max(p.warmth_floor, 0.12)
+            reasons.append("activity:wakeup")
+        elif recent_event_type == "gaming_detected" and recent_event_age_s <= 900.0 and not p.should_be_withdrawn:
+            p.allow_topic_shift = False
+            p.max_sentences = min(p.max_sentences, 3)
+            p.warmth_floor = max(p.warmth_floor, 0.14)
+            reasons.append("activity:gaming_detected")
+        elif recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0 and sys_mode == "normal":
+            p.warmth_floor = max(p.warmth_floor, 0.12)
+            reasons.append("activity:gaming_exited")
 
         bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
         bond_ceiling = _BOND_INTIMACY.get(bond_stage, _BOND_INTIMACY_DEFAULT)

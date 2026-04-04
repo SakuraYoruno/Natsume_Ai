@@ -190,3 +190,52 @@ class TestActivityMonitorConfig:
         # 注：具体是否从 env 读取取决于实现，至少不报错
         assert isinstance(monitor._gaming_check_interval_s, (int, float))
         assert isinstance(monitor._idle_check_interval_s, (int, float))
+
+
+
+class TestActivityMonitorRecentEvents:
+    def test_gaming_detected_updates_recent_event_status(self, monkeypatch):
+        import host_brain.core.activity_monitor as am
+
+        mock_service = MagicMock()
+        mock_service.on_event.return_value = {
+            "from_mode": "normal",
+            "to_mode": "gaming",
+            "source": "auto_gaming",
+            "reason": "检测到游戏进程: genshinimpact.exe",
+        }
+        monitor = am.ActivityMonitor(mode_service=mock_service)
+
+        monkeypatch.setattr(
+            am,
+            "_get_foreground_window_info",
+            lambda: {"process_name": "genshinimpact.exe", "window_title": "Genshin Impact", "pid": 1000},
+        )
+        monkeypatch.setattr(am, "_is_gaming_process", lambda process_name, window_title: True)
+
+        monitor._check_foreground()
+        status = monitor.get_status()
+
+        assert status["recent_event_type"] == "gaming_detected"
+        assert status["recent_event_payload"]["process_name"] == "genshinimpact.exe"
+        assert status["last_mode_transition"]["to_mode"] == "gaming"
+        assert status["recent_event_age_s"] is not None
+
+    def test_user_interaction_wakeup_updates_recent_event_status(self):
+        from host_brain.core.activity_monitor import ActivityMonitor
+
+        mock_service = MagicMock()
+        mock_service.on_event.return_value = {
+            "from_mode": "sleep",
+            "to_mode": "normal",
+            "source": "auto_wakeup",
+            "reason": "收到用户消息，从 sleep 唤醒 (channel=host_interaction)",
+        }
+        monitor = ActivityMonitor(mode_service=mock_service)
+
+        monitor.notify_user_interaction()
+        status = monitor.get_status()
+
+        assert status["recent_event_type"] == "wakeup"
+        assert status["recent_event_payload"]["channel"] == "host_interaction"
+        assert status["last_mode_transition"]["source"] == "auto_wakeup"

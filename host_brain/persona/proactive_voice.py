@@ -901,6 +901,15 @@ class PersonaProactiveVoice:
                         scene_influence,
                     )
                     continue
+                activity_allowed, activity_influence = self._activity_allows_scene(scene_type, ctx)
+                if not activity_allowed:
+                    _logger.debug(
+                        "主动表达被 activity_monitor 拦截: user=%s scene=%s reason=%s",
+                        uid,
+                        scene_type,
+                        activity_influence,
+                    )
+                    continue
                 motive_allowed, motive_influence = self._motive_allows_scene(scene_type, motive_state)
                 if not motive_allowed:
                     _logger.debug(
@@ -946,6 +955,11 @@ class PersonaProactiveVoice:
                     motive_state=motive_state,
                     memory_persona_signal=memory_persona_signal,
                 )
+                content, activity_style_influence = self._apply_activity_to_content(
+                    content,
+                    scene_type=scene_type,
+                    ctx=ctx,
+                )
                 emotion_tag = self._scene_emotion(
                     scene_type,
                     loneliness_value=_loneliness_value,
@@ -973,9 +987,11 @@ class PersonaProactiveVoice:
                         long_absent_influence,
                         mode_influence,
                         scene_influence,
+                        activity_influence,
                         motive_influence,
                         memory_influence,
                         memory_style_influence,
+                        activity_style_influence,
                     )
                     if part
                 )
@@ -1214,6 +1230,42 @@ class PersonaProactiveVoice:
             return False, "gaming activity suppresses generic late-night prompt"
         return True, "" if sys_mode == "normal" else f"mode={sys_mode}"
 
+    def _activity_allows_scene(self, scene_type: str, ctx: dict[str, Any]) -> tuple[bool, str]:
+        _sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)
+        try:
+            idle_minutes = float(activity_monitor.get("idle_minutes") or 0.0)
+        except (TypeError, ValueError):
+            idle_minutes = 0.0
+        recent_event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
+        try:
+            recent_event_age_s = float(activity_monitor.get("recent_event_age_s"))
+        except (TypeError, ValueError):
+            recent_event_age_s = float("inf")
+        is_gaming = bool(activity_monitor.get("is_gaming"))
+        pending_topics = ctx.get("pending_followup_topics")
+        has_pending_topics = isinstance(pending_topics, list) and any(
+            isinstance(item, dict) and str(item.get("topic_label") or "").strip() for item in pending_topics
+        )
+
+        if recent_event_type == "wakeup" and recent_event_age_s <= 600.0:
+            if scene_type != SCENE_MORNING_GREET:
+                return False, "activity:wakeup prefers gentle morning re-entry"
+            return True, "activity:wakeup"
+
+        if idle_minutes >= 20.0 and scene_type in {SCENE_LATE_NIGHT, SCENE_MORNING_GREET, SCENE_HOLIDAY_GREET}:
+            return False, f"activity:idle={idle_minutes:.1f} suppresses generic ping"
+
+        if (is_gaming or recent_event_type == "gaming_detected") and scene_type == SCENE_LONG_ABSENT and has_pending_topics:
+            return False, "activity:gaming prefers topic follow-up over reconnect"
+
+        if recent_event_type == "gaming_detected" and recent_event_age_s <= 900.0 and scene_type == SCENE_TOPIC_FOLLOWUP:
+            return True, "activity:gaming_detected"
+
+        if recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0 and scene_type == SCENE_LONG_ABSENT:
+            return True, "activity:gaming_exited"
+
+        return True, ""
+
     @staticmethod
     def _coerce_scene_awareness(ctx: dict[str, Any]) -> dict[str, Any]:
         raw = ctx.get("scene_awareness")
@@ -1281,12 +1333,46 @@ class PersonaProactiveVoice:
         return True, ""
 
     def _apply_mode_to_style(self, style: str, ctx: dict[str, Any]) -> str:
-        sys_mode, _activity_monitor = self._resolve_runtime_mode(ctx)
+        sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)
+        recent_event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
         if sys_mode == "gaming" and style == "default":
             return "playful"
-        if sys_mode in {"focus", "sleep"} and style == "playful":
+        if (sys_mode in {"focus", "sleep"} or recent_event_type == "wakeup") and style == "playful":
+            return "warm"
+        if recent_event_type == "wakeup" and style == "default":
             return "warm"
         return style
+
+    def _apply_activity_to_content(
+        self,
+        content: str,
+        *,
+        scene_type: str,
+        ctx: dict[str, Any],
+    ) -> tuple[str, str]:
+        resolved_content = str(content or "").strip()
+        if not resolved_content:
+            return resolved_content, ""
+
+        _sys_mode, activity_monitor = self._resolve_runtime_mode(ctx)
+        recent_event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
+        try:
+            recent_event_age_s = float(activity_monitor.get("recent_event_age_s"))
+        except (TypeError, ValueError):
+            recent_event_age_s = float("inf")
+        is_gaming = bool(activity_monitor.get("is_gaming"))
+
+        if recent_event_type == "wakeup" and recent_event_age_s <= 600.0 and scene_type == SCENE_MORNING_GREET:
+            return "醒啦？先慢慢清醒一下，我在。", "activity:wakeup_gentle_morning"
+
+        if (is_gaming or recent_event_type == "gaming_detected") and scene_type == SCENE_TOPIC_FOLLOWUP:
+            topic_label = self._extract_topic_label(ctx)
+            return f"你先专心打，等你这局打完再和我说说{topic_label}？", "activity:gaming_companion_followup"
+
+        if recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0 and scene_type == SCENE_LONG_ABSENT:
+            return "刚从游戏里出来的话就先缓一缓，我只是想轻轻接你一下。", "activity:gaming_exit_soft_reconnect"
+
+        return resolved_content, ""
 
     # ── 场景检测 ──────────────────────────────────────────────────────────
 
