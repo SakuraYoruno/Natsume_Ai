@@ -74,6 +74,65 @@ def test_response_policy_warm_memory_promotes_warmer_continuity() -> None:
     assert "memory:warm=WARM" in policy["policy_reason_tags"]
 
 
+def test_response_policy_recoil_reason_tag_blocks_even_without_fragile_emotion() -> None:
+    policy = decide_response_policy(
+        ResponsePolicyInput(
+            silence_state={"response_willingness": 0.94, "willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+            bond_summary={"stage": "FRIEND"},
+            motive_state={
+                "care_drive": 0.28,
+                "continuity_drive": 0.3,
+                "withdraw_drive": 0.58,
+                "self_protect_drive": 0.74,
+            },
+            memory_persona_signal={
+                "suppressed_memory_count": 0,
+                "distorted_memory_count": 0,
+                "avg_distortion_level": 0.0,
+                "dominant_memory_emotion": "NEUTRAL",
+                "recall_bias": "neutral",
+                "protective_recoil_count": 1,
+            },
+        )
+    ).as_dict()
+
+    assert policy["allow_followup"] is False
+    assert policy["allow_proactive_after_reply"] is False
+    assert policy["allow_topic_shift"] is False
+    assert "memory:recoil=1" in policy["policy_reason_tags"]
+
+
+def test_response_policy_resonance_reason_tag_warms_neutral_memory_continuity() -> None:
+    policy = decide_response_policy(
+        ResponsePolicyInput(
+            silence_state={"response_willingness": 0.97, "willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+            bond_summary={"stage": "FRIEND"},
+            motive_state={
+                "care_drive": 0.72,
+                "continuity_drive": 0.84,
+                "reach_out_drive": 0.46,
+                "withdraw_drive": 0.08,
+                "self_protect_drive": 0.06,
+            },
+            memory_persona_signal={
+                "suppressed_memory_count": 0,
+                "distorted_memory_count": 0,
+                "avg_distortion_level": 0.0,
+                "dominant_memory_emotion": "NEUTRAL",
+                "recall_bias": "neutral",
+                "shared_history_resonance_count": 2,
+            },
+        )
+    ).as_dict()
+
+    assert policy["allow_followup"] is True
+    assert policy["min_sentences"] >= 2
+    assert policy["warmth_floor"] >= 0.26
+    assert "memory:resonance=2" in policy["policy_reason_tags"]
+
+
 def test_chat_context_builder_passes_memory_signal_into_response_policy(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ccb,
@@ -277,6 +336,74 @@ def test_proactive_voice_warm_memory_makes_followup_more_natural() -> None:
     assert "搬家" in result.content
     assert "后来有新进展吗" in result.content
     assert "memory:warm_followup=WARM" in result.motive_influence
+
+
+def test_proactive_voice_recoil_reason_blocks_topic_followup_without_fragile_emotion() -> None:
+    voice = PersonaProactiveVoice()
+    ts = _ts_at_hour(15, 0)
+
+    result = voice.evaluate_scene(
+        user_id="memory-recoil-block",
+        context={
+            "current_ts_ms": ts,
+            "user_online": False,
+            "last_interaction_ts_ms": ts - 1000,
+            "pending_followup_topics": [{"topic_label": "旅行", "topic_keywords": ["旅行"]}],
+            "motive_state": {
+                "reach_out_drive": 0.52,
+                "care_drive": 0.36,
+                "continuity_drive": 0.62,
+                "withdraw_drive": 0.48,
+                "self_protect_drive": 0.72,
+                "dominant_motive": "self_protect",
+            },
+            "memory_persona_signal": {
+                "suppressed_memory_count": 0,
+                "avg_distortion_level": 0.0,
+                "dominant_memory_emotion": "NEUTRAL",
+                "recall_bias": "neutral",
+                "protective_recoil_count": 1,
+            },
+        },
+    )
+
+    assert result is None
+
+
+def test_proactive_voice_resonance_reason_enriches_followup_copy_without_warm_emotion() -> None:
+    voice = PersonaProactiveVoice()
+    ts = _ts_at_hour(15, 0)
+
+    result = voice.evaluate_scene(
+        user_id="memory-resonance-followup",
+        context={
+            "current_ts_ms": ts,
+            "user_online": False,
+            "last_interaction_ts_ms": ts - 1000,
+            "pending_followup_topics": [{"topic_label": "新工作", "topic_keywords": ["工作"]}],
+            "motive_state": {
+                "reach_out_drive": 0.6,
+                "care_drive": 0.74,
+                "continuity_drive": 0.86,
+                "withdraw_drive": 0.08,
+                "self_protect_drive": 0.08,
+                "dominant_motive": "continuity",
+            },
+            "memory_persona_signal": {
+                "suppressed_memory_count": 0,
+                "avg_distortion_level": 0.0,
+                "dominant_memory_emotion": "NEUTRAL",
+                "recall_bias": "neutral",
+                "shared_history_resonance_count": 2,
+            },
+        },
+    )
+
+    assert result is not None
+    assert result.scene_type == SCENE_TOPIC_FOLLOWUP
+    assert "新工作" in result.content
+    assert "我还惦记着" in result.content
+    assert "memory:resonance_followup=NEUTRAL" in result.motive_influence
 
 
 

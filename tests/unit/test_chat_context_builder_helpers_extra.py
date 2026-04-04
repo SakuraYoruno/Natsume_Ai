@@ -384,6 +384,50 @@ def test_build_memory_recall_summary_turns_signal_into_readable_hint() -> None:
     assert "先轻触试探" in summary
 
 
+def test_build_memory_persona_signal_tracks_recall_reason_tag_bias() -> None:
+    signal = ccb._build_memory_persona_signal(
+        [
+            {
+                "metadata": {
+                    "persona_recall_reason_tags": ["shared_history_resonance"],
+                }
+            },
+            {
+                "metadata": {
+                    "persona_recall_reason_tags": ["protective_recoil_penalty"],
+                }
+            },
+        ]
+    )
+
+    assert signal["humanized_memory_count"] == 2
+    assert signal["shared_history_resonance_count"] == 1
+    assert signal["protective_recoil_count"] == 1
+    assert signal["recall_bias"] == "guarded"
+    assert "防御性回缩" in str(signal["memory_persona_guidance"])
+
+
+def test_build_memory_recall_summary_mentions_resonance_and_recoil_counts() -> None:
+    summary = ccb._build_memory_recall_summary(
+        {
+            "humanized_memory_count": 2,
+            "suppressed_memory_count": 0,
+            "distorted_memory_count": 0,
+            "avg_distortion_level": 0.0,
+            "dominant_memory_emotion": None,
+            "recall_bias": "guarded",
+            "shared_history_resonance_count": 1,
+            "protective_recoil_count": 1,
+            "memory_persona_guidance": "当前召回里同时有共享记忆共振和防御性回缩。",
+        }
+    )
+
+    assert "2 条带人格化标记的记忆" in summary
+    assert "1 条带共享记忆共振" in summary
+    assert "1 条带防御性回缩" in summary
+    assert "共享记忆共振" in summary
+
+
 def test_apply_memory_persona_signal_to_persona_expression_hint_softens_suppressed_memory() -> None:
     hint = {
         "style_hint": "respond naturally",

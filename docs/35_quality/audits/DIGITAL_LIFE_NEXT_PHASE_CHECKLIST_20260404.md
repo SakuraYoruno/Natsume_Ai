@@ -169,6 +169,8 @@
 - 重点模块：`host_brain/app/chat_context_builder.py`、`host_brain/persona/proactive_voice.py`、`host_brain/persona/response_policy.py`。
 - 交付物：memory-aware 的表达调节规则。
 - 验收标准：同样是命中“过去聊过的事”，不同情绪染色下会出现不同表达方式。
+- 本轮进展（2026-04-04）：已让 `memory_persona_signal` 吸收 `shared_history_resonance` / `protective_recoil_penalty` 两类召回理由标签，并接入 `chat_context_builder -> response_policy -> proactive_voice`；主回复的 `persona_expression_hint`、回复约束和主动 follow-up 都会随“共享记忆共振 / 防御性回缩”出现稳定差异。
+- 验证记录：已补充 `tests/unit/test_chat_context_builder_helpers_extra.py` 与 `tests/unit/test_memory_persona_behavior_chain.py` 的新样例，并联跑 `tests/unit/test_mode_aware_policy_motive.py`、`tests/unit/test_scene_aware_proactive.py`、`tests/unit/test_prompt_builder_helpers_extra.py`，本轮聚焦验证 `55 passed`。
 
 ### N2-T04：增加记忆人格化端到端回归
 

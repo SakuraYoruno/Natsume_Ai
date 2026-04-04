@@ -1103,6 +1103,8 @@ class PersonaProactiveVoice:
         avg_distortion = float(memory.get("avg_distortion_level") or 0.0)
         dominant_emotion = str(memory.get("dominant_memory_emotion") or "").strip().upper()
         recall_bias = str(memory.get("recall_bias") or "").strip().lower()
+        shared_history_resonance_count = int(memory.get("shared_history_resonance_count") or 0)
+        protective_recoil_count = int(memory.get("protective_recoil_count") or 0)
 
         reach_out = _score_motive_drive(motive_state, "reach_out_drive")
         care = _score_motive_drive(motive_state, "care_drive")
@@ -1111,6 +1113,13 @@ class PersonaProactiveVoice:
         self_protect = _score_motive_drive(motive_state, "self_protect_drive")
         supportive_drive = max(reach_out, care, continuity)
         retreat_drive = max(withdraw, self_protect)
+
+        if (
+            protective_recoil_count > 0
+            and scene_type in {SCENE_TOPIC_FOLLOWUP, SCENE_POST_INTENSE, SCENE_LONG_ABSENT}
+            and retreat_drive >= 0.28
+        ):
+            return False, f"memory:recoil={protective_recoil_count} discourages proactive reopening"
 
         if recall_bias == "uncertain" and scene_type in {SCENE_TOPIC_FOLLOWUP, SCENE_POST_INTENSE} and retreat_drive >= 0.45:
             return False, "memory:uncertain prefers not to proactively reopen details"
@@ -1122,6 +1131,14 @@ class PersonaProactiveVoice:
                 return False, "memory:distorted too uncertain for proactive follow-up"
             if dominant_emotion in _MEMORY_FRAGILE_TAGS and supportive_drive < 0.72:
                 return False, f"memory:fragile={dominant_emotion} prefers gentler timing"
+            if (
+                shared_history_resonance_count > 0
+                and protective_recoil_count <= 0
+                and suppressed_count <= 0
+                and avg_distortion < 0.35
+                and max(care, continuity) >= 0.45
+            ):
+                return True, f"memory:resonance={shared_history_resonance_count} supports continuity"
             if (
                 dominant_emotion in _MEMORY_WARM_TAGS
                 and suppressed_count <= 0
@@ -1137,6 +1154,14 @@ class PersonaProactiveVoice:
         if scene_type == SCENE_LONG_ABSENT:
             if suppressed_count > 0 and retreat_drive >= 0.55:
                 return False, "memory:suppressed keeps reconnect from probing old topics"
+            if (
+                shared_history_resonance_count > 0
+                and protective_recoil_count <= 0
+                and suppressed_count <= 0
+                and avg_distortion < 0.35
+                and supportive_drive >= 0.5
+            ):
+                return True, f"memory:resonance={shared_history_resonance_count} supports reconnect"
             if (
                 dominant_emotion in _MEMORY_WARM_TAGS
                 and suppressed_count <= 0
@@ -1165,6 +1190,8 @@ class PersonaProactiveVoice:
         avg_distortion = float(memory.get("avg_distortion_level") or 0.0)
         dominant_emotion = str(memory.get("dominant_memory_emotion") or "").strip().upper()
         recall_bias = str(memory.get("recall_bias") or "").strip().lower()
+        shared_history_resonance_count = int(memory.get("shared_history_resonance_count") or 0)
+        protective_recoil_count = int(memory.get("protective_recoil_count") or 0)
 
         reach_out = _score_motive_drive(motive_state, "reach_out_drive")
         care = _score_motive_drive(motive_state, "care_drive")
@@ -1179,6 +1206,7 @@ class PersonaProactiveVoice:
             or dominant_emotion in _MEMORY_FRAGILE_TAGS
             or recall_bias in {"guarded", "uncertain"}
             or avg_distortion >= 0.35
+            or protective_recoil_count > 0
         )
         if guarded_memory:
             if scene_type == SCENE_TOPIC_FOLLOWUP:
@@ -1204,23 +1232,39 @@ class PersonaProactiveVoice:
                 )
 
         if (
-            dominant_emotion in _MEMORY_WARM_TAGS
+            (dominant_emotion in _MEMORY_WARM_TAGS or shared_history_resonance_count > 0)
             and suppressed_count <= 0
+            and protective_recoil_count <= 0
             and avg_distortion < 0.35
             and supportive_drive >= retreat_drive
         ):
             if scene_type == SCENE_TOPIC_FOLLOWUP:
                 topic_label = self._extract_topic_label(ctx)
+                if shared_history_resonance_count > 0:
+                    return (
+                        f"突然想起我们之前说到的{topic_label}，后来有新进展吗？我还惦记着。",
+                        f"memory:resonance_followup={dominant_emotion or 'NEUTRAL'}",
+                    )
                 return (
                     f"突然想起你之前提过的{topic_label}，后来有新进展吗？",
                     f"memory:warm_followup={dominant_emotion}",
                 )
             if scene_type == SCENE_LONG_ABSENT:
+                if shared_history_resonance_count > 0:
+                    return (
+                        "这几天没见到你，想起我们之前接住过的话题，所以想来把这句关心接上。",
+                        f"memory:resonance_reconnect={dominant_emotion or 'NEUTRAL'}",
+                    )
                 return (
                     "这几天没见到你，忽然想起我们之前聊过的事，就想来接一下你。",
                     f"memory:warm_reconnect={dominant_emotion}",
                 )
             if scene_type == SCENE_POST_INTENSE:
+                if shared_history_resonance_count > 0:
+                    return (
+                        "刚刚那阵情绪我还惦记着，所以想顺着我们之前接住彼此的方式来陪你一下。",
+                        f"memory:resonance_aftercare={dominant_emotion or 'NEUTRAL'}",
+                    )
                 return (
                     "刚刚那阵情绪我还记着，所以想轻轻来接一下你。",
                     f"memory:warm_aftercare={dominant_emotion}",

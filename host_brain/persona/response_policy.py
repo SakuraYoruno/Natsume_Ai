@@ -444,6 +444,8 @@ class ResponsePolicyLayer:
             avg_distortion = float(_coerce_optional_float(memory_persona_signal.get("avg_distortion_level")) or 0.0)
             dominant_memory_emotion = str(memory_persona_signal.get("dominant_memory_emotion") or "").strip().upper()
             recall_bias = str(memory_persona_signal.get("recall_bias") or "").strip().lower()
+            shared_history_resonance_count = int(memory_persona_signal.get("shared_history_resonance_count") or 0)
+            protective_recoil_count = int(memory_persona_signal.get("protective_recoil_count") or 0)
 
             if suppressed_count > 0:
                 p.allow_followup = False
@@ -459,6 +461,17 @@ class ResponsePolicyLayer:
                 reasons.append(f"memory:distortion={avg_distortion:.2f}")
             elif distorted_count > 0:
                 reasons.append(f"memory:distorted={distorted_count}")
+
+            if protective_recoil_count > 0:
+                p.allow_followup = False
+                p.allow_topic_shift = False
+                p.allow_proactive_after_reply = False
+                p.warmth_ceiling = min(p.warmth_ceiling, 0.74)
+                p.intimacy_ceiling = min(p.intimacy_ceiling, 0.42)
+                p.withdrawal_guard = True
+                if retreat_drive >= 0.35:
+                    p.should_be_withdrawn = True
+                reasons.append(f"memory:recoil={protective_recoil_count}")
 
             if dominant_memory_emotion in _MEMORY_FRAGILE_TAGS or recall_bias == "guarded":
                 p.allow_followup = False
@@ -481,7 +494,24 @@ class ResponsePolicyLayer:
                 reasons.append(f"memory:warm={dominant_memory_emotion}")
 
             if (
-                (suppressed_count > 0 or dominant_memory_emotion in _MEMORY_FRAGILE_TAGS or avg_distortion >= 0.5)
+                shared_history_resonance_count > 0
+                and protective_recoil_count <= 0
+                and suppressed_count <= 0
+                and avg_distortion < 0.35
+                and supportive_drive >= retreat_drive
+            ):
+                p.warmth_floor = max(p.warmth_floor, 0.20 if supportive_drive < 0.62 else 0.26)
+                if p.allow_followup and max(care_drive, continuity_drive) >= 0.52:
+                    p.min_sentences = max(p.min_sentences, 2)
+                reasons.append(f"memory:resonance={shared_history_resonance_count}")
+
+            if (
+                (
+                    suppressed_count > 0
+                    or dominant_memory_emotion in _MEMORY_FRAGILE_TAGS
+                    or avg_distortion >= 0.5
+                    or protective_recoil_count > 0
+                )
                 and retreat_drive >= 0.45
             ):
                 p.allow_proactive_after_reply = False

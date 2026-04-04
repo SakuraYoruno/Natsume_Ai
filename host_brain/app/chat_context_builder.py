@@ -557,6 +557,8 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
     suppressed_count = 0
     distorted_count = 0
     distortion_sum = 0.0
+    shared_history_resonance_count = 0
+    protective_recoil_count = 0
     emotion_counts: dict[str, int] = {}
 
     for row in list(retrieval_evidence_items or [])[:12]:
@@ -573,8 +575,15 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
         suppression_flag = _coerce_optional_bool(metadata.get("suppression_flag")) is True
         distortion_level = float(_coerce_optional_float(metadata.get("distortion_level")) or 0.0)
         distortion_level = _clamp_float(distortion_level, minimum=0.0, maximum=1.0)
+        reason_tags = {
+            str(tag).strip().lower()
+            for tag in (metadata.get("persona_recall_reason_tags") or [])
+            if str(tag).strip()
+        }
+        has_resonance = "shared_history_resonance" in reason_tags
+        has_protective_recoil = "protective_recoil_penalty" in reason_tags
 
-        if not emotion_color_tag and not suppression_flag and distortion_level <= 0.0:
+        if not emotion_color_tag and not suppression_flag and distortion_level <= 0.0 and not has_resonance and not has_protective_recoil:
             continue
 
         humanized_count += 1
@@ -585,6 +594,10 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
         if distortion_level > 0.0:
             distorted_count += 1
             distortion_sum += distortion_level
+        if has_resonance:
+            shared_history_resonance_count += 1
+        if has_protective_recoil:
+            protective_recoil_count += 1
 
     if humanized_count <= 0:
         return {}
@@ -607,6 +620,21 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
     elif distorted_count > 0:
         guidance_parts.append("涉及旧事时保留一点留白，避免把模糊细节说得过满")
 
+    if protective_recoil_count > 0:
+        if recall_bias == "neutral":
+            recall_bias = "guarded"
+        guidance_parts.append("当前召回带有防御性回缩，先陪伴确认，不要逼近旧细节")
+
+    if (
+        shared_history_resonance_count > 0
+        and protective_recoil_count <= 0
+        and suppressed_count <= 0
+        and avg_distortion < 0.35
+    ):
+        if recall_bias == "neutral":
+            recall_bias = "warm"
+        guidance_parts.append("可以顺着共同经历自然接续，但只轻轻提起，不要一次把回忆说满")
+
     if dominant_emotion in warm_tags and suppressed_count <= 0:
         if recall_bias == "neutral":
             recall_bias = "warm"
@@ -624,6 +652,8 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
         "avg_distortion_level": round(avg_distortion, 4),
         "dominant_memory_emotion": dominant_emotion or None,
         "recall_bias": recall_bias,
+        "shared_history_resonance_count": shared_history_resonance_count,
+        "protective_recoil_count": protective_recoil_count,
         "memory_persona_guidance": guidance_text or None,
     }
 
@@ -672,6 +702,8 @@ def _build_memory_recall_summary(memory_signal_raw: Mapping[str, Any] | None) ->
     avg_distortion = float(_coerce_optional_float(memory_signal.get("avg_distortion_level")) or 0.0)
     dominant_emotion = str(memory_signal.get("dominant_memory_emotion") or "").strip().upper()
     recall_bias = str(memory_signal.get("recall_bias") or "").strip().lower()
+    shared_history_resonance_count = _coerce_non_negative_int(memory_signal.get("shared_history_resonance_count"))
+    protective_recoil_count = _coerce_non_negative_int(memory_signal.get("protective_recoil_count"))
     guidance = str(memory_signal.get("memory_persona_guidance") or "").strip()
 
     if humanized_count <= 0 and not guidance and not dominant_emotion:
@@ -690,6 +722,10 @@ def _build_memory_recall_summary(memory_signal_raw: Mapping[str, Any] | None) ->
         parts.append(f"本次召回命中了 {humanized_count} 条带人格化标记的记忆")
     if dominant_emotion:
         parts.append(f"主导回忆情绪偏向 {dominant_emotion}")
+    if shared_history_resonance_count > 0:
+        parts.append(f"{shared_history_resonance_count} 条带共享记忆共振")
+    if protective_recoil_count > 0:
+        parts.append(f"{protective_recoil_count} 条带防御性回缩")
     if suppressed_count > 0:
         parts.append(f"其中 {suppressed_count} 条处于压制状态")
     if distorted_count > 0:
@@ -859,6 +895,8 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
     avg_distortion = float(_coerce_optional_float(memory_signal.get("avg_distortion_level")) or 0.0)
     dominant_emotion = str(memory_signal.get("dominant_memory_emotion") or "").strip().upper()
     recall_bias = str(memory_signal.get("recall_bias") or "").strip().lower()
+    shared_history_resonance_count = int(memory_signal.get("shared_history_resonance_count") or 0)
+    protective_recoil_count = int(memory_signal.get("protective_recoil_count") or 0)
 
     warm_tags = {"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"}
     fragile_tags = {"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"}
@@ -877,6 +915,13 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
     elif distorted_count > 0:
         memory_guidance.append("带一点回忆感可以，但别把模糊细节说得过满")
 
+    if protective_recoil_count > 0:
+        follow_up_tendency = min(follow_up_tendency, 0.02)
+        echo_weight_modifier = min(echo_weight_modifier, 0.04)
+        if not pace_hint:
+            pace_hint = "steady"
+        memory_guidance.append("当前召回带有防御性回缩，先陪伴确认，不要直接逼近旧细节")
+
     if dominant_emotion in warm_tags and suppressed_count <= 0 and avg_distortion < 0.35:
         tone = "caring" if tone == "gentle" else tone
         follow_up_tendency = max(follow_up_tendency, 0.04)
@@ -885,6 +930,17 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
     elif dominant_emotion in fragile_tags:
         follow_up_tendency = min(follow_up_tendency, 0.02)
         memory_guidance.append("涉及脆弱回忆时先稳住情绪，再决定是否继续往下说")
+
+    if (
+        shared_history_resonance_count > 0
+        and protective_recoil_count <= 0
+        and suppressed_count <= 0
+        and avg_distortion < 0.35
+    ):
+        tone = "caring" if tone == "gentle" else tone
+        follow_up_tendency = max(follow_up_tendency, 0.08)
+        echo_weight_modifier = max(echo_weight_modifier, 0.06)
+        memory_guidance.append("带共享记忆共振时，可以顺着共同经历自然接续，但不要一次说满")
 
     guidance_text = str(memory_signal.get("memory_persona_guidance") or "").strip()
     if guidance_text:
