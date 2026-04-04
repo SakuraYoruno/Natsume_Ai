@@ -842,18 +842,7 @@ def run_proactive_intent_dispatch(
             return personality_result
         return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
 
-    last_interaction_ts = None
-    try:
-        ledger = get_ledger()
-        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
-        if db_path:
-            conn = _sqlite3.connect(db_path)
-            row = conn.execute("SELECT ts_ms FROM intent_log ORDER BY ts_ms DESC LIMIT 1").fetchone()
-            conn.close()
-            if row:
-                last_interaction_ts = int(row[0])
-    except Exception:
-        pass
+    last_interaction_ts = _load_last_interaction_ts(get_ledger=get_ledger)
 
     bond_summary: dict[str, Any] = {}
     try:
@@ -1193,6 +1182,34 @@ def _load_recent_topics(*, get_ledger: Callable[[], Any]) -> list[str]:
     except Exception:
         pass
     return topics
+
+
+def _load_last_interaction_ts(
+    *,
+    get_ledger: Callable[[], Any],
+    now_ts_ms: int | None = None,
+    max_future_skew_ms: int = 60_000,
+) -> int | None:
+    try:
+        ledger = get_ledger()
+        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
+        if not db_path:
+            return None
+        current_ts = int(now_ts_ms if now_ts_ms is not None else _time.time() * 1000)
+        upper_bound = current_ts + max(0, int(max_future_skew_ms))
+        conn = _sqlite3.connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT ts_ms FROM intent_log WHERE ts_ms > 0 AND ts_ms <= ? ORDER BY ts_ms DESC LIMIT 1",
+                (upper_bound,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return int(row[0])
+    except Exception:
+        return None
 
 
 def _load_recent_diary_snippet() -> str:

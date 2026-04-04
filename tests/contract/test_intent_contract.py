@@ -87,3 +87,13 @@ class TestIntentContract(unittest.TestCase):
 
         self.assertEqual(INTENT_SCHEMA_INVALID, result_1["reason_code"])
         self.assertEqual(INTENT_SCHEMA_INVALID, result_2["reason_code"])
+
+    def test_t23_future_intent_ts_is_clamped_in_intent_log(self) -> None:
+        payload = self._fresh_intent(seq=1, intent_id="intent_t23_001", nonce="nonce_t23_001")
+        payload["ts_ms"] = self.now_ms + 120_000
+
+        result = self.engine.evaluate_intent(payload, current_ms=self.now_ms)
+
+        self.assertEqual("REJECT", result["decision"])
+        self.assertEqual(EXPIRED_INTENT, result["reason_code"])
+        self.assertEqual(self.now_ms, self.ledger.intent_log[-1]["ts_ms"])

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from types import SimpleNamespace
 
 from host_brain.app.http_hooks_runtime_helpers import (
     _build_runtime_summary,
+    _load_last_interaction_ts,
     build_digital_life_runtime_snapshot,
     run_proactive_intent_dispatch,
 )
@@ -255,6 +257,23 @@ def test_run_proactive_intent_dispatch_routes_personality_tick(monkeypatch) -> N
     assert result["status"] == "OK"
     assert result["user_id"] == "persona-user-001"
     assert result["tick_ran"] is True
+
+
+def test_load_last_interaction_ts_ignores_future_intent_rows(tmp_path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE intent_log (ts_ms INTEGER)")
+    conn.execute("INSERT INTO intent_log(ts_ms) VALUES (?)", (1_800_000_000_003,))
+    conn.execute("INSERT INTO intent_log(ts_ms) VALUES (?)", (1_775_314_738_620,))
+    conn.commit()
+    conn.close()
+
+    result = _load_last_interaction_ts(
+        get_ledger=lambda: SimpleNamespace(_db_path=str(db_path), db_path=str(db_path)),
+        now_ts_ms=1_775_315_000_000,
+    )
+
+    assert result == 1_775_314_738_620
 
 
 def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) -> None:

@@ -87,7 +87,7 @@ class IntentDecisionEngine:
             "intent_id": intent_id,
             "session_id": session_id,
             "seq": seq,
-            "ts_ms": normalized.get("ts_ms"),
+            "ts_ms": _normalize_intent_log_ts_ms(normalized.get("ts_ms"), now_ms_value=now),
             "nonce": nonce,
             "parse_stage": parse.parse_stage,
             "raw_text": raw_intent if isinstance(raw_intent, str) else None,
@@ -521,6 +521,18 @@ def _is_expired(*, ts_ms: int, now_ms_value: int, ttl_ms: int) -> bool:
     if ts_ms > now_ms_value + 60_000:
         return True
     return now_ms_value - ts_ms > ttl_ms
+
+
+def _normalize_intent_log_ts_ms(raw_ts_ms: Any, *, now_ms_value: int, max_future_skew_ms: int = 60_000) -> int:
+    try:
+        candidate = int(raw_ts_ms)
+    except (TypeError, ValueError):
+        return now_ms_value
+    if candidate <= 0:
+        return now_ms_value
+    if candidate > now_ms_value + max_future_skew_ms:
+        return now_ms_value
+    return candidate
 
 
 def _hard_state_from_snapshot(governance_snapshot: dict[str, Any] | None) -> dict:
