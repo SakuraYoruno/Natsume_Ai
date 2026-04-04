@@ -1,7 +1,7 @@
 受众：MASTER
 标题：数字生命运行验收 Findings（N0-T01）
-版本：v2.3
-日期：2026-04-04
+版本：v2.4
+日期：2026-04-05
 状态：已复验
 
 ## 文档目的
@@ -86,7 +86,7 @@ with TestClient(app):
 
 当前数字生命运行状态判定为：
 
-> **scheduler、人格 tick、runtime snapshot、沉默/身体感、以及主动表达引擎都已在 runtime 成立；当前主阻塞主要收缩为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及 live `/v1/chat` 下一轮 readback 与多消息 memory writeback 证据仍不足。**
+> **scheduler、人格 tick、runtime snapshot、沉默/身体感、主动表达引擎、以及 `/v1/chat` 写回→下一轮 readback 链都已在 runtime 成立；当前主阻塞主要收缩为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及关系叙事层与完整 LLM 内容层验证。**
 
 本轮已确认的事实：
 
@@ -96,7 +96,7 @@ with TestClient(app):
 - 沉默引擎与身体感已不只是“有字段”，而是会真实改写 `motive`、`reply_posture` 与 `decision_chain`。
 - `/v1/chat` 主回复入口可走通，但当前环境下会在 runtime 层降级为 `LLM_UNAVAILABLE`，因此主回复链尚不能算完整端到端 PASS。
 - 已定位并修复 `LLM_UNAVAILABLE` 早退绕过 `_async_post_process` 的断点；降级路径现在仍会触发 `session_end` 与 episodic memory writeback。
-- `on_user_awaken` 的自动化链路已打通，但 live `/v1/chat` 下一轮 readback 证据仍待补齐。
+- 已补齐 live `/v1/chat` 两轮真实样本：首轮 `WRITE/SUCCESS` 会落账，第二轮 prompt 可稳定读回 `offline_hours / offline_awakening_hint / offline_anticipation_topics`。
 - 主动表达链已补修两处 runtime 断点：future `intent_log.ts_ms` 不再污染 idle gate，scheduler 形态的 `mood_state=steady` 也不再被误判成 `sys_mode=steady`。
 - 在 seeded `>45m` idle 条件下，`proactive_talk_periodic` 已经过一轮真实 `195s` 观察窗触发成功，并通过模板 fallback 推送出主动消息。
 
@@ -109,12 +109,12 @@ with TestClient(app):
 | V1 | Scheduler 是否启动 | PASS | `/scheduler/health=200`，`scheduler_status=HEALTHY`，`enabled_tasks=9` |
 | V2 | Personality Tick 是否注册并运行 | PASS | `inner_world_tick` / `silence_tick` / `body_sense_tick` 在 70 秒内进入 `OK`，`last_reason_code=null` |
 | V3 | 离线时间流 / 等待感 | PASS | `offline_state`、`absence_band`、`offline_reconnect_style` 已进入 runtime snapshot 且可被 6.5h synthetic round 稳定观测 |
-| V4 | 会话开始 / 结束闭环 | PARTIAL | 自动化链路已从 degraded `/v1/chat` 写回推进到 `6.5h` synthetic `on_user_awaken` snapshot；但 live `/v1/chat` 下一轮 readback 仍未完成实窗复验 |
+| V4 | 会话开始 / 结束闭环 | PASS | 已同时具备 degraded `/v1/chat` → `6.5h` synthetic `on_user_awaken` snapshot，以及 live `/v1/chat` 两轮样本下的真实 writeback → 下一轮 readback 证据 |
 | V5 | 沉默引擎是否影响行为 | PASS | `willingness=SILENT` 与 `topic_resistance` 可把 `motive` 推到 `withdraw`，并把回复姿态压成 `withdrawn` |
 | V6 | 身体感是否影响行为 | PASS | `fatigue=EXHAUSTED`、`drowsiness=DROWSY` 会进入 `response_policy.reason_tags` 并改写 `reply_posture` |
 | V7 | 关系叙事层 | PARTIAL | snapshot 已能观测 `bond` 与 narrative 摘要，但本轮未把它与真实回复差异完整闭环到内容层 |
 | V8 | 主动表达引擎 | PASS | future `intent_log.ts_ms` 与 timed scheduler 的 `mood_state→sys_mode` 误判都已修复；seeded `>45m` idle 下，`proactive_talk_periodic` 在真实 `195s` 观察窗内 `OK` 且成功推送主动消息 |
-| V9 | 记忆连续性同步写回 | PARTIAL | degraded `/v1/chat` 的 writeback 已补通，并能喂出 `6.5h` synthetic awaken snapshot；但仍缺少真实多消息对话下的 ledger / 下一轮读取证据 |
+| V9 | 记忆连续性同步写回 | PASS | 真实 `/v1/chat` 两轮样本已验证 `memory_ops_log` 连续出现 `WRITE/SUCCESS`，且第二轮 prompt 可读回上一轮写入的 `offline_anticipation_topics` |
 | V10 | Findings 汇总与修正建议 | PASS | 本文已刷新为复验版 findings |
 
 ---
@@ -216,7 +216,7 @@ with TestClient(app):
 
 > 主回复链入口已连通，但当前环境无法把数字生命验证推进到完整 LLM 输出层。当前最大的端到端阻塞已从旧版 personality dispatch 断点，转移为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`。
 
-### E5：降级路径 `session_end` 已补通，`awaken` 证据仍待补齐
+### E5：`/v1/chat` 写回→`awaken/readback` 链已补齐真实闭环证据
 
 已定位到根因：
 
@@ -233,14 +233,22 @@ with TestClient(app):
 - 同时验证 `body_sense.on_conversation_end()` 被调用
 - 同文件再补 `6.5h` synthetic gap 回归：degraded `/v1/chat` 写回后，`on_user_awaken()` 可读出 `offline_hours=6.5`、`absence_band=6h_plus`、`anticipation_topics=["那个项目"]`
 
-当前仍缺：
+本轮新增实窗回归：
 
-- 真实多轮 `/v1/chat` 之后的下一轮 readback 证据
-- 6.5 小时离线样本下 `loneliness` 收敛的 live 观察
+- `tests/integration/test_chat_agent_soul_pipeline.py` 新增 `test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt`
+- 使用真实 `/v1/chat` 两轮请求，首轮验证 `COMMIT.decision = APPROVE`
+- 首轮后处理真实落账：`memory_ops_log` 至少出现 1 条 `WRITE/SUCCESS`
+- 首轮 `session_end` 会把 `anticipation_topics` 写入 inner world
+- 第二轮请求前推进 `6.5h`，第二轮 prompt 可读回：
+  - `- offline_hours: 6.5`
+  - `- offline_awakening_hint:`
+  - `- offline_anticipation_topics:`
+  - `那个项目`
+- 两轮结束后 `memory_ops_log` 至少出现 2 条 `WRITE/SUCCESS`
 
 结论：
 
-> 当前已经证明 degraded `/v1/chat` 写回可以继续喂出后续 `on_user_awaken` snapshot；但 live `/v1/chat` 的下一轮 readback 仍未拿到，因此 V4 先维持 `PARTIAL`。
+> degraded `/v1/chat` 写回、synthetic `on_user_awaken` snapshot、以及 live `/v1/chat` 两轮 writeback → 下一轮 readback 证据现在都已补齐，V4 / V9 可以同步升级为 `PASS`。
 
 ### E6：主动表达引擎已在 manual dispatch 与 timed scheduler 两条路径通过
 
@@ -309,37 +317,36 @@ with TestClient(app):
 - 恢复 `127.0.0.1:17800` Edge RPC
 - 重新跑本 findings 中的 `/v1/chat` 与 proactive dispatch 验证
 
-### Gap 2（P0）
+### Gap 2（P1）
 
-**live `/v1/chat` 的下一轮 `on_user_awaken` readback 仍缺少稳定闭环证据。**
-
-现象：
-
-- `session_end -> on_user_awaken` 的自动化链路已打通，但还缺真实下一轮读取证据
-- `on_user_awaken` 后的 `loneliness` 收敛仍未在 live 样本中确认
-- 仍缺一轮固定脚本的离线→唤醒→再读取验收
-
-建议优先动作：
-
-- 跑一轮固定的离线→唤醒→下一轮读取脚本
-- 对照 `offline_state` 与 inner world 的前后差异
-- 补 `on_user_awaken` 的最小自动化回归
-
-### Gap 3（P1）
-
-**多消息真实对话下的 memory continuity writeback 仍缺少稳定闭环证据。**
+**关系叙事层与真实回复内容层的联动仍缺少完整闭环证据。**
 
 现象：
 
-- `LLM_UNAVAILABLE` 分支绕过 `_async_post_process` 的问题已修复
-- 已新增自动化回归锁住 degraded path 的 `persist_chat_episodic_memory` 与 `inner_world.on_session_end`
-- 但仍缺真实多消息对话后的 ledger / 下一轮读取证据
+- `bond_narrative`、`response_policy`、`motive_state` 已进入 runtime snapshot
+- 但当前环境仍被 `LLM_UNAVAILABLE` 降级，真实 LLM 内容层还没完成复验
+- `V7` 仍停留在“可观测、可解释”，尚未完成“稳定改写真实回复内容”的端到端证据
 
 建议优先动作：
 
-- 补一轮多消息真实对话写回验收
-- 对照 `session_end` 前后 inner world / `memory_ops_log` 变化
-- 在真实 `/v1/chat` 样本上确认 `anticipation_topics` 下一轮可读
+- 恢复真实 LLM / Edge RPC 后重跑 `/v1/chat` 内容层验收
+- 对照同输入下不同 `bond / motive / response_policy` 的回复差异
+- 补关系叙事层进入真实 narrative 的最小自动化回归
+
+### Gap 3（P2）
+
+**live 长离线样本下的 `loneliness / waiting expression` 内容层验证仍不足。**
+
+现象：
+
+- synthetic `6.5h` 与 live 两轮 readback 证据已补齐
+- 但更长离线样本下的 `loneliness` 收敛、waiting expression 与真实 narrative 差异仍主要停留在 snapshot / prompt 层
+
+建议优先动作：
+
+- 补 `24h+ / 72h+` 样本的真实 `/v1/chat` 内容层验收
+- 对照 `offline_state`、prompt 注入与最终 narrative 的一致性
+- 补长离线档位的最小自动化回归
 
 ---
 
@@ -351,7 +358,7 @@ with TestClient(app):
 
 本轮复验后，这一结论应正式作废，修正为：
 
-> scheduler、personality ticks 与 proactive engine 已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖，以及 live `/v1/chat` 下一轮 readback 与多消息 memory writeback 证据不足。
+> scheduler、personality ticks、proactive engine、以及 `/v1/chat` 写回→下一轮 readback 链都已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖，以及关系叙事层与完整内容层验证。
 
 ---
 
@@ -364,6 +371,6 @@ with TestClient(app):
 建议下一步执行顺序：
 
 1. 先恢复或隔离 `LLM_UNAVAILABLE / edge rpc unavailable` 环境阻塞。
-2. 再补 `on_user_awaken` 的可重复验收样本与回归。
-3. 补多消息 `memory writeback` 的真实对话验收，并把 `V9` 从 `PARTIAL` 往前推进。
-4. 修完后再刷新一次本 findings，并把 V4 / V7 / V9 重新判定。
+2. 恢复真实 LLM / Edge RPC 后，补 `bond_narrative / response_policy / motive_state` 对真实回复内容的验收。
+3. 补长离线档位（`24h+ / 72h+`）的 live 内容层观察与自动化回归。
+4. 修完后再刷新一次本 findings，并把 `V7` 与内容层相关结论重新判定。

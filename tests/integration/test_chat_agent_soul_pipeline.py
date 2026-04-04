@@ -261,6 +261,44 @@ def _patch_chat_agent_runtime(
     return captured
 
 
+def _patch_chat_agent_runtime_keep_post_process(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    expected_prompt_markers_by_call: list[list[str]],
+    narratives_by_call: list[str],
+) -> dict[str, Any]:
+    captured: dict[str, Any] = {"calls": []}
+
+    async def _fake_chunks(**kwargs):  # noqa: ANN001
+        call_index = len(captured["calls"])
+        prompt_text = str(kwargs.get("prompt_text") or "")
+        system_prompt = str(kwargs.get("system_prompt") or "")
+        assert system_prompt.strip()
+        markers = expected_prompt_markers_by_call[min(call_index, len(expected_prompt_markers_by_call) - 1)]
+        for marker in markers:
+            assert marker in prompt_text
+        captured["calls"].append(dict(kwargs))
+        narrative = narratives_by_call[min(call_index, len(narratives_by_call) - 1)]
+        yield json.dumps(
+            {
+                "narrative": {
+                    "text": narrative,
+                },
+            },
+            ensure_ascii=False,
+        )
+
+    def _passthrough_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _fake_chunks)
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.apply_response_intelligence",
+        _passthrough_response_intelligence,
+    )
+    return captured
+
+
 def _make_llm_runtime() -> dict[str, Any]:
     return {
         "available": True,
@@ -1763,6 +1801,252 @@ async def test_top_agent_retrieval_init_failure_but_state_arbiter_keeps_soul_pip
     assert recall_capture["recall_results"] == {
         "bond_graph": "trust still feels present even while retrieval is unavailable",
     }
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+    from host_brain.memory.episodic import EpisodicStore
+    from host_brain.memory.memory_worth_evaluator import DECISION_WRITE, MemoryWorthResult
+    from host_brain.persona.inner_world import OfflineInnerWorld
+    from tests.fakes.chroma_client import FakeChromaClient
+
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+
+    persona_user_id = "persona-user-http-readback"
+    current_ts = [1_000]
+    bond_engine = BondStageEngine()
+    inner_world = OfflineInnerWorld(state_dir=str(tmp_path / "inner_world"))
+    ledger = SQLiteLedger(db_path=tmp_path / "audit.sqlite3", check_same_thread=False)
+    store = EpisodicStore(
+        ledger=ledger,
+        chroma_client=FakeChromaClient(collection_profiles={"episodic": 3}),
+        embedding_fn=lambda _text: ([0.1, 0.2, 0.3], "fake-embed"),
+        embedding_model_id_hint="fake-embed",
+        embedding_provider_hint="test",
+    )
+
+    class _MemoryWorthEvaluator:
+        def evaluate(self, *_args, **_kwargs):  # noqa: ANN001
+            return MemoryWorthResult(
+                decision=DECISION_WRITE,
+                worth_score=0.91,
+                tags=["new_info", "continuity"],
+                reason="integration_test_forced_write",
+            )
+
+    class _PredictiveState:
+        def record_emotion(self, *_args, **_kwargs):  # noqa: ANN001, ANN003
+            return None
+
+        def predict_current(self, *_args, **_kwargs):  # noqa: ANN001, ANN003
+            return SimpleNamespace(confidence=0.0, as_dict=lambda: {})
+
+    class _MetaLoop:
+        def record(self, *_args, **_kwargs):  # noqa: ANN001, ANN003
+            return None
+
+    class _MemoryGuard:
+        def check_episodic_write(self, _record):  # noqa: ANN001
+            return None
+
+        def aggregate_emotion_tags(self, _session_id, _tags):  # noqa: ANN001
+            return None
+
+    class _GraphNode:
+        def as_dict(self) -> dict[str, Any]:
+            return {"memory_id": "mem-node"}
+
+    class _GraphWalk:
+        def __init__(self) -> None:
+            self.chain = ["mem-node"]
+
+        def as_dict(self) -> dict[str, Any]:
+            return {"chain": list(self.chain)}
+
+    class _MemoryGraph:
+        def add_memory(self, **_kwargs):  # noqa: ANN003
+            return _GraphNode()
+
+        def walk(self, *_args, **_kwargs):  # noqa: ANN001, ANN003
+            return _GraphWalk()
+
+    class _ConsolidationDecision:
+        should_trigger = False
+        memory_count_24h = 0
+
+        def as_dict(self) -> dict[str, Any]:
+            return {
+                "should_trigger": False,
+                "memory_count_24h": 0,
+                "reason_code": "NOT_NEEDED",
+            }
+
+    class _ConsolidationTrigger:
+        def on_memory_written(self, **_kwargs):  # noqa: ANN003
+            return None
+
+        def check(self) -> _ConsolidationDecision:
+            return _ConsolidationDecision()
+
+    class _BondWriter:
+        @staticmethod
+        def classify_interaction(*_args, **_kwargs):  # noqa: ANN001, ANN003
+            return "NOOP"
+
+        def __init__(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return None
+
+        def apply_update(self, **_kwargs):  # noqa: ANN003
+            return None
+
+    async def _noop_vts(**_kwargs):  # noqa: ANN001
+        return None
+
+    async def _immediate_to_thread(func, /, *args, **kwargs):  # noqa: ANN001
+        return func(*args, **kwargs)
+
+    def _fake_now_ms() -> int:
+        return current_ts[0]
+
+    _install_runtime_chain(
+        monkeypatch,
+        tmp_path=tmp_path,
+        bond_engine=bond_engine,
+    )
+    _disable_dispatch_plan(monkeypatch)
+    _patch_top_agent_http_runtime(monkeypatch)
+    captured = _patch_chat_agent_runtime_keep_post_process(
+        monkeypatch,
+        expected_prompt_markers_by_call=[
+            [],
+            [
+                "- offline_hours: 6.5",
+                "- offline_awakening_hint:",
+                "- offline_anticipation_topics:",
+                "那个项目",
+            ],
+        ],
+        narratives_by_call=[
+            "我们继续把那个项目收口。",
+            "好，我们接着把那个项目收口。",
+        ],
+    )
+
+    _patch_shared_host_ledger(monkeypatch, ledger)
+    monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
+    monkeypatch.setattr("host_brain.app.dependencies._episodic_store", store, raising=False)
+    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_store", lambda: store)
+    monkeypatch.setattr("host_brain.app.dependencies.get_memory_worth_evaluator", lambda: _MemoryWorthEvaluator())
+    monkeypatch.setattr("host_brain.app.dependencies.get_predictive_state_engine", lambda: _PredictiveState())
+    monkeypatch.setattr("host_brain.app.dependencies.get_meta_learning_loop", lambda: _MetaLoop())
+    monkeypatch.setattr("host_brain.app.dependencies.get_memory_guard", lambda: _MemoryGuard())
+    monkeypatch.setattr("host_brain.app.dependencies.get_episodic_memory_graph", lambda: _MemoryGraph())
+    monkeypatch.setattr("host_brain.app.dependencies.get_consolidation_trigger", lambda: _ConsolidationTrigger())
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_distillation_engine",
+        lambda: SimpleNamespace(run_batch=lambda: SimpleNamespace(status="OK", processed_count=0)),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_bond_update_queue",
+        lambda: SimpleNamespace(enqueue=lambda _payload: {"status": "QUEUED"}),
+    )
+    monkeypatch.setattr("host_brain.bond.bond_dynamics.BondDynamicsWriter", _BondWriter)
+    monkeypatch.setattr("host_brain.app.chat_handler.resolve_person_id", lambda *_args, **_kwargs: persona_user_id)
+    monkeypatch.setattr("host_brain.app.top_agent.resolve_person_id", lambda *_args, **_kwargs: persona_user_id)
+    monkeypatch.setattr("host_brain.app.chat_context_builder.get_canonical_bond_user_id", lambda: persona_user_id)
+    monkeypatch.setattr("host_brain.bond.user_identity.get_canonical_bond_user_id", lambda: persona_user_id)
+    monkeypatch.setattr("host_brain.bond.user_identity.resolve_bond_user_id", lambda *_args, **_kwargs: persona_user_id)
+    monkeypatch.setattr("host_brain.persona.inner_world.get_inner_world", lambda: inner_world)
+    monkeypatch.setattr("host_brain.persona.inner_world._now_ms", _fake_now_ms)
+    monkeypatch.setattr("host_brain.airlock.quarantine.classify_ingress", lambda _text: "FACT")
+    monkeypatch.setattr("host_brain.app.vts_emotion_driver._drive_stream_vts_emotion", _noop_vts)
+    monkeypatch.setattr("host_brain.app.top_agent.asyncio.to_thread", _immediate_to_thread)
+
+    client = TestClient(fastapi_app)
+    try:
+        response1 = client.post(
+            "/v1/chat",
+            json={
+                "message": "那个项目今天还没说完，我们继续收口吧。",
+                "session_id": f"session-http-writeback-{uuid.uuid4().hex[:8]}",
+                "reply_channel": "WEB",
+                "suppress_edge_tts": True,
+                "suppress_edge_vts": True,
+            },
+        )
+
+        assert response1.status_code == 200
+        commit1 = _parse_http_sse_commit(response1.text)
+        assert commit1["decision"] == "APPROVE"
+        assert commit1["narrative"] == "我们继续把那个项目收口。"
+
+        _wait_for(
+            lambda: len(
+                [
+                    row for row in ledger.memory_ops_log
+                    if row.get("op_kind") == "WRITE" and row.get("status") == "SUCCESS"
+                ]
+            ) >= 1,
+            timeout_s=2.0,
+        )
+        _wait_for(
+            lambda: bool(inner_world.get_state(persona_user_id)["anticipation_topics"]),
+            timeout_s=2.0,
+        )
+        state_after_first = inner_world.get_state(persona_user_id)
+        assert state_after_first["anticipation_topics"]
+        assert "那个项目" in state_after_first["anticipation_topics"][0]
+
+        current_ts[0] += int(6.5 * 3600 * 1000)
+
+        response2 = client.post(
+            "/v1/chat",
+            json={
+                "message": "我回来了，继续那个项目。",
+                "session_id": f"session-http-readback-{uuid.uuid4().hex[:8]}",
+                "reply_channel": "WEB",
+                "suppress_edge_tts": True,
+                "suppress_edge_vts": True,
+            },
+        )
+
+        assert response2.status_code == 200
+        commit2 = _parse_http_sse_commit(response2.text)
+        assert commit2["decision"] == "APPROVE"
+        assert commit2["narrative"] == "好，我们接着把那个项目收口。"
+
+        _wait_for(
+            lambda: len(
+                [
+                    row for row in ledger.memory_ops_log
+                    if row.get("op_kind") == "WRITE" and row.get("status") == "SUCCESS"
+                ]
+            ) >= 2,
+            timeout_s=2.0,
+        )
+
+        assert len(captured["calls"]) == 2
+        second_prompt = str(captured["calls"][1]["prompt_text"] or "")
+        assert "- offline_hours: 6.5" in second_prompt
+        assert "- offline_awakening_hint:" in second_prompt
+        assert "- offline_anticipation_topics:" in second_prompt
+        assert "那个项目" in second_prompt
+
+        write_rows = [
+            row for row in ledger.memory_ops_log
+            if row.get("op_kind") == "WRITE" and row.get("status") == "SUCCESS"
+        ]
+        assert len(write_rows) == 2
+        assert all(any(str(ref).startswith("chat://request/") for ref in row.get("evidence_refs") or []) for row in write_rows)
+    finally:
+        client.close()
+        ledger.close()
 
 
 @pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
