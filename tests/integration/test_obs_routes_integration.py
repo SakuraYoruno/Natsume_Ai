@@ -360,7 +360,12 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
             "response_policy": {"allow_topic_shift": False},
             "runtime_summary": {
                 "headline": "mode=focus | offline=6h_plus | motive=continuity | reply=focused",
-                "current_state": {"sys_mode": "focus", "absence_band": "6h_plus", "dominant_motive": "continuity"},
+                "current_state": {
+                    "sys_mode": "focus",
+                    "absence_band": "6h_plus",
+                    "offline_reconnect_style": "soft_resume",
+                    "dominant_motive": "continuity",
+                },
                 "reply_posture": {"allow_topic_shift": False},
                 "why_reply": ["mode:focus", "motive:continuity"],
             },
@@ -404,6 +409,7 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["bond_summary_human"]["stage"] == "朋友"
     assert data["motive_state"]["dominant_motive"] == "continuity"
     assert data["runtime_summary"]["current_state"]["sys_mode"] == "focus"
+    assert data["runtime_summary"]["current_state"]["offline_reconnect_style"] == "soft_resume"
     assert data["runtime_summary"]["why_reply"][0] == "mode:focus"
     assert data["slot_status"]["sys_mode_status"] == "live"
 

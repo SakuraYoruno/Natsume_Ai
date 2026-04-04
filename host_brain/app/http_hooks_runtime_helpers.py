@@ -12,6 +12,11 @@ import urllib.request as _urlreq
 from pathlib import Path
 from typing import Any, Callable
 
+from host_brain.persona.offline_continuity import (
+    reconnect_style_for_absence_band,
+    resolve_absence_band as resolve_offline_absence_band,
+)
+
 
 def read_world_canon_fact(world_store: Any, fact_key: str) -> str | None:
     if str(fact_key or "").strip() != "world_canon_facts":
@@ -104,19 +109,7 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
 
 
 def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
-    raw_band = str(offline_state.get("absence_band") or "").strip()
-    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
-        return raw_band
-    offline_hours = _coerce_float(offline_state.get("offline_hours"), 0.0)
-    if offline_hours >= 7 * 24:
-        return "7d_plus"
-    if offline_hours >= 72:
-        return "72h_plus"
-    if offline_hours >= 24:
-        return "24h_plus"
-    if offline_hours >= 6:
-        return "6h_plus"
-    return "recent"
+    return resolve_offline_absence_band(offline_state)
 
 
 def _derive_reply_posture(response_policy: dict[str, Any]) -> str:
@@ -154,6 +147,7 @@ def _build_runtime_summary(
     degraded_reasons: list[str],
 ) -> dict[str, Any]:
     absence_band = _resolve_absence_band(offline_state)
+    offline_reconnect_style = reconnect_style_for_absence_band(absence_band)
     bond_stage = str(
         bond_state.get("current_stage")
         or bond_summary.get("stage")
@@ -222,6 +216,7 @@ def _build_runtime_summary(
             "sys_mode": sys_mode,
             "bond_stage": bond_stage,
             "absence_band": absence_band,
+            "offline_reconnect_style": offline_reconnect_style,
             "willingness_level": willingness_level,
             "fatigue_level": fatigue_level,
             "dominant_motive": dominant_motive,
