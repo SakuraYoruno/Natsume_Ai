@@ -277,3 +277,208 @@ def test_proactive_voice_warm_memory_makes_followup_more_natural() -> None:
     assert "搬家" in result.content
     assert "后来有新进展吗" in result.content
     assert "memory:warm_followup=WARM" in result.motive_influence
+
+
+
+def _build_runtime_payload_from_memory_case(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    memory_signal: dict[str, object],
+    motive_state: dict[str, float | str],
+) -> dict[str, object]:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+                "memory_emotion_hint": {
+                    "mood_state": "steady",
+                    "emotion_tag": "NEUTRAL",
+                    "humanized_memory_count": 2,
+                    **memory_signal,
+                },
+                "memory_recall_summary": "固定 recall 包：记忆人格化对照样例。",
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "NEUTRAL",
+                "emotion_intensity": 0.42,
+                "emotion_range_hint": "steady",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            hint = SimpleNamespace(
+                style_hint="respond naturally",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                pace_hint="steady",
+            )
+            setattr(hint, "追问倾向", 0.0)
+            return hint
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace())
+
+    class _FakeMotiveState:
+        def __init__(self, payload: dict[str, float | str]) -> None:
+            self._payload = dict(payload)
+
+        def as_dict(self):
+            return dict(self._payload)
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr(
+        "host_brain.persona.motive_engine.compute_motive_state",
+        lambda _inp: _FakeMotiveState(motive_state),
+    )
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-memory-matrix",
+        person_id="person-memory-matrix",
+        session_id="session-memory-matrix",
+        thread_id=None,
+        user_message="我们继续说刚才那件事吧",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "NEUTRAL", "emotion_intensity": 0.42},
+        recall_slot_text={},
+        bond_summary={"stage": "FRIEND"},
+        scene_type="CHAT",
+    )
+    return ccb.build_chat_prompt_runtime_payload(runtime_input=runtime_input, style_bindings={})
+
+
+@pytest.mark.parametrize(
+    ("case_name", "memory_signal", "motive_state", "expectations"),
+    [
+        (
+            "warm_continuity",
+            {
+                "suppressed_memory_count": 0,
+                "distorted_memory_count": 0,
+                "avg_distortion_level": 0.12,
+                "dominant_memory_emotion": "WARM",
+                "recall_bias": "warm",
+            },
+            {
+                "care_drive": 0.68,
+                "reach_out_drive": 0.44,
+                "continuity_drive": 0.74,
+                "withdraw_drive": 0.08,
+                "self_protect_drive": 0.06,
+                "dominant_motive": "continuity",
+            },
+            {
+                "allow_followup": True,
+                "allow_proactive_after_reply": True,
+                "allow_topic_shift": True,
+                "reason_tag": "memory:warm=WARM",
+                "tone": "caring",
+                "followup_floor": 0.12,
+                "guidance_keyword": "温暖",
+            },
+        ),
+        (
+            "suppressed_pain",
+            {
+                "suppressed_memory_count": 1,
+                "distorted_memory_count": 1,
+                "avg_distortion_level": 0.52,
+                "dominant_memory_emotion": "HURT",
+                "recall_bias": "guarded",
+            },
+            {
+                "care_drive": 0.34,
+                "reach_out_drive": 0.22,
+                "continuity_drive": 0.28,
+                "withdraw_drive": 0.48,
+                "self_protect_drive": 0.82,
+                "dominant_motive": "self_protect",
+            },
+            {
+                "allow_followup": False,
+                "allow_proactive_after_reply": False,
+                "allow_topic_shift": False,
+                "reason_tag": "memory:protective_guard",
+                "tone": "gentle",
+                "followup_ceiling": 0.03,
+                "guidance_keyword": "轻触试探",
+            },
+        ),
+        (
+            "distorted_fragile",
+            {
+                "suppressed_memory_count": 0,
+                "distorted_memory_count": 1,
+                "avg_distortion_level": 0.61,
+                "dominant_memory_emotion": "ANXIOUS",
+                "recall_bias": "uncertain",
+            },
+            {
+                "care_drive": 0.46,
+                "reach_out_drive": 0.26,
+                "continuity_drive": 0.4,
+                "withdraw_drive": 0.24,
+                "self_protect_drive": 0.28,
+                "dominant_motive": "care",
+            },
+            {
+                "allow_followup": False,
+                "allow_proactive_after_reply": False,
+                "allow_topic_shift": False,
+                "reason_tag": "memory:distortion=0.61",
+                "tone": "gentle",
+                "followup_ceiling": 0.02,
+                "guidance_keyword": "模糊",
+            },
+        ),
+    ],
+)
+def test_memory_persona_reply_runtime_regression_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    case_name: str,
+    memory_signal: dict[str, object],
+    motive_state: dict[str, float | str],
+    expectations: dict[str, object],
+) -> None:
+    runtime_payload = _build_runtime_payload_from_memory_case(
+        monkeypatch,
+        memory_signal=memory_signal,
+        motive_state=motive_state,
+    )
+
+    response_policy = dict(runtime_payload.get("response_policy") or {})
+    hint = dict(runtime_payload.get("persona_expression_hint") or {})
+    memory_summary = str(runtime_payload.get("memory_recall_summary") or "")
+
+    assert response_policy["allow_followup"] is expectations["allow_followup"], case_name
+    assert response_policy["allow_proactive_after_reply"] is expectations["allow_proactive_after_reply"], case_name
+    assert response_policy["allow_topic_shift"] is expectations["allow_topic_shift"], case_name
+    assert expectations["reason_tag"] in response_policy["policy_reason_tags"], case_name
+    assert hint["tone"] == expectations["tone"], case_name
+    assert expectations["guidance_keyword"] in str(hint.get("memory_guidance") or ""), case_name
+    assert memory_summary == "固定 recall 包：记忆人格化对照样例。", case_name
+
+    follow_up_tendency = float(hint.get("follow_up_tendency") or 0.0)
+    if "followup_floor" in expectations:
+        assert follow_up_tendency >= float(expectations["followup_floor"]), case_name
+    if "followup_ceiling" in expectations:
+        assert follow_up_tendency <= float(expectations["followup_ceiling"]), case_name
