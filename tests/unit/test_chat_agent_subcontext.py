@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -814,6 +815,29 @@ def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy()
     )
     assert "陪你聊下去" in close_default
 
+
+def test_chat_agent_quality_fallback_reply_uses_runtime_payload_for_continuity_and_shared_memory() -> None:
+    reply = _build_chat_agent_quality_fallback_reply(
+        user_message="你还记得我们之前说的那个展览吗",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "挚友", "shared_memory_count": 2},
+        emotion_context={},
+        render_target_lang="zh",
+        response_policy={"allow_followup": False},
+        prompt_runtime_payload={
+            "offline_state": {"anticipation_topics": ["那场展览"]},
+            "motive_state": {"dominant_motive": "continuity", "continuity_drive": 0.91},
+            "bond_narrative": {
+                "shared_memories": ["那场展览和我们之前熬夜聊出来的计划"],
+            },
+        },
+    )
+    assert "记得" in reply
+    assert "展览" in reply
+    assert "接" in reply
+    assert "想先从哪一段继续" not in reply
+
+
 def test_chat_agent_helper_reflection_buffer_and_sub_agent_prompt_variants(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "off")
     assert _should_buffer_stream_output(
@@ -1000,7 +1024,17 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
     monkeypatch.setattr(
         "host_brain.app.top_agent_prompt.build_top_agent_prompt",
-        lambda **_kwargs: ("prompt", "system", {}),
+        lambda **_kwargs: (
+            "prompt",
+            "system",
+            {},
+            {
+                "offline_state": {"anticipation_topics": ["那场展览"]},
+                "motive_state": {"dominant_motive": "continuity", "continuity_drive": 0.91},
+                "bond_narrative": {"shared_memories": ["那场展览和我们之前熬夜聊出来的计划"]},
+                "response_policy": {"allow_followup": False, "max_sentences": 2},
+            },
+        ),
     )
     captured: list[dict[str, object]] = []
 
@@ -1021,31 +1055,95 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     agent_input = ChatAgentInput(
         request_id="req-chat-runtime-fail",
         session_id="sess-chat-runtime-fail",
-        user_message="hello",
+        user_message="你还记得我们之前说的那个展览吗",
         person_id="person-001",
         render_target_lang="zh",
+        bond_summary={"stage": "挚友", "shared_memory_count": 2},
         llm_runtime=None,
     )
     events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
     commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    commit_payload = json.loads(commit.removeprefix("data: ").strip())
     assert "LLM_UNAVAILABLE" in commit
     assert captured[-1]["request_id"] == "req-chat-runtime-fail"
-    assert captured[-1]["user_message"] == "hello"
+    assert captured[-1]["user_message"] == "你还记得我们之前说的那个展览吗"
     assert captured[-1]["model_id"] == "llm-unavailable-fallback"
+    assert "展览" in str(commit_payload["narrative"])
+    assert "脑子有点转不动" not in str(commit_payload["narrative"])
+    assert str(captured[-1]["narrative"]) == str(commit_payload["narrative"])
+    assert dict(captured[-1]["motive_state"] or {})["dominant_motive"] == "continuity"
+    assert dict(captured[-1]["response_policy"] or {})["allow_followup"] is False
 
     unavailable_input = ChatAgentInput(
         request_id="req-chat-runtime-down",
         session_id="sess-chat-runtime-down",
-        user_message="hello",
+        user_message="你还记得我们之前说的那个展览吗",
         person_id="person-001",
         render_target_lang="zh",
+        bond_summary={"stage": "挚友", "shared_memory_count": 2},
         llm_runtime={"available": False, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
     )
     events = _run(_collect_events(chat_agent_sse_generator(unavailable_input)))
     commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    commit_payload = json.loads(commit.removeprefix("data: ").strip())
     assert "LLM_UNAVAILABLE" in commit
     assert captured[-1]["request_id"] == "req-chat-runtime-down"
     assert captured[-1]["model_id"] == "mock"
+    assert "展览" in str(commit_payload["narrative"])
+    assert str(captured[-1]["narrative"]) == str(commit_payload["narrative"])
+
+
+def test_chat_agent_llm_exception_quality_fallback_uses_runtime_payload(monkeypatch) -> None:
+    def _fake_build_top_agent_prompt(**_kwargs):  # noqa: ANN001
+        return (
+            "PROMPT_TEXT",
+            "SYSTEM_PROMPT",
+            {"temperature": 0.2},
+            {
+                "offline_state": {"anticipation_topics": ["那场展览"]},
+                "motive_state": {"dominant_motive": "continuity", "continuity_drive": 0.88},
+                "bond_narrative": {"shared_memories": ["那场展览和我们之前熬夜聊出来的计划"]},
+                "response_policy": {"allow_followup": False, "max_sentences": 2},
+            },
+        )
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs.get("narrative") or "", {"reflection": {"enabled": False}}
+
+    async def _raising_chunks(**_kwargs):  # noqa: ANN001
+        raise RuntimeError("llm unavailable")
+        yield  # pragma: no cover
+
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr("host_brain.app.top_agent_prompt.build_top_agent_prompt", _fake_build_top_agent_prompt)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _raising_chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-fallback-memory",
+        session_id="session-001",
+        user_message="你还记得我们之前说的那个展览吗",
+        person_id="default",
+        render_target_lang="zh",
+        bond_summary={"stage": "挚友", "shared_memory_count": 2},
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-model",
+            "timeout_ms": 1000,
+            "llm_api_key": "",
+            "base_url_override": "",
+            "agent_gen_params": {"temperature": 0.2},
+        },
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    commit = [event for event in events if '"phase": "COMMIT"' in event][-1]
+    assert "展览" in commit
+    assert "脑子有点转不动" not in commit
+    assert "想先从哪一段继续" not in commit
+
 
 def test_chat_agent_commit_enforces_response_policy_max_sentences_from_runtime_payload(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")

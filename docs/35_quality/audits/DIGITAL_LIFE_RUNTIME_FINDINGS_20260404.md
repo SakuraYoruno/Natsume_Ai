@@ -1,6 +1,6 @@
 受众：MASTER
 标题：数字生命运行验收 Findings（N0-T01）
-版本：v2.4
+版本：v2.5
 日期：2026-04-05
 状态：已复验
 
@@ -86,7 +86,7 @@ with TestClient(app):
 
 当前数字生命运行状态判定为：
 
-> **scheduler、人格 tick、runtime snapshot、沉默/身体感、主动表达引擎、以及 `/v1/chat` 写回→下一轮 readback 链都已在 runtime 成立；当前主阻塞主要收缩为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及关系叙事层与完整 LLM 内容层验证。**
+> **scheduler、人格 tick、runtime snapshot、沉默/身体感、主动表达引擎、以及 `/v1/chat` 写回→下一轮 readback 链都已在 runtime 成立；`bond_narrative / motive_state / response_policy` 也已能在 `LLM_UNAVAILABLE` 降级回复里真实改写 narrative，当前主阻塞收缩为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及真实 LLM 内容层与长离线 live 复验。**
 
 本轮已确认的事实：
 
@@ -96,6 +96,7 @@ with TestClient(app):
 - 沉默引擎与身体感已不只是“有字段”，而是会真实改写 `motive`、`reply_posture` 与 `decision_chain`。
 - `/v1/chat` 主回复入口可走通，但当前环境下会在 runtime 层降级为 `LLM_UNAVAILABLE`，因此主回复链尚不能算完整端到端 PASS。
 - 已定位并修复 `LLM_UNAVAILABLE` 早退绕过 `_async_post_process` 的断点；降级路径现在仍会触发 `session_end` 与 episodic memory writeback。
+- 已补修 `chat_agent` 的 `LLM_UNAVAILABLE / LLM exception` 降级 narrative：fallback 不再固定回落到通用道歉，而会消费 `offline_anticipation_topics / bond_narrative / motive_state / response_policy`，并稳定改写 `COMMIT.narrative` 与 `_async_post_process` 入参。
 - 已补齐 live `/v1/chat` 两轮真实样本：首轮 `WRITE/SUCCESS` 会落账，第二轮 prompt 可稳定读回 `offline_hours / offline_awakening_hint / offline_anticipation_topics`。
 - 主动表达链已补修两处 runtime 断点：future `intent_log.ts_ms` 不再污染 idle gate，scheduler 形态的 `mood_state=steady` 也不再被误判成 `sys_mode=steady`。
 - 在 seeded `>45m` idle 条件下，`proactive_talk_periodic` 已经过一轮真实 `195s` 观察窗触发成功，并通过模板 fallback 推送出主动消息。
@@ -112,7 +113,7 @@ with TestClient(app):
 | V4 | 会话开始 / 结束闭环 | PASS | 已同时具备 degraded `/v1/chat` → `6.5h` synthetic `on_user_awaken` snapshot，以及 live `/v1/chat` 两轮样本下的真实 writeback → 下一轮 readback 证据 |
 | V5 | 沉默引擎是否影响行为 | PASS | `willingness=SILENT` 与 `topic_resistance` 可把 `motive` 推到 `withdraw`，并把回复姿态压成 `withdrawn` |
 | V6 | 身体感是否影响行为 | PASS | `fatigue=EXHAUSTED`、`drowsiness=DROWSY` 会进入 `response_policy.reason_tags` 并改写 `reply_posture` |
-| V7 | 关系叙事层 | PARTIAL | snapshot 已能观测 `bond` 与 narrative 摘要，但本轮未把它与真实回复差异完整闭环到内容层 |
+| V7 | 关系叙事层 | PASS | `bond_narrative / motive_state / response_policy` 已能在真实 runtime 的降级回复里稳定改写 `COMMIT.narrative`，且对应 `_async_post_process` 与单测回归已锁住 |
 | V8 | 主动表达引擎 | PASS | future `intent_log.ts_ms` 与 timed scheduler 的 `mood_state→sys_mode` 误判都已修复；seeded `>45m` idle 下，`proactive_talk_periodic` 在真实 `195s` 观察窗内 `OK` 且成功推送主动消息 |
 | V9 | 记忆连续性同步写回 | PASS | 真实 `/v1/chat` 两轮样本已验证 `memory_ops_log` 连续出现 `WRITE/SUCCESS`，且第二轮 prompt 可读回上一轮写入的 `offline_anticipation_topics` |
 | V10 | Findings 汇总与修正建议 | PASS | 本文已刷新为复验版 findings |
@@ -291,7 +292,7 @@ with TestClient(app):
 
 - 本轮为了满足默认 `45m` idle gate，使用临时 ledger seed 了一条 `46m` 之前的 intent 记录。
 - push client 使用内存 mock，只替换外部发送侧，不改变 scheduler / dispatcher / proactive skill 的真实执行链。
-- 当前内容来源仍是模板 fallback，因为运行环境仍处于 `LLM_UNAVAILABLE`。
+- 当前内容来源仍是 `LLM_UNAVAILABLE` 下的 stateful fallback，而不是完整真实 LLM 输出。
 
 结论：
 
@@ -309,7 +310,7 @@ with TestClient(app):
 
 - `/v1/chat` 主回复链降级到 fallback narrative
 - 主动表达链无法完成真实内容生成
-- 无法把 V4 / V7 / V8 / V9 升到完整 PASS
+- 无法完成真实 LLM narrative 与 Edge 语音链路的完整端到端验收
 
 建议优先动作：
 
@@ -319,13 +320,13 @@ with TestClient(app):
 
 ### Gap 2（P1）
 
-**关系叙事层与真实回复内容层的联动仍缺少完整闭环证据。**
+**关系叙事层已在降级内容层闭环，但真实 LLM narrative 仍缺 live 对照证据。**
 
 现象：
 
-- `bond_narrative`、`response_policy`、`motive_state` 已进入 runtime snapshot
+- `bond_narrative`、`response_policy`、`motive_state` 已进入 runtime snapshot，并会改写 `LLM_UNAVAILABLE` 下的实际回复 narrative
 - 但当前环境仍被 `LLM_UNAVAILABLE` 降级，真实 LLM 内容层还没完成复验
-- `V7` 仍停留在“可观测、可解释”，尚未完成“稳定改写真实回复内容”的端到端证据
+- 当前 remaining work 已从“V7 不生效”收缩到“恢复真实 LLM 后补同输入差异对照”
 
 建议优先动作：
 
@@ -366,11 +367,11 @@ with TestClient(app):
 
 本轮 `N0-T01` 复验可以收口成一句话：
 
-> **数字生命底盘已经不是“像在跑”，而是 scheduler、snapshot、silence、body_sense 都已在 runtime 成立；但完整体验仍卡在环境级降级与少数闭环断点。**
+> **数字生命底盘已经不是“像在跑”，而是 scheduler、snapshot、silence、body_sense、以及 stateful degraded narrative 都已在 runtime 成立；但完整体验仍卡在环境级降级与少数 live 内容层验收。**
 
 建议下一步执行顺序：
 
 1. 先恢复或隔离 `LLM_UNAVAILABLE / edge rpc unavailable` 环境阻塞。
 2. 恢复真实 LLM / Edge RPC 后，补 `bond_narrative / response_policy / motive_state` 对真实回复内容的验收。
 3. 补长离线档位（`24h+ / 72h+`）的 live 内容层观察与自动化回归。
-4. 修完后再刷新一次本 findings，并把 `V7` 与内容层相关结论重新判定。
+4. 修完后再刷新一次本 findings，重点更新真实 LLM narrative 与 Edge 链路结论。

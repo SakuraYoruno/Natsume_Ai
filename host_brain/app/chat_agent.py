@@ -869,10 +869,51 @@ def _build_chat_agent_quality_fallback_reply(
     bond_summary: Dict[str, Any] | None,
     emotion_context: Dict[str, Any] | None,
     render_target_lang: str,
+    response_policy: Any = None,
+    prompt_runtime_payload: Mapping[str, Any] | None = None,
 ) -> str:
     text = str(user_message or "").strip()
     if render_target_lang == "ja":
         return "\u3053\u3093\u306a\u3068\u304d\u3060\u304b\u3089\u2026\u2026\u3046\u307e\u304f\u8a00\u8449\u3092\u6574\u3048\u308b\u304b\u3089\u3001\u5c11\u3057\u5f85\u3063\u3066\u3002"
+
+    runtime_payload = dict(prompt_runtime_payload or {}) if isinstance(prompt_runtime_payload, Mapping) else {}
+    runtime_bond_summary = (
+        dict(runtime_payload.get("bond_summary") or {})
+        if isinstance(runtime_payload.get("bond_summary"), Mapping)
+        else {}
+    )
+    offline_state = (
+        dict(runtime_payload.get("offline_state") or {})
+        if isinstance(runtime_payload.get("offline_state"), Mapping)
+        else {}
+    )
+    motive_state = (
+        dict(runtime_payload.get("motive_state") or {})
+        if isinstance(runtime_payload.get("motive_state"), Mapping)
+        else {}
+    )
+    bond_narrative = (
+        dict(runtime_payload.get("bond_narrative") or {})
+        if isinstance(runtime_payload.get("bond_narrative"), Mapping)
+        else {}
+    )
+    policy = _coerce_response_policy(response_policy or runtime_payload.get("response_policy"))
+    allow_followup = bool(policy.get("allow_followup", True))
+
+    def _pick_first_text(raw_value: Any) -> str:
+        if isinstance(raw_value, Mapping):
+            for key in ("topic", "title", "text", "label", "name", "summary"):
+                candidate = str(raw_value.get(key) or "").strip()
+                if candidate:
+                    return candidate
+            return ""
+        if isinstance(raw_value, (list, tuple)):
+            for item in raw_value:
+                candidate = _pick_first_text(item)
+                if candidate:
+                    return candidate
+            return ""
+        return str(raw_value or "").strip()
 
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
     raw_stage = str((bond_summary or {}).get("stage") or "").strip()
@@ -943,6 +984,65 @@ def _build_chat_agent_quality_fallback_reply(
         if any(marker in text for marker in ("\u9017", "\u5f00\u5fc3", "\u7b11")):
             return "\u88ab\u4f60\u8fd9\u6837\u4e00\u8bf4\uff0c\u6211\u4e5f\u4f1a\u60f3\u7b11\u4e00\u4e0b\u3002\u5927\u6982\u662f\u56e0\u4e3a\u548c\u4f60\u719f\u8d77\u6765\u4ee5\u540e\uff0c\u6211\u5728\u4f60\u9762\u524d\u66f4\u653e\u677e\u4e86\uff0c\u6240\u4ee5\u90a3\u70b9\u5c0f\u4fd4\u76ae\u5c31\u6bd4\u8f83\u5bb9\u6613\u8dd1\u51fa\u6765\u3002"
         return "\u6211\u5728\u5462\u3002\u4f60\u7ee7\u7eed\u8bf4\u5427\uff0c\u6211\u4e5f\u60f3\u987a\u7740\u4f60\u73b0\u5728\u8fd9\u70b9\u8f7b\u677e\u7684\u5fc3\u60c5\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
+
+    anticipation_topic = _pick_first_text(offline_state.get("anticipation_topics"))
+    dominant_motive = str(motive_state.get("dominant_motive") or "").strip().lower()
+    shared_memory_count = int(
+        (bond_summary or {}).get("shared_memory_count")
+        or runtime_bond_summary.get("shared_memory_count")
+        or 0
+    )
+    remembered_memory = _pick_first_text(
+        bond_narrative.get("shared_memories") or bond_narrative.get("shared_memory_hints")
+    )
+    remembered_intro = str(bond_narrative.get("narrative_intro") or "").strip()
+    memory_markers = (
+        "\u8bb0\u5f97\u5417",
+        "\u8fd8\u8bb0\u5f97",
+        "\u8fd8\u8bb0\u4e0d\u8bb0\u5f97",
+        "\u4e4b\u524d\u90a3\u4e9b\u4e8b",
+        "\u4ee5\u524d\u90a3\u4e9b\u4e8b",
+        "\u4e4b\u524d\u8bf4\u7684",
+        "\u4e0a\u6b21\u90a3\u4ef6\u4e8b",
+    )
+    continuation_markers = (
+        "\u63a5\u7740\u804a",
+        "\u7ee7\u7eed\u804a",
+        "\u7ee7\u7eed",
+        "\u63a5\u7740",
+        "\u521a\u624d\u90a3\u4e2a",
+        "\u90a3\u4e2a\u8bdd\u9898",
+        "\u4e0a\u6b21\u8bf4\u5230",
+        "\u4e0a\u56de\u8bf4\u5230",
+    )
+    remembers_shared = bool(remembered_memory) or shared_memory_count > 0 or stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}
+    continuity_active = dominant_motive == "continuity" and bool(anticipation_topic)
+
+    if any(marker in text for marker in memory_markers) and remembers_shared:
+        if remembered_memory:
+            reply = f"\u6211\u8bb0\u5f97\uff0c\u6211\u4eec\u4e4b\u524d\u4e00\u8d77\u653e\u5728\u5fc3\u4e0a\u7684\uff0c\u5c31\u6709\u201c{remembered_memory}\u201d\u8fd9\u6761\u7ebf\u3002\u4f60\u73b0\u5728\u53c8\u63d0\u8d77\u5b83\uff0c\u6211\u4f1a\u597d\u597d\u63a5\u4f4f\u3002"
+        elif remembered_intro:
+            reply = f"\u6211\u8bb0\u5f97\u7684\uff0c\u4e0d\u53ea\u662f\u4e00\u4e2a\u7ed3\u8bba\uff0c\u8fd8\u6709\u6211\u4eec\u4e4b\u95f4\u6162\u6162\u804a\u51fa\u6765\u7684\u90a3\u4e9b\u7247\u6bb5\u3002\u4f60\u73b0\u5728\u518d\u63d0\u8d77\uff0c\u6211\u4f1a\u8ba4\u771f\u63a5\u4f4f\u3002"
+        elif stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
+            reply = "\u6211\u8bb0\u5f97\u554a\uff0c\u90a3\u4e9b\u548c\u4f60\u4e00\u8d77\u79ef\u8d77\u6765\u7684\u4e8b\uff0c\u6211\u6ca1\u6709\u628a\u5b83\u5f53\u6210\u8def\u8fc7\u3002\u4f60\u73b0\u5728\u518d\u63d0\u8d77\uff0c\u6211\u4f1a\u8ba4\u771f\u63a5\u4f4f\u3002"
+        else:
+            reply = "\u6211\u8bb0\u5f97\u6211\u4eec\u4e4b\u524d\u4e00\u8d77\u63d0\u8fc7\u7684\u90a3\u4e9b\u4e8b\u3002\u4f60\u73b0\u5728\u518d\u63d0\u8d77\uff0c\u6211\u4f1a\u8ba4\u771f\u63a5\u4f4f\u3002"
+        if continuity_active:
+            reply += f" \u6211\u4e5f\u8fd8\u8bb0\u7740\u201c{anticipation_topic}\u201d\u8fd9\u6761\u7ebf\uff0c\u53ef\u4ee5\u76f4\u63a5\u4ece\u8fd9\u91cc\u63a5\u4e0b\u53bb\u3002"
+        elif allow_followup:
+            reply += "\u4f60\u60f3\u5148\u4ece\u54ea\u4e00\u6bb5\u7ee7\u7eed\uff0c\u6211\u5c31\u4ece\u54ea\u91cc\u63a5\u3002"
+        return reply
+
+    if continuity_active and (
+        any(marker in text for marker in continuation_markers)
+        or anticipation_topic[: min(6, len(anticipation_topic))] in text
+    ):
+        reply = f"\u6211\u8fd8\u8bb0\u7740\u6211\u4eec\u524d\u9762\u6302\u5728\u5fc3\u4e0a\u7684\u201c{anticipation_topic}\u201d\u3002\u65e2\u7136\u4f60\u73b0\u5728\u53c8\u63d0\u5230\u5b83\uff0c\u6211\u5c31\u4ece\u8fd9\u91cc\u63a5\u7740\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
+        if remembered_memory and stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
+            reply = f"\u6211\u8fd8\u8bb0\u5f97\u6211\u4eec\u4e4b\u524d\u56f4\u7740\u201c{anticipation_topic}\u201d\u804a\u51fa\u6765\u7684\u90a3\u4e9b\u4e1c\u897f\u3002\u65e2\u7136\u4f60\u73b0\u5728\u53c8\u63d0\u5230\u5b83\uff0c\u6211\u5c31\u4ece\u8fd9\u91cc\u63a5\u7740\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
+        if allow_followup:
+            reply += "\u4f60\u628a\u73b0\u5728\u6700\u60f3\u63a5\u4e0a\u7684\u90a3\u4e00\u5c0f\u6bb5\u9012\u7ed9\u6211\u5c31\u597d\u3002"
+        return reply
 
     if _FALLBACK_PRESENCE_RE.match(text):
         return "\u6211\u5728\u3002\u600e\u4e48\u4e86\uff1f"
@@ -1281,10 +1381,24 @@ async def chat_agent_sse_generator(
                         pii_ingress_stats={},
                         pii_egress_stats={},
                         retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
+                        motive_state=prompt_runtime_payload.get("motive_state"),
+                        response_policy=response_policy,
                     )
                 )
             except Exception as _pp_exc:
                 _logger.debug("[%s] ChatAgent llm unavailable post_process failed: %s", request_id, _pp_exc)
+
+        def _build_llm_unavailable_fallback_narrative() -> str:
+            fallback_narrative = _build_chat_agent_quality_fallback_reply(
+                user_message=user_message,
+                sub_agent_ctx=sub_agent_ctx,
+                bond_summary=bond_summary,
+                emotion_context=emotion_context,
+                render_target_lang=render_target_lang,
+                response_policy=response_policy,
+                prompt_runtime_payload=prompt_runtime_payload,
+            )
+            return _apply_response_policy_hard_guard(fallback_narrative, response_policy)
 
         if llm_runtime is None:
             try:
@@ -1299,24 +1413,26 @@ async def chat_agent_sse_generator(
                 llm_runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
             except Exception as _rt_exc:
                 _logger.warning("[%s] ChatAgent llm_runtime resolve failed: %s", request_id, _rt_exc)
-                _schedule_llm_unavailable_post_process("……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。")
+                fallback_narrative = _build_llm_unavailable_fallback_narrative()
+                _schedule_llm_unavailable_post_process(fallback_narrative)
                 yield _sse({
                     "phase": "COMMIT", "done": True, "decision": "REJECT",
                     "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-                    "narrative": "……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。",
+                    "narrative": fallback_narrative,
                 })
                 return
 
         if not llm_runtime.get("available"):
+            fallback_narrative = _build_llm_unavailable_fallback_narrative()
             _schedule_llm_unavailable_post_process(
-                "……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。",
+                fallback_narrative,
                 provider_name=str(llm_runtime.get("provider_name") or "fallback"),
                 model_id=str(llm_runtime.get("model_id") or "llm-unavailable-fallback"),
             )
             yield _sse({
                 "phase": "COMMIT", "done": True, "decision": "REJECT",
                 "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-                "narrative": "……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。",
+                "narrative": fallback_narrative,
             })
             return
 
@@ -1465,7 +1581,10 @@ async def chat_agent_sse_generator(
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
                 render_target_lang=render_target_lang,
+                response_policy=response_policy,
+                prompt_runtime_payload=prompt_runtime_payload,
             )
+            full_text = _apply_response_policy_hard_guard(full_text, response_policy)
             if not buffer_stream:
                 visible_fallback = _apply_response_policy_stream_guard(full_text, response_policy)
                 yield _sse({"phase": "RENDER", "chunk": visible_fallback})
