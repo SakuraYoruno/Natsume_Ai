@@ -88,6 +88,34 @@ def _copy_skill_manifest(skill_manifest: list[dict[str, Any]] | None) -> list[di
     return copied
 
 
+def _copy_scene_awareness(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {}
+
+    scene_tags: list[str] = []
+    raw_tags = raw.get("scene_tags") or []
+    if isinstance(raw_tags, list):
+        for item in raw_tags:
+            normalized = str(item or "").strip().lower().replace("-", "_").replace(" ", "_")
+            if normalized and normalized not in scene_tags:
+                scene_tags.append(normalized)
+
+    current_activity = str(raw.get("current_activity") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if current_activity and current_activity not in scene_tags:
+        scene_tags.insert(0, current_activity)
+
+    cleaned: dict[str, Any] = {}
+    if scene_tags:
+        cleaned["scene_tags"] = scene_tags
+    if current_activity:
+        cleaned["current_activity"] = current_activity
+    if isinstance(raw.get("companion_suitable"), bool):
+        cleaned["companion_suitable"] = bool(raw.get("companion_suitable"))
+    if isinstance(raw.get("has_screenshot"), bool):
+        cleaned["has_screenshot"] = bool(raw.get("has_screenshot"))
+    return cleaned
+
+
 @dataclass(slots=True)
 class ChatRuntimeInput:
     request_id: str
@@ -107,6 +135,7 @@ class ChatRuntimeInput:
     committed_route_token: str | None = None
     committed_route_token_detail: dict[str, Any] = field(default_factory=dict)
     skill_manifest: list[dict[str, Any]] = field(default_factory=list)
+    scene_awareness: dict[str, Any] = field(default_factory=dict)
 
     def to_runtime_payload(
         self,
@@ -126,6 +155,8 @@ class ChatRuntimeInput:
             graph_section["committed_route_token_detail"] = dict(self.committed_route_token_detail)
         if self.skill_manifest:
             graph_section["skill_manifest"] = _copy_skill_manifest(self.skill_manifest)
+        if self.scene_awareness:
+            graph_section["scene_awareness"] = _copy_scene_awareness(self.scene_awareness)
 
         return {
             "version": CHAT_RUNTIME_INPUT_VERSION,
@@ -175,6 +206,7 @@ def build_chat_runtime_input(
     committed_route_token: str | None = None,
     committed_route_token_detail: Mapping[str, Any] | None = None,
     skill_manifest: list[dict[str, Any]] | None = None,
+    scene_awareness: Mapping[str, Any] | None = None,
 ) -> ChatRuntimeInput:
     normalized_emotion_state = normalize_chat_emotion_context(emotion_state)
     normalized_emotion_snapshot = (
@@ -203,6 +235,7 @@ def build_chat_runtime_input(
         committed_route_token=(str(committed_route_token).strip() if committed_route_token else None),
         committed_route_token_detail=_copy_mapping(committed_route_token_detail),
         skill_manifest=_copy_skill_manifest(skill_manifest),
+        scene_awareness=_copy_scene_awareness(scene_awareness),
     )
 
 
@@ -348,6 +381,9 @@ def get_chat_runtime_graph(runtime_payload: Mapping[str, Any]) -> dict[str, Any]
     skill_manifest = runtime_payload.get("skill_manifest")
     if isinstance(skill_manifest, list):
         graph_section["skill_manifest"] = _copy_skill_manifest(skill_manifest)
+    scene_awareness = runtime_payload.get("scene_awareness")
+    if isinstance(scene_awareness, Mapping):
+        graph_section["scene_awareness"] = _copy_scene_awareness(scene_awareness)
     return graph_section
 
 

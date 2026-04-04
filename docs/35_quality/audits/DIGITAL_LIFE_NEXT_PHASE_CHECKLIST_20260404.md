@@ -218,6 +218,8 @@
 - 重点模块：`host_brain/app/vision/agent_loop.py`、`host_brain/app/vision/edge_rpc_client.py`、`host_brain/persona/proactive_voice.py`。
 - 交付物：scene-aware proactive 的最小接线与安全降级策略。
 - 验收标准：有截图时可做轻量场景感知；无截图时优雅退化；`sleep` 或高 self-protect 时不误触发。
+- 本轮进展（2026-04-04）：已在 `host_brain/app/chat_runtime_input.py` 增加 `scene_awareness` 的结构化安全入口，只保留 `scene_tags / current_activity / companion_suitable / has_screenshot`，并在 `host_brain/app/chat_context_builder.py` 增加 scene-aware `persona_expression_hint` 收口；主回复现在可以吃到安全的 scene tag，但不会把 `screen_description`、`app_name` 等原始视觉细节塞进回复链。
+- 验证记录：已补 `tests/unit/test_chat_context_builder_helpers_extra.py` 的 scene-aware 安全裁剪与表达回归，并联跑 `tests/unit/test_scene_aware_proactive.py`、`tests/unit/test_mode_activity_scene_regression_matrix.py`、`tests/unit/test_prompt_builder_helpers_extra.py`、`tests/unit/test_clawdbot_pipeline.py`，本轮聚焦验证 `69 passed`。
 
 ### N3-T04：增加模式/活动/场景联合回归测试
 

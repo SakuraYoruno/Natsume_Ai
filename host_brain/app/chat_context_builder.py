@@ -948,6 +948,68 @@ def _apply_activity_monitor_to_persona_expression_hint(
     return hint
 
 
+def _apply_scene_awareness_to_persona_expression_hint(
+    hint_raw: Mapping[str, Any] | None,
+    scene_awareness_raw: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
+    scene_awareness = dict(scene_awareness_raw or {}) if isinstance(scene_awareness_raw, Mapping) else {}
+    if not hint or not scene_awareness:
+        return hint
+
+    raw_tags = scene_awareness.get("scene_tags") or []
+    scene_tags = {
+        str(tag or "").strip().lower().replace("-", "_").replace(" ", "_")
+        for tag in raw_tags
+        if str(tag or "").strip()
+    }
+    current_activity = str(scene_awareness.get("current_activity") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if current_activity:
+        scene_tags.add(current_activity)
+    companion_suitable = scene_awareness.get("companion_suitable")
+
+    if not scene_tags and companion_suitable is None:
+        return hint
+
+    tone = str(hint.get("tone") or "gentle").strip() or "gentle"
+    style_hint = str(hint.get("style_hint") or "").strip()
+    follow_up_tendency = _coerce_optional_float(hint.get("follow_up_tendency")) or 0.0
+    echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
+    pace_hint = str(hint.get("pace_hint") or "").strip()
+    scene_guidance: list[str] = []
+
+    if companion_suitable is False or scene_tags & {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}:
+        tone = "gentle"
+        follow_up_tendency = min(follow_up_tendency, 0.01)
+        echo_weight_modifier = min(echo_weight_modifier, 0.03)
+        if not pace_hint:
+            pace_hint = "steady"
+        scene_guidance.append("当前场景更像在专注或不适合打扰，只做轻声贴边回应，不主动展开")
+    elif scene_tags & {"gaming", "gameplay", "battle", "lobby"}:
+        if tone == "gentle":
+            tone = "playful"
+        follow_up_tendency = max(follow_up_tendency, 0.04)
+        echo_weight_modifier = max(echo_weight_modifier, 0.03)
+        if not pace_hint:
+            pace_hint = "brisk"
+        scene_guidance.append("当前是陪伴型场景，顺着眼前事情轻接就好，不展开任何原始画面细节")
+
+    if scene_guidance:
+        guidance_text = "；".join(dict.fromkeys(part for part in scene_guidance if part))
+        style_hint = f"{style_hint}；{guidance_text}" if style_hint else guidance_text
+        hint["scene_guidance"] = guidance_text
+        if scene_tags:
+            hint["scene_tags"] = sorted(scene_tags)
+
+    hint["tone"] = tone
+    hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
+    hint["follow_up_tendency"] = round(_clamp_float(follow_up_tendency, minimum=-0.3, maximum=0.3), 4)
+    hint["echo_weight_modifier"] = round(_clamp_float(echo_weight_modifier, minimum=-0.3, maximum=0.3), 4)
+    if pace_hint:
+        hint["pace_hint"] = pace_hint
+    return hint
+
+
 def _apply_runtime_mode_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     runtime_flags_raw: Mapping[str, Any] | None,
@@ -1471,6 +1533,15 @@ def build_chat_prompt_runtime_payload(
         activity_monitor = runtime_mode_flags.get("activity_monitor")
         if isinstance(activity_monitor, Mapping):
             runtime_payload["activity_monitor"] = dict(activity_monitor)
+    graph_payload = dict(runtime_payload.get("graph") or {})
+    scene_awareness_raw = graph_payload.get("scene_awareness")
+    scene_awareness = (
+        dict(scene_awareness_raw)
+        if isinstance(scene_awareness_raw, Mapping)
+        else {}
+    )
+    if scene_awareness:
+        runtime_payload["scene_awareness"] = scene_awareness
     memory_persona_signal_raw = prompt_context.get("memory_emotion_hint")
     memory_persona_signal = (
         dict(memory_persona_signal_raw)
@@ -1987,6 +2058,12 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["persona_expression_hint"] = _apply_activity_monitor_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("activity_monitor"),
+        )
+
+    if runtime_payload.get("persona_expression_hint") and runtime_payload.get("scene_awareness"):
+        runtime_payload["persona_expression_hint"] = _apply_scene_awareness_to_persona_expression_hint(
+            runtime_payload.get("persona_expression_hint"),
+            runtime_payload.get("scene_awareness"),
         )
 
     if runtime_payload.get("persona_expression_hint") and runtime_payload.get("runtime_mode"):

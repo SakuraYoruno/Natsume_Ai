@@ -928,6 +928,60 @@ def test_apply_activity_monitor_to_persona_expression_hint_idle_keeps_gentle_ree
     assert "空闲后重连时先轻轻接住" in str(adjusted.get("activity_guidance") or "")
 
 
+def test_apply_scene_awareness_to_persona_expression_hint_focus_scene_suppresses_followup() -> None:
+    hint = {
+        "style_hint": "自然回应",
+        "tone": "caring",
+        "echo_weight_modifier": 0.08,
+        "follow_up_tendency": 0.12,
+        "pace_hint": "steady",
+    }
+
+    adjusted = ccb._apply_scene_awareness_to_persona_expression_hint(
+        hint,
+        {
+            "scene_tags": ["focus_work"],
+            "current_activity": "coding",
+            "companion_suitable": False,
+            "has_screenshot": True,
+            "screen_description": "IDE and terminal on screen",
+        },
+    )
+
+    assert adjusted["tone"] == "gentle"
+    assert adjusted["follow_up_tendency"] == 0.01
+    assert adjusted["echo_weight_modifier"] == 0.03
+    assert "不适合打扰" in str(adjusted.get("scene_guidance") or "")
+    assert "screen_description" not in str(adjusted)
+
+
+def test_apply_scene_awareness_to_persona_expression_hint_gaming_scene_keeps_companion_style() -> None:
+    hint = {
+        "style_hint": "自然回应",
+        "tone": "gentle",
+        "echo_weight_modifier": 0.0,
+        "follow_up_tendency": 0.0,
+    }
+
+    adjusted = ccb._apply_scene_awareness_to_persona_expression_hint(
+        hint,
+        {
+            "scene_tags": ["battle"],
+            "current_activity": "gaming",
+            "companion_suitable": True,
+            "has_screenshot": True,
+            "screen_description": "boss fight in progress",
+        },
+    )
+
+    assert adjusted["tone"] == "playful"
+    assert adjusted["follow_up_tendency"] >= 0.04
+    assert adjusted["echo_weight_modifier"] >= 0.03
+    assert adjusted["pace_hint"] == "brisk"
+    assert "陪伴型场景" in str(adjusted.get("scene_guidance") or "")
+    assert "screen_description" not in str(adjusted)
+
+
 def test_build_chat_prompt_runtime_payload_applies_motive_to_expression_hint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1227,6 +1281,113 @@ def test_build_chat_prompt_runtime_payload_applies_activity_hint_to_expression(
     assert hint["echo_weight_modifier"] >= 0.04
     assert hint["activity_event_type"] == "gaming_detected"
     assert "优先短句接球和陪玩" in str(hint.get("activity_guidance") or "")
+
+
+def test_build_chat_prompt_runtime_payload_keeps_only_structured_scene_awareness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOST_SYS_MODE", "normal")
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+                "hard_snapshot": {"sys_mode": "normal"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "NEUTRAL",
+                "emotion_intensity": 0.3,
+                "emotion_range_hint": "calm",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(
+                style_hint="自然回应",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                追问倾向=0.0,
+                pace_hint="steady",
+            )
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace())
+
+    class _FakeMotiveState:
+        def as_dict(self):
+            return {
+                "care_drive": 0.42,
+                "reach_out_drive": 0.32,
+                "continuity_drive": 0.46,
+                "withdraw_drive": 0.12,
+                "self_protect_drive": 0.08,
+                "dominant_motive": "continuity",
+            }
+
+    class _FakePolicy:
+        def as_dict(self):
+            return {"allow_followup": True, "max_sentences": 3}
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", lambda _inp: _FakeMotiveState())
+    monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", lambda _inp: _FakePolicy())
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-scene-expression",
+        person_id="person-scene-expression",
+        session_id="session-scene-expression",
+        thread_id=None,
+        user_message="先这样吧",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "NEUTRAL", "emotion_intensity": 0.3},
+        recall_slot_text={},
+        bond_summary={},
+        scene_type="CHAT",
+        scene_awareness={
+            "scene_tags": ["battle"],
+            "current_activity": "gaming",
+            "companion_suitable": True,
+            "has_screenshot": True,
+            "screen_description": "boss fight in progress",
+            "app_name": "Genshin Impact",
+        },
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    scene_awareness = dict(runtime_payload.get("scene_awareness") or {})
+    hint = dict(runtime_payload.get("persona_expression_hint") or {})
+    assert scene_awareness["scene_tags"][:2] == ["gaming", "battle"]
+    assert scene_awareness["current_activity"] == "gaming"
+    assert scene_awareness["companion_suitable"] is True
+    assert scene_awareness["has_screenshot"] is True
+    assert "screen_description" not in scene_awareness
+    assert "app_name" not in scene_awareness
+    assert "screen_description" not in str(runtime_payload)
+    assert hint["tone"] == "playful"
+    assert "原始画面细节" in str(hint.get("scene_guidance") or "")
 
 
 
