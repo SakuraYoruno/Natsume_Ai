@@ -1,18 +1,18 @@
 受众：MASTER
 标题：数字生命运行验收 Findings（N0-T01）
-版本：v1.0
+版本：v2.0
 日期：2026-04-04
-状态：已验证
+状态：已复验
 
 ## 文档目的
 
-按 `docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md` 对当前分支做一轮真实运行验收，把“代码已接线”收口成“运行已证实 / 已发现断点”的正式 findings。
+按 `docs/35_quality/audits/DIGITAL_LIFE_RUNTIME_VERIFICATION_PLAN_20260403.md` 对当前分支做一轮真实运行复验，把旧版“代码已接线”的判断，收口成“哪些能力已在 runtime 成立、哪些断点仍未闭环”的正式 findings。
 
 本文重点回答：
 
-1. scheduler 是否真实启动。
-2. 数字生命核心 tick 是否只是“注册到了 registry”，还是已经形成“触发 → 执行 → 状态更新”的闭环。
-3. 当前运行环境里，哪些问题属于环境阻塞，哪些问题属于主链实现断点。
+1. scheduler 与 personality tick 是否已经真实跑通。
+2. `offline_state / silence_state / body_sense / motive / response_policy` 是否已经进入统一 runtime 行为链。
+3. 当前 remaining gaps 究竟是环境阻塞，还是主链闭环仍未完成。
 
 ---
 
@@ -20,33 +20,19 @@
 
 - 仓库：`D:\Natsume_Ai`
 - 分支：`codex`
-- 验证 commit：`460ea0c`（`feat: add self reflection narrative guardrails`）
-- 验证时间：`2026-04-04 19:40:45` ~ `2026-04-04 19:41:56`（Asia/Shanghai）
+- 验证 commit：`fc19409`（`feat: unify digital life runtime snapshot`）
+- 验证时间：`2026-04-04 19:40` ~ `2026-04-04 23:03`（Asia/Shanghai）
 - 宿主环境：Windows + `dev`
-- 验证方式：使用 `fastapi.testclient.TestClient(app)` 启动真实 FastAPI lifespan，并在同一进程内观察 `/health` 与 `/scheduler/health`
+- 验证方式：使用 `fastapi.testclient.TestClient(app)` 启动真实 FastAPI lifespan，并在同一进程内结合 `/health`、`/scheduler/health`、`/obs/runtime-snapshot`、`/v1/chat`、直接 runtime state 读取与一次主动链手动 dispatch 复验。
 
-### 本轮使用的验证命令
+### 本轮补充复验命令
 
 ```powershell
 @'
-from fastapi.testclient import TestClient
-from host_brain.app.fastapi_app import app
 import json
-with TestClient(app) as client:
-    health = client.get('/health?skip_dependency_probes=1')
-    sched = client.get('/scheduler/health')
-    print('HEALTH_STATUS', health.status_code)
-    print(json.dumps(health.json(), ensure_ascii=False))
-    print('SCHED_STATUS', sched.status_code)
-    print(json.dumps(sched.json(), ensure_ascii=False))
-'@ | python -X utf8 -
-```
-
-```powershell
-@'
-import json, time
 from fastapi.testclient import TestClient
 from host_brain.app.fastapi_app import app
+
 watch = {'inner_world_tick', 'silence_tick', 'body_sense_tick', 'proactive_talk_periodic'}
 with TestClient(app) as client:
     before = client.get('/scheduler/health').json()
@@ -54,12 +40,43 @@ with TestClient(app) as client:
     for task in before.get('tasks', []):
         if task.get('task_id') in watch:
             print(json.dumps(task, ensure_ascii=False))
-    time.sleep(70)
+    import time; time.sleep(70)
     after = client.get('/scheduler/health').json()
     print('AFTER')
     for task in after.get('tasks', []):
         if task.get('task_id') in watch:
             print(json.dumps(task, ensure_ascii=False))
+'@ | python -X utf8 -
+```
+
+```powershell
+@'
+import json
+import logging
+from fastapi.testclient import TestClient
+from host_brain.app.fastapi_app import app
+from host_brain.app.dependencies import get_ledger
+from host_brain.app.http_hooks_runtime_helpers import run_proactive_intent_dispatch
+
+system_intent = {
+    'skill_name': 'proactive_talk',
+    'sys_mode': 'normal',
+    'mood_state': 'steady',
+    'emotion_tag': 'NEUTRAL',
+    'args': {'idle_threshold_ms': 0, 'topic_hint': '那个项目'},
+    'request_id': 'verify-proactive-20260404',
+    'intent_id': 'verify-proactive-20260404',
+}
+
+with TestClient(app):
+    result = run_proactive_intent_dispatch(
+        system_intent,
+        logger=logging.getLogger('digital_life_verify'),
+        get_ledger=get_ledger,
+        retention_policy=None,
+        ui_pusher=lambda message: {'status': 'mocked', 'type': message.get('type')},
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 '@ | python -X utf8 -
 ```
 
@@ -69,18 +86,17 @@ with TestClient(app) as client:
 
 当前数字生命运行状态判定为：
 
-> **基础调度已成立，但核心人格 tick 仍未形成真正可执行闭环。**
+> **scheduler 与人格 tick 已经真实跑通，runtime snapshot 也已能解释“为什么这样回”；当前主阻塞已从旧版 `UNKNOWN_SKILL` 转移为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及 `session_end / awaken / proactive` 闭环证据仍不足。**
 
 本轮已确认的事实：
 
-- `NatsumeScheduler` 已真实启动，`/scheduler/health` 可返回健康快照，且默认已注册 8 个任务。
-- `inner_world_tick`、`silence_tick`、`body_sense_tick` 在 70 秒观察窗内确实被 scheduler 触发。
-- 但这 3 个 tick 的执行结果统一为 `last_reason_code="UNKNOWN_SKILL"`，说明当前仍停留在“任务被调度”而不是“skill 被成功执行”。
-- `proactive_talk_periodic` 已注册，但 70 秒窗口内未触发；这与其 `180s` interval 配置一致，本轮不足以判定失败。
-
-因此，`N0-T01` 的结论不是“数字生命已经跑通”，而是：
-
-> **调度底盘是真的，注册也是真的，但 scheduler → runtime dispatch → personality skill execution 之间还有一个 P0 断点。**
+- `NatsumeScheduler` 已真实启动，`/scheduler/health` 为健康态，默认启用任务数为 `9`。
+- `inner_world_tick`、`silence_tick`、`body_sense_tick` 在 70 秒观察窗内从 `PENDING` 进入 `OK`，且 `last_reason_code = null`，旧版 findings 中“统一掉到 `UNKNOWN_SKILL`”的结论已失效。
+- `/obs/runtime-snapshot` 已能稳定汇总 `decision_chain` 与 `core_slots`，并可观测 `offline_state / silence_state / body_sense / motive / response_policy`。
+- 沉默引擎与身体感已不只是“有字段”，而是会真实改写 `motive`、`reply_posture` 与 `decision_chain`。
+- `/v1/chat` 主回复入口可走通，但当前环境下会在 runtime 层降级为 `LLM_UNAVAILABLE`，因此主回复链尚不能算完整端到端 PASS。
+- `session_end / on_user_awaken` 在本轮真实 `/v1/chat` 降级路径下仍缺少稳定闭环证据。
+- 主动表达链的旧问题已不再是 `sys_mode` 误判；补测显示它现在卡在 `intent_log` 最新时间戳超前到 `2027-01-15T16:00:00.003`，导致 idle gate 直接拒绝。
 
 ---
 
@@ -88,207 +104,232 @@ with TestClient(app) as client:
 
 | 编号 | 验证项 | 结果 | 结论 |
 |---|---|---|---|
-| V1 | Scheduler 是否启动 | PASS | `/scheduler/health=200`，`scheduler_status=HEALTHY`，`enabled_tasks=8` |
-| V2 | Personality Tick 是否注册并运行 | PARTIAL | `inner_world_tick` / `silence_tick` / `body_sense_tick` 已注册且被触发，但执行结果为 `UNKNOWN_SKILL` |
-| V3 | 离线时间流 / 等待感 | NOT_RUN | 本轮未进入会话前后状态对照，且被 V2 断点阻塞 |
-| V4 | 会话开始 / 结束闭环 | NOT_RUN | 未做 awaken / session_end 行为链验收 |
-| V5 | 沉默引擎是否影响行为 | NOT_RUN | 仅观察到 tick 触发，未观察回复行为差异 |
-| V6 | 身体感是否影响行为 | NOT_RUN | 仅观察到 tick 触发，未观察回复行为差异 |
-| V7 | 关系叙事层 | NOT_RUN | 本轮未做 bond narrative 输入输出验证 |
-| V8 | 主动表达引擎 | PARTIAL | `proactive_talk_periodic` 已注册，但 70 秒窗口内未触发，不足以下结论 |
-| V9 | 记忆连续性同步写回 | NOT_RUN | 本轮未做多轮会话与写回验证 |
-| V10 | Findings 汇总与修复建议 | PASS | 本文已产出 |
+| V1 | Scheduler 是否启动 | PASS | `/scheduler/health=200`，`scheduler_status=HEALTHY`，`enabled_tasks=9` |
+| V2 | Personality Tick 是否注册并运行 | PASS | `inner_world_tick` / `silence_tick` / `body_sense_tick` 在 70 秒内进入 `OK`，`last_reason_code=null` |
+| V3 | 离线时间流 / 等待感 | PASS | `offline_state`、`absence_band`、`offline_reconnect_style` 已进入 runtime snapshot 且可被 6.5h synthetic round 稳定观测 |
+| V4 | 会话开始 / 结束闭环 | PARTIAL | `/v1/chat` 入口可走通，但本轮降级路径下未证明 `session_end / on_user_awaken` 稳定更新 inner world |
+| V5 | 沉默引擎是否影响行为 | PASS | `willingness=SILENT` 与 `topic_resistance` 可把 `motive` 推到 `withdraw`，并把回复姿态压成 `withdrawn` |
+| V6 | 身体感是否影响行为 | PASS | `fatigue=EXHAUSTED`、`drowsiness=DROWSY` 会进入 `response_policy.reason_tags` 并改写 `reply_posture` |
+| V7 | 关系叙事层 | PARTIAL | snapshot 已能观测 `bond` 与 narrative 摘要，但本轮未把它与真实回复差异完整闭环到内容层 |
+| V8 | 主动表达引擎 | PARTIAL | 70 秒窗口内 timed task 未到触发周期；手动 dispatch 改为被 future `intent_log.ts_ms` 卡住，而非旧版 `UNKNOWN_SKILL` / `sys_mode` 问题 |
+| V9 | 记忆连续性同步写回 | PARTIAL | 运行态可读到旧 `anticipation_topics`，但本轮 `/v1/chat` 降级路径未证明最新消息被稳定写回 |
+| V10 | Findings 汇总与修正建议 | PASS | 本文已刷新为复验版 findings |
 
 ---
 
 ## 关键证据
 
-### E1：Scheduler 启动证据成立
+### E1：Scheduler 与 personality ticks 已真实打通
 
 `/scheduler/health` 返回：
 
 - `status_code = 200`
 - `scheduler_status = HEALTHY`
-- `total_tasks = 8`
-- `enabled_tasks = 8`
+- `enabled_tasks = 9`
 
-已观察到的任务清单：
+70 秒观察窗内：
 
-- `proactive_talk_periodic`
-- `inner_world_tick`
-- `silence_tick`
-- `body_sense_tick`
-- `gaming_companion_tick`
-- `long_term_memory_distillation`
-- `audit_retention_daily`
-- `emergent_growth_weekly`
-
-结论：**V1 通过，scheduler 不是“代码存在但未启动”的假接线。**
-
-### E2：核心人格 tick 确实被触发，但没有执行成功
-
-70 秒观察窗口前：
-
-- `inner_world_tick = PENDING`
-- `silence_tick = PENDING`
-- `body_sense_tick = PENDING`
-- `proactive_talk_periodic = PENDING`
-
-70 秒观察窗口后：
-
-- `inner_world_tick = OK`，`last_run_ts` 有值，`last_reason_code = UNKNOWN_SKILL`
-- `silence_tick = OK`，`last_run_ts` 有值，`last_reason_code = UNKNOWN_SKILL`
-- `body_sense_tick = OK`，`last_run_ts` 有值，`last_reason_code = UNKNOWN_SKILL`
-- `proactive_talk_periodic = PENDING`
+- `inner_world_tick`: `PENDING -> OK`
+- `silence_tick`: `PENDING -> OK`
+- `body_sense_tick`: `PENDING -> OK`
+- 三者均有 `last_run_ts`
+- 三者均为 `last_reason_code = null`
+- `proactive_talk_periodic` 在 70 秒内仍为 `PENDING`，与其 `180s` interval 一致
 
 结论：
 
-- `inner_world_tick` / `silence_tick` / `body_sense_tick` **确实被 scheduler timer 触发了**。
-- 但触发后的执行链没有进入对应 personality skill handler。
-- 当前只能证明“任务调度存在”，还不能证明“数字生命状态机真实运转”。
+> 旧版 findings 中“ticks 被调度但统一掉到 `UNKNOWN_SKILL`”已经不成立。当前 scheduler → personality tick runtime dispatch 已经成立，V2 应从旧版 `PARTIAL` 升为 `PASS`。
 
-### E3：运行环境存在降级，但不等于本轮主断点
+### E2：统一 runtime snapshot 已能解释离线连续性与行为姿态
 
-本轮同时观察到以下降级日志：
+基线 `GET /obs/runtime-snapshot?current_topic=那个项目` 返回：
 
-- `OPENAI_API_KEY missing`
-- `edge rpc unreachable: ConnectError; attempted=http://127.0.0.1:17800`
-- `StateArbiter: EpisodicStore 注册失败（降级）`
-- `进化周期任务注册失败（降级）: NORMAL`
-- `Personality 工具注册失败（降级）: No module named 'host_brain.skills.impl.inner_world_skill'`
+- `headline = "mode=normal | bond=STRANGER | motive=continuity | reply=focused"`
+- `current_state.sys_mode = normal`
+- `reply_posture.style = focused`
+- `decision_chain = ["mode:normal", "self_reflection_guard:medium", "motive:continuity", "response_policy:focused"]`
 
-其中需要区分两类问题：
+构造 6.5 小时久别状态后再次观测：
 
-1. **环境依赖缺失**
-   - `OPENAI_API_KEY missing`
-   - Edge RPC 不可达
-   - 这些会影响完整端到端能力，但**不是**本轮 `UNKNOWN_SKILL` 的直接原因。
-2. **主链实现断点**
-   - `UNKNOWN_SKILL`
-   - `personality_tools_catalog` 导入失败
-   - 这是数字生命 tick 无法落到 handler 的主因带。
+- `headline = "mode=normal | bond=STRANGER | offline=6h_plus | motive=continuity | reply=focused"`
+- `current_state.absence_band = 6h_plus`
+- `current_state.offline_reconnect_style = soft_resume`
+- `core_slots.offline_state.offline_hours = 6.5`
+- `core_slots.offline_state.anticipation_topics` 含 `那个项目`
 
-### E4：`/health?skip_dependency_probes=1` 与启动报告存在观测差异
+结论：
+
+> `offline_state / continuity / runtime snapshot` 已经真实成立，V3 可判定为 `PASS`。
+
+### E3：沉默引擎与身体感已进入真实行为链
+
+在 runtime 中手动压低意愿并提高疲劳后，`GET /obs/runtime-snapshot?current_topic=那个项目` 返回：
+
+- `headline = "mode=normal | bond=STRANGER | offline=6h_plus | motive=withdraw | reply=withdrawn"`
+- `current_state.willingness_level = SILENT`
+- `current_state.fatigue_level = EXHAUSTED`
+- `current_state.drowsiness_level = DROWSY`
+- `current_state.topic_resistance_active = true`
+- `reply_posture.style = withdrawn`
+- `reply_posture.max_chars = 33`
+- `reply_posture.should_be_withdrawn = true`
+- `decision_chain` 含：
+  - `offline:6h_plus->soft_resume`
+  - `silence:SILENT`
+  - `silence:topic_resistance`
+  - `body:EXHAUSTED/DROWSY`
+  - `motive:withdraw`
+  - `response_policy:withdrawn`
+- `core_slots.response_policy.reason_tags` 含：
+  - `willingness:SILENT`
+  - `topic_resistance:active`
+  - `body:fatigue=EXHAUSTED,drowsy=DROWSY`
+
+结论：
+
+> 沉默引擎与身体感已经不只是“tick 会执行”，而是会真实决定 reply posture 与 motive，V5 / V6 可判定为 `PASS`。
+
+### E4：主回复入口可用，但当前被环境级降级截断
 
 `/health?skip_dependency_probes=1` 返回：
 
 - `status_code = 200`
-- `overall_status = DEGRADED`
+- `status = OK`
 - `required_unavailable = 1`
-- 唯一明确 down 项为 `host.integrations.llm_gateway`
 
-但同一轮 startup report 中同时记录：
+但 startup report 与日志持续出现：
 
-- 5 个 `edge.rpc.*` probe 全部不可达
-- `required_unavailable = 6`
+- `OPENAI_API_KEY missing`
+- `edge rpc unreachable: ConnectError; attempted=http://127.0.0.1:17800`
+- Chroma / identity probing 仍有降级
 
-结论：
+真实 `POST /v1/chat` 结果：
 
-> `skip_dependency_probes=1` 的健康快照适合看 host 本体是否存活，但不适合作为完整运行环境健康结论。
-
-这不是数字生命主链 bug，但会影响验收时对“环境是否已就绪”的判断精度。
-
----
-
-## 根因分析
-
-### F1（P0）：scheduler 已能触发任务，但 runtime dispatcher 不认识这些 personality tick
-
-本轮已经确认：
-
-- `host_brain/app/http_hooks.py` 启动时把 `inner_world_tick`、`silence_tick`、`body_sense_tick` 注册进 scheduler。
-- 但 `host_brain/app/http_hooks_runtime_helpers.py` 中的 `run_proactive_intent_dispatch(...)` 只显式处理：
-  - `proactive_talk`
-  - `evolution_cycle`
-  - `audit_retention`
-- 对其它 `skill_name` 直接返回：
-  - `{"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL"}`
-
-这与 70 秒观察窗中的 `last_reason_code="UNKNOWN_SKILL"` 完全吻合。
+- `status_code = 200`
+- COMMIT：`decision = REJECT`
+- `reason_code = LLM_UNAVAILABLE`
+- 仍会返回降级 narrative reply
 
 结论：
 
-> **当前的直接 root cause 不是“scheduler 没触发”，而是“dispatcher 根本不分发这些 tick skill”。**
+> 主回复链入口已连通，但当前环境无法把数字生命验证推进到完整 LLM 输出层。当前最大的端到端阻塞已从旧版 personality dispatch 断点，转移为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`。
 
-### F2（P0）：personality registry 仍引用不存在的实现模块
+### E5：`session_end / awaken` 闭环证据仍不足
 
-`host_brain/skills/personality_registry.py` 仍尝试导入：
+第一次 `/v1/chat` 后直接读取 inner world：
 
-- `host_brain.skills.impl.inner_world_skill`
-- `host_brain.skills.impl.silence_skill`
-- `host_brain.skills.impl.body_sense_skill`
+- `last_interaction_ts_ms` 未稳定更新为本次聊天时间
+- `anticipation_topics` 仍保留旧残留：`["贪吃蛇", "continue", "remember me"]`
 
-但当前 `host_brain/skills/impl/` 目录中并不存在这些模块，导致启动阶段出现：
+对 6.5 小时离线状态执行“唤醒式”聊天后再次读取：
 
-- `Personality 工具注册失败（降级）: No module named 'host_brain.skills.impl.inner_world_skill'`
+- `loneliness` 未观察到明确回落
+- 本轮未拿到 `on_user_awaken` 完整收口证据
 
-这说明即便 dispatcher 被补通，personality skill registry 这层仍需要同步修复，否则工具目录、技能注册与运行行为仍会持续不一致。
+结论：
 
-### F3（P1）：主动表达链本轮只验证到“已注册”，还未验证到“已执行”
+> 本轮只能证明 `/v1/chat` 真实入口通了，还不能证明 `session_end` 与 `on_user_awaken` 在降级路径下稳定闭环，因此 V4 只能维持 `PARTIAL`。
 
-`proactive_talk_periodic` 已出现在 scheduler health 中，但由于其 interval 为 `180s`，本轮 `70s` 观察窗内仍为 `PENDING`。
+### E6：主动表达链的新阻塞已转移到 future ledger timestamp
 
-因此当前只能得出：
+主动链补测使用：
 
-- 任务注册成立
-- 默认启用成立
-- 但是否在真实 idle 条件下成功触发、触发后是否生成有效主动消息，本轮尚未验证
+- `skill_name = proactive_talk`
+- `sys_mode = normal`
+- `args.idle_threshold_ms = 0`
+- `args.topic_hint = 那个项目`
+
+实际返回：
+
+- `status = REJECTED`
+- `reason_code = SCHED_CONDITION_UNMET`
+- `detail = "idle time -24685027034ms < threshold 0ms"`
+
+进一步直接查询 `audit.sqlite3`：
+
+- `SELECT ts_ms FROM intent_log ORDER BY ts_ms DESC LIMIT 1`
+- 返回 `1800000000003`
+- 对应时间：`2027-01-15T16:00:00.003`
+
+结论：
+
+> 主动链现在不再是旧版的 `UNKNOWN_SKILL` 或首轮补测中的 `sys_mode` 误判；当前真实阻塞是 ledger 中存在 future `intent_log.ts_ms`，导致 idle gate 永远优先拒绝。这使 V8 仍只能判定为 `PARTIAL`。
 
 ---
 
-## 当前 Top Gaps 排序
+## 根因与 Top Gaps
 
 ### Gap 1（P0）
 
-**补通 scheduler → dispatcher → personality tick handler 的真实执行链。**
+**环境级 `LLM_UNAVAILABLE / edge rpc unavailable` 仍阻塞完整端到端验收。**
 
-建议优先修复方向：
+影响：
 
-- 不再让 `run_proactive_intent_dispatch(...)` 只认 `proactive_talk`
-- 改为接入统一 skill registry，或显式补齐 `inner_world_tick` / `silence_tick` / `body_sense_tick` / `gaming_companion_tick` 的分发表
+- `/v1/chat` 主回复链降级到 fallback narrative
+- 主动表达链无法完成真实内容生成
+- 无法把 V4 / V7 / V8 / V9 升到完整 PASS
+
+建议优先动作：
+
+- 恢复 `OPENAI_API_KEY`
+- 恢复 `127.0.0.1:17800` Edge RPC
+- 重新跑本 findings 中的 `/v1/chat` 与 proactive dispatch 验证
 
 ### Gap 2（P0）
 
-**修复 `personality_registry` 中失效的 skill 实现导入。**
+**`session_end / on_user_awaken` 在真实 `/v1/chat` 降级路径下仍缺少稳定闭环证据。**
 
-建议优先修复方向：
+现象：
 
-- 对齐 `host_brain/skills/impl/` 的真实文件结构
-- 删除过时导入路径，或补回缺失的 skill wrapper
-- 让 catalog 注册状态与 runtime 可执行状态重新一致
+- `last_interaction_ts_ms` 未稳定追到当前轮
+- `anticipation_topics` 未稳定写回当前话题
+- 唤醒后 `loneliness` 未观察到明确收敛
+
+建议优先动作：
+
+- 增加可重复的 hook-level 验证样本
+- 定位 `session_end` 与 `awaken` 是否被 LLM unavailable 分支绕过
+- 补最小自动化回归
 
 ### Gap 3（P1）
 
-**补齐完整验收环境，避免“代码已修好但外部依赖仍降级”。**
+**主动表达链被 future `intent_log.ts_ms` 卡住，idle gate 失真。**
 
-包括但不限于：
+现象：
 
-- `OPENAI_API_KEY`
-- Edge RPC（`127.0.0.1:17800`）
-- EpisodicStore / evolution task 的降级原因
+- 最新 `intent_log.ts_ms = 1800000000003`
+- 已超前到 `2027-01-15`
+- 手动 proactive dispatch 在 `idle_threshold_ms=0` 下仍直接被拒绝
+
+建议优先动作：
+
+- 排查是谁写入了未来时间戳
+- 为 idle gate 增加“未来时间戳钳制 / 忽略”保护
+- 修复后补跑 timed task 与手动 dispatch 双复验
 
 ---
 
-## 历史异常记录
+## 历史结论修正
 
-上一轮观察中还出现过：
+旧版 `DIGITAL_LIFE_RUNTIME_FINDINGS_20260404.md` 的核心结论是：
 
-- `World canon startup sync degraded: table canon_change_log has no column named before_body`
+> `inner_world_tick / silence_tick / body_sense_tick` 已被 scheduler 触发，但统一落到 `UNKNOWN_SKILL`。
 
-本轮未再次复现，因此暂不列为当前主阻塞，但建议继续保留为迁移兼容性风险项。
+本轮复验后，这一结论应正式作废，修正为：
+
+> scheduler 与 personality ticks 已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖、会话闭环证据不足，以及主动链被 future ledger timestamp 卡住。
 
 ---
 
 ## 结论与下一步建议
 
-本轮 `N0-T01` 验收已经把当前数字生命运行现状收束成一句话：
+本轮 `N0-T01` 复验可以收口成一句话：
 
-> **数字生命底盘已经不是假功能，但当前还卡在“被 scheduler 触发 ≠ 被人格技能真实执行”的关键断点。**
+> **数字生命底盘已经不是“像在跑”，而是 scheduler、snapshot、silence、body_sense 都已在 runtime 成立；但完整体验仍卡在环境级降级与少数闭环断点。**
 
 建议下一步执行顺序：
 
-1. 先修 `UNKNOWN_SKILL` 的 dispatcher 断点。
-2. 再修 `personality_registry` 的失效导入。
-3. 修完后重跑本验收文档中的两条命令。
-4. 然后继续推进 `N0-T02`：补统一 runtime snapshot 观测面。
-
+1. 先恢复或隔离 `LLM_UNAVAILABLE / edge rpc unavailable` 环境阻塞。
+2. 再补 `session_end / on_user_awaken` 的可重复验收样本与回归。
+3. 修 future `intent_log.ts_ms`，重跑 proactive timed + manual dispatch 双验证。
+4. 修完后再刷新一次本 findings，并把 V4 / V8 / V9 重新判定。
