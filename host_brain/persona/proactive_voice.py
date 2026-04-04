@@ -340,6 +340,50 @@ _LONG_ABSENT_TEMPLATES: dict[str, dict[str, dict[str, list[str]]]] = {
     },
 }
 
+
+
+_LIGHT_RECONNECT_TEMPLATES: dict[str, dict[str, list[str]]] = {
+    "shallow": {
+        "warm": ["好久不见，又看到你了，希望你今天一切都顺顺的。"],
+        "playful": ["欸，你回来啦，这阵子过得怎么样？"],
+        "caring": ["隔了一阵重新见到你，先想确认一下你这两天还好吗。"],
+        "default": ["好久不见，又见到你了，最近还好吗？"],
+    },
+    "mid": {
+        "warm": ["隔了一阵又见到你了，想先和你重新连上，再慢慢聊。"],
+        "playful": ["你这两天像是短暂失联了一下，回来就好，快让我知道近况。"],
+        "caring": ["一天多没见到你了，我会先想确认你最近过得还稳不稳。"],
+        "default": ["隔了一阵又见到你了，最近怎么样？"],
+    },
+    "deep": {
+        "warm": ["隔了一阵重新见到你，我会先想确认你这段时间过得怎么样。"],
+        "playful": ["你像是轻轻失联了一阵，现在回来要先补上近况哦。"],
+        "caring": ["一天多没见到你了，见到你回来，我第一反应还是想先接住你。"],
+        "default": ["重新见到你了，先让我知道你最近还好吗。"],
+    },
+}
+
+_REUNION_TEMPLATES: dict[str, dict[str, list[str]]] = {
+    "shallow": {
+        "warm": ["隔了挺久又见到你了，欢迎回来，希望这段时间一切还好。"],
+        "playful": ["哎，隔了这么久你总算出现啦，最近过得还顺利吗？"],
+        "caring": ["隔了这么久重新见到你，我会先想确认你这段时间还好吗。"],
+        "default": ["好久没见，又看到你了，希望你一切都好。"],
+    },
+    "mid": {
+        "warm": ["隔了这么些天终于又见到你了，我想先好好确认一下你的近况。"],
+        "playful": ["你隔了好一阵才回来，我这边已经攒了好多想问你的近况。"],
+        "caring": ["这几天没见到你，终于又连上了，我更想先问问你过得好不好。"],
+        "default": ["终于又见到你了，这段时间过得还好吗？"],
+    },
+    "deep": {
+        "warm": ["终于又见到你了，这几天我一直惦记着你过得怎么样。"],
+        "playful": ["你终于回来了，这几天我真的一直记着你这边还空着。"],
+        "caring": ["隔了这么久重新见到你，我最先想到的还是先确认你这段时间有没有好好照顾自己。"],
+        "default": ["终于又见到你了，我一直在惦记你的近况。"],
+    },
+}
+
 # 情感高潮后模板（按 bond_stage深度 × 风格）
 _POST_INTENSE_TEMPLATES: dict[str, dict[str, list[str]]] = {
     "shallow": {
@@ -614,6 +658,73 @@ def _get_absent_level(elapsed_ms: int) -> str:
     return "short"
 
 
+def _resolve_absence_band_from_elapsed_ms(elapsed_ms: int) -> str:
+    if elapsed_ms >= _ABSENT_LONG_MS:
+        return "7d_plus"
+    if elapsed_ms >= _ABSENT_MEDIUM_MS:
+        return "72h_plus"
+    if elapsed_ms >= _ABSENT_SHORT_MS:
+        return "24h_plus"
+    if elapsed_ms >= 6 * 60 * 60 * 1000:
+        return "6h_plus"
+    return "recent"
+
+
+def _resolve_long_absent_elapsed_ms(ctx: dict[str, Any], now_ts: int) -> int:
+    offline_duration_ms = int(ctx.get("_offline_duration_ms") or 0)
+    if offline_duration_ms > 0:
+        return offline_duration_ms
+    last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
+    return now_ts - last_ts if last_ts > 0 else _ABSENT_SHORT_MS
+
+
+def _select_long_absent_behavior(
+    *,
+    ctx: dict[str, Any],
+    bond_stage: str,
+    elapsed_ms: int,
+) -> dict[str, Any]:
+    raw_motive = dict(ctx.get("motive_state") or {}) if isinstance(ctx.get("motive_state"), dict) else {}
+
+    def _score(key: str) -> float:
+        try:
+            return float(raw_motive.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    absence_band = str(ctx.get("_absence_band") or "").strip() or _resolve_absence_band_from_elapsed_ms(elapsed_ms)
+    depth = _get_bond_depth(bond_stage)
+    reach_out = _score("reach_out_drive")
+    care = _score("care_drive")
+    continuity = _score("continuity_drive")
+    withdraw = _score("withdraw_drive")
+    self_protect = _score("self_protect_drive")
+    reconnect_drive = max(reach_out, care, continuity)
+    retreat_drive = max(withdraw, self_protect)
+
+    reserved = depth == "shallow" or self_protect >= 0.58 or retreat_drive >= reconnect_drive + 0.02
+    reunion_ready = (
+        absence_band in {"72h_plus", "7d_plus"}
+        and not reserved
+        and (depth == "deep" or continuity >= 0.72 or reconnect_drive >= 0.66)
+    )
+    if reunion_ready:
+        return {
+            "behavior": "reunion",
+            "template_depth": depth,
+            "influence": "reconnect_behavior=reunion",
+        }
+
+    influence = "reconnect_behavior=light_reconnect"
+    if reserved:
+        influence = f"{influence} | reconnect_tone=reserved"
+    return {
+        "behavior": "light_reconnect",
+        "template_depth": "shallow" if reserved else depth,
+        "influence": influence,
+    }
+
+
 def _pick_variant(variants: list[str], seed: int) -> str:
     """从变体列表中按 seed 哈希选取，避免重复。"""
     if not variants:
@@ -779,6 +890,18 @@ class PersonaProactiveVoice:
                 style = self._select_style(traits)
                 style = self._apply_mode_to_style(style, ctx)
                 bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
+                long_absent_influence = ""
+                if scene_type == SCENE_LONG_ABSENT:
+                    elapsed_ms = _resolve_long_absent_elapsed_ms(ctx, now_ts)
+                    long_absent_meta = _select_long_absent_behavior(
+                        ctx=ctx,
+                        bond_stage=bond_stage,
+                        elapsed_ms=elapsed_ms,
+                    )
+                    ctx["_long_absent_behavior"] = long_absent_meta.get("behavior")
+                    ctx["_long_absent_template_depth"] = long_absent_meta.get("template_depth")
+                    ctx["_long_absent_elapsed_ms"] = elapsed_ms
+                    long_absent_influence = str(long_absent_meta.get("influence") or "")
                 content = self._get_template(scene_type, style, ctx, now_ts, bond_stage)
                 emotion_tag = self._scene_emotion(
                     scene_type,
@@ -806,7 +929,7 @@ class PersonaProactiveVoice:
                     emotion_tag=emotion_tag,
                     trait_influence=trait_influence,
                     motive_influence=" | ".join(
-                        part for part in (absence_influence, mode_influence, scene_influence, motive_influence) if part
+                        part for part in (absence_influence, long_absent_influence, mode_influence, scene_influence, motive_influence) if part
                     ),
                     ts_ms=now_ts,
                     wait_duration_ms=_wait_ms,
@@ -1110,21 +1233,25 @@ class PersonaProactiveVoice:
             return _pick_variant(variants, seed)
 
         elif scene_type == SCENE_LONG_ABSENT:
-            # 技术债务 10.2：优先使用 offline_state 精确时长，回退 last_interaction_ts_ms
-            offline_duration_ms = int(ctx.get("_offline_duration_ms") or 0)
-            if offline_duration_ms > 0:
-                elapsed = offline_duration_ms
-            else:
-                last_ts = int(ctx.get("last_interaction_ts_ms") or 0)
-                elapsed = now_ts - last_ts if last_ts > 0 else _ABSENT_SHORT_MS
+            elapsed = int(ctx.get("_long_absent_elapsed_ms") or 0) or _resolve_long_absent_elapsed_ms(ctx, now_ts)
             level = _get_absent_level(elapsed)
+            behavior = str(ctx.get("_long_absent_behavior") or "").strip() or "light_reconnect"
+            template_depth = str(ctx.get("_long_absent_template_depth") or depth).strip() or depth
+            if behavior == "reunion":
+                behavior_templates = _REUNION_TEMPLATES
+            else:
+                behavior_templates = _LIGHT_RECONNECT_TEMPLATES
+
+            depth_templates = behavior_templates.get(template_depth, behavior_templates.get(depth, behavior_templates.get("mid", {})))
+            variants = depth_templates.get(style) or depth_templates.get("default", [])
+            if variants:
+                return _pick_variant(variants, seed)
+
             level_templates = _LONG_ABSENT_TEMPLATES.get(level, _LONG_ABSENT_TEMPLATES["short"])
             depth_templates = level_templates.get(depth, level_templates.get("mid", {}))
-            # 技术债务 10.2：高孤独感（>0.6）时优先选取更深情的变体（列表末尾）
             loneliness = float(ctx.get("_loneliness_value") or 0.0)
             variants = depth_templates.get(style) or depth_templates.get("default", ["好久不见，你还好吗"])
             if loneliness >= 0.6 and len(variants) > 1:
-                # 孤独感高时，从后半段变体中选取（通常更深情）
                 half = max(1, len(variants) // 2)
                 variants = variants[half:]
             return _pick_variant(variants, seed)

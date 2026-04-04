@@ -704,6 +704,7 @@ def _apply_offline_state_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     offline_guidance: list[str] = []
+    reconnect_style = ""
 
     if absence_band == "6h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.04)
@@ -718,13 +719,15 @@ def _apply_offline_state_to_persona_expression_hint(
             tone = "caring"
         if not pace_hint:
             pace_hint = "steady"
-        offline_guidance.append("先回应一天未见后的重新连上，再顺势进入正文")
+        reconnect_style = "light_reconnect"
+        offline_guidance.append("先把它当成轻度失联后的重新连上，不要直接写成久别重逢，再顺势进入正文")
     elif absence_band == "72h_plus":
         tone = "caring"
         follow_up_tendency = max(follow_up_tendency, 0.12)
         echo_weight_modifier = max(echo_weight_modifier, 0.10)
         if not pace_hint:
             pace_hint = "slow"
+        reconnect_style = "reunion"
         offline_guidance.append("把回复写得像久别重逢后的接住与确认，再慢慢展开内容")
     elif absence_band == "7d_plus":
         tone = "caring"
@@ -732,6 +735,7 @@ def _apply_offline_state_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.12)
         if not pace_hint:
             pace_hint = "slow"
+        reconnect_style = "reunion"
         offline_guidance.append("把这次对话当作久别后的重逢，先确认近况与状态，再自然续上话题")
 
     if loneliness >= 0.55:
@@ -744,6 +748,8 @@ def _apply_offline_state_to_persona_expression_hint(
         guidance_text = "；".join(dict.fromkeys(part for part in offline_guidance if part))
         style_hint = f"{style_hint}；{guidance_text}" if style_hint else guidance_text
         hint["offline_guidance"] = guidance_text
+    if reconnect_style:
+        hint["offline_reconnect_style"] = reconnect_style
 
     hint["tone"] = tone
     hint["style_hint"] = _truncate_for_prompt(style_hint, limit=240) or style_hint
