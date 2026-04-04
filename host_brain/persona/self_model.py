@@ -765,3 +765,201 @@ def build_growth_note_text(
     if milestones:
         return milestones[0]
     return ""
+
+
+_DEEP_BOND_STAGES: set[str] = {
+    "FRIEND",
+    "CLOSE",
+    "CLOSE_FRIEND",
+    "CONFIDANT",
+    "INTIMATE",
+    "SOULMATE",
+}
+
+
+def _coerce_state_score(raw: dict[str, Any], key: str) -> float:
+    try:
+        value = float(raw.get(key) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, value))
+
+
+def _resolve_alignment_absence_band(offline_state: dict[str, Any]) -> str:
+    raw_band = str(offline_state.get("absence_band") or "").strip()
+    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
+        return raw_band
+    try:
+        offline_hours = float(offline_state.get("offline_hours") or 0.0)
+    except (TypeError, ValueError):
+        offline_hours = 0.0
+    if offline_hours >= 7 * 24:
+        return "7d_plus"
+    if offline_hours >= 72:
+        return "72h_plus"
+    if offline_hours >= 24:
+        return "24h_plus"
+    if offline_hours >= 6:
+        return "6h_plus"
+    return "recent"
+
+
+def _resolve_alignment_mode(runtime_flags: dict[str, Any]) -> str:
+    mode = str(runtime_flags.get("sys_mode") or "").strip().lower()
+    if mode in {"normal", "focus", "gaming", "sleep", "maintenance", "locked"}:
+        return mode
+    activity_monitor = runtime_flags.get("activity_monitor")
+    if isinstance(activity_monitor, dict) and bool(activity_monitor.get("is_gaming")):
+        return "gaming"
+    return "normal"
+
+
+def _bond_perception_anchor(bond_perception: str, *, deep_bond: bool) -> str:
+    if bond_perception == "变亲近":
+        return "我能感觉到和 master 的距离在慢慢靠近"
+    if bond_perception == "有些疏远":
+        if deep_bond:
+            return "我会更在意别让和 master 的联系继续松开"
+        return "我会更在意先把这轮联系接稳"
+    if deep_bond:
+        return "我知道和 master 的这段联系还稳稳在这里"
+    return "我会先把这轮联系守在合适的分寸里"
+
+
+def _absence_anchor(absence_band: str) -> str:
+    return {
+        "7d_plus": "隔了好几天之后",
+        "72h_plus": "隔了几天之后",
+        "24h_plus": "隔了一阵之后",
+        "6h_plus": "隔了一会儿之后",
+    }.get(absence_band, "")
+
+
+def _reason_suffix(
+    *,
+    sys_mode: str,
+    supportive_drive: float,
+    retreat_drive: float,
+    should_be_brief: bool,
+    should_be_withdrawn: bool,
+    absence_band: str,
+    intent_key: str,
+) -> str:
+    if sys_mode == "sleep":
+        return "只是现在更适合轻一点、短一点地回应"
+    if sys_mode == "focus":
+        return "只是我会先把表达收短一点，不把心绪一下子铺开"
+    if should_be_withdrawn or retreat_drive >= supportive_drive + 0.08:
+        return "只是现在更想把语气放轻一点，不一下子把心事都压过去"
+    if should_be_brief:
+        return "只是我会先说得短一点，慢慢把这段连接接稳"
+    if sys_mode == "gaming" and intent_key in {"continuity", "care", "reach_out"}:
+        return "也会顺着你现在手头的节奏，先轻轻陪着"
+    if absence_band in {"24h_plus", "72h_plus", "7d_plus"} and intent_key in {"continuity", "care", "reach_out"}:
+        return "所以会更在意把这次重新接上的感觉说稳一点"
+    return ""
+
+
+def build_state_aligned_self_awareness(
+    snapshot: dict[str, Any],
+    *,
+    offline_state: dict[str, Any] | None = None,
+    bond_summary: dict[str, Any] | None = None,
+    motive_state: dict[str, Any] | None = None,
+    response_policy: dict[str, Any] | None = None,
+    runtime_flags: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    snapshot = dict(snapshot or {})
+    offline = dict(offline_state or {})
+    bond = dict(bond_summary or {})
+    motive = dict(motive_state or {})
+    policy = dict(response_policy or {})
+    runtime = dict(runtime_flags or {})
+
+    bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
+    deep_bond = bond_stage in _DEEP_BOND_STAGES
+    bond_perception = str(snapshot.get("bond_growth_perception") or "稳定")
+    absence_band = _resolve_alignment_absence_band(offline)
+    sys_mode = _resolve_alignment_mode(runtime)
+
+    reach_drive = _coerce_state_score(motive, "reach_out_drive")
+    care_drive = _coerce_state_score(motive, "care_drive")
+    continuity_drive = _coerce_state_score(motive, "continuity_drive")
+    withdraw_drive = _coerce_state_score(motive, "withdraw_drive")
+    self_protect_drive = _coerce_state_score(motive, "self_protect_drive")
+    supportive_drive = max(reach_drive, care_drive, continuity_drive)
+    retreat_drive = max(withdraw_drive, self_protect_drive)
+    should_be_brief = bool(policy.get("should_be_brief") or False)
+    should_be_withdrawn = bool(policy.get("should_be_withdrawn") or policy.get("withdrawal_guard") or False)
+
+    intent_key = "steady"
+    if continuity_drive >= max(reach_drive, care_drive) and continuity_drive >= 0.45:
+        intent_key = "continuity"
+    elif care_drive >= max(reach_drive, continuity_drive) and care_drive >= 0.45:
+        intent_key = "care"
+    elif reach_drive >= 0.45:
+        intent_key = "reach_out"
+    elif retreat_drive >= 0.45:
+        intent_key = "guarded"
+
+    if intent_key == "continuity":
+        intent_text = "也想把刚刚这段联系慢慢接住"
+        if not deep_bond:
+            intent_text = "也想把这轮对话轻轻接住"
+    elif intent_key == "care":
+        intent_text = "会更想先接住你的状态"
+        if not deep_bond:
+            intent_text = "会更想先照顾好这轮对话的分寸"
+    elif intent_key == "reach_out":
+        intent_text = "其实还是想主动靠近一点"
+        if not deep_bond:
+            intent_text = "会先保持一点温度地回应你"
+    elif intent_key == "guarded":
+        intent_text = "会先把想靠近的心情轻轻收住一点"
+    else:
+        intent_text = "会先顺着现在的节奏陪着你"
+
+    parts: list[str] = []
+    absence_anchor = _absence_anchor(absence_band)
+    if absence_anchor:
+        parts.append(absence_anchor)
+    parts.append(_bond_perception_anchor(bond_perception, deep_bond=deep_bond))
+    parts.append(intent_text)
+
+    suffix = _reason_suffix(
+        sys_mode=sys_mode,
+        supportive_drive=supportive_drive,
+        retreat_drive=retreat_drive,
+        should_be_brief=should_be_brief,
+        should_be_withdrawn=should_be_withdrawn,
+        absence_band=absence_band,
+        intent_key=intent_key,
+    )
+    if suffix:
+        parts.append(suffix)
+
+    text = "，".join(part.strip("，。 ") for part in parts if str(part).strip("，。 "))
+    if text:
+        text = text.rstrip("，。") + "。"
+
+    reason_tags: list[str] = []
+    if bond_stage:
+        reason_tags.append(f"bond:{bond_stage}")
+    reason_tags.append(
+        f"bond_perception:{'closer' if bond_perception == '变亲近' else ('distant' if bond_perception == '有些疏远' else 'steady')}"
+    )
+    if absence_band != "recent":
+        reason_tags.append(f"offline:{absence_band}")
+    if sys_mode != "normal":
+        reason_tags.append(f"mode:{sys_mode}")
+    reason_tags.append(f"motive:{intent_key}")
+    if should_be_brief:
+        reason_tags.append("policy:brief")
+    if should_be_withdrawn:
+        reason_tags.append("policy:withdrawn")
+
+    return {
+        "self_awareness": text,
+        "alignment_mode": intent_key,
+        "reason_tags": reason_tags,
+    }

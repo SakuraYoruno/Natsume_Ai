@@ -150,3 +150,54 @@ def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> Non
         "recent_change": "更坦率了",
         "milestone_felt": "被珍惜",
     }
+
+
+
+def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() -> None:
+    aligned = sr_mod.align_self_reflection_pulse(
+        {"self_awareness": "原始自省", "mood_awareness": "mood", "growth_note": "grow"},
+        snapshot={"bond_growth_perception": "稳定"},
+        offline_state={"offline_hours": 80.0},
+        bond_summary={"stage": "FRIEND"},
+        motive_state={
+            "reach_out_drive": 0.42,
+            "care_drive": 0.48,
+            "continuity_drive": 0.82,
+            "withdraw_drive": 0.18,
+            "self_protect_drive": 0.12,
+        },
+        response_policy={"should_be_brief": True},
+        runtime_flags={"sys_mode": "normal"},
+    )
+
+    assert aligned["self_awareness"] != "原始自省"
+    assert "接住" in aligned["self_awareness"]
+    assert "说得短一点" in aligned["self_awareness"]
+    assert aligned["state_alignment"] == aligned["self_awareness"]
+    assert "offline:72h_plus" in aligned["state_alignment_reasons"]
+    assert "motive:continuity" in aligned["state_alignment_reasons"]
+    assert "policy:brief" in aligned["state_alignment_reasons"]
+
+
+
+def test_align_self_reflection_pulse_prefers_guarded_tone_when_retreat_dominates() -> None:
+    aligned = sr_mod.align_self_reflection_pulse(
+        {"self_awareness": "原始自省", "mood_awareness": "mood", "growth_note": "grow"},
+        snapshot={"bond_growth_perception": "有些疏远"},
+        offline_state={"offline_hours": 2.0},
+        bond_summary={"stage": "ACQUAINTANCE"},
+        motive_state={
+            "reach_out_drive": 0.18,
+            "care_drive": 0.22,
+            "continuity_drive": 0.16,
+            "withdraw_drive": 0.72,
+            "self_protect_drive": 0.78,
+        },
+        response_policy={"should_be_withdrawn": True, "withdrawal_guard": True},
+        runtime_flags={"sys_mode": "focus"},
+    )
+
+    assert "收短一点" in aligned["self_awareness"] or "放轻一点" in aligned["self_awareness"]
+    assert "mode:focus" in aligned["state_alignment_reasons"]
+    assert "motive:guarded" in aligned["state_alignment_reasons"]
+    assert "policy:withdrawn" in aligned["state_alignment_reasons"]

@@ -1472,8 +1472,14 @@ def build_chat_prompt_runtime_payload(
 
     # ── P1-FIX：接入 SelfReflection ──────────────────────────────────────
     # prompt_builder 通过 runtime_payload.get("self_reflection_pulse") 读取
+    _sr_for_alignment = None
+    _sr_align_pulse = None
+    _sr_snapshot_inputs: dict[str, Any] = {}
     try:
-        from host_brain.persona.self_reflection import SelfReflection as _SelfReflection  # noqa: PLC0415
+        from host_brain.persona.self_reflection import (  # noqa: PLC0415
+            SelfReflection as _SelfReflection,
+            align_self_reflection_pulse as _align_self_reflection_pulse,
+        )
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
         from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
         if not hasattr(build_chat_prompt_runtime_payload, "_self_reflection"):
@@ -1526,6 +1532,17 @@ def build_chat_prompt_runtime_payload(
             _sr_style_evolution = get_drift_detector().get_style_evolution_summary()
         except Exception:
             pass
+        _sr_for_alignment = _sr
+        _sr_align_pulse = _align_self_reflection_pulse
+        _sr_snapshot_inputs = {
+            "timeline_summary": _tl_summary_for_sr,
+            "timeline_diary": _tl_diary_for_sr,
+            "bond_state": _sr_bond_state,
+            "bond_summary": _sr_bond_summary,
+            "persona_changes": _sr_persona_changes,
+            "last_deep_talk_ts_ms": _sr_last_deep_talk_ts_ms,
+            "current_ts_ms": _sr_current_ts_ms,
+        }
         _pulse = _sr.maybe_generate(
             turn_count=_turn,
             timeline_summary=_tl_summary_for_sr,
@@ -1687,6 +1704,24 @@ def build_chat_prompt_runtime_payload(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("motive_state"),
         )
+        if runtime_payload.get("self_reflection_pulse") and _sr_for_alignment is not None and _sr_align_pulse is not None:
+            try:
+                _sr_snapshot = _sr_for_alignment._model.build_snapshot(**_sr_snapshot_inputs)
+                _sr_snapshot = _sr_for_alignment._validate_consistency(
+                    _sr_snapshot,
+                    _sr_snapshot_inputs.get("bond_state"),
+                )
+                runtime_payload["self_reflection_pulse"] = _sr_align_pulse(
+                    runtime_payload.get("self_reflection_pulse"),
+                    snapshot=_sr_snapshot,
+                    offline_state=runtime_payload.get("offline_state"),
+                    bond_summary=runtime_payload.get("bond_summary") or _sr_snapshot_inputs.get("bond_summary"),
+                    motive_state=runtime_payload.get("motive_state"),
+                    response_policy=runtime_payload.get("response_policy"),
+                    runtime_flags=runtime_payload.get("runtime_mode"),
+                )
+            except Exception as _sr_align_exc:
+                logger.debug("SelfReflection narrative alignment degraded: %s", _sr_align_exc)
 
     except (ImportError, AttributeError, Exception) as _motive_exc:
         logger.debug("MotiveEngine / ResponsePolicyLayer 接入降级: %s", _motive_exc)

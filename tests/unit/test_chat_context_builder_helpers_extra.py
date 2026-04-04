@@ -824,3 +824,127 @@ def test_build_chat_prompt_runtime_payload_applies_motive_to_expression_hint(
     assert hint["tone"] == "caring"
     assert hint["follow_up_tendency"] >= 0.08
     assert "先接住对方情绪" in str(hint.get("style_hint") or "")
+
+
+
+def test_build_chat_prompt_runtime_payload_aligns_self_reflection_after_motive_and_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "THINKING",
+                "emotion_intensity": 0.55,
+                "emotion_range_hint": "measured",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.self_reflection.SelfReflection.maybe_generate",
+        lambda self, **kwargs: {
+            "self_awareness": "原始自省",
+            "mood_awareness": "情绪还算平稳",
+            "growth_note": "最近更会接住对话了",
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.self_model.SelfModel.build_snapshot",
+        lambda self, **kwargs: {"bond_growth_perception": "稳定"},
+    )
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(
+                style_hint="自然回应",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                追问倾向=0.0,
+                pace_hint="steady",
+            )
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace(), get_change_log=lambda *_args, **_kwargs: [])
+
+    class _FakeMotiveState:
+        def as_dict(self):
+            return {
+                "care_drive": 0.46,
+                "reach_out_drive": 0.34,
+                "continuity_drive": 0.82,
+                "withdraw_drive": 0.12,
+                "self_protect_drive": 0.10,
+                "dominant_motive": "continuity",
+            }
+
+    class _FakePolicy:
+        def as_dict(self):
+            return {
+                "allow_followup": True,
+                "max_sentences": 3,
+                "should_be_brief": True,
+                "should_be_withdrawn": False,
+                "withdrawal_guard": False,
+            }
+
+    captured: dict[str, dict] = {}
+
+    def _fake_compute_motive_state(inp):  # noqa: ANN001
+        captured["motive_pulse"] = dict(inp.self_reflection_pulse or {})
+        return _FakeMotiveState()
+
+    def _fake_decide_response_policy(inp):  # noqa: ANN001
+        captured["policy_pulse"] = dict(inp.self_reflection_pulse or {})
+        return _FakePolicy()
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", _fake_compute_motive_state)
+    monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", _fake_decide_response_policy)
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-self-reflect-align",
+        person_id="person-self-reflect-align",
+        session_id="session-self-reflect-align",
+        thread_id=None,
+        user_message="继续说刚刚那件事",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "THINKING", "emotion_intensity": 0.55},
+        recall_slot_text={},
+        bond_summary={"stage": "FRIEND"},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    pulse = dict(runtime_payload.get("self_reflection_pulse") or {})
+    assert captured["motive_pulse"]["self_awareness"] == "原始自省"
+    assert captured["policy_pulse"]["self_awareness"] == "原始自省"
+    assert pulse["self_awareness"] != "原始自省"
+    assert "接住" in pulse["self_awareness"]
+    assert "说得短一点" in pulse["self_awareness"]
+    assert pulse["state_alignment"] == pulse["self_awareness"]
+    assert "motive:continuity" in pulse["state_alignment_reasons"]
+    assert "policy:brief" in pulse["state_alignment_reasons"]

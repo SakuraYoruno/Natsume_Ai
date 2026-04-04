@@ -229,6 +229,8 @@
 - 目标：让“我为什么这样回应”不再由多个槽位重复表述或互相冲突。
 - 重点模块：`host_brain/persona/self_reflection.py`、`host_brain/persona/self_model.py`、`host_brain/app/chat_context_builder.py`。
 - 验收标准：自我叙事能与当前状态对齐，不出现“嘴上说想靠近，行为上却完全抽离”的断裂解释。
+- 本轮进展（2026-04-04）：已在 `self_reflection -> motive_state -> response_policy` 之后增加二次 narrative alignment，`self_reflection_pulse.self_awareness` 会按 `offline_state / bond / motive / response_policy` 重写为统一口径。
+- 验证记录：新增 helper 与 `chat_context_builder` 接线回归，覆盖“重连但收敛”和“保护性收缩”两类解释对齐场景。
 
 ### N4-T02：把日级/周级成长叙事沉淀为可复用摘要
 

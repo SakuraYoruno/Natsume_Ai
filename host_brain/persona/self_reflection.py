@@ -27,6 +27,7 @@ from host_brain.persona.self_model import (
     build_growth_note_text,
     build_mood_awareness_text,
     build_self_awareness_text,
+    build_state_aligned_self_awareness,
     detect_contradictions,
 )
 
@@ -504,6 +505,41 @@ def build_self_reflection_pulse(
                 pulse["style_trend_note"] = style_trend_note
 
     return pulse
+
+
+def align_self_reflection_pulse(
+    pulse: dict[str, Any] | None,
+    *,
+    snapshot: dict[str, Any] | None = None,
+    offline_state: dict[str, Any] | None = None,
+    bond_summary: dict[str, Any] | None = None,
+    motive_state: dict[str, Any] | None = None,
+    response_policy: dict[str, Any] | None = None,
+    runtime_flags: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = dict(pulse or {})
+    if not result:
+        return result
+
+    alignment = build_state_aligned_self_awareness(
+        dict(snapshot or {}),
+        offline_state=dict(offline_state or {}),
+        bond_summary=dict(bond_summary or {}),
+        motive_state=dict(motive_state or {}),
+        response_policy=dict(response_policy or {}),
+        runtime_flags=dict(runtime_flags or {}),
+    )
+    aligned_self_awareness = str(alignment.get("self_awareness") or "").strip()
+    if aligned_self_awareness:
+        result["self_awareness"] = aligned_self_awareness
+        result["state_alignment"] = aligned_self_awareness
+    alignment_mode = str(alignment.get("alignment_mode") or "").strip()
+    if alignment_mode:
+        result["state_alignment_mode"] = alignment_mode
+    reason_tags = [str(item).strip() for item in (alignment.get("reason_tags") or []) if str(item).strip()]
+    if reason_tags:
+        result["state_alignment_reasons"] = reason_tags
+    return result
 
 
 # ---------------------------------------------------------------------------
