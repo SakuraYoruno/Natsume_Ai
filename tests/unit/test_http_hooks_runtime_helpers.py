@@ -56,6 +56,7 @@ def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week
         _build_runtime_summary(
             current_topic="那个项目",
             sys_mode="normal",
+            activity_monitor={},
             bond_state={"current_stage": "FRIEND"},
             bond_summary={"stage": "FRIEND"},
             offline_state={
@@ -102,6 +103,11 @@ def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week
     for summary, (absence_band, _offline_hours, reconnect_style, _reply_posture, _warmth_floor) in zip(summaries, cases):
         assert summary["current_state"]["absence_band"] == absence_band
         assert summary["current_state"]["offline_reconnect_style"] == reconnect_style
+        assert summary["decision_chain"][0] == "mode:normal"
+        assert f"offline:{absence_band}->{reconnect_style}" in summary["decision_chain"]
+        assert summary["core_slots"]["offline_state"]["absence_band"] == absence_band
+        assert summary["core_slots"]["offline_state"]["offline_reconnect_style"] == reconnect_style
+        assert summary["core_slots"]["response_policy"]["reply_posture"] == summary["reply_posture"]["style"]
         assert f"offline={absence_band}" in summary["headline"]
         assert f"offline:{absence_band}" in summary["why_reply"]
         assert "motive:continuity" in summary["why_reply"]
@@ -440,6 +446,13 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["runtime_summary"]["current_state"]["absence_band"] == "6h_plus"
     assert snapshot["runtime_summary"]["current_state"]["offline_reconnect_style"] == "soft_resume"
     assert snapshot["runtime_summary"]["reply_posture"]["allow_topic_shift"] is False
+    assert snapshot["runtime_summary"]["decision_chain"][0] == "mode:focus"
+    assert "offline:6h_plus->soft_resume" in snapshot["runtime_summary"]["decision_chain"]
+    assert snapshot["runtime_summary"]["core_slots"]["sys_mode"]["idle_minutes"] == 4.5
+    assert snapshot["runtime_summary"]["core_slots"]["offline_state"]["anticipation_topics"] == ["那个项目"]
+    assert snapshot["runtime_summary"]["core_slots"]["bond_narrative"]["shared_memory_count"] == 2
+    assert snapshot["runtime_summary"]["core_slots"]["motive_state"]["active_drives"]["continuity_drive"] == 0.57
+    assert snapshot["runtime_summary"]["core_slots"]["response_policy"]["reply_posture"] == "focused"
     assert "mode:focus" in snapshot["runtime_summary"]["why_reply"]
     assert "motive:continuity" in snapshot["runtime_summary"]["why_reply"]
     assert snapshot["slot_status"]["response_policy"] == "live"

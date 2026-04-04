@@ -364,9 +364,23 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
                     "sys_mode": "focus",
                     "absence_band": "6h_plus",
                     "offline_reconnect_style": "soft_resume",
+                    "activity_event": "wakeup",
                     "dominant_motive": "continuity",
                 },
                 "reply_posture": {"allow_topic_shift": False},
+                "decision_chain": [
+                    "mode:focus",
+                    "activity:wakeup",
+                    "offline:6h_plus->soft_resume",
+                    "motive:continuity",
+                    "response_policy:focused",
+                ],
+                "core_slots": {
+                    "sys_mode": {"value": "focus", "activity_event": "wakeup", "idle_minutes": 3.5},
+                    "offline_state": {"absence_band": "6h_plus", "offline_reconnect_style": "soft_resume"},
+                    "motive_state": {"dominant_motive": "continuity"},
+                    "response_policy": {"reply_posture": "focused"},
+                },
                 "why_reply": ["mode:focus", "motive:continuity"],
             },
             "slot_status": {"response_policy": "live"},
@@ -410,6 +424,10 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["motive_state"]["dominant_motive"] == "continuity"
     assert data["runtime_summary"]["current_state"]["sys_mode"] == "focus"
     assert data["runtime_summary"]["current_state"]["offline_reconnect_style"] == "soft_resume"
+    assert data["runtime_summary"]["current_state"]["activity_event"] == "wakeup"
+    assert "offline:6h_plus->soft_resume" in data["runtime_summary"]["decision_chain"]
+    assert data["runtime_summary"]["core_slots"]["sys_mode"]["activity_event"] == "wakeup"
+    assert data["runtime_summary"]["core_slots"]["response_policy"]["reply_posture"] == "focused"
     assert data["runtime_summary"]["why_reply"][0] == "mode:focus"
     assert data["slot_status"]["sys_mode_status"] == "live"
 

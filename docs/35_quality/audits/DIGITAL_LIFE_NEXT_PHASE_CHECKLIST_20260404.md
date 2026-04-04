@@ -76,6 +76,8 @@
 - 重点模块：`host_brain/app/obs_routes.py`、`host_brain/app/http_hooks_runtime_helpers.py`、现有 trace / health 输出。
 - 交付物：统一 snapshot 接口或 trace 视图，以及最小回归测试。
 - 验收标准：开发者不读源码也能判断“当前数字生命状态到底是什么、为什么这样回复”。
+- 本轮进展（2026-04-04）：已收口 `GET /obs/runtime-snapshot` 的统一摘要层，在 `runtime_summary` 中补充 `decision_chain` 与 `core_slots`，把 `sys_mode / offline_state / silence_state / body_sense / bond_narrative / self_reflection_pulse / motive_state / response_policy` 压成稳定的只读观测块，同时保留原始 slot 供深挖。
+- 验证记录：已补 `tests/unit/test_http_hooks_runtime_helpers.py` 与 `tests/integration/test_obs_routes_integration.py` 回归，覆盖 helper 侧摘要聚合、跨离线档位解释链，以及 route 侧 `/obs/runtime-snapshot` 输出透传。
 
 ### N0-T03：建立“同输入、不同内在状态”人工验收脚本
 

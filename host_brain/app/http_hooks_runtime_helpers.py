@@ -108,6 +108,15 @@ def _coerce_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _truncate_text(value: Any, limit: int = 120) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}…"
+
+
 def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
     return resolve_offline_absence_band(offline_state)
 
@@ -134,6 +143,7 @@ def _build_runtime_summary(
     *,
     current_topic: str,
     sys_mode: str,
+    activity_monitor: dict[str, Any],
     bond_state: dict[str, Any],
     bond_summary: dict[str, Any],
     offline_state: dict[str, Any],
@@ -155,14 +165,21 @@ def _build_runtime_summary(
     ).strip() or "UNKNOWN"
     willingness_level = str(silence_state.get("willingness_level") or "NORMAL").strip().upper() or "NORMAL"
     fatigue_level = str(body_sense.get("fatigue_level") or "UNKNOWN").strip().upper() or "UNKNOWN"
+    drowsiness_level = str(body_sense.get("drowsiness_level") or "UNKNOWN").strip().upper() or "UNKNOWN"
     dominant_motive = str(motive_state.get("dominant_motive") or "unknown").strip() or "unknown"
     reply_posture = _derive_reply_posture(response_policy)
+    activity_event = str(activity_monitor.get("recent_event_type") or "").strip()
+    topic_resistance_active = bool(silence_state.get("topic_resistance_active") or False)
+    guardrails = dict(self_reflection_pulse.get("narrative_guardrails") or {})
+    self_reflection_risk_level = str(guardrails.get("risk_level") or "").strip().lower()
 
     headline_parts: list[str] = [f"mode={sys_mode}"]
     if bond_stage and bond_stage != "UNKNOWN":
         headline_parts.append(f"bond={bond_stage}")
     if absence_band != "recent":
         headline_parts.append(f"offline={absence_band}")
+    if activity_event:
+        headline_parts.append(f"activity={activity_event}")
     if dominant_motive and dominant_motive != "unknown":
         headline_parts.append(f"motive={dominant_motive}")
     headline_parts.append(f"reply={reply_posture}")
@@ -210,6 +227,127 @@ def _build_runtime_summary(
         if str(status or "").strip() != "live"
     ]
 
+    anticipation_topics = [
+        str(item).strip()
+        for item in (offline_state.get("anticipation_topics") or [])
+        if str(item).strip()
+    ][:3]
+    first_narrative = ""
+    narratives = list(bond_narrative.get("narratives") or [])
+    if narratives:
+        first_narrative = str(narratives[0] or "").strip()
+    guardrail_tags = [
+        str(item).strip()
+        for item in (guardrails.get("risk_tags") or [])
+        if str(item).strip()
+    ]
+    try:
+        shared_memory_count = int(bond_narrative.get("shared_memory_count") or 0)
+    except (TypeError, ValueError):
+        shared_memory_count = 0
+    motive_active_drives = {
+        key: round(_coerce_float(motive_state.get(key), 0.0), 3)
+        for key in (
+            "reach_out_drive",
+            "care_drive",
+            "continuity_drive",
+            "withdraw_drive",
+            "self_protect_drive",
+        )
+        if _coerce_float(motive_state.get(key), 0.0) > 0.0
+    }
+    decision_chain: list[str] = []
+    for item in (
+        f"mode:{sys_mode}",
+        f"activity:{activity_event}" if activity_event else "",
+        f"offline:{absence_band}->{offline_reconnect_style}" if absence_band != "recent" else "",
+        f"silence:{willingness_level}" if willingness_level != "NORMAL" else "",
+        "silence:topic_resistance" if topic_resistance_active else "",
+        f"body:{fatigue_level}/{drowsiness_level}"
+        if fatigue_level != "FRESH" or drowsiness_level not in {"UNKNOWN", "ALERT", "AWAKE"}
+        else "",
+        f"self_reflection_guard:{self_reflection_risk_level}" if self_reflection_risk_level else "",
+        f"motive:{dominant_motive}" if dominant_motive != "unknown" else "",
+        f"response_policy:{reply_posture}",
+    ):
+        label = str(item or "").strip()
+        if label and label not in decision_chain:
+            decision_chain.append(label)
+
+    core_slots = {
+        "sys_mode": {
+            "status": str(slot_status.get("hard_state") or "unknown"),
+            "value": sys_mode,
+            "activity_event": activity_event,
+            "idle_minutes": round(_coerce_float(activity_monitor.get("idle_minutes"), 0.0), 1),
+        },
+        "offline_state": {
+            "status": str(slot_status.get("offline_state") or "unknown"),
+            "absence_band": absence_band,
+            "offline_hours": round(_coerce_float(offline_state.get("offline_hours"), 0.0), 1),
+            "offline_reconnect_style": offline_reconnect_style,
+            "loneliness_level": round(_coerce_float(offline_state.get("loneliness_level"), 0.0), 3),
+            "anticipation_topics": anticipation_topics,
+            "should_express_waiting": bool(offline_state.get("should_express_waiting") or False),
+            "awakening_hint": _truncate_text(offline_state.get("awakening_hint"), limit=100),
+        },
+        "silence_state": {
+            "status": str(slot_status.get("silence_state") or "unknown"),
+            "response_willingness": round(_coerce_float(silence_state.get("response_willingness"), 1.0), 3),
+            "willingness_level": willingness_level,
+            "topic_resistance_active": topic_resistance_active,
+            "resistant_topic": str(silence_state.get("resistant_topic") or "").strip(),
+            "topic_resistance_hint": _truncate_text(silence_state.get("topic_resistance_hint"), limit=100),
+        },
+        "body_sense": {
+            "status": str(slot_status.get("body_sense") or "unknown"),
+            "fatigue_level": fatigue_level,
+            "drowsiness_level": drowsiness_level,
+            "loneliness_level": str(body_sense.get("loneliness_level") or "UNKNOWN").strip().upper() or "UNKNOWN",
+            "willingness_penalty": round(_coerce_float(body_sense.get("willingness_penalty"), 0.0), 3),
+            "body_sense_hint": _truncate_text(body_sense.get("body_sense_hint"), limit=100),
+        },
+        "bond_narrative": {
+            "status": str(slot_status.get("bond_narrative") or "unknown"),
+            "bond_stage": bond_stage,
+            "relationship_duration": str(bond_narrative.get("relationship_duration") or "").strip(),
+            "shared_memory_count": shared_memory_count,
+            "narrative_preview": _truncate_text(first_narrative, limit=100),
+        },
+        "self_reflection_pulse": {
+            "status": str(slot_status.get("self_reflection_pulse") or "unknown"),
+            "self_awareness": _truncate_text(self_reflection_pulse.get("self_awareness"), limit=100),
+            "growth_note": _truncate_text(growth_note, limit=100),
+            "time_context": str(self_reflection_pulse.get("time_context") or "").strip(),
+            "guardrail_risk_level": self_reflection_risk_level,
+            "guardrail_tags": guardrail_tags,
+        },
+        "motive_state": {
+            "status": str(slot_status.get("motive_state") or "unknown"),
+            "dominant_motive": dominant_motive,
+            "reason_tags": [
+                str(item).strip()
+                for item in (motive_state.get("motive_reason_tags") or [])
+                if str(item).strip()
+            ][:5],
+            "active_drives": motive_active_drives,
+        },
+        "response_policy": {
+            "status": str(slot_status.get("response_policy") or "unknown"),
+            "reply_posture": reply_posture,
+            "max_chars": int(response_policy.get("max_chars") or 0),
+            "max_sentences": int(response_policy.get("max_sentences") or 0),
+            "allow_followup": bool(response_policy.get("allow_followup", True)),
+            "allow_topic_shift": bool(response_policy.get("allow_topic_shift", True)),
+            "allow_proactive_after_reply": bool(response_policy.get("allow_proactive_after_reply", True)),
+            "reason_tags": [
+                str(item).strip()
+                for item in (response_policy.get("policy_reason_tags") or [])
+                if str(item).strip()
+            ][:5],
+        },
+    }
+
     return {
         "headline": " | ".join(part for part in headline_parts if part),
         "current_state": {
@@ -219,6 +357,10 @@ def _build_runtime_summary(
             "offline_reconnect_style": offline_reconnect_style,
             "willingness_level": willingness_level,
             "fatigue_level": fatigue_level,
+            "drowsiness_level": drowsiness_level,
+            "activity_event": activity_event,
+            "topic_resistance_active": topic_resistance_active,
+            "self_reflection_risk_level": self_reflection_risk_level,
             "dominant_motive": dominant_motive,
         },
         "reply_posture": {
@@ -232,6 +374,8 @@ def _build_runtime_summary(
             "warmth_floor": _coerce_float(response_policy.get("warmth_floor"), 0.0),
             "intimacy_ceiling": _coerce_float(response_policy.get("intimacy_ceiling"), 0.0),
         },
+        "decision_chain": decision_chain,
+        "core_slots": core_slots,
         "why_reply": why_reply,
         "notable_signals": notable_signals,
         "degraded_slots": degraded_slots,
@@ -604,6 +748,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
     runtime_summary = _build_runtime_summary(
         current_topic=normalized_topic,
         sys_mode=sys_mode,
+        activity_monitor=activity_monitor,
         bond_state=bond_state,
         bond_summary=bond_summary,
         offline_state=offline_state,
