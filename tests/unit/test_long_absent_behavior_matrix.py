@@ -39,7 +39,7 @@ def test_day_level_reconnect_uses_light_reconnect_behavior() -> None:
 
 
 
-def test_week_level_deep_bond_uses_reunion_behavior() -> None:
+def test_week_level_deep_bond_uses_deep_reunion_behavior() -> None:
     voice = PersonaProactiveVoice()
     now_ts = 10 * 24 * 3600 * 1000
     result = voice.evaluate_scene(
@@ -67,8 +67,8 @@ def test_week_level_deep_bond_uses_reunion_behavior() -> None:
 
     assert result is not None
     assert result.scene_type == SCENE_LONG_ABSENT
-    assert "reconnect_behavior=reunion" in result.motive_influence
-    assert any(token in result.content for token in ("终于又见到你了", "一直惦记", "这几天"))
+    assert "reconnect_behavior=deep_reunion" in result.motive_influence
+    assert any(token in result.content for token in ("终于又见到你了", "这段时间", "先确认"))
 
 
 
@@ -114,6 +114,15 @@ def test_offline_hint_marks_reconnect_style() -> None:
         "pace_hint": "steady",
     }
 
+    short = ccb._apply_offline_state_to_persona_expression_hint(
+        base_hint,
+        {
+            "offline_hours": 8.0,
+            "absence_band": "6h_plus",
+            "loneliness_level": 0.22,
+            "anticipation_level": 0.24,
+        },
+    )
     light = ccb._apply_offline_state_to_persona_expression_hint(
         base_hint,
         {
@@ -132,6 +141,17 @@ def test_offline_hint_marks_reconnect_style() -> None:
             "anticipation_level": 0.46,
         },
     )
+    deep_reunion = ccb._apply_offline_state_to_persona_expression_hint(
+        base_hint,
+        {
+            "offline_hours": 8 * 24.0,
+            "absence_band": "7d_plus",
+            "loneliness_level": 0.48,
+            "anticipation_level": 0.46,
+        },
+    )
 
+    assert short["offline_reconnect_style"] == "soft_resume"
     assert light["offline_reconnect_style"] == "light_reconnect"
     assert reunion["offline_reconnect_style"] == "reunion"
+    assert deep_reunion["offline_reconnect_style"] == "deep_reunion"

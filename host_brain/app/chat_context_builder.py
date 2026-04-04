@@ -767,7 +767,8 @@ def _apply_offline_state_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "steady"
-        offline_guidance.append("先轻轻接住重新连上的感觉，再自然进入当前话题")
+        reconnect_style = "soft_resume"
+        offline_guidance.append("先把它当成短暂离开后的重新接上，轻轻接住就好，再自然进入当前话题")
     elif absence_band == "24h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.08)
         echo_weight_modifier = max(echo_weight_modifier, 0.06)
@@ -787,12 +788,12 @@ def _apply_offline_state_to_persona_expression_hint(
         offline_guidance.append("把回复写得像久别重逢后的接住与确认，再慢慢展开内容")
     elif absence_band == "7d_plus":
         tone = "caring"
-        follow_up_tendency = max(follow_up_tendency, 0.15)
-        echo_weight_modifier = max(echo_weight_modifier, 0.12)
+        follow_up_tendency = max(follow_up_tendency, 0.18)
+        echo_weight_modifier = max(echo_weight_modifier, 0.14)
         if not pace_hint:
             pace_hint = "slow"
-        reconnect_style = "reunion"
-        offline_guidance.append("把这次对话当作久别后的重逢，先确认近况与状态，再自然续上话题")
+        reconnect_style = "deep_reunion"
+        offline_guidance.append("把这次对话当作久别后的重逢，先确认近况与状态，再慢慢把联系接稳")
 
     if loneliness >= 0.55:
         echo_weight_modifier = max(echo_weight_modifier, 0.08)

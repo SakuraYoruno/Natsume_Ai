@@ -105,6 +105,7 @@
 - 重点模块：`host_brain/persona/inner_world.py`、`host_brain/persona/emotional_silence.py`、`host_brain/persona/proactive_voice.py`。
 - 交付物：至少覆盖 `6h / 24h / 72h / 7d` 的差异化规则与测试样本。
 - 验收标准：同一用户回归时，系统能明显区分“刚离开”“隔天再见”“久别重逢”。
+- 本轮进展（2026-04-04）：已把 offline reconnect 语义进一步拆成 `soft_resume / light_reconnect / reunion / deep_reunion` 四档；`7d_plus` 不再与 `72h_plus` 共用同一重逢强度，并补齐 `tests/unit/test_offline_continuity_regression_matrix.py` 回归断言。
 
 ### N1-T02：让等待感、沉默恢复、主动触达共用一套长时段语义
 

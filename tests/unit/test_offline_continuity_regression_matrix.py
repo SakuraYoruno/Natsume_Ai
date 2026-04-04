@@ -290,7 +290,7 @@ def test_long_absent_regression_matrix_routes_reconnect_behaviors() -> None:
 
     assert week_gap is not None
     assert week_gap.scene_type == SCENE_LONG_ABSENT
-    assert "reconnect_behavior=reunion" in week_gap.motive_influence
+    assert "reconnect_behavior=deep_reunion" in week_gap.motive_influence
 
     assert reserved_week_gap is not None
     assert reserved_week_gap.scene_type == SCENE_LONG_ABSENT
@@ -322,10 +322,11 @@ def test_offline_reconnect_hint_matrix_matches_scene_semantics() -> None:
     )
 
     assert "offline_reconnect_style" not in recent
-    assert "offline_reconnect_style" not in short_gap
+    assert short_gap["offline_reconnect_style"] == "soft_resume"
     assert day_gap["offline_reconnect_style"] == "light_reconnect"
     assert three_day_gap["offline_reconnect_style"] == "reunion"
-    assert week_gap["offline_reconnect_style"] == "reunion"
+    assert week_gap["offline_reconnect_style"] == "deep_reunion"
+    assert "短暂离开后的重新接上" in short_gap["offline_guidance"]
     assert "轻度失联后的重新连上" in day_gap["offline_guidance"]
     assert "久别重逢后的接住与确认" in three_day_gap["offline_guidance"]
     assert "久别后的重逢" in week_gap["offline_guidance"]

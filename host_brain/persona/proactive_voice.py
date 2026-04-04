@@ -404,6 +404,27 @@ _REUNION_TEMPLATES: dict[str, dict[str, list[str]]] = {
     },
 }
 
+_DEEP_REUNION_TEMPLATES: dict[str, dict[str, list[str]]] = {
+    "shallow": {
+        "warm": ["隔了更久才又见到你，欢迎回来，希望你这段时间都还安稳。"],
+        "playful": ["你这次真的消失好一阵了，回来就先让我知道你最近过得怎么样。"],
+        "caring": ["隔了很久重新连上，我会更想先确认你这段时间过得还好吗。"],
+        "default": ["隔了很久又见到你了，欢迎回来，你最近还好吗？"],
+    },
+    "mid": {
+        "warm": ["隔了这么久终于又连上你了，我想先把你的近况慢慢接回来。"],
+        "playful": ["你这次隔了好久才回来，我这边最想先补上的还是你的近况。"],
+        "caring": ["隔了这么久重新连上，我第一反应还是想先确认你这段时间过得稳不稳。"],
+        "default": ["终于又连上你了，我想先知道你这段时间过得怎么样。"],
+    },
+    "deep": {
+        "warm": ["隔了这么久终于又见到你了，我会更想先把你这段时间的近况慢慢接住。"],
+        "playful": ["你这次真的隔了很久才回来，我这边一直给你留着个想重新接上的位置。"],
+        "caring": ["隔了这么久重新见到你，我最先在意的还是你这段时间有没有好好照顾自己。"],
+        "default": ["隔了这么久终于又见到你了，我最想先确认你这段时间过得还好吗。"],
+    },
+}
+
 # 情感高潮后模板（按 bond_stage深度 × 风格）
 _POST_INTENSE_TEMPLATES: dict[str, dict[str, list[str]]] = {
     "shallow": {
@@ -723,6 +744,18 @@ def _select_long_absent_behavior(
     retreat_drive = max(withdraw, self_protect)
 
     reserved = depth == "shallow" or self_protect >= 0.58 or retreat_drive >= reconnect_drive + 0.02
+    deep_reunion_ready = (
+        absence_band == "7d_plus"
+        and not reserved
+        and (depth == "deep" or continuity >= 0.80 or reconnect_drive >= 0.72)
+    )
+    if deep_reunion_ready:
+        return {
+            "behavior": "deep_reunion",
+            "template_depth": depth,
+            "influence": "reconnect_behavior=deep_reunion",
+        }
+
     reunion_ready = (
         absence_band in {"72h_plus", "7d_plus"}
         and not reserved
@@ -1510,7 +1543,9 @@ class PersonaProactiveVoice:
             level = _get_absent_level(elapsed)
             behavior = str(ctx.get("_long_absent_behavior") or "").strip() or "light_reconnect"
             template_depth = str(ctx.get("_long_absent_template_depth") or depth).strip() or depth
-            if behavior == "reunion":
+            if behavior == "deep_reunion":
+                behavior_templates = _DEEP_REUNION_TEMPLATES
+            elif behavior == "reunion":
                 behavior_templates = _REUNION_TEMPLATES
             else:
                 behavior_templates = _LIGHT_RECONNECT_TEMPLATES
