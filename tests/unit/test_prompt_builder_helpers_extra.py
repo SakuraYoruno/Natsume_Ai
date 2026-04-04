@@ -211,6 +211,52 @@ def test_render_host_generation_prompt_covers_active_and_degraded_injection_path
     assert pb.get_last_injection_meta()["mode"] == "DEGRADED"
 
 
+def test_render_node_generation_prompt_includes_memory_recall_persona_block() -> None:
+    prompt = pb.render_node_generation_prompt(
+        node_id=pb.CHAT_DIRECT_NODE_ID,
+        runtime_payload={
+            "request": {
+                "request_id": "req-memory-recall-prompt",
+                "person_id": "person-memory-recall-prompt",
+                "session_id": "session-memory-recall-prompt",
+                "thread_id": None,
+                "user_message": "我突然想起以前一起散步的时候了",
+            },
+            "render": {"target_lang": "zh"},
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "emotion": {
+                "state": {"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.56},
+                "snapshot": {"emotion_context": {"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.56}},
+            },
+            "prompt_context": {
+                "payload": {
+                    "hard_snapshot": {"session_id": "session-memory-recall-prompt", "thread_id": None},
+                    "bond_summary": {},
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {"strict_json_output": True},
+                    "tool_meta_pack": [],
+                    "emotion_pulse": {"emotion_tag": "HAPPY", "mood_state": "steady"},
+                    "emotion_recall": "Current affective layer: mood_state=steady; emotion_tag=HAPPY.",
+                    "memory_emotion_hint": {"recall_bias": "uncertain"},
+                    "memory_recall_summary": "本次召回命中了 2 条带人格化标记的记忆；其中 1 条处于压制状态；处理建议：先轻触试探，不要把旧事说得过满",
+                    "bond_texture": {},
+                },
+                "validation": {"valid": True, "reason_code": None, "violation_count": 0},
+                "observability": {},
+            },
+            "core_reasoner_primary": {"payload": {"narrative": {"text": "core narrative"}, "intent_draft": {}}},
+            "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
+            "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
+        },
+    )
+
+    assert "MEMORY_RECALL_PERSONA" in prompt
+    assert "filtered recollections" in prompt
+    assert "本次召回命中了 2 条带人格化标记的记忆" in prompt
+
+
 def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hint() -> None:
     prompt = pb.render_node_generation_prompt(
         node_id="top_agent",

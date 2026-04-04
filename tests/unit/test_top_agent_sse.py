@@ -357,6 +357,110 @@ class TestTopAgentSseGenerator:
         assert captured["person_id"] == "default"
         assert captured["render_target_lang"] == "ja"
 
+    def test_success_path_prefetches_bond_and_motive_into_retrieval(self, monkeypatch) -> None:
+        monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+        monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+
+        request_body = SimpleNamespace(message="hello", session_id="session-001", thread_id="thread-001")
+        metrics = MagicMock()
+        captured_dispatch: dict[str, object] = {}
+        captured_retrieval: dict[str, object] = {}
+
+        class _PassRecallPack:
+            def get_slot(self, _slot_name):  # noqa: ANN001
+                return None
+
+        class _PassRecallPackBuilder:
+            def build(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+                return _PassRecallPack()
+
+        async def _capturing_retrieval(**kwargs):  # noqa: ANN001
+            captured_retrieval.update(kwargs)
+            return {"status": "OK"}, []
+
+        async def _bond_prefetch(**_kwargs):  # noqa: ANN001
+            return (
+                {
+                    "bond_stage": "FRIEND",
+                    "bond_score": 0.72,
+                    "trend": "WARMING",
+                    "capability_hint": "SAFE_SHARE",
+                    "interaction_count": 12,
+                },
+                {
+                    "slot_name": "bond_graph",
+                    "source": "state_arbiter_bond",
+                    "snippet": "当前关系阶段：FRIEND，关系强度：0.72",
+                    "content": "当前关系阶段：FRIEND，关系强度：0.72",
+                    "metadata": {"bond_stage": "FRIEND", "bond_score": 0.72},
+                },
+            )
+
+        async def _fake_dispatch_agent(**kwargs):  # noqa: ANN001
+            captured_dispatch.update(kwargs)
+            yield "data: " + json.dumps({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "final answer",
+                "request_id": kwargs.get("request_id"),
+                "audit_refs": {"path": "chat_agent:direct"},
+            }, ensure_ascii=False) + "\n\n"
+
+        with patch(
+            "host_brain.app.top_agent.chat_lite_governor",
+            return_value={"decision": "APPROVE", "reason_code": None, "intent_id": "intent-001", "mood_state": "engaged"},
+        ), patch(
+            "host_brain.app.chat_retrieval_helpers._run_retrieval",
+            new=_capturing_retrieval,
+        ), patch(
+            "host_brain.app.prompt_builder.infer_render_target_lang",
+            return_value="ja",
+        ), patch(
+            "host_brain.app.state_arbiter_queries._resolve_state_arbiter_bond_fact",
+            new=_bond_prefetch,
+        ), patch(
+            "host_brain.persona.motive_runtime.compute_runtime_motive_state",
+            return_value={"dominant_motive": "continuity", "drives": {"continuity_drive": 0.83}},
+        ), patch(
+            "host_brain.app.dependencies.get_recall_pack_builder",
+            return_value=_PassRecallPackBuilder(),
+        ), patch(
+            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
+            new=_fake_runtime,
+        ), patch(
+            "host_brain.app.dispatch_agent.dispatch_agent_sse_generator",
+            new=_fake_dispatch_agent,
+        ), patch(
+            "host_brain.app.top_agent._maybe_build_phatic_fastpath_reply",
+            return_value=None,
+        ):
+            events = _run(
+                _collect_events(
+                    top_agent_sse_generator(
+                        request_body=request_body,
+                        request_id="req-success-persona",
+                        session_id="session-001",
+                        ts_ms=1000,
+                        intent_draft={"id": "intent-001"},
+                        emotion_context={"emotion_tag": "NEUTRAL", "emotion_intensity": 0.5},
+                        emotion_snapshot={"emotion_tag": "NEUTRAL", "mood_state": "engaged"},
+                        governor_result={"decision": "APPROVE"},
+                        intent_id="intent-001",
+                        metrics=metrics,
+                    ),
+                ),
+            )
+
+        commit = json.loads(events[-1].removeprefix("data: ").strip())
+        assert commit["decision"] == "APPROVE"
+        assert captured_retrieval["mood_state"] == "engaged"
+        assert captured_retrieval["bond_summary"]["stage"] == "FRIEND"
+        assert captured_retrieval["bond_summary"]["score"] == 0.72
+        assert captured_retrieval["motive_state"]["dominant_motive"] == "continuity"
+        assert dict(captured_dispatch["bond_summary"])["stage"] == "FRIEND"
+        assert any(item.get("slot_name") == "bond_graph" for item in list(captured_dispatch["retrieval_evidence_items"]))
+
     def test_top_agent_hands_off_to_dispatch_agent(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")

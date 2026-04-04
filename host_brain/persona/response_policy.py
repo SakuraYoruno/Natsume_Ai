@@ -115,6 +115,36 @@ def _offline_warmth_floor_for_absence_band(absence_band: str) -> float:
     }.get(absence_band, 0.0)
 
 
+_MEMORY_WARM_TAGS = frozenset({"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"})
+_MEMORY_FRAGILE_TAGS = frozenset({"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"})
+
+
+def _coerce_memory_persona_signal(raw: dict[str, Any] | None) -> dict[str, Any]:
+    return dict(raw or {}) if isinstance(raw, dict) else {}
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _score_motive_drive(motive_state: dict[str, Any] | None, key: str) -> float:
+    motive = dict(motive_state or {})
+    candidate = motive.get(key)
+    if candidate in (None, ""):
+        drives = motive.get("drives")
+        if isinstance(drives, dict):
+            candidate = drives.get(key)
+    try:
+        return float(candidate or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # ── 数据类 ────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -128,6 +158,7 @@ class ResponsePolicyInput:
     self_reflection_pulse: dict[str, Any] | None = None
     emotion_context: dict[str, Any] | None = None
     motive_state: dict[str, Any] | None = None
+    memory_persona_signal: dict[str, Any] | None = None
     user_message: str = ""
     runtime_flags: dict[str, Any] | None = None
 
@@ -202,6 +233,7 @@ class ResponsePolicyLayer:
         reflection = dict(inp.self_reflection_pulse or {})
         emotion = dict(inp.emotion_context or {})
         motive = dict(inp.motive_state or {})
+        memory_persona_signal = _coerce_memory_persona_signal(inp.memory_persona_signal)
         runtime_flags = _coerce_runtime_flags(inp.runtime_flags)
         sys_mode = _resolve_sys_mode(runtime_flags)
         activity_monitor = _resolve_activity_monitor(runtime_flags)
@@ -337,11 +369,15 @@ class ResponsePolicyLayer:
                 reasons.append("reflection:withdraw_hint")
 
         # ── 规则 H：motive_state 补充修正（可选） ────────────────────────────
-        if motive:
-            withdraw_drive = float(motive.get("withdraw_drive") or 0.0)
-            self_protect = float(motive.get("self_protect_drive") or 0.0)
-            reach_out = float(motive.get("reach_out_drive") or 0.0)
+        reach_out_drive = _score_motive_drive(motive, "reach_out_drive")
+        care_drive = _score_motive_drive(motive, "care_drive")
+        continuity_drive = _score_motive_drive(motive, "continuity_drive")
+        withdraw_drive = _score_motive_drive(motive, "withdraw_drive")
+        self_protect = _score_motive_drive(motive, "self_protect_drive")
+        supportive_drive = max(care_drive, continuity_drive)
+        retreat_drive = max(withdraw_drive, self_protect)
 
+        if motive:
             if withdraw_drive >= 0.7:
                 p.max_chars = min(p.max_chars, int(p.max_chars * 0.75))
                 p.allow_followup = False
@@ -353,9 +389,60 @@ class ResponsePolicyLayer:
                 p.confession_guard = True
                 reasons.append(f"motive:self_protect={self_protect:.2f}")
 
-            if reach_out >= 0.6 and not p.should_be_withdrawn:
+            if reach_out_drive >= 0.6 and not p.should_be_withdrawn:
                 p.warmth_floor = max(p.warmth_floor, 0.20)
-                reasons.append(f"motive:reach_out={reach_out:.2f}")
+                reasons.append(f"motive:reach_out={reach_out_drive:.2f}")
+
+        # ── 规则 I：记忆人格化结果影响追问 / 延续 / 回避 ────────────────────
+        if memory_persona_signal:
+            suppressed_count = int(memory_persona_signal.get("suppressed_memory_count") or 0)
+            distorted_count = int(memory_persona_signal.get("distorted_memory_count") or 0)
+            avg_distortion = float(_coerce_optional_float(memory_persona_signal.get("avg_distortion_level")) or 0.0)
+            dominant_memory_emotion = str(memory_persona_signal.get("dominant_memory_emotion") or "").strip().upper()
+            recall_bias = str(memory_persona_signal.get("recall_bias") or "").strip().lower()
+
+            if suppressed_count > 0:
+                p.allow_followup = False
+                p.max_sentences = min(p.max_sentences, 3)
+                p.intimacy_ceiling = min(p.intimacy_ceiling, 0.55)
+                p.withdrawal_guard = True
+                reasons.append(f"memory:suppressed={suppressed_count}")
+
+            if avg_distortion >= 0.35 or recall_bias == "uncertain":
+                p.allow_topic_shift = False
+                p.max_chars = min(p.max_chars, int(p.max_chars * 0.90))
+                p.humor_ceiling = min(p.humor_ceiling, 0.18)
+                reasons.append(f"memory:distortion={avg_distortion:.2f}")
+            elif distorted_count > 0:
+                reasons.append(f"memory:distorted={distorted_count}")
+
+            if dominant_memory_emotion in _MEMORY_FRAGILE_TAGS or recall_bias == "guarded":
+                p.allow_followup = False
+                p.allow_proactive_after_reply = False
+                p.warmth_ceiling = min(p.warmth_ceiling, 0.78)
+                p.intimacy_ceiling = min(p.intimacy_ceiling, 0.48)
+                p.withdrawal_guard = True
+                if retreat_drive >= supportive_drive:
+                    p.should_be_withdrawn = True
+                reasons.append(f"memory:fragile={dominant_memory_emotion or recall_bias or 'unknown'}")
+            elif (
+                dominant_memory_emotion in _MEMORY_WARM_TAGS
+                and suppressed_count <= 0
+                and avg_distortion < 0.35
+                and supportive_drive >= retreat_drive
+            ):
+                p.warmth_floor = max(p.warmth_floor, 0.16 if supportive_drive < 0.62 else 0.22)
+                if p.allow_followup and supportive_drive >= 0.58:
+                    p.min_sentences = max(p.min_sentences, 2)
+                reasons.append(f"memory:warm={dominant_memory_emotion}")
+
+            if (
+                (suppressed_count > 0 or dominant_memory_emotion in _MEMORY_FRAGILE_TAGS or avg_distortion >= 0.5)
+                and retreat_drive >= 0.45
+            ):
+                p.allow_proactive_after_reply = False
+                p.should_be_withdrawn = True
+                reasons.append("memory:protective_guard")
 
         # ── 最终收口：保证 max >= min ──────────────────────────────────────────
         p.max_chars = max(p.max_chars, 15)

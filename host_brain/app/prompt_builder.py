@@ -1025,6 +1025,11 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         snapshot_captured_ts_ms = 0
     memory_emotion_hint_raw = prompt_context.get("memory_emotion_hint")
     memory_emotion_hint = dict(memory_emotion_hint_raw) if isinstance(memory_emotion_hint_raw, Mapping) else {}
+    memory_recall_summary = _truncate_for_prompt(
+        prompt_context.get("memory_recall_summary")
+        or memory_emotion_hint.get("memory_recall_summary"),
+        limit=360,
+    )
     bond_texture_raw = prompt_context.get("bond_texture")
     bond_texture = dict(bond_texture_raw) if isinstance(bond_texture_raw, Mapping) else {}
     memory_emotion_hint_json = _truncate_for_prompt(
@@ -1452,6 +1457,13 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             "- Treat this as affective recall only; it must shape tone and pacing, not facts.\n"
             f"- {emotion_recall_text}\n\n"
         )
+    memory_recall_persona_block = ""
+    if memory_recall_summary:
+        memory_recall_persona_block = (
+            "MEMORY_RECALL_PERSONA:\n"
+            "- Treat recalled memories as filtered recollections, not verbatim evidence.\n"
+            f"- {memory_recall_summary}\n\n"
+        )
 
     render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
 
@@ -1618,6 +1630,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{multimodal_input_block}"
         f"{cn_style_boost_block}"
         f"{emotion_recall_block}"
+        f"{memory_recall_persona_block}"
         f"{_persona_expression_hint_block}"
         f"{_self_reflection_block}"
         f"{_bond_narrative_block}"

@@ -811,6 +811,86 @@ def _extract_visible_text(raw: str) -> str:
     return text
 
 
+def _build_retrieval_bond_summary(summary_raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(summary_raw)
+    bond_stage = str(raw.get("bond_stage") or raw.get("stage") or "").strip()
+    if not bond_stage:
+        return {}
+
+    bond_summary: dict[str, Any] = {
+        "stage": bond_stage,
+        "trend": str(raw.get("trend") or "").strip(),
+        "capability_hint": str(raw.get("capability_hint") or "").strip(),
+    }
+    bond_score = _coerce_trace_score(raw.get("bond_score"))
+    if bond_score is not None:
+        bond_summary["score"] = bond_score
+        bond_summary["bond_score"] = bond_score
+    try:
+        interaction_count = int(raw.get("interaction_count") or 0)
+    except (TypeError, ValueError):
+        interaction_count = 0
+    if interaction_count > 0:
+        bond_summary["interaction_count"] = interaction_count
+    return bond_summary
+
+
+async def _prefetch_retrieval_persona_inputs(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    emotion_context: Mapping[str, Any],
+    mood_state: str | None,
+    governor_decision: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
+    bond_summary: dict[str, Any] = {}
+    bond_evidence: dict[str, Any] | None = None
+    motive_state: dict[str, Any] = {}
+
+    try:
+        from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact  # noqa: PLC0415
+
+        bond_summary_raw, bond_evidence = await _resolve_state_arbiter_bond_fact(
+            session_id=session_id,
+            request_id=request_id,
+        )
+        bond_summary = _build_retrieval_bond_summary(bond_summary_raw)
+    except Exception as exc:
+        _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
+
+    try:
+        from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+
+        retrieval_emotion_context = dict(emotion_context or {})
+        if mood_state and not str(retrieval_emotion_context.get("mood_state") or "").strip():
+            retrieval_emotion_context["mood_state"] = mood_state
+        runtime_flags = {"source": "top_agent_retrieval"}
+        resolved_sys_mode = str(
+            (governor_decision or {}).get("sys_mode")
+            or (governor_decision or {}).get("mood_state")
+            or ""
+        ).strip().lower()
+        if resolved_sys_mode:
+            runtime_flags["sys_mode"] = resolved_sys_mode
+        motive_state_raw = await asyncio.to_thread(
+            compute_runtime_motive_state,
+            persona_user_id=person_id,
+            current_topic=user_message,
+            bond_summary=bond_summary,
+            emotion_context=retrieval_emotion_context,
+            pending_topics=[user_message] if user_message else [],
+            runtime_flags=runtime_flags,
+            now_ms=None,
+        )
+        motive_state = dict(motive_state_raw) if isinstance(motive_state_raw, Mapping) else {}
+    except Exception as exc:
+        _logger.debug("[%s] retrieval persona motive prefetch failed: %s", request_id, exc)
+
+    return bond_summary, bond_evidence, motive_state
+
+
 # ---------------------------------------------------------------------------
 # 顶级 Agent SSE 生成器
 # ---------------------------------------------------------------------------
@@ -1045,10 +1125,33 @@ async def top_agent_sse_generator(
     retrieval_task: asyncio.Task | None = None
     retrieval_evidence_items: list[dict[str, Any]] = []
     retrieval_summary: dict[str, Any] = {"status": "SKIPPED"}
+    bond_evidence: dict[str, Any] | None = None
+    retrieval_motive_state: dict[str, Any] = {}
     # Phase XV P4：Gateway 通道已注入 render_target_lang="zh"（永远中文）
     # 其他通道回退到 infer_render_target_lang() 根据输入语言推断
     _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
     render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
+    _hard_state_summary = gov.get("hard_state_summary") if isinstance(gov.get("hard_state_summary"), Mapping) else {}
+    retrieval_mood_state = (
+        str(
+            emotion_snapshot.get("mood_state")
+            or emotion_context.get("mood_state")
+            or gov.get("mood_state")
+            or _hard_state_summary.get("mood_state")
+            or ""
+        ).strip().lower()
+        or None
+    )
+
+    bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_retrieval_persona_inputs(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        emotion_context=emotion_context,
+        mood_state=retrieval_mood_state,
+        governor_decision=gov,
+    )
 
     try:
         from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
@@ -1066,6 +1169,9 @@ async def top_agent_sse_generator(
                 ts_ms=ts_ms,
                 emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
                 render_target_lang=render_target_lang,
+                mood_state=retrieval_mood_state,
+                bond_summary=bond_summary or None,
+                motive_state=retrieval_motive_state or None,
             )
         )
     except Exception as _retr_exc:
@@ -1083,32 +1189,11 @@ async def top_agent_sse_generator(
 
     # StateArbiter 精简查询（Phase XIV v4 去重）
     # ────────────────────────────────────────────────────────────────────
-    # 旧链路做了四路并行查询：world_canon / style_canon / episodic / bond
-    # 但 world_canon 和 episodic 已经通过 RecallFusion 五路召回覆盖（同源），
-    # style_canon 通过 style_pack 常驻注入覆盖（同源 style_profile_v5.json），
-    # 保留它们只会在 prompt 中产生重复内容浪费 token。
-    #
-    # 只保留 bond_graph：它提供的是当前关系阶段/分数的结构化快照，
-    # 与 RecallFusion 的 neo4j_bond（历史关系事件语义检索）是互补的。
+    # bond_graph 结构化快照已在检索前预取，用于 retrieval persona ranking；
+    # 这里仅把预取得到的 evidence 追加进 evidence_items，避免重复查询。
     # ────────────────────────────────────────────────────────────────────
-    try:
-        from host_brain.app.state_arbiter_queries import (  # noqa: PLC0415
-            _resolve_state_arbiter_bond_fact,
-        )
-        bond_summary_raw, bond_evidence = await _resolve_state_arbiter_bond_fact(
-            session_id=session_id, request_id=request_id,
-        )
-        if bond_evidence is not None:
-            retrieval_evidence_items.append(bond_evidence)
-        bond_stage = str(bond_summary_raw.get("bond_stage") or "").strip()
-        if bond_stage:
-            bond_summary = {
-                "stage": bond_stage,
-                "trend": str(bond_summary_raw.get("trend") or ""),
-                "capability_hint": str(bond_summary_raw.get("capability_hint") or ""),
-            }
-    except Exception as _sa_exc:
-        _logger.debug("[%s] top_agent state_arbiter failed: %s", request_id, _sa_exc)
+    if bond_evidence is not None:
+        retrieval_evidence_items.append(bond_evidence)
 
     # RecallPack 槽位预算分配
     try:

@@ -91,6 +91,51 @@ DEFAULT_NODE_SELECTOR = "default"
 DEFAULT_VECTOR_WEIGHT: float = 0.7
 DEFAULT_FTS_WEIGHT: float = 0.3
 
+_WARM_EMOTION_TAGS = frozenset({"happy", "calm", "warm", "trust", "affection", "grateful", "love", "joy"})
+_FRAGILE_EMOTION_TAGS = frozenset({"sad", "fear", "angry", "anxious", "hurt", "pain", "guilt", "shame"})
+_CONTINUITY_HINT_KEYWORDS = ("上次", "之前", "后来", "还记得", "一起", "约定", "说好", "那天", "继续", "remember", "last time", "together", "promise")
+_WARM_HINT_KEYWORDS = ("一起", "陪你", "说好", "约定", "开心", "想你", "等你", "抱", "温柔", "高兴", "庆祝")
+_BOND_STAGE_DEPTH_MAP = {
+    "stranger": 0.10,
+    "acquaintance": 0.25,
+    "familiar": 0.38,
+    "friend": 0.62,
+    "close_friend": 0.78,
+    "family": 0.86,
+    "partner": 0.90,
+    "intimate": 0.92,
+    "deep": 0.88,
+}
+_PROTECTIVE_MOOD_BIAS = {
+    "critical": 0.95,
+    "withdrawn": 0.90,
+    "depressed": 0.88,
+    "low": 0.80,
+    "tired": 0.72,
+    "negative": 0.68,
+    "sad": 0.66,
+}
+_CONTINUITY_MOOD_BIAS = {
+    "engaged": 0.72,
+    "warm": 0.76,
+    "positive": 0.74,
+    "calm": 0.56,
+    "steady": 0.46,
+    "tired": 0.26,
+    "critical": 0.12,
+    "withdrawn": 0.18,
+}
+_WARM_MOOD_BIAS = {
+    "engaged": 0.74,
+    "warm": 0.82,
+    "positive": 0.78,
+    "calm": 0.60,
+    "steady": 0.44,
+    "tired": 0.28,
+    "critical": 0.14,
+    "withdrawn": 0.20,
+}
+
 
 class RecallFusionServiceContract:
     """Recall candidates from multiple routes and fuse into a stable list."""
@@ -250,6 +295,9 @@ class RecallFusionServiceContract:
         session_id: str | None = None,
         ts_ms: int | None = None,
         emotion_filter: str | None = None,
+        mood_state: str | None = None,
+        bond_summary: Mapping[str, Any] | None = None,
+        motive_state: Mapping[str, Any] | None = None,
         render_target_lang: str | None = None,
         target_store_ids: list[str] | None = None,
         time_lookback_days: int | None = None,
@@ -293,6 +341,12 @@ class RecallFusionServiceContract:
                 detail="recall service unavailable",
                 ts_ms=now_value,
             )
+
+        persona_recall_profile = _build_persona_recall_profile(
+            mood_state=mood_state,
+            bond_summary=bond_summary,
+            motive_state=motive_state,
+        )
 
         fused_candidates: dict[str, dict[str, Any]] = {}
         for route in routes:
@@ -349,6 +403,11 @@ class RecallFusionServiceContract:
                 candidate = _normalize_candidate(raw=raw, route=route, rank=rank)
                 if not candidate:
                     continue
+                candidate = _apply_persona_recall_weight(
+                    candidate=candidate,
+                    route=route,
+                    persona_profile=persona_recall_profile,
+                )
                 # FIX: 使用 store_id::doc_id 作为 key，防止不同 store 产生相同
                 # source_ref/doc_id 时发生跨路由错误合并（原实现仅用 source_ref 或 doc_id）。
                 store_id_for_key = str(candidate["metadata"].get("store_id") or route.store_id or "")
@@ -637,6 +696,223 @@ def _normalize_candidate(
         "metadata": merged_metadata,
         "evidence_refs": evidence_refs_primary,
     }
+
+
+def _clamp_unit_float(value: Any, *, default: float = 0.0) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, numeric))
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _extract_drive_score(raw: Mapping[str, Any], *keys: str) -> float:
+    drives = _coerce_mapping(raw.get("drives"))
+    for key in keys:
+        if key in raw:
+            return _clamp_unit_float(raw.get(key))
+        if key in drives:
+            return _clamp_unit_float(drives.get(key))
+    return 0.0
+
+
+def _estimate_bond_depth(bond_summary: Mapping[str, Any]) -> float:
+    raw = _coerce_mapping(bond_summary)
+    for key in ("bond_depth", "depth_score", "bond_score", "score", "closeness", "intimacy", "trust_score"):
+        value = raw.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        if numeric > 1.0:
+            numeric = numeric / 100.0
+        return max(0.0, min(1.0, numeric))
+    stage = str(raw.get("stage") or raw.get("bond_stage") or "").strip().lower()
+    return _BOND_STAGE_DEPTH_MAP.get(stage, 0.0)
+
+
+def _build_persona_recall_profile(
+    *,
+    mood_state: str | None,
+    bond_summary: Mapping[str, Any] | None,
+    motive_state: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    normalized_bond = _coerce_mapping(bond_summary)
+    normalized_motive = _coerce_mapping(motive_state)
+    normalized_mood = str(mood_state or "").strip().lower()
+    if not normalized_mood and not normalized_bond and not normalized_motive:
+        return None
+
+    bond_depth = _estimate_bond_depth(normalized_bond)
+    reach_out_drive = _extract_drive_score(normalized_motive, "reach_out_drive", "reach_out")
+    care_drive = _extract_drive_score(normalized_motive, "care_drive", "care")
+    continuity_drive = _extract_drive_score(normalized_motive, "continuity_drive", "continuity")
+    withdraw_drive = _extract_drive_score(normalized_motive, "withdraw_drive", "withdraw")
+    self_protect_drive = _extract_drive_score(normalized_motive, "self_protect_drive", "self_protect")
+    dominant_motive = str(normalized_motive.get("dominant_motive") or "").strip().lower()
+
+    protect_bias = max(
+        _PROTECTIVE_MOOD_BIAS.get(normalized_mood, 0.22),
+        withdraw_drive,
+        self_protect_drive,
+    )
+    continuity_bias = _clamp_unit_float(
+        max(
+            _CONTINUITY_MOOD_BIAS.get(normalized_mood, 0.36),
+            care_drive,
+            continuity_drive,
+            reach_out_drive * 0.82,
+            bond_depth * 0.60,
+        ) - withdraw_drive * 0.08
+    )
+    warm_bias = _clamp_unit_float(
+        max(
+            _WARM_MOOD_BIAS.get(normalized_mood, 0.34),
+            care_drive,
+            reach_out_drive * 0.35,
+            max(0.0, bond_depth - 0.15),
+        ) - self_protect_drive * 0.08
+    )
+
+    if dominant_motive in {"self_protect", "withdraw", "withdrawal"}:
+        protect_bias = max(protect_bias, 0.75)
+        continuity_bias = _clamp_unit_float(continuity_bias - 0.08)
+    if dominant_motive in {"continuity", "reach_out", "care"}:
+        continuity_bias = max(continuity_bias, 0.70)
+        warm_bias = max(warm_bias, 0.62)
+
+    return {
+        "mood_state": normalized_mood or "steady",
+        "bond_stage": str(normalized_bond.get("stage") or normalized_bond.get("bond_stage") or "").strip(),
+        "bond_depth": round(_clamp_unit_float(bond_depth), 4),
+        "dominant_motive": dominant_motive,
+        "reach_out_drive": round(reach_out_drive, 4),
+        "care_drive": round(care_drive, 4),
+        "continuity_drive": round(continuity_drive, 4),
+        "withdraw_drive": round(withdraw_drive, 4),
+        "self_protect_drive": round(self_protect_drive, 4),
+        "protect_bias": round(_clamp_unit_float(protect_bias), 4),
+        "continuity_bias": round(_clamp_unit_float(continuity_bias), 4),
+        "warm_bias": round(_clamp_unit_float(warm_bias), 4),
+    }
+
+
+def _memory_matches_keywords(text: str, keywords: tuple[str, ...]) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(keyword.lower() in lowered for keyword in keywords)
+
+
+def _classify_persona_memory(candidate: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    text_blob = " ".join(
+        str(part or "")
+        for part in (
+            candidate.get("snippet"),
+            metadata.get("source_ref"),
+            metadata.get("memory_kind"),
+            metadata.get("topic"),
+        )
+        if str(part or "").strip()
+    )
+    emotion_tag = str(metadata.get("emotion_tag") or "").strip().lower()
+    emotion_color_tag = str(metadata.get("emotion_color_tag") or "").strip().lower()
+    suppression_flag = _parse_bool(metadata.get("suppression_flag"), default=False)
+    distortion_level = _clamp_unit_float(metadata.get("distortion_level"))
+    continuity_memory = _memory_matches_keywords(text_blob, _CONTINUITY_HINT_KEYWORDS)
+    warm_memory = bool({emotion_tag, emotion_color_tag}.intersection(_WARM_EMOTION_TAGS)) or _memory_matches_keywords(text_blob, _WARM_HINT_KEYWORDS)
+    fragile_memory = suppression_flag or distortion_level >= 0.45 or bool({emotion_tag, emotion_color_tag}.intersection(_FRAGILE_EMOTION_TAGS))
+    return {
+        "continuity_memory": continuity_memory,
+        "warm_memory": warm_memory,
+        "fragile_memory": fragile_memory,
+        "suppression_flag": suppression_flag,
+        "distortion_level": distortion_level,
+    }
+
+
+def _apply_persona_recall_weight(
+    *,
+    candidate: dict[str, Any],
+    route: RecallRouteConfig,
+    persona_profile: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if route.store_id != STORE_EPISODIC_VECTOR or not persona_profile:
+        return candidate
+
+    score = _coerce_score(candidate.get("score"))
+    metadata = _coerce_mapping(candidate.get("metadata"))
+    memory_flags = _classify_persona_memory(candidate)
+    protect_bias = _clamp_unit_float(persona_profile.get("protect_bias"))
+    continuity_bias = _clamp_unit_float(persona_profile.get("continuity_bias"))
+    warm_bias = _clamp_unit_float(persona_profile.get("warm_bias"))
+    bond_depth = _clamp_unit_float(persona_profile.get("bond_depth"))
+
+    multiplier = 1.0
+    reason_tags: list[str] = []
+
+    if memory_flags["continuity_memory"]:
+        continuity_boost = 0.08 * continuity_bias + 0.06 * bond_depth
+        multiplier += continuity_boost
+        if continuity_boost > 0.0:
+            reason_tags.append("continuity_boost")
+        if bond_depth >= 0.70:
+            multiplier += 0.04
+            reason_tags.append("bond_depth_boost")
+
+    if memory_flags["warm_memory"]:
+        warm_boost = 0.06 * warm_bias + 0.02 * max(0.0, continuity_bias - 0.5)
+        multiplier += warm_boost
+        if warm_boost > 0.0:
+            reason_tags.append("warm_memory_boost")
+
+    if memory_flags["fragile_memory"]:
+        fragile_penalty = 0.08 * protect_bias + 0.03 * memory_flags["distortion_level"]
+        multiplier -= fragile_penalty
+        if fragile_penalty > 0.0:
+            reason_tags.append("fragile_memory_guard")
+
+    if memory_flags["suppression_flag"]:
+        multiplier -= 0.18 * protect_bias + 0.08
+        reason_tags.append("suppression_penalty")
+
+    if memory_flags["distortion_level"] > 0.0:
+        distortion_penalty = min(0.14, memory_flags["distortion_level"] * (0.05 + 0.07 * protect_bias))
+        multiplier -= distortion_penalty
+        reason_tags.append("distortion_penalty")
+
+    multiplier = max(0.35, min(1.45, multiplier))
+    adjusted_score = round(max(0.0, min(1.0, score * multiplier)), 6)
+    boost = round(adjusted_score - score, 6)
+
+    updated = dict(candidate)
+    updated_metadata = dict(metadata)
+    updated_metadata["persona_recall_profile"] = {
+        "mood_state": str(persona_profile.get("mood_state") or ""),
+        "bond_stage": str(persona_profile.get("bond_stage") or ""),
+        "bond_depth": round(bond_depth, 4),
+        "dominant_motive": str(persona_profile.get("dominant_motive") or ""),
+        "protect_bias": round(protect_bias, 4),
+        "continuity_bias": round(continuity_bias, 4),
+        "warm_bias": round(warm_bias, 4),
+    }
+    updated_metadata["persona_recall_multiplier"] = round(multiplier, 6)
+    updated_metadata["persona_recall_boost"] = boost
+    updated_metadata["persona_recall_reason_tags"] = sorted(set(reason_tags))
+    score_boost = _coerce_mapping(updated_metadata.get("score_boost"))
+    score_boost["persona_recall_boost"] = boost
+    updated_metadata["score_boost"] = score_boost
+    updated["score"] = adjusted_score
+    updated["confidence"] = adjusted_score
+    updated["metadata"] = updated_metadata
+    return updated
 
 
 def _filter_recall_routes(

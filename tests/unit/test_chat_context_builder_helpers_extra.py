@@ -364,6 +364,26 @@ def test_build_memory_persona_signal_summarizes_humanized_recall_metadata() -> N
     assert signal["memory_persona_guidance"]
 
 
+def test_build_memory_recall_summary_turns_signal_into_readable_hint() -> None:
+    summary = ccb._build_memory_recall_summary(
+        {
+            "humanized_memory_count": 3,
+            "suppressed_memory_count": 1,
+            "distorted_memory_count": 2,
+            "avg_distortion_level": 0.4,
+            "dominant_memory_emotion": "WARM",
+            "recall_bias": "uncertain",
+            "memory_persona_guidance": "命中压制记忆时先轻触试探，不要直接掀开高压回忆",
+        }
+    )
+
+    assert "3 条带人格化标记的记忆" in summary
+    assert "主导回忆情绪偏向 WARM" in summary
+    assert "1 条处于压制状态" in summary
+    assert "平均失真 0.40" in summary
+    assert "先轻触试探" in summary
+
+
 def test_apply_memory_persona_signal_to_persona_expression_hint_softens_suppressed_memory() -> None:
     hint = {
         "style_hint": "respond naturally",
@@ -433,11 +453,14 @@ def test_build_chat_context_pack_includes_memory_persona_signal(
     )
 
     memory_hint = dict(prompt_context.get("memory_emotion_hint") or {})
+    recall_summary = str(prompt_context.get("memory_recall_summary") or "")
     assert meta["valid"] is True
     assert memory_hint["humanized_memory_count"] == 2
     assert memory_hint["suppressed_memory_count"] == 1
     assert memory_hint["dominant_memory_emotion"] == "WARM"
     assert memory_hint["recall_bias"] == "uncertain"
+    assert recall_summary
+    assert memory_hint["memory_recall_summary"] == recall_summary
 
 
 def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expression_hint(
@@ -465,6 +488,7 @@ def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expr
                     "recall_bias": "uncertain",
                     "memory_persona_guidance": "touch the memory gently and do not over-claim details",
                 },
+                "memory_recall_summary": "本次召回命中了 2 条带人格化标记的记忆；其中 1 条处于压制状态；处理建议：touch the memory gently and do not over-claim details",
             },
             "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
             "prompt_context_observability": {"source_stats": {}},
@@ -543,6 +567,7 @@ def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expr
 
     assert memory_signal["suppressed_memory_count"] == 1
     assert memory_signal["avg_distortion_level"] == pytest.approx(0.52, abs=1e-4)
+    assert runtime_payload["memory_recall_summary"].startswith("本次召回命中了 2 条带人格化标记的记忆")
     assert hint["tone"] == "caring"
     assert hint["follow_up_tendency"] == 0.03
     assert hint["echo_weight_modifier"] == 0.05

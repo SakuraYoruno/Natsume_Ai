@@ -1435,6 +1435,24 @@ async def chat_agent_sse_generator(
 
     # 提取 TTS 文本（Phase XV 双轨语言：text_ja 走语音通道）
     tts_text = _extract_tts_text(full_text)
+    if _tts_sentence_stream_enabled and tts_text and tts_sentence_index == 0:
+        tts_fallback_splitter = SentenceSplitter()
+        for _tts_sentence in tts_fallback_splitter.feed(tts_text):
+            if _tts_sentence.strip():
+                _etag = _infer_emotion_tag_for_tts(
+                    _tts_sentence,
+                    str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                )
+                asyncio.create_task(_post_speak_sentence(
+                    text=_tts_sentence,
+                    utterance_id=f"utt_{request_id}_{tts_sentence_index:03d}",
+                    emotion_tag=_etag,
+                    request_id=request_id,
+                    session_id=session_id,
+                ))
+                tts_sentence_index += 1
+    if _tts_sentence_stream_enabled and tts_sentence_index > 0:
+        await asyncio.sleep(0)
 
     # ── 5. apply_response_intelligence（反思链 + 多模态后缀）─────────
     response_intelligence_meta: dict[str, Any] = {}

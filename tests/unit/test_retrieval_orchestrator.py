@@ -357,3 +357,62 @@ def test_retrieval_orchestrator_cache_key_separates_render_target_lang() -> None
     assert pipeline.calls == 2
     assert zh_out.retrieval_summary["cache_hit"] is False
     assert ja_out.retrieval_summary["cache_hit"] is False
+
+
+
+def test_retrieval_orchestrator_cache_key_separates_persona_context() -> None:
+    result = RetrievalPipelineResult(
+        success=True,
+        status="OK",
+        reason_code=None,
+        stage="S_RET_PIPELINE",
+        detail="ok",
+        output={
+            "recall": {"routes": ["episodic_vector"], "route_rows": [], "route_errors": [], "candidate_count": 1},
+            "rerank": {"topk": [{"evidence_ref": "e1", "snippet": "hello"}]},
+            "evidence_pack": {"evidence_refs": ["e1"]},
+            "reason_chain": [],
+            "degraded": False,
+        },
+    )
+    pipeline = _CountingPipeline(result=result)
+    orchestrator = RetrievalOrchestrator(
+        pipeline=pipeline,  # type: ignore[arg-type]
+        cache_enabled=True,
+        cache_ttl_ms=5000,
+        cache_max_entries=128,
+    )
+
+    out1 = _run(
+        orchestrator,
+        RetrievalOrchestratorRequest(
+            trace_id="trace::persona-1",
+            query="same-query",
+            session_state={"session_id": "persona-cache"},
+            request_id="req::persona-1",
+            session_id="persona-cache",
+            mood_state="critical",
+            bond_summary={"stage": "FRIEND"},
+            motive_state={"dominant_motive": "self_protect", "drives": {"self_protect_drive": 0.88}},
+        ),
+    )
+    out2 = _run(
+        orchestrator,
+        RetrievalOrchestratorRequest(
+            trace_id="trace::persona-2",
+            query="same-query",
+            session_state={"session_id": "persona-cache"},
+            request_id="req::persona-2",
+            session_id="persona-cache",
+            mood_state="engaged",
+            bond_summary={"stage": "INTIMATE"},
+            motive_state={"dominant_motive": "continuity", "drives": {"continuity_drive": 0.91}},
+        ),
+    )
+
+    assert pipeline.calls == 2
+    assert out1.retrieval_summary["cache_hit"] is False
+    assert out2.retrieval_summary["cache_hit"] is False
+    assert "mood_state" in out1.retrieval_summary["cache_key_scope"]
+    assert "bond_summary" in out2.retrieval_summary["cache_key_scope"]
+    assert "motive_state" in out2.retrieval_summary["cache_key_scope"]

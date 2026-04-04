@@ -290,6 +290,13 @@ def build_chat_context_pack(
         ):
             continue
         retrieval_kind = "persona_utterance" if store_id == "persona_utterance" else "episodic"
+        _emotion_color_tag = str(
+            metadata.get("emotion_color_tag") or metadata.get("emotion_tag") or ""
+        ).strip().upper() or None
+        _suppression_flag = _coerce_optional_bool(metadata.get("suppression_flag"))
+        _distortion_level = _coerce_optional_float(metadata.get("distortion_level"))
+        if _distortion_level is not None:
+            _distortion_level = round(_clamp_float(float(_distortion_level), minimum=0.0, maximum=1.0), 4)
         retrieval_rows.append(
             {
                 "slot": "retrieval",
@@ -306,6 +313,9 @@ def build_chat_context_pack(
                 "file_rel_path": str(metadata.get("file_rel_path") or "").strip() or None,
                 "block_id": str(metadata.get("block_id") or "").strip() or None,
                 "line_index": metadata.get("line_index"),
+                "emotion_color_tag": _emotion_color_tag,
+                "suppression_flag": _suppression_flag,
+                "distortion_level": _distortion_level,
             }
         )
 
@@ -328,8 +338,12 @@ def build_chat_context_pack(
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
     memory_persona_signal = _build_memory_persona_signal(retrieval_evidence_items)
+    memory_recall_summary = ""
     if memory_persona_signal:
         memory_emotion_hint.update(memory_persona_signal)
+        memory_recall_summary = _build_memory_recall_summary(memory_emotion_hint)
+        if memory_recall_summary:
+            memory_emotion_hint["memory_recall_summary"] = memory_recall_summary
     emotion_recall_text = (
         str(dict(cpb_slots or {}).get("emotion_recall") or "").strip()
         or build_emotion_recall_text(
@@ -424,6 +438,8 @@ def build_chat_context_pack(
         "memory_emotion_hint": memory_emotion_hint,
         "bond_texture": bond_texture,
     }
+    if memory_recall_summary:
+        context_pack["memory_recall_summary"] = memory_recall_summary
 
     validation = validate_context_pack(context_pack)
     violations = [
@@ -602,6 +618,46 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
         "recall_bias": recall_bias,
         "memory_persona_guidance": guidance_text or None,
     }
+
+
+def _build_memory_recall_summary(memory_signal_raw: Mapping[str, Any] | None) -> str:
+    memory_signal = dict(memory_signal_raw or {}) if isinstance(memory_signal_raw, Mapping) else {}
+    if not memory_signal:
+        return ""
+
+    humanized_count = _coerce_non_negative_int(memory_signal.get("humanized_memory_count"))
+    suppressed_count = _coerce_non_negative_int(memory_signal.get("suppressed_memory_count"))
+    distorted_count = _coerce_non_negative_int(memory_signal.get("distorted_memory_count"))
+    avg_distortion = float(_coerce_optional_float(memory_signal.get("avg_distortion_level")) or 0.0)
+    dominant_emotion = str(memory_signal.get("dominant_memory_emotion") or "").strip().upper()
+    recall_bias = str(memory_signal.get("recall_bias") or "").strip().lower()
+    guidance = str(memory_signal.get("memory_persona_guidance") or "").strip()
+
+    if humanized_count <= 0 and not guidance and not dominant_emotion:
+        return ""
+
+    bias_labels = {
+        "warm": "偏温暖承接",
+        "guarded": "偏克制试探",
+        "uncertain": "偏留白保守",
+        "fragile": "偏脆弱照看",
+        "neutral": "偏中性回忆",
+    }
+
+    parts: list[str] = []
+    if humanized_count > 0:
+        parts.append(f"本次召回命中了 {humanized_count} 条带人格化标记的记忆")
+    if dominant_emotion:
+        parts.append(f"主导回忆情绪偏向 {dominant_emotion}")
+    if suppressed_count > 0:
+        parts.append(f"其中 {suppressed_count} 条处于压制状态")
+    if distorted_count > 0:
+        parts.append(f"{distorted_count} 条带有细节失真，平均失真 {avg_distortion:.2f}")
+    if recall_bias:
+        parts.append(f"当前回忆倾向 {bias_labels.get(recall_bias, recall_bias)}")
+    if guidance:
+        parts.append(f"处理建议：{guidance}")
+    return "；".join(part for part in parts if part)
 
 
 def _apply_motive_state_to_persona_expression_hint(
@@ -956,6 +1012,7 @@ def build_prompt_context_observability(
     node_bindings_raw = style_pack.get("node_bindings")
     node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
     emotion_recall_text = str(prompt_context.get("emotion_recall") or "").strip()
+    memory_recall_summary_text = str(prompt_context.get("memory_recall_summary") or "").strip()
 
     slot_item_counts = {
         "authoritative": len(authoritative_rows),
@@ -964,6 +1021,7 @@ def build_prompt_context_observability(
         "style_node_bindings": len(node_bindings),
         "tool_meta_pack": len(tool_meta_rows),
         "emotion_recall": (1 if emotion_recall_text else 0),
+        "memory_recall_summary": (1 if memory_recall_summary_text else 0),
     }
 
     selected_tier, selected_reason = _select_context_degrade_tier(
@@ -987,6 +1045,7 @@ def build_prompt_context_observability(
                 "constraints": dict(prompt_context.get("constraints") or {}),
                 "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
                 "emotion_recall": emotion_recall_text,
+                "memory_recall_summary": memory_recall_summary_text,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -1031,6 +1090,7 @@ def build_prompt_context_observability(
             "style_prompt_rows": len(style_rows),
             "style_binding_nodes": len(node_bindings),
             "emotion_recall_present": bool(emotion_recall_text),
+            "memory_recall_summary_present": bool(memory_recall_summary_text),
         },
         "context_size_chars": context_chars,
     }
@@ -1187,6 +1247,13 @@ def build_chat_prompt_runtime_payload(
     )
     if memory_persona_signal:
         runtime_payload["memory_persona_signal"] = memory_persona_signal
+    memory_recall_summary = str(
+        prompt_context.get("memory_recall_summary")
+        or memory_persona_signal.get("memory_recall_summary")
+        or ""
+    ).strip()
+    if memory_recall_summary:
+        runtime_payload["memory_recall_summary"] = memory_recall_summary
     try:
         from host_brain.app.intelligent_runtime import build_prompt_intelligence  # noqa: PLC0415
 
@@ -1610,6 +1677,8 @@ def build_chat_prompt_runtime_payload(
             self_reflection_pulse=runtime_payload.get("self_reflection_pulse"),
             emotion_context=runtime_payload.get("triggered_emotions"),
             motive_state=runtime_payload.get("motive_state"),
+            memory_persona_signal=runtime_payload.get("memory_persona_signal"),
+            user_message=str(runtime_input.user_message or ""),
             runtime_flags=runtime_payload.get("runtime_mode"),
         )
         _policy_decision = decide_response_policy(_policy_inp)

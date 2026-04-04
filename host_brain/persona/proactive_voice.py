@@ -65,6 +65,26 @@ _ABSENT_SHORT_MS = 24 * 60 * 60 * 1000        # 24小时
 _ABSENT_MEDIUM_MS = 3 * 24 * 60 * 60 * 1000   # 72小时
 _ABSENT_LONG_MS = 7 * 24 * 60 * 60 * 1000     # 1周
 
+_MEMORY_WARM_TAGS = frozenset({"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"})
+_MEMORY_FRAGILE_TAGS = frozenset({"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"})
+
+
+def _coerce_memory_persona_signal(raw: Any) -> dict[str, Any]:
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _score_motive_drive(motive_state: dict[str, Any] | None, key: str) -> float:
+    motive = dict(motive_state or {})
+    candidate = motive.get(key)
+    if candidate in (None, ""):
+        drives = motive.get("drives")
+        if isinstance(drives, dict):
+            candidate = drives.get(key)
+    try:
+        return float(candidate or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 # ---------------------------------------------------------------------------
 # 数据结构
@@ -793,6 +813,8 @@ class PersonaProactiveVoice:
                     每项为 dict，含 topic_label(str) 和 topic_keywords(list[str])
                 - offline_state: OfflineStateSnapshot dict（Phase XVI，可选）
                     含 offline_duration_ms / loneliness_value / anticipation_value
+                - memory_persona_signal: 记忆人格化摘要（可选）
+                    含 suppressed_memory_count / dominant_memory_emotion / recall_bias 等
 
         Returns:
             ProactiveExpression 或 None（不触发）
@@ -801,6 +823,7 @@ class PersonaProactiveVoice:
         ctx = dict(context or {})
         now_ts = int(ctx.get("current_ts_ms") or _now_ms())
         motive_state = dict(ctx.get("motive_state") or {}) if isinstance(ctx.get("motive_state"), dict) else {}
+        memory_persona_signal = _coerce_memory_persona_signal(ctx.get("memory_persona_signal"))
 
         # ── 技术债务 10.2：读取 Phase XVI offline_state 快照 ─────────────────
         offline_state: dict[str, Any] = {}
@@ -887,6 +910,19 @@ class PersonaProactiveVoice:
                         motive_influence,
                     )
                     continue
+                memory_allowed, memory_influence = self._memory_persona_allows_scene(
+                    scene_type,
+                    memory_persona_signal,
+                    motive_state,
+                )
+                if not memory_allowed:
+                    _logger.debug(
+                        "主动表达被 memory_persona_signal 拦截: user=%s scene=%s reason=%s",
+                        uid,
+                        scene_type,
+                        memory_influence,
+                    )
+                    continue
                 style = self._select_style(traits)
                 style = self._apply_mode_to_style(style, ctx)
                 bond_stage = str(ctx.get("bond_stage") or "STRANGER").strip().upper()
@@ -903,6 +939,13 @@ class PersonaProactiveVoice:
                     ctx["_long_absent_elapsed_ms"] = elapsed_ms
                     long_absent_influence = str(long_absent_meta.get("influence") or "")
                 content = self._get_template(scene_type, style, ctx, now_ts, bond_stage)
+                content, memory_style_influence = self._apply_memory_persona_to_content(
+                    content,
+                    scene_type=scene_type,
+                    ctx=ctx,
+                    motive_state=motive_state,
+                    memory_persona_signal=memory_persona_signal,
+                )
                 emotion_tag = self._scene_emotion(
                     scene_type,
                     loneliness_value=_loneliness_value,
@@ -923,14 +966,25 @@ class PersonaProactiveVoice:
                 if scene_type == SCENE_LONG_ABSENT and _absence_band:
                     absence_influence = f"absence_band={_absence_band}"
 
+                influence_summary = " | ".join(
+                    part
+                    for part in (
+                        absence_influence,
+                        long_absent_influence,
+                        mode_influence,
+                        scene_influence,
+                        motive_influence,
+                        memory_influence,
+                        memory_style_influence,
+                    )
+                    if part
+                )
                 expr = ProactiveExpression(
                     scene_type=scene_type,
                     content=content,
                     emotion_tag=emotion_tag,
                     trait_influence=trait_influence,
-                    motive_influence=" | ".join(
-                        part for part in (absence_influence, long_absent_influence, mode_influence, scene_influence, motive_influence) if part
-                    ),
+                    motive_influence=influence_summary,
                     ts_ms=now_ts,
                     wait_duration_ms=_wait_ms,
                     loneliness_value=_loneliness_value,
@@ -940,7 +994,7 @@ class PersonaProactiveVoice:
                     "主动表达触发: user=%s scene=%s style=%s bond=%s wait=%.1fh loneliness=%.2f motive=%s",
                     uid, scene_type, style, bond_stage,
                     _wait_ms / 3_600_000, _loneliness_value,
-                    motive_influence or "-",
+                    influence_summary or "-",
                 )
                 return expr
 
@@ -955,17 +1009,11 @@ class PersonaProactiveVoice:
         if not raw:
             return True, ""
 
-        def _score(key: str) -> float:
-            try:
-                return float(raw.get(key) or 0.0)
-            except (TypeError, ValueError):
-                return 0.0
-
-        reach_out = _score("reach_out_drive")
-        care = _score("care_drive")
-        continuity = _score("continuity_drive")
-        withdraw = _score("withdraw_drive")
-        self_protect = _score("self_protect_drive")
+        reach_out = _score_motive_drive(raw, "reach_out_drive")
+        care = _score_motive_drive(raw, "care_drive")
+        continuity = _score_motive_drive(raw, "continuity_drive")
+        withdraw = _score_motive_drive(raw, "withdraw_drive")
+        self_protect = _score_motive_drive(raw, "self_protect_drive")
         dominant_motive = str(raw.get("dominant_motive") or "").strip()
 
         active_drive = max(reach_out, care, continuity)
@@ -1003,6 +1051,145 @@ class PersonaProactiveVoice:
         if dominant_motive:
             return True, f"dominant_motive={dominant_motive}"
         return True, ""
+
+    def _memory_persona_allows_scene(
+        self,
+        scene_type: str,
+        memory_persona_signal: dict[str, Any] | None,
+        motive_state: dict[str, Any] | None,
+    ) -> tuple[bool, str]:
+        memory = _coerce_memory_persona_signal(memory_persona_signal)
+        if not memory:
+            return True, ""
+
+        suppressed_count = int(memory.get("suppressed_memory_count") or 0)
+        avg_distortion = float(memory.get("avg_distortion_level") or 0.0)
+        dominant_emotion = str(memory.get("dominant_memory_emotion") or "").strip().upper()
+        recall_bias = str(memory.get("recall_bias") or "").strip().lower()
+
+        reach_out = _score_motive_drive(motive_state, "reach_out_drive")
+        care = _score_motive_drive(motive_state, "care_drive")
+        continuity = _score_motive_drive(motive_state, "continuity_drive")
+        withdraw = _score_motive_drive(motive_state, "withdraw_drive")
+        self_protect = _score_motive_drive(motive_state, "self_protect_drive")
+        supportive_drive = max(reach_out, care, continuity)
+        retreat_drive = max(withdraw, self_protect)
+
+        if recall_bias == "uncertain" and scene_type in {SCENE_TOPIC_FOLLOWUP, SCENE_POST_INTENSE} and retreat_drive >= 0.45:
+            return False, "memory:uncertain prefers not to proactively reopen details"
+
+        if scene_type == SCENE_TOPIC_FOLLOWUP:
+            if suppressed_count > 0 and retreat_drive >= 0.35:
+                return False, "memory:suppressed discourages topic follow-up"
+            if avg_distortion >= 0.5:
+                return False, "memory:distorted too uncertain for proactive follow-up"
+            if dominant_emotion in _MEMORY_FRAGILE_TAGS and supportive_drive < 0.72:
+                return False, f"memory:fragile={dominant_emotion} prefers gentler timing"
+            if (
+                dominant_emotion in _MEMORY_WARM_TAGS
+                and suppressed_count <= 0
+                and avg_distortion < 0.35
+                and max(care, continuity) >= 0.45
+            ):
+                return True, f"memory:warm={dominant_emotion} supports continuity"
+
+        if scene_type == SCENE_POST_INTENSE:
+            if (suppressed_count > 0 or dominant_emotion in _MEMORY_FRAGILE_TAGS) and max(care, continuity) < 0.75:
+                return False, "memory:fragile suggests waiting after intense turn"
+
+        if scene_type == SCENE_LONG_ABSENT:
+            if suppressed_count > 0 and retreat_drive >= 0.55:
+                return False, "memory:suppressed keeps reconnect from probing old topics"
+            if (
+                dominant_emotion in _MEMORY_WARM_TAGS
+                and suppressed_count <= 0
+                and avg_distortion < 0.35
+                and supportive_drive >= 0.5
+            ):
+                return True, f"memory:warm={dominant_emotion} supports reconnect"
+
+        return True, ""
+
+    def _apply_memory_persona_to_content(
+        self,
+        content: str,
+        *,
+        scene_type: str,
+        ctx: dict[str, Any],
+        motive_state: dict[str, Any] | None,
+        memory_persona_signal: dict[str, Any] | None,
+    ) -> tuple[str, str]:
+        resolved_content = str(content or "").strip()
+        memory = _coerce_memory_persona_signal(memory_persona_signal)
+        if not resolved_content or not memory:
+            return resolved_content, ""
+
+        suppressed_count = int(memory.get("suppressed_memory_count") or 0)
+        avg_distortion = float(memory.get("avg_distortion_level") or 0.0)
+        dominant_emotion = str(memory.get("dominant_memory_emotion") or "").strip().upper()
+        recall_bias = str(memory.get("recall_bias") or "").strip().lower()
+
+        reach_out = _score_motive_drive(motive_state, "reach_out_drive")
+        care = _score_motive_drive(motive_state, "care_drive")
+        continuity = _score_motive_drive(motive_state, "continuity_drive")
+        withdraw = _score_motive_drive(motive_state, "withdraw_drive")
+        self_protect = _score_motive_drive(motive_state, "self_protect_drive")
+        supportive_drive = max(reach_out, care, continuity)
+        retreat_drive = max(withdraw, self_protect)
+
+        guarded_memory = (
+            suppressed_count > 0
+            or dominant_emotion in _MEMORY_FRAGILE_TAGS
+            or recall_bias in {"guarded", "uncertain"}
+            or avg_distortion >= 0.35
+        )
+        if guarded_memory:
+            if scene_type == SCENE_TOPIC_FOLLOWUP:
+                topic_label = self._extract_topic_label(ctx)
+                return (
+                    f"忽然想起你之前提过的{topic_label}，如果你现在愿意聊的话，可以慢慢说。",
+                    "memory:guarded_soften_followup",
+                )
+            if scene_type == SCENE_POST_INTENSE:
+                return (
+                    "我还记着你刚刚那阵情绪，如果现在不想展开也没关系，我在。",
+                    "memory:guarded_soften_post_intense",
+                )
+            if scene_type == SCENE_LONG_ABSENT:
+                return (
+                    "这阵子没见到你，只是想轻轻确认你还好，不急着解释。",
+                    "memory:guarded_soften_reconnect",
+                )
+            if scene_type == SCENE_LATE_NIGHT:
+                return (
+                    "这么晚了，如果你只是想安静待一会儿也没关系，我陪着。",
+                    "memory:guarded_soften_late_night",
+                )
+
+        if (
+            dominant_emotion in _MEMORY_WARM_TAGS
+            and suppressed_count <= 0
+            and avg_distortion < 0.35
+            and supportive_drive >= retreat_drive
+        ):
+            if scene_type == SCENE_TOPIC_FOLLOWUP:
+                topic_label = self._extract_topic_label(ctx)
+                return (
+                    f"突然想起你之前提过的{topic_label}，后来有新进展吗？",
+                    f"memory:warm_followup={dominant_emotion}",
+                )
+            if scene_type == SCENE_LONG_ABSENT:
+                return (
+                    "这几天没见到你，忽然想起我们之前聊过的事，就想来接一下你。",
+                    f"memory:warm_reconnect={dominant_emotion}",
+                )
+            if scene_type == SCENE_POST_INTENSE:
+                return (
+                    "刚刚那阵情绪我还记着，所以想轻轻来接一下你。",
+                    f"memory:warm_aftercare={dominant_emotion}",
+                )
+
+        return resolved_content, ""
 
     @staticmethod
     def _resolve_runtime_mode(ctx: dict[str, Any]) -> tuple[str, dict[str, Any]]:

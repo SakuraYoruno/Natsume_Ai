@@ -201,6 +201,9 @@ class RetrievalOrchestratorRequest:
     top_k: int = 8
     ts_ms: int | None = None
     emotion_context: str | None = None
+    mood_state: str | None = None
+    bond_summary: Mapping[str, Any] | None = None
+    motive_state: Mapping[str, Any] | None = None
     render_target_lang: str | None = None
     turn_index: int = 0
     query_plan: QueryPlan | Mapping[str, Any] | None = None
@@ -272,6 +275,8 @@ class RetrievalOrchestrator:
             query_plan_payload = dict(query_plan_raw)
         else:
             query_plan_payload = {}
+        bond_summary = dict(request.bond_summary) if isinstance(request.bond_summary, Mapping) else {}
+        motive_state = dict(request.motive_state) if isinstance(request.motive_state, Mapping) else {}
         payload = {
             "person_id": person_id,
             "session_id": session_id,
@@ -279,6 +284,9 @@ class RetrievalOrchestrator:
             "top_k": int(normalized_top_k),
             "intent_id": str(request.intent_id or "").strip(),
             "emotion_context": str(request.emotion_context or "").strip(),
+            "mood_state": str(request.mood_state or "").strip().lower(),
+            "bond_summary": bond_summary,
+            "motive_state": motive_state,
             "render_target_lang": str(request.render_target_lang or "").strip().lower(),
             "turn_index": int(request.turn_index),
             "query_plan": query_plan_payload,
@@ -343,7 +351,7 @@ class RetrievalOrchestrator:
         summary["cache_hit"] = bool(cache_hit and self._cache_enabled)
         summary["cache_ttl_ms"] = int(self._cache_ttl_ms if self._cache_enabled else 0)
         summary["cache_age_ms"] = max(0, int(cache_age_ms))
-        summary["cache_key_scope"] = "person_id+session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan"
+        summary["cache_key_scope"] = "person_id+session_id+query+top_k+intent_id+emotion_context+mood_state+bond_summary+motive_state+render_target_lang+turn_index+query_plan"
         evidence_items = [
             dict(item) if isinstance(item, Mapping) else item
             for item in list(result.retrieval_evidence_items or [])
@@ -358,7 +366,7 @@ class RetrievalOrchestrator:
             "ttl_ms": int(self._cache_ttl_ms if self._cache_enabled else 0),
             "age_ms": max(0, int(cache_age_ms)),
             "max_entries": int(self._cache_max_entries),
-            "key_scope": "person_id+session_id+query+top_k+intent_id+emotion_context+render_target_lang+turn_index+query_plan",
+            "key_scope": "person_id+session_id+query+top_k+intent_id+emotion_context+mood_state+bond_summary+motive_state+render_target_lang+turn_index+query_plan",
         }
         return RetrievalOrchestratorResult(
             success=bool(result.success),
@@ -437,6 +445,9 @@ class RetrievalOrchestrator:
                     top_k=request.top_k,
                     ts_ms=request.ts_ms,
                     emotion_context=request.emotion_context,
+                    mood_state=request.mood_state,
+                    bond_summary=request.bond_summary,
+                    motive_state=request.motive_state,
                     render_target_lang=request.render_target_lang,
                     turn_index=request.turn_index,
                     query_plan=resolved_query_plan,
@@ -462,6 +473,9 @@ class RetrievalOrchestrator:
                 top_k=normalized_top_k,
                 ts_ms=request.ts_ms,
                 emotion_context=request.emotion_context,
+                mood_state=request.mood_state,
+                bond_summary=request.bond_summary,
+                motive_state=request.motive_state,
                 render_target_lang=request.render_target_lang,
                 turn_index=int(request.turn_index),
                 query_plan=resolved_query_plan,
