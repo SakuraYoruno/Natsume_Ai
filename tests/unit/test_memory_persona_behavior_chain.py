@@ -493,6 +493,76 @@ def _build_runtime_payload_from_memory_case(
     return ccb.build_chat_prompt_runtime_payload(runtime_input=runtime_input, style_bindings={})
 
 
+def _build_runtime_payload_from_recall_pack(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    retrieval_evidence_items: list[dict[str, object]],
+    motive_state: dict[str, float | str],
+) -> dict[str, object]:
+    import host_brain.app.dependencies as deps
+    import host_brain.app.emotion_context as emotion_context
+
+    normalized_emotion = {
+        "mood_state": "steady",
+        "emotion_tag": "NEUTRAL",
+        "emotion_range_hint": "steady",
+        "allowed_emotion_tags": ["NEUTRAL", "WARM"],
+        "emotion_intensity": 0.42,
+    }
+    monkeypatch.setattr(emotion_context, "normalize_chat_emotion_context", lambda raw: normalized_emotion)
+    monkeypatch.setattr(deps, "get_bond_stage_engine", lambda: None)
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            hint = SimpleNamespace(
+                style_hint="respond naturally",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                pace_hint="steady",
+            )
+            setattr(hint, "追问倾向", 0.0)
+            return hint
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace())
+
+    class _FakeMotiveState:
+        def __init__(self, payload: dict[str, float | str]) -> None:
+            self._payload = dict(payload)
+
+        def as_dict(self):
+            return dict(self._payload)
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr(
+        "host_brain.persona.motive_engine.compute_motive_state",
+        lambda _inp: _FakeMotiveState(motive_state),
+    )
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-memory-e2e",
+        person_id="person-memory-e2e",
+        session_id="session-memory-e2e",
+        thread_id=None,
+        user_message="我们继续刚才的话题吧",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK", "reason_code": "NONE"},
+        retrieval_evidence_items=retrieval_evidence_items,
+        emotion_state={"mood_state": "steady", "emotion_tag": "NEUTRAL", "emotion_intensity": 0.42},
+        recall_slot_text={},
+        bond_summary={"stage": "FRIEND"},
+        scene_type="CHAT",
+    )
+    return ccb.build_chat_prompt_runtime_payload(runtime_input=runtime_input, style_bindings={})
+
+
 @pytest.mark.parametrize(
     ("case_name", "memory_signal", "motive_state", "expectations"),
     [
@@ -609,3 +679,78 @@ def test_memory_persona_reply_runtime_regression_matrix(
         assert follow_up_tendency >= float(expectations["followup_floor"]), case_name
     if "followup_ceiling" in expectations:
         assert follow_up_tendency <= float(expectations["followup_ceiling"]), case_name
+
+
+def test_fixed_recall_pack_end_to_end_recoil_signal_reaches_response_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_payload = _build_runtime_payload_from_recall_pack(
+        monkeypatch,
+        retrieval_evidence_items=[
+            {
+                "snippet": "I should not reopen that part too abruptly.",
+                "metadata": {
+                    "persona_recall_reason_tags": ["protective_recoil_penalty"],
+                },
+            }
+        ],
+        motive_state={
+            "care_drive": 0.28,
+            "reach_out_drive": 0.24,
+            "continuity_drive": 0.3,
+            "withdraw_drive": 0.58,
+            "self_protect_drive": 0.76,
+            "dominant_motive": "self_protect",
+        },
+    )
+
+    memory_signal = dict(runtime_payload.get("memory_persona_signal") or {})
+    response_policy = dict(runtime_payload.get("response_policy") or {})
+
+    assert memory_signal["protective_recoil_count"] == 1
+    assert "防御性回缩" in str(runtime_payload.get("memory_recall_summary") or "")
+    assert response_policy["allow_followup"] is False
+    assert "memory:recoil=1" in response_policy["policy_reason_tags"]
+
+
+def test_fixed_recall_pack_end_to_end_resonance_signal_reaches_proactive_followup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_payload = _build_runtime_payload_from_recall_pack(
+        monkeypatch,
+        retrieval_evidence_items=[
+            {
+                "snippet": "I still remember what we said last time together.",
+                "metadata": {
+                    "persona_recall_reason_tags": ["shared_history_resonance"],
+                },
+            }
+        ],
+        motive_state={
+            "care_drive": 0.72,
+            "reach_out_drive": 0.58,
+            "continuity_drive": 0.84,
+            "withdraw_drive": 0.08,
+            "self_protect_drive": 0.08,
+            "dominant_motive": "continuity",
+        },
+    )
+
+    voice = PersonaProactiveVoice()
+    ts = _ts_at_hour(15, 0)
+    result = voice.evaluate_scene(
+        user_id="memory-e2e-resonance",
+        context={
+            **runtime_payload,
+            "current_ts_ms": ts,
+            "user_online": False,
+            "last_interaction_ts_ms": ts - 1000,
+            "pending_followup_topics": [{"topic_label": "新工作", "topic_keywords": ["工作"]}],
+        },
+    )
+
+    assert dict(runtime_payload.get("memory_persona_signal") or {})["shared_history_resonance_count"] == 1
+    assert result is not None
+    assert result.scene_type == SCENE_TOPIC_FOLLOWUP
+    assert "我还惦记着" in result.content
+    assert "memory:resonance_followup=NEUTRAL" in result.motive_influence

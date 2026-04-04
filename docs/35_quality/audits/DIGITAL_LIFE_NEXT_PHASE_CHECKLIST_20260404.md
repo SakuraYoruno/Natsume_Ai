@@ -177,6 +177,8 @@
 - 目标：用固定 recall 包，验证主回复与主动链路的差异可回归。
 - 重点模块：`tests/unit/`、必要时 `tests/integration/`。
 - 验收标准：情绪染色、压制、失真至少覆盖 3 组对照样例。
+- 本轮进展（2026-04-04）：已在 `tests/unit/test_memory_persona_behavior_chain.py` 增加固定 recall 包的端到端样例，直接覆盖 `retrieval_evidence_items -> build_chat_prompt_runtime_payload -> response_policy / proactive_voice` 链路，确认 `shared_history_resonance` 与 `protective_recoil_penalty` 不只是局部 helper 行为，而是能稳定影响主回复和主动 follow-up。
+- 验证记录：`tests/unit/test_memory_persona_behavior_chain.py` 定向通过，并与 `tests/unit/test_chat_context_builder_helpers_extra.py`、`tests/unit/test_scene_aware_proactive.py`、`tests/unit/test_mode_aware_policy_motive.py`、`tests/unit/test_prompt_builder_helpers_extra.py` 联跑通过，本轮 `57 passed`。
 
 ### N2 完成标志
 
