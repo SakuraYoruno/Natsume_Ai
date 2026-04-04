@@ -188,9 +188,13 @@ def test_build_self_reflection_pulse_adds_narrative_guardrails_when_evidence_is_
     assert guardrails["risk_level"] == "high"
     assert guardrails["allowed_style"] == "brief"
     assert guardrails["allow_self_narrative_expansion"] is False
+    assert guardrails["max_self_narrative_sentences"] == 1
     assert "time_context_unverified" in guardrails["risk_tags"]
     assert "unsupported_self_claim" in guardrails["risk_tags"]
     assert "anthropomorphic_overreach" in guardrails["risk_tags"]
+    assert any("最近/这段时间" in item for item in guardrails["prompt_directives"])
+    assert any("人类式经历" in item for item in guardrails["prompt_directives"])
+    assert any("不要主动展开自我叙事" in item for item in guardrails["prompt_directives"])
 
 
 
@@ -221,6 +225,7 @@ def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() ->
     guardrails = dict(aligned["narrative_guardrails"])
     assert guardrails["risk_level"] == "high"
     assert "reflection_vs_policy_tension" in guardrails["risk_tags"]
+    assert any("主回复任务和既有边界为先" in item for item in guardrails["prompt_directives"])
 
 
 

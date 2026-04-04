@@ -446,6 +446,34 @@ _NARRATIVE_GUARDRAIL_INSTRUCTIONS: dict[str, str] = {
 }
 
 
+def _build_narrative_guardrail_prompt_directives(
+    ordered_tags: list[str],
+    *,
+    risk_level: str,
+    allow_self_narrative_expansion: bool,
+) -> list[str]:
+    directives: list[str] = []
+
+    def _add_directive(text: str) -> None:
+        text = str(text or "").strip()
+        if text and text not in directives:
+            directives.append(text)
+
+    if risk_level == "high":
+        _add_directive("涉及自我叙事时，只允许一小句辅助说明，优先回应当前话题，不要展开成长故事或回忆链。")
+    if "time_context_unverified" in ordered_tags:
+        _add_directive("如果提到时间，只能说“最近/这段时间”，不要声称具体日期、时长或明确阶段。")
+    if "unsupported_self_claim" in ordered_tags:
+        _add_directive("没有明确依据时，不要把推测写成确定的自我变化、关系进展或内心结论。")
+    if "anthropomorphic_overreach" in ordered_tags:
+        _add_directive("不要把系统状态、趋势、沉默、模式切换或薄弱线索写成人类式经历、自传或命运感叙事。")
+    if not allow_self_narrative_expansion:
+        _add_directive("若用户没有直接追问，不要主动展开自我叙事，只允许轻量辅助一句。")
+    if "reflection_vs_policy_tension" in ordered_tags:
+        _add_directive("当前以主回复任务和既有边界为先，自我叙事只能退到辅助位。")
+    return directives
+
+
 def _build_narrative_guardrails(
     snapshot: dict[str, Any] | None,
     *,
@@ -557,13 +585,21 @@ def _build_narrative_guardrails(
         risk_score += 1 if tag == "reflection_vs_policy_tension" else 2
     risk_level = "high" if risk_score >= 4 else "medium"
     allowed_style = "brief" if risk_level == "high" else "guarded"
+    allow_self_narrative_expansion = False
     instructions = [_NARRATIVE_GUARDRAIL_INSTRUCTIONS[tag] for tag in ordered_tags]
+    prompt_directives = _build_narrative_guardrail_prompt_directives(
+        ordered_tags,
+        risk_level=risk_level,
+        allow_self_narrative_expansion=allow_self_narrative_expansion,
+    )
     return {
         "risk_level": risk_level,
         "risk_tags": ordered_tags,
         "instruction": " ".join(instructions),
         "allowed_style": allowed_style,
-        "allow_self_narrative_expansion": False,
+        "allow_self_narrative_expansion": allow_self_narrative_expansion,
+        "max_self_narrative_sentences": 1 if risk_level == "high" else 2,
+        "prompt_directives": prompt_directives,
     }
 
 

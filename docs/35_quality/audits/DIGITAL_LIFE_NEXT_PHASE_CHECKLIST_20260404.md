@@ -264,6 +264,8 @@
 - 目标：防止自我叙事出现越界拟人、时间错乱、无依据自述。
 - 重点模块：`host_brain/persona/self_reflection.py`、`host_brain/persona/response_policy.py`、prompt 约束链。
 - 验收标准：高阶自我描述可控、可追溯、可降级。
+- 本轮进展（2026-04-04）：已将 `narrative_guardrails` 收束为统一 guardrail 描述，补充 `max_self_narrative_sentences / prompt_directives`，并在 `prompt_builder` 中把高风险自我叙事显式降级为“只允许一小句辅助说明、只用相对时间、禁止拟人化扩写、优先服从主回复任务与边界”。
+- 验证记录：新增 `self_reflection` / `prompt_builder` 回归，覆盖薄证据高风险 guardrail 生成、policy tension 降级，以及提示词端对 `prompt_directives` 与句数上限的渲染透传。
 
 ### N4 完成标志
 

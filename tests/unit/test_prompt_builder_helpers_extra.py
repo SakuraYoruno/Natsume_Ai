@@ -298,3 +298,64 @@ def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hi
     assert "PERSONA_EXPRESSION_HINT" in prompt
     assert "motive_guidance" in prompt
     assert "先接住对方情绪" in prompt
+
+
+def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_directives() -> None:
+    prompt = pb.render_node_generation_prompt(
+        node_id="top_agent",
+        runtime_payload={
+            "user_message": "继续说说你最近的变化",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "response_policy": {
+                "allow_followup": False,
+                "allow_topic_shift": False,
+                "allow_proactive_after_reply": False,
+                "confession_guard": True,
+                "withdrawal_guard": True,
+                "should_be_brief": True,
+                "should_be_withdrawn": True,
+                "max_sentences": 2,
+            },
+            "self_reflection_pulse": {
+                "self_awareness": "aware",
+                "narrative_guardrails": {
+                    "risk_level": "high",
+                    "risk_tags": [
+                        "time_context_unverified",
+                        "unsupported_self_claim",
+                        "anthropomorphic_overreach",
+                        "reflection_vs_policy_tension",
+                    ],
+                    "instruction": "若时间线证据不足，只能说最近/这段时间，不要扩写无依据的自我叙事。",
+                    "allowed_style": "brief",
+                    "allow_self_narrative_expansion": False,
+                    "max_self_narrative_sentences": 1,
+                    "prompt_directives": [
+                        "涉及自我叙事时，只允许一小句辅助说明，优先回应当前话题，不要展开成长故事或回忆链。",
+                        "如果提到时间，只能说“最近/这段时间”，不要声称具体日期、时长或明确阶段。",
+                        "不要把系统状态、趋势、沉默、模式切换或薄弱线索写成人类式经历、自传或命运感叙事。",
+                        "若用户没有直接追问，不要主动展开自我叙事，只允许轻量辅助一句。",
+                        "当前以主回复任务和既有边界为先，自我叙事只能退到辅助位。",
+                    ],
+                },
+            },
+        },
+    )
+
+    assert "SELF_REFLECTION_PULSE" in prompt
+    assert "max_self_narrative_sentences: 1" in prompt
+    assert "prompt_directives:" in prompt
+    assert "如果提到时间，只能说“最近/这段时间”" in prompt
+    assert "不要把系统状态、趋势、沉默、模式切换或薄弱线索写成人类式经历" in prompt
+    assert "当前以主回复任务和既有边界为先" in prompt

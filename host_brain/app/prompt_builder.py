@@ -1309,11 +1309,22 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 _ng_risk = _truncate_for_prompt(_sr_ng.get("risk_level"), limit=16) or ""
                 _ng_style = _truncate_for_prompt(_sr_ng.get("allowed_style"), limit=20) or ""
                 _ng_instruction = _truncate_for_prompt(_sr_ng.get("instruction"), limit=240) or ""
+                try:
+                    _ng_max_self_narrative_sentences = int(
+                        _sr_ng.get("max_self_narrative_sentences") or 0
+                    )
+                except (TypeError, ValueError):
+                    _ng_max_self_narrative_sentences = 0
                 _ng_tags = [
                     _truncate_for_prompt(item, limit=40) or ""
                     for item in (_sr_ng.get("risk_tags") or [])
                 ]
                 _ng_tags = [item for item in _ng_tags if item]
+                _ng_prompt_directives = [
+                    _truncate_for_prompt(item, limit=120) or ""
+                    for item in (_sr_ng.get("prompt_directives") or [])
+                ]
+                _ng_prompt_directives = [item for item in _ng_prompt_directives if item]
                 _ng_allow_expand = bool(_sr_ng.get("allow_self_narrative_expansion", True))
                 if _ng_risk:
                     _ng_parts.append(f"  risk_level: {_ng_risk}")
@@ -1324,8 +1335,17 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                     _rp_directives.append(f"自我叙事约束：{_ng_instruction}")
                 if _ng_style:
                     _ng_parts.append(f"  allowed_style: {_ng_style}")
+                if _ng_max_self_narrative_sentences > 0:
+                    _ng_parts.append(
+                        f"  max_self_narrative_sentences: {_ng_max_self_narrative_sentences}"
+                    )
                 if not _ng_allow_expand:
                     _ng_parts.append("  allow_self_narrative_expansion: false")
+                if _ng_prompt_directives:
+                    _ng_parts.append(f"  prompt_directives: {' | '.join(_ng_prompt_directives)}")
+                    for _ng_directive in _ng_prompt_directives:
+                        if _ng_directive not in _rp_directives:
+                            _rp_directives.append(_ng_directive)
                 if len(_ng_parts) > 1:
                     _sr_parts.extend(_ng_parts)
             if len(_sr_parts) > 1:  # 至少有一个子字段
