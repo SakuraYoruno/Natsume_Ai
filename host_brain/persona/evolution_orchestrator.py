@@ -46,6 +46,7 @@ class EvolutionCycleResult:
 
     # 最终输出：注入下一轮对话的 growth_awareness
     growth_awareness: dict[str, Any] = field(default_factory=dict)
+    growth_summary: dict[str, Any] = field(default_factory=dict)
 
     # 统计
     traits_changed: bool = False
@@ -59,6 +60,7 @@ class EvolutionCycleResult:
             "date": self.date,
             "ts_ms": self.ts_ms,
             "growth_awareness": self.growth_awareness,
+            "growth_summary": self.growth_summary,
             "traits_changed": self.traits_changed,
             "desire_text": self.desire_text,
             "growth_results_count": len(self.growth_results),
@@ -113,6 +115,7 @@ class EvolutionOrchestrator:
 
         # 缓存最近一次 growth_awareness（供下一轮对话注入）
         self._last_growth_awareness: dict[str, Any] = {}
+        self._growth_cycle_log: dict[str, list[dict[str, Any]]] = {}
         self._rng = random.Random()
         # 成长停滞感知：记录连续无特质变化的进化周期数
         self._stagnant_cycles: int = 0
@@ -242,6 +245,12 @@ class EvolutionOrchestrator:
         )
         result.growth_awareness = growth_awareness
         result.desire_text = desire_text
+
+        self._append_growth_cycle_log(
+            user_id=user_id,
+            result=result,
+        )
+        result.growth_summary = self.get_growth_summary(user_id, now_ts_ms=ts)
 
         # 缓存供下一轮对话使用
         self._last_growth_awareness = growth_awareness
@@ -897,6 +906,59 @@ class EvolutionOrchestrator:
             return self._rng.choice(_TRAIT_FELT_VARIANTS[max_trait])
         return ""
 
+    def _append_growth_cycle_log(self, *, user_id: str, result: EvolutionCycleResult) -> None:
+        """记录最近的成长周期结果，供后续摘要复用。"""
+        uid = str(user_id or "").strip()
+        if not uid:
+            return
+        awareness = dict(result.growth_awareness or {})
+        entry = {
+            "cycle_id": result.cycle_id,
+            "date": result.date,
+            "ts_ms": int(result.ts_ms or 0),
+            "growth_awareness": awareness,
+            "traits_changed": bool(result.traits_changed),
+            "traits_regressed": bool(result.traits_regressed),
+            "desire_text": str(result.desire_text or "").strip(),
+        }
+        history = self._growth_cycle_log.setdefault(uid, [])
+        history.append(entry)
+        if len(history) > 21:
+            self._growth_cycle_log[uid] = history[-21:]
+
+    @staticmethod
+    def _pick_growth_focus(awareness: dict[str, Any]) -> str:
+        for key in ("recent_change", "trait_felt", "milestone_felt", "stagnation_felt", "regression_felt", "desire"):
+            text = str(awareness.get(key) or "").strip()
+            if text:
+                return text
+        return ""
+
+    def _build_weekly_growth_summary(self, entries: list[dict[str, Any]]) -> str:
+        snippets: list[str] = []
+        seen: set[str] = set()
+        for entry in reversed(entries):
+            awareness = dict(entry.get("growth_awareness") or {})
+            focus = self._pick_growth_focus(awareness)
+            if focus and focus not in seen:
+                snippets.append(focus)
+                seen.add(focus)
+            if len(snippets) >= 2:
+                break
+        if not snippets:
+            return ""
+        if len(snippets) == 1:
+            return snippets[0]
+        return "；".join(snippets)
+
+    def _collect_active_growth_themes(self, entries: list[dict[str, Any]]) -> list[str]:
+        ordered_keys = ("recent_change", "trait_felt", "milestone_felt", "stagnation_felt", "regression_felt", "desire")
+        themes: list[str] = []
+        for key in ordered_keys:
+            if any(str(dict(entry.get("growth_awareness") or {}).get(key) or "").strip() for entry in entries):
+                themes.append(key)
+        return themes
+
     # ── 辅助方法 ──────────────────────────────────────────────────────────
 
     def _infer_milestones(self, bond_state: Any | None) -> list[str]:
@@ -977,6 +1039,36 @@ class EvolutionOrchestrator:
         供 SelfReflection 在下一轮对话中注入 prompt。
         """
         return dict(self._last_growth_awareness)
+
+    def get_growth_summary(self, user_id: str, *, now_ts_ms: int = 0) -> dict[str, Any]:
+        """获取最近日级/周级成长摘要。"""
+        uid = str(user_id or "").strip()
+        history = list(self._growth_cycle_log.get(uid, []))
+        if not history:
+            return {}
+
+        effective_now = int(now_ts_ms or history[-1].get("ts_ms") or _now_ms())
+        week_start_ms = effective_now - 7 * 24 * 3600 * 1000
+        weekly_entries = [entry for entry in history if int(entry.get("ts_ms") or 0) >= week_start_ms]
+        if not weekly_entries:
+            weekly_entries = [history[-1]]
+        latest = weekly_entries[-1]
+        latest_awareness = dict(latest.get("growth_awareness") or {})
+        daily_summary = self._pick_growth_focus(latest_awareness)
+        weekly_summary = self._build_weekly_growth_summary(weekly_entries)
+        if weekly_summary and weekly_summary == daily_summary and len(weekly_entries) <= 1:
+            weekly_summary = ""
+
+        summary: dict[str, Any] = {
+            "last_cycle_date": str(latest.get("date") or "").strip(),
+            "recent_cycle_count": len(weekly_entries),
+            "active_themes": self._collect_active_growth_themes(weekly_entries),
+        }
+        if daily_summary:
+            summary["daily_summary"] = daily_summary
+        if weekly_summary:
+            summary["weekly_summary"] = weekly_summary
+        return summary
 
     def set_growth_awareness(self, awareness: dict[str, Any]) -> None:
         """手动设置 growth_awareness（用于测试或外部注入）。"""

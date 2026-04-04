@@ -138,6 +138,13 @@ def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> Non
             "milestone_felt": "被珍惜",
             "desire": None,
         },
+        growth_summary={
+            "daily_summary": "今天更会把关系接稳。",
+            "weekly_summary": "这周更敢表达在意，也更会接住情绪。",
+            "active_themes": ["recent_change", "desire"],
+            "recent_cycle_count": 3,
+            "last_cycle_date": "2026-04-04",
+        },
         trigger_reason="因为刚刚很想你",
         time_context="久别重逢",
     )
@@ -149,6 +156,13 @@ def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> Non
     assert pulse["growth_awareness"] == {
         "recent_change": "更坦率了",
         "milestone_felt": "被珍惜",
+    }
+    assert pulse["growth_summary"] == {
+        "daily_summary": "今天更会把关系接稳。",
+        "weekly_summary": "这周更敢表达在意，也更会接住情绪。",
+        "active_themes": ["recent_change", "desire"],
+        "recent_cycle_count": 3,
+        "last_cycle_date": "2026-04-04",
     }
 
 

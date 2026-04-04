@@ -132,6 +132,13 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
             'stagnation_felt': '偶尔也会担心自己是不是成长得太慢了',
             'regression_felt': '有时候也担心自己会不会退回去。',
         },
+        'growth_summary': {
+            'daily_summary': '今天更会把关系接稳。',
+            'weekly_summary': '这周更敢表达在意，也更会接住情绪。',
+            'recent_cycle_count': 3,
+            'last_cycle_date': '2026-04-04',
+            'active_themes': ['recent_change', 'desire'],
+        },
     }
     runtime_payload['bond_narrative'] = {
         'shared_memories': ['那天一起聊到很晚的时候，感觉很安心', '第一次被认真安慰的时候，记到了现在'],
@@ -143,6 +150,10 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
 
     assert 'SELF_REFLECTION_PULSE' in prompt
     assert 'growth_awareness' in prompt
+    assert 'growth_summary' in prompt
+    assert 'daily_summary: 今天更会把关系接稳。' in prompt
+    assert 'weekly_summary: 这周更敢表达在意，也更会接住情绪。' in prompt
+    assert 'active_themes: recent_change, desire' in prompt
     assert 'stagnation_felt' in prompt
     assert 'regression_felt' in prompt
     assert 'BOND_NARRATIVE' in prompt

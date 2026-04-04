@@ -227,6 +227,7 @@ class SelfReflection:
         last_deep_talk_ts_ms: int = 0,
         current_ts_ms: int = 0,
         growth_awareness: dict[str, Any] | None = None,
+        growth_summary: dict[str, Any] | None = None,
         current_emotion: str = "",
         weekly_talk_count: int = -1,
         llm_fn: Any | None = None,
@@ -242,6 +243,8 @@ class SelfReflection:
             其他参数同 SelfModel.build_snapshot()
             growth_awareness: 进化意识字典（由 EvolutionOrchestrator 生成，Phase XVI）。
                 包含 recent_change / trait_felt / milestone_felt / desire 字段。
+            growth_summary: 近期成长摘要（由 EvolutionOrchestrator 聚合），可跨轮复用。
+                包含 daily_summary / weekly_summary / active_themes 等字段。
             current_emotion: 当前情感标签（大写），用于事件驱动触发判断。
             weekly_talk_count: 本周对话次数（-1 表示未知）。用于时间感知触发原因。
             llm_fn: 可选的 LLM 调用函数 (prompt: str) -> str。
@@ -307,6 +310,7 @@ class SelfReflection:
             pulse = build_self_reflection_pulse(
                 snapshot,
                 growth_awareness=growth_awareness,
+                growth_summary=growth_summary,
                 trigger_reason=trigger_reason,
                 time_context=time_context,
                 llm_fn=llm_fn,
@@ -434,6 +438,7 @@ def build_self_reflection_pulse(
     snapshot: dict[str, Any],
     *,
     growth_awareness: dict[str, Any] | None = None,
+    growth_summary: dict[str, Any] | None = None,
     trigger_reason: str = "",
     time_context: str = "",
     llm_fn: Any | None = None,
@@ -445,6 +450,8 @@ def build_self_reflection_pulse(
         snapshot: SelfModelSnapshot.as_dict() 格式的字典
         growth_awareness: 进化意识字典（由 EvolutionOrchestrator 生成），可选。
             包含 recent_change / trait_felt / milestone_felt / desire 字段。
+        growth_summary: 近期成长摘要（由 EvolutionOrchestrator 聚合），可选。
+            包含 daily_summary / weekly_summary / active_themes 等字段。
         trigger_reason: 本次自省的触发原因（第一人称），注入 pulse 让自省更有意义。
         time_context: 时间感知标签（如"久别重逢"/"频繁互动"），用于丰富自省内容。
         llm_fn: 可选的 LLM 调用函数 (prompt: str) -> str。
@@ -493,6 +500,25 @@ def build_self_reflection_pulse(
         filtered = {k: v for k, v in growth_awareness.items() if v}
         if filtered:
             pulse["growth_awareness"] = filtered
+
+    if growth_summary and isinstance(growth_summary, dict):
+        filtered_summary: dict[str, Any] = {}
+        for key in ("daily_summary", "weekly_summary", "last_cycle_date"):
+            value = str(growth_summary.get(key) or "").strip()
+            if value:
+                filtered_summary[key] = value
+        cycle_count = growth_summary.get("recent_cycle_count")
+        if isinstance(cycle_count, int) and cycle_count > 0:
+            filtered_summary["recent_cycle_count"] = cycle_count
+        active_themes = [
+            str(item).strip()
+            for item in (growth_summary.get("active_themes") or [])
+            if str(item).strip()
+        ]
+        if active_themes:
+            filtered_summary["active_themes"] = active_themes
+        if filtered_summary:
+            pulse["growth_summary"] = filtered_summary
 
     # 注入风格演变趋势（v1.11）
     if style_evolution and isinstance(style_evolution, dict):

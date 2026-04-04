@@ -318,3 +318,37 @@ def test_detect_regression_and_log_evolution_cycle_swallow_exceptions(monkeypatc
     assert result.traits_regressed is False
 
     orchestrator._log_evolution_cycle(result)
+
+
+
+def test_growth_summary_collapses_recent_cycles_into_daily_and_weekly_digest() -> None:
+    orchestrator = EvolutionOrchestrator()
+
+    first = EvolutionCycleResult(
+        cycle_id="evo_1",
+        date="2026-04-02",
+        ts_ms=1_000,
+        growth_awareness={"recent_change": "更会接住对话了", "desire": "想再靠近一点"},
+        traits_changed=True,
+        desire_text="想再靠近一点",
+    )
+    second = EvolutionCycleResult(
+        cycle_id="evo_2",
+        date="2026-04-04",
+        ts_ms=3_000,
+        growth_awareness={"trait_felt": "好像更能接住情绪了", "milestone_felt": "已经聊过很多次深入的话题"},
+        traits_changed=True,
+    )
+
+    orchestrator._append_growth_cycle_log(user_id="u1", result=first)
+    orchestrator._append_growth_cycle_log(user_id="u1", result=second)
+
+    summary = orchestrator.get_growth_summary("u1", now_ts_ms=3_000)
+
+    assert summary["daily_summary"] == "好像更能接住情绪了"
+    assert "好像更能接住情绪了" in summary["weekly_summary"]
+    assert "更会接住对话了" in summary["weekly_summary"]
+    assert summary["last_cycle_date"] == "2026-04-04"
+    assert summary["recent_cycle_count"] == 2
+    assert summary["active_themes"] == ["recent_change", "trait_felt", "milestone_felt", "desire"]
+

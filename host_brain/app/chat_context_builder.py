@@ -1523,6 +1523,10 @@ def build_chat_prompt_runtime_payload(
             _sr_growth_awareness = dict(_evo.get_last_growth_awareness() or {})
         except Exception:
             _sr_growth_awareness = {}
+        try:
+            _sr_growth_summary = dict(_evo.get_growth_summary(_sr_user_id, now_ts_ms=_sr_current_ts_ms) or {})
+        except Exception:
+            _sr_growth_summary = {}
         _tl_summary_for_sr = dict(runtime_payload.get("emotion_timeline") or _tl_summary or {})
         _tl_diary_for_sr = dict(_tl_diary or {})
         # ── 断链5修复（v1.12）：获取风格演变摘要，注入自省感知 ──────────
@@ -1554,6 +1558,7 @@ def build_chat_prompt_runtime_payload(
             last_deep_talk_ts_ms=_sr_last_deep_talk_ts_ms,
             current_ts_ms=_sr_current_ts_ms,
             growth_awareness=_sr_growth_awareness,
+            growth_summary=_sr_growth_summary,
             style_evolution=_sr_style_evolution,
         )
         if _pulse:

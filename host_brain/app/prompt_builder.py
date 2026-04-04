@@ -1271,6 +1271,31 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                     _ga_parts.append(f"  desire: {_ga_desire}")
                 if len(_ga_parts) > 1:
                     _sr_parts.extend(_ga_parts)
+            _sr_gs_raw = _srp.get("growth_summary")
+            _sr_gs = dict(_sr_gs_raw) if isinstance(_sr_gs_raw, Mapping) else {}
+            if _sr_gs:
+                _gs_parts: list[str] = ["- growth_summary:"]
+                _gs_daily = _truncate_for_prompt(_sr_gs.get("daily_summary"), limit=140) or ""
+                _gs_weekly = _truncate_for_prompt(_sr_gs.get("weekly_summary"), limit=180) or ""
+                _gs_last_date = _truncate_for_prompt(_sr_gs.get("last_cycle_date"), limit=40) or ""
+                _gs_recent_count = int(_sr_gs.get("recent_cycle_count") or 0)
+                _gs_themes = [
+                    _truncate_for_prompt(item, limit=40) or ""
+                    for item in (_sr_gs.get("active_themes") or [])
+                ]
+                _gs_themes = [item for item in _gs_themes if item]
+                if _gs_daily:
+                    _gs_parts.append(f"  daily_summary: {_gs_daily}")
+                if _gs_weekly and _gs_weekly != _gs_daily:
+                    _gs_parts.append(f"  weekly_summary: {_gs_weekly}")
+                if _gs_last_date:
+                    _gs_parts.append(f"  last_cycle_date: {_gs_last_date}")
+                if _gs_recent_count > 0:
+                    _gs_parts.append(f"  recent_cycle_count: {_gs_recent_count}")
+                if _gs_themes:
+                    _gs_parts.append(f"  active_themes: {', '.join(_gs_themes)}")
+                if len(_gs_parts) > 1:
+                    _sr_parts.extend(_gs_parts)
             if len(_sr_parts) > 1:  # 至少有一个子字段
                 _self_reflection_block = "\n".join(_sr_parts) + "\n\n"
     except Exception:

@@ -948,3 +948,116 @@ def test_build_chat_prompt_runtime_payload_aligns_self_reflection_after_motive_a
     assert pulse["state_alignment"] == pulse["self_awareness"]
     assert "motive:continuity" in pulse["state_alignment_reasons"]
     assert "policy:brief" in pulse["state_alignment_reasons"]
+
+
+
+def test_build_chat_prompt_runtime_payload_passes_growth_summary_into_self_reflection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "NEUTRAL",
+                "emotion_intensity": 0.35,
+                "emotion_range_hint": "steady",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    class _FakeReflection:
+        def maybe_generate(self, **kwargs):  # noqa: ANN003
+            return {
+                "self_awareness": "ok",
+                "growth_summary": dict(kwargs.get("growth_summary") or {}),
+            }
+
+    class _FakeEvolutionOrchestrator:
+        def get_last_growth_awareness(self):
+            return {}
+
+        def get_growth_summary(self, user_id, *, now_ts_ms=0):  # noqa: ANN001
+            return {
+                "daily_summary": "今天更会把关系接稳。",
+                "weekly_summary": "这周更敢表达在意。",
+                "recent_cycle_count": 2,
+                "active_themes": ["recent_change", "desire"],
+                "last_cycle_date": "2026-04-04",
+            }
+
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):  # noqa: ANN001
+            return SimpleNamespace(
+                style_hint="自然回应",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                追问倾向=0.0,
+                pace_hint="steady",
+            )
+
+    class _FakePersonaEngine:
+        @staticmethod
+        def get_instance():
+            return SimpleNamespace(get_traits=lambda _user_id: SimpleNamespace(), get_change_log=lambda *_args, **_kwargs: [])
+
+    class _FakeMotiveState:
+        def as_dict(self):
+            return {
+                "care_drive": 0.4,
+                "reach_out_drive": 0.3,
+                "continuity_drive": 0.35,
+                "withdraw_drive": 0.12,
+                "self_protect_drive": 0.1,
+                "dominant_motive": "care",
+            }
+
+    class _FakePolicy:
+        def as_dict(self):
+            return {"allow_followup": True, "max_sentences": 3}
+
+    monkeypatch.setattr("host_brain.persona.expression_adapter.PersonaExpressionAdapter", _FakeAdapter)
+    monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
+    monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", lambda _inp: _FakeMotiveState())
+    monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", lambda _inp: _FakePolicy())
+    monkeypatch.setattr(ccb.build_chat_prompt_runtime_payload, "_self_reflection", _FakeReflection(), raising=False)
+    monkeypatch.setattr(ccb.build_chat_prompt_runtime_payload, "_evolution_orchestrator", _FakeEvolutionOrchestrator(), raising=False)
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-growth-summary-pass",
+        person_id="person-growth-summary-pass",
+        session_id="session-growth-summary-pass",
+        thread_id=None,
+        user_message="继续聊聊最近的变化",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "NEUTRAL", "emotion_intensity": 0.35},
+        recall_slot_text={},
+        bond_summary={"stage": "FRIEND"},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    growth_summary = dict(dict(runtime_payload.get("self_reflection_pulse") or {}).get("growth_summary") or {})
+    assert growth_summary["daily_summary"] == "今天更会把关系接稳。"
+    assert growth_summary["weekly_summary"] == "这周更敢表达在意。"
+    assert growth_summary["active_themes"] == ["recent_change", "desire"]

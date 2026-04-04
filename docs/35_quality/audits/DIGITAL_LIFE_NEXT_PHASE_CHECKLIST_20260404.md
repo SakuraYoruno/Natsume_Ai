@@ -237,6 +237,8 @@
 - 目标：把零散的 self reflection 变成可累计的“最近我发生了什么变化”。
 - 重点模块：`host_brain/persona/emergent_growth_engine.py`、`host_brain/persona/evolution_orchestrator.py`。
 - 验收标准：成长叙事能跨轮复用，但不会在每轮重复刷屏。
+- 本轮进展（2026-04-04）：已为 `EvolutionOrchestrator` 增加最近成长周期缓存与 `growth_summary` 聚合，产出 `daily_summary / weekly_summary / active_themes`，并经 `chat_context_builder -> self_reflection_pulse -> prompt_builder` 透传。
+- 验证记录：新增 orchestrator / self_reflection / chat_context_builder / prompt_builder 回归，覆盖摘要聚合、pulse 注入、提示词渲染与相邻自省链集成。
 
 ### N4-T03：增加自我叙事 guardrails
 
