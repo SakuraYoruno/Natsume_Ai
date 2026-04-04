@@ -659,7 +659,8 @@ def run_proactive_intent_dispatch(
 ) -> dict[str, Any]:
     from host_brain.skills.impl.proactive_talk import execute_proactive_talk  # noqa: PLC0415
 
-    skill_name = system_intent.get("skill_name", "")
+    skill_name = str(system_intent.get("skill_name", "") or "").strip()
+    args = dict(system_intent.get("args") or {})
     if skill_name == "audit_retention":
         try:
             from host_brain.audit.retention import RetentionPolicy, run_retention_policy  # noqa: PLC0415
@@ -684,12 +685,22 @@ def run_proactive_intent_dispatch(
                 "detail": str(retention_exc),
             }
 
-    if skill_name != "proactive_talk":
-        if skill_name == "evolution_cycle":
-            return _run_evolution_cycle(system_intent=system_intent, logger=logger)
-        return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
+    if skill_name == "long_term_memory_distillation":
+        return run_long_term_distillation_handler(args, {})
 
-    args = dict(system_intent.get("args") or {})
+    if skill_name == "evolution_cycle":
+        return _run_evolution_cycle(system_intent=system_intent, logger=logger)
+
+    if skill_name != "proactive_talk":
+        personality_result = _run_personality_scheduler_skill(
+            system_intent=system_intent,
+            logger=logger,
+            get_ledger=get_ledger,
+            ui_pusher=ui_pusher,
+        )
+        if personality_result is not None:
+            return personality_result
+        return {"status": "SKIPPED", "reason_code": "UNKNOWN_SKILL", "skill_name": skill_name}
 
     last_interaction_ts = None
     try:
@@ -833,6 +844,107 @@ def run_proactive_intent_dispatch(
         "scene_awareness": system_intent.get("scene_awareness") or args.get("scene_awareness") or {},
     }
     return execute_proactive_talk(args=args, context=context)
+
+
+def _run_personality_scheduler_skill(
+    *,
+    system_intent: dict[str, Any],
+    logger: Any,
+    get_ledger: Callable[[], Any],
+    ui_pusher: Callable[[dict[str, Any]], dict[str, Any]],
+) -> dict[str, Any] | None:
+    try:
+        from host_brain.skills.personality_registry import build_personality_skill_registry  # noqa: PLC0415
+    except Exception as exc:
+        logger.warning("Personality skill registry unavailable: %s", exc)
+        return None
+
+    skill_name = str(system_intent.get("skill_name") or "").strip()
+    if not skill_name:
+        return None
+
+    try:
+        registry = build_personality_skill_registry()
+        meta = registry.get(skill_name)
+    except Exception as exc:
+        logger.warning("Personality skill registry build failed: %s", exc)
+        return {
+            "status": "FAILED",
+            "reason_code": "PERSONALITY_REGISTRY_FAILED",
+            "skill_name": skill_name,
+            "detail": str(exc),
+        }
+
+    if meta is None:
+        return None
+
+    if not bool(getattr(meta, "scheduler_allowed", False)):
+        return {
+            "status": "REJECTED",
+            "reason_code": "SKILL_NOT_SCHEDULER_ALLOWED",
+            "skill_name": skill_name,
+        }
+
+    emotion_context = {
+        "emotion_tag": str(system_intent.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
+        "mood_state": str(system_intent.get("mood_state") or "steady").strip().lower() or "steady",
+        "triggered_emotions": list(system_intent.get("triggered_emotions") or []),
+    }
+
+    bond_summary: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_bond_stage_engine as _get_bse  # noqa: PLC0415
+
+        bse = _get_bse()
+        if bse is not None:
+            bond_state = bse.get_bond_state(session_id="default")
+            if bond_state is not None:
+                bond_summary = {
+                    "stage": str(getattr(bond_state, "stage", "") or "").strip(),
+                    "trend": str(getattr(bond_state, "trend", "") or "").strip(),
+                    "capability_hint": str(getattr(bond_state, "capability_hint", "") or "").strip(),
+                }
+    except Exception as exc:
+        logger.debug("personality skill bond summary unavailable: %s", exc)
+
+    context = {
+        "request_id": system_intent.get("request_id"),
+        "intent_id": system_intent.get("intent_id"),
+        "task_id": system_intent.get("task_id"),
+        "skill_name": skill_name,
+        "logger": logger,
+        "get_ledger": get_ledger,
+        "ui_pusher": ui_pusher,
+        "system_intent": dict(system_intent),
+        "bond_summary": bond_summary,
+        "emotion_context": emotion_context,
+        "scene_awareness": system_intent.get("scene_awareness") or {},
+    }
+
+    args = dict(system_intent.get("args") or {})
+    try:
+        result = meta.handler(args, context)
+    except Exception as exc:
+        logger.warning("Personality scheduler skill failed: skill=%s err=%s", skill_name, exc)
+        return {
+            "status": "FAILED",
+            "reason_code": "PERSONALITY_SKILL_FAILED",
+            "skill_name": skill_name,
+            "detail": str(exc),
+        }
+
+    if not isinstance(result, dict):
+        return {
+            "status": "FAILED",
+            "reason_code": "PERSONALITY_SKILL_INVALID_RESULT",
+            "skill_name": skill_name,
+            "detail": f"expected dict result, got {type(result).__name__}",
+        }
+
+    payload = dict(result)
+    payload.setdefault("status", "OK")
+    payload.setdefault("skill_name", skill_name)
+    return payload
 
 
 def run_long_term_distillation_handler(args: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:

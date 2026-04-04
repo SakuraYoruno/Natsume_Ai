@@ -156,6 +156,38 @@ def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypat
     assert captured["context"]["response_policy"]["should_be_withdrawn"] is True
 
 
+def test_run_proactive_intent_dispatch_routes_personality_tick(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.persona.inner_world.get_inner_world",
+        lambda: SimpleNamespace(
+            tick=lambda user_id: {
+                "status": "OK",
+                "user_id": user_id,
+                "tick_ran": True,
+            }
+        ),
+    )
+
+    result = run_proactive_intent_dispatch(
+        {
+            "skill_name": "inner_world_tick",
+            "request_id": "req-inner-world-tick",
+            "intent_id": "intent-inner-world-tick",
+            "emotion_tag": "CALM",
+            "mood_state": "steady",
+            "args": {"user_id": "persona-user-001"},
+        },
+        logger=logging.getLogger("tests.http_hooks_runtime_helpers"),
+        get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
+        retention_policy=None,
+        ui_pusher=lambda _msg: {"status": "OK"},
+    )
+
+    assert result["status"] == "OK"
+    assert result["user_id"] == "persona-user-001"
+    assert result["tick_ran"] is True
+
+
 def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) -> None:
     class _FakeBondState:
         current_stage = "FRIEND"

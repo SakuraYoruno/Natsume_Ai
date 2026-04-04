@@ -403,7 +403,7 @@ def runtime_lifespan(
                             "args": {"user_id": "user_1"},
                             "proposer_node_id": "scheduler",
                         },
-                        priority=TaskPriority.NORMAL,
+                        priority=TaskPriority.MEDIUM,
                         mode_allowlist=["normal", "sleep"],
                         enabled=True,
                         description="daily evolution cycle task",
