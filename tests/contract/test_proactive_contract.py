@@ -196,6 +196,26 @@ class TestProactiveTalkConditions:
         assert result["status"] == STATUS_REJECTED
         assert result["reason_code"] == SCHED_NO_CONTENT
 
+    def test_runtime_fallback_marker_uses_template(self) -> None:
+        ts = now_ms()
+
+        def empty_llm(_):
+            return {"greeting": "", "fallback_to_template": True}
+
+        result = execute_proactive_talk(
+            {},
+            {
+                "sys_mode": "normal",
+                "last_interaction_ts": ts - DEFAULT_IDLE_THRESHOLD_MS - 1000,
+                "llm_generator": empty_llm,
+                "time_period": "afternoon",
+                "user_name": "小明",
+            },
+        )
+        assert result["status"] == STATUS_EXECUTED
+        assert result["template_fallback_used"] is True
+        assert "小明" in result["message"]["content"]
+
     def test_custom_idle_threshold(self) -> None:
         ts = now_ms()
         # 自定义阈值 1 小时

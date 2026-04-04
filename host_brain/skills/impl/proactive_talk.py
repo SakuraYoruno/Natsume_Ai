@@ -280,6 +280,24 @@ LLMGenerator = Callable[[dict[str, Any]], dict[str, Any]]
 UIPusher = Callable[[dict[str, Any]], dict[str, Any]]
 
 
+def _build_template_greeting(
+    *,
+    user_name: str,
+    time_period: str,
+    scene_awareness: Mapping[str, Any] | None = None,
+) -> str:
+    scene_tags = list((scene_awareness or {}).get("scene_tags") or [])
+    if any(tag in _SCENE_GAMING_TAGS for tag in scene_tags):
+        return f"{user_name}，我先轻轻陪你一会儿，不打扰你操作。"
+    templates = {
+        "morning": f"{user_name}早上好～新的一天开始了呢",
+        "noon": f"{user_name}中午了，记得吃饭哦～",
+        "evening": f"{user_name}晚上好～今天过得怎么样？",
+        "night": f"{user_name}夜深了，注意休息哦～",
+    }
+    return templates.get(time_period, f"{user_name}，好久没聊了，在忙什么呢？")
+
+
 def _get_time_period() -> str:
     """获取当前时段标签。"""
     hour = datetime.datetime.now().hour
@@ -420,6 +438,7 @@ def execute_proactive_talk(
     # LLM 生成主动问候
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     greeting: str = ""
+    fallback_to_template = False
 
     if llm_generator:
         try:
@@ -441,6 +460,7 @@ def execute_proactive_talk(
             }
             llm_result = llm_generator(llm_input)
             greeting = str(llm_result.get("greeting", llm_result.get("content", "")))
+            fallback_to_template = bool(llm_result.get("fallback_to_template"))
         except Exception as exc:
             logger.warning("LLM proactive talk failed: %s", exc)
             return {
@@ -451,18 +471,12 @@ def execute_proactive_talk(
                 "request_id": request_id,
                 "ts_ms": ts,
             }
-    else:
-        # 降级模板
-        templates = {
-            "morning": f"{user_name}早上好～新的一天开始了呢",
-            "noon": f"{user_name}中午了，记得吃饭哦～",
-            "evening": f"{user_name}晚上好～今天过得怎么样？",
-            "night": f"{user_name}夜深了，注意休息哦～",
-        }
-        greeting = templates.get(time_period, f"{user_name}，好久没聊了，在忙什么呢？")
-
-    if (not llm_generator) and any(tag in _SCENE_GAMING_TAGS for tag in scene_awareness.get("scene_tags") or []):
-        greeting = f"{user_name}，我先轻轻陪你一会儿，不打扰你操作。"
+    if (not llm_generator) or (fallback_to_template and not greeting.strip()):
+        greeting = _build_template_greeting(
+            user_name=user_name,
+            time_period=time_period,
+            scene_awareness=scene_awareness,
+        )
 
     greeting = _apply_response_policy_to_proactive_text(greeting, response_policy)
 
@@ -517,4 +531,5 @@ def execute_proactive_talk(
         "response_policy": response_policy,
         "scene_driven": bool(scene_hint),
         "scene_awareness": scene_awareness,
+        "template_fallback_used": fallback_to_template,
     }

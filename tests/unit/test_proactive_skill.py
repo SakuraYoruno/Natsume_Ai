@@ -194,6 +194,20 @@ class TestProactiveTalkQABlock:
         assert result["status"] == STATUS_EXECUTED
         assert len(pushed) == 1
 
+    def test_llm_fallback_marker_uses_template(self) -> None:
+        pusher, pushed = _make_ui_pusher()
+        result = execute_proactive_talk(
+            args={"idle_threshold_ms": 1000},
+            context=_ctx(
+                last_interaction_ts=0,
+                llm_generator=lambda _inp: {"greeting": "", "fallback_to_template": True},
+                ui_pusher=pusher,
+            ),
+        )
+        assert result["status"] == STATUS_EXECUTED
+        assert result["template_fallback_used"] is True
+        assert len(pushed) == 1
+
 
 # ── T-PROACT-05 ──
 

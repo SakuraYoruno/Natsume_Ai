@@ -1319,6 +1319,11 @@ def _build_llm_generator(
             return {"greeting": text, "content": text}
         except Exception as exc:
             logger.warning("proactive_talk LLM 生成失败: %s", exc)
-            return {}
+            return {
+                "greeting": "",
+                "content": "",
+                "fallback_to_template": True,
+                "fallback_reason": "LLM_UNAVAILABLE",
+            }
 
     return _llm_generator

@@ -70,7 +70,7 @@
 - 交付物：`DIGITAL_LIFE_RUNTIME_FINDINGS_YYYYMMDD.md`。
 - 验收标准：对每个验证项记录 commit、环境、输入、观测输出、PASS/FAIL/PARTIAL、后续建议。
 - 本轮进展（2026-04-04）：已将 `DIGITAL_LIFE_RUNTIME_FINDINGS_20260404.md` 刷新为复验版 v2.0；确认 scheduler 与 personality ticks 已真实打通，统一 runtime snapshot 已能观测 `offline_state / silence_state / body_sense / motive / response_policy`，旧版 `UNKNOWN_SKILL` 主结论已正式失效。
-- 验证记录：`/scheduler/health` 为 `HEALTHY` 且 `enabled_tasks=9`；70 秒观察窗内 `inner_world_tick / silence_tick / body_sense_tick` 均从 `PENDING -> OK` 且 `last_reason_code=null`；`/v1/chat` 真实入口可用但当前被 `LLM_UNAVAILABLE` 降级；手动 `proactive_talk` dispatch 在显式 `sys_mode=normal` 下不再卡 `sys_mode`，而是被 future `intent_log.ts_ms=1800000000003` 触发的 idle gate 拒绝。
+- 验证记录：`/scheduler/health` 为 `HEALTHY` 且 `enabled_tasks=9`；70 秒观察窗内 `inner_world_tick / silence_tick / body_sense_tick` 均从 `PENDING -> OK` 且 `last_reason_code=null`；`/v1/chat` 真实入口可用但当前被 `LLM_UNAVAILABLE` 降级；手动 `proactive_talk` dispatch 已补修 future `intent_log.ts_ms` 守卫并再次复测为 `EXECUTED`，当前通过模板 fallback 发出主动消息，剩余缺口是 `>=180s` 的 timed task 实窗复验与完整 LLM 内容层验证。
 
 ### N0-T02：收束统一的数字生命 runtime snapshot
 

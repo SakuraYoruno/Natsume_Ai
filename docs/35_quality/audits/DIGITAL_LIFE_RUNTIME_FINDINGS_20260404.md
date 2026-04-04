@@ -111,7 +111,7 @@ with TestClient(app):
 | V5 | 沉默引擎是否影响行为 | PASS | `willingness=SILENT` 与 `topic_resistance` 可把 `motive` 推到 `withdraw`，并把回复姿态压成 `withdrawn` |
 | V6 | 身体感是否影响行为 | PASS | `fatigue=EXHAUSTED`、`drowsiness=DROWSY` 会进入 `response_policy.reason_tags` 并改写 `reply_posture` |
 | V7 | 关系叙事层 | PARTIAL | snapshot 已能观测 `bond` 与 narrative 摘要，但本轮未把它与真实回复差异完整闭环到内容层 |
-| V8 | 主动表达引擎 | PARTIAL | 70 秒窗口内 timed task 未到触发周期；手动 dispatch 改为被 future `intent_log.ts_ms` 卡住，而非旧版 `UNKNOWN_SKILL` / `sys_mode` 问题 |
+| V8 | 主动表达引擎 | PARTIAL | 70 秒窗口内 timed task 仍未到触发周期；future `intent_log.ts_ms` 已修复后，手动 dispatch 已可 `EXECUTED`，但当前仍走模板降级而非完整 LLM 内容 |
 | V9 | 记忆连续性同步写回 | PARTIAL | 运行态可读到旧 `anticipation_topics`，但本轮 `/v1/chat` 降级路径未证明最新消息被稳定写回 |
 | V10 | Findings 汇总与修正建议 | PASS | 本文已刷新为复验版 findings |
 
@@ -230,7 +230,7 @@ with TestClient(app):
 
 > 本轮只能证明 `/v1/chat` 真实入口通了，还不能证明 `session_end` 与 `on_user_awaken` 在降级路径下稳定闭环，因此 V4 只能维持 `PARTIAL`。
 
-### E6：主动表达链的新阻塞已转移到 future ledger timestamp
+### E6：主动表达链已修复 future timestamp 阻塞，并可模板降级执行
 
 主动链补测使用：
 
@@ -239,7 +239,7 @@ with TestClient(app):
 - `args.idle_threshold_ms = 0`
 - `args.topic_hint = 那个项目`
 
-实际返回：
+第一轮补测返回：
 
 - `status = REJECTED`
 - `reason_code = SCHED_CONDITION_UNMET`
@@ -251,9 +251,17 @@ with TestClient(app):
 - 返回 `1800000000003`
 - 对应时间：`2027-01-15T16:00:00.003`
 
+修复后再次补测：
+
+- `status = EXECUTED`
+- `reason_code = null`
+- `message.type = proactive_talk`
+- `message.content = "主人夜深了，注意休息哦～"`
+- `template_fallback_used = true`
+
 结论：
 
-> 主动链现在不再是旧版的 `UNKNOWN_SKILL` 或首轮补测中的 `sys_mode` 误判；当前真实阻塞是 ledger 中存在 future `intent_log.ts_ms`，导致 idle gate 永远优先拒绝。这使 V8 仍只能判定为 `PARTIAL`。
+> 主动链的 future `intent_log.ts_ms` 阻塞已经修复；当前 manual dispatch 已可执行，V8 保持 `PARTIAL` 的剩余原因不再是 idle gate，而是 timed scheduler 尚未补 180s 实窗复验，且内容层仍受 `LLM_UNAVAILABLE` 影响走模板降级。
 
 ---
 
@@ -293,19 +301,20 @@ with TestClient(app):
 
 ### Gap 3（P1）
 
-**主动表达链被 future `intent_log.ts_ms` 卡住，idle gate 失真。**
+**主动表达链仍缺少 180s 调度实窗复验，且当前内容层仅验证到模板降级。**
 
 现象：
 
-- 最新 `intent_log.ts_ms = 1800000000003`
-- 已超前到 `2027-01-15`
-- 手动 proactive dispatch 在 `idle_threshold_ms=0` 下仍直接被拒绝
+- future `intent_log.ts_ms` 已修复
+- 手动 proactive dispatch 已可 `EXECUTED`
+- 但 70 秒观察窗仍不足以证明 `proactive_talk_periodic` 定时任务真实触发
+- 当前执行内容仍因 `LLM_UNAVAILABLE` 走模板 fallback
 
 建议优先动作：
 
-- 排查是谁写入了未来时间戳
-- 为 idle gate 增加“未来时间戳钳制 / 忽略”保护
-- 修复后补跑 timed task 与手动 dispatch 双复验
+- 补一轮 `>=180s` 的 scheduler 真实观察窗
+- 恢复 LLM/Edge 依赖后重跑主动链内容层验收
+- 将 manual dispatch 与 timed task 结果并入同一轮 findings
 
 ---
 
@@ -317,7 +326,7 @@ with TestClient(app):
 
 本轮复验后，这一结论应正式作废，修正为：
 
-> scheduler 与 personality ticks 已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖、会话闭环证据不足，以及主动链被 future ledger timestamp 卡住。
+> scheduler 与 personality ticks 已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖、会话闭环证据不足，以及主动链仅完成模板降级验证、尚未补足 timed scheduler 实窗证据。
 
 ---
 
@@ -331,5 +340,5 @@ with TestClient(app):
 
 1. 先恢复或隔离 `LLM_UNAVAILABLE / edge rpc unavailable` 环境阻塞。
 2. 再补 `session_end / on_user_awaken` 的可重复验收样本与回归。
-3. 修 future `intent_log.ts_ms`，重跑 proactive timed + manual dispatch 双验证。
+3. 补 `>=180s` 的 proactive timed task 实窗复验，并与 manual dispatch 合并验收。
 4. 修完后再刷新一次本 findings，并把 V4 / V8 / V9 重新判定。
