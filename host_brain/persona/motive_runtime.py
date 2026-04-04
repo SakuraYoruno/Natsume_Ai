@@ -7,6 +7,8 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.persona.offline_continuity import classify_absence_band
+
 _logger = logging.getLogger("Natsume.motive_runtime")
 
 
@@ -22,15 +24,7 @@ def _now_ms() -> int:
 
 
 def _classify_absence_band(offline_hours: float) -> str:
-    if offline_hours >= 7 * 24:
-        return "7d_plus"
-    if offline_hours >= 72:
-        return "72h_plus"
-    if offline_hours >= 24:
-        return "24h_plus"
-    if offline_hours >= 6:
-        return "6h_plus"
-    return "recent"
+    return classify_absence_band(offline_hours)
 
 
 

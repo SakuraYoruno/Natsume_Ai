@@ -113,6 +113,8 @@
 - 重点模块：`host_brain/persona/emotional_silence.py`、`host_brain/persona/motive_engine.py`、`host_brain/persona/proactive_voice.py`。
 - 交付物：统一的长时段语义映射表。
 - 验收标准：长时间未见既会影响主动表达，也会影响沉默恢复与回复表达，不出现相互打架。
+- 本轮进展（2026-04-04）：已新增 `host_brain/persona/offline_continuity.py`，统一 `absence_band` 解析、`reconnect_style` 映射、`warmth_floor` 与 `absence_recovery_factor`；并接入 `chat_context_builder / emotional_silence / response_policy / proactive_voice / self_model / inner_world / motive_runtime`。
+- 验证记录：新增 `tests/unit/test_offline_continuity_semantics.py`，并与 `test_offline_continuity_bands.py`、`test_offline_continuity_regression_matrix.py`、`test_long_absent_behavior_matrix.py`、`test_persona_phase8.py`、`test_motive_runtime_background.py`、`test_mode_aware_policy_motive.py` 联跑通过。
 
 ### N1-T03：补“久别重逢”与“轻度失联”两类主动行为模板
 

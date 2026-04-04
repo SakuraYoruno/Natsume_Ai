@@ -34,6 +34,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.persona.offline_continuity import (
+    classify_absence_band_from_duration_ms,
+    reconnect_style_for_absence_band,
+    resolve_absence_band as resolve_offline_absence_band,
+)
+
 _logger = logging.getLogger("Natsume.proactive_voice")
 
 
@@ -700,15 +706,7 @@ def _get_absent_level(elapsed_ms: int) -> str:
 
 
 def _resolve_absence_band_from_elapsed_ms(elapsed_ms: int) -> str:
-    if elapsed_ms >= _ABSENT_LONG_MS:
-        return "7d_plus"
-    if elapsed_ms >= _ABSENT_MEDIUM_MS:
-        return "72h_plus"
-    if elapsed_ms >= _ABSENT_SHORT_MS:
-        return "24h_plus"
-    if elapsed_ms >= 6 * 60 * 60 * 1000:
-        return "6h_plus"
-    return "recent"
+    return classify_absence_band_from_duration_ms(elapsed_ms)
 
 
 def _resolve_long_absent_elapsed_ms(ctx: dict[str, Any], now_ts: int) -> int:
@@ -742,10 +740,11 @@ def _select_long_absent_behavior(
     self_protect = _score("self_protect_drive")
     reconnect_drive = max(reach_out, care, continuity)
     retreat_drive = max(withdraw, self_protect)
+    baseline_style = reconnect_style_for_absence_band(absence_band)
 
     reserved = depth == "shallow" or self_protect >= 0.58 or retreat_drive >= reconnect_drive + 0.02
     deep_reunion_ready = (
-        absence_band == "7d_plus"
+        baseline_style == "deep_reunion"
         and not reserved
         and (depth == "deep" or continuity >= 0.80 or reconnect_drive >= 0.72)
     )
@@ -757,7 +756,7 @@ def _select_long_absent_behavior(
         }
 
     reunion_ready = (
-        absence_band in {"72h_plus", "7d_plus"}
+        baseline_style in {"reunion", "deep_reunion"}
         and not reserved
         and (depth == "deep" or continuity >= 0.72 or reconnect_drive >= 0.66)
     )
@@ -881,21 +880,10 @@ class PersonaProactiveVoice:
             or offline_state.get("anticipation")
             or 0.0
         )
-        _absence_band = str(offline_state.get("absence_band") or "").strip()
-        if _absence_band not in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
-            _offline_hours = float(offline_state.get("offline_hours") or 0.0)
-            if _offline_hours <= 0.0 and _offline_duration_ms > 0:
-                _offline_hours = _offline_duration_ms / 3_600_000.0
-            if _offline_hours >= 7 * 24:
-                _absence_band = "7d_plus"
-            elif _offline_hours >= 72:
-                _absence_band = "72h_plus"
-            elif _offline_hours >= 24:
-                _absence_band = "24h_plus"
-            elif _offline_hours >= 6:
-                _absence_band = "6h_plus"
-            else:
-                _absence_band = "recent"
+        _absence_band = resolve_offline_absence_band(
+            offline_state,
+            offline_duration_ms=_offline_duration_ms,
+        )
         if _offline_duration_ms > 0 and not ctx.get("_offline_duration_ms"):
             ctx["_offline_duration_ms"] = _offline_duration_ms
         ctx["_loneliness_value"] = _loneliness_value

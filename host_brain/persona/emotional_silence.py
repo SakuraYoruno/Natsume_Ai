@@ -35,6 +35,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.persona.offline_continuity import (
+    absence_recovery_factor_for_absence_band,
+    resolve_absence_band as resolve_offline_absence_band,
+)
+
 _logger = logging.getLogger("Natsume.emotional_silence")
 
 # ---------------------------------------------------------------------------
@@ -91,33 +96,11 @@ _TOPIC_RESISTANCE_PENALTY = 0.3
 
 
 def _resolve_absence_band(offline_state: dict[str, Any] | None) -> str:
-    raw = dict(offline_state or {}) if isinstance(offline_state, dict) else {}
-    raw_band = str(raw.get("absence_band") or "").strip()
-    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
-        return raw_band
-    try:
-        offline_hours = float(raw.get("offline_hours") or 0.0)
-    except (TypeError, ValueError):
-        offline_hours = 0.0
-    if offline_hours >= 7 * 24:
-        return "7d_plus"
-    if offline_hours >= 72:
-        return "72h_plus"
-    if offline_hours >= 24:
-        return "24h_plus"
-    if offline_hours >= 6:
-        return "6h_plus"
-    return "recent"
+    return resolve_offline_absence_band(offline_state)
 
 
 def _absence_recovery_factor(absence_band: str) -> float:
-    return {
-        "recent": 1.0,
-        "6h_plus": 1.03,
-        "24h_plus": 1.08,
-        "72h_plus": 1.14,
-        "7d_plus": 1.20,
-    }.get(absence_band, 1.0)
+    return absence_recovery_factor_for_absence_band(absence_band)
 
 
 # ---------------------------------------------------------------------------

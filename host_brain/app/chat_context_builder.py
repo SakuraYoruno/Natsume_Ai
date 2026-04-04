@@ -12,6 +12,11 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
+from host_brain.persona.offline_continuity import (
+    reconnect_style_for_absence_band,
+    resolve_absence_band as resolve_offline_absence_band,
+)
+
 logger = logging.getLogger(__name__)
 
 from host_brain.app.dependencies import get_ledger
@@ -732,22 +737,7 @@ def _apply_offline_state_to_persona_expression_hint(
     if not hint or not offline_state:
         return hint
 
-    def _resolve_absence_band() -> str:
-        raw_band = str(offline_state.get("absence_band") or "").strip()
-        if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
-            return raw_band
-        offline_hours = _coerce_optional_float(offline_state.get("offline_hours")) or 0.0
-        if offline_hours >= 7 * 24:
-            return "7d_plus"
-        if offline_hours >= 72:
-            return "72h_plus"
-        if offline_hours >= 24:
-            return "24h_plus"
-        if offline_hours >= 6:
-            return "6h_plus"
-        return "recent"
-
-    absence_band = _resolve_absence_band()
+    absence_band = resolve_offline_absence_band(offline_state)
     if absence_band == "recent":
         return hint
 
@@ -760,14 +750,13 @@ def _apply_offline_state_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     offline_guidance: list[str] = []
-    reconnect_style = ""
+    reconnect_style = reconnect_style_for_absence_band(absence_band)
 
     if absence_band == "6h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.04)
         echo_weight_modifier = max(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "steady"
-        reconnect_style = "soft_resume"
         offline_guidance.append("先把它当成短暂离开后的重新接上，轻轻接住就好，再自然进入当前话题")
     elif absence_band == "24h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.08)
@@ -776,7 +765,6 @@ def _apply_offline_state_to_persona_expression_hint(
             tone = "caring"
         if not pace_hint:
             pace_hint = "steady"
-        reconnect_style = "light_reconnect"
         offline_guidance.append("先把它当成轻度失联后的重新连上，不要直接写成久别重逢，再顺势进入正文")
     elif absence_band == "72h_plus":
         tone = "caring"
@@ -784,7 +772,6 @@ def _apply_offline_state_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.10)
         if not pace_hint:
             pace_hint = "slow"
-        reconnect_style = "reunion"
         offline_guidance.append("把回复写得像久别重逢后的接住与确认，再慢慢展开内容")
     elif absence_band == "7d_plus":
         tone = "caring"
@@ -792,7 +779,6 @@ def _apply_offline_state_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.14)
         if not pace_hint:
             pace_hint = "slow"
-        reconnect_style = "deep_reunion"
         offline_guidance.append("把这次对话当作久别后的重逢，先确认近况与状态，再慢慢把联系接稳")
 
     if loneliness >= 0.55:

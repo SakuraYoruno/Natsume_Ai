@@ -19,6 +19,8 @@ import math
 import random
 from typing import Any
 
+from host_brain.persona.offline_continuity import resolve_absence_band as resolve_offline_absence_band
+
 _logger = logging.getLogger("Natsume.self_model")
 
 
@@ -786,22 +788,7 @@ def _coerce_state_score(raw: dict[str, Any], key: str) -> float:
 
 
 def _resolve_alignment_absence_band(offline_state: dict[str, Any]) -> str:
-    raw_band = str(offline_state.get("absence_band") or "").strip()
-    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
-        return raw_band
-    try:
-        offline_hours = float(offline_state.get("offline_hours") or 0.0)
-    except (TypeError, ValueError):
-        offline_hours = 0.0
-    if offline_hours >= 7 * 24:
-        return "7d_plus"
-    if offline_hours >= 72:
-        return "72h_plus"
-    if offline_hours >= 24:
-        return "24h_plus"
-    if offline_hours >= 6:
-        return "6h_plus"
-    return "recent"
+    return resolve_offline_absence_band(offline_state)
 
 
 def _resolve_alignment_mode(runtime_flags: dict[str, Any]) -> str:

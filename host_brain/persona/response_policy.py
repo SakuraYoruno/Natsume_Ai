@@ -32,6 +32,12 @@ from dataclasses import dataclass, field
 import logging
 from typing import Any
 
+from host_brain.persona.offline_continuity import (
+    classify_absence_band,
+    resolve_absence_band as resolve_offline_absence_band,
+    warmth_floor_for_absence_band,
+)
+
 _logger = logging.getLogger("Natsume.response_policy")
 
 
@@ -92,36 +98,15 @@ def _resolve_recent_activity_event(activity_monitor: dict[str, Any]) -> tuple[st
 
 
 def _classify_absence_band(offline_hours: float) -> str:
-    if offline_hours >= 7 * 24:
-        return "7d_plus"
-    if offline_hours >= 72:
-        return "72h_plus"
-    if offline_hours >= 24:
-        return "24h_plus"
-    if offline_hours >= 6:
-        return "6h_plus"
-    return "recent"
+    return classify_absence_band(offline_hours)
 
 
 def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
-    raw_band = str(offline_state.get("absence_band") or "").strip()
-    if raw_band in {"recent", "6h_plus", "24h_plus", "72h_plus", "7d_plus"}:
-        return raw_band
-    try:
-        offline_hours = float(offline_state.get("offline_hours") or 0.0)
-    except (TypeError, ValueError):
-        offline_hours = 0.0
-    return _classify_absence_band(offline_hours)
+    return resolve_offline_absence_band(offline_state)
 
 
 def _offline_warmth_floor_for_absence_band(absence_band: str) -> float:
-    return {
-        "recent": 0.0,
-        "6h_plus": 0.08,
-        "24h_plus": 0.15,
-        "72h_plus": 0.18,
-        "7d_plus": 0.22,
-    }.get(absence_band, 0.0)
+    return warmth_floor_for_absence_band(absence_band)
 
 
 _MEMORY_WARM_TAGS = frozenset({"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"})
