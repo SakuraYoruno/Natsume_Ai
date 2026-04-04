@@ -259,6 +259,53 @@ def test_run_proactive_intent_dispatch_routes_personality_tick(monkeypatch) -> N
     assert result["tick_ran"] is True
 
 
+def test_run_proactive_intent_dispatch_does_not_treat_mood_state_as_sys_mode(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_execute_proactive_talk(*, args, context):  # noqa: ANN001
+        captured["args"] = dict(args)
+        captured["context"] = dict(context)
+        return {"status": "EXECUTED", "reason_code": None}
+
+    monkeypatch.setattr(
+        "host_brain.app.http_hooks_runtime_helpers._load_recent_topics",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "host_brain.app.http_hooks_runtime_helpers._load_recent_diary_snippet",
+        lambda: "",
+    )
+    monkeypatch.setattr(
+        "host_brain.app.http_hooks_runtime_helpers._load_recent_dream_snippet",
+        lambda **_kwargs: "",
+    )
+    monkeypatch.setattr(
+        "host_brain.app.http_hooks_runtime_helpers._build_llm_generator",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "host_brain.skills.impl.proactive_talk.execute_proactive_talk",
+        _fake_execute_proactive_talk,
+    )
+
+    result = run_proactive_intent_dispatch(
+        {
+            "skill_name": "proactive_talk",
+            "request_id": "req-proactive-scheduler-shape",
+            "intent_id": "intent-proactive-scheduler-shape",
+            "mood_state": "steady",
+            "args": {"idle_threshold_ms": 0},
+        },
+        logger=logging.getLogger("tests.http_hooks_runtime_helpers"),
+        get_ledger=lambda: SimpleNamespace(_db_path=None, db_path=None),
+        retention_policy=None,
+        ui_pusher=lambda _msg: {"status": "OK"},
+    )
+
+    assert result["status"] == "EXECUTED"
+    assert captured["context"]["sys_mode"] == "normal"
+
+
 def test_load_last_interaction_ts_ignores_future_intent_rows(tmp_path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     conn = sqlite3.connect(db_path)

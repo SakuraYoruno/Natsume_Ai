@@ -1,6 +1,6 @@
 受众：MASTER
 标题：数字生命运行验收 Findings（N0-T01）
-版本：v2.0
+版本：v2.1
 日期：2026-04-04
 状态：已复验
 
@@ -86,7 +86,7 @@ with TestClient(app):
 
 当前数字生命运行状态判定为：
 
-> **scheduler 与人格 tick 已经真实跑通，runtime snapshot 也已能解释“为什么这样回”；当前主阻塞已从旧版 `UNKNOWN_SKILL` 转移为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及 `session_end / awaken / proactive` 闭环证据仍不足。**
+> **scheduler、人格 tick、runtime snapshot、沉默/身体感、以及主动表达引擎都已在 runtime 成立；当前主阻塞主要收缩为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及 `session_end / awaken / memory writeback` 闭环证据仍不足。**
 
 本轮已确认的事实：
 
@@ -96,7 +96,8 @@ with TestClient(app):
 - 沉默引擎与身体感已不只是“有字段”，而是会真实改写 `motive`、`reply_posture` 与 `decision_chain`。
 - `/v1/chat` 主回复入口可走通，但当前环境下会在 runtime 层降级为 `LLM_UNAVAILABLE`，因此主回复链尚不能算完整端到端 PASS。
 - `session_end / on_user_awaken` 在本轮真实 `/v1/chat` 降级路径下仍缺少稳定闭环证据。
-- 主动表达链的旧问题已不再是 `sys_mode` 误判；补测显示它现在卡在 `intent_log` 最新时间戳超前到 `2027-01-15T16:00:00.003`，导致 idle gate 直接拒绝。
+- 主动表达链已补修两处 runtime 断点：future `intent_log.ts_ms` 不再污染 idle gate，scheduler 形态的 `mood_state=steady` 也不再被误判成 `sys_mode=steady`。
+- 在 seeded `>45m` idle 条件下，`proactive_talk_periodic` 已经过一轮真实 `195s` 观察窗触发成功，并通过模板 fallback 推送出主动消息。
 
 ---
 
@@ -111,7 +112,7 @@ with TestClient(app):
 | V5 | 沉默引擎是否影响行为 | PASS | `willingness=SILENT` 与 `topic_resistance` 可把 `motive` 推到 `withdraw`，并把回复姿态压成 `withdrawn` |
 | V6 | 身体感是否影响行为 | PASS | `fatigue=EXHAUSTED`、`drowsiness=DROWSY` 会进入 `response_policy.reason_tags` 并改写 `reply_posture` |
 | V7 | 关系叙事层 | PARTIAL | snapshot 已能观测 `bond` 与 narrative 摘要，但本轮未把它与真实回复差异完整闭环到内容层 |
-| V8 | 主动表达引擎 | PARTIAL | 70 秒窗口内 timed task 仍未到触发周期；future `intent_log.ts_ms` 已修复后，手动 dispatch 已可 `EXECUTED`，但当前仍走模板降级而非完整 LLM 内容 |
+| V8 | 主动表达引擎 | PASS | future `intent_log.ts_ms` 与 timed scheduler 的 `mood_state→sys_mode` 误判都已修复；seeded `>45m` idle 下，`proactive_talk_periodic` 在真实 `195s` 观察窗内 `OK` 且成功推送主动消息 |
 | V9 | 记忆连续性同步写回 | PARTIAL | 运行态可读到旧 `anticipation_topics`，但本轮 `/v1/chat` 降级路径未证明最新消息被稳定写回 |
 | V10 | Findings 汇总与修正建议 | PASS | 本文已刷新为复验版 findings |
 
@@ -230,7 +231,7 @@ with TestClient(app):
 
 > 本轮只能证明 `/v1/chat` 真实入口通了，还不能证明 `session_end` 与 `on_user_awaken` 在降级路径下稳定闭环，因此 V4 只能维持 `PARTIAL`。
 
-### E6：主动表达链已修复 future timestamp 阻塞，并可模板降级执行
+### E6：主动表达引擎已在 manual dispatch 与 timed scheduler 两条路径通过
 
 主动链补测使用：
 
@@ -239,7 +240,7 @@ with TestClient(app):
 - `args.idle_threshold_ms = 0`
 - `args.topic_hint = 那个项目`
 
-第一轮补测返回：
+前序补测先确认了两个 runtime 断点：
 
 - `status = REJECTED`
 - `reason_code = SCHED_CONDITION_UNMET`
@@ -251,7 +252,7 @@ with TestClient(app):
 - 返回 `1800000000003`
 - 对应时间：`2027-01-15T16:00:00.003`
 
-修复后再次补测：
+其后 manual dispatch 补测返回：
 
 - `status = EXECUTED`
 - `reason_code = null`
@@ -259,9 +260,23 @@ with TestClient(app):
 - `message.content = "主人夜深了，注意休息哦～"`
 - `template_fallback_used = true`
 
+再补一轮 seeded `>45m` idle 的真实 `195s` scheduler 观察窗：
+
+- `before.proactive_talk_periodic.status = PENDING`
+- `after.proactive_talk_periodic.status = OK`
+- `after.proactive_talk_periodic.last_reason_code = null`
+- `push_count = 1`
+- `last_push.content = "主人夜深了，注意休息哦～"`
+
+说明：
+
+- 本轮为了满足默认 `45m` idle gate，使用临时 ledger seed 了一条 `46m` 之前的 intent 记录。
+- push client 使用内存 mock，只替换外部发送侧，不改变 scheduler / dispatcher / proactive skill 的真实执行链。
+- 当前内容来源仍是模板 fallback，因为运行环境仍处于 `LLM_UNAVAILABLE`。
+
 结论：
 
-> 主动链的 future `intent_log.ts_ms` 阻塞已经修复；当前 manual dispatch 已可执行，V8 保持 `PARTIAL` 的剩余原因不再是 idle gate，而是 timed scheduler 尚未补 180s 实窗复验，且内容层仍受 `LLM_UNAVAILABLE` 影响走模板降级。
+> 主动表达引擎已经在 manual dispatch 与 timed scheduler 两条 runtime 路径跑通，V8 可升级为 `PASS`；当前剩余的只是 LLM 不可用时的内容层降级，而不再是调度或执行闭环问题。
 
 ---
 
@@ -301,20 +316,19 @@ with TestClient(app):
 
 ### Gap 3（P1）
 
-**主动表达链仍缺少 180s 调度实窗复验，且当前内容层仅验证到模板降级。**
+**`session_end / memory continuity writeback` 仍缺少稳定闭环证据。**
 
 现象：
 
-- future `intent_log.ts_ms` 已修复
-- 手动 proactive dispatch 已可 `EXECUTED`
-- 但 70 秒观察窗仍不足以证明 `proactive_talk_periodic` 定时任务真实触发
-- 当前执行内容仍因 `LLM_UNAVAILABLE` 走模板 fallback
+- `anticipation_topics` 仍可能停留在旧残留
+- 本轮 `/v1/chat` 降级路径未证明最新话题被稳定写回
+- `V9` 仍只能判定为 `PARTIAL`
 
 建议优先动作：
 
-- 补一轮 `>=180s` 的 scheduler 真实观察窗
-- 恢复 LLM/Edge 依赖后重跑主动链内容层验收
-- 将 manual dispatch 与 timed task 结果并入同一轮 findings
+- 补一轮多消息真实对话写回验收
+- 对照 `session_end` 前后 inner world / memory_ops_log 变化
+- 补最小自动化回归，锁住 `anticipation_topics` 与相关 writeback
 
 ---
 
@@ -326,7 +340,7 @@ with TestClient(app):
 
 本轮复验后，这一结论应正式作废，修正为：
 
-> scheduler 与 personality ticks 已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖、会话闭环证据不足，以及主动链仅完成模板降级验证、尚未补足 timed scheduler 实窗证据。
+> scheduler、personality ticks 与 proactive engine 已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖，以及会话闭环与 memory writeback 证据不足。
 
 ---
 
@@ -340,5 +354,5 @@ with TestClient(app):
 
 1. 先恢复或隔离 `LLM_UNAVAILABLE / edge rpc unavailable` 环境阻塞。
 2. 再补 `session_end / on_user_awaken` 的可重复验收样本与回归。
-3. 补 `>=180s` 的 proactive timed task 实窗复验，并与 manual dispatch 合并验收。
-4. 修完后再刷新一次本 findings，并把 V4 / V8 / V9 重新判定。
+3. 补 `session_end / memory writeback` 的真实对话验收，并把 `V9` 从 `PARTIAL` 往前推进。
+4. 修完后再刷新一次本 findings，并把 V4 / V7 / V9 重新判定。

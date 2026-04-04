@@ -909,7 +909,6 @@ def run_proactive_intent_dispatch(
 
     resolved_sys_mode = str(
         system_intent.get("sys_mode")
-        or system_intent.get("mood_state")
         or "normal"
     ).strip().lower() or "normal"
 
