@@ -167,6 +167,33 @@ def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> Non
 
 
 
+def test_build_self_reflection_pulse_adds_narrative_guardrails_when_evidence_is_thin(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sr_mod,
+        "build_self_awareness_text",
+        lambda snapshot, time_context="", llm_fn=None, style_evolution=None: "aware",
+    )
+    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot, llm_fn=None: "mood")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_growth_note_text",
+        lambda snapshot, llm_fn=None, style_evolution=None: "",
+    )
+    monkeypatch.setattr(sr_mod, "detect_contradictions", lambda snapshot: [])
+    monkeypatch.setattr(sr_mod, "build_contradiction_awareness_text", lambda contradictions: "")
+
+    pulse = build_self_reflection_pulse({"bond_growth_perception": "稳定"})
+
+    guardrails = dict(pulse["narrative_guardrails"])
+    assert guardrails["risk_level"] == "high"
+    assert guardrails["allowed_style"] == "brief"
+    assert guardrails["allow_self_narrative_expansion"] is False
+    assert "time_context_unverified" in guardrails["risk_tags"]
+    assert "unsupported_self_claim" in guardrails["risk_tags"]
+    assert "anthropomorphic_overreach" in guardrails["risk_tags"]
+
+
+
 def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() -> None:
     aligned = sr_mod.align_self_reflection_pulse(
         {"self_awareness": "原始自省", "mood_awareness": "mood", "growth_note": "grow"},
@@ -191,6 +218,9 @@ def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() ->
     assert "offline:72h_plus" in aligned["state_alignment_reasons"]
     assert "motive:continuity" in aligned["state_alignment_reasons"]
     assert "policy:brief" in aligned["state_alignment_reasons"]
+    guardrails = dict(aligned["narrative_guardrails"])
+    assert guardrails["risk_level"] == "high"
+    assert "reflection_vs_policy_tension" in guardrails["risk_tags"]
 
 
 

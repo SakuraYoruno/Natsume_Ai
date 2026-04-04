@@ -430,6 +430,143 @@ class SelfReflection:
         return self._next_trigger_turn
 
 
+
+_NARRATIVE_GUARDRAIL_ORDER: tuple[str, ...] = (
+    "time_context_unverified",
+    "unsupported_self_claim",
+    "anthropomorphic_overreach",
+    "reflection_vs_policy_tension",
+)
+
+_NARRATIVE_GUARDRAIL_INSTRUCTIONS: dict[str, str] = {
+    "time_context_unverified": "若时间线证据不足，只能说“最近/这段时间”，不要声称具体多久或哪一天。",
+    "unsupported_self_claim": "没有明确依据时，不要把推测写成确定的自我变化、关系进展或内心结论。",
+    "anthropomorphic_overreach": "不要把系统状态、薄弱线索或抽象趋势扩写成人类式经历、自传或命运感叙事。",
+    "reflection_vs_policy_tension": "自我叙事只能轻量辅助，不能压过当前事实、主回应任务和既有边界。",
+}
+
+
+def _build_narrative_guardrails(
+    snapshot: dict[str, Any] | None,
+    *,
+    time_context: str = "",
+    growth_awareness: dict[str, Any] | None = None,
+    growth_summary: dict[str, Any] | None = None,
+    style_evolution: dict[str, Any] | None = None,
+    response_policy: dict[str, Any] | None = None,
+    runtime_flags: dict[str, Any] | None = None,
+    base_tags: list[str] | None = None,
+) -> dict[str, Any]:
+    snapshot = dict(snapshot or {})
+    growth_awareness = dict(growth_awareness or {})
+    growth_summary = dict(growth_summary or {})
+    style_evolution = dict(style_evolution or {})
+    response_policy = dict(response_policy or {})
+    runtime_flags = dict(runtime_flags or {})
+
+    tags: list[str] = [
+        str(tag).strip()
+        for tag in (base_tags or [])
+        if str(tag).strip() in _NARRATIVE_GUARDRAIL_ORDER
+    ]
+
+    def _add_tag(tag: str) -> None:
+        if tag and tag in _NARRATIVE_GUARDRAIL_ORDER and tag not in tags:
+            tags.append(tag)
+
+    time_context = str(time_context or "").strip()
+    try:
+        last_deep_talk_days_ago = int(snapshot.get("last_deep_talk_days_ago") or -1)
+    except (TypeError, ValueError):
+        last_deep_talk_days_ago = -1
+    try:
+        event_count = int(snapshot.get("event_count") or 0)
+    except (TypeError, ValueError):
+        event_count = 0
+
+    personality_changes = [
+        str(item).strip()
+        for item in (snapshot.get("personality_changes") or [])
+        if str(item).strip()
+    ]
+    growth_milestones = [
+        str(item).strip()
+        for item in (snapshot.get("growth_milestones") or [])
+        if str(item).strip()
+    ]
+    growth_awareness_values = [
+        str(value).strip()
+        for value in growth_awareness.values()
+        if str(value).strip()
+    ]
+    growth_summary_values = [
+        str(growth_summary.get(key) or "").strip()
+        for key in ("daily_summary", "weekly_summary", "last_cycle_date")
+        if str(growth_summary.get(key) or "").strip()
+    ]
+    growth_summary_values.extend(
+        str(item).strip()
+        for item in (growth_summary.get("active_themes") or [])
+        if str(item).strip()
+    )
+    try:
+        growth_cycle_count = int(growth_summary.get("recent_cycle_count") or 0)
+    except (TypeError, ValueError):
+        growth_cycle_count = 0
+    history_count = int(style_evolution.get("history_count") or 0)
+    trend = style_evolution.get("trend") or {}
+    style_evidence = history_count >= 20 and any(
+        str(direction).strip().lower() in {"rising", "falling"}
+        for direction in (trend.values() if isinstance(trend, dict) else [])
+    )
+
+    has_growth_evidence = bool(
+        personality_changes
+        or growth_milestones
+        or growth_awareness_values
+        or growth_summary_values
+        or growth_cycle_count > 0
+        or style_evidence
+    )
+    has_relationship_anchor = event_count > 0 or last_deep_talk_days_ago >= 0
+    has_self_evidence = has_growth_evidence or has_relationship_anchor
+
+    if not time_context and last_deep_talk_days_ago < 0:
+        _add_tag("time_context_unverified")
+    if not has_self_evidence:
+        _add_tag("unsupported_self_claim")
+    if not has_self_evidence and not time_context:
+        _add_tag("anthropomorphic_overreach")
+
+    sys_mode = str(runtime_flags.get("sys_mode") or "").strip().lower()
+    policy_guarded = bool(
+        response_policy.get("should_be_brief")
+        or response_policy.get("should_be_withdrawn")
+        or response_policy.get("withdrawal_guard")
+        or sys_mode in {"sleep", "locked", "maintenance"}
+    )
+    if policy_guarded:
+        _add_tag("reflection_vs_policy_tension")
+
+    ordered_tags = [tag for tag in _NARRATIVE_GUARDRAIL_ORDER if tag in tags]
+    if not ordered_tags:
+        return {}
+
+    risk_score = 0
+    for tag in ordered_tags:
+        risk_score += 1 if tag == "reflection_vs_policy_tension" else 2
+    risk_level = "high" if risk_score >= 4 else "medium"
+    allowed_style = "brief" if risk_level == "high" else "guarded"
+    instructions = [_NARRATIVE_GUARDRAIL_INSTRUCTIONS[tag] for tag in ordered_tags]
+    return {
+        "risk_level": risk_level,
+        "risk_tags": ordered_tags,
+        "instruction": " ".join(instructions),
+        "allowed_style": allowed_style,
+        "allow_self_narrative_expansion": False,
+    }
+
+
 # ---------------------------------------------------------------------------
 # self_reflection_pulse 构建函数
 # ---------------------------------------------------------------------------
@@ -530,6 +667,16 @@ def build_self_reflection_pulse(
             if style_trend_note:
                 pulse["style_trend_note"] = style_trend_note
 
+    narrative_guardrails = _build_narrative_guardrails(
+        snapshot,
+        time_context=time_context,
+        growth_awareness=growth_awareness,
+        growth_summary=growth_summary,
+        style_evolution=style_evolution,
+    )
+    if narrative_guardrails:
+        pulse["narrative_guardrails"] = narrative_guardrails
+
     return pulse
 
 
@@ -565,6 +712,24 @@ def align_self_reflection_pulse(
     reason_tags = [str(item).strip() for item in (alignment.get("reason_tags") or []) if str(item).strip()]
     if reason_tags:
         result["state_alignment_reasons"] = reason_tags
+
+    existing_guardrails = dict(result.get("narrative_guardrails") or {})
+    existing_tags = [
+        str(item).strip()
+        for item in (existing_guardrails.get("risk_tags") or [])
+        if str(item).strip()
+    ]
+    narrative_guardrails = _build_narrative_guardrails(
+        snapshot,
+        time_context=str(result.get("time_context") or ""),
+        growth_awareness=dict(result.get("growth_awareness") or {}),
+        growth_summary=dict(result.get("growth_summary") or {}),
+        response_policy=response_policy,
+        runtime_flags=runtime_flags,
+        base_tags=existing_tags,
+    )
+    if narrative_guardrails:
+        result["narrative_guardrails"] = narrative_guardrails
     return result
 
 

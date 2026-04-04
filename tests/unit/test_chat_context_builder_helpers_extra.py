@@ -948,6 +948,9 @@ def test_build_chat_prompt_runtime_payload_aligns_self_reflection_after_motive_a
     assert pulse["state_alignment"] == pulse["self_awareness"]
     assert "motive:continuity" in pulse["state_alignment_reasons"]
     assert "policy:brief" in pulse["state_alignment_reasons"]
+    guardrails = dict(pulse["narrative_guardrails"])
+    assert guardrails["risk_level"] == "high"
+    assert "reflection_vs_policy_tension" in guardrails["risk_tags"]
 
 
 

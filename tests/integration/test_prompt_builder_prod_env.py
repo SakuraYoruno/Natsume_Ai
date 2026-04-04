@@ -139,6 +139,13 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
             'last_cycle_date': '2026-04-04',
             'active_themes': ['recent_change', 'desire'],
         },
+        'narrative_guardrails': {
+            'risk_level': 'high',
+            'risk_tags': ['time_context_unverified', 'unsupported_self_claim'],
+            'instruction': '若时间线证据不足，只能说最近/这段时间，不要声称具体多久。',
+            'allowed_style': 'brief',
+            'allow_self_narrative_expansion': False,
+        },
     }
     runtime_payload['bond_narrative'] = {
         'shared_memories': ['那天一起聊到很晚的时候，感觉很安心', '第一次被认真安慰的时候，记到了现在'],
@@ -156,6 +163,9 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
     assert 'active_themes: recent_change, desire' in prompt
     assert 'stagnation_felt' in prompt
     assert 'regression_felt' in prompt
+    assert 'narrative_guardrails' in prompt
+    assert 'risk_level: high' in prompt
+    assert 'allow_self_narrative_expansion: false' in prompt
     assert 'BOND_NARRATIVE' in prompt
     assert 'shared_memory_1' in prompt
 
@@ -181,6 +191,15 @@ def test_prompt_builder_prod_renders_response_policy_constraints() -> None:
         'should_be_withdrawn': True,
         'policy_reason_tags': ['willingness:LOW', 'confession_guard:shallow_bond'],
     }
+    runtime_payload['self_reflection_pulse'] = {
+        'narrative_guardrails': {
+            'risk_level': 'high',
+            'risk_tags': ['time_context_unverified', 'unsupported_self_claim'],
+            'instruction': '若时间线证据不足，只能说最近/这段时间，不要声称具体多久。',
+            'allowed_style': 'brief',
+            'allow_self_narrative_expansion': False,
+        }
+    }
 
     prompt = render_node_generation_prompt(node_id='renderer_ja_c_style', runtime_payload=runtime_payload)
 
@@ -193,6 +212,7 @@ def test_prompt_builder_prod_renders_response_policy_constraints() -> None:
     assert '本轮不要主动追问。' in prompt
     assert '本轮不要擅自扩展或切换话题。' in prompt
     assert '避免表白式、依赖式或越界亲密表达。' in prompt
+    assert '自我叙事约束：若时间线证据不足，只能说最近/这段时间，不要声称具体多久。' in prompt
     assert 'response_policy_reasons: willingness:LOW, confession_guard:shallow_bond' in prompt
 
 

@@ -135,3 +135,35 @@ def test_response_policy_recent_gaming_detected_adds_companion_bias() -> None:
     assert policy["warmth_floor"] >= 0.14
     assert "mode:gaming" in policy["policy_reason_tags"]
     assert "activity:gaming_detected" in policy["policy_reason_tags"]
+
+
+def test_response_policy_narrative_guardrail_restrains_self_expansion() -> None:
+    policy = decide_response_policy(
+        ResponsePolicyInput(
+            silence_state={"response_willingness": 0.95, "willingness_level": "NORMAL"},
+            body_sense={"fatigue_level": "FRESH", "drowsiness_level": "AWAKE"},
+            bond_summary={"stage": "FRIEND"},
+            self_reflection_pulse={
+                "narrative_guardrails": {
+                    "risk_level": "high",
+                    "risk_tags": [
+                        "time_context_unverified",
+                        "unsupported_self_claim",
+                        "anthropomorphic_overreach",
+                    ],
+                    "instruction": "若时间线证据不足，只能说最近，不要扩写。",
+                    "allowed_style": "brief",
+                    "allow_self_narrative_expansion": False,
+                }
+            },
+        )
+    ).as_dict()
+
+    assert policy["allow_followup"] is False
+    assert policy["allow_topic_shift"] is False
+    assert policy["allow_proactive_after_reply"] is False
+    assert policy["should_be_brief"] is True
+    assert policy["should_be_withdrawn"] is True
+    assert policy["max_sentences"] == 2
+    assert "reflection_guard:high" in policy["policy_reason_tags"]
+    assert "reflection_guard:time_context_unverified" in policy["policy_reason_tags"]

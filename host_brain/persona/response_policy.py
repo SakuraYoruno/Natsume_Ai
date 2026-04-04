@@ -388,13 +388,44 @@ class ResponsePolicyLayer:
             p.warmth_floor = max(p.warmth_floor, 0.10)
             reasons.append("offline:loneliness_high")
 
-        # ── 规则 G：自我反思收缩期，轻度收敛 ────────────────────────────────
+        # ── 规则 G：自我反思收缩期，轻度收敛 + narrative guardrail ───────────
         if reflection:
             withdraw_hint = bool(reflection.get("withdraw_hint") or False)
             if withdraw_hint:
                 p.max_chars = min(p.max_chars, int(p.max_chars * 0.85))
                 p.confession_guard = True
                 reasons.append("reflection:withdraw_hint")
+
+            narrative_guardrails_raw = reflection.get("narrative_guardrails")
+            narrative_guardrails = (
+                dict(narrative_guardrails_raw)
+                if isinstance(narrative_guardrails_raw, dict)
+                else {}
+            )
+            risk_level = str(narrative_guardrails.get("risk_level") or "").strip().lower()
+            risk_tags = [
+                str(item).strip()
+                for item in (narrative_guardrails.get("risk_tags") or [])
+                if str(item).strip()
+            ]
+            allow_expansion = bool(narrative_guardrails.get("allow_self_narrative_expansion", True))
+            if risk_level in {"medium", "high"} or not allow_expansion:
+                p.allow_followup = False
+                p.allow_topic_shift = False
+                p.allow_proactive_after_reply = False
+                p.confession_guard = True
+                p.withdrawal_guard = True
+                p.should_be_brief = True
+                p.max_sentences = min(p.max_sentences, 2 if risk_level == "high" else 3)
+                p.max_chars = min(p.max_chars, 90 if risk_level == "high" else 140)
+                p.intimacy_ceiling = min(p.intimacy_ceiling, 0.35 if risk_level == "high" else 0.45)
+                p.humor_ceiling = min(p.humor_ceiling, 0.12 if risk_level == "high" else 0.18)
+                if risk_level == "high" or "anthropomorphic_overreach" in risk_tags:
+                    p.should_be_withdrawn = True
+                if risk_level:
+                    reasons.append(f"reflection_guard:{risk_level}")
+                for tag in risk_tags:
+                    reasons.append(f"reflection_guard:{tag}")
 
         # ── 规则 H：motive_state 补充修正（可选） ────────────────────────────
         reach_out_drive = _score_motive_drive(motive, "reach_out_drive")

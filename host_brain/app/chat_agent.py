@@ -259,7 +259,7 @@ def _soften_followup_sentence(sentence: str) -> str:
     softened = softened.rstrip("，,、；;：: ").strip()
     if softened == normalized and _looks_like_followup_sentence(normalized):
         return ""
-    if softened and softened[-1] not in "。！？!?":
+    if softened and softened[-1] not in ".。！？!?":
         softened += "。"
     return softened
 
@@ -319,7 +319,7 @@ def _soften_confession_sentence(sentence: str) -> str:
         softened = softened.replace(source, target)
     softened = re.sub(r"\s+", " ", softened).strip()
     softened = softened.rstrip("，,、；;：: ").strip()
-    if softened and softened[-1] not in "。！？!?":
+    if softened and softened[-1] not in ".。！？!?":
         softened += "。"
     return softened
 
@@ -346,7 +346,7 @@ def _soften_intimacy_sentence(sentence: str) -> str:
     softened = softened.lstrip("，,、；;：: ").strip()
     softened = re.sub(r"([。！？!?])\1+", r"\1", softened)
     softened = softened.rstrip("，,、；;：: ").strip()
-    if softened and softened[-1] not in "。！？!?":
+    if softened and softened[-1] not in ".。！？!?":
         softened += "。"
     return softened
 
@@ -368,7 +368,7 @@ def _soften_humor_tone(text: str) -> str:
     normalized = normalized.rstrip("，,、；;：: ").strip()
     if not normalized:
         return "嗯。"
-    if normalized[-1] not in "。！？!?":
+    if normalized[-1] not in ".。！？!?":
         normalized += "。"
     return normalized
 
