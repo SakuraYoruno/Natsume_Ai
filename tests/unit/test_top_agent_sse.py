@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -836,6 +837,15 @@ def test_runtime_unavailable_rejects_after_preprocessing(monkeypatch) -> None:
         total_detections=2,
         detections=[{"rule_id": "phone"}, {"rule_id": "email"}],
     )
+    captured: dict[str, object] = {}
+
+    def _fake_post_process(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+
+        async def _done():
+            return None
+
+        return _done()
 
     with patch(
         "host_brain.app.top_agent.chat_lite_governor",
@@ -870,6 +880,9 @@ def test_runtime_unavailable_rejects_after_preprocessing(monkeypatch) -> None:
     ), patch(
         "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
         new=_fake_unavailable_runtime,
+    ), patch(
+        "host_brain.app.top_agent._async_post_process",
+        new=_fake_post_process,
     ):
         events = _run(
             _collect_events(
@@ -891,6 +904,179 @@ def test_runtime_unavailable_rejects_after_preprocessing(monkeypatch) -> None:
     commit = json.loads(events[-1].removeprefix("data: ").strip())
     assert commit["decision"] == "REJECT"
     assert commit["reason_code"] == "LLM_UNAVAILABLE"
+    assert captured["user_message"] == "hello"
+    assert captured["narrative"] == commit["narrative"]
+    assert captured["model_id"] == "llm-unavailable-fallback"
+
+
+def test_runtime_unavailable_still_runs_post_process_writeback(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+
+    request_body = SimpleNamespace(message="remember me", session_id="session-001", thread_id=None)
+    metrics = MagicMock()
+    memory_calls: list[dict[str, object]] = []
+    inner_world_calls: list[dict[str, object]] = []
+    body_sense_calls: list[object] = []
+
+    async def _fake_unavailable_runtime(**_kwargs):  # noqa: ANN001
+        return {"available": False}
+
+    async def _immediate_to_thread(func, /, *args, **kwargs):  # noqa: ANN001
+        return func(*args, **kwargs)
+
+    async def _collect_events_and_drain(async_iterable) -> list[str]:
+        events: list[str] = []
+        async for item in async_iterable:
+            events.append(item)
+        await asyncio.sleep(0.01)
+        return events
+
+    def _fake_persist_chat_episodic_memory(**kwargs):  # noqa: ANN001
+        memory_calls.append(dict(kwargs))
+        return {"status": "OK", "memory_id": "mem::runtime-down"}
+
+    class _InnerWorld:
+        def on_session_end(self, user_id, **kwargs):  # noqa: ANN001, ANN003
+            inner_world_calls.append({"user_id": user_id, **kwargs})
+
+    class _BodySense:
+        def on_conversation_end(self, *, duration_minutes=None):  # noqa: ANN003
+            body_sense_calls.append(duration_minutes)
+
+    ledger = SimpleNamespace(
+        log_governor=lambda _row: None,
+        log_llm_node_call=lambda _row: None,
+        log_graph_run_trace=lambda _row: None,
+        log_voice_event=lambda _row: None,
+    )
+
+    with ExitStack() as stack:
+        stack.enter_context(patch(
+            "host_brain.app.top_agent.chat_lite_governor",
+            return_value={"decision": "APPROVE", "reason_code": None, "intent_id": "intent-001"},
+        ))
+        stack.enter_context(patch(
+            "host_brain.airlock.pii_filter._check_channel",
+            return_value=False,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent._maybe_build_task_progress_fastpath",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent._maybe_build_recent_turn_answer",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent._maybe_build_phatic_fastpath_reply",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.chat_retrieval_helpers._run_retrieval",
+            new=_fake_retrieval,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.prompt_builder.infer_render_target_lang",
+            return_value="zh",
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.state_arbiter_queries._resolve_state_arbiter_bond_fact",
+            new=_fake_state_arbiter,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_recall_pack_builder",
+            return_value=_FakeRecallPackBuilder(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
+            new=_fake_unavailable_runtime,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent.asyncio.to_thread",
+            new=_immediate_to_thread,
+        ))
+        stack.enter_context(patch(
+            "host_brain.airlock.quarantine.classify_ingress",
+            return_value="FACT",
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.observability_persist.persist_chat_episodic_memory",
+            side_effect=_fake_persist_chat_episodic_memory,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=SimpleNamespace(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=ledger,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_bond_stage_engine",
+            return_value=SimpleNamespace(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            return_value=_FakeBondQueue(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.bond.bond_dynamics.BondDynamicsWriter",
+            _FakeBondWriter,
+        ))
+        stack.enter_context(patch(
+            "host_brain.bond.user_identity.resolve_bond_user_id",
+            return_value="user-001",
+        ))
+        stack.enter_context(patch(
+            "host_brain.bond.user_identity.get_canonical_bond_user_id",
+            return_value="persona-user-001",
+        ))
+        stack.enter_context(patch(
+            "host_brain.persona.inner_world.get_inner_world",
+            return_value=_InnerWorld(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.persona.body_sense.get_body_sense_model",
+            return_value=_BodySense(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
+            new=AsyncMock(return_value=None),
+        ))
+
+        events = _run(
+            _collect_events_and_drain(
+                top_agent_sse_generator(
+                    request_body=request_body,
+                    request_id="req-runtime-writeback",
+                    session_id="session-001",
+                    ts_ms=1000,
+                    intent_draft={"id": "intent-001"},
+                    emotion_context={"emotion_tag": "NEUTRAL", "emotion_intensity": 0.4},
+                    emotion_snapshot={},
+                    governor_result={"decision": "APPROVE"},
+                    intent_id="intent-001",
+                    metrics=metrics,
+                )
+            )
+        )
+
+    commit = json.loads(events[-1].removeprefix("data: ").strip())
+    assert commit["decision"] == "REJECT"
+    assert commit["reason_code"] == "LLM_UNAVAILABLE"
+    assert len(memory_calls) == 1
+    assert memory_calls[0]["user_message"] == "remember me"
+    assert memory_calls[0]["assistant_reply"] == commit["narrative"]
+    assert inner_world_calls == [
+        {
+            "user_id": "persona-user-001",
+            "valence": 0.0,
+            "arousal": 0.4,
+            "pending_topics": ["remember me"],
+        }
+    ]
+    assert len(body_sense_calls) == 1
 
 
 def test_retrieval_init_failure_and_recall_pack_still_dispatch(monkeypatch) -> None:

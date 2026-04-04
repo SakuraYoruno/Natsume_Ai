@@ -1224,6 +1224,37 @@ async def top_agent_sse_generator(
     )
 
     if not llm_runtime.get("available"):
+        fallback_narrative = "嗯……蓝现在脑子有点转不动，等一下再来找我好不好？"
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        try:
+            asyncio.create_task(_async_post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=fallback_narrative,
+                emotion_context=emotion_context,
+                bond_summary=bond_summary,
+                ts_ms=ts_ms,
+                render_target_lang=render_target_lang,
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name=str(llm_runtime.get("provider_name") or "fallback"),
+                model_id=str(llm_runtime.get("model_id") or "llm-unavailable-fallback"),
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary=(
+                    retrieval_summary
+                    or {"status": "SKIPPED", "reason_code": "LLM_UNAVAILABLE"}
+                ),
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                retrieval_evidence_items=list(retrieval_evidence_items or []),
+            ))
+        except Exception as _pp_exc:
+            _logger.debug("[%s] top_agent llm unavailable post_process failed: %s", request_id, _pp_exc)
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "REJECT",
             "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,

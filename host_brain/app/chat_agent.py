@@ -1244,6 +1244,48 @@ async def chat_agent_sse_generator(
         }
     else:
         llm_runtime = agent_input.llm_runtime
+
+        def _schedule_llm_unavailable_post_process(
+            fallback_narrative: str,
+            *,
+            provider_name: str = "fallback",
+            model_id: str = "llm-unavailable-fallback",
+        ) -> None:
+            try:
+                from host_brain.app.top_agent import _async_post_process  # noqa: PLC0415
+
+                total_latency_ms = int(time.time() * 1000) - ts_ms
+                asyncio.create_task(
+                    _async_post_process(
+                        request_id=request_id,
+                        person_id=person_id,
+                        session_id=session_id,
+                        user_message=user_message,
+                        narrative=fallback_narrative,
+                        emotion_context=emotion_context,
+                        bond_summary=bond_summary,
+                        ts_ms=ts_ms,
+                        render_target_lang=render_target_lang,
+                        total_latency_ms=total_latency_ms,
+                        llm_latency_ms=0,
+                        first_token_ms=None,
+                        provider_name=provider_name,
+                        model_id=model_id,
+                        buffer_stream=False,
+                        delegated_agents=[],
+                        retrieval_summary=(
+                            agent_input.retrieval_summary
+                            or {"status": "SKIPPED", "reason_code": "LLM_UNAVAILABLE"}
+                        ),
+                        gov_decision={"decision": "APPROVE"},
+                        pii_ingress_stats={},
+                        pii_egress_stats={},
+                        retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
+                    )
+                )
+            except Exception as _pp_exc:
+                _logger.debug("[%s] ChatAgent llm unavailable post_process failed: %s", request_id, _pp_exc)
+
         if llm_runtime is None:
             try:
                 from host_brain.app.graph_config_builder import (  # noqa: PLC0415
@@ -1257,6 +1299,7 @@ async def chat_agent_sse_generator(
                 llm_runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
             except Exception as _rt_exc:
                 _logger.warning("[%s] ChatAgent llm_runtime resolve failed: %s", request_id, _rt_exc)
+                _schedule_llm_unavailable_post_process("……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。")
                 yield _sse({
                     "phase": "COMMIT", "done": True, "decision": "REJECT",
                     "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
@@ -1265,6 +1308,11 @@ async def chat_agent_sse_generator(
                 return
 
         if not llm_runtime.get("available"):
+            _schedule_llm_unavailable_post_process(
+                "……抱歉，蓝现在脑子有点转不动，过一会儿再来找我吧。",
+                provider_name=str(llm_runtime.get("provider_name") or "fallback"),
+                model_id=str(llm_runtime.get("model_id") or "llm-unavailable-fallback"),
+            )
             yield _sse({
                 "phase": "COMMIT", "done": True, "decision": "REJECT",
                 "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,

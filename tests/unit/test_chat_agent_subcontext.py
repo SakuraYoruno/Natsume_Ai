@@ -1002,11 +1002,21 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
         "host_brain.app.top_agent_prompt.build_top_agent_prompt",
         lambda **_kwargs: ("prompt", "system", {}),
     )
+    captured: list[dict[str, object]] = []
+
+    def _fake_post_process(**kwargs):  # noqa: ANN001
+        captured.append(dict(kwargs))
+
+        async def _done():
+            return None
+
+        return _done()
 
     async def _bad_runtime(**_kwargs):
         raise RuntimeError("runtime unavailable")
 
     monkeypatch.setattr("host_brain.app.graph_config_builder.resolve_host_llm_runtime_async", _bad_runtime)
+    monkeypatch.setattr("host_brain.app.top_agent._async_post_process", _fake_post_process)
 
     agent_input = ChatAgentInput(
         request_id="req-chat-runtime-fail",
@@ -1019,6 +1029,9 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
     commit = next(item for item in events if '"phase": "COMMIT"' in item)
     assert "LLM_UNAVAILABLE" in commit
+    assert captured[-1]["request_id"] == "req-chat-runtime-fail"
+    assert captured[-1]["user_message"] == "hello"
+    assert captured[-1]["model_id"] == "llm-unavailable-fallback"
 
     unavailable_input = ChatAgentInput(
         request_id="req-chat-runtime-down",
@@ -1031,6 +1044,8 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     events = _run(_collect_events(chat_agent_sse_generator(unavailable_input)))
     commit = next(item for item in events if '"phase": "COMMIT"' in item)
     assert "LLM_UNAVAILABLE" in commit
+    assert captured[-1]["request_id"] == "req-chat-runtime-down"
+    assert captured[-1]["model_id"] == "mock"
 
 def test_chat_agent_commit_enforces_response_policy_max_sentences_from_runtime_payload(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
