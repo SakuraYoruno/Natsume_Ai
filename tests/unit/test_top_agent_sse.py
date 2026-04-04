@@ -1079,6 +1079,174 @@ def test_runtime_unavailable_still_runs_post_process_writeback(monkeypatch) -> N
     assert len(body_sense_calls) == 1
 
 
+def test_runtime_unavailable_writeback_feeds_awaken_snapshot(monkeypatch, tmp_path) -> None:
+    from host_brain.persona.inner_world import OfflineInnerWorld
+
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+
+    request_body = SimpleNamespace(message="那个项目", session_id="session-001", thread_id=None)
+    metrics = MagicMock()
+    current_ts = [1_000]
+    inner_world = OfflineInnerWorld(state_dir=str(tmp_path / "inner_world"))
+
+    async def _fake_unavailable_runtime(**_kwargs):  # noqa: ANN001
+        return {"available": False}
+
+    async def _immediate_to_thread(func, /, *args, **kwargs):  # noqa: ANN001
+        return func(*args, **kwargs)
+
+    async def _collect_events_and_drain(async_iterable) -> list[str]:
+        events: list[str] = []
+        async for item in async_iterable:
+            events.append(item)
+        await asyncio.sleep(0.01)
+        return events
+
+    def _fake_now_ms() -> int:
+        return current_ts[0]
+
+    def _fake_persist_chat_episodic_memory(**_kwargs):  # noqa: ANN001
+        return {"status": "OK", "memory_id": "mem::awaken"}
+
+    class _BodySense:
+        def on_conversation_end(self, *, duration_minutes=None):  # noqa: ANN003
+            _ = duration_minutes
+            return None
+
+    ledger = SimpleNamespace(
+        log_governor=lambda _row: None,
+        log_llm_node_call=lambda _row: None,
+        log_graph_run_trace=lambda _row: None,
+        log_voice_event=lambda _row: None,
+    )
+
+    with ExitStack() as stack:
+        stack.enter_context(patch(
+            "host_brain.app.top_agent.chat_lite_governor",
+            return_value={"decision": "APPROVE", "reason_code": None, "intent_id": "intent-001"},
+        ))
+        stack.enter_context(patch(
+            "host_brain.airlock.pii_filter._check_channel",
+            return_value=False,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent._maybe_build_task_progress_fastpath",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent._maybe_build_recent_turn_answer",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent._maybe_build_phatic_fastpath_reply",
+            return_value=None,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.chat_retrieval_helpers._run_retrieval",
+            new=_fake_retrieval,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.prompt_builder.infer_render_target_lang",
+            return_value="zh",
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.state_arbiter_queries._resolve_state_arbiter_bond_fact",
+            new=_fake_state_arbiter,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_recall_pack_builder",
+            return_value=_FakeRecallPackBuilder(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
+            new=_fake_unavailable_runtime,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.top_agent.asyncio.to_thread",
+            new=_immediate_to_thread,
+        ))
+        stack.enter_context(patch(
+            "host_brain.airlock.quarantine.classify_ingress",
+            return_value="FACT",
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.observability_persist.persist_chat_episodic_memory",
+            side_effect=_fake_persist_chat_episodic_memory,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_episodic_store",
+            return_value=SimpleNamespace(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=ledger,
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_bond_stage_engine",
+            return_value=SimpleNamespace(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.dependencies.get_bond_update_queue",
+            return_value=_FakeBondQueue(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.bond.bond_dynamics.BondDynamicsWriter",
+            _FakeBondWriter,
+        ))
+        stack.enter_context(patch(
+            "host_brain.bond.user_identity.resolve_bond_user_id",
+            return_value="user-001",
+        ))
+        stack.enter_context(patch(
+            "host_brain.bond.user_identity.get_canonical_bond_user_id",
+            return_value="persona-user-001",
+        ))
+        stack.enter_context(patch(
+            "host_brain.persona.inner_world.get_inner_world",
+            return_value=inner_world,
+        ))
+        stack.enter_context(patch(
+            "host_brain.persona.inner_world._now_ms",
+            new=_fake_now_ms,
+        ))
+        stack.enter_context(patch(
+            "host_brain.persona.body_sense.get_body_sense_model",
+            return_value=_BodySense(),
+        ))
+        stack.enter_context(patch(
+            "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
+            new=AsyncMock(return_value=None),
+        ))
+
+        events = _run(
+            _collect_events_and_drain(
+                top_agent_sse_generator(
+                    request_body=request_body,
+                    request_id="req-runtime-awaken",
+                    session_id="session-001",
+                    ts_ms=current_ts[0],
+                    intent_draft={"id": "intent-001"},
+                    emotion_context={"emotion_tag": "NEUTRAL", "emotion_intensity": 0.4},
+                    emotion_snapshot={},
+                    governor_result={"decision": "APPROVE"},
+                    intent_id="intent-001",
+                    metrics=metrics,
+                )
+            )
+        )
+
+        current_ts[0] += int(6.5 * 3600 * 1000)
+        snapshot = inner_world.on_user_awaken("persona-user-001")
+
+    commit = json.loads(events[-1].removeprefix("data: ").strip())
+    assert commit["reason_code"] == "LLM_UNAVAILABLE"
+    assert round(snapshot.offline_hours, 1) == 6.5
+    assert snapshot.absence_band == "6h_plus"
+    assert snapshot.anticipation_topics == ["那个项目"]
+    assert snapshot.awakening_hint
+
+
 def test_retrieval_init_failure_and_recall_pack_still_dispatch(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
