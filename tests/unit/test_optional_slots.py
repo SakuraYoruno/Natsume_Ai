@@ -44,6 +44,7 @@ class TestOptionalSlots:
         assert "emotion_pulse" in OPTIONAL_SLOTS
         assert "bond_texture" in OPTIONAL_SLOTS
         assert "memory_emotion_hint" in OPTIONAL_SLOTS
+        assert "memory_persona_evidence" in OPTIONAL_SLOTS
         assert "memory_recall_summary" in OPTIONAL_SLOTS
 
     def test_none_returning_builder_not_in_output(self):

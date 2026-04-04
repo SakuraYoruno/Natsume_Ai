@@ -240,6 +240,14 @@ def test_render_node_generation_prompt_includes_memory_recall_persona_block() ->
                     "emotion_pulse": {"emotion_tag": "HAPPY", "mood_state": "steady"},
                     "emotion_recall": "Current affective layer: mood_state=steady; emotion_tag=HAPPY.",
                     "memory_emotion_hint": {"recall_bias": "uncertain"},
+                    "memory_persona_evidence": [
+                        {
+                            "content": "shared walk by the river",
+                            "emotion_color_tag": "WARM",
+                            "suppression_flag": True,
+                            "distortion_level": 0.4,
+                        }
+                    ],
                     "memory_recall_summary": "本次召回命中了 2 条带人格化标记的记忆；其中 1 条处于压制状态；处理建议：先轻触试探，不要把旧事说得过满",
                     "bond_texture": {},
                 },
@@ -253,7 +261,10 @@ def test_render_node_generation_prompt_includes_memory_recall_persona_block() ->
     )
 
     assert "MEMORY_RECALL_PERSONA" in prompt
+    assert "MEMORY_RECALL_EVIDENCE" in prompt
     assert "filtered recollections" in prompt
+    assert "shared walk by the river" in prompt
+    assert "emotion=WARM" in prompt
     assert "本次召回命中了 2 条带人格化标记的记忆" in prompt
 
 

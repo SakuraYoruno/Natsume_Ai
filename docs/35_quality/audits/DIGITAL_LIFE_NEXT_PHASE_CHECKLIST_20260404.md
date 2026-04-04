@@ -151,6 +151,8 @@
 - 重点模块：`host_brain/memory/episodic.py`、`host_brain/app/memory/episodic_store.py`、`host_brain/app/chat_context_builder.py`。
 - 交付物：回忆摘要中的人性化元信息，以及可见的 prompt/runtime 消费链。
 - 验收标准：回忆不再只是“命中文本”，而是带有当前人格状态过滤后的再现。
+- 本轮进展（2026-04-04）：已新增显式 `memory_persona_evidence` 链路，把带 `emotion_color_tag / suppression_flag / distortion_level` 的 recall 片段从 `prompt_context` 透传到 `runtime_payload`，并在 `prompt_builder` 中渲染为 `MEMORY_RECALL_EVIDENCE` 区块。
+- 验证记录：`test_chat_context_builder_helpers_extra.py`、`test_prompt_builder_helpers_extra.py`、`test_memory_persona_behavior_chain.py`、`test_node_style_bindings_prompt.py`、`test_prompt_context_helpers_extra.py`、`test_optional_slots.py` 联跑通过，确认槽位声明、runtime 透传与 prompt 消费一致。
 
 ### N2-T02：让 mood / bond / motive 共同影响记忆取回排序
 

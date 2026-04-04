@@ -453,12 +453,17 @@ def test_build_chat_context_pack_includes_memory_persona_signal(
     )
 
     memory_hint = dict(prompt_context.get("memory_emotion_hint") or {})
+    memory_evidence = list(prompt_context.get("memory_persona_evidence") or [])
     recall_summary = str(prompt_context.get("memory_recall_summary") or "")
     assert meta["valid"] is True
     assert memory_hint["humanized_memory_count"] == 2
     assert memory_hint["suppressed_memory_count"] == 1
     assert memory_hint["dominant_memory_emotion"] == "WARM"
     assert memory_hint["recall_bias"] == "uncertain"
+    assert len(memory_evidence) == 2
+    assert memory_evidence[0]["emotion_color_tag"] == "WARM"
+    assert memory_evidence[0]["suppression_flag"] is True
+    assert memory_evidence[0]["distortion_level"] == pytest.approx(0.4, abs=1e-4)
     assert recall_summary
     assert memory_hint["memory_recall_summary"] == recall_summary
 
@@ -488,6 +493,20 @@ def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expr
                     "recall_bias": "uncertain",
                     "memory_persona_guidance": "touch the memory gently and do not over-claim details",
                 },
+                "memory_persona_evidence": [
+                    {
+                        "content": "shared walk by the river",
+                        "emotion_color_tag": "WARM",
+                        "suppression_flag": True,
+                        "distortion_level": 0.52,
+                    },
+                    {
+                        "content": "quiet afterglow",
+                        "emotion_color_tag": "WARM",
+                        "suppression_flag": False,
+                        "distortion_level": None,
+                    },
+                ],
                 "memory_recall_summary": "本次召回命中了 2 条带人格化标记的记忆；其中 1 条处于压制状态；处理建议：touch the memory gently and do not over-claim details",
             },
             "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
@@ -563,10 +582,14 @@ def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expr
     )
 
     memory_signal = dict(runtime_payload.get("memory_persona_signal") or {})
+    memory_evidence = list(runtime_payload.get("memory_persona_evidence") or [])
     hint = dict(runtime_payload.get("persona_expression_hint") or {})
 
     assert memory_signal["suppressed_memory_count"] == 1
     assert memory_signal["avg_distortion_level"] == pytest.approx(0.52, abs=1e-4)
+    assert len(memory_evidence) == 2
+    assert memory_evidence[0]["emotion_color_tag"] == "WARM"
+    assert memory_evidence[0]["suppression_flag"] is True
     assert runtime_payload["memory_recall_summary"].startswith("本次召回命中了 2 条带人格化标记的记忆")
     assert hint["tone"] == "caring"
     assert hint["follow_up_tendency"] == 0.03

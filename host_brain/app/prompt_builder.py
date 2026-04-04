@@ -1030,6 +1030,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         or memory_emotion_hint.get("memory_recall_summary"),
         limit=360,
     )
+    memory_persona_evidence_raw = prompt_context.get("memory_persona_evidence")
+    memory_persona_evidence = (
+        [dict(item) for item in memory_persona_evidence_raw if isinstance(item, Mapping)]
+        if isinstance(memory_persona_evidence_raw, list)
+        else []
+    )
     bond_texture_raw = prompt_context.get("bond_texture")
     bond_texture = dict(bond_texture_raw) if isinstance(bond_texture_raw, Mapping) else {}
     memory_emotion_hint_json = _truncate_for_prompt(
@@ -1515,6 +1521,32 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             "- Treat recalled memories as filtered recollections, not verbatim evidence.\n"
             f"- {memory_recall_summary}\n\n"
         )
+    memory_recall_evidence_block = ""
+    if memory_persona_evidence:
+        evidence_lines: list[str] = []
+        for item in memory_persona_evidence[:3]:
+            tags: list[str] = []
+            emotion_color_tag = str(item.get("emotion_color_tag") or "").strip().upper()
+            if emotion_color_tag:
+                tags.append(f"emotion={emotion_color_tag}")
+            if bool(item.get("suppression_flag")):
+                tags.append("suppressed")
+            try:
+                distortion_level = float(item.get("distortion_level"))
+            except (TypeError, ValueError):
+                distortion_level = 0.0
+            if distortion_level > 0.0:
+                tags.append(f"distortion={distortion_level:.2f}")
+            content = _truncate_for_prompt(item.get("content"), limit=120) or "memory fragment"
+            prefix = f"[{' | '.join(tags)}] " if tags else ""
+            evidence_lines.append(f"- {prefix}{content}")
+        if evidence_lines:
+            memory_recall_evidence_block = (
+                "MEMORY_RECALL_EVIDENCE:\n"
+                "- Use these tagged recall snippets as filtered memory cues, not literal proof.\n"
+                + "\n".join(evidence_lines)
+                + "\n\n"
+            )
 
     render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
 
@@ -1682,6 +1714,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         f"{cn_style_boost_block}"
         f"{emotion_recall_block}"
         f"{memory_recall_persona_block}"
+        f"{memory_recall_evidence_block}"
         f"{_persona_expression_hint_block}"
         f"{_self_reflection_block}"
         f"{_bond_narrative_block}"

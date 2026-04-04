@@ -343,6 +343,7 @@ def build_chat_context_pack(
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
     memory_persona_signal = _build_memory_persona_signal(retrieval_evidence_items)
+    memory_persona_evidence = _build_memory_persona_evidence(retrieval_rows)
     memory_recall_summary = ""
     if memory_persona_signal:
         memory_emotion_hint.update(memory_persona_signal)
@@ -443,6 +444,8 @@ def build_chat_context_pack(
         "memory_emotion_hint": memory_emotion_hint,
         "bond_texture": bond_texture,
     }
+    if memory_persona_evidence:
+        context_pack["memory_persona_evidence"] = memory_persona_evidence
     if memory_recall_summary:
         context_pack["memory_recall_summary"] = memory_recall_summary
 
@@ -623,6 +626,39 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
         "recall_bias": recall_bias,
         "memory_persona_guidance": guidance_text or None,
     }
+
+
+def _build_memory_persona_evidence(retrieval_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    evidence_rows: list[dict[str, Any]] = []
+    for row in list(retrieval_rows or [])[:8]:
+        if not isinstance(row, Mapping):
+            continue
+        emotion_color_tag = str(row.get("emotion_color_tag") or "").strip().upper()
+        suppression_flag = _coerce_optional_bool(row.get("suppression_flag")) is True
+        distortion_level = _coerce_optional_float(row.get("distortion_level"))
+        if distortion_level is not None:
+            distortion_level = round(_clamp_float(float(distortion_level), minimum=0.0, maximum=1.0), 4)
+        if not emotion_color_tag and not suppression_flag and (distortion_level is None or distortion_level <= 0.0):
+            continue
+
+        content = _truncate_for_prompt(row.get("content"), limit=160)
+        if not content:
+            continue
+
+        evidence_rows.append(
+            {
+                "content": content,
+                "emotion_color_tag": emotion_color_tag or None,
+                "suppression_flag": suppression_flag,
+                "distortion_level": distortion_level,
+                "source_ref": str(row.get("source_ref") or "").strip() or None,
+                "evidence_ref": str(row.get("evidence_ref") or "").strip() or None,
+                "kind": str(row.get("kind") or "episodic").strip() or "episodic",
+            }
+        )
+        if len(evidence_rows) >= 4:
+            break
+    return evidence_rows
 
 
 def _build_memory_recall_summary(memory_signal_raw: Mapping[str, Any] | None) -> str:
@@ -1000,6 +1036,11 @@ def build_prompt_context_observability(
     node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
     emotion_recall_text = str(prompt_context.get("emotion_recall") or "").strip()
     memory_recall_summary_text = str(prompt_context.get("memory_recall_summary") or "").strip()
+    memory_persona_evidence_rows = (
+        list(prompt_context.get("memory_persona_evidence") or [])
+        if isinstance(prompt_context.get("memory_persona_evidence"), list)
+        else []
+    )
 
     slot_item_counts = {
         "authoritative": len(authoritative_rows),
@@ -1008,6 +1049,7 @@ def build_prompt_context_observability(
         "style_node_bindings": len(node_bindings),
         "tool_meta_pack": len(tool_meta_rows),
         "emotion_recall": (1 if emotion_recall_text else 0),
+        "memory_persona_evidence": len(memory_persona_evidence_rows),
         "memory_recall_summary": (1 if memory_recall_summary_text else 0),
     }
 
@@ -1032,6 +1074,7 @@ def build_prompt_context_observability(
                 "constraints": dict(prompt_context.get("constraints") or {}),
                 "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
                 "emotion_recall": emotion_recall_text,
+                "memory_persona_evidence": memory_persona_evidence_rows,
                 "memory_recall_summary": memory_recall_summary_text,
             },
             ensure_ascii=False,
@@ -1234,6 +1277,14 @@ def build_chat_prompt_runtime_payload(
     )
     if memory_persona_signal:
         runtime_payload["memory_persona_signal"] = memory_persona_signal
+    memory_persona_evidence_raw = prompt_context.get("memory_persona_evidence")
+    memory_persona_evidence = (
+        [dict(item) for item in memory_persona_evidence_raw if isinstance(item, Mapping)]
+        if isinstance(memory_persona_evidence_raw, list)
+        else []
+    )
+    if memory_persona_evidence:
+        runtime_payload["memory_persona_evidence"] = memory_persona_evidence
     memory_recall_summary = str(
         prompt_context.get("memory_recall_summary")
         or memory_persona_signal.get("memory_recall_summary")
