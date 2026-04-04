@@ -854,6 +854,16 @@ def _apply_persona_recall_weight(
     continuity_bias = _clamp_unit_float(persona_profile.get("continuity_bias"))
     warm_bias = _clamp_unit_float(persona_profile.get("warm_bias"))
     bond_depth = _clamp_unit_float(persona_profile.get("bond_depth"))
+    reach_out_drive = _clamp_unit_float(persona_profile.get("reach_out_drive"))
+    care_drive = _clamp_unit_float(persona_profile.get("care_drive"))
+    continuity_drive = _clamp_unit_float(persona_profile.get("continuity_drive"))
+    withdraw_drive = _clamp_unit_float(persona_profile.get("withdraw_drive"))
+    self_protect_drive = _clamp_unit_float(persona_profile.get("self_protect_drive"))
+    shared_history_pull = _clamp_unit_float(
+        continuity_drive * 0.55 + care_drive * 0.25 + reach_out_drive * 0.20
+    )
+    relational_safety = _clamp_unit_float(max(bond_depth * 0.80, warm_bias * 0.75))
+    defensive_recoil = _clamp_unit_float(max(protect_bias, self_protect_drive, withdraw_drive))
 
     multiplier = 1.0
     reason_tags: list[str] = []
@@ -873,11 +883,25 @@ def _apply_persona_recall_weight(
         if warm_boost > 0.0:
             reason_tags.append("warm_memory_boost")
 
+    if memory_flags["continuity_memory"] and memory_flags["warm_memory"]:
+        resonance_signal = max(shared_history_pull, relational_safety)
+        if resonance_signal >= 0.58:
+            resonance_boost = 0.04 * shared_history_pull + 0.03 * max(0.0, relational_safety - 0.55)
+            multiplier += resonance_boost
+            if resonance_boost > 0.0:
+                reason_tags.append("shared_history_resonance")
+
     if memory_flags["fragile_memory"]:
         fragile_penalty = 0.08 * protect_bias + 0.03 * memory_flags["distortion_level"]
         multiplier -= fragile_penalty
         if fragile_penalty > 0.0:
             reason_tags.append("fragile_memory_guard")
+
+        if defensive_recoil >= 0.72:
+            protective_recoil_penalty = 0.07 * (defensive_recoil - 0.72) + 0.05 * max(withdraw_drive, self_protect_drive)
+            multiplier -= protective_recoil_penalty
+            if protective_recoil_penalty > 0.0:
+                reason_tags.append("protective_recoil_penalty")
 
     if memory_flags["suppression_flag"]:
         multiplier -= 0.18 * protect_bias + 0.08
@@ -899,9 +923,16 @@ def _apply_persona_recall_weight(
         "bond_stage": str(persona_profile.get("bond_stage") or ""),
         "bond_depth": round(bond_depth, 4),
         "dominant_motive": str(persona_profile.get("dominant_motive") or ""),
+        "reach_out_drive": round(reach_out_drive, 4),
+        "care_drive": round(care_drive, 4),
+        "continuity_drive": round(continuity_drive, 4),
+        "withdraw_drive": round(withdraw_drive, 4),
+        "self_protect_drive": round(self_protect_drive, 4),
         "protect_bias": round(protect_bias, 4),
         "continuity_bias": round(continuity_bias, 4),
         "warm_bias": round(warm_bias, 4),
+        "shared_history_pull": round(shared_history_pull, 4),
+        "defensive_recoil": round(defensive_recoil, 4),
     }
     updated_metadata["persona_recall_multiplier"] = round(multiplier, 6)
     updated_metadata["persona_recall_boost"] = boost

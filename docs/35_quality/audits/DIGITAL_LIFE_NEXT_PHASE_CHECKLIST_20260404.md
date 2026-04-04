@@ -160,6 +160,8 @@
 - 重点模块：`host_brain/memory/episodic.py`、`host_brain/retrieval/`、`host_brain/app/chat_context_builder.py`。
 - 交付物：最小排序权重策略与测试矩阵。
 - 验收标准：轻聊时不轻易翻出高压痛感记忆；高 care / 高 continuity 场景更容易取回关系延续性记忆。
+- 本轮进展（2026-04-04）：已在 `host_brain/retrieval/recall_fusion.py` 增加 `shared_history_resonance` 与 `protective_recoil_penalty` 两类 persona-aware 权重，让 `mood_state / bond_depth / continuity_drive / care_drive / self_protect_drive` 共同参与 episodic recall 排序。
+- 验证记录：已补充 `tests/unit/test_recall_fusion_persona_memory_ranking.py` 两组 N2-T02 回归样本，并与 `tests/unit/test_memory_persona_behavior_chain.py` 聚焦联跑通过，确认高连续性共享记忆可压过略高相似度的中性记忆，且高防御状态会进一步压低 fragile / suppressed memory。
 
 ### N2-T03：让记忆人格化结果影响主动与主回复表达
 

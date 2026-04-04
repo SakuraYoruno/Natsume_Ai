@@ -219,3 +219,119 @@ def test_no_persona_context_keeps_default_ranking() -> None:
     top = result.output["candidates"][0]
     assert top["doc_id"] == "fragile-memory"
     assert "persona_recall_boost" not in top["metadata"]
+
+
+def test_joint_relational_signals_prioritize_shared_history_over_higher_score_neutral() -> None:
+    service, chroma = _make_service()
+    _upsert_memory(
+        chroma,
+        memory_id="shared-promise",
+        text="I still remember the promise we made last time together.",
+        score=0.74,
+        metadata={
+            "emotion_tag": "HAPPY",
+            "emotion_color_tag": "WARM",
+            "suppression_flag": False,
+            "distortion_level": 0.0,
+        },
+    )
+    _upsert_memory(
+        chroma,
+        memory_id="neutral-log",
+        text="Routine archive entry for a neutral note.",
+        score=0.91,
+        metadata={
+            "emotion_tag": "NEUTRAL",
+            "emotion_color_tag": "NEUTRAL",
+            "suppression_flag": False,
+            "distortion_level": 0.0,
+        },
+    )
+
+    result = service.recall(
+        request_id="req-persona-resonance",
+        query="Do you still remember what we promised last time?",
+        query_embedding=_QUERY_EMBEDDING,
+        mood_state="warm",
+        bond_summary={"stage": "CLOSE_FRIEND", "score": 0.84},
+        motive_state={
+            "dominant_motive": "continuity",
+            "drives": {
+                "continuity_drive": 0.95,
+                "care_drive": 0.88,
+                "reach_out_drive": 0.78,
+            },
+        },
+    )
+
+    top = result.output["candidates"][0]
+    assert top["doc_id"] == "shared-promise"
+    assert top["metadata"]["persona_recall_multiplier"] > 1.25
+    assert "shared_history_resonance" in top["metadata"]["persona_recall_reason_tags"]
+
+
+def test_defensive_recoil_penalty_only_appears_for_high_guarded_fragile_memory() -> None:
+    service, chroma = _make_service()
+    _upsert_memory(
+        chroma,
+        memory_id="fragile-memory",
+        text="I do not want to reopen that distorted and painful memory.",
+        score=0.88,
+        metadata={
+            "emotion_tag": "SAD",
+            "emotion_color_tag": "SAD",
+            "suppression_flag": True,
+            "distortion_level": 0.62,
+        },
+    )
+    _upsert_memory(
+        chroma,
+        memory_id="neutral-memory",
+        text="A neutral memory note without emotional pull.",
+        score=0.71,
+        metadata={
+            "emotion_tag": "NEUTRAL",
+            "emotion_color_tag": "NEUTRAL",
+            "suppression_flag": False,
+            "distortion_level": 0.0,
+        },
+    )
+
+    mild = service.recall(
+        request_id="req-persona-mild-guard",
+        query="What happened there?",
+        query_embedding=_QUERY_EMBEDDING,
+        mood_state="steady",
+        bond_summary={"stage": "FRIEND", "score": 0.62},
+        motive_state={
+            "dominant_motive": "care",
+            "drives": {
+                "continuity_drive": 0.36,
+                "care_drive": 0.48,
+                "self_protect_drive": 0.34,
+                "withdraw_drive": 0.22,
+            },
+        },
+    )
+    guarded = service.recall(
+        request_id="req-persona-high-guard",
+        query="What happened there?",
+        query_embedding=_QUERY_EMBEDDING,
+        mood_state="withdrawn",
+        bond_summary={"stage": "FRIEND", "score": 0.62},
+        motive_state={
+            "dominant_motive": "self_protect",
+            "drives": {
+                "continuity_drive": 0.22,
+                "care_drive": 0.18,
+                "self_protect_drive": 0.94,
+                "withdraw_drive": 0.86,
+            },
+        },
+    )
+
+    mild_fragile = next(item for item in mild.output["candidates"] if item["doc_id"] == "fragile-memory")
+    guarded_fragile = next(item for item in guarded.output["candidates"] if item["doc_id"] == "fragile-memory")
+    assert guarded_fragile["metadata"]["persona_recall_multiplier"] < mild_fragile["metadata"]["persona_recall_multiplier"]
+    assert "protective_recoil_penalty" in guarded_fragile["metadata"]["persona_recall_reason_tags"]
+    assert "protective_recoil_penalty" not in mild_fragile["metadata"]["persona_recall_reason_tags"]
