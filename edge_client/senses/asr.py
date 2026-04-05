@@ -932,6 +932,9 @@ class AsrService:
         self._lock = threading.Lock()
         self._audio_buffer: list[Any] = []
         self._buffer_start_ts: int = 0
+        self._buffer_duration_s: float = 0.0
+        self._trailing_silence_duration_s: float = 0.0
+        self._trailing_silence_chunks: int = 0
         self._running = False
         self._rpc_event_callback = rpc_event_callback
         # ── 设备恢复状态 ──
@@ -972,8 +975,7 @@ class AsrService:
         with self._lock:
             self._session_id = session_id or f"asr_{new_request_id()}"
             self._seq = 0
-            self._audio_buffer = []
-            self._buffer_start_ts = 0
+            self._reset_audio_window_locked()
 
         # Load model first
         load_result = self._model.load()
@@ -1041,6 +1043,35 @@ class AsrService:
             ]
 
         results: list[VoiceRpcResult] = []
+        if final:
+            combined_text = self._combine_segment_texts(
+                seg.text for seg in asr_result.segments
+            )
+            if combined_text:
+                combined_alternates = self._collect_segment_alternates(
+                    asr_result.segments
+                )
+                average_confidence = round(
+                    sum(seg.confidence for seg in asr_result.segments)
+                    / len(asr_result.segments),
+                    4,
+                )
+                first_segment = asr_result.segments[0]
+                last_segment = asr_result.segments[-1]
+                results.append(
+                    self._emit_rpc_event(
+                        request_id=req_id,
+                        text=combined_text,
+                        confidence=average_confidence,
+                        start_ms=int(first_segment.start * 1000),
+                        end_ms=int(last_segment.end * 1000),
+                        alternates=combined_alternates,
+                        final=True,
+                        ts_ms=timestamp + max(0, int(first_segment.start * 1000)),
+                    )
+                )
+                return results
+
         for seg in asr_result.segments:
             alternates: list[dict[str, Any]] = []
             if seg.words:
@@ -1284,18 +1315,38 @@ class AsrService:
         if not self._running:
             return
 
+        is_silent_like = self._chunk_looks_silent(audio_chunk)
+        if is_silent_like:
+            with self._lock:
+                if not self._audio_buffer:
+                    return
+
         with self._lock:
             if not self._audio_buffer:
                 self._buffer_start_ts = ts_ms
             self._audio_buffer.append(audio_chunk)
+            self._buffer_duration_s += self._config.chunk_duration_s
+            if is_silent_like:
+                self._trailing_silence_duration_s += self._config.chunk_duration_s
+                self._trailing_silence_chunks += 1
+            else:
+                self._trailing_silence_duration_s = 0.0
+                self._trailing_silence_chunks = 0
+            buffer_duration = self._buffer_duration_s
+            trailing_silence_duration = self._trailing_silence_duration_s
 
-        # Check if buffer exceeds max speech duration
-        buffer_duration = (ts_ms - self._buffer_start_ts) / 1000.0
         if buffer_duration >= self._config.max_speech_duration_s:
             self._flush_buffer(final=False)
-        elif buffer_duration >= self._config.silence_duration_s:
-            # Try VAD-based flush
-            self._flush_buffer(final=False)
+        elif trailing_silence_duration >= self._config.silence_duration_s:
+            self._flush_buffer(final=True)
+
+    def _chunk_looks_silent(self, audio_chunk: Any) -> bool:
+        peak = WhisperModelManager._estimate_audio_peak(audio_chunk)
+        rms = WhisperModelManager._estimate_audio_rms(audio_chunk)
+        return (
+            peak < self._config.precheck_min_peak
+            and rms < self._config.precheck_min_rms
+        )
 
     def _flush_buffer(self, final: bool = False) -> None:
         """Flush accumulated audio buffer through transcription."""
@@ -1303,8 +1354,16 @@ class AsrService:
             if not self._audio_buffer:
                 return
             buffer_copy = list(self._audio_buffer)
-            self._audio_buffer = []
             start_ts = self._buffer_start_ts
+            trailing_silence_chunks = (
+                self._trailing_silence_chunks if final else 0
+            )
+            self._reset_audio_window_locked()
+
+        if 0 < trailing_silence_chunks < len(buffer_copy):
+            buffer_copy = buffer_copy[:-trailing_silence_chunks]
+        if not buffer_copy:
+            return
 
         try:
             import numpy as np
@@ -1319,6 +1378,43 @@ class AsrService:
             ts_ms=start_ts,
             final=final,
         )
+
+    def _reset_audio_window_locked(self) -> None:
+        self._audio_buffer = []
+        self._buffer_start_ts = 0
+        self._buffer_duration_s = 0.0
+        self._trailing_silence_duration_s = 0.0
+        self._trailing_silence_chunks = 0
+
+    @staticmethod
+    def _combine_segment_texts(parts: list[str] | tuple[str, ...] | Any) -> str:
+        combined = ""
+        for raw_part in parts:
+            part = str(raw_part or "").strip()
+            if not part:
+                continue
+            if combined and combined[-1].isalnum() and part[0].isalnum():
+                combined = f"{combined} {part}"
+            else:
+                combined = f"{combined}{part}"
+        return combined
+
+    @staticmethod
+    def _collect_segment_alternates(
+        segments: list[TranscriptionSegment],
+    ) -> list[dict[str, Any]]:
+        alternates: list[dict[str, Any]] = []
+        for seg in segments:
+            if not seg.words:
+                continue
+            for word in seg.words:
+                alternates.append({
+                    "text": word.get("word", ""),
+                    "confidence": round(word.get("probability", 0.0), 4),
+                })
+                if len(alternates) >= 3:
+                    return alternates
+        return alternates
 
     def _emit_rpc_event(
         self,

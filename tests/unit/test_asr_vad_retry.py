@@ -175,6 +175,106 @@ def test_asr_service_offsets_segment_timestamps() -> None:
     assert rpc.asr_chunk.call_args_list[1].kwargs["ts_ms"] == 1600
 
 
+def test_asr_service_coalesces_final_segments_into_one_event() -> None:
+    rpc = MagicMock()
+    rpc.asr_chunk.return_value = MagicMock()
+    model = MagicMock()
+    model.transcribe.return_value = AsrResult(
+        success=True,
+        reason_code=None,
+        detail="ok",
+        segments=[
+            TranscriptionSegment(text="hello", start=0.0, end=0.4, confidence=0.7),
+            TranscriptionSegment(text="world", start=0.6, end=1.0, confidence=0.9),
+        ],
+        language="zh",
+        language_probability=0.99,
+        duration_s=1.0,
+        processing_time_s=0.1,
+    )
+
+    service = AsrService(
+        rpc=rpc,
+        config=AsrConfig(device="cpu"),
+        model_manager=model,
+    )
+
+    service.transcribe_audio([0.1, -0.1], request_id="req-test", ts_ms=1000, final=True)
+
+    assert rpc.asr_chunk.call_count == 1
+    assert rpc.asr_chunk.call_args.kwargs["payload"]["text"] == "hello world"
+    assert rpc.asr_chunk.call_args.kwargs["payload"]["final"] is True
+    assert rpc.asr_chunk.call_args.kwargs["ts_ms"] == 1000
+
+
+def test_asr_service_marks_silence_window_flush_as_final() -> None:
+    service = AsrService(
+        rpc=MagicMock(),
+        config=AsrConfig(
+            device="cpu",
+            chunk_duration_s=0.5,
+            silence_duration_s=1.0,
+            precheck_min_peak=0.01,
+            precheck_min_rms=0.002,
+        ),
+        model_manager=MagicMock(),
+    )
+    service._running = True
+    service._flush_buffer = MagicMock()
+
+    service._on_audio_chunk([0.2, -0.2], 1000)
+    service._on_audio_chunk([0.0, 0.0, 0.0], 1500)
+
+    service._flush_buffer.assert_not_called()
+
+    service._on_audio_chunk([0.0, 0.0, 0.0], 2000)
+
+    service._flush_buffer.assert_called_once_with(final=True)
+
+
+def test_asr_service_keeps_active_audio_window_buffered() -> None:
+    service = AsrService(
+        rpc=MagicMock(),
+        config=AsrConfig(
+            device="cpu",
+            silence_duration_s=1.0,
+            max_speech_duration_s=10.0,
+            precheck_min_peak=0.01,
+            precheck_min_rms=0.002,
+        ),
+        model_manager=MagicMock(),
+    )
+    service._running = True
+    service._flush_buffer = MagicMock()
+
+    service._on_audio_chunk([0.2, -0.2], 1000)
+    service._on_audio_chunk([0.2, -0.2], 2000)
+
+    service._flush_buffer.assert_not_called()
+
+
+def test_asr_service_ignores_leading_silence_chunks() -> None:
+    service = AsrService(
+        rpc=MagicMock(),
+        config=AsrConfig(
+            device="cpu",
+            chunk_duration_s=0.5,
+            silence_duration_s=1.0,
+            precheck_min_peak=0.01,
+            precheck_min_rms=0.002,
+        ),
+        model_manager=MagicMock(),
+    )
+    service._running = True
+    service._flush_buffer = MagicMock()
+
+    service._on_audio_chunk([0.0, 0.0, 0.0], 1000)
+    service._on_audio_chunk([0.0, 0.0, 0.0], 1500)
+
+    assert service._audio_buffer == []
+    service._flush_buffer.assert_not_called()
+
+
 def test_word_probabilities_drive_segment_confidence() -> None:
     segment = SimpleNamespace(
         text=" 测试 ",
