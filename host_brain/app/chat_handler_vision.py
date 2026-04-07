@@ -23,7 +23,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Mapping, Optional
 
 from host_brain.airlock.image_filter import (
     IMAGE_EGRESS_BLOCK,
@@ -42,11 +42,48 @@ from host_brain.app.graph_config_builder import (
     resolve_host_llm_runtime_async,
 )
 from host_brain.app.observability_persist import persist_chat_episodic_memory
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.schemas import ChatRequest
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
 
 _logger = logging.getLogger("Natsume.chat_handler_vision")
+
+
+class _SafeTemplateDict(dict[str, str]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict(
+        {
+            str(key): "" if value is None else str(value)
+            for key, value in kwargs.items()
+        }
+    )
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    return _format_template_text(mapping.get(key, default), **kwargs)
 
 # ---------------------------------------------------------------------------
 # 云模型 SLA 监控（生产化加固）
@@ -165,68 +202,85 @@ VISION_UI_NODE_SEQUENCE = [
     "vision_renderer",         # 结构化输出渲染（界面元素 + 操作建议）
 ]
 
-# ---------------------------------------------------------------------------
-# 视觉分析 Prompt 模板
-# ---------------------------------------------------------------------------
-
-_VISION_ANALYSIS_SYSTEM_PROMPT = """你是夏目（Natsume），一个温柔、聪明的 AI 助手，擅长分析用户界面和屏幕截图。
-
-当用户分享屏幕截图或描述界面内容时，你需要：
-1. 识别界面类型（应用程序、网页、系统界面等）
-2. 描述界面中的主要元素和布局
-3. 理解用户的操作意图
-4. 提供具体、可操作的建议
-
-回答风格：温柔自然，像朋友一样解释，避免过于技术性的术语。
-语言：根据用户消息语言自动切换（中文/日文/英文）。
-"""
-
-_VISION_ANALYSIS_USER_PROMPT_TEMPLATE = """用户消息：{user_message}
-
-{vision_context_section}
-
-请分析上述内容，提供：
-1. 界面/内容识别：这是什么类型的界面或内容？
-2. 关键元素：主要的界面元素有哪些？
-3. 操作建议：针对用户的问题，具体应该怎么操作？
-4. 自然语言回复：用温柔友好的语气回答用户。
-
-请直接给出自然语言回复，不需要分点列举（除非用户明确要求）。"""
-
-
 def _build_vision_context_section(vision_context: Optional[Dict[str, Any]]) -> str:
     """构建视觉上下文描述段落。"""
+    templates = _load_template_mapping("chat_handler_vision.analysis_prompt.templates")
     if not vision_context:
-        return "（用户未提供截图，请根据文字描述进行分析）"
+        return _mapping_text(
+            templates,
+            "no_screenshot_context",
+        )
 
     parts = []
     screen_desc = str(vision_context.get("screen_description") or "").strip()
     if screen_desc:
-        parts.append(f"界面描述：{screen_desc}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "screen_description_label",
+                value=screen_desc,
+            )
+        )
 
     app_name = str(vision_context.get("app_name") or "").strip()
     if app_name:
-        parts.append(f"应用程序：{app_name}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "app_name_label",
+                value=app_name,
+            )
+        )
 
     os_info = str(vision_context.get("os_info") or "").strip()
     if os_info:
-        parts.append(f"操作系统：{os_info}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "os_info_label",
+                value=os_info,
+            )
+        )
 
     resolution = str(vision_context.get("resolution") or "").strip()
     if resolution:
-        parts.append(f"分辨率：{resolution}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "resolution_label",
+                value=resolution,
+            )
+        )
 
     error_text = str(vision_context.get("error_text") or "").strip()
     if error_text:
-        parts.append(f"错误信息：{error_text}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "error_text_label",
+                value=error_text,
+            )
+        )
 
     selected_text = str(vision_context.get("selected_text") or "").strip()
     if selected_text:
-        parts.append(f"选中文本：{selected_text}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "selected_text_label",
+                value=selected_text,
+            )
+        )
 
     if parts:
-        return "视觉上下文：\n" + "\n".join(f"  - {p}" for p in parts)
-    return "（视觉上下文为空，请根据文字描述进行分析）"
+        return (
+            f"{_mapping_text(templates, 'context_title')}\n"
+            + "\n".join(f"  - {part}" for part in parts)
+        )
+    return _mapping_text(
+        templates,
+        "empty_context",
+    )
 
 
 def _has_image_input(vision_context: Optional[Dict[str, Any]]) -> bool:
@@ -267,11 +321,15 @@ async def _call_vision_llm(
     api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
     timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 15000)
     available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))
+    analysis_templates = _load_template_mapping("chat_handler_vision.analysis_prompt.templates")
+    fallback_templates = _load_template_mapping("chat_handler_vision.fallback_texts")
 
     if not available or not api_key:
-        # 降级：返回友好的不可用提示
         return {
-            "narrative": "啊啦，视觉分析功能现在暂时不可用呢。不过你可以用文字描述一下你看到的界面，我来帮你分析！",
+            "narrative": _mapping_text(
+                fallback_templates,
+                "llm_unavailable",
+            ),
             "model_used": model_id,
             "provider": provider_name,
             "status": "DEGRADED",
@@ -279,7 +337,9 @@ async def _call_vision_llm(
         }
 
     vision_context_section = _build_vision_context_section(vision_context)
-    user_prompt = _VISION_ANALYSIS_USER_PROMPT_TEMPLATE.format(
+    user_prompt = _mapping_text(
+        analysis_templates,
+        "user_prompt_template",
         user_message=user_message,
         vision_context_section=vision_context_section,
     )
@@ -330,8 +390,12 @@ async def _call_vision_llm(
 
         # 构建消息列表（支持多模态）
         messages: list[dict] = [
-            {"role": "system", "content": _VISION_ANALYSIS_SYSTEM_PROMPT},
+            {"role": "system", "content": ""},
         ]
+        messages[0]["content"] = _mapping_text(
+            analysis_templates,
+            "system_prompt",
+        )
         if has_image and image_base64:
             # Gemini Vision 多模态消息格式
             messages.append({
@@ -381,7 +445,10 @@ async def _call_vision_llm(
                 narrative = str(result.get("content") or result.get("text") or "").strip()
 
         if not narrative:
-            narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
+            narrative = _mapping_text(
+                fallback_templates,
+                "empty_narrative",
+            )
 
         return {
             "narrative": narrative,
@@ -414,7 +481,10 @@ async def _call_vision_llm(
             provider=provider_name,
         )
         return {
-            "narrative": "啊啦，视觉分析的时候遇到了一点小问题呢。你可以再试一次，或者用文字描述一下你看到的内容，我来帮你！",
+            "narrative": _mapping_text(
+                fallback_templates,
+                "llm_error",
+            ),
             "model_used": model_id,
             "provider": provider_name,
             "status": "DEGRADED",
@@ -453,6 +523,8 @@ async def _vision_ui_sse_generator(
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    fallback_templates = _load_template_mapping("chat_handler_vision.fallback_texts")
+
     # ── 生产化加固：HMAC 签名校验 ─────────────────────────────────────────
     # 环境变量：HOST_VISION_HMAC_SECRET（非空时启用）
     # 请求方需在 request_body.hmac_signature 中提供签名：
@@ -488,7 +560,10 @@ async def _vision_ui_sse_generator(
                 "done": True,
                 "decision": "REJECT",
                 "reason_code": "VISION_HMAC_INVALID",
-                "narrative": "啊啦，请求签名验证失败呢，请检查一下鉴权配置。",
+                "narrative": _mapping_text(
+                    fallback_templates,
+                    "hmac_rejected",
+                ),
                 "request_id": request_id,
             })
             return
@@ -525,7 +600,10 @@ async def _vision_ui_sse_generator(
                 "done": True,
                 "decision": "REJECT",
                 "reason_code": "VISION_ORIGIN_NOT_ALLOWED",
-                "narrative": "啊啦，这个请求来源不在允许范围内呢。",
+                "narrative": _mapping_text(
+                    fallback_templates,
+                    "origin_not_allowed",
+                ),
                 "request_id": request_id,
             })
             return
@@ -656,7 +734,10 @@ async def _vision_ui_sse_generator(
         })
 
         if not narrative:
-            narrative = "啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？"
+            narrative = _mapping_text(
+                fallback_templates,
+                "empty_narrative",
+            )
 
         # response_format 分支：actions 模式 → 生成 ActionPlan
         response_format = str(getattr(request_body, "response_format", "text") or "text").lower()
@@ -800,6 +881,9 @@ async def _vision_ui_sse_generator(
             "done": True,
             "decision": "REJECT",
             "reason_code": "VISION_INTERNAL_ERROR",
-            "narrative": "啊啦，视觉分析的时候遇到了一点小问题呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？",
+            "narrative": _mapping_text(
+                fallback_templates,
+                "sse_error",
+            ),
             "request_id": request_id,
         })

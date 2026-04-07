@@ -10,12 +10,35 @@ import sqlite3 as _sqlite3
 import time as _time
 import urllib.request as _urlreq
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 from host_brain.persona.offline_continuity import (
     reconnect_style_for_absence_band,
     resolve_absence_band as resolve_offline_absence_band,
 )
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 
 def read_world_canon_fact(world_store: Any, fact_key: str) -> str | None:
@@ -1254,6 +1277,7 @@ def _build_llm_generator(
     dream_snippet: str,
 ) -> Callable[[dict[str, Any]], dict[str, Any]]:
     def _llm_generator(llm_input: dict[str, Any]) -> dict[str, Any]:
+        templates = _load_template_mapping("http_hooks_runtime_helpers.proactive_talk_llm_prompt")
         time_period = llm_input.get("time_period", "evening")
         user_name = llm_input.get("user_name", "主人")
         topic_hint = llm_input.get("topic_hint") or ""
@@ -1265,26 +1289,82 @@ def _build_llm_generator(
         motive_hint = str(llm_input.get("motive_hint") or "").strip()
 
         prompt_parts = [
-            f"你是夏目藍，现在是{time_period}时段。",
-            f"请主动发起一句话问候{user_name}。",
+            _mapping_text(
+                templates,
+                "time_period_line",
+                time_period=time_period,
+            ),
+            _mapping_text(
+                templates,
+                "greeting_line",
+                user_name=user_name,
+            ),
         ]
         if stage:
-            prompt_parts.append(f"当前关系阶段：{stage}，{hint}。")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "bond_stage_line",
+                    stage=stage,
+                    hint=hint,
+                )
+            )
         if emotion_hint:
-            prompt_parts.append(f"你的情感状态：{emotion_hint}")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "emotion_hint_line",
+                    emotion_hint=emotion_hint,
+                )
+            )
         if motive_hint:
-            prompt_parts.append(f"你当前的主动动机：{motive_hint}")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "motive_hint_line",
+                    motive_hint=motive_hint,
+                )
+            )
         if dream_snippet:
-            prompt_parts.append(f"你昨晚做了一个梦，可以自然地提起：{dream_snippet[:60]}。")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "dream_snippet_line",
+                    dream_snippet=dream_snippet[:60],
+                )
+            )
         elif diary_snippet:
-            prompt_parts.append(f"你写了日记，可以自然地提起今天的感受：{diary_snippet[:60]}。")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "diary_snippet_line",
+                    diary_snippet=diary_snippet[:60],
+                )
+            )
         elif topics_str:
-            prompt_parts.append(f"可以围绕最近话题展开：{topics_str}。")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "recent_topics_line",
+                    topics_str=topics_str,
+                )
+            )
         if topic_hint:
-            prompt_parts.append(f"话题提示：{topic_hint}。")
-        prompt_parts.append("要求：自然、温暖、20字以内，不要重复打招呼模板。")
+            prompt_parts.append(
+                _mapping_text(
+                    templates,
+                    "topic_hint_line",
+                    topic_hint=topic_hint,
+                )
+            )
+        prompt_parts.append(
+            _mapping_text(
+                templates,
+                "requirements_line",
+            )
+        )
 
-        prompt = "".join(prompt_parts)
+        prompt = _mapping_text(templates, "prompt_separator").join(prompt_parts)
         try:
             data = _json.dumps(
                 {

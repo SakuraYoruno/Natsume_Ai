@@ -307,6 +307,8 @@ def test_render_node_prompt_adds_affection_reply_guidance() -> None:
 
     assert "Avoid generic acknowledgement formulas" in prompt
     assert "For affection or confession messages" in prompt
+    assert "answer your stance explicitly in the first sentence" in prompt
+    assert "Never reply with only a generic thanks or acknowledgement." in prompt
 
 
 def test_prompt_context_observability_marks_bare_llm_when_minimal_fallback() -> None:

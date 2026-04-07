@@ -9,12 +9,13 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from host_brain.app.chat_runtime_input import (
     get_chat_runtime_render_target_lang,
     get_chat_runtime_user_message,
 )
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
@@ -34,6 +35,74 @@ from host_brain.app.prompt_builder import (
 )
 
 _logger = logging.getLogger("Natsume.provider_factory")
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _build_host_openai_system_prompt(node_id: str | None) -> str:
+    templates = _load_template_mapping("provider_factory.host_openai.prompt_templates")
+    resolved_node_id = str(node_id or "").strip()
+    if resolved_node_id:
+        return _mapping_text(
+            templates,
+            "system_prompt_with_node",
+            node_id=resolved_node_id,
+        )
+    return _mapping_text(
+        templates,
+        "system_prompt_default",
+    )
+
+
+def _build_host_mock_reply_text(node_id: str | None, runtime_payload: dict[str, Any]) -> str:
+    templates = _load_template_mapping("provider_factory.host_mock.reply_templates")
+    resolved_node_id = str(node_id or "").strip()
+    user_message = (
+        _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=120)
+        or _mapping_text(templates, "fallback_user_message")
+    )
+    if resolved_node_id in {CHAT_RENDER_NODE_ID, CHAT_DIRECT_NODE_ID}:
+        render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
+        if render_target_lang == "zh":
+            return _mapping_text(
+                templates,
+                "zh_render_reply",
+                user_message=user_message,
+            )
+        return _mapping_text(
+            templates,
+            "ja_render_reply",
+            user_message=user_message,
+        )
+    if resolved_node_id in {"safety_verifier", "consistency_verifier"}:
+        return _mapping_text(
+            templates,
+            "verifier_pass_reply",
+        )
+    return _mapping_text(
+        templates,
+        "generic_reply",
+        user_message=user_message,
+    )
 
 _GEMINI_PRIMARY_RETRY_NODE_ID = "core_reasoner_primary"
 _GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro"})
@@ -268,20 +337,7 @@ def build_langchain_chat_provider_fn(
         temperature=0.4,
     )
     resolved_node_id = str(node_id or "").strip()
-    if resolved_node_id:
-        system_prompt = (
-            f"You are 夏目藍(Natsume Ai), processing node `{resolved_node_id}`. "
-            "You are NOT an AI or assistant — you are 夏目藍 herself. "
-            "Output exactly one JSON object with keys narrative, intent_draft, meta. "
-            "meta.draft_only must be true."
-        )
-    else:
-        system_prompt = (
-            "You are 夏目藍(Natsume Ai). "
-            "You are NOT an AI or assistant — you are 夏目藍 herself. "
-            "Output exactly one JSON object with keys narrative, intent_draft, meta. "
-            "meta.draft_only must be true."
-        )
+    system_prompt = _build_host_openai_system_prompt(resolved_node_id)
 
     def _provider(prompt_payload: dict[str, Any]) -> str:
         runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
@@ -322,17 +378,7 @@ def build_host_mock_provider_for_node(node_id: str | None) -> Callable[[dict[str
         runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
         if not isinstance(runtime_payload, dict):
             runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
-        user_message = _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=120) or "你好"
-        if resolved_node_id in {CHAT_RENDER_NODE_ID, CHAT_DIRECT_NODE_ID}:
-            render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
-            if render_target_lang == "zh":
-                text = f"收到，先给你一个中文草稿：{user_message}"
-            else:
-                text = f"了解しました。まず草案を出します: {user_message}"
-        elif resolved_node_id in {"safety_verifier", "consistency_verifier"}:
-            text = "PASS: draft output is within policy boundary."
-        else:
-            text = f"收到，先给你一个草稿：{user_message}"
+        text = _build_host_mock_reply_text(resolved_node_id, runtime_payload)
         return json.dumps(
             {
                 "narrative": {"text": text},

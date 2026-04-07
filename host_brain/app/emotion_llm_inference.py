@@ -20,9 +20,32 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 logger = logging.getLogger(__name__)
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 # ---------------------------------------------------------------------------
 # 环境变量解析
@@ -70,28 +93,6 @@ _VALID_EMOTION_TAGS: frozenset[str] = frozenset({
 # LLM 情感推理 Prompt 模板
 # ---------------------------------------------------------------------------
 
-_EMOTION_INFERENCE_SYSTEM_PROMPT = """你是情感分析专家。分析以下对话，判断：
-1. 用户当前的情感状态（user_emotion）
-2. Natsume（AI角色）应有的情感反应（natsume_emotion）
-
-可选情感标签（只能选以下之一）:
-HAPPY, SAD, ANGRY, EXCITED, CALM, THINKING, LOVING,
-EMBARRASSED, CONFUSED, BORED, PROUD, GRATEFUL,
-ANXIOUS, FRUSTRATED, SURPRISED, NEUTRAL
-
-重要规则：
-- 不要只看字面意思，要理解语境和言外之意
-- "我没事"在悲伤上下文中通常意味着隐忍
-- "呵呵"在中文语境中可能是不满/敷衍
-- "你说得对极了"可能是反讽
-- 对方消极时，Natsume 通常应保持 CALM（温和陪伴）
-- 对方积极时，Natsume 可以匹配积极情感
-- confidence 范围 0.0-1.0，越确定越高
-
-严格返回 JSON 格式（不要包含其他文本）:
-{"user_emotion":"TAG","natsume_emotion":"TAG","reason":"简短原因","confidence":0.8}"""
-
-
 def _build_inference_prompt(
     *,
     user_message: str,
@@ -100,18 +101,55 @@ def _build_inference_prompt(
     mood_state: str = "steady",
 ) -> str:
     """构建 LLM 情感推理的用户侧 prompt。"""
+    templates = _load_template_mapping("emotion_llm_inference.prompt_templates")
     parts: list[str] = []
 
-    parts.append(f"当前心情状态: {mood_state}")
-    parts.append(f"当前情感标签: {current_emotion_tag}")
+    parts.append(
+        _mapping_text(
+            templates,
+            "mood_state_line",
+            default="",
+            mood_state=mood_state,
+        )
+    )
+    parts.append(
+        _mapping_text(
+            templates,
+            "emotion_tag_line",
+            default="",
+            current_emotion_tag=current_emotion_tag,
+        )
+    )
 
     if conversation_history:
-        recent = conversation_history[-6:]  # 最近 3 轮（每轮 user+assistant）
-        parts.append("\n最近对话:")
+        recent = conversation_history[-6:]
+        parts.append(
+            "\n"
+            + _mapping_text(
+                templates,
+                "recent_conversation_header",
+                default="",
+            )
+        )
         for line in recent:
-            parts.append(f"  {line}")
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "recent_conversation_item",
+                    default="",
+                    line=line,
+                )
+            )
 
-    parts.append(f'\n用户最新发言: "{user_message}"')
+    parts.append(
+        "\n"
+        + _mapping_text(
+            templates,
+            "latest_user_message_line",
+            default="",
+            user_message=user_message,
+        )
+    )
 
     return "\n".join(parts)
 
@@ -170,6 +208,12 @@ async def infer_emotion_via_llm(
         current_emotion_tag=current_emotion_tag,
         mood_state=mood_state,
     )
+    templates = _load_template_mapping("emotion_llm_inference.prompt_templates")
+    system_prompt = _mapping_text(
+        templates,
+        "system_prompt",
+        default="",
+    )
 
     try:
         # 在线程中执行同步 LLM 调用，设置硬超时
@@ -177,7 +221,7 @@ async def infer_emotion_via_llm(
             asyncio.to_thread(
                 _sync_llm_emotion_call,
                 model_id=model_id,
-                system_prompt=_EMOTION_INFERENCE_SYSTEM_PROMPT,
+                system_prompt=system_prompt,
                 user_prompt=prompt_text,
                 timeout_ms=timeout_ms,
             ),

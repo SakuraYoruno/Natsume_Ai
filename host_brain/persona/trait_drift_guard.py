@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.persona.personality_traits import (
     DEFAULT_BASELINE,
     TRAIT_NAMES,
@@ -187,6 +188,67 @@ _TREND_LOCK_AWARENESS: dict[str, dict[str, list[str]]] = {
     },
 }
 
+_TREND_LOCK_TRAIT_CN: dict[str, str] = {
+    "warmth": "温柔度",
+    "curiosity": "好奇心",
+    "humor": "幽默感",
+    "sensitivity": "敏感度",
+    "assertiveness": "自信度",
+    "playfulness": "俏皮度",
+    "resilience": "韧性",
+}
+
+_TREND_LOCK_DIRECTION_CN: dict[str, str] = {
+    "UP": "上升",
+    "DOWN": "下降",
+}
+
+_TREND_LOCK_REASON_TEMPLATE = "{trait_cn}连续{count}次{direction_cn}，需要审查"
+_TREND_LOCK_ACTION_TEMPLATE = (
+    "建议 Host 审查 {trait_cn} 的持续{direction_cn}趋势，"
+    "累计变化 {cumulative:+.4f}。"
+    "若符合预期，请确认；否则请回滚。"
+)
+
+
+def _default_trend_lock_template_data() -> dict[str, Any]:
+    return {
+        "trend_lock_awareness": {
+            trait_name: {
+                direction: list(texts)
+                for direction, texts in direction_mapping.items()
+            }
+            for trait_name, direction_mapping in _TREND_LOCK_AWARENESS.items()
+        },
+        "trait_names_cn": dict(_TREND_LOCK_TRAIT_CN),
+        "direction_names_cn": dict(_TREND_LOCK_DIRECTION_CN),
+        "reason_template": _TREND_LOCK_REASON_TEMPLATE,
+        "proposed_action_template": _TREND_LOCK_ACTION_TEMPLATE,
+    }
+
+
+def _load_trend_lock_template_data() -> dict[str, Any]:
+    try:
+        raw = resolve_prompt_template_json_merged("trait_drift_guard.trend_lock_templates")
+    except Exception:
+        return _default_trend_lock_template_data()
+    return dict(raw) if isinstance(raw, Mapping) else _default_trend_lock_template_data()
+
+
+def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
+    if isinstance(raw, list):
+        normalized = [str(item).strip() for item in raw if str(item).strip()]
+        if normalized:
+            return normalized
+    return list(fallback)
+
+
+def _format_template_text(template: str, **kwargs: Any) -> str:
+    try:
+        return str(template or "").format(**kwargs)
+    except Exception:
+        return str(template or "")
+
 
 # ---------------------------------------------------------------------------
 # TraitDriftGuard — 安全校验器
@@ -332,6 +394,26 @@ class TraitDriftGuard:
         """检测连续同向变化，返回 Evolution 提案或 None。"""
         import random as _random
         recent = list(history[-self._trend_lock_threshold:])
+        template_data = _load_trend_lock_template_data()
+        awareness_mapping = (
+            template_data.get("trend_lock_awareness")
+            if isinstance(template_data.get("trend_lock_awareness"), Mapping)
+            else _TREND_LOCK_AWARENESS
+        )
+        trait_names_cn = (
+            {str(key): str(value or "") for key, value in template_data.get("trait_names_cn", {}).items()}
+            if isinstance(template_data.get("trait_names_cn"), Mapping)
+            else dict(_TREND_LOCK_TRAIT_CN)
+        )
+        direction_names_cn = (
+            {str(key): str(value or "") for key, value in template_data.get("direction_names_cn", {}).items()}
+            if isinstance(template_data.get("direction_names_cn"), Mapping)
+            else dict(_TREND_LOCK_DIRECTION_CN)
+        )
+        reason_template = str(template_data.get("reason_template") or _TREND_LOCK_REASON_TEMPLATE)
+        action_template = str(
+            template_data.get("proposed_action_template") or _TREND_LOCK_ACTION_TEMPLATE
+        )
 
         for name in TRAIT_NAMES:
             current_d = float(current_delta.get(name, 0.0))
@@ -355,19 +437,21 @@ class TraitDriftGuard:
             # 包括本次变化，总次数 = consecutive + 1
             total_count = consecutive + 1
             if total_count > self._trend_lock_threshold:
-                _CN_NAMES = {
-                    "warmth": "温柔度", "curiosity": "好奇心",
-                    "humor": "幽默感", "sensitivity": "敏感度",
-                    "assertiveness": "自信度", "playfulness": "俏皮度",
-                    "resilience": "韧性",
-                }
-                cn_name = _CN_NAMES.get(name, name)
-                dir_cn = "上升" if direction == "UP" else "下降"
+                cn_name = trait_names_cn.get(name, _TREND_LOCK_TRAIT_CN.get(name, name))
+                dir_cn = direction_names_cn.get(
+                    direction,
+                    _TREND_LOCK_DIRECTION_CN.get(direction, direction),
+                )
 
                 # 生成角色内自省感知文本
-                awareness_pool = (
-                    _TREND_LOCK_AWARENESS.get(name, {})
-                    .get(direction, [])
+                awareness_trait_mapping = (
+                    awareness_mapping.get(name)
+                    if isinstance(awareness_mapping, Mapping)
+                    else None
+                )
+                awareness_pool = _normalize_text_list(
+                    awareness_trait_mapping.get(direction) if isinstance(awareness_trait_mapping, Mapping) else None,
+                    _TREND_LOCK_AWARENESS.get(name, {}).get(direction, []),
                 )
                 awareness_hint = (
                     _random.choice(awareness_pool) if awareness_pool else ""
@@ -378,11 +462,19 @@ class TraitDriftGuard:
                     direction=direction,
                     consecutive_count=total_count,
                     cumulative_delta=cumulative,
-                    reason=f"{cn_name}连续{total_count}次{dir_cn}，需要审查",
-                    proposed_action=(
-                        f"建议 Host 审查 {cn_name} 的持续{dir_cn}趋势，"
-                        f"累计变化 {cumulative:+.4f}。"
-                        f"若符合预期，请确认；否则请回滚。"
+                    reason=_format_template_text(
+                        reason_template,
+                        trait_cn=cn_name,
+                        count=total_count,
+                        direction_cn=dir_cn,
+                        cumulative=cumulative,
+                    ),
+                    proposed_action=_format_template_text(
+                        action_template,
+                        trait_cn=cn_name,
+                        count=total_count,
+                        direction_cn=dir_cn,
+                        cumulative=cumulative,
                     ),
                     awareness_hint=awareness_hint,
                 )

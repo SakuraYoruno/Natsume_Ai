@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.input_routes")
@@ -35,6 +36,11 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
     "当前聊天",
     "当前会话",
 }
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, dict) else {}
 
 
 class InputPayload(BaseModel):
@@ -331,13 +337,14 @@ def _build_gateway_reply_text(
     narrative: str,
     reason_code: str | None,
 ) -> str:
+    templates = _load_template_mapping("input_routes.fallback_texts")
     reply_text = str(narrative or "").strip()
     if reply_text:
         return reply_text
     if str(decision or "").upper() != "APPROVE":
-        return "唔…刚刚好像出了点小问题，等一下再试试好吗？"
+        return str(templates.get("reject_default") or "")
     _ = reason_code
-    return "收到。"
+    return str(templates.get("approve_empty") or "")
 
 
 def _build_reply_preview(text: str, *, limit: int = 120) -> str:

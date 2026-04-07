@@ -207,6 +207,51 @@ def test_asr_service_coalesces_final_segments_into_one_event() -> None:
     assert rpc.asr_chunk.call_args.kwargs["ts_ms"] == 1000
 
 
+def test_asr_service_splits_long_final_segments_into_multiple_events() -> None:
+    rpc = MagicMock()
+    rpc.asr_chunk.return_value = MagicMock()
+    model = MagicMock()
+    model.transcribe.return_value = AsrResult(
+        success=True,
+        reason_code=None,
+        detail="ok",
+        segments=[
+            TranscriptionSegment(text="哥哥,现在测试真实采集", start=0.0, end=3.3, confidence=0.91),
+            TranscriptionSegment(text="哥哥,现在测试真实采集", start=3.3, end=7.8, confidence=0.92),
+            TranscriptionSegment(text="12345", start=7.8, end=10.2, confidence=0.88),
+        ],
+        language="zh",
+        language_probability=0.99,
+        duration_s=10.2,
+        processing_time_s=0.1,
+    )
+
+    service = AsrService(
+        rpc=rpc,
+        config=AsrConfig(device="cpu"),
+        model_manager=model,
+    )
+
+    service.transcribe_audio([0.1, -0.1], request_id="req-test", ts_ms=1000, final=True)
+
+    assert rpc.asr_chunk.call_count == 3
+    assert [call.kwargs["payload"]["text"] for call in rpc.asr_chunk.call_args_list] == [
+        "哥哥,现在测试真实采集",
+        "哥哥,现在测试真实采集",
+        "12345",
+    ]
+    assert [call.kwargs["payload"]["final"] for call in rpc.asr_chunk.call_args_list] == [
+        True,
+        True,
+        True,
+    ]
+    assert [call.kwargs["ts_ms"] for call in rpc.asr_chunk.call_args_list] == [
+        1000,
+        4300,
+        8800,
+    ]
+
+
 def test_asr_service_marks_silence_window_flush_as_final() -> None:
     service = AsrService(
         rpc=MagicMock(),

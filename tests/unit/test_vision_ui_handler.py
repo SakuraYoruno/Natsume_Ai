@@ -17,10 +17,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from host_brain.app.chat_handler_vision import (
     _build_vision_context_section,
+    _call_vision_llm,
     _has_image_input,
     _vision_ui_sse_generator,
     VISION_UI_NODE_SEQUENCE,
 )
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +44,11 @@ def _make_request_body(
     req.scene_type = "SCENE_VISION_UI"
     req.emotion_context = emotion_context
     req.vision_context = vision_context
+    req.hmac_signature = ""
+    req.origin_ip = ""
+    req.image_upload_consent = False
+    req.response_format = "text"
+    req.person_id = None
     return req
 
 
@@ -132,6 +140,182 @@ class TestVisionHelpers:
 # ---------------------------------------------------------------------------
 # 测试：_vision_ui_sse_generator 正常流程
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_vision_templates_override_context_and_unavailable_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_handler_vision.analysis_prompt.templates",
+        content=json.dumps(
+            {
+                "no_screenshot_context": "（这里使用自定义截图缺失提示）",
+                "screen_description_label": "画面：{value}",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+    store.upsert_template(
+        "chat_handler_vision.fallback_texts",
+        content=json.dumps(
+            {
+                "llm_unavailable": "这是自定义视觉不可用文案。",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    assert _build_vision_context_section(None) == "（这里使用自定义截图缺失提示）"
+    assert "画面：登录页" in _build_vision_context_section({"screen_description": "登录页"})
+
+    result = await _call_vision_llm(
+        request_id="req-vision-template-override",
+        user_message="帮我看看这个界面",
+        vision_context=None,
+        llm_runtime={
+            "cloud_provider_name": "gemini",
+            "cloud_model_id": "gemini-2.5-flash",
+            "cloud_llm_api_key": "",
+            "cloud_timeout_ms": 15000,
+            "cloud_available": False,
+        },
+        ts_ms=1000,
+    )
+
+    assert result["narrative"] == "这是自定义视觉不可用文案。"
+
+
+@pytest.mark.asyncio
+async def test_vision_templates_override_hmac_rejected_narrative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_handler_vision.fallback_texts",
+        content=json.dumps(
+            {
+                "hmac_rejected": "这是自定义 HMAC 拒绝文案。",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    monkeypatch.setenv("HOST_VISION_HMAC_SECRET", "unit-test-secret")
+
+    request_body = _make_request_body()
+    request_body.hmac_signature = "bad-signature"
+    metrics = _make_metrics()
+
+    events = []
+    async for event in _vision_ui_sse_generator(
+        request_body=request_body,
+        request_id="req-vision-hmac-reject",
+        session_id="session-vision-hmac-reject",
+        ts_ms=1000,
+        intent_draft={},
+        scene_type="SCENE_VISION_UI",
+        scene_type_source="pre_classifier",
+        governor_result=_make_governor_result(),
+        emotion_context={},
+        emotion_snapshot={},
+        intent_id="intent-vision-hmac-reject",
+        reason_code=None,
+        metrics=metrics,
+    ):
+        events.append(event)
+
+    parsed = _parse_sse_events(events)
+    commit_event = next(e for e in parsed if e.get("phase") == "COMMIT")
+    assert commit_event.get("reason_code") == "VISION_HMAC_INVALID"
+    assert commit_event.get("narrative") == "这是自定义 HMAC 拒绝文案。"
+
+
+@pytest.mark.asyncio
+async def test_vision_templates_override_prompts_and_empty_narrative(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_handler_vision.analysis_prompt.templates",
+        content=json.dumps(
+            {
+                "system_prompt": "这是自定义 system prompt。",
+                "user_prompt_template": "请求内容：{user_message}\n{vision_context_section}",
+                "no_screenshot_context": "（这里使用自定义截图缺失提示）",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+    store.upsert_template(
+        "chat_handler_vision.fallback_texts",
+        content=json.dumps(
+            {
+                "empty_narrative": "这是自定义空回复兜底。",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    captured: dict[str, object] = {}
+
+    def _fake_provider(payload: dict) -> dict:
+        captured["payload"] = payload
+        return {}
+
+    result = await _call_vision_llm(
+        request_id="req-vision-prompt-override",
+        user_message="帮我看看这个界面",
+        vision_context=None,
+        llm_runtime={
+            "cloud_provider_name": "gemini",
+            "cloud_model_id": "gemini-2.5-flash",
+            "cloud_llm_api_key": "test-key",
+            "cloud_timeout_ms": 15000,
+            "cloud_available": True,
+            "cloud_provider_fn": _fake_provider,
+        },
+        ts_ms=1000,
+    )
+
+    payload = dict(captured["payload"] or {})
+    messages = list(payload.get("messages") or [])
+    assert messages[0]["content"] == "这是自定义 system prompt。"
+    assert messages[1]["content"] == "请求内容：帮我看看这个界面\n（这里使用自定义截图缺失提示）"
+    assert result["narrative"] == "这是自定义空回复兜底。"
+
+
+def test_builtin_vision_templates_are_clean() -> None:
+    analysis_templates = resolve_prompt_template_json_merged("chat_handler_vision.analysis_prompt.templates")
+    fallback_templates = resolve_prompt_template_json_merged("chat_handler_vision.fallback_texts")
+
+    assert analysis_templates["context_title"] == "视觉上下文："
+    assert analysis_templates["screen_description_label"] == "界面描述：{value}"
+    assert fallback_templates["hmac_rejected"] == "啊啦，请求签名验证失败呢，请检查一下鉴权配置。"
+    assert fallback_templates["origin_not_allowed"] == "啊啦，这个请求来源不在允许范围内呢。"
+
 
 class TestVisionUiSseGenerator:
     """_vision_ui_sse_generator 测试。"""

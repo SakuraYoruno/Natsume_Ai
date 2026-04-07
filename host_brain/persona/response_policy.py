@@ -58,7 +58,9 @@ _BOND_INTIMACY: dict[str, float] = {
     "ACQUAINTANCE": 0.30,
     "FRIEND": 0.50,
     "CLOSE": 0.65,
+    "CLOSE_FRIEND": 0.65,
     "INTIMATE": 0.80,
+    "CONFIDANT": 0.80,
     "SOULMATE": 0.95,
 }
 _BOND_INTIMACY_DEFAULT = 0.45

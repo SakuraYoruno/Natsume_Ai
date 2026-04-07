@@ -68,7 +68,7 @@ def test_health_side_filter_edge():
 
 def test_health_response_structure_stable():
     async def probe_down(service_id: str) -> ServiceHealthResult:
-        return ServiceHealthResult(service_id, service_id, "host", "DOWN", error_summary="杩炴帴澶辫触")
+        return ServiceHealthResult(service_id, service_id, "host", "DOWN", error_summary="连接失败")
 
     agg = ServiceHealthAggregator()
     agg.register_probe("neo4j", probe_down)

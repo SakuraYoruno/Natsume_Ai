@@ -1,12 +1,21 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Search, Database, BookOpen, Brain, Archive, Filter } from 'lucide-react'
-import { fetchMemoryStats, fetchEpisodicStoreStats, fetchDistillationStats, fetchCanonDocuments, fetchRecallPackStats, fetchContextCompressorStats } from '../api/obs.js'
-import BarChart from '../components/charts/BarChart.jsx'
+import { RefreshCw, Database, BookOpen, Brain, Archive } from 'lucide-react'
+import {
+  fetchMemoryStats,
+  fetchEpisodicStoreStats,
+  fetchDistillationStats,
+  fetchCanonDocuments,
+  fetchRecallPackStats,
+  fetchContextCompressorStats,
+} from '../api/obs.js'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import useAppStore from '../store/useAppStore.js'
 
 const WINDOW_OPTIONS = [
-  { label: '1h', value: 60 }, { label: '6h', value: 360 },
-  { label: '24h', value: 1440 }, { label: '7d', value: 10080 },
+  { label: '1h', value: 60 },
+  { label: '6h', value: 360 },
+  { label: '24h', value: 1440 },
+  { label: '7d', value: 10080 },
 ]
 
 function StatCard({ label, value, sub, color = 'text-gray-800' }) {
@@ -20,8 +29,8 @@ function StatCard({ label, value, sub, color = 'text-gray-800' }) {
 }
 
 export default function MemoryBrowser() {
-  const pollingEnabled = useAppStore(s => s.pollingEnabled)
-  const pollingInterval = useAppStore(s => s.pollingInterval)
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
   const [windowMinutes, setWindowMinutes] = useState(360)
   const [loading, setLoading] = useState(true)
   const [memData, setMemData] = useState(null)
@@ -34,7 +43,7 @@ export default function MemoryBrowser() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [mem, ep, dist, canon, recall, compress] = await Promise.all([
+      const [mem, episodic, distill, canon, recall, compress] = await Promise.all([
         fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchEpisodicStoreStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchDistillationStats({ window_minutes: windowMinutes }).catch(() => null),
@@ -42,14 +51,20 @@ export default function MemoryBrowser() {
         fetchRecallPackStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchContextCompressorStats({ window_minutes: windowMinutes }).catch(() => null),
       ])
-      setMemData(mem); setEpisodicData(ep); setDistillData(dist)
-      setCanonDocs(canon); setRecallData(recall); setCompressData(compress)
-    } catch {} finally { setLoading(false) }
+      setMemData(mem)
+      setEpisodicData(episodic)
+      setDistillData(distill)
+      setCanonDocs(canon)
+      setRecallData(recall)
+      setCompressData(compress)
+    } finally {
+      setLoading(false)
+    }
   }, [windowMinutes])
 
   useEffect(() => {
     load()
-    if (!pollingEnabled) return
+    if (!pollingEnabled) return undefined
     const timer = setInterval(load, pollingInterval * 1000)
     return () => clearInterval(timer)
   }, [load, pollingEnabled, pollingInterval])
@@ -66,8 +81,16 @@ export default function MemoryBrowser() {
           <p className="text-sm text-gray-500">情景记忆 · 蒸馏历史 · Canon 文档 · RecallPack 预算</p>
         </div>
         <div className="flex items-center gap-2">
-          <select className="text-xs border rounded px-2 py-1.5" value={windowMinutes} onChange={e => setWindowMinutes(Number(e.target.value))}>
-            {WINDOW_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          <select
+            className="text-xs border rounded px-2 py-1.5"
+            value={windowMinutes}
+            onChange={(e) => setWindowMinutes(Number(e.target.value))}
+          >
+            {WINDOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
           <button className="btn-secondary" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
@@ -75,29 +98,41 @@ export default function MemoryBrowser() {
         </div>
       </div>
 
-      {/* Memory 子系统统计 */}
+      <DigitalLifeNav />
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {subsystems.map(s => (
-          <StatCard key={s.subsystem} label={s.display_name}
-            value={s.success_rate != null ? `${s.success_rate}%` : '—'}
-            sub={`${s.total} 次操作`}
-            color={s.success_rate >= 90 ? 'text-green-600' : s.success_rate >= 70 ? 'text-orange-500' : 'text-red-500'} />
+        {subsystems.map((subsystem) => (
+          <StatCard
+            key={subsystem.subsystem}
+            label={subsystem.display_name}
+            value={subsystem.success_rate != null ? `${subsystem.success_rate}%` : '—'}
+            sub={`${subsystem.total} 次操作`}
+            color={
+              subsystem.success_rate >= 90
+                ? 'text-green-600'
+                : subsystem.success_rate >= 70
+                ? 'text-orange-500'
+                : 'text-red-500'
+            }
+          />
         ))}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* RecallPack 槽位预算 */}
         {slots.length > 0 && (
           <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3"><Database size={14} className="inline mr-1" />RecallPack Token 预算</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">
+              <Database size={14} className="inline mr-1" />
+              RecallPack Token 预算
+            </h2>
             <div className="space-y-2">
-              {slots.map(s => (
-                <div key={s.slot} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-600 w-32 shrink-0 truncate">{s.slot}</span>
+              {slots.map((slot) => (
+                <div key={slot.slot} className="flex items-center gap-2">
+                  <span className="text-xs text-gray-600 w-32 shrink-0 truncate">{slot.slot}</span>
                   <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(100, s.avg_tokens / 8)}%` }} />
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(100, slot.avg_tokens / 8)}%` }} />
                   </div>
-                  <span className="text-xs text-gray-500 w-16 text-right">{s.avg_tokens?.toFixed(0)} tok</span>
+                  <span className="text-xs text-gray-500 w-16 text-right">{slot.avg_tokens?.toFixed(0)} tok</span>
                 </div>
               ))}
             </div>
@@ -111,16 +146,20 @@ export default function MemoryBrowser() {
           </div>
         )}
 
-        {/* Canon 文档树 */}
         <div className="card p-4">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3"><BookOpen size={14} className="inline mr-1" />Canon 文档 (SSOT)</h2>
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">
+            <BookOpen size={14} className="inline mr-1" />
+            Canon 文档 (SSOT)
+          </h2>
           {docs.length > 0 ? (
             <div className="space-y-1 max-h-64 overflow-y-auto">
-              {docs.map(d => (
-                <div key={d.doc_id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-3 py-1.5">
-                  <span className="font-mono text-gray-700 truncate flex-1">{d.doc_id}</span>
-                  <span className="text-gray-400 shrink-0 ml-2">v{d.version}</span>
-                  <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${d.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{d.status}</span>
+              {docs.map((doc) => (
+                <div key={doc.doc_id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-3 py-1.5">
+                  <span className="font-mono text-gray-700 truncate flex-1">{doc.doc_id}</span>
+                  <span className="text-gray-400 shrink-0 ml-2">v{doc.version}</span>
+                  <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] ${doc.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {doc.status}
+                  </span>
                 </div>
               ))}
             </div>
@@ -129,26 +168,72 @@ export default function MemoryBrowser() {
           )}
         </div>
 
-        {/* 上下文压缩统计 */}
         {compressData && (
           <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3"><Archive size={14} className="inline mr-1" />上下文压缩</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">
+              <Archive size={14} className="inline mr-1" />
+              上下文压缩
+            </h2>
             <div className="grid grid-cols-3 gap-3 text-center text-xs">
-              <div><div className="text-lg font-bold text-blue-600">{compressData.total_compressions ?? 0}</div><div className="text-gray-500">压缩次数</div></div>
-              <div><div className="text-lg font-bold text-green-600">{compressData.avg_compress_rate ?? '—'}%</div><div className="text-gray-500">平均压缩率</div></div>
-              <div><div className="text-lg font-bold text-purple-600">{compressData.total_tokens_saved ?? 0}</div><div className="text-gray-500">节省 Token</div></div>
+              <div>
+                <div className="text-lg font-bold text-blue-600">{compressData.total_compressions ?? 0}</div>
+                <div className="text-gray-500">压缩次数</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-green-600">{compressData.avg_compress_rate ?? '—'}%</div>
+                <div className="text-gray-500">平均压缩率</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-purple-600">{compressData.total_tokens_saved ?? 0}</div>
+                <div className="text-gray-500">节省 Token</div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* 蒸馏统计 */}
         {distillData && (
           <div className="card p-4">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3"><Brain size={14} className="inline mr-1" />长期蒸馏</h2>
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">
+              <Brain size={14} className="inline mr-1" />
+              长期蒸馏
+            </h2>
             <div className="grid grid-cols-3 gap-3 text-center text-xs">
-              <div><div className="text-lg font-bold text-indigo-600">{distillData.total_cycles ?? 0}</div><div className="text-gray-500">蒸馏循环</div></div>
-              <div><div className="text-lg font-bold text-green-600">{distillData.success_rate ?? '—'}%</div><div className="text-gray-500">成功率</div></div>
-              <div><div className="text-lg font-bold text-gray-600">{distillData.total_proposals ?? 0}</div><div className="text-gray-500">提案数</div></div>
+              <div>
+                <div className="text-lg font-bold text-indigo-600">{distillData.total_cycles ?? 0}</div>
+                <div className="text-gray-500">蒸馏循环</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-green-600">{distillData.success_rate ?? '—'}%</div>
+                <div className="text-gray-500">成功率</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-gray-600">{distillData.total_proposals ?? 0}</div>
+                <div className="text-gray-500">提案数</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {episodicData && (
+          <div className="card p-4 lg:col-span-2">
+            <h2 className="text-sm font-semibold text-gray-700 mb-3">Episodic 写入摘要</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
+              <div>
+                <div className="text-lg font-bold text-blue-600">{episodicData.total_writes ?? 0}</div>
+                <div className="text-gray-500">写入次数</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-orange-500">{episodicData.guard_block_rate ?? '—'}%</div>
+                <div className="text-gray-500">Guard 拦截率</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-purple-600">{episodicData.distill_eligible_rate ?? '—'}%</div>
+                <div className="text-gray-500">蒸馏资格率</div>
+              </div>
+              <div>
+                <div className="text-lg font-bold text-gray-700">{episodicData.dream_block_count ?? 0}</div>
+                <div className="text-gray-500">Dream 拦截</div>
+              </div>
             </div>
           </div>
         )}

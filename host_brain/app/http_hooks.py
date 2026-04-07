@@ -30,6 +30,13 @@ def _startup_status_is_degraded(value: Any) -> bool:
     return normalized.startswith("DEGRADED") or normalized.startswith("FAIL")
 
 
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _build_audit_retention_task_config() -> Any:
     from host_brain.scheduler.task_registry import (  # noqa: PLC0415
         SchedulerTaskConfig,
@@ -132,6 +139,10 @@ def runtime_lifespan(
             )
             new_module_statuses: dict[str, str] = {}
             _retention_policy: Any | None = None
+            _startup_eager_warmup = _parse_bool_env(
+                "HOST_STARTUP_EAGER_WARMUP",
+                default=False,
+            )
             new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
                 ledger=ledger,
                 logger=logger,
@@ -140,9 +151,29 @@ def runtime_lifespan(
                 ("recall_pack_builder", get_recall_pack_builder),
                 ("memory_guard", get_memory_guard),
                 ("state_arbiter", get_state_arbiter),
+            ]:
+                try:
+                    factory()
+                    new_module_statuses[name] = "OK"
+                except Exception as exc:
+                    new_module_statuses[name] = f"DEGRADED: {exc}"
+                    logger.warning(
+                        "新模块 %s 启动探针失败（降级）: %s",
+                        name, exc,
+                        extra={"module": name, "error": str(exc)},
+                    )
+            for name, factory in [
                 ("distillation_engine", get_distillation_engine),
                 ("semantic_recaller", get_semantic_recaller),
             ]:
+                if not _startup_eager_warmup:
+                    new_module_statuses[name] = "OK (lazy init)"
+                    logger.info(
+                        "新模块 %s 跳过启动预热，改为按需初始化",
+                        name,
+                        extra={"module": name},
+                    )
+                    continue
                 try:
                     factory()
                     new_module_statuses[name] = "OK"
@@ -196,20 +227,19 @@ def runtime_lifespan(
                 try:
                     from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
 
-                    _ep_store = get_episodic_store()
-
-                    _episodic_get_fact = lambda fact_key, _store=_ep_store: read_episodic_latest_fact(
-                        _store,
-                        fact_key,
-                    )
+                    def _episodic_get_fact(fact_key: str) -> Any:
+                        return read_episodic_latest_fact(
+                            get_episodic_store(),
+                            fact_key,
+                        )
 
                     _arbiter.register_source(StateSource.EPISODIC_STORE, _episodic_get_fact)
-                    logger.info("StateArbiter: EpisodicStore 已注册")
+                    logger.info("StateArbiter: EpisodicStore 已注册（lazy）")
                 except Exception as _exc:
                     logger.warning("StateArbiter: EpisodicStore 注册失败（降级）: %s", _exc)
 
                 new_module_statuses["state_arbiter_sources"] = (
-                    f"OK:{len(_arbiter._sources)} sources"
+                    f"OK:{len(_arbiter._sources)} sources (episodic lazy)"
                 )
             except Exception as _sa_exc:
                 logger.warning("StateArbiter 状态源注册失败（降级）: %s", _sa_exc)
@@ -254,12 +284,18 @@ def runtime_lifespan(
                     ScheduledTask, TaskPriority, get_scheduler,
                 )
 
-                _distill_engine = get_distillation_engine()
                 _scheduler = get_scheduler()
+                _distill_engine: Any | None = None
+
+                def _get_distill_engine() -> Any:
+                    nonlocal _distill_engine
+                    if _distill_engine is None:
+                        _distill_engine = get_distillation_engine()
+                    return _distill_engine
 
                 async def _run_distillation_task() -> None:
                     """DistillationEngine 蒸馏定时任务执行体。"""
-                    report = await _distill_engine.run_batch()
+                    report = await _get_distill_engine().run_batch()
                     logger.info(
                         "蒸馏任务完成: 候选=%d, 成功=%d, 跳过=%d, 失败=%d, 耗时=%dms",
                         report.total_candidates, report.distilled_count,

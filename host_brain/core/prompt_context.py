@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.tools.catalog import TOOL_META_ALLOWED_KEYS, normalize_tool_meta
 
 PC_MISSING_SLOT = "PROMPT_CONTEXT_MISSING_SLOT"
@@ -44,6 +45,11 @@ OPTIONAL_SLOTS: dict[str, type] = {
 # M28-G：动态槽位注册表（OPT-16）
 # slot_name → builder_fn(context_data: dict) -> Any
 _DYNAMIC_SLOT_REGISTRY: dict[str, Any] = {}
+
+
+def _load_emotion_pulse_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("prompt_context.emotion_pulse_texts")
+    return dict(raw) if isinstance(raw, dict) else {}
 
 
 def register_slot(name: str, builder_fn: Any) -> None:
@@ -97,27 +103,30 @@ def build_emotion_pulse_slot(
         except Exception:
             pass
     intensity = round(arousal * 0.7 + abs(valence) * 0.3, 4)
+    emotion_pulse_templates = _load_emotion_pulse_templates()
+    style_templates = dict(emotion_pulse_templates.get("style_hint") or {})
+    flow_templates = dict(emotion_pulse_templates.get("flow_hint") or {})
 
     # Phase 3: 构建丰富的 style_hint（渐进式，非二元）
     style_parts: list[str] = []
     if valence > 0.5:
-        style_parts.append("语气带着温暖和愉悦")
+        style_parts.append(str(style_templates.get("valence_high") or "语气带着温暖和愉悦"))
     elif valence > 0.2:
-        style_parts.append("语气轻快自然")
+        style_parts.append(str(style_templates.get("valence_mid") or "语气轻快自然"))
     elif valence < -0.5:
-        style_parts.append("语气温柔而克制")
+        style_parts.append(str(style_templates.get("valence_low") or "语气温柔而克制"))
     elif valence < -0.2:
-        style_parts.append("语气略带沉静")
+        style_parts.append(str(style_templates.get("valence_soft_low") or "语气略带沉静"))
     else:
-        style_parts.append("语气平稳自然")
+        style_parts.append(str(style_templates.get("valence_default") or "语气平稳自然"))
     if arousal > 0.6:
-        style_parts.append("节奏稍快，表达有活力")
+        style_parts.append(str(style_templates.get("arousal_high") or "节奏稍快，表达有活力"))
     elif arousal < -0.2:
-        style_parts.append("节奏放慢，语调轻柔舒缓")
+        style_parts.append(str(style_templates.get("arousal_low") or "节奏放慢，语调轻柔舒缓"))
     if dominance > 0.4:
-        style_parts.append("态度自信坚定")
+        style_parts.append(str(style_templates.get("dominance_high") or "态度自信坚定"))
     elif dominance < -0.3:
-        style_parts.append("姿态柔软温顺")
+        style_parts.append(str(style_templates.get("dominance_low") or "姿态柔软温顺"))
     style_hint = "，".join(style_parts)
 
     # Phase 3: 情绪流动描述（基于时间线趋势）
@@ -125,9 +134,9 @@ def build_emotion_pulse_slot(
     if timeline_summary and isinstance(timeline_summary, dict):
         trend = str(timeline_summary.get("trend") or "stable").strip()
         if trend == "improving":
-            flow_hint = "心情正在慢慢变好"
+            flow_hint = str(flow_templates.get("improving") or "心情正在慢慢变好")
         elif trend == "declining":
-            flow_hint = "感觉有些低落，不如刚才那么好了"
+            flow_hint = str(flow_templates.get("declining") or "感觉有些低落，不如刚才那么好了")
 
     # Phase 3: 共情描述（基于情感回声）
     empathy_hint = ""

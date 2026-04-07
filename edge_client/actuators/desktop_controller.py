@@ -21,6 +21,8 @@ from enum import Enum
 from io import BytesIO
 from typing import Any
 
+from edge_client.runtime_texts import edge_runtime_text
+
 logger = logging.getLogger("Natsume.edge.actuators.desktop_controller")
 
 
@@ -223,7 +225,11 @@ class DesktopController:
                     height=screenshot.height,
                     monitor_index=mon_idx,
                     latency_ms=latency_ms,
-                    detail="截图成功",
+                    detail=edge_runtime_text(
+                        "desktop_controller",
+                        "screenshot_success",
+                        default="截图成功",
+                    ),
                 )
         except Exception as exc:
             latency_ms = int((time.monotonic() - t0) * 1000)
@@ -376,7 +382,11 @@ class DesktopController:
                 action_type=action.type.value,
                 success=True,
                 reason_code=None,
-                detail="执行成功",
+                detail=edge_runtime_text(
+                    "desktop_controller",
+                    "action_success",
+                    default="执行成功",
+                ),
                 latency_ms=latency_ms,
             )
 

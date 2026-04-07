@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 from .clawdbot_protocol import (
     Action,
@@ -23,73 +25,30 @@ from .clawdbot_protocol import (
 
 _logger = logging.getLogger("Natsume.action_planner")
 
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
 # ---------------------------------------------------------------------------
 # LLM Prompt：指令生成
 # ---------------------------------------------------------------------------
-
-_ACTION_PLANNER_SYSTEM_PROMPT = """你是夏目（Natsume），一个擅长 UI 自动化的 AI 助手。
-
-你的任务是：根据用户的目标和当前屏幕截图，生成一个可以直接执行的操作指令序列。
-
-输出格式要求（严格 JSON，不要有任何额外文字）：
-{
-  "goal_understood": "用一句话复述你理解的目标",
-  "actions": [
-    {
-      "type": "click",
-      "target_desc": "登录按钮",
-      "x": 320,
-      "y": 480
-    },
-    {
-      "type": "type",
-      "target_desc": "用户名输入框",
-      "text": "admin"
-    },
-    {
-      "type": "press",
-      "key": "Enter"
-    },
-    {
-      "type": "screenshot",
-      "screenshot_label": "after_login"
-    },
-    {
-      "type": "done",
-      "target_desc": "登录流程完成"
-    }
-  ],
-  "confidence": 0.85,
-  "notes": "如果登录失败，请检查用户名和密码是否正确"
-}
-
-操作类型说明：
-- click: 单击，需要 x/y 坐标和 target_desc
-- double_click: 双击，需要 x/y 坐标
-- right_click: 右键单击，需要 x/y 坐标
-- type: 输入文本，需要 text 字段
-- press: 按键，需要 key 字段（如 "Enter"、"ctrl+c"、"Tab"）
-- scroll: 滚动，需要 direction（up/down/left/right）和 steps
-- drag: 拖拽，需要 x/y（起点）和 to_x/to_y（终点）
-- screenshot: 截图，需要 screenshot_label（用于状态追踪）
-- wait: 等待，需要 wait_ms（毫秒）
-- assert: 断言，需要 assert_text 或 assert_element
-- done: 标记目标完成，放在最后
-
-注意事项：
-1. 坐标必须是屏幕绝对像素坐标（左上角为原点）
-2. 如果截图中看不清坐标，请给出估算值并在 notes 中说明
-3. 每个 click 操作都必须有 target_desc
-4. 复杂操作序列中，在关键步骤后插入 screenshot 指令，便于 Agent Loop 验证
-5. 最后一条指令必须是 done
-"""
-
-_ACTION_PLANNER_USER_PROMPT_TEMPLATE = """用户目标：{goal}
-
-{vision_context_section}
-
-请生成操作指令序列（严格 JSON 格式）："""
-
 
 # ---------------------------------------------------------------------------
 # 核心函数：生成 ActionPlan
@@ -126,6 +85,7 @@ async def generate_action_plan(
     api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
     timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 20000)
     available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))
+    templates = _load_template_mapping("vision.action_planner.prompt_templates")
 
     # LLM 不可用时返回降级计划
     if not available or not api_key or provider_fn is None:
@@ -135,7 +95,9 @@ async def generate_action_plan(
     # 构建 Prompt
     from host_brain.app.chat_handler_vision import _build_vision_context_section, _has_image_input
     vision_section = _build_vision_context_section(vision_context)
-    user_prompt = _ACTION_PLANNER_USER_PROMPT_TEMPLATE.format(
+    user_prompt = _mapping_text(
+        templates,
+        "user_prompt_template",
         goal=goal,
         vision_context_section=vision_section,
     )
@@ -147,7 +109,13 @@ async def generate_action_plan(
     image_mime = str((vision_context or {}).get("image_mime") or "image/png").strip()
 
     messages: list[dict] = [
-        {"role": "system", "content": _ACTION_PLANNER_SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": _mapping_text(
+                templates,
+                "system_prompt",
+            ),
+        },
     ]
     if has_image and image_base64:
         messages.append({

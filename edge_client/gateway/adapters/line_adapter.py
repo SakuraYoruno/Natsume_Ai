@@ -29,6 +29,7 @@ import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
 from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.line")
 
@@ -350,7 +351,14 @@ class LineAdapter(AbstractPlatformAdapter):
                 })
             else:
                 # 图片路径为空，降级为文本提示
-                messages.append({"type": "text", "text": "[图片]"})
+                messages.append({
+                    "type": "text",
+                    "text": edge_runtime_text(
+                        "line_adapter",
+                        "image_fallback",
+                        default="[图片]",
+                    ),
+                })
 
         return messages
 
@@ -362,22 +370,49 @@ class LineAdapter(AbstractPlatformAdapter):
         if message_type == "sticker":
             package_id = message.get("packageId", "")
             sticker_id = message.get("stickerId", "")
-            return f"[贴图:{package_id}/{sticker_id}]"
+            return edge_runtime_text(
+                "line_adapter",
+                "sticker_template",
+                default="[贴图:{package_id}/{sticker_id}]",
+                package_id=package_id,
+                sticker_id=sticker_id,
+            )
         if message_type == "image":
-            return "[图片]"
+            return edge_runtime_text("line_adapter", "image_content", default="[图片]")
         if message_type == "video":
-            return "[视频]"
+            return edge_runtime_text("line_adapter", "video_content", default="[视频]")
         if message_type == "audio":
-            return "[语音]"
+            return edge_runtime_text("line_adapter", "audio_content", default="[语音]")
         if message_type == "file":
-            file_name = message.get("fileName", "未知文件")
-            return f"[文件:{file_name}]"
+            file_name = message.get("fileName") or edge_runtime_text(
+                "line_adapter",
+                "default_file_name",
+                default="未知文件",
+            )
+            return edge_runtime_text(
+                "line_adapter",
+                "file_template",
+                default="[文件:{file_name}]",
+                file_name=file_name,
+            )
         if message_type == "location":
-            title = message.get("title") or "位置"
+            title = message.get("title") or edge_runtime_text(
+                "line_adapter",
+                "default_location_title",
+                default="位置",
+            )
             address = message.get("address") or ""
             lat = message.get("latitude", "")
             lng = message.get("longitude", "")
-            return f"[位置:{title} {address} ({lat},{lng})]"
+            return edge_runtime_text(
+                "line_adapter",
+                "location_template",
+                default="[位置:{title} {address} ({lat},{lng})]",
+                title=title,
+                address=address,
+                lat=lat,
+                lng=lng,
+            )
         return f"[{message_type}]"
 
     @staticmethod

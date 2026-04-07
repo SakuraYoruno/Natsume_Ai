@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import random
 
 import host_brain.persona.bond_aware_style as bas
+from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.bond_aware_style import (
     BondAwareStyleEngine,
     _build_memory_style_instruction,
@@ -89,3 +92,80 @@ def test_build_memory_style_instruction_handles_empty_unknown_and_known_stage(mo
     known = _build_memory_style_instruction("ACQUAINTANCE", ["a", "b"])
     assert "几段记忆" in known
     assert bas._MEMORY_STYLE_GUIDES["ACQUAINTANCE"][0] in known
+
+
+def test_style_templates_override_runtime_sections(monkeypatch) -> None:
+    monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "bond_aware_style.style_templates",
+        content=json.dumps(
+            {
+                "profiles": {
+                    "FRIEND": {
+                        "style_instruction": "自定义朋友风格",
+                        "forbidden_patterns": ["别太官腔"],
+                    },
+                },
+                "mood_adjustments": {
+                    "negative": "自定义接住情绪",
+                },
+                "rift_style_map": {
+                    "light": {
+                        "fresh": "自定义轻裂痕 fresh",
+                    },
+                },
+                "natsume_mood_adjustments": {
+                    "SAD": "自定义夏目低落语气",
+                },
+                "substage_config": {
+                    "FRIEND": {
+                        "entry_hint": "自定义刚成朋友",
+                        "stable_hint": "自定义稳定朋友",
+                    },
+                },
+                "trend_adjustments": {
+                    "rising": "自定义关系升温提醒",
+                },
+                "memory_style_guides": {
+                    "FRIEND": ["自定义朋友记忆指导"],
+                },
+                "memory_count_hints": {
+                    "1": "自定义一条记忆提示",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    engine = BondAwareStyleEngine()
+    result = engine.generate(
+        bond_stage="FRIEND",
+        intimacy_score=0.41,
+        mood_state="negative",
+        natsume_mood="SAD",
+        rift_active=True,
+        rift_severity="light",
+        rift_progress=0.1,
+        bond_trend="rising",
+        shared_memory_hints=["一起看过海"],
+    )
+
+    assert result.style_instruction == "自定义朋友风格"
+    assert result.mood_adjustment == "自定义接住情绪"
+    assert result.rift_adjustment == "自定义轻裂痕 fresh"
+    assert result.substage_hint == "自定义刚成朋友"
+    assert result.natsume_mood_hint == "自定义夏目低落语气"
+    assert result.shared_memory_hint == "自定义一条记忆提示自定义朋友记忆指导"
+    assert result.forbidden_patterns == ["别太官腔"]
+    assert "trend_adjustment: 自定义关系升温提醒" in result.prompt_injection
+    assert _get_rift_adjustment(True, "light", 0.1) == "自定义轻裂痕 fresh"
+    assert _build_memory_style_instruction("FRIEND", ["一起看过海"]) == "自定义一条记忆提示自定义朋友记忆指导"

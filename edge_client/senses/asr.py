@@ -1044,23 +1044,28 @@ class AsrService:
 
         results: list[VoiceRpcResult] = []
         if final:
-            combined_text = self._combine_segment_texts(
-                seg.text for seg in asr_result.segments
-            )
-            if combined_text:
-                combined_alternates = self._collect_segment_alternates(
-                    asr_result.segments
+            final_groups = self._build_final_emit_groups(asr_result.segments)
+            for group in final_groups:
+                combined_text = self._combine_segment_texts(
+                    seg.text for seg in group
                 )
+                if not combined_text:
+                    continue
+                combined_alternates = self._collect_segment_alternates(group)
                 average_confidence = round(
-                    sum(seg.confidence for seg in asr_result.segments)
-                    / len(asr_result.segments),
+                    sum(seg.confidence for seg in group)
+                    / len(group),
                     4,
                 )
-                first_segment = asr_result.segments[0]
-                last_segment = asr_result.segments[-1]
+                first_segment = group[0]
+                last_segment = group[-1]
                 results.append(
                     self._emit_rpc_event(
-                        request_id=req_id,
+                        request_id=(
+                            req_id
+                            if len(final_groups) == 1
+                            else new_request_id()
+                        ),
                         text=combined_text,
                         confidence=average_confidence,
                         start_ms=int(first_segment.start * 1000),
@@ -1070,6 +1075,7 @@ class AsrService:
                         ts_ms=timestamp + max(0, int(first_segment.start * 1000)),
                     )
                 )
+            if results:
                 return results
 
         for seg in asr_result.segments:
@@ -1415,6 +1421,90 @@ class AsrService:
                 if len(alternates) >= 3:
                     return alternates
         return alternates
+
+    def _build_final_emit_groups(
+        self,
+        segments: list[TranscriptionSegment],
+    ) -> list[list[TranscriptionSegment]]:
+        if not segments:
+            return []
+        if len(segments) == 1:
+            return [list(segments)]
+
+        total_duration_s = max(0.0, segments[-1].end - segments[0].start)
+        if total_duration_s < 3.0:
+            return [list(segments)]
+
+        groups: list[list[TranscriptionSegment]] = []
+        current_group: list[TranscriptionSegment] = [segments[0]]
+        for segment in segments[1:]:
+            if self._should_start_new_final_group(
+                current_group=current_group,
+                next_segment=segment,
+                total_duration_s=total_duration_s,
+            ):
+                groups.append(current_group)
+                current_group = [segment]
+            else:
+                current_group.append(segment)
+        if current_group:
+            groups.append(current_group)
+        return groups
+
+    def _should_start_new_final_group(
+        self,
+        *,
+        current_group: list[TranscriptionSegment],
+        next_segment: TranscriptionSegment,
+        total_duration_s: float,
+    ) -> bool:
+        previous_segment = current_group[-1]
+        previous_text = str(previous_segment.text or "").strip()
+        next_text = str(next_segment.text or "").strip()
+        if not previous_text or not next_text:
+            return False
+
+        if (
+            self._is_micro_transcript(previous_text)
+            or self._is_micro_transcript(next_text)
+        ):
+            return False
+
+        gap_s = max(0.0, float(next_segment.start) - float(previous_segment.end))
+        if gap_s >= max(0.35, self._config.chunk_duration_s * 0.75):
+            return True
+
+        if total_duration_s >= 6.0:
+            return True
+
+        if self._ends_with_terminal_punctuation(previous_text):
+            return True
+
+        if self._is_digit_like_text(previous_text) or self._is_digit_like_text(next_text):
+            return True
+
+        return False
+
+    @staticmethod
+    def _is_micro_transcript(text: str) -> bool:
+        normalized = "".join(ch for ch in str(text or "").strip() if ch.isalnum())
+        if not normalized:
+            return True
+        return len(normalized) <= 2
+
+    @staticmethod
+    def _ends_with_terminal_punctuation(text: str) -> bool:
+        stripped = str(text or "").strip()
+        if not stripped:
+            return False
+        return stripped.endswith(("。", "！", "？", "!", "?", ";", "；"))
+
+    @staticmethod
+    def _is_digit_like_text(text: str) -> bool:
+        normalized = "".join(ch for ch in str(text or "").strip() if ch.isalnum())
+        if not normalized:
+            return False
+        return normalized.isdigit()
 
     def _emit_rpc_event(
         self,

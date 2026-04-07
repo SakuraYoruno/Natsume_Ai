@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
+from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona import self_model as self_model_mod
 from host_brain.persona.evolution_orchestrator import (
     EvolutionCycleResult,
@@ -351,4 +354,68 @@ def test_growth_summary_collapses_recent_cycles_into_daily_and_weekly_digest() -
     assert summary["last_cycle_date"] == "2026-04-04"
     assert summary["recent_cycle_count"] == 2
     assert summary["active_themes"] == ["recent_change", "trait_felt", "milestone_felt", "desire"]
+
+
+def test_awareness_templates_override_runtime_sections(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "evolution_orchestrator.awareness_templates",
+        content=json.dumps(
+            {
+                "recent_change_templates": {
+                    "warmth": {
+                        "notable": ["自定义明显变温柔"],
+                    },
+                },
+                "recent_change_snapshot_prefix": "【{change}】",
+                "recent_change_fallbacks": ["自定义成长中"],
+                "stagnation_felt_pool": {
+                    "mild": ["自定义轻停滞"],
+                },
+                "regression_felt_pool": {
+                    "warmth": {
+                        "notable": ["自定义明显回退"],
+                    },
+                },
+                "generic_regression_text": "自定义通用回退",
+                "sustained_regression_pool": ["自定义持续回退"],
+                "trait_felt_variants": {
+                    "sensitivity": ["自定义更懂情绪"],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    orchestrator = EvolutionOrchestrator()
+    monkeypatch.setattr(orchestrator._rng, "choice", lambda seq: seq[0])
+
+    assert orchestrator._build_recent_change_text([], {"personality_changes": ["更坦率了"]}) == "【更坦率了】"
+    assert orchestrator._build_recent_change_text(
+        [{"applied": True, "delta_applied": {"warmth": 0.03}}],
+        {},
+    ) == "自定义明显变温柔"
+    assert orchestrator._build_recent_change_text(
+        [{"applied": True, "delta_applied": {"unknown": 0.03}}],
+        {},
+    ) == "自定义成长中"
+    assert orchestrator._build_trait_felt_text(
+        [{"applied": True, "delta_applied": {"sensitivity": 0.02}}],
+    ) == "自定义更懂情绪"
+    assert orchestrator._build_stagnation_felt_text(4) == "自定义轻停滞"
+    assert orchestrator._build_regression_felt_text(
+        regression_details=[{"trait": "warmth", "delta": -0.03}],
+        regression_cycles=2,
+    ) == "自定义明显回退...自定义持续回退"
+    assert orchestrator._build_regression_felt_text(
+        regression_details=[{"trait": "unknown", "delta": -0.01}],
+        regression_cycles=0,
+    ) == "自定义通用回退"
 

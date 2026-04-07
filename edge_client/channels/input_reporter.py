@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from edge_client.runtime_texts import edge_runtime_text
+
 logger = logging.getLogger("Natsume.edge.channels.input_reporter")
 
 
@@ -245,7 +247,11 @@ class EdgeInputReporter:
                 success=True,
                 source=source,
                 reason_code=None,
-                detail="上报成功",
+                detail=edge_runtime_text(
+                    "input_reporter",
+                    "report_success",
+                    default="上报成功",
+                ),
             )
         except Exception as exc:
             logger.warning(

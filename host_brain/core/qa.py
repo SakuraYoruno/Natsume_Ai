@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+
 VIOLATION_JSON_PARSE_ERROR = "LLM_JSON_PARSE_ERROR"
 VIOLATION_SINGLE_JSON_REQUIRED = "LLM_SINGLE_JSON_REQUIRED"
 VIOLATION_ROOT_OBJECT_REQUIRED = "LLM_ROOT_OBJECT_REQUIRED"
@@ -323,22 +325,28 @@ def build_fallback_output(
     }
 
 
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
 def _build_emotion_aware_fallback_text(
     emotion_context: dict[str, Any] | None,
 ) -> str:
     """M29-M（OPT-?）：根据情感上下文生成情感感知的降级文本。"""
+    templates = _load_template_mapping("core.qa.fallback_texts")
+    default_text = str(templates.get("default") or "")
     if not emotion_context:
-        return "嗯…脑子有点转不过来，等我缓一下再回你。"
+        return default_text
     emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").upper()
     mood_state = str(emotion_context.get("mood_state") or "steady").lower()
-    # 根据情感状态选择合适的降级文本
     if emotion_tag in ("SAD", "ANXIOUS") or mood_state in ("tired", "critical"):
-        return "我现在有点状态不太好，让我稍微缓一缓，稍后再好好回应你。"
+        return str(templates.get("sad_or_tired") or default_text)
     if emotion_tag in ("ANGRY", "FRUSTRATED"):
-        return "我需要冷静一下…等会儿再好好说。"
+        return str(templates.get("angry_or_frustrated") or default_text)
     if emotion_tag in ("HAPPY", "EXCITED"):
-        return "哎呀，现在有点小问题，不过没关系，我马上就好！"
-    return "嗯…脑子有点转不过来，等我缓一下再回你。"
+        return str(templates.get("happy_or_excited") or default_text)
+    return default_text
 
 
 def _validate_required_fields(payload: dict[str, Any], result: LintResult) -> None:

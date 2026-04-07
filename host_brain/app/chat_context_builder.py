@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
 from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.chat_runtime_input import build_emotion_recall_text
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.core.prompt_context import (
@@ -42,6 +43,37 @@ CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
 
 _LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"phatic", "affection"})
 _SHORT_CHAT_PERSONA_SCORE_FLOOR = 0.12
+
+_RUNTIME_GUIDANCE_TEMPLATES_DEFAULT: dict[str, Any] = {}
+
+
+def _load_runtime_guidance_templates() -> dict[str, Any]:
+    try:
+        raw = resolve_prompt_template_json_merged("chat_context_builder.runtime_guidance_texts")
+    except Exception:
+        return {}
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _template_text(
+    template_data: Mapping[str, Any] | None,
+    *keys: str,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    current: Any = template_data
+    for key in keys:
+        if not isinstance(current, Mapping):
+            current = None
+            break
+        current = current.get(key)
+    text = str(current or default)
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
 
 
 def normalize_node_style_bindings(
@@ -362,6 +394,7 @@ def build_chat_context_pack(
         "emotion_tag": emotion_tag,
         "tone_hint": str(emotion_pulse.get("style_hint") or ""),
     }
+    runtime_guidance_templates = _load_runtime_guidance_templates()
     # Phase 4: 注入 BondEmotionalTexture 亲密温度和裂痕状态（让关系有温度）
     try:
         from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
@@ -383,15 +416,40 @@ def build_chat_context_pack(
             bond_texture["intimacy_temperature"] = round(_texture.intimacy_temperature, 3)
             # 亲密温度 → 自然语言描述
             if _texture.intimacy_temperature > 0.8:
-                bond_texture["texture_hint"] = "和对方的关系很亲密，可以自在地表达真实想法，偶尔撒娇也没关系"
+                bond_texture["texture_hint"] = _template_text(
+                    runtime_guidance_templates,
+                    "bond_texture",
+                    "temperature_hints",
+                    "gt_0_8",
+                )
             elif _texture.intimacy_temperature > 0.6:
-                bond_texture["texture_hint"] = "关系不错，交流起来很舒适，可以分享更多内心感受"
+                bond_texture["texture_hint"] = _template_text(
+                    runtime_guidance_templates,
+                    "bond_texture",
+                    "temperature_hints",
+                    "gt_0_6",
+                )
             elif _texture.intimacy_temperature > 0.4:
-                bond_texture["texture_hint"] = "关系在自然发展中，保持真诚和适度的温暖"
+                bond_texture["texture_hint"] = _template_text(
+                    runtime_guidance_templates,
+                    "bond_texture",
+                    "temperature_hints",
+                    "gt_0_4",
+                )
             elif _texture.intimacy_temperature > 0.2:
-                bond_texture["texture_hint"] = "关系还比较生疏，表达上注意分寸，多一些耐心"
+                bond_texture["texture_hint"] = _template_text(
+                    runtime_guidance_templates,
+                    "bond_texture",
+                    "temperature_hints",
+                    "gt_0_2",
+                )
             else:
-                bond_texture["texture_hint"] = "初识阶段，保持礼貌和善意，不要过分亲密"
+                bond_texture["texture_hint"] = _template_text(
+                    runtime_guidance_templates,
+                    "bond_texture",
+                    "temperature_hints",
+                    "default",
+                )
             # 裂痕状态
             _rift = _bond_state.rift
             if _rift is not None and _rift.is_active():
@@ -399,11 +457,27 @@ def build_chat_context_pack(
                 bond_texture["rift_cause"] = _rift.rift_cause
                 bond_texture["rift_repair_progress"] = round(_rift.repair_progress, 2)
                 if _rift.repair_progress > 0.7:
-                    bond_texture["rift_hint"] = "之前的小误会正在化解，气氛已经好多了，继续温暖互动"
+                    bond_texture["rift_hint"] = _template_text(
+                        runtime_guidance_templates,
+                        "bond_texture",
+                        "rift_hints",
+                        "repair_high",
+                    )
                 elif _rift.repair_progress > 0.3:
-                    bond_texture["rift_hint"] = "之前有些不愉快，正在修复中，需要更多耐心和温柔"
+                    bond_texture["rift_hint"] = _template_text(
+                        runtime_guidance_templates,
+                        "bond_texture",
+                        "rift_hints",
+                        "repair_mid",
+                    )
                 else:
-                    bond_texture["rift_hint"] = f"关系有些裂痕（{_rift.rift_cause}），说话要特别小心，多表达关心"
+                    bond_texture["rift_hint"] = _template_text(
+                        runtime_guidance_templates,
+                        "bond_texture",
+                        "rift_hints",
+                        "repair_low_template",
+                        rift_cause=_rift.rift_cause,
+                    )
             else:
                 bond_texture["rift_active"] = False
     except (ImportError, AttributeError, Exception):
@@ -609,21 +683,46 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
     avg_distortion = distortion_sum / max(distorted_count, 1) if distorted_count > 0 else 0.0
     guidance_parts: list[str] = []
     recall_bias = "neutral"
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if suppressed_count > 0:
         recall_bias = "guarded"
-        guidance_parts.append("命中压制记忆时先轻触试探，不要直接掀开高压回忆")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "suppressed",
+            )
+        )
 
     if avg_distortion >= 0.35:
         recall_bias = "uncertain"
-        guidance_parts.append("相关回忆细节可能有失真，不要把旧事说成绝对确定")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "distortion_high",
+            )
+        )
     elif distorted_count > 0:
-        guidance_parts.append("涉及旧事时保留一点留白，避免把模糊细节说得过满")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "distortion_low",
+            )
+        )
 
     if protective_recoil_count > 0:
         if recall_bias == "neutral":
             recall_bias = "guarded"
-        guidance_parts.append("当前召回带有防御性回缩，先陪伴确认，不要逼近旧细节")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "protective_recoil",
+            )
+        )
 
     if (
         shared_history_resonance_count > 0
@@ -633,16 +732,34 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
     ):
         if recall_bias == "neutral":
             recall_bias = "warm"
-        guidance_parts.append("可以顺着共同经历自然接续，但只轻轻提起，不要一次把回忆说满")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "shared_history",
+            )
+        )
 
     if dominant_emotion in warm_tags and suppressed_count <= 0:
         if recall_bias == "neutral":
             recall_bias = "warm"
-        guidance_parts.append("可以顺着共同记忆自然承接情绪，但保持轻柔不过度沉浸")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "warm_emotion",
+            )
+        )
     elif dominant_emotion in fragile_tags:
         if recall_bias == "neutral":
             recall_bias = "fragile"
-        guidance_parts.append("若触及相关回忆，先确认对方是否愿意继续，不要追问过深")
+        guidance_parts.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_signal_guidance",
+                "fragile_emotion",
+            )
+        )
 
     guidance_text = "；".join(dict.fromkeys(part for part in guidance_parts if part))
     return {
@@ -765,6 +882,7 @@ def _apply_motive_state_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     motive_guidance: list[str] = []
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if care_drive >= 0.62 and care_drive >= retreat_drive:
         tone = "caring"
@@ -772,11 +890,23 @@ def _apply_motive_state_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.08)
         if not pace_hint:
             pace_hint = "steady"
-        motive_guidance.append("先接住对方情绪，再回应内容，优先表达关心和陪伴")
+        motive_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "motive_guidance",
+                "care",
+            )
+        )
 
     if continuity_drive >= 0.68 and continuity_drive >= retreat_drive:
         follow_up_tendency = max(follow_up_tendency, 0.12)
-        motive_guidance.append("可以轻微延续当前话题，但保持柔和不过度追问")
+        motive_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "motive_guidance",
+                "continuity",
+            )
+        )
 
     if retreat_drive >= 0.72 and retreat_drive >= active_drive + 0.1:
         tone = "gentle"
@@ -784,7 +914,13 @@ def _apply_motive_state_to_persona_expression_hint(
         echo_weight_modifier = min(echo_weight_modifier, 0.02)
         if not pace_hint:
             pace_hint = "slow"
-        motive_guidance.append("当前更偏向收缩和自我保护，减少追问，先保持边界和稳定")
+        motive_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "motive_guidance",
+                "retreat",
+            )
+        )
 
     if motive_guidance:
         guidance_text = "；".join(dict.fromkeys(motive_guidance))
@@ -823,13 +959,20 @@ def _apply_offline_state_to_persona_expression_hint(
     pace_hint = str(hint.get("pace_hint") or "").strip()
     offline_guidance: list[str] = []
     reconnect_style = reconnect_style_for_absence_band(absence_band)
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if absence_band == "6h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.04)
         echo_weight_modifier = max(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "steady"
-        offline_guidance.append("先把它当成短暂离开后的重新接上，轻轻接住就好，再自然进入当前话题")
+        offline_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "offline_guidance",
+                "6h_plus",
+            )
+        )
     elif absence_band == "24h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.08)
         echo_weight_modifier = max(echo_weight_modifier, 0.06)
@@ -837,27 +980,57 @@ def _apply_offline_state_to_persona_expression_hint(
             tone = "caring"
         if not pace_hint:
             pace_hint = "steady"
-        offline_guidance.append("先把它当成轻度失联后的重新连上，不要直接写成久别重逢，再顺势进入正文")
+        offline_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "offline_guidance",
+                "24h_plus",
+            )
+        )
     elif absence_band == "72h_plus":
         tone = "caring"
         follow_up_tendency = max(follow_up_tendency, 0.12)
         echo_weight_modifier = max(echo_weight_modifier, 0.10)
         if not pace_hint:
             pace_hint = "slow"
-        offline_guidance.append("把回复写得像久别重逢后的接住与确认，再慢慢展开内容")
+        offline_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "offline_guidance",
+                "72h_plus",
+            )
+        )
     elif absence_band == "7d_plus":
         tone = "caring"
         follow_up_tendency = max(follow_up_tendency, 0.18)
         echo_weight_modifier = max(echo_weight_modifier, 0.14)
         if not pace_hint:
             pace_hint = "slow"
-        offline_guidance.append("把这次对话当作久别后的重逢，先确认近况与状态，再慢慢把联系接稳")
+        offline_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "offline_guidance",
+                "7d_plus",
+            )
+        )
 
     if loneliness >= 0.55:
         echo_weight_modifier = max(echo_weight_modifier, 0.08)
-        offline_guidance.append("先让对方感到被接住，不要一上来就推进信息")
+        offline_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "offline_guidance",
+                "loneliness",
+            )
+        )
     elif anticipation >= 0.6 and absence_band in {"24h_plus", "72h_plus", "7d_plus"}:
-        offline_guidance.append("可以自然接回之前挂念的话题，但语气保持柔和")
+        offline_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "offline_guidance",
+                "anticipation",
+            )
+        )
 
     if offline_guidance:
         guidance_text = "；".join(dict.fromkeys(part for part in offline_guidance if part))
@@ -890,6 +1063,7 @@ def _apply_activity_monitor_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     activity_guidance: list[str] = []
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     recent_event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
     try:
@@ -907,7 +1081,13 @@ def _apply_activity_monitor_to_persona_expression_hint(
         follow_up_tendency = min(follow_up_tendency, 0.02)
         echo_weight_modifier = min(echo_weight_modifier, 0.03)
         pace_hint = "slow"
-        activity_guidance.append("对方刚醒时先轻声接住，别连着追问，也不要一下子塞太多信息")
+        activity_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "activity_guidance",
+                "wakeup",
+            )
+        )
     elif (is_gaming or recent_event_type == "gaming_detected") and recent_event_age_s <= 900.0:
         if tone == "gentle":
             tone = "playful"
@@ -915,14 +1095,26 @@ def _apply_activity_monitor_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "brisk"
-        activity_guidance.append("对方正在游戏里时优先短句接球和陪玩，不突然切到复杂话题")
+        activity_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "activity_guidance",
+                "gaming_detected",
+            )
+        )
     elif recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0:
         tone = "caring" if tone == "gentle" else tone
         follow_up_tendency = min(max(follow_up_tendency, 0.03), 0.08)
         echo_weight_modifier = max(echo_weight_modifier, 0.05)
         if not pace_hint:
             pace_hint = "steady"
-        activity_guidance.append("对方刚从游戏里退出来时先轻轻接一下，再决定要不要展开")
+        activity_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "activity_guidance",
+                "gaming_exited",
+            )
+        )
     elif idle_minutes >= 20.0:
         if tone == "playful":
             tone = "gentle"
@@ -930,7 +1122,13 @@ def _apply_activity_monitor_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "steady"
-        activity_guidance.append("对方空闲后重连时先轻轻接住，再慢慢进入正题，不要一上来推进太猛")
+        activity_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "activity_guidance",
+                "idle_reentry",
+            )
+        )
 
     if activity_guidance:
         guidance_text = "；".join(dict.fromkeys(part for part in activity_guidance if part))
@@ -977,6 +1175,7 @@ def _apply_scene_awareness_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     scene_guidance: list[str] = []
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if companion_suitable is False or scene_tags & {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}:
         tone = "gentle"
@@ -984,7 +1183,13 @@ def _apply_scene_awareness_to_persona_expression_hint(
         echo_weight_modifier = min(echo_weight_modifier, 0.03)
         if not pace_hint:
             pace_hint = "steady"
-        scene_guidance.append("当前场景更像在专注或不适合打扰，只做轻声贴边回应，不主动展开")
+        scene_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "scene_guidance",
+                "focus",
+            )
+        )
     elif scene_tags & {"gaming", "gameplay", "battle", "lobby"}:
         if tone == "gentle":
             tone = "playful"
@@ -992,7 +1197,13 @@ def _apply_scene_awareness_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.03)
         if not pace_hint:
             pace_hint = "brisk"
-        scene_guidance.append("当前是陪伴型场景，顺着眼前事情轻接就好，不展开任何原始画面细节")
+        scene_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "scene_guidance",
+                "gaming",
+            )
+        )
 
     if scene_guidance:
         guidance_text = "；".join(dict.fromkeys(part for part in scene_guidance if part))
@@ -1033,6 +1244,7 @@ def _apply_runtime_mode_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     mode_guidance: list[str] = []
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if sys_mode == "focus":
         if tone == "playful":
@@ -1041,7 +1253,13 @@ def _apply_runtime_mode_to_persona_expression_hint(
         echo_weight_modifier = min(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "steady"
-        mode_guidance.append("focus 模式下先短句回应，少追问、不切话题，尽量不要打断当前专注")
+        mode_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "mode_guidance",
+                "focus",
+            )
+        )
     elif sys_mode == "gaming":
         if tone == "gentle":
             tone = "playful"
@@ -1049,20 +1267,38 @@ def _apply_runtime_mode_to_persona_expression_hint(
         echo_weight_modifier = max(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "brisk"
-        mode_guidance.append("gaming 模式下优先陪玩接球，用短句和临场回应跟住当前节奏")
+        mode_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "mode_guidance",
+                "gaming",
+            )
+        )
     elif sys_mode == "sleep":
         tone = "gentle"
         follow_up_tendency = min(follow_up_tendency, 0.0)
         echo_weight_modifier = min(echo_weight_modifier, 0.02)
         pace_hint = "slow"
-        mode_guidance.append("sleep 模式下只做轻声确认，不主动展开新话题，也不拉长回复")
+        mode_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "mode_guidance",
+                "sleep",
+            )
+        )
     elif sys_mode in {"maintenance", "locked"}:
         tone = "gentle"
         follow_up_tendency = min(follow_up_tendency, 0.0)
         echo_weight_modifier = min(echo_weight_modifier, 0.02)
         if not pace_hint:
             pace_hint = "steady"
-        mode_guidance.append("当前模式以收口和稳定为主，只保留最小必要回应")
+        mode_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "mode_guidance",
+                "minimal",
+            )
+        )
 
     if mode_guidance:
         guidance_text = "；".join(dict.fromkeys(part for part in mode_guidance if part))
@@ -1105,35 +1341,72 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
     warm_tags = {"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"}
     fragile_tags = {"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"}
     memory_guidance: list[str] = []
+    runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if suppressed_count > 0 or recall_bias == "guarded":
         follow_up_tendency = min(follow_up_tendency, 0.03)
         echo_weight_modifier = min(echo_weight_modifier, 0.05)
         if not pace_hint:
             pace_hint = "steady"
-        memory_guidance.append("命中被压制的旧记忆时，先轻触试探，不要一下子追问太深")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "suppressed",
+            )
+        )
 
     if avg_distortion >= 0.35 or recall_bias == "uncertain":
         follow_up_tendency = min(follow_up_tendency, 0.04)
-        memory_guidance.append("相关回忆可能有些模糊，措辞留一点余地，不要说得像完全确定")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "uncertain",
+            )
+        )
     elif distorted_count > 0:
-        memory_guidance.append("带一点回忆感可以，但别把模糊细节说得过满")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "distorted",
+            )
+        )
 
     if protective_recoil_count > 0:
         follow_up_tendency = min(follow_up_tendency, 0.02)
         echo_weight_modifier = min(echo_weight_modifier, 0.04)
         if not pace_hint:
             pace_hint = "steady"
-        memory_guidance.append("当前召回带有防御性回缩，先陪伴确认，不要直接逼近旧细节")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "protective_recoil",
+            )
+        )
 
     if dominant_emotion in warm_tags and suppressed_count <= 0 and avg_distortion < 0.35:
         tone = "caring" if tone == "gentle" else tone
         follow_up_tendency = max(follow_up_tendency, 0.04)
         echo_weight_modifier = max(echo_weight_modifier, 0.05)
-        memory_guidance.append("这类回忆偏温暖，可以自然承接熟悉感，但保持克制")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "warm",
+            )
+        )
     elif dominant_emotion in fragile_tags:
         follow_up_tendency = min(follow_up_tendency, 0.02)
-        memory_guidance.append("涉及脆弱回忆时先稳住情绪，再决定是否继续往下说")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "fragile",
+            )
+        )
 
     if (
         shared_history_resonance_count > 0
@@ -1144,7 +1417,13 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
         tone = "caring" if tone == "gentle" else tone
         follow_up_tendency = max(follow_up_tendency, 0.08)
         echo_weight_modifier = max(echo_weight_modifier, 0.06)
-        memory_guidance.append("带共享记忆共振时，可以顺着共同经历自然接续，但不要一次说满")
+        memory_guidance.append(
+            _template_text(
+                runtime_guidance_templates,
+                "memory_hint_guidance",
+                "shared_history",
+            )
+        )
 
     guidance_text = str(memory_signal.get("memory_persona_guidance") or "").strip()
     if guidance_text:

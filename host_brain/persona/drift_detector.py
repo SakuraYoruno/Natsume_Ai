@@ -30,9 +30,42 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.drift_detector")
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _load_correction_hint_templates() -> tuple[dict[str, str], list[str]]:
+    raw = _load_template_mapping("drift_detector.correction_hints")
+
+    raw_by_dim = raw.get("by_dim")
+    if isinstance(raw_by_dim, Mapping):
+        by_dim = {
+            str(key): str(value)
+            for key, value in raw_by_dim.items()
+            if str(key or "").strip() and str(value or "").strip()
+        }
+    else:
+        by_dim = {}
+    if not by_dim:
+        by_dim = dict(_CORRECTION_HINTS_BY_DIM)
+
+    raw_generic = raw.get("generic")
+    if isinstance(raw_generic, list):
+        generic = [str(item) for item in raw_generic if str(item or "").strip()]
+    else:
+        generic = []
+    if not generic:
+        generic = list(_CORRECTION_HINTS_GENERIC)
+
+    return by_dim, generic
 
 
 # ---------------------------------------------------------------------------
@@ -538,13 +571,14 @@ class PersonaDriftDetector:
         优先匹配具体维度的专属提示，无匹配时使用通用兜底语。
         """
         import hashlib
+        by_dim, generic = _load_correction_hint_templates()
         # 尝试匹配第一个有专属提示的漂移维度
         for dim in drift_dims:
-            if dim in _CORRECTION_HINTS_BY_DIM:
-                return _CORRECTION_HINTS_BY_DIM[dim]
+            if dim in by_dim:
+                return by_dim[dim]
         # 兜底：按轮次哈希选取通用提示，避免重复
-        idx = int(hashlib.md5(str(self._turn_count).encode()).hexdigest(), 16) % len(_CORRECTION_HINTS_GENERIC)
-        return _CORRECTION_HINTS_GENERIC[idx]
+        idx = int(hashlib.md5(str(self._turn_count).encode()).hexdigest(), 16) % len(generic)
+        return generic[idx]
 
     def _compute_average_fingerprint(self) -> StyleFingerprint:
         """计算最近风格指纹的平均值。"""

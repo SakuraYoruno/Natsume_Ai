@@ -1,18 +1,10 @@
-"""P4/P6：intent_agent_entry 节点 handler — 内部实现为透明子图（intent_agent_subgraph）。
-
-职责：
-- P4：顺序执行子图节点；P6-2：带硬边界的局部循环（max_local_steps / max_retry_count / local_loop_timeout_ms）
-- 写入 payload["subgraph_commit_summary"]（§4.1 冻结）
-- 失败时写入 payload["subgraph_failure"]（§4.2；P6 循环边界/超时/内部错误用 LOCAL_LOOP_*）
-- 写入 payload["subgraph_trace"]，含 step 级（P6-1 §3）
-- 不写入 committed_route_token（仅 Governor 可写）
-"""
-
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.integrations.graph_contract import (
     LOCAL_LOOP_CONFIG_MAX_RETRY,
     LOCAL_LOOP_CONFIG_MAX_STEPS,
@@ -35,26 +27,49 @@ SUBGRAPH_NODE_IDS = [
     "tool_planner",
 ]
 
-# P6-1 建议默认值（可被 node_binding 覆盖）
 _DEFAULT_MAX_LOCAL_STEPS = 10
 _DEFAULT_MAX_RETRY_COUNT = 2
 _DEFAULT_LOCAL_LOOP_TIMEOUT_MS = 60_000
 
 
-def _int_positive(value: Any, default: int) -> int:
-    """解析为正整数；无效或非正时返回 default。"""
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
     try:
-        n = int(value)
-        return n if n > 0 else default
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _resolve_failure_text(key: str, **kwargs: Any) -> str:
+    templates = _load_template_mapping("intent_agent_entry_handler.failure_texts")
+    return _mapping_text(templates, key, **kwargs)
+
+
+def _int_positive(value: Any, default: int) -> int:
+    try:
+        number = int(value)
+        return number if number > 0 else default
     except (TypeError, ValueError):
         return default
 
 
 def _int_non_neg(value: Any, default: int) -> int:
-    """解析为非负整数；无效或负时返回 default。"""
     try:
-        n = int(value)
-        return n if n >= 0 else default
+        number = int(value)
+        return number if number >= 0 else default
     except (TypeError, ValueError):
         return default
 
@@ -63,7 +78,6 @@ def intent_agent_entry_handler(
     payload: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """执行 intent_agent_subgraph，带 P6-2 局部循环边界；写 summary / failure / step 级 trace。"""
     ctx = dict(context or {})
     request_id = str(ctx.get("request_id") or payload.get("request_id") or "").strip()
     invoke = ctx.get("invoke_model_node")
@@ -73,13 +87,18 @@ def intent_agent_entry_handler(
             request_id=request_id,
             failed_node=SUBGRAPH_NODE_IDS[0],
             error_code="INVOKE_MODEL_UNAVAILABLE",
-            safe_fallback_reason="invoke_model_node 不可用，子图未执行",
+            safe_fallback_reason=_resolve_failure_text(
+                "invoke_model_unavailable",
+            ),
         )
 
     binding = ctx.get("node_binding") or {}
     max_local_steps = _int_positive(binding.get(LOCAL_LOOP_CONFIG_MAX_STEPS), _DEFAULT_MAX_LOCAL_STEPS)
     max_retry_count = _int_non_neg(binding.get(LOCAL_LOOP_CONFIG_MAX_RETRY), _DEFAULT_MAX_RETRY_COUNT)
-    local_loop_timeout_ms = _int_positive(binding.get(LOCAL_LOOP_CONFIG_TIMEOUT_MS), _DEFAULT_LOCAL_LOOP_TIMEOUT_MS)
+    local_loop_timeout_ms = _int_positive(
+        binding.get(LOCAL_LOOP_CONFIG_TIMEOUT_MS),
+        _DEFAULT_LOCAL_LOOP_TIMEOUT_MS,
+    )
 
     out = dict(payload)
     subgraph_trace: list[dict[str, Any]] = []
@@ -89,12 +108,27 @@ def intent_agent_entry_handler(
     for step_index in range(max_local_steps):
         if step_index >= len(SUBGRAPH_NODE_IDS):
             break
+
         elapsed_ms = int(time.time() * 1000) - start_ms
         if elapsed_ms >= local_loop_timeout_ms:
-            _append_step(subgraph_trace, step_index, LOCAL_LOOP_VIRTUAL_NODE_ID, STATUS_FAILED, "LOCAL_LOOP_TIMEOUT", "local loop timeout")
+            _append_step(
+                subgraph_trace,
+                step_index,
+                LOCAL_LOOP_VIRTUAL_NODE_ID,
+                STATUS_FAILED,
+                "LOCAL_LOOP_TIMEOUT",
+                "local loop timeout",
+            )
             return _emit_local_loop_failure(
-                out, request_id, LOCAL_LOOP_FAILURE_TIMEOUT, subgraph_trace,
-                safe_fallback_reason=f"局部循环超时（{elapsed_ms}ms >= {local_loop_timeout_ms}ms）",
+                out,
+                request_id,
+                LOCAL_LOOP_FAILURE_TIMEOUT,
+                subgraph_trace,
+                safe_fallback_reason=_resolve_failure_text(
+                    "local_loop_timeout",
+                    elapsed_ms=elapsed_ms,
+                    timeout_ms=local_loop_timeout_ms,
+                ),
             )
 
         node_id = SUBGRAPH_NODE_IDS[step_index]
@@ -111,21 +145,44 @@ def intent_agent_entry_handler(
                 _append_step(subgraph_trace, step_index, node_id, STATUS_FAILED, "SUBGRAPH_NODE_ERROR", str(exc))
                 if attempt >= max_retry_count:
                     return _emit_local_loop_failure(
-                        out, request_id, LOCAL_LOOP_FAILURE_INTERNAL_ERROR, subgraph_trace,
+                        out,
+                        request_id,
+                        LOCAL_LOOP_FAILURE_INTERNAL_ERROR,
+                        subgraph_trace,
                         failed_node=node_id,
-                        safe_fallback_reason=f"子图节点 {node_id} 执行异常（重试{max_retry_count}次后）: {exc!s}",
+                        safe_fallback_reason=_resolve_failure_text(
+                            "node_exception",
+                            node_id=node_id,
+                            max_retry_count=max_retry_count,
+                            error=str(exc),
+                        ),
                     )
 
-    # 未在 max_local_steps 内跑完所有节点
     if step_index + 1 < len(SUBGRAPH_NODE_IDS):
-        _append_step(subgraph_trace, step_index, LOCAL_LOOP_VIRTUAL_NODE_ID, STATUS_FAILED, "LOCAL_LOOP_MAX_STEPS", "max_local_steps reached")
+        _append_step(
+            subgraph_trace,
+            step_index,
+            LOCAL_LOOP_VIRTUAL_NODE_ID,
+            STATUS_FAILED,
+            "LOCAL_LOOP_MAX_STEPS",
+            "max_local_steps reached",
+        )
         return _emit_local_loop_failure(
-            out, request_id, LOCAL_LOOP_FAILURE_MAX_STEPS, subgraph_trace,
-            safe_fallback_reason=f"局部循环达到最大步数（{max_local_steps}）未完成所有节点",
+            out,
+            request_id,
+            LOCAL_LOOP_FAILURE_MAX_STEPS,
+            subgraph_trace,
+            safe_fallback_reason=_resolve_failure_text(
+                "max_steps_reached",
+                max_local_steps=max_local_steps,
+            ),
         )
 
     out["subgraph_trace"] = subgraph_trace
-    out[PAYLOAD_KEY_SUBGRAPH_COMMIT_SUMMARY] = build_subgraph_commit_summary(subgraph_id=SUBGRAPH_ID, subgraph_trace=subgraph_trace)
+    out[PAYLOAD_KEY_SUBGRAPH_COMMIT_SUMMARY] = build_subgraph_commit_summary(
+        subgraph_id=SUBGRAPH_ID,
+        subgraph_trace=subgraph_trace,
+    )
     _strip_committed(out)
     return out
 
@@ -138,15 +195,16 @@ def _append_step(
     reason_code: str | None,
     detail: str,
 ) -> None:
-    """P6-1 §3：step 级信息写入 subgraph_trace（至少 step_index, node_id, ts_ms, status）。"""
-    subgraph_trace.append({
-        "step_index": step_index,
-        "node_id": node_id,
-        "ts_ms": int(time.time() * 1000),
-        "status": status,
-        "reason_code": reason_code,
-        "detail": detail,
-    })
+    subgraph_trace.append(
+        {
+            "step_index": step_index,
+            "node_id": node_id,
+            "ts_ms": int(time.time() * 1000),
+            "status": status,
+            "reason_code": reason_code,
+            "detail": detail,
+        }
+    )
 
 
 def _emit_local_loop_failure(
@@ -158,7 +216,6 @@ def _emit_local_loop_failure(
     failed_node: str = LOCAL_LOOP_VIRTUAL_NODE_ID,
     safe_fallback_reason: str,
 ) -> dict[str, Any]:
-    """写 subgraph_failure（LOCAL_LOOP_*）+ subgraph_trace + summary，然后 return。"""
     trace_ref = f"request_id={request_id}|subgraph_id={SUBGRAPH_ID}|trace_len={len(subgraph_trace)}"
     out[PAYLOAD_KEY_SUBGRAPH_FAILURE] = {
         "failed_node": failed_node,
@@ -167,7 +224,10 @@ def _emit_local_loop_failure(
         "trace_ref": trace_ref,
     }
     out["subgraph_trace"] = subgraph_trace
-    out[PAYLOAD_KEY_SUBGRAPH_COMMIT_SUMMARY] = build_subgraph_commit_summary(subgraph_id=SUBGRAPH_ID, subgraph_trace=subgraph_trace)
+    out[PAYLOAD_KEY_SUBGRAPH_COMMIT_SUMMARY] = build_subgraph_commit_summary(
+        subgraph_id=SUBGRAPH_ID,
+        subgraph_trace=subgraph_trace,
+    )
     _strip_committed(out)
     return out
 
@@ -180,16 +240,17 @@ def _emit_failure(
     error_code: str,
     safe_fallback_reason: str,
 ) -> dict[str, Any]:
-    """子图未执行或入口失败时的归一化输出（§4.2）；trace 含 step_index 以符合 P6 step 级口径。"""
     out = dict(payload)
-    subgraph_trace = [{
-        "step_index": 0,
-        "node_id": failed_node,
-        "ts_ms": int(time.time() * 1000),
-        "status": STATUS_FAILED,
-        "reason_code": error_code,
-        "detail": safe_fallback_reason,
-    }]
+    subgraph_trace = [
+        {
+            "step_index": 0,
+            "node_id": failed_node,
+            "ts_ms": int(time.time() * 1000),
+            "status": STATUS_FAILED,
+            "reason_code": error_code,
+            "detail": safe_fallback_reason,
+        }
+    ]
     out["subgraph_trace"] = subgraph_trace
     out[PAYLOAD_KEY_SUBGRAPH_FAILURE] = {
         "failed_node": failed_node,
@@ -206,7 +267,6 @@ def _emit_failure(
 
 
 def _strip_committed(payload: dict[str, Any]) -> None:
-    """子图不得写入 committed_*（§3 验收 5）。"""
-    for k in list(payload.keys()):
-        if str(k or "").startswith("committed_"):
-            payload.pop(k, None)
+    for key in list(payload.keys()):
+        if str(key or "").startswith("committed_"):
+            payload.pop(key, None)

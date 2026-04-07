@@ -1,6 +1,6 @@
 受众：MASTER
 标题：数字生命运行验收 Findings（N0-T01）
-版本：v2.5
+版本：v2.6
 日期：2026-04-05
 状态：已复验
 
@@ -86,7 +86,7 @@ with TestClient(app):
 
 当前数字生命运行状态判定为：
 
-> **scheduler、人格 tick、runtime snapshot、沉默/身体感、主动表达引擎、以及 `/v1/chat` 写回→下一轮 readback 链都已在 runtime 成立；`bond_narrative / motive_state / response_policy` 也已能在 `LLM_UNAVAILABLE` 降级回复里真实改写 narrative，当前主阻塞收缩为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，以及真实 LLM 内容层与长离线 live 复验。**
+> **scheduler、人格 tick、runtime snapshot、沉默/身体感、主动表达引擎、以及 `/v1/chat` 写回→下一轮 readback 链都已在 runtime 成立；`bond_narrative / motive_state / response_policy` 不只会改写降级 narrative，也已经重新进入真实 Gemini 内容层。当前主剩余收口点已从环境级 `LLM_UNAVAILABLE / edge rpc unavailable`，收缩到长离线 live 内容层对照与偶发 LLM timeout 稳态观察。**
 
 本轮已确认的事实：
 
@@ -94,12 +94,13 @@ with TestClient(app):
 - `inner_world_tick`、`silence_tick`、`body_sense_tick` 在 70 秒观察窗内从 `PENDING` 进入 `OK`，且 `last_reason_code = null`，旧版 findings 中“统一掉到 `UNKNOWN_SKILL`”的结论已失效。
 - `/obs/runtime-snapshot` 已能稳定汇总 `decision_chain` 与 `core_slots`，并可观测 `offline_state / silence_state / body_sense / motive / response_policy`。
 - 沉默引擎与身体感已不只是“有字段”，而是会真实改写 `motive`、`reply_posture` 与 `decision_chain`。
-- `/v1/chat` 主回复入口可走通，但当前环境下会在 runtime 层降级为 `LLM_UNAVAILABLE`，因此主回复链尚不能算完整端到端 PASS。
+- `/v1/chat` 主回复入口当前已恢复真实 LLM 输出：`2026-04-05` 的 live 复验中，`chat_agent:sub=phatic_fastpath` 返回 `model_id=gemini-2.5-pro`，`chat_agent:direct` 返回 `model_id=gemini-2.5-flash`，均为 `decision=APPROVE`。
 - 已定位并修复 `LLM_UNAVAILABLE` 早退绕过 `_async_post_process` 的断点；降级路径现在仍会触发 `session_end` 与 episodic memory writeback。
 - 已补修 `chat_agent` 的 `LLM_UNAVAILABLE / LLM exception` 降级 narrative：fallback 不再固定回落到通用道歉，而会消费 `offline_anticipation_topics / bond_narrative / motive_state / response_policy`，并稳定改写 `COMMIT.narrative` 与 `_async_post_process` 入参。
 - 已补齐 live `/v1/chat` 两轮真实样本：首轮 `WRITE/SUCCESS` 会落账，第二轮 prompt 可稳定读回 `offline_hours / offline_awakening_hint / offline_anticipation_topics`。
 - 主动表达链已补修两处 runtime 断点：future `intent_log.ts_ms` 不再污染 idle gate，scheduler 形态的 `mood_state=steady` 也不再被误判成 `sys_mode=steady`。
 - 在 seeded `>45m` idle 条件下，`proactive_talk_periodic` 已经过一轮真实 `195s` 观察窗触发成功，并通过模板 fallback 推送出主动消息。
+- `2026-04-05` 已补 `tests/integration/test_chat_agent_soul_pipeline.py` 的长离线多轮回归，新增覆盖 `24h+ / 72h+ / 7d+` 的 prompt readback 与 waiting expression 标记，避免这部分再次只停留在 snapshot / helper 层。
 
 ---
 
@@ -192,30 +193,36 @@ with TestClient(app):
 
 > 沉默引擎与身体感已经不只是“tick 会执行”，而是会真实决定 reply posture 与 motive，V5 / V6 可判定为 `PASS`。
 
-### E4：主回复入口可用，但当前被环境级降级截断
+### E4：主回复入口已恢复真实 LLM 输出，Edge 依赖当前为远端 gateway-only 健康态
 
-`/health?skip_dependency_probes=1` 返回：
+`/ready` / startup report 当前返回：
 
-- `status_code = 200`
-- `status = OK`
-- `required_unavailable = 1`
+- `ready = true`
+- `status = READY`
+- `required_unavailable = 0`
 
-但 startup report 与日志持续出现：
+当前可直接确认的事实：
 
-- `OPENAI_API_KEY missing`
-- `edge rpc unreachable: ConnectError; attempted=http://127.0.0.1:17800`
-- Chroma / identity probing 仍有降级
+- Host 使用 `HOST_LLM_PROVIDER=gemini`，并能真实访问 `https://generativelanguage.googleapis.com/v1beta/models?...`，日志返回 `HTTP/1.1 200 OK`
+- Edge 依赖当前不是本机直连模式，而是 `gateway-only mode (http://192.168.1.101:19000)`；`edge.rpc.gateway / asr / tts / barge_in / resource_gate` 在 `/ready` 中均为 `UP`
+- 本地 `http://127.0.0.1:11434/api/ps` 的 `502` 仍会出现在健康探测日志里，但它不再阻断 Gemini 主链
 
-真实 `POST /v1/chat` 结果：
+`2026-04-05` 的真实 `POST /v1/chat` 复验结果：
 
-- `status_code = 200`
-- COMMIT：`decision = REJECT`
-- `reason_code = LLM_UNAVAILABLE`
-- 仍会返回降级 narrative reply
+- Case 1：`在吗`
+  - `status_code = 200`
+  - COMMIT：`decision = APPROVE`
+  - `audit_refs.path = chat_agent:sub=phatic_fastpath`
+  - `model_id = gemini-2.5-pro`
+- Case 2：`我今天有点累，但还是想把那个项目继续推进，你会怎么陪我聊？`
+  - `status_code = 200`
+  - COMMIT：`decision = APPROVE`
+  - `audit_refs.path = chat_agent:direct`
+  - `model_id = gemini-2.5-flash`
 
 结论：
 
-> 主回复链入口已连通，但当前环境无法把数字生命验证推进到完整 LLM 输出层。当前最大的端到端阻塞已从旧版 personality dispatch 断点，转移为环境级 `LLM_UNAVAILABLE / edge rpc unavailable`。
+> 旧版“环境级 `LLM_UNAVAILABLE / edge rpc unavailable` 阻塞主回复链”的结论已不再成立。当前主回复链已恢复真实 Gemini 输出；Edge 依赖也已稳定落在远端 gateway-only 健康态。剩余问题转向偶发 timeout 的稳态观察，以及更长离线档位的 live 内容层对照。
 
 ### E5：`/v1/chat` 写回→`awaken/readback` 链已补齐真实闭环证据
 
@@ -304,50 +311,50 @@ with TestClient(app):
 
 ### Gap 1（P0）
 
-**环境级 `LLM_UNAVAILABLE / edge rpc unavailable` 仍阻塞完整端到端验收。**
+**live 长离线样本下的 `loneliness / waiting expression` 内容层验证仍不足。**
 
 影响：
 
-- `/v1/chat` 主回复链降级到 fallback narrative
-- 主动表达链无法完成真实内容生成
-- 无法完成真实 LLM narrative 与 Edge 语音链路的完整端到端验收
+- 目前 `6.5h` synthetic 与多轮 readback 已有证据，`24h+ / 72h+ / 7d+` 也已有自动化 prompt 回归
+- 但更长离线样本下，真实 LLM narrative 是否稳定体现等待感、重连强度和话题延续，仍缺 live 对照证据
+- Findings 还不能把“长离线内容层已 PASS”写成最终结论
 
 建议优先动作：
 
-- 恢复 `OPENAI_API_KEY`
-- 恢复 `127.0.0.1:17800` Edge RPC
-- 重新跑本 findings 中的 `/v1/chat` 与 proactive dispatch 验证
+- 补 `24h+ / 72h+` 的真实 `/v1/chat` 对照样本
+- 对照 `offline_state`、prompt 注入与最终 narrative 的一致性
+- 视结果刷新本 findings 的 live 长离线结论
 
 ### Gap 2（P1）
 
-**关系叙事层已在降级内容层闭环，但真实 LLM narrative 仍缺 live 对照证据。**
+**关系叙事层已回到真实 LLM 内容层，但“同输入、不同状态”的 live 差异对照还不够。**
 
 现象：
 
-- `bond_narrative`、`response_policy`、`motive_state` 已进入 runtime snapshot，并会改写 `LLM_UNAVAILABLE` 下的实际回复 narrative
-- 但当前环境仍被 `LLM_UNAVAILABLE` 降级，真实 LLM 内容层还没完成复验
-- 当前 remaining work 已从“V7 不生效”收缩到“恢复真实 LLM 后补同输入差异对照”
+- `bond_narrative`、`response_policy`、`motive_state` 已进入 runtime snapshot，也已重新进入真实 Gemini 输出链
+- 但当前 live 证据仍以“链路恢复可用”为主，对 `bond / motive / policy` 三者如何共同改写真实 narrative 的对照样本还偏少
+- 当前 remaining work 已从“恢复环境”收缩到“补 live 差异样本并固定验收脚本”
 
 建议优先动作：
 
-- 恢复真实 LLM / Edge RPC 后重跑 `/v1/chat` 内容层验收
 - 对照同输入下不同 `bond / motive / response_policy` 的回复差异
 - 补关系叙事层进入真实 narrative 的最小自动化回归
 
 ### Gap 3（P2）
 
-**live 长离线样本下的 `loneliness / waiting expression` 内容层验证仍不足。**
+**偶发 LLM timeout 仍需稳态观察，但已不再构成主阻塞。**
 
 现象：
 
-- synthetic `6.5h` 与 live 两轮 readback 证据已补齐
-- 但更长离线样本下的 `loneliness` 收敛、waiting expression 与真实 narrative 差异仍主要停留在 snapshot / prompt 层
+- `2026-04-05 15:09` 左右日志中仍出现过单次 `ChatAgent LLM failed: Request timed out.`
+- 之后的 live `/v1/chat` 已连续恢复 `APPROVE + gemini-*` 输出
+- 这说明当前更像偶发稳态问题，而不是“环境彻底不可用”
 
 建议优先动作：
 
-- 补 `24h+ / 72h+` 样本的真实 `/v1/chat` 内容层验收
-- 对照 `offline_state`、prompt 注入与最终 narrative 的一致性
-- 补长离线档位的最小自动化回归
+- 继续观察 timeout 频率与触发条件
+- 如再次出现，补最小重试/降级证据与监控指标
+- 不要再把它与“环境级 `LLM_UNAVAILABLE` 持续阻塞”混为一类
 
 ---
 
@@ -359,7 +366,7 @@ with TestClient(app):
 
 本轮复验后，这一结论应正式作废，修正为：
 
-> scheduler、personality ticks、proactive engine、以及 `/v1/chat` 写回→下一轮 readback 链都已真实打通；当前 remaining gaps 已转移到环境级 LLM/edge 依赖，以及关系叙事层与完整内容层验证。
+> scheduler、personality ticks、proactive engine、以及 `/v1/chat` 写回→下一轮 readback 链都已真实打通；真实 Gemini 内容层与远端 Edge gateway 也已恢复。当前 remaining gaps 已转移到长离线 live 内容层、关系叙事差异对照，以及偶发 timeout 的稳态观察。
 
 ---
 
@@ -367,11 +374,11 @@ with TestClient(app):
 
 本轮 `N0-T01` 复验可以收口成一句话：
 
-> **数字生命底盘已经不是“像在跑”，而是 scheduler、snapshot、silence、body_sense、以及 stateful degraded narrative 都已在 runtime 成立；但完整体验仍卡在环境级降级与少数 live 内容层验收。**
+> **数字生命底盘已经不是“像在跑”，而是 scheduler、snapshot、silence、body_sense、stateful degraded narrative、以及真实 Gemini 主回复链都已在 runtime 成立；当前差的已经不是“能不能跑”，而是更长时间尺度与更细状态差异的 live 内容层证据。**
 
 建议下一步执行顺序：
 
-1. 先恢复或隔离 `LLM_UNAVAILABLE / edge rpc unavailable` 环境阻塞。
-2. 恢复真实 LLM / Edge RPC 后，补 `bond_narrative / response_policy / motive_state` 对真实回复内容的验收。
-3. 补长离线档位（`24h+ / 72h+`）的 live 内容层观察与自动化回归。
-4. 修完后再刷新一次本 findings，重点更新真实 LLM narrative 与 Edge 链路结论。
+1. 先补长离线档位（`24h+ / 72h+ / 7d+`）的 live 内容层观察，把 waiting expression 从 prompt 证据推进到 narrative 证据。
+2. 再补 `bond_narrative / response_policy / motive_state` 对真实回复内容的同输入差异对照。
+3. 持续观察 Gemini 偶发 timeout，确认它是边缘噪声还是需要专项稳态修复。
+4. 修完后再刷新一次本 findings，重点更新长离线 live narrative 与真实内容层差异结论。

@@ -6,6 +6,7 @@ import {
   fetchSysModeHistory,
   updateAutoRules,
 } from '../api/obs.js'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 
 // 模式定义：图标 + 颜色 + 中文名 + 说明
 const MODE_DEFS = {
@@ -173,6 +174,8 @@ export default function RuntimeMode() {
 
   return (
     <div className="space-y-6">
+      <DigitalLifeNav />
+
       {/* 页面标题 */}
       <div>
         <h1 className="text-xl font-bold text-gray-800">运行模式管理</h1>

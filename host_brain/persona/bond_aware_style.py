@@ -7,10 +7,51 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.persona.bond_aware_style")
+
+
+def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
+    if isinstance(raw, list):
+        normalized = [str(item).strip() for item in raw if str(item).strip()]
+        if normalized:
+            return normalized
+    return list(fallback)
+
+
+def _normalize_text_mapping(raw: Any, fallback: Mapping[str, str]) -> dict[str, str]:
+    normalized = {str(key): str(value or "") for key, value in fallback.items()}
+    if not isinstance(raw, Mapping):
+        return normalized
+    for key, value in raw.items():
+        key_text = str(key).strip()
+        if key_text:
+            normalized[key_text] = str(value or "")
+    return normalized
+
+
+def _normalize_memory_count_hints(raw: Any, fallback: Mapping[int, str]) -> dict[int, str]:
+    normalized = {int(key): str(value or "") for key, value in fallback.items()}
+    if not isinstance(raw, Mapping):
+        return normalized
+    for key, value in raw.items():
+        try:
+            key_num = int(key)
+        except (TypeError, ValueError):
+            continue
+        normalized[key_num] = str(value or "")
+    return normalized
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 # ---------------------------------------------------------------------------
 # Bond 阶段 → 风格维度配置
@@ -163,8 +204,12 @@ def _get_rift_adjustment(
     if not rift_active:
         return ""
 
+    template_data = _load_style_template_data()
+    rift_mapping = template_data.get("rift_style_map")
+    rift_source = rift_mapping if isinstance(rift_mapping, Mapping) else _RIFT_STYLE_MAP
+
     severity = str(rift_severity or "medium").strip().lower()
-    if severity not in _RIFT_STYLE_MAP:
+    if severity not in rift_source:
         severity = "medium"
 
     progress = max(0.0, min(1.0, float(rift_progress or 0.0)))
@@ -175,7 +220,11 @@ def _get_rift_adjustment(
     else:
         stage_key = "fresh"
 
-    return _RIFT_STYLE_MAP[severity][stage_key]
+    stage_mapping = rift_source.get(severity)
+    fallback_mapping = _RIFT_STYLE_MAP.get(severity, _RIFT_STYLE_MAP["medium"])
+    if not isinstance(stage_mapping, Mapping):
+        stage_mapping = fallback_mapping
+    return str(stage_mapping.get(stage_key) or fallback_mapping.get(stage_key) or "")
 
 # ---------------------------------------------------------------------------
 # Natsume 自身情绪叠加调整
@@ -250,11 +299,28 @@ def _get_substage_hint(stage: str, intimacy_score: float) -> str:
     Returns:
         子阶段感知提示文本，无法判断时返回空字符串
     """
-    config = _BOND_SUBSTAGE_CONFIG.get(stage)
-    if config is None:
+    template_data = _load_style_template_data()
+    substage_mapping = template_data.get("substage_config")
+    raw_config = substage_mapping.get(stage) if isinstance(substage_mapping, Mapping) else None
+    fallback_config = _BOND_SUBSTAGE_CONFIG.get(stage)
+
+    if isinstance(raw_config, Mapping):
+        range_low = _coerce_float(raw_config.get("range_low"), fallback_config[0] if fallback_config else 0.0)
+        range_high = _coerce_float(raw_config.get("range_high"), fallback_config[1] if fallback_config else 0.0)
+        entry_ratio = _coerce_float(raw_config.get("entry_ratio"), fallback_config[2] if fallback_config else 0.5)
+        entry_hint = str(
+            raw_config.get("entry_hint")
+            or (fallback_config[3] if fallback_config else "")
+        )
+        stable_hint = str(
+            raw_config.get("stable_hint")
+            or (fallback_config[4] if fallback_config else "")
+        )
+    elif fallback_config is not None:
+        range_low, range_high, entry_ratio, entry_hint, stable_hint = fallback_config
+    else:
         return ""
 
-    range_low, range_high, entry_ratio, entry_hint, stable_hint = config
     span = range_high - range_low
     if span <= 0:
         return stable_hint
@@ -324,7 +390,7 @@ class BondAwareStyleEngine:
         *,
         profiles: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        self._profiles = dict(profiles or BOND_STYLE_PROFILES)
+        self._profiles = dict(profiles) if profiles is not None else None
 
     def generate(
         self,
@@ -356,12 +422,19 @@ class BondAwareStyleEngine:
                 注入后让 Natsume 的表达带有"我记得你"的温度。
         """
         stage = str(bond_stage or "STRANGER").strip().upper()
-        profile = self._profiles.get(stage, self._profiles.get("STRANGER", {}))
+        template_data = _load_style_template_data()
+        profile_source = self._profiles if self._profiles is not None else template_data.get("profiles")
+        fallback_profile = BOND_STYLE_PROFILES.get(stage, BOND_STYLE_PROFILES.get("STRANGER", {}))
+        raw_profile = profile_source.get(stage) if isinstance(profile_source, Mapping) else None
+        profile = raw_profile if isinstance(raw_profile, Mapping) else fallback_profile
 
         # 基础风格指令
-        style_instr = str(profile.get("style_instruction", ""))
-        intimacy = float(profile.get("intimacy", 0.3))
-        forbidden = list(profile.get("forbidden_patterns", []))
+        style_instr = str(profile.get("style_instruction") or fallback_profile.get("style_instruction", ""))
+        intimacy = _coerce_float(profile.get("intimacy"), fallback_profile.get("intimacy", 0.3))
+        forbidden = _normalize_text_list(
+            profile.get("forbidden_patterns"),
+            list(fallback_profile.get("forbidden_patterns", [])),
+        )
 
         # 子阶段感知（刚进入 vs 深度稳定）
         score = float(intimacy_score or 0.0)
@@ -369,11 +442,19 @@ class BondAwareStyleEngine:
 
         # 用户情绪调整
         mood = str(mood_state or "neutral").strip().lower()
-        mood_adj = MOOD_STYLE_ADJUSTMENTS.get(mood, "")
+        mood_adjustments = _normalize_text_mapping(
+            template_data.get("mood_adjustments"),
+            MOOD_STYLE_ADJUSTMENTS,
+        )
+        mood_adj = mood_adjustments.get(mood, "")
 
         # Natsume 自身情绪叠加
         nat_mood = str(natsume_mood or "NEUTRAL").strip().upper()
-        natsume_mood_hint = NATSUME_MOOD_ADJUSTMENTS.get(nat_mood, "")
+        natsume_mood_adjustments = _normalize_text_mapping(
+            template_data.get("natsume_mood_adjustments"),
+            NATSUME_MOOD_ADJUSTMENTS,
+        )
+        natsume_mood_hint = natsume_mood_adjustments.get(nat_mood, "")
 
         # 裂痕调整（细腻的进度感知）
         rift_adj = _get_rift_adjustment(
@@ -385,10 +466,17 @@ class BondAwareStyleEngine:
         # 趋势调整
         trend_adj = ""
         trend = str(bond_trend or "").strip().lower()
+        trend_adjustments = _normalize_text_mapping(
+            template_data.get("trend_adjustments"),
+            {
+                "rising": "关系在变好，可以稍微大胆一点表达。",
+                "declining": "关系在降温，注意保持温和，不要施压。",
+            },
+        )
         if trend in ("rising", "improving"):
-            trend_adj = "关系在变好，可以稍微大胆一点表达。"
+            trend_adj = trend_adjustments.get("rising", "")
         elif trend in ("declining", "cooling"):
-            trend_adj = "关系在降温，注意保持温和，不要施压。"
+            trend_adj = trend_adjustments.get("declining", "")
 
         # 拼接最终 prompt 注入文本
         parts: list[str] = [
@@ -485,6 +573,52 @@ _MEMORY_COUNT_HINTS: dict[int, str] = {
 }
 
 
+def _default_style_template_data() -> dict[str, Any]:
+    return {
+        "profiles": {
+            stage: {
+                **{key: value for key, value in profile.items() if key != "forbidden_patterns"},
+                "forbidden_patterns": list(profile.get("forbidden_patterns", [])),
+            }
+            for stage, profile in BOND_STYLE_PROFILES.items()
+        },
+        "mood_adjustments": dict(MOOD_STYLE_ADJUSTMENTS),
+        "rift_style_map": {
+            severity: {stage: text for stage, text in stage_mapping.items()}
+            for severity, stage_mapping in _RIFT_STYLE_MAP.items()
+        },
+        "natsume_mood_adjustments": dict(NATSUME_MOOD_ADJUSTMENTS),
+        "substage_config": {
+            stage: {
+                "range_low": range_low,
+                "range_high": range_high,
+                "entry_ratio": entry_ratio,
+                "entry_hint": entry_hint,
+                "stable_hint": stable_hint,
+            }
+            for stage, (range_low, range_high, entry_ratio, entry_hint, stable_hint) in _BOND_SUBSTAGE_CONFIG.items()
+        },
+        "trend_adjustments": {
+            "rising": "关系在变好，可以稍微大胆一点表达。",
+            "declining": "关系在降温，注意保持温和，不要施压。",
+        },
+        "memory_style_guides": {
+            stage: list(texts) for stage, texts in _MEMORY_STYLE_GUIDES.items()
+        },
+        "memory_count_hints": {
+            str(key): value for key, value in _MEMORY_COUNT_HINTS.items()
+        },
+    }
+
+
+def _load_style_template_data() -> dict[str, Any]:
+    try:
+        raw = resolve_prompt_template_json_merged("bond_aware_style.style_templates")
+    except Exception:
+        return _default_style_template_data()
+    return dict(raw) if isinstance(raw, Mapping) else _default_style_template_data()
+
+
 def _build_memory_style_instruction(stage: str, hints: list[str]) -> str:
     """根据 Bond 阶段和记忆数量，生成关系记忆运用的风格指导。
 
@@ -501,13 +635,25 @@ def _build_memory_style_instruction(stage: str, hints: list[str]) -> str:
         return ""
 
     count = len(hints)
+    template_data = _load_style_template_data()
 
     # 阶段风格指导
-    stage_guides = _MEMORY_STYLE_GUIDES.get(stage, [])
+    memory_style_guides = template_data.get("memory_style_guides")
+    if isinstance(memory_style_guides, Mapping):
+        stage_guides = _normalize_text_list(
+            memory_style_guides.get(stage),
+            _MEMORY_STYLE_GUIDES.get(stage, []),
+        )
+    else:
+        stage_guides = list(_MEMORY_STYLE_GUIDES.get(stage, []))
     stage_guide = _rnd.choice(stage_guides) if stage_guides else ""
 
     # 数量提示
-    count_hint = _MEMORY_COUNT_HINTS.get(min(count, 3), _MEMORY_COUNT_HINTS[3])
+    memory_count_hints = _normalize_memory_count_hints(
+        template_data.get("memory_count_hints"),
+        _MEMORY_COUNT_HINTS,
+    )
+    count_hint = memory_count_hints.get(min(count, 3), memory_count_hints[3])
 
     parts = []
     if count_hint:

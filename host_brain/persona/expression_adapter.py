@@ -14,7 +14,9 @@ Phase II 核心模块——根据 PersonalityTraits + EmotionVector + Bond 阶�
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 from host_brain.persona.personality_traits import (
     ExpressionHint,
@@ -26,6 +28,51 @@ from host_brain.persona.emotion_reactivity import (
 )
 
 _logger = logging.getLogger("Natsume.expression_adapter")
+
+
+class _SafeTemplateDict(dict[str, str]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict(
+        {
+            str(key): "" if value is None else str(value)
+            for key, value in kwargs.items()
+        }
+    )
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+    raw = mapping.get(key)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    return _format_template_text(mapping.get(key, default), **kwargs)
+
+
+def _load_style_hint_templates() -> dict[str, Any]:
+    return _load_template_mapping("expression_adapter.style_hint.templates")
 
 # ---------------------------------------------------------------------------
 # Bond 阶段 → 表达开放度
@@ -189,49 +236,124 @@ class PersonaExpressionAdapter:
         _NEGATIVE = {"SAD", "ANGRY", "ANXIOUS", "FRUSTRATED", "CONFUSED"}
         _MILD_NEG = {"BORED", "FRUSTRATED", "CONFUSED"}
         _POSITIVE = {"HAPPY", "EXCITED", "LOVING", "PROUD", "GRATEFUL", "SURPRISED"}
+        templates = _load_style_hint_templates()
+        core_templates = _mapping_section(templates, "core")
+        trait_templates = _mapping_section(templates, "traits")
+        bond_templates = _mapping_section(templates, "bond")
+        pace_templates = _mapping_section(templates, "pace")
 
         if modifiers.empathy_boost >= 0.2:
             if openness >= 0.7:
-                parts.append("深度共情，用亲近的人才会说的话去安慰")
+                parts.append(
+                    _mapping_text(
+                        core_templates,
+                        "empathy_high_close",
+                    )
+                )
             else:
-                parts.append("温柔共情，表达关心但保持分寸")
+                parts.append(
+                    _mapping_text(
+                        core_templates,
+                        "empathy_high_reserved",
+                    )
+                )
 
         if modifiers.humor_deflection >= 0.3:
-            parts.append("可以用轻松幽默的方式化解气氛")
+            parts.append(
+                _mapping_text(
+                    core_templates,
+                    "humor_deflection",
+                )
+            )
 
         if modifiers.curiosity_follow_up >= 0.2:
-            parts.append("保持好奇心，自然地追问了解更多")
+            parts.append(
+                _mapping_text(
+                    core_templates,
+                    "curiosity_follow_up",
+                )
+            )
 
         # ── 特质驱动的基础风格 ────────────────────────────────────────────
         if not parts:
             if traits.warmth >= 0.7:
-                parts.append("温柔真诚")
+                parts.append(
+                    _mapping_text(
+                        trait_templates,
+                        "warmth",
+                    )
+                )
             if traits.playfulness >= 0.6 and openness >= 0.5:
-                parts.append("可以适当俏皮")
+                parts.append(
+                    _mapping_text(
+                        trait_templates,
+                        "playfulness",
+                    )
+                )
             if traits.assertiveness >= 0.6:
-                parts.append("语气自信")
+                parts.append(
+                    _mapping_text(
+                        trait_templates,
+                        "assertiveness",
+                    )
+                )
             if not parts:
-                parts.append("自然温和")
+                parts.append(
+                    _mapping_text(
+                        trait_templates,
+                        "default",
+                    )
+                )
 
         # ── 关系阶段微调 ─────────────────────────────────────────────────
         if openness >= 0.8 and user_emotion_tag in _POSITIVE:
-            parts.append("可以更自在地表达喜悦")
+            parts.append(
+                _mapping_text(
+                    bond_templates,
+                    "positive_open",
+                )
+            )
         if openness >= 0.8 and traits.playfulness >= 0.5:
-            parts.append("偶尔撒个小娇也没关系")
+            parts.append(
+                _mapping_text(
+                    bond_templates,
+                    "playful_open",
+                )
+            )
         if openness < 0.4:
-            parts.append("注意保持适当距离")
+            parts.append(
+                _mapping_text(
+                    bond_templates,
+                    "distance",
+                )
+            )
 
         # ── 对话节奏微调 ─────────────────────────────────────────────────
         if pace == PACE_RAPID:
-            parts.append("回复简洁利落，跟上对方的节奏")
+            parts.append(
+                _mapping_text(
+                    pace_templates,
+                    "rapid",
+                )
+            )
             # 快节奏时抑制过度俏皮，避免显得不认真
             if traits.playfulness >= 0.6 and openness < 0.6:
                 pass  # 已有俏皮提示时不再追加
         elif pace == PACE_DEEP:
-            parts.append("认真倾听，回复可以更细腻深入一些")
+            parts.append(
+                _mapping_text(
+                    pace_templates,
+                    "deep",
+                )
+            )
             # 深度对话时强化敏感度表达
             if traits.sensitivity >= 0.6:
-                parts.append("注意捕捉对方话语中的细微情感")
+                parts.append(
+                    _mapping_text(
+                        pace_templates,
+                        "deep_sensitive",
+                    )
+                )
 
         return "，".join(parts)
 
@@ -289,51 +411,50 @@ class PersonaExpressionAdapter:
         Returns:
             可直接嵌入 system prompt 的文本段落
         """
+        templates = _load_template_mapping("expression_adapter.prompt_section.templates")
+
         # ── tone → 行为指导 ──────────────────────────────────────────────
-        _TONE_GUIDANCE: dict[str, str] = {
-            "caring": "优先表达关心和陪伴，语气温柔体贴",
-            "playful": "可以活泼一些，适当加入轻松的语气，但不要过度",
-            "serious": "保持认真和专注，用心回应对方的需求",
-            "gentle": "保持自然温和的语气，不需要刻意表演情绪",
-        }
-        guidance = _TONE_GUIDANCE.get(hint.tone, "保持真诚自然")
+        guidance = _mapping_text(
+            _mapping_section(templates, "tone_guidance"),
+            hint.tone,
+        )
+        if not guidance:
+            guidance = _mapping_text(templates, "default_guidance")
 
         # ── echo_weight_modifier → 情感共鸣程度描述 ──────────────────────
         delta = float(hint.echo_weight_modifier)
         if delta >= 0.12:
-            echo_desc = "今天对他的情绪感受很深，多一些情感共鸣"
+            echo_desc = _mapping_text(templates, "echo_high")
         elif delta >= 0.05:
-            echo_desc = "适当跟随他的情绪节奏"
+            echo_desc = _mapping_text(templates, "echo_mid")
         elif delta <= -0.08:
-            echo_desc = "保持情绪稳定，不过度卷入他的情绪波动"
+            echo_desc = _mapping_text(templates, "echo_low")
         else:
-            echo_desc = "情感共鸣保持自然"
+            echo_desc = _mapping_text(templates, "echo_default")
 
         # ── follow_up_tendency → 追问倾向描述 ────────────────────────────
         follow = float(hint.追问倾向)
         if follow >= 0.5:
-            follow_desc = "今天想多了解他一些，可以自然地多问一句"
+            follow_desc = _mapping_text(templates, "follow_up_high")
         elif follow >= 0.2:
-            follow_desc = "如果话题有趣，可以顺势追问"
+            follow_desc = _mapping_text(templates, "follow_up_mid")
         else:
-            follow_desc = "不需要刻意追问，跟着对话自然走"
+            follow_desc = _mapping_text(templates, "follow_up_low")
 
         # ── pace_hint → 对话节奏描述 ──────────────────────────────────
         pace = str(getattr(hint, "pace_hint", "normal") or "normal")
         if pace == "rapid":
-            pace_desc = "对方在快节奏聊天，回复要简洁有活力，不要长篇大论"
+            pace_desc = _mapping_text(templates, "pace_rapid")
         elif pace == "deep":
-            pace_desc = "对方在认真倾诉或深度讨论，回复可以更细腻、更有深度"
+            pace_desc = _mapping_text(templates, "pace_deep")
         else:
-            pace_desc = "对话节奏正常，保持自然"
+            pace_desc = _mapping_text(templates, "pace_normal")
 
-        lines: list[str] = [
-            "【表达策略提示】",
-            f"- 风格：{hint.style_hint}",
-            f"- 语气：{guidance}",
-            f"- 情感共鸣：{echo_desc}",
-            f"- 追问倾向：{follow_desc}",
-            f"- 对话节奏：{pace_desc}",
-        ]
-
-        return "\n".join(lines) + "\n\n"
+        return (
+            _mapping_text(templates, "title")
+            + _mapping_text(templates, "style_label", value=hint.style_hint)
+            + _mapping_text(templates, "tone_label", value=guidance)
+            + _mapping_text(templates, "echo_label", value=echo_desc)
+            + _mapping_text(templates, "follow_up_label", value=follow_desc)
+            + _mapping_text(templates, "pace_label", value=pace_desc)
+        )

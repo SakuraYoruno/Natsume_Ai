@@ -13,7 +13,9 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.sub_agent")
 
@@ -73,6 +75,54 @@ AGENT_CAPABILITIES: dict[str, str] = {
 # 调度器
 # ---------------------------------------------------------------------------
 
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+_DEFAULT_AGENT_CAPABILITIES: dict[str, str] = {
+    AGENT_CODE: "代码专家：生成、修改、审查代码，并解释技术概念",
+    AGENT_TRANSLATE: "翻译专家：处理中日英多语翻译，包含校对和润色",
+    AGENT_INTENT: "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
+    AGENT_VISION: "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
+    AGENT_REPAIR: "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力",
+}
+
+
+def get_agent_capabilities() -> dict[str, str]:
+    templates = _load_template_mapping("sub_agent_protocol.agent_capabilities")
+    capabilities = dict(_DEFAULT_AGENT_CAPABILITIES)
+    for agent_id in ALL_AGENT_IDS:
+        resolved = str(templates.get(agent_id) or capabilities.get(agent_id) or "").strip()
+        if resolved:
+            capabilities[agent_id] = resolved
+    return capabilities
+
+
+def _runtime_text(key: str, **kwargs: Any) -> str:
+    templates = _load_template_mapping("sub_agent_protocol.runtime_texts")
+    return _mapping_text(templates, key, **kwargs)
+
+
+AGENT_CAPABILITIES = get_agent_capabilities()
+
+
 class SubAgentDispatcher:
     """子 Agent 统一调度器。
 
@@ -125,7 +175,10 @@ class SubAgentDispatcher:
             resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
-                error=f"unknown agent_id: {req.agent_id}",
+                error=_runtime_text(
+                    "unknown_agent",
+                    agent_id=req.agent_id,
+                ),
             )
             self._log_dispatch(req, resp)
             return resp
@@ -204,7 +257,10 @@ class SubAgentDispatcher:
             resp = SubAgentResponse(
                 success=False,
                 agent_id=req.agent_id,
-                error=f"timeout after {req.timeout_ms}ms",
+                error=_runtime_text(
+                    "timeout_after",
+                    timeout_ms=req.timeout_ms,
+                ),
                 latency_ms=latency_ms,
             )
             self._log_dispatch(req, resp)

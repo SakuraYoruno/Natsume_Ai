@@ -18,7 +18,11 @@ import json
 import logging
 from typing import Any, Mapping
 
-from host_brain.app.sub_agent_protocol import AGENT_CAPABILITIES
+from host_brain.app.prompt_template_store import (
+    resolve_prompt_template_json_merged,
+    resolve_prompt_template_text,
+)
+from host_brain.app.sub_agent_protocol import get_agent_capabilities
 
 _logger = logging.getLogger("Natsume.top_agent_prompt")
 
@@ -26,22 +30,6 @@ _logger = logging.getLogger("Natsume.top_agent_prompt")
 # 常量
 # ---------------------------------------------------------------------------
 TOP_AGENT_NODE_ID = "top_agent"
-_STYLE_CORRECTION_BLOCK_CN = (
-    "【语言纠偏（高优先级）】\n"
-    "- 普通问候、确认、轻寒暄时，不要每句都以‘嗯……’起手。\n"
-    "- 省略号‘……’只在犹豫、停顿、欲言又止时使用；普通问候/确认每句最多一次。\n"
-    "- 少用空泛模板，如‘我在呢’‘我也很喜欢呢’‘我觉得很好看呢’；尽量补一处具体观察或自然追问。\n"
-    "- 文字气质要像年轻但成熟、温和而克制的老师，不要像通用陪聊助手。\n"
-    "- 陌生/初识阶段优先礼貌、自然、清爽，减少黏腻感和过软撒娇语气。"
-)
-_STYLE_CORRECTION_BLOCK_JA = (
-    "【話し方の補正（高優先度）】\n"
-    "- 軽い挨拶や相槌では、毎回同じ出だしを繰り返さない。\n"
-    "- 『……』は躊躇や間が必要な場面に限定し、通常の挨拶では多用しない。\n"
-    "- 空疎な優しさテンプレートを避け、一つ具体的な観察や自然な問い返しを添える。\n"
-    "- 全体の印象は、若く見えても落ち着きのある人・面倒見のよい先生。\n"
-    "- 初期段階では、丁寧で自然、少し距離感のある柔らかさを優先する。"
-)
 DEFAULT_CONTINUITY_RECENT_TURNS = 16
 DEFAULT_CONTINUITY_RECENT_MAX_TOKENS = 6000
 DEFAULT_CONTINUITY_OLDER_SUMMARY_MAX_TOKENS = 3000
@@ -49,6 +37,44 @@ DEFAULT_CONTINUITY_TOTAL_MAX_TOKENS = (
     DEFAULT_CONTINUITY_RECENT_MAX_TOKENS + DEFAULT_CONTINUITY_OLDER_SUMMARY_MAX_TOKENS
 )
 DEFAULT_CONTINUITY_FETCH_ROWS = 128
+
+
+def _get_style_correction_block(render_target_lang: str) -> str:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return resolve_prompt_template_text("top_agent_prompt.style_correction.ja")
+    return resolve_prompt_template_text("top_agent_prompt.style_correction.cn")
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(key): "" if value is None else str(value) for key, value in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _load_continuity_templates() -> dict[str, str]:
+    raw = _load_template_mapping("top_agent_prompt.continuity_sections")
+    return {
+        "user_label": str(raw.get("user_label") or "User"),
+        "assistant_label": str(raw.get("assistant_label") or "Assistant"),
+        "recent_session_title": str(raw.get("recent_session_title") or "Recent session context:"),
+        "recent_continuity_title": str(raw.get("recent_continuity_title") or "Recent continuity context:"),
+        "earlier_summary_title": str(raw.get("earlier_summary_title") or "Earlier continuity summary:"),
+    }
+
+
+def _resolve_continuity_role_label(*, role: str, templates: Mapping[str, str]) -> str:
+    return str(templates.get("user_label") or "User") if role == "user" else str(
+        templates.get("assistant_label") or "Assistant"
+    )
 
 
 def _normalize_recent_context_limit(raw_value: Any) -> int:
@@ -212,6 +238,7 @@ def _build_older_history_summary(
 ) -> str:
     from host_brain.app.recall import truncate_to_token_limit  # noqa: PLC0415
 
+    continuity_templates = _load_continuity_templates()
     lines: list[str] = []
     for turn in list(turns or []):
         role = str(turn.get("role") or "user").strip().lower()
@@ -221,7 +248,7 @@ def _build_older_history_summary(
         )
         if not content:
             continue
-        label = "User" if role == "user" else "Assistant"
+        label = _resolve_continuity_role_label(role=role, templates=continuity_templates)
         compact = " ".join(content.split())
         if len(compact) > 120:
             compact = compact[:117].rstrip() + "..."
@@ -246,6 +273,7 @@ def _build_recent_session_context_block(
     if not resolved_session_id and not resolved_person_id:
         return ""
 
+    continuity_templates = _load_continuity_templates()
     turn_limit = _normalize_continuity_turn_limit(max_turns)
     request_id_text = str(request_id or "").strip()
 
@@ -303,15 +331,19 @@ def _build_recent_session_context_block(
         )
         if not content:
             continue
-        label = "User" if role == "user" else "Assistant"
+        label = _resolve_continuity_role_label(role=role, templates=continuity_templates)
         raw_lines.append(f"{label}: {content}")
 
     parts: list[str] = []
     if raw_lines:
-        title = "Recent continuity context:" if resolved_person_id else "Recent session context:"
+        title = (
+            continuity_templates["recent_continuity_title"]
+            if resolved_person_id
+            else continuity_templates["recent_session_title"]
+        )
         parts.append(title + "\n" + "\n".join(raw_lines))
     if compressed.summary:
-        parts.append("Earlier continuity summary:\n" + str(compressed.summary).strip())
+        parts.append(continuity_templates["earlier_summary_title"] + "\n" + str(compressed.summary).strip())
 
     return "\n\n".join(part for part in parts if str(part).strip())
 
@@ -430,17 +462,35 @@ def build_top_agent_prompt(
         TOP_AGENT_NODE_ID,
         render_target_lang=render_target_lang,
     )
+    _section_templates = _load_template_mapping("top_agent_prompt.sections")
 
     _parts = []
     if _cp_text:
-        _parts.append(f"【角色人设】\n{_cp_text}")
+        _parts.append(
+            _format_template_text(
+                _section_templates.get("profile_title", "【角色人设】\n")
+            )
+            + _cp_text
+        )
     if _style_text:
-        _parts.append(f"【说话风格（必须遵守）】\n{_style_text}")
-    _parts.append(_STYLE_CORRECTION_BLOCK_JA if render_target_lang == "ja" else _STYLE_CORRECTION_BLOCK_CN)
+        _parts.append(
+            _format_template_text(
+                _section_templates.get("style_title", "【说话风格（必须遵守）】\n")
+            )
+            + _style_text
+        )
+    _parts.append(_get_style_correction_block(render_target_lang))
     _parts.append(_node_role)
     system_prompt = "\n\n".join(_parts)
 
-    prompt_text = full_prompt + "\n\n" + f"【用户消息】\n{user_message}"
+    prompt_text = (
+        full_prompt
+        + "\n\n"
+        + _format_template_text(
+            _section_templates.get("user_message_title", "【用户消息】\n")
+        )
+        + user_message
+    )
 
     if include_runtime_payload:
         return prompt_text, system_prompt, gen_params, dict(prompt_payload)
@@ -453,10 +503,11 @@ def build_top_agent_prompt(
 
 def _build_agent_capabilities_block() -> str:
     """构建子 Agent 能力描述块。"""
-    lines = ["【可用能力（委托协议）】"]
-    lines.append("如果用户的请求需要以下专业能力，在回复中嵌入 [DELEGATE:agent_id:任务描述] 标记委托对应 Agent。")
-    lines.append("如果是日常闲聊/情感交流/知识问答，直接回复即可，不需要委托。")
-    for agent_id, desc in AGENT_CAPABILITIES.items():
-        lines.append(f"- {agent_id}：{desc}")
-    lines.append("委托格式示例：[DELEGATE:code_agent:写一个快速排序算法]")
+    templates = _load_template_mapping("top_agent_prompt.delegate.block_templates")
+    lines = [_format_template_text(templates.get("title"))]
+    lines.append(_format_template_text(templates.get("delegate_rule")))
+    lines.append(_format_template_text(templates.get("direct_reply_rule")))
+    for agent_id, desc in get_agent_capabilities().items():
+        lines.append(_format_template_text(templates.get("agent_line"), agent_id=agent_id, desc=desc))
+    lines.append(_format_template_text(templates.get("delegate_example")))
     return "\n".join(lines)

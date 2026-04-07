@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import host_brain.persona.self_reflection as sr_mod
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.self_reflection import SelfReflection, build_self_reflection_pulse
 
 
@@ -111,6 +114,75 @@ def test_time_context_buckets_and_trigger_reason_priority() -> None:
     ) == sr_mod._SCHEDULED_TRIGGER_REASONS[-1]
 
 
+def test_trigger_reason_templates_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "self_reflection.trigger_reason_templates",
+        content=json.dumps(
+            {
+                "emotion": {
+                    "SAD": ["自定义难过触发"],
+                },
+                "scheduled": ["自定义定时触发"],
+                "time_aware": {
+                    "久别重逢": ["自定义久别重逢"],
+                },
+                "force_generate_reason": "自定义强制触发",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    reflection = SelfReflection(seed=0)
+    reflection._rng = SimpleNamespace(choice=lambda seq: seq[0])
+
+    assert reflection._pick_trigger_reason(
+        emotion="SAD",
+        event_driven=True,
+        time_context="久别重逢",
+    ) == "自定义难过触发"
+    assert reflection._pick_trigger_reason(
+        emotion="",
+        event_driven=False,
+        time_context="久别重逢",
+    ) == "自定义久别重逢"
+    assert reflection._pick_trigger_reason(
+        emotion="",
+        event_driven=False,
+        time_context="",
+    ) == "自定义定时触发"
+
+    monkeypatch.setattr(
+        reflection._model,
+        "build_snapshot",
+        lambda **kwargs: {"bond_growth_perception": "稳定", "raw": kwargs},
+    )
+    monkeypatch.setattr(
+        sr_mod,
+        "build_self_reflection_pulse",
+        lambda snapshot, **kwargs: {"self_awareness": "ok", **kwargs},
+    )
+    pulse = reflection.force_generate()
+    assert pulse["trigger_reason"] == "自定义强制触发"
+
+
+def test_builtin_self_reflection_templates_are_clean() -> None:
+    trigger_templates = resolve_prompt_template_json_merged("self_reflection.trigger_reason_templates")
+    guardrail_templates = resolve_prompt_template_json_merged("self_reflection.narrative_guardrail_texts")
+
+    assert trigger_templates["force_generate_reason"] == "强制触发（测试）"
+    assert trigger_templates["scheduled"][0] == "到了该停下来想想的时候了"
+    assert guardrail_templates["directive_high_risk"].startswith("涉及自我叙事时")
+    assert guardrail_templates["directive_reflection_vs_policy_tension"].startswith("当前以主回复任务")
+
+
 def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> None:
     monkeypatch.setattr(
         sr_mod,
@@ -198,6 +270,50 @@ def test_build_self_reflection_pulse_adds_narrative_guardrails_when_evidence_is_
 
 
 
+def test_build_self_reflection_pulse_uses_guardrail_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "self_reflection.narrative_guardrail_texts",
+        content=json.dumps(
+            {
+                "instructions": {
+                    "time_context_unverified": "自定义时间证据不足说明",
+                },
+                "directive_high_risk": "自定义高风险收束",
+                "directive_time_context_unverified": "自定义最近/这段时间限制",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    monkeypatch.setattr(
+        sr_mod,
+        "build_self_awareness_text",
+        lambda snapshot, time_context="", llm_fn=None, style_evolution=None: "aware",
+    )
+    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot, llm_fn=None: "mood")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_growth_note_text",
+        lambda snapshot, llm_fn=None, style_evolution=None: "",
+    )
+    monkeypatch.setattr(sr_mod, "detect_contradictions", lambda snapshot: [])
+    monkeypatch.setattr(sr_mod, "build_contradiction_awareness_text", lambda contradictions: "")
+
+    pulse = build_self_reflection_pulse({"bond_growth_perception": "稳定"})
+    guardrails = dict(pulse["narrative_guardrails"])
+
+    assert "自定义时间证据不足说明" in guardrails["instruction"]
+    assert "自定义高风险收束" in guardrails["prompt_directives"]
+    assert "自定义最近/这段时间限制" in guardrails["prompt_directives"]
+
+
 def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() -> None:
     aligned = sr_mod.align_self_reflection_pulse(
         {"self_awareness": "原始自省", "mood_awareness": "mood", "growth_note": "grow"},
@@ -250,3 +366,67 @@ def test_align_self_reflection_pulse_prefers_guarded_tone_when_retreat_dominates
     assert "mode:focus" in aligned["state_alignment_reasons"]
     assert "motive:guarded" in aligned["state_alignment_reasons"]
     assert "policy:withdrawn" in aligned["state_alignment_reasons"]
+
+
+def test_build_style_trend_note_uses_runtime_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "self_reflection.style_trend_templates",
+        content=json.dumps(
+            {
+                "trait_cn": {
+                    "warmth": "柔软气息",
+                },
+                "text_pool": {
+                    "rising": ["自定义上升：{trait}"],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    monkeypatch.setattr(sr_mod.random, "choice", lambda seq: seq[0])
+
+    text = sr_mod._build_style_trend_note({"warmth": "rising"})
+
+    assert text == "自定义上升：柔软气息"
+
+
+def test_build_style_trend_note_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "persona.self_narrative_prompts",
+        content=json.dumps(
+            {
+                "style_trend_prompt": "自定义风格趋势：{hint_str}",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    captured: dict[str, str] = {}
+
+    def _fake_llm(prompt: str) -> str:
+        captured["prompt"] = prompt
+        return "风格在变化"
+
+    text = sr_mod._build_style_trend_note(
+        {"warmth": "rising", "humor": "falling"},
+        llm_fn=_fake_llm,
+    )
+
+    assert text == "风格在变化"
+    assert captured["prompt"].startswith("自定义风格趋势：")

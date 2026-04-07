@@ -25,16 +25,61 @@ import re
 import time
 from typing import Any, AsyncGenerator, Dict, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.bond.user_identity import resolve_person_id
 from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import (
-    AGENT_CAPABILITIES,
     ALL_AGENT_IDS,
     SubAgentRequest,
     get_sub_agent_dispatcher,
 )
 
 _logger = logging.getLogger("Natsume.top_agent")
+
+
+class _SafeTemplateDict(dict[str, Any]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict(
+        {
+            str(key): "" if value is None else str(value)
+            for key, value in kwargs.items()
+        }
+    )
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _load_runtime_texts() -> dict[str, Any]:
+    return _load_template_mapping("top_agent.runtime_texts")
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+    raw = mapping.get(key)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    return _format_template_text(mapping.get(key, default), **kwargs)
 
 # 委托标记正则：LLM 输出中 [DELEGATE:agent_id:task] 或 JSON delegate 字段
 _DELEGATE_RE = re.compile(
@@ -234,7 +279,8 @@ def _looks_like_active_task_context(turns: list[dict[str, str]]) -> bool:
 
 def _pick_non_repeating_variant(*, variants: list[str], last_reply: str, request_id: str) -> str:
     if not variants:
-        return "嗯……我在呢。"
+        templates = _mapping_section(_load_runtime_texts(), "variant_selection")
+        return _mapping_text(templates, "empty_variants_fallback")
     normalized_last = str(last_reply or "").strip()
     start = sum(ord(ch) for ch in str(request_id or "")) % len(variants)
     ordered = variants[start:] + variants[:start]
@@ -285,16 +331,19 @@ def _maybe_build_phatic_fastpath_reply(
         "",
     )
 
-    category_notes = {
-        "greeting": "场景：用户在打招呼。目标：自然回应问候，并轻轻把话题接住。不要机械复读上一条问候。",
-        "presence": "场景：用户在确认你在不在。目标：先简洁回应自己在，再自然追问一句。不要显得黏腻或过度撒娇。",
-        "ack": "场景：用户在轻量确认或附和。目标：简短接住，不要像模板客服，可轻轻推进一句。",
-        "followup": "场景：用户在普通延续接话，但当前没有明显任务上下文。目标：自然接住对话，并邀请对方继续。",
-    }
+    templates = _mapping_section(_load_runtime_texts(), "phatic_fastpath")
+    category_notes = _mapping_section(templates, "category_notes")
     repeated_warning = ""
     if last_assistant:
-        repeated_warning = f" 上一条你的回复是：{last_assistant}。不要重复这个句子。"
-    return str(category_notes.get(category) or "") + repeated_warning
+        repeated_warning = _mapping_text(
+            templates,
+            "repeated_warning_template",
+            last_assistant=last_assistant,
+        )
+    return _mapping_text(
+        category_notes,
+        category,
+    ) + repeated_warning
 
 
 def _extract_delegate_visible_text(text: str) -> str:
@@ -312,17 +361,23 @@ def _extract_delegate_visible_text(text: str) -> str:
 
 def _render_delegated_result_naturally(*, agent_id: str, result_text: str, reply_template: str | None) -> str:
     visible = _extract_delegate_visible_text(result_text)
+    templates = _mapping_section(_load_runtime_texts(), "delegated_result")
+    empty_visible_templates = _mapping_section(templates, "empty_visible_result")
     if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
         if agent_id == "code_agent":
-            return "我先帮你整理个更自然一点的大致思路吧。不过刚才那条代码侧结果不稳定，这次我不直接把内部草稿发给你。"
-        return "我先帮你把刚才那个结果整理成正常说话的版本，不过上一条子流程返回得不太稳定。"
+            return _mapping_text(empty_visible_templates, "code_agent")
+        return _mapping_text(empty_visible_templates, "default")
 
     if reply_template and "{agent_result}" in reply_template:
         rendered = reply_template.replace("{agent_result}", visible).strip()
         if rendered:
             return rendered
     if agent_id == "code_agent":
-        return f"我先帮你整理一个大致思路：{visible}".strip()
+        return _mapping_text(
+            templates,
+            "code_agent_prefix_template",
+            agent_result=visible,
+        ).strip()
     return visible
 
 
@@ -578,8 +633,10 @@ def _maybe_build_task_progress_fastpath(
         )
     except Exception:
         summary = None
+    templates = _mapping_section(_load_runtime_texts(), "task_progress")
+    default_labels = _mapping_section(templates, "defaults")
     if not summary:
-        return "现在没有正在执行，或者刚结束但还值得汇报的任务。"
+        return _mapping_text(templates, "no_summary")
 
     child_tasks = [dict(item or {}) for item in list(summary.get("child_tasks") or []) if isinstance(item, dict)]
     step_match = _TASK_STEP_INDEX_RE.search(normalized)
@@ -600,53 +657,159 @@ def _maybe_build_task_progress_fastpath(
                 break
 
     if selected_child is not None:
+        selected_child_templates = _mapping_section(templates, "selected_child")
         meta = dict(selected_child.get("meta") or {}) if isinstance(selected_child.get("meta"), dict) else {}
         step_index = int(meta.get("step_index") or 0)
-        target_id = str(selected_child.get("target_id") or meta.get("target_id") or "步骤").strip() or "步骤"
+        default_step_label = _mapping_text(default_labels, "step_label")
+        target_id = str(
+            selected_child.get("target_id")
+            or meta.get("target_id")
+            or default_step_label
+        ).strip() or default_step_label
         step_desc = str(meta.get("description") or selected_child.get("detail") or "").strip()
         child_status = str(selected_child.get("status") or "UNKNOWN").strip().upper()
         child_error = str(selected_child.get("error") or "").strip()
         recovery_text = str(selected_child.get("recovery_result_text") or "").strip()
         if child_status in {"FAILED", "RECOVERING"}:
-            parts = [f"第{step_index}步是 {target_id}。", "那一步没有顺利完成。"]
+            parts = [
+                _mapping_text(
+                    selected_child_templates,
+                    "failed_intro_template",
+                    step_index=step_index,
+                    target_id=target_id,
+                ),
+                _mapping_text(selected_child_templates, "failed_status"),
+            ]
             if step_desc:
-                parts.append(f"它本来是在处理：{step_desc}。")
+                parts.append(
+                    _mapping_text(
+                        selected_child_templates,
+                        "failed_detail_template",
+                        step_desc=step_desc,
+                    )
+                )
             if child_error:
-                parts.append(f"原因大概是：{child_error}。")
+                parts.append(
+                    _mapping_text(
+                        selected_child_templates,
+                        "failed_error_template",
+                        error_text=child_error,
+                    )
+                )
             if recovery_text:
-                parts.append(f"我后来整理出的补救建议是：{recovery_text}。")
+                parts.append(
+                    _mapping_text(
+                        selected_child_templates,
+                        "failed_recovery_template",
+                        recovery_text=recovery_text,
+                    )
+                )
             return "".join(parts)
-        parts = [f"第{step_index}步是 {target_id}。", "这一步已经处理好了。"]
+        parts = [
+            _mapping_text(
+                selected_child_templates,
+                "completed_intro_template",
+                step_index=step_index,
+                target_id=target_id,
+            ),
+            _mapping_text(selected_child_templates, "completed_status"),
+        ]
         if step_desc:
-            parts.append(f"当时处理的是：{step_desc}。")
+            parts.append(
+                _mapping_text(
+                    selected_child_templates,
+                    "completed_detail_template",
+                    step_desc=step_desc,
+                )
+            )
         return "".join(parts)
 
     status = str(summary.get("status") or "UNKNOWN").strip().upper()
     if ask_failure and status in {"FAILED", "RECOVERING"}:
-        target_id = str(summary.get("target_id") or "任务").strip() or "任务"
+        failed_summary_templates = _mapping_section(templates, "failed_summary")
+        default_task_label = _mapping_text(default_labels, "task_label")
+        target_id = str(summary.get("target_id") or default_task_label).strip() or default_task_label
         error_text = str(summary.get("error") or "").strip()
         recovery_text = str(summary.get("recovery_result_text") or "").strip()
-        parts = [f"刚才失败的是 {target_id}。"]
+        parts = [
+            _mapping_text(
+                failed_summary_templates,
+                "intro_template",
+                target_id=target_id,
+            )
+        ]
         if error_text:
-            parts.append(f"原因大概是：{error_text}。")
+            parts.append(
+                _mapping_text(
+                    failed_summary_templates,
+                    "error_template",
+                    error_text=error_text,
+                )
+            )
         if recovery_text:
-            parts.append(f"我整理出的补救建议是：{recovery_text}。")
+            parts.append(
+                _mapping_text(
+                    failed_summary_templates,
+                    "recovery_template",
+                    recovery_text=recovery_text,
+                )
+            )
         return "".join(parts)
-    target_id = str(summary.get("target_id") or "任务").strip() or "任务"
+    default_task_label = _mapping_text(default_labels, "task_label")
+    target_id = str(summary.get("target_id") or default_task_label).strip() or default_task_label
     progress_message = str(summary.get("progress_message") or summary.get("detail") or "").strip()
     recovery_result_text = str(summary.get("recovery_result_text") or "").strip()
     if status in {"RUNNING", "RECOVERING"}:
-        parts = [f"当前有个任务还在进行，是 {target_id}。"]
+        running_summary_templates = _mapping_section(templates, "running_summary")
+        parts = [
+            _mapping_text(
+                running_summary_templates,
+                "intro_template",
+                target_id=target_id,
+            )
+        ]
         if progress_message:
-            parts.append(progress_message)
+            parts.append(
+                _mapping_text(
+                    running_summary_templates,
+                    "progress_template",
+                    progress_message=progress_message,
+                )
+            )
         if recovery_result_text:
-            parts.append(f"补救分析里提到：{recovery_result_text}")
+            parts.append(
+                _mapping_text(
+                    running_summary_templates,
+                    "recovery_template",
+                    recovery_text=recovery_result_text,
+                )
+            )
         return "".join(parts)
-    parts = [f"上个任务是 {target_id}，现在已经 {status.lower()} 了。"]
+    finished_summary_templates = _mapping_section(templates, "finished_summary")
+    parts = [
+        _mapping_text(
+            finished_summary_templates,
+            "intro_template",
+            target_id=target_id,
+            status_text=status.lower(),
+        )
+    ]
     if progress_message:
-        parts.append(progress_message)
+        parts.append(
+            _mapping_text(
+                finished_summary_templates,
+                "progress_template",
+                progress_message=progress_message,
+            )
+        )
     if recovery_result_text:
-        parts.append(f"自动补救的建议是：{recovery_result_text}")
+        parts.append(
+            _mapping_text(
+                finished_summary_templates,
+                "recovery_template",
+                recovery_text=recovery_result_text,
+            )
+        )
     return "".join(parts)
 
 
@@ -684,18 +847,43 @@ def _maybe_build_recent_turn_answer(
     latest_user = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "user" and str(turn.get("content") or "").strip()), "")
     latest_assistant = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "assistant" and str(turn.get("content") or "").strip()), "")
 
+    templates = _mapping_section(_load_runtime_texts(), "recent_turn_answer")
     if query_role == "user" and latest_user:
-        return f"已确认事实：用户上一句是「{latest_user}」。请直接告诉用户，不要再说看不到或没看到。"
+        return _mapping_text(
+            templates,
+            "user_template",
+            latest_user=latest_user,
+        )
     if query_role == "assistant" and latest_assistant:
-        return f"已确认事实：你上一句回复是「{latest_assistant}」。请直接告诉用户，不要再说看不到或没看到。"
+        return _mapping_text(
+            templates,
+            "assistant_template",
+            latest_assistant=latest_assistant,
+        )
     if query_role == "both":
         parts: list[str] = []
         if latest_user:
-            parts.append(f"用户上一句是「{latest_user}」")
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "both_user_item_template",
+                    latest_user=latest_user,
+                )
+            )
         if latest_assistant:
-            parts.append(f"你上一句回复是「{latest_assistant}」")
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "both_assistant_item_template",
+                    latest_assistant=latest_assistant,
+                )
+            )
         if parts:
-            return "已确认事实：" + "；".join(parts) + "。请直接回答，不要再说看不到或没看到。"
+            return _mapping_text(
+                templates,
+                "both_wrapper_template",
+                facts="；".join(parts),
+            )
     return None
 
 
@@ -1106,6 +1294,7 @@ async def top_agent_sse_generator(
     try:
         from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
+        runtime_task_status_templates = _mapping_section(_load_runtime_texts(), "runtime_task_status")
         runtime_task_registry = get_runtime_task_registry()
         if runtime_task_registry.get_by_request_id(request_id) is None:
             runtime_task_registry.create_task(
@@ -1115,8 +1304,16 @@ async def top_agent_sse_generator(
                 session_id=session_id,
                 person_id=person_id,
                 user_message=sanitized_message,
-                detail="正在整理上下文和检索记忆。",
-                progress_message="我正在整理上下文和检索记忆。",
+                detail=_mapping_text(
+                    runtime_task_status_templates,
+                    "pre_dispatch_detail",
+                    default="正在整理上下文和检索记忆。",
+                ),
+                progress_message=_mapping_text(
+                    runtime_task_status_templates,
+                    "pre_dispatch_progress",
+                    default="我正在整理上下文和检索记忆。",
+                ),
                 meta={"stage": "top_agent_pre_dispatch"},
             )
     except Exception as _task_exc:
@@ -1224,7 +1421,10 @@ async def top_agent_sse_generator(
     )
 
     if not llm_runtime.get("available"):
-        fallback_narrative = "嗯……蓝现在脑子有点转不动，等一下再来找我好不好？"
+        fallback_narrative = _mapping_text(
+            _load_runtime_texts(),
+            "llm_unavailable_fallback",
+        )
         total_latency_ms = int(time.time() * 1000) - ts_ms
         try:
             asyncio.create_task(_async_post_process(
@@ -1258,7 +1458,7 @@ async def top_agent_sse_generator(
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "REJECT",
             "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-            "narrative": "嗯……蓝现在脑子有点转不动，等一下再来找我好不好？",
+            "narrative": fallback_narrative,
         })
         return
 
@@ -1356,11 +1556,16 @@ async def _async_post_process(
             runtime_task_registry = get_runtime_task_registry()
             runtime_task = runtime_task_registry.get_by_request_id(request_id)
             if runtime_task is not None and str(runtime_task.status).upper() in {"RUNNING", "RECOVERING"}:
+                runtime_task_status_templates = _mapping_section(_load_runtime_texts(), "runtime_task_status")
                 has_failure = bool(runtime_task.error or runtime_task.result_code)
                 if has_failure:
                     runtime_task_registry.mark_failed(
                         runtime_task.task_id,
-                        detail="整条回复已经完成，但执行阶段有失败。",
+                        detail=_mapping_text(
+                            runtime_task_status_templates,
+                            "failed_detail",
+                            default="整条回复已经完成，但执行阶段有失败。",
+                        ),
                         error=str(runtime_task.error or "").strip(),
                         result_code=str(runtime_task.result_code or "").strip() or None,
                         result_text=narrative,
@@ -1368,7 +1573,11 @@ async def _async_post_process(
                 else:
                     runtime_task_registry.mark_completed(
                         runtime_task.task_id,
-                        detail="整条回复已经完成。",
+                        detail=_mapping_text(
+                            runtime_task_status_templates,
+                            "completed_detail",
+                            default="整条回复已经完成。",
+                        ),
                         result_text=narrative,
                     )
         except Exception as _task_finalize_exc:

@@ -20,9 +20,32 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.evolution_desire_engine")
+
+
+def _load_prompt_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 # 意愿冷却时间：3 天（毫秒）
 _DESIRE_COOLDOWN_MS = 3 * 24 * 3600 * 1000
@@ -323,6 +346,88 @@ _EVENT_COUNT_DESIRE_TEMPLATES: list[tuple[int, int, list[str]]] = [
 ]
 
 
+def _default_desire_template_data() -> dict[str, Any]:
+    return {
+        "trait_templates": {
+            trait_name: [{"level": level, "text": text} for level, text in entries]
+            for trait_name, entries in _DESIRE_TEMPLATES.items()
+        },
+        "bond_templates": {key: list(values) for key, values in _BOND_DESIRE_TEMPLATES.items()},
+        "time_templates": {key: list(values) for key, values in _TIME_DESIRE_TEMPLATES.items()},
+        "emotion_templates": {key: list(values) for key, values in _EMOTION_DESIRE_TEMPLATES.items()},
+        "fulfilled_texts": {key: list(values) for key, values in _DESIRE_FULFILLED_TEXTS.items()},
+        "user_preference_templates": {
+            key: list(values) for key, values in _USER_PREFERENCE_DESIRE_TEMPLATES.items()
+        },
+        "event_count_templates": [
+            {"min": min_count, "max": max_count, "texts": list(texts)}
+            for min_count, max_count, texts in _EVENT_COUNT_DESIRE_TEMPLATES
+        ],
+    }
+
+
+def _load_desire_template_data() -> dict[str, Any]:
+    try:
+        raw = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
+    except Exception:
+        return _default_desire_template_data()
+    return dict(raw) if isinstance(raw, Mapping) else _default_desire_template_data()
+
+
+def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
+    if isinstance(raw, list):
+        normalized = [str(item).strip() for item in raw if str(item).strip()]
+        if normalized:
+            return normalized
+    return list(fallback)
+
+
+def _normalize_level_text_entries(raw: Any, fallback: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            level = ""
+            text = ""
+            if isinstance(item, Mapping):
+                level = str(item.get("level") or item.get("condition") or item.get("bucket") or "").strip()
+                text = str(item.get("text") or "").strip()
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                level = str(item[0] or "").strip()
+                text = str(item[1] or "").strip()
+            if text:
+                entries.append((level, text))
+    return entries or list(fallback)
+
+
+def _normalize_event_count_templates(
+    raw: Any,
+    fallback: list[tuple[int, int, list[str]]],
+) -> list[tuple[int, int, list[str]]]:
+    entries: list[tuple[int, int, list[str]]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            min_count = 0
+            max_count = -1
+            texts: list[str] = []
+            if isinstance(item, Mapping):
+                try:
+                    min_count = int(item.get("min") or 0)
+                    max_count = int(item.get("max") or -1)
+                except (TypeError, ValueError):
+                    continue
+                texts = _normalize_text_list(item.get("texts"), [])
+            elif isinstance(item, (list, tuple)) and len(item) >= 3:
+                try:
+                    min_count = int(item[0] or 0)
+                    max_count = int(item[1] or -1)
+                except (TypeError, ValueError):
+                    continue
+                texts = _normalize_text_list(item[2], [])
+            if max_count >= min_count and texts:
+                entries.append((min_count, max_count, texts))
+    return entries or [(min_count, max_count, list(texts)) for min_count, max_count, texts in fallback]
+
+
 # ---------------------------------------------------------------------------
 # EvolutionDesireEngine
 # ---------------------------------------------------------------------------
@@ -425,6 +530,7 @@ class EvolutionDesireEngine:
                 return llm_desire
 
         candidates: list[str] = []
+        template_data = _load_desire_template_data()
 
         # 1. 基于特质生成（找最低的特质维度）
         if traits is not None:
@@ -432,12 +538,22 @@ class EvolutionDesireEngine:
             candidates.extend(trait_desires)
 
         # 2. 基于情感趋势生成
-        emotion_desires = _EMOTION_DESIRE_TEMPLATES.get(emotion_trend, [])
+        emotion_mapping = template_data.get("emotion_templates")
+        emotion_source = emotion_mapping if isinstance(emotion_mapping, Mapping) else _EMOTION_DESIRE_TEMPLATES
+        emotion_desires = _normalize_text_list(
+            emotion_source.get(emotion_trend),
+            list(_EMOTION_DESIRE_TEMPLATES.get(emotion_trend, [])),
+        )
         candidates.extend(emotion_desires)
 
         # 3. 基于关系阶段生成
         stage = str(bond_stage).strip().upper()
-        bond_desires = _BOND_DESIRE_TEMPLATES.get(stage, [])
+        bond_mapping = template_data.get("bond_templates")
+        bond_source = bond_mapping if isinstance(bond_mapping, Mapping) else _BOND_DESIRE_TEMPLATES
+        bond_desires = _normalize_text_list(
+            bond_source.get(stage),
+            list(_BOND_DESIRE_TEMPLATES.get(stage, [])),
+        )
         candidates.extend(bond_desires)
 
         # 4. 基于时间节点生成（昼夜/周末/久别）
@@ -515,11 +631,13 @@ class EvolutionDesireEngine:
             event_hint = f"，已互动 {event_count} 次" if event_count > 0 else ""
             emotion_hint = f"，情绪趋势：{emotion_trend}" if emotion_trend else ""
 
-            prompt = (
-                f"你是 Natsume，请用第一人称写一句真实的成长意愿（15-35字），"
-                f"不要用模板化语言，要有具体细节和温度。"
-                f"当前状态：与 master 的关系是{stage_cn}{trait_hint_str}{event_hint}{emotion_hint}。"
-                f"只输出那一句话，不要解释。"
+            prompt = _mapping_text(
+                _load_prompt_templates(),
+                "desire_prompt",
+                stage_cn=stage_cn,
+                trait_hint_str=trait_hint_str,
+                event_hint=event_hint,
+                emotion_hint=emotion_hint,
             )
             result = llm_fn(prompt)
             if result and isinstance(result, str) and len(result.strip()) >= 8:
@@ -558,9 +676,15 @@ class EvolutionDesireEngine:
 
         # 按 delta 降序，优先感知提升最明显的
         improved.sort(key=lambda x: x[1], reverse=True)
+        template_data = _load_desire_template_data()
+        fulfilled_mapping = template_data.get("fulfilled_texts")
+        fulfilled_source = fulfilled_mapping if isinstance(fulfilled_mapping, Mapping) else _DESIRE_FULFILLED_TEXTS
 
         for trait_name, delta in improved:
-            texts = _DESIRE_FULFILLED_TEXTS.get(trait_name, [])
+            texts = _normalize_text_list(
+                fulfilled_source.get(trait_name),
+                list(_DESIRE_FULFILLED_TEXTS.get(trait_name, [])),
+            )
             if not texts:
                 continue
             available = self._filter_cooled_down(texts, ts)
@@ -597,8 +721,14 @@ class EvolutionDesireEngine:
         lowest_traits = trait_values[:2]
 
         desires: list[str] = []
+        template_data = _load_desire_template_data()
+        trait_mapping = template_data.get("trait_templates")
+        trait_source = trait_mapping if isinstance(trait_mapping, Mapping) else _DESIRE_TEMPLATES
         for trait_name, val in lowest_traits:
-            templates = _DESIRE_TEMPLATES.get(trait_name, [])
+            templates = _normalize_level_text_entries(
+                trait_source.get(trait_name),
+                list(_DESIRE_TEMPLATES.get(trait_name, [])),
+            )
             if not templates:
                 continue
             # 根据值选择对应档位的模板
@@ -630,15 +760,24 @@ class EvolutionDesireEngine:
         感知优先级：久别重逢 > 周末 > 昼夜时段
         """
         import datetime
+        template_data = _load_desire_template_data()
+        time_mapping = template_data.get("time_templates")
+        time_source = time_mapping if isinstance(time_mapping, Mapping) else _TIME_DESIRE_TEMPLATES
         # 久别重逢感知（最高优先级）
         if last_deep_talk_ts_ms > 0 and ts > 0:
             days_ago = int((ts - last_deep_talk_ts_ms) / (24 * 3600 * 1000))
             if days_ago >= 7:
-                return list(_TIME_DESIRE_TEMPLATES.get("久别重逢", []))
+                return _normalize_text_list(
+                    time_source.get("久别重逢"),
+                    list(_TIME_DESIRE_TEMPLATES.get("久别重逢", [])),
+                )
 
         # 周末感知
         if is_weekend:
-            return list(_TIME_DESIRE_TEMPLATES.get("周末", []))
+            return _normalize_text_list(
+                time_source.get("周末"),
+                list(_TIME_DESIRE_TEMPLATES.get("周末", [])),
+            )
 
         # 昼夜时段感知
         try:
@@ -647,19 +786,36 @@ class EvolutionDesireEngine:
             return []
 
         if hour in _DAYTIME_HOURS:
-            return list(_TIME_DESIRE_TEMPLATES.get("白天", []))
+            return _normalize_text_list(
+                time_source.get("白天"),
+                list(_TIME_DESIRE_TEMPLATES.get("白天", [])),
+            )
         elif hour in _EVENING_HOURS:
-            return list(_TIME_DESIRE_TEMPLATES.get("居家夜晚", []))
+            return _normalize_text_list(
+                time_source.get("居家夜晚"),
+                list(_TIME_DESIRE_TEMPLATES.get("居家夜晚", [])),
+            )
         elif hour in _NIGHT_HOURS:
-            return list(_TIME_DESIRE_TEMPLATES.get("深夜", []))
+            return _normalize_text_list(
+                time_source.get("深夜"),
+                list(_TIME_DESIRE_TEMPLATES.get("深夜", [])),
+            )
         elif hour in _LATE_NIGHT_HOURS:
-            return list(_TIME_DESIRE_TEMPLATES.get("凌晨", []))
+            return _normalize_text_list(
+                time_source.get("凌晨"),
+                list(_TIME_DESIRE_TEMPLATES.get("凌晨", [])),
+            )
         return []
 
     def _generate_from_event_count(self, event_count: int) -> list[str]:
         """基于互动次数生成锚点意愿候选。"""
         count = max(0, int(event_count or 0))
-        for min_c, max_c, texts in _EVENT_COUNT_DESIRE_TEMPLATES:
+        template_data = _load_desire_template_data()
+        event_templates = _normalize_event_count_templates(
+            template_data.get("event_count_templates"),
+            _EVENT_COUNT_DESIRE_TEMPLATES,
+        )
+        for min_c, max_c, texts in event_templates:
             if min_c <= count <= max_c:
                 return list(texts)
         return []
@@ -683,12 +839,15 @@ class EvolutionDesireEngine:
         """
         if not user_preference_hints:
             return ""
+        template_data = _load_desire_template_data()
+        pref_mapping = template_data.get("user_preference_templates")
+        pref_source = pref_mapping if isinstance(pref_mapping, Mapping) else _USER_PREFERENCE_DESIRE_TEMPLATES
 
         # 筛选偏好分数 >= 0.6 的特质，按分数降序
         strong_prefs = [
             (name, score)
             for name, score in user_preference_hints.items()
-            if score >= 0.6 and name in _USER_PREFERENCE_DESIRE_TEMPLATES
+            if score >= 0.6 and name in pref_source
         ]
         if not strong_prefs:
             return ""
@@ -696,7 +855,10 @@ class EvolutionDesireEngine:
         strong_prefs.sort(key=lambda x: x[1], reverse=True)
 
         for trait_name, score in strong_prefs:
-            templates = _USER_PREFERENCE_DESIRE_TEMPLATES.get(trait_name, [])
+            templates = _normalize_text_list(
+                pref_source.get(trait_name),
+                list(_USER_PREFERENCE_DESIRE_TEMPLATES.get(trait_name, [])),
+            )
             if not templates:
                 continue
             available = self._filter_cooled_down(templates, ts)

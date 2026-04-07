@@ -21,6 +21,7 @@ from edge_client.channels.wechat_command_queue import (
     wait_wechat_command_result,
 )
 from edge_client.config import EdgeConfig, load_edge_config
+from edge_client.runtime_texts import edge_runtime_text
 from edge_client.rpc.auth import NonceReplayCache, validate_edge_rpc_auth
 from edge_client.runtime import (
     EdgeRuntime,
@@ -1239,7 +1240,11 @@ def _handle_visual_locate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> Ed
         status=STATUS_REJECTED,
         reason_code="VLM_REMOVED",
         stage="S_EDGE_VISUAL_LOCATE",
-        detail="Edge 端 VLM 模型已移除，视觉定位功能不可用",
+        detail=edge_runtime_text(
+            "fastapi_app",
+            "vlm_removed_detail",
+            default="Edge 端 VLM 模型已移除，视觉定位功能不可用",
+        ),
         event={},
     )
 

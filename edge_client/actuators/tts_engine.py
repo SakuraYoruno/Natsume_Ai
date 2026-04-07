@@ -339,7 +339,7 @@ class SoVITSModelManager:
 
             self._state = TtsState.LOADING
 
-            # 灏濊瘯鍔犺浇 GPT-SoVITS 鎺ㄧ悊寮曟搸
+            # 尝试加载 GPT-SoVITS 推理引擎
             try:
                 model = _load_sovits_model(
                     model_path=self._config.model_path,
@@ -465,7 +465,7 @@ class SoVITSModelManager:
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
 
-            # 璁＄畻闊抽鏃堕暱
+            # 计算音频时长
             duration_s = 0.0
             if audio_data is not None and hasattr(audio_data, "__len__"):
                 duration_s = len(audio_data) / max(sr, 1)
@@ -1339,7 +1339,7 @@ def _synthesize_audio(
     if elapsed > timeout_s:
         raise TimeoutError(f"synthesis took {elapsed:.1f}s > timeout {timeout_s:.1f}s")
 
-    # 鎻愬彇闊抽鏁版嵁
+    # 提取音频数据
     if isinstance(result, dict):
         audio = result.get("audio", np.zeros(1, dtype=np.float32))
         sr = int(result.get("sample_rate", DEFAULT_SAMPLE_RATE))

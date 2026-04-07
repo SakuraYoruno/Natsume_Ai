@@ -35,9 +35,41 @@ import logging
 import os
 import re
 import time
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Mapping, Optional
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.dispatch_agent")
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+    raw = mapping.get(key)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _load_runtime_texts() -> dict[str, Any]:
+    return _load_template_mapping("dispatch_agent.runtime_texts")
 
 # ---------------------------------------------------------------------------
 # 硬规则路由：不需要 LLM，<1ms
@@ -169,6 +201,9 @@ def _build_task_progress_sub_context(
     from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
     registry = get_runtime_task_registry()
+    templates = _mapping_section(_load_runtime_texts(), "task_progress")
+    default_labels = _mapping_section(templates, "defaults")
+    default_task_label = _mapping_text(default_labels, "task_label", default="任务") or "任务"
     summary = registry.summarize_for_chat(
         person_id=person_id,
         session_id=session_id,
@@ -178,12 +213,16 @@ def _build_task_progress_sub_context(
         return SubAgentContext(
             agent_id="task_progress_direct",
             task="task_progress_query",
-            result_text="现在没有正在执行，或者刚结束但还值得汇报的任务。",
+            result_text=_mapping_text(
+                templates,
+                "no_summary",
+                default="现在没有正在执行，或者刚结束但还值得汇报的任务。",
+            ),
             success=True,
         )
 
     status = str(summary.get("status") or "UNKNOWN").strip().upper()
-    target_id = str(summary.get("target_id") or "任务").strip() or "任务"
+    target_id = str(summary.get("target_id") or default_task_label).strip() or default_task_label
     elapsed_text = _format_elapsed_ms(int(summary.get("elapsed_ms") or 0))
     progress_message = str(summary.get("progress_message") or summary.get("detail") or "").strip()
     result_code = str(summary.get("result_code") or "").strip()
@@ -192,24 +231,84 @@ def _build_task_progress_sub_context(
     recovery_error = str(summary.get("recovery_error") or "").strip()
 
     if status in {"RUNNING", "RECOVERING"}:
-        parts = [f"当前有个任务还在进行，是 {target_id}。", f"已经跑了 {elapsed_text}。"]
+        parts = [
+            _mapping_text(
+                templates,
+                "running_intro_template",
+                default="当前有个任务还在进行，是 {target_id}。",
+                target_id=target_id,
+            ),
+            _mapping_text(
+                templates,
+                "running_elapsed_template",
+                default="已经跑了 {elapsed_text}。",
+                elapsed_text=elapsed_text,
+            ),
+        ]
         if progress_message:
             parts.append(progress_message)
         if recovery_status == "RUNNING":
-            parts.append("我也已经开始自动补救了。")
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "running_recovery_active",
+                    default="我也已经开始自动补救了。",
+                )
+            )
         elif recovery_result_text:
-            parts.append(f"补救分析里提到：{recovery_result_text}")
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "running_recovery_result_template",
+                    default="补救分析里提到：{recovery_result_text}",
+                    recovery_result_text=recovery_result_text,
+                )
+            )
         return SubAgentContext(agent_id="task_progress_direct", task="task_progress_query", result_text="".join(parts), success=True)
 
-    parts = [f"最近一个相关任务是 {target_id}。", f"状态是 {status}。"]
+    parts = [
+        _mapping_text(
+            templates,
+            "finished_intro_template",
+            default="最近一个相关任务是 {target_id}。",
+            target_id=target_id,
+        ),
+        _mapping_text(
+            templates,
+            "finished_status_template",
+            default="状态是 {status}。",
+            status=status,
+        ),
+    ]
     if progress_message:
         parts.append(progress_message)
     if result_code:
-        parts.append(f"结果码是 {result_code}。")
+        parts.append(
+            _mapping_text(
+                templates,
+                "finished_result_code_template",
+                default="结果码是 {result_code}。",
+                result_code=result_code,
+            )
+        )
     if recovery_result_text:
-        parts.append(f"自动补救给出的建议是：{recovery_result_text}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "finished_recovery_result_template",
+                default="自动补救给出的建议是：{recovery_result_text}",
+                recovery_result_text=recovery_result_text,
+            )
+        )
     elif recovery_error:
-        parts.append(f"补救过程也没有完全顺利：{recovery_error}")
+        parts.append(
+            _mapping_text(
+                templates,
+                "finished_recovery_error_template",
+                default="补救过程也没有完全顺利：{recovery_error}",
+                recovery_error=recovery_error,
+            )
+        )
     return SubAgentContext(agent_id="task_progress_direct", task="task_progress_query", result_text="".join(parts), success=True)
 
 
@@ -342,6 +441,11 @@ async def _execute_multi_step_plan(
     from host_brain.app.chat_agent import SubAgentContext  # noqa: PLC0415
     from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
+    templates = _mapping_section(_load_runtime_texts(), "plan_execution")
+    default_labels = _mapping_section(templates, "defaults")
+    default_target_label = _mapping_text(default_labels, "target_label", default="步骤") or "步骤"
+    default_failure_code = _mapping_text(default_labels, "failure_code", default="FAILED") or "FAILED"
+
     registry, parent_task = _get_or_create_runtime_task(
         request_id=request_id,
         task_kind="plan",
@@ -349,8 +453,16 @@ async def _execute_multi_step_plan(
         session_id=session_id,
         person_id=person_id,
         user_message=user_message,
-        detail="正在生成并执行多步骤计划。",
-        progress_message="我正在拆解这件事，准备分步处理。",
+        detail=_mapping_text(
+            templates,
+            "parent_start_detail",
+            default="正在生成并执行多步骤计划。",
+        ),
+        progress_message=_mapping_text(
+            templates,
+            "parent_start_progress",
+            default="我正在拆解这件事，准备分步处理。",
+        ),
         meta={"plan": dict(plan or {})},
     )
 
@@ -364,6 +476,7 @@ async def _execute_multi_step_plan(
         target_id = str(step.get("target_id") or "").strip()
         description = str(step.get("description") or "").strip()
         task_description = str(step.get("task_description") or description).strip() or description
+        step_target_id = target_id or description or default_target_label
         child_task = registry.create_task(
             task_kind=f"plan_step:{route}",
             target_id=target_id,
@@ -371,8 +484,20 @@ async def _execute_multi_step_plan(
             session_id=session_id,
             person_id=person_id,
             user_message=task_description,
-            detail=f"计划第{step_index}步：{description}",
-            progress_message=f"计划第{step_index}步正在处理：{target_id}。",
+            detail=_mapping_text(
+                templates,
+                "child_detail_template",
+                default="计划第{step_index}步：{description}",
+                step_index=step_index,
+                description=description,
+            ),
+            progress_message=_mapping_text(
+                templates,
+                "child_progress_template",
+                default="计划第{step_index}步正在处理：{target_id}。",
+                step_index=step_index,
+                target_id=step_target_id,
+            ),
             meta=dict(step),
             parent_task_id=parent_task.task_id,
         )
@@ -399,7 +524,12 @@ async def _execute_multi_step_plan(
         if ctx.success:
             registry.mark_completed(
                 child_task.task_id,
-                detail=f"计划第{step_index}步已完成。",
+                detail=_mapping_text(
+                    templates,
+                    "child_completed_detail_template",
+                    default="计划第{step_index}步已完成。",
+                    step_index=step_index,
+                ),
                 result_text=ctx.result_text,
             )
             return {"step": step, "context": ctx, "child_task_id": child_task.task_id}
@@ -407,7 +537,12 @@ async def _execute_multi_step_plan(
         failure_code = _extract_result_code(ctx.error)
         registry.mark_failed(
             child_task.task_id,
-            detail=f"计划第{step_index}步失败。",
+            detail=_mapping_text(
+                templates,
+                "child_failed_detail_template",
+                default="计划第{step_index}步失败。",
+                step_index=step_index,
+            ),
             error=ctx.error,
             result_code=failure_code,
             result_text=ctx.result_text,
@@ -420,7 +555,14 @@ async def _execute_multi_step_plan(
         if recovery_plan:
             registry.mark_recovering(
                 child_task.task_id,
-                detail=str(recovery_plan.get("summary") or "正在自动补救。"),
+                detail=str(
+                    recovery_plan.get("summary")
+                    or _mapping_text(
+                        templates,
+                        "child_recovery_detail_fallback",
+                        default="正在自动补救。",
+                    )
+                ),
                 recovery_plan=recovery_plan,
             )
             recovery_ctx = await _dispatch_to_sub_agent(
@@ -457,17 +599,41 @@ async def _execute_multi_step_plan(
         registry.update_task(
             parent_task.task_id,
             status="RUNNING",
-            detail=f"计划包含 {len(steps)} 个可并行子任务，正在并行处理。",
-            progress_message=f"我正在并行处理 {len(steps)} 个子任务。",
+            detail=_mapping_text(
+                templates,
+                "parallel_parent_detail_template",
+                default="计划包含 {total_steps} 个可并行子任务，正在并行处理。",
+                total_steps=len(steps),
+            ),
+            progress_message=_mapping_text(
+                templates,
+                "parallel_parent_progress_template",
+                default="我正在并行处理 {total_steps} 个子任务。",
+                total_steps=len(steps),
+            ),
         )
         results = list(await asyncio.gather(*(_run_plan_step(step) for step in steps)))
     else:
         for index, step in enumerate(steps, start=1):
+            current_target = str(step.get("target_id") or step.get("description") or default_target_label).strip() or default_target_label
             registry.update_task(
                 parent_task.task_id,
                 status="RUNNING",
-                detail=f"计划第 {index}/{len(steps)} 步正在执行：{step.get('target_id') or step.get('description')}",
-                progress_message=f"我正在处理计划第 {index}/{len(steps)} 步。",
+                detail=_mapping_text(
+                    templates,
+                    "sequential_parent_detail_template",
+                    default="计划第 {step_index}/{total_steps} 步正在执行：{target_id}",
+                    step_index=index,
+                    total_steps=len(steps),
+                    target_id=current_target,
+                ),
+                progress_message=_mapping_text(
+                    templates,
+                    "sequential_parent_progress_template",
+                    default="我正在处理计划第 {step_index}/{total_steps} 步。",
+                    step_index=index,
+                    total_steps=len(steps),
+                ),
             )
             results.append(await _run_plan_step(step))
 
@@ -480,7 +646,7 @@ async def _execute_multi_step_plan(
         step = dict(item.get("step") or {})
         ctx = item.get("context")
         step_index = int(step.get("step_index") or 0)
-        target_id = str(step.get("target_id") or "步骤").strip()
+        target_id = str(step.get("target_id") or default_target_label).strip() or default_target_label
         result_text = str(getattr(ctx, "result_text", "") or "").strip()
         error_text = str(getattr(ctx, "error", "") or "").strip()
         child_task_id = str(item.get("child_task_id") or "").strip() or None
@@ -507,13 +673,34 @@ async def _execute_multi_step_plan(
         })
         if step_success:
             success_count += 1
-            summary_lines.append(f"第{step_index}步（{target_id}）已完成：{result_text[:180]}")
+            summary_lines.append(
+                _mapping_text(
+                    templates,
+                    "summary_success_template",
+                    default="第{step_index}步（{target_id}）已完成：{result_text}",
+                    step_index=step_index,
+                    target_id=target_id,
+                    result_text=result_text[:180],
+                )
+            )
         else:
-            failure_line = f"第{step_index}步（{target_id}）失败：{error_text or 'FAILED'}"
+            failure_line = _mapping_text(
+                templates,
+                "summary_failure_template",
+                default="第{step_index}步（{target_id}）失败：{error_text}",
+                step_index=step_index,
+                target_id=target_id,
+                error_text=error_text or default_failure_code,
+            )
             if result_text:
-                failure_line += f"；补救建议：{result_text[:180]}"
+                failure_line += _mapping_text(
+                    templates,
+                    "summary_failure_recovery_template",
+                    default="；补救建议：{result_text}",
+                    result_text=result_text[:180],
+                )
             summary_lines.append(failure_line)
-            failure_messages.append(error_text or "FAILED")
+            failure_messages.append(error_text or default_failure_code)
 
     plan_payload = {
         "parallel_enabled": bool(plan.get("parallel_enabled")),
@@ -527,8 +714,16 @@ async def _execute_multi_step_plan(
         registry.update_task(
             parent_task.task_id,
             status="RUNNING",
-            detail="多步骤计划已经执行完，正在整理最终回复。",
-            progress_message="多步骤计划已经执行完，我正在整理最终回复。",
+            detail=_mapping_text(
+                templates,
+                "parent_success_detail",
+                default="多步骤计划已经执行完，正在整理最终回复。",
+            ),
+            progress_message=_mapping_text(
+                templates,
+                "parent_success_progress",
+                default="多步骤计划已经执行完，我正在整理最终回复。",
+            ),
             result_text="\n".join(summary_lines),
         )
         return SubAgentContext(
@@ -544,8 +739,16 @@ async def _execute_multi_step_plan(
     registry.update_task(
         parent_task.task_id,
         status="RUNNING",
-        detail="多步骤计划已经执行完，但有步骤失败，正在整理失败说明。",
-        progress_message="多步骤计划里有步骤失败，我正在整理说明和建议。",
+        detail=_mapping_text(
+            templates,
+            "parent_failure_detail",
+            default="多步骤计划已经执行完，但有步骤失败，正在整理失败说明。",
+        ),
+        progress_message=_mapping_text(
+            templates,
+            "parent_failure_progress",
+            default="多步骤计划里有步骤失败，我正在整理说明和建议。",
+        ),
         error=" | ".join(failure_messages)[:500],
         result_code="PLAN_PARTIAL_FAILURE",
         result_text="\n".join(summary_lines),
@@ -623,48 +826,99 @@ def _build_failure_recovery_plan(
     normalized_target = str(target_id or "").strip()
     normalized_error = str(error_text or "").strip()
     result_code = _extract_result_code(normalized_error) or normalized_error.split(":", 1)[0].strip().upper() or "FAILED"
+    templates = _load_template_mapping("dispatch_agent.failure_recovery.templates")
     if result_code in {"FILE_NOT_FOUND", "FILE_PATH_MISSING", "FILE_EXEC_ERROR"}:
+        template_section = _mapping_section(templates, "file_error")
         return {
             "strategy": "delegate",
             "agent_id": "intent_agent",
-            "summary": "原技能失败，正在让执行专家分析文件问题并推断可行修复方案。",
-            "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请分析最可能的原因，并给出简短修复建议；如果能从原句推断更合理的文件路径，也请直接指出。",
+            "summary": _mapping_text(
+                template_section,
+                "summary",
+            ),
+            "task": _mapping_text(
+                template_section,
+                "task_template",
+                user_message=user_message,
+                target_id=normalized_target,
+                error_text=normalized_error,
+            ),
             "reason_code": result_code,
         }
     if result_code in {"BROWSER_UNAVAILABLE", "BROWSER_TIMEOUT", "BROWSER_BACKEND_UNSUPPORTED"}:
+        template_section = _mapping_section(templates, "browser_error")
         return {
             "strategy": "delegate",
             "agent_id": "repair_agent",
-            "summary": "原技能失败，正在尝试自动补齐浏览器后端并恢复执行能力。",
-            "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请自动安装或补齐浏览器执行后端，然后返回是否可以重试。",
+            "summary": _mapping_text(
+                template_section,
+                "summary",
+            ),
+            "task": _mapping_text(
+                template_section,
+                "task_template",
+                user_message=user_message,
+                target_id=normalized_target,
+                error_text=normalized_error,
+            ),
             "reason_code": result_code,
             "retry_original": True,
         }
     if result_code in {"NETWORK_UNAVAILABLE", "BOND_UNAVAILABLE"}:
+        template_section = _mapping_section(templates, "network_error")
         return {
             "strategy": "delegate",
             "agent_id": "repair_agent",
-            "summary": "原技能失败，正在尝试自动修复网络或服务连接并重试。",
-            "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请自动检查并修复网络连接或服务可用性，然后返回是否可以重试。",
+            "summary": _mapping_text(
+                template_section,
+                "summary",
+            ),
+            "task": _mapping_text(
+                template_section,
+                "task_template",
+                user_message=user_message,
+                target_id=normalized_target,
+                error_text=normalized_error,
+            ),
             "reason_code": result_code,
             "retry_original": True,
         }
     if result_code in {"SKILL_EXECUTION_ERROR", "FAILED"}:
+        template_section = _mapping_section(templates, "skill_exec_error")
         return {
             "strategy": "delegate",
             "agent_id": "intent_agent",
-            "summary": "原技能失败，正在让执行专家补做故障分析。",
-            "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请分析失败原因，并给出最合适的下一步建议。",
+            "summary": _mapping_text(
+                template_section,
+                "summary",
+            ),
+            "task": _mapping_text(
+                template_section,
+                "task_template",
+                user_message=user_message,
+                target_id=normalized_target,
+                error_text=normalized_error,
+            ),
             "reason_code": result_code,
         }
     # 兜底：所有未知错误码统一交给 repair_agent 的 LLM 规划器尝试自动修复
     # repair_agent 内部会调用 LLM 分析错误并生成修复计划（pip/npm/系统命令等）
     # 修复成功后 retry_original=True 会触发 dispatch_agent 自动重试原 Skill
+    template_section = _mapping_section(templates, "default_error")
     return {
         "strategy": "delegate",
         "agent_id": "repair_agent",
-        "summary": "原技能失败，正在尝试自动分析并修复运行环境。",
-        "task": f"用户原请求：{user_message}。刚才执行 {normalized_target} 失败，错误是 {normalized_error}。请自动分析错误原因，修复运行环境依赖，然后返回是否可以重试。",
+        "summary": _mapping_text(
+            template_section,
+            "summary",
+        ),
+        "task": _mapping_text(
+            template_section,
+            "task_template",
+            user_message=user_message,
+            target_id=normalized_target,
+            error_text=normalized_error,
+        ),
         "reason_code": result_code,
         "retry_original": True,
     }
@@ -715,6 +969,7 @@ async def _retry_after_repair(
 
 
 def _build_dispatch_system_prompt() -> str:
+    templates = _load_template_mapping("dispatch_agent.routing_prompt.templates")
     skill_lines: list[str] = []
     try:
         from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
@@ -723,61 +978,35 @@ def _build_dispatch_system_prompt() -> str:
             meta = registry.get(skill_name)
             description = str(getattr(meta, "description", "") or "").strip()
             if description:
-                skill_lines.append(f"- {skill_name}: {description}")
+                skill_lines.append(
+                    _mapping_text(
+                        templates,
+                        "skill_line_with_description",
+                        skill_name=skill_name,
+                        description=description,
+                    )
+                )
             else:
-                skill_lines.append(f"- {skill_name}")
+                skill_lines.append(
+                    _mapping_text(
+                        templates,
+                        "skill_line_without_description",
+                        skill_name=skill_name,
+                    )
+                )
     except Exception:
-        skill_lines = [
-            "- web_search: 网络搜索",
-            "- memory_store: 记忆写入",
-            "- file_read: 文件读取",
-            "- file_write: 文件写入",
-            "- browser_navigate: 浏览器打开网页",
-        ]
+        raw_fallback_lines = templates.get("fallback_skill_lines")
+        if isinstance(raw_fallback_lines, list):
+            skill_lines = [str(item) for item in raw_fallback_lines if str(item or "").strip()]
+        else:
+            skill_lines = []
 
     skill_manifest = "\n".join(skill_lines)
-    return f"""你是一个意图分类器，输出固定格式 JSON，决定如何处理用户消息。
-
-可选路由：
-- "chat"：闲聊/情感/日常对话，直接由 ChatAgent 处理
-- "delegate"：需要执行代码/翻译/图像分析等任务，委托给子 Agent
-- "skill"：需要搜索/记忆/文件操作/系统操作/浏览器操作等，调用 Skill 执行
-
-输出格式（严格 JSON，不要额外文字）：
-{{"route": "chat"|"delegate"|"skill", "target_id": "agent_id或skill_id或空", "task": "任务描述或空"}}
-
-子 Agent ID: code_agent, translate_agent, vision_agent, intent_agent
-当前已注册 Skill：
-{skill_manifest}
-
-规则：
-- 80% 的消息是闲聊，优先返回 {{"route": "chat", "target_id": "", "task": ""}}
-- 只有明确的任务请求才委托，不要过度委托
-- 如果某个已注册 skill 明显比子 Agent 更贴切，优先选 skill
-- 不确定时返回 chat"""
-
-
-_DISPATCH_SYSTEM_PROMPT = """你是一个意图分类器，输出固定格式 JSON，决定如何处理用户消息。
-
-可选路由：
-- "chat"：闲聊/情感/日常对话，直接由 ChatAgent 处理
-- "delegate"：需要执行代码/翻译/图像分析等任务，委托给子 Agent
-- "skill"：需要搜索/记忆/文件操作等，调用 Skill 执行
-
-输出格式（严格 JSON，不要额外文字）：
-{"route": "chat"|"delegate"|"skill", "target_id": "agent_id或skill_id或空", "task": "任务描述或空"}
-
-子 Agent ID: code_agent, translate_agent, vision_agent, intent_agent
-Skill ID: web_search, memory_store, file_read, file_write, file_list, system_info, process_list, network_status, browser_navigate, browser_screenshot, hub_skill_install, hub_skill_search, hub_skill_list, hub_skill_remove
-
-规则：
-- 80% 的消息是闲聊，优先返回 {"route": "chat", "target_id": "", "task": ""}
-- 只有明确的任务请求才委托，不要过度委托
-- 不确定时返回 chat"""
-
-_DISPATCH_PROMPT_TEMPLATE = """用户消息：{message}
-
-输出 JSON："""
+    return _mapping_text(
+        templates,
+        "system_prompt_template",
+        skill_manifest=skill_manifest,
+    )
 
 
 async def _llm_route_dispatch(
@@ -793,6 +1022,7 @@ async def _llm_route_dispatch(
     """
     try:
         from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
+        templates = _load_template_mapping("dispatch_agent.routing_prompt.templates")
 
         provider_name = str(llm_runtime["provider_name"])
         model_id = str(llm_runtime["model_id"])
@@ -812,7 +1042,11 @@ async def _llm_route_dispatch(
             model_id=model_id,
             api_key=api_key,
             timeout_ms=timeout_ms,
-            prompt_text=_DISPATCH_PROMPT_TEMPLATE.format(message=user_message[:500]),
+            prompt_text=_mapping_text(
+                templates,
+                "user_prompt_template",
+                message=user_message[:500],
+            ),
             system_prompt=_build_dispatch_system_prompt(),
             gen_params=gen_params,
             base_url_override=base_url,
@@ -1049,7 +1283,16 @@ async def dispatch_agent_sse_generator(
             session_id=session_id,
             person_id=person_id,
         )
-        narrative = _airlock_sanitize_output(str(progress_ctx.result_text or "现在没有正在执行，或者刚结束但还值得汇报的任务。").strip())
+        narrative = _airlock_sanitize_output(
+            str(
+                progress_ctx.result_text
+                or _mapping_text(
+                    _mapping_section(_load_runtime_texts(), "task_progress"),
+                    "no_summary",
+                    default="现在没有正在执行，或者刚结束但还值得汇报的任务。",
+                )
+            ).strip()
+        )
         total_latency_ms = int(time.time() * 1000) - ts_ms
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "APPROVE",
@@ -1086,6 +1329,7 @@ async def dispatch_agent_sse_generator(
         _logger.info("[%s] DispatchAgent → delegate: %s (reason=%s)", request_id, target_id, route_reason)
         yield _sse({"phase": "PRESENCE", "event": "DELEGATING", "agent": target_id, "request_id": request_id})
 
+        delegate_runtime_texts = _mapping_section(_load_runtime_texts(), "delegate_runtime")
         task_registry, runtime_task = _get_or_create_runtime_task(
             request_id=request_id,
             task_kind="sub_agent",
@@ -1093,8 +1337,18 @@ async def dispatch_agent_sse_generator(
             session_id=session_id,
             person_id=person_id,
             user_message=sanitized_message,
-            detail=f"delegating to {target_id}",
-            progress_message=f"我正在处理 {target_id} 这条委托。",
+            detail=_mapping_text(
+                delegate_runtime_texts,
+                "start_detail_template",
+                default="delegating to {target_id}",
+                target_id=target_id,
+            ),
+            progress_message=_mapping_text(
+                delegate_runtime_texts,
+                "start_progress_template",
+                default="我正在处理 {target_id} 这条委托。",
+                target_id=target_id,
+            ),
             meta={"route_reason": route_reason, "task_description": task_description},
         )
 
@@ -1115,8 +1369,18 @@ async def dispatch_agent_sse_generator(
             task_registry.update_task(
                 runtime_task.task_id,
                 status="RUNNING",
-                detail=f"{target_id} 已完成，正在整理回复。",
-                progress_message=f"{target_id} 已完成，我正在把结果整理成自然回复。",
+                detail=_mapping_text(
+                    delegate_runtime_texts,
+                    "success_detail_template",
+                    default="{target_id} 已完成，正在整理回复。",
+                    target_id=target_id,
+                ),
+                progress_message=_mapping_text(
+                    delegate_runtime_texts,
+                    "success_progress_template",
+                    default="{target_id} 已完成，我正在把结果整理成自然回复。",
+                    target_id=target_id,
+                ),
                 result_text=sub_ctx.result_text,
                 result_code=None,
                 error=None,
@@ -1126,8 +1390,17 @@ async def dispatch_agent_sse_generator(
             task_registry.update_task(
                 runtime_task.task_id,
                 status="RUNNING",
-                detail=f"{target_id} 执行阶段失败，正在整理回复。",
-                progress_message="执行阶段出了点问题，我正在整理怎么告诉你。",
+                detail=_mapping_text(
+                    delegate_runtime_texts,
+                    "failure_detail_template",
+                    default="{target_id} 执行阶段失败，正在整理回复。",
+                    target_id=target_id,
+                ),
+                progress_message=_mapping_text(
+                    delegate_runtime_texts,
+                    "failure_progress",
+                    default="执行阶段出了点问题，我正在整理怎么告诉你。",
+                ),
                 error=sub_ctx.error,
                 result_code=failure_code,
                 result_text=sub_ctx.result_text,
@@ -1140,7 +1413,14 @@ async def dispatch_agent_sse_generator(
             if recovery_plan and str(recovery_plan.get("agent_id") or "") != target_id:
                 task_registry.mark_recovering(
                     runtime_task.task_id,
-                    detail=str(recovery_plan.get("summary") or "正在补救中。"),
+                    detail=str(
+                        recovery_plan.get("summary")
+                        or _mapping_text(
+                            delegate_runtime_texts,
+                            "recovery_detail_fallback",
+                            default="正在补救中。",
+                        )
+                    ),
                     recovery_plan=recovery_plan,
                 )
                 yield _sse({
@@ -1171,8 +1451,16 @@ async def dispatch_agent_sse_generator(
                 task_registry.update_task(
                     runtime_task.task_id,
                     status="RUNNING",
-                    detail="自动补救分析已经完成，正在整理回复。",
-                    progress_message="自动补救分析已经完成，我正在整理回复。",
+                    detail=_mapping_text(
+                        delegate_runtime_texts,
+                        "recovery_done_detail",
+                        default="自动补救分析已经完成，正在整理回复。",
+                    ),
+                    progress_message=_mapping_text(
+                        delegate_runtime_texts,
+                        "recovery_done_progress",
+                        default="自动补救分析已经完成，我正在整理回复。",
+                    ),
                 )
                 sub_ctx = SubAgentContext(
                     agent_id="delegate_failure_recovery",
@@ -1194,6 +1482,7 @@ async def dispatch_agent_sse_generator(
         _logger.info("[%s] DispatchAgent → skill: %s (reason=%s)", request_id, target_id, route_reason)
         yield _sse({"phase": "PRESENCE", "event": "SKILL_RUNNING", "skill_id": target_id, "request_id": request_id})
 
+        skill_runtime_texts = _mapping_section(_load_runtime_texts(), "skill_runtime")
         task_registry, runtime_task = _get_or_create_runtime_task(
             request_id=request_id,
             task_kind="skill",
@@ -1201,8 +1490,18 @@ async def dispatch_agent_sse_generator(
             session_id=session_id,
             person_id=person_id,
             user_message=sanitized_message,
-            detail=f"running skill {target_id}",
-            progress_message=f"我正在执行 {target_id}。",
+            detail=_mapping_text(
+                skill_runtime_texts,
+                "start_detail_template",
+                default="running skill {target_id}",
+                target_id=target_id,
+            ),
+            progress_message=_mapping_text(
+                skill_runtime_texts,
+                "start_progress_template",
+                default="我正在执行 {target_id}。",
+                target_id=target_id,
+            ),
             meta={"route_reason": route_reason},
         )
 
@@ -1217,8 +1516,18 @@ async def dispatch_agent_sse_generator(
             task_registry.update_task(
                 runtime_task.task_id,
                 status="RUNNING",
-                detail=f"{target_id} 已完成，正在整理回复。",
-                progress_message=f"{target_id} 已完成，我正在把结果整理成自然回复。",
+                detail=_mapping_text(
+                    skill_runtime_texts,
+                    "success_detail_template",
+                    default="{target_id} 已完成，正在整理回复。",
+                    target_id=target_id,
+                ),
+                progress_message=_mapping_text(
+                    skill_runtime_texts,
+                    "success_progress_template",
+                    default="{target_id} 已完成，我正在把结果整理成自然回复。",
+                    target_id=target_id,
+                ),
                 result_text=skill_ctx.result_text,
                 result_code=None,
                 error=None,
@@ -1228,8 +1537,17 @@ async def dispatch_agent_sse_generator(
             task_registry.update_task(
                 runtime_task.task_id,
                 status="RUNNING",
-                detail=f"{target_id} 执行阶段失败，正在整理回复。",
-                progress_message="执行阶段出了点问题，我正在整理怎么告诉你。",
+                detail=_mapping_text(
+                    skill_runtime_texts,
+                    "failure_detail_template",
+                    default="{target_id} 执行阶段失败，正在整理回复。",
+                    target_id=target_id,
+                ),
+                progress_message=_mapping_text(
+                    skill_runtime_texts,
+                    "failure_progress",
+                    default="执行阶段出了点问题，我正在整理怎么告诉你。",
+                ),
                 error=skill_ctx.error,
                 result_code=failure_code,
                 result_text=skill_ctx.result_text,
@@ -1242,7 +1560,14 @@ async def dispatch_agent_sse_generator(
             if recovery_plan:
                 task_registry.mark_recovering(
                     runtime_task.task_id,
-                    detail=str(recovery_plan.get("summary") or "正在补救中。"),
+                    detail=str(
+                        recovery_plan.get("summary")
+                        or _mapping_text(
+                            skill_runtime_texts,
+                            "recovery_detail_fallback",
+                            default="正在补救中。",
+                        )
+                    ),
                     recovery_plan=recovery_plan,
                 )
                 yield _sse({
@@ -1295,8 +1620,18 @@ async def dispatch_agent_sse_generator(
                         task_registry.update_task(
                             runtime_task.task_id,
                             status="RUNNING",
-                            detail=f"{target_id} 已在自动修复后重试成功，正在整理回复。",
-                            progress_message=f"{target_id} 已在自动修复后重试成功。",
+                            detail=_mapping_text(
+                                skill_runtime_texts,
+                                "retry_success_detail_template",
+                                default="{target_id} 已在自动修复后重试成功，正在整理回复。",
+                                target_id=target_id,
+                            ),
+                            progress_message=_mapping_text(
+                                skill_runtime_texts,
+                                "retry_success_progress_template",
+                                default="{target_id} 已在自动修复后重试成功。",
+                                target_id=target_id,
+                            ),
                             error=None,
                             result_code=None,
                             result_text=retried_ctx.result_text,
@@ -1306,8 +1641,16 @@ async def dispatch_agent_sse_generator(
                         task_registry.update_task(
                             runtime_task.task_id,
                             status="RUNNING",
-                            detail="自动修复已执行，但重试后仍然失败，正在整理回复。",
-                            progress_message="自动修复已经执行，但重试后还是失败了。",
+                            detail=_mapping_text(
+                                skill_runtime_texts,
+                                "retry_failure_detail",
+                                default="自动修复已执行，但重试后仍然失败，正在整理回复。",
+                            ),
+                            progress_message=_mapping_text(
+                                skill_runtime_texts,
+                                "retry_failure_progress",
+                                default="自动修复已经执行，但重试后还是失败了。",
+                            ),
                             error=retried_ctx.error or skill_ctx.error,
                             result_code=_extract_result_code(retried_ctx.error) or failure_code,
                             result_text=retried_ctx.result_text or recovery_ctx.result_text,
@@ -1324,8 +1667,16 @@ async def dispatch_agent_sse_generator(
                     task_registry.update_task(
                         runtime_task.task_id,
                         status="RUNNING",
-                        detail="自动补救分析已经完成，正在整理回复。",
-                        progress_message="自动补救分析已经完成，我正在整理回复。",
+                        detail=_mapping_text(
+                            skill_runtime_texts,
+                            "recovery_done_detail",
+                            default="自动补救分析已经完成，正在整理回复。",
+                        ),
+                        progress_message=_mapping_text(
+                            skill_runtime_texts,
+                            "recovery_done_progress",
+                            default="自动补救分析已经完成，我正在整理回复。",
+                        ),
                     )
                     skill_ctx = SubAgentContext(
                         agent_id="skill_failure_recovery",
@@ -1386,7 +1737,12 @@ async def _dispatch_to_sub_agent(
         _logger.warning("[%s] Unknown agent_id=%s, skipping delegate", request_id, agent_id)
         return SubAgentContext(
             agent_id=agent_id, task=task, success=False,
-            error=f"未知子 Agent: {agent_id}",
+            error=_mapping_text(
+                _mapping_section(_load_runtime_texts(), "sub_agent_dispatch"),
+                "unknown_agent_error_template",
+                default="未知子 Agent: {agent_id}",
+                agent_id=agent_id,
+            ),
         )
 
     started_ms = int(time.time() * 1000)
@@ -1678,28 +2034,61 @@ def _summarize_skill_result_text(skill_id: str, payload: dict[str, Any] | None, 
     structured = dict(payload or {})
     detail = structured.get("detail") if isinstance(structured.get("detail"), dict) else {}
     message = str((detail or {}).get("message") or "").strip()
+    templates = _mapping_section(_load_runtime_texts(), "skill_result_summary")
+    defaults = _mapping_section(templates, "defaults")
     if skill_id == "hub_skill_install":
-        name = str((detail or {}).get("name") or "这个技能").strip() or "这个技能"
+        default_install_name = _mapping_text(defaults, "install_name", default="这个技能") or "这个技能"
+        name = str((detail or {}).get("name") or default_install_name).strip() or default_install_name
         activated = bool((detail or {}).get("activated"))
         if message:
             return message[:2000]
-        return (f"技能 {name} 已安装并激活" if activated else f"技能 {name} 已安装")[:2000]
+        template_key = "install_activated_template" if activated else "install_template"
+        default_template = "技能 {name} 已安装并激活" if activated else "技能 {name} 已安装"
+        return _mapping_text(
+            templates,
+            template_key,
+            default=default_template,
+            name=name,
+        )[:2000]
     if skill_id == "hub_skill_search":
         total = int((detail or {}).get("total") or 0)
-        query = str(structured.get("query") or structured.get("action") or "相关技能").strip() or "相关技能"
-        return f"已搜索到 {total} 个与{query}相关的技能"[:2000]
+        default_search_query = _mapping_text(defaults, "search_query", default="相关技能") or "相关技能"
+        query = str(structured.get("query") or structured.get("action") or default_search_query).strip() or default_search_query
+        return _mapping_text(
+            templates,
+            "search_template",
+            default="已搜索到 {total} 个与{query}相关的技能",
+            total=total,
+            query=query,
+        )[:2000]
     if skill_id == "hub_skill_list":
         total = int((detail or {}).get("total") or 0)
-        return f"当前已安装 {total} 个 Hub 技能"[:2000]
+        return _mapping_text(
+            templates,
+            "list_template",
+            default="当前已安装 {total} 个 Hub 技能",
+            total=total,
+        )[:2000]
     if skill_id == "hub_skill_remove":
-        name = str((detail or {}).get("name") or "该技能").strip() or "该技能"
+        default_remove_name = _mapping_text(defaults, "remove_name", default="该技能") or "该技能"
+        name = str((detail or {}).get("name") or default_remove_name).strip() or default_remove_name
         if message:
             return message[:2000]
-        return f"技能 {name} 已移除"[:2000]
+        return _mapping_text(
+            templates,
+            "remove_template",
+            default="技能 {name} 已移除",
+            name=name,
+        )[:2000]
     if message:
         return message[:2000]
     fallback = str(fallback_text or "").strip()
-    return fallback[:2000] if fallback else f"Skill {skill_id} 执行成功"
+    return fallback[:2000] if fallback else _mapping_text(
+        templates,
+        "default_template",
+        default="Skill {skill_id} 执行成功",
+        skill_id=skill_id,
+    )[:2000]
 
 
 async def _execute_skill(
@@ -1810,7 +2199,12 @@ async def _execute_skill(
             result_text = _summarize_skill_result_text(skill_id, payload, result_digest)
             return result_text, True, "", payload
         elif result.status == "IDEMPOTENT_REPLAY":
-            return f"（已执行过相同的 {skill_id} 操作）", True, "", {}
+            return _mapping_text(
+                _mapping_section(_load_runtime_texts(), "skill_result_summary"),
+                "idempotent_replay_template",
+                default="（已执行过相同的 {skill_id} 操作）",
+                skill_id=skill_id,
+            ), True, "", {}
         else:
             detail = result.detail or {}
             payload = dict(getattr(result, "runtime_payload", None) or {})

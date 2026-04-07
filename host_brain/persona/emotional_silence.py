@@ -33,7 +33,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 from host_brain.persona.offline_continuity import (
     absence_recovery_factor_for_absence_band,
@@ -167,6 +169,28 @@ _TOPIC_RESISTANCE_HINT_TEMPLATE = (
     "你对‘{topic}’这个话题有真实的抗拒感，不是礼貌转移，"
     "而是真的不想谈这个。可以沉默、转移、或简短表达不想聊。"
 )
+
+
+def _load_runtime_hints() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("emotional_silence.runtime_hints")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, str]:
+    raw = mapping.get(key)
+    if isinstance(raw, Mapping):
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +493,9 @@ class EmotionalSilenceEngine:
         """
         willingness = self._response_willingness
         level = _classify_willingness(willingness)
-        silence_hint = _SILENCE_HINT_MAP.get(level, "")
+        templates = _load_runtime_hints()
+        silence_hint_map = _mapping_section(templates, "silence_hints")
+        silence_hint = str(silence_hint_map.get(level, _SILENCE_HINT_MAP.get(level, "")))
 
         # 话题抗拒检测
         is_resistant, resistant_topic, resistance_strength = self.check_topic_resistance(current_topic)
@@ -478,8 +504,11 @@ class EmotionalSilenceEngine:
             # 话题抗拒额外降低意愿
             effective_willingness = max(0.05, willingness - _TOPIC_RESISTANCE_PENALTY * resistance_strength)
             effective_level = _classify_willingness(effective_willingness)
-            silence_hint = _SILENCE_HINT_MAP.get(effective_level, silence_hint)
-            topic_resistance_hint = _TOPIC_RESISTANCE_HINT_TEMPLATE.format(topic=resistant_topic)
+            silence_hint = str(silence_hint_map.get(effective_level, _SILENCE_HINT_MAP.get(effective_level, silence_hint)))
+            topic_resistance_hint = _format_template_text(
+                templates.get("topic_resistance_template", _TOPIC_RESISTANCE_HINT_TEMPLATE),
+                topic=resistant_topic,
+            )
             self._active_resistant_topic = resistant_topic
         else:
             self._active_resistant_topic = ""

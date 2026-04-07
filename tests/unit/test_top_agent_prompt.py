@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.top_agent_prompt import (
+    _build_agent_capabilities_block,
     _build_recent_session_context_block,
     build_top_agent_prompt,
 )
+from host_brain.app.prompt_template_store import PromptTemplateStore
 
 
 class TestTopAgentPrompt:
@@ -62,6 +66,99 @@ class TestTopAgentPrompt:
         assert build_runtime_input.call_args.kwargs["render_target_lang"] == "ja"
         assert recent_context.call_args.kwargs["render_target_lang"] == "ja"
         assert "話し方の補正（高優先度）" in system_prompt
+
+    def test_build_agent_capabilities_block_uses_prompt_template_override(self, monkeypatch) -> None:
+        ledger = SQLiteLedger(":memory:", check_same_thread=False)
+        store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+        store.upsert_template(
+            "top_agent_prompt.delegate.block_templates",
+            content=json.dumps(
+                {
+                    "title": "【代理能力】",
+                    "agent_line": "- {agent_id} => {desc}",
+                },
+                ensure_ascii=False,
+            ),
+            enabled=True,
+        )
+
+        import host_brain.app.dependencies as deps
+
+        monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+        monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+        block = _build_agent_capabilities_block()
+
+        assert "【代理能力】" in block
+        assert "- code_agent =>" in block
+        assert "委托格式示例" in block
+
+    def test_build_top_agent_prompt_uses_section_template_override(self, monkeypatch) -> None:
+        ledger = SQLiteLedger(":memory:", check_same_thread=False)
+        store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+        store.upsert_template(
+            "top_agent_prompt.sections",
+            content=json.dumps(
+                {
+                    "profile_title": "【设定卡】\n",
+                    "style_title": "【风格卡】\n",
+                    "user_message_title": "【本轮输入】\n",
+                },
+                ensure_ascii=False,
+            ),
+            enabled=True,
+        )
+
+        import host_brain.app.dependencies as deps
+
+        monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+        monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+        with patch(
+            "host_brain.app.chat_runtime_input.build_chat_runtime_input",
+            return_value={"runtime": "input"},
+        ), patch(
+            "host_brain.app.chat_context_builder.build_chat_prompt_runtime_payload",
+            return_value={"gen_params": {"temperature": 0.2}},
+        ), patch(
+            "host_brain.app.prompt_builder.render_node_generation_prompt",
+            return_value="PROMPT_BODY",
+        ), patch(
+            "host_brain.app.prompt_builder._build_node_role_instruction",
+            return_value="SYSTEM_PROMPT",
+        ), patch(
+            "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
+            side_effect=lambda payload, emotion_context: {
+                **payload,
+                "gen_params": {"temperature": 0.42},
+            },
+        ), patch(
+            "host_brain.app.top_agent_prompt._build_recent_session_context_block",
+            return_value="",
+        ), patch(
+            "host_brain.app.prompt_builder._load_character_profile",
+            return_value="角色内容",
+        ), patch(
+            "host_brain.app.chat_context_builder._load_v5_style_instruction",
+            return_value="风格内容",
+        ):
+            prompt_text, system_prompt, _ = build_top_agent_prompt(
+                user_message="hello world",
+                render_target_lang="zh",
+                emotion_context={"emotion_tag": "HAPPY"},
+                emotion_snapshot={"emotion_tag": "HAPPY"},
+                retrieval_summary={"status": "OK"},
+                retrieval_evidence_items=[],
+                session_id="session-001",
+                request_id="req-001",
+                thread_id="thread-001",
+                bond_summary={"stage": "FRIEND"},
+                recall_slot_text={},
+            )
+
+        assert "【设定卡】" in system_prompt
+        assert "【风格卡】" in system_prompt
+        assert "【本轮输入】\nhello world" in prompt_text
 
     def test_build_recent_session_context_block_formats_previous_turns(self) -> None:
         class _FakeLedger:
@@ -178,8 +275,8 @@ class TestTopAgentPrompt:
                         "session_id": "wechat_session_01",
                         "payload": {
                             "person_id": "user-001",
-                            "input_preview": "寰俊鍒氭墠璇磋繃鐨勮瘽",
-                            "reply_preview": "鎴戝湪寰俊閲岃繕鍥炶繃浣犮€?",
+                            "input_preview": "微信刚才说过的话",
+                            "reply_preview": "我在微信里还回过你。",
                         },
                         "ts_ms": 30,
                     },
@@ -188,8 +285,8 @@ class TestTopAgentPrompt:
                         "session_id": "qq_session_02",
                         "payload": {
                             "person_id": "user-001",
-                            "input_preview": "QQ閲岃杩囩殑璇?",
-                            "reply_preview": "鎴戝湪QQ閲岃繕鍥炶繃浣犮€?",
+                            "input_preview": "QQ里说过的话",
+                            "reply_preview": "我在QQ里还回过你。",
                         },
                         "ts_ms": 20,
                     },
@@ -198,8 +295,8 @@ class TestTopAgentPrompt:
                         "session_id": "other_session_99",
                         "payload": {
                             "person_id": "user-999",
-                            "input_preview": "鍒汉鐨勫唴瀹?",
-                            "reply_preview": "涓嶅簲琚甫鍏?",
+                            "input_preview": "别人的内容",
+                            "reply_preview": "不应被带入",
                         },
                         "ts_ms": 10,
                     },
@@ -217,9 +314,9 @@ class TestTopAgentPrompt:
             )
 
         assert "Recent continuity context:" in block
-        assert "寰俊鍒氭墠璇磋繃鐨勮瘽" in block
-        assert "QQ閲岃杩囩殑璇?" in block
-        assert "鍒汉鐨勫唴瀹?" not in block
+        assert "微信刚才说过的话" in block
+        assert "QQ里说过的话" in block
+        assert "别人的内容" not in block
 
     def test_build_recent_session_context_block_adds_older_history_summary(self) -> None:
         class _FakeLedger:
@@ -278,6 +375,89 @@ class TestTopAgentPrompt:
         assert "recent topic two" in block
         assert "Earlier continuity summary:" in block
         assert "old topic alpha" in block or "old topic beta" in block
+
+    def test_build_recent_session_context_block_uses_continuity_template_override(self, monkeypatch) -> None:
+        ledger = SQLiteLedger(":memory:", check_same_thread=False)
+        store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+        store.upsert_template(
+            "top_agent_prompt.continuity_sections",
+            content=json.dumps(
+                {
+                    "user_label": "Visitor",
+                    "assistant_label": "Natsume",
+                    "recent_session_title": "Session recap:",
+                    "recent_continuity_title": "Cross-session recap:",
+                    "earlier_summary_title": "Earlier recap:",
+                },
+                ensure_ascii=False,
+            ),
+            enabled=True,
+        )
+
+        import host_brain.app.dependencies as deps
+
+        monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+        monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+        class _FakeLedger:
+            def fetch_by_time_range(self, table: str, *, limit: int = 100, **_: object) -> list[dict[str, object]]:
+                assert table == "voice_event_log"
+                assert limit == 2000
+                return [
+                    {
+                        "request_id": "req-old-1",
+                        "session_id": "qq_dm_3414578517",
+                        "event_type": "INPUT_COMPLETED",
+                        "payload": {
+                            "input_preview": "old topic alpha",
+                            "reply_preview": "old reply alpha",
+                        },
+                    },
+                    {
+                        "request_id": "req-old-2",
+                        "session_id": "qq_dm_3414578517",
+                        "event_type": "INPUT_COMPLETED",
+                        "payload": {
+                            "input_preview": "old topic beta",
+                            "reply_preview": "old reply beta",
+                        },
+                    },
+                    {
+                        "request_id": "req-recent-1",
+                        "session_id": "qq_dm_3414578517",
+                        "event_type": "INPUT_COMPLETED",
+                        "payload": {
+                            "input_preview": "recent topic one",
+                            "reply_preview": "recent reply one",
+                        },
+                    },
+                    {
+                        "request_id": "req-recent-2",
+                        "session_id": "qq_dm_3414578517",
+                        "event_type": "INPUT_COMPLETED",
+                        "payload": {
+                            "input_preview": "recent topic two",
+                            "reply_preview": "recent reply two",
+                        },
+                    },
+                ]
+
+        with patch("host_brain.app.dependencies.get_prompt_template_store", return_value=store), patch(
+            "host_brain.app.dependencies.get_ledger",
+            return_value=_FakeLedger(),
+        ):
+            block = _build_recent_session_context_block(
+                session_id="qq_dm_3414578517",
+                request_id="req-current",
+                render_target_lang="zh",
+                max_turns=2,
+            )
+
+        assert "Session recap:" in block
+        assert "Visitor: recent topic one" in block
+        assert "Natsume: recent reply one" in block
+        assert "Earlier recap:" in block
+        assert "Visitor: old topic alpha" in block or "Visitor: old topic beta" in block
 
     def test_build_top_agent_prompt_appends_recent_session_context(self) -> None:
         with patch(

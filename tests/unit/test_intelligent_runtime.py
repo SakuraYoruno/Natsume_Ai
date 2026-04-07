@@ -1,14 +1,16 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.agents.planning_agent import PlanningAgent
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.intelligent_runtime import (
+    _sanitize_narrative,
     apply_response_intelligence,
     build_prompt_intelligence,
     resolve_tts_route,
 )
+from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 
@@ -199,6 +201,46 @@ def test_apply_response_intelligence_extracts_narrative_text_from_fenced_json(mo
     assert revised_text == "嗯，是这样啊……不过，我这边还没看到上一句。"
 
 
+def test_apply_response_intelligence_repairs_evasive_affection_question_reply(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+
+    revised_text, meta = apply_response_intelligence(
+        request_id="req-affection-question-directness",
+        user_message="你喜欢我吗",
+        narrative="嗯……我在这里，很珍惜能这样和你说话的时间。",
+        emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
+        bond_summary={"stage": "STRANGER"},
+        render_lang="zh",
+        allow_rewrite=True,
+    )
+
+    reflection = dict(meta.get("reflection") or {})
+
+    assert reflection.get("revised") is True
+    assert "我在这里" not in revised_text
+    assert "喜欢" in revised_text or "在意" in revised_text
+
+
+def test_apply_response_intelligence_repairs_generic_thanks_on_affection_disclosure(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+
+    revised_text, meta = apply_response_intelligence(
+        request_id="req-affection-disclosure-directness",
+        user_message="我喜欢你",
+        narrative="嗯……谢谢你。能这样和你说话，我也很高兴。",
+        emotion_context={"emotion_tag": "NEUTRAL", "turn_count": 1},
+        bond_summary={"stage": "STRANGER"},
+        render_lang="zh",
+        allow_rewrite=True,
+    )
+
+    reflection = dict(meta.get("reflection") or {})
+
+    assert reflection.get("revised") is True
+    assert "认真记着" in revised_text or "认真对待" in revised_text or "慢一点比较好" in revised_text
+    assert revised_text != "嗯……谢谢你。能这样和你说话，我也很高兴。"
+
+
 def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> None:
     _patch_dependencies(monkeypatch)
 
@@ -221,3 +263,50 @@ def test_resolve_tts_route_maps_canonical_calm_to_comfort_style(monkeypatch) -> 
     )
 
     assert route.get("emotion_tag") == "comfort"
+
+
+def test_reflection_chain_revise_uses_minimal_fallback_for_empty_reply() -> None:
+    chain = ReflectionChain()
+
+    result = chain.revise(
+        user_message="你喜欢我吗",
+        ai_response="",
+        emotion_tag="",
+        bond_stage="ACQUAINTANCE",
+    )
+
+    assert result.revised_text == "等我一下，我刚才这句没接稳。"
+
+
+def test_reflection_chain_revise_replaces_too_short_reply_with_minimal_fallback() -> None:
+    chain = ReflectionChain()
+
+    result = chain.revise(
+        user_message="你喜欢我吗",
+        ai_response="嗯",
+        emotion_tag="",
+        bond_stage="ACQUAINTANCE",
+    )
+
+    assert result.revised_text == "等我一下，我刚才这句没接稳。"
+
+
+def test_sanitize_narrative_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "intelligent_runtime.sanitize.empty_narrative",
+        content="我还在这里。",
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    assert _sanitize_narrative(
+        text="您好，感谢您的支持",
+        bond_stage="FRIEND",
+        render_lang="zh",
+    ) == "我还在这里。"

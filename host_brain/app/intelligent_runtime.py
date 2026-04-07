@@ -5,6 +5,7 @@ import logging
 import re
 from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_text
 from host_brain.skills.skill_composer import SkillComposer, SkillSpec
 
 logger = logging.getLogger("Natsume.app.intelligent_runtime")
@@ -111,6 +112,24 @@ _BUILTIN_COMPOSER_SPECS: tuple[SkillSpec, ...] = (
         avg_latency_ms=20.0,
     ),
 )
+
+
+def _is_direct_affection_turn(user_message: str) -> bool:
+    normalized = str(user_message or "").strip()
+    if not normalized:
+        return False
+    markers = (
+        "你喜欢我吗",
+        "喜欢我吗",
+        "你会喜欢我吗",
+        "你爱我吗",
+        "我喜欢你",
+        "我好喜欢你",
+        "我真的喜欢你",
+        "我爱你",
+        "我想你",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[str, Any]:
@@ -308,8 +327,9 @@ def apply_response_intelligence(
     bond_stage = str((bond_summary or {}).get("stage") or "STRANGER").strip().upper() or "STRANGER"
     reflection_meta: dict[str, Any] = {"status": "SKIPPED", "reason_code": "NOT_TRIGGERED"}
     revised_text = raw_text
+    force_reflect = _is_direct_affection_turn(user_message)
 
-    if reflection.should_reflect(
+    if force_reflect or reflection.should_reflect(
         emotion_tag=emotion_tag,
         intent=str((bond_summary or {}).get("intent") or ""),
         bond_stage=bond_stage,
@@ -568,7 +588,7 @@ def _sanitize_narrative(*, text: str, bond_stage: str, render_lang: str) -> str:
         sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
     sanitized = re.sub(r"\s+", " ", sanitized).strip()
     if not sanitized:
-        sanitized = "我在。"
+        sanitized = resolve_prompt_template_text("intelligent_runtime.sanitize.empty_narrative")
     if bond_stage == "STRANGER" and render_lang == "zh":
         sanitized = sanitized.replace("呢。", "。").replace("呀。", "。")
     return sanitized

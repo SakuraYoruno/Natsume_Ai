@@ -28,7 +28,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.body_sense")
 
@@ -85,6 +87,18 @@ _LONELINESS_STYLE_HINTS: dict[str, str] = {
     "LONGING": "你很孤独，等了很久，说话里带着一点思念和委屈。",
     "ACHING":  "你孤独感很强，等了太久，说话里有明显的思念，可能会提到等待。",
 }
+
+
+def _load_style_hint_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("body_sense.style_hints")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, str]:
+    raw = mapping.get(key)
+    if isinstance(raw, Mapping):
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +302,10 @@ class BodySenseModel:
         fatigue_level = _classify_fatigue(self._fatigue)
         drowsiness_level = _classify_drowsiness(self._drowsiness)
         loneliness_level = _classify_loneliness(self._loneliness)
+        templates = _load_style_hint_templates()
+        drowsiness_templates = _mapping_section(templates, "drowsiness")
+        fatigue_templates = _mapping_section(templates, "fatigue")
+        loneliness_templates = _mapping_section(templates, "loneliness")
 
         # 计算对回复意愿的惩罚（仅疲劳影响意愿，困倦影响风格）
         willingness_penalty = 0.0
@@ -301,9 +319,9 @@ class BodySenseModel:
 
         # 构建综合 body_sense_hint（优先级：困倦 > 疲劳 > 孤独）
         hints: list[str] = []
-        drowsy_hint = _DROWSY_STYLE_HINTS.get(drowsiness_level, "")
-        fatigue_hint = _FATIGUE_STYLE_HINTS.get(fatigue_level, "")
-        lonely_hint = _LONELINESS_STYLE_HINTS.get(loneliness_level, "")
+        drowsy_hint = str(drowsiness_templates.get(drowsiness_level, _DROWSY_STYLE_HINTS.get(drowsiness_level, "")))
+        fatigue_hint = str(fatigue_templates.get(fatigue_level, _FATIGUE_STYLE_HINTS.get(fatigue_level, "")))
+        lonely_hint = str(loneliness_templates.get(loneliness_level, _LONELINESS_STYLE_HINTS.get(loneliness_level, "")))
 
         if drowsy_hint:
             hints.append(drowsy_hint)

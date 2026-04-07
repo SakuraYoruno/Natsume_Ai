@@ -295,7 +295,7 @@
 |------|------|
 | **文件** | `host_brain/app/chat_handler_complex.py` |
 | **根因 1** | `_skill_manifest_for_graph` 在 `SCENE_EXEC_INTENT` 场景下被构建了两次：第一次在 retrieval 等待之前（结果传入 `build_chat_runtime_input`），第二次在 `graph_start_ms` 之后（结果传入 `graph_payload`）。两次构建时机不同，导致 `runtime_input` 和 `graph_payload` 中的 skill_manifest 来自不同时刻，存在不一致风险 |
-| **根因 2** | 第一次构建的 warning 日志中含有 UTF-8 被 GBK 误读的乱码字符串 `鏋勫缓澶辫触锛堥檷绾т负绌哄垪琛級` |
+| **根因 2** | 第一次构建的 warning 日志中出现 UTF-8 被 GBK 误读后的乱码 warning，导致日志内容不可读 |
 | **影响** | skill_manifest 不一致可能导致图执行时使用错误的技能列表；乱码日志影响故障排查 |
 | **修复** | 删除第一次多余的构建代码块（9 行），保留第二次构建；修复 warning 日志为正确中文 `skill_manifest 构建失败（降级为空列表）` |
 

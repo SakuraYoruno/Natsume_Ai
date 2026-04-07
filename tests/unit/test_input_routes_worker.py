@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.input_routes import _build_gateway_reply_text, _dispatch_to_graph_worker
+from host_brain.app.prompt_template_store import PromptTemplateStore
 
 
 def _run(coro):
@@ -107,3 +109,35 @@ def test_build_gateway_reply_text_fallback_for_empty_reject() -> None:
         reason_code="RATE_LIMIT",
     )
     assert "再试试" in text
+
+
+def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "input_routes.fallback_texts",
+        content=json.dumps(
+            {
+                "reject_default": "先等等我，我马上回来。",
+                "approve_empty": "已经收到啦。",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    assert _build_gateway_reply_text(
+        decision="REJECT",
+        narrative="",
+        reason_code="RATE_LIMIT",
+    ) == "先等等我，我马上回来。"
+    assert _build_gateway_reply_text(
+        decision="APPROVE",
+        narrative="",
+        reason_code=None,
+    ) == "已经收到啦。"

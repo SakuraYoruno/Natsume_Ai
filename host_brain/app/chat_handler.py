@@ -40,6 +40,7 @@ from host_brain.app.graph_config_builder import (
     SCENE_WORK_TRANSLATE,
     pre_intent_classifier,
 )
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.schemas import ChatRequest
 from host_brain.core.ids import new_request_id
 
@@ -52,6 +53,14 @@ from host_brain.app.observability_persist import (  # noqa: F401
 )
 
 _logger = logging.getLogger("Natsume.chat_handler")
+
+
+def _resolve_sys_mode_narrative(mode: str) -> str:
+    templates = resolve_prompt_template_json_merged("chat_handler.sys_mode.narratives")
+    mapping = dict(templates) if isinstance(templates, dict) else {}
+    mode_key = str(mode or "").strip().lower()
+    fallback_key = mode_key if mode_key in {"locked", "maintenance"} else "maintenance"
+    return str(mapping.get(fallback_key) or mapping.get("maintenance") or "")
 
 
 async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:
@@ -80,7 +89,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
     _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
     if _current_sys_mode == "locked":
         async def _locked_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': '抱歉……蓝现在被锁住了，没办法回应你。等那边解除之后我再来找你。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': _resolve_sys_mode_narrative('locked'), 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _locked_sse(),
             media_type="text/event-stream",
@@ -88,7 +97,7 @@ async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any)
         )
     if _current_sys_mode == "maintenance":
         async def _maintenance_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': '蓝这会儿在调整一些东西……等弄好了就回来，稍等我一下。', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance'), 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _maintenance_sse(),
             media_type="text/event-stream",

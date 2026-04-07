@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from host_brain.app.chat_handler import _unified_chat_sse_generator, handle_chat
+from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
 def _run(coro):
@@ -337,6 +339,47 @@ class TestChatHandlerTopAgentBridge:
         assert payload["decision"] == "REJECT"
         assert payload["reason_code"] == "SYS_MODE_MAINTENANCE"
         metrics.inc_chat.assert_called_once()
+
+    def test_handle_chat_locked_mode_uses_prompt_template_override(self, monkeypatch) -> None:
+        ledger = SQLiteLedger(":memory:", check_same_thread=False)
+        store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+        store.upsert_template(
+            "chat_handler.sys_mode.narratives",
+            content=json.dumps(
+                {
+                    "locked": "这是自定义 locked 文案。",
+                },
+                ensure_ascii=False,
+            ),
+            enabled=True,
+        )
+
+        import host_brain.app.dependencies as deps
+
+        monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+        monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+        request_body = SimpleNamespace(
+            message="hello",
+            session_id="session-locked-override",
+            thread_id=None,
+            person_id=None,
+            reply_channel=None,
+            reply_target=None,
+            intent_draft=None,
+        )
+        request = SimpleNamespace(state=SimpleNamespace(request_id="req-locked-override"))
+        metrics = MagicMock()
+
+        with patch.dict("os.environ", {"HOST_SYS_MODE": "locked"}, clear=False), patch(
+            "host_brain.app.chat_handler.resolve_person_id",
+            return_value="person-locked-override",
+        ):
+            response = _run(handle_chat(request_body, request, metrics))
+            events = _run(_collect_events(response.body_iterator))
+
+        payload = json.loads(events[0].removeprefix("data: ").strip())
+        assert payload["narrative"] == "这是自定义 locked 文案。"
 
     def test_unified_chat_invalid_explicit_scene_falls_back_to_chat(self) -> None:
         request_body = SimpleNamespace(

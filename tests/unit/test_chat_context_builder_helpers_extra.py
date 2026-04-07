@@ -8,6 +8,8 @@ import pytest
 
 from host_brain.app import chat_context_builder as ccb
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core import prompt_context as pc
 
 
@@ -510,6 +512,242 @@ def test_build_chat_context_pack_includes_memory_persona_signal(
     assert memory_evidence[0]["distortion_level"] == pytest.approx(0.4, abs=1e-4)
     assert recall_summary
     assert memory_hint["memory_recall_summary"] == recall_summary
+
+
+def test_runtime_guidance_templates_override_runtime_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_context_builder.runtime_guidance_texts",
+        content=json.dumps(
+            {
+                "memory_signal_guidance": {
+                    "suppressed": "custom-memory-signal",
+                },
+                "motive_guidance": {
+                    "care": "custom-motive-care",
+                },
+                "offline_guidance": {
+                    "72h_plus": "custom-offline-72h",
+                },
+                "activity_guidance": {
+                    "wakeup": "custom-activity-wakeup",
+                },
+                "scene_guidance": {
+                    "focus": "custom-scene-focus",
+                },
+                "mode_guidance": {
+                    "focus": "custom-mode-focus",
+                },
+                "memory_hint_guidance": {
+                    "suppressed": "custom-memory-hint",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    signal = ccb._build_memory_persona_signal(
+        [
+            {
+                "metadata": {
+                    "suppression_flag": True,
+                }
+            }
+        ]
+    )
+    assert signal["memory_persona_guidance"] == "custom-memory-signal"
+
+    motive_hint = ccb._apply_motive_state_to_persona_expression_hint(
+        {
+            "style_hint": "baseline",
+            "tone": "gentle",
+            "echo_weight_modifier": 0.0,
+            "follow_up_tendency": 0.0,
+        },
+        {
+            "care_drive": 0.78,
+            "reach_out_drive": 0.2,
+            "continuity_drive": 0.1,
+            "withdraw_drive": 0.0,
+            "self_protect_drive": 0.0,
+        },
+    )
+    assert motive_hint["motive_guidance"] == "custom-motive-care"
+
+    offline_hint = ccb._apply_offline_state_to_persona_expression_hint(
+        {
+            "style_hint": "baseline",
+            "tone": "gentle",
+            "echo_weight_modifier": 0.0,
+            "follow_up_tendency": 0.0,
+        },
+        {
+            "absence_band": "72h_plus",
+            "loneliness_level": 0.0,
+            "anticipation_level": 0.0,
+        },
+    )
+    assert offline_hint["offline_guidance"] == "custom-offline-72h"
+
+    activity_hint = ccb._apply_activity_monitor_to_persona_expression_hint(
+        {
+            "style_hint": "baseline",
+            "tone": "gentle",
+            "echo_weight_modifier": 0.0,
+            "follow_up_tendency": 0.0,
+        },
+        {
+            "recent_event_type": "wakeup",
+            "recent_event_age_s": 30.0,
+        },
+    )
+    assert activity_hint["activity_guidance"] == "custom-activity-wakeup"
+
+    scene_hint = ccb._apply_scene_awareness_to_persona_expression_hint(
+        {
+            "style_hint": "baseline",
+            "tone": "gentle",
+            "echo_weight_modifier": 0.0,
+            "follow_up_tendency": 0.0,
+        },
+        {
+            "scene_tags": ["focus_work"],
+            "companion_suitable": False,
+        },
+    )
+    assert scene_hint["scene_guidance"] == "custom-scene-focus"
+
+    mode_hint = ccb._apply_runtime_mode_to_persona_expression_hint(
+        {
+            "style_hint": "baseline",
+            "tone": "playful",
+            "echo_weight_modifier": 0.12,
+            "follow_up_tendency": 0.16,
+        },
+        {
+            "sys_mode": "focus",
+        },
+    )
+    assert mode_hint["mode_guidance"] == "custom-mode-focus"
+
+    memory_hint = ccb._apply_memory_persona_signal_to_persona_expression_hint(
+        {
+            "style_hint": "baseline",
+            "tone": "gentle",
+            "echo_weight_modifier": 0.1,
+            "follow_up_tendency": 0.1,
+        },
+        {
+            "suppressed_memory_count": 1,
+            "distorted_memory_count": 0,
+            "avg_distortion_level": 0.0,
+            "recall_bias": "guarded",
+        },
+    )
+    assert "custom-memory-hint" in str(memory_hint.get("memory_guidance") or "")
+
+
+def test_runtime_guidance_builtin_templates_are_clean() -> None:
+    templates = resolve_prompt_template_json_merged("chat_context_builder.runtime_guidance_texts")
+    assert templates["bond_texture"]["temperature_hints"]["gt_0_8"] == "和对方的关系很亲密，可以自在地表达真实想法，偶尔撒娇也没关系"
+    assert templates["memory_signal_guidance"]["suppressed"] == "命中压制记忆时先轻触试探，不要直接掀开高压回忆"
+    assert templates["motive_guidance"]["care"] == "先接住对方情绪，再回应内容，优先表达关心和陪伴"
+    assert templates["offline_guidance"]["7d_plus"] == "把这次对话当作久别后的重逢，先确认近况与状态，再慢慢把联系接稳"
+    assert templates["memory_hint_guidance"]["shared_history"] == "带共享记忆共振时，可以顺着共同经历自然接续，但不要一次说满"
+    assert templates["mode_guidance"]["focus"].startswith("focus 模式下先短句回应")
+
+
+def test_runtime_guidance_templates_override_bond_texture_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_context_builder.runtime_guidance_texts",
+        content=json.dumps(
+            {
+                "bond_texture": {
+                    "temperature_hints": {
+                        "gt_0_8": "custom-bond-temperature",
+                    },
+                    "rift_hints": {
+                        "repair_low_template": "custom-rift {rift_cause}",
+                    },
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+    import host_brain.app.emotion_context as emotion_context
+
+    class _FakeRift:
+        rift_cause = "drift"
+        repair_progress = 0.1
+
+        def is_active(self) -> bool:
+            return True
+
+    class _FakeTexture:
+        intimacy_temperature = 0.85
+
+    class _FakeBondState:
+        current_stage = "FRIEND"
+        texture = _FakeTexture()
+        rift = _FakeRift()
+
+        def trend(self) -> str:
+            return "up"
+
+        def to_summary(self) -> dict[str, object]:
+            return {"current_stage": "FRIEND"}
+
+    class _FakeBondStageEngine:
+        def get_state(self, _user_id: str) -> _FakeBondState:
+            return _FakeBondState()
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    monkeypatch.setattr(deps, "get_bond_stage_engine", lambda: _FakeBondStageEngine())
+    monkeypatch.setattr(
+        emotion_context,
+        "normalize_chat_emotion_context",
+        lambda raw: {
+            "mood_state": "steady",
+            "emotion_tag": "NEUTRAL",
+            "emotion_range_hint": "calm",
+            "allowed_emotion_tags": ["NEUTRAL"],
+            "emotion_intensity": 0.2,
+        },
+    )
+    monkeypatch.setattr(ccb, "validate_context_pack", lambda _pack: pc.PromptContextValidationResult())
+
+    prompt_context, meta = ccb.build_chat_context_pack(
+        request_id="req-bond-template",
+        session_id="session-bond-template",
+        thread_id=None,
+        retrieval_summary={"status": "OK", "reason_code": "NONE"},
+        retrieval_evidence_items=[],
+        style_bindings=None,
+        emotion_context={},
+        cpb_slots={"style_canon": "STYLE_SLOT", "world_canon": "WORLD_SLOT"},
+    )
+
+    bond_texture = dict(prompt_context.get("bond_texture") or {})
+    assert meta["valid"] is True
+    assert bond_texture["texture_hint"] == "custom-bond-temperature"
+    assert bond_texture["rift_hint"] == "custom-rift drift"
 
 
 def test_build_chat_prompt_runtime_payload_applies_memory_persona_signal_to_expression_hint(

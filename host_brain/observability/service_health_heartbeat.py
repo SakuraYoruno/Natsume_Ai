@@ -10,6 +10,7 @@ import os
 import threading
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from host_brain.observability.service_registry import (
     EDGE_SERVICE_IDS,
@@ -122,6 +123,29 @@ def _get_ollama_base_url() -> str:
     if raw.rstrip("/").lower().endswith("/v1"):
         raw = raw.rstrip("/")[:-3].rstrip("/")
     return raw
+
+
+def _is_loopback_host(hostname: str | None) -> bool:
+    normalized = str(hostname or "").strip().lower()
+    return normalized in {"127.0.0.1", "localhost", "::1"}
+
+
+def _should_probe_local_ollama_node(node_id: str) -> tuple[bool, str]:
+    if not _parse_bool_env("HOST_CHAT_HOST_14B_ENABLED", default=False):
+        return False, "HOST_CHAT_HOST_14B_ENABLED=false"
+
+    route_provider = str(
+        os.environ.get("HOST_CHAT_HOST_14B_PROVIDER") or "openai"
+    ).strip().lower() or "openai"
+    if route_provider not in {"openai", "ollama"}:
+        return False, f"HOST_CHAT_HOST_14B_PROVIDER={route_provider}"
+
+    base_url = _get_ollama_base_url()
+    parsed = urlparse(base_url)
+    if not _is_loopback_host(parsed.hostname):
+        return False, f"HOST_CHAT_HOST_14B_BASE_URL={base_url}"
+
+    return True, f"{node_id} probe enabled"
 
 
 def _is_local_ollama_keepalive_enabled() -> bool:
@@ -328,6 +352,14 @@ async def _probe_llm_nodes() -> Dict[str, Dict[str, Any]]:
 
     # 启动本地模型探测任务
     for nid in LLM_LOCAL_NODE_IDS:
+        should_probe, skip_reason = _should_probe_local_ollama_node(nid)
+        if not should_probe:
+            results[nid] = {
+                "status": "SKIPPED",
+                "latency_ms": None,
+                "detail": f"local Ollama probe skipped: {skip_reason}",
+            }
+            continue
         meta = LLM_NODE_REGISTRY[nid]
         local_tasks[nid] = asyncio.create_task(_probe_ollama_local(meta["model_id"]))
 

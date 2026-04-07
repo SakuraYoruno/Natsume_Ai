@@ -5,6 +5,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.chat_agent import (
     ChatAgentInput,
     SubAgentContext,
@@ -27,6 +28,10 @@ from host_brain.app.chat_agent import (
     _build_reply_preview,
     _strip_internal_delegate_markers,
     chat_agent_sse_generator,
+)
+from host_brain.app.prompt_template_store import (
+    PromptTemplateStore,
+    resolve_prompt_template_json_merged,
 )
 
 
@@ -183,7 +188,7 @@ def test_chat_agent_greeting_fallback_is_not_generic_wait(monkeypatch) -> None:
     events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
     commit = [e for e in events if '"phase": "COMMIT"' in e][-1]
     assert "等一下呢" not in commit
-    assert "你好啊。今天是想和我随便聊聊，还是有什么事想跟我说？" in commit
+    assert '"narrative": "你好啊。"' in commit
 
 
 def test_chat_agent_strength_fallback_answers_question(monkeypatch) -> None:
@@ -301,6 +306,101 @@ def test_build_sub_agent_context_prompt_for_plan_execution() -> None:
 
 
 
+def test_build_sub_agent_context_prompt_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_agent.sub_agent_context.prompt_templates",
+        content=json.dumps(
+            {
+                "recent_turn_direct": (
+                    "[已核实事实]\n"
+                    "  内容：{result_text}\n"
+                    "  说明：直接用夏目蓝自己的话说出来。\n"
+                )
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = _build_sub_agent_context_prompt(
+        SubAgentContext(
+            agent_id="recent_turn_direct",
+            task="recent_turn_direct",
+            result_text="刚才确认过了，今天会下雨。",
+            success=True,
+        )
+    )
+
+    assert "[已核实事实]" in prompt
+    assert "今天会下雨" in prompt
+    assert "我看不到" not in prompt
+
+
+def test_chat_agent_runtime_texts_override_helper_defaults(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_agent.runtime_texts",
+        content=json.dumps(
+            {
+                "list_more_suffix": " 以及更多",
+                "sub_agent_recovery_hint_line": "  备注：{result_text}\n",
+                "unknown_error": "暂时还说不清",
+                "unnamed_skill_name": "匿名技能",
+                "author_suffix": "（来自 {author}）",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = _build_sub_agent_context_prompt(
+        SubAgentContext(
+            agent_id="tool_agent",
+            task="处理一下",
+            result_text="建议先重试一次。",
+            error="",
+            success=False,
+        )
+    )
+    reply = _build_deterministic_sub_agent_reply(
+        SubAgentContext(
+            agent_id="skill:hub_skill_search",
+            task="搜索技能 天气",
+            result_text="",
+            success=True,
+            payload={
+                "detail": {
+                    "total": 1,
+                    "skills": [
+                        {"name": "", "description": "查询实时天气", "author": "tester"},
+                    ],
+                },
+            },
+        ),
+        render_target_lang="zh",
+    )
+
+    assert "备注：建议先重试一次。" in prompt
+    assert "暂时还说不清" in prompt
+    assert _format_hub_skill_name_list_cn(["a", "b", "c"], limit=2) == "a、b 以及更多"
+    assert reply is not None
+    assert "匿名技能" in reply
+    assert "来自 tester" in reply
+
+
 def test_build_deterministic_sub_agent_reply_for_plan_execution() -> None:
     reply = _build_deterministic_sub_agent_reply(
         SubAgentContext(
@@ -327,6 +427,124 @@ def test_build_deterministic_sub_agent_reply_for_plan_execution() -> None:
     assert "第2步" in reply
     assert "OpenAI 官网" in reply
     assert "记住你最喜欢的颜色是蓝色了" in reply
+
+
+def test_build_deterministic_sub_agent_reply_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_agent.plan_execution.reply_templates",
+        content=json.dumps(
+            {
+                "step_success": {
+                    "web_search": "第{step_index}步，我先查了 {topic}。",
+                },
+                "summary": {
+                    "intro_sequential": "这件事我先按 {total_steps} 步替你顺了一遍。",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    reply = _build_deterministic_sub_agent_reply(
+        SubAgentContext(
+            agent_id="plan_execution",
+            task="先搜索",
+            result_text="",
+            success=True,
+            payload={
+                "parallel_enabled": False,
+                "total_steps": 1,
+                "success_count": 1,
+                "steps": [
+                    {
+                        "step_index": 1,
+                        "target_id": "web_search",
+                        "description": "搜索 OpenAI 官网",
+                        "task_description": "搜索 OpenAI 官网",
+                        "success": True,
+                        "result_text": "done:web_search",
+                        "error": "",
+                        "recovery_result_text": "",
+                    }
+                ],
+            },
+        ),
+        render_target_lang="zh",
+    )
+
+    assert reply is not None
+    assert "这件事我先按 1 步替你顺了一遍。" in reply
+    assert "第1步，我先查了 OpenAI 官网。" in reply
+    assert "现在这些都已经处理好了。" in reply
+
+
+def test_chat_agent_gateway_reply_depth_hint_uses_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "chat_agent.runtime_texts",
+        content=json.dumps(
+            {
+                "gateway_reply_depth_hint": "（请短一点，适合消息框）",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    captured = {}
+
+    def _fake_build_top_agent_prompt(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        return "PROMPT_TEXT", "SYSTEM_PROMPT", {"temperature": 0.2}
+
+    async def _empty_chunks(**_kwargs):  # noqa: ANN001
+        if False:
+            yield ""
+
+    def _fake_apply_response_intelligence(**_kwargs):  # noqa: ANN001
+        return "final answer", {"reflection": {"enabled": False}}
+
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr("host_brain.app.top_agent_prompt.build_top_agent_prompt", _fake_build_top_agent_prompt)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _empty_chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _fake_apply_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-agent-gateway-hint",
+        session_id="session-gateway-hint",
+        user_message="帮我总结一下",
+        person_id="default",
+        render_target_lang="zh",
+        reply_depth_policy="gateway",
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-model",
+            "timeout_ms": 1000,
+            "llm_api_key": "",
+            "base_url_override": "",
+            "agent_gen_params": {"temperature": 0.2},
+        },
+    )
+
+    _run(_collect_events(chat_agent_sse_generator(agent_input)))
+
+    assert str(captured.get("user_message") or "").endswith("（请短一点，适合消息框）")
 
 
 def test_chat_agent_plan_execution_uses_deterministic_renderer(monkeypatch) -> None:
@@ -721,31 +939,31 @@ def test_chat_agent_helper_fallback_and_capability_replies(monkeypatch) -> None:
         sub_agent_ctx=SubAgentContext(agent_id="phatic_fastpath"),
         bond_summary=None,
         render_target_lang="zh",
-    ) == "我在呢。你想和我说什么？"
-    assert "暖一下" in _build_chat_agent_fallback_reply(
+    ) == "我在。"
+    assert _build_chat_agent_fallback_reply(
         user_message="想你了",
         sub_agent_ctx=None,
         bond_summary=None,
         render_target_lang="zh",
-    )
+    ) == "等我一下，我刚才这句没接稳。"
     assert _build_chat_agent_fallback_reply(
         user_message="在吗",
         sub_agent_ctx=None,
         bond_summary=None,
         render_target_lang="zh",
-    ) == "我在。怎么了？"
-    assert "你好啊" in _build_chat_agent_fallback_reply(
+    ) == "我在。"
+    assert _build_chat_agent_fallback_reply(
         user_message="你好",
         sub_agent_ctx=None,
         bond_summary=None,
         render_target_lang="zh",
-    )
+    ) == "你好啊。"
     assert _build_chat_agent_fallback_reply(
         user_message="随便说点什么",
         sub_agent_ctx=None,
         bond_summary=None,
         render_target_lang="ja",
-    ) == "ちょっと待ってね……うまく言葉を整えるから。"
+    ) == "ちょっと待ってね……今の一言を整え直す。"
 
     monkeypatch.setattr(
         "host_brain.app.dependencies.get_skill_registry",
@@ -771,7 +989,32 @@ def test_chat_agent_helper_fallback_and_capability_replies(monkeypatch) -> None:
     assert _build_installed_capabilities_reply(render_target_lang="ja") == "今の私が使える能力を整理して伝えるね。少し待って。"
 
 
-def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy() -> None:
+def test_builtin_chat_agent_templates_are_clean() -> None:
+    capabilities = resolve_prompt_template_json_merged("chat_agent.capabilities.reply_templates")
+    runtime_texts = resolve_prompt_template_json_merged("chat_agent.runtime_texts")
+    sub_agent_context = resolve_prompt_template_json_merged("chat_agent.sub_agent_context.prompt_templates")
+
+    assert isinstance(capabilities, dict)
+    assert capabilities.get("zh_intro") == "我现在能调动的能力，大致是这些："
+    assert capabilities.get("ja_intro") == "今の私が使える能力を整理して伝えるね。少し待って。"
+
+    assert isinstance(runtime_texts, dict)
+    assert runtime_texts.get("default_step_target")
+    assert runtime_texts.get("default_topic")
+    assert runtime_texts.get("default_skill_name")
+    assert runtime_texts.get("default_skill_query")
+    assert runtime_texts.get("list_more_suffix") == " 等"
+    assert runtime_texts.get("author_suffix")
+    assert runtime_texts.get("unknown_error") == "未知错误"
+    assert runtime_texts.get("gateway_reply_depth_hint")
+
+    assert isinstance(sub_agent_context, dict)
+    assert "[子 Agent 执行结果]" in str(sub_agent_context.get("failure") or "")
+    assert "不要提内部模块" in str(sub_agent_context.get("failure") or "")
+    assert "[当前已核实的信息]" in str(sub_agent_context.get("recent_turn_direct") or "")
+
+
+def test_chat_agent_quality_fallback_reply_is_minimal_and_avoids_meta_copy() -> None:
     comfort = _build_chat_agent_quality_fallback_reply(
         user_message="今天有点难受，感觉什么都做不好。",
         sub_agent_ctx=None,
@@ -779,10 +1022,8 @@ def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy()
         emotion_context={"emotion_tag": "SAD"},
         render_target_lang="zh",
     )
-    assert "辛苦" in comfort
-    assert "陪你" in comfort
+    assert comfort == "等我一下，我刚才这句没接稳。"
     assert "草稿" not in comfort
-    assert "整理得更自然一点" not in comfort
 
     repair = _build_chat_agent_quality_fallback_reply(
         user_message="我还是有点在意之前那次争执。",
@@ -791,8 +1032,7 @@ def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy()
         emotion_context={"emotion_tag": "ANXIOUS"},
         render_target_lang="zh",
     )
-    assert "不会装作" in repair
-    assert "说开" in repair
+    assert repair == "等我一下，我刚才这句没接稳。"
 
     playful = _build_chat_agent_quality_fallback_reply(
         user_message="你最近是不是更会逗我开心了？",
@@ -801,10 +1041,8 @@ def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy()
         emotion_context={"emotion_tag": "HAPPY"},
         render_target_lang="zh",
     )
-    assert "笑" in playful
-    assert "放松" in playful
+    assert playful == "等我一下，我刚才这句没接稳。"
     assert "草稿" not in playful
-    assert "整理得更自然一点" not in playful
 
     close_default = _build_chat_agent_quality_fallback_reply(
         user_message="那我们接着聊吧",
@@ -813,10 +1051,32 @@ def test_chat_agent_quality_fallback_reply_tracks_emotion_and_avoids_meta_copy()
         emotion_context={},
         render_target_lang="zh",
     )
-    assert "陪你聊下去" in close_default
+    assert close_default == "等我一下，我刚才这句没接稳。"
 
 
-def test_chat_agent_quality_fallback_reply_uses_runtime_payload_for_continuity_and_shared_memory() -> None:
+def test_chat_agent_quality_fallback_reply_does_not_fake_semantic_affection_answers() -> None:
+    confirmation = _build_chat_agent_quality_fallback_reply(
+        user_message="你喜欢我吗",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "相识"},
+        emotion_context={},
+        render_target_lang="zh",
+        response_policy={"confession_guard": True, "intimacy_ceiling": 0.15},
+    )
+    assert confirmation == "等我一下，我刚才这句没接稳。"
+
+    disclosure = _build_chat_agent_quality_fallback_reply(
+        user_message="我喜欢你",
+        sub_agent_ctx=None,
+        bond_summary={"stage": "相识"},
+        emotion_context={},
+        render_target_lang="zh",
+        response_policy={"confession_guard": True, "intimacy_ceiling": 0.15},
+    )
+    assert disclosure == "等我一下，我刚才这句没接稳。"
+
+
+def test_chat_agent_quality_fallback_reply_does_not_fabricate_memory_continuity() -> None:
     reply = _build_chat_agent_quality_fallback_reply(
         user_message="你还记得我们之前说的那个展览吗",
         sub_agent_ctx=None,
@@ -832,8 +1092,7 @@ def test_chat_agent_quality_fallback_reply_uses_runtime_payload_for_continuity_a
             },
         },
     )
-    assert "记得" in reply
-    assert "展览" in reply
+    assert reply == "等我一下，我刚才这句没接稳。"
     assert "接" in reply
     assert "想先从哪一段继续" not in reply
 
@@ -1068,7 +1327,7 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     assert captured[-1]["request_id"] == "req-chat-runtime-fail"
     assert captured[-1]["user_message"] == "你还记得我们之前说的那个展览吗"
     assert captured[-1]["model_id"] == "llm-unavailable-fallback"
-    assert "展览" in str(commit_payload["narrative"])
+    assert str(commit_payload["narrative"]) == "等我一下，我刚才这句没接稳。"
     assert "脑子有点转不动" not in str(commit_payload["narrative"])
     assert str(captured[-1]["narrative"]) == str(commit_payload["narrative"])
     assert dict(captured[-1]["motive_state"] or {})["dominant_motive"] == "continuity"
@@ -1089,7 +1348,7 @@ def test_chat_agent_runtime_resolve_failure_and_unavailable_runtime(monkeypatch)
     assert "LLM_UNAVAILABLE" in commit
     assert captured[-1]["request_id"] == "req-chat-runtime-down"
     assert captured[-1]["model_id"] == "mock"
-    assert "展览" in str(commit_payload["narrative"])
+    assert str(commit_payload["narrative"]) == "等我一下，我刚才这句没接稳。"
     assert str(captured[-1]["narrative"]) == str(commit_payload["narrative"])
 
 
@@ -1140,7 +1399,7 @@ def test_chat_agent_llm_exception_quality_fallback_uses_runtime_payload(monkeypa
 
     events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
     commit = [event for event in events if '"phase": "COMMIT"' in event][-1]
-    assert "展览" in commit
+    assert '"narrative": "等我一下，我刚才这句没接稳。"' in commit
     assert "脑子有点转不动" not in commit
     assert "想先从哪一段继续" not in commit
 
@@ -1342,6 +1601,45 @@ def test_chat_agent_commit_enforces_response_policy_confession_guard(monkeypatch
     assert "我爱你" not in joined
     assert "好想你" not in joined
     assert "很在意你" in commit or "惦记你" in commit
+
+
+def test_chat_agent_commit_keeps_affection_confirmation_question_on_topic(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.app.top_agent_prompt.build_top_agent_prompt",
+        lambda **_kwargs: (
+            "prompt",
+            "system",
+            {},
+            {"response_policy": {"confession_guard": True, "intimacy_ceiling": 0.15}},
+        ),
+    )
+
+    async def _chunks(**_kwargs):  # noqa: ANN001
+        yield "我喜欢你。"
+
+    def _identity_response_intelligence(**kwargs):  # noqa: ANN001
+        return kwargs["narrative"], {"reflection": {"enabled": False}}
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _chunks)
+    monkeypatch.setattr("host_brain.app.intelligent_runtime.apply_response_intelligence", _identity_response_intelligence)
+
+    agent_input = ChatAgentInput(
+        request_id="req-chat-policy-affection-question",
+        session_id="sess-chat-policy-affection-question",
+        user_message="你喜欢我吗",
+        person_id="person-001",
+        render_target_lang="zh",
+        llm_runtime={"available": True, "provider_name": "mock", "model_id": "mock", "timeout_ms": 1000},
+    )
+
+    events = _run(_collect_events(chat_agent_sse_generator(agent_input)))
+    joined = "\n".join(events)
+    commit = next(item for item in events if '"phase": "COMMIT"' in item)
+    assert "我在。你慢慢说" not in joined
+    assert "在意你" in commit or "无动于衷" in commit or "心动" in commit
+
 
 def test_chat_agent_commit_enforces_response_policy_topic_shift_guard(monkeypatch) -> None:
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")

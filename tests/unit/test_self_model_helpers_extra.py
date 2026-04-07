@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import host_brain.persona.self_model as sm
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
 @dataclass
@@ -14,6 +17,22 @@ class _Record:
 class _BondState:
     current_stage: str = "FRIEND"
     event_count: int = 0
+
+
+def _install_store(monkeypatch, template_id: str, content: dict) -> PromptTemplateStore:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        template_id,
+        content=json.dumps(content, ensure_ascii=False),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    return store
 
 
 def test_compute_emotional_stability_accounts_for_flip_count_and_negative_duration() -> None:
@@ -139,3 +158,171 @@ def test_build_mood_awareness_text_uses_normal_pool(monkeypatch) -> None:
 
     assert "思考" in text
 
+
+def test_self_model_narrative_text_pools_use_template_override(monkeypatch) -> None:
+    _install_store(
+        monkeypatch,
+        "self_model.narrative_text_pools",
+        {
+            "mood_text_pool": {
+                "偏好": ["自定义好心情"],
+            },
+            "bond_text_pool": {
+                "变亲近": ["自定义更亲近"],
+            },
+            "time_context_text_pool": {
+                "久别重逢": ["自定义重逢"],
+            },
+            "contradiction_text_pool": {
+                "mood_low_bond_up": ["自定义矛盾"],
+            },
+            "mood_awareness_pool": {
+                "stable": ["情绪模板::{emotion}"],
+            },
+            "growth_note_wrappers": ["包装::{change}"],
+        },
+    )
+    monkeypatch.setattr(sm.random, "choice", lambda pool: pool[0])
+    monkeypatch.setattr(sm.random, "random", lambda: 0.1)
+
+    assert sm.build_self_awareness_text(
+        {
+            "recent_mood_trend": "偏好",
+            "bond_growth_perception": "变亲近",
+            "event_count": 99,
+        },
+        time_context="久别重逢",
+    ) == "自定义好心情，自定义更亲近，自定义重逢"
+
+    contradictions = sm.detect_contradictions(
+        {
+            "recent_mood_trend": "偏低",
+            "bond_growth_perception": "变亲近",
+            "emotional_stability": 0.6,
+            "personality_changes": ["变得更温柔了"],
+        }
+    )
+    assert contradictions[0]["text"] == "自定义矛盾"
+
+    assert sm.build_mood_awareness_text(
+        {
+            "dominant_recent_emotion": "HAPPY",
+            "emotional_stability": 0.8,
+        }
+    ) == "情绪模板::开心"
+
+    assert sm.build_growth_note_text(
+        {
+            "personality_changes": ["更坦率了"],
+            "growth_milestones": [],
+        }
+    ) == "包装::更坦率了"
+
+
+def test_build_state_aligned_self_awareness_uses_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "self_model.state_alignment_texts",
+        content=json.dumps(
+            {
+                "bond_perception_anchor": {
+                    "steady_default": "自定义稳住联系",
+                },
+                "absence_anchor": {
+                    "72h_plus": "自定义几天后",
+                },
+                "reason_suffix": {
+                    "brief": "自定义简短收束",
+                },
+                "intent_text": {
+                    "continuity_default": "自定义接住这轮",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    aligned = sm.build_state_aligned_self_awareness(
+        {"bond_growth_perception": "稳定"},
+        offline_state={"offline_hours": 80.0},
+        bond_summary={"stage": "ACQUAINTANCE"},
+        motive_state={"continuity_drive": 0.8},
+        response_policy={"should_be_brief": True},
+        runtime_flags={"sys_mode": "normal"},
+    )
+
+    assert aligned["self_awareness"] == "自定义几天后，自定义稳住联系，自定义接住这轮，自定义简短收束。"
+    assert "offline:72h_plus" in aligned["reason_tags"]
+    assert "motive:continuity" in aligned["reason_tags"]
+    assert "policy:brief" in aligned["reason_tags"]
+
+
+def test_self_model_llm_prompts_use_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "persona.self_narrative_prompts",
+        content=json.dumps(
+            {
+                "self_awareness_prompt": "自定义自我感知：{mood_trend}/{emotion_cn}/{bond_perception}",
+                "mood_awareness_prompt": "自定义情绪感知：{emotion_cn}/{stability_desc}",
+                "growth_note_prompt": "自定义成长感知：{context}",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    captured: list[str] = []
+
+    def _fake_llm(prompt: str) -> str:
+        captured.append(prompt)
+        return "这是生成成功"
+
+    assert sm.build_self_awareness_text(
+        {
+            "recent_mood_trend": "偏好",
+            "dominant_recent_emotion": "HAPPY",
+            "bond_growth_perception": "变亲近",
+        },
+        llm_fn=_fake_llm,
+    ) == "这是生成成功"
+    assert sm.build_mood_awareness_text(
+        {
+            "dominant_recent_emotion": "HAPPY",
+            "emotional_stability": 0.8,
+        },
+        llm_fn=_fake_llm,
+    ) == "这是生成成功"
+    assert sm.build_growth_note_text(
+        {
+            "personality_changes": ["变得更温柔了"],
+            "growth_milestones": [],
+        },
+        llm_fn=_fake_llm,
+    ) == "这是生成成功"
+
+    assert captured[0].startswith("自定义自我感知：")
+    assert captured[1].startswith("自定义情绪感知：")
+    assert captured[2].startswith("自定义成长感知：")
+
+
+def test_builtin_self_model_narrative_text_pools_are_clean() -> None:
+    templates = resolve_prompt_template_json_merged("self_model.narrative_text_pools")
+    assert templates["mood_text_pool"]["偏好"][0] == "最近心情挺好的"
+    assert templates["bond_text_pool"]["变亲近"][0] == "感觉和 master 的关系在慢慢变好"
+    assert templates["time_context_text_pool"]["久别重逢"][0] == "好久没见了，重新在一起感觉有点不真实"
+    assert templates["mood_awareness_pool"]["stable"][0] == "今天整体感觉{emotion}，情绪比较稳定"
+    assert templates["growth_note_wrappers"][0] == "感觉自己{change}"

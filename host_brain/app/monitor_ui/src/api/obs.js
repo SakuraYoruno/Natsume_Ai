@@ -1,3 +1,5 @@
+import { deepRepairMojibake } from '../utils/text.js'
+
 /**
  * API 请求层 — 封装所有 /obs/* 请求
  */
@@ -13,7 +15,8 @@ async function request(url, options = {}) {
     const text = await res.text()
     throw new Error(`HTTP ${res.status}: ${text}`)
   }
-  return res.json()
+  const data = await res.json()
+  return deepRepairMojibake(data)
 }
 
 // ===== 工具函数 =====
@@ -257,6 +260,42 @@ export function fetchCanonProposals(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/canon/proposals${qs ? '?' + qs : ''}`)
+}
+
+// ===== Prompt Config =====
+
+export function fetchPromptTemplates(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/prompt-config/templates${qs ? '?' + qs : ''}`)
+}
+
+export function fetchPromptTemplate(templateId) {
+  return request(`/prompt-config/templates/${encodeURIComponent(templateId)}`)
+}
+
+export function fetchPersonaFirstBatchCatalog() {
+  return request('/prompt-config/catalog/persona-first-batch')
+}
+
+export function updatePromptTemplate(templateId, payload) {
+  return request(`/prompt-config/templates/${encodeURIComponent(templateId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function resetPromptTemplate(templateId) {
+  return request(`/prompt-config/templates/${encodeURIComponent(templateId)}/reset`, {
+    method: 'POST',
+  })
+}
+
+export function reloadPromptTemplates() {
+  return request('/prompt-config/reload', {
+    method: 'POST',
+  })
 }
 
 /**
@@ -871,6 +910,14 @@ export function fetchSkillsHubStats() {
 /** 获取当前系统运行模式状态 */
 export function fetchSysModeStatus() {
   return request('/obs/sys-mode')
+}
+
+/** 获取统一数字生命 runtime snapshot */
+export function fetchDigitalLifeRuntimeSnapshot(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/runtime-snapshot${qs ? '?' + qs : ''}`)
 }
 
 /** 切换系统运行模式 */

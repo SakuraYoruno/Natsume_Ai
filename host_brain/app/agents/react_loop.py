@@ -19,13 +19,35 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from host_brain.app.agents.tool_registry import (
     ToolSpec,
     execute_tool,
     is_tool_allowed,
 )
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 # ---------------------------------------------------------------------------
 # ReAct 数据结构
@@ -83,52 +105,37 @@ class ReactResult:
 # ReAct 循环实现
 # ---------------------------------------------------------------------------
 
-_REACT_SYSTEM_PROMPT_TEMPLATE = """你是一个专业的 AI 助手，负责完成用户的任务。
-
-你可以使用以下工具：
-{tools_description}
-
-每次回复必须是合法的 JSON 格式，包含以下字段之一：
-
-1. 调用工具时：
-{{
-  "thought": "你的推理过程",
-  "action_type": "tool_call",
-  "action": {{
-    "tool": "工具名称",
-    "args": {{工具参数}}
-  }}
-}}
-
-2. 给出最终答案时：
-{{
-  "thought": "你的推理过程",
-  "action_type": "final_answer",
-  "final_answer": "最终答案内容"
-}}
-
-规则：
-- 每次只能调用一个工具
-- 工具名称必须是上面列出的工具之一
-- 如果不需要工具，直接给出 final_answer
-- 回复必须是合法 JSON，不要包含其他内容
-"""
-
-
 def _build_tools_description(tools: list[ToolSpec]) -> str:
     """构建工具描述文本，用于 system prompt。"""
+    templates = _load_template_mapping("react_loop.prompt_templates")
     if not tools:
-        return "（无可用工具，请直接给出 final_answer）"
-    lines = []
+        return _mapping_text(
+            templates,
+            "no_tools_description",
+        )
+    lines: list[str] = []
     for tool in tools:
-        lines.append(f"- {tool.tool_id}：{tool.description}")
+        lines.append(
+            _mapping_text(
+                templates,
+                "tool_line",
+                tool_id=tool.tool_id,
+                description=tool.description,
+            )
+        )
         params = tool.parameters.get("properties") or {}
         if params:
             param_desc = ", ".join(
-                f"{k}（{v.get('description', '')}）"
-                for k, v in params.items()
+                f"{key}({value.get('description', '')})"
+                for key, value in params.items()
             )
-            lines.append(f"  参数：{param_desc}")
+            lines.append(
+                _mapping_text(
+                    templates,
+                    "tool_params_line",
+                    param_desc=param_desc,
+                )
+            )
     return "\n".join(lines)
 
 
@@ -139,6 +146,7 @@ def _parse_llm_react_output(raw_output: str) -> dict[str, Any]:
         解析后的字典，解析失败时返回 final_answer 格式
     """
     raw = str(raw_output or "").strip()
+    templates = _load_template_mapping("react_loop.prompt_templates")
     if not raw:
         return {"thought": "", "action_type": "final_answer", "final_answer": ""}
 
@@ -160,7 +168,10 @@ def _parse_llm_react_output(raw_output: str) -> dict[str, Any]:
     except (json.JSONDecodeError, ValueError):
         # 解析失败：把原始输出作为 final_answer
         return {
-            "thought": "LLM 输出解析失败，直接返回原始内容",
+            "thought": _mapping_text(
+                templates,
+                "parse_failure_thought",
+            ),
             "action_type": "final_answer",
             "final_answer": raw,
         }
@@ -195,10 +206,15 @@ def run_react_loop(
     ctx = dict(context or {})
     steps: list[ReactStep] = []
     risk_flags: list[str] = []
+    templates = _load_template_mapping("react_loop.prompt_templates")
 
     # 构建 system prompt
     tools_desc = _build_tools_description(tools)
-    system_prompt = _REACT_SYSTEM_PROMPT_TEMPLATE.format(tools_description=tools_desc)
+    system_prompt = _mapping_text(
+        templates,
+        "system_prompt_template",
+        tools_description=tools_desc,
+    )
     if system_prompt_extra:
         system_prompt = system_prompt + "\n\n" + system_prompt_extra.strip()
 
@@ -216,11 +232,18 @@ def run_react_loop(
         try:
             if gateway is None:
                 # 无 gateway：直接返回 final_answer（降级）
-                final_answer = f"[ReAct 降级] agent_id={agent_id}，无 LLM gateway"
+                final_answer = _mapping_text(
+                    templates,
+                    "no_llm_final_answer",
+                    agent_id=agent_id,
+                )
                 stopped_reason = "NO_LLM"
                 steps.append(ReactStep(
                     step=step_num,
-                    thought="无 LLM gateway，直接降级",
+                    thought=_mapping_text(
+                        templates,
+                        "no_llm_thought",
+                    ),
                     action_type="final_answer",
                     action=None,
                     observation=None,
@@ -238,12 +261,20 @@ def run_react_loop(
 
         except Exception as exc:
             # LLM 调用失败：降级
-            final_answer = f"[ReAct LLM 错误] {type(exc).__name__}: {exc}"
+            final_answer = _mapping_text(
+                templates,
+                "llm_error_final_answer",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             stopped_reason = "ERROR"
             risk_flags.append(f"LLM_ERROR:{type(exc).__name__}")
             steps.append(ReactStep(
                 step=step_num,
-                thought="LLM 调用失败",
+                thought=_mapping_text(
+                    templates,
+                    "llm_error_thought",
+                ),
                 action_type="error",
                 action=None,
                 observation={"error": str(exc)},
@@ -300,7 +331,16 @@ def run_react_loop(
             # 把工具结果追加到消息历史，供下一轮 LLM 参考
             messages.append({"role": "assistant", "content": raw_output})
             obs_text = json.dumps(observation, ensure_ascii=False)
-            messages.append({"role": "user", "content": f"工具执行结果：{obs_text}\n\n请继续。"})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": _mapping_text(
+                        templates,
+                        "tool_result_message",
+                        obs_text=obs_text,
+                    ),
+                }
+            )
 
         else:
             # 未知 action_type：视为 final_answer
@@ -325,11 +365,22 @@ def run_react_loop(
         # MAX_STEPS 时用最后一步的 thought 作为 final_answer
         if steps and not final_answer:
             last_step = steps[-1]
-            final_answer = str(last_step.final_answer or last_step.thought or "ReAct 达到最大步数")
+            final_answer = str(
+                last_step.final_answer
+                or last_step.thought
+                or _mapping_text(
+                    templates,
+                    "max_steps_final_answer",
+                )
+            )
     else:
         confidence = 0.3
         if not final_answer:
-            final_answer = f"[ReAct 异常停止] stopped_reason={stopped_reason}"
+            final_answer = _mapping_text(
+                templates,
+                "abnormal_stop_final_answer",
+                stopped_reason=stopped_reason,
+            )
 
     return ReactResult(
         agent_id=agent_id,

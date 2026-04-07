@@ -37,6 +37,7 @@ from host_brain.app.obs_routes import router as obs_router, set_ledger_provider 
 from host_brain.app.health_routes import router as health_router
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.input_routes import router as input_router
+from host_brain.app.prompt_config_routes import router as prompt_config_router
 from host_brain.app.dependencies import (
     get_ledger as _get_ledger_dep,
     get_tool_catalog,
@@ -193,6 +194,11 @@ app.include_router(obs_router)
 # 注册 Agent Loop REST API 路由（ClawdBot 视觉自动化闭环）
 # ---------------------------------------------------------------------------
 app.include_router(agent_router)
+
+# ---------------------------------------------------------------------------
+# 注册 Prompt 模板配置 REST API 路由
+# ---------------------------------------------------------------------------
+app.include_router(prompt_config_router)
 
 # ---------------------------------------------------------------------------
 # 注册 Edge 输入接收路由（ASR / 微信消息 → Graph 流通）

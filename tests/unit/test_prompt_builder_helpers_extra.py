@@ -9,6 +9,12 @@ from unittest.mock import patch
 import pytest
 
 from host_brain.app import prompt_builder as pb
+from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.prompt_template_store import (
+    PromptTemplateStore,
+    resolve_prompt_template_json_merged,
+    resolve_prompt_template_text,
+)
 
 
 def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,11 +89,90 @@ def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
     )
 
     assert "For affection or confession messages" in close_rules
+    assert "answer your stance explicitly in the first sentence" in close_rules
+    assert "Never reply with only a generic thanks or acknowledgement." in close_rules
     assert "priority" in close_rules.lower() or "优先" in close_rules
     assert "TTS" in close_rules or "日本" in close_rules
     assert "问问他晚饭吃了没有" in hinted_rules
     assert "第一人称" in hinted_rules or "感受" in hinted_rules
     assert "仅在用户请求确实不明确" in default_rules or "追问" in default_rules
+
+
+def test_builtin_direct_response_templates_are_clean() -> None:
+    base_rules = resolve_prompt_template_json_merged("prompt_builder.direct_response.base_rules")
+    affection_rules = resolve_prompt_template_json_merged("prompt_builder.direct_response.affection_rules")
+
+    assert resolve_prompt_template_text("prompt_builder.direct_response.block_title") == "【回答优先级】"
+    assert resolve_prompt_template_text("prompt_builder.direct_response.followup_hint_prefix") == "追问建议："
+    assert resolve_prompt_template_text("prompt_builder.direct_response.default_followup_rule") == "仅在用户请求确实不明确或信息不完整时才追问。"
+    assert resolve_prompt_template_text("prompt_builder.direct_response.brief_rule") == "如果用户要求简短，就把回复控制在一两句短句内。"
+    assert "第一人称" in resolve_prompt_template_text("prompt_builder.direct_response.daily_life_rule")
+    assert "优先级相关请求" in resolve_prompt_template_text("prompt_builder.direct_response.priority_rule")
+    assert "TTS" in resolve_prompt_template_text("prompt_builder.direct_response.ja_output_rule")
+    assert "简体中文" in resolve_prompt_template_text("prompt_builder.direct_response.zh_output_rule")
+
+    assert isinstance(base_rules, list)
+    assert base_rules[0] == "先回应用户当下最具体的诉求。"
+
+    assert isinstance(affection_rules, list)
+    assert "For affection or confession messages" in affection_rules[0]
+
+
+def test_builtin_prompt_builder_runtime_templates_are_clean() -> None:
+    node_role_templates = resolve_prompt_template_json_merged("prompt_builder.node_role.instructions")
+    host_generation_templates = resolve_prompt_template_json_merged("prompt_builder.host_generation.blocks")
+    render_contract_templates = resolve_prompt_template_json_merged("prompt_builder.render_contract.blocks")
+    persona_expression_templates = resolve_prompt_template_json_merged("prompt_builder.persona_expression.templates")
+    runtime_section_templates = resolve_prompt_template_json_merged("prompt_builder.runtime_sections.templates")
+    emotion_binding_templates = resolve_prompt_template_json_merged("prompt_builder.emotion_binding.texts")
+    self_reflection_templates = resolve_prompt_template_json_merged("prompt_builder.self_reflection.templates")
+
+    assert node_role_templates["generic_default"].startswith("Role: generic node.")
+    assert node_role_templates["tool_planner_skills_header"] == "AVAILABLE_SKILLS:"
+    assert host_generation_templates["intro"] == "You are the Natsume core reasoning node.\n"
+    assert host_generation_templates["evidence_title"] == "Evidence:\n"
+    assert host_generation_templates["evidence_empty"] == "- (none)"
+    assert render_contract_templates["empty_placeholder"] == "- (none)"
+    assert persona_expression_templates["title"] == "PERSONA_EXPRESSION_HINT:\n"
+    assert persona_expression_templates["default_guidance"] == "保持真诚自然"
+    assert runtime_section_templates["bond_aware_title"] == "BOND_AWARE_STYLE:\n"
+    assert runtime_section_templates["memory_recall_evidence_guidance"].startswith("- Use these tagged recall snippets")
+    assert emotion_binding_templates["echo_intensity"]["high"] == "强烈共鸣"
+    assert emotion_binding_templates["vad"]["default"] == "情绪平稳"
+    assert self_reflection_templates["narrative_instruction_prefix"] == "自我叙事约束：{instruction}"
+
+
+def test_build_character_dynamic_patch_uses_prompt_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.character_dynamic_patch.templates",
+        content=json.dumps(
+            {
+                "title": "【状态加成】",
+                "holiday_patches": {
+                    "春节": "今天是春节 override。",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    patch_text = pb._build_character_dynamic_patch(
+        is_holiday=True,
+        holiday_name="春节",
+    )
+
+    assert "【状态加成】" in patch_text
+    assert "今天是春节 override。" in patch_text
 
 
 def test_build_node_role_instruction_covers_known_and_generic_nodes() -> None:
@@ -118,6 +203,33 @@ def test_build_node_role_instruction_covers_known_and_generic_nodes() -> None:
     assert "AVAILABLE_SKILLS" in tool_planner
     assert "memory_recall" in tool_planner
     assert generic.startswith("Role: generic node.")
+
+
+def test_build_node_role_instruction_uses_prompt_template_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.node_role.instructions",
+        content=json.dumps(
+            {
+                "chat_direct": {
+                    "zh": "角色：chat_direct_override。\n目标：先把话说清楚。",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    instruction = pb._build_node_role_instruction(pb.CHAT_DIRECT_NODE_ID, render_target_lang="zh")
+
+    assert instruction.startswith("角色：chat_direct_override。")
+    assert "先把话说清楚" in instruction
 
 
 def test_json_coercion_and_langchain_extractors_cover_fallback_paths() -> None:
@@ -209,6 +321,183 @@ def test_render_host_generation_prompt_covers_active_and_degraded_injection_path
 
     assert "You are the Natsume core reasoning node." in degraded_prompt
     assert pb.get_last_injection_meta()["mode"] == "DEGRADED"
+
+
+def test_render_host_generation_prompt_uses_prompt_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.host_generation.blocks",
+        content=json.dumps(
+            {
+                "intro": "You are the overridden host node.\n",
+                "evidence_empty": "- override-empty",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = pb.render_host_generation_prompt({"user_message": "hello", "retrieval": {}})
+
+    assert prompt.startswith("You are the overridden host node.\n")
+    assert "Evidence:\n- override-empty" in prompt
+
+
+def test_render_node_generation_prompt_uses_render_contract_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.render_contract.blocks",
+        content=json.dumps(
+            {
+                "output_intro": "输出契约：请返回 JSON。\n",
+                "empty_placeholder": "- rc-empty",
+                "section_titles": {
+                    "user_message": "【用户输入】",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = pb.render_node_generation_prompt(
+        node_id=pb.CHAT_DIRECT_NODE_ID,
+        runtime_payload={
+            "user_message": "继续说",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+        },
+    )
+
+    assert "输出契约：请返回 JSON。" in prompt
+    assert "【用户输入】" in prompt
+    assert "- rc-empty" in prompt
+
+
+def test_render_node_generation_prompt_uses_response_policy_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.response_policy.directives",
+        content=json.dumps(
+            {
+                "no_followup": "这一轮不要追问。",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = pb.render_node_generation_prompt(
+        node_id="top_agent",
+        runtime_payload={
+            "user_message": "继续",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "response_policy": {
+                "allow_followup": False,
+                "max_sentences": 2,
+            },
+        },
+    )
+
+    assert "这一轮不要追问。" in prompt
+
+
+def test_render_node_generation_prompt_uses_persona_expression_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.persona_expression.templates",
+        content=json.dumps(
+            {
+                "title": "PERSONA_BLOCK:\n",
+                "tone_guidance": {
+                    "caring": "先轻轻接住对方，再慢慢回应。",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = pb.render_node_generation_prompt(
+        node_id="top_agent",
+        runtime_payload={
+            "user_message": "我有点难过",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "persona_expression_hint": {
+                "style_hint": "自然回应",
+                "tone": "caring",
+                "echo_weight_modifier": 0.08,
+                "follow_up_tendency": 0.08,
+            },
+        },
+    )
+
+    assert "PERSONA_BLOCK:" in prompt
+    assert "先轻轻接住对方，再慢慢回应。" in prompt
 
 
 def test_render_node_generation_prompt_includes_memory_recall_persona_block() -> None:
@@ -359,3 +648,137 @@ def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_direc
     assert "如果提到时间，只能说“最近/这段时间”" in prompt
     assert "不要把系统状态、趋势、沉默、模式切换或薄弱线索写成人类式经历" in prompt
     assert "当前以主回复任务和既有边界为先" in prompt
+
+
+def test_render_node_generation_prompt_uses_runtime_sections_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.runtime_sections.templates",
+        content=json.dumps(
+            {
+                "bond_aware_title": "BOND_BLOCK:\n",
+                "planning_execution_title": "PLAN_EXEC_BLOCK:\n",
+                "multimodal_input_title": "MULTI_INPUT_BLOCK:\n",
+                "emotion_recall_title": "EMOTION_RECALL_BLOCK:\n",
+                "memory_recall_persona_title": "MEMORY_PERSONA_BLOCK:\n",
+                "memory_recall_evidence_title": "MEMORY_EVIDENCE_BLOCK:\n",
+                "memory_recall_evidence_guidance": "- 把这些片段当作模糊记忆线索，不要当作硬证据。\n",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = pb.render_node_generation_prompt(
+        node_id="top_agent",
+        runtime_payload={
+            "user_message": "继续说",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                    "emotion_recall": "Current affective layer: mood_state=steady.",
+                    "memory_persona_evidence": [
+                        {
+                            "content": "shared walk by the river",
+                            "emotion_color_tag": "WARM",
+                            "suppression_flag": True,
+                            "distortion_level": 0.4,
+                        }
+                    ],
+                    "memory_recall_summary": "本次召回命中了带人格线索的记忆。",
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "bond_aware_style": {
+                "bond_stage": "FRIEND",
+                "intimacy_level": 0.52,
+                "prompt_injection": "多一点熟悉感",
+                "forbidden_patterns": ["overpromise"],
+            },
+            "planning_execution": {
+                "success": True,
+                "executed_skills": ["memory_recall"],
+                "step_results": [{"description": "召回记忆", "status": "done"}],
+            },
+            "multimodal_input": {
+                "primary_modality": "text",
+                "modalities": ["text", "memory"],
+                "emotion_signals": ["warm"],
+            },
+        },
+    )
+
+    assert "BOND_BLOCK" in prompt
+    assert "PLAN_EXEC_BLOCK" in prompt
+    assert "MULTI_INPUT_BLOCK" in prompt
+    assert "EMOTION_RECALL_BLOCK" in prompt
+    assert "MEMORY_PERSONA_BLOCK" in prompt
+    assert "MEMORY_EVIDENCE_BLOCK" in prompt
+    assert "模糊记忆线索" in prompt
+
+
+def test_render_node_generation_prompt_uses_self_reflection_template_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "prompt_builder.self_reflection.templates",
+        content=json.dumps(
+            {
+                "narrative_instruction_prefix": "自我叙事提示：{instruction}",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    prompt = pb.render_node_generation_prompt(
+        node_id="top_agent",
+        runtime_payload={
+            "user_message": "继续说说",
+            "render_target_lang": "zh",
+            "prompt_context": {
+                "payload": {
+                    "authoritative": [],
+                    "retrieval": [],
+                    "style_pack": {},
+                    "constraints": {},
+                },
+                "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
+                "observability": {},
+            },
+            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
+            "response_policy": {
+                "allow_followup": False,
+                "max_sentences": 2,
+            },
+            "self_reflection_pulse": {
+                "self_awareness": "aware",
+                "narrative_guardrails": {
+                    "instruction": "只能说最近，不要说具体时长。",
+                },
+            },
+        },
+    )
+
+    assert "自我叙事提示：只能说最近，不要说具体时长。" in prompt

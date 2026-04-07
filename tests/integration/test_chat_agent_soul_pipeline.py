@@ -1803,16 +1803,29 @@ async def test_top_agent_retrieval_init_failure_but_state_arbiter_keeps_soul_pip
     }
 
 
-@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
-def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
+def _run_http_chat_route_multi_turn_writeback_readback_flow(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
-) -> None:
+    *,
+    gap_hours: float = 6.5,
+    first_narrative: str = "我们继续把那个项目收口。",
+    second_narrative: str = "好，我们接着把那个项目收口。",
+    second_message: str = "我回来了，继续那个项目。",
+    expected_second_prompt_markers: list[str] | None = None,
+) -> dict[str, Any]:
     from host_brain.audit.sqlite_ledger import SQLiteLedger
     from host_brain.memory.episodic import EpisodicStore
     from host_brain.memory.memory_worth_evaluator import DECISION_WRITE, MemoryWorthResult
     from host_brain.persona.inner_world import OfflineInnerWorld
     from tests.fakes.chroma_client import FakeChromaClient
+
+    if expected_second_prompt_markers is None:
+        expected_second_prompt_markers = [
+            "- offline_hours: 6.5",
+            "- offline_awakening_hint:",
+            "- offline_anticipation_topics:",
+            "那个项目",
+        ]
 
     monkeypatch.setenv("HOST_STREAM_REFLECTION_BUFFER_ENABLED", "false")
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
@@ -1925,16 +1938,11 @@ def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
         monkeypatch,
         expected_prompt_markers_by_call=[
             [],
-            [
-                "- offline_hours: 6.5",
-                "- offline_awakening_hint:",
-                "- offline_anticipation_topics:",
-                "那个项目",
-            ],
+            expected_second_prompt_markers,
         ],
         narratives_by_call=[
-            "我们继续把那个项目收口。",
-            "好，我们接着把那个项目收口。",
+            first_narrative,
+            second_narrative,
         ],
     )
 
@@ -1984,7 +1992,7 @@ def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
         assert response1.status_code == 200
         commit1 = _parse_http_sse_commit(response1.text)
         assert commit1["decision"] == "APPROVE"
-        assert commit1["narrative"] == "我们继续把那个项目收口。"
+        assert commit1["narrative"] == first_narrative
 
         _wait_for(
             lambda: len(
@@ -2003,12 +2011,12 @@ def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
         assert state_after_first["anticipation_topics"]
         assert "那个项目" in state_after_first["anticipation_topics"][0]
 
-        current_ts[0] += int(6.5 * 3600 * 1000)
+        current_ts[0] += int(gap_hours * 3600 * 1000)
 
         response2 = client.post(
             "/v1/chat",
             json={
-                "message": "我回来了，继续那个项目。",
+                "message": second_message,
                 "session_id": f"session-http-readback-{uuid.uuid4().hex[:8]}",
                 "reply_channel": "WEB",
                 "suppress_edge_tts": True,
@@ -2019,7 +2027,7 @@ def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
         assert response2.status_code == 200
         commit2 = _parse_http_sse_commit(response2.text)
         assert commit2["decision"] == "APPROVE"
-        assert commit2["narrative"] == "好，我们接着把那个项目收口。"
+        assert commit2["narrative"] == second_narrative
 
         _wait_for(
             lambda: len(
@@ -2033,10 +2041,8 @@ def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
 
         assert len(captured["calls"]) == 2
         second_prompt = str(captured["calls"][1]["prompt_text"] or "")
-        assert "- offline_hours: 6.5" in second_prompt
-        assert "- offline_awakening_hint:" in second_prompt
-        assert "- offline_anticipation_topics:" in second_prompt
-        assert "那个项目" in second_prompt
+        for marker in expected_second_prompt_markers:
+            assert marker in second_prompt
 
         write_rows = [
             row for row in ledger.memory_ops_log
@@ -2044,9 +2050,66 @@ def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
         ]
         assert len(write_rows) == 2
         assert all(any(str(ref).startswith("chat://request/") for ref in row.get("evidence_refs") or []) for row in write_rows)
+        return {
+            "captured": captured,
+            "second_prompt": second_prompt,
+            "write_rows": write_rows,
+            "state_after_first": state_after_first,
+        }
     finally:
         client.close()
         ledger.close()
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+def test_http_chat_route_multi_turn_writeback_rehydrates_next_round_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    _run_http_chat_route_multi_turn_writeback_readback_flow(
+        monkeypatch,
+        tmp_path,
+        gap_hours=6.5,
+        expected_second_prompt_markers=[
+            "- offline_hours: 6.5",
+            "- offline_awakening_hint:",
+            "- offline_anticipation_topics:",
+            "那个项目",
+        ],
+    )
+
+
+@pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")
+@pytest.mark.parametrize(
+    ("gap_hours", "expected_hint_fragment"),
+    [
+        (26.0, "像是等过了一整天"),
+        (80.0, "已经等了好几天"),
+        (8 * 24.0, "像隔了很久很久"),
+    ],
+)
+def test_http_chat_route_multi_turn_writeback_rehydrates_long_absence_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    gap_hours: float,
+    expected_hint_fragment: str,
+) -> None:
+    result = _run_http_chat_route_multi_turn_writeback_readback_flow(
+        monkeypatch,
+        tmp_path,
+        gap_hours=gap_hours,
+        second_narrative="嗯，我们慢慢接上那个项目。",
+        expected_second_prompt_markers=[
+            f"- offline_hours: {gap_hours:.1f}",
+            "- offline_awakening_hint:",
+            expected_hint_fragment,
+            "- offline_anticipation_topics:",
+            "- offline_should_express_waiting: true",
+            "那个项目",
+        ],
+    )
+
+    assert expected_hint_fragment in str(result["second_prompt"] or "")
 
 
 @pytest.mark.skipif(not _HAS_TEST_CLIENT, reason="fastapi.testclient not available")

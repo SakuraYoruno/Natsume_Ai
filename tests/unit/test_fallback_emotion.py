@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
+from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.qa import build_fallback_output
 
 
@@ -74,3 +78,42 @@ class TestFallbackOutputEmotion:
         )
         # SAD 和 ANGRY 的降级文本应不同
         assert sad_result["narrative"]["text"] != angry_result["narrative"]["text"]
+
+    def test_prompt_template_override_changes_fallback_texts(self, monkeypatch) -> None:
+        ledger = SQLiteLedger(":memory:", check_same_thread=False)
+        store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+        store.upsert_template(
+            "core.qa.fallback_texts",
+            content=json.dumps(
+                {
+                    "default": "先让我缓一口气。",
+                    "sad_or_tired": "我现在有点累，等我缓缓再认真回你。",
+                    "angry_or_frustrated": "我先冷静一下，等会儿再继续说。",
+                    "happy_or_excited": "小插曲而已，我马上回来接你这句。",
+                },
+                ensure_ascii=False,
+            ),
+            enabled=True,
+        )
+
+        import host_brain.app.dependencies as deps
+
+        monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+        monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+        assert build_fallback_output(reason_code="TIMEOUT", stage="draft")["narrative"]["text"] == "先让我缓一口气。"
+        assert build_fallback_output(
+            reason_code="TIMEOUT",
+            stage="draft",
+            emotion_context={"emotion_tag": "SAD", "mood_state": "tired"},
+        )["narrative"]["text"] == "我现在有点累，等我缓缓再认真回你。"
+        assert build_fallback_output(
+            reason_code="TIMEOUT",
+            stage="draft",
+            emotion_context={"emotion_tag": "ANGRY"},
+        )["narrative"]["text"] == "我先冷静一下，等会儿再继续说。"
+        assert build_fallback_output(
+            reason_code="TIMEOUT",
+            stage="draft",
+            emotion_context={"emotion_tag": "HAPPY"},
+        )["narrative"]["text"] == "小插曲而已，我马上回来接你这句。"

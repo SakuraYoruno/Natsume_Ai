@@ -86,7 +86,7 @@ _EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS: frozenset[str] = frozenset({"[ASR_VAD_NO_SPE
 _EDGE_ASR_BRIDGE_RECENT: dict[str, int] = {}
 _EDGE_ASR_BRIDGE_RECENT_LOCK = threading.Lock()
 # 同 session_id 下最近一次 bridge 的文本和时间戳（用于文本相似度去重）
-_EDGE_ASR_BRIDGE_LAST_TEXT: dict[str, tuple[str, int]] = {}  # session_id -> (text, ts_ms)
+_EDGE_ASR_BRIDGE_LAST_TEXT: dict[str, tuple[str, int, int | None]] = {}
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -258,13 +258,22 @@ def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> N
         ts_ms = int(ts_ms_raw) if ts_ms_raw is not None else int(time.time() * 1000)
     except (TypeError, ValueError):
         ts_ms = int(time.time() * 1000)
+    seq_raw = payload.get("seq", candidate.get("seq"))
+    try:
+        seq_value = int(seq_raw) if seq_raw is not None else None
+    except (TypeError, ValueError):
+        seq_value = None
 
     dedup_window_ms = max(
         0,
         _parse_int_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", default=15000),
     )
     if dedup_window_ms > 0:
-        dedup_key = f"{session_id}::{text.casefold()}"
+        dedup_key = (
+            f"{session_id}::{text.casefold()}::{seq_value}"
+            if seq_value is not None
+            else f"{session_id}::{text.casefold()}"
+        )
         with _EDGE_ASR_BRIDGE_RECENT_LOCK:
             cutoff = ts_ms - dedup_window_ms
             stale_keys = [key for key, seen_at in _EDGE_ASR_BRIDGE_RECENT.items() if seen_at < cutoff]
@@ -285,23 +294,30 @@ def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> N
             # 且时间差在窗口内，视为重复（防止 ASR 反复识别同一段语音产生噪声链路）
             last_entry = _EDGE_ASR_BRIDGE_LAST_TEXT.get(session_id)
             if last_entry is not None:
-                last_text, last_ts = last_entry
+                last_text, last_ts, last_seq = last_entry
                 if (ts_ms - last_ts) <= dedup_window_ms:
-                    cur = text.casefold()
-                    prev = last_text.casefold()
-                    if cur == prev or cur in prev or prev in cur:
-                        _log_if_available(
-                            logger,
-                            "debug",
-                            "edge event ASR bridge deduped (similar) request_id=%s session_id=%s text=%.40s prev=%.40s",
-                            request_id,
-                            session_id,
-                            text,
-                            last_text,
-                        )
-                        return
+                    same_seq = (
+                        seq_value is not None
+                        and last_seq is not None
+                        and seq_value == last_seq
+                    )
+                    missing_seq = seq_value is None or last_seq is None
+                    if same_seq or missing_seq:
+                        cur = text.casefold()
+                        prev = last_text.casefold()
+                        if cur == prev or cur in prev or prev in cur:
+                            _log_if_available(
+                                logger,
+                                "debug",
+                                "edge event ASR bridge deduped (similar) request_id=%s session_id=%s text=%.40s prev=%.40s",
+                                request_id,
+                                session_id,
+                                text,
+                                last_text,
+                            )
+                            return
             _EDGE_ASR_BRIDGE_RECENT[dedup_key] = ts_ms
-            _EDGE_ASR_BRIDGE_LAST_TEXT[session_id] = (text, ts_ms)
+            _EDGE_ASR_BRIDGE_LAST_TEXT[session_id] = (text, ts_ms, seq_value)
 
     async def _dispatch() -> None:
         try:

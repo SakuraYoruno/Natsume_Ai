@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from host_brain.app.chat_agent import SubAgentContext
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
 from host_brain.app.dispatch_agent import (
     _build_skill_args,
     _build_dispatch_system_prompt,
@@ -33,6 +34,7 @@ from host_brain.app.dispatch_agent import (
     dispatch_agent_sse_generator,
 )
 from host_brain.app.runtime_task_registry import RuntimeTaskRegistry
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
 def _run(coro):
@@ -49,6 +51,22 @@ async def _collect(agen):
 def _parse_sse_event(raw: str) -> dict:
     assert raw.startswith("data: ")
     return json.loads(raw[len("data: ") :].strip())
+
+
+def _install_template_store(monkeypatch, template_id: str, content: dict) -> PromptTemplateStore:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        template_id,
+        content=json.dumps(content, ensure_ascii=False),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    return store
 
 
 def test_extract_result_code_and_format_elapsed_ms() -> None:
@@ -127,6 +145,51 @@ def test_build_task_progress_sub_context_variants(monkeypatch) -> None:
     assert "file_read" in failed_ctx.result_text
     assert "FILE_NOT_FOUND" in failed_ctx.result_text
     assert "repair failed" in failed_ctx.result_text
+
+
+def test_build_task_progress_sub_context_uses_runtime_template_override(monkeypatch) -> None:
+    _install_template_store(
+        monkeypatch,
+        "dispatch_agent.runtime_texts",
+        {
+            "task_progress": {
+                "no_summary": "custom-empty-progress",
+                "running_intro_template": "RUN::{target_id}。",
+                "running_elapsed_template": "ELAPSED::{elapsed_text}。",
+                "running_recovery_active": "RECOVERING-NOW。",
+            }
+        },
+    )
+
+    class _Registry:
+        def __init__(self) -> None:
+            self.summary = None
+
+        def summarize_for_chat(self, **_kwargs):
+            return self.summary
+
+    registry = _Registry()
+    monkeypatch.setattr("host_brain.app.dependencies.get_runtime_task_registry", lambda: registry)
+
+    empty_ctx = _build_task_progress_sub_context(
+        request_id="req-progress-custom-empty",
+        session_id="sess-progress",
+        person_id="person-progress",
+    )
+    assert empty_ctx.result_text == "custom-empty-progress"
+
+    registry.summary = {
+        "status": "RUNNING",
+        "target_id": "browser_navigate",
+        "elapsed_ms": 1_500,
+        "recovery_status": "RUNNING",
+    }
+    running_ctx = _build_task_progress_sub_context(
+        request_id="req-progress-custom-running",
+        session_id="sess-progress",
+        person_id="person-progress",
+    )
+    assert running_ctx.result_text == "RUN::browser_navigate。ELAPSED::1.5s。RECOVERING-NOW。"
 
 
 def test_route_target_allows_parallel_for_delegate_and_skill(monkeypatch) -> None:
@@ -384,6 +447,59 @@ def test_build_dispatch_system_prompt_and_parse_bool_env(monkeypatch) -> None:
     assert _parse_bool_env("DISPATCH_BOOL_TRUE") is True
     assert _parse_bool_env("DISPATCH_BOOL_FALSE") is False
     assert _parse_bool_env("DISPATCH_BOOL_MISSING", default=True) is True
+
+
+def test_dispatch_routing_prompt_templates_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "dispatch_agent.routing_prompt.templates",
+        content=json.dumps(
+            {
+                "skill_line_with_description": "* {skill_name} => {description}",
+                "skill_line_without_description": "* {skill_name}",
+                "fallback_skill_lines": ["* fallback_skill"],
+                "system_prompt_template": "自定义路由系统提示\n{skill_manifest}",
+                "user_prompt_template": "输入消息：{message}",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    class _Registry:
+        def list_skill_names(self):
+            return ["alpha", "beta"]
+
+        def get(self, skill_name):
+            if skill_name == "alpha":
+                return SimpleNamespace(description="first skill")
+            return SimpleNamespace(description="")
+
+    monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: _Registry())
+    prompt = _build_dispatch_system_prompt()
+    assert "自定义路由系统提示" in prompt
+    assert "* alpha => first skill" in prompt
+    assert "* beta" in prompt
+
+    async def _capture_stream(**kwargs):
+        assert kwargs["prompt_text"] == "输入消息：hello"
+        assert kwargs["system_prompt"].startswith("自定义路由系统提示")
+        yield '{"route":"chat","target_id":"","task":""}'
+
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks", _capture_stream)
+    assert _run(
+        _llm_route_dispatch(
+            user_message="hello",
+            llm_runtime={"provider_name": "mock-provider", "model_id": "mock-model"},
+            request_id="req-dispatch-template",
+        )
+    ) == ("chat", "", "")
 
 
 def test_llm_route_dispatch_parses_json_and_falls_back(monkeypatch) -> None:
@@ -818,6 +934,34 @@ def test_coerce_and_summarize_structured_skill_result_helpers() -> None:
         "",
     ) == "已移除 demo"
     assert _summarize_skill_result_text("custom_skill", None, "") == "Skill custom_skill 执行成功"
+
+
+def test_summarize_skill_result_text_uses_runtime_template_override(monkeypatch) -> None:
+    _install_template_store(
+        monkeypatch,
+        "dispatch_agent.runtime_texts",
+        {
+            "skill_result_summary": {
+                "install_activated_template": "安装激活::{name}",
+                "default_template": "done::{skill_id}",
+            }
+        },
+    )
+
+    assert _summarize_skill_result_text(
+        "hub_skill_install",
+        {"detail": {"name": "demo", "activated": True}},
+        "",
+    ) == "安装激活::demo"
+    assert _summarize_skill_result_text("custom_skill", None, "") == "done::custom_skill"
+
+
+def test_builtin_dispatch_runtime_templates_are_clean() -> None:
+    templates = resolve_prompt_template_json_merged("dispatch_agent.runtime_texts")
+    assert templates["task_progress"]["no_summary"] == "现在没有正在执行，或者刚结束但还值得汇报的任务。"
+    assert templates["plan_execution"]["parent_start_detail"] == "正在生成并执行多步骤计划。"
+    assert templates["sub_agent_dispatch"]["unknown_agent_error_template"] == "未知子 Agent: {agent_id}"
+    assert templates["skill_result_summary"]["idempotent_replay_template"] == "（已执行过相同的 {skill_id} 操作）"
 
 
 def test_execute_skill_returns_missing_skill_error(monkeypatch) -> None:

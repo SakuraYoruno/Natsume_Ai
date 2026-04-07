@@ -1,72 +1,81 @@
-"""TranslateAgent Handler（M-MA5 / P10）。
-
-职责：
-- 处理翻译请求（SCENE_WORK_TRANSLATE）
-- 接入 ReAct 循环（run_react_loop，只读工具，allow_side_effects=False）
-- 产出 AgentArtifact 工件，写入 state["agent_artifacts"]
-
-对应节点：workbench_translate
-ReAct 循环：run_react_loop（P6 已封板，只读工具，allow_side_effects=False）
-"""
-
 from __future__ import annotations
 
 import os
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from host_brain.app.agents.agent_registry import AGENT_ID_TRANSLATE
 from host_brain.app.agents.react_loop import run_react_loop
 from host_brain.app.agents.tool_registry import get_tools_for_agent
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _resolve_translate_agent_runtime_texts() -> dict[str, Any]:
+    return _load_template_mapping("translate_agent_handler.runtime_texts")
+
+
+def _resolve_translate_agent_system_prompt() -> str:
+    return _mapping_text(
+        _resolve_translate_agent_runtime_texts(),
+        "system_prompt_extra",
+    )
+
+
+def _resolve_translate_agent_error_summary() -> str:
+    return _mapping_text(
+        _resolve_translate_agent_runtime_texts(),
+        "handler_error_summary",
+    )
 
 
 def translate_agent_handler(
     payload: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """TranslateAgent handler（P10，ReAct 模式）。
-
-    Observe → Think（LLM）→ Act（只读工具）→ Observe → ... → final_answer
-
-    Args:
-        payload: 当前图 payload
-        context: 执行上下文
-
-    Returns:
-        更新后的 state（含 agent_artifacts[translate_agent]）
-    """
     ctx = dict(context or {})
     request_id = str(ctx.get("request_id") or payload.get("request_id") or "").strip()
 
     out = dict(payload)
 
     try:
-        user_input = str(
-            payload.get("user_input")
-            or payload.get("query")
-            or ""
-        ).strip()
-
-        # 获取 TranslateAgent 可用工具（只读，allow_side_effects=False）
+        user_input = str(payload.get("user_input") or payload.get("query") or "").strip()
         tools = get_tools_for_agent(AGENT_ID_TRANSLATE, allow_side_effects=False)
-
-        # 获取 LLM gateway（从 context 或 payload 中读取）
         gateway = ctx.get("gateway") or payload.get("_gateway")
 
-        # 执行 ReAct 循环（最多 3 步，翻译场景无需多步推理）
         react_result = run_react_loop(
             agent_id=AGENT_ID_TRANSLATE,
             user_input=user_input,
             tools=tools,
             gateway=gateway,
-            system_prompt_extra="你是翻译专家，负责生成高质量的翻译草案。",
+            system_prompt_extra=_resolve_translate_agent_system_prompt(),
             max_steps=int(os.environ.get("TRANSLATE_AGENT_REACT_MAX_STEPS") or "3"),
             allow_side_effects=False,
             context=ctx,
         )
 
-        # 写入 react_scratchpad（工作区，供 JudgeAgent 和 trace 读取）
         out["react_scratchpad"] = react_result.to_scratchpad_dict()
 
         artifact_ref = f"artifact://{request_id}/{AGENT_ID_TRANSLATE}_{int(time.time() * 1000)}"
@@ -87,12 +96,11 @@ def translate_agent_handler(
             "stopped_reason": react_result.stopped_reason,
             "ts_ms": int(time.time() * 1000),
         }
-
     except Exception as exc:
         artifacts = out.setdefault("agent_artifacts", {})
         artifacts[AGENT_ID_TRANSLATE] = {
             "artifact_ref": f"artifact://{request_id}/{AGENT_ID_TRANSLATE}_error",
-            "summary": "TranslateAgent 执行异常",
+            "summary": _resolve_translate_agent_error_summary(),
             "confidence": 0.0,
             "risk_flags": [f"HANDLER_ERROR:{type(exc).__name__}"],
             "error": str(exc),

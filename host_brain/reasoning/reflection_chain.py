@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_text
+
 _logger = logging.getLogger("Natsume.reasoning.reflection_chain")
 
 # ---------------------------------------------------------------------------
@@ -46,6 +48,8 @@ _CUSTOMER_SERVICE_PATTERN = re.compile(
 _SYSTEM_STATUS_PATTERN = re.compile(
     r"(系统(正在|已经)|功能(暂时|目前)|版本号|更新日志|服务器|接口|API)",
 )
+_FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+_FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 
 # ---------------------------------------------------------------------------
 # 触发条件
@@ -57,6 +61,109 @@ HIGH_RISK_EMOTION_TAGS = frozenset({
 HIGH_RISK_INTENTS = frozenset({
     "emotion", "recall_memory", "complex",
 })
+
+_AFFECTION_QUESTION_MARKERS = (
+    "你喜欢我吗",
+    "喜欢我吗",
+    "你会喜欢我吗",
+    "你爱我吗",
+    "你在意我吗",
+)
+_AFFECTION_DISCLOSURE_MARKERS = (
+    "我喜欢你",
+    "我好喜欢你",
+    "我真的喜欢你",
+    "我爱你",
+    "我想你",
+)
+_AFFECTION_STANCE_MARKERS = (
+    "喜欢你",
+    "在意你",
+    "有好感",
+    "心动",
+    "会认真对待",
+    "会认真记住",
+    "慢慢走近",
+    "慢慢了解",
+    "还太早",
+    "还没到",
+    "不想把话说得太满",
+)
+_AFFECTION_EVASION_MARKERS = (
+    "我在这里",
+    "珍惜能这样和你说话",
+    "能这样和你说话",
+    "很高兴能这样和你说话",
+)
+
+
+def _is_affection_question(user_message: str) -> bool:
+    normalized = str(user_message or "").strip()
+    return any(marker in normalized for marker in _AFFECTION_QUESTION_MARKERS)
+
+
+def _is_affection_disclosure(user_message: str) -> bool:
+    normalized = str(user_message or "").strip()
+    return any(marker in normalized for marker in _AFFECTION_DISCLOSURE_MARKERS)
+
+
+def _contains_affection_stance(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in _AFFECTION_STANCE_MARKERS):
+        return True
+    if "不讨厌" in normalized and "你" in normalized:
+        return True
+    if "现在" in normalized and ("太早" in normalized or "说得太满" in normalized):
+        return True
+    return False
+
+
+def _looks_like_affection_evasion(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if any(marker in normalized for marker in _AFFECTION_EVASION_MARKERS):
+        return True
+    if normalized.startswith("嗯……谢谢你") and not _contains_affection_stance(normalized):
+        return True
+    return False
+
+
+def _build_affection_question_revision(*, bond_stage: str) -> str:
+    stage = str(bond_stage or "").strip().upper()
+    if stage in {"STRANGER", "ACQUAINTANCE"}:
+        return resolve_prompt_template_text("reflection_chain.affection_question.stranger")
+    if stage == "FRIEND":
+        return resolve_prompt_template_text("reflection_chain.affection_question.friend")
+    if stage in {"CLOSE", "CLOSE_FRIEND", "INTIMATE", "CONFIDANT", "SOULMATE"}:
+        return resolve_prompt_template_text("reflection_chain.affection_question.close")
+    return resolve_prompt_template_text("reflection_chain.affection_question.default")
+
+
+def _build_affection_disclosure_revision(*, bond_stage: str) -> str:
+    stage = str(bond_stage or "").strip().upper()
+    if stage in {"STRANGER", "ACQUAINTANCE"}:
+        return resolve_prompt_template_text("reflection_chain.affection_disclosure.stranger")
+    if stage == "FRIEND":
+        return resolve_prompt_template_text("reflection_chain.affection_disclosure.friend")
+    if stage in {"CLOSE", "CLOSE_FRIEND", "INTIMATE", "CONFIDANT", "SOULMATE"}:
+        return resolve_prompt_template_text("reflection_chain.affection_disclosure.close")
+    return resolve_prompt_template_text("reflection_chain.affection_disclosure.default")
+
+
+def _build_contextual_revision_fallback(*, user_message: str, bond_stage: str) -> str:
+    normalized = str(user_message or "").strip()
+    if _FALLBACK_PRESENCE_RE.match(normalized):
+        return resolve_prompt_template_text("reflection_chain.contextual_fallback.presence")
+    if _FALLBACK_GREETING_RE.match(normalized):
+        return resolve_prompt_template_text("reflection_chain.contextual_fallback.greeting")
+    return resolve_prompt_template_text("reflection_chain.contextual_fallback.default")
+
+
+def _build_revision_empathy_prefix() -> str:
+    return resolve_prompt_template_text("reflection_chain.revision_empathy_prefix")
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +314,7 @@ class ReflectionChain:
         all_issues.extend(d3.issues)
 
         # 4. 信息准确性
-        d4 = self._eval_info_accuracy(ai_resp)
+        d4 = self._eval_info_accuracy(user_msg, ai_resp)
         dimensions.append(d4)
         all_issues.extend(d4.issues)
 
@@ -223,6 +330,14 @@ class ReflectionChain:
         )
         passed = overall >= self._threshold
         should_revise = not passed
+        if _is_affection_question(user_msg) and (
+            not _contains_affection_stance(ai_resp) or _looks_like_affection_evasion(ai_resp)
+        ):
+            should_revise = True
+        if _is_affection_disclosure(user_msg) and (
+            not _contains_affection_stance(ai_resp) or _looks_like_affection_evasion(ai_resp)
+        ):
+            should_revise = True
 
         # 生成修正提示
         if should_revise:
@@ -269,7 +384,7 @@ class ReflectionChain:
         operations: list[str] = []
 
         if not original:
-            revised = "我在。"
+            revised = _build_contextual_revision_fallback(user_message=user_message, bond_stage=bond_stage)
             operations.append("fallback_empty")
         else:
             if _AI_SELF_REF_PATTERN.search(revised):
@@ -288,7 +403,7 @@ class ReflectionChain:
             if etag in {"sadness", "grief", "despair", "loneliness", "anxiety", "fear"}:
                 empathy_markers = ("我在", "陪你", "抱抱", "辛苦", "心疼", "理解", "别一个人扛")
                 if not any(marker in revised for marker in empathy_markers):
-                    prefix = "我在，先别一个人扛着。"
+                    prefix = _build_revision_empathy_prefix()
                     revised = f"{prefix}{revised}" if revised else prefix
                     operations.append("prepend_empathy")
 
@@ -311,8 +426,18 @@ class ReflectionChain:
                         operations.append(f"relax_{old}")
 
             if len(revised) < 6 and str(user_message or "").strip():
-                revised = f"{revised}我会认真陪你说。".strip()
-                operations.append("extend_too_short_reply")
+                revised = _build_contextual_revision_fallback(user_message=user_message, bond_stage=bond_stage)
+                operations.append("replace_too_short_reply")
+            elif _is_affection_question(user_message) and (
+                not _contains_affection_stance(revised) or _looks_like_affection_evasion(revised)
+            ):
+                revised = _build_affection_question_revision(bond_stage=bond_stage)
+                operations.append("repair_affection_question_directness")
+            elif _is_affection_disclosure(user_message) and (
+                not _contains_affection_stance(revised) or _looks_like_affection_evasion(revised)
+            ):
+                revised = _build_affection_disclosure_revision(bond_stage=bond_stage)
+                operations.append("repair_affection_disclosure_directness")
 
             user_len = len(str(user_message or "").strip())
             if user_len < 16 and len(revised) > 120:
@@ -325,7 +450,7 @@ class ReflectionChain:
 
             revised = re.sub(r"\s+", " ", revised).strip()
             if not revised:
-                revised = "我在。"
+                revised = _build_contextual_revision_fallback(user_message=user_message, bond_stage=bond_stage)
                 operations.append("fallback_after_cleanup")
 
         after = self.reflect(
@@ -431,7 +556,7 @@ class ReflectionChain:
         )
 
     @staticmethod
-    def _eval_info_accuracy(ai_resp: str) -> DimensionScore:
+    def _eval_info_accuracy(user_msg: str, ai_resp: str) -> DimensionScore:
         """信息准确性：检测明显的编造痕迹。"""
         issues: list[str] = []
         score = 0.9
@@ -444,6 +569,22 @@ class ReflectionChain:
             if marker in ai_resp:
                 score -= 0.2
                 issues.append(f"可能编造记忆（含'{marker}'）")
+
+        if _is_affection_question(user_msg):
+            if not _contains_affection_stance(ai_resp):
+                score -= 0.55
+                issues.append("没有正面回答喜欢类直问，只是在回避题意")
+            elif _looks_like_affection_evasion(ai_resp):
+                score -= 0.35
+                issues.append("把喜欢类直问答成了泛化陪伴")
+
+        if _is_affection_disclosure(user_msg):
+            if not _contains_affection_stance(ai_resp):
+                score -= 0.45
+                issues.append("对告白没有表明态度，只做了泛化感谢")
+            elif _looks_like_affection_evasion(ai_resp):
+                score -= 0.25
+                issues.append("对告白的回应过于泛化，像在回避题意")
 
         return DimensionScore(
             dimension=DIMENSION_INFO_ACCURACY,

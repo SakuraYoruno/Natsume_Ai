@@ -2,7 +2,7 @@
 
 Design goals:
 - Read paired `.ast` files from translated_cn/raw_jp roots.
-- Extract only target speaker utterances (default: 钃?钘?.
+- Extract only target speaker utterances (default: 蓝 / 夏目蓝 / 夏目).
 - Keep raw cleaned lines as artifacts for audit/review.
 - Distill corpus statistics into tone-only style instructions.
 - Upsert into StyleCanonStore (never write raw plot text as canon body).
@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--include-mixed-speakers",
         action="store_true",
-        help="Include entries like '闈欐祦&钃?. Default is exact match only.",
+        help="Include entries like '静流&蓝'. Default is exact match only.",
     )
     parser.add_argument("--min-line-len", type=int, default=2, help="Minimum cleaned line length.")
     parser.add_argument("--max-files", type=int, default=0, help="Limit paired files (0=no limit).")
@@ -811,4 +811,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

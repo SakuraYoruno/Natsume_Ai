@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { RefreshCw, Settings, Cpu, GitBranch, Gauge, Shield, Clock, Database, Zap, SearchCheck, Layers3 } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
-import { fetchLlmRouteStats, fetchLlmCallStats, fetchRateLimitBackendStats, fetchServicesHealth, fetchMetricsTimeseries, fetchRetrievalRuntime } from '../api/obs.js'
+import { fetchLlmRouteStats, fetchLlmCallStats, fetchRateLimitBackendStats, fetchServicesHealth, fetchMetricsTimeseries, fetchRetrievalRuntime, fetchDigitalLifeRuntimeSnapshot } from '../api/obs.js'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import useAppStore from '../store/useAppStore.js'
 
 function StatCard({ label, value, sub, color = 'text-gray-800', icon: Icon }) {
@@ -32,20 +33,22 @@ export default function SystemConfig() {
   const [healthData, setHealthData] = useState(null)
   const [tsData, setTsData] = useState(null)
   const [retrievalRuntime, setRetrievalRuntime] = useState(null)
+  const [runtimeSnapshot, setRuntimeSnapshot] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [route, call, rate, health, ts, retrievalRt] = await Promise.all([
+      const [route, call, rate, health, ts, retrievalRt, runtime] = await Promise.all([
         fetchLlmRouteStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchLlmCallStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchRateLimitBackendStats({}).catch(() => null),
         fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
         fetchMetricsTimeseries({ time_range: timeRange }).catch(() => null),
         fetchRetrievalRuntime({ limit: 5 }).catch(() => null),
+        fetchDigitalLifeRuntimeSnapshot().catch(() => null),
       ])
       setRouteData(route); setCallData(call); setRateData(rate)
-      setHealthData(health); setTsData(ts); setRetrievalRuntime(retrievalRt)
+      setHealthData(health); setTsData(ts); setRetrievalRuntime(retrievalRt); setRuntimeSnapshot(runtime)
     } catch {} finally { setLoading(false) }
   }, [windowMinutes, timeRange])
 
@@ -60,6 +63,9 @@ export default function SystemConfig() {
   const callStats = callData?.models || []
   const rateKeys = rateData?.top_keys || []
   const hasLlmSamples = (routeData?.total_decisions ?? 0) > 0 || (callData?.total_calls ?? 0) > 0
+  const notLiveSlots = Object.values(runtimeSnapshot?.slot_status || {}).filter((value) => value !== 'live').length
+  const replyPosture = runtimeSnapshot?.runtime_summary?.reply_posture?.style || '—'
+  const sysMode = runtimeSnapshot?.sys_mode || '—'
 
   // 延迟时序（如果有）
   const latencyPoints = tsData?.points || []
@@ -70,8 +76,8 @@ export default function SystemConfig() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">系统配置与性能</h1>
-          <p className="text-sm text-gray-500">模型路由 · LLM 成本 · 限流状态 · 延迟分析</p>
+          <h1 className="text-xl font-semibold text-gray-900">数字生命系统底座</h1>
+          <p className="text-sm text-gray-500">模型路由 · 检索对齐 · 限流后端 · 延迟分析</p>
         </div>
         <div className="flex items-center gap-2">
           <select className="text-xs border rounded px-2 py-1.5" value={windowMinutes} onChange={e => setWindowMinutes(Number(e.target.value))}>
@@ -80,6 +86,34 @@ export default function SystemConfig() {
           <button className="btn-secondary" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
           </button>
+        </div>
+      </div>
+
+      <DigitalLifeNav />
+
+      <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50 via-white to-sky-50 p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-medium text-primary">
+              <Settings size={12} />
+              人格运行底座
+            </div>
+            <div className="mt-3 text-2xl font-bold text-gray-900">{sysMode}</div>
+            <div className="mt-1 text-sm text-gray-600">
+              当前回复姿态 `{replyPosture}`，非 live slot 共 {notLiveSlots} 项。
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs text-gray-500">
+            <span className="rounded-full border border-gray-200 bg-white px-3 py-1">
+              services：{healthData ? `${healthData.degraded}/${healthData.down}` : '—'}
+            </span>
+            <span className="rounded-full border border-gray-200 bg-white px-3 py-1">
+              rate backend：{rateData?.backend_type || '—'}
+            </span>
+            <span className="rounded-full border border-gray-200 bg-white px-3 py-1">
+              retrieval：{retrievalRuntime?.suite_profile || 'custom'}
+            </span>
+          </div>
         </div>
       </div>
 

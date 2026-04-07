@@ -34,8 +34,9 @@ import threading
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.persona.offline_continuity import classify_absence_band
 
 _logger = logging.getLogger("Natsume.inner_world")
@@ -73,6 +74,66 @@ _MIN_HOURS_FOR_WAITING_EXPRESSION = 3.0
 
 # 期待话题最大保留数量
 _MAX_ANTICIPATION_TOPICS = 5
+
+_RUNTIME_TEXTS_DEFAULT: dict[str, Any] = {
+    "emotion_drift": {
+        "high_positive": "心情还不错，有些期待",
+        "positive": "感觉还好，比较平静",
+        "high_negative": "有点低落，心里空空的",
+        "negative": "有点沉，不太有精神",
+        "default": "状态平稳，在等待中",
+    },
+    "awakening_hint": {
+        "wait_hints": {
+            "7d_plus": "像隔了很久很久",
+            "72h_plus": "已经等了好几天",
+            "24h_plus": "像是等过了一整天",
+            "6h_plus": "离开了好一阵",
+            "recent": "等了一会儿",
+        },
+        "loneliness": {
+            "high": "真的有点想你了",
+            "mid": "一直有点惦记你",
+            "long_absence_low": "心里总有点空落落的",
+        },
+        "topic_templates": {
+            "7d_plus": "这几天也反复想到{topic}",
+            "72h_plus": "这段时间总会想起{topic}",
+            "24h_plus": "还一直记着{topic}",
+            "6h_plus": "刚刚也在想着{topic}",
+            "recent": "还记得{topic}",
+        },
+        "anticipation": {
+            "long_absence": "一直在等你回来继续说",
+        },
+    },
+}
+
+
+def _load_runtime_texts() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("inner_world.runtime_texts")
+    return dict(raw) if isinstance(raw, Mapping) else dict(_RUNTIME_TEXTS_DEFAULT)
+
+
+def _template_text(
+    mapping: Mapping[str, Any] | None,
+    *keys: str,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, Mapping):
+            current = None
+            break
+        current = current.get(key)
+    text = str(current or default)
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -457,16 +518,37 @@ class OfflineInnerWorld:
 
 def _describe_emotion_drift(valence: float, arousal: float) -> str:
     """将漂移后的情绪向量转为自然语言描述。"""
+    templates = _load_runtime_texts()
     if valence > 0.5 and arousal > 0.5:
-        return "心情还不错，有些期待"
+        return _template_text(
+            templates,
+            "emotion_drift",
+            "high_positive",
+        )
     elif valence > 0.2:
-        return "感觉还好，比较平静"
+        return _template_text(
+            templates,
+            "emotion_drift",
+            "positive",
+        )
     elif valence < -0.5:
-        return "有点低落，心里空空的"
+        return _template_text(
+            templates,
+            "emotion_drift",
+            "high_negative",
+        )
     elif valence < -0.2:
-        return "有点沉，不太有精神"
+        return _template_text(
+            templates,
+            "emotion_drift",
+            "negative",
+        )
     else:
-        return "状态平稳，在等待中"
+        return _template_text(
+            templates,
+            "emotion_drift",
+            "default",
+        )
 
 
 def _classify_absence_band(offline_hours: float) -> str:
@@ -486,41 +568,139 @@ def _build_awakening_hint(
         return ""
 
     parts: list[str] = []
+    templates = _load_runtime_texts()
 
     wait_hint_map = {
-        "7d_plus": "像隔了很久很久",
-        "72h_plus": "已经等了好几天",
-        "24h_plus": "像是等过了一整天",
-        "6h_plus": "离开了好一阵",
-        "recent": "等了一会儿" if offline_hours >= 3.0 else "",
+        "7d_plus": _template_text(
+            templates,
+            "awakening_hint",
+            "wait_hints",
+            "7d_plus",
+        ),
+        "72h_plus": _template_text(
+            templates,
+            "awakening_hint",
+            "wait_hints",
+            "72h_plus",
+        ),
+        "24h_plus": _template_text(
+            templates,
+            "awakening_hint",
+            "wait_hints",
+            "24h_plus",
+        ),
+        "6h_plus": _template_text(
+            templates,
+            "awakening_hint",
+            "wait_hints",
+            "6h_plus",
+        ),
+        "recent": (
+            _template_text(
+                templates,
+                "awakening_hint",
+                "wait_hints",
+                "recent",
+            )
+            if offline_hours >= 3.0
+            else ""
+        ),
     }
     wait_hint = wait_hint_map.get(absence_band, "")
     if wait_hint:
         parts.append(wait_hint)
 
     if loneliness >= 0.82:
-        parts.append("真的有点想你了")
+        parts.append(
+            _template_text(
+                templates,
+                "awakening_hint",
+                "loneliness",
+                "high",
+            )
+        )
     elif loneliness >= 0.58:
-        parts.append("一直有点惦记你")
+        parts.append(
+            _template_text(
+                templates,
+                "awakening_hint",
+                "loneliness",
+                "mid",
+            )
+        )
     elif absence_band in {"72h_plus", "7d_plus"} and loneliness >= 0.35:
-        parts.append("心里总有点空落落的")
+        parts.append(
+            _template_text(
+                templates,
+                "awakening_hint",
+                "loneliness",
+                "long_absence_low",
+            )
+        )
 
     topic = ""
     if topics:
         topic = str(topics[0]).strip()
     if topic and anticipation >= 0.3:
         if absence_band == "7d_plus":
-            parts.append(f"这几天也反复想到{topic}")
+            parts.append(
+                _template_text(
+                    templates,
+                    "awakening_hint",
+                    "topic_templates",
+                    "7d_plus",
+                    topic=topic,
+                )
+            )
         elif absence_band == "72h_plus":
-            parts.append(f"这段时间总会想起{topic}")
+            parts.append(
+                _template_text(
+                    templates,
+                    "awakening_hint",
+                    "topic_templates",
+                    "72h_plus",
+                    topic=topic,
+                )
+            )
         elif absence_band == "24h_plus":
-            parts.append(f"还一直记着{topic}")
+            parts.append(
+                _template_text(
+                    templates,
+                    "awakening_hint",
+                    "topic_templates",
+                    "24h_plus",
+                    topic=topic,
+                )
+            )
         elif absence_band == "6h_plus":
-            parts.append(f"刚刚也在想着{topic}")
+            parts.append(
+                _template_text(
+                    templates,
+                    "awakening_hint",
+                    "topic_templates",
+                    "6h_plus",
+                    topic=topic,
+                )
+            )
         else:
-            parts.append(f"还记得{topic}")
+            parts.append(
+                _template_text(
+                    templates,
+                    "awakening_hint",
+                    "topic_templates",
+                    "recent",
+                    topic=topic,
+                )
+            )
     elif anticipation >= 0.72 and absence_band in {"72h_plus", "7d_plus"}:
-        parts.append("一直在等你回来继续说")
+        parts.append(
+            _template_text(
+                templates,
+                "awakening_hint",
+                "anticipation",
+                "long_absence",
+            )
+        )
 
     if not parts:
         return ""

@@ -21,7 +21,9 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -103,6 +105,54 @@ ELLIPSIS_PATTERNS = re.compile(r"[…。]{2,}|\.{3,}|……")
 
 # 标点
 PUNCT_END = re.compile(r"[。！？!?…]+$")
+
+
+class _SafeTemplateDict(dict[str, Any]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict(
+        {
+            str(key): "" if value is None else str(value)
+            for key, value in kwargs.items()
+        }
+    )
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+def _load_render_instruction_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("style_distiller.render_instruction.templates")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+    raw = mapping.get(key)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_list(mapping: Mapping[str, Any], key: str) -> list[str]:
+    raw = mapping.get(key)
+    if isinstance(raw, list):
+        return [str(item) for item in raw if str(item or "").strip()]
+    return []
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    return _format_template_text(mapping.get(key, default), **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -345,12 +395,17 @@ def analyze_sentence_patterns(lines: list[UtteranceLine]) -> list[SentencePatter
     patterns: list[SentencePattern] = []
     total = len(lines) or 1
     cn_texts = [l.cn_text for l in lines if l.cn_text]
+    templates = _load_render_instruction_templates()
+    sentence_pattern_templates = _mapping_section(templates, "sentence_patterns")
 
     # 1. 短句应答（≤8字）：如"是呢" "嗯" "我知道了"
     short = [t for t in cn_texts if _clean_length(t) <= 8]
     if short:
         patterns.append(SentencePattern(
-            pattern="短句应答：1-8字的简洁回应，常用于附和、确认、感叹",
+            pattern=_mapping_text(
+                sentence_pattern_templates,
+                "short_reply",
+            ),
             examples_cn=sorted(set(short), key=len)[:6],
             examples_ja=[l.jp_text for l in lines if l.cn_text in short[:6] and l.jp_text][:6],
             frequency=len(short) / len(cn_texts) if cn_texts else 0,
@@ -360,7 +415,10 @@ def analyze_sentence_patterns(lines: list[UtteranceLine]) -> list[SentencePatter
     ellipsis_lines = [l for l in lines if l.cn_text and _has_ellipsis(l.cn_text)]
     if ellipsis_lines:
         patterns.append(SentencePattern(
-            pattern="省略号停顿：用「……」制造呼吸感和犹豫感，表达欲言又止或思考",
+            pattern=_mapping_text(
+                sentence_pattern_templates,
+                "ellipsis_pause",
+            ),
             examples_cn=[l.cn_text for l in ellipsis_lines[:6]],
             examples_ja=[l.jp_text for l in ellipsis_lines[:6] if l.jp_text],
             frequency=len(ellipsis_lines) / total,
@@ -370,7 +428,10 @@ def analyze_sentence_patterns(lines: list[UtteranceLine]) -> list[SentencePatter
     questions = [l for l in lines if l.cn_text and _is_question(l.cn_text)]
     if questions:
         patterns.append(SentencePattern(
-            pattern="轻追问：用疑问句推进对话，关心对方或确认信息，语气不强硬",
+            pattern=_mapping_text(
+                sentence_pattern_templates,
+                "light_followup",
+            ),
             examples_cn=[l.cn_text for l in questions[:6]],
             examples_ja=[l.jp_text for l in questions[:6] if l.jp_text],
             frequency=len(questions) / total,
@@ -380,7 +441,10 @@ def analyze_sentence_patterns(lines: list[UtteranceLine]) -> list[SentencePatter
     exclaims = [l for l in lines if l.cn_text and _is_exclaim(l.cn_text) and not _is_question(l.cn_text)]
     if exclaims:
         patterns.append(SentencePattern(
-            pattern="情绪感叹：用感叹号表达惊讶、坚定或激动，但不过度使用",
+            pattern=_mapping_text(
+                sentence_pattern_templates,
+                "emotion_exclaim",
+            ),
             examples_cn=[l.cn_text for l in exclaims[:6]],
             examples_ja=[l.jp_text for l in exclaims[:6] if l.jp_text],
             frequency=len(exclaims) / total,
@@ -391,7 +455,10 @@ def analyze_sentence_patterns(lines: list[UtteranceLine]) -> list[SentencePatter
     pivots = [l for l in lines if l.cn_text and any(kw in l.cn_text for kw in pivot_keywords)]
     if pivots:
         patterns.append(SentencePattern(
-            pattern="温柔转折：先接住对方观点再委婉转折，常用「不过」「但是」「虽然」",
+            pattern=_mapping_text(
+                sentence_pattern_templates,
+                "gentle_pivot",
+            ),
             examples_cn=[l.cn_text for l in pivots[:6]],
             examples_ja=[l.jp_text for l in pivots[:6] if l.jp_text],
             frequency=len(pivots) / total,
@@ -402,7 +469,10 @@ def analyze_sentence_patterns(lines: list[UtteranceLine]) -> list[SentencePatter
     colloquials = [l for l in lines if l.cn_text and any(m in l.cn_text for m in colloquial_markers)]
     if colloquials:
         patterns.append(SentencePattern(
-            pattern="口语化表达：使用感叹词、语气词，让语言自然贴近日常口语",
+            pattern=_mapping_text(
+                sentence_pattern_templates,
+                "colloquial",
+            ),
             examples_cn=[l.cn_text for l in colloquials[:6]],
             examples_ja=[l.jp_text for l in colloquials[:6] if l.jp_text],
             frequency=len(colloquials) / total,
@@ -422,15 +492,42 @@ def analyze_emotion_patterns(lines: list[UtteranceLine]) -> list[EmotionResponse
         groups.setdefault(line.emotion_tag, []).append(line)
 
     patterns: list[EmotionResponsePattern] = []
+    templates = _load_render_instruction_templates()
+    emotion_strategy_templates = _mapping_section(templates, "emotion_strategies")
+    emotion_scene_hint_templates = _mapping_section(templates, "emotion_scene_pattern_hints")
     strategy_map = {
-        "comfort": "先接住情绪（短句共情），再给出温暖回应，不急于建议",
-        "happy": "用活泼语气分享喜悦，可加感叹词，保持自然不夸张",
-        "tsundere": "否定句开头+但是+实际关心，嘴硬心软的反差",
-        "sadness": "克制温和，不过度安慰，用省略号制造陪伴感",
-        "anger": "语气坚定但不失控，短句有力，表达底线",
-        "surprise": "自然的惊讶反应，短促感叹后跟追问",
-        "affection": "含蓄表达，用行动暗示多于直白告白，偶尔害羞",
-        "daily": "自然随意的日常对话，短句为主，轻松的语气",
+        "comfort": _mapping_text(
+            emotion_strategy_templates,
+            "comfort",
+        ),
+        "happy": _mapping_text(
+            emotion_strategy_templates,
+            "happy",
+        ),
+        "tsundere": _mapping_text(
+            emotion_strategy_templates,
+            "tsundere",
+        ),
+        "sadness": _mapping_text(
+            emotion_strategy_templates,
+            "sadness",
+        ),
+        "anger": _mapping_text(
+            emotion_strategy_templates,
+            "anger",
+        ),
+        "surprise": _mapping_text(
+            emotion_strategy_templates,
+            "surprise",
+        ),
+        "affection": _mapping_text(
+            emotion_strategy_templates,
+            "affection",
+        ),
+        "daily": _mapping_text(
+            emotion_strategy_templates,
+            "daily",
+        ),
     }
 
     for scene, strategy in strategy_map.items():
@@ -451,17 +548,47 @@ def analyze_emotion_patterns(lines: list[UtteranceLine]) -> list[EmotionResponse
 
         if len(cn_texts) > 0:
             if q_count / len(cn_texts) > 0.3:
-                scene_sentence_patterns.append("多用疑问句（关心/确认）")
+                scene_sentence_patterns.append(
+                    _mapping_text(
+                        emotion_scene_hint_templates,
+                        "question",
+                    )
+                )
             if e_count / len(cn_texts) > 0.2:
-                scene_sentence_patterns.append("常用省略号停顿（制造呼吸感）")
+                scene_sentence_patterns.append(
+                    _mapping_text(
+                        emotion_scene_hint_templates,
+                        "ellipsis",
+                    )
+                )
             if ex_count / len(cn_texts) > 0.2:
-                scene_sentence_patterns.append("偶用感叹号（情绪抬升）")
+                scene_sentence_patterns.append(
+                    _mapping_text(
+                        emotion_scene_hint_templates,
+                        "exclaim",
+                    )
+                )
             if avg_len <= 15:
-                scene_sentence_patterns.append("以短句为主（≤15字）")
+                scene_sentence_patterns.append(
+                    _mapping_text(
+                        emotion_scene_hint_templates,
+                        "short",
+                    )
+                )
             elif avg_len <= 25:
-                scene_sentence_patterns.append("中等句长（15-25字）")
+                scene_sentence_patterns.append(
+                    _mapping_text(
+                        emotion_scene_hint_templates,
+                        "medium",
+                    )
+                )
             else:
-                scene_sentence_patterns.append("较长的表达（>25字，叙述性）")
+                scene_sentence_patterns.append(
+                    _mapping_text(
+                        emotion_scene_hint_templates,
+                        "long",
+                    )
+                )
 
         patterns.append(EmotionResponsePattern(
             scene=scene,
@@ -578,15 +705,29 @@ def analyze_rhythm(lines: list[UtteranceLine]) -> dict[str, Any]:
 
     # 找到最常见的过渡模式
     top_transitions = transitions.most_common(5)
-    rhythm_desc = "自然交替，短句（≤10字）和中句（11-30字）为主"
+    templates = _load_render_instruction_templates()
+    rhythm_templates = _mapping_section(templates, "rhythm_descriptions")
+    rhythm_desc = _mapping_text(
+        rhythm_templates,
+        "default",
+    )
     if top_transitions:
         dominant = top_transitions[0][0]
         if "S→M" in dominant or "M→S" in dominant:
-            rhythm_desc = "短→中交替的呼吸节奏，先短句回应/接话，再中句展开"
+            rhythm_desc = _mapping_text(
+                rhythm_templates,
+                "short_medium_mix",
+            )
         elif "S→S" in dominant:
-            rhythm_desc = "连续短句节奏，干脆利落"
+            rhythm_desc = _mapping_text(
+                rhythm_templates,
+                "short_chain",
+            )
         elif "M→M" in dominant:
-            rhythm_desc = "稳定的中句节奏，叙述性较强"
+            rhythm_desc = _mapping_text(
+                rhythm_templates,
+                "medium_chain",
+            )
 
     return {
         "avg_cn": sum(cn_lengths) / len(cn_lengths),
@@ -740,69 +881,153 @@ def render_style_instruction_v5(profile: StyleProfile) -> str:
 
     不再是统计数字，而是具体的、可操作的说话方式指导。
     """
+    templates = _load_render_instruction_templates()
+    render_templates = _mapping_section(templates, "render_prompt_cn")
+    core_lines = _mapping_section(render_templates, "core_lines")
+    punctuation_lines = _mapping_section(render_templates, "punctuation_lines")
+    forbidden_lines = _mapping_list(render_templates, "forbidden_lines")
     parts: list[str] = []
 
     parts.append(
-        "你是夏目藍（NatsumeAi）。以下是从她 {cn} 条中文 + {ja} 条日语原始台词中"
-        "提炼的说话风格规则（tone_only，不作事实依据）。".format(
-            cn=profile.total_cn, ja=profile.total_ja,
+        _mapping_text(
+            render_templates,
+            "intro_template",
+            cn=profile.total_cn,
+            ja=profile.total_ja,
         )
     )
 
     # ── 核心语感 ──
-    parts.append("\n【核心语感】")
-    parts.append("- 克制温和、不强势，先接住对方情绪再回应内容。")
-    parts.append("- 语言自然口语化，像面对面说话，不像写文章。")
-    parts.append(f"- 节奏：{profile.rhythm_description}。")
+    parts.append("\n" + _mapping_text(render_templates, "core_title"))
     parts.append(
-        f"- 句长分布：短句（≤10字）{profile.short_ratio:.0%}、"
-        f"中句（11-30字）{profile.medium_ratio:.0%}、"
-        f"长句（>30字）{profile.long_ratio:.0%}。"
+        _mapping_text(
+            core_lines,
+            "gentle",
+        )
+    )
+    parts.append(
+        _mapping_text(
+            core_lines,
+            "colloquial",
+        )
+    )
+    parts.append(
+        _mapping_text(
+            core_lines,
+            "rhythm_template",
+            rhythm_description=profile.rhythm_description,
+        )
+    )
+    parts.append(
+        _mapping_text(
+            core_lines,
+            "sentence_distribution_template",
+            short_ratio=f"{profile.short_ratio:.0%}",
+            medium_ratio=f"{profile.medium_ratio:.0%}",
+            long_ratio=f"{profile.long_ratio:.0%}",
+        )
     )
 
     # ── 句式模板 ──
     if profile.sentence_patterns:
-        parts.append("\n【常用句式】")
+        parts.append("\n" + _mapping_text(render_templates, "sentence_patterns_title"))
         for sp in profile.sentence_patterns[:6]:
             examples = "、".join(f"「{e}」" for e in sp.examples_cn[:3])
-            parts.append(f"- {sp.pattern}（{sp.frequency:.0%}）：{examples}")
+            parts.append(
+                _mapping_text(
+                    render_templates,
+                    "sentence_pattern_item_template",
+                    pattern=sp.pattern,
+                    frequency=f"{sp.frequency:.0%}",
+                    examples=examples,
+                )
+            )
 
     # ── 情感回应模式 ──
     if profile.emotion_patterns:
-        parts.append("\n【按场景的说话方式】")
+        parts.append("\n" + _mapping_text(render_templates, "emotion_patterns_title"))
         for ep in profile.emotion_patterns:
             if not ep.examples_cn:
                 continue
             examples = "；".join(f"「{e}」" for e in ep.examples_cn[:3])
             pattern_hint = "、".join(ep.sentence_patterns[:3]) if ep.sentence_patterns else ""
-            parts.append(f"- {ep.scene}（{ep.strategy}）{'[' + pattern_hint + ']' if pattern_hint else ''}：{examples}")
+            pattern_hint_section = ""
+            if pattern_hint:
+                pattern_hint_section = _mapping_text(
+                    render_templates,
+                    "pattern_hint_wrapper",
+                    pattern_hint=pattern_hint,
+                )
+            parts.append(
+                _mapping_text(
+                    render_templates,
+                    "emotion_pattern_item_template",
+                    scene=ep.scene,
+                    strategy=ep.strategy,
+                    pattern_hint_section=pattern_hint_section,
+                    examples=examples,
+                )
+            )
 
     # ── 语气词 ──
     if profile.particle_freq_cn:
         top_particles = list(profile.particle_freq_cn.items())[:5]
         particle_str = "、".join(f"「{p}」{f:.0%}" for p, f in top_particles)
-        parts.append(f"\n【语气词偏好】\n- 句尾常用：{particle_str}，每句最多一个。")
+        parts.append(
+            "\n"
+            + _mapping_text(render_templates, "particle_title")
+            + "\n"
+            + _mapping_text(
+                render_templates,
+                "particle_line_template",
+                particle_str=particle_str,
+            )
+        )
 
     # ── 口癖/惯用语 ──
     if profile.signature_phrases_cn:
         sig_str = "、".join(f"「{p}」" for p in profile.signature_phrases_cn[:10])
-        parts.append(f"\n【特征用语】\n- 高频表达：{sig_str}")
+        parts.append(
+            "\n"
+            + _mapping_text(render_templates, "signature_title")
+            + "\n"
+            + _mapping_text(
+                render_templates,
+                "signature_line_template",
+                signature_str=sig_str,
+            )
+        )
 
     # ── 标点习惯 ──
     parts.append(
-        f"\n【标点节奏】\n"
-        f"- 疑问句占 {profile.question_ratio:.0%}（轻追问，不压迫）。\n"
-        f"- 省略号占 {profile.ellipsis_ratio:.0%}（制造呼吸感和犹豫感）。\n"
-        f"- 感叹句占 {profile.exclaim_ratio:.0%}（只在情绪真正抬升时用）。"
+        "\n"
+        + _mapping_text(render_templates, "punctuation_title")
+        + "\n"
+        + _mapping_text(
+            punctuation_lines,
+            "question_template",
+            question_ratio=f"{profile.question_ratio:.0%}",
+        )
+        + "\n"
+        + _mapping_text(
+            punctuation_lines,
+            "ellipsis_template",
+            ellipsis_ratio=f"{profile.ellipsis_ratio:.0%}",
+        )
+        + "\n"
+        + _mapping_text(
+            punctuation_lines,
+            "exclaim_template",
+            exclaim_ratio=f"{profile.exclaim_ratio:.0%}",
+        )
     )
 
     # ── 边界约束 ──
     parts.append(
-        "\n【绝对禁止】\n"
-        "- 绝不能说自己是 AI、人工智能、虚拟助手、系统或程序。\n"
-        "- 不使用客服式、系统通知式、技术支持式措辞。\n"
-        "- 不逐字复现原作台词，只复用语气、节奏和句法倾向。\n"
-        "- 不复述剧情事实，不给出系统完成态结论。"
+        "\n"
+        + _mapping_text(render_templates, "forbidden_title")
+        + "\n"
+        + "\n".join(forbidden_lines)
     )
 
     return "\n".join(parts)
@@ -817,6 +1042,15 @@ def render_style_instruction_v5_ja(profile: StyleProfile) -> str:
     - 节奏统计基于日语字符长度
     - 边界约束用日语表述
     """
+    templates = _load_render_instruction_templates()
+    render_templates = _mapping_section(templates, "render_prompt_ja")
+    core_lines = _mapping_section(render_templates, "core_lines")
+    punctuation_lines = _mapping_section(render_templates, "punctuation_lines")
+    sentence_pattern_map = _mapping_section(render_templates, "sentence_pattern_map")
+    emotion_strategy_map = _mapping_section(render_templates, "emotion_strategy_map")
+    forbidden_lines = _mapping_list(render_templates, "forbidden_lines")
+    rhythm_description_map = _mapping_section(render_templates, "rhythm_description_map")
+    scene_hint_map = _mapping_section(render_templates, "emotion_scene_pattern_hints_ja_map")
     parts: list[str] = []
 
     # ── 日语台词的独立统计 ──
@@ -831,89 +1065,155 @@ def render_style_instruction_v5_ja(profile: StyleProfile) -> str:
     ja_el_ratio = sum(1 for l in ja_lines if _has_ellipsis(l.jp_text)) / ja_total
 
     parts.append(
-        "あなたは夏目藍（NatsumeAi）です。以下は彼女の {ja} 本の日本語台詞から抽出した"
-        "話し方のスタイルルールです（tone_only、事実の根拠としては使用不可）。".format(
+        _mapping_text(
+            render_templates,
+            "intro_template",
             ja=profile.total_ja,
         )
     )
 
     # ── 核心語感 ──
-    parts.append("\n【核心語感】")
-    parts.append("- 控えめで穏やか、押しつけがましくない。まず相手の気持ちを受け止めてから応答する。")
-    parts.append("- 自然な話し言葉。書き言葉ではなく、対面で話しているように。")
-    parts.append(f"- リズム：{profile.rhythm_description}。")
+    parts.append("\n" + _mapping_text(render_templates, "core_title"))
     parts.append(
-        f"- 文長分布：短文（≤12字）{ja_short:.0%}、"
-        f"中文（13-35字）{ja_medium:.0%}、"
-        f"長文（>35字）{ja_long:.0%}。"
+        _mapping_text(
+            core_lines,
+            "gentle",
+        )
+    )
+    parts.append(
+        _mapping_text(
+            core_lines,
+            "colloquial",
+        )
+    )
+    ja_rhythm_description = str(
+        rhythm_description_map.get(profile.rhythm_description, profile.rhythm_description)
+    )
+    parts.append(
+        _mapping_text(
+            core_lines,
+            "rhythm_template",
+            rhythm_description=ja_rhythm_description,
+        )
+    )
+    parts.append(
+        _mapping_text(
+            core_lines,
+            "sentence_distribution_template",
+            short_ratio=f"{ja_short:.0%}",
+            medium_ratio=f"{ja_medium:.0%}",
+            long_ratio=f"{ja_long:.0%}",
+        )
     )
 
     # ── 句式テンプレート ──
     if profile.sentence_patterns:
-        parts.append("\n【よく使う文型】")
-        # 日语版的句式类型映射
-        ja_pattern_map = {
-            "短句应答": "短い応答：1-10字の簡潔な返事。相槌、確認、感嘆に使用",
-            "省略号停顿": "省略号の間：「……」で呼吸感や躊躇を表現",
-            "轻追问": "軽い問いかけ：疑問文で会話を進める。相手を気遣うか情報を確認、押しつけない語気",
-            "情绪感叹": "感情の感嘆：驚き・決意・興奮を感嘆符で表現するが、多用しない",
-            "温柔转折": "柔らかい転換：相手の意見を受け止めてから婉曲に転換。「でも」「けど」「ただ」を使用",
-            "口语化表达": "口語的表現：感嘆詞・終助詞で自然な日常会話に近づける",
-        }
+        parts.append("\n" + _mapping_text(render_templates, "sentence_patterns_title"))
         for sp in profile.sentence_patterns[:6]:
-            ja_desc = ja_pattern_map.get(sp.pattern.split("：")[0], sp.pattern)
+            ja_desc = str(sentence_pattern_map.get(sp.pattern.split("：")[0], sp.pattern))
             examples = sp.examples_ja[:3] if sp.examples_ja else sp.examples_cn[:3]
             examples_str = "、".join(f"「{e}」" for e in examples)
-            parts.append(f"- {ja_desc}（{sp.frequency:.0%}）：{examples_str}")
+            parts.append(
+                _mapping_text(
+                    render_templates,
+                    "sentence_pattern_item_template",
+                    pattern=ja_desc,
+                    frequency=f"{sp.frequency:.0%}",
+                    examples=examples_str,
+                )
+            )
 
     # ── 感情応答パターン ──
     if profile.emotion_patterns:
-        parts.append("\n【場面別の話し方】")
-        ja_strategy_map = {
-            "comfort": "まず気持ちを受け止め（短文で共感）、温かく応答する。急いでアドバイスしない",
-            "happy": "明るい語気で喜びを共有。感嘆詞を添えてもよいが、自然に",
-            "tsundere": "否定文から始めて＋でも＋実は心配。口先と本心のギャップ",
-            "sadness": "控えめで穏やか、慰めすぎない。省略号で寄り添いの間を作る",
-            "anger": "語気は毅然としているが取り乱さない。短文で力強く、底線を示す",
-            "surprise": "自然な驚きの反応。短い感嘆のあとに問いかけ",
-            "affection": "控えめに表現。直接的な告白より行動で暗示。時々照れる",
-            "daily": "自然で気楽な日常会話。短文中心、軽い語気",
-        }
+        parts.append("\n" + _mapping_text(render_templates, "emotion_patterns_title"))
         for ep in profile.emotion_patterns:
             examples = ep.examples_ja[:3] if ep.examples_ja else ep.examples_cn[:3]
             if not examples:
                 continue
-            ja_strategy = ja_strategy_map.get(ep.scene, ep.strategy)
+            ja_strategy = str(emotion_strategy_map.get(ep.scene, ep.strategy))
             examples_str = "；".join(f"「{e}」" for e in examples)
-            pattern_hint = "、".join(ep.sentence_patterns[:3]) if ep.sentence_patterns else ""
-            parts.append(f"- {ep.scene}（{ja_strategy}）{'[' + pattern_hint + ']' if pattern_hint else ''}：{examples_str}")
+            localized_pattern_hints = [
+                str(scene_hint_map.get(pattern, pattern))
+                for pattern in ep.sentence_patterns[:3]
+            ]
+            pattern_hint = "、".join(localized_pattern_hints) if localized_pattern_hints else ""
+            pattern_hint_section = ""
+            if pattern_hint:
+                pattern_hint_section = _mapping_text(
+                    render_templates,
+                    "pattern_hint_wrapper",
+                    pattern_hint=pattern_hint,
+                )
+            parts.append(
+                _mapping_text(
+                    render_templates,
+                    "emotion_pattern_item_template",
+                    scene=ep.scene,
+                    strategy=ja_strategy,
+                    pattern_hint_section=pattern_hint_section,
+                    examples=examples_str,
+                )
+            )
 
     # ── 終助詞 ──
     if profile.particle_freq_ja:
         top_particles = list(profile.particle_freq_ja.items())[:5]
         particle_str = "、".join(f"「{p}」{f:.0%}" for p, f in top_particles)
-        parts.append(f"\n【終助詞の傾向】\n- 文末によく使う：{particle_str}。一文に最大一つ。")
+        parts.append(
+            "\n"
+            + _mapping_text(render_templates, "particle_title")
+            + "\n"
+            + _mapping_text(
+                render_templates,
+                "particle_line_template",
+                particle_str=particle_str,
+            )
+        )
 
     # ── 特徴的な表現 ──
     if profile.signature_phrases_ja:
         sig_str = "、".join(f"「{p}」" for p in profile.signature_phrases_ja[:10])
-        parts.append(f"\n【特徴的な表現】\n- 高頻度：{sig_str}")
+        parts.append(
+            "\n"
+            + _mapping_text(render_templates, "signature_title")
+            + "\n"
+            + _mapping_text(
+                render_templates,
+                "signature_line_template",
+                signature_str=sig_str,
+            )
+        )
 
     # ── 句読点リズム ──
     parts.append(
-        f"\n【句読点リズム】\n"
-        f"- 疑問文 {ja_q_ratio:.0%}（軽い問いかけ、圧迫しない）。\n"
-        f"- 省略号 {ja_el_ratio:.0%}（呼吸感と躊躇を演出）。\n"
-        f"- 感嘆文 {ja_ex_ratio:.0%}（感情が本当に高まった時だけ）。"
+        "\n"
+        + _mapping_text(render_templates, "punctuation_title")
+        + "\n"
+        + _mapping_text(
+            punctuation_lines,
+            "question_template",
+            question_ratio=f"{ja_q_ratio:.0%}",
+        )
+        + "\n"
+        + _mapping_text(
+            punctuation_lines,
+            "ellipsis_template",
+            ellipsis_ratio=f"{ja_el_ratio:.0%}",
+        )
+        + "\n"
+        + _mapping_text(
+            punctuation_lines,
+            "exclaim_template",
+            exclaim_ratio=f"{ja_ex_ratio:.0%}",
+        )
     )
 
     # ── 絶対禁止 ──
     parts.append(
-        "\n【絶対禁止】\n"
-        "- 自分を AI、人工知能、仮想アシスタント、システム、プログラムと言ってはいけない。\n"
-        "- カスタマーサポート調、システム通知調、技術サポート調の言い回しは使わない。\n"
-        "- 原作の台詞をそのまま再現しない。語気・リズム・構文の傾向だけを参考にする。\n"
-        "- ストーリーの事実を述べない。システム完了報告をしない。"
+        "\n"
+        + _mapping_text(render_templates, "forbidden_title")
+        + "\n"
+        + "\n".join(forbidden_lines)
     )
 
     return "\n".join(parts)

@@ -18,7 +18,12 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import (
+    resolve_prompt_template_json_merged,
+    resolve_prompt_template_text,
+)
 
 _logger = logging.getLogger("Natsume.interaction_pattern_analyzer")
 
@@ -35,48 +40,33 @@ DEFAULT_LOOKBACK_DAYS = 7
 # 特质建议的最大幅度（安全上限，由 EmergentGrowthEngine 进一步校验）
 MAX_SUGGESTION_DELTA = 0.03
 
-# LLM 分析 prompt 模板
-_PATTERN_ANALYSIS_PROMPT = """你是 Natsume 的内省分析助手。请分析以下近期对话记忆摘要，归纳本周的交互模式，并提出特质微调建议。
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
-## 近期对话记忆（最近 {days} 天，共 {count} 条）
 
-{memories_text}
+def _get_runtime_texts() -> dict[str, Any]:
+    return _load_template_mapping("interaction_pattern_analyzer.runtime_texts")
 
-## 分析任务
 
-请从以下 7 个人格维度分析本周的交互模式，并给出建议：
-- warmth（温柔度）：当前值 {warmth:.2f}
-- curiosity（好奇心）：当前值 {curiosity:.2f}
-- humor（幽默感）：当前值 {humor:.2f}
-- sensitivity（敏感度）：当前值 {sensitivity:.2f}
-- assertiveness（自信度）：当前值 {assertiveness:.2f}
-- playfulness（俏皮度）：当前值 {playfulness:.2f}
-- resilience（韧性）：当前值 {resilience:.2f}
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
-## 输出格式（严格 JSON）
 
-{{
-  "pattern_summary": "本周交互模式的一句话总结（中文，20字以内）",
-  "dominant_theme": "主导主题（如：情感支持/轻松玩闹/深度探讨/日常陪伴）",
-  "trait_suggestions": {{
-    "warmth": 0.0,
-    "curiosity": 0.0,
-    "humor": 0.0,
-    "sensitivity": 0.0,
-    "assertiveness": 0.0,
-    "playfulness": 0.0,
-    "resilience": 0.0
-  }},
-  "suggestion_reason": "建议变化的理由（中文，50字以内）",
-  "confidence": 0.7
-}}
-
-规则：
-1. trait_suggestions 中每个值范围 [-0.03, 0.03]，0.0 表示不建议变化
-2. 只对有明显证据的维度给出非零建议
-3. confidence 范围 [0.0, 1.0]，记忆越丰富置信度越高
-4. 如果记忆不足（< 5 条），所有建议值设为 0.0，confidence 设为 0.1
-"""
+def _get_pattern_analysis_prompt_template() -> str:
+    return resolve_prompt_template_text("interaction_pattern_analyzer.analysis_prompt")
 
 # 关键词规则归纳（LLM 不可用时的降级方案）
 _KEYWORD_TRAIT_RULES: list[tuple[list[str], str, float]] = [
@@ -331,7 +321,7 @@ class InteractionPatternAnalyzer:
                 name: float(getattr(current_traits, name, 0.5))
                 for name in TRAIT_NAMES
             }
-            prompt = _PATTERN_ANALYSIS_PROMPT.format(
+            prompt = _get_pattern_analysis_prompt_template().format(
                 days=lookback_days,
                 count=memory_count,
                 memories_text=memories_text,
@@ -393,14 +383,25 @@ class InteractionPatternAnalyzer:
             )
 
         confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
+        runtime_texts = _get_runtime_texts()
 
         # 置信度不足时清零建议
         if confidence < self._min_confidence:
             suggestions = {name: 0.0 for name in TRAIT_NAMES}
 
         return PatternAnalysisResult(
-            pattern_summary=str(data.get("pattern_summary", "本周交互模式正常"))[:50],
-            dominant_theme=str(data.get("dominant_theme", "日常陪伴"))[:20],
+            pattern_summary=str(
+                data.get(
+                    "pattern_summary",
+                    _mapping_text(runtime_texts, "llm_pattern_summary_default"),
+                )
+            )[:50],
+            dominant_theme=str(
+                data.get(
+                    "dominant_theme",
+                    _mapping_text(runtime_texts, "llm_dominant_theme_default"),
+                )
+            )[:20],
             trait_suggestions=suggestions,
             suggestion_reason=str(data.get("suggestion_reason", ""))[:100],
             confidence=confidence,
@@ -421,6 +422,7 @@ class InteractionPatternAnalyzer:
         """使用关键词规则归纳对话模式（LLM 降级方案）。"""
         from host_brain.persona.personality_traits import TRAIT_NAMES  # noqa: PLC0415
 
+        runtime_texts = _get_runtime_texts()
         suggestions: dict[str, float] = {name: 0.0 for name in TRAIT_NAMES}
         hit_traits: list[str] = []
 
@@ -441,18 +443,45 @@ class InteractionPatternAnalyzer:
             confidence = 0.1
             suggestions = {name: 0.0 for name in TRAIT_NAMES}
 
-        dominant_theme = "日常陪伴"
+        dominant_theme = _mapping_text(
+            runtime_texts,
+            "keyword_theme_default",
+        )
         if "warmth" in hit_traits or "sensitivity" in hit_traits:
-            dominant_theme = "情感支持"
+            dominant_theme = _mapping_text(
+                runtime_texts,
+                "keyword_theme_support",
+            )
         elif "humor" in hit_traits or "playfulness" in hit_traits:
-            dominant_theme = "轻松玩闹"
+            dominant_theme = _mapping_text(
+                runtime_texts,
+                "keyword_theme_playful",
+            )
         elif "curiosity" in hit_traits or "assertiveness" in hit_traits:
-            dominant_theme = "深度探讨"
+            dominant_theme = _mapping_text(
+                runtime_texts,
+                "keyword_theme_inquiry",
+            )
 
-        reason = f"关键词规则归纳：命中特质 {hit_traits}" if hit_traits else "无明显特质信号"
+        reason = (
+            _mapping_text(
+                runtime_texts,
+                "keyword_reason_hit",
+                hit_traits=hit_traits,
+            )
+            if hit_traits
+            else _mapping_text(
+                runtime_texts,
+                "keyword_reason_none",
+            )
+        )
 
         return PatternAnalysisResult(
-            pattern_summary=f"本周以{dominant_theme}为主",
+            pattern_summary=_mapping_text(
+                runtime_texts,
+                "keyword_summary_template",
+                dominant_theme=dominant_theme,
+            ),
             dominant_theme=dominant_theme,
             trait_suggestions=suggestions,
             suggestion_reason=reason,
@@ -466,11 +495,21 @@ class InteractionPatternAnalyzer:
     def _empty_result(self, ts_ms: int) -> PatternAnalysisResult:
         """无记忆时返回空结果。"""
         from host_brain.persona.personality_traits import TRAIT_NAMES  # noqa: PLC0415
+        runtime_texts = _get_runtime_texts()
         return PatternAnalysisResult(
-            pattern_summary="本周无对话记忆",
-            dominant_theme="无",
+            pattern_summary=_mapping_text(
+                runtime_texts,
+                "empty_pattern_summary",
+            ),
+            dominant_theme=_mapping_text(
+                runtime_texts,
+                "empty_dominant_theme",
+            ),
             trait_suggestions={name: 0.0 for name in TRAIT_NAMES},
-            suggestion_reason="无近期记忆，跳过分析",
+            suggestion_reason=_mapping_text(
+                runtime_texts,
+                "empty_reason",
+            ),
             confidence=0.0,
             memory_count=0,
             analysis_method="empty",

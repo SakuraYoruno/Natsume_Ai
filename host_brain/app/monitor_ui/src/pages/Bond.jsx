@@ -5,6 +5,7 @@ import {
   fetchBondHealth,
   submitBondEvent,
 } from '../api/obs.js'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import useAppStore from '../store/useAppStore.js'
 
 // ── 阶段颜色映射 ──────────────────────────────────────────────────────────
@@ -233,6 +234,8 @@ export default function Bond() {
 
   return (
     <div className="space-y-6">
+      <DigitalLifeNav />
+
       {/* 标题 */}
       <div className="flex items-center justify-between">
         <div>

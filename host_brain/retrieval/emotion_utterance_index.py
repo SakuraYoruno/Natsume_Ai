@@ -21,7 +21,9 @@ import json
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 from host_brain.retrieval.style_distiller import (
     DEFAULT_CN_LINES_PATH,
@@ -57,6 +59,27 @@ EMOTION_FALLBACK_MAP: dict[str, list[str]] = {
     "ANXIETY": ["comfort", "sadness", "daily"],
     "TSUNDERE": ["tsundere", "daily"],
 }
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -257,18 +280,37 @@ class EmotionTaggedUtteranceIndex:
         if not result.samples:
             return ""
 
+        templates = _load_template_mapping("emotion_utterance_index.prompt_render_texts")
+        raw_guidance_lines = templates.get("guidance_lines")
+        guidance_lines = (
+            [str(item) for item in raw_guidance_lines if str(item or "").strip()]
+            if isinstance(raw_guidance_lines, list)
+            else []
+        )
+        if not guidance_lines:
+            guidance_lines = [
+                "- 以下台词仅作为说话风格和语气参考，展示这个角色的语言习惯。",
+                "- 学习她的句式节奏、语气词用法、情感表达方式，而非逐字复制。",
+                "- 根据当前对话情境自然地融入这些语言特质。",
+            ]
         lines: list[str] = [
-            "PERSONA_STYLE_EXAMPLES:",
-            "- 以下台词仅作为说话风格和语气参考，展示这个角色的语言习惯。",
-            "- 学习她的句式节奏、语气词用法、情感表达方式，而非逐字复制。",
-            "- 根据当前对话情境自然地融入这些语言特质。",
+            _mapping_text(templates, "title"),
+            *guidance_lines,
         ]
 
         for sample in result.samples:
             text = sample.jp_text if lang == "ja" else sample.cn_text
             if not text:
                 text = sample.cn_text or sample.jp_text
-            lines.append(f"- [{sample.emotion_tag}] {sample.speaker}: {text}")
+            lines.append(
+                _mapping_text(
+                    templates,
+                    "sample_item_template",
+                    emotion_tag=sample.emotion_tag,
+                    speaker=sample.speaker,
+                    text=text,
+                )
+            )
 
         lines.append("")  # 尾部空行
         return "\n".join(lines)

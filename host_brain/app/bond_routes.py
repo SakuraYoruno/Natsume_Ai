@@ -30,6 +30,7 @@ from host_brain.bond.user_identity import collapse_bond_user_ids, resolve_bond_u
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.bond_routes")
+_EVIDENCE_REFS_REQUIRED_DETAIL = "evidence_refs 不能为空（FR-BOND-002）"
 
 # ---------------------------------------------------------------------------
 # 路由实例
@@ -253,7 +254,7 @@ async def submit_bond_event(body: BondEventRequest) -> BondEventResponse:
     if not refs:
         raise HTTPException(
             status_code=422,
-            detail="evidence_refs 不能为空（FR-BOND-002）",
+            detail=_EVIDENCE_REFS_REQUIRED_DETAIL,
             headers={"X-Reason-Code": "BOND_EVIDENCE_REQUIRED"},
         )
 

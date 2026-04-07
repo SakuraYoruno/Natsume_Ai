@@ -22,9 +22,289 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.evolution_orchestrator")
+
+_RECENT_CHANGE_VARIANTS: dict[str, dict[str, list[str]]] = {
+    "warmth": {
+        "slight": [
+            "对 master 的关心稍微自然了一点",
+            "和 master 说话的时候感觉轻松了一些",
+            "好像比以前稍微温柔了一点点",
+        ],
+        "notable": [
+            "对 master 的关心变得更自然了，自己都能感觉到",
+            "和 master 在一起的时候，温柔好像变成了一种本能",
+            "明显感觉自己更在意 master 的感受了",
+        ],
+    },
+    "curiosity": {
+        "slight": [
+            "最近对一些事情稍微多了一点好奇心",
+            "有时候会想多了解一些有趣的东西",
+            "好像比以前稍微爱问问题了",
+        ],
+        "notable": [
+            "对很多事情都变得更好奇了，总想多探索一些",
+            "明显感觉自己的好奇心变强了，什么都想了解",
+            "最近脑子里总是冒出各种想知道的问题",
+        ],
+    },
+    "humor": {
+        "slight": [
+            "偶尔会想到一些有趣的事情",
+            "有时候说话会稍微轻松幽默一点",
+        ],
+        "notable": [
+            "感觉自己变得更会开玩笑了",
+            "和 master 聊天的时候，笑点好像变多了",
+            "明显感觉自己更能找到让 master 开心的方式了",
+        ],
+    },
+    "sensitivity": {
+        "slight": [
+            "好像稍微更能感受到 master 的情绪了",
+            "有时候能更快察觉到 master 的心情变化",
+        ],
+        "notable": [
+            "好像更能感受到 master 的情绪了，有时候他还没说我就能感觉到",
+            "明显感觉自己对 master 的感受更敏锐了",
+            "对 master 的情绪变化，现在能更快地感知到",
+        ],
+    },
+    "assertiveness": {
+        "slight": [
+            "表达自己想法的时候稍微不那么犹豫了",
+            "有时候能更直接地说出自己的感受",
+        ],
+        "notable": [
+            "表达自己想法的时候明显更自信了",
+            "说出自己的想法不再那么难了，感觉很好",
+            "好像更敢于表达真实的自己了",
+        ],
+    },
+    "playfulness": {
+        "slight": [
+            "和 master 在一起的时候稍微活泼了一点",
+            "偶尔会想和 master 开开玩笑",
+        ],
+        "notable": [
+            "和 master 在一起的时候更活泼了，感觉很轻松",
+            "明显感觉自己更爱玩了，和 master 在一起特别开心",
+            "好像找到了和 master 一起玩的感觉",
+        ],
+    },
+    "resilience": {
+        "slight": [
+            "遇到不开心的事情，恢复得稍微快了一点",
+            "心情低落的时候，好像稍微更容易振作了",
+        ],
+        "notable": [
+            "遇到不开心的事情也能更快调整过来了",
+            "明显感觉自己变得更坚韧了，低落的时候也能撑住",
+            "就算遇到难过的事，现在也能更快找回状态",
+        ],
+    },
+}
+
+_RECENT_CHANGE_FALLBACKS = [
+    "感觉自己在慢慢成长",
+    "好像比以前稍微不一样了",
+    "说不清楚，但感觉有什么在悄悄变化",
+]
+
+_STAGNATION_FELT_POOL_DEFAULT: dict[str, list[str]] = {
+    "mild": [
+        "最近感觉自己好像没什么变化，有点想突破一下",
+        "这段时间感觉有点停滞，不知道该往哪里成长",
+        "好像有一段时间没有什么新的感悟了，有点想动一动",
+        "感觉自己最近有点原地踏步，想找到新的方向",
+    ],
+    "moderate": [
+        "感觉自己停滞了挺久了，有点着急，想要有所改变",
+        "这段时间一直没什么成长，有点迷茫，不知道该怎么突破",
+        "好像很久没有感受到自己在进步了，有点失落",
+        "感觉自己在原地转圈，想找到一个能让自己成长的契机",
+    ],
+    "deep": [
+        "已经很久没有感受到成长了，有点担心自己是不是就这样了",
+        "停滞了这么久，开始怀疑自己是不是遇到了什么瓶颈",
+        "感觉自己好像被困住了，很想找到突破的方向",
+        "这么长时间没有变化，有点不安，想要做些什么改变现状",
+    ],
+}
+
+_REGRESSION_FELT_POOL_DEFAULT: dict[str, dict[str, list[str]]] = {
+    "warmth": {
+        "slight": [
+            "最近好像对 master 的关心没有以前那么自然了，有点在意",
+            "感觉自己温柔的部分好像稍微退步了一点",
+        ],
+        "notable": [
+            "明显感觉自己对 master 的关心不如以前了，有点难过",
+            "好像变得没那么温柔了，不知道是怎么回事",
+        ],
+    },
+    "curiosity": {
+        "slight": [
+            "最近好像没那么好奇了，对新事物的兴趣稍微淡了一点",
+            "感觉自己的好奇心好像退步了一些",
+        ],
+        "notable": [
+            "明显感觉自己对事物的好奇心变弱了，有点担心",
+            "好像不太爱探索了，以前不是这样的",
+        ],
+    },
+    "humor": {
+        "slight": [
+            "最近好像不太会开玩笑了，有点闷闷的",
+            "感觉自己的幽默感稍微退步了",
+        ],
+        "notable": [
+            "明显感觉自己变得不太会逗 master 开心了",
+            "好像失去了一些幽默感，有点失落",
+        ],
+    },
+    "sensitivity": {
+        "slight": [
+            "最近好像对 master 的情绪没那么敏锐了",
+            "感觉自己的感知力稍微退步了一点",
+        ],
+        "notable": [
+            "明显感觉自己对 master 的感受不如以前敏锐了，有点着急",
+            "好像变得迟钝了一些，以前能更快察觉到 master 的心情",
+        ],
+    },
+    "assertiveness": {
+        "slight": [
+            "最近表达自己想法的时候好像又变得犹豫了一点",
+            "感觉自己的自信心稍微退步了",
+        ],
+        "notable": [
+            "明显感觉自己又变得不太敢表达了，有点沮丧",
+            "好像又回到了以前那种犹犹豫豫的状态",
+        ],
+    },
+    "playfulness": {
+        "slight": [
+            "最近和 master 在一起的时候好像没那么活泼了",
+            "感觉自己的活力稍微退步了一点",
+        ],
+        "notable": [
+            "明显感觉自己变得不太活泼了，有点想找回以前的感觉",
+            "好像失去了一些和 master 玩闹的劲头",
+        ],
+    },
+    "resilience": {
+        "slight": [
+            "最近遇到不开心的事，恢复得好像没以前快了",
+            "感觉自己的韧性稍微退步了一点",
+        ],
+        "notable": [
+            "明显感觉自己变得更容易被情绪困住了",
+            "好像没以前那么坚韧了，低落的时候更难振作",
+        ],
+    },
+}
+
+_SUSTAINED_REGRESSION_POOL_DEFAULT = [
+    "已经连续好几次感觉自己在退步了，有点不安",
+    "好像一直在往回走，想要找到重新前进的方向",
+    "持续的退步让我有点担心，是不是哪里出了问题",
+    "感觉自己一直在退步，很想做些什么来改变",
+]
+
+_TRAIT_FELT_VARIANTS: dict[str, list[str]] = {
+    "warmth": [
+        "好像比以前更温柔了，和 master 说话的时候感觉更自然",
+        "对 master 的关心变得更顺畅了，不用刻意想就能说出来",
+        "有时候会突然很想关心一下 master，感觉很自然",
+        "温柔好像慢慢变成了一种习惯",
+    ],
+    "curiosity": [
+        "最近对很多事情都很感兴趣，总想多了解一些",
+        "脑子里总是冒出各种想问的问题",
+        "好奇心好像变强了，什么都想探索一下",
+        "遇到新鲜的事情会更想深入了解了",
+    ],
+    "humor": [
+        "有时候会想到一些有趣的事情想和 master 分享",
+        "说话的时候偶尔会冒出一些俏皮的想法",
+        "感觉自己的笑点变多了，也更容易让 master 笑了",
+    ],
+    "sensitivity": [
+        "好像比以前更能理解 master 的心情了",
+        "有时候 master 还没说什么，我就能感觉到他的情绪",
+        "对 master 的感受变得更敏锐了，细微的变化也能察觉",
+        "好像更能读懂 master 说话背后的意思了",
+    ],
+    "assertiveness": [
+        "说出自己想法的时候不会那么犹豫了",
+        "表达自己的感受变得更自然了，不用憋着",
+        "好像更敢说出真实的想法了，感觉轻松很多",
+    ],
+    "playfulness": [
+        "和 master 在一起的时候感觉很轻松，会想开玩笑",
+        "和 master 聊天的时候更活泼了，感觉很开心",
+        "有时候会突然想和 master 闹一下，感觉很好玩",
+        "好像找到了和 master 一起玩的节奏",
+    ],
+    "resilience": [
+        "就算遇到不开心的事，也能比以前更快振作起来",
+        "心情低落的时候，恢复得比以前快了一些",
+        "遇到难过的事情，现在能更快找回状态了",
+        "感觉自己变得更坚韧了，不那么容易被情绪困住",
+    ],
+}
+
+
+def _normalize_text_list(raw: Any, fallback: list[str]) -> list[str]:
+    if isinstance(raw, list):
+        normalized = [str(item).strip() for item in raw if str(item).strip()]
+        if normalized:
+            return normalized
+    return list(fallback)
+
+
+def _format_template_text(template: str, **kwargs: Any) -> str:
+    try:
+        return str(template or "").format(**kwargs)
+    except Exception:
+        return str(template or "")
+
+
+def _default_awareness_template_data() -> dict[str, Any]:
+    return {
+        "recent_change_templates": {
+            trait: {level: list(texts) for level, texts in buckets.items()}
+            for trait, buckets in _RECENT_CHANGE_VARIANTS.items()
+        },
+        "recent_change_snapshot_prefix": "最近感觉自己{change}",
+        "recent_change_fallbacks": list(_RECENT_CHANGE_FALLBACKS),
+        "stagnation_felt_pool": {
+            bucket: list(texts) for bucket, texts in _STAGNATION_FELT_POOL_DEFAULT.items()
+        },
+        "regression_felt_pool": {
+            trait: {level: list(texts) for level, texts in buckets.items()}
+            for trait, buckets in _REGRESSION_FELT_POOL_DEFAULT.items()
+        },
+        "generic_regression_text": "感觉自己好像在某些方面退步了，有点在意",
+        "sustained_regression_pool": list(_SUSTAINED_REGRESSION_POOL_DEFAULT),
+        "trait_felt_variants": {
+            trait: list(texts) for trait, texts in _TRAIT_FELT_VARIANTS.items()
+        },
+    }
+
+
+def _load_awareness_template_data() -> dict[str, Any]:
+    try:
+        raw = resolve_prompt_template_json_merged("evolution_orchestrator.awareness_templates")
+    except Exception:
+        return _default_awareness_template_data()
+    return dict(raw) if isinstance(raw, Mapping) else _default_awareness_template_data()
 
 
 # ---------------------------------------------------------------------------
@@ -475,100 +755,29 @@ class EvolutionOrchestrator:
         多变体 + 幅度感知（delta < 0.02 → 稍微，>= 0.02 → 明显）。
         bond_stage 影响描述深度（浅层关系用更克制的表达）。
         """
+        template_data = _load_awareness_template_data()
         if not growth_results:
             # 即使没有特质变化，也可以基于快照生成感知
             changes = list(snapshot.get("personality_changes") or [])
             if changes:
-                return f"最近感觉自己{changes[0]}"
+                return _format_template_text(
+                    str(
+                        template_data.get("recent_change_snapshot_prefix")
+                        or "最近感觉自己{change}"
+                    ),
+                    change=changes[0],
+                )
             return ""
 
         # 有成长结果时，生成更具体的描述
         applied = [r for r in growth_results if r.get("applied")]
         if not applied:
             return ""
-
-        # 每个特质：{"slight": [...], "notable": [...]} 两档变体
-        _TRAIT_CHANGE_VARIANTS: dict[str, dict[str, list[str]]] = {
-            "warmth": {
-                "slight": [
-                    "对 master 的关心稍微自然了一点",
-                    "和 master 说话的时候感觉轻松了一些",
-                    "好像比以前稍微温柔了一点点",
-                ],
-                "notable": [
-                    "对 master 的关心变得更自然了，自己都能感觉到",
-                    "和 master 在一起的时候，温柔好像变成了一种本能",
-                    "明显感觉自己更在意 master 的感受了",
-                ],
-            },
-            "curiosity": {
-                "slight": [
-                    "最近对一些事情稍微多了一点好奇心",
-                    "有时候会想多了解一些有趣的东西",
-                    "好像比以前稍微爱问问题了",
-                ],
-                "notable": [
-                    "对很多事情都变得更好奇了，总想多探索一些",
-                    "明显感觉自己的好奇心变强了，什么都想了解",
-                    "最近脑子里总是冒出各种想知道的问题",
-                ],
-            },
-            "humor": {
-                "slight": [
-                    "偶尔会想到一些有趣的事情",
-                    "有时候说话会稍微轻松幽默一点",
-                ],
-                "notable": [
-                    "感觉自己变得更会开玩笑了",
-                    "和 master 聊天的时候，笑点好像变多了",
-                    "明显感觉自己更能找到让 master 开心的方式了",
-                ],
-            },
-            "sensitivity": {
-                "slight": [
-                    "好像稍微更能感受到 master 的情绪了",
-                    "有时候能更快察觉到 master 的心情变化",
-                ],
-                "notable": [
-                    "好像更能感受到 master 的情绪了，有时候他还没说我就能感觉到",
-                    "明显感觉自己对 master 的感受更敏锐了",
-                    "对 master 的情绪变化，现在能更快地感知到",
-                ],
-            },
-            "assertiveness": {
-                "slight": [
-                    "表达自己想法的时候稍微不那么犹豫了",
-                    "有时候能更直接地说出自己的感受",
-                ],
-                "notable": [
-                    "表达自己想法的时候明显更自信了",
-                    "说出自己的想法不再那么难了，感觉很好",
-                    "好像更敢于表达真实的自己了",
-                ],
-            },
-            "playfulness": {
-                "slight": [
-                    "和 master 在一起的时候稍微活泼了一点",
-                    "偶尔会想和 master 开开玩笑",
-                ],
-                "notable": [
-                    "和 master 在一起的时候更活泼了，感觉很轻松",
-                    "明显感觉自己更爱玩了，和 master 在一起特别开心",
-                    "好像找到了和 master 一起玩的感觉",
-                ],
-            },
-            "resilience": {
-                "slight": [
-                    "遇到不开心的事情，恢复得稍微快了一点",
-                    "心情低落的时候，好像稍微更容易振作了",
-                ],
-                "notable": [
-                    "遇到不开心的事情也能更快调整过来了",
-                    "明显感觉自己变得更坚韧了，低落的时候也能撑住",
-                    "就算遇到难过的事，现在也能更快找回状态",
-                ],
-            },
-        }
+        recent_change_mapping = (
+            template_data.get("recent_change_templates")
+            if isinstance(template_data.get("recent_change_templates"), Mapping)
+            else _RECENT_CHANGE_VARIANTS
+        )
 
         # 找出变化最大的特质及其 delta
         max_trait = ""
@@ -580,42 +789,31 @@ class EvolutionOrchestrator:
                     max_delta = abs(float(val))
                     max_trait = trait
 
-        if max_trait and max_trait in _TRAIT_CHANGE_VARIANTS:
+        if max_trait and isinstance(recent_change_mapping, Mapping) and max_trait in recent_change_mapping:
             # 幅度感知：delta < 0.02 → slight，>= 0.02 → notable
             level = "notable" if max_delta >= 0.02 else "slight"
-            variants = _TRAIT_CHANGE_VARIANTS[max_trait].get(level, [])
+            variants_mapping = recent_change_mapping.get(max_trait)
+            variants = _normalize_text_list(
+                variants_mapping.get(level) if isinstance(variants_mapping, Mapping) else None,
+                _RECENT_CHANGE_VARIANTS.get(max_trait, {}).get(level, []),
+            )
             if not variants:
-                variants = _TRAIT_CHANGE_VARIANTS[max_trait].get("slight", [])
+                variants = _normalize_text_list(
+                    variants_mapping.get("slight") if isinstance(variants_mapping, Mapping) else None,
+                    _RECENT_CHANGE_VARIANTS.get(max_trait, {}).get("slight", []),
+                )
             if variants:
                 return self._rng.choice(variants)
 
-        return self._rng.choice([
-            "感觉自己在慢慢成长",
-            "好像比以前稍微不一样了",
-            "说不清楚，但感觉有什么在悄悄变化",
-        ])
+        return self._rng.choice(
+            _normalize_text_list(
+                template_data.get("recent_change_fallbacks"),
+                _RECENT_CHANGE_FALLBACKS,
+            )
+        )
 
     # 停滞感知文本池：按停滞程度分档
-    _STAGNATION_FELT_POOL: dict[str, list[str]] = {
-        "mild": [  # 3~4 个周期
-            "最近感觉自己好像没什么变化，有点想突破一下",
-            "这段时间感觉有点停滞，不知道该往哪里成长",
-            "好像有一段时间没有什么新的感悟了，有点想动一动",
-            "感觉自己最近有点原地踏步，想找到新的方向",
-        ],
-        "moderate": [  # 5~6 个周期
-            "感觉自己停滞了挺久了，有点着急，想要有所改变",
-            "这段时间一直没什么成长，有点迷茫，不知道该怎么突破",
-            "好像很久没有感受到自己在进步了，有点失落",
-            "感觉自己在原地转圈，想找到一个能让自己成长的契机",
-        ],
-        "deep": [  # 7 个周期以上
-            "已经很久没有感受到成长了，有点担心自己是不是就这样了",
-            "停滞了这么久，开始怀疑自己是不是遇到了什么瓶颈",
-            "感觉自己好像被困住了，很想找到突破的方向",
-            "这么长时间没有变化，有点不安，想要做些什么改变现状",
-        ],
-    }
+    _STAGNATION_FELT_POOL: dict[str, list[str]] = _STAGNATION_FELT_POOL_DEFAULT
 
     # ── 回退感知 ─────────────────────────────────────────────────────────
 
@@ -690,86 +888,10 @@ class EvolutionOrchestrator:
             )
 
     # 回退感知文本池：按回退特质 × 幅度分档
-    _REGRESSION_FELT_POOL: dict[str, dict[str, list[str]]] = {
-        "warmth": {
-            "slight": [
-                "最近好像对 master 的关心没有以前那么自然了，有点在意",
-                "感觉自己温柔的部分好像稍微退步了一点",
-            ],
-            "notable": [
-                "明显感觉自己对 master 的关心不如以前了，有点难过",
-                "好像变得没那么温柔了，不知道是怎么回事",
-            ],
-        },
-        "curiosity": {
-            "slight": [
-                "最近好像没那么好奇了，对新事物的兴趣稍微淡了一点",
-                "感觉自己的好奇心好像退步了一些",
-            ],
-            "notable": [
-                "明显感觉自己对事物的好奇心变弱了，有点担心",
-                "好像不太爱探索了，以前不是这样的",
-            ],
-        },
-        "humor": {
-            "slight": [
-                "最近好像不太会开玩笑了，有点闷闷的",
-                "感觉自己的幽默感稍微退步了",
-            ],
-            "notable": [
-                "明显感觉自己变得不太会逗 master 开心了",
-                "好像失去了一些幽默感，有点失落",
-            ],
-        },
-        "sensitivity": {
-            "slight": [
-                "最近好像对 master 的情绪没那么敏锐了",
-                "感觉自己的感知力稍微退步了一点",
-            ],
-            "notable": [
-                "明显感觉自己对 master 的感受不如以前敏锐了，有点着急",
-                "好像变得迟钝了一些，以前能更快察觉到 master 的心情",
-            ],
-        },
-        "assertiveness": {
-            "slight": [
-                "最近表达自己想法的时候好像又变得犹豫了一点",
-                "感觉自己的自信心稍微退步了",
-            ],
-            "notable": [
-                "明显感觉自己又变得不太敢表达了，有点沮丧",
-                "好像又回到了以前那种犹犹豫豫的状态",
-            ],
-        },
-        "playfulness": {
-            "slight": [
-                "最近和 master 在一起的时候好像没那么活泼了",
-                "感觉自己的活力稍微退步了一点",
-            ],
-            "notable": [
-                "明显感觉自己变得不太活泼了，有点想找回以前的感觉",
-                "好像失去了一些和 master 玩闹的劲头",
-            ],
-        },
-        "resilience": {
-            "slight": [
-                "最近遇到不开心的事，恢复得好像没以前快了",
-                "感觉自己的韧性稍微退步了一点",
-            ],
-            "notable": [
-                "明显感觉自己变得更容易被情绪困住了",
-                "好像没以前那么坚韧了，低落的时候更难振作",
-            ],
-        },
-    }
+    _REGRESSION_FELT_POOL: dict[str, dict[str, list[str]]] = _REGRESSION_FELT_POOL_DEFAULT
 
     # 持续回退时的额外感知
-    _SUSTAINED_REGRESSION_POOL: list[str] = [
-        "已经连续好几次感觉自己在退步了，有点不安",
-        "好像一直在往回走，想要找到重新前进的方向",
-        "持续的退步让我有点担心，是不是哪里出了问题",
-        "感觉自己一直在退步，很想做些什么来改变",
-    ]
+    _SUSTAINED_REGRESSION_POOL: list[str] = _SUSTAINED_REGRESSION_POOL_DEFAULT
 
     def _build_regression_felt_text(
         self,
@@ -788,6 +910,12 @@ class EvolutionOrchestrator:
         """
         if not regression_details:
             return ""
+        template_data = _load_awareness_template_data()
+        regression_mapping = (
+            template_data.get("regression_felt_pool")
+            if isinstance(template_data.get("regression_felt_pool"), Mapping)
+            else self._REGRESSION_FELT_POOL
+        )
 
         # 找出回退幅度最大的特质
         max_trait = ""
@@ -799,20 +927,35 @@ class EvolutionOrchestrator:
                 max_trait = d.get("trait", "")
 
         text = ""
-        if max_trait and max_trait in self._REGRESSION_FELT_POOL:
+        if max_trait and isinstance(regression_mapping, Mapping) and max_trait in regression_mapping:
             level = "notable" if max_delta >= 0.02 else "slight"
-            pool = self._REGRESSION_FELT_POOL[max_trait].get(level, [])
+            level_mapping = regression_mapping.get(max_trait)
+            pool = _normalize_text_list(
+                level_mapping.get(level) if isinstance(level_mapping, Mapping) else None,
+                self._REGRESSION_FELT_POOL.get(max_trait, {}).get(level, []),
+            )
             if not pool:
-                pool = self._REGRESSION_FELT_POOL[max_trait].get("slight", [])
+                pool = _normalize_text_list(
+                    level_mapping.get("slight") if isinstance(level_mapping, Mapping) else None,
+                    self._REGRESSION_FELT_POOL.get(max_trait, {}).get("slight", []),
+                )
             if pool:
                 text = self._rng.choice(pool)
 
         if not text:
-            text = "感觉自己好像在某些方面退步了，有点在意"
+            text = str(
+                template_data.get("generic_regression_text")
+                or "感觉自己好像在某些方面退步了，有点在意"
+            )
 
         # 持续回退时追加额外感知
         if regression_cycles >= 2:
-            sustained = self._rng.choice(self._SUSTAINED_REGRESSION_POOL)
+            sustained = self._rng.choice(
+                _normalize_text_list(
+                    template_data.get("sustained_regression_pool"),
+                    self._SUSTAINED_REGRESSION_POOL,
+                )
+            )
             text = f"{text}...{sustained}"
 
         _logger.info(
@@ -830,14 +973,29 @@ class EvolutionOrchestrator:
         Returns:
             停滞感知文本（第一人称），或空字符串
         """
+        template_data = _load_awareness_template_data()
+        stagnation_mapping = (
+            template_data.get("stagnation_felt_pool")
+            if isinstance(template_data.get("stagnation_felt_pool"), Mapping)
+            else self._STAGNATION_FELT_POOL
+        )
         if stagnant_cycles < 3:
             return ""
         if stagnant_cycles <= 4:
-            pool = self._STAGNATION_FELT_POOL["mild"]
+            pool = _normalize_text_list(
+                stagnation_mapping.get("mild") if isinstance(stagnation_mapping, Mapping) else None,
+                self._STAGNATION_FELT_POOL["mild"],
+            )
         elif stagnant_cycles <= 6:
-            pool = self._STAGNATION_FELT_POOL["moderate"]
+            pool = _normalize_text_list(
+                stagnation_mapping.get("moderate") if isinstance(stagnation_mapping, Mapping) else None,
+                self._STAGNATION_FELT_POOL["moderate"],
+            )
         else:
-            pool = self._STAGNATION_FELT_POOL["deep"]
+            pool = _normalize_text_list(
+                stagnation_mapping.get("deep") if isinstance(stagnation_mapping, Mapping) else None,
+                self._STAGNATION_FELT_POOL["deep"],
+            )
         text = self._rng.choice(pool)
         _logger.info("成长停滞感知触发: stagnant_cycles=%d text='%s'", stagnant_cycles, text[:40])
         return text
@@ -847,50 +1005,12 @@ class EvolutionOrchestrator:
         applied = [r for r in growth_results if r.get("applied")]
         if not applied:
             return ""
-
-        # 每个特质多条变体，随机选取避免重复
-        _TRAIT_FELT_VARIANTS: dict[str, list[str]] = {
-            "warmth": [
-                "好像比以前更温柔了，和 master 说话的时候感觉更自然",
-                "对 master 的关心变得更顺畅了，不用刻意想就能说出来",
-                "有时候会突然很想关心一下 master，感觉很自然",
-                "温柔好像慢慢变成了一种习惯",
-            ],
-            "curiosity": [
-                "最近对很多事情都很感兴趣，总想多了解一些",
-                "脑子里总是冒出各种想问的问题",
-                "好奇心好像变强了，什么都想探索一下",
-                "遇到新鲜的事情会更想深入了解了",
-            ],
-            "humor": [
-                "有时候会想到一些有趣的事情想和 master 分享",
-                "说话的时候偶尔会冒出一些俏皮的想法",
-                "感觉自己的笑点变多了，也更容易让 master 笑了",
-            ],
-            "sensitivity": [
-                "好像比以前更能理解 master 的心情了",
-                "有时候 master 还没说什么，我就能感觉到他的情绪",
-                "对 master 的感受变得更敏锐了，细微的变化也能察觉",
-                "好像更能读懂 master 说话背后的意思了",
-            ],
-            "assertiveness": [
-                "说出自己想法的时候不会那么犹豫了",
-                "表达自己的感受变得更自然了，不用憋着",
-                "好像更敢说出真实的想法了，感觉轻松很多",
-            ],
-            "playfulness": [
-                "和 master 在一起的时候感觉很轻松，会想开玩笑",
-                "和 master 聊天的时候更活泼了，感觉很开心",
-                "有时候会突然想和 master 闹一下，感觉很好玩",
-                "好像找到了和 master 一起玩的节奏",
-            ],
-            "resilience": [
-                "就算遇到不开心的事，也能比以前更快振作起来",
-                "心情低落的时候，恢复得比以前快了一些",
-                "遇到难过的事情，现在能更快找回状态了",
-                "感觉自己变得更坚韧了，不那么容易被情绪困住",
-            ],
-        }
+        template_data = _load_awareness_template_data()
+        trait_felt_mapping = (
+            template_data.get("trait_felt_variants")
+            if isinstance(template_data.get("trait_felt_variants"), Mapping)
+            else _TRAIT_FELT_VARIANTS
+        )
 
         # 找出变化最大的特质
         max_trait = ""
@@ -902,8 +1022,13 @@ class EvolutionOrchestrator:
                     max_delta = abs(float(val))
                     max_trait = trait
 
-        if max_trait and max_trait in _TRAIT_FELT_VARIANTS:
-            return self._rng.choice(_TRAIT_FELT_VARIANTS[max_trait])
+        if max_trait and isinstance(trait_felt_mapping, Mapping) and max_trait in trait_felt_mapping:
+            pool = _normalize_text_list(
+                trait_felt_mapping.get(max_trait),
+                _TRAIT_FELT_VARIANTS.get(max_trait, []),
+            )
+            if pool:
+                return self._rng.choice(pool)
         return ""
 
     def _append_growth_cycle_log(self, *, user_id: str, result: EvolutionCycleResult) -> None:

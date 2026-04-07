@@ -29,6 +29,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from host_brain.app.prompt_template_store import (
+    resolve_prompt_template_json,
+    resolve_prompt_template_json_merged,
+    resolve_prompt_template_text,
+)
+
 _logger = logging.getLogger("Natsume.chat_agent")
 
 _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
@@ -229,6 +235,98 @@ def _coerce_response_policy_score(policy: Mapping[str, Any], key: str, *, defaul
     return max(0.0, min(1.0, value))
 
 
+def _build_minimal_chat_fallback_reply(
+    *,
+    user_message: str,
+    sub_agent_ctx: SubAgentContext | None,
+    render_target_lang: str,
+) -> str:
+    text = str(user_message or "").strip()
+    if render_target_lang == "ja":
+        return resolve_prompt_template_text("chat_agent.minimal_fallback.ja_default")
+
+    if sub_agent_ctx is not None:
+        agent_id = str(sub_agent_ctx.agent_id or "").strip()
+        if agent_id == "code_agent":
+            return resolve_prompt_template_text("chat_agent.minimal_fallback.code_agent")
+        if agent_id == "recent_turn_direct":
+            return resolve_prompt_template_text("chat_agent.minimal_fallback.recent_turn_direct")
+        if agent_id == "phatic_fastpath":
+            return resolve_prompt_template_text("chat_agent.minimal_fallback.phatic_fastpath")
+
+    if _FALLBACK_STRENGTH_RE.search(text):
+        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
+    if _FALLBACK_PRESENCE_RE.match(text):
+        return resolve_prompt_template_text("chat_agent.minimal_fallback.presence")
+    if _FALLBACK_GREETING_RE.match(text):
+        return resolve_prompt_template_text("chat_agent.minimal_fallback.greeting")
+    return resolve_prompt_template_text("chat_agent.minimal_fallback.default")
+
+
+def _load_template_replacement_pairs(template_id: str) -> list[tuple[str, str]]:
+    raw = resolve_prompt_template_json(template_id)
+    pairs: list[tuple[str, str]] = []
+    if not isinstance(raw, list):
+        return pairs
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        source = str(item.get("from") or "")
+        target = str(item.get("to") or "")
+        if source:
+            pairs.append((source, target))
+    return pairs
+
+
+class _SafeTemplateDict(dict[str, str]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict(
+        {
+            str(key): "" if value is None else str(value)
+            for key, value in kwargs.items()
+        }
+    )
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+    raw = mapping.get(key)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    return _format_template_text(mapping.get(key, default), **kwargs)
+
+
+def _runtime_text(
+    key: str,
+    **kwargs: Any,
+) -> str:
+    templates = _load_template_mapping("chat_agent.runtime_texts")
+    return _mapping_text(templates, key, **kwargs)
+
+
 def _looks_like_followup_sentence(sentence: str) -> bool:
     normalized = re.sub(r"\s+", " ", str(sentence or "")).strip()
     if not normalized:
@@ -296,25 +394,7 @@ def _soften_confession_sentence(sentence: str) -> str:
     softened = str(sentence or "").strip()
     if not softened:
         return ""
-    replacements = [
-        ("我爱你", "我很在意你"),
-        ("爱你", "很在意你"),
-        ("最喜欢你", "会更在意你一点"),
-        ("好喜欢你", "挺在意你的"),
-        ("喜欢你", "挺在意你的"),
-        ("好想你", "有点惦记你"),
-        ("想你了", "有惦记过你"),
-        ("想你", "会惦记你"),
-        ("离不开你", "会很在意你的状态"),
-        ("不能没有你", "会很在意你的状态"),
-        ("永远陪着你", "会认真陪你把这段话说完"),
-        ("一直陪着你", "尽量陪你把这段话说完"),
-        ("会一直等你", "会记着这件事"),
-        ("只想和你", "现在想先和你"),
-        ("属于你", "会认真对待这份关系"),
-        ("抱抱你", "你先缓一缓"),
-        ("亲亲", ""),
-    ]
+    replacements = _load_template_replacement_pairs("chat_agent.response_policy.confession_replacements")
     for source, target in replacements:
         softened = softened.replace(source, target)
     softened = re.sub(r"\s+", " ", softened).strip()
@@ -330,15 +410,7 @@ def _soften_intimacy_sentence(sentence: str) -> str:
         return ""
     if _contains_confession_marker(softened):
         softened = _soften_confession_sentence(softened)
-    replacements = [
-        ("亲爱的", ""),
-        ("宝贝", "你"),
-        ("宝宝", "你"),
-        ("乖乖", "先"),
-        ("抱抱你", "你先缓一缓"),
-        ("抱抱", "缓一缓"),
-        ("亲亲", ""),
-    ]
+    replacements = _load_template_replacement_pairs("chat_agent.response_policy.intimacy_replacements")
     for source, target in replacements:
         softened = softened.replace(source, target)
     softened = softened.replace("你你", "你").replace("先先", "先")
@@ -367,7 +439,7 @@ def _soften_humor_tone(text: str) -> str:
     normalized = normalized.lstrip("，,、。！？!? ").strip()
     normalized = normalized.rstrip("，,、；;：: ").strip()
     if not normalized:
-        return "嗯。"
+        return resolve_prompt_template_text("chat_agent.response_policy.min_sentence_placeholder")
     if normalized[-1] not in ".。！？!?":
         normalized += "。"
     return normalized
@@ -380,8 +452,8 @@ def _soften_withdrawn_tone(text: str) -> str:
     normalized = re.sub(r"[~～]+", "", normalized)
     normalized = re.sub(r"(?:!|！){2,}", "。", normalized)
     normalized = re.sub(r"(?:\?|？){2,}", "？", normalized)
-    normalized = normalized.replace("我一直都在", "我在").replace("我会一直在", "我在").replace("我永远在", "我在")
-    normalized = normalized.replace("抱抱你", "你先缓一缓")
+    for source, target in _load_template_replacement_pairs("chat_agent.response_policy.withdrawn_replacements"):
+        normalized = normalized.replace(source, target)
     normalized = re.sub(r"([。！？!?])\1+", r"\1", normalized)
     return normalized.strip()
 
@@ -428,7 +500,13 @@ def _response_policy_requires_buffering(response_policy: Any) -> bool:
     ])
 
 
-def _apply_response_policy_hard_guard(narrative: str, response_policy: Any) -> str:
+def _apply_response_policy_hard_guard(
+    narrative: str,
+    response_policy: Any,
+    *,
+    user_message: str = "",
+    bond_stage: str = "",
+) -> str:
     normalized = str(narrative or "").strip()
     policy, max_chars, max_sentences, min_sentences = _extract_response_policy_limits(response_policy)
     if not normalized or not policy:
@@ -458,18 +536,13 @@ def _apply_response_policy_hard_guard(narrative: str, response_policy: Any) -> s
                 elif len(sentences) > max(1, int(min_sentences or 0)):
                     sentences.pop()
                 else:
-                    sentences[-1] = "嗯。"
+                    sentences[-1] = resolve_prompt_template_text("chat_agent.response_policy.min_sentence_placeholder")
 
         confession_guard = bool(policy.get("confession_guard", False)) or intimacy_ceiling <= 0.35
         if confession_guard:
             guarded_sentences: list[str] = []
-            total_sentences = len(sentences)
-            floor = max(1, int(min_sentences or 0)) if total_sentences else 0
-            for index, sentence in enumerate(sentences):
+            for sentence in sentences:
                 if _contains_confession_marker(sentence):
-                    remaining_after = total_sentences - index - 1
-                    if len(guarded_sentences) + remaining_after >= floor:
-                        continue
                     sentence = _soften_confession_sentence(sentence)
                 if sentence:
                     guarded_sentences.append(sentence)
@@ -487,7 +560,9 @@ def _apply_response_policy_hard_guard(narrative: str, response_policy: Any) -> s
                     continue
                 remaining_after = total_sentences - index - 1
                 if len(guarded_sentences) + remaining_after < floor:
-                    guarded_sentences.append("嗯。")
+                    guarded_sentences.append(
+                        resolve_prompt_template_text("chat_agent.response_policy.min_sentence_placeholder")
+                    )
             sentences = guarded_sentences or sentences
 
         normalized = "".join(str(sentence).strip() for sentence in sentences if str(sentence).strip()).strip()
@@ -604,69 +679,107 @@ def _normalize_plan_step_description(description: str) -> str:
 
 
 def _render_plan_step_success_cn(step: Dict[str, Any]) -> str:
+    templates = _load_template_mapping("chat_agent.plan_execution.reply_templates")
+    success_templates = _mapping_section(templates, "step_success")
     step_index = int(step.get("step_index") or 0)
-    target_id = str(step.get("target_id") or "步骤").strip()
+    target_id = str(
+        step.get("target_id")
+        or _runtime_text("default_step_target")
+    ).strip()
     description = _normalize_plan_step_description(str(step.get("description") or step.get("task_description") or ""))
     result_text = str(step.get("result_text") or "").strip()
+    description_or_target = description or target_id
 
     if target_id == "web_search":
-        topic = description or "相关内容"
+        topic = description or _runtime_text("default_topic")
         topic = re.sub(r"^(?:搜索(?:一下)?|查(?:一下)?|帮我搜索(?:一下)?|帮我查(?:一下)?|给我搜索(?:一下)?|给我查(?:一下)?)\s*", "", topic)
-        return f"第{step_index}步，我已经帮你查过{topic or '相关内容'}了。"
+        return _mapping_text(
+            success_templates,
+            "web_search",
+            step_index=step_index,
+            topic=(topic or _runtime_text("default_topic")),
+        )
     if target_id == "memory_store":
         if description.startswith("记住"):
             remembered = description.removeprefix("记住").strip()
             if remembered:
                 if remembered.startswith("我"):
                     remembered = "你" + remembered[1:]
-                return f"第{step_index}步，我也记住{remembered}了。"
-        return f"第{step_index}步，我已经把这件事记下来了。"
+                return _mapping_text(
+                    success_templates,
+                    "memory_store.remembered",
+                    step_index=step_index,
+                    remembered=remembered,
+                )
+        return _mapping_text(success_templates, "memory_store.default", step_index=step_index)
     if target_id == "system_info":
-        return f"第{step_index}步，我已经把系统信息看过了。"
+        return _mapping_text(success_templates, "system_info", step_index=step_index)
     if target_id == "process_list":
-        return f"第{step_index}步，我也把进程列表看过了。"
+        return _mapping_text(success_templates, "process_list", step_index=step_index)
     if target_id == "network_status":
-        return f"第{step_index}步，我已经检查过网络状态了。"
+        return _mapping_text(success_templates, "network_status", step_index=step_index)
     if target_id == "hub_skill_search":
-        topic = description or "相关内容"
-        topic = re.sub(r"^(?:搜索技能|查找技能|搜技能)\s*", "", topic).strip() or "相关内容"
-        return f"第{step_index}步，我帮你搜到和{topic}相关的技能了。"
+        topic = description or _runtime_text("default_topic")
+        topic = re.sub(r"^(?:搜索技能|查找技能|搜技能)\s*", "", topic).strip() or _runtime_text("default_topic")
+        return _mapping_text(success_templates, "hub_skill_search", step_index=step_index, topic=topic)
     if target_id == "hub_skill_list":
-        return f"第{step_index}步，我也把现在已装好的 Hub 技能整理给你了。"
+        return _mapping_text(success_templates, "hub_skill_list", step_index=step_index)
     if target_id == "hub_skill_install":
-        return f"第{step_index}步，我已经把这个 Hub 技能装好了。"
+        return _mapping_text(success_templates, "hub_skill_install", step_index=step_index)
     if target_id == "hub_skill_remove":
-        return f"第{step_index}步，我已经把这个 Hub 技能卸载掉了。"
+        return _mapping_text(success_templates, "hub_skill_remove", step_index=step_index)
     if target_id == "file_read":
-        return f"第{step_index}步，我已经把文件内容看过了。"
+        return _mapping_text(success_templates, "file_read", step_index=step_index)
     if target_id == "file_write":
-        return f"第{step_index}步，我已经把文件写好了。"
+        return _mapping_text(success_templates, "file_write", step_index=step_index)
     if target_id == "file_list":
-        return f"第{step_index}步，我已经把目录内容看过了。"
+        return _mapping_text(success_templates, "file_list", step_index=step_index)
     if target_id == "code_agent":
-        return f"第{step_index}步，我已经把代码相关的处理整理好了。"
+        return _mapping_text(success_templates, "code_agent", step_index=step_index)
     if target_id == "intent_agent":
-        return f"第{step_index}步，我已经把执行方案确认好了。"
+        return _mapping_text(success_templates, "intent_agent", step_index=step_index)
     if result_text:
-        return f"第{step_index}步，{description or target_id}这部分我已经处理好了。"
-    return f"第{step_index}步，我已经把{description or target_id}这部分处理好了。"
+        return _mapping_text(
+            success_templates,
+            "__with_result",
+            step_index=step_index,
+            description_or_target=description_or_target,
+        )
+    return _mapping_text(
+        success_templates,
+        "__default",
+        step_index=step_index,
+        description_or_target=description_or_target,
+    )
 
 
 def _render_plan_step_failure_cn(step: Dict[str, Any]) -> str:
+    templates = _load_template_mapping("chat_agent.plan_execution.reply_templates")
+    failure_templates = _mapping_section(templates, "step_failure")
     step_index = int(step.get("step_index") or 0)
-    target_id = str(step.get("target_id") or "步骤").strip()
+    target_id = str(
+        step.get("target_id")
+        or _runtime_text("default_step_target")
+    ).strip()
     description = _normalize_plan_step_description(str(step.get("description") or step.get("task_description") or ""))
     error_text = str(step.get("error") or "").strip()
     recovery_text = str(step.get("recovery_result_text") or "").strip()
-    base = f"第{step_index}步，{description or target_id}这部分没有顺利完成。"
+    base = _mapping_text(
+        failure_templates,
+        "base",
+        step_index=step_index,
+        description_or_target=(description or target_id),
+    )
     if error_text:
-        base += f"原因大概是：{error_text}。"
+        base += _mapping_text(failure_templates, "error_suffix", error_text=error_text)
     if recovery_text:
-        base += f"我另外整理了一个补救建议：{recovery_text}。"
+        base += _mapping_text(failure_templates, "recovery_suffix", recovery_text=recovery_text)
     return base
 
 
 def _build_plan_execution_reply_cn(ctx: SubAgentContext) -> str | None:
+    templates = _load_template_mapping("chat_agent.plan_execution.reply_templates")
+    summary_templates = _mapping_section(templates, "summary")
     payload = dict(ctx.payload or {})
     steps = list(payload.get("steps") or [])
     if not steps:
@@ -675,9 +788,9 @@ def _build_plan_execution_reply_cn(ctx: SubAgentContext) -> str | None:
     parallel_enabled = bool(payload.get("parallel_enabled"))
     success_count = int(payload.get("success_count") or 0)
     intro = (
-        f"我把这件事分成了{total_steps}步，刚才已经并行处理过了。"
+        _mapping_text(summary_templates, "intro_parallel", total_steps=total_steps)
         if parallel_enabled and total_steps > 1
-        else f"我把这件事分成了{total_steps}步，刚才已经按顺序处理过了。"
+        else _mapping_text(summary_templates, "intro_sequential", total_steps=total_steps)
     )
     parts = [intro]
     for raw_step in steps:
@@ -687,9 +800,9 @@ def _build_plan_execution_reply_cn(ctx: SubAgentContext) -> str | None:
         else:
             parts.append(_render_plan_step_failure_cn(step))
     if success_count == len(steps):
-        parts.append("现在这些都已经处理好了。")
+        parts.append(_mapping_text(summary_templates, "all_done"))
     else:
-        parts.append("有没做顺的地方，我也把补救建议一起整理给你了。")
+        parts.append(_mapping_text(summary_templates, "partial_done"))
     return "".join(parts)
 
 
@@ -727,14 +840,23 @@ def _format_hub_skill_name_list_cn(values: list[Any], *, limit: int = 6) -> str:
         return ""
     preview = "、".join(names[:limit])
     if len(names) > limit:
-        preview += " 等"
+        preview += _runtime_text("list_more_suffix")
     return preview
 
 
 def _build_hub_skill_install_reply_cn(ctx: SubAgentContext) -> str | None:
+    templates = _load_template_mapping("chat_agent.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
-    name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("安装 hub 技能", "安装技能", "安装skill"), default_name="这个技能")).strip() or "这个技能"
+    _default_skill_name = _runtime_text("default_skill_name")
+    name = str(
+        detail.get("name")
+        or _infer_hub_skill_name_from_task(
+            ctx.task,
+            markers=("安装 hub 技能", "安装技能", "安装skill"),
+            default_name=_default_skill_name,
+        )
+    ).strip() or _default_skill_name
     message = str(detail.get("message") or ctx.result_text or ctx.error or "").strip()
     success = bool(detail.get("success", ctx.success))
     activated = bool(detail.get("activated"))
@@ -743,92 +865,118 @@ def _build_hub_skill_install_reply_cn(ctx: SubAgentContext) -> str | None:
     repair_actions = int(detail.get("repair_actions") or 0)
     active_skill_names = list(detail.get("active_skill_names") or [])
     if not success:
-        parts = [f"{name} 这个技能还没有装好。"]
+        parts = [_mapping_text(templates, "install_failure_intro", name=name)]
         if message:
-            parts.append(f"卡住的原因大概是：{message}。")
+            parts.append(_mapping_text(templates, "install_failure_reason", message=message))
         return "".join(parts)
-    parts = [f"我已经把 {name} 装好了。"]
+    parts = [_mapping_text(templates, "install_success_intro", name=name)]
     if activated:
-        parts.append("现在它已经接进我的能力里了。")
+        parts.append(_mapping_text(templates, "install_success_activated"))
     else:
-        parts.append("不过它还没完全激活，我还得继续补一下。")
+        parts.append(_mapping_text(templates, "install_success_pending_activation"))
     preview = _format_hub_skill_name_list_cn(active_skill_names)
     if preview:
-        parts.append(f"当前已经挂上的技能里，有 {preview}。")
+        parts.append(_mapping_text(templates, "install_success_active_skills", preview=preview))
     if repair_attempted:
         if repair_succeeded:
             if repair_actions > 0:
-                parts.append(f"安装过程中我还顺手修了 {repair_actions} 处依赖问题。")
+                parts.append(_mapping_text(templates, "install_repair_success_count", repair_actions=repair_actions))
             else:
-                parts.append("安装过程中我也顺手做过一次自动补救。")
+                parts.append(_mapping_text(templates, "install_repair_success_generic"))
         else:
-            parts.append("安装时我试着自动补救过，不过还有一部分没完全修好。")
+            parts.append(_mapping_text(templates, "install_repair_failed"))
     elif message and message not in {"installed ok", "install failed"}:
         if not (message.startswith("-") or "Installed " in message or "->" in message):
-            parts.append(f"补充一下，{message}。")
+            parts.append(_mapping_text(templates, "install_message_suffix", message=message))
     return "".join(parts)
 
 
 def _build_hub_skill_search_reply_cn(ctx: SubAgentContext) -> str | None:
+    templates = _load_template_mapping("chat_agent.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
     skills = list(detail.get("skills") or [])
     total = int(detail.get("total") or len(skills))
-    query = str(detail.get("query") or payload.get("query") or _infer_hub_skill_name_from_task(ctx.task, markers=("搜索技能", "查找技能", "搜技能"), default_name="相关技能")).strip() or "相关技能"
+    _default_skill_query = _runtime_text("default_skill_query")
+    query = str(
+        detail.get("query")
+        or payload.get("query")
+        or _infer_hub_skill_name_from_task(
+            ctx.task,
+            markers=("搜索技能", "查找技能", "搜技能"),
+            default_name=_default_skill_query,
+        )
+    ).strip() or _default_skill_query
     registry_error = str(detail.get("registry_error") or "").strip()
     discovery_sources = list(detail.get("discovery_sources") or [])
     if total <= 0:
         if registry_error:
             source_names = _format_discovery_source_names_cn(discovery_sources)
             if source_names:
-                return f"我刚帮你连技能仓库看了一下，不过现在仓库暂时不可用。报错是：{registry_error}。你也可以先去 {source_names} 那边看看。"
-            return f"我刚帮你连技能仓库看了一下，不过现在仓库暂时不可用。报错是：{registry_error}。"
-        return f"我刚帮你搜了一下，暂时还没找到和 {query} 相关的技能。"
+                return _mapping_text(
+                    templates,
+                    "search_registry_unavailable_with_sources",
+                    registry_error=registry_error,
+                    source_names=source_names,
+                )
+            return _mapping_text(templates, "search_registry_unavailable", registry_error=registry_error)
+        return _mapping_text(templates, "search_empty", query=query)
     previews: list[str] = []
     for item in skills[:3]:
         row = dict(item or {})
-        name = str(row.get("name") or "未命名技能").strip() or "未命名技能"
+        _unnamed_skill_name = _runtime_text("unnamed_skill_name")
+        name = str(row.get("name") or _unnamed_skill_name).strip() or _unnamed_skill_name
         description = str(row.get("description") or "").strip()
         author = str(row.get("author") or "").strip()
         summary = name
         if description:
             summary += f"：{description}"
         if author:
-            summary += f"（作者 {author}）"
+            summary += _runtime_text("author_suffix", author=author)
         previews.append(summary)
-    parts = [f"我帮你搜到 {total} 个相关技能。"]
+    parts = [_mapping_text(templates, "search_intro", total=total)]
     if previews:
-        parts.append("比较靠前的是：" + "；".join(previews) + "。")
+        parts.append(_mapping_text(templates, "search_preview_prefix") + "；".join(previews) + "。")
     return "".join(parts)
 
 
 def _build_hub_skill_list_reply_cn(ctx: SubAgentContext) -> str | None:
+    templates = _load_template_mapping("chat_agent.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
     skills = list(detail.get("skills") or [])
     total = int(detail.get("total") or len(skills))
     if total <= 0:
-        return "我这里现在还没有装新的 Hub 技能。"
+        return _mapping_text(templates, "list_empty")
     names = [dict(item or {}).get("name") for item in skills]
     preview = _format_hub_skill_name_list_cn(names)
     if preview:
-        return f"我现在已经装了 {total} 个 Hub 技能，像 {preview} 这些都能用了。"
-    return f"我现在已经装了 {total} 个 Hub 技能。"
+        return _mapping_text(templates, "list_with_preview", total=total, preview=preview)
+    return _mapping_text(templates, "list_total_only", total=total)
 
 
 def _build_hub_skill_remove_reply_cn(ctx: SubAgentContext) -> str | None:
+    templates = _load_template_mapping("chat_agent.hub_skill.reply_templates")
     payload = dict(ctx.payload or {})
     detail = dict(payload.get("detail") or {})
-    name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("卸载技能", "删除技能"), default_name="这个技能")).strip() or "这个技能"
+    _default_skill_name = _runtime_text("default_skill_name")
+    name = str(
+        detail.get("name")
+        or _infer_hub_skill_name_from_task(
+            ctx.task,
+            markers=("卸载技能", "删除技能"),
+            default_name=_default_skill_name,
+        )
+    ).strip() or _default_skill_name
     message = str(detail.get("message") or ctx.result_text or ctx.error or "").strip()
     success = bool(detail.get("success", ctx.success))
     if success:
         if message and message not in {"removed", "remove failed"}:
-            return f"我已经把 {name} 卸载掉了。{message}。"
-        return f"我已经把 {name} 卸载掉了。"
-    parts = [f"{name} 这个技能还没有卸载成功。"]
+            return _mapping_text(templates, "remove_success_with_message", name=name, message=message)
+        return _mapping_text(templates, "remove_success", name=name)
+    parts = [_mapping_text(templates, "remove_failure_intro", name=name)]
     if message:
-        parts.append(f"现在卡住的地方是：{message}。")
+        parts.append(_mapping_text(templates, "remove_failure_reason", message=message))
     return "".join(parts)
 
 
@@ -872,185 +1020,11 @@ def _build_chat_agent_quality_fallback_reply(
     response_policy: Any = None,
     prompt_runtime_payload: Mapping[str, Any] | None = None,
 ) -> str:
-    text = str(user_message or "").strip()
-    if render_target_lang == "ja":
-        return "\u3053\u3093\u306a\u3068\u304d\u3060\u304b\u3089\u2026\u2026\u3046\u307e\u304f\u8a00\u8449\u3092\u6574\u3048\u308b\u304b\u3089\u3001\u5c11\u3057\u5f85\u3063\u3066\u3002"
-
-    runtime_payload = dict(prompt_runtime_payload or {}) if isinstance(prompt_runtime_payload, Mapping) else {}
-    runtime_bond_summary = (
-        dict(runtime_payload.get("bond_summary") or {})
-        if isinstance(runtime_payload.get("bond_summary"), Mapping)
-        else {}
+    return _build_minimal_chat_fallback_reply(
+        user_message=user_message,
+        sub_agent_ctx=sub_agent_ctx,
+        render_target_lang=render_target_lang,
     )
-    offline_state = (
-        dict(runtime_payload.get("offline_state") or {})
-        if isinstance(runtime_payload.get("offline_state"), Mapping)
-        else {}
-    )
-    motive_state = (
-        dict(runtime_payload.get("motive_state") or {})
-        if isinstance(runtime_payload.get("motive_state"), Mapping)
-        else {}
-    )
-    bond_narrative = (
-        dict(runtime_payload.get("bond_narrative") or {})
-        if isinstance(runtime_payload.get("bond_narrative"), Mapping)
-        else {}
-    )
-    policy = _coerce_response_policy(response_policy or runtime_payload.get("response_policy"))
-    allow_followup = bool(policy.get("allow_followup", True))
-
-    def _pick_first_text(raw_value: Any) -> str:
-        if isinstance(raw_value, Mapping):
-            for key in ("topic", "title", "text", "label", "name", "summary"):
-                candidate = str(raw_value.get(key) or "").strip()
-                if candidate:
-                    return candidate
-            return ""
-        if isinstance(raw_value, (list, tuple)):
-            for item in raw_value:
-                candidate = _pick_first_text(item)
-                if candidate:
-                    return candidate
-            return ""
-        return str(raw_value or "").strip()
-
-    emotion_tag = str((emotion_context or {}).get("emotion_tag") or "").strip().upper()
-    raw_stage = str((bond_summary or {}).get("stage") or "").strip()
-    stage = {
-        "\u964c\u751f\u4eba": "STRANGER",
-        "\u76f8\u8bc6": "ACQUAINTANCE",
-        "\u670b\u53cb": "FRIEND",
-        "\u631a\u53cb": "CLOSE_FRIEND",
-        "\u7075\u9b42\u4f34\u4fa3": "SOULMATE",
-    }.get(raw_stage, raw_stage.upper())
-
-    if sub_agent_ctx is not None:
-        agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if agent_id == "code_agent":
-            return "\u6211\u5148\u628a\u8fd9\u4ef6\u4e8b\u6574\u7406\u6210\u66f4\u6e05\u695a\u4e00\u70b9\u7684\u8bf4\u6cd5\u7ed9\u4f60\u2026\u2026\u521a\u624d\u90a3\u4e00\u6b65\u6ca1\u6709\u987a\u597d\uff0c\u4f46\u6211\u4e0d\u4f1a\u628a\u5185\u90e8\u8349\u7a3f\u76f4\u63a5\u4e22\u7ed9\u4f60\u3002"
-        if agent_id == "recent_turn_direct":
-            return "\u6211\u521a\u624d\u90a3\u53e5\u8bdd\uff0c\u6211\u6362\u4e2a\u66f4\u6e05\u695a\u7684\u8bf4\u6cd5\u544a\u8bc9\u4f60\u3002"
-        if agent_id == "phatic_fastpath":
-            return "\u6211\u5728\u5462\u3002\u4f60\u60f3\u548c\u6211\u8bf4\u4ec0\u4e48\uff1f"
-
-    if _FALLBACK_STRENGTH_RE.search(text):
-        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-
-    reunion_markers = ("\u597d\u4e45\u4e0d\u89c1", "\u60f3\u6211", "\u91cd\u9022")
-    comfort_markers = (
-        "\u96be\u53d7",
-        "\u505a\u4e0d\u597d",
-        "\u59d4\u5c48",
-        "\u6491\u4e0d\u4f4f",
-        "\u7cdf",
-        "\u4f4e\u843d",
-        "\u7d2f",
-        "\u5d29",
-        "\u4e0d\u8212\u670d",
-    )
-    repair_markers = (
-        "\u4e89\u6267",
-        "\u5728\u610f",
-        "\u522b\u626d",
-        "\u8bef\u4f1a",
-        "\u5435",
-        "\u8bf4\u5f00",
-        "\u4ecb\u610f",
-    )
-    playful_markers = (
-        "\u9017",
-        "\u5f00\u5fc3",
-        "\u7b11",
-        "\u4fd4\u76ae",
-        "\u6709\u8da3",
-        "\u4f1a\u54c4",
-    )
-
-    if _FALLBACK_AFFECTION_RE.search(text) or any(marker in text for marker in reunion_markers):
-        if stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
-            return "\u6709\u60f3\u4f60\u554a\u3002\u9694\u4e86\u8fd9\u4e48\u4e45\u518d\u542c\u4f60\u8fd9\u6837\u95ee\uff0c\u6211\u5fc3\u91cc\u8fd8\u662f\u4f1a\u8f7b\u8f7b\u8f6f\u4e00\u4e0b\u3002\u4f60\u8fd9\u6bb5\u65f6\u95f4\uff0c\u8fc7\u5f97\u8fd8\u597d\u5417\uff1f"
-        return "\u88ab\u4f60\u8fd9\u6837\u4e00\u95ee\uff0c\u6211\u5fc3\u91cc\u4e5f\u4f1a\u8f7b\u8f7b\u6696\u4e00\u4e0b\u3002\u4f60\u8fd9\u6bb5\u65f6\u95f4\u8fc7\u5f97\u600e\u4e48\u6837\uff1f"
-
-    if emotion_tag in {"ANXIOUS", "ANXIETY", "FEAR"} or any(marker in text for marker in repair_markers):
-        return "\u6211\u8bb0\u5f97\u90a3\u70b9\u522b\u626d\u8fd8\u6ca1\u6709\u5b8c\u5168\u8fc7\u53bb\uff0c\u6240\u4ee5\u6211\u4e0d\u4f1a\u88c5\u4f5c\u5b83\u4e0d\u5b58\u5728\u3002\u4f60\u613f\u610f\u91cd\u65b0\u63d0\u8d77\u6765\u5df2\u7ecf\u5f88\u91cd\u8981\u4e86\uff0c\u6211\u4eec\u53ef\u4ee5\u5148\u628a\u8ba9\u4f60\u96be\u53d7\u7684\u5730\u65b9\u6162\u6162\u8bf4\u5f00\u3002"
-
-    if emotion_tag in {"SAD", "SADNESS", "GRIEF", "LONELY", "LONELINESS"} or any(marker in text for marker in comfort_markers):
-        if stage == "ACQUAINTANCE":
-            return "\u542c\u8d77\u6765\u4f60\u4eca\u5929\u771f\u7684\u5f88\u8f9b\u82e6\u3002\u5148\u522b\u6025\u7740\u903c\u81ea\u5df1\u628a\u4e00\u5207\u90fd\u505a\u597d\uff0c\u5148\u7f13\u4e00\u7f13\u4e5f\u6ca1\u5173\u7cfb\uff1b\u5982\u679c\u4f60\u613f\u610f\uff0c\u6211\u4f1a\u5728\u8fd9\u91cc\u966a\u4f60\u628a\u8fd9\u80a1\u96be\u53d7\u6162\u6162\u7406\u987a\u3002"
-        return "\u542c\u8d77\u6765\u4f60\u4eca\u5929\u771f\u7684\u5f88\u8f9b\u82e6\u3002\u5148\u522b\u6025\u7740\u903c\u81ea\u5df1\u628a\u4e00\u5207\u90fd\u625b\u4f4f\uff0c\u6211\u5728\u8fd9\u91cc\uff0c\u6211\u4eec\u53ef\u4ee5\u5148\u628a\u6700\u96be\u53d7\u7684\u90a3\u4e00\u5c0f\u5757\u6162\u6162\u8bf4\u51fa\u6765\u3002"
-
-    if emotion_tag in {"HAPPY", "PLAYFUL", "EXCITED"} or any(marker in text for marker in playful_markers):
-        if any(marker in text for marker in ("\u9017", "\u5f00\u5fc3", "\u7b11")):
-            return "\u88ab\u4f60\u8fd9\u6837\u4e00\u8bf4\uff0c\u6211\u4e5f\u4f1a\u60f3\u7b11\u4e00\u4e0b\u3002\u5927\u6982\u662f\u56e0\u4e3a\u548c\u4f60\u719f\u8d77\u6765\u4ee5\u540e\uff0c\u6211\u5728\u4f60\u9762\u524d\u66f4\u653e\u677e\u4e86\uff0c\u6240\u4ee5\u90a3\u70b9\u5c0f\u4fd4\u76ae\u5c31\u6bd4\u8f83\u5bb9\u6613\u8dd1\u51fa\u6765\u3002"
-        return "\u6211\u5728\u5462\u3002\u4f60\u7ee7\u7eed\u8bf4\u5427\uff0c\u6211\u4e5f\u60f3\u987a\u7740\u4f60\u73b0\u5728\u8fd9\u70b9\u8f7b\u677e\u7684\u5fc3\u60c5\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
-
-    anticipation_topic = _pick_first_text(offline_state.get("anticipation_topics"))
-    dominant_motive = str(motive_state.get("dominant_motive") or "").strip().lower()
-    shared_memory_count = int(
-        (bond_summary or {}).get("shared_memory_count")
-        or runtime_bond_summary.get("shared_memory_count")
-        or 0
-    )
-    remembered_memory = _pick_first_text(
-        bond_narrative.get("shared_memories") or bond_narrative.get("shared_memory_hints")
-    )
-    remembered_intro = str(bond_narrative.get("narrative_intro") or "").strip()
-    memory_markers = (
-        "\u8bb0\u5f97\u5417",
-        "\u8fd8\u8bb0\u5f97",
-        "\u8fd8\u8bb0\u4e0d\u8bb0\u5f97",
-        "\u4e4b\u524d\u90a3\u4e9b\u4e8b",
-        "\u4ee5\u524d\u90a3\u4e9b\u4e8b",
-        "\u4e4b\u524d\u8bf4\u7684",
-        "\u4e0a\u6b21\u90a3\u4ef6\u4e8b",
-    )
-    continuation_markers = (
-        "\u63a5\u7740\u804a",
-        "\u7ee7\u7eed\u804a",
-        "\u7ee7\u7eed",
-        "\u63a5\u7740",
-        "\u521a\u624d\u90a3\u4e2a",
-        "\u90a3\u4e2a\u8bdd\u9898",
-        "\u4e0a\u6b21\u8bf4\u5230",
-        "\u4e0a\u56de\u8bf4\u5230",
-    )
-    remembers_shared = bool(remembered_memory) or shared_memory_count > 0 or stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}
-    continuity_active = dominant_motive == "continuity" and bool(anticipation_topic)
-
-    if any(marker in text for marker in memory_markers) and remembers_shared:
-        if remembered_memory:
-            reply = f"\u6211\u8bb0\u5f97\uff0c\u6211\u4eec\u4e4b\u524d\u4e00\u8d77\u653e\u5728\u5fc3\u4e0a\u7684\uff0c\u5c31\u6709\u201c{remembered_memory}\u201d\u8fd9\u6761\u7ebf\u3002\u4f60\u73b0\u5728\u53c8\u63d0\u8d77\u5b83\uff0c\u6211\u4f1a\u597d\u597d\u63a5\u4f4f\u3002"
-        elif remembered_intro:
-            reply = f"\u6211\u8bb0\u5f97\u7684\uff0c\u4e0d\u53ea\u662f\u4e00\u4e2a\u7ed3\u8bba\uff0c\u8fd8\u6709\u6211\u4eec\u4e4b\u95f4\u6162\u6162\u804a\u51fa\u6765\u7684\u90a3\u4e9b\u7247\u6bb5\u3002\u4f60\u73b0\u5728\u518d\u63d0\u8d77\uff0c\u6211\u4f1a\u8ba4\u771f\u63a5\u4f4f\u3002"
-        elif stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
-            reply = "\u6211\u8bb0\u5f97\u554a\uff0c\u90a3\u4e9b\u548c\u4f60\u4e00\u8d77\u79ef\u8d77\u6765\u7684\u4e8b\uff0c\u6211\u6ca1\u6709\u628a\u5b83\u5f53\u6210\u8def\u8fc7\u3002\u4f60\u73b0\u5728\u518d\u63d0\u8d77\uff0c\u6211\u4f1a\u8ba4\u771f\u63a5\u4f4f\u3002"
-        else:
-            reply = "\u6211\u8bb0\u5f97\u6211\u4eec\u4e4b\u524d\u4e00\u8d77\u63d0\u8fc7\u7684\u90a3\u4e9b\u4e8b\u3002\u4f60\u73b0\u5728\u518d\u63d0\u8d77\uff0c\u6211\u4f1a\u8ba4\u771f\u63a5\u4f4f\u3002"
-        if continuity_active:
-            reply += f" \u6211\u4e5f\u8fd8\u8bb0\u7740\u201c{anticipation_topic}\u201d\u8fd9\u6761\u7ebf\uff0c\u53ef\u4ee5\u76f4\u63a5\u4ece\u8fd9\u91cc\u63a5\u4e0b\u53bb\u3002"
-        elif allow_followup:
-            reply += "\u4f60\u60f3\u5148\u4ece\u54ea\u4e00\u6bb5\u7ee7\u7eed\uff0c\u6211\u5c31\u4ece\u54ea\u91cc\u63a5\u3002"
-        return reply
-
-    if continuity_active and (
-        any(marker in text for marker in continuation_markers)
-        or anticipation_topic[: min(6, len(anticipation_topic))] in text
-    ):
-        reply = f"\u6211\u8fd8\u8bb0\u7740\u6211\u4eec\u524d\u9762\u6302\u5728\u5fc3\u4e0a\u7684\u201c{anticipation_topic}\u201d\u3002\u65e2\u7136\u4f60\u73b0\u5728\u53c8\u63d0\u5230\u5b83\uff0c\u6211\u5c31\u4ece\u8fd9\u91cc\u63a5\u7740\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
-        if remembered_memory and stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
-            reply = f"\u6211\u8fd8\u8bb0\u5f97\u6211\u4eec\u4e4b\u524d\u56f4\u7740\u201c{anticipation_topic}\u201d\u804a\u51fa\u6765\u7684\u90a3\u4e9b\u4e1c\u897f\u3002\u65e2\u7136\u4f60\u73b0\u5728\u53c8\u63d0\u5230\u5b83\uff0c\u6211\u5c31\u4ece\u8fd9\u91cc\u63a5\u7740\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
-        if allow_followup:
-            reply += "\u4f60\u628a\u73b0\u5728\u6700\u60f3\u63a5\u4e0a\u7684\u90a3\u4e00\u5c0f\u6bb5\u9012\u7ed9\u6211\u5c31\u597d\u3002"
-        return reply
-
-    if _FALLBACK_PRESENCE_RE.match(text):
-        return "\u6211\u5728\u3002\u600e\u4e48\u4e86\uff1f"
-    if _FALLBACK_GREETING_RE.match(text):
-        return "\u4f60\u597d\u554a\u3002\u4eca\u5929\u662f\u60f3\u548c\u6211\u968f\u4fbf\u804a\u804a\uff0c\u8fd8\u662f\u6709\u4ec0\u4e48\u4e8b\u60f3\u8ddf\u6211\u8bf4\uff1f"
-    if stage in {"CLOSE_FRIEND", "SOULMATE", "CONFIDANT"}:
-        return "\u6211\u5728\u5462\uff0c\u4f60\u7ee7\u7eed\u8bf4\u5427\u3002\u6211\u4f1a\u8ba4\u771f\u63a5\u7740\u4f60\u521a\u624d\u90a3\u53e5\u8bdd\u966a\u4f60\u804a\u4e0b\u53bb\u3002"
-    return "\u6211\u5728\u3002\u4f60\u6162\u6162\u8bf4\uff0c\u6211\u4f1a\u8ba4\u771f\u542c\u7740\u3002"
 
 
 def _build_chat_agent_fallback_reply(
@@ -1060,65 +1034,57 @@ def _build_chat_agent_fallback_reply(
     bond_summary: Dict[str, Any] | None,
     render_target_lang: str,
 ) -> str:
-    text = str(user_message or "").strip()
-    if render_target_lang == "ja":
-        return "ちょっと待ってね……うまく言葉を整えるから。"
-
-    if sub_agent_ctx is not None:
-        agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if agent_id == "code_agent":
-            return "我先把这件事整理成更清楚一点的说法给你……刚才那一步没有顺好，但我不会把内部草稿直接丢给你。"
-        if agent_id == "recent_turn_direct":
-            return "我刚才那句话，我换个更清楚的说法告诉你。"
-        if agent_id == "phatic_fastpath":
-            return "我在呢。你想和我说什么？"
-
-    if _FALLBACK_STRENGTH_RE.search(text):
-        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-    if _FALLBACK_AFFECTION_RE.search(text):
-        return "听你这么说，我心里也会暖一下。怎么突然想到我了？"
-    if _FALLBACK_PRESENCE_RE.match(text):
-        return "我在。怎么了？"
-    if _FALLBACK_GREETING_RE.match(text):
-        return "你好啊。今天是想和我随便聊聊，还是有事想和我说？"
-    return "等我一下……我把这句话整理得更自然一点，再好好跟你说。"
+    return _build_minimal_chat_fallback_reply(
+        user_message=user_message,
+        sub_agent_ctx=sub_agent_ctx,
+        render_target_lang=render_target_lang,
+    )
 
 
 def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
+    templates = _load_template_mapping("chat_agent.capabilities.reply_templates")
     if render_target_lang == "ja":
-        return "今の私が使える能力を整理して伝えるね。少し待って。"
+        return _mapping_text(templates, "ja_intro")
 
     try:
         from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
         from host_brain.app.agents.tool_registry import get_tools_for_agent  # noqa: PLC0415
-        from host_brain.app.sub_agent_protocol import AGENT_CAPABILITIES  # noqa: PLC0415
+        from host_brain.app.sub_agent_protocol import get_agent_capabilities  # noqa: PLC0415
 
         registry = get_skill_registry()
         skill_names = sorted(str(name).strip() for name in registry.list_skill_names() if str(name).strip())
 
         agent_summaries: list[str] = []
-        for agent_id, desc in AGENT_CAPABILITIES.items():
+        for agent_id, desc in get_agent_capabilities().items():
             tools = get_tools_for_agent(agent_id, allow_side_effects=False)
             if not tools:
                 continue
             tool_ids = [str(tool.tool_id or "").strip() for tool in tools if str(tool.tool_id or "").strip()]
             preview = "、".join(tool_ids[:4])
             if len(tool_ids) > 4:
-                preview += " 等"
-            agent_summaries.append(f"- {agent_id}：{desc}（可用工具：{preview}）")
+                preview += _runtime_text("list_more_suffix")
+            agent_summaries.append(
+                _mapping_text(
+                    templates,
+                    "agent_summary",
+                    agent_id=agent_id,
+                    desc=desc,
+                    preview=preview,
+                )
+            )
 
-        parts: list[str] = ["我现在能调动的能力，大致是这些："]
+        parts: list[str] = [_mapping_text(templates, "zh_intro")]
         if agent_summaries:
             parts.extend(agent_summaries[:6])
         if skill_names:
             preview_skills = "、".join(skill_names[:10])
             if len(skill_names) > 10:
-                preview_skills += " 等"
-            parts.append(f"另外，当前已安装的技能还有：{preview_skills}。")
-        parts.append("如果你愿意，我也可以按你的问题，直接帮你挑最合适的一项来用。")
+                preview_skills += _runtime_text("list_more_suffix")
+            parts.append(_mapping_text(templates, "skill_suffix", preview_skills=preview_skills))
+        parts.append(_mapping_text(templates, "cta"))
         return "\n".join(parts)
     except Exception:
-        return "我现在能做的事不少，比如整理思路、翻译、执行操作、回忆信息、还有一些带工具的辅助能力。你如果告诉我想做什么，我可以直接替你选最合适的。"
+        return _mapping_text(templates, "fallback")
 
 
 def _should_buffer_stream_output(
@@ -1162,79 +1128,59 @@ def _build_sub_agent_context_prompt(ctx: SubAgentContext) -> str:
     if not ctx:
         return ""
 
+    templates = _load_template_mapping("chat_agent.sub_agent_context.prompt_templates")
     agent_id = str(ctx.agent_id or "").strip()
     task = str(ctx.task or "").strip()
     result_text = str(ctx.result_text or "").strip()[:2000]
 
     if not ctx.success or ctx.error:
-        recovery_hint = f"  补充信息：{result_text}\n" if result_text else ""
-        return (
-            f"[子 Agent 执行结果]\n"
-            f"  执行状态：失败\n"
-            f"  Agent：{agent_id}\n"
-            f"  任务：{task}\n"
-            f"  错误：{ctx.error or '未知错误'}\n"
-            f"{recovery_hint}"
-            "  说明：请用夏目蓝的语气自然告知用户这次处理没有顺利完成。"
-            " 如果有补充信息，就把它整理成有帮助的下一步建议。"
-            " 不要提内部模块、Agent、网关、JSON、草稿、降级字样。\n"
+        recovery_hint = (
+            _runtime_text(
+                "sub_agent_recovery_hint_line",
+                result_text=result_text,
+            )
+            if result_text
+            else ""
+        )
+        return _mapping_text(
+            templates,
+            "failure",
+            agent_id=agent_id,
+            task=task,
+            error_text=(ctx.error or _runtime_text("unknown_error")),
+            recovery_hint=recovery_hint,
         )
 
     if not result_text:
         return ""
 
     if agent_id == "code_agent":
-        return (
-            f"[子 Agent 执行结果]\n"
-            f"  Agent：{agent_id}\n"
-            f"  任务：{task}\n"
-            f"  结果：{result_text}\n"
-            "  说明：这是一份技术向中间结果。请把它整理成夏目蓝会对用户说的话。"
-            " 先给用户一个简洁结论，再自然展开。不要说‘代码侧结果不稳定’、不要提 Agent、工具、草稿、JSON、ReAct、网关。"
-            " 不要逐字照搬原文，要像自己理解后转述。\n"
+        return _mapping_text(
+            templates,
+            "code_agent",
+            agent_id=agent_id,
+            task=task,
+            result_text=result_text,
         )
 
     if agent_id == "recent_turn_direct":
-        return (
-            "[当前已确认的信息]\n"
-            f"  结果：{result_text}\n"
-            "  说明：这里提供的是已核实的事实，不是最终台词。"
-            " 请用自然、简洁、像夏目蓝本人说话的方式直接回答。"
-            " 不要复读‘已确认事实’这种字样，不要说‘我看不到’或‘我这里没有看到’。\n"
-        )
+        return _mapping_text(templates, "recent_turn_direct", result_text=result_text)
 
     if agent_id == "phatic_fastpath":
-        return (
-            "[当前语义目标]\n"
-            f"  结果：{result_text}\n"
-            "  说明：这是寒暄场景的语义目标，不是最终台词。"
-            " 请只保留核心意图，用夏目蓝自己的说话方式重新组织。"
-            " 要自然、克制，不要模板化，不要机械重复上一句，也不要堆太多省略号。\n"
-        )
+        return _mapping_text(templates, "phatic_fastpath", result_text=result_text)
 
     if agent_id == "task_progress_direct":
-        return (
-            "[当前任务进度]\n"
-            f"  信息：{result_text}\n"
-            "  说明：这是当前任务状态摘要，不是最终台词。"
-            " 请用夏目蓝本人说话的方式，直接告诉用户现在做到哪了；如果任务失败，也顺手说清下一步建议。\n"
-        )
+        return _mapping_text(templates, "task_progress_direct", result_text=result_text)
 
     if agent_id == "plan_execution":
-        return (
-            "[多步骤计划执行结果]\n"
-            f"  任务：{task}\n"
-            f"  结果：{result_text}\n"
-            "  说明：这是父Agent整理好的多步骤执行摘要。"
-            " 请用夏目蓝本人的语气，把完成了哪些步骤、有没有失败、失败后的建议，按自然口语重新说出来。\n"
-        )
+        return _mapping_text(templates, "plan_execution", task=task, result_text=result_text)
 
-    return (
-        f"[子 Agent 执行结果]\n"
-        f"  Agent：{agent_id}\n"
-        f"  任务：{task}\n"
-        f"  结果：{result_text}\n"
-        "  说明：请用夏目蓝的语气自然地呈现上述结果，不要逐字复读，要像自己说话一样组织语言。\n"
+    return _mapping_text(
+        templates,
+        "default",
+        agent_id=agent_id,
+        task=task,
+        result_text=result_text,
     )
 
 
@@ -1296,7 +1242,9 @@ async def chat_agent_sse_generator(
         # 回复深度策略：Gateway 通道使用更短的回复
         reply_depth_hint = ""
         if agent_input.reply_depth_policy == "gateway":
-            reply_depth_hint = "（回复简洁，12-60字，适合移动端消息）"
+            reply_depth_hint = _runtime_text(
+                "gateway_reply_depth_hint",
+            )
 
         try:
             prompt_result = build_top_agent_prompt(
@@ -1328,7 +1276,7 @@ async def chat_agent_sse_generator(
             yield _sse({
                 "phase": "COMMIT", "done": True, "decision": "REJECT",
                 "reason_code": "PROMPT_BUILD_FAILED", "request_id": request_id,
-                "narrative": "……嗯，蓝这边有点小状况，等一下再来找我好不好？",
+                "narrative": resolve_prompt_template_text("chat_agent.minimal_fallback.prompt_build_failed"),
             })
             return
 
@@ -1398,7 +1346,12 @@ async def chat_agent_sse_generator(
                 response_policy=response_policy,
                 prompt_runtime_payload=prompt_runtime_payload,
             )
-            return _apply_response_policy_hard_guard(fallback_narrative, response_policy)
+            return _apply_response_policy_hard_guard(
+                fallback_narrative,
+                response_policy,
+                user_message=user_message,
+                bond_stage=str((bond_summary or {}).get("stage") or ""),
+            )
 
         if llm_runtime is None:
             try:
@@ -1584,7 +1537,12 @@ async def chat_agent_sse_generator(
                 response_policy=response_policy,
                 prompt_runtime_payload=prompt_runtime_payload,
             )
-            full_text = _apply_response_policy_hard_guard(full_text, response_policy)
+            full_text = _apply_response_policy_hard_guard(
+                full_text,
+                response_policy,
+                user_message=user_message,
+                bond_stage=str((bond_summary or {}).get("stage") or ""),
+            )
             if not buffer_stream:
                 visible_fallback = _apply_response_policy_stream_guard(full_text, response_policy)
                 yield _sse({"phase": "RENDER", "chunk": visible_fallback})
@@ -1635,7 +1593,12 @@ async def chat_agent_sse_generator(
             render_lang=render_target_lang,
             allow_rewrite=buffer_stream,
         )
-        narrative = _apply_response_policy_hard_guard(narrative, response_policy)
+        narrative = _apply_response_policy_hard_guard(
+            narrative,
+            response_policy,
+            user_message=user_message,
+            bond_stage=str((bond_summary or {}).get("stage") or ""),
+        )
 
         if buffer_stream and narrative:
             rendered_text = narrative
@@ -1678,7 +1641,12 @@ async def chat_agent_sse_generator(
     # ── 6. 出口净化 ──────────────────────────────────────────────────
     narrative = _strip_internal_delegate_markers(narrative)
     narrative = _airlock_sanitize_output(narrative)
-    narrative = _apply_response_policy_hard_guard(narrative, response_policy)
+    narrative = _apply_response_policy_hard_guard(
+        narrative,
+        response_policy,
+        user_message=user_message,
+        bond_stage=str((bond_summary or {}).get("stage") or ""),
+    )
 
     # PII 出口检查
     _pii_egress_stats: dict[str, Any] = {}
@@ -1687,7 +1655,12 @@ async def chat_agent_sse_generator(
         if _check_channel("EGRESS"):
             _pii_eg = pii_scrub_text(narrative, context="egress")
             narrative = _pii_eg.scrubbed_text
-            narrative = _apply_response_policy_hard_guard(narrative, response_policy)
+            narrative = _apply_response_policy_hard_guard(
+                narrative,
+                response_policy,
+                user_message=user_message,
+                bond_stage=str((bond_summary or {}).get("stage") or ""),
+            )
             if _pii_eg.has_pii:
                 _pii_egress_stats = {
                     "detections": _pii_eg.total_detections,

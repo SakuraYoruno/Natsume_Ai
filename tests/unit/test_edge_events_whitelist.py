@@ -226,3 +226,75 @@ def test_edge_events_placeholder_asr_text_skips_bridge_candidate(monkeypatch: py
 
     assert response.accepted == 1
     assert scheduled == []
+
+
+def test_schedule_edge_asr_bridge_allows_same_text_with_new_seq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduled: list[object] = []
+
+    class _LoopStub:
+        def create_task(self, coro):  # noqa: ANN001
+            scheduled.append(coro)
+            coro.close()
+            return object()
+
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", "15000")
+    monkeypatch.setattr(system_handler.asyncio, "get_running_loop", lambda: _LoopStub())
+    system_handler._EDGE_ASR_BRIDGE_RECENT.clear()
+    system_handler._EDGE_ASR_BRIDGE_LAST_TEXT.clear()
+
+    system_handler._schedule_edge_asr_bridge(
+        candidate={
+            "request_id": "req-a",
+            "session_id": "sess-a",
+            "text": "哥哥,现在测试真实采集",
+            "ts_ms": 1000,
+            "payload": {"text": "哥哥,现在测试真实采集", "seq": 1, "is_final": True},
+        },
+        logger=_LedgerStub(),
+    )
+    system_handler._schedule_edge_asr_bridge(
+        candidate={
+            "request_id": "req-b",
+            "session_id": "sess-a",
+            "text": "哥哥,现在测试真实采集",
+            "ts_ms": 2500,
+            "payload": {"text": "哥哥,现在测试真实采集", "seq": 2, "is_final": True},
+        },
+        logger=_LedgerStub(),
+    )
+
+    assert len(scheduled) == 2
+
+
+def test_schedule_edge_asr_bridge_dedups_same_text_same_seq(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduled: list[object] = []
+
+    class _LoopStub:
+        def create_task(self, coro):  # noqa: ANN001
+            scheduled.append(coro)
+            coro.close()
+            return object()
+
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_DEDUP_WINDOW_MS", "15000")
+    monkeypatch.setattr(system_handler.asyncio, "get_running_loop", lambda: _LoopStub())
+    system_handler._EDGE_ASR_BRIDGE_RECENT.clear()
+    system_handler._EDGE_ASR_BRIDGE_LAST_TEXT.clear()
+
+    candidate = {
+        "request_id": "req-same",
+        "session_id": "sess-same",
+        "text": "哥哥,现在测试真实采集",
+        "ts_ms": 1000,
+        "payload": {"text": "哥哥,现在测试真实采集", "seq": 3, "is_final": True},
+    }
+    system_handler._schedule_edge_asr_bridge(candidate=candidate, logger=_LedgerStub())
+    system_handler._schedule_edge_asr_bridge(
+        candidate={**candidate, "request_id": "req-same-2", "ts_ms": 1800},
+        logger=_LedgerStub(),
+    )
+
+    assert len(scheduled) == 1

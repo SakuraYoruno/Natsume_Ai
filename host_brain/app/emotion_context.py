@@ -16,6 +16,7 @@ import threading
 import time
 from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.core.metabolism import (
     build_governance_snapshot,
     build_hard_snapshot,
@@ -65,6 +66,33 @@ _global_prev_emotion_tag: str | None = None
 
 # 方向 D：上次日记写入时间戳（ms），防止频繁写入
 _last_diary_flush_ts: int = 0
+
+
+def _load_profile_hint_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("emotion_context.user_profile_hints")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _load_inner_monologue_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("emotion_context.inner_monologue_texts")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, str]:
+    raw = mapping.get(key)
+    if isinstance(raw, Mapping):
+        return {str(k): str(v) for k, v in raw.items()}
+    return {}
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 
 def get_emotion_timeline() -> EmotionTimeline:
@@ -372,42 +400,44 @@ def _vector_to_inner_monologue(v: EmotionVector) -> str:
     替代原来机械的 4 种 style_hint 模板。
     """
     val, aro, dom = v.valence, v.arousal, v.dominance
+    templates = _load_inner_monologue_templates()
+    case_templates = _mapping_section(templates, "cases")
 
     # 高正面 + 高唤醒：兴奋/雀跃
     if val > 0.6 and aro > 0.6:
-        return "现在心里特别开心，有种想要分享一切的冲动"
+        return str(case_templates.get("high_positive_high_arousal") or "现在心里特别开心，有种想要分享一切的冲动")
     # 高正面 + 低唤醒：温暖/安心
     if val > 0.5 and aro < 0.3:
-        return "心里暖暖的，感觉很安心，这种平静的幸福感真好"
+        return str(case_templates.get("high_positive_low_arousal") or "心里暖暖的，感觉很安心，这种平静的幸福感真好")
     # 中正面 + 中唤醒：小雀跃
     if val > 0.3 and aro > 0.3:
-        return "心情不错，有些小雀跃，想和对方多聊聊"
+        return str(case_templates.get("mid_positive_mid_arousal") or "心情不错，有些小雀跃，想和对方多聊聊")
     # 中正面 + 低唤醒：恬淡满足
     if val > 0.2 and aro <= 0.0:
-        return "很舒服的状态，不需要太多言语，安静待着也很好"
+        return str(case_templates.get("mid_positive_low_arousal") or "很舒服的状态，不需要太多言语，安静待着也很好")
     # 高负面 + 高唤醒：难受但克制
     if val < -0.5 and aro > 0.5:
-        return "心里有些难受，但还在努力消化这种感觉，不想让对方担心"
+        return str(case_templates.get("high_negative_high_arousal") or "心里有些难受，但还在努力消化这种感觉，不想让对方担心")
     # 高负面 + 低唤醒：低落沉默
     if val < -0.5 and aro < 0.0:
-        return "有点低落，不太想说话，只想安静待一会儿"
+        return str(case_templates.get("high_negative_low_arousal") or "有点低落，不太想说话，只想安静待一会儿")
     # 中负面：有点沉
     if val < -0.3:
-        return "心情有点沉，不过还好，也许聊聊会好一些"
+        return str(case_templates.get("mid_negative") or "心情有点沉，不过还好，也许聊聊会好一些")
     # 高唤醒 + 中性效价：紧张/期待
     if aro > 0.5 and abs(val) < 0.3:
-        return "有些紧张，心跳比平时快一些，不知道在期待什么"
+        return str(case_templates.get("high_arousal_neutral_valence") or "有些紧张，心跳比平时快一些，不知道在期待什么")
     # 低唤醒 + 中性效价：平静如水
     if aro < -0.3 and abs(val) < 0.3:
-        return "很平静，像水面一样，思绪慢慢地流淌"
+        return str(case_templates.get("low_arousal_neutral_valence") or "很平静，像水面一样，思绪慢慢地流淌")
     # 高支配感：自信/掌控
     if dom > 0.4:
-        return "状态不错，心里很有底，知道自己在做什么"
+        return str(case_templates.get("high_dominance") or "状态不错，心里很有底，知道自己在做什么")
     # 低支配感：柔软/顺从
     if dom < -0.3:
-        return "心态比较柔软，愿意倾听和配合对方"
+        return str(case_templates.get("low_dominance") or "心态比较柔软，愿意倾听和配合对方")
     # 默认：平稳自然
-    return "状态还不错，心里很平稳，可以自然地聊下去"
+    return str(templates.get("default") or "状态还不错，心里很平稳，可以自然地聊下去")
 
 
 def _coerce_non_negative_int(value: Any, *, default: int) -> int:
@@ -599,15 +629,41 @@ class UserEmotionProfile:
         """将用户情感画像转为自然语言提示。"""
         from host_brain.core.emotion_constants import EMOTION_TAG_ZH as _EMOTION_ZH  # noqa: PLC0415
 
+        templates = _load_profile_hint_templates()
+        tone_templates = _mapping_section(templates, "tone")
+        emotion_templates = _mapping_section(templates, "emotion_frequency")
+        volatility_templates = _mapping_section(templates, "volatility")
+        output_templates = _mapping_section(templates, "output")
         parts: list[str] = []
 
         # 整体基调
         if avg_valence > 0.3:
-            parts.append("这位用户总体上是一个比较积极乐观的人")
+            parts.append(
+                str(
+                    tone_templates.get(
+                        "positive",
+                        "这位用户总体上是一个比较积极乐观的人",
+                    )
+                )
+            )
         elif avg_valence < -0.3:
-            parts.append("这位用户似乎最近心情不太好，需要更多温暖和关心")
+            parts.append(
+                str(
+                    tone_templates.get(
+                        "negative",
+                        "这位用户似乎最近心情不太好，需要更多温暖和关心",
+                    )
+                )
+            )
         else:
-            parts.append("这位用户的情绪比较平稳")
+            parts.append(
+                str(
+                    tone_templates.get(
+                        "neutral",
+                        "这位用户的情绪比较平稳",
+                    )
+                )
+            )
 
         # 常见情感
         if top_emotions:
@@ -615,17 +671,51 @@ class UserEmotionProfile:
             top_zh = _EMOTION_ZH.get(top_tag, top_tag)
             ratio = top_emotions[0].get("ratio", 0)
             if ratio > 0.5:
-                parts.append(f"大部分时候处于{top_zh}的状态")
+                parts.append(
+                    _format_template_text(
+                        emotion_templates.get(
+                            "dominant",
+                            "大部分时候处于{emotion}的状态",
+                        ),
+                        emotion=top_zh,
+                    )
+                )
             elif ratio > 0.3:
-                parts.append(f"经常处于{top_zh}的状态")
+                parts.append(
+                    _format_template_text(
+                        emotion_templates.get(
+                            "frequent",
+                            "经常处于{emotion}的状态",
+                        ),
+                        emotion=top_zh,
+                    )
+                )
 
         # 波动性
         if volatility > 0.5:
-            parts.append("情绪变化比较大，对情感话题可能比较敏感")
+            parts.append(
+                str(
+                    volatility_templates.get(
+                        "high",
+                        "情绪变化比较大，对情感话题可能比较敏感",
+                    )
+                )
+            )
         elif volatility < 0.2:
-            parts.append("情绪很稳定")
+            parts.append(
+                str(
+                    volatility_templates.get(
+                        "low",
+                        "情绪很稳定",
+                    )
+                )
+            )
 
-        return "，".join(parts) + "。" if parts else ""
+        if not parts:
+            return ""
+        joiner = str(output_templates.get("joiner", "，"))
+        suffix = str(output_templates.get("suffix", "。"))
+        return joiner.join(parts) + suffix
 
 
 # 全局用户情感画像单例

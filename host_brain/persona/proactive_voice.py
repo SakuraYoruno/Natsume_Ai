@@ -32,7 +32,9 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 from host_brain.persona.offline_continuity import (
     classify_absence_band_from_duration_ms,
@@ -41,6 +43,36 @@ from host_brain.persona.offline_continuity import (
 )
 
 _logger = logging.getLogger("Natsume.proactive_voice")
+
+
+def _load_template_json(template_id: str, *, fallback: Any) -> Any:
+    try:
+        raw = resolve_prompt_template_json_merged(template_id)
+    except Exception:
+        return fallback
+    if raw is None:
+        return fallback
+    if isinstance(fallback, Mapping):
+        return raw if isinstance(raw, Mapping) else fallback
+    if isinstance(fallback, list):
+        return raw if isinstance(raw, list) else fallback
+    return raw
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +442,31 @@ _REUNION_TEMPLATES: dict[str, dict[str, list[str]]] = {
     },
 }
 
+_DEFAULT_RUNTIME_TEXTS: dict[str, str] = {
+    "guarded_soften_followup": "忽然想起你之前提过的{topic_label}，如果你现在愿意聊的话，可以慢慢说。",
+    "guarded_soften_post_intense": "我还记着你刚刚那阵情绪，如果现在不想展开也没关系，我在。",
+    "guarded_soften_reconnect": "这阵子没见到你，只是想轻轻确认你还好，不急着解释。",
+    "guarded_soften_late_night": "这么晚了，如果你只是想安静待一会儿也没关系，我陪着。",
+    "resonance_followup": "突然想起我们之前说到的{topic_label}，后来有新进展吗？我还惦记着。",
+    "warm_followup": "突然想起你之前提过的{topic_label}，后来有新进展吗？",
+    "resonance_reconnect": "这几天没见到你，想起我们之前接住过的话题，所以想来把这句关心接上。",
+    "warm_reconnect": "这几天没见到你，忽然想起我们之前聊过的事，就想来接一下你。",
+    "resonance_aftercare": "刚刚那阵情绪我还惦记着，所以想顺着我们之前接住彼此的方式来陪你一下。",
+    "warm_aftercare": "刚刚那阵情绪我还记着，所以想轻轻来接一下你。",
+    "wakeup_gentle_morning": "醒啦？先慢慢清醒一下，我在。",
+    "gaming_companion_followup": "你先专心打，等你这局打完再和我说说{topic_label}？",
+    "gaming_exit_soft_reconnect": "刚从游戏里出来的话就先缓一缓，我只是想轻轻接你一下。",
+    "trait_default": "默认风格",
+    "trait_warm": "高温柔度和敏感度→温暖关心风格",
+    "trait_playful": "高俏皮度和幽默感→轻松俏皮风格",
+    "trait_caring": "高温柔度→关怀体贴风格",
+    "trait_balanced": "均衡人格→自然风格",
+    "trait_fallback": "自然风格",
+    "default_topic_label": "那件事",
+    "generic_default_reply": "你好～",
+    "holiday_generic_default": "节日快乐",
+}
+
 _DEEP_REUNION_TEMPLATES: dict[str, dict[str, list[str]]] = {
     "shallow": {
         "warm": ["隔了更久才又见到你，欢迎回来，希望你这段时间都还安稳。"],
@@ -664,6 +721,16 @@ _MORNING_GREET_TEMPLATES: dict[str, dict[str, dict[str, list[str]]]] = {
             "default": ["早上好，冬天来了，注意保暖哦"],
         },
     },
+}
+
+_DEFAULT_SCENE_TEMPLATES: dict[str, Any] = {
+    "late_night": _LATE_NIGHT_TEMPLATES,
+    "long_absent": _LONG_ABSENT_TEMPLATES,
+    "light_reconnect": _LIGHT_RECONNECT_TEMPLATES,
+    "reunion": _REUNION_TEMPLATES,
+    "deep_reunion": _DEEP_REUNION_TEMPLATES,
+    "post_intense": _POST_INTENSE_TEMPLATES,
+    "topic_followup": _TOPIC_FOLLOWUP_TEMPLATES,
 }
 
 
@@ -1183,6 +1250,10 @@ class PersonaProactiveVoice:
     ) -> tuple[str, str]:
         resolved_content = str(content or "").strip()
         memory = _coerce_memory_persona_signal(memory_persona_signal)
+        runtime_texts = _load_template_json(
+            "proactive_voice.runtime_texts",
+            fallback=_DEFAULT_RUNTIME_TEXTS,
+        )
         if not resolved_content or not memory:
             return resolved_content, ""
 
@@ -1212,22 +1283,35 @@ class PersonaProactiveVoice:
             if scene_type == SCENE_TOPIC_FOLLOWUP:
                 topic_label = self._extract_topic_label(ctx)
                 return (
-                    f"忽然想起你之前提过的{topic_label}，如果你现在愿意聊的话，可以慢慢说。",
+                    _mapping_text(
+                        runtime_texts,
+                        "guarded_soften_followup",
+                        topic_label=topic_label,
+                    ),
                     "memory:guarded_soften_followup",
                 )
             if scene_type == SCENE_POST_INTENSE:
                 return (
-                    "我还记着你刚刚那阵情绪，如果现在不想展开也没关系，我在。",
+                    _mapping_text(
+                        runtime_texts,
+                        "guarded_soften_post_intense",
+                    ),
                     "memory:guarded_soften_post_intense",
                 )
             if scene_type == SCENE_LONG_ABSENT:
                 return (
-                    "这阵子没见到你，只是想轻轻确认你还好，不急着解释。",
+                    _mapping_text(
+                        runtime_texts,
+                        "guarded_soften_reconnect",
+                    ),
                     "memory:guarded_soften_reconnect",
                 )
             if scene_type == SCENE_LATE_NIGHT:
                 return (
-                    "这么晚了，如果你只是想安静待一会儿也没关系，我陪着。",
+                    _mapping_text(
+                        runtime_texts,
+                        "guarded_soften_late_night",
+                    ),
                     "memory:guarded_soften_late_night",
                 )
 
@@ -1242,31 +1326,51 @@ class PersonaProactiveVoice:
                 topic_label = self._extract_topic_label(ctx)
                 if shared_history_resonance_count > 0:
                     return (
-                        f"突然想起我们之前说到的{topic_label}，后来有新进展吗？我还惦记着。",
+                        _mapping_text(
+                            runtime_texts,
+                            "resonance_followup",
+                            topic_label=topic_label,
+                        ),
                         f"memory:resonance_followup={dominant_emotion or 'NEUTRAL'}",
                     )
                 return (
-                    f"突然想起你之前提过的{topic_label}，后来有新进展吗？",
+                    _mapping_text(
+                        runtime_texts,
+                        "warm_followup",
+                        topic_label=topic_label,
+                    ),
                     f"memory:warm_followup={dominant_emotion}",
                 )
             if scene_type == SCENE_LONG_ABSENT:
                 if shared_history_resonance_count > 0:
                     return (
-                        "这几天没见到你，想起我们之前接住过的话题，所以想来把这句关心接上。",
+                        _mapping_text(
+                            runtime_texts,
+                            "resonance_reconnect",
+                        ),
                         f"memory:resonance_reconnect={dominant_emotion or 'NEUTRAL'}",
                     )
                 return (
-                    "这几天没见到你，忽然想起我们之前聊过的事，就想来接一下你。",
+                    _mapping_text(
+                        runtime_texts,
+                        "warm_reconnect",
+                    ),
                     f"memory:warm_reconnect={dominant_emotion}",
                 )
             if scene_type == SCENE_POST_INTENSE:
                 if shared_history_resonance_count > 0:
                     return (
-                        "刚刚那阵情绪我还惦记着，所以想顺着我们之前接住彼此的方式来陪你一下。",
+                        _mapping_text(
+                            runtime_texts,
+                            "resonance_aftercare",
+                        ),
                         f"memory:resonance_aftercare={dominant_emotion or 'NEUTRAL'}",
                     )
                 return (
-                    "刚刚那阵情绪我还记着，所以想轻轻来接一下你。",
+                    _mapping_text(
+                        runtime_texts,
+                        "warm_aftercare",
+                    ),
                     f"memory:warm_aftercare={dominant_emotion}",
                 )
 
@@ -1416,6 +1520,10 @@ class PersonaProactiveVoice:
         ctx: dict[str, Any],
     ) -> tuple[str, str]:
         resolved_content = str(content or "").strip()
+        runtime_texts = _load_template_json(
+            "proactive_voice.runtime_texts",
+            fallback=_DEFAULT_RUNTIME_TEXTS,
+        )
         if not resolved_content:
             return resolved_content, ""
 
@@ -1428,14 +1536,33 @@ class PersonaProactiveVoice:
         is_gaming = bool(activity_monitor.get("is_gaming"))
 
         if recent_event_type == "wakeup" and recent_event_age_s <= 600.0 and scene_type == SCENE_MORNING_GREET:
-            return "醒啦？先慢慢清醒一下，我在。", "activity:wakeup_gentle_morning"
+            return (
+                _mapping_text(
+                    runtime_texts,
+                    "wakeup_gentle_morning",
+                ),
+                "activity:wakeup_gentle_morning",
+            )
 
         if (is_gaming or recent_event_type == "gaming_detected") and scene_type == SCENE_TOPIC_FOLLOWUP:
             topic_label = self._extract_topic_label(ctx)
-            return f"你先专心打，等你这局打完再和我说说{topic_label}？", "activity:gaming_companion_followup"
+            return (
+                _mapping_text(
+                    runtime_texts,
+                    "gaming_companion_followup",
+                    topic_label=topic_label,
+                ),
+                "activity:gaming_companion_followup",
+            )
 
         if recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0 and scene_type == SCENE_LONG_ABSENT:
-            return "刚从游戏里出来的话就先缓一缓，我只是想轻轻接你一下。", "activity:gaming_exit_soft_reconnect"
+            return (
+                _mapping_text(
+                    runtime_texts,
+                    "gaming_exit_soft_reconnect",
+                ),
+                "activity:gaming_exit_soft_reconnect",
+            )
 
         return resolved_content, ""
 
@@ -1561,12 +1688,28 @@ class PersonaProactiveVoice:
         """获取表达模板（支持 bond_stage 分层、离线时长感知、季节感知、节日专属）。"""
         seed = _day_seed(now_ts)
         depth = _get_bond_depth(bond_stage)
+        runtime_texts = _load_template_json(
+            "proactive_voice.runtime_texts",
+            fallback=_DEFAULT_RUNTIME_TEXTS,
+        )
+        scene_templates = _load_template_json(
+            "proactive_voice.scene_templates",
+            fallback=_DEFAULT_SCENE_TEMPLATES,
+        )
+        late_night_templates = scene_templates.get("late_night") if isinstance(scene_templates, Mapping) else None
+        long_absent_templates = scene_templates.get("long_absent") if isinstance(scene_templates, Mapping) else None
+        light_reconnect_templates = scene_templates.get("light_reconnect") if isinstance(scene_templates, Mapping) else None
+        reunion_templates = scene_templates.get("reunion") if isinstance(scene_templates, Mapping) else None
+        deep_reunion_templates = scene_templates.get("deep_reunion") if isinstance(scene_templates, Mapping) else None
+        post_intense_templates = scene_templates.get("post_intense") if isinstance(scene_templates, Mapping) else None
+        topic_followup_templates = scene_templates.get("topic_followup") if isinstance(scene_templates, Mapping) else None
 
         if scene_type == SCENE_HOLIDAY_GREET:
             return self._get_holiday_template(ctx, style, seed)
 
         elif scene_type == SCENE_LATE_NIGHT:
-            depth_templates = _LATE_NIGHT_TEMPLATES.get(depth, _LATE_NIGHT_TEMPLATES["mid"])
+            late_night_source = late_night_templates if isinstance(late_night_templates, Mapping) else _LATE_NIGHT_TEMPLATES
+            depth_templates = late_night_source.get(depth, _LATE_NIGHT_TEMPLATES["mid"])
             variants = depth_templates.get(style) or depth_templates.get("default", ["这么晚了，注意休息哦"])
             return _pick_variant(variants, seed)
 
@@ -1576,18 +1719,23 @@ class PersonaProactiveVoice:
             behavior = str(ctx.get("_long_absent_behavior") or "").strip() or "light_reconnect"
             template_depth = str(ctx.get("_long_absent_template_depth") or depth).strip() or depth
             if behavior == "deep_reunion":
-                behavior_templates = _DEEP_REUNION_TEMPLATES
+                behavior_templates = (
+                    deep_reunion_templates if isinstance(deep_reunion_templates, Mapping) else _DEEP_REUNION_TEMPLATES
+                )
             elif behavior == "reunion":
-                behavior_templates = _REUNION_TEMPLATES
+                behavior_templates = reunion_templates if isinstance(reunion_templates, Mapping) else _REUNION_TEMPLATES
             else:
-                behavior_templates = _LIGHT_RECONNECT_TEMPLATES
+                behavior_templates = (
+                    light_reconnect_templates if isinstance(light_reconnect_templates, Mapping) else _LIGHT_RECONNECT_TEMPLATES
+                )
 
             depth_templates = behavior_templates.get(template_depth, behavior_templates.get(depth, behavior_templates.get("mid", {})))
             variants = depth_templates.get(style) or depth_templates.get("default", [])
             if variants:
                 return _pick_variant(variants, seed)
 
-            level_templates = _LONG_ABSENT_TEMPLATES.get(level, _LONG_ABSENT_TEMPLATES["short"])
+            long_absent_source = long_absent_templates if isinstance(long_absent_templates, Mapping) else _LONG_ABSENT_TEMPLATES
+            level_templates = long_absent_source.get(level, _LONG_ABSENT_TEMPLATES["short"])
             depth_templates = level_templates.get(depth, level_templates.get("mid", {}))
             loneliness = float(ctx.get("_loneliness_value") or 0.0)
             variants = depth_templates.get(style) or depth_templates.get("default", ["好久不见，你还好吗"])
@@ -1597,12 +1745,16 @@ class PersonaProactiveVoice:
             return _pick_variant(variants, seed)
 
         elif scene_type == SCENE_POST_INTENSE:
-            depth_templates = _POST_INTENSE_TEMPLATES.get(depth, _POST_INTENSE_TEMPLATES["mid"])
+            post_intense_source = post_intense_templates if isinstance(post_intense_templates, Mapping) else _POST_INTENSE_TEMPLATES
+            depth_templates = post_intense_source.get(depth, _POST_INTENSE_TEMPLATES["mid"])
             variants = depth_templates.get(style) or depth_templates.get("default", ["昨天的对话很有意义呢"])
             return _pick_variant(variants, seed)
 
         elif scene_type == SCENE_TOPIC_FOLLOWUP:
-            depth_templates = _TOPIC_FOLLOWUP_TEMPLATES.get(depth, _TOPIC_FOLLOWUP_TEMPLATES["mid"])
+            topic_followup_source = (
+                topic_followup_templates if isinstance(topic_followup_templates, Mapping) else _TOPIC_FOLLOWUP_TEMPLATES
+            )
+            depth_templates = topic_followup_source.get(depth, _TOPIC_FOLLOWUP_TEMPLATES["mid"])
             variants = depth_templates.get(style) or depth_templates.get("default", ["对了，之前你提到{topic}，后来怎么样了"])
             raw = _pick_variant(variants, seed)
             # 从 context 中取第一个有效话题标签填充模板
@@ -1610,28 +1762,56 @@ class PersonaProactiveVoice:
             return raw.replace("{topic}", topic_label)
 
         elif scene_type == SCENE_MORNING_GREET:
+            morning_data = _load_template_json(
+                "proactive_voice.morning_greet_templates",
+                fallback=_MORNING_GREET_TEMPLATES,
+            )
             dt = datetime.datetime.fromtimestamp(now_ts / 1000)
             season = _get_season(dt.month)
-            season_templates = _MORNING_GREET_TEMPLATES.get(season, _MORNING_GREET_TEMPLATES["spring"])
+            season_source = morning_data if isinstance(morning_data, Mapping) else _MORNING_GREET_TEMPLATES
+            season_templates = season_source.get(season, _MORNING_GREET_TEMPLATES["spring"])
             depth_templates = season_templates.get(depth, season_templates.get("mid", {}))
             variants = depth_templates.get(style) or depth_templates.get("default", ["早上好～"])
             return _pick_variant(variants, seed)
 
-        return "你好～"
+        return _mapping_text(
+            runtime_texts,
+            "generic_default_reply",
+        )
 
     def _get_holiday_template(self, ctx: dict[str, Any], style: str, seed: int) -> str:
         """获取节日专属文案。"""
+        holiday_data = _load_template_json(
+            "proactive_voice.holiday_templates",
+            fallback={"special": _HOLIDAY_SPECIAL, "default": _HOLIDAY_DEFAULT},
+        )
+        special_mapping = holiday_data.get("special") if isinstance(holiday_data, Mapping) else None
+        default_mapping = holiday_data.get("default") if isinstance(holiday_data, Mapping) else None
+        special_templates = special_mapping if isinstance(special_mapping, Mapping) else _HOLIDAY_SPECIAL
+        default_templates = default_mapping if isinstance(default_mapping, Mapping) else _HOLIDAY_DEFAULT
+        runtime_texts = _load_template_json(
+            "proactive_voice.runtime_texts",
+            fallback=_DEFAULT_RUNTIME_TEXTS,
+        )
         holiday_name = str(ctx.get("holiday_name") or "").strip()
 
         # 尝试匹配专属节日
-        for key in _HOLIDAY_SPECIAL:
+        for key in special_templates:
             if key in holiday_name or holiday_name in key:
-                style_variants = _HOLIDAY_SPECIAL[key].get(style) or _HOLIDAY_SPECIAL[key].get("warm", [])
+                style_variants = special_templates[key].get(style) or special_templates[key].get("warm", [])
                 if style_variants:
                     return _pick_variant(style_variants, seed)
 
         # 默认节日文案
-        default_variants = _HOLIDAY_DEFAULT.get(style) or _HOLIDAY_DEFAULT.get("warm", ["节日快乐"])
+        default_variants = default_templates.get(style) or default_templates.get(
+            "warm",
+            [
+                _mapping_text(
+                    runtime_texts,
+                    "holiday_generic_default",
+                )
+            ],
+        )
         content = _pick_variant(default_variants, seed)
 
         # 替换节日名称
@@ -1644,13 +1824,20 @@ class PersonaProactiveVoice:
     @staticmethod
     def _extract_topic_label(ctx: dict[str, Any]) -> str:
         """从 context 的 pending_followup_topics 中提取第一个有效话题标签。"""
+        runtime_texts = _load_template_json(
+            "proactive_voice.runtime_texts",
+            fallback=_DEFAULT_RUNTIME_TEXTS,
+        )
         topics = ctx.get("pending_followup_topics") or []
         for t in topics:
             if isinstance(t, dict):
                 label = str(t.get("topic_label", "")).strip()
                 if label:
                     return label
-        return "那件事"
+        return _mapping_text(
+            runtime_texts,
+            "default_topic_label",
+        )
 
     def _scene_emotion(
         self,
@@ -1690,15 +1877,40 @@ class PersonaProactiveVoice:
 
     def _describe_trait_influence(self, traits: Any, style: str) -> str:
         """描述人格特质对表达风格的影响。"""
+        runtime_texts = _load_template_json(
+            "proactive_voice.runtime_texts",
+            fallback=_DEFAULT_RUNTIME_TEXTS,
+        )
         if traits is None:
-            return "默认风格"
+            return _mapping_text(
+                runtime_texts,
+                "trait_default",
+            )
         desc_map = {
-            "warm": "高温柔度和敏感度→温暖关心风格",
-            "playful": "高俏皮度和幽默感→轻松俏皮风格",
-            "caring": "高温柔度→关怀体贴风格",
-            "default": "均衡人格→自然风格",
+            "warm": _mapping_text(
+                runtime_texts,
+                "trait_warm",
+            ),
+            "playful": _mapping_text(
+                runtime_texts,
+                "trait_playful",
+            ),
+            "caring": _mapping_text(
+                runtime_texts,
+                "trait_caring",
+            ),
+            "default": _mapping_text(
+                runtime_texts,
+                "trait_balanced",
+            ),
         }
-        return desc_map.get(style, "自然风格")
+        return desc_map.get(
+            style,
+            _mapping_text(
+                runtime_texts,
+                "trait_fallback",
+            ),
+        )
 
     # ── 频率控制 ──────────────────────────────────────────────────────────
 

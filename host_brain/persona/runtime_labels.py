@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+MOOD_TREND_POSITIVE = "偏好"
+MOOD_TREND_NEGATIVE = "偏低"
+MOOD_TREND_STABLE = "平稳"
+
+MOOD_TREND_LABELS = {
+    "positive": MOOD_TREND_POSITIVE,
+    "negative": MOOD_TREND_NEGATIVE,
+    "stable": MOOD_TREND_STABLE,
+}
+
+BOND_GROWTH_CLOSER = "变亲近"
+BOND_GROWTH_DISTANT = "有些疏远"
+BOND_GROWTH_STABLE = "稳定"
+
+BOND_GROWTH_LABELS = {
+    "closer": BOND_GROWTH_CLOSER,
+    "distant": BOND_GROWTH_DISTANT,
+    "stable": BOND_GROWTH_STABLE,
+}
+
+TIME_CONTEXT_REUNION = "久别重逢"
+TIME_CONTEXT_SHORT_ABSENCE = "短暂分离"
+TIME_CONTEXT_FREQUENT_INTERACTION = "频繁互动"
+TIME_CONTEXT_SPARSE_INTERACTION = "稀少互动"
+
+TIME_CONTEXT_LABELS = {
+    "reunion": TIME_CONTEXT_REUNION,
+    "short_absence": TIME_CONTEXT_SHORT_ABSENCE,
+    "frequent_interaction": TIME_CONTEXT_FREQUENT_INTERACTION,
+    "sparse_interaction": TIME_CONTEXT_SPARSE_INTERACTION,
+}

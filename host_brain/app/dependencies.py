@@ -69,6 +69,7 @@ from host_brain.app.memory.memory_guard import MemoryGuard
 from host_brain.app.memory.state_arbiter import StateArbiter
 from host_brain.app.memory.distillation_engine import DistillationEngine
 from host_brain.app.recall.semantic_recall import SemanticRecaller
+from host_brain.app.prompt_template_store import PromptTemplateStore
 
 _logger = logging.getLogger("Natsume.dependencies")
 _EDGE_RPC_DEPENDENCY_SERVICE_IDS = (
@@ -109,6 +110,7 @@ _memory_guard: Optional[MemoryGuard] = None
 _state_arbiter: Optional[StateArbiter] = None
 _distillation_engine: Optional[DistillationEngine] = None
 _semantic_recaller: Optional[SemanticRecaller] = None
+_prompt_template_store: Optional[PromptTemplateStore] = None
 _context_compressor: Optional[Any] = None
 _emotion_timeline: Optional[Any] = None
 _bond_aware_style_engine: Optional[BondAwareStyleEngine] = None
@@ -180,6 +182,14 @@ def get_ledger() -> SQLiteLedger:
         db_path = os.environ.get("Natsume_AUDIT_DB", "host_brain/data/audit.sqlite3")
         _ledger = SQLiteLedger(db_path=db_path, check_same_thread=False)
     return _ledger
+
+
+def get_prompt_template_store() -> PromptTemplateStore:
+    global _prompt_template_store
+    ledger = get_ledger()
+    if _prompt_template_store is None or getattr(_prompt_template_store, "_ledger", None) is not ledger:
+        _prompt_template_store = PromptTemplateStore(ledger=ledger)
+    return _prompt_template_store
 
 
 def _resolve_episodic_embedding_binding() -> tuple[Any, str, str]:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 class _MockResponse:
@@ -32,6 +32,14 @@ class _MockClient:
     async def post(self, url: str, json: dict | None = None, timeout: float | None = None):
         self.posts.append((url, json, timeout))
         return _MockResponse(status_code=200, payload={"done": True})
+
+
+class _FailOnUnexpectedHttpClient:
+    async def get(self, url: str, timeout: float | None = None):
+        raise AssertionError(f"unexpected http GET: {url}")
+
+    async def post(self, url: str, json: dict | None = None, timeout: float | None = None):
+        raise AssertionError(f"unexpected http POST: {url}")
 
 
 def test_probe_host_uses_lightweight_health_url() -> None:
@@ -112,3 +120,49 @@ def test_local_ollama_keepalive_flag_is_forced_off() -> None:
 
     with patch.dict("os.environ", {"HOST_LOCAL_14B_KEEPALIVE_ENABLED": "true"}, clear=False):
         assert heartbeat._is_local_ollama_keepalive_enabled() is False
+
+
+def test_probe_llm_nodes_skips_local_ollama_when_host_14b_disabled() -> None:
+    from host_brain.observability import service_health_heartbeat as heartbeat
+
+    client = _FailOnUnexpectedHttpClient()
+    with (
+        patch.object(heartbeat, "_get_http_client", return_value=client),
+        patch.object(
+            heartbeat,
+            "_probe_gemini_cloud",
+            new=AsyncMock(return_value={"status": "UP", "latency_ms": 12, "detail": "ok"}),
+        ),
+        patch.dict("os.environ", {"HOST_CHAT_HOST_14B_ENABLED": "false"}, clear=False),
+    ):
+        result = asyncio.run(heartbeat._probe_llm_nodes())
+
+    assert result["host_local_14b"]["status"] == "SKIPPED"
+    assert "HOST_CHAT_HOST_14B_ENABLED=false" in result["host_local_14b"]["detail"]
+
+
+def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
+    from host_brain.observability import service_health_heartbeat as heartbeat
+
+    client = _FailOnUnexpectedHttpClient()
+    with (
+        patch.object(heartbeat, "_get_http_client", return_value=client),
+        patch.object(
+            heartbeat,
+            "_probe_gemini_cloud",
+            new=AsyncMock(return_value={"status": "UP", "latency_ms": 12, "detail": "ok"}),
+        ),
+        patch.dict(
+            "os.environ",
+            {
+                "HOST_CHAT_HOST_14B_ENABLED": "true",
+                "HOST_CHAT_HOST_14B_PROVIDER": "openai",
+                "HOST_CHAT_HOST_14B_BASE_URL": "http://192.168.1.101:11434",
+            },
+            clear=False,
+        ),
+    ):
+        result = asyncio.run(heartbeat._probe_llm_nodes())
+
+    assert result["host_local_14b"]["status"] == "SKIPPED"
+    assert "HOST_CHAT_HOST_14B_BASE_URL=http://192.168.1.101:11434" in result["host_local_14b"]["detail"]
