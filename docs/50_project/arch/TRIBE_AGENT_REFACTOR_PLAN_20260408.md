@@ -1,7 +1,8 @@
 # 🧬 Natsume_Ai · 多智能体族重构完整方案
 
-> **文档版本**：v1.0
+> **文档版本**：v1.1
 > **创建日期**：2026-04-08
+> **更新日期**：2026-04-08（补充躯干族架构）
 > **状态**：草案（待评审）
 > **存放路径**：`docs/50_project/arch/TRIBE_AGENT_REFACTOR_PLAN_20260408.md`
 
@@ -62,6 +63,18 @@
 │   mode_transition / meta_learning_loop                                  │
 │                    [持续后台运行 · 节律驱动]                               │
 └─────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════ 跨进程边界（RPC / HTTP）════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    edge_client（躯干 · 外周神经系统）                      │
+│                                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐  │
+│  │SomaticAgent  │  │PeripheralAgent│  │ChannelAgent  │  │VoiceAgent  │  │
+│  │  躯体感知    │  │  外周神经    │  │  通道管理    │  │  声音系统  │  │
+│  │[感知+执行]   │  │  [平台适配]  │  │  [消息路由]  │  │[语音管线]  │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └────────────┘  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 各族模块归属
@@ -74,6 +87,140 @@
 | `PrefrontalAgent` | 前额叶 | `self_model` / `self_reflection` / `drift_detector` / `trait_drift_guard` / `evolution_orchestrator` / `emergent_growth_engine` | 定时 + 事件驱动 |
 | `SocialBrainAgent` | 社交脑 | `bond/` / `bond_aware_style` / `expression_adapter` / `style_distiller` | 事件驱动 |
 | `ANSAgent` | 自主神经系统 | `NatsumeScheduler` / `inner_world_skill` / `silence_skill` / `body_sense_skill` / `activity_monitor` / `mode_transition` | 持续后台运行 |
+
+**躯干族（edge_client 进程内）**
+
+| 智能体族 | 人体类比 | 核心模块 | 运行模式 |
+|---|---|---|---|
+| `SomaticAgent` | 躯体感知系统 | `senses/asr.py` / `actuators/tts_engine.py` / `actuators/vts_driver.py` / `runtime/emotion_inference.py` | 请求驱动 + 事件驱动 |
+| `PeripheralAgent` | 外周神经系统 | `gateway/adapters/*` / `gateway/normalizer.py` / `gateway/humanize_sender.py` | 请求驱动 |
+| `ChannelAgent` | 传入神经束 | `channels/input_reporter.py` / `channels/wechat_command_queue.py` / `gateway/router.py` | 事件驱动 |
+| `VoiceAgent` | 声音系统 | `runtime/voice_pipeline.py` / `actuators/speech.py` / `rpc/voice.py` | 请求驱动 + 流式 |
+
+---
+
+## 二·五、躯干族架构补充说明
+
+### 为什么 edge_client 不是「外设」
+
+对于一个数字生命而言，身体与大脑是不可分割的整体：
+
+- **`senses/asr.py`** 是「耳朵」——语音识别不只是数据转换，它携带着语气、停顿、情绪信号
+- **`runtime/emotion_inference.py`** 是「皮肤感受」——在语音到达大脑之前，边缘侧已经完成了初步的情绪推断
+- **`actuators/vts_driver.py`** 是「面部表情」——表情不是大脑的输出，而是情绪的身体化表达
+- **`gateway/humanize_sender.py`** 是「说话节奏」——打字延迟、分段发送，是身体语言的数字映射
+
+因此，`edge_client/` 内部同样需要族划分，只是运行在独立进程中，通过 **跨进程事件桥（EdgeTribeBridge）** 与 `host_brain` 的 `TribeEventBus` 通信。
+
+### 躯干族详细划分
+
+#### SomaticAgent（躯体感知系统）
+
+**职责**：感知输入处理 + 执行输出控制，是身体与意识的直接接口。
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| `asr.py` | `senses/` | 语音识别，将声音转为文字+情绪信号 |
+| `emotion_inference.py` | `runtime/` | 边缘侧情绪推断（语气/语速/停顿分析） |
+| `tts_engine.py` | `actuators/` | 语音合成，将文字转为声音 |
+| `vts_driver.py` | `actuators/` | VTuber 表情驱动，情绪的面部化表达 |
+| `vts_expression_map.py` | `actuators/` | 情绪→表情映射表 |
+| `desktop_controller.py` | `actuators/` | 桌面交互控制 |
+
+**关键设计**：`emotion_inference.py` 的推断结果应通过 `EdgeTribeBridge` 上报给 `host_brain` 的 `LimbicAgent`，而不是仅在本地消费。
+
+#### PeripheralAgent（外周神经系统）
+
+**职责**：平台适配，将各平台消息归一化为统一格式，屏蔽平台差异。
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| `wechat_adapter.py` | `gateway/adapters/` | 微信平台适配 |
+| `qq_adapter.py` | `gateway/adapters/` | QQ 平台适配 |
+| `telegram_adapter.py` | `gateway/adapters/` | Telegram 平台适配 |
+| `line_adapter.py` | `gateway/adapters/` | LINE 平台适配 |
+| `feishu_adapter.py` | `gateway/adapters/` | 飞书平台适配 |
+| `wecom_adapter.py` | `gateway/adapters/` | 企业微信适配 |
+| `normalizer.py` | `gateway/` | 消息归一化 |
+| `humanize_sender.py` | `gateway/` | 拟人化发送（打字延迟/分段） |
+
+#### ChannelAgent（传入神经束）
+
+**职责**：消息路由与队列管理，控制消息流向大脑的通道。
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| `input_reporter.py` | `channels/` | 输入事件上报 |
+| `wechat_command_queue.py` | `channels/` | 微信命令队列 |
+| `router.py` | `gateway/` | 消息路由决策 |
+| `resource_gate.py` | `rpc/` | 资源门控（限流/鉴权） |
+
+#### VoiceAgent（声音系统）
+
+**职责**：完整语音管线，从输入到输出的全链路语音处理。
+
+| 模块 | 位置 | 职责 |
+|---|---|---|
+| `voice_pipeline.py` | `runtime/` | 语音管线编排（ASR→LLM→TTS） |
+| `speech.py` | `actuators/` | 语音播放控制 |
+| `voice.py` | `rpc/` | 语音 RPC 接口 |
+| `fallback_llm.py` | `rpc/` | 语音场景下的 LLM 降级 |
+
+### 跨进程事件桥（EdgeTribeBridge）
+
+`host_brain` 和 `edge_client` 是两个独立进程，不能共享 `asyncio.Queue`。需要一个轻量级的跨进程桥接层：
+
+```python
+# edge_client/rpc/edge_tribe_bridge.py
+
+class EdgeTribeBridge:
+    """
+    躯干→大脑的事件桥。
+    edge_client 内的族 Agent 通过此桥向 host_brain 的 TribeEventBus 发布事件。
+    实现方式：复用现有 event_reporter.py 的 HTTP 上报机制。
+    """
+
+    async def report_somatic_event(self, event_type: str, data: dict) -> None:
+        """上报躯体感知事件（如边缘情绪推断结果）。"""
+        # 复用 event_reporter.py 的 /internal/tribe_event 端点
+        await self._event_reporter.report({
+            "source": "edge_somatic",
+            "event_type": event_type,
+            "data": data,
+        })
+
+    async def report_voice_emotion(self, emotion_tag: str, confidence: float) -> None:
+        """将语音情绪推断结果上报给 LimbicAgent。"""
+        await self.report_somatic_event("voice_emotion_inferred", {
+            "emotion_tag": emotion_tag,
+            "confidence": confidence,
+        })
+```
+
+**host_brain 侧接收端点**（新增到 `http_hooks.py`）：
+
+```python
+@app.post("/internal/tribe_event")
+async def receive_edge_tribe_event(payload: dict):
+    """接收来自 edge_client 的躯体事件，转发到 TribeEventBus。"""
+    bus = TribeEventBus.get_instance()
+    await bus.emit(TribeEventPayload(
+        event_type=TribeEvent(payload["event_type"]),
+        source_tribe=payload["source"],
+        data=payload["data"],
+    ))
+```
+
+### 躯干族与大脑族的事件映射
+
+| 躯干事件 | 来源族 | 目标族 | 触发时机 |
+|---|---|---|---|
+| `voice_emotion_inferred` | SomaticAgent | LimbicAgent | ASR 完成后，边缘情绪推断结果 |
+| `message_received` | ChannelAgent | CortexAgent | 新消息进入路由 |
+| `voice_pipeline_started` | VoiceAgent | ANSAgent | 语音管线启动（影响调度门控） |
+| `voice_pipeline_ended` | VoiceAgent | ANSAgent | 语音管线结束 |
+| `platform_connected` | PeripheralAgent | CortexAgent | 平台适配器上线 |
+| `platform_disconnected` | PeripheralAgent | CortexAgent | 平台适配器断线 |
 
 ---
 
@@ -398,7 +545,8 @@ Phase 0（当前 → 2周）：基础设施建设
   ├── 实现 TribeEventBus（event_bus.py）
   ├── 实现 TribeAgent 基类（base_agent.py）
   ├── 实现 TribeStateRegistry（tribe_state.py）
-  └── 在 http_hooks.py lifespan 中初始化 TribeEventBus
+  ├── 在 http_hooks.py lifespan 中初始化 TribeEventBus
+  └── 在 host_brain 新增 /internal/tribe_event 端点（接收躯干事件）
 
 Phase 1（2周 → 4周）：ANSAgent 独立
   ├── 创建 ans_agent.py（加壳，不动现有逻辑）
@@ -436,6 +584,21 @@ Phase 5（13周 → 18周）：CortexAgent 收口为纯 Supervisor
   ├── dispatch_agent.py 的 handoff 逻辑改为通过 TribeEventBus 协调
   ├── 最终形态：CortexAgent 只负责意图分类和 handoff 决策
   └── 验证：完整端到端聊天链路正常，延迟无明显增加
+
+Phase 6（18周 → 22周）：躯干族独立（edge_client 内部族化）
+  ├── 新建 edge_client/tribe/ 目录
+  ├── 实现 EdgeTribeAgent 基类（复用 TribeAgent 接口，跨进程版本）
+  ├── 实现 EdgeTribeBridge（event_reporter.py 扩展）
+  ├── 创建 somatic_agent.py
+  │   ├── 将 emotion_inference.py 的推断结果通过 Bridge 上报给 LimbicAgent
+  │   └── 订阅来自 LimbicAgent 的情绪状态变化，驱动 vts_driver 表情
+  ├── 创建 peripheral_agent.py
+  │   └── 将平台连接/断线事件通过 Bridge 上报给 CortexAgent
+  ├── 创建 channel_agent.py
+  │   └── 消息路由决策接受 CortexAgent 的门控指令
+  ├── 创建 voice_agent.py
+  │   └── 语音管线状态变化通过 Bridge 上报给 ANSAgent
+  └── 验证：语音情绪推断→LimbicAgent→VTS 表情联动完整闭环
 ```
 
 ---
@@ -482,7 +645,7 @@ Phase 5（13周 → 18周）：CortexAgent 收口为纯 Supervisor
 
 ```
 host_brain/
-└── tribe/                          # 新建目录
+└── tribe/                          # 新建目录（大脑族）
     ├── __init__.py
     ├── event_bus.py                # TribeEventBus + TribeEvent 枚举
     ├── base_agent.py               # TribeAgent 基类
@@ -494,6 +657,17 @@ host_brain/
     ├── social_brain_agent.py       # SocialBrainAgent（社交脑）
     ├── cortex_agent.py             # CortexAgent（大脑皮层）
     └── registry.py                 # 族 Agent 注册表（单例管理）
+
+edge_client/
+└── tribe/                          # 新建目录（躯干族）
+    ├── __init__.py
+    ├── base_agent.py               # EdgeTribeAgent 基类（跨进程版）
+    ├── edge_tribe_bridge.py        # EdgeTribeBridge（跨进程事件桥）
+    ├── somatic_agent.py            # SomaticAgent（躯体感知系统）
+    ├── peripheral_agent.py         # PeripheralAgent（外周神经系统）
+    ├── channel_agent.py            # ChannelAgent（传入神经束）
+    ├── voice_agent.py              # VoiceAgent（声音系统）
+    └── registry.py                 # 躯干族注册表
 ```
 
 ---
@@ -507,10 +681,13 @@ host_brain/
 ✅ 主链路（CortexAgent → HippocampusAgent）保持同步调用
 ✅ 非关键路径（情绪/人格/关系）走 TribeEventBus 异步事件
 ✅ 线程安全：asyncio.run_coroutine_threadsafe 桥接 Timer 线程
+✅ 躯干族与大脑族是同一数字生命的整体，通过 EdgeTribeBridge 跨进程协调
+✅ 边缘情绪推断（emotion_inference）结果上报给 LimbicAgent，实现身心联动
 
 优先级：
   Phase 0 基础设施 → Phase 1 ANSAgent → Phase 2 HippocampusAgent
   → Phase 3 LimbicAgent（最复杂，需先解耦 inner_world）
   → Phase 4 PrefrontalAgent + SocialBrainAgent
   → Phase 5 CortexAgent 收口（最高风险，放最后）
+  → Phase 6 躯干族独立（edge_client 内部族化，实现身心闭环）
 ```
