@@ -37,6 +37,7 @@ Natsume AI 是一个具备持续人格、情感状态与长期记忆的 AI 伴�
 - 🤫 **Phase XVIII 沉默能力**：情绪驱动的回复意愿分级（NORMAL→MUTE 五级），话题抗拒映射，意愿随时间自然恢复
 - 🫀 **身体感知**：疲劳度/困倦度/孤独度三维近似具身感知，影响回复意愿与表达风格
 - 🧠 **记忆人性化**：情绪染色、时间衰减、痛苦记忆压制，三层权重融合召回
+- 🌱 **Phase XIX 涌现成长**：InteractionPatternAnalyzer 分析对话模式（话题偏好/情绪触发词/沉默触发词），EmergentGrowthEngine 每周生成成长笔记并注入 self_reflection_pulse，自然演化而非规则驱动
 - 🏗️ **Phase XV 架构**：DispatchAgent（调度）+ ChatAgent（人格渲染）分离，所有面向用户的输出必经 ChatAgent
 
 ---
@@ -77,7 +78,7 @@ graph TB
             MEM["记忆子系统<br/>Chroma 向量库 + 情节记忆图"]
             BOND["Bond 关系图谱<br/>Neo4j · 关系动力 · 里程碑追踪"]
             EMO["情感系统<br/>代谢衰减 · 持久化 · LLM 推理 · VTS 同步"]
-            PERSONA["人格子系统<br/>19 模块 · 漂移守卫 · 主动发声 · 沉默能力 · 身体感知"]
+            PERSONA["人格子系统<br/>21 模块 · 漂移守卫 · 主动发声 · 沉默能力 · 身体感知 · 涌现成长"]
             VISION["视觉子系统<br/>OCR · UI 识别 · 视觉 Agent 循环"]
             AUDIT["审计账本（SQLite）<br/>WAL · 迁移守卫 · 保留策略"]
             CHAN["通道适配<br/>Edge RPC · Gateway · VTS · TTS 路由"]
@@ -318,6 +319,7 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 | 模块 | 职责 |
 |------|------|
 | `persona_engine.py` | 人格引擎主入口 |
+
 | `personality_traits.py` | 人格特质定义 |
 | `self_model.py` | 自我模型（自我认知） |
 | `self_reflection.py` | 自我反思链（LLM 动态生成 + 模板降级，支持 style_evolution 注入） |
@@ -336,6 +338,8 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 | `inner_world.py` | **Phase XVI** 离线内心世界状态机（InnerStateClock / OfflineEmotionDrift / LonelinessAccumulator / AnticipationTracker / OfflineStateSnapshot） |
 | `emotional_silence.py` | **Phase XVIII** 情绪驱动沉默引擎（response_willingness / topic_resistance_map / NORMAL~MUTE 五级 / apply_body_sense_penalty） |
 | `body_sense.py` | **v1.12** 身体感知模型（fatigue_level / drowsiness_level / loneliness_level 三维近似具身感知） |
+| `interaction_pattern_analyzer.py` | **Phase XIX** 对话模式分析器（话题偏好 / 情绪触发词 / 沉默触发词 / 对话节奏统计） |
+| `emergent_growth_engine.py` | **Phase XIX** 涌现成长引擎（每周生成成长笔记 / get_latest_growth_note / 注入 self_reflection_pulse） |
 
 #### 🧠 `memory/` — 记忆子系统
 
@@ -428,7 +432,7 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 | `file_registry.py` | 文件技能注册 |
 | `memory_registry.py` | 记忆技能注册 |
 | `notification_registry.py` | 通知技能注册 |
-| `personality_registry.py` | 人格技能注册（inner_world_tick / silence_tick / body_sense_tick 等调度 handler） |
+| `personality_registry.py` | 人格技能注册（inner_world_tick / silence_tick / body_sense_tick / emergent_growth_weekly / emergent_growth_status 等调度 handler） |
 | `scheduler_registry.py` | 调度技能注册 |
 | `shell_registry.py` | Shell 技能注册 |
 | `system_registry.py` | 系统技能注册 |
@@ -541,7 +545,7 @@ Natsume_Ai_repo/
 │   │   ├── schemas/             # 数据类型定义
 │   │   ├── http_hooks.py        # 调度任务注册（inner_world_tick / silence_tick / body_sense_tick / gaming_companion_tick）
 │   │   └── monitor_ui/          # 监控面板前端（React + Vite）
-│   ├── persona/                 # 人格子系统（19 模块）
+│   ├── persona/                 # 人格子系统（21 模块）
 │   ├── memory/                  # 记忆子系统（Chroma + Canon）
 │   ├── retrieval/               # 检索增强（Embedding + Reranker + 5路 Recall）
 │   ├── bond/                    # 关系图谱（Neo4j）
@@ -553,7 +557,8 @@ Natsume_Ai_repo/
 │   │   ├── impl/inner_world_skill.py      # Phase XVI handler
 │   │   ├── impl/silence_skill.py          # Phase XVIII handler
 │   │   ├── impl/body_sense_skill.py       # v1.12 handler
-│   │   └── impl/gaming_companion_executor.py  # gaming 陪玩识图
+│   │   ├── impl/gaming_companion_executor.py  # gaming 陪玩识图
+│   │   └── impl/emergent_growth_skill.py       # Phase XIX 涌现成长 handler
 │   ├── channels/                # 通道适配（Edge RPC + VTS + TTS）
 │   ├── core/                    # 核心基础（服务容器 + 情感 + 模式）
 │   ├── observability/           # 可观测性
@@ -908,6 +913,7 @@ POST /v1/canon/sync
 | 沉默能力 | silence_tick / silence_conversation_start / silence_conversation_end |
 | 身体感知 | body_sense_tick / body_sense_conversation_start / body_sense_conversation_end |
 | 游戏陪玩 | gaming_companion_tick（gaming 模式下每 300s 截图 + 多模态 LLM 识图） |
+| 涌现成长 | emergent_growth_weekly（每周六 03:00 分析对话模式 + 生成成长笔记）/ emergent_growth_status（成长状态查询） |
 
 ### 📦 外部技能安装
 
