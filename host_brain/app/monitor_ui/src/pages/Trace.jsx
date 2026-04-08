@@ -16,44 +16,105 @@ import {
   Video, Brain, Shield, Database, Zap, ArrowRightLeft, Filter,
   CheckCircle, ArrowLeft, Clock3,
 } from 'lucide-react'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import CustomNode from '../components/trace/CustomNode.jsx'
+import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
+import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
+import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
 import TraceRequestDetail from './TraceRequestDetail.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { applyDagreLayout } from '../utils/traceLayout.js'
-import { connectTraceLiveFeed, fetchTraceNodes, fetchTraceStreamEvents, fetchGraphSchema, fetchCheckpoints, fetchChainStats, fetchObsMetrics, fetchSessions } from '../api/obs.js'
+import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
+import { sanitizeRecentRequests } from '../utils/sessionList.js'
+import {
+  connectTraceLiveFeed,
+  fetchTraceNodes,
+  fetchTraceStreamEvents,
+  fetchGraphSchema,
+  fetchCheckpoints,
+  fetchChainStats,
+  fetchObsMetrics,
+  fetchSessions,
+} from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
 
-// ===== 分组定义（Phase XIV v4 顶级 Agent 架构）=====
 const GROUPS = [
   {
     id: 'edge',
-    label: 'Edge 端输入',
-    desc: 'ASR 语音识别 · Gateway Webhook · 输入上报',
+    label: '边缘输入',
+    desc: 'ASR · 网关回调 · 输入上报',
     icon: Mic,
     color: '#059669',
     bg: '#ECFDF5',
     border: '#6EE7B7',
     nodeIds: ['asr', 'gateway_webhook', 'input_reporter'],
-    traceNodeIds: ['input_reporter'],
+    traceNodeIds: ['asr', 'gateway_webhook', 'input_reporter'],
   },
   {
     id: 'entry',
-    label: '入口 & 检索',
-    desc: 'Airlock 入口净化 · Governor 鉴权 · Recall Fusion 多路召回',
+    label: '入口守护',
+    desc: 'Airlock Ingress · Governor',
     icon: ArrowRightLeft,
     color: '#475467',
     bg: '#F8FAFC',
     border: '#CBD5E1',
-    nodeIds: ['airlock_ingress', 'governor', 'recall_fusion'],
-    traceNodeIds: ['airlock_ingress', 'governor', 'recall_fusion', 'host_input'],
+    nodeIds: ['airlock_ingress', 'governor'],
+    traceNodeIds: ['airlock_ingress', 'governor', 'host_input'],
+  },
+  {
+    id: 'retrieval',
+    label: '检索规划',
+    desc: 'Query Planner · Agentic RAG · Recall Fusion',
+    icon: Filter,
+    color: '#0891B2',
+    bg: '#ECFEFF',
+    border: '#67E8F9',
+    nodeIds: ['query_planner', 'agentic_rag', 'recall_fusion'],
+    traceNodeIds: ['query_planner', 'agentic_rag', 'recall_fusion'],
+  },
+  {
+    id: 'persona',
+    label: '人格上下文',
+    desc: '情感 · 常驻记忆 · 动机状态',
+    icon: Bookmark,
+    color: '#0F766E',
+    bg: '#F0FDFA',
+    border: '#5EEAD4',
+    nodeIds: ['emotion_context', 'persona_resident_memory', 'motive_state'],
+    traceNodeIds: ['emotion_context', 'persona_resident_memory', 'motive_state'],
+  },
+  {
+    id: 'orchestration',
+    label: '编排决策',
+    desc: '响应策略 · Top Agent',
+    icon: Shield,
+    color: '#7C3AED',
+    bg: '#F5F3FF',
+    border: '#C4B5FD',
+    nodeIds: ['response_policy', 'top_agent'],
+    traceNodeIds: ['response_policy', 'top_agent'],
+  },
+  {
+    id: 'agent',
+    label: '代理调度',
+    desc: 'Dispatch Agent · Sub Agent · Chat Agent',
+    icon: Users,
+    color: '#9333EA',
+    bg: '#FAF5FF',
+    border: '#D8B4FE',
+    nodeIds: ['dispatch_agent', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
+    traceNodeIds: ['dispatch_agent', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
   },
   {
     id: 'llm',
-    label: 'Prompt & LLM',
-    desc: 'Prompt 组装 · LLM 流式生成',
+    label: '提示与模型',
+    desc: 'Prompt Builder · LLM Stream',
     icon: Brain,
     color: '#2970FF',
     bg: '#EEF4FF',
@@ -62,128 +123,127 @@ const GROUPS = [
     traceNodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'top_agent_llm_stream'],
   },
   {
-    id: 'agent',
-    label: '子 Agent 委托',
-    desc: 'Code / Translate / Intent / Vision Agent',
-    icon: Users,
-    color: '#7C3AED',
-    bg: '#F5F3FF',
-    border: '#C4B5FD',
-    nodeIds: ['sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision'],
-    traceNodeIds: [],
-  },
-  {
     id: 'postprocess',
-    label: '后处理 & 输出',
-    desc: 'Airlock 出口 · PII 过滤 · 记忆写入 · Bond 更新 · TTS · VTS',
+    label: '收口输出',
+    desc: '出口净化 · PII · 记忆/Bond · TTS/VTS',
     icon: Zap,
     color: '#D97706',
     bg: '#FFFBEB',
     border: '#FCD34D',
     nodeIds: ['airlock_egress', 'pii_filter', 'episodic_store', 'bond_update', 'tts', 'vts_driver'],
-    traceNodeIds: ['airlock_egress', 'airlock', 'pii_filter', 'episodic_store', 'bond_update', 'audit_snapshot'],
+    traceNodeIds: ['airlock_egress', 'pii_filter', 'episodic_store', 'bond_update', 'audit_snapshot', 'tts', 'vts_driver'],
   },
 ]
 
-// ===== 双端全链路静态图定义（Phase XIV v4 顶级 Agent 架构）=====
 const FULL_CHAIN_SCHEMA = {
-  graph_id: 'natsume.top_agent_v4',
+  graph_id: 'natsume.digital_life_trace_v2',
   nodes: [
-    // Edge 端输入
-    { node_id: 'asr',              node_type: 'asr',       display_name: 'ASR 语音识别',       layer: 'edge' },
-    { node_id: 'gateway_webhook',  node_type: 'system',    display_name: 'Gateway Webhook',    layer: 'edge' },
-    { node_id: 'input_reporter',   node_type: 'system',    display_name: '输入上报',            layer: 'edge' },
-    // Host 入口
-    { node_id: 'airlock_ingress',  node_type: 'governor',  display_name: 'Airlock 入口',       layer: 'host' },
-    { node_id: 'governor',         node_type: 'governor',  display_name: 'Governor',           layer: 'host' },
-    // 检索
-    { node_id: 'recall_fusion',    node_type: 'recall',    display_name: 'Recall Fusion',      layer: 'host' },
-    // Prompt + LLM
-    { node_id: 'prompt_builder',   node_type: 'system',    display_name: 'Prompt Builder',     layer: 'host' },
-    { node_id: 'llm_stream',       node_type: 'llm',       display_name: 'LLM 流式生成',       layer: 'host' },
-    // 子 Agent（委托路径分叉）
-    { node_id: 'sub_agent_code',      node_type: 'agent',  display_name: 'Code Agent',         layer: 'host' },
-    { node_id: 'sub_agent_translate', node_type: 'agent',  display_name: 'Translate Agent',    layer: 'host' },
-    { node_id: 'sub_agent_intent',    node_type: 'agent',  display_name: 'Intent Agent',       layer: 'host' },
-    { node_id: 'sub_agent_vision',    node_type: 'agent',  display_name: 'Vision Agent',       layer: 'host' },
-    // 后处理
-    { node_id: 'airlock_egress',   node_type: 'governor',  display_name: 'Airlock 出口',       layer: 'host' },
-    { node_id: 'pii_filter',       node_type: 'governor',  display_name: 'PII 过滤',           layer: 'host' },
-    { node_id: 'episodic_store',   node_type: 'memory',    display_name: '记忆写入',            layer: 'host' },
-    { node_id: 'bond_update',      node_type: 'bond',      display_name: 'Bond 更新',          layer: 'host' },
-    // Edge 端输出
-    { node_id: 'tts',              node_type: 'tts',       display_name: 'TTS 语音合成',       layer: 'edge' },
-    { node_id: 'vts_driver',       node_type: 'vts',       display_name: 'VTS 表情驱动',       layer: 'edge' },
+    { node_id: 'asr', node_type: 'asr', display_name: '语音识别', layer: 'edge' },
+    { node_id: 'gateway_webhook', node_type: 'system', display_name: '网关回调', layer: 'edge' },
+    { node_id: 'input_reporter', node_type: 'system', display_name: '输入上报', layer: 'edge' },
+    { node_id: 'airlock_ingress', node_type: 'governor', display_name: '入口净化', layer: 'host' },
+    { node_id: 'governor', node_type: 'governor', display_name: '入口守护', layer: 'host' },
+    { node_id: 'query_planner', node_type: 'retrieval', display_name: '查询规划器', layer: 'host' },
+    { node_id: 'agentic_rag', node_type: 'retrieval', display_name: 'Agentic RAG', layer: 'host' },
+    { node_id: 'recall_fusion', node_type: 'recall', display_name: '召回融合', layer: 'host' },
+    { node_id: 'emotion_context', node_type: 'system', display_name: '情感上下文', layer: 'host' },
+    { node_id: 'persona_resident_memory', node_type: 'memory', display_name: '人设常驻记忆', layer: 'host' },
+    { node_id: 'motive_state', node_type: 'system', display_name: '动机状态', layer: 'host' },
+    { node_id: 'response_policy', node_type: 'system', display_name: '响应策略', layer: 'host' },
+    { node_id: 'top_agent', node_type: 'system', display_name: 'Top Agent', layer: 'host' },
+    { node_id: 'dispatch_agent', node_type: 'agent', display_name: 'Dispatch Agent', layer: 'host' },
+    { node_id: 'sub_agent_code', node_type: 'agent', display_name: '代码代理', layer: 'host' },
+    { node_id: 'sub_agent_translate', node_type: 'agent', display_name: '翻译代理', layer: 'host' },
+    { node_id: 'sub_agent_intent', node_type: 'agent', display_name: '意图代理', layer: 'host' },
+    { node_id: 'sub_agent_vision', node_type: 'agent', display_name: '视觉代理', layer: 'host' },
+    { node_id: 'chat_agent', node_type: 'agent', display_name: 'Chat Agent', layer: 'host' },
+    { node_id: 'prompt_builder', node_type: 'system', display_name: '提示构建器', layer: 'host' },
+    { node_id: 'llm_stream', node_type: 'llm', display_name: '模型流式生成', layer: 'host' },
+    { node_id: 'airlock_egress', node_type: 'governor', display_name: '出口净化', layer: 'host' },
+    { node_id: 'pii_filter', node_type: 'governor', display_name: '隐私过滤', layer: 'host' },
+    { node_id: 'episodic_store', node_type: 'memory', display_name: '记忆写入', layer: 'host' },
+    { node_id: 'bond_update', node_type: 'bond', display_name: '关系更新', layer: 'host' },
+    { node_id: 'tts', node_type: 'tts', display_name: '语音合成', layer: 'edge' },
+    { node_id: 'vts_driver', node_type: 'vts', display_name: '表情驱动', layer: 'edge' },
   ],
   edges: [
-    // 入站
-    { source: 'asr',              target: 'airlock_ingress'  },
-    { source: 'gateway_webhook',  target: 'airlock_ingress'  },
-    { source: 'input_reporter',   target: 'airlock_ingress'  },
-    // 入口链路
-    { source: 'airlock_ingress',  target: 'governor'         },
-    { source: 'governor',         target: 'recall_fusion'    },
-    // 检索 → Prompt → LLM
-    { source: 'recall_fusion',    target: 'prompt_builder'   },
-    { source: 'prompt_builder',   target: 'llm_stream'       },
-    // LLM → 闲聊直出 → 后处理
-    { source: 'llm_stream',       target: 'airlock_egress'   },
-    // LLM → 委托路径分叉
-    { source: 'llm_stream',       target: 'sub_agent_code'      },
-    { source: 'llm_stream',       target: 'sub_agent_translate' },
-    { source: 'llm_stream',       target: 'sub_agent_intent'    },
-    { source: 'llm_stream',       target: 'sub_agent_vision'    },
-    // 子 Agent → 后处理
-    { source: 'sub_agent_code',      target: 'airlock_egress'   },
-    { source: 'sub_agent_translate', target: 'airlock_egress'   },
-    { source: 'sub_agent_intent',    target: 'airlock_egress'   },
-    { source: 'sub_agent_vision',    target: 'airlock_egress'   },
-    // 后处理
-    { source: 'airlock_egress',   target: 'pii_filter'       },
-    { source: 'airlock_egress',   target: 'episodic_store'   },
-    { source: 'airlock_egress',   target: 'bond_update'      },
-    { source: 'airlock_egress',   target: 'tts'              },
-    { source: 'airlock_egress',   target: 'vts_driver'       },
+    { source: 'asr', target: 'airlock_ingress' },
+    { source: 'gateway_webhook', target: 'airlock_ingress' },
+    { source: 'input_reporter', target: 'airlock_ingress' },
+    { source: 'airlock_ingress', target: 'governor' },
+    { source: 'governor', target: 'query_planner' },
+    { source: 'query_planner', target: 'agentic_rag' },
+    { source: 'agentic_rag', target: 'recall_fusion' },
+    { source: 'recall_fusion', target: 'emotion_context' },
+    { source: 'emotion_context', target: 'persona_resident_memory' },
+    { source: 'persona_resident_memory', target: 'motive_state' },
+    { source: 'motive_state', target: 'response_policy' },
+    { source: 'response_policy', target: 'top_agent' },
+    { source: 'top_agent', target: 'dispatch_agent' },
+    { source: 'top_agent', target: 'prompt_builder' },
+    { source: 'dispatch_agent', target: 'sub_agent_code' },
+    { source: 'dispatch_agent', target: 'sub_agent_translate' },
+    { source: 'dispatch_agent', target: 'sub_agent_intent' },
+    { source: 'dispatch_agent', target: 'sub_agent_vision' },
+    { source: 'dispatch_agent', target: 'chat_agent' },
+    { source: 'sub_agent_code', target: 'chat_agent' },
+    { source: 'sub_agent_translate', target: 'chat_agent' },
+    { source: 'sub_agent_intent', target: 'chat_agent' },
+    { source: 'sub_agent_vision', target: 'chat_agent' },
+    { source: 'chat_agent', target: 'prompt_builder' },
+    { source: 'prompt_builder', target: 'llm_stream' },
+    { source: 'llm_stream', target: 'airlock_egress' },
+    { source: 'airlock_egress', target: 'pii_filter' },
+    { source: 'airlock_egress', target: 'episodic_store' },
+    { source: 'airlock_egress', target: 'bond_update' },
+    { source: 'airlock_egress', target: 'tts' },
+    { source: 'airlock_egress', target: 'vts_driver' },
   ],
 }
 
-// Mock trace 数据
+const FULL_CHAIN_NODE_MAP = Object.fromEntries(FULL_CHAIN_SCHEMA.nodes.map((node) => [node.node_id, node]))
+const FULL_CHAIN_NODE_ID_SET = new Set(FULL_CHAIN_SCHEMA.nodes.map((node) => node.node_id))
+
 function getTraceGroupNodeIds(group) {
   return group?.traceNodeIds ?? group?.nodeIds ?? []
 }
 
-function normalizeTraceGroupNodeId(nodeId = '') {
-  if (nodeId.startsWith('voice_')) return 'input_reporter'
-  if (nodeId.startsWith('episodic_store')) return 'episodic_store'
-  if (nodeId.startsWith('bond_update')) return 'bond_update'
-  if (nodeId.startsWith('sub_agent:code') || nodeId === 'sub_agent_code') return 'sub_agent_code'
-  if (nodeId.startsWith('sub_agent:translate') || nodeId === 'sub_agent_translate') return 'sub_agent_translate'
-  if (nodeId.startsWith('sub_agent:intent') || nodeId === 'sub_agent_intent') return 'sub_agent_intent'
-  if (nodeId.startsWith('sub_agent:vision') || nodeId === 'sub_agent_vision') return 'sub_agent_vision'
-  if (nodeId.startsWith('sub_agent:')) return 'sub_agent_intent'
-  if (nodeId.startsWith('airlock')) return nodeId.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
-  if (nodeId === 'host_input') return 'airlock_ingress'
-  if (nodeId === 'llm_gateway' || nodeId === 'top_agent_llm_stream') return 'llm_stream'
-  if (nodeId.startsWith('retrieval_') || nodeId === 'recall_fusion') return 'recall_fusion'
-  return nodeId
+function normalizeTraceGroupNodeId(nodeId = '', nodeType = '') {
+  const normalized = String(nodeId || '').trim()
+  const normalizedType = String(nodeType || '').trim().toLowerCase()
+  if (normalizedType === 'tts' || normalized.startsWith('voice_tts_')) return 'tts'
+  if (normalizedType === 'vts' || normalized.startsWith('voice_vts_')) return 'vts_driver'
+  if (normalizedType === 'asr' || normalized.startsWith('voice_asr_')) return 'asr'
+  if (normalized.startsWith('voice_edge_')) return 'input_reporter'
+  if (normalized.startsWith('voice_')) return 'input_reporter'
+  if (normalized.startsWith('episodic_store')) return 'episodic_store'
+  if (normalized.startsWith('bond_update')) return 'bond_update'
+  if (normalized.startsWith('sub_agent:code') || normalized === 'sub_agent_code') return 'sub_agent_code'
+  if (normalized.startsWith('sub_agent:translate') || normalized === 'sub_agent_translate') return 'sub_agent_translate'
+  if (normalized.startsWith('sub_agent:intent') || normalized === 'sub_agent_intent') return 'sub_agent_intent'
+  if (normalized.startsWith('sub_agent:vision') || normalized === 'sub_agent_vision') return 'sub_agent_vision'
+  if (normalized.startsWith('sub_agent:')) return 'sub_agent_intent'
+  if (normalized.startsWith('airlock')) return normalized.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
+  if (normalized === 'host_input') return 'airlock_ingress'
+  if (normalized === 'llm_gateway' || normalized === 'top_agent_llm_stream') return 'llm_stream'
+  if (normalized.startsWith('retrieval_') || normalized === 'recall_fusion') return 'recall_fusion'
+  return normalized
 }
 
 function getTraceGroupState(group, traceData) {
   if (!group || !traceData) {
-    return {
-      groupNodes: [],
-      groupEdges: [],
-      activeNodeIds: [],
-      activeCount: 0,
-      traceNodeMap: {},
-    }
+    return { groupNodes: [], groupEdges: [], activeNodeIds: [], activeCount: 0, traceNodeMap: {} }
   }
 
   const allowedIds = new Set(getTraceGroupNodeIds(group))
-  const groupNodes = (traceData.nodes ?? []).filter((node) => allowedIds.has(normalizeTraceGroupNodeId(node.node_id)))
+  const groupNodes = (traceData.nodes ?? []).filter((node) => {
+    const explicitGroupId = String(node?.group_id || '').trim()
+    if (explicitGroupId) return explicitGroupId === group.id
+    return allowedIds.has(normalizeTraceGroupNodeId(node.node_id, node.node_type))
+  })
   const groupNodeIdSet = new Set(groupNodes.map((node) => node.node_id))
   const groupEdges = (traceData.edges ?? []).filter((edge) => groupNodeIdSet.has(edge.source) && groupNodeIdSet.has(edge.target))
-  const activeNodeIds = [...new Set(groupNodes.map((node) => normalizeTraceGroupNodeId(node.node_id)))]
+  const activeNodeIds = [...new Set(groupNodes.map((node) => normalizeTraceGroupNodeId(node.node_id, node.node_type)))]
 
   return {
     groupNodes,
@@ -194,18 +254,125 @@ function getTraceGroupState(group, traceData) {
   }
 }
 
-function getObservedTraceSchema(traceData) {
-  if (!traceData) return FULL_CHAIN_SCHEMA
+function getTraceStatusPriority(status = '') {
   return {
-    nodes: (traceData.nodes ?? []).map((node) => ({
-      ...node,
-      layer: node.layer ?? node.side ?? 'host',
-    })),
-    edges: traceData.edges ?? [],
+    error: 5,
+    degraded: 4,
+    running: 3,
+    healthy: 2,
+    unknown: 1,
+  }[normalizeBadgeStatus(status)] ?? 0
+}
+
+function mergeObservedNodesIntoCanonicalTraceNode(canonicalNode, observedNodes) {
+  const orderedNodes = [...observedNodes].sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
+  const latestNode = orderedNodes[orderedNodes.length - 1] ?? {}
+  const highlightedNode = orderedNodes.reduce((selected, current) => {
+    if (!selected) return current
+    const selectedPriority = getTraceStatusPriority(selected?.status)
+    const currentPriority = getTraceStatusPriority(current?.status)
+    if (currentPriority !== selectedPriority) {
+      return currentPriority > selectedPriority ? current : selected
+    }
+    return (current?.ts_ms ?? 0) >= (selected?.ts_ms ?? 0) ? current : selected
+  }, null)
+  const observedNodeIds = orderedNodes
+    .map((node) => String(node?.node_id || '').trim())
+    .filter(Boolean)
+  const statusBreakdown = orderedNodes.reduce((accumulator, node) => {
+    const key = String(node?.status || 'UNKNOWN').toUpperCase()
+    accumulator[key] = (accumulator[key] ?? 0) + 1
+    return accumulator
+  }, {})
+  const cumulativeLatencyMs = orderedNodes.reduce((total, node) => (
+    total + (Number.isFinite(Number(node?.latency_ms)) ? Number(node.latency_ms) : 0)
+  ), 0)
+
+  return {
+    ...canonicalNode,
+    ...latestNode,
+    node_id: canonicalNode.node_id,
+    display_name: canonicalNode.display_name,
+    node_type: canonicalNode.node_type,
+    layer: canonicalNode.layer,
+    side: canonicalNode.layer,
+    status: highlightedNode?.status ?? latestNode?.status ?? 'UNKNOWN',
+    reason_code: highlightedNode?.reason_code ?? latestNode?.reason_code ?? null,
+    error: highlightedNode?.error ?? highlightedNode?.reason_code ?? latestNode?.error ?? null,
+    latency_ms: cumulativeLatencyMs > 0 ? cumulativeLatencyMs : (latestNode?.latency_ms ?? null),
+    input_data: orderedNodes.length > 1 ? {
+      observed_node_count: orderedNodes.length,
+      latest_observed_node_id: latestNode?.node_id ?? null,
+      latest_input: latestNode?.input_data ?? null,
+    } : (latestNode?.input_data ?? null),
+    output_data: orderedNodes.length > 1 ? {
+      observed_node_count: orderedNodes.length,
+      observed_node_ids: observedNodeIds,
+      latest_observed_node_id: latestNode?.node_id ?? null,
+      latest_display_name: latestNode?.display_name ?? null,
+      latest_status: latestNode?.status ?? null,
+      latest_output: latestNode?.output_data ?? null,
+      status_breakdown: statusBreakdown,
+    } : (latestNode?.output_data ?? null),
   }
 }
 
-const LIVE_TRACE_GROUP_ORDER = ['edge', 'entry', 'recall', 'agent', 'llm', 'postprocess']
+function getObservedTraceSchema(traceData) {
+  if (!traceData) {
+    return {
+      ...FULL_CHAIN_SCHEMA,
+      activeNodeIds: null,
+      traceNodeMap: {},
+      rawNodeCount: 0,
+      rawEdgeCount: 0,
+      canonicalized: true,
+    }
+  }
+
+  const observedNodes = Array.isArray(traceData?.nodes)
+    ? traceData.nodes.map((node) => ({ ...node, layer: node.layer ?? node.side ?? 'host' }))
+    : []
+  const observedEdges = Array.isArray(traceData?.edges) ? traceData.edges : []
+  const groupedObservedNodes = {}
+
+  observedNodes.forEach((node) => {
+    const canonicalId = normalizeTraceGroupNodeId(node.node_id, node.node_type)
+    if (!FULL_CHAIN_NODE_ID_SET.has(canonicalId)) return
+    if (!groupedObservedNodes[canonicalId]) groupedObservedNodes[canonicalId] = []
+    groupedObservedNodes[canonicalId].push(node)
+  })
+
+  const activeNodeIds = Object.keys(groupedObservedNodes)
+
+  if (activeNodeIds.length === 0) {
+    return {
+      nodes: observedNodes,
+      edges: observedEdges,
+      activeNodeIds: observedNodes.map((node) => node.node_id),
+      traceNodeMap: Object.fromEntries(observedNodes.map((node) => [node.node_id, node])),
+      rawNodeCount: observedNodes.length,
+      rawEdgeCount: observedEdges.length,
+      canonicalized: false,
+    }
+  }
+
+  return {
+    nodes: FULL_CHAIN_SCHEMA.nodes,
+    edges: FULL_CHAIN_SCHEMA.edges,
+    activeNodeIds,
+    traceNodeMap: Object.fromEntries(
+      activeNodeIds.map((nodeId) => [
+        nodeId,
+        mergeObservedNodesIntoCanonicalTraceNode(FULL_CHAIN_NODE_MAP[nodeId], groupedObservedNodes[nodeId]),
+      ]),
+    ),
+    rawNodeCount: observedNodes.length,
+    rawEdgeCount: observedEdges.length,
+    canonicalized: true,
+  }
+}
+
+const LIVE_TRACE_GROUP_ORDER = ['edge', 'entry', 'retrieval', 'persona', 'orchestration', 'agent', 'llm', 'postprocess']
 
 function normalizeBadgeStatus(status) {
   const value = String(status || '').toUpperCase()
@@ -220,9 +387,11 @@ function getLiveTraceStageLabel(groupId) {
   return {
     edge: '输入',
     entry: '入口',
-    recall: '召回',
-    agent: 'Agent',
-    llm: '推理',
+    retrieval: '检索',
+    persona: '人格',
+    orchestration: '编排',
+    agent: '代理',
+    llm: '模型',
     postprocess: '输出',
   }[groupId] ?? groupId
 }
@@ -256,7 +425,8 @@ function getLatestPrimaryTraceNode(traceData) {
 
 function getLiveTraceFlow(traceData) {
   const latestNode = getLatestPrimaryTraceNode(traceData)
-  const latestNormalizedNodeId = latestNode ? normalizeTraceGroupNodeId(latestNode.node_id) : null
+  const latestNormalizedNodeId = latestNode ? normalizeTraceGroupNodeId(latestNode.node_id, latestNode.node_type) : null
+  const latestGroupId = String(latestNode?.group_id || '').trim() || null
 
   return LIVE_TRACE_GROUP_ORDER
     .map((groupId) => GROUPS.find((group) => group.id === groupId))
@@ -264,7 +434,7 @@ function getLiveTraceFlow(traceData) {
     .map((group) => {
       const traceGroupState = getTraceGroupState(group, traceData)
       const hasError = traceGroupState.groupNodes.some((node) => ['FAIL', 'ERROR', 'DOWN'].includes(String(node.status || '').toUpperCase()))
-      const isCurrent = latestNormalizedNodeId ? getTraceGroupNodeIds(group).includes(latestNormalizedNodeId) : false
+      const isCurrent = latestGroupId ? latestGroupId === group.id : (latestNormalizedNodeId ? getTraceGroupNodeIds(group).includes(latestNormalizedNodeId) : false)
       let status = 'idle'
       if (traceGroupState.activeCount > 0) {
         status = hasError ? 'error' : (isCurrent ? 'running' : 'done')
@@ -298,7 +468,9 @@ function getLiveTraceOutputPreview(traceData) {
   if (typeof output === 'string' && output.trim()) return output.trim()
   if (typeof summary.failure_event === 'string' && summary.failure_event.trim()) return summary.failure_event.trim()
   const latestNode = getLatestPrimaryTraceNode(traceData) || getLatestTraceNode(traceData)
-  if (typeof latestNode?.reason_code === 'string' && latestNode.reason_code.trim()) return latestNode.reason_code.trim()
+  if (typeof latestNode?.reason_code === 'string' && latestNode.reason_code.trim()) {
+    return formatAlertTitle(latestNode.reason_code.trim())
+  }
   if (typeof latestNode?.error === 'string' && latestNode.error.trim()) return latestNode.error.trim()
   return ''
 }
@@ -307,18 +479,123 @@ function getLiveTraceCurrentLabel(traceData) {
   const latestNode = getLatestPrimaryTraceNode(traceData) || getLatestTraceNode(traceData)
   if (!latestNode) return '等待节点上报'
   const status = String(latestNode.status || '').toUpperCase()
-  return `${latestNode.display_name || latestNode.node_id} · ${status || 'UNKNOWN'}`
+  return `${getTraceNodeDisplayName(latestNode)} · ${humanizeToken(status || '未知')}`
+}
+
+const LIVE_TRACE_KEY_NODE_IDS = [
+  'airlock_ingress',
+  'governor',
+  'query_planner',
+  'agentic_rag',
+  'recall_fusion',
+  'emotion_context',
+  'persona_resident_memory',
+  'motive_state',
+  'response_policy',
+  'top_agent',
+  'dispatch_agent',
+  'sub_agent_code',
+  'sub_agent_translate',
+  'sub_agent_intent',
+  'sub_agent_vision',
+  'chat_agent',
+  'prompt_builder',
+  'llm_stream',
+  'airlock_egress',
+]
+const LIVE_TRACE_KEY_NODE_INDEX = Object.fromEntries(LIVE_TRACE_KEY_NODE_IDS.map((nodeId, index) => [nodeId, index]))
+
+function getLiveTraceKeyNodeSortKey(node) {
+  const normalizedId = normalizeTraceGroupNodeId(node?.node_id, node?.node_type)
+  if (LIVE_TRACE_KEY_NODE_INDEX[normalizedId] != null) return LIVE_TRACE_KEY_NODE_INDEX[normalizedId]
+  if (String(node?.node_id || '').startsWith('sub_agent:')) {
+    return (LIVE_TRACE_KEY_NODE_INDEX.chat_agent ?? 999) - 0.5
+  }
+  return 999
+}
+
+function buildLiveTraceKeyNodeSequence(traceData) {
+  const nodes = Array.isArray(traceData?.nodes) ? [...traceData.nodes] : []
+  const seen = new Set()
+  return nodes
+    .filter((node) => {
+      const normalizedId = normalizeTraceGroupNodeId(node?.node_id, node?.node_type)
+      if (String(node?.side || node?.layer || '').toLowerCase() === 'edge') return false
+      if (LIVE_TRACE_KEY_NODE_INDEX[normalizedId] != null) return true
+      return String(node?.node_id || '').startsWith('sub_agent:')
+    })
+    .sort((a, b) => {
+      const rankDiff = getLiveTraceKeyNodeSortKey(a) - getLiveTraceKeyNodeSortKey(b)
+      if (rankDiff !== 0) return rankDiff
+      return (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0)
+    })
+    .filter((node) => {
+      const dedupeKey = String(node?.node_id || normalizeTraceGroupNodeId(node?.node_id, node?.node_type))
+      if (!dedupeKey || seen.has(dedupeKey)) return false
+      seen.add(dedupeKey)
+      return true
+    })
+    .map((node) => ({
+      nodeId: node.node_id,
+      label: getTraceNodeDisplayName(node),
+      status: node.status,
+      preview: extractLiveTraceNodePreview(node),
+    }))
 }
 
 function buildLiveTraceMetrics(session, traceData) {
   const flow = traceData ? getLiveTraceFlow(traceData) : []
   return {
     flow,
+    keyNodeSequence: traceData ? buildLiveTraceKeyNodeSequence(traceData) : [],
     currentLabel: traceData ? getLiveTraceCurrentLabel(traceData) : '等待链路详情',
     outputPreview: traceData ? getLiveTraceOutputPreview(traceData) : '',
     nodeCount: traceData?.node_count ?? 0,
     latencyMs: traceData?.total_latency_ms ?? session?.total_latency_ms ?? null,
-    status: traceData?.status ?? session?.status ?? 'UNKNOWN',
+    status: traceData?.status ?? session?.status ?? '未知',
+  }
+}
+
+function KeyNodeSequence({ nodes = [] }) {
+  if (!Array.isArray(nodes) || nodes.length === 0) return null
+  return (
+    <div>
+      <div className="text-xs font-medium text-gray-500">关键节点链</div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {nodes.map((node, index) => (
+          <React.Fragment key={`${node.nodeId}-${index}`}>
+            <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700">
+              <span>{node.label}</span>
+              <StatusBadge status={normalizeBadgeStatus(node.status)} />
+            </span>
+            {index < nodes.length - 1 ? <ChevronRight size={12} className="text-gray-300" /> : null}
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function getTraceIssueCount(traceData) {
+  return Array.isArray(traceData?.nodes)
+    ? traceData.nodes.filter((node) => ['DEGRADED', 'FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECTED', 'REJECT'].includes(String(node?.status || '').toUpperCase())).length
+    : 0
+}
+
+function getTraceRunningCount(traceData) {
+  return Array.isArray(traceData?.nodes)
+    ? traceData.nodes.filter((node) => ['RUNNING', 'STARTED'].includes(String(node?.status || '').toUpperCase())).length
+    : 0
+}
+
+function getTraceActiveStageMeta(traceData) {
+  const flow = traceData ? getLiveTraceFlow(traceData) : []
+  const activeStages = flow.filter((stage) => stage.count > 0)
+  const currentStage = flow.find((stage) => stage.status === 'running') || activeStages[activeStages.length - 1] || null
+  return {
+    flow,
+    activeStageCount: activeStages.length,
+    currentStageLabel: currentStage?.label || '等待链路推进',
   }
 }
 
@@ -359,7 +636,7 @@ function pickLiveTracePreviewValue(value) {
       value.detail,
       value.error,
       value.reason,
-      value.reason_code,
+      value.reason_code ? formatAlertTitle(value.reason_code) : value.reason_code,
       value.label,
       value.summary,
       value.value,
@@ -380,7 +657,7 @@ function pickLiveTracePreviewValue(value) {
 function extractLiveTraceNodePreview(node) {
   if (!node) return ''
   const candidates = [
-    node.reason_code,
+    node.reason_code ? formatAlertTitle(node.reason_code) : node.reason_code,
     node.error,
     pickLiveTracePreviewValue(node.output_data),
     pickLiveTracePreviewValue(node.input_data),
@@ -397,7 +674,7 @@ function buildSnapshotTimelineEntries(requestId, traceData) {
     changeType: 'snapshot',
     label: '快照',
     nodeId: node.node_id,
-    displayName: node.display_name || node.node_id,
+    displayName: getTraceNodeDisplayName(node),
     status: node.status,
     previousStatus: null,
     tsMs: node.ts_ms ?? null,
@@ -418,7 +695,7 @@ function buildDeltaTimelineEntries(deltaItem) {
       changeType,
       label: changeType === 'added' ? '新增' : '更新',
       nodeId: node.node_id,
-      displayName: node.display_name || node.node_id,
+      displayName: getTraceNodeDisplayName(node),
       status: node.status,
       previousStatus: change?.previous_status || null,
       tsMs: node.ts_ms ?? null,
@@ -460,6 +737,23 @@ function getLiveTraceChangeBadgeClass(changeType) {
   if (changeType === 'added') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (changeType === 'updated') return 'border-blue-200 bg-blue-50 text-blue-700'
   return 'border-gray-200 bg-gray-50 text-gray-500'
+}
+
+function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 'text-gray-900' }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-blue-600">
+          <Icon size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium text-gray-500">{title}</div>
+          <div className={`mt-1 break-all text-sm font-semibold leading-6 ${toneClassName}`}>{value}</div>
+          {caption ? <div className="mt-1 break-all text-xs leading-5 text-gray-500">{caption}</div> : null}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
@@ -509,6 +803,10 @@ const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSele
         })}
       </div>
 
+      <div className="mt-3">
+        <KeyNodeSequence nodes={metrics.keyNodeSequence} />
+      </div>
+
       <button className="mt-3 block w-full text-left" onClick={onSelect}>
         <div className="text-xs font-medium text-gray-500">当前节点</div>
         <div className="mt-1 text-sm text-gray-700 break-all">{metrics.currentLabel}</div>
@@ -526,7 +824,9 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
     return (
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="text-sm font-semibold text-gray-900">活跃预览</div>
-        <div className="mt-3 text-sm text-gray-400">等待最近请求载入。</div>
+        <div className="mt-3">
+          <EmptyStateCard title="等待最近请求载入" hint="实时链路启动后会自动展示。" className="p-4" />
+        </div>
       </div>
     )
   }
@@ -554,7 +854,7 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
         </div>
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
           <div className="text-xs font-medium text-gray-500">链路规模</div>
-          <div className="mt-1 text-sm text-gray-800">{metrics.nodeCount} nodes</div>
+          <div className="mt-1 text-sm text-gray-800">{metrics.nodeCount} 个节点</div>
           <div className="mt-1 text-xs text-gray-500">{metrics.latencyMs != null ? `${metrics.latencyMs}ms` : '等待耗时落盘'}</div>
         </div>
       </div>
@@ -582,6 +882,8 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
         </div>
       </div>
 
+      <KeyNodeSequence nodes={metrics.keyNodeSequence} />
+
       <div className="grid grid-cols-1 gap-3">
         <div>
           <div className="text-xs font-medium text-gray-500">输入</div>
@@ -601,11 +903,11 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
         <div className="text-xs font-medium text-gray-500">最近节点</div>
         <div className="mt-2 space-y-2">
           {latestNodes.length === 0 ? (
-            <div className="text-sm text-gray-400">暂无节点详情。</div>
+            <EmptyStateCard title="暂无节点详情" hint="当前链路还未上报可展示节点。" className="p-4" />
           ) : latestNodes.map((node) => (
             <div key={`${session.request_id}-${node.node_id}-${node.ts_ms}`} className="rounded-lg border border-gray-200 px-3 py-2">
               <div className="flex items-center gap-2">
-                <div className="text-sm font-medium text-gray-800">{node.display_name || node.node_id}</div>
+                <div className="text-sm font-medium text-gray-800">{getTraceNodeDisplayName(node)}</div>
                 <StatusBadge status={normalizeBadgeStatus(node.status)} />
                 <div className="ml-auto text-xs text-gray-400">{formatRecentTraceTime(node.ts_ms)}</div>
               </div>
@@ -628,7 +930,9 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
     return (
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <div className="text-sm font-semibold text-gray-900">活跃预览</div>
-        <div className="mt-3 text-sm text-gray-400">等待最近请求载入。</div>
+        <div className="mt-3">
+          <EmptyStateCard title="等待最近请求载入" hint="实时链路启动后会自动展示。" className="p-4" />
+        </div>
       </div>
     )
   }
@@ -656,7 +960,7 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
         </div>
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
           <div className="text-xs font-medium text-gray-500">链路规模</div>
-          <div className="mt-1 text-sm text-gray-800">{metrics.nodeCount} nodes</div>
+          <div className="mt-1 text-sm text-gray-800">{metrics.nodeCount} 个节点</div>
           <div className="mt-1 text-xs text-gray-500">{metrics.latencyMs != null ? `${metrics.latencyMs}ms` : '等待耗时落盘'}</div>
         </div>
       </div>
@@ -684,6 +988,8 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
         </div>
       </div>
 
+      <KeyNodeSequence nodes={metrics.keyNodeSequence} />
+
       <div className="grid grid-cols-1 gap-3">
         <div>
           <div className="text-xs font-medium text-gray-500">输入</div>
@@ -703,7 +1009,7 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
         <div className="text-xs font-medium text-gray-500">最新节点变化</div>
         <div className="mt-2 space-y-2">
           {recentTimelineEntries.length === 0 ? (
-            <div className="text-sm text-gray-400">暂无节点变化。</div>
+            <EmptyStateCard title="暂无节点变化" hint="等待节点事件进入时间线。" className="p-4" />
           ) : recentTimelineEntries.map((entry) => (
             <div key={entry.entryId} className="rounded-lg border border-gray-200 px-3 py-2">
               <div className="flex items-center gap-2">
@@ -826,7 +1132,10 @@ function GanttView({ traceData, onSelectNode }) {
   if (timeline.length === 0) return null
   const totalMs = timeline[0]?.total_ms ?? 1
   const filtered = filter.trim()
-    ? timeline.filter(n => (n.display_name || n.node_id || '').toLowerCase().includes(filter.toLowerCase()))
+    ? timeline.filter((node) => {
+      const searchText = `${getTraceNodeDisplayName(node)} ${node.node_id || ''}`.toLowerCase()
+      return searchText.includes(filter.toLowerCase())
+    })
     : timeline
   const ticks = Array.from({ length: 6 }, (_, i) => Math.round(totalMs * i / 5))
   return (
@@ -854,10 +1163,10 @@ function GanttView({ traceData, onSelectNode }) {
               className="flex items-center gap-2 rounded border cursor-pointer hover:shadow-sm transition-shadow bg-gray-50 border-gray-200"
               style={{ padding: '4px 8px' }}
               onClick={() => onSelectNode?.(node)}
-              title={`${node.display_name || node.node_id}: ${node.start_ms}ms → ${node.end_ms}ms (${node.latency_ms ?? 0}ms) [${node.status ?? 'UNKNOWN'}]`}
+              title={`${getTraceNodeDisplayName(node)}: ${node.start_ms}ms → ${node.end_ms}ms (${node.latency_ms ?? 0}ms) [${node.status ?? '未知'}]`}
             >
               <div className="w-36 shrink-0">
-                <div className="text-xs font-medium text-gray-700 truncate">{node.display_name || node.node_id}</div>
+                <div className="text-xs font-medium text-gray-700 truncate">{getTraceNodeDisplayName(node)}</div>
                 <div className="text-xs text-gray-400">{node.latency_ms ?? 0}ms</div>
               </div>
               <div className="flex-1 relative h-6 bg-gray-100 rounded overflow-hidden">
@@ -914,7 +1223,7 @@ function GroupDagView({ groupId, traceData, onSelectNode }) {
     setEdges(fe)
   }, [groupId, traceData, handleSelect, setNodes, setEdges])
 
-  if (!group) return <div className="p-8 text-gray-400">分组不存在</div>
+  if (!group) return <EmptyStateCard title="分组不存在" hint="请返回链路总览重新选择分组。" className="p-8" />
 
   const Icon = group.icon
   const activeCount = traceGroupState ? traceGroupState.activeCount : 0
@@ -954,7 +1263,7 @@ function GroupDagView({ groupId, traceData, onSelectNode }) {
           <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
             <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'dag' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
               onClick={() => setViewMode('dag')}>
-              <GitBranch size={11} /> DAG
+              <GitBranch size={11} /> 拓扑图
             </button>
             <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'gantt' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
               onClick={() => setViewMode('gantt')}>
@@ -1014,16 +1323,19 @@ function FullChainView({ traceData, onSelectNode }) {
     onSelectNode?.(data)
   }, [onSelectNode])
 
+  const overviewSchema = React.useMemo(() => getObservedTraceSchema(traceData), [traceData])
+
   useEffect(() => {
-    const schema = getObservedTraceSchema(traceData)
-    const activeNodeIds = traceData ? schema.nodes.map((node) => node.node_id) : null
-    const traceNodeMap  = traceData ? Object.fromEntries(schema.nodes.map((node) => [node.node_id, node])) : {}
     const { nodes: fn, edges: fe } = buildFlowData(
-      schema.nodes, schema.edges, handleSelect, activeNodeIds, traceNodeMap
+      overviewSchema.nodes,
+      overviewSchema.edges,
+      handleSelect,
+      overviewSchema.activeNodeIds,
+      overviewSchema.traceNodeMap,
     )
     setNodes(fn)
     setEdges(fe)
-  }, [traceData, handleSelect, setNodes, setEdges])
+  }, [overviewSchema, handleSelect, setNodes, setEdges])
 
   return (
     <div className="flex flex-col h-full flex-1">
@@ -1091,28 +1403,29 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
     setSelectedNode(data)
   }, [])
 
+  const overviewSchema = React.useMemo(() => getObservedTraceSchema(traceData), [traceData])
+
   useEffect(() => {
-    const schema = getObservedTraceSchema(traceData)
-    const activeNodeIds = traceData ? schema.nodes.map((node) => node.node_id) : null
-    const traceNodeMap = traceData ? Object.fromEntries(schema.nodes.map((node) => [node.node_id, node])) : {}
     const { nodes: fn, edges: fe } = buildFlowData(
-      schema.nodes,
-      schema.edges,
+      overviewSchema.nodes,
+      overviewSchema.edges,
       handleSelect,
-      activeNodeIds,
-      traceNodeMap,
+      overviewSchema.activeNodeIds,
+      overviewSchema.traceNodeMap,
     )
     setNodes(fn)
     setEdges(fe)
-  }, [traceData, handleSelect, setNodes, setEdges])
+  }, [overviewSchema, handleSelect, setNodes, setEdges])
 
   if (!traceData) return null
 
   const currentStatus = String(traceData.status || '').toUpperCase()
   const currentHealthy = ['OK', 'UP', 'SUCCESS'].includes(currentStatus)
   const flow = getLiveTraceFlow(traceData)
-  const nodeCount = (traceData.nodes ?? []).length
-  const edgeCount = (traceData.edges ?? []).length
+  const activeNodeSet = new Set(overviewSchema.activeNodeIds ?? [])
+  const nodeCount = activeNodeSet.size
+  const edgeCount = overviewSchema.edges.filter((edge) => activeNodeSet.has(edge.source) && activeNodeSet.has(edge.target)).length
+  const rawNodeCount = overviewSchema.rawNodeCount
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 md:p-5 shadow-sm shadow-slate-100/60">
@@ -1130,13 +1443,16 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${currentHealthy ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-            {currentStatus || 'UNKNOWN'}
+            {currentStatus || '未知'}
           </span>
           <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
-            {nodeCount} nodes
+            {nodeCount} 拓扑节点
           </span>
           <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
-            {edgeCount} edges
+            {edgeCount} 激活连线
+          </span>
+          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
+            {rawNodeCount} 原始事件
           </span>
           {traceData.total_latency_ms != null && (
             <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
@@ -1214,7 +1530,7 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
               </div>
               <div>
                 <div className="text-gray-400">最终状态</div>
-                <div className={`mt-1 font-medium ${currentHealthy ? 'text-green-600' : 'text-amber-600'}`}>{currentStatus || 'UNKNOWN'}</div>
+                <div className={`mt-1 font-medium ${currentHealthy ? 'text-green-600' : 'text-amber-600'}`}>{currentStatus || '未知'}</div>
               </div>
             </div>
           </div>
@@ -1222,9 +1538,7 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
           {selectedNode ? (
             <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
           ) : (
-            <div className="rounded-xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-400">
-              点击左侧节点，直接查看该节点的输入、输出和状态。
-            </div>
+            <EmptyStateCard title="请选择节点" hint="点击左侧节点后查看输入、输出与状态。" className="p-5" />
           )}
         </div>
       </div>
@@ -1253,6 +1567,12 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const pollingInterval = useAppStore((s) => s.pollingInterval)
   const selectedRequestId = useAppStore((s) => s.selectedRequestId)
   const setSelectedRequestId = useAppStore((s) => s.setSelectedRequestId)
+  const { runtimeSnapshot, promptStats: promptBuilderData } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes: 60,
+    minIntervalSeconds: 10,
+  })
 
   const load = useCallback(async (id, options = {}) => {
     if (!id?.trim()) return
@@ -1284,8 +1604,11 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         keyword: keyword || undefined,
         status: recentStatusFilter || undefined,
       })
-      setRecentRequests(data.items ?? [])
+      setRecentRequests(sanitizeRecentRequests(data.items, { keyword }))
       setRecentKeyword(keyword)
+    } catch (fetchError) {
+      console.warn('[Trace] failed to load recent requests:', fetchError)
+      setRecentRequests([])
     } finally {
       setRecentLoading(false)
     }
@@ -1409,7 +1732,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           },
           onError: (payload) => {
             if (closed) return
-            setLiveTraceError(payload?.detail || 'trace live feed error')
+            setLiveTraceError(payload?.detail || '实时链路流异常')
           },
           onConnectionError: () => {
             if (closed) return
@@ -1528,9 +1851,14 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const selectedLiveTraceItem = liveTraceItems.find((item) => item.session.request_id === selectedRequestId)
     ?? liveTraceItems[0]
     ?? null
-  const selectedLiveTraceTitle = selectedLiveTraceItem
-    ? getSessionDisplayTitle(selectedLiveTraceItem.session, selectedLiveTraceItem.trace)
-    : selectedRequestId
+  const selectedSessionFallback = selectedLiveTraceItem?.session
+    ?? recentRequests.find((item) => item.request_id === selectedRequestId)
+    ?? (selectedRequestId ? { request_id: selectedRequestId } : null)
+  const selectedTraceTitleSource = selectedLiveTraceItem?.trace
+    ?? (traceData?.request_id === selectedRequestId ? traceData : null)
+  const selectedLiveTraceTitle = selectedRequestId
+    ? getSessionDisplayTitle(selectedSessionFallback, selectedTraceTitleSource)
+    : null
   const selectedLiveTraceTimelineEntries = selectedLiveTraceItem?.session?.request_id
     ? (liveTraceTimelineEntries[selectedLiveTraceItem.session.request_id] ?? [])
     : []
@@ -1547,9 +1875,18 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
     : '优先展示最近活跃的链路进度、当前节点和输出摘要。'
   const activeCountLabel = isHistorySearchMode ? '条搜索结果' : '条活跃请求'
   const historySectionHint = shouldAutoShowHistory
-    ? '当前没有活跃链路，自动回退展示历史请求。'
+    ? '当前没有活跃链路，自动回退展示历史请求（已默认隐藏测试会话与纯问号占位消息）。'
     : '历史请求默认收起；需要回看刚才跑过什么时，再从这里展开。'
   const canCollapseHistory = historyExpanded && !shouldAutoShowHistory
+  const selectedTraceStageMeta = getTraceActiveStageMeta(traceData)
+  const selectedIssueCount = getTraceIssueCount(traceData)
+  const selectedRunningCount = getTraceRunningCount(traceData)
+  const selectedCurrentNodeLabel = traceData ? getLiveTraceCurrentLabel(traceData) : '等待选中请求'
+  const selectedOutputPreview = traceData ? getLiveTraceOutputPreview(traceData) : ''
+  const liveModeLabel = !pollingEnabled ? '实时暂停' : liveFeedConnected ? 'SSE 实时流' : '轮询兜底'
+  const liveModeCaption = liveFeedLastTs
+    ? `最近事件 ${formatRecentTraceTime(liveFeedLastTs)}`
+    : (liveTraceItems.length > 0 ? `${liveTraceItems.length} 条活跃请求` : '等待活跃请求')
 
   const focusRequestOverview = useCallback((requestId) => {
     if (!requestId) return
@@ -1577,7 +1914,57 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
   return (
     <div className="space-y-5">
-      {/* 页头 + 搜索 */}
+      <DigitalLifeNav />
+
+      <PageHero
+        icon={Activity}
+        eyebrow="全链路 Trace"
+        title="数字生命请求链路可视化"
+        description="从输入边缘、Query Planner、Agentic RAG、人格上下文到 Top Agent / Dispatch / Chat Agent，统一查看当前请求的完整路径。"
+        gradientClass="from-blue-50 via-white to-violet-50"
+        metaItems={[
+          `活跃请求：${liveTraceItems.length}`,
+          `当前节点：${traceInfo?.nodeCount ?? 0}`,
+          selectedRequestId ? '已选中请求' : '未选中请求',
+          currentTraceHealthy ? '当前链路：健康' : '当前链路：待关注',
+        ]}
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <HomeSummaryCard
+          icon={Bookmark}
+          title="当前请求"
+          value={selectedLiveTraceTitle || '等待选中请求'}
+          caption={selectedRequestId || '从下方活跃请求流选择一条 request'}
+        />
+        <HomeSummaryCard
+          icon={Layers}
+          title="阶段覆盖"
+          value={`${selectedTraceStageMeta.activeStageCount}/${GROUPS.length}`}
+          caption={`当前阶段：${selectedTraceStageMeta.currentStageLabel}`}
+        />
+        <HomeSummaryCard
+          icon={Shield}
+          title="待关注节点"
+          value={selectedIssueCount > 0 ? `${selectedIssueCount} 个异常/降级` : '无异常节点'}
+          caption={selectedRunningCount > 0 ? `运行中 ${selectedRunningCount} 个节点` : (traceInfo?.latency != null ? `总耗时 ${traceInfo.latency}ms` : '等待节点继续推进')}
+          toneClassName={selectedIssueCount > 0 ? 'text-orange-600' : 'text-emerald-600'}
+        />
+        <HomeSummaryCard
+          icon={Activity}
+          title="当前节点"
+          value={selectedCurrentNodeLabel}
+          caption={selectedOutputPreview || '暂无输出摘要，可能仍在执行或尚未落盘。'}
+        />
+        <HomeSummaryCard
+          icon={Clock3}
+          title="实时模式"
+          value={liveModeLabel}
+          caption={liveModeCaption}
+          toneClassName={!pollingEnabled ? 'text-gray-700' : liveFeedConnected ? 'text-emerald-600' : 'text-amber-600'}
+        />
+      </div>
+
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-xl font-semibold text-gray-900 shrink-0">链路可视化</h1>
         <div className="flex items-center gap-2 flex-1 min-w-64">
@@ -1634,8 +2021,20 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
             </span>
           </div>
         )}
-        {error && <span className="text-xs text-red-500">{error}</span>}
+        {error && (
+          <NoticeBanner variant="error" title="链路查询异常" className="w-full md:w-auto">
+            {error}
+          </NoticeBanner>
+        )}
       </div>
+
+      {runtimeSnapshot && (
+        <DigitalLifeRuntimeCard
+          runtimeSnapshot={runtimeSnapshot}
+          promptStats={promptBuilderData}
+          compact
+        />
+      )}
 
       {selectedRequestId && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center gap-3 flex-wrap">
@@ -1697,19 +2096,17 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
             <div className="mt-3 space-y-3">
               {liveTraceLoading && liveTraceItems.length === 0 && (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">
-                  正在加载最近请求的链路详情...
-                </div>
+                <NoticeBanner variant="info" title="加载中" className="px-4 py-8">
+                  正在加载最近请求的链路详情…
+                </NoticeBanner>
               )}
               {!liveTraceLoading && liveTraceError && liveTraceItems.length === 0 && (
-                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-8 text-center text-sm text-red-500">
-                  活跃链路流加载失败：{liveTraceError}
-                </div>
+                <NoticeBanner variant="error" title="活跃链路流加载失败" className="px-4 py-8">
+                  {liveTraceError}
+                </NoticeBanner>
               )}
               {!liveTraceLoading && !liveTraceError && liveTraceItems.length === 0 && (
-                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">
-                  最近没有可展示的请求链路。
-                </div>
+                <EmptyStateCard title="暂无可展示请求链路" hint="有新的请求后会自动显示在这里。" className="p-6" />
               )}
               {liveTraceItems.map((item) => (
                 <LiveTraceCard
@@ -1805,10 +2202,16 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           </div>
           <div className="divide-y divide-gray-100">
             {recentLoading && recentRequests.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-gray-400">加载历史请求中...</div>
+              <div className="px-4 py-4">
+                <NoticeBanner variant="info" title="加载中">
+                  正在加载历史请求…
+                </NoticeBanner>
+              </div>
             )}
             {!recentLoading && recentRequests.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-gray-400">最近没有历史请求</div>
+              <div className="px-4 py-4">
+                <EmptyStateCard title="暂无历史请求" hint="链路请求完成后会在这里沉淀。" className="p-4" />
+              </div>
             )}
             {recentRequests.map((item) => {
               const statusMeta = getRecentRequestStatusMeta(item.status)
@@ -1927,7 +2330,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
                 </span>
                 <div className="flex-1">
                   <div className="font-semibold text-gray-800 text-sm">双端全链路拓扑图</div>
-                  <div className="text-xs text-gray-500 mt-0.5">需要单独放大排查静态 DAG 时再进入。</div>
+                  <div className="text-xs text-gray-500 mt-0.5">需要单独放大排查静态拓扑图时再进入。</div>
                 </div>
                 <ChevronRight size={16} className="text-gray-400 shrink-0" />
               </button>

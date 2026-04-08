@@ -18,7 +18,14 @@ import {
   Wand2,
   ShieldCheck,
 } from 'lucide-react'
+import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import MetricCard from '../components/MetricCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import useAppStore from '../store/useAppStore.js'
 
 function SourceBadge({ source }) {
   const cls = source === 'override'
@@ -34,20 +41,15 @@ function TypeBadge({ value }) {
   return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{value}</span>
 }
 
-function StatCard({ icon: Icon, label, value, hint, tone = 'text-gray-900' }) {
-  return (
-    <div className="card p-4">
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <Icon size={14} />
-        <span>{label}</span>
-      </div>
-      <div className={`mt-2 text-2xl font-bold ${tone}`}>{value ?? '—'}</div>
-      <div className="mt-1 text-xs text-gray-400">{hint ?? '—'}</div>
-    </div>
-  )
-}
-
 export default function PromptConfig() {
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes: 60,
+  })
+
   const [filters, setFilters] = useState({
     keyword: '',
     scope: '',
@@ -64,8 +66,9 @@ export default function PromptConfig() {
   const [saving, setSaving] = useState(false)
   const [reloading, setReloading] = useState(false)
 
-  const scopes = useMemo(() => [...new Set(items.map(item => item.scope).filter(Boolean))], [items])
-  const categories = useMemo(() => [...new Set(items.map(item => item.category).filter(Boolean))], [items])
+  const scopes = useMemo(() => [...new Set(items.map((item) => item.scope).filter(Boolean))], [items])
+  const categories = useMemo(() => [...new Set(items.map((item) => item.category).filter(Boolean))], [items])
+
   const summary = useMemo(() => ({
     total: items.length,
     override: items.filter((item) => item.source === 'override').length,
@@ -84,7 +87,7 @@ export default function PromptConfig() {
         setSelected(null)
         return
       }
-      const hasCurrent = nextItems.some(item => item.template_id === selectedId)
+      const hasCurrent = nextItems.some((item) => item.template_id === selectedId)
       if (!selectedId || !hasCurrent) {
         setSelectedId(nextItems[0].template_id)
       }
@@ -112,11 +115,13 @@ export default function PromptConfig() {
   }, [])
 
   useEffect(() => {
-    loadList()
+    void loadList()
   }, [loadList])
 
   useEffect(() => {
-    if (selectedId) loadDetail(selectedId)
+    if (selectedId) {
+      void loadDetail(selectedId)
+    }
   }, [selectedId, loadDetail])
 
   const isDirty = useMemo(() => {
@@ -156,7 +161,7 @@ export default function PromptConfig() {
       setDraftContent(data.item.resolved_content ?? '')
       setDraftEnabled(true)
       await loadList()
-      toast.success('已恢复默认')
+      toast.success('已恢复默认值')
     } catch (error) {
       toast.error(`恢复默认失败：${error.message}`)
     } finally {
@@ -182,12 +187,12 @@ export default function PromptConfig() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Prompt / Fallback 运营</h1>
-          <p className="text-sm text-gray-500">把主链提示词、兜底文本和守卫替换词收口到数据库，在 WebUI 里安全调参。</p>
+          <h1 className="text-xl font-semibold text-gray-900">提示与兜底运营</h1>
+          <p className="text-sm text-gray-500">将主链路提示词、守卫兜底和运营文案统一收口到可视化配置。</p>
         </div>
         <div className="flex items-center gap-2">
           <Link to="/persona-config" className="btn-secondary">
-            <Wand2 size={14} /> Persona 运营
+            <Wand2 size={14} /> 人格运营
           </Link>
           <button className="btn-secondary" onClick={handleReload} disabled={reloading}>
             <RefreshCw size={14} className={reloading ? 'animate-spin' : ''} /> 刷新缓存
@@ -196,30 +201,26 @@ export default function PromptConfig() {
       </div>
 
       <DigitalLifeNav />
+      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
-      <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50 via-white to-indigo-50 p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-medium text-primary">
-              <FileText size={12} />
-              数字生命 Prompt 运营台
-            </div>
-            <div className="mt-3 text-2xl font-bold text-gray-900">{summary.total}</div>
-            <div className="mt-1 text-sm text-gray-600">
-              当前模板池已纳入主链提示词、守卫类兜底和部分可运营文案。
-            </div>
-          </div>
+      <PageHero
+        icon={FileText}
+        eyebrow="数字生命提示运营台"
+        title={summary.total}
+        description="当前模板池覆盖主链路提示词、守卫型兜底与部分可运营文案。"
+        gradientClass="from-primary-50 via-white to-indigo-50"
+        aside={(
           <div className="max-w-xl rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs leading-6 text-orange-800">
-            优先改语气、关系感、节奏和运营文案；不要改 JSON 键名，也不要把运营文案写成系统指令。
+            建议优先调整语气、关系感与表达节奏；不要修改 JSON 键名，也不要把运营文案写成系统指令。
           </div>
-        </div>
-      </div>
+        )}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Database} label="模板总数" value={summary.total} hint={`${scopes.length} 个 scope`} tone="text-blue-600" />
-        <StatCard icon={Wand2} label="覆盖模板" value={summary.override} hint="当前已落库 override" tone="text-green-600" />
-        <StatCard icon={FileText} label="JSON 模板" value={summary.json} hint={`${categories.length} 个 category`} tone="text-purple-600" />
-        <StatCard icon={ShieldCheck} label="Guard / Fallback" value={summary.guarded} hint="守卫与兜底相关项" tone="text-orange-500" />
+        <MetricCard icon={Database} label="模板总数" value={summary.total} hint={`${scopes.length} 个 scope`} tone="text-blue-600" />
+        <MetricCard icon={Wand2} label="覆盖模板" value={summary.override} hint="当前落地 override" tone="text-green-600" />
+        <MetricCard icon={FileText} label="JSON 模板" value={summary.json} hint={`${categories.length} 个 category`} tone="text-purple-600" />
+        <MetricCard icon={ShieldCheck} label="Guard / Fallback" value={summary.guarded} hint="守卫与兜底相关项" tone="text-orange-500" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[360px,1fr] gap-4">
@@ -241,7 +242,7 @@ export default function PromptConfig() {
                 onChange={(e) => setFilters((prev) => ({ ...prev, scope: e.target.value }))}
               >
                 <option value="">全部 Scope</option>
-                {scopes.map(scope => <option key={scope} value={scope}>{scope}</option>)}
+                {scopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
               </select>
               <select
                 className="text-xs border border-gray-300 rounded px-2 py-2"
@@ -249,7 +250,7 @@ export default function PromptConfig() {
                 onChange={(e) => setFilters((prev) => ({ ...prev, category: e.target.value }))}
               >
                 <option value="">全部 Category</option>
-                {categories.map(category => <option key={category} value={category}>{category}</option>)}
+                {categories.map((category) => <option key={category} value={category}>{category}</option>)}
               </select>
               <select
                 className="text-xs border border-gray-300 rounded px-2 py-2"
@@ -297,16 +298,14 @@ export default function PromptConfig() {
               )
             })}
             {!loadingList && items.length === 0 && (
-              <div className="text-sm text-gray-400 text-center py-8">没有匹配的模板</div>
+              <EmptyStateCard title="没有匹配模板" hint="可调整关键词或筛选条件重试。" className="p-4" />
             )}
           </div>
         </div>
 
         <div className="card p-5">
           {!selected && (
-            <div className="h-full min-h-[420px] flex items-center justify-center text-gray-400">
-              请选择一个模板开始编辑
-            </div>
+            <EmptyStateCard title="请选择模板" hint="从左侧列表选择一个模板开始编辑。" className="min-h-[420px] flex flex-col items-center justify-center" />
           )}
 
           {selected && (
@@ -365,7 +364,7 @@ export default function PromptConfig() {
                 <div className="space-y-3">
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                     <div className="text-xs font-medium text-gray-700 flex items-center gap-2 mb-2">
-                      <Database size={14} /> 默认内容
+                      <Database size={14} /> 代码默认内容
                     </div>
                     <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-[220px] overflow-y-auto">{selected.default_content}</pre>
                   </div>
@@ -381,16 +380,18 @@ export default function PromptConfig() {
                     <div>locale：{selected.locale}</div>
                     <div>source：{selected.source}</div>
                     <div>override：{selected.has_override ? 'yes' : 'no'}</div>
-                    <div>updated：{selected.updated_at_ts_ms ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN') : '—'}</div>
+                    <div>updated：{selected.updated_at_ts_ms ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN') : '-'}</div>
                     {selected.content_type === 'json' && (
-                      <div className="text-orange-500">json 类型模板请提交合法 JSON 文本。</div>
+                      <div className="text-orange-500">JSON 类型模板请提交合法 JSON 文本。</div>
                     )}
                   </div>
                 </div>
               </div>
 
               {loadingDetail && (
-                <div className="text-xs text-gray-400">正在刷新模板详情…</div>
+                <NoticeBanner variant="info" title="模板刷新中">
+                  正在同步模板详情…
+                </NoticeBanner>
               )}
             </div>
           )}

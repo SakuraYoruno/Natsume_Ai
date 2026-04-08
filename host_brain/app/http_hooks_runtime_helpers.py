@@ -140,6 +140,154 @@ def _truncate_text(value: Any, limit: int = 120) -> str:
     return f"{text[:limit].rstrip()}…"
 
 
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _seconds_since_timestamp(*, ts_ms: Any, now_ms: int) -> int | None:
+    value = _coerce_int(ts_ms, 0)
+    if value <= 0:
+        return None
+    delta_ms = max(0, int(now_ms) - value)
+    return int(delta_ms / 1000)
+
+
+def _extract_interval_seconds(task_health: dict[str, Any]) -> int | None:
+    trigger_config = task_health.get("trigger_config")
+    if not isinstance(trigger_config, dict):
+        return None
+    seconds = _coerce_int(trigger_config.get("seconds"), 0)
+    return seconds if seconds > 0 else None
+
+
+def _classify_tick_health(
+    *,
+    scheduler_status: str,
+    core_ticks_registered: bool,
+    seconds_since_last_tick: int | None,
+    expected_interval_s: int,
+) -> str:
+    normalized_scheduler = str(scheduler_status or "").strip().upper()
+    if normalized_scheduler in {"UNAVAILABLE", "ERROR", "STOPPED", "DOWN", "OFFLINE"}:
+        return "inactive"
+    if not core_ticks_registered:
+        return "inactive"
+    if seconds_since_last_tick is None:
+        return "inactive"
+
+    base_interval = max(int(expected_interval_s or 60), 30)
+    if seconds_since_last_tick <= int(base_interval * 2.5):
+        return "fresh"
+    if seconds_since_last_tick <= int(base_interval * 6):
+        return "delayed"
+    return "stalled"
+
+
+def _build_background_runtime_snapshot(
+    *,
+    now_ms: int,
+    persona_user_id: str,
+    inner_world_state: dict[str, Any],
+) -> dict[str, Any]:
+    scheduler_snapshot: dict[str, Any] = {}
+    scheduler_error = ""
+    try:
+        from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe  # noqa: PLC0415
+
+        scheduler_snapshot = dict(get_scheduler_health_snapshot_safe() or {})
+    except Exception as exc:
+        scheduler_error = str(exc)[:160]
+        scheduler_snapshot = {
+            "scheduler_status": "UNAVAILABLE",
+            "total_tasks": 0,
+            "enabled_tasks": 0,
+            "suspended_tasks": 0,
+            "error_tasks": 0,
+            "tasks": [],
+            "ts_ms": now_ms,
+        }
+
+    scheduler_status = str(scheduler_snapshot.get("scheduler_status") or "UNAVAILABLE").strip().upper()
+    scheduler_active = scheduler_status in {"HEALTHY", "DEGRADED", "RUNNING", "UP", "OK"}
+    core_tick_ids = ["inner_world_tick", "silence_tick", "body_sense_tick"]
+    tasks_by_id: dict[str, dict[str, Any]] = {}
+    for item in list(scheduler_snapshot.get("tasks") or []):
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("task_id") or "").strip()
+        if task_id:
+            tasks_by_id[task_id] = dict(item)
+
+    core_ticks_missing = [task_id for task_id in core_tick_ids if task_id not in tasks_by_id]
+    core_ticks_registered = len(core_ticks_missing) == 0
+
+    core_tick_tasks: dict[str, Any] = {}
+    for task_id in core_tick_ids:
+        task_health = tasks_by_id.get(task_id, {})
+        status_value = str(task_health.get("status") or "MISSING").strip().upper() or "MISSING"
+        enabled = bool(task_health.get("enabled", False)) if task_health else False
+        expected_interval_s = _extract_interval_seconds(task_health) or 60
+        last_run_ts = _coerce_int(task_health.get("last_run_ts"), 0)
+        if last_run_ts <= 0:
+            last_run_ts = None
+        core_tick_tasks[task_id] = {
+            "status": status_value,
+            "enabled": enabled,
+            "last_run_ts": last_run_ts,
+            "expected_interval_s": expected_interval_s,
+            "seconds_since_last_run": _seconds_since_timestamp(ts_ms=last_run_ts, now_ms=now_ms),
+        }
+
+    last_inner_world_tick_ts_ms = _coerce_int(inner_world_state.get("last_tick_ts_ms"), 0)
+    if last_inner_world_tick_ts_ms <= 0:
+        last_inner_world_tick_ts_ms = None
+    seconds_since_inner_world_tick = _seconds_since_timestamp(
+        ts_ms=last_inner_world_tick_ts_ms,
+        now_ms=now_ms,
+    )
+
+    inner_tick_expected_interval_s = int(
+        core_tick_tasks.get("inner_world_tick", {}).get("expected_interval_s") or 60
+    )
+    tick_health = _classify_tick_health(
+        scheduler_status=scheduler_status,
+        core_ticks_registered=core_ticks_registered,
+        seconds_since_last_tick=seconds_since_inner_world_tick,
+        expected_interval_s=inner_tick_expected_interval_s,
+    )
+
+    inner_world_user_id = str(inner_world_state.get("user_id") or "").strip()
+    persona_user_alignment_ok = (not inner_world_user_id) or inner_world_user_id == persona_user_id
+    is_advancing = bool(
+        scheduler_active
+        and core_ticks_registered
+        and tick_health in {"fresh", "delayed"}
+        and core_tick_tasks.get("inner_world_tick", {}).get("enabled", False)
+        and persona_user_alignment_ok
+    )
+
+    return {
+        "scheduler_status": scheduler_status,
+        "scheduler_active": scheduler_active,
+        "scheduler_total_tasks": _coerce_int(scheduler_snapshot.get("total_tasks"), 0),
+        "scheduler_enabled_tasks": _coerce_int(scheduler_snapshot.get("enabled_tasks"), 0),
+        "core_tick_ids": core_tick_ids,
+        "core_ticks_registered": core_ticks_registered,
+        "core_ticks_missing": core_ticks_missing,
+        "core_tick_tasks": core_tick_tasks,
+        "last_inner_world_tick_ts_ms": last_inner_world_tick_ts_ms,
+        "seconds_since_inner_world_tick": seconds_since_inner_world_tick,
+        "tick_health": tick_health,
+        "persona_user_alignment_ok": persona_user_alignment_ok,
+        "inner_world_user_id": inner_world_user_id or None,
+        "is_advancing": is_advancing,
+        "scheduler_error": scheduler_error or None,
+    }
+
+
 def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
     return resolve_offline_absence_band(offline_state)
 
@@ -452,7 +600,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
     try:
         from host_brain.app import dependencies as _deps  # noqa: PLC0415
 
-        monitor = getattr(_deps, "_activity_monitor_ref", None)
+        monitor = _deps.get_activity_monitor(create_if_missing=True)
         if monitor is not None:
             if hasattr(monitor, "get_status"):
                 activity_monitor = _as_plain_dict(monitor.get_status())
@@ -784,6 +932,11 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         slot_status=slot_status,
         degraded_reasons=degraded_reasons,
     )
+    background_runtime = _build_background_runtime_snapshot(
+        now_ms=now_ms,
+        persona_user_id=persona_user_id,
+        inner_world_state=inner_world_state,
+    )
 
     return {
         "persona_user_id": persona_user_id,
@@ -805,6 +958,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         "motive_state": motive_state,
         "response_policy": response_policy,
         "runtime_summary": runtime_summary,
+        "background_runtime": background_runtime,
         "slot_status": slot_status,
         "degraded": bool(degraded_reasons),
         "degraded_reasons": degraded_reasons,

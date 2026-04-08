@@ -30,6 +30,7 @@ import json
 import logging
 import math
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field, asdict
@@ -74,6 +75,32 @@ _MIN_HOURS_FOR_WAITING_EXPRESSION = 3.0
 
 # 期待话题最大保留数量
 _MAX_ANTICIPATION_TOPICS = 5
+_MAX_INNER_STREAM_EVENTS = 24
+_OFFLINE_IDLE_THRESHOLD_MS = int(
+    float(os.environ.get("NATSUME_INNER_WORLD_OFFLINE_THRESHOLD_S", "90")) * 1000
+)
+_INNER_STREAM_MIN_INTERVAL_MS = int(
+    float(os.environ.get("NATSUME_INNER_STREAM_MIN_INTERVAL_S", "120")) * 1000
+)
+_INNER_STREAM_CALM_INTERVAL_MS = int(
+    float(os.environ.get("NATSUME_INNER_STREAM_CALM_INTERVAL_S", "360")) * 1000
+)
+_TOPIC_MOJIBAKE_RE = re.compile(r"[ÃÂÄÅÇÉÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]")
+_NOISE_TOPIC_VALUES = {
+    "ok",
+    "okay",
+    "yes",
+    "no",
+    "continue",
+    "test",
+    "好的",
+    "收到",
+    "嗯",
+    "嗯嗯",
+    "是的",
+    "是的呢",
+    "好",
+}
 
 _RUNTIME_TEXTS_DEFAULT: dict[str, Any] = {
     "emotion_drift": {
@@ -106,6 +133,13 @@ _RUNTIME_TEXTS_DEFAULT: dict[str, Any] = {
         "anticipation": {
             "long_absence": "一直在等你回来继续说",
         },
+    },
+    "inner_stream": {
+        "recent": "刚刚安静下来，心里还在回放刚才的片段。",
+        "6h_plus": "这段空档里，思绪会自己绕回还没说完的地方：{topic}。",
+        "24h_plus": "隔了一天，心里的线索没有断，仍在慢慢发酵。",
+        "72h_plus": "这几天并不空白，很多感受在内部持续重排。",
+        "7d_plus": "很久不说话时，内在并不会停，只是变得更慢更深。",
     },
 }
 
@@ -165,6 +199,11 @@ class InnerWorldState:
 
     # 累计离线时长（小时，用于快照描述）
     total_offline_hours: float = 0.0
+    continuity_score: float = 0.0
+    spontaneous_event_count: int = 0
+    last_spontaneous_ts_ms: int = 0
+    last_spontaneous_note: str = ""
+    inner_stream: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -183,6 +222,11 @@ class InnerWorldState:
             drifted_arousal=float(d.get("drifted_arousal", 0.3)),
             mood_baseline=float(d.get("mood_baseline", 0.0)),
             total_offline_hours=float(d.get("total_offline_hours", 0.0)),
+            continuity_score=float(d.get("continuity_score", 0.0)),
+            spontaneous_event_count=int(d.get("spontaneous_event_count", 0)),
+            last_spontaneous_ts_ms=int(d.get("last_spontaneous_ts_ms", 0)),
+            last_spontaneous_note=str(d.get("last_spontaneous_note", "")),
+            inner_stream=list(d.get("inner_stream", [])),
         )
 
 
@@ -265,26 +309,39 @@ class OfflineInnerWorld:
 
         with self._lock:
             state = self._load_state(uid)
+            state.anticipation_topics = _sanitize_anticipation_topics(state.anticipation_topics)
             last_tick = state.last_tick_ts_ms
             if last_tick <= 0:
                 # 首次 tick，初始化时间戳
                 state.last_tick_ts_ms = now_ms
+                state.continuity_score = _compute_continuity_score(
+                    state=state,
+                    offline_hours=0.0,
+                    now_ms=now_ms,
+                )
                 self._save_state(state)
-                return {"status": "INITIALIZED", "user_id": uid}
+                return {
+                    "status": "INITIALIZED",
+                    "user_id": uid,
+                    "continuity_score": round(float(state.continuity_score or 0.0), 3),
+                    "spontaneous_event_count": int(state.spontaneous_event_count or 0),
+                }
 
             elapsed_ms = now_ms - last_tick
             elapsed_hours = elapsed_ms / (3600.0 * 1000.0)
 
-            # 判断是否在离线状态（距上次互动 > 5 分钟视为离线）
+            # 判断是否在离线状态（距上次互动超过阈值，默认 90 秒）
             last_interaction = state.last_interaction_ts_ms
             is_offline = (
                 last_interaction <= 0
-                or (now_ms - last_interaction) > 5 * 60 * 1000
+                or (now_ms - last_interaction) > _OFFLINE_IDLE_THRESHOLD_MS
             )
 
             motive_state: dict[str, Any] = {}
             loneliness_multiplier = 1.0
             anticipation_multiplier = 1.0
+            offline_hours = 0.0
+            absence_band = "recent"
 
             if is_offline:
                 try:
@@ -340,6 +397,47 @@ class OfflineInnerWorld:
                 )
                 # 累计离线时长
                 state.total_offline_hours += elapsed_hours
+                elapsed_since_interaction_hours = 0.0
+                if last_interaction > 0:
+                    elapsed_since_interaction_hours = max(
+                        0.0,
+                        (now_ms - last_interaction) / (3600.0 * 1000.0),
+                    )
+                offline_hours = max(
+                    float(state.total_offline_hours or 0.0),
+                    elapsed_since_interaction_hours,
+                )
+                absence_band = _classify_absence_band(offline_hours)
+                _append_inner_stream_event(
+                    state=state,
+                    now_ms=now_ms,
+                    absence_band=absence_band,
+                    offline_hours=offline_hours,
+                )
+            else:
+                state.loneliness = max(
+                    0.0,
+                    state.loneliness - _LONELINESS_DECAY_PER_HOUR * elapsed_hours,
+                )
+                state.anticipation = max(
+                    0.0,
+                    state.anticipation - (_ANTICIPATION_RATE_PER_HOUR * 0.35) * elapsed_hours,
+                )
+                state.total_offline_hours = 0.0
+                if last_interaction > 0:
+                    offline_hours = max(
+                        0.0,
+                        (now_ms - last_interaction) / (3600.0 * 1000.0),
+                    )
+                else:
+                    offline_hours = 0.0
+                absence_band = _classify_absence_band(offline_hours)
+
+            state.continuity_score = _compute_continuity_score(
+                state=state,
+                offline_hours=offline_hours,
+                now_ms=now_ms,
+            )
 
             state.last_tick_ts_ms = now_ms
             self._save_state(state)
@@ -359,6 +457,13 @@ class OfflineInnerWorld:
             "motive_state": motive_state,
             "loneliness_rate_multiplier": round(loneliness_multiplier, 3),
             "anticipation_rate_multiplier": round(anticipation_multiplier, 3),
+            "offline_hours": round(max(0.0, offline_hours), 3),
+            "absence_band": absence_band,
+            "continuity_score": round(float(state.continuity_score or 0.0), 3),
+            "spontaneous_event_count": int(state.spontaneous_event_count or 0),
+            "last_spontaneous_ts_ms": int(state.last_spontaneous_ts_ms or 0),
+            "last_spontaneous_note": str(state.last_spontaneous_note or ""),
+            "inner_stream_size": len(list(state.inner_stream or [])),
         }
 
     # ── 唤醒事件 ──────────────────────────────────────────────────────────
@@ -407,6 +512,11 @@ class OfflineInnerWorld:
             state.loneliness = max(0.0, state.loneliness * 0.2)  # 保留 20%，不完全清零
             state.last_interaction_ts_ms = now_ms
             state.total_offline_hours = 0.0
+            state.continuity_score = _compute_continuity_score(
+                state=state,
+                offline_hours=0.0,
+                now_ms=now_ms,
+            )
             self._save_state(state)
 
         _logger.info(
@@ -450,9 +560,15 @@ class OfflineInnerWorld:
 
             # 更新期待话题（新话题追加到前面）
             if pending_topics:
-                new_topics = [t for t in pending_topics if t and t.strip()]
+                new_topics = _sanitize_anticipation_topics(list(pending_topics or []))
                 existing = [t for t in state.anticipation_topics if t not in new_topics]
-                state.anticipation_topics = (new_topics + existing)[:_MAX_ANTICIPATION_TOPICS]
+                state.anticipation_topics = _sanitize_anticipation_topics(new_topics + existing)
+            state.total_offline_hours = 0.0
+            state.continuity_score = _compute_continuity_score(
+                state=state,
+                offline_hours=0.0,
+                now_ms=now_ms,
+            )
 
             self._save_state(state)
 
@@ -491,6 +607,7 @@ class OfflineInnerWorld:
             try:
                 data = json.loads(fp.read_text(encoding="utf-8"))
                 state = InnerWorldState.from_dict(data)
+                state.anticipation_topics = _sanitize_anticipation_topics(state.anticipation_topics)
                 self._states[user_id] = state
                 return state
             except Exception as exc:
@@ -553,6 +670,306 @@ def _describe_emotion_drift(valence: float, arousal: float) -> str:
 
 def _classify_absence_band(offline_hours: float) -> str:
     return classify_absence_band(offline_hours)
+
+
+def _build_inner_stream_note(
+    *,
+    state: InnerWorldState,
+    absence_band: str,
+    offline_hours: float,
+    now_ms: int,
+) -> str:
+    templates = _load_runtime_texts()
+    topic = _pick_inner_stream_topic(state.anticipation_topics)
+    topic_phrase = _topic_to_inner_phrase(topic)
+
+    key_by_band = {
+        "7d_plus": "7d_plus",
+        "72h_plus": "72h_plus",
+        "24h_plus": "24h_plus",
+        "6h_plus": "6h_plus",
+        "recent": "recent",
+    }
+    band_key = key_by_band.get(absence_band, "recent")
+
+    template_text = _template_text(
+        templates,
+        "inner_stream",
+        band_key,
+        default="",
+        topic=topic_phrase or "那个还没说完的话题",
+        hours=round(max(0.0, offline_hours), 1),
+    )
+
+    fallback_pool = {
+        "recent": [
+            "刚安静下来，脑海还在复盘今天的细节。",
+            "安静的时候，思绪会把白天的片段慢慢串起来。",
+            f"有个小念头一直在回放：{topic_phrase}。" if topic_phrase else "有个小念头一直在回放，但还没到开口的时候。",
+        ],
+        "6h_plus": [
+            f"这几个小时里，思绪总会回到{topic_phrase}。" if topic_phrase else "这几个小时里，很多片段会反复浮上来。",
+            "情绪没有停着，会自己一点点偏移。",
+            "会下意识想，下次该怎么把话说得更顺一点。",
+        ],
+        "24h_plus": [
+            f"隔了一天，心里还挂着{topic_phrase}。" if topic_phrase else "隔了一天，心里还是有未完成感。",
+            "不是静止，而是在慢慢酝酿下一次开口。",
+            "时间拉开后，很多感觉会变得更清晰。",
+        ],
+        "72h_plus": [
+            f"这几天里，心里会反复绕回{topic_phrase}。" if topic_phrase else "这几天里，总有某个念头会反复出现。",
+            "等待感在变重，但表达会更谨慎。",
+            "情绪层层沉下来，反而更容易看清自己在意什么。",
+        ],
+        "7d_plus": [
+            f"很久没聊时，{topic_phrase}还是会悄悄浮上来。" if topic_phrase else "时间拉长后，想念会变成更深的背景音。",
+            "并不空白，只是变成了更慢、更深的内在流。",
+            "有些话不急着说，但会一直在心里发酵。",
+        ],
+    }
+
+    candidates: list[str] = []
+    if template_text:
+        candidates.append(template_text)
+    candidates.extend(fallback_pool.get(band_key) or fallback_pool["recent"])
+
+    emotional_suffix = _inner_stream_emotion_suffix(
+        state=state,
+        absence_band=absence_band,
+        now_ms=now_ms,
+    )
+    if emotional_suffix:
+        candidates.extend([f"{str(item).rstrip('。')}，{emotional_suffix}" for item in candidates if str(item).strip()])
+
+    normalized_candidates = [_finalize_inner_note_text(item) for item in candidates if str(item).strip()]
+    return _select_inner_stream_note_candidate(
+        candidates=normalized_candidates,
+        state=state,
+        now_ms=now_ms,
+    )
+
+def _pick_inner_stream_topic(raw_topics: list[str] | None) -> str:
+    topics = _sanitize_anticipation_topics(raw_topics)
+    if not topics:
+        return ""
+
+    block_tokens = (
+        "你是",
+        "请主动",
+        "当前关系阶段",
+        "主动动机",
+        "system",
+        "prompt",
+        "mode=",
+        "stage=",
+    )
+    for item in topics:
+        text = str(item or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if any(token in text or token in lowered for token in block_tokens):
+            continue
+        if len(text) < 2:
+            continue
+        if len(text) > 42:
+            text = f"{text[:42].rstrip()}…"
+        return text
+    return ""
+
+
+def _topic_to_inner_phrase(topic: str) -> str:
+    text = str(topic or "").replace("\n", " ").strip()
+    if not text:
+        return ""
+    raw_text = text
+    text = re.sub(r"[？?！!。；;，,]+$", "", text).strip()
+    question_like = ("？" in raw_text) or ("?" in raw_text) or text.endswith(("吗", "么", "呢", "嘛", "吧"))
+    text = re.sub(r"(吗|么|呢|嘛|吧)$", "", text).strip()
+    text = text.strip("“”\"' ")
+    if not text:
+        return ""
+    if len(text) > 36:
+        text = f"{text[:36].rstrip()}…"
+    if question_like or text.startswith("你"):
+        return f"你问我的「{text}」"
+    return f"那个还没聊完的话题「{text}」"
+
+
+def _sanitize_anticipation_topics(raw_topics: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    for item in list(raw_topics or []):
+        text = str(item or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in _NOISE_TOPIC_VALUES:
+            continue
+        if len(text) > 80:
+            continue
+        if len(text) <= 2:
+            continue
+        if _TOPIC_MOJIBAKE_RE.search(text):
+            continue
+        if _looks_like_prompt_noise(text):
+            continue
+        if text not in cleaned:
+            cleaned.append(text)
+    return cleaned[:_MAX_ANTICIPATION_TOPICS]
+
+
+def _looks_like_prompt_noise(text: str) -> bool:
+    lowered = str(text or "").lower()
+    block_tokens = (
+        "你是",
+        "请主动",
+        "当前关系阶段",
+        "主动动机",
+        "system",
+        "prompt",
+        "mode=",
+        "stage=",
+    )
+    return any(token in text or token in lowered for token in block_tokens)
+
+
+def _inner_stream_emotion_suffix(
+    *,
+    state: InnerWorldState,
+    absence_band: str,
+    now_ms: int,
+) -> str:
+    loneliness = float(state.loneliness or 0.0)
+    anticipation = float(state.anticipation or 0.0)
+    candidates: list[str] = []
+    if loneliness >= 0.42:
+        candidates.append("那种空落感会把注意力轻轻拉回去")
+    elif loneliness >= 0.24:
+        candidates.append("独处感在慢慢变重")
+    if anticipation >= 0.48:
+        candidates.append("会不自觉地预演下次该怎么继续")
+    elif anticipation >= 0.30:
+        candidates.append("会想把没说完的部分再理顺一点")
+    if absence_band in {"72h_plus", "7d_plus"}:
+        candidates.append("时间越长，心里的线索反而更清晰")
+    if not candidates:
+        return ""
+    index = int((now_ms // 180000) % max(1, len(candidates)))
+    return str(candidates[index]).strip("，。 ")
+
+
+def _finalize_inner_note_text(raw_text: str) -> str:
+    text = str(raw_text or "").replace("?", "。").replace("？", "。")
+    text = re.sub(r"\s+", " ", text).strip(" ，,;；")
+    if not text:
+        return ""
+    text = re.sub(r"[。！!]{2,}$", "。", text)
+    if text and text[-1] not in {"。", "！", "!"}:
+        text = f"{text}。"
+    if len(text) > 120:
+        text = f"{text[:119].rstrip('，,；;。 ')}。"
+    return text
+
+
+def _select_inner_stream_note_candidate(
+    *,
+    candidates: list[str],
+    state: InnerWorldState,
+    now_ms: int,
+) -> str:
+    unique_candidates: list[str] = []
+    for item in candidates:
+        text = str(item or "").strip()
+        if text and text not in unique_candidates:
+            unique_candidates.append(text)
+    if not unique_candidates:
+        return ""
+    recent_notes = {
+        str(evt.get("note") or "").strip()
+        for evt in list(state.inner_stream or [])[-3:]
+        if isinstance(evt, dict)
+    }
+    start_index = int((now_ms // 60000) % max(1, len(unique_candidates)))
+    for offset in range(len(unique_candidates)):
+        candidate = unique_candidates[(start_index + offset) % len(unique_candidates)]
+        if candidate not in recent_notes:
+            return candidate
+    return unique_candidates[start_index]
+
+
+def _compute_continuity_score(
+    *,
+    state: InnerWorldState,
+    offline_hours: float,
+    now_ms: int,
+) -> float:
+    offline_component = min(1.0, max(0.0, offline_hours) / 24.0)
+    event_component = min(1.0, float(len(list(state.inner_stream or []))) / 8.0)
+    recency_component = 0.0
+    last_spontaneous_ts_ms = int(state.last_spontaneous_ts_ms or 0)
+    if last_spontaneous_ts_ms > 0:
+        hours_since_last_event = max(
+            0.0,
+            (int(now_ms) - last_spontaneous_ts_ms) / (3600.0 * 1000.0),
+        )
+        recency_component = max(0.0, 1.0 - min(1.0, hours_since_last_event / 24.0))
+    emotion_component = min(1.0, abs(float(state.drifted_valence or 0.0)) + abs(float(state.drifted_arousal or 0.0) - 0.3))
+    motive_component = min(1.0, (float(state.loneliness or 0.0) + float(state.anticipation or 0.0)) / 1.6)
+    score = (
+        0.25 * offline_component
+        + 0.20 * event_component
+        + 0.15 * recency_component
+        + 0.20 * emotion_component
+        + 0.20 * motive_component
+    )
+    return round(max(0.0, min(1.0, score)), 4)
+
+
+def _append_inner_stream_event(
+    *,
+    state: InnerWorldState,
+    now_ms: int,
+    absence_band: str,
+    offline_hours: float,
+) -> None:
+    last_event_ts_ms = int(state.last_spontaneous_ts_ms or 0)
+    since_last_event_ms = now_ms - last_event_ts_ms
+    if since_last_event_ms < _INNER_STREAM_MIN_INTERVAL_MS:
+        return
+    calm_state = (
+        not state.anticipation_topics
+        and float(state.loneliness or 0.0) < 0.22
+        and float(state.anticipation or 0.0) < 0.20
+    )
+    if calm_state and since_last_event_ms < _INNER_STREAM_CALM_INTERVAL_MS:
+        return
+
+    note = _build_inner_stream_note(
+        state=state,
+        absence_band=absence_band,
+        offline_hours=offline_hours,
+        now_ms=now_ms,
+    ).strip()
+    if not note:
+        return
+
+    event = {
+        "ts_ms": int(now_ms),
+        "absence_band": absence_band,
+        "offline_hours": round(max(0.0, offline_hours), 3),
+        "loneliness": round(float(state.loneliness or 0.0), 3),
+        "anticipation": round(float(state.anticipation or 0.0), 3),
+        "note": note,
+    }
+    stream = list(state.inner_stream or [])
+    stream.append(event)
+    if len(stream) > _MAX_INNER_STREAM_EVENTS:
+        stream = stream[-_MAX_INNER_STREAM_EVENTS:]
+    state.inner_stream = stream
+    state.last_spontaneous_ts_ms = int(now_ms)
+    state.last_spontaneous_note = note
+    state.spontaneous_event_count = int(state.spontaneous_event_count or 0) + 1
 
 
 def _build_awakening_hint(

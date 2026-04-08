@@ -37,6 +37,20 @@ DEFAULT_CONTINUITY_TOTAL_MAX_TOKENS = (
     DEFAULT_CONTINUITY_RECENT_MAX_TOKENS + DEFAULT_CONTINUITY_OLDER_SUMMARY_MAX_TOKENS
 )
 DEFAULT_CONTINUITY_FETCH_ROWS = 128
+DEFAULT_CONTINUITY_GUARD = (
+    "Continuity rule:\n"
+    "Treat the exchange as ongoing when recent continuity context exists. "
+    "Do not restart with first-meeting language or repeat self-introduction "
+    "unless the user explicitly asks who you are or the session clearly reset."
+)
+DEFAULT_CLARIFICATION_GUARD = (
+    "Clarification rule:\n"
+    "When the user asks what your previous words meant, or asks about the immediately preceding turn, "
+    "anchor the answer to the latest turn in recent continuity context first. "
+    "Explain that line directly and concretely. Do not switch topics, do not pull in distant memories, "
+    "do not restart the relationship framing, and do not bounce back with another "
+    "\"you mean ... ?\" question when the previous turn is already available."
+)
 
 
 def _get_style_correction_block(render_target_lang: str) -> str:
@@ -125,6 +139,17 @@ def _sanitize_recent_preview(*, text: str, render_target_lang: str) -> str:
     if _looks_corrupted_recent_preview(repaired):
         return ""
 
+    lowered = repaired.lower()
+    if (
+        lowered.startswith("```json")
+        or lowered.startswith('{"narrative"')
+        or '"intent_draft"' in lowered
+        or '"draft_only"' in lowered
+        or "[react" in lowered
+        or "agent_id=" in lowered
+    ):
+        return ""
+
     if str(render_target_lang or "").strip().lower() == "zh" and _contains_kana(repaired):
         return ""
 
@@ -139,6 +164,15 @@ def _normalize_continuity_turn_limit(raw_value: Any) -> int:
     return max(1, min(limit, 32))
 
 
+def _is_clarification_followup_query(text: str) -> bool:
+    try:
+        from host_brain.app.chat_retrieval_helpers import _is_contextual_followup_query  # noqa: PLC0415
+
+        return bool(_is_contextual_followup_query(str(text or "").strip()))
+    except Exception:
+        return False
+
+
 def _fetch_continuity_rows(
     *,
     ledger: Any,
@@ -151,29 +185,17 @@ def _fetch_continuity_rows(
     resolved_person_id = str(person_id or "").strip()
     request_id_text = str(request_id or "").strip()
     rows: list[dict[str, Any]] = []
+
+    def _sort_and_trim(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deduped = _dedupe_continuity_rows(candidates)
+        if not deduped:
+            return []
+        deduped.sort(key=lambda row: int(row.get("ts_ms") or 0))
+        return deduped[-int(fetch_limit):]
+
     conn = getattr(ledger, "_conn", None)
     if conn is not None:
-        if resolved_person_id:
-            fetched = conn.execute(
-                """
-                SELECT request_id, session_id, payload, ts_ms
-                FROM voice_event_log
-                WHERE event_type = 'INPUT_COMPLETED'
-                  AND request_id <> ?
-                ORDER BY ts_ms DESC
-                LIMIT ?
-                """,
-                (request_id_text, int(fetch_limit)),
-            ).fetchall()
-            filtered_rows: list[dict[str, Any]] = []
-            for row in list(fetched):
-                current = dict(row)
-                payload = _coerce_payload_dict(current.get("payload"))
-                if str(payload.get("person_id") or "").strip() != resolved_person_id:
-                    continue
-                filtered_rows.append(current)
-            rows = list(reversed(filtered_rows))
-        else:
+        if resolved_session_id:
             fetched = conn.execute(
                 """
                 SELECT request_id, session_id, payload, ts_ms
@@ -184,12 +206,44 @@ def _fetch_continuity_rows(
                 ORDER BY ts_ms DESC
                 LIMIT ?
                 """,
-                (resolved_session_id, request_id_text, int(fetch_limit)),
+                (resolved_session_id, request_id_text, int(max(fetch_limit * 4, fetch_limit))),
             ).fetchall()
-            rows = [dict(row) for row in reversed(list(fetched))]
+            session_rows = [dict(row) for row in list(fetched)]
+            filtered_session_rows: list[dict[str, Any]] = []
+            for row in session_rows:
+                if str(row.get("session_id") or "").strip() != resolved_session_id:
+                    continue
+                payload = _coerce_payload_dict(row.get("payload"))
+                if resolved_person_id and str(payload.get("person_id") or "").strip() != resolved_person_id:
+                    continue
+                filtered_session_rows.append(row)
+            session_rows = filtered_session_rows
+            rows = _sort_and_trim(session_rows)
+
+        if not rows and resolved_person_id:
+            fetched = conn.execute(
+                """
+                SELECT request_id, session_id, payload, ts_ms
+                FROM voice_event_log
+                WHERE event_type = 'INPUT_COMPLETED'
+                  AND request_id <> ?
+                ORDER BY ts_ms DESC
+                LIMIT ?
+                """,
+                (request_id_text, int(max(fetch_limit * 4, fetch_limit))),
+            ).fetchall()
+            filtered_rows: list[dict[str, Any]] = []
+            for row in list(fetched):
+                current = dict(row)
+                payload = _coerce_payload_dict(current.get("payload"))
+                if str(payload.get("person_id") or "").strip() != resolved_person_id:
+                    continue
+                filtered_rows.append(current)
+            rows = _sort_and_trim(filtered_rows)
     elif hasattr(ledger, "fetch_by_time_range"):
         fetched = ledger.fetch_by_time_range("voice_event_log", limit=2000)
-        filtered: list[dict[str, Any]] = []
+        session_filtered: list[dict[str, Any]] = []
+        person_filtered: list[dict[str, Any]] = []
         for row in list(fetched or []):
             if not isinstance(row, Mapping):
                 continue
@@ -197,23 +251,23 @@ def _fetch_continuity_rows(
             row_session_id = str(current.get("session_id") or "").strip()
             payload = _coerce_payload_dict(current.get("payload"))
             row_person_id = str(payload.get("person_id") or "").strip()
-            if resolved_person_id:
-                if row_person_id != resolved_person_id:
-                    continue
-            elif row_session_id != resolved_session_id:
-                continue
             if str(current.get("event_type") or "").strip() != "INPUT_COMPLETED":
                 continue
             if str(current.get("request_id") or "").strip() == request_id_text:
                 continue
-            filtered.append(current)
-        rows = filtered[-int(fetch_limit):]
+            if resolved_session_id and row_session_id == resolved_session_id:
+                if not resolved_person_id or row_person_id == resolved_person_id:
+                    session_filtered.append(current)
+                continue
+            if resolved_person_id and row_person_id == resolved_person_id:
+                person_filtered.append(current)
+        rows = _sort_and_trim(session_filtered if session_filtered else person_filtered)
     return rows
 
 
 def _voice_rows_to_turns(*, rows: list[dict[str, Any]], render_target_lang: str) -> list[dict[str, str]]:
     turns: list[dict[str, str]] = []
-    for row in list(rows or []):
+    for row in _dedupe_continuity_rows(list(rows or [])):
         payload = _coerce_payload_dict(row.get("payload"))
         input_preview = _sanitize_recent_preview(
             text=str(payload.get("input_preview") or "").strip(),
@@ -228,6 +282,41 @@ def _voice_rows_to_turns(*, rows: list[dict[str, Any]], render_target_lang: str)
         if reply_preview:
             turns.append({"role": "assistant", "content": reply_preview})
     return turns
+
+
+def _dedupe_continuity_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    picked_by_request: dict[str, dict[str, Any]] = {}
+    passthrough: list[dict[str, Any]] = []
+
+    def _row_score(row: Mapping[str, Any], payload: Mapping[str, Any]) -> tuple[int, int, int, int]:
+        return (
+            int(row.get("ts_ms") or 0),
+            len(payload),
+            1 if payload.get("phase") else 0,
+            1 if payload.get("conversation_id") else 0,
+        )
+
+    for raw_row in list(rows or []):
+        if not isinstance(raw_row, Mapping):
+            continue
+        current = dict(raw_row)
+        payload = _coerce_payload_dict(current.get("payload"))
+        current["payload"] = payload
+        request_key = str(current.get("request_id") or "").strip()
+        if not request_key:
+            passthrough.append(current)
+            continue
+        existing = picked_by_request.get(request_key)
+        if existing is None:
+            picked_by_request[request_key] = current
+            continue
+        existing_payload = _coerce_payload_dict(existing.get("payload"))
+        if _row_score(current, payload) >= _row_score(existing, existing_payload):
+            picked_by_request[request_key] = current
+
+    combined = list(picked_by_request.values()) + passthrough
+    combined.sort(key=lambda row: int(row.get("ts_ms") or 0))
+    return combined
 
 
 def _build_older_history_summary(
@@ -435,7 +524,9 @@ def build_top_agent_prompt(
         render_target_lang=render_target_lang,
     )
     if recent_session_context:
-        full_prompt = full_prompt + "\n\n" + recent_session_context
+        full_prompt = full_prompt + "\n\n" + recent_session_context + "\n\n" + DEFAULT_CONTINUITY_GUARD
+        if _is_clarification_followup_query(user_message):
+            full_prompt = full_prompt + "\n" + DEFAULT_CLARIFICATION_GUARD
 
     # ── 4. 追加子 Agent 能力描述 ─────────────────────────────────────
     agent_block = _build_agent_capabilities_block()

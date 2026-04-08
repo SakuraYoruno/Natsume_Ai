@@ -45,6 +45,16 @@ def build_offline_state_from_inner_state(
     resolved_hours = round(max(0.0, offline_hours), 4)
     resolved_duration_ms = max(0, int(round(resolved_hours * 3600.0 * 1000.0)))
     absence_band = _classify_absence_band(resolved_hours)
+    continuity_score = float(current.get("continuity_score") or 0.0)
+    spontaneous_event_count = int(current.get("spontaneous_event_count") or 0)
+    last_spontaneous_ts_ms = int(current.get("last_spontaneous_ts_ms") or 0)
+    last_spontaneous_note = str(current.get("last_spontaneous_note") or "").strip()
+
+    raw_inner_stream = list(current.get("inner_stream") or [])
+    inner_stream_tail: list[dict[str, Any]] = []
+    for item in raw_inner_stream[-8:]:
+        if isinstance(item, Mapping):
+            inner_stream_tail.append(dict(item))
 
     return {
         "offline_hours": resolved_hours,
@@ -53,6 +63,11 @@ def build_offline_state_from_inner_state(
         "loneliness_level": float(current.get("loneliness") or 0.0),
         "anticipation_level": float(current.get("anticipation") or 0.0),
         "anticipation_topics": list(current.get("anticipation_topics") or []),
+        "continuity_score": continuity_score,
+        "spontaneous_event_count": spontaneous_event_count,
+        "last_spontaneous_ts_ms": last_spontaneous_ts_ms,
+        "last_spontaneous_note": last_spontaneous_note,
+        "inner_stream": inner_stream_tail,
     }
 
 

@@ -79,6 +79,261 @@ def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str
     return f"OK (registered={len(registered)}/{len(task_ids)}; tasks={','.join(registered)})"
 
 
+def _bootstrap_personality_scheduler(
+    *,
+    logger: Any,
+    get_ledger: Callable[[], Any],
+    retention_policy: Any,
+    proactive_push_client_builder: Callable[[], Any] | None = None,
+) -> dict[str, str]:
+    from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
+    from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
+    from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
+    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
+        SchedulerTaskConfig,
+        SchedulerTaskRegistry,
+        TaskPriority,
+        TriggerMode,
+    )
+
+    registry = SchedulerTaskRegistry.get_instance()
+    health_reporter = SchedulerHealthReporter(registry=registry)
+    set_scheduler_providers(
+        registry=registry,
+        health_reporter=health_reporter,
+    )
+
+    proactive_push_state: dict[str, Any] = {
+        "client": None,
+        "detail": "proactive push client unavailable",
+    }
+
+    if proactive_push_client_builder is None:
+        try:
+            from host_brain.app.vision.proactive_push_client import (  # noqa: PLC0415
+                build_proactive_push_client as proactive_push_client_builder,
+            )
+        except Exception as exc:
+            proactive_push_client_builder = None
+            proactive_push_state["detail"] = str(exc) or proactive_push_state["detail"]
+            logger.warning("Proactive push client import degraded: %s", exc)
+
+    if proactive_push_client_builder is not None:
+        try:
+            proactive_push_state["client"] = proactive_push_client_builder()
+            proactive_push_state["detail"] = ""
+        except Exception as exc:
+            proactive_push_state["detail"] = str(exc) or proactive_push_state["detail"]
+            logger.warning("Proactive push client init degraded: %s", exc)
+
+    def _ui_pusher(message: dict[str, Any]) -> dict[str, Any]:
+        client = proactive_push_state.get("client")
+        if client is None:
+            return {
+                "success": False,
+                "status": "SKIPPED",
+                "detail": str(proactive_push_state.get("detail") or "proactive push client unavailable"),
+            }
+        return client.push(message)
+
+    def _intent_dispatcher(system_intent: dict[str, Any]) -> dict[str, Any]:
+        skill_name = str(system_intent.get("skill_name") or "").strip()
+        if skill_name == "proactive_talk" and proactive_push_state.get("client") is None:
+            return {
+                "status": "SKIPPED",
+                "reason_code": "PROACTIVE_PUSH_UNAVAILABLE",
+                "detail": str(proactive_push_state.get("detail") or "proactive push client unavailable"),
+            }
+        return run_proactive_intent_dispatch(
+            system_intent,
+            logger=logger,
+            get_ledger=get_ledger,
+            retention_policy=retention_policy,
+            ui_pusher=_ui_pusher,
+        )
+
+    scheduler = NatsumeScheduler(
+        registry=registry,
+        health_reporter=health_reporter,
+        intent_dispatcher=_intent_dispatcher,
+    )
+
+    def _register_task(
+        *,
+        config: Any,
+        success_message: str,
+        failure_message: str,
+    ) -> None:
+        try:
+            if registry.get(config.task_id) is None:
+                registry.register(config)
+                logger.info(success_message, config.task_id)
+        except Exception as exc:
+            logger.warning(failure_message, exc)
+
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="proactive_talk_periodic",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 180},
+            intent_template={
+                "skill_name": "proactive_talk",
+                "args": {"idle_threshold_ms": 2700000},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["normal", "sleep"],
+            enabled=True,
+            description="主动对话：每 3 分钟检查一次，空闲 45 分钟后尝试发起问候",
+        ),
+        success_message="主动对话任务已注册: task_id=%s, interval=180s",
+        failure_message="主动对话任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="evolution_cycle_daily",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"hour": 3, "minute": 0},
+            intent_template={
+                "skill_name": "evolution_cycle",
+                "args": {"user_id": "user_1"},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.MEDIUM,
+            mode_allowlist=["normal", "sleep"],
+            enabled=True,
+            description="daily evolution cycle task",
+        ),
+        success_message="进化周期任务已注册: task_id=%s, cron=03:00",
+        failure_message="进化周期任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="inner_world_tick",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 60},
+            intent_template={
+                "skill_name": "inner_world_tick",
+                "args": {"user_id": "user_1"},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            description="离线内心世界时钟：每分钟推进孤独感、期待值与情绪漂移",
+        ),
+        success_message="离线内心世界时钟任务已注册: task_id=%s, interval=60s",
+        failure_message="离线内心世界时钟任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="silence_tick",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 60},
+            intent_template={
+                "skill_name": "silence_tick",
+                "args": {"user_id": "user_1"},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            description="沉默引擎 tick：每分钟恢复意愿与话题抗拒衰减",
+        ),
+        success_message="沉默引擎 tick 任务已注册: task_id=%s, interval=60s",
+        failure_message="沉默引擎 tick 任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="body_sense_tick",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 60},
+            intent_template={
+                "skill_name": "body_sense_tick",
+                "args": {"user_id": "user_1"},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            description="身体感知 tick：每分钟更新困倦感并恢复疲劳值",
+        ),
+        success_message="身体感知 tick 任务已注册: task_id=%s, interval=60s",
+        failure_message="身体感知 tick 任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="gaming_companion_tick",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": 300},
+            intent_template={
+                "skill_name": "gaming_companion_tick",
+                "args": {
+                    "user_id": "user_1",
+                    "monitor": 1,
+                },
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["gaming"],
+            enabled=True,
+            description="gaming 陪玩识图 tick：每 5 分钟截图分析并尝试陪玩反馈",
+        ),
+        success_message="gaming 陪玩识图 tick 任务已注册: task_id=%s, interval=300s",
+        failure_message="gaming 陪玩识图 tick 任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="emergent_growth_weekly",
+            trigger_mode=TriggerMode.CRON,
+            trigger_config={"day_of_week": 6, "hour": 3, "minute": 0},
+            intent_template={
+                "skill_name": "emergent_growth_weekly",
+                "args": {
+                    "user_id": "user_1",
+                    "lookback_days": 7,
+                    "use_llm": False,
+                },
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["normal", "sleep"],
+            enabled=True,
+            description="涌现式成长：每周日 03:00 分析近期对话并沉淀人格微调",
+        ),
+        success_message="涌现式成长任务已注册: task_id=%s, cron=周日03:00",
+        failure_message="涌现式成长任务注册失败（降级）: %s",
+    )
+
+    scheduler.start()
+
+    tracked_task_ids = [
+        "proactive_talk_periodic",
+        "inner_world_tick",
+        "silence_tick",
+        "body_sense_tick",
+    ]
+    proactive_push_ready = proactive_push_state.get("client") is not None
+    proactive_push_status = (
+        "OK"
+        if proactive_push_ready
+        else f"DEGRADED: {proactive_push_state.get('detail') or 'proactive push client unavailable'}"
+    )
+
+    return {
+        "proactive_talk_scheduler": (
+            "OK "
+            f"(started; proactive_push={'ready' if proactive_push_ready else 'skip'}; "
+            f"background_ticks=3)"
+        ),
+        "proactive_push_client": proactive_push_status,
+        "personality_tick_registry": _build_personality_tick_status(
+            registry=registry,
+            task_ids=tracked_task_ids,
+        ),
+    }
+
+
 def _sync_world_canon_index_on_startup(
     *,
     ledger: Any,
@@ -160,7 +415,7 @@ def runtime_lifespan(
                     logger.warning(
                         "新模块 %s 启动探针失败（降级）: %s",
                         name, exc,
-                        extra={"module": name, "error": str(exc)},
+                        extra={"startup_module": name, "error": str(exc)},
                     )
             for name, factory in [
                 ("distillation_engine", get_distillation_engine),
@@ -171,7 +426,7 @@ def runtime_lifespan(
                     logger.info(
                         "新模块 %s 跳过启动预热，改为按需初始化",
                         name,
-                        extra={"module": name},
+                        extra={"startup_module": name},
                     )
                     continue
                 try:
@@ -182,7 +437,7 @@ def runtime_lifespan(
                     logger.warning(
                         "新模块 %s 启动探针失败（降级）: %s",
                         name, exc,
-                        extra={"module": name, "error": str(exc)},
+                        extra={"startup_module": name, "error": str(exc)},
                     )
 
             # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、StyleCanon、EpisodicStore）
@@ -372,7 +627,6 @@ def runtime_lifespan(
                     SchedulerTaskRegistry, SchedulerTaskConfig, TriggerMode, TaskPriority,
                 )
                 from host_brain.scheduler.scheduler import NatsumeScheduler  # noqa: PLC0415
-                from host_brain.app.vision.proactive_push_client import build_proactive_push_client  # noqa: PLC0415
 
                 _proactive_registry = SchedulerTaskRegistry.get_instance()
 
@@ -395,24 +649,51 @@ def runtime_lifespan(
                 if _proactive_registry.get("proactive_talk_periodic") is None:
                     _proactive_registry.register(_proactive_task)
 
-                # 构建 ui_pusher 回调（同步推送到 Edge）
-                _push_client = build_proactive_push_client()
+                # 构建 ui_pusher 回调（同步推送到 Edge）；失败时仅降级 proactive push，不阻断 core ticks
+                _proactive_push_detail = ""
+                try:
+                    from host_brain.app.vision.proactive_push_client import build_proactive_push_client  # noqa: PLC0415
 
-                _ui_pusher = lambda message, _client=_push_client: _client.push(message)
+                    _push_client = build_proactive_push_client()
+                    _ui_pusher = lambda message, _client=_push_client: _client.push(message)
+                    new_module_statuses["proactive_push_client"] = "OK"
+                except Exception as _push_exc:
+                    _proactive_push_detail = str(_push_exc) or "proactive push client unavailable"
+                    new_module_statuses["proactive_push_client"] = f"DEGRADED: {_proactive_push_detail}"
+                    logger.warning("Proactive push client init degraded: %s", _push_exc)
+                    _ui_pusher = (
+                        lambda _message,
+                        _detail=_proactive_push_detail: {
+                            "success": False,
+                            "status": "SKIPPED",
+                            "detail": _detail,
+                        }
+                    )
 
-                _proactive_intent_dispatcher = (
-                    lambda system_intent,
-                    _logger=logger,
-                    _get_ledger=get_ledger,
-                    _retention_policy=_retention_policy,
-                    _ui_pusher=_ui_pusher: run_proactive_intent_dispatch(
+                def _proactive_intent_dispatcher(
+                    system_intent: dict[str, Any],
+                    _logger: Any = logger,
+                    _get_ledger: Callable[[], Any] = get_ledger,
+                    _retention_policy: Any = _retention_policy,
+                    _ui_pusher: Callable[[dict[str, Any]], dict[str, Any]] = _ui_pusher,
+                    _push_detail: str = _proactive_push_detail,
+                ) -> dict[str, Any]:
+                    if (
+                        str(system_intent.get("skill_name") or "").strip() == "proactive_talk"
+                        and _push_detail
+                    ):
+                        return {
+                            "status": "SKIPPED",
+                            "reason_code": "PROACTIVE_PUSH_UNAVAILABLE",
+                            "detail": _push_detail,
+                        }
+                    return run_proactive_intent_dispatch(
                         system_intent,
                         logger=_logger,
                         get_ledger=_get_ledger,
                         retention_policy=_retention_policy,
                         ui_pusher=_ui_pusher,
                     )
-                )
 
                 from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
                 from host_brain.scheduler.scheduler_routes import set_scheduler_providers  # noqa: PLC0415
@@ -436,7 +717,7 @@ def runtime_lifespan(
                         trigger_config={"hour": 3, "minute": 0},
                         intent_template={
                             "skill_name": "evolution_cycle",
-                            "args": {"user_id": "user_1"},
+                            "args": {},
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.MEDIUM,
@@ -458,7 +739,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": 60},  # 每分钟 tick 一次
                         intent_template={
                             "skill_name": "inner_world_tick",
-                            "args": {"user_id": "user_1"},
+                            "args": {},
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -480,7 +761,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": 60},  # 每分钟 tick 一次
                         intent_template={
                             "skill_name": "silence_tick",
-                            "args": {"user_id": "user_1"},
+                            "args": {},
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -502,7 +783,7 @@ def runtime_lifespan(
                         trigger_config={"seconds": 60},  # 每分钟 tick 一次
                         intent_template={
                             "skill_name": "body_sense_tick",
-                            "args": {"user_id": "user_1"},
+                            "args": {},
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
@@ -525,7 +806,6 @@ def runtime_lifespan(
                         intent_template={
                             "skill_name": "gaming_companion_tick",
                             "args": {
-                                "user_id": "user_1",
                                 "monitor": 1,
                             },
                             "proposer_node_id": "scheduler",
@@ -550,7 +830,6 @@ def runtime_lifespan(
                         intent_template={
                             "skill_name": "emergent_growth_weekly",
                             "args": {
-                                "user_id": "user_1",
                                 "lookback_days": 7,
                                 "use_llm": False,
                             },
@@ -577,7 +856,9 @@ def runtime_lifespan(
                     "body_sense_tick",
                 ]
                 new_module_statuses["proactive_talk_scheduler"] = (
-                    f"OK (started; core_ticks={len(_core_personality_task_ids)})"
+                    "OK "
+                    f"(started; core_ticks={len(_core_personality_task_ids)}; "
+                    f"proactive_push={'ready' if not _proactive_push_detail else 'skip'})"
                 )
                 new_module_statuses["personality_tick_registry"] = _build_personality_tick_status(
                     registry=_proactive_registry,
@@ -821,7 +1102,7 @@ def runtime_lifespan(
             except Exception as hb_exc:
                 logger.warning("Service health heartbeat start skipped: %s", hb_exc)
         except Exception as exc:
-            logger.warning("Startup probe degraded", extra={"error": str(exc)})
+            logger.warning("Startup probe degraded: %s", exc, exc_info=True)
         yield
         # ── Shutdown 阶段 ──
         # 停止 ActivityMonitor

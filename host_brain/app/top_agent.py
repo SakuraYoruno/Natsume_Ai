@@ -89,6 +89,9 @@ _DELEGATE_RE = re.compile(
 _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
 _RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
 _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
+_CLARIFICATION_DIRECT_QUERY_RE = re.compile(
+    r"^(什么意思|啥意思|什么意思啊|啥意思啊|这是什么意思|你这是什么意思|这话什么意思|这句什么意思|你这话什么意思|你这句什么意思|刚才那句什么意思|你刚才那句什么意思|你刚刚那句什么意思)[?？!！。…~]*$"
+)
 _DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
 _GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
 _PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
@@ -530,6 +533,157 @@ def _summarize_response_policy_for_trace(response_policy: Mapping[str, Any] | No
     return summary
 
 
+def _summarize_emotion_context_for_trace(emotion_context: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(emotion_context)
+    if not raw:
+        return {}
+
+    summary: dict[str, Any] = {}
+    for key in ("emotion_tag", "mood_state", "emotion_range_hint"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+
+    for key in ("emotion_intensity", "valence", "arousal"):
+        score = _coerce_trace_score(raw.get(key))
+        if score is not None:
+            summary[key] = score
+
+    vad_vector = raw.get("vad_vector")
+    if isinstance(vad_vector, Mapping):
+        vad_summary: dict[str, float] = {}
+        for key in ("valence", "arousal", "dominance"):
+            score = _coerce_trace_score(vad_vector.get(key))
+            if score is not None:
+                vad_summary[key] = score
+        if vad_summary:
+            summary["vad_vector"] = vad_summary
+
+    triggered = [
+        str(item).strip()
+        for item in list(raw.get("triggered_emotions") or [])
+        if str(item).strip()
+    ]
+    if triggered:
+        summary["triggered_emotions"] = triggered[:8]
+    return summary
+
+
+def _summarize_persona_resident_memory_for_trace(
+    *,
+    bond_summary: Mapping[str, Any] | None,
+    retrieval_summary: Mapping[str, Any] | None,
+    retrieval_evidence_items: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+
+    bond_raw = _coerce_trace_mapping(bond_summary)
+    if bond_raw:
+        bond_info: dict[str, Any] = {}
+        for key in ("stage", "trend", "user_id"):
+            value = str(bond_raw.get(key) or "").strip()
+            if value:
+                bond_info[key] = value
+        score = _coerce_trace_score(bond_raw.get("score"))
+        if score is not None:
+            bond_info["score"] = score
+        if bond_info:
+            summary["bond"] = bond_info
+
+    retrieval_raw = _coerce_trace_mapping(retrieval_summary)
+    if retrieval_raw:
+        retrieval_info: dict[str, Any] = {}
+        for key in ("status", "reason_code", "pack_id"):
+            value = str(retrieval_raw.get(key) or "").strip()
+            if value:
+                retrieval_info[key] = value
+        for key in ("candidate_count", "route_count", "rerank_topk"):
+            try:
+                retrieval_info[key] = int(retrieval_raw.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+        target_stores = [
+            str(item).strip()
+            for item in list(retrieval_raw.get("target_stores") or [])
+            if str(item).strip()
+        ]
+        if target_stores:
+            retrieval_info["target_stores"] = target_stores
+        if retrieval_info:
+            summary["retrieval"] = retrieval_info
+
+    evidence_items = [item for item in list(retrieval_evidence_items or []) if isinstance(item, Mapping)]
+    if evidence_items:
+        summary["evidence_count"] = len(evidence_items)
+        store_ids = sorted(
+            {
+                str(item.get("store_id") or item.get("source_type") or item.get("kind") or "").strip()
+                for item in evidence_items
+                if str(item.get("store_id") or item.get("source_type") or item.get("kind") or "").strip()
+            }
+        )
+        if store_ids:
+            summary["evidence_store_ids"] = store_ids
+    return summary
+
+
+def _normalize_trace_stage_meta(trace_stage_meta: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(trace_stage_meta, Mapping):
+        return {}
+
+    normalized: dict[str, Any] = {}
+    for key, value in dict(trace_stage_meta).items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, dict)) and not value:
+            continue
+        normalized[str(key)] = value
+    return normalized
+
+
+def _build_trace_stage_node(
+    *,
+    node_id: str,
+    node_type: str,
+    display_name: str,
+    ts_ms: int,
+    status: str = "OK",
+    side: str = "host",
+    reason_code: str | None = None,
+    latency_ms: int | None = None,
+    provider: str | None = None,
+    model_id: str | None = None,
+    input_data: Any = None,
+    output_data: Any = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "node_id": node_id,
+        "node_type": node_type,
+        "display_name": display_name,
+        "side": side,
+        "status": status,
+        "ts_ms": ts_ms,
+    }
+    if reason_code:
+        node["reason_code"] = reason_code
+    if latency_ms is not None:
+        node["latency_ms"] = latency_ms
+    if provider:
+        node["provider"] = provider
+    if model_id:
+        node["model_id"] = model_id
+    if input_data not in (None, {}, []):
+        node["input_data"] = input_data
+    if output_data not in (None, {}, []):
+        node["output_data"] = output_data
+    if error:
+        node["error"] = error
+    return node
+
+
 class _SubAgentGatewayAdapter:
     def __init__(
         self,
@@ -844,21 +998,42 @@ def _maybe_build_recent_turn_answer(
     if not turns:
         return None
 
+    def _finalize_recent_turn_text(candidate: str, *, fallback: str) -> str:
+        normalized = str(candidate or "").strip()
+        if not normalized:
+            return fallback
+        if any(
+            token in normalized
+            for token in ("已确认事实", "请直接告诉用户", "请直接回答", "不要再说看不到", "不要再说没看到")
+        ):
+            return fallback
+        return normalized
+
     latest_user = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "user" and str(turn.get("content") or "").strip()), "")
     latest_assistant = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "assistant" and str(turn.get("content") or "").strip()), "")
 
     templates = _mapping_section(_load_runtime_texts(), "recent_turn_answer")
     if query_role == "user" and latest_user:
-        return _mapping_text(
-            templates,
-            "user_template",
-            latest_user=latest_user,
+        fallback = f"你上一句是「{latest_user}」。"
+        return _finalize_recent_turn_text(
+            _mapping_text(
+                templates,
+                "user_template",
+                latest_user=latest_user,
+                default=fallback,
+            ),
+            fallback=fallback,
         )
     if query_role == "assistant" and latest_assistant:
-        return _mapping_text(
-            templates,
-            "assistant_template",
-            latest_assistant=latest_assistant,
+        fallback = f"我上一句说的是「{latest_assistant}」。"
+        return _finalize_recent_turn_text(
+            _mapping_text(
+                templates,
+                "assistant_template",
+                latest_assistant=latest_assistant,
+                default=fallback,
+            ),
+            fallback=fallback,
         )
     if query_role == "both":
         parts: list[str] = []
@@ -868,6 +1043,7 @@ def _maybe_build_recent_turn_answer(
                     templates,
                     "both_user_item_template",
                     latest_user=latest_user,
+                    default="你上一句是「{latest_user}」",
                 )
             )
         if latest_assistant:
@@ -876,15 +1052,64 @@ def _maybe_build_recent_turn_answer(
                     templates,
                     "both_assistant_item_template",
                     latest_assistant=latest_assistant,
+                    default="我上一句说的是「{latest_assistant}」",
                 )
             )
         if parts:
-            return _mapping_text(
-                templates,
-                "both_wrapper_template",
-                facts="；".join(parts),
+            fallback = "；".join(parts) + "。"
+            return _finalize_recent_turn_text(
+                _mapping_text(
+                    templates,
+                    "both_wrapper_template",
+                    facts="；".join(parts),
+                    default=fallback,
+                ),
+                fallback=fallback,
             )
     return None
+
+
+def _maybe_build_previous_meaning_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized or not _CLARIFICATION_DIRECT_QUERY_RE.match(normalized):
+        return None
+
+    turns = _load_continuity_turns(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        render_target_lang=render_target_lang,
+        fetch_limit=24,
+    )
+    if not turns:
+        return None
+
+    latest_assistant = next(
+        (
+            str(turn.get("content") or "").strip()
+            for turn in reversed(turns)
+            if str(turn.get("role") or "").strip().lower() == "assistant"
+            and str(turn.get("content") or "").strip()
+        ),
+        "",
+    )
+    if not latest_assistant:
+        return None
+
+    templates = _mapping_section(_load_runtime_texts(), "clarification_direct_answer")
+    return _mapping_text(
+        templates,
+        "assistant_meaning_template",
+        latest_assistant=latest_assistant,
+        default="我刚才的意思是：{latest_assistant}",
+    )
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
@@ -1187,6 +1412,12 @@ async def top_agent_sse_generator(
             retrieval_summary={"status": "SKIPPED", "reason_code": "TASK_PROGRESS_DIRECT"},
             gov_decision=governor_result, pii_ingress_stats=_pii_ingress_stats,
             pii_egress_stats={},
+            trace_stage_meta={
+                "top_agent_used": True,
+                "dispatch_agent_used": False,
+                "chat_agent_used": False,
+                "top_agent_mode": "task_progress_direct",
+            },
         ))
         return
 
@@ -1198,6 +1429,36 @@ async def top_agent_sse_generator(
         render_target_lang="zh",
     )
     if recent_turn_answer:
+        narrative = _airlock_sanitize_output(str(recent_turn_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _sse({
+            "phase": "COMMIT", "done": True, "decision": "APPROVE",
+            "narrative": narrative, "request_id": request_id,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "top_agent:recent_turn_direct",
+                "latency_ms": total_latency_ms,
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+            },
+        })
+        asyncio.create_task(_async_post_process(
+            request_id=request_id, person_id=person_id, session_id=session_id,
+            user_message=sanitized_message, narrative=narrative,
+            emotion_context=emotion_context, bond_summary={}, ts_ms=ts_ms,
+            render_target_lang="zh", total_latency_ms=total_latency_ms,
+            llm_latency_ms=0, first_token_ms=None, provider_name="", model_id="",
+            buffer_stream=False, delegated_agents=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
+            gov_decision=governor_result, pii_ingress_stats=_pii_ingress_stats,
+            pii_egress_stats={},
+            trace_stage_meta={
+                "top_agent_used": True,
+                "dispatch_agent_used": False,
+                "chat_agent_used": False,
+                "top_agent_mode": "recent_turn_direct",
+            },
+        ))
+        return
         from host_brain.app.chat_agent import (  # noqa: PLC0415
             ChatAgentInput,
             SubAgentContext,
@@ -1238,6 +1499,45 @@ async def top_agent_sse_generator(
         )
         async for event in chat_agent_sse_generator(chat_input):
             yield event
+        return
+
+    clarification_direct_answer = _maybe_build_previous_meaning_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang="zh",
+    )
+    if clarification_direct_answer:
+        narrative = _airlock_sanitize_output(str(clarification_direct_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _sse({
+            "phase": "COMMIT", "done": True, "decision": "APPROVE",
+            "narrative": narrative, "request_id": request_id,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "top_agent:clarification_direct",
+                "latency_ms": total_latency_ms,
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+            },
+        })
+        asyncio.create_task(_async_post_process(
+            request_id=request_id, person_id=person_id, session_id=session_id,
+            user_message=sanitized_message, narrative=narrative,
+            emotion_context=emotion_context, bond_summary={}, ts_ms=ts_ms,
+            render_target_lang="zh", total_latency_ms=total_latency_ms,
+            llm_latency_ms=0, first_token_ms=None, provider_name="", model_id="",
+            buffer_stream=False, delegated_agents=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "CLARIFICATION_DIRECT"},
+            gov_decision=governor_result, pii_ingress_stats=_pii_ingress_stats,
+            pii_egress_stats={},
+            trace_stage_meta={
+                "top_agent_used": True,
+                "dispatch_agent_used": False,
+                "chat_agent_used": False,
+                "top_agent_mode": "clarification_direct",
+            },
+        ))
         return
 
     phatic_fastpath_reply = _maybe_build_phatic_fastpath_reply(
@@ -1285,6 +1585,14 @@ async def top_agent_sse_generator(
             ts_ms=ts_ms,
             intent_draft={**intent_draft, "fastpath_type": "phatic"},
             llm_runtime=None,
+            trace_stage_meta={
+                "top_agent_used": True,
+                "dispatch_agent_used": False,
+                "chat_agent_used": True,
+                "chat_mode": "sub_agent",
+                "chat_sub_agent_id": "phatic_fastpath",
+                "top_agent_mode": "phatic_fastpath",
+            },
         )
         async for event in chat_agent_sse_generator(chat_input):
             yield event
@@ -1391,21 +1699,34 @@ async def top_agent_sse_generator(
     # ────────────────────────────────────────────────────────────────────
     if bond_evidence is not None:
         retrieval_evidence_items.append(bond_evidence)
+    try:
+        from host_brain.app.chat_retrieval_helpers import filter_retrieval_evidence_items_for_prompt  # noqa: PLC0415
+
+        filtered_evidence_items, prompt_filter_meta = filter_retrieval_evidence_items_for_prompt(
+            user_message=sanitized_message,
+            retrieval_summary=retrieval_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
+        )
+        if prompt_filter_meta.get("applied"):
+            retrieval_evidence_items = filtered_evidence_items
+            retrieval_summary = dict(retrieval_summary or {})
+            retrieval_summary["prompt_filter"] = dict(prompt_filter_meta)
+    except Exception as _prompt_filter_exc:
+        _logger.debug("[%s] top_agent prompt retrieval filter failed: %s", request_id, _prompt_filter_exc)
 
     # RecallPack 槽位预算分配
     try:
+        from host_brain.app.chat_retrieval_helpers import _build_recall_pack_inputs  # noqa: PLC0415
         from host_brain.app.dependencies import get_recall_pack_builder  # noqa: PLC0415
         cpb = get_recall_pack_builder()
         if retrieval_evidence_items:
-            _recall_results: dict[str, str] = {}
-            for item in retrieval_evidence_items:
-                slot = str(item.get("kind") or item.get("source_type") or "retrieval").lower()
-                content = str(item.get("content") or item.get("snippet") or "")
-                if content:
-                    _recall_results[slot] = (_recall_results.get(slot, "") + "\n" + content).strip()
+            _recall_results = _build_recall_pack_inputs(retrieval_evidence_items)
             if _recall_results:
                 from host_brain.app.schemas.recall_pack import RECALL_SLOT_PRIORITY  # noqa: PLC0415
-                pack = cpb.build(_recall_results, task_type="chat")
+                try:
+                    pack = cpb.build(_recall_results, task_type="chat", request_id=request_id)
+                except TypeError:
+                    pack = cpb.build(_recall_results, task_type="chat")
                 for slot_name in RECALL_SLOT_PRIORITY:
                     slot = pack.get_slot(slot_name)
                     if slot and str(getattr(slot, "content", "") or "").strip():
@@ -1452,6 +1773,12 @@ async def top_agent_sse_generator(
                 pii_ingress_stats=_pii_ingress_stats,
                 pii_egress_stats={},
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
+                trace_stage_meta={
+                    "top_agent_used": True,
+                    "dispatch_agent_used": False,
+                    "chat_agent_used": False,
+                    "top_agent_mode": "llm_unavailable",
+                },
             ))
         except Exception as _pp_exc:
             _logger.debug("[%s] top_agent llm unavailable post_process failed: %s", request_id, _pp_exc)
@@ -1524,6 +1851,7 @@ async def _async_post_process(
     retrieval_evidence_items: list[dict[str, Any]] | None = None,  # 召回文档片段
     motive_state: Mapping[str, Any] | None = None,
     response_policy: Mapping[str, Any] | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
     """异步后处理：审计写入 + Airlock 安全分类 + 记忆写入 + Bond 更新 + VTS + TTS。
 
@@ -1649,13 +1977,14 @@ async def _async_post_process(
             })
 
         # (3) graph_run_trace — 端到端链路汇总
-        _path = "delegate" if delegated_agents else "chat_direct"
+        _trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
         _retrieval_status = _normalized_retrieval_summary.get("status", "SKIPPED")
         _retrieval_count = _normalized_retrieval_summary.get("candidate_count", 0)
+        _retrieval_reason = str(_normalized_retrieval_summary.get("reason_code") or "").strip() or None
         _retrieval_output = {
             "candidate_count": _retrieval_count,
             "status": _retrieval_status,
-            "reason_code": _normalized_retrieval_summary.get("reason_code"),
+            "reason_code": _retrieval_reason,
             "error": _normalized_retrieval_summary.get("error"),
             "route_count": _normalized_retrieval_summary.get("route_count"),
             "rerank_topk": _normalized_retrieval_summary.get("rerank_topk"),
@@ -1674,25 +2003,220 @@ async def _async_post_process(
             "fallback_reranker_used": bool(_normalized_retrieval_summary.get("fallback_reranker_used", False)),
             "fallback_reranker_reason_code": _normalized_retrieval_summary.get("fallback_reranker_reason_code"),
         }
-        _prompt_builder_output: dict[str, Any] = {}
+        _query_plan_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("query_plan"))
+        _agentic_rag_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("agentic_meta"))
+        _emotion_trace = _summarize_emotion_context_for_trace(emotion_context)
+        _persona_memory_trace = _summarize_persona_resident_memory_for_trace(
+            bond_summary=bond_summary,
+            retrieval_summary=_normalized_retrieval_summary,
+            retrieval_evidence_items=_evidence_items,
+        )
         _motive_trace = _summarize_motive_state_for_trace(motive_state)
+        _response_policy_trace = _summarize_response_policy_for_trace(response_policy)
+        _prompt_builder_output: dict[str, Any] = {}
         if _motive_trace:
             _prompt_builder_output["motive_state"] = _motive_trace
-        _response_policy_trace = _summarize_response_policy_for_trace(response_policy)
         if _response_policy_trace:
             _prompt_builder_output["response_policy"] = _response_policy_trace
-        _prompt_builder_node = {
-            "node_id": "prompt_builder",
-            "node_type": "system",
-            "display_name": "Prompt Builder",
-            "side": "host",
-            "status": "OK",
-            "ts_ms": ts_ms,
+        _prompt_builder_status = "OK" if (llm_input_digest or _prompt_builder_output) else "SKIPPED"
+        _prompt_builder_node = _build_trace_stage_node(
+            node_id="prompt_builder",
+            node_type="system",
+            display_name="Prompt Builder",
+            status=_prompt_builder_status,
+            ts_ms=ts_ms,
+            output_data=_prompt_builder_output,
+        )
+
+        _dispatch_used = bool(_trace_stage_meta.get("dispatch_agent_used"))
+        _chat_used = bool(_trace_stage_meta.get("chat_agent_used"))
+        _path = str(
+            _trace_stage_meta.get("dispatch_route")
+            or ("delegate" if delegated_agents else "chat_direct")
+        ).strip() or ("delegate" if delegated_agents else "chat_direct")
+        _dispatch_reason = str(_trace_stage_meta.get("dispatch_reason") or "").strip() or None
+        _dispatch_target = str(_trace_stage_meta.get("dispatch_target") or "").strip() or None
+        _chat_mode = str(
+            _trace_stage_meta.get("chat_mode")
+            or ("sub_agent" if delegated_agents else "direct")
+        ).strip() or ("sub_agent" if delegated_agents else "direct")
+        _chat_sub_agent_id = str(_trace_stage_meta.get("chat_sub_agent_id") or "").strip() or None
+        _dispatch_output = {
+            "route": _path,
+            "reason": _dispatch_reason,
+            "target": _dispatch_target,
         }
-        if _prompt_builder_output:
-            _prompt_builder_node["output_data"] = _prompt_builder_output
+        _chat_output = {
+            "mode": _chat_mode,
+            "sub_agent_id": _chat_sub_agent_id,
+            "delegated_agent_count": len(list(delegated_agents or [])),
+        }
+        _top_agent_output = {
+            "path": _path,
+            "retrieval_status": _retrieval_status,
+            "retrieval_candidate_count": _retrieval_count,
+            "delegated_agent_count": len(list(delegated_agents or [])),
+            "trace_stage_meta": _trace_stage_meta,
+        }
 
         # 构建 nodes_json：记录每个处理阶段的耗时和状态
+        _trace_nodes_v2: list[dict[str, Any]] = [
+            _build_trace_stage_node(
+                node_id="airlock_ingress",
+                node_type="governor",
+                display_name="Airlock Ingress",
+                ts_ms=ts_ms,
+                status="OK",
+            ),
+            _build_trace_stage_node(
+                node_id="governor",
+                node_type="governor",
+                display_name="Governor",
+                ts_ms=ts_ms,
+                status=gov_decision.get("decision", "APPROVE") if gov_decision else "OK",
+                latency_ms=gov_decision.get("latency_ms", 0) if gov_decision else 0,
+                reason_code=gov_decision.get("reason_code") if gov_decision else None,
+                output_data={"rule_trace": gov_decision.get("rule_trace")} if gov_decision else None,
+            ),
+            _build_trace_stage_node(
+                node_id="query_planner",
+                node_type="retrieval",
+                display_name="Query Planner",
+                ts_ms=ts_ms,
+                status=_retrieval_status if (_query_plan_output or _retrieval_status != "SKIPPED") else "SKIPPED",
+                reason_code=_retrieval_reason,
+                output_data=_query_plan_output,
+            ),
+            _build_trace_stage_node(
+                node_id="agentic_rag",
+                node_type="retrieval",
+                display_name="Agentic RAG",
+                ts_ms=ts_ms,
+                status=_retrieval_status if (_agentic_rag_output or _retrieval_status != "SKIPPED") else "SKIPPED",
+                reason_code=_retrieval_reason,
+                output_data=_agentic_rag_output,
+            ),
+            _build_trace_stage_node(
+                node_id="recall_fusion",
+                node_type="recall",
+                display_name="Recall Fusion",
+                ts_ms=ts_ms,
+                status=_retrieval_status,
+                reason_code=_retrieval_reason,
+                output_data=_retrieval_output,
+            ),
+            _build_trace_stage_node(
+                node_id="emotion_context",
+                node_type="system",
+                display_name="Emotion Context",
+                ts_ms=ts_ms,
+                status="OK" if _emotion_trace else "SKIPPED",
+                output_data=_emotion_trace,
+            ),
+            _build_trace_stage_node(
+                node_id="persona_resident_memory",
+                node_type="memory",
+                display_name="Persona Resident Memory",
+                ts_ms=ts_ms,
+                status="OK" if _persona_memory_trace else "SKIPPED",
+                output_data=_persona_memory_trace,
+            ),
+            _build_trace_stage_node(
+                node_id="motive_state",
+                node_type="system",
+                display_name="Motive State",
+                ts_ms=ts_ms,
+                status="OK" if _motive_trace else "SKIPPED",
+                output_data=_motive_trace,
+            ),
+            _build_trace_stage_node(
+                node_id="response_policy",
+                node_type="system",
+                display_name="Response Policy",
+                ts_ms=ts_ms,
+                status="OK" if _response_policy_trace else "SKIPPED",
+                output_data=_response_policy_trace,
+            ),
+            _build_trace_stage_node(
+                node_id="top_agent",
+                node_type="system",
+                display_name="Top Agent",
+                ts_ms=ts_ms,
+                status="OK" if narrative.strip() else "DEGRADED",
+                output_data=_top_agent_output,
+            ),
+        ]
+        if _dispatch_used:
+            _trace_nodes_v2.append(
+                _build_trace_stage_node(
+                    node_id="dispatch_agent",
+                    node_type="agent",
+                    display_name="Dispatch Agent",
+                    ts_ms=ts_ms,
+                    status="OK",
+                    reason_code=_dispatch_reason,
+                    output_data=_dispatch_output,
+                )
+            )
+        for da in (delegated_agents or []):
+            _agent_id = str(da.get("agent_id") or "?")
+            _trace_nodes_v2.append(
+                _build_trace_stage_node(
+                    node_id=f"sub_agent:{_agent_id}",
+                    node_type="agent",
+                    display_name=f"Sub Agent: {_agent_id}",
+                    ts_ms=ts_ms,
+                    status="OK" if da.get("success") else "FAILED",
+                    latency_ms=da.get("latency_ms", 0),
+                    error=da.get("error"),
+                    output_data={
+                        "agent_id": _agent_id,
+                        "audit_refs": da.get("audit_refs"),
+                    },
+                )
+            )
+        if _chat_used:
+            _trace_nodes_v2.append(
+                _build_trace_stage_node(
+                    node_id="chat_agent",
+                    node_type="agent",
+                    display_name="Chat Agent",
+                    ts_ms=ts_ms,
+                    status="OK" if narrative.strip() else "DEGRADED",
+                    output_data=_chat_output,
+                )
+            )
+        _trace_nodes_v2.append(_prompt_builder_node)
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="llm_stream",
+                node_type="llm",
+                display_name="LLM Stream",
+                ts_ms=ts_ms,
+                status="OK" if narrative.strip() else "DEGRADED",
+                latency_ms=llm_latency_ms,
+                provider=provider_name,
+                model_id=model_id,
+                input_data={
+                    "first_token_ms": first_token_ms,
+                    "buffer_stream": buffer_stream,
+                    "input_digest": (llm_input_digest or "")[:300] or None,
+                },
+                output_data={
+                    "final_response": (narrative or "")[:800] or None,
+                },
+            )
+        )
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="airlock_egress",
+                node_type="governor",
+                display_name="Airlock Egress",
+                ts_ms=_now,
+                status="OK",
+            )
+        )
+
         trace_nodes: list[dict[str, Any]] = [
             {"node_id": "airlock_ingress", "node_type": "governor", "display_name": "Airlock 入口",
              "side": "host", "status": "OK", "ts_ms": ts_ms},
@@ -1743,6 +2267,7 @@ async def _async_post_process(
         })
 
         # PII 统计（如果有）
+        trace_nodes = list(_trace_nodes_v2)
         _pii_detail = {}
         if pii_ingress_stats:
             _pii_detail["ingress"] = pii_ingress_stats

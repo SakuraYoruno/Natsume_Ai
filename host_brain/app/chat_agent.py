@@ -95,6 +95,7 @@ class ChatAgentInput:
     thread_id: Optional[str] = None
     ts_ms: int = 0
     intent_draft: Dict[str, Any] = field(default_factory=dict)
+    trace_stage_meta: Dict[str, Any] = field(default_factory=dict)
 
     # ── LLM 运行时（由调用者 resolve 后传入，避免重复 resolve）──
     llm_runtime: Optional[Dict[str, Any]] = None
@@ -1212,8 +1213,15 @@ async def chat_agent_sse_generator(
     thread_id = agent_input.thread_id
     ts_ms = agent_input.ts_ms or int(time.time() * 1000)
     intent_draft = agent_input.intent_draft or {}
+    trace_stage_meta = dict(agent_input.trace_stage_meta or {})
     response_policy = _coerce_response_policy(agent_input.response_policy)
     sub_agent_ctx = agent_input.sub_agent_context
+    if "chat_agent_used" not in trace_stage_meta:
+        trace_stage_meta["chat_agent_used"] = True
+    if "chat_mode" not in trace_stage_meta:
+        trace_stage_meta["chat_mode"] = "sub_agent" if sub_agent_ctx else "direct"
+    if sub_agent_ctx and not str(trace_stage_meta.get("chat_sub_agent_id") or "").strip():
+        trace_stage_meta["chat_sub_agent_id"] = sub_agent_ctx.agent_id
     deterministic_reply = _build_deterministic_sub_agent_reply(sub_agent_ctx, render_target_lang=render_target_lang)
 
     prompt_text = ""
@@ -1331,6 +1339,7 @@ async def chat_agent_sse_generator(
                         retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
                         motive_state=prompt_runtime_payload.get("motive_state"),
                         response_policy=response_policy,
+                        trace_stage_meta=trace_stage_meta,
                     )
                 )
             except Exception as _pp_exc:
@@ -1757,6 +1766,7 @@ async def chat_agent_sse_generator(
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
                 motive_state=prompt_runtime_payload.get("motive_state"),
                 response_policy=response_policy,
+                trace_stage_meta=trace_stage_meta,
             )
         )
     except Exception as _pp_exc:

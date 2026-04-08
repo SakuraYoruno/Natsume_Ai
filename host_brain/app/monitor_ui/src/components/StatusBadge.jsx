@@ -1,11 +1,6 @@
 import React from 'react'
-import { CheckCircle, AlertTriangle, XCircle, Loader2, MinusCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Loader2, MinusCircle, XCircle } from 'lucide-react'
 
-/**
- * 状态徽章
- * @param {'healthy'|'degraded'|'error'|'running'|'unknown'|'up'|'down'} status
- * @param {string} [label] - 自定义文字，默认使用 status 映射
- */
 const STATUS_MAP = {
   healthy: {
     cls: 'badge-success',
@@ -25,7 +20,7 @@ const STATUS_MAP = {
   down: {
     cls: 'badge-danger',
     icon: XCircle,
-    label: '故障',
+    label: '离线',
   },
   error: {
     cls: 'badge-danger',
@@ -46,13 +41,14 @@ const STATUS_MAP = {
 }
 
 export default function StatusBadge({ status = 'unknown', label }) {
-  const normalized = (status || '').toLowerCase()
-  const cfg = STATUS_MAP[normalized] ?? STATUS_MAP.unknown
-  const Icon = cfg.icon
+  const normalized = String(status || '').toLowerCase()
+  const config = STATUS_MAP[normalized] ?? STATUS_MAP.unknown
+  const Icon = config.icon
+
   return (
-    <span className={cfg.cls}>
-      <Icon size={11} className={cfg.spin ? 'animate-spin' : ''} />
-      {label ?? cfg.label}
+    <span className={config.cls}>
+      <Icon size={11} className={config.spin ? 'animate-spin' : ''} />
+      {label ?? config.label}
     </span>
   )
 }

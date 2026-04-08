@@ -17,7 +17,6 @@ from host_brain.observability.service_health_aggregator import (
     validate_health_response,
 )
 from host_brain.observability.session_query import SessionQueryService
-from host_brain.observability.trace_node_builder import TraceNodeBuilder, _IO_MAX_BYTES
 
 __all__ = [
     "ALL_SERVICES",
@@ -31,9 +30,7 @@ __all__ = [
     "ServiceHealthAggregator",
     "ServiceHealthResult",
     "SessionQueryService",
-    "TraceNodeBuilder",
     "UnifiedTimelineEntry",
-    "_IO_MAX_BYTES",
     "build_cross_timeline",
     "build_obs_metrics_response",
     "get_obs_mode",

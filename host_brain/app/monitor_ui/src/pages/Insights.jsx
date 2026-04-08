@@ -1,8 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Flame, ArrowLeft } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import InsightChartCard from '../components/insights/InsightChartCard.jsx'
+import InsightSection from '../components/insights/InsightSection.jsx'
+import MetricCard from '../components/MetricCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import {
   fetchGovernorStats,
   fetchErrors,
@@ -27,6 +37,7 @@ import {
   fetchErrorHeatmap,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
+import { formatAlertTitle, formatEmotionTag, humanizeToken } from '../utils/digitalLife.js'
 
 // ===== 工具函数 =====
 
@@ -83,34 +94,18 @@ const WINDOW_OPTIONS = [
 ]
 
 const INSIGHT_GROUPS = [
-  { id: 'global', title: '全局与错误', icon: AlertTriangle, desc: 'Governor决策、全局错误追踪、热力图、请求链路统计、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
-  { id: 'memory', title: '子系统与记忆', icon: Database, desc: '子系统健康、Memory统计、EpisodicStore、ContextCompressor', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
-  { id: 'llm', title: 'Agent与LLM', icon: Bot, desc: 'Agent Loop、LLM成本、路由决策、Prompt构建、RecallPack', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
-  { id: 'safety', title: '安全与护栏', icon: ShieldCheck, desc: 'QA违规、权限拒绝、宪法校验、UI断言安全', color: 'text-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-100', iconBg: 'bg-emerald-100' },
-  { id: 'state', title: '状态与规范', icon: GitMerge, desc: 'Bond 查询统计、Canon提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
-  { id: 'vts', title: 'VTS通道', icon: Tv, desc: 'VTS通道统计', color: 'text-pink-700', bg: 'bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-100', iconBg: 'bg-pink-100' },
+  { id: 'global', title: '全局与错误', icon: AlertTriangle, desc: '入口守护决策、全局错误追踪、热力图、请求链路统计、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
+  { id: 'memory', title: '子系统与记忆', icon: Database, desc: '子系统健康、记忆统计、情景写入、上下文压缩', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
+  { id: 'llm', title: '多代理与推理', icon: Bot, desc: '自动化循环、模型成本、路由决策、提示构建、召回包', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
+  { id: 'safety', title: '安全与护栏', icon: ShieldCheck, desc: '质检违规、权限拒绝、规则校验、界面断言安全', color: 'text-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-100', iconBg: 'bg-emerald-100' },
+  { id: 'state', title: '状态与规范', icon: GitMerge, desc: '关系查询统计、主设定提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
+  { id: 'vts', title: '表情通道', icon: Tv, desc: '表情通道统计', color: 'text-pink-700', bg: 'bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-100', iconBg: 'bg-pink-100' },
 ]
 
 // ===== 子组件：统计卡片 =====
-function StatCard({ label, value, sub, color = 'text-gray-800' }) {
-  return (
-    <div className="card p-4 text-center">
-      <div className={`text-2xl font-bold ${color}`}>{value ?? '—'}</div>
-      <div className="text-xs text-gray-500 mt-1">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
-    </div>
-  )
-}
-
-// ===== 子组件：板块标题 =====
-function SectionTitle({ icon: Icon, title, color = 'text-gray-700' }) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <Icon size={16} className={color} />
-      <h2 className={`text-sm font-semibold ${color}`}>{title}</h2>
-    </div>
-  )
-}
+const StatCard = ({ label, value, sub, color = 'text-gray-800' }) => (
+  <MetricCard label={label} value={value} hint={sub ?? ''} tone={color} variant="stacked" />
+)
 
 // ===== 主页面 =====
 export default function Insights() {
@@ -120,6 +115,7 @@ export default function Insights() {
   const location = useLocation()
   const currentGroup = location.pathname.split('/').pop()
   const isRoot = currentGroup === 'insights' || currentGroup === ''
+  const currentGroupMeta = INSIGHT_GROUPS.find((group) => group.id === currentGroup) || null
 
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [loading, setLoading] = useState(true)
@@ -133,6 +129,11 @@ export default function Insights() {
   const [vtsData,     setVtsData]     = useState(null)
   const [qaData,      setQaData]      = useState(null)
   const [llmCallData, setLlmCallData] = useState(null)
+  const { runtimeSnapshot, promptStats: promptBuilderData } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes,
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -173,36 +174,43 @@ export default function Insights() {
 
   return (
     <div className="space-y-8">
-      {/* 页头 */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">监控洞察</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Governor 决策 · 错误追踪 · 子系统健康 · Agent Loop</p>
+          <p className="mt-0.5 text-sm text-gray-500">把全链路监控、记忆链路、多代理推理与数字生命状态收敛到同一套观测面。</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded border border-gray-300 overflow-hidden text-sm">
-            {WINDOW_OPTIONS.map(({ label, value }) => (
-              <button
-                key={value}
-                className={`px-2.5 py-1.5 transition-colors ${
-                  windowMinutes === value
-                    ? 'bg-primary text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50'
-                }`}
-                onClick={() => setWindowMinutes(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            刷新
+            {loading ? '刷新中' : '刷新'}
           </button>
         </div>
       </div>
 
-      {error && <div className="card p-4 text-red-500 text-sm">加载失败：{error}</div>}
+      <DigitalLifeNav />
+
+      <PageHero
+        icon={currentGroupMeta?.icon || Activity}
+        eyebrow={isRoot ? '数字生命综合洞察' : `${currentGroupMeta?.title || '监控分组'} 深度洞察`}
+        title={isRoot ? '全链路观测面板' : currentGroupMeta?.title || '监控分组'}
+        description={
+          isRoot
+            ? '从全局错误、记忆系统、安全守卫到 VTS 通道，先看总览，再按分组继续下钻。'
+            : currentGroupMeta?.desc || '查看该分组下的详细指标、图表与最近事件。'
+        }
+        gradientClass="from-amber-50 via-white to-sky-50"
+        metaItems={[
+          `时间窗口：${windowMinutes} 分钟`,
+          `全局错误：${errData?.total_errors ?? 0}`,
+          `子系统：${subsysData?.subsystems?.length ?? 0}`,
+          `Agent Loop：${agentData?.total_loops ?? 0}`,
+          `VTS 事件：${vtsData?.total_events ?? 0}`,
+        ]}
+      />
+
+      {error && <NoticeBanner variant="error">加载失败：{error}</NoticeBanner>}
+      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptBuilderData} compact={!isRoot} />
       {isRoot ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
           {INSIGHT_GROUPS.map(g => (
@@ -236,8 +244,7 @@ export default function Insights() {
           {currentGroup === 'global' && (
             <>
               {/* ===== P1: Governor 决策漏斗 ===== */}
-      <section>
-        <SectionTitle icon={ShieldCheck} title="Governor 决策漏斗" color="text-blue-600" />
+      <InsightSection icon={ShieldCheck} title="入口守护决策漏斗" color="text-blue-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard label="总决策数"  value={govData?.total}     />
           <StatCard label="批准"      value={govData?.approved}  color="text-green-600" />
@@ -261,31 +268,28 @@ export default function Insights() {
             />
           </div>
           {/* reason_code 分布 */}
-          <div className="card p-4">
-            {(govData?.reason_codes?.length ?? 0) > 0 ? (
-              <BarChart
-                title="拒绝 reason_code 分布"
-                direction="horizontal"
-                categories={(govData?.reason_codes ?? []).map((r) => r.reason_code)}
-                series={[{ name: '次数', data: (govData?.reason_codes ?? []).map((r) => r.count), color: '#F04438' }]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <ShieldCheck size={24} className="mb-2 text-green-400" />
-                <span className="text-xs font-medium text-gray-500">拒绝 reason_code 分布</span>
-                <span className="mt-1">暂无拒绝记录</span>
-              </div>
-            )}
-          </div>
+          <InsightChartCard
+            title="拒绝原因分布"
+            hasData={(govData?.reason_codes?.length ?? 0) > 0}
+            emptyIcon={ShieldCheck}
+            emptyText="暂无拒绝记录"
+            emptyIconClassName="text-green-400"
+          >
+            <BarChart
+              title="拒绝原因分布"
+              direction="horizontal"
+              categories={(govData?.reason_codes ?? []).map((r) => formatAlertTitle(r.reason_code))}
+              series={[{ name: '次数', data: (govData?.reason_codes ?? []).map((r) => r.count), color: '#F04438' }]}
+            />
+          </InsightChartCard>
         </div>
-      </section>
+      </InsightSection>
               {/* ===== P1: 全局错误追踪 ===== */}
-      <section>
-        <SectionTitle icon={AlertTriangle} title="全局错误追踪" color="text-red-500" />
+      <InsightSection icon={AlertTriangle} title="全局错误追踪" color="text-red-500">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard label="错误总数" value={errData?.total_errors} color={errData?.total_errors > 0 ? 'text-red-500' : 'text-green-600'} />
           {(errData?.stages ?? []).slice(0, 3).map((s) => (
-            <StatCard key={s.stage} label={s.stage} value={s.count} sub={`${s.pct}%`} color="text-orange-500" />
+            <StatCard key={s.stage} label={humanizeToken(s.stage)} value={s.count} sub={`${s.pct}%`} color="text-orange-500" />
           ))}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -298,22 +302,20 @@ export default function Insights() {
             />
           </div>
           {/* Top reason_code */}
-          <div className="card p-4">
-            {(errData?.top_codes?.length ?? 0) > 0 ? (
-              <BarChart
-                title="错误 reason_code Top10"
-                direction="horizontal"
-                categories={(errData?.top_codes ?? []).map((c) => c.reason_code)}
-                series={[{ name: '次数', data: (errData?.top_codes ?? []).map((c) => c.count), color: '#F79009' }]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <AlertTriangle size={24} className="mb-2 text-green-400" />
-                <span className="text-xs font-medium text-gray-500">错误 reason_code Top10</span>
-                <span className="mt-1">暂无错误记录</span>
-              </div>
-            )}
-          </div>
+          <InsightChartCard
+            title="错误原因 Top10"
+            hasData={(errData?.top_codes?.length ?? 0) > 0}
+            emptyIcon={AlertTriangle}
+            emptyText="暂无错误记录"
+            emptyIconClassName="text-green-400"
+          >
+            <BarChart
+              title="错误原因 Top10"
+              direction="horizontal"
+              categories={(errData?.top_codes ?? []).map((c) => formatAlertTitle(c.reason_code))}
+              series={[{ name: '次数', data: (errData?.top_codes ?? []).map((c) => c.count), color: '#F79009' }]}
+            />
+          </InsightChartCard>
         </div>
         {/* 最近错误列表 */}
         {(errData?.recent?.length ?? 0) > 0 && (
@@ -324,7 +326,7 @@ export default function Insights() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['时间', 'Stage', 'Reason Code', '详情'].map((h) => (
+                  {['时间', '环节', '原因码', '详情'].map((h) => (
                     <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
                   ))}
                 </tr>
@@ -333,8 +335,8 @@ export default function Insights() {
                 {(errData?.recent ?? []).map((e, i) => (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">{formatTime(e.ts_ms)}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-orange-600">{e.stage ?? '—'}</td>
-                    <td className="px-4 py-2 text-xs font-mono text-red-600">{e.reason_code ?? '—'}</td>
+                    <td className="px-4 py-2 text-xs text-orange-600">{e.stage ? humanizeToken(e.stage) : '—'}</td>
+                    <td className="px-4 py-2 text-xs text-red-600">{e.reason_code ? formatAlertTitle(e.reason_code) : '—'}</td>
                     <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-xs" title={e.detail}>{e.detail || '—'}</td>
                   </tr>
                 ))}
@@ -342,7 +344,7 @@ export default function Insights() {
             </table>
           </div>
         )}
-      </section>
+      </InsightSection>
               <ErrorHeatmapSection windowMinutes={windowMinutes} />
               <ChainStatsSection windowMinutes={windowMinutes} />
               <FailureStatsSection windowMinutes={windowMinutes} />
@@ -352,8 +354,7 @@ export default function Insights() {
           {currentGroup === 'memory' && (
             <>
               {/* ===== P2: 子系统健康矩阵 ===== */}
-      <section>
-        <SectionTitle icon={Cpu} title="子系统健康矩阵" color="text-purple-600" />
+      <InsightSection icon={Cpu} title="子系统健康矩阵" color="text-purple-600">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {(subsysData?.subsystems ?? []).map((s) => (
             <div
@@ -380,32 +381,31 @@ export default function Insights() {
             </div>
           ))}
           {(subsysData?.subsystems ?? []).length === 0 && (
-            <div className="col-span-full text-center py-10 text-gray-400 text-sm">暂无子系统数据</div>
+            <EmptyStateCard title="暂无子系统数据" hint="当前窗口未采集到子系统健康样本。" className="col-span-full" />
           )}
         </div>
-      </section>
+      </InsightSection>
               {/* ===== Ref #32: Memory 子系统统计 ===== */}
-      <section>
-        <SectionTitle icon={Database} title="Memory 子系统统计" color="text-teal-600" />
+      <InsightSection icon={Database} title="记忆子系统统计" color="text-teal-600">
         {/* 聚合指标卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard
-            label="EpisodicStore 写入量"
+            label="情景写入量"
             value={memoryData?.total_writes ?? '—'}
             color="text-teal-600"
           />
           <StatCard
-            label="MemoryGuard 拒绝率"
+            label="记忆守卫拒绝率"
             value={memoryData?.guard_reject_rate != null ? `${memoryData.guard_reject_rate}%` : '—'}
             color={memoryData?.guard_reject_rate > 30 ? 'text-red-500' : memoryData?.guard_reject_rate > 10 ? 'text-orange-500' : 'text-green-600'}
           />
           <StatCard
-            label="ContextCompressor 压缩率"
+            label="上下文压缩率"
             value={memoryData?.compress_rate != null ? `${memoryData.compress_rate}%` : '—'}
             color="text-blue-600"
           />
           <StatCard
-            label="LongTermDistiller 蒸馏次数"
+            label="长期蒸馏次数"
             value={memoryData?.distill_count ?? '—'}
             color="text-purple-600"
           />
@@ -441,13 +441,10 @@ export default function Insights() {
             </div>
           ))}
           {(memoryData?.subsystems ?? []).length === 0 && (
-            <div className="col-span-full text-center py-8 text-gray-400 text-sm">
-              <Database size={24} className="mx-auto mb-2 text-gray-300" />
-              暂无 Memory 子系统数据
-            </div>
+            <EmptyStateCard title="暂无记忆子系统数据" hint="等待记忆链路产出统计后展示。" icon={Database} className="col-span-full p-6" />
           )}
         </div>
-      </section>
+      </InsightSection>
               <EpisodicStoreStatsSection windowMinutes={windowMinutes} />
               <ContextCompressorStatsSection windowMinutes={windowMinutes} />
             </>
@@ -456,8 +453,7 @@ export default function Insights() {
           {currentGroup === 'llm' && (
             <>
               {/* ===== P3: Agent Loop 统计 ===== */}
-      <section>
-        <SectionTitle icon={Bot} title="Agent Loop 统计" color="text-indigo-600" />
+      <InsightSection icon={Bot} title="自动化循环统计" color="text-indigo-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard label="总执行次数"  value={agentData?.total_loops} />
           <StatCard label="目标达成"    value={agentData?.achieved}    color="text-green-600" />
@@ -472,7 +468,7 @@ export default function Insights() {
         {(agentData?.recent_loops?.length ?? 0) > 0 && (
           <div className="card overflow-hidden">
             <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
-              最近 Agent Loop 执行
+              最近自动化循环执行
             </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -510,24 +506,20 @@ export default function Insights() {
           </div>
         )}
       {(agentData?.total_loops ?? 0) === 0 && (
-          <div className="card p-8 text-center text-gray-400 text-sm">
-            <Bot size={24} className="mx-auto mb-2 text-gray-300" />
-            暂无 Agent Loop 执行记录
-          </div>
+          <EmptyStateCard title="暂无自动化循环执行记录" hint="待有会话执行后展示统计明细。" icon={Bot} />
         )}
-      </section>
+      </InsightSection>
               {/* ===== Ref #41: LLM 调用成本统计 ===== */}
-      <section>
-        <SectionTitle icon={Zap} title="LLM 调用成本统计" color="text-amber-600" />
+      <InsightSection icon={Zap} title="模型调用成本统计" color="text-amber-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard label="总调用次数" value={llmCallData?.total_calls ?? '—'} />
           <StatCard
-            label="总 Token 消耗"
+            label="总词元消耗"
             value={llmCallData?.total_tokens != null ? llmCallData.total_tokens.toLocaleString() : '—'}
             color="text-amber-600"
           />
           <StatCard
-            label="Prompt Tokens"
+            label="输入词元"
             value={llmCallData?.total_prompt_tokens != null ? llmCallData.total_prompt_tokens.toLocaleString() : '—'}
             color="text-blue-600"
           />
@@ -539,29 +531,26 @@ export default function Insights() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* 按 model_id 分组的 token 消耗 */}
-          <div className="card p-4">
-            {(llmCallData?.models?.length ?? 0) > 0 ? (
-              <BarChart
-                title="各模型 Token 消耗"
-                direction="horizontal"
-                categories={(llmCallData?.models ?? []).map((m) => m.model_id)}
-                series={[
-                  { name: 'Prompt', data: (llmCallData?.models ?? []).map((m) => m.total_prompt_tokens), color: '#2970FF' },
-                  { name: 'Completion', data: (llmCallData?.models ?? []).map((m) => m.total_completion_tokens), color: '#F79009' },
-                ]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <Zap size={24} className="mb-2 text-gray-300" />
-                <span className="text-xs font-medium text-gray-500">各模型 Token 消耗</span>
-                <span className="mt-1">暂无 LLM 调用数据</span>
-              </div>
-            )}
-          </div>
+          <InsightChartCard
+            title="各模型词元消耗"
+            hasData={(llmCallData?.models?.length ?? 0) > 0}
+            emptyIcon={Zap}
+            emptyText="暂无模型调用数据"
+          >
+            <BarChart
+              title="各模型词元消耗"
+              direction="horizontal"
+              categories={(llmCallData?.models ?? []).map((m) => m.model_id)}
+              series={[
+                { name: '输入', data: (llmCallData?.models ?? []).map((m) => m.total_prompt_tokens), color: '#2970FF' },
+                { name: '输出', data: (llmCallData?.models ?? []).map((m) => m.total_completion_tokens), color: '#F79009' },
+              ]}
+            />
+          </InsightChartCard>
           {/* 调用量时序趋势 */}
           <div className="card p-4">
             <LineChart
-              title="LLM 调用量趋势"
+              title="模型调用量趋势"
               xData={llmCallData?.timeseries_labels ?? []}
               series={[
                 { name: '调用次数', data: llmCallData?.timeseries_calls ?? [], color: '#2970FF' },
@@ -578,7 +567,7 @@ export default function Insights() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  {['模型 ID', '调用次数', 'Prompt Tokens', 'Completion Tokens', '总 Tokens', '平均延迟', 'P95 延迟'].map((h) => (
+                  {['模型 ID', '调用次数', '输入词元', '输出词元', '总词元', '平均延迟', 'P95 延迟'].map((h) => (
                     <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
                   ))}
                 </tr>
@@ -599,7 +588,7 @@ export default function Insights() {
             </table>
           </div>
         )}
-      </section>
+      </InsightSection>
               <RouteStatsSection windowMinutes={windowMinutes} />
               <PromptBuilderStatsSection windowMinutes={windowMinutes} />
               <RecallPackSection windowMinutes={windowMinutes} />
@@ -609,8 +598,7 @@ export default function Insights() {
           {currentGroup === 'safety' && (
             <>
               {/* ===== Ref #40: QA 违规统计 ===== */}
-      <section>
-        <SectionTitle icon={FileWarning} title="QA 违规统计" color="text-red-600" />
+      <InsightSection icon={FileWarning} title="QA 违规统计" color="text-red-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard
             label="违规总数"
@@ -635,22 +623,20 @@ export default function Insights() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* 违规码分布 */}
-          <div className="card p-4">
-            {(qaData?.violation_codes?.length ?? 0) > 0 ? (
-              <BarChart
-                title="违规码分布"
-                direction="horizontal"
-                categories={(qaData?.violation_codes ?? []).map((c) => c.violation_code)}
-                series={[{ name: '次数', data: (qaData?.violation_codes ?? []).map((c) => c.count), color: '#F04438' }]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <FileWarning size={24} className="mb-2 text-green-400" />
-                <span className="text-xs font-medium text-gray-500">违规码分布</span>
-                <span className="mt-1">暂无 QA 违规记录</span>
-              </div>
-            )}
-          </div>
+          <InsightChartCard
+            title="违规码分布"
+            hasData={(qaData?.violation_codes?.length ?? 0) > 0}
+            emptyIcon={FileWarning}
+            emptyText="暂无 QA 违规记录"
+            emptyIconClassName="text-green-400"
+          >
+            <BarChart
+              title="违规码分布"
+              direction="horizontal"
+              categories={(qaData?.violation_codes ?? []).map((c) => c.violation_code)}
+              series={[{ name: '次数', data: (qaData?.violation_codes ?? []).map((c) => c.count), color: '#F04438' }]}
+            />
+          </InsightChartCard>
           {/* 违规时序趋势 */}
           <div className="card p-4">
             <LineChart
@@ -688,7 +674,7 @@ export default function Insights() {
             </table>
           </div>
         )}
-      </section>
+      </InsightSection>
               <PermissionStatsSection windowMinutes={windowMinutes} />
               <MemoryGuardStatsSection windowMinutes={windowMinutes} />
               <UIAssertionSection windowMinutes={windowMinutes} />
@@ -705,8 +691,7 @@ export default function Insights() {
           {currentGroup === 'vts' && (
             <>
               {/* ===== Ref #38: VTS 通道统计 ===== */}
-      <section>
-        <SectionTitle icon={Tv} title="VTS 通道统计" color="text-pink-600" />
+      <InsightSection icon={Tv} title="表情通道统计" color="text-pink-600">
         {/* 聚合指标卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard
@@ -731,25 +716,22 @@ export default function Insights() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Top 情感标签横向柱状图 */}
-          <div className="card p-4">
-            {(vtsData?.top_emotions?.length ?? 0) > 0 ? (
-              <BarChart
-                title="Top 情感标签分布"
-                direction="horizontal"
-                categories={(vtsData?.top_emotions ?? []).map((e) => e.emotion_tag)}
-                series={[{ name: '次数', data: (vtsData?.top_emotions ?? []).map((e) => e.count), color: '#EC4899' }]}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-                <Tv size={24} className="mb-2 text-gray-300" />
-                <span className="text-xs font-medium text-gray-500">Top 情感标签分布</span>
-                <span className="mt-1">暂无 VTS 事件数据</span>
-              </div>
-            )}
-          </div>
+          <InsightChartCard
+            title="Top 情感标签分布"
+            hasData={(vtsData?.top_emotions?.length ?? 0) > 0}
+            emptyIcon={Tv}
+            emptyText="暂无表情事件数据"
+          >
+            <BarChart
+              title="Top 情感标签分布"
+              direction="horizontal"
+              categories={(vtsData?.top_emotions ?? []).map((e) => formatEmotionTag(e.emotion_tag))}
+              series={[{ name: '次数', data: (vtsData?.top_emotions ?? []).map((e) => e.count), color: '#EC4899' }]}
+            />
+          </InsightChartCard>
           {/* Talk Gate 统计 */}
           <div className="card p-4">
-            <div className="text-xs font-medium text-gray-500 mb-3">Talk Gate 统计</div>
+            <div className="text-xs font-medium text-gray-500 mb-3">对话门控统计</div>
             <div className="grid grid-cols-3 gap-3">
               <div className="text-center">
                 <div className="text-2xl font-bold text-gray-700">{vtsData?.talk_gate_total ?? '—'}</div>
@@ -779,13 +761,11 @@ export default function Insights() {
               </div>
             )}
             {(vtsData?.talk_gate_total ?? 0) === 0 && (
-              <div className="flex flex-col items-center justify-center h-32 text-gray-400 text-sm">
-                <span>暂无 Talk Gate 数据</span>
-              </div>
+              <NoticeBanner variant="info" className="mt-4">暂无对话门控数据</NoticeBanner>
             )}
           </div>
         </div>
-      </section>
+      </InsightSection>
             </>
           )}
         </div>
@@ -802,8 +782,7 @@ function RouteStatsSection({ windowMinutes }) {
     fetchLlmRouteStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={GitBranch} title="LLM 路由决策统计" color="text-indigo-600" />
+    <InsightSection icon={GitBranch} title="模型路由决策统计" color="text-indigo-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总路由决策" value={data?.total_decisions ?? '—'} color="text-indigo-600" />
         <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color={data?.fallback_rate > 20 ? 'text-red-500' : 'text-orange-500'} />
@@ -814,7 +793,7 @@ function RouteStatsSection({ windowMinutes }) {
         <div className="card p-4">
           <div className="text-xs font-semibold text-gray-600 mb-3">模型选择分布</div>
           {(data?.models ?? []).length === 0 ? (
-            <div className="text-center py-6 text-gray-400 text-xs">暂无路由数据</div>
+            <EmptyStateCard title="暂无路由数据" hint="窗口内无路由决策样本。" className="p-6" />
           ) : (
             <div className="space-y-2">
               {(data?.models ?? []).map((m) => (
@@ -833,7 +812,7 @@ function RouteStatsSection({ windowMinutes }) {
         <div className="card p-4">
           <div className="text-xs font-semibold text-gray-600 mb-3">任务类型分布</div>
           {(data?.task_types ?? []).length === 0 ? (
-            <div className="text-center py-6 text-gray-400 text-xs">暂无数据</div>
+            <EmptyStateCard title="暂无任务类型数据" hint="窗口内尚无可统计的任务类型。" className="p-6" />
           ) : (
             <div className="space-y-2">
               {(data?.task_types ?? []).map((t) => (
@@ -849,7 +828,7 @@ function RouteStatsSection({ windowMinutes }) {
           )}
         </div>
       </div>
-    </section>
+    </InsightSection>
   )
 }
 
@@ -860,17 +839,16 @@ function RecallPackSection({ windowMinutes }) {
     fetchRecallPackStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={Layers} title="RecallPack Token Budget" color="text-cyan-600" />
+    <InsightSection icon={Layers} title="召回包词元预算" color="text-cyan-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-        <StatCard label="总 Pack 数" value={data?.total_packs ?? '—'} color="text-cyan-600" />
-        <StatCard label="平均 Token 数" value={data?.avg_total_tokens != null ? Math.round(data.avg_total_tokens) : '—'} color="text-blue-600" />
+        <StatCard label="召回包总数" value={data?.total_packs ?? '—'} color="text-cyan-600" />
+        <StatCard label="平均词元数" value={data?.avg_total_tokens != null ? Math.round(data.avg_total_tokens) : '—'} color="text-blue-600" />
         <StatCard label="截断率" value={data?.truncation_rate != null ? `${data.truncation_rate}%` : '—'} color={data?.truncation_rate > 30 ? 'text-red-500' : 'text-green-600'} />
         <StatCard label="冲突率" value={data?.conflict_rate != null ? `${data.conflict_rate}%` : '—'} color={data?.conflict_rate > 10 ? 'text-orange-500' : 'text-green-600'} />
       </div>
       {(data?.slots ?? []).length > 0 && (
         <div className="card p-4">
-          <div className="text-xs font-semibold text-gray-600 mb-3">各槽位 Token 消耗</div>
+          <div className="text-xs font-semibold text-gray-600 mb-3">各槽位词元消耗</div>
           <div className="space-y-2">
             {(data?.slots ?? []).map((s) => (
               <div key={s.slot} className="flex items-center gap-2">
@@ -886,7 +864,7 @@ function RecallPackSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -897,8 +875,7 @@ function FailureStatsSection({ windowMinutes }) {
     fetchFailureStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={TriangleAlert} title="FailureMatrix 失败事件统计" color="text-amber-600" />
+    <InsightSection icon={TriangleAlert} title="失败事件统计" color="text-amber-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总失败事件" value={data?.total_failures ?? '—'} color="text-gray-700" />
         <StatCard label="中止次数" value={data?.abort_count ?? '—'} color="text-red-600" />
@@ -922,7 +899,7 @@ function FailureStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -933,17 +910,16 @@ function PermissionStatsSection({ windowMinutes }) {
     fetchPermissionStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={Lock} title="PermissionGuard 权限拒绝统计" color="text-violet-600" />
+    <InsightSection icon={Lock} title="权限拒绝统计" color="text-violet-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
         <StatCard label="允许次数" value={data?.allowed_count ?? '—'} color="text-green-600" />
         <StatCard label="拒绝次数" value={data?.denied_count ?? '—'} color="text-red-600" />
-        <StatCard label="SCHEDULER 拒绝" value={data?.scheduler_denied_count ?? '—'} color="text-orange-500" />
+        <StatCard label="调度器拒绝" value={data?.scheduler_denied_count ?? '—'} color="text-orange-500" />
       </div>
       {(data?.top_denied_tools ?? []).length > 0 && (
         <div className="card p-4">
-          <div className="text-xs font-semibold text-gray-600 mb-3">Top 拒绝工具</div>
+          <div className="text-xs font-semibold text-gray-600 mb-3">拒绝工具 Top</div>
           <div className="space-y-2">
             {(data?.top_denied_tools ?? []).map((t) => (
               <div key={t.tool_name} className="flex items-center gap-2">
@@ -958,7 +934,7 @@ function PermissionStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -969,8 +945,7 @@ function MemoryGuardStatsSection({ windowMinutes }) {
     fetchMemoryGuardStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={BookLock} title="MemoryGuard 宪法校验统计" color="text-emerald-600" />
+    <InsightSection icon={BookLock} title="记忆守卫校验统计" color="text-emerald-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
         <StatCard label="通过次数" value={data?.passed_count ?? '—'} color="text-green-600" />
@@ -978,8 +953,8 @@ function MemoryGuardStatsSection({ windowMinutes }) {
         <StatCard label="拦截率" value={data?.block_rate != null ? `${data.block_rate}%` : '—'} color={data?.block_rate > 20 ? 'text-red-500' : 'text-green-600'} />
       </div>
       <div className="grid grid-cols-3 gap-4 mb-4">
-        <StatCard label="NARRATIVE_ONLY" value={data?.narrative_only_count ?? '—'} color="text-orange-500" />
-        <StatCard label="Dream 拦截" value={data?.dream_blocked_count ?? '—'} color="text-purple-500" />
+        <StatCard label="仅叙事" value={data?.narrative_only_count ?? '—'} color="text-orange-500" />
+        <StatCard label="梦境拦截" value={data?.dream_blocked_count ?? '—'} color="text-purple-500" />
         <StatCard label="蒸馏资格" value={data?.distill_eligible_count ?? '—'} color="text-blue-600" />
       </div>
       {(data?.top_reject_reasons ?? []).length > 0 && (
@@ -998,7 +973,7 @@ function MemoryGuardStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1009,13 +984,12 @@ function StateArbiterStatsSection({ windowMinutes }) {
     fetchStateArbiterStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={GitMerge} title="StateArbiter Bond 查询统计" color="text-cyan-600" />
+    <InsightSection icon={GitMerge} title="状态仲裁关系查询统计" color="text-cyan-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总查询次数" value={data?.total_resolutions ?? '—'} color="text-gray-700" />
         <StatCard label="冲突次数" value={data?.conflict_count ?? '—'} color="text-red-600" />
         <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color="text-orange-500" />
-        <StatCard label="Bond 快照" value={data?.session_override_count ?? '—'} color="text-blue-600" />
+        <StatCard label="关系快照" value={data?.session_override_count ?? '—'} color="text-blue-600" />
       </div>
       {(data?.top_sources ?? []).length > 0 && (
         <div className="card p-4">
@@ -1033,7 +1007,7 @@ function StateArbiterStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1044,16 +1018,15 @@ function ContextCompressorStatsSection({ windowMinutes }) {
     fetchContextCompressorStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={Minimize2} title="ContextCompressor 压缩效率统计" color="text-teal-600" />
+    <InsightSection icon={Minimize2} title="上下文压缩效率统计" color="text-teal-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总压缩次数" value={data?.total_compressions ?? '—'} color="text-gray-700" />
         <StatCard label="活跃压缩" value={data?.active_count ?? '—'} color="text-green-600" />
         <StatCard label="平均压缩率" value={data?.avg_compression_ratio != null ? `${(data.avg_compression_ratio * 100).toFixed(1)}%` : '—'} color="text-teal-600" />
-        <StatCard label="平均节省轮次" value={data?.avg_token_saving != null ? data.avg_token_saving.toFixed(1) : '—'} color="text-blue-600" />
+        <StatCard label="平均节省词元" value={data?.avg_token_saving != null ? data.avg_token_saving.toFixed(1) : '—'} color="text-blue-600" />
       </div>
       <div className="grid grid-cols-3 gap-4 mb-4">
-        <StatCard label="总节省轮次" value={data?.total_tokens_saved ?? '—'} color="text-teal-700" />
+        <StatCard label="总节省词元" value={data?.total_tokens_saved ?? '—'} color="text-teal-700" />
         <StatCard label="摘要生成次数" value={data?.summary_generated_count ?? '—'} color="text-indigo-600" />
         <StatCard label="降级次数" value={data?.degraded_count ?? '—'} color="text-orange-500" />
       </div>
@@ -1073,7 +1046,7 @@ function ContextCompressorStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1084,8 +1057,7 @@ function PromptBuilderStatsSection({ windowMinutes }) {
     fetchPromptBuilderStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={FileCode} title="PromptBuilder 构建统计" color="text-violet-600" />
+    <InsightSection icon={FileCode} title="提示构建统计" color="text-violet-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总构建次数" value={data?.total_builds ?? '—'} color="text-gray-700" />
         <StatCard label="注入检测" value={data?.injection_detected_count ?? '—'} color="text-red-600" />
@@ -1099,7 +1071,7 @@ function PromptBuilderStatsSection({ windowMinutes }) {
       </div>
       {(data?.slot_fill_distribution ?? []).length > 0 && (
         <div className="card p-4">
-          <div className="text-xs font-semibold text-gray-600 mb-3">Slot 填充分布</div>
+          <div className="text-xs font-semibold text-gray-600 mb-3">槽位填充分布</div>
           <div className="space-y-2">
             {(data?.slot_fill_distribution ?? []).map((s) => (
               <div key={s.slot} className="flex items-center gap-2">
@@ -1113,7 +1085,7 @@ function PromptBuilderStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1124,8 +1096,7 @@ function EpisodicStoreStatsSection({ windowMinutes }) {
     fetchEpisodicStoreStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={Archive} title="EpisodicStore 写入统计" color="text-amber-600" />
+    <InsightSection icon={Archive} title="情景记忆写入统计" color="text-amber-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总尝试次数" value={data?.total_attempts ?? '—'} color="text-gray-700" />
         <StatCard label="写入成功" value={data?.written_count ?? '—'} color="text-green-600" />
@@ -1133,12 +1104,12 @@ function EpisodicStoreStatsSection({ windowMinutes }) {
         <StatCard label="写入率" value={data?.write_rate != null ? `${data.write_rate}%` : '—'} color={data?.write_rate < 50 ? 'text-orange-500' : 'text-green-600'} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-        <StatCard label="MemoryGuard 拦截" value={data?.memory_guard_blocked_count ?? '—'} color="text-red-600" />
-        <StatCard label="Dream 拦截" value={data?.dream_blocked_count ?? '—'} color="text-purple-500" />
-        <StatCard label="NARRATIVE_ONLY" value={data?.narrative_only_blocked_count ?? '—'} color="text-orange-500" />
+        <StatCard label="记忆守卫拦截" value={data?.memory_guard_blocked_count ?? '—'} color="text-red-600" />
+        <StatCard label="梦境拦截" value={data?.dream_blocked_count ?? '—'} color="text-purple-500" />
+        <StatCard label="仅叙事拦截" value={data?.narrative_only_blocked_count ?? '—'} color="text-orange-500" />
         <StatCard label="蒸馏资格" value={data?.distill_eligible_count ?? '—'} color="text-blue-600" />
       </div>
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1149,8 +1120,7 @@ function UIAssertionSection({ windowMinutes }) {
     fetchUIAssertionStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={ShieldAlert} title="UI 断言安全统计" color="text-red-600" />
+    <InsightSection icon={ShieldAlert} title="UI 断言安全统计" color="text-red-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总断言事件" value={data?.total_assertions ?? '—'} color="text-gray-700" />
         <StatCard label="敏感界面拦截" value={data?.sensitive_blocked ?? '—'} color="text-red-600" />
@@ -1173,7 +1143,7 @@ function UIAssertionSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1200,13 +1170,12 @@ function ChainStatsSection({ windowMinutes }) {
   }
 
   return (
-    <section>
-      <SectionTitle icon={Activity} title="请求链路统计" color="text-blue-600" />
+    <InsightSection icon={Activity} title="请求链路统计" color="text-blue-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总请求数" value={data?.total_requests ?? '—'} color="text-gray-700" />
-        <StatCard label="Governor 拦截率" value={data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—'} color={data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700'} />
+        <StatCard label="入口守护拦截率" value={data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—'} color={data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700'} />
         <StatCard label="记忆写入次数" value={data?.episodic_written_count ?? '—'} color="text-green-600" />
-        <StatCard label="Canon 提案次数" value={data?.canon_proposal_count ?? '—'} color="text-indigo-600" />
+        <StatCard label="主设定提案次数" value={data?.canon_proposal_count ?? '—'} color="text-indigo-600" />
       </div>
       {/* 节点耗时分布直方图 */}
       <div className="card p-4">
@@ -1240,11 +1209,15 @@ function ChainStatsSection({ windowMinutes }) {
             )
           })}
           {nodes.filter(n => n.total_calls > 0).length === 0 && (
-            <div className="text-center py-4 text-xs text-gray-400">暂无节点调用数据（窗口内无 AUDIT_SNAPSHOT 记录）</div>
+            <EmptyStateCard
+              title="暂无节点调用数据"
+              hint="窗口内暂无审计快照记录。"
+              className="p-6"
+            />
           )}
         </div>
       </div>
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1254,8 +1227,7 @@ function CanonProposalStatsSection({ windowMinutes }) {
     fetchCanonProposalStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
   }, [windowMinutes])
   return (
-    <section>
-      <SectionTitle icon={ScrollText} title="Canon 提案统计" color="text-indigo-600" />
+    <InsightSection icon={ScrollText} title="主设定提案统计" color="text-indigo-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总提案数" value={data?.total ?? '—'} color="text-gray-700" />
         <StatCard label="待审核" value={data?.pending ?? '—'} color={data?.pending > 0 ? 'text-orange-500' : 'text-gray-400'} />
@@ -1343,7 +1315,7 @@ function CanonProposalStatsSection({ windowMinutes }) {
           </table>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }
 
@@ -1370,8 +1342,7 @@ function ErrorHeatmapSection({ windowMinutes }) {
   const hours = Array.from({ length: 24 }, (_, i) => i)
 
   return (
-    <section>
-      <SectionTitle icon={Flame} title="错误热力图" color="text-red-600" />
+    <InsightSection icon={Flame} title="错误热力图" color="text-red-600">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
         <StatCard label="总错误数" value={data?.total_errors ?? '—'} color={data?.total_errors > 0 ? 'text-red-600' : 'text-green-600'} />
         <StatCard label="统计窗口" value={data?.window_hours != null ? `${data.window_hours}h` : '—'} color="text-gray-700" />
@@ -1444,6 +1415,6 @@ function ErrorHeatmapSection({ windowMinutes }) {
           </div>
         </div>
       )}
-    </section>
+    </InsightSection>
   )
 }

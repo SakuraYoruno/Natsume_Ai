@@ -32,6 +32,9 @@ def test_build_offline_state_from_inner_state_uses_elapsed_hours() -> None:
     assert offline_state["absence_band"] == "recent"
     assert offline_state["loneliness_level"] == pytest.approx(0.6, abs=1e-6)
     assert offline_state["anticipation_topics"] == ["上次没说完的话题"]
+    assert offline_state["continuity_score"] == pytest.approx(0.0, abs=1e-6)
+    assert offline_state["spontaneous_event_count"] == 0
+    assert offline_state["inner_stream"] == []
 
 
 def test_build_offline_state_from_inner_state_classifies_long_absence_bands() -> None:
@@ -50,6 +53,40 @@ def test_build_offline_state_from_inner_state_classifies_long_absence_bands() ->
     assert offline_state["offline_hours"] == pytest.approx(80.0, abs=1e-4)
     assert offline_state["offline_duration_ms"] == 80 * 3600 * 1000
     assert offline_state["absence_band"] == "72h_plus"
+
+
+def test_build_offline_state_from_inner_state_includes_continuity_tail() -> None:
+    now_ms = 50 * 3600 * 1000
+    inner_stream = [
+        {
+            "ts_ms": now_ms - i * 60_000,
+            "note": f"note-{i}",
+            "absence_band": "6h_plus",
+            "offline_hours": 6.0,
+        }
+        for i in range(10)
+    ]
+    offline_state = build_offline_state_from_inner_state(
+        {
+            "last_interaction_ts_ms": now_ms - 10 * 3600 * 1000,
+            "total_offline_hours": 10.0,
+            "loneliness": 0.45,
+            "anticipation": 0.38,
+            "continuity_score": 0.64,
+            "spontaneous_event_count": 11,
+            "last_spontaneous_ts_ms": now_ms - 30_000,
+            "last_spontaneous_note": "latest-note",
+            "inner_stream": inner_stream,
+        },
+        now_ms=now_ms,
+    )
+
+    assert offline_state["continuity_score"] == pytest.approx(0.64, abs=1e-6)
+    assert offline_state["spontaneous_event_count"] == 11
+    assert offline_state["last_spontaneous_note"] == "latest-note"
+    assert len(offline_state["inner_stream"]) == 8
+    assert offline_state["inner_stream"][0]["note"] == "note-2"
+    assert offline_state["inner_stream"][-1]["note"] == "note-9"
 
 
 def test_emotional_silence_tick_uses_motive_state_to_adjust_recovery(monkeypatch) -> None:
@@ -159,6 +196,57 @@ def test_inner_world_tick_uses_motive_state_to_adjust_offline_growth(monkeypatch
     assert fast_result["loneliness"] > slow_result["loneliness"]
     assert fast_result["anticipation"] > slow_result["anticipation"]
     assert fast_result["anticipation_rate_multiplier"] > slow_result["anticipation_rate_multiplier"]
+    assert fast_result["spontaneous_event_count"] >= 1
+    assert bool(fast_result["last_spontaneous_note"])
+    assert len(fast_world.get_state("user_1").get("inner_stream") or []) >= 1
+    assert fast_result["continuity_score"] >= slow_result["continuity_score"]
+
+
+def test_inner_world_tick_respects_min_interval_for_spontaneous_events(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    import host_brain.persona.inner_world as inner_world_module
+
+    now_holder = {"value": 43_200_000}
+    monkeypatch.setattr(inner_world_module, "_now_ms", lambda: int(now_holder["value"]))
+    monkeypatch.setattr(
+        "host_brain.persona.motive_runtime.compute_runtime_motive_state",
+        lambda **_kwargs: {
+            "reach_out_drive": 0.62,
+            "continuity_drive": 0.66,
+            "withdraw_drive": 0.10,
+            "self_protect_drive": 0.12,
+            "dominant_motive": "continuity",
+        },
+    )
+
+    world = OfflineInnerWorld(state_dir=str(tmp_path / "interval"))
+    world._save_state(
+        InnerWorldState(
+            user_id="user_1",
+            last_interaction_ts_ms=now_holder["value"] - 8 * 3_600_000,
+            last_tick_ts_ms=now_holder["value"] - 60_000,
+            loneliness=0.3,
+            anticipation=0.35,
+            anticipation_topics=["收尾计划"],
+            drifted_valence=0.1,
+            drifted_arousal=0.45,
+            mood_baseline=0.0,
+            total_offline_hours=8.0,
+        )
+    )
+
+    first = world.tick("user_1")
+    assert first["spontaneous_event_count"] == 1
+
+    now_holder["value"] += 60_000
+    second = world.tick("user_1")
+    assert second["spontaneous_event_count"] == 1
+
+    now_holder["value"] += 4 * 60_000
+    third = world.tick("user_1")
+    assert third["spontaneous_event_count"] == 2
 
 
 def test_motive_behavior_matrix_changes_proactive_silence_and_expression_paths(monkeypatch) -> None:

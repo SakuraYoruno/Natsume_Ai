@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Any, Callable, Optional
@@ -84,6 +85,7 @@ class RecallPackBuilder:
         task_type: Optional[str] = None,
         slot_budget_overrides: dict[str, int] | None = None,
         total_budget_override: int | None = None,
+        request_id: str | None = None,
     ) -> RecallPack:
         pack = RecallPack()
         effective_total_budget = int(total_budget_override) if total_budget_override else RECALL_PACK_TOKEN_BUDGET
@@ -136,6 +138,17 @@ class RecallPackBuilder:
             effective_total_budget,
             len(pack.conflict_events),
         )
+        self._emit_audit(
+            "RECALL_PACK_TRACE",
+            {
+                "request_id": request_id,
+                "task_type": task_type,
+                "total_budget": effective_total_budget,
+                "total_tokens": pack.total_token_count,
+                "conflict_events": len(pack.conflict_events),
+                "trace": copy.deepcopy(pack.subgraph_trace),
+            },
+        )
         return pack
 
     async def build_with_semantic_recall(
@@ -146,9 +159,10 @@ class RecallPackBuilder:
         semantic_recaller: Optional[Any] = None,
         task_type: Optional[str] = None,
         semantic_recall_max_tokens: int = 600,
+        request_id: str | None = None,
     ) -> RecallPack:
         if recall_results.get("episodic_vector"):
-            return self.build(recall_results, task_type=task_type)
+            return self.build(recall_results, task_type=task_type, request_id=request_id)
 
         if semantic_recaller is not None and query:
             try:
@@ -172,7 +186,7 @@ class RecallPackBuilder:
             except Exception as exc:
                 logger.warning("Semantic recall failed without breaking main path: %s", exc)
 
-        return self.build(recall_results, task_type=task_type)
+        return self.build(recall_results, task_type=task_type, request_id=request_id)
 
     def _check_style_task_conflict(self, pack: RecallPack, task_type: str) -> None:
         style_slot = pack.get_slot("style_canon")

@@ -4,6 +4,10 @@ import {
   Shield, Search, FolderOpen, Globe, Zap, Tag,
 } from 'lucide-react'
 import { fetchSkillsHubStats } from '../api/obs.js'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
 import useAppStore from '../store/useAppStore.js'
 
 const CLEARANCE_STYLES = {
@@ -105,10 +109,9 @@ export default function SkillsHub() {
 
   return (
     <div className="space-y-6">
-      {/* 页头 */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Skills Hub</h1>
+          <h1 className="text-xl font-semibold text-gray-900">技能中心</h1>
           <p className="text-sm text-gray-500 mt-0.5">技能管理 · 热加载 · 外部目录扫描</p>
         </div>
         <button className="btn-secondary" onClick={load} disabled={loading}>
@@ -116,13 +119,29 @@ export default function SkillsHub() {
         </button>
       </div>
 
-      {error && <div className="card p-4 text-red-500 text-sm">{error}</div>}
+      <DigitalLifeNav />
+
+      <PageHero
+        icon={Package}
+        eyebrow="技能与能力扩展"
+        title={data?.hub_enabled ? 'Skills Hub 已启用' : 'Skills Hub 当前未启用'}
+        description="集中查看内置技能、Hub / 外部技能来源、加载状态以及风险等级，方便统一收口技能侧能力。"
+        gradientClass="from-emerald-50 via-white to-indigo-50"
+        metaItems={[
+          `技能总数：${data?.total_skills ?? 0}`,
+          `已加载：${data?.loaded_skills ?? 0}`,
+          `加载失败：${data?.failed_skills ?? 0}`,
+          `过滤结果：${filtered.length}`,
+        ]}
+      />
+
+      {error && <NoticeBanner variant="error">{error}</NoticeBanner>}
 
       {/* 概览统计 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="card p-4 text-center">
           <div className={`text-2xl font-bold ${data?.hub_enabled ? 'text-green-600' : 'text-gray-400'}`}>
-            {data?.hub_enabled ? 'ON' : 'OFF'}
+            {data?.hub_enabled ? '开启' : '关闭'}
           </div>
           <div className="text-xs text-gray-500 mt-1">Hub 状态</div>
         </div>
@@ -192,9 +211,11 @@ export default function SkillsHub() {
       )}
 
       {!loading && filtered.length === 0 && (
-        <div className="text-center text-gray-400 py-12">
-          {filter ? '没有匹配的技能' : '暂无已加载技能'}
-        </div>
+        <EmptyStateCard
+          title={filter ? '没有匹配的技能' : '暂无已加载技能'}
+          hint={filter ? '请尝试更换关键字。' : '等待 SkillsHub 拉取后将展示在此。'}
+          className="py-12"
+        />
       )}
     </div>
   )

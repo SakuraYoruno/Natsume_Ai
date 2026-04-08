@@ -29,7 +29,7 @@ from host_brain.tools.broker import (
     ToolBroker,
     ToolExecutionResult,
 )
-from host_brain.tools.catalog import ToolCatalog
+from host_brain.tools.catalog import ToolCatalog, ToolMeta
 from host_brain.tools.selector import ToolSelection, select_tool_meta_pack
 from host_brain.skills.custom_provider_installer import (
     build_provider_module_name,
@@ -45,6 +45,7 @@ from host_brain.skills.hub.hub_installer import (
     search_remote_skills,
 )
 from host_brain.skills.install_repair import repair_skill_loading_failure
+from host_brain.app.http_hooks_runtime_helpers import run_long_term_distillation_handler
 
 _logger = logging.getLogger("Natsume.tool_routes")
 
@@ -87,6 +88,118 @@ def _get_catalog() -> ToolCatalog:
     if _catalog_provider is not None:
         return _catalog_provider()
     raise RuntimeError("ToolCatalog provider not configured")
+
+
+def _empty_schema_hash() -> str:
+    import hashlib
+    import json
+
+    return "sha256:" + hashlib.sha256(
+        json.dumps({"type": "object", "properties": {}}, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _register_catalog_tool(
+    *,
+    catalog: ToolCatalog,
+    broker: ToolBroker,
+    tool_id: str,
+    side_effect_level: str,
+    auth_level: str,
+    domain_tags: tuple[str, ...],
+    desc: str,
+    handler: Callable[[dict[str, Any], dict[str, Any] | None], Any],
+) -> None:
+    catalog.register(ToolMeta(
+        id=tool_id,
+        name=tool_id,
+        desc=desc,
+        schema_hash=_empty_schema_hash(),
+        side_effect_level=side_effect_level,
+        auth_level=auth_level,
+        domain_tags=domain_tags,
+        version="1.0",
+    ))
+    broker.register_handler(tool_id, handler)
+
+
+def _ensure_default_tool_catalog_seeded() -> int:
+    catalog = _get_catalog()
+    existing_tools = catalog.list_all()
+    if existing_tools:
+        return len(existing_tools)
+
+    broker = _get_broker()
+
+    from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+    from host_brain.skills.personality_registry import build_personality_skill_registry  # noqa: PLC0415
+    from host_brain.skills.scheduler_registry import build_scheduler_skill_registry  # noqa: PLC0415
+
+    skill_registry = get_skill_registry()
+    builtin_tool_defs = [
+        ("file_list", "READ", "NONE", ("file",), "列出目录内容（只读）"),
+        ("file_read", "READ", "NONE", ("file",), "读取文件内容（只读）"),
+        ("memory_search", "READ", "NONE", ("memory",), "语义检索记忆库"),
+        ("system_info", "READ", "NONE", ("system",), "查询系统信息"),
+        ("network_status", "READ", "NONE", ("system",), "查询网络状态"),
+        ("web_search", "READ", "NONE", ("web",), "执行网络搜索"),
+    ]
+    for tool_id, side_effect_level, auth_level, domain_tags, desc in builtin_tool_defs:
+        skill_meta = skill_registry.get(tool_id)
+        if skill_meta is None:
+            continue
+        _register_catalog_tool(
+            catalog=catalog,
+            broker=broker,
+            tool_id=tool_id,
+            side_effect_level=side_effect_level,
+            auth_level=auth_level,
+            domain_tags=domain_tags,
+            desc=desc,
+            handler=lambda args, ctx, _h=skill_meta.handler: _h(args or {}, ctx or {}),
+        )
+
+    personality_registry = build_personality_skill_registry()
+    scheduler_registry = build_scheduler_skill_registry()
+    personality_tool_defs = [
+        ("diary_writer", "WRITE", "LOW", ("memory", "file"), "每日日记生成：汇总当日对话→LLM→双写文件+Episodic"),
+        ("dream_generator", "WRITE", "LOW", ("memory",), "梦境生成：读取Episodic→LLM生成梦境叙事→写回Episodic"),
+        ("desktop_note", "WRITE", "LOW", ("system", "file"), "桌面留言：创建/更新/删除文本文件（路径穿越防护）"),
+        ("focus_mode", "READ", "NONE", ("system",), "专注模式切换：进入/退出专注模式"),
+        ("proactive_talk", "WRITE", "LOW", ("chat",), "主动对话：空闲超阈值时触发LLM生成问候并推送到Edge"),
+    ]
+    scheduler_tool_defs = [
+        ("scheduler_add", "WRITE", "MEDIUM", ("system",), "向调度器添加定时任务"),
+        ("scheduler_cancel", "WRITE", "MEDIUM", ("system",), "取消/删除调度任务（不可逆）"),
+        ("scheduler_list", "READ", "NONE", ("system",), "列出当前所有调度任务"),
+    ]
+    for registry, definitions in ((personality_registry, personality_tool_defs), (scheduler_registry, scheduler_tool_defs)):
+        for tool_id, side_effect_level, auth_level, domain_tags, desc in definitions:
+            skill_meta = registry.get(tool_id)
+            if skill_meta is None:
+                continue
+            _register_catalog_tool(
+                catalog=catalog,
+                broker=broker,
+                tool_id=tool_id,
+                side_effect_level=side_effect_level,
+                auth_level=auth_level,
+                domain_tags=domain_tags,
+                desc=desc,
+                handler=lambda args, ctx, _h=skill_meta.handler: _h(args or {}, ctx or {}),
+            )
+
+    _register_catalog_tool(
+        catalog=catalog,
+        broker=broker,
+        tool_id="long_term_memory_distillation",
+        side_effect_level="WRITE",
+        auth_level="LOW",
+        domain_tags=("memory",),
+        desc="长期记忆蒸馏：从EpisodicStore召回高频记忆→LLM摘要→生成World Canon提案",
+        handler=lambda args, ctx: run_long_term_distillation_handler(args or {}, ctx or {}),
+    )
+    return len(catalog.list_all())
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +380,7 @@ async def tool_health() -> ToolHealthResponse:
 
     try:
         catalog = _get_catalog()
+        _ensure_default_tool_catalog_seeded()
         all_tools = catalog.list_all()
         write_count = sum(1 for t in all_tools if t.side_effect_level == "WRITE")
         read_count = len(all_tools) - write_count
@@ -319,6 +433,7 @@ async def get_tool_meta_pack(
 
     try:
         catalog = _get_catalog()
+        _ensure_default_tool_catalog_seeded()
         selection: ToolSelection = select_tool_meta_pack(
             catalog,
             query=query,
@@ -385,6 +500,7 @@ async def get_tool_meta(tool_id: str) -> ToolMetaResponse:
 
     try:
         catalog = _get_catalog()
+        _ensure_default_tool_catalog_seeded()
         meta = catalog.get(tool_id)
         return ToolMetaResponse(
             id=meta.id,
@@ -425,6 +541,7 @@ async def execute_tool(body: ToolExecuteRequest) -> ToolExecuteResponse:
     ts_ms = int(time.time() * 1000)
 
     try:
+        _ensure_default_tool_catalog_seeded()
         broker = _get_broker()
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))

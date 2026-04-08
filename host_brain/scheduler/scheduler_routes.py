@@ -68,6 +68,105 @@ def _get_health() -> SchedulerHealthReporter:
 
 # ── Pydantic 模型 ──
 
+def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
+    registry = _registry
+    health = _health_reporter
+
+    if registry is None and health is None:
+        return {
+            "scheduler_status": "UNAVAILABLE",
+            "total_tasks": 0,
+            "enabled_tasks": 0,
+            "suspended_tasks": 0,
+            "error_tasks": 0,
+            "tasks": [],
+            "ts_ms": now_ms(),
+        }
+
+    if registry is not None and health is None:
+        tasks = [
+            {
+                "task_id": task.task_id,
+                "trigger_mode": task.trigger_mode.value,
+                "trigger_config": dict(task.trigger_config or {}),
+                "priority": task.priority.value,
+                "enabled": task.enabled,
+                "status": "UNKNOWN",
+                "last_run_ts": None,
+                "next_run_ts": None,
+                "error_count": 0,
+                "suspended_reason": None,
+                "last_reason_code": None,
+            }
+            for task in registry.all_tasks()
+        ]
+        return {
+            "scheduler_status": "UNAVAILABLE",
+            "total_tasks": len(tasks),
+            "enabled_tasks": sum(1 for item in tasks if item["enabled"]),
+            "suspended_tasks": 0,
+            "error_tasks": 0,
+            "tasks": tasks,
+            "ts_ms": now_ms(),
+        }
+
+    try:
+        snapshot = health.build_health_snapshot() if health is not None else {}
+    except Exception as exc:
+        logger.warning("Failed to build scheduler health snapshot", exc_info=True)
+        tasks = []
+        if registry is not None:
+            tasks = [
+                {
+                    "task_id": task.task_id,
+                    "trigger_mode": task.trigger_mode.value,
+                    "trigger_config": dict(task.trigger_config or {}),
+                    "priority": task.priority.value,
+                    "enabled": task.enabled,
+                    "status": "ERROR",
+                    "last_run_ts": None,
+                    "next_run_ts": None,
+                    "error_count": 0,
+                    "suspended_reason": None,
+                    "last_reason_code": str(exc)[:120],
+                }
+                for task in registry.all_tasks()
+            ]
+        return {
+            "scheduler_status": "ERROR",
+            "total_tasks": len(tasks),
+            "enabled_tasks": sum(1 for item in tasks if item["enabled"]),
+            "suspended_tasks": 0,
+            "error_tasks": len(tasks) if tasks else 1,
+            "tasks": tasks,
+            "ts_ms": now_ms(),
+        }
+
+    normalized = dict(snapshot or {})
+    task_items: list[dict[str, Any]] = []
+    for item in list(normalized.get("tasks") or []):
+        if not isinstance(item, dict):
+            continue
+        task_copy = dict(item)
+        task_id = str(task_copy.get("task_id") or "").strip()
+        if registry is not None and task_id:
+            task_config = registry.get(task_id)
+            if task_config is not None:
+                task_copy.setdefault("trigger_config", dict(task_config.trigger_config or {}))
+                task_copy.setdefault("enabled", task_config.enabled)
+                task_copy.setdefault("priority", task_config.priority.value)
+                task_copy.setdefault("trigger_mode", task_config.trigger_mode.value)
+        task_items.append(task_copy)
+    normalized["tasks"] = task_items
+    normalized.setdefault("ts_ms", now_ms())
+    normalized.setdefault("scheduler_status", "UNAVAILABLE")
+    normalized.setdefault("total_tasks", len(task_items))
+    normalized.setdefault("enabled_tasks", sum(1 for item in task_items if item.get("enabled")))
+    normalized.setdefault("suspended_tasks", 0)
+    normalized.setdefault("error_tasks", 0)
+    return normalized
+
+
 class TaskCreateRequest(BaseModel):
     task_id: str = Field(..., description="任务唯一 ID")
     trigger_mode: str = Field(..., description="触发模式：cron / interval / once")

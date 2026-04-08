@@ -14,20 +14,20 @@ import {
 const ITEMS = [
   { to: '/digital-life', label: '总览', icon: Sparkles },
   { to: '/emotion', label: '情绪', icon: Waves },
-  { to: '/bond', label: 'Bond', icon: Heart },
+  { to: '/bond', label: '关系', icon: Heart },
   { to: '/memory', label: '记忆', icon: Database },
-  { to: '/runtime-mode', label: '模式', icon: Orbit },
-  { to: '/inner-world', label: '内心世界', icon: MoonStar },
-  { to: '/response-policy', label: '回应策略', icon: Sparkles },
+  { to: '/runtime-mode', label: '存在态', icon: Orbit },
+  { to: '/inner-world', label: '内在世界', icon: MoonStar },
+  { to: '/response-policy', label: '回复策略', icon: Sparkles },
   { to: '/self-model', label: '自我模型', icon: Brain },
-  { to: '/persona-config', label: 'Persona', icon: Wand2 },
+  { to: '/persona-config', label: '人格文案', icon: Wand2 },
 ]
 
 export default function DigitalLifeNav() {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
-      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-400">
-        Digital Life
+      <div className="mb-2 text-xs font-medium tracking-wide text-gray-400">
+        数字生命导航
       </div>
       <div className="flex flex-wrap gap-2">
         {ITEMS.map(({ to, label, icon: Icon }) => (

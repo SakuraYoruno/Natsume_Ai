@@ -219,7 +219,9 @@ class SessionQueryService:
         normalized = row.get("normalized_json")
         raw_text = row.get("raw_text")
         if isinstance(raw_text, str) and raw_text.strip():
-            return raw_text.strip()[:120]
+            preview = raw_text.strip()
+            if not SessionQueryService._is_placeholder_preview(preview):
+                return preview[:120]
 
         if isinstance(normalized, dict):
             args = normalized.get("args")
@@ -227,7 +229,9 @@ class SessionQueryService:
                 for key in ("text", "query", "message", "content"):
                     value = args.get(key)
                     if isinstance(value, str) and value.strip():
-                        return value.strip()[:120]
+                        preview = value.strip()
+                        if not SessionQueryService._is_placeholder_preview(preview):
+                            return preview[:120]
         return None
 
     @staticmethod

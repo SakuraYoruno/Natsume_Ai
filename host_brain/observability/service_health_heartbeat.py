@@ -457,6 +457,76 @@ async def _probe_host() -> Dict[str, Any]:
     return {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
 
 
+def _write_core_service_cache(
+    *,
+    now_ts: int,
+    edge_result: Dict[str, Any],
+    host_result: Dict[str, Any],
+) -> None:
+    """写入 host/edge 核心服务缓存，不包含 LLM 节点。"""
+    host_overall = host_result.get("overall_status", "DOWN")
+    host_latency = host_result.get("latency_ms")
+    sub_services = host_result.get("sub_services") or {}
+
+    with _cache_lock:
+        for sid in EDGE_SERVICE_IDS:
+            sub = sub_services.get(sid)
+            status = sub["status"] if sub else edge_result["status"]
+            _cache[sid] = {
+                "status": status,
+                "latency_ms": edge_result.get("latency_ms"),
+                "last_check_ts": now_ts,
+                "name": _EDGE_DISPLAY_NAMES.get(sid, sid),
+                "side": "edge",
+            }
+
+        for sid in _HOST_SERVICE_IDS:
+            sub = sub_services.get(sid)
+            status = sub["status"] if sub else host_overall
+            _cache[sid] = {
+                "status": status,
+                "latency_ms": host_latency,
+                "last_check_ts": now_ts,
+                "name": _HOST_DISPLAY_NAMES.get(sid, sid),
+                "side": "host",
+            }
+
+
+def has_fresh_core_service_cache() -> bool:
+    """核心 host/edge 服务缓存是否完整且未过期。"""
+    required_ids = [*_HOST_SERVICE_IDS, *EDGE_SERVICE_IDS]
+    now_ts = int(time.time() * 1000)
+
+    with _cache_lock:
+        entries = {sid: _cache.get(sid) for sid in required_ids}
+
+    for sid in required_ids:
+        entry = entries.get(sid)
+        if not entry:
+            return False
+        last_ts = entry.get("last_check_ts") or 0
+        if (now_ts - int(last_ts)) / 1000.0 > CACHE_TTL_SEC:
+            return False
+    return True
+
+
+async def prime_core_service_cache_once() -> None:
+    """按需执行一轮 host/edge 核心服务探测并写入缓存。"""
+    now_ts = int(time.time() * 1000)
+    try:
+        edge_result = await _probe_edge()
+    except Exception as exc:
+        logger.debug("Prime core cache edge probe failed: %s", exc)
+        edge_result = {"status": "DOWN", "latency_ms": None}
+    try:
+        host_result = await _probe_host()
+    except Exception as exc:
+        logger.debug("Prime core cache host probe failed: %s", exc)
+        host_result = {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
+
+    _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
+
+
 async def run_once() -> None:
     """执行一轮心跳探测并更新缓存。
 
@@ -484,39 +554,10 @@ async def run_once() -> None:
         logger.debug("Heartbeat LLM probe failed (will cache DOWN): %s", exc)
         llm_results = {}
 
+    _write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
     host_overall = host_result.get("overall_status", "DOWN")
-    host_latency = host_result.get("latency_ms")
-    sub_services = host_result.get("sub_services") or {}
 
     with _cache_lock:
-        # Edge 服务：优先使用 /health 返回的子服务独立状态，否则回退到 Edge 整体探测结果
-        for sid in EDGE_SERVICE_IDS:
-            sub = sub_services.get(sid)
-            if sub:
-                status = sub["status"]
-            else:
-                status = edge_result["status"]
-            _cache[sid] = {
-                "status": status,
-                "latency_ms": edge_result.get("latency_ms"),
-                "last_check_ts": now_ts,
-                "name": _EDGE_DISPLAY_NAMES.get(sid, sid),
-                "side": "edge",
-            }
-        # Host 服务：使用各子服务独立状态，无映射的回退到 Host 整体状态
-        for sid in _HOST_SERVICE_IDS:
-            sub = sub_services.get(sid)
-            if sub:
-                status = sub["status"]
-            else:
-                status = host_overall
-            _cache[sid] = {
-                "status": status,
-                "latency_ms": host_latency,
-                "last_check_ts": now_ts,
-                "name": _HOST_DISPLAY_NAMES.get(sid, sid),
-                "side": "host",
-            }
         # LLM 节点：使用独立探活结果，Host 进程 DOWN 时所有 LLM 节点也标记为 DOWN
         for sid in LLM_NODE_IDS:
             if host_overall == "DOWN":

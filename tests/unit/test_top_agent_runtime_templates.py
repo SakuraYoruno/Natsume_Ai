@@ -215,7 +215,8 @@ def test_builtin_top_agent_runtime_templates_are_clean() -> None:
     templates = resolve_prompt_template_json_merged("top_agent.runtime_texts")
     assert templates["variant_selection"]["empty_variants_fallback"] == "嗯……我在呢。"
     assert templates["task_progress"]["no_summary"] == "现在没有正在执行，或者刚结束但还值得汇报的任务。"
-    assert templates["recent_turn_answer"]["user_template"].startswith("已确认事实：用户上一句是")
+    assert templates["recent_turn_answer"]["user_template"] == "你上一句是「{latest_user}」。"
+    assert templates["clarification_direct_answer"]["assistant_meaning_template"] == "我刚才的意思是：{latest_assistant}"
     assert templates["runtime_task_status"]["pre_dispatch_detail"] == "正在整理上下文和检索记忆。"
     assert templates["runtime_task_status"]["pre_dispatch_progress"] == "我正在整理上下文和检索记忆。"
     assert templates["runtime_task_status"]["failed_detail"] == "整条回复已经完成，但执行阶段有失败。"

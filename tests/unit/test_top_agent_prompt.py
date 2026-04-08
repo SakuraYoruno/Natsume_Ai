@@ -318,6 +318,110 @@ class TestTopAgentPrompt:
         assert "QQ里说过的话" in block
         assert "别人的内容" not in block
 
+    def test_build_recent_session_context_block_prefers_same_session_and_dedupes_same_request(self) -> None:
+        class _FakeCursor:
+            def __init__(self, rows: list[dict[str, object]]) -> None:
+                self._rows = rows
+
+            def fetchall(self) -> list[dict[str, object]]:
+                return list(self._rows)
+
+        class _FakeConn:
+            def execute(self, sql: str, params: tuple[object, ...]) -> _FakeCursor:
+                normalized = " ".join(str(sql).split())
+                if "WHERE session_id = ?" in normalized:
+                    assert params[0] == "qq_dm_3414578517"
+                    return _FakeCursor([
+                        {
+                            "request_id": "req-dup",
+                            "session_id": "qq_dm_3414578517",
+                            "payload": {
+                                "person_id": "default",
+                                "input_preview": "hello blue",
+                                "reply_preview": "hi there",
+                            },
+                            "ts_ms": 10,
+                        },
+                        {
+                            "request_id": "req-dup",
+                            "session_id": "qq_dm_3414578517",
+                            "payload": {
+                                "conversation_id": "qq_dm_3414578517",
+                                "person_id": "default",
+                                "phase": "COMPLETED",
+                                "input_preview": "hello blue",
+                                "reply_preview": "hi there",
+                            },
+                            "ts_ms": 11,
+                        },
+                        {
+                            "request_id": "req-other-session",
+                            "session_id": "wechat_session_01",
+                            "payload": {
+                                "person_id": "default",
+                                "input_preview": "foreign session",
+                                "reply_preview": "should not appear",
+                            },
+                            "ts_ms": 12,
+                        },
+                    ])
+                raise AssertionError(f"unexpected SQL: {normalized}")
+
+        class _FakeLedger:
+            _conn = _FakeConn()
+
+        with patch("host_brain.app.dependencies.get_ledger", return_value=_FakeLedger()):
+            block = _build_recent_session_context_block(
+                session_id="qq_dm_3414578517",
+                person_id="default",
+                request_id="req-current",
+                render_target_lang="zh",
+            )
+
+        assert "Recent continuity context:" in block
+        assert block.count("hello blue") == 1
+        assert block.count("hi there") == 1
+        assert "foreign session" not in block
+
+    def test_build_recent_session_context_block_filters_internal_agent_artifacts(self) -> None:
+        class _FakeLedger:
+            def fetch_by_time_range(self, table: str, *, limit: int = 100, **_: object) -> list[dict[str, object]]:
+                assert table == "voice_event_log"
+                assert limit == 2000
+                return [
+                    {
+                        "request_id": "req-old-1",
+                        "session_id": "qq_dm_3414578517",
+                        "event_type": "INPUT_COMPLETED",
+                        "payload": {
+                            "input_preview": "what did you mean",
+                            "reply_preview": '{"narrative":{"text":"internal"},"intent_draft":{},"meta":{"draft_only":true}}',
+                        },
+                    },
+                    {
+                        "request_id": "req-old-2",
+                        "session_id": "qq_dm_3414578517",
+                        "event_type": "INPUT_COMPLETED",
+                        "payload": {
+                            "input_preview": "say it naturally",
+                            "reply_preview": "Sure, let me say it naturally.",
+                        },
+                    },
+                ]
+
+        with patch("host_brain.app.dependencies.get_ledger", return_value=_FakeLedger()):
+            block = _build_recent_session_context_block(
+                session_id="qq_dm_3414578517",
+                request_id="req-current",
+                render_target_lang="zh",
+                max_turns=4,
+            )
+
+        assert "say it naturally" in block
+        assert "Sure, let me say it naturally." in block
+        assert '"intent_draft"' not in block
+        assert "draft_only" not in block
+
     def test_build_recent_session_context_block_adds_older_history_summary(self) -> None:
         class _FakeLedger:
             def fetch_by_time_range(self, table: str, *, limit: int = 100, **_: object) -> list[dict[str, object]]:
@@ -483,4 +587,5 @@ class TestTopAgentPrompt:
             )
 
         assert "Recent session context:" in prompt_text
+        assert "Continuity rule:" in prompt_text
         assert "Assistant: 贪吃蛇啊……是说那个游戏吗？" in prompt_text

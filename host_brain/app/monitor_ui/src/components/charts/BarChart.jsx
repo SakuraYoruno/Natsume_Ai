@@ -1,15 +1,24 @@
-import React, { useMemo } from 'react'
-import ReactECharts from 'echarts-for-react'
+import React, { Suspense, lazy, useMemo } from 'react'
+import echarts from './echartsBarCore.js'
 
-/**
- * 通用柱状/条形图封装组件
- * @param {string} title - 图表标题
- * @param {Array<{name, data, color}>} series - 柱状系列
- * @param {string[]} categories - 分类轴数据
- * @param {'vertical'|'horizontal'} [direction='vertical'] - 方向
- * @param {string} [yUnit] - 单位
- * @param {number} [height=240] - 图表高度
- */
+const ReactECharts = lazy(() =>
+  import('echarts-for-react/lib/core').then((mod) => ({
+    default: mod?.default?.default ?? mod?.default ?? mod,
+  }))
+)
+
+function ChartFallback({ title, height }) {
+  return (
+    <div style={{ height }} className="flex items-center justify-center rounded-lg bg-gray-50 text-gray-400 text-sm">
+      <div className="text-center">
+        <div className="text-2xl mb-1">📊</div>
+        <div>{title}</div>
+        <div className="text-xs text-gray-300 mt-1">图表组件加载中…</div>
+      </div>
+    </div>
+  )
+}
+
 export default function BarChart({
   title,
   series = [],
@@ -35,7 +44,7 @@ export default function BarChart({
     const valueAxis = {
       type: 'value',
       splitLine: { lineStyle: { color: '#F2F4F7', type: 'dashed' } },
-      axisLabel: { color: '#98A2B3', fontSize: 11, formatter: (v) => `${v}${yUnit}` },
+      axisLabel: { color: '#98A2B3', fontSize: 11, formatter: (value) => `${value}${yUnit}` },
     }
 
     return {
@@ -49,7 +58,7 @@ export default function BarChart({
         axisPointer: { type: 'shadow' },
         formatter: (params) => {
           const lines = params.map(
-            (p) => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.color};margin-right:4px"></span>${p.seriesName}: <b>${p.value ?? '—'}${yUnit}</b>`
+            (item) => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};margin-right:4px"></span>${item.seriesName}: <b>${item.value ?? '—'}${yUnit}</b>`
           )
           return `<div style="font-size:12px">${params[0]?.axisValue}<br/>${lines.join('<br/>')}</div>`
         },
@@ -65,19 +74,19 @@ export default function BarChart({
       },
       xAxis: isHorizontal ? valueAxis : categoryAxis,
       yAxis: isHorizontal ? categoryAxis : valueAxis,
-      series: series.map((s, i) => ({
-        name: s.name,
+      series: series.map((item) => ({
+        name: item.name,
         type: 'bar',
-        data: s.data ?? [],
+        data: item.data ?? [],
         itemStyle: {
-          color: s.color ?? '#2970FF',
+          color: item.color ?? '#2970FF',
           borderRadius: isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0],
         },
         barMaxWidth: 40,
         barGap: '20%',
       })),
     }
-  }, [title, series, categories, direction, yUnit])
+  }, [title, series, categories, direction, yUnit, isHorizontal])
 
   if (categories.length === 0) {
     return (
@@ -91,5 +100,9 @@ export default function BarChart({
     )
   }
 
-  return <ReactECharts option={option} style={{ height }} notMerge />
+  return (
+    <Suspense fallback={<ChartFallback title={title} height={height} />}>
+      <ReactECharts echarts={echarts} option={option} style={{ height }} notMerge />
+    </Suspense>
+  )
 }

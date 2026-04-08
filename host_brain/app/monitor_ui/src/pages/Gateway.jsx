@@ -1,71 +1,77 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  RefreshCw, MessageSquare, CheckCircle, AlertTriangle, XCircle,
-  HelpCircle, Phone, PhoneOff, Radio, Send, ArrowDownToLine,
-  Wifi, WifiOff, Zap,
+  RefreshCw,
+  MessageSquare,
+  CheckCircle,
+  AlertTriangle,
+  XCircle,
+  HelpCircle,
+  Phone,
+  Radio,
+  Send,
+  ArrowDownToLine,
+  Wifi,
+  Zap,
 } from 'lucide-react'
 import { fetchGatewayStats, fetchWeChatStats, resetWeChatChannel } from '../api/obs.js'
+import MetricCard from '../components/MetricCard.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import SectionHeading from '../components/SectionHeading.jsx'
+import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useAppStore from '../store/useAppStore.js'
 
-// ===== 平台图标与标签 =====
 const PLATFORM_META = {
-  wechat:   { label: '微信',     color: '#07C160', icon: MessageSquare },
-  qq:       { label: 'QQ',       color: '#12B7F5', icon: MessageSquare },
+  wechat: { label: '微信', color: '#07C160', icon: MessageSquare },
+  qq: { label: 'QQ', color: '#12B7F5', icon: MessageSquare },
   telegram: { label: 'Telegram', color: '#0088CC', icon: Send },
-  feishu:   { label: '飞书',     color: '#3370FF', icon: Zap },
-  wecom:    { label: '企业微信', color: '#2B7CE9', icon: Radio },
-  line:     { label: 'LINE',     color: '#00B900', icon: MessageSquare },
+  feishu: { label: '飞书', color: '#3370FF', icon: Zap },
+  wecom: { label: '企业微信', color: '#2B7CE9', icon: Radio },
+  line: { label: 'LINE', color: '#00B900', icon: MessageSquare },
 }
 
-function StatusBadge({ status }) {
-  const map = {
-    UP:      { icon: CheckCircle,   color: 'text-green-600',  bg: 'bg-green-50 border-green-200',  label: 'UP' },
-    DEGRADED:{ icon: AlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 border-orange-200',label: 'DEGRADED' },
-    DOWN:    { icon: XCircle,       color: 'text-red-500',    bg: 'bg-red-50 border-red-200',      label: 'DOWN' },
-    UNKNOWN: { icon: HelpCircle,    color: 'text-gray-400',   bg: 'bg-gray-50 border-gray-200',    label: 'UNKNOWN' },
-  }
-  const cfg = map[status] ?? map.UNKNOWN
-  const Icon = cfg.icon
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-xs font-semibold ${cfg.color} ${cfg.bg}`}>
-      <Icon size={12} />{cfg.label}
-    </span>
-  )
-}
-
-function StatCard({ label, value, sub, color = 'text-gray-800', icon: Icon }) {
-  return (
-    <div className="card p-4 text-center">
-      {Icon && <Icon size={16} className="mx-auto text-gray-400 mb-1" />}
-      <div className={`text-2xl font-bold ${color}`}>{value ?? '—'}</div>
-      <div className="text-xs text-gray-500 mt-1">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
-    </div>
-  )
-}
+const WINDOW_OPTIONS = [
+  { label: '1h', value: 60 },
+  { label: '6h', value: 360 },
+  { label: '24h', value: 1440 },
+  { label: '7d', value: 10080 },
+]
 
 function formatTime(tsMs) {
   if (!tsMs) return '—'
   return new Date(tsMs).toLocaleString('zh-CN', {
-    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
   })
 }
 
-const WINDOW_OPTIONS = [
-  { label: '1h',  value: 60    },
-  { label: '6h',  value: 360   },
-  { label: '24h', value: 1440  },
-  { label: '7d',  value: 10080 },
-]
+function StatusBadge({ status }) {
+  const map = {
+    UP: { icon: CheckCircle, color: 'text-green-600', bg: 'bg-green-50 border-green-200', label: '在线' },
+    DEGRADED: { icon: AlertTriangle, color: 'text-orange-500', bg: 'bg-orange-50 border-orange-200', label: '降级' },
+    DOWN: { icon: XCircle, color: 'text-red-500', bg: 'bg-red-50 border-red-200', label: '离线' },
+    UNKNOWN: { icon: HelpCircle, color: 'text-gray-400', bg: 'bg-gray-50 border-gray-200', label: '未知' },
+  }
+  const cfg = map[status] ?? map.UNKNOWN
+  const Icon = cfg.icon
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${cfg.color} ${cfg.bg}`}>
+      <Icon size={12} />
+      {cfg.label}
+    </span>
+  )
+}
 
-// ===== 单平台卡片 =====
 function PlatformCard({ data }) {
   const meta = PLATFORM_META[data.platform] || { label: data.platform, color: '#666', icon: MessageSquare }
   const Icon = meta.icon
-  const total = data.inbound_count + data.outbound_count
 
   return (
-    <div className="card p-4 space-y-3" style={{ borderLeft: `4px solid ${meta.color}` }}>
+    <div className="card space-y-3 p-4" style={{ borderLeft: `4px solid ${meta.color}` }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Icon size={18} style={{ color: meta.color }} />
@@ -74,53 +80,56 @@ function PlatformCard({ data }) {
         <StatusBadge status={data.status} />
       </div>
 
-      {data.status_detail && (
-        <div className="text-xs text-gray-400">{data.status_detail}</div>
-      )}
+      {data.status_detail ? <div className="text-xs text-gray-400">{data.status_detail}</div> : null}
 
       <div className="grid grid-cols-3 gap-2 text-center text-xs">
         <div>
-          <div className="text-lg font-bold text-blue-600">{data.inbound_count}</div>
+          <div className="text-lg font-bold text-blue-600">{data.inbound_count ?? 0}</div>
           <div className="text-gray-500">入站</div>
         </div>
         <div>
-          <div className="text-lg font-bold text-green-600">{data.outbound_count}</div>
+          <div className="text-lg font-bold text-green-600">{data.outbound_count ?? 0}</div>
           <div className="text-gray-500">出站</div>
         </div>
         <div>
-          <div className={`text-lg font-bold ${data.error_count > 0 ? 'text-red-500' : 'text-gray-400'}`}>{data.error_count}</div>
+          <div className={`text-lg font-bold ${(data.error_count ?? 0) > 0 ? 'text-red-500' : 'text-gray-400'}`}>
+            {data.error_count ?? 0}
+          </div>
           <div className="text-gray-500">错误</div>
         </div>
       </div>
 
-      {data.avg_latency_ms > 0 && (
-        <div className="text-xs text-gray-500">平均延迟 <span className="font-medium text-gray-700">{data.avg_latency_ms}ms</span></div>
-      )}
+      {(data.avg_latency_ms ?? 0) > 0 ? (
+        <div className="text-xs text-gray-500">
+          平均延迟 <span className="font-medium text-gray-700">{data.avg_latency_ms}ms</span>
+        </div>
+      ) : null}
 
-      {data.bridge_status && (
+      {data.bridge_status ? (
         <div className="flex items-center gap-1 text-xs">
           <Wifi size={11} className="text-green-500" />
-          <span className="text-gray-500">Bridge: <span className="font-medium">{data.bridge_status}</span></span>
+          <span className="text-gray-500">
+            桥接：<span className="font-medium text-gray-700">{data.bridge_status}</span>
+          </span>
         </div>
-      )}
+      ) : null}
 
-      {data.call_active > 0 && (
+      {(data.call_active ?? 0) > 0 ? (
         <div className="flex items-center gap-1 text-xs text-blue-600">
           <Phone size={11} />
-          <span>活跃通话: {data.call_active}</span>
+          <span>活跃通话：{data.call_active}</span>
         </div>
-      )}
+      ) : null}
 
-      {data.last_event_ts_ms && (
-        <div className="text-xs text-gray-400">最后活动 {formatTime(data.last_event_ts_ms)}</div>
-      )}
+      {data.last_event_ts_ms ? (
+        <div className="text-xs text-gray-400">最后活动：{formatTime(data.last_event_ts_ms)}</div>
+      ) : null}
     </div>
   )
 }
 
-// ===== 主页面 =====
 export default function Gateway() {
-  const pollingEnabled  = useAppStore((s) => s.pollingEnabled)
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
 
   const [windowMinutes, setWindowMinutes] = useState(60)
@@ -141,8 +150,8 @@ export default function Gateway() {
       ])
       setData(gatewayRes)
       setWechatDetail(wechatRes)
-    } catch (e) {
-      setError(e.message)
+    } catch (loadError) {
+      setError(`加载失败：${loadError.message}`)
     } finally {
       setLoading(false)
     }
@@ -150,120 +159,182 @@ export default function Gateway() {
 
   useEffect(() => {
     load()
-    if (!pollingEnabled) return
+    if (!pollingEnabled) return undefined
     const timer = setInterval(load, pollingInterval * 1000)
     return () => clearInterval(timer)
   }, [load, pollingEnabled, pollingInterval])
 
   const handleReset = async () => {
-    setResetting(true); setResetMsg(null)
+    setResetting(true)
+    setResetMsg(null)
     try {
       const result = await resetWeChatChannel({ reason: 'manual_ui' })
       setResetMsg({ ok: true, text: result.detail || '重置成功' })
       await load()
-    } catch (e) {
-      setResetMsg({ ok: false, text: e.message })
-    } finally { setResetting(false) }
+    } catch (resetError) {
+      setResetMsg({ ok: false, text: `重置失败：${resetError.message}` })
+    } finally {
+      setResetting(false)
+    }
   }
 
   const platforms = data?.platforms ?? []
-  const activePlatforms = platforms.filter(p => p.status === 'UP' || p.inbound_count > 0 || p.outbound_count > 0)
-  const isInitialState = !!data && (data.total_inbound ?? 0) === 0 && (data.total_outbound ?? 0) === 0 && (data.total_errors ?? 0) === 0
+  const activePlatforms = platforms.filter(
+    (item) => item.status === 'UP' || (item.inbound_count ?? 0) > 0 || (item.outbound_count ?? 0) > 0
+  )
+  const isInitialState =
+    !!data &&
+    (data.total_inbound ?? 0) === 0 &&
+    (data.total_outbound ?? 0) === 0 &&
+    (data.total_errors ?? 0) === 0
+
+  const hasWeChatRateLimits = (wechatDetail?.rate_limits ?? []).length > 0
+  const hasWeChatEvents = (wechatDetail?.recent_events ?? []).length > 0
 
   return (
     <div className="space-y-6">
-      {/* 页头 */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">统一消息网关</h1>
-          <p className="text-sm text-gray-500 mt-0.5">六平台消息路由 · 拟人化发送 · 语音视频通话</p>
+          <p className="mt-0.5 text-sm text-gray-500">六平台消息路由 · 拟人化发送 · 语音视频通话</p>
         </div>
         <div className="flex items-center gap-2">
-          <select className="text-xs border border-gray-300 rounded px-2 py-1.5" value={windowMinutes}
-            onChange={e => setWindowMinutes(Number(e.target.value))}>
-            {WINDOW_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <TimeWindowSelect
+            value={windowMinutes}
+            onChange={setWindowMinutes}
+            options={WINDOW_OPTIONS}
+            className="rounded border border-gray-300 px-2 py-1.5 text-xs"
+          />
           <button className="btn-secondary" onClick={load} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
           </button>
         </div>
       </div>
 
-      {error && <div className="card p-4 text-red-500 text-sm">{error}</div>}
-      {!error && isInitialState && (
+      <PageHero
+        icon={MessageSquare}
+        eyebrow="跨平台消息总线"
+        title={`${platforms.length} 平台`}
+        description={
+          isInitialState
+            ? '当前窗口暂无流量样本，平台卡显示的是适配器健康态。'
+            : `近窗口入站 ${data?.total_inbound ?? 0}，出站 ${data?.total_outbound ?? 0}，错误 ${data?.total_errors ?? 0}。`
+        }
+        gradientClass="from-primary-50 via-white to-emerald-50"
+        metaItems={[
+          `在线平台：${activePlatforms.length}`,
+          `拟人化：${data?.humanize_enabled ? '开启' : '关闭'}`,
+          `窗口：${windowMinutes} 分钟`,
+        ]}
+      />
+
+      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+
+      {!error && isInitialState ? (
         <div className="card p-4 text-sm text-gray-500">
           <div className="mb-1 text-xs text-gray-400">
-            Status falls back to remote Gateway adapter health when the local window has no samples.
+            当前数据为空流量初始态，页面显示的是健康快照，不是接口故障。
           </div>
-          当前是初始态，最近窗口还没有网关消息样本。平台卡片显示的是空流量状态，不是接口故障。
+          如果你正在压测或联调，请先触发一条网关输入后再观察分平台统计。
         </div>
-      )}
+      ) : null}
 
-      {/* 汇总统计 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="总入站" value={data?.total_inbound ?? '—'} color="text-blue-600" icon={ArrowDownToLine} />
-        <StatCard label="总出站" value={data?.total_outbound ?? '—'} color="text-green-600" icon={Send} />
-        <StatCard label="总错误" value={data?.total_errors ?? '—'} color={data?.total_errors > 0 ? 'text-red-500' : 'text-gray-400'} icon={XCircle} />
-        <StatCard label="拟人化"
-          value={data?.humanize_enabled ? 'ON' : 'OFF'}
-          sub={data?.humanize_enabled ? `${data.humanize_typing_speed_cps} CPS` : '已关闭'}
-          color={data?.humanize_enabled ? 'text-green-600' : 'text-gray-400'}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <MetricCard
+          label="总入站"
+          value={data?.total_inbound ?? '—'}
+          tone="text-blue-600"
+          icon={ArrowDownToLine}
+          variant="stacked"
+          hint=""
+        />
+        <MetricCard
+          label="总出站"
+          value={data?.total_outbound ?? '—'}
+          tone="text-green-600"
+          icon={Send}
+          variant="stacked"
+          hint=""
+        />
+        <MetricCard
+          label="总错误"
+          value={data?.total_errors ?? '—'}
+          tone={(data?.total_errors ?? 0) > 0 ? 'text-red-500' : 'text-gray-400'}
+          icon={XCircle}
+          variant="stacked"
+          hint=""
+        />
+        <MetricCard
+          label="拟人化"
+          value={data?.humanize_enabled ? '开启' : '关闭'}
+          hint={data?.humanize_enabled ? `字速 ${data?.humanize_typing_speed_cps ?? '—'} 字/秒` : '已关闭'}
+          tone={data?.humanize_enabled ? 'text-green-600' : 'text-gray-400'}
           icon={Zap}
+          variant="stacked"
         />
       </div>
 
-      {/* 六平台卡片网格 */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">平台状态</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {platforms.map(p => <PlatformCard key={p.platform} data={p} />)}
-        </div>
+        <SectionHeading icon={Wifi} title="平台状态" />
+        {platforms.length > 0 ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {platforms.map((item) => (
+              <PlatformCard key={item.platform} data={item} />
+            ))}
+          </div>
+        ) : (
+          <EmptyStateCard title="暂无平台样本" hint="当前窗口还没有观测到网关平台数据，待第一批消息到达后会自动刷新展示。" className="p-6" />
+        )}
       </div>
 
-      {/* 微信详细 — 兼容旧 WeChat 页面功能 */}
-      {wechatDetail && (
-        <div className="card p-4 space-y-4">
+      {wechatDetail ? (
+        <div className="card space-y-4 p-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-700">微信通道详情</h2>
             <button className="btn-secondary text-xs" onClick={handleReset} disabled={resetting}>
               {resetting ? '重置中…' : '重置频率限制'}
             </button>
           </div>
-          {resetMsg && (
-            <div className={`text-xs px-3 py-2 rounded ${resetMsg.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+
+          {resetMsg ? (
+            <div className={`rounded px-3 py-2 text-xs ${resetMsg.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
               {resetMsg.text}
             </div>
-          )}
-          {/* 频率限制摘要 */}
-          {wechatDetail.rate_limits && wechatDetail.rate_limits.length > 0 && (
+          ) : null}
+
+          {hasWeChatRateLimits ? (
             <div className="space-y-1">
               <div className="text-xs font-medium text-gray-600">频率限制</div>
-              {wechatDetail.rate_limits.map((rl, i) => (
-                <div key={i} className="flex items-center justify-between text-xs bg-gray-50 rounded px-3 py-1.5">
-                  <span className="text-gray-600">{rl.key || rl.name || `限制 ${i + 1}`}</span>
-                  <span className={rl.remaining <= 0 ? 'text-red-500 font-medium' : 'text-gray-500'}>
-                    {rl.current}/{rl.limit} ({rl.remaining} 剩余)
+              {wechatDetail.rate_limits.map((item, index) => (
+                <div key={`${item.key ?? item.name ?? 'limit'}-${index}`} className="flex items-center justify-between rounded bg-gray-50 px-3 py-1.5 text-xs">
+                  <span className="text-gray-600">{item.key || item.name || `限制 ${index + 1}`}</span>
+                  <span className={(item.remaining ?? 0) <= 0 ? 'font-medium text-red-500' : 'text-gray-500'}>
+                    {item.current}/{item.limit}（剩余 {item.remaining}）
                   </span>
                 </div>
               ))}
             </div>
+          ) : (
+            <EmptyStateCard title="当前窗口没有频率限制命中记录" hint="说明节流状态稳定。" className="p-4" />
           )}
-          {/* 最近事件 */}
-          {wechatDetail.recent_events && wechatDetail.recent_events.length > 0 && (
+
+          {hasWeChatEvents ? (
             <div className="space-y-1">
               <div className="text-xs font-medium text-gray-600">最近事件</div>
-              <div className="max-h-48 overflow-y-auto space-y-1">
-                {wechatDetail.recent_events.slice(0, 15).map((ev, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs bg-gray-50 rounded px-3 py-1.5">
-                    <span className="text-gray-400 shrink-0">{formatTime(ev.ts_ms)}</span>
-                    <span className="font-mono text-gray-600 truncate">{ev.event_type || ev.audit_tag || '—'}</span>
+              <div className="max-h-48 space-y-1 overflow-y-auto">
+                {wechatDetail.recent_events.slice(0, 15).map((event, index) => (
+                  <div key={`event-${index}`} className="flex items-center gap-2 rounded bg-gray-50 px-3 py-1.5 text-xs">
+                    <span className="shrink-0 text-gray-400">{formatTime(event.ts_ms)}</span>
+                    <span className="truncate font-mono text-gray-600">{event.event_type || event.audit_tag || '—'}</span>
                   </div>
                 ))}
               </div>
             </div>
+          ) : (
+            <EmptyStateCard title="当前窗口暂无微信事件" hint="触发一条消息后会自动展示。" className="p-4" />
           )}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

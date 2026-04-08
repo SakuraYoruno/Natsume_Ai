@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from typing import Any, Mapping, Optional
@@ -132,12 +133,51 @@ _hard_state: Optional[Any] = None  # 实际类型: HardState
 
 # ── 进程级 ActivityMonitor 引用（用于消息链路通知 user_interaction） ──
 _activity_monitor_ref: Optional[Any] = None
+_activity_monitor_lock = __import__("threading").Lock()
 
 
 def set_activity_monitor(monitor) -> None:
     """注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。"""
     global _activity_monitor_ref
     _activity_monitor_ref = monitor
+
+
+def get_activity_monitor(*, create_if_missing: bool = False, ledger: Any | None = None):
+    """获取进程级 ActivityMonitor，可选在缺失时懒启动。"""
+    global _activity_monitor_ref
+    monitor = _activity_monitor_ref
+    if monitor is not None or not create_if_missing:
+        return monitor
+
+    with _activity_monitor_lock:
+        monitor = _activity_monitor_ref
+        if monitor is not None:
+            return monitor
+
+        from host_brain.core.activity_monitor import ActivityMonitor  # noqa: PLC0415
+
+        mode_service = None
+        try:
+            from host_brain.app.obs_routes_sysmode import _get_mode_transition_service  # noqa: PLC0415
+
+            mode_service = _get_mode_transition_service()
+        except Exception as exc:
+            _logger.warning("获取 ModeTransitionService 失败，改为本地初始化: %s", exc)
+
+        if mode_service is None:
+            from host_brain.core.mode_transition import ModeTransitionService  # noqa: PLC0415
+
+            mode_service = ModeTransitionService(
+                get_hard_state=get_hard_state,
+                set_sys_mode=set_sys_mode,
+                ledger=ledger if ledger is not None else get_ledger(),
+            )
+
+        monitor = ActivityMonitor(mode_transition_service=mode_service)
+        monitor.start()
+        _activity_monitor_ref = monitor
+        _logger.info("ActivityMonitor 已注册到 dependencies")
+        return monitor
 
 
 def notify_user_interaction() -> None:
@@ -147,7 +187,7 @@ def notify_user_interaction() -> None:
     触发 sleep→normal 唤醒 和 空闲计时器重置。
     安全降级：如果 ActivityMonitor 未初始化则静默跳过。
     """
-    monitor = _activity_monitor_ref
+    monitor = get_activity_monitor()
     if monitor is not None:
         try:
             monitor.notify_user_interaction()
@@ -639,7 +679,7 @@ def get_recall_pack_builder() -> RecallPackBuilder:
                     request_id=str(detail.get("request_id") or "recall_pack_builder"),
                     stage=event,
                     reason_code=event,
-                    detail=str(detail),
+                    detail=json.dumps(detail, ensure_ascii=False, default=str),
                 )
             except Exception as exc:
                 _logger.warning("RecallPackBuilder 审计写入失败: %s", exc)

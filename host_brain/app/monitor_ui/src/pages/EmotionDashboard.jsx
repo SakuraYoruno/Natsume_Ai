@@ -1,10 +1,24 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { RefreshCw, Heart, Smile, Frown, Meh, Zap, Activity } from 'lucide-react'
-import { fetchVtsStats, fetchMemoryStats, fetchDigitalLifeRuntimeSnapshot } from '../api/obs.js'
+import {
+  Activity,
+  Heart,
+  Frown,
+  Meh,
+  RefreshCw,
+  Smile,
+  Zap,
+} from 'lucide-react'
+import { fetchMemoryStats, fetchVtsStats } from '../api/obs.js'
 import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import MetricCard from '../components/MetricCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../store/useAppStore.js'
-import { formatStage } from '../utils/digitalLife.js'
+import { formatEmotionTag, formatNumber, formatStage } from '../utils/digitalLife.js'
 
 const MOOD_STYLES = {
   calm: { icon: Meh, color: 'text-blue-500', bg: 'bg-blue-50', label: '平静' },
@@ -18,9 +32,12 @@ const EMOTION_COLORS = {
   HAPPY: '#22c55e',
   EXCITED: '#eab308',
   SAD: '#3b82f6',
+  SADNESS: '#3b82f6',
   ANGRY: '#ef4444',
+  ANGER: '#ef4444',
   NEUTRAL: '#9ca3af',
   SURPRISED: '#a855f7',
+  SURPRISE: '#a855f7',
   CONFUSED: '#f97316',
   CALM: '#06b6d4',
   LOVE: '#ec4899',
@@ -36,21 +53,27 @@ const WINDOW_OPTIONS = [
   { label: '7d', value: 10080 },
 ]
 
-function VADGauge({ label, value, color }) {
-  const pct = ((value + 1) / 2 * 100).toFixed(0)
+function Gauge({ label, value, color }) {
+  const numeric = Number(value || 0)
+  const percent = ((numeric + 1) / 2) * 100
+  const colorMap = {
+    'text-green-600': '#22c55e',
+    'text-blue-600': '#3b82f6',
+    'text-purple-600': '#a855f7',
+  }
+
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
         <span className="text-gray-600">{label}</span>
-        <span className={`font-mono font-bold ${color}`}>{value.toFixed(2)}</span>
+        <span className={`font-mono font-bold ${color}`}>{numeric.toFixed(2)}</span>
       </div>
-      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+      <div className="h-2 overflow-hidden rounded-full bg-gray-200">
         <div
           className="h-full rounded-full transition-all duration-500"
           style={{
-            width: `${pct}%`,
-            backgroundColor:
-              color === 'text-green-600' ? '#22c55e' : color === 'text-blue-600' ? '#3b82f6' : '#a855f7',
+            width: `${percent.toFixed(0)}%`,
+            backgroundColor: colorMap[color] || '#a855f7',
           }}
         />
       </div>
@@ -64,25 +87,32 @@ function VADGauge({ label, value, color }) {
 }
 
 export default function EmotionDashboard() {
-  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
-  const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingEnabled = useAppStore((state) => state.pollingEnabled)
+  const pollingInterval = useAppStore((state) => state.pollingInterval)
   const [windowMinutes, setWindowMinutes] = useState(360)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [vtsData, setVtsData] = useState(null)
-  const [memData, setMemData] = useState(null)
-  const [runtimeSnapshot, setRuntimeSnapshot] = useState(null)
+  const [memoryData, setMemoryData] = useState(null)
+
+  const { runtimeSnapshot } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes,
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError('')
     try {
-      const [vts, mem, runtime] = await Promise.all([
+      const [vts, memory] = await Promise.all([
         fetchVtsStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchDigitalLifeRuntimeSnapshot().catch(() => null),
       ])
       setVtsData(vts)
-      setMemData(mem)
-      setRuntimeSnapshot(runtime)
+      setMemoryData(memory)
+    } catch (loadError) {
+      setError(loadError.message || '情绪数据加载失败')
     } finally {
       setLoading(false)
     }
@@ -90,6 +120,9 @@ export default function EmotionDashboard() {
 
   useEffect(() => {
     load()
+  }, [load])
+
+  useEffect(() => {
     if (!pollingEnabled) return undefined
     const timer = setInterval(load, pollingInterval * 1000)
     return () => clearInterval(timer)
@@ -103,84 +136,103 @@ export default function EmotionDashboard() {
     emotionContext.emotion_intensity ?? emotionContext?.emotion_timeline_summary?.avg_intensity ?? 0
   )
   const bondEventCount = Number(bondState.event_count || 0)
-  const normalizedBondTemperature = Math.max(0, Math.min(1, bondEventCount / 500))
+  const bondTemperature = Math.max(0, Math.min(1, bondEventCount / 500))
+
   const emotionState = {
     valence: Number(
-      emotionContext?.user_emotion_profile?.avg_valence ??
-        emotionContext?.emotion_timeline_summary?.avg_valence ??
-        0
+      emotionContext?.user_emotion_profile?.avg_valence
+        ?? emotionContext?.emotion_timeline_summary?.avg_valence
+        ?? 0
     ),
     arousal: Number(emotionContext?.user_emotion_profile?.avg_arousal ?? emotionIntensity ?? 0),
     dominance: Number(selfModel?.emotional_stability ?? 0),
     mood: String(emotionContext.mood_state || 'steady').toLowerCase(),
-    emotion_tag: String(emotionContext.emotion_tag || 'NEUTRAL').toUpperCase(),
-    bond_temperature: normalizedBondTemperature,
-    bond_stage: String(bondState.current_stage || 'STRANGER').toUpperCase(),
+    emotionTag: String(emotionContext.emotion_tag || 'NEUTRAL').toUpperCase(),
+    bondStage: String(bondState.current_stage || 'STRANGER').toUpperCase(),
   }
+
   const moodStyle = MOOD_STYLES[emotionState.mood] || MOOD_STYLES.steady
   const MoodIcon = moodStyle.icon
+  const emotionTagLabel = formatEmotionTag(emotionState.emotionTag)
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">情感仪表盘</h1>
-          <p className="text-sm text-gray-500">VAD 三维 · 情感分布 · Bond 亲密温度</p>
+          <h1 className="text-xl font-semibold text-gray-900">情绪仪表盘</h1>
+          <p className="text-sm text-gray-500">统一查看情绪三维、表情分布与关系温度。</p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            className="text-xs border rounded px-2 py-1.5"
-            value={windowMinutes}
-            onChange={(e) => setWindowMinutes(Number(e.target.value))}
-          >
-            {WINDOW_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
           <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            刷新
           </button>
         </div>
       </div>
 
       <DigitalLifeNav />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
+      <PageHero
+        icon={Heart}
+        eyebrow="情绪快照"
+        title={moodStyle.label}
+        description={`主情绪 ${emotionTagLabel} · 关系阶段 ${formatStage(emotionState.bondStage)} · 数据来自运行快照与 VTS 聚合。`}
+        gradientClass="from-primary-50 via-white to-rose-50"
+        metaItems={[
+          `主情绪：${emotionTagLabel}`,
+          `关系温度：${(bondTemperature * 100).toFixed(0)}%`,
+          `表情样本：${topEmotions.length}`,
+        ]}
+      />
+
+      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard label="当前情绪" value={emotionTagLabel} hint={moodStyle.label} tone="text-pink-600" />
+        <MetricCard label="关系阶段" value={formatStage(emotionState.bondStage)} hint={`事件 ${bondEventCount} 次`} tone="text-purple-600" />
+        <MetricCard label="表情降级率" value={`${vtsData?.degrade_rate ?? 0}%`} hint={`应用率 ${vtsData?.apply_rate ?? 0}%`} tone={vtsData?.degrade_rate > 10 ? 'text-orange-500' : 'text-green-600'} />
+        <MetricCard label="对话放行" value={vtsData?.talk_gate_allowed ?? 0} hint={`记忆子系统 ${memoryData?.subsystems?.length ?? 0} 个`} tone="text-blue-600" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="card space-y-4 p-5">
+          <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
             <Heart size={14} className="text-pink-500" />
             当前状态
           </h2>
-          <div className="text-center py-4">
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full ${moodStyle.bg}`}>
+          <div className="py-4 text-center">
+            <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 ${moodStyle.bg}`}>
               <MoodIcon size={20} className={moodStyle.color} />
               <span className={`font-bold ${moodStyle.color}`}>{moodStyle.label}</span>
             </div>
             <div className="mt-2 text-xs text-gray-500">
-              emotion_tag: <span className="font-mono text-gray-700">{emotionState.emotion_tag}</span>
+              主情绪：<span className="text-gray-700">{emotionTagLabel}</span>
             </div>
-            <div className="mt-1 text-xs text-gray-400">来自 `runtime snapshot`，不再使用前端 mock 状态</div>
+            <div className="mt-2">
+              <NoticeBanner variant="info" className="text-left">
+                这里已经直接读取运行时快照，不再使用前端模拟情绪数据。
+              </NoticeBanner>
+            </div>
           </div>
           <div className="space-y-3">
-            <VADGauge label="Valence（效价）" value={emotionState.valence} color="text-green-600" />
-            <VADGauge label="Arousal（唤醒度）" value={emotionState.arousal} color="text-blue-600" />
-            <VADGauge label="Dominance（支配感）" value={emotionState.dominance} color="text-purple-600" />
+            <Gauge label="效价" value={emotionState.valence} color="text-green-600" />
+            <Gauge label="唤醒" value={emotionState.arousal} color="text-blue-600" />
+            <Gauge label="稳定度" value={emotionState.dominance} color="text-purple-600" />
           </div>
         </div>
 
-        <div className="card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
+        <div className="card space-y-4 p-5">
+          <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
             <Activity size={14} className="text-indigo-500" />
-            情感标签分布
+            情绪标签分布
           </h2>
           {topEmotions.length > 0 ? (
             <div className="space-y-2">
               {topEmotions.map((emotion) => (
                 <div key={emotion.emotion_tag} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-600 w-20 shrink-0 truncate">{emotion.emotion_tag}</span>
-                  <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                  <span className="w-20 shrink-0 truncate text-xs text-gray-600">{formatEmotionTag(emotion.emotion_tag)}</span>
+                  <div className="h-4 flex-1 overflow-hidden rounded-full bg-gray-100">
                     <div
                       className="h-full rounded-full"
                       style={{
@@ -189,18 +241,19 @@ export default function EmotionDashboard() {
                       }}
                     />
                   </div>
-                  <span className="text-xs text-gray-500 w-12 text-right">{emotion.pct}%</span>
-                  <span className="text-xs text-gray-400 w-8 text-right">{emotion.count}</span>
+                  <span className="w-12 text-right text-xs text-gray-500">{emotion.pct}%</span>
+                  <span className="w-8 text-right text-xs text-gray-400">{emotion.count}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-center text-gray-400 py-8 text-xs">暂无情感数据</div>
+            <EmptyStateCard title="暂无情绪样本" hint="等待情绪样本进入后再展示分布。" className="p-6" />
           )}
-          {vtsData && (
-            <div className="grid grid-cols-3 gap-2 text-center text-xs pt-2 border-t">
+
+          {vtsData ? (
+            <div className="grid grid-cols-3 gap-2 border-t pt-2 text-center text-xs">
               <div>
-                <div className="text-lg font-bold text-green-600">{vtsData.apply_rate ?? '—'}%</div>
+                <div className="text-lg font-bold text-green-600">{vtsData.apply_rate ?? 0}%</div>
                 <div className="text-gray-500">表情应用率</div>
               </div>
               <div>
@@ -211,20 +264,20 @@ export default function EmotionDashboard() {
               </div>
               <div>
                 <div className="text-lg font-bold text-blue-600">{vtsData.talk_gate_allowed ?? 0}</div>
-                <div className="text-gray-500">对话放行</div>
+                <div className="text-gray-500">放行次数</div>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
-        <div className="card p-5 space-y-4">
-          <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
+        <div className="card space-y-4 p-5">
+          <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
             <Zap size={14} className="text-pink-500" />
-            Bond 关系
+            关系温度
           </h2>
-          <div className="text-center py-4">
-            <div className="relative w-32 h-32 mx-auto">
-              <svg viewBox="0 0 120 120" className="w-full h-full">
+          <div className="py-4 text-center">
+            <div className="relative mx-auto h-32 w-32">
+              <svg viewBox="0 0 120 120" className="h-full w-full">
                 <circle cx="60" cy="60" r="50" fill="none" stroke="#e5e7eb" strokeWidth="8" />
                 <circle
                   cx="60"
@@ -232,35 +285,36 @@ export default function EmotionDashboard() {
                   r="50"
                   fill="none"
                   stroke="#ec4899"
-                  strokeWidth="8"
-                  strokeDasharray={`${emotionState.bond_temperature * 314} 314`}
+                  strokeDasharray={`${bondTemperature * 314} 314`}
                   strokeLinecap="round"
                   transform="rotate(-90 60 60)"
                   className="transition-all duration-1000"
                 />
                 <text x="60" y="55" textAnchor="middle" className="fill-gray-800 text-lg font-bold">
-                  {(emotionState.bond_temperature * 100).toFixed(0)}°
+                  {(bondTemperature * 100).toFixed(0)}°
                 </text>
                 <text x="60" y="72" textAnchor="middle" className="fill-gray-500 text-[10px]">
-                  {emotionState.bond_stage}
+                  {formatStage(emotionState.bondStage)}
                 </text>
               </svg>
             </div>
           </div>
+
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="card p-2 text-center">
-              <div className="font-bold text-pink-600">{formatStage(emotionState.bond_stage)}</div>
+              <div className="font-bold text-pink-600">{formatStage(emotionState.bondStage)}</div>
               <div className="text-gray-500">当前阶段</div>
             </div>
             <div className="card p-2 text-center">
-              <div className="font-bold text-gray-700">{emotionState.bond_temperature.toFixed(2)}</div>
-              <div className="text-gray-500">阶段热度（按事件量归一）</div>
+              <div className="font-bold text-gray-700">{formatNumber(bondTemperature, 2)}</div>
+              <div className="text-gray-500">温度值</div>
             </div>
           </div>
-          {memData?.subsystems && (
-            <div className="space-y-1 pt-2 border-t">
-              <div className="text-xs font-medium text-gray-600 mb-1">记忆子系统</div>
-              {memData.subsystems.map((subsystem) => (
+
+          {memoryData?.subsystems ? (
+            <div className="space-y-1 border-t pt-2">
+              <div className="mb-1 text-xs font-medium text-gray-600">记忆子系统成功率</div>
+              {memoryData.subsystems.map((subsystem) => (
                 <div key={subsystem.subsystem} className="flex items-center justify-between text-xs">
                   <span className="text-gray-600">{subsystem.display_name}</span>
                   <span
@@ -268,8 +322,8 @@ export default function EmotionDashboard() {
                       subsystem.success_rate >= 90
                         ? 'text-green-600'
                         : subsystem.success_rate >= 70
-                        ? 'text-orange-500'
-                        : 'text-red-500'
+                          ? 'text-orange-500'
+                          : 'text-red-500'
                     }
                   >
                     {subsystem.success_rate ?? '—'}%
@@ -277,12 +331,12 @@ export default function EmotionDashboard() {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Link to="/response-policy" className="btn-secondary text-sm">查看回应策略</Link>
+        <Link to="/response-policy" className="btn-secondary text-sm">查看回复策略</Link>
         <Link to="/self-model" className="btn-secondary text-sm">查看自我模型</Link>
       </div>
     </div>

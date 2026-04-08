@@ -5,7 +5,17 @@ from typing import Any
 
 def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> str:
     raw_user_id = str((args or {}).get("user_id") or (context or {}).get("user_id") or "").strip()
-    return raw_user_id or "user_1"
+    if raw_user_id:
+        return raw_user_id
+    try:
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+
+        resolved = str(get_canonical_bond_user_id() or "").strip()
+        if resolved:
+            return resolved
+    except Exception:
+        pass
+    return "user_1"
 
 
 def _resolve_current_topic(args: dict[str, Any], context: dict[str, Any] | None) -> str:

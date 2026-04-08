@@ -398,7 +398,9 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
         "host_brain.persona.inner_world.get_inner_world",
         lambda: SimpleNamespace(
             get_state=lambda _user_id: {
+                "user_id": "persona-user-001",
                 "last_interaction_ts_ms": 1700000000000,
+                "last_tick_ts_ms": 1700000009000,
                 "total_offline_hours": 12.0,
                 "loneliness": 0.42,
                 "anticipation": 0.35,
@@ -494,6 +496,42 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
         ),
     )
 
+    monkeypatch.setattr("host_brain.app.http_hooks_runtime_helpers._time.time", lambda: 1700000010.0)
+    monkeypatch.setattr(
+        "host_brain.scheduler.scheduler_routes.get_scheduler_health_snapshot_safe",
+        lambda: {
+            "scheduler_status": "HEALTHY",
+            "total_tasks": 9,
+            "enabled_tasks": 9,
+            "suspended_tasks": 0,
+            "error_tasks": 0,
+            "tasks": [
+                {
+                    "task_id": "inner_world_tick",
+                    "status": "OK",
+                    "enabled": True,
+                    "last_run_ts": 1700000009000,
+                    "trigger_config": {"seconds": 60},
+                },
+                {
+                    "task_id": "silence_tick",
+                    "status": "OK",
+                    "enabled": True,
+                    "last_run_ts": 1700000009000,
+                    "trigger_config": {"seconds": 60},
+                },
+                {
+                    "task_id": "body_sense_tick",
+                    "status": "OK",
+                    "enabled": True,
+                    "last_run_ts": 1700000009000,
+                    "trigger_config": {"seconds": 60},
+                },
+            ],
+            "ts_ms": 1700000010000,
+        },
+    )
+
     snapshot = build_digital_life_runtime_snapshot(current_topic="那个项目")
 
     assert snapshot["persona_user_id"] == "persona-user-001"
@@ -521,5 +559,11 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["runtime_summary"]["core_slots"]["response_policy"]["reply_posture"] == "focused"
     assert "mode:focus" in snapshot["runtime_summary"]["why_reply"]
     assert "motive:continuity" in snapshot["runtime_summary"]["why_reply"]
+    assert snapshot["background_runtime"]["scheduler_status"] == "HEALTHY"
+    assert snapshot["background_runtime"]["core_ticks_registered"] is True
+    assert snapshot["background_runtime"]["core_tick_tasks"]["inner_world_tick"]["status"] == "OK"
+    assert snapshot["background_runtime"]["persona_user_alignment_ok"] is True
+    assert snapshot["background_runtime"]["tick_health"] == "fresh"
+    assert snapshot["background_runtime"]["is_advancing"] is True
     assert snapshot["slot_status"]["response_policy"] == "live"
     assert snapshot["degraded"] is False

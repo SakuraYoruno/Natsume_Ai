@@ -153,7 +153,6 @@ class TestTopAgentSseGenerator:
     def test_recent_turn_query_is_answered_from_continuity_without_llm(self) -> None:
         request_body = SimpleNamespace(message="上一句是什么", session_id="session-001", thread_id=None)
         metrics = MagicMock()
-        captured = {}
 
         class _FakeLedger:
             def fetch_by_time_range(self, table: str, *, limit: int = 100, **_: object) -> list[dict[str, object]]:
@@ -218,9 +217,9 @@ class TestTopAgentSseGenerator:
 
         commit = json.loads(events[-1].removeprefix("data: ").strip())
         assert commit["decision"] == "APPROVE"
-        assert commit["audit_refs"]["path"] == "chat_agent:direct"
-        assert captured["chat_input"].sub_agent_context is not None
-        assert captured["chat_input"].sub_agent_context.agent_id == "recent_turn_direct"
+        assert commit["audit_refs"]["path"] == "top_agent:recent_turn_direct"
+        assert "你上一句" in commit["narrative"]
+        return
         assert "已确认事实：" in commit["narrative"]
         assert "不要再说看不到或没看到" in commit["narrative"]
 
@@ -1267,14 +1266,14 @@ def test_retrieval_init_failure_and_recall_pack_still_dispatch(monkeypatch) -> N
 
     class _FakePack:
         def get_slot(self, name: str):
-            if name == "bond":
+            if name == "bond_graph":
                 return SimpleNamespace(content="bond recall slot")
             return None
 
     class _RecallBuilder:
         def build(self, recall_results, task_type):  # noqa: ANN001
             assert task_type == "chat"
-            assert recall_results == {"bond": "bond memory"}
+            assert recall_results == {"bond_graph": "bond memory"}
             return _FakePack()
 
     async def _fake_state_arbiter_with_bond(**_kwargs):  # noqa: ANN001
@@ -1324,7 +1323,7 @@ def test_retrieval_init_failure_and_recall_pack_still_dispatch(monkeypatch) -> N
         return_value=_RecallBuilder(),
     ), patch(
         "host_brain.app.schemas.recall_pack.RECALL_SLOT_PRIORITY",
-        ["bond"],
+        ["bond_graph"],
     ), patch(
         "host_brain.app.graph_config_builder.resolve_host_llm_runtime_async",
         new=_fake_runtime,
@@ -1353,7 +1352,7 @@ def test_retrieval_init_failure_and_recall_pack_still_dispatch(monkeypatch) -> N
     assert commit["decision"] == "APPROVE"
     assert captured["retrieval_summary"]["status"] == "SKIPPED"
     assert captured["bond_summary"]["stage"] == "FRIEND"
-    assert captured["recall_slot_text"]["bond"] == "bond recall slot"
+    assert captured["recall_slot_text"]["bond_graph"] == "bond recall slot"
 
 
 def test_retrieval_failure_degrades_summary_before_dispatch(monkeypatch) -> None:

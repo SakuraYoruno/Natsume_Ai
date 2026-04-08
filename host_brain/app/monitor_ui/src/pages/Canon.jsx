@@ -1,128 +1,161 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
-  fetchCanonProposals,
-  fetchCanonDocuments,
-  submitCanonProposal,
   approveCanonProposal,
+  fetchCanonDocuments,
+  fetchCanonProposals,
+  fetchVaultStats,
   rejectCanonProposal,
   rollbackCanonProposal,
-  fetchVaultStats,
+  submitCanonProposal,
 } from '../api/obs.js'
 import {
   BookOpen,
-  FilePlus,
   CheckCircle,
-  XCircle,
-  RefreshCw,
   ChevronDown,
   ChevronUp,
-  AlertCircle,
+  FilePlus,
   Lock,
+  RefreshCw,
   RotateCcw,
   Search,
+  XCircle,
 } from 'lucide-react'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import MetricCard from '../components/MetricCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import SectionHeading from '../components/SectionHeading.jsx'
 
-// ── 状态徽章 ──────────────────────────────────────────────────────────────
-const STATUS_BADGE = {
-  pending:  'bg-yellow-100 text-yellow-700 border-yellow-200',
-  APPLIED:  'bg-green-100  text-green-700  border-green-200',
-  rejected: 'bg-red-100    text-red-700    border-red-200',
-  rolled_back: 'bg-gray-100 text-gray-600  border-gray-200',
+const STATUS_STYLES = {
+  pending: 'border-yellow-200 bg-yellow-100 text-yellow-700',
+  APPLIED: 'border-green-200 bg-green-100 text-green-700',
+  rejected: 'border-red-200 bg-red-100 text-red-700',
+  rolled_back: 'border-gray-200 bg-gray-100 text-gray-600',
+}
+
+const PROPOSAL_STATUS_LABELS = {
+  pending: '待审核',
+  APPLIED: '已生效',
+  rejected: '已拒绝',
+  rolled_back: '已回滚',
+}
+
+const MANIFEST_STATUS_LABELS = {
+  ACTIVE: '生效中',
+  active: '生效中',
+  UNDONE: '已撤销',
+  GC: '已回收',
+}
+
+const PAGE_SIZE = 20
+
+function formatDateTime(tsMs) {
+  if (!tsMs) {
+    return '—'
+  }
+  return new Date(tsMs).toLocaleString('zh-CN')
 }
 
 function StatusBadge({ status }) {
-  const cls = STATUS_BADGE[status] || 'bg-gray-100 text-gray-500 border-gray-200'
   return (
-    <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>
-      {status}
+    <span
+      className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${
+        STATUS_STYLES[status] || 'border-gray-200 bg-gray-100 text-gray-500'
+      }`}
+    >
+      {PROPOSAL_STATUS_LABELS[status] || status || '—'}
     </span>
   )
 }
 
-// ── 提案行 ────────────────────────────────────────────────────────────────
 function ProposalRow({ item, onApprove, onReject, onRollback }) {
   const [expanded, setExpanded] = useState(false)
-  const ts = item.ts_ms ? new Date(item.ts_ms).toLocaleString('zh-CN') : '—'
 
   return (
     <>
-      <tr className="hover:bg-gray-50 transition-colors">
-        <td className="px-4 py-2 text-xs text-gray-500 font-mono max-w-[120px] truncate" title={item.proposal_id}>
-          {item.proposal_id?.slice(0, 16)}…
+      <tr className="transition-colors hover:bg-gray-50">
+        <td className="max-w-[140px] truncate px-4 py-2 font-mono text-xs text-gray-500" title={item.proposal_id}>
+          {item.proposal_id || '—'}
         </td>
-        <td className="px-4 py-2 text-xs text-gray-700 max-w-[120px] truncate" title={item.target_doc_id}>
+        <td className="max-w-[160px] truncate px-4 py-2 text-xs text-gray-700" title={item.target_doc_id}>
           {item.target_doc_id || '—'}
         </td>
-        <td className="px-4 py-2"><StatusBadge status={item.status} /></td>
-        <td className="px-4 py-2 text-xs text-gray-500 max-w-[200px] truncate" title={item.summary}>
+        <td className="px-4 py-2">
+          <StatusBadge status={item.status} />
+        </td>
+        <td className="max-w-[220px] truncate px-4 py-2 text-xs text-gray-500" title={item.summary}>
           {item.summary || '—'}
         </td>
-        <td className="px-4 py-2 text-xs text-gray-400">{ts}</td>
+        <td className="px-4 py-2 text-xs text-gray-400">{formatDateTime(item.ts_ms)}</td>
         <td className="px-4 py-2">
           <div className="flex items-center gap-1">
-            {item.status === 'pending' && (
+            {item.status === 'pending' ? (
               <>
                 <button
-                  className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
+                  className="flex items-center gap-1 rounded border border-green-200 bg-green-50 px-2 py-1 text-xs text-green-700 transition-colors hover:bg-green-100"
                   onClick={() => onApprove(item)}
                   title="审核通过"
                 >
-                  <CheckCircle size={12} /> 通过
+                  <CheckCircle size={12} />
+                  通过
                 </button>
                 <button
-                  className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+                  className="flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 transition-colors hover:bg-red-100"
                   onClick={() => onReject(item)}
                   title="拒绝提案"
                 >
-                  <XCircle size={12} /> 拒绝
+                  <XCircle size={12} />
+                  拒绝
                 </button>
               </>
-            )}
-            {/* Ref #81: 回滚按钮（仅 APPLIED 状态） */}
-            {item.status === 'APPLIED' && (
+            ) : null}
+
+            {item.status === 'APPLIED' ? (
               <button
-                className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 transition-colors"
+                className="flex items-center gap-1 rounded border border-orange-200 bg-orange-50 px-2 py-1 text-xs text-orange-700 transition-colors hover:bg-orange-100"
                 onClick={() => onRollback(item)}
-                title="回滚到 base_version"
+                title="回滚到基础版本"
               >
-                <RotateCcw size={12} /> 回滚
+                <RotateCcw size={12} />
+                回滚
               </button>
-            )}
+            ) : null}
+
             <button
-              className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-              onClick={() => setExpanded(v => !v)}
-              title={expanded ? '收起' : '展开详情'}
+              className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              onClick={() => setExpanded((value) => !value)}
+              title={expanded ? '收起详情' : '展开详情'}
             >
               {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
           </div>
         </td>
       </tr>
-      {expanded && (
+
+      {expanded ? (
         <tr className="bg-gray-50">
           <td colSpan={6} className="px-6 py-3">
-            <div className="text-xs text-gray-600 space-y-1">
-              <div><span className="font-medium text-gray-700">提案 ID：</span>{item.proposal_id}</div>
-              <div><span className="font-medium text-gray-700">目标文档：</span>{item.target_doc_id}</div>
-              {item.proposer_node_id && (
-                <div><span className="font-medium text-gray-700">提案来源：</span>{item.proposer_node_id}</div>
-              )}
-              {item.proposed_hash && (
+            <div className="space-y-1 text-xs text-gray-600">
+              <div><span className="font-medium text-gray-700">提案 ID：</span>{item.proposal_id || '—'}</div>
+              <div><span className="font-medium text-gray-700">目标文档：</span>{item.target_doc_id || '—'}</div>
+              {item.proposer_node_id ? (
+                <div><span className="font-medium text-gray-700">来源节点：</span>{item.proposer_node_id}</div>
+              ) : null}
+              {item.proposed_hash ? (
                 <div><span className="font-medium text-gray-700">内容哈希：</span><span className="font-mono">{item.proposed_hash}</span></div>
-              )}
-              {item.base_version != null && (
-                <div><span className="font-medium text-gray-700">基础版本：</span>v{item.base_version} → v{item.proposed_version}</div>
-              )}
+              ) : null}
+              {item.base_version != null ? (
+                <div><span className="font-medium text-gray-700">版本变化：</span>v{item.base_version} → v{item.proposed_version}</div>
+              ) : null}
             </div>
           </td>
         </tr>
-      )}
+      ) : null}
     </>
   )
 }
 
-// ── 提交提案弹窗 ──────────────────────────────────────────────────────────
 function SubmitModal({ onClose, onSubmit }) {
   const [form, setForm] = useState({
     proposal_id: `manual-${Date.now()}`,
@@ -135,22 +168,26 @@ function SubmitModal({ onClose, onSubmit }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleSubmit = async (event) => {
+    event.preventDefault()
     if (!form.target_doc_id.trim() || !form.proposed_title.trim() || !form.proposed_body.trim()) {
-      setError('目标文档 ID、标题和正文为必填项')
+      setError('目标文档 ID、标题和正文为必填项。')
       return
     }
+
     setLoading(true)
     setError('')
     try {
       await onSubmit({
         ...form,
-        proposed_tags: form.proposed_tags.split(',').map(t => t.trim()).filter(Boolean),
+        proposed_tags: form.proposed_tags
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
       })
       onClose()
-    } catch (err) {
-      setError(err.message || '提交失败')
+    } catch (submitError) {
+      setError(submitError.message || '提交失败')
     } finally {
       setLoading(false)
     }
@@ -158,77 +195,92 @@ function SubmitModal({ onClose, onSubmit }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
-        <h3 className="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2">
-          <FilePlus size={16} className="text-primary" /> 提交新 Canon 提案
+      <div className="mx-4 w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+        <h3 className="mb-4 flex items-center gap-2 text-base font-semibold text-gray-800">
+          <FilePlus size={16} className="text-primary" />
+          提交新主设定提案
         </h3>
+
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">提案 ID</label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">提案 ID</label>
             <input
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
+              className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
               value={form.proposal_id}
-              onChange={e => setForm(f => ({ ...f, proposal_id: e.target.value }))}
+              onChange={(event) => setForm((current) => ({ ...current, proposal_id: event.target.value }))}
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">目标文档 ID <span className="text-red-500">*</span></label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              目标文档 ID <span className="text-red-500">*</span>
+            </label>
             <input
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
+              className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
               value={form.target_doc_id}
-              onChange={e => setForm(f => ({ ...f, target_doc_id: e.target.value }))}
-              placeholder="如：world_canon_001"
+              onChange={(event) => setForm((current) => ({ ...current, target_doc_id: event.target.value }))}
+              placeholder="例如：world_canon_001"
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">标题 <span className="text-red-500">*</span></label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              标题 <span className="text-red-500">*</span>
+            </label>
             <input
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
+              className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
               value={form.proposed_title}
-              onChange={e => setForm(f => ({ ...f, proposed_title: e.target.value }))}
+              onChange={(event) => setForm((current) => ({ ...current, proposed_title: event.target.value }))}
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">正文 <span className="text-red-500">*</span></label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">
+              正文 <span className="text-red-500">*</span>
+            </label>
             <textarea
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200 resize-none"
               rows={4}
+              className="w-full resize-none rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
               value={form.proposed_body}
-              onChange={e => setForm(f => ({ ...f, proposed_body: e.target.value }))}
+              onChange={(event) => setForm((current) => ({ ...current, proposed_body: event.target.value }))}
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">标签（逗号分隔）</label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">标签（逗号分隔）</label>
             <input
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
+              className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
               value={form.proposed_tags}
-              onChange={e => setForm(f => ({ ...f, proposed_tags: e.target.value }))}
-              placeholder="如：character,world,lore"
+              onChange={(event) => setForm((current) => ({ ...current, proposed_tags: event.target.value }))}
+              placeholder="例如：角色, 世界观, 设定"
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">摘要（不超过 200 字）</label>
+            <label className="mb-1 block text-xs font-medium text-gray-600">摘要（不超过 200 字）</label>
             <input
-              className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
+              className="w-full rounded border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
               value={form.summary}
-              onChange={e => setForm(f => ({ ...f, summary: e.target.value.slice(0, 200) }))}
+              onChange={(event) => setForm((current) => ({ ...current, summary: event.target.value.slice(0, 200) }))}
             />
           </div>
-          {error && (
-            <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-              <AlertCircle size={12} /> {error}
-            </div>
-          )}
+
+          {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-4 py-1.5 rounded border border-gray-300 text-sm text-gray-600 hover:bg-gray-50">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded border border-gray-300 px-4 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
+            >
               取消
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-1.5 rounded bg-primary text-white text-sm font-medium hover:bg-primary-600 disabled:opacity-50 flex items-center gap-1.5"
+              className="flex items-center gap-1.5 rounded bg-primary px-4 py-1.5 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
             >
-              {loading && <RefreshCw size={12} className="animate-spin" />}
+              {loading ? <RefreshCw size={12} className="animate-spin" /> : null}
               提交提案
             </button>
           </div>
@@ -238,55 +290,62 @@ function SubmitModal({ onClose, onSubmit }) {
   )
 }
 
-// ── 文档卡片 ──────────────────────────────────────────────────────────────
 function DocCard({ doc }) {
   const [expanded, setExpanded] = useState(false)
-  const ts = doc.ts_ms ? new Date(doc.ts_ms).toLocaleString('zh-CN') : '—'
+
   return (
-    <div className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition-shadow">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 transition-shadow hover:shadow-sm">
       <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-medium text-sm text-gray-800 truncate">{doc.title || doc.doc_id}</span>
-            <span className="text-xs text-gray-400 font-mono">v{doc.version}</span>
-            <span className={`text-xs px-1.5 py-0.5 rounded border ${doc.status === 'active' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-              {doc.status}
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="truncate text-sm font-medium text-gray-800">{doc.title || doc.doc_id}</span>
+            <span className="text-xs font-mono text-gray-400">v{doc.version}</span>
+            <span
+              className={`rounded border px-1.5 py-0.5 text-xs ${
+                doc.status === 'ACTIVE' || doc.status === 'active'
+                  ? 'border-green-200 bg-green-50 text-green-700'
+                  : 'border-gray-200 bg-gray-100 text-gray-500'
+              }`}
+            >
+              {MANIFEST_STATUS_LABELS[doc.status] || doc.status || '—'}
             </span>
           </div>
-          <div className="text-xs text-gray-500 mb-1">
-            ID: <span className="font-mono">{doc.doc_id}</span> · 更新于 {ts}
+          <div className="mb-1 text-xs text-gray-500">
+            ID：<span className="font-mono">{doc.doc_id}</span> · 更新时间：{formatDateTime(doc.ts_ms)}
           </div>
-          {doc.tags?.length > 0 && (
-            <div className="flex flex-wrap gap-1 mb-1">
-              {doc.tags.map(tag => (
-                <span key={tag} className="text-xs bg-blue-50 text-blue-600 border border-blue-100 rounded px-1.5 py-0.5">{tag}</span>
+          {Array.isArray(doc.tags) && doc.tags.length > 0 ? (
+            <div className="mb-1 flex flex-wrap gap-1">
+              {doc.tags.map((tag) => (
+                <span key={tag} className="rounded border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-xs text-blue-600">
+                  {tag}
+                </span>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
         <button
-          className="p-1 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex-shrink-0"
-          onClick={() => setExpanded(v => !v)}
+          className="flex-shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
-      {expanded && (
-        <div className="mt-2 pt-2 border-t border-gray-100">
-          <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words bg-gray-50 rounded p-2 max-h-40 overflow-y-auto">
+
+      {expanded ? (
+        <div className="mt-2 border-t border-gray-100 pt-2">
+          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded bg-gray-50 p-2 text-xs text-gray-600">
             {doc.body || '（无正文）'}
           </pre>
           <div className="mt-1 text-xs text-gray-400">
-            哈希：<span className="font-mono">{doc.hash?.slice(0, 16)}…</span>
-            {doc.updated_by && <> · 更新者：{doc.updated_by}</>}
+            哈希：<span className="font-mono">{doc.hash?.slice(0, 16) || '—'}</span>
+            {doc.updated_by ? <> · 更新者：{doc.updated_by}</> : null}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
 
-// ── 主页面 ────────────────────────────────────────────────────────────────
 export default function Canon() {
   const [proposals, setProposals] = useState([])
   const [documents, setDocuments] = useState([])
@@ -297,281 +356,306 @@ export default function Canon() {
   const [docsLoading, setDocsLoading] = useState(false)
   const [error, setError] = useState('')
   const [showSubmitModal, setShowSubmitModal] = useState(false)
-  const [activeTab, setActiveTab] = useState('proposals') // 'proposals' | 'documents'
-  const [vaultData, setVaultData] = useState(null)        // Ref #44: Vault 统计
-  const [docKeyword, setDocKeyword] = useState('')         // Ref #85: 文档搜索关键词
-  const PAGE_SIZE = 20
+  const [activeTab, setActiveTab] = useState('proposals')
+  const [vaultData, setVaultData] = useState(null)
+  const [docKeyword, setDocKeyword] = useState('')
 
   const loadProposals = useCallback(async () => {
     setLoading(true)
     setError('')
     try {
-      const data = await fetchCanonProposals({ status: statusFilter || undefined, page, page_size: PAGE_SIZE })
-      setProposals(data.items || [])
-      setTotal(data.total || 0)
-    } catch (err) {
-      setError(err.message || '加载提案失败')
+      const data = await fetchCanonProposals({
+        status: statusFilter || undefined,
+        page,
+        page_size: PAGE_SIZE,
+      })
+      setProposals(data?.items || [])
+      setTotal(data?.total || 0)
+    } catch (loadError) {
+      setError(loadError.message || '提案加载失败')
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, page])
+  }, [page, statusFilter])
 
   const loadDocuments = useCallback(async () => {
     setDocsLoading(true)
+    setError('')
     try {
       const data = await fetchCanonDocuments()
-      setDocuments(data.items || [])
-    } catch (err) {
-      setError(err.message || '加载文档失败')
+      setDocuments(data?.items || data?.documents || [])
+    } catch (loadError) {
+      setError(loadError.message || '文档加载失败')
     } finally {
       setDocsLoading(false)
     }
   }, [])
 
-  // Ref #44: 加载 Vault 统计
   const loadVaultStats = useCallback(async () => {
     try {
       const data = await fetchVaultStats({ limit: 10 })
       setVaultData(data)
     } catch {
-      // 降级：不影响主流程
+      setVaultData(null)
     }
   }, [])
 
   useEffect(() => {
-    if (activeTab === 'proposals') loadProposals()
-    else loadDocuments()
-    loadVaultStats()
-  }, [activeTab, loadProposals, loadDocuments, loadVaultStats])
+    if (activeTab === 'proposals') {
+      void loadProposals()
+    } else {
+      void loadDocuments()
+    }
+    void loadVaultStats()
+  }, [activeTab, loadDocuments, loadProposals, loadVaultStats])
 
   const handleApprove = async (item) => {
-    if (!window.confirm(`确认审核通过提案 ${item.proposal_id?.slice(0, 16)}…？`)) return
+    if (!window.confirm(`确认通过提案 ${item.proposal_id || '—'}？`)) {
+      return
+    }
     try {
       await approveCanonProposal(item.proposal_id, {
         proposed_title: item.summary || item.proposal_id,
         proposed_tags: [],
         proposed_body: item.summary || '',
       })
-      loadProposals()
-    } catch (err) {
-      toast.error(`审核失败：${err.message}`)
+      await loadProposals()
+      toast.success('提案已通过')
+    } catch (actionError) {
+      toast.error(`审核失败：${actionError.message}`)
     }
   }
 
   const handleReject = async (item) => {
     const reason = window.prompt('请输入拒绝原因（可选）：')
-    if (reason === null) return
+    if (reason === null) {
+      return
+    }
     try {
       await rejectCanonProposal(item.proposal_id, { reason })
-      loadProposals()
-    } catch (err) {
-      toast.error(`拒绝失败：${err.message}`)
+      await loadProposals()
+      toast.success('提案已拒绝')
+    } catch (actionError) {
+      toast.error(`拒绝失败：${actionError.message}`)
     }
   }
 
-  // Ref #81: 回滚已 APPLIED 的提案
   const handleRollback = async (item) => {
-    const reason = window.prompt(`确认回滚提案 ${item.proposal_id?.slice(0, 16)}… 到 base_version？\n请输入回滚原因（可选）：`)
-    if (reason === null) return
+    const reason = window.prompt(`确认回滚提案 ${item.proposal_id || '—'}？\n请输入回滚原因（可选）：`)
+    if (reason === null) {
+      return
+    }
     try {
       await rollbackCanonProposal(item.proposal_id, { rollback_reason: reason })
-      loadProposals()
-    } catch (err) {
-      toast.error(`回滚失败：${err.message}`)
+      await loadProposals()
+      toast.success('提案已回滚')
+    } catch (actionError) {
+      toast.error(`回滚失败：${actionError.message}`)
     }
   }
 
   const handleSubmit = async (formData) => {
     await submitCanonProposal(formData)
-    loadProposals()
+    await loadProposals()
+    toast.success('提案已提交')
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const filteredDocuments = useMemo(() => {
+    const keyword = docKeyword.trim().toLowerCase()
+    if (!keyword) {
+      return documents
+    }
+    return documents.filter((doc) => (
+      (doc.title || '').toLowerCase().includes(keyword)
+      || (doc.doc_id || '').toLowerCase().includes(keyword)
+      || (doc.tags || []).some((tag) => String(tag).toLowerCase().includes(keyword))
+    ))
+  }, [docKeyword, documents])
 
   return (
     <div className="space-y-4">
-      {/* 页头 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
-            <BookOpen size={18} className="text-primary" /> Canon 管理
-          </h1>
-          <p className="text-xs text-gray-500 mt-0.5">World Canon 提案审核 · SSOT 文档管理</p>
-        </div>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <PageHero
+          icon={BookOpen}
+          eyebrow="设定管理"
+          title={activeTab === 'proposals' ? '提案审核' : '文档浏览'}
+          description="管理世界设定提案、主设定文档与变更清单。"
+          gradientClass="from-primary-50 via-white to-violet-50"
+          metaItems={[
+            `提案数：${total}`,
+            `文档数：${documents.length}`,
+            `清单：${vaultData?.total_manifests ?? 0}`,
+          ]}
+        />
+
         <div className="flex items-center gap-2">
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
-            onClick={() => activeTab === 'proposals' ? loadProposals() : loadDocuments()}
+            className="flex items-center gap-1.5 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+            onClick={() => {
+              if (activeTab === 'proposals') {
+                void loadProposals()
+              } else {
+                void loadDocuments()
+              }
+            }}
           >
-            <RefreshCw size={13} className={loading || docsLoading ? 'animate-spin' : ''} /> 刷新
+            <RefreshCw size={13} className={loading || docsLoading ? 'animate-spin' : ''} />
+            刷新
           </button>
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-primary text-white text-sm font-medium hover:bg-primary-600 transition-colors"
+            className="flex items-center gap-1.5 rounded bg-primary px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary-600"
             onClick={() => setShowSubmitModal(true)}
           >
-            <FilePlus size={13} /> 提交提案
+            <FilePlus size={13} />
+            提交提案
           </button>
         </div>
       </div>
 
-      {/* Ref #44: Vault 统计侧边栏 */}
-      {vaultData && (
-        <div className="card p-4 border border-gray-200">
-          <div className="flex items-center gap-2 mb-3">
-            <Lock size={14} className="text-violet-600" />
-            <h2 className="text-sm font-semibold text-violet-600">ArtifactVault Manifest 统计</h2>
-            {vaultData.reversible_rate != null && (
-              <span className="ml-auto text-xs text-gray-400">可逆比例 {vaultData.reversible_rate}%</span>
-            )}
+      {vaultData ? (
+        <div className="card border border-gray-200 p-4">
+          <SectionHeading icon={Lock} title="变更清单统计" tone="text-violet-600" />
+          <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricCard label="总清单" value={vaultData.total_manifests ?? 0} variant="stacked" />
+            <MetricCard label="生效中" value={vaultData.active_count ?? 0} variant="stacked" tone="text-green-600" />
+            <MetricCard label="已撤销" value={vaultData.undone_count ?? 0} variant="stacked" tone="text-orange-500" />
+            <MetricCard label="已回收" value={vaultData.gc_count ?? 0} variant="stacked" tone="text-gray-500" />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-            <div className="text-center">
-              <div className="text-xl font-bold text-gray-700">{vaultData.total_manifests}</div>
-              <div className="text-xs text-gray-400 mt-0.5">总 Manifest</div>
-            </div>
-            <div className="text-center">
-              <div className="text-xl font-bold text-green-600">{vaultData.active_count}</div>
-              <div className="text-xs text-gray-400 mt-0.5">ACTIVE</div>
-            </div>
-            <div className="text-center">
-              <div className="text-xl font-bold text-orange-500">{vaultData.undone_count}</div>
-              <div className="text-xs text-gray-400 mt-0.5">UNDONE</div>
-            </div>
-            <div className="text-center">
-              <div className="text-xl font-bold text-gray-400">{vaultData.gc_count}</div>
-              <div className="text-xs text-gray-400 mt-0.5">GC'd</div>
-            </div>
-          </div>
-          {/* 状态分布进度条 */}
-          {vaultData.total_manifests > 0 && (
+
+          {vaultData.total_manifests > 0 ? (
             <div className="mb-3">
-              <div className="flex text-xs text-gray-400 mb-1 justify-between">
-                <span>ACTIVE {Math.round(vaultData.active_count / vaultData.total_manifests * 100)}%</span>
-                <span>UNDONE {Math.round(vaultData.undone_count / vaultData.total_manifests * 100)}%</span>
-                <span>GC {Math.round(vaultData.gc_count / vaultData.total_manifests * 100)}%</span>
+              <div className="mb-1 flex justify-between text-xs text-gray-400">
+                <span>生效中 {Math.round((vaultData.active_count / vaultData.total_manifests) * 100)}%</span>
+                <span>已撤销 {Math.round((vaultData.undone_count / vaultData.total_manifests) * 100)}%</span>
+                <span>已回收 {Math.round((vaultData.gc_count / vaultData.total_manifests) * 100)}%</span>
               </div>
-              <div className="flex h-2 rounded overflow-hidden">
-                <div className="bg-green-500" style={{ width: `${vaultData.active_count / vaultData.total_manifests * 100}%` }} />
-                <div className="bg-orange-400" style={{ width: `${vaultData.undone_count / vaultData.total_manifests * 100}%` }} />
-                <div className="bg-gray-300" style={{ width: `${vaultData.gc_count / vaultData.total_manifests * 100}%` }} />
+              <div className="flex h-2 overflow-hidden rounded">
+                <div className="bg-green-500" style={{ width: `${(vaultData.active_count / vaultData.total_manifests) * 100}%` }} />
+                <div className="bg-orange-400" style={{ width: `${(vaultData.undone_count / vaultData.total_manifests) * 100}%` }} />
+                <div className="bg-gray-300" style={{ width: `${(vaultData.gc_count / vaultData.total_manifests) * 100}%` }} />
               </div>
             </div>
-          )}
-          {/* 最近 Manifest 列表 */}
-          {vaultData.recent_manifests?.length > 0 && (
+          ) : null}
+
+          {Array.isArray(vaultData.recent_manifests) && vaultData.recent_manifests.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
-                <thead className="bg-gray-50 border-b border-gray-100">
+                <thead className="border-b border-gray-100 bg-gray-50">
                   <tr>
-                    {['Manifest ID', '类型', '状态', '可逆', '摘要'].map((h) => (
-                      <th key={h} className="px-3 py-1.5 text-left font-medium text-gray-500">{h}</th>
+                    {['清单 ID', '类型', '状态', '可逆', '摘要'].map((title) => (
+                      <th key={title} className="px-3 py-1.5 text-left font-medium text-gray-500">
+                        {title}
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {vaultData.recent_manifests.map((m, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-3 py-1.5 font-mono text-violet-600 truncate max-w-[100px]" title={m.manifest_id}>
-                        {m.manifest_id?.slice(0, 12)}…
+                  {vaultData.recent_manifests.map((item, index) => (
+                    <tr key={`${item.manifest_id}-${index}`} className="hover:bg-gray-50">
+                      <td className="max-w-[120px] truncate px-3 py-1.5 font-mono text-violet-600" title={item.manifest_id}>
+                        {item.manifest_id || '—'}
                       </td>
-                      <td className="px-3 py-1.5 text-gray-500">{m.artifact_type || '—'}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{item.artifact_type || '—'}</td>
                       <td className="px-3 py-1.5">
-                        <span className={`px-1.5 py-0.5 rounded border font-medium ${
-                          m.status === 'ACTIVE' ? 'bg-green-50 text-green-700 border-green-200' :
-                          m.status === 'UNDONE' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                          'bg-gray-100 text-gray-500 border-gray-200'
-                        }`}>{m.status}</span>
+                        <span
+                          className={`rounded border px-1.5 py-0.5 font-medium ${
+                            item.status === 'ACTIVE'
+                              ? 'border-green-200 bg-green-50 text-green-700'
+                              : item.status === 'UNDONE'
+                                ? 'border-orange-200 bg-orange-50 text-orange-700'
+                                : 'border-gray-200 bg-gray-100 text-gray-500'
+                          }`}
+                        >
+                          {MANIFEST_STATUS_LABELS[item.status] || item.status || '—'}
+                        </span>
                       </td>
                       <td className="px-3 py-1.5 text-center">
-                        {m.is_reversible
-                          ? <span className="text-green-600">✓</span>
-                          : <span className="text-gray-300">—</span>
-                        }
+                        {item.is_reversible ? <span className="text-green-600">✓</span> : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-gray-400 truncate max-w-[120px]" title={m.summary}>
-                        {m.summary || '—'}
+                      <td className="max-w-[160px] truncate px-3 py-1.5 text-gray-400" title={item.summary}>
+                        {item.summary || '—'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-          {vaultData.total_manifests === 0 && (
-            <div className="text-center py-4 text-gray-400 text-sm">暂无 Vault Manifest 记录</div>
+          ) : (
+            <EmptyStateCard title="暂无变更清单记录" hint="等待设定变更写入后展示。" className="p-6" />
           )}
         </div>
-      )}
+      ) : null}
 
-      {/* Tab 切换 */}
       <div className="flex border-b border-gray-200">
         {[
           { key: 'proposals', label: '提案列表' },
-          { key: 'documents', label: 'SSOT 文档' },
-        ].map(({ key, label }) => (
+          { key: 'documents', label: '主设定文档' },
+        ].map((item) => (
           <button
-            key={key}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === key
-                ? 'border-primary text-primary'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+            key={item.key}
+            className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === item.key ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
-            onClick={() => setActiveTab(key)}
+            onClick={() => setActiveTab(item.key)}
           >
-            {label}
+            {item.label}
           </button>
         ))}
       </div>
 
-      {/* 错误提示 */}
-      {error && (
-        <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-2">
-          <AlertCircle size={14} /> {error}
-        </div>
-      )}
+      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
 
-      {/* 提案列表 */}
-      {activeTab === 'proposals' && (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          {/* 过滤栏 */}
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+      {activeTab === 'proposals' ? (
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
             <span className="text-xs text-gray-500">状态过滤：</span>
-            {['', 'pending', 'APPLIED', 'rejected'].map(s => (
+            {['', 'pending', 'APPLIED', 'rejected'].map((status) => (
               <button
-                key={s}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  statusFilter === s
-                    ? 'bg-primary text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                key={status}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                  statusFilter === status ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
-                onClick={() => { setStatusFilter(s); setPage(1) }}
+                onClick={() => {
+                  setStatusFilter(status)
+                  setPage(1)
+                }}
               >
-                {s || '全部'}
+                {PROPOSAL_STATUS_LABELS[status] || status || '全部'}
               </button>
             ))}
             <span className="ml-auto text-xs text-gray-400">共 {total} 条</span>
           </div>
 
-          {/* 表格 */}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">提案 ID</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">目标文档</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">状态</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">摘要</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">时间</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">操作</th>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  {['提案 ID', '目标文档', '状态', '摘要', '时间', '操作'].map((title) => (
+                    <th key={title} className="px-4 py-2 text-left text-xs font-medium text-gray-500">
+                      {title}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {loading ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">加载中…</td></tr>
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                      <span className="inline-flex items-center gap-2">
+                        <RefreshCw size={12} className="animate-spin" />
+                        加载中…
+                      </span>
+                    </td>
+                  </tr>
                 ) : proposals.length === 0 ? (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-400">暂无提案</td></tr>
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6">
+                      <EmptyStateCard title="暂无提案" hint="提交或同步后会展示在这里。" className="p-6" />
+                    </td>
+                  </tr>
                 ) : (
-                  proposals.map(item => (
+                  proposals.map((item) => (
                     <ProposalRow key={item.proposal_id} item={item} onApprove={handleApprove} onReject={handleReject} onRollback={handleRollback} />
                   ))
                 )}
@@ -579,67 +663,55 @@ export default function Canon() {
             </table>
           </div>
 
-          {/* 分页 */}
-          {totalPages > 1 && (
-            <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+          {totalPages > 1 ? (
+            <div className="flex items-center justify-between border-t border-gray-100 px-4 py-3">
               <span className="text-xs text-gray-400">第 {page} / {totalPages} 页</span>
               <div className="flex gap-1">
                 <button
-                  className="px-2.5 py-1 rounded border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                   disabled={page <= 1}
-                  onClick={() => setPage(p => p - 1)}
-                >上一页</button>
+                  onClick={() => setPage((current) => current - 1)}
+                >
+                  上一页
+                </button>
                 <button
-                  className="px-2.5 py-1 rounded border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                  className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
                   disabled={page >= totalPages}
-                  onClick={() => setPage(p => p + 1)}
-                >下一页</button>
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  下一页
+                </button>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
-      )}
-
-      {/* SSOT 文档列表 */}
-      {activeTab === 'documents' && (
-        <div>
-          {/* Ref #85: 文档搜索过滤 */}
-          <div className="mb-3 relative">
+      ) : (
+        <div className="space-y-3">
+          <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-primary-200"
-              placeholder="按标题或标签搜索文档…"
+              className="w-full rounded border border-gray-300 py-1.5 pl-8 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary-200"
+              placeholder="按标题、文档 ID 或标签搜索文档"
               value={docKeyword}
-              onChange={e => setDocKeyword(e.target.value)}
+              onChange={(event) => setDocKeyword(event.target.value)}
             />
           </div>
+
           {docsLoading ? (
-            <div className="text-center py-8 text-sm text-gray-400">加载中…</div>
-          ) : documents.length === 0 ? (
-            <div className="text-center py-8 text-sm text-gray-400">暂无 World Canon 文档</div>
+            <NoticeBanner variant="info">文档加载中…</NoticeBanner>
+          ) : filteredDocuments.length === 0 ? (
+            <EmptyStateCard title="暂无主设定文档" hint="当前没有匹配的文档结果。" className="p-8" />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {documents
-                .filter(doc => {
-                  if (!docKeyword.trim()) return true
-                  const kw = docKeyword.trim().toLowerCase()
-                  return (
-                    (doc.title || '').toLowerCase().includes(kw) ||
-                    (doc.doc_id || '').toLowerCase().includes(kw) ||
-                    (doc.tags || []).some(t => t.toLowerCase().includes(kw))
-                  )
-                })
-                .map(doc => <DocCard key={doc.doc_id} doc={doc} />)
-              }
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {filteredDocuments.map((doc) => (
+                <DocCard key={doc.doc_id} doc={doc} />
+              ))}
             </div>
           )}
         </div>
       )}
 
-      {/* 提交提案弹窗 */}
-      {showSubmitModal && (
-        <SubmitModal onClose={() => setShowSubmitModal(false)} onSubmit={handleSubmit} />
-      )}
+      {showSubmitModal ? <SubmitModal onClose={() => setShowSubmitModal(false)} onSubmit={handleSubmit} /> : null}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import React from 'react'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { isChunkLoadError, recoverFromChunkError } from '../utils/chunkRecovery.js'
 
 /**
  * 全局错误边界 — 捕获子组件渲染异常，显示友好错误页 + 重试按钮。
@@ -18,6 +19,10 @@ export default class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     this.setState({ errorInfo })
     console.error('[ErrorBoundary] Uncaught error:', error, errorInfo)
+
+    if (isChunkLoadError(error)) {
+      recoverFromChunkError()
+    }
   }
 
   handleReset = () => {

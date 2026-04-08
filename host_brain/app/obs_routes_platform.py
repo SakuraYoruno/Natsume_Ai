@@ -8,12 +8,16 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.app.dependencies import get_skill_registry
+from host_brain.skills.custom_provider_installer import list_custom_provider_infos
+from host_brain.skills.hub.hub_installer import list_installed_skills as list_installed_hub_skills
 
 logger = logging.getLogger("Natsume.obs")
 
@@ -502,21 +506,73 @@ async def get_skills_hub_stats():
 
     if hub_enabled:
         try:
-            # 尝试从 SkillRegistry 获取已注册技能
-            from host_brain.skills.registry import SkillRegistry
-            registry = SkillRegistry.get_instance()
-            all_skills = registry.list_all() if hasattr(registry, "list_all") else []
-            for sk in all_skills:
-                if isinstance(sk, dict):
-                    skills_list.append(SkillHubEntry(
-                        name=sk.get("name", sk.get("skill_id", "unknown")),
-                        version=sk.get("version", ""),
-                        author=sk.get("author", ""),
-                        clearance=sk.get("clearance", "LOW"),
-                        risk_level=sk.get("risk_level", 1),
-                        source=sk.get("source", "builtin"),
-                        status="loaded",
-                    ))
+            registry = get_skill_registry()
+            active_skills = list(registry.all())
+            active_skill_names = {str(item.skill_name) for item in active_skills}
+
+            installed_hub_rows = list_installed_hub_skills()
+            installed_hub_by_name = {
+                str(row.get("name") or "").strip(): dict(row)
+                for row in installed_hub_rows
+                if str(row.get("name") or "").strip()
+            }
+
+            custom_provider_infos = list_custom_provider_infos(active_skill_names=active_skill_names)
+            custom_skill_names = {
+                str(skill_name).strip()
+                for info in custom_provider_infos
+                for skill_name in info.declared_skill_names
+                if str(skill_name).strip()
+            }
+            failed_count += sum(1 for info in custom_provider_infos if str(info.status or "").upper() == "ERROR")
+
+            for meta in active_skills:
+                hub_row = installed_hub_by_name.get(str(meta.skill_name))
+                if hub_row is not None:
+                    source = str(hub_row.get("source") or "hub").strip().lower() or "hub"
+                    version = str(hub_row.get("version") or "")
+                    author = str(hub_row.get("author") or "")
+                elif str(meta.skill_name) in custom_skill_names:
+                    source = "external"
+                    version = ""
+                    author = ""
+                else:
+                    source = "builtin"
+                    version = ""
+                    author = ""
+
+                skills_list.append(SkillHubEntry(
+                    name=str(meta.skill_name),
+                    version=version,
+                    author=author,
+                    clearance=str(meta.clearance or "LOW").upper(),
+                    risk_level=int(meta.risk_level or 1),
+                    source=source,
+                    status="loaded",
+                ))
+
+            loaded_names = {skill.name for skill in skills_list}
+            for hub_row in installed_hub_rows:
+                hub_name = str(hub_row.get("name") or "").strip()
+                if not hub_name or hub_name in loaded_names:
+                    continue
+                skills_list.append(SkillHubEntry(
+                    name=hub_name,
+                    version=str(hub_row.get("version") or ""),
+                    author=str(hub_row.get("author") or ""),
+                    clearance="LOW",
+                    risk_level=1,
+                    source=str(hub_row.get("source") or "hub").strip().lower() or "hub",
+                    status="installed",
+                ))
+
+            external_dirs.extend(
+                sorted({
+                    str(Path(str(row.get("dir") or "")).parent)
+                    for row in installed_hub_rows
+                    if str(row.get("dir") or "").strip()
+                })
+            )
         except Exception as exc:
             logger.warning("get_skills_hub_stats: registry load failed: %s", exc)
             failed_count += 1
@@ -539,10 +595,20 @@ async def get_skills_hub_stats():
                 if d and os.path.isdir(d):
                     external_dirs.append(d)
 
+    deduped_skills: List[SkillHubEntry] = []
+    seen_skill_names: set[str] = set()
+    for skill in skills_list:
+        if skill.name in seen_skill_names:
+            continue
+        seen_skill_names.add(skill.name)
+        deduped_skills.append(skill)
+    skills_list = deduped_skills
+    external_dirs = sorted({str(path).strip() for path in external_dirs if str(path).strip()})
+
     return SkillHubStatsResponse(
         hub_enabled=hub_enabled,
         total_skills=len(skills_list) + failed_count,
-        loaded_skills=len(skills_list),
+        loaded_skills=sum(1 for skill in skills_list if skill.status == "loaded"),
         failed_skills=failed_count,
         skills=skills_list,
         external_dirs_scanned=external_dirs,
@@ -579,6 +645,13 @@ async def ws_health(websocket: WebSocket):
                 # 获取最新健康数据（与 GET /obs/services/health 逻辑一致）
                 ledger = _get_ledger_instance()
                 if ledger:
+                    try:
+                        from host_brain.observability import service_health_heartbeat as heartbeat
+
+                        if not heartbeat.has_fresh_core_service_cache():
+                            await heartbeat.prime_core_service_cache_once()
+                    except Exception:
+                        pass
                     now_ms = _now_ms()
                     since_ms = now_ms - 60 * 60 * 1000  # 默认 1h 窗口
                     probe_registry, _extra = _build_probe_registry(ledger, since_ms)

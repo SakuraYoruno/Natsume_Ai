@@ -2,6 +2,12 @@ import React, { useEffect, useCallback } from 'react'
 import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Layers, Search } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats, fetchDistillationStats, fetchSemanticRecallStats } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -87,18 +93,25 @@ function buildMockData(rangeMinutes) {
 export default function Metrics() {
   const timeRange    = useAppStore((s) => s.timeRange)
   const setTimeRange = useAppStore((s) => s.setTimeRange)
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
   const [data, setData]       = React.useState(null)
   const [loading, setLoading] = React.useState(true)
   const [error, setError]     = React.useState(null)
   const [isMock, setIsMock]   = React.useState(false)
   const [rlData, setRlData]   = React.useState(null)  // Ref #43: 速率限制后端状态
+  const rangeCfg = TIME_RANGES.find((r) => r.value === timeRange) ?? TIME_RANGES[0]
+  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes: rangeCfg.minutes,
+  })
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     setIsMock(false)
     try {
-      const rangeCfg = TIME_RANGES.find((r) => r.value === timeRange) ?? TIME_RANGES[0]
       let res
       try {
         const apiRes = await fetchMetricsTimeseries({ time_range: timeRange })
@@ -109,24 +122,16 @@ export default function Metrics() {
         setIsMock(true)
       }
       setData(res)
-      // Ref #43: 加载速率限制后端状态
-      try {
-        const rl = await fetchRateLimitBackendStats({ top_k: 10 })
-        setRlData(rl)
-      } catch {
-        // 降级：不影响主流程
-      }
+      const rl = await fetchRateLimitBackendStats({ top_k: 10 }).catch(() => null)
+      setRlData(rl)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }, [timeRange])
+  }, [rangeCfg.minutes, timeRange])
 
   useEffect(() => { load() }, [load])
-
-  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
-  const pollingInterval = useAppStore((s) => s.pollingInterval)
 
   useEffect(() => {
     if (!pollingEnabled) return
@@ -146,7 +151,6 @@ export default function Metrics() {
 
   return (
     <div className="space-y-6">
-      {/* 页头 */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">指标大盘</h1>
@@ -178,7 +182,23 @@ export default function Metrics() {
         </div>
       </div>
 
-      {/* 汇总统计行 */}
+      <DigitalLifeNav />
+
+      <PageHero
+        icon={Activity}
+        eyebrow="核心指标总览"
+        title="请求量、拒绝率与关键链路指标"
+        description="统一查看请求趋势、守卫拒绝、记忆压缩、提词构建与状态仲裁等核心指标。"
+        gradientClass="from-cyan-50 via-white to-indigo-50"
+        metaItems={[
+          `时间窗口：${timeRange}`,
+          `总请求：${summary.total_requests ?? 0}`,
+          `总拒绝：${summary.total_rejections ?? 0}`,
+          `拒绝率：${summary.rejection_rate != null ? `${summary.rejection_rate.toFixed(1)}%` : '—'}`,
+          isMock ? '当前为模拟数据' : '当前为实时数据',
+        ]}
+      />
+
       {!loading && !error && (
         <div className="grid grid-cols-3 gap-4">
           {[
@@ -194,9 +214,10 @@ export default function Metrics() {
         </div>
       )}
 
-      {error && <div className="card p-4 text-red-500 text-sm">加载失败：{error}</div>}
+      {error && <NoticeBanner variant="error">加载失败：{error}</NoticeBanner>}
 
-      {/* 图表网格 */}
+      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+
       {isInitialState && (
         <div className="card p-4 text-sm text-gray-500">
           当前观测数据已经清到初始态，最近窗口没有请求样本，所以这里显示 0 和空图是预期表现。
@@ -227,11 +248,11 @@ export default function Metrics() {
           />
         </div>
 
-        {/* reason_code 分布 */}
+        {/* 原因码分布 */}
         <div className="card p-4">
           {rcCodes.length > 0 ? (
             <BarChart
-              title="reason_code 分布"
+              title="原因码分布"
               direction="horizontal"
               categories={rcCodes}
               series={[
@@ -239,10 +260,7 @@ export default function Metrics() {
               ]}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-              <span className="text-xs font-medium text-gray-500 mb-4">reason_code 分布</span>
-              <span>暂无拒绝记录</span>
-            </div>
+            <EmptyStateCard title="暂无拒绝记录" hint="当前窗口没有拒绝样本。" className="h-48 flex items-center justify-center" />
           )}
         </div>
 
@@ -250,7 +268,7 @@ export default function Metrics() {
         <div className="card p-4">
           {latSvcs.length > 0 ? (
             <BarChart
-              title="服务响应延迟 (ms)"
+              title="服务响应延迟（ms）"
               direction="vertical"
               yUnit="ms"
               categories={latSvcs}
@@ -260,10 +278,7 @@ export default function Metrics() {
               ]}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-48 text-gray-400 text-sm">
-              <span className="text-xs font-medium text-gray-500 mb-4">服务响应延迟 (ms)</span>
-              <span>暂无延迟数据</span>
-            </div>
+            <EmptyStateCard title="暂无延迟数据" hint="当前窗口没有可用延迟样本。" className="h-48 flex items-center justify-center" />
           )}
         </div>
       </div>
@@ -288,11 +303,11 @@ export default function Metrics() {
           <div className="grid grid-cols-3 gap-4 mb-4">
             <div className="text-center">
               <div className="text-xl font-bold text-gray-700">{rlData.total_keys}</div>
-              <div className="text-xs text-gray-400 mt-1">总 Key 数</div>
+              <div className="text-xs text-gray-400 mt-1">总键数</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold text-indigo-600">{rlData.active_keys}</div>
-              <div className="text-xs text-gray-400 mt-1">活跃 Key</div>
+              <div className="text-xs text-gray-400 mt-1">活跃键数</div>
             </div>
             <div className="text-center">
               <div className={`text-xl font-bold ${rlData.is_degraded ? 'text-orange-500' : 'text-green-600'}`}>
@@ -306,7 +321,7 @@ export default function Metrics() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    {['Key', '当前计数', '窗口'].map((h) => (
+                    {['键名', '当前计数', '窗口'].map((h) => (
                       <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
                     ))}
                   </tr>
@@ -326,7 +341,7 @@ export default function Metrics() {
             </div>
           )}
           {rlData.top_keys.length === 0 && (
-            <div className="text-center py-4 text-gray-400 text-sm">近 5 分钟无速率限制触发</div>
+            <EmptyStateCard title="近 5 分钟无速率限制触发" hint="当前限流后端运行平稳。" className="p-6" />
           )}
         </div>
       )}
@@ -363,7 +378,7 @@ function MemoryGuardMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <BookLock size={14} className="text-emerald-600" />
-        <span className="text-sm font-semibold text-gray-700">MemoryGuard 宪法校验（近 1h）</span>
+        <span className="text-sm font-semibold text-gray-700">记忆守卫规则校验（近 1h）</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
@@ -403,15 +418,15 @@ function StateArbiterMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <GitMerge size={14} className="text-cyan-600" />
-        <span className="text-sm font-semibold text-gray-700">StateArbiter Bond 查询（近 1h）</span>
-        <span className="text-xs text-gray-400">仅 bond_graph 快照</span>
+        <span className="text-sm font-semibold text-gray-700">状态仲裁关系查询（近 1h）</span>
+        <span className="text-xs text-gray-400">仅关系图快照</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总查询', value: data?.total_resolutions, color: 'text-gray-700' },
           { label: '冲突', value: data?.conflict_count, color: 'text-red-600' },
           { label: '降级', value: data?.fallback_count, color: 'text-orange-500' },
-          { label: 'Bond快照', value: data?.session_override_count, color: 'text-blue-600' },
+          { label: '关系快照', value: data?.session_override_count, color: 'text-blue-600' },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
@@ -433,13 +448,13 @@ function ContextCompressorMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Minimize2 size={14} className="text-teal-600" />
-        <span className="text-sm font-semibold text-gray-700">ContextCompressor 压缩效率（近 1h）</span>
+        <span className="text-sm font-semibold text-gray-700">上下文压缩效率（近 1h）</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总压缩', value: data?.total_compressions, color: 'text-gray-700' },
           { label: '活跃', value: data?.active_count, color: 'text-green-600' },
-          { label: '节省轮次', value: data?.total_tokens_saved, color: 'text-teal-600' },
+          { label: '节省词元', value: data?.total_tokens_saved, color: 'text-teal-600' },
           { label: '摘要生成', value: data?.summary_generated_count, color: 'text-indigo-600' },
         ].map(({ label, value, color }) => (
           <div key={label}>
@@ -473,7 +488,7 @@ function PromptBuilderMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <FileCode size={14} className="text-violet-600" />
-        <span className="text-sm font-semibold text-gray-700">PromptBuilder 安全（近 1h）</span>
+        <span className="text-sm font-semibold text-gray-700">提示构建安全（近 1h）</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
@@ -518,13 +533,13 @@ function EpisodicStoreMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Archive size={14} className="text-amber-600" />
-        <span className="text-sm font-semibold text-gray-700">EpisodicStore 写入（近 1h）</span>
+        <span className="text-sm font-semibold text-gray-700">情景记忆写入（近 1h）</span>
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总尝试', value: data?.total_attempts, color: 'text-gray-700' },
           { label: '写入成功', value: data?.written_count, color: 'text-green-600' },
-          { label: 'MG 拦截', value: data?.memory_guard_blocked_count, color: data?.memory_guard_blocked_count > 0 ? 'text-red-600' : 'text-gray-400' },
+          { label: '记忆守卫拦截', value: data?.memory_guard_blocked_count, color: data?.memory_guard_blocked_count > 0 ? 'text-red-600' : 'text-gray-400' },
           { label: '蒸馏资格', value: data?.distill_eligible_count, color: 'text-blue-600' },
         ].map(({ label, value, color }) => (
           <div key={label}>
@@ -560,7 +575,7 @@ function CanonProposalMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <ScrollText size={14} className="text-indigo-600" />
-        <span className="text-sm font-semibold text-gray-700">Canon 提案（全量）</span>
+        <span className="text-sm font-semibold text-gray-700">主设定提案（全量）</span>
         {(data?.pending ?? 0) > 0 && (
           <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-medium ml-auto">
             {data.pending} 待审核
@@ -650,23 +665,23 @@ function SemanticRecallMiniCard() {
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Search size={14} className="text-sky-600" />
-        <span className="text-sm font-semibold text-gray-700">语义召回器（SemanticRecaller）</span>
+        <span className="text-sm font-semibold text-gray-700">语义召回</span>
         {data && (
           <span className={`ml-auto text-xs px-1.5 py-0.5 rounded border font-medium ${
             isOk
               ? 'bg-green-50 text-green-700 border-green-200'
               : 'bg-orange-50 text-orange-700 border-orange-200'
           }`}>
-            {isOk ? 'OK' : 'DEGRADED'}
+            {isOk ? '正常' : '降级'}
           </span>
         )}
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
-          { label: 'Top-K', value: data?.top_k, color: 'text-gray-700' },
+          { label: '召回上限', value: data?.top_k, color: 'text-gray-700' },
           { label: '相似度阈值', value: data?.similarity_threshold != null ? data.similarity_threshold.toFixed(2) : '—', color: 'text-sky-600' },
-          { label: 'Mock 文档', value: data?.mock_doc_count, color: data?.use_mock ? 'text-orange-500' : 'text-gray-400' },
-          { label: '模式', value: data?.use_mock ? 'Mock' : 'Chroma', color: data?.use_mock ? 'text-orange-500' : 'text-green-600' },
+          { label: '模拟文档', value: data?.mock_doc_count, color: data?.use_mock ? 'text-orange-500' : 'text-gray-400' },
+          { label: '模式', value: data?.use_mock ? '模拟' : 'Chroma', color: data?.use_mock ? 'text-orange-500' : 'text-green-600' },
         ].map(({ label, value, color }) => (
           <div key={label}>
             <div className={`text-xl font-bold ${color}`}>{value ?? '—'}</div>
@@ -681,7 +696,7 @@ function SemanticRecallMiniCard() {
       )}
       {data?.use_mock && (
         <div className="mt-2 text-xs text-orange-400">
-          ⚠ 当前使用 Mock 后端，生产环境请设置 SEMANTIC_RECALL_USE_MOCK=false
+          ⚠ 当前使用模拟后端，生产环境请设置 <span className="font-mono">SEMANTIC_RECALL_USE_MOCK=false</span>
         </div>
       )}
     </div>
@@ -703,7 +718,7 @@ function ChainMiniCard() {
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总请求', value: data?.total_requests, color: 'text-gray-700' },
-          { label: 'Gov 拦截率', value: data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—', color: data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700' },
+          { label: '入口守护拦截率', value: data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—', color: data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700' },
           { label: '记忆写入', value: data?.episodic_written_count, color: 'text-green-600' },
           { label: 'QA 重写', value: data?.qa_rewrite_count, color: 'text-orange-500' },
         ].map(({ label, value, color }) => (
@@ -716,7 +731,7 @@ function ChainMiniCard() {
       {data?.governor_block_rate != null && (
         <div className="mt-3">
           <div className="flex justify-between text-xs text-gray-400 mb-1">
-            <span>Governor 拦截率</span>
+            <span>入口守护拦截率</span>
             <span className={data.governor_block_rate > 10 ? 'text-red-500 font-medium' : 'text-green-600 font-medium'}>
               {data.governor_block_rate}%
             </span>

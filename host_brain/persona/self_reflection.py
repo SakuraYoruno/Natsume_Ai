@@ -620,8 +620,13 @@ def _build_narrative_guardrails(
             tags.append(tag)
 
     time_context = str(time_context or "").strip()
+    raw_last_deep_talk_days_ago = snapshot.get("last_deep_talk_days_ago")
     try:
-        last_deep_talk_days_ago = int(snapshot.get("last_deep_talk_days_ago") or -1)
+        last_deep_talk_days_ago = (
+            int(raw_last_deep_talk_days_ago)
+            if raw_last_deep_talk_days_ago is not None
+            else -1
+        )
     except (TypeError, ValueError):
         last_deep_talk_days_ago = -1
     try:

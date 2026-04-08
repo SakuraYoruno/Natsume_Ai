@@ -19,26 +19,27 @@ import {
   ArrowRightLeft,
   CheckCircle,
 } from 'lucide-react'
+import { getTraceNodeDisplayName } from './traceNodeText.js'
 
 // ===== 节点类型 → 图标 + 颜色 =====
 const NODE_TYPE_CONFIG = {
-  intent:    { icon: MessageSquare, color: '#2970FF', bg: '#EEF4FF', label: 'Intent'    },
-  governor:  { icon: Shield,        color: '#7C3AED', bg: '#F5F3FF', label: 'Governor'  },
-  skill:     { icon: Wrench,        color: '#0891B2', bg: '#ECFEFF', label: 'Skill'     },
-  asr:       { icon: Mic,           color: '#059669', bg: '#ECFDF5', label: 'ASR'       },
-  tts:       { icon: Volume2,       color: '#D97706', bg: '#FFFBEB', label: 'TTS'       },
-  vts:       { icon: Video,         color: '#DB2777', bg: '#FDF2F8', label: 'VTS'       },
-  llm:       { icon: Brain,         color: '#2970FF', bg: '#EEF4FF', label: 'LLM'       },
-  memory:    { icon: Database,      color: '#7C3AED', bg: '#F5F3FF', label: 'Memory'    },
-  bond:      { icon: Zap,           color: '#D97706', bg: '#FFFBEB', label: 'Bond'      },
-  system:    { icon: Cpu,           color: '#475467', bg: '#F9FAFB', label: 'System'    },
-  branch:    { icon: GitBranch,     color: '#0891B2', bg: '#ECFEFF', label: 'Branch'    },
-  recall:    { icon: Search,        color: '#0891B2', bg: '#ECFEFF', label: 'Recall'    },
-  retrieval: { icon: Filter,        color: '#0891B2', bg: '#ECFEFF', label: 'Retrieval' },
-  agent:     { icon: Users,         color: '#7C3AED', bg: '#F5F3FF', label: 'Agent'     },
-  router:    { icon: ArrowRightLeft, color: '#475467', bg: '#F9FAFB', label: 'Router'   },
-  judge:     { icon: CheckCircle,   color: '#059669', bg: '#ECFDF5', label: 'Judge'     },
-  default:   { icon: AlertCircle,   color: '#98A2B3', bg: '#F9FAFB', label: 'Node'      },
+  intent:    { icon: MessageSquare, color: '#2970FF', bg: '#EEF4FF', label: '意图' },
+  governor:  { icon: Shield,        color: '#7C3AED', bg: '#F5F3FF', label: '守护' },
+  skill:     { icon: Wrench,        color: '#0891B2', bg: '#ECFEFF', label: '技能' },
+  asr:       { icon: Mic,           color: '#059669', bg: '#ECFDF5', label: '语音' },
+  tts:       { icon: Volume2,       color: '#D97706', bg: '#FFFBEB', label: '合成' },
+  vts:       { icon: Video,         color: '#DB2777', bg: '#FDF2F8', label: '表情' },
+  llm:       { icon: Brain,         color: '#2970FF', bg: '#EEF4FF', label: '模型' },
+  memory:    { icon: Database,      color: '#7C3AED', bg: '#F5F3FF', label: '记忆' },
+  bond:      { icon: Zap,           color: '#D97706', bg: '#FFFBEB', label: '关系' },
+  system:    { icon: Cpu,           color: '#475467', bg: '#F9FAFB', label: '系统' },
+  branch:    { icon: GitBranch,     color: '#0891B2', bg: '#ECFEFF', label: '分流' },
+  recall:    { icon: Search,        color: '#0891B2', bg: '#ECFEFF', label: '召回' },
+  retrieval: { icon: Filter,        color: '#0891B2', bg: '#ECFEFF', label: '检索' },
+  agent:     { icon: Users,         color: '#7C3AED', bg: '#F5F3FF', label: '代理' },
+  router:    { icon: ArrowRightLeft, color: '#475467', bg: '#F9FAFB', label: '路由' },
+  judge:     { icon: CheckCircle,   color: '#059669', bg: '#ECFDF5', label: '判定' },
+  default:   { icon: AlertCircle,   color: '#98A2B3', bg: '#F9FAFB', label: '节点' },
 }
 
 // ===== Provider 徽章颜色 =====
@@ -65,9 +66,9 @@ const STATUS_BORDER = {
 
 // ===== 端侧标签颜色 =====
 const LAYER_BADGE = {
-  edge: { bg: '#ECFDF5', text: '#059669', label: 'Edge' },
-  host: { bg: '#EEF4FF', text: '#2970FF', label: 'Host' },
-  both: { bg: '#F5F3FF', text: '#7C3AED', label: 'Both' },
+  edge: { bg: '#ECFDF5', text: '#059669', label: '边缘' },
+  host: { bg: '#EEF4FF', text: '#2970FF', label: '主端' },
+  both: { bg: '#F5F3FF', text: '#7C3AED', label: '双端' },
 }
 
 function getStatusBorder(status) {
@@ -134,7 +135,7 @@ const CustomNode = memo(({ data, selected }) => {
             <Icon size={13} />
           </span>
           <span className={`text-xs font-semibold truncate flex-1 ${isInactive ? 'text-gray-600' : 'text-gray-800'}`}>
-            {data.display_name || data.label || cfg.label}
+            {getTraceNodeDisplayName(data, cfg.label)}
           </span>
         </div>
 

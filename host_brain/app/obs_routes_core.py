@@ -34,6 +34,7 @@ from host_brain.observability.service_registry import (
 logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
+_DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
 
 # ---------------------------------------------------------------------------
 # 依赖注入
@@ -171,6 +172,219 @@ def _build_trace_edges(
             )
         )
     return merged_edges
+
+
+def _clone_trace_node(node: TraceNode, **updates: Any) -> TraceNode:
+    payload = _model_dump_compat(node)
+    payload.update(updates)
+    return TraceNode(**payload)
+
+
+def _infer_trace_group_id(
+    *,
+    node_id: Any,
+    node_type: Any = "",
+    side: Any = None,
+) -> Optional[str]:
+    normalized_id = str(node_id or "").strip()
+    normalized_type = str(node_type or "").strip().lower()
+    normalized_side = str(side or "").strip().lower()
+
+    if normalized_type in {"tts", "vts"}:
+        return "postprocess"
+    if normalized_type in {"asr", "edge"} or normalized_id in {"asr", "gateway_webhook", "input_reporter"}:
+        return "edge"
+    if normalized_id.startswith("voice_"):
+        return "edge"
+
+    if normalized_id in {"host_input", "airlock_ingress", "governor"}:
+        return "entry"
+
+    if normalized_id in {"query_planner", "agentic_rag", "recall_fusion"} or normalized_id.startswith("retrieval_"):
+        return "retrieval"
+
+    if normalized_id in {"emotion_context", "persona_resident_memory", "motive_state"}:
+        return "persona"
+
+    if normalized_id in {"top_agent", "response_policy"}:
+        return "orchestration"
+
+    if normalized_id in {"dispatch_agent", "chat_agent"} or normalized_id.startswith("sub_agent"):
+        return "agent"
+
+    if normalized_id in {"prompt_builder", "llm_stream", "llm_gateway", "top_agent_llm_stream"} or normalized_type == "llm" or normalized_id.startswith("llm_"):
+        return "llm"
+
+    if normalized_id in {"airlock_egress", "pii_filter", "audit_snapshot"}:
+        return "postprocess"
+    if normalized_id.startswith("episodic_store") or normalized_id.startswith("bond_update"):
+        return "postprocess"
+
+    if normalized_side == "edge":
+        return "edge"
+    if normalized_side == "host":
+        return "orchestration"
+    return None
+
+
+def _enrich_trace_nodes(nodes: List[TraceNode]) -> List[TraceNode]:
+    enriched: List[TraceNode] = []
+    for node in nodes:
+        group_id = node.group_id or _infer_trace_group_id(
+            node_id=node.node_id,
+            node_type=node.node_type,
+            side=node.side,
+        )
+        enriched.append(
+            _clone_trace_node(
+                node,
+                group_id=group_id,
+            )
+        )
+    return enriched
+
+
+def _infer_subgraph_owner_node_id(subgraph_id: str) -> Optional[str]:
+    normalized = str(subgraph_id or "").strip().lower()
+    if not normalized:
+        return None
+    if "intent" in normalized:
+        return "sub_agent_intent"
+    if "code" in normalized:
+        return "sub_agent_code"
+    if "translate" in normalized:
+        return "sub_agent_translate"
+    if "vision" in normalized:
+        return "sub_agent_vision"
+    return None
+
+
+def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
+    try:
+        from host_brain.integrations.graph_evidence import get_evidence_plane
+
+        rows = get_evidence_plane().query_subgraph_summary(request_id=request_id)
+    except Exception as exc:
+        logger.debug("_build_trace_subgraphs degraded: %s", exc)
+        return []
+
+    subgraphs: List[Dict[str, Any]] = []
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            continue
+
+        raw_subgraph_id = str(row.get("subgraph_id") or "").strip()
+        subgraph_id = raw_subgraph_id or f"subgraph_{idx}"
+        owner_node_id = _infer_subgraph_owner_node_id(subgraph_id)
+        graph_trace_flat = _safe_json(row.get("graph_trace_flat_json"))
+        flat_rows = list(graph_trace_flat or []) if isinstance(graph_trace_flat, list) else []
+
+        nodes: List[Dict[str, Any]] = []
+        prev_node_id: Optional[str] = None
+        for step_index, entry in enumerate(flat_rows, start=1):
+            if not isinstance(entry, dict):
+                continue
+            raw_node_id = str(entry.get("node_id") or f"step_{step_index}").strip() or f"step_{step_index}"
+            node_id = f"{subgraph_id}:{raw_node_id}:{step_index}"
+            reason_code = str(entry.get("reason_code") or "").strip() or None
+            detail = str(entry.get("detail") or "").strip() or None
+            node = TraceNode(
+                node_id=node_id,
+                node_type=str(entry.get("node_type") or "agent"),
+                display_name=str(entry.get("display_name") or raw_node_id),
+                side="host",
+                status=_normalize_trace_node_status(
+                    entry.get("status", "UNKNOWN"),
+                    node_type=str(entry.get("node_type") or "agent"),
+                    reason_code=reason_code,
+                    output_data={"detail": detail} if detail else None,
+                ),
+                reason_code=reason_code,
+                input_data={
+                    "raw_node_id": raw_node_id,
+                    "step_index": step_index,
+                },
+                output_data={
+                    "detail": detail,
+                    "entry": dict(entry),
+                },
+                ts_ms=entry.get("ts_ms"),
+                error=reason_code,
+                group_id="agent",
+                owner_node_id=owner_node_id,
+                subgraph_id=subgraph_id,
+                parent_node_id=prev_node_id,
+            )
+            nodes.append(_model_dump_compat(node))
+            prev_node_id = node_id
+
+        edges = [
+            {"source": nodes[index]["node_id"], "target": nodes[index + 1]["node_id"]}
+            for index in range(len(nodes) - 1)
+        ]
+
+        try:
+            node_count = int(row.get("node_count") or len(nodes))
+        except (TypeError, ValueError):
+            node_count = len(nodes)
+        try:
+            success_count = int(row.get("success_count") or 0)
+        except (TypeError, ValueError):
+            success_count = 0
+        try:
+            fail_count = int(row.get("fail_count") or 0)
+        except (TypeError, ValueError):
+            fail_count = 0
+        try:
+            committed_at_ms = int(row.get("committed_at_ms") or 0)
+        except (TypeError, ValueError):
+            committed_at_ms = 0
+
+        subgraphs.append(
+            {
+                "subgraph_id": subgraph_id,
+                "owner_node_id": owner_node_id,
+                "node_count": node_count,
+                "success_count": success_count,
+                "fail_count": fail_count,
+                "committed_at_ms": committed_at_ms,
+                "nodes": nodes,
+                "edges": edges,
+                "graph_trace_flat": flat_rows,
+            }
+        )
+    return subgraphs
+
+
+def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
+    try:
+        from host_brain.integrations.graph_evidence import get_evidence_plane
+
+        rows = get_evidence_plane().query_stream_events(request_id=request_id)
+    except Exception as exc:
+        logger.debug("_build_trace_stream_events degraded: %s", exc)
+        return []
+
+    events: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            ts_ms = int(row.get("ts_ms") or 0)
+        except (TypeError, ValueError):
+            ts_ms = 0
+        events.append(
+            {
+                "request_id": str(row.get("request_id", "")),
+                "graph_id": str(row.get("graph_id", "")),
+                "phase": str(row.get("phase", "")),
+                "event_type": str(row.get("event_type", "")),
+                "node_id": row.get("node_id"),
+                "chunk": row.get("chunk"),
+                "ts_ms": ts_ms,
+            }
+        )
+    return events
 
 
 def _coalesce_trace_status(base_status: str, nodes: List[TraceNode]) -> str:
@@ -952,6 +1166,10 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 10
     if node_id == "governor":
         return 20
+    if node_id == "query_planner":
+        return 25
+    if node_id == "agentic_rag":
+        return 28
     # 检索
     if node_id.startswith("retrieval_embedding"):
         return 30
@@ -963,16 +1181,30 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 33
     if node_id.startswith("retrieval_pipeline"):
         return 34
+    if node_id == "emotion_context":
+        return 35
+    if node_id == "persona_resident_memory":
+        return 36
+    if node_id == "motive_state":
+        return 37
+    if node_id == "response_policy":
+        return 38
+    if node_id == "top_agent":
+        return 39
+    if node_id == "dispatch_agent":
+        return 41
+    if node_id == "chat_agent":
+        return 43
     # Prompt + LLM
     if node_id == "prompt_builder":
-        return 40
+        return 45
     if node_id in ("llm_stream", "llm_gateway", "top_agent_llm_stream"):
         return 50
     if node_id.startswith("llm_"):
         return 51
     # 子 Agent
     if node_id.startswith("sub_agent"):
-        return 55
+        return 42
     # 出口
     if node_id == "airlock_egress":
         return 60
@@ -1132,6 +1364,10 @@ class TraceNode(BaseModel):
     output_data: Optional[Any] = None
     ts_ms: Optional[int] = None
     error: Optional[str] = None
+    group_id: Optional[str] = None
+    owner_node_id: Optional[str] = None
+    subgraph_id: Optional[str] = None
+    parent_node_id: Optional[str] = None
 
 class TraceEdge(BaseModel):
     source: str
@@ -1146,6 +1382,8 @@ class TraceResponse(BaseModel):
     nodes: List[TraceNode]
     edges: List[TraceEdge]
     summary: Optional[Dict[str, Any]] = None
+    subgraphs: List[Dict[str, Any]] = Field(default_factory=list)
+    stream_events: List[Dict[str, Any]] = Field(default_factory=list)
     ts_ms: int
     timestamp: int
 
@@ -1311,6 +1549,8 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
         error_rows=error_rows,
         voice_rows=voice_rows,
     )
+    subgraphs = _build_trace_subgraphs(request_id)
+    stream_events = _build_trace_stream_events(request_id)
 
     if trace_rows:
         row_dict = trace_rows[-1]
@@ -1349,12 +1589,17 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
                 output_data=output_data,
                 ts_ms=node_row.get("ts_ms"),
                 error=node_row.get("error"),
+                group_id=node_row.get("group_id"),
+                owner_node_id=node_row.get("owner_node_id"),
+                subgraph_id=node_row.get("subgraph_id"),
+                parent_node_id=node_row.get("parent_node_id"),
             ))
 
         edges = [TraceEdge(source=edge.get("source", ""), target=edge.get("target", "")) for edge in edges_raw]
         voice_nodes = _build_voice_trace_nodes(voice_rows)
         edges = _build_trace_edges(nodes, edges, voice_nodes)
         nodes.extend(voice_nodes)
+        nodes = _enrich_trace_nodes(nodes)
         trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
 
         return TraceResponse(
@@ -1366,6 +1611,8 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
             nodes=nodes,
             edges=edges,
             summary=summary,
+            subgraphs=subgraphs,
+            stream_events=stream_events,
             ts_ms=row_dict.get("ts_ms", _now_ms()),
             timestamp=_now_ms(),
         )
@@ -1386,7 +1633,7 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     if audit_snapshot_node is not None:
         synthesized_nodes.append(audit_snapshot_node)
 
-    nodes = _sort_trace_nodes(synthesized_nodes)
+    nodes = _enrich_trace_nodes(_sort_trace_nodes(synthesized_nodes))
     edges = _build_linear_trace_edges(nodes)
     decision = str(summary.get("decision") or "").strip().upper()
     base_status = "FAIL" if decision and decision != "APPROVE" else "OK"
@@ -1402,6 +1649,8 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
         nodes=nodes,
         edges=edges,
         summary=summary,
+        subgraphs=subgraphs,
+        stream_events=stream_events,
         ts_ms=trace_ts,
         timestamp=_now_ms(),
     )
@@ -1434,6 +1683,59 @@ def _dedup_sessions_by_content(sessions: List[SessionItem]) -> List[SessionItem]
     deduped = sorted(best.values(), key=lambda s: s.ts_ms, reverse=True)
     # 无 session_id 的放在最前面（通常是手动触发的请求）
     return no_session + deduped
+
+
+def _is_placeholder_session_preview(value: Optional[str]) -> bool:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return False
+    return all(ch in {"?", "？"} for ch in normalized)
+
+
+def _is_debug_session_id(session_id: Optional[str]) -> bool:
+    normalized = str(session_id or "").strip().lower()
+    if not normalized:
+        return False
+    return normalized.startswith(_DEBUG_SESSION_PREFIXES)
+
+
+def _normalize_session_preview(value: Optional[str]) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _sanitize_session_items_for_export(
+    sessions: List[SessionItem],
+    *,
+    keyword: Optional[str] = None,
+) -> List[SessionItem]:
+    keyword_active = bool(str(keyword or "").strip())
+    filtered: List[SessionItem] = []
+    for session in sessions:
+        preview_key = _normalize_session_preview(session.input_preview)
+        if _is_placeholder_session_preview(session.input_preview):
+            continue
+        if not keyword_active and not preview_key:
+            continue
+        if not keyword_active and _is_debug_session_id(session.session_id):
+            continue
+        filtered.append(session)
+
+    best: Dict[str, SessionItem] = {}
+    passthrough: List[SessionItem] = []
+    for session in filtered:
+        session_key = str(session.session_id or "").strip().lower()
+        preview_key = _normalize_session_preview(session.input_preview)
+        if not session_key or not preview_key:
+            passthrough.append(session)
+            continue
+        dedupe_key = f"{session_key}::{preview_key}"
+        previous = best.get(dedupe_key)
+        if previous is None or session.ts_ms > previous.ts_ms:
+            best[dedupe_key] = session
+
+    sanitized = passthrough + sorted(best.values(), key=lambda s: s.ts_ms, reverse=True)
+    sanitized.sort(key=lambda s: s.ts_ms, reverse=True)
+    return sanitized
 
 
 def _build_trace_live_feed_snapshot(
@@ -1666,6 +1968,13 @@ async def get_services_health(
     """WARN-BE-001: 调用 ServiceHealthAggregator.aggregate() 而非内联聚合逻辑。"""
     ledger = _get_ledger()
     since_ms = _now_ms() - window_minutes * 60 * 1000
+    try:
+        from host_brain.observability import service_health_heartbeat as heartbeat
+
+        if not heartbeat.has_fresh_core_service_cache():
+            await heartbeat.prime_core_service_cache_once()
+    except Exception:
+        pass
 
     # 使用 ledger 数据构建探测函数注册表（被动监控）
     probe_registry, extra_data = _build_probe_registry(ledger, since_ms)
@@ -1778,7 +2087,7 @@ def _build_probe_registry(ledger, since_ms: int):
         _last = health["last_call_ts"]
         display_name = sid.upper().replace("_", " ") if sid == "edge_rpc" else sid.upper()
 
-        async def _make_edge_probe(s=_status, p=_p95, l=_last, _sid=sid, _dname=display_name):
+        async def _make_edge_probe(_sid_ignored=None, s=_status, p=_p95, l=_last, _sid=sid, _dname=display_name):
             return ServiceHealthResult(_sid, _dname, "edge", s, latency_ms=p, last_check_ts=l)
 
         registry[sid] = _make_edge_probe
@@ -1856,7 +2165,7 @@ def _build_probe_registry(ledger, since_ms: int):
         _p95 = health["p95_ms"]
         _last = health["last_call_ts"]
 
-        async def _make_llm_probe(s=_status, p=_p95, l=_last, nid=node_id, m=meta):
+        async def _make_llm_probe(_sid_ignored=None, s=_status, p=_p95, l=_last, nid=node_id, m=meta):
             return ServiceHealthResult(nid, m["role"], "host", s, latency_ms=p, last_check_ts=l)
 
         registry[node_id] = _make_llm_probe
@@ -1910,20 +2219,21 @@ async def export_sessions_csv(
     from fastapi.responses import StreamingResponse
 
     ledger = _get_ledger()
-    svc = SessionQueryService(ledger)
     since_ms = _now_ms() - window_minutes * 60 * 1000
 
-    # 一次性拉取所有数据（最多 max_rows 行）
-    result = svc.query(
+    sessions_response = _build_sessions_response(
+        ledger,
         page=1,
         page_size=max_rows,
         status=status,
+        window_minutes=window_minutes,
         keyword=keyword,
-        start_time=since_ms,
-        end_time=_now_ms(),
     )
 
-    rows = result.get("items", [])
+    rows = _sanitize_session_items_for_export(
+        list(sessions_response.items),
+        keyword=keyword,
+    )
 
     # 构建 CSV
     output = io.StringIO()

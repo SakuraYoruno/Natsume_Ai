@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React from 'react'
 import {
   Clock3,
   MessageSquareDashed,
@@ -7,70 +7,35 @@ import {
   Sparkles,
   Waves,
 } from 'lucide-react'
-import { fetchDigitalLifeRuntimeSnapshot } from '../api/obs.js'
 import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import KeyValueRow from '../components/KeyValueRow.jsx'
+import MetricCard from '../components/MetricCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
+import InnerContinuityCard from '../components/InnerContinuityCard.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   asArray,
   compactText,
+  formatAbsenceBand,
   formatBoolean,
   formatDateTime,
   formatNumber,
+  formatReconnectStyle,
+  formatSlotStatus,
 } from '../utils/digitalLife.js'
 
-function StatCard({ icon: Icon, label, value, hint, tone = 'text-gray-900' }) {
-  return (
-    <div className="card p-4">
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <Icon size={14} />
-        <span>{label}</span>
-      </div>
-      <div className={`mt-2 text-2xl font-bold ${tone}`}>{value ?? '—'}</div>
-      <div className="mt-1 text-xs text-gray-400">{hint ?? '—'}</div>
-    </div>
-  )
-}
-
-function InfoRow({ label, value }) {
-  return (
-    <div className="flex items-start justify-between gap-3 text-sm">
-      <span className="text-gray-500">{label}</span>
-      <span className="max-w-[60%] break-words text-right font-medium text-gray-800">{value ?? '—'}</span>
-    </div>
-  )
-}
-
 export default function InnerWorldDashboard() {
-  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
-  const pollingInterval = useAppStore((s) => s.pollingInterval)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [runtimeSnapshot, setRuntimeSnapshot] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchDigitalLifeRuntimeSnapshot()
-      setRuntimeSnapshot(data)
-    } catch (loadError) {
-      setError(loadError.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) {
-      return undefined
-    }
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const pollingEnabled = useAppStore((state) => state.pollingEnabled)
+  const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const { runtimeSnapshot, loading, error, reload } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes: 60,
+  })
 
   const innerWorldState = runtimeSnapshot?.inner_world_state || {}
   const offlineState = runtimeSnapshot?.offline_state || {}
@@ -78,15 +43,17 @@ export default function InnerWorldDashboard() {
   const currentState = runtimeSummary?.current_state || {}
   const offlineSlot = runtimeSummary?.core_slots?.offline_state || {}
   const anticipationTopics = asArray(offlineState.anticipation_topics)
+  const absenceBandLabel = formatAbsenceBand(offlineState.absence_band || currentState.absence_band)
+  const reconnectStyleLabel = formatReconnectStyle(offlineSlot.offline_reconnect_style || currentState.offline_reconnect_style)
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Inner World</h1>
-          <p className="text-sm text-gray-500">独处状态、离线演化、期待话题与内在漂移</p>
+          <h1 className="text-xl font-semibold text-gray-900">内在世界</h1>
+          <p className="text-sm text-gray-500">观察独处状态、离线演化、期待话题与内在漂移。</p>
         </div>
-        <button className="btn-secondary" onClick={load} disabled={loading}>
+        <button className="btn-secondary" onClick={reload} disabled={loading}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           刷新
         </button>
@@ -94,80 +61,74 @@ export default function InnerWorldDashboard() {
 
       <DigitalLifeNav />
 
-      <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50 via-white to-indigo-50 p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-medium text-primary">
-              <MoonStar size={12} />
-              内心世界专题页
-            </div>
-            <div className="mt-3 text-2xl font-bold text-gray-900">
-              {offlineState.absence_band || currentState.absence_band || 'recent'}
-            </div>
-            <div className="mt-1 text-sm text-gray-600">
-              {anticipationTopics.length > 0 ? `有 ${anticipationTopics.length} 个待表达主题正在悬挂` : '当前没有明显的待表达主题'}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs text-gray-500">
-            <span className="rounded-full border border-gray-200 bg-white px-3 py-1">
-              离线 {offlineState.offline_hours != null ? `${formatNumber(offlineState.offline_hours, 2)}h` : '—'}
-            </span>
-            <span className="rounded-full border border-gray-200 bg-white px-3 py-1">
-              should_express_waiting：{formatBoolean(offlineSlot.should_express_waiting)}
-            </span>
-            <span className="rounded-full border border-gray-200 bg-white px-3 py-1">
-              user_id：{innerWorldState.user_id || '—'}
-            </span>
-          </div>
-        </div>
-      </div>
+      <PageHero
+        icon={MoonStar}
+        eyebrow="内在世界专题"
+        title={absenceBandLabel === '—' ? '近期在线' : absenceBandLabel}
+        description={
+          anticipationTopics.length > 0
+            ? `当前有 ${anticipationTopics.length} 个待表达话题仍在悬挂中。`
+            : '当前没有明显的待表达话题，内在世界相对平静。'
+        }
+        gradientClass="from-primary-50 via-white to-indigo-50"
+        metaItems={[
+          `离线时长：${offlineState.offline_hours != null ? `${formatNumber(offlineState.offline_hours, 2)} 小时` : '—'}`,
+          `表达等待：${formatBoolean(offlineSlot.should_express_waiting)}`,
+          `用户 ID：${innerWorldState.user_id || '—'}`,
+        ]}
+      />
 
-      {error && <div className="card p-4 text-sm text-red-500">加载失败：{error}</div>}
+      <BackgroundRuntimeCard runtimeSnapshot={runtimeSnapshot} />
+      <InnerContinuityCard runtimeSnapshot={runtimeSnapshot} />
+      {error ? <NoticeBanner variant="error" title="内在世界加载失败">{error}</NoticeBanner> : null}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <MetricCard
           icon={Clock3}
           label="离线时长"
-          value={offlineState.offline_hours != null ? `${formatNumber(offlineState.offline_hours, 2)}h` : '—'}
-          hint={`band=${offlineState.absence_band || '—'}`}
+          value={offlineState.offline_hours != null ? `${formatNumber(offlineState.offline_hours, 2)} 小时` : '—'}
+          hint={`分层 ${absenceBandLabel}`}
           tone="text-blue-600"
         />
-        <StatCard
+        <MetricCard
           icon={MoonStar}
-          label="Loneliness"
+          label="孤独感"
           value={formatNumber(offlineState.loneliness_level ?? innerWorldState.loneliness, 3)}
           hint="独处牵引"
           tone="text-purple-600"
         />
-        <StatCard
+        <MetricCard
           icon={Sparkles}
-          label="Anticipation"
+          label="期待感"
           value={formatNumber(offlineState.anticipation_level ?? innerWorldState.anticipation, 3)}
-          hint={`${anticipationTopics.length} 个主题`}
+          hint={`${anticipationTopics.length} 个话题`}
           tone="text-pink-600"
         />
-        <StatCard
+        <MetricCard
           icon={Waves}
-          label="漂移"
+          label="内在漂移"
           value={`${formatNumber(innerWorldState.drifted_valence, 2)} / ${formatNumber(innerWorldState.drifted_arousal, 2)}`}
-          hint="valence / arousal"
+          hint="效价 / 唤醒"
           tone="text-indigo-600"
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-5">
           <div className="flex items-center gap-2">
             <Clock3 size={15} className="text-gray-500" />
             <h2 className="text-sm font-semibold text-gray-800">离线状态</h2>
           </div>
           <div className="mt-4 space-y-3">
-            <InfoRow label="离线分层" value={offlineState.absence_band || currentState.absence_band || '—'} />
-            <InfoRow label="离线时长" value={offlineState.offline_duration_ms ? `${formatNumber(offlineState.offline_duration_ms / 3600000, 2)}h` : '—'} />
-            <InfoRow label="最后互动" value={formatDateTime(innerWorldState.last_interaction_ts_ms)} />
-            <InfoRow label="最后 tick" value={formatDateTime(innerWorldState.last_tick_ts_ms)} />
-            <InfoRow label="重新连接风格" value={offlineSlot.offline_reconnect_style || currentState.offline_reconnect_style || '—'} />
-            <InfoRow label="唤醒提示" value={offlineSlot.awakening_hint || '—'} />
+            <KeyValueRow label="离线分层" value={absenceBandLabel} />
+            <KeyValueRow
+              label="离线时长"
+              value={offlineState.offline_duration_ms ? `${formatNumber(offlineState.offline_duration_ms / 3600000, 2)} 小时` : '—'}
+            />
+            <KeyValueRow label="最后互动" value={formatDateTime(innerWorldState.last_interaction_ts_ms)} />
+            <KeyValueRow label="最后心跳" value={formatDateTime(innerWorldState.last_tick_ts_ms)} />
+            <KeyValueRow label="重连风格" value={reconnectStyleLabel} />
+            <KeyValueRow label="唤醒提示" value={offlineSlot.awakening_hint || '—'} />
           </div>
         </div>
 
@@ -177,12 +138,12 @@ export default function InnerWorldDashboard() {
             <h2 className="text-sm font-semibold text-gray-800">内在漂移</h2>
           </div>
           <div className="mt-4 space-y-3">
-            <InfoRow label="漂移效价" value={formatNumber(innerWorldState.drifted_valence, 3)} />
-            <InfoRow label="漂移唤醒" value={formatNumber(innerWorldState.drifted_arousal, 3)} />
-            <InfoRow label="情绪基线" value={formatNumber(innerWorldState.mood_baseline, 3)} />
-            <InfoRow label="总离线小时" value={formatNumber(innerWorldState.total_offline_hours, 2)} />
-            <InfoRow label="是否表达等待" value={formatBoolean(offlineSlot.should_express_waiting)} />
-            <InfoRow label="slot 状态" value={runtimeSnapshot?.slot_status?.inner_world_state || '—'} />
+            <KeyValueRow label="漂移效价" value={formatNumber(innerWorldState.drifted_valence, 3)} />
+            <KeyValueRow label="漂移唤醒" value={formatNumber(innerWorldState.drifted_arousal, 3)} />
+            <KeyValueRow label="情绪基线" value={formatNumber(innerWorldState.mood_baseline, 3)} />
+            <KeyValueRow label="累计离线小时" value={formatNumber(innerWorldState.total_offline_hours, 2)} />
+            <KeyValueRow label="是否表达等待" value={formatBoolean(offlineSlot.should_express_waiting)} />
+            <KeyValueRow label="槽位状态" value={formatSlotStatus(runtimeSnapshot?.slot_status?.inner_world_state)} />
           </div>
         </div>
 
@@ -194,14 +155,19 @@ export default function InnerWorldDashboard() {
           <div className="mt-4 space-y-2">
             {anticipationTopics.length > 0 ? (
               anticipationTopics.slice(0, 8).map((topic, index) => (
-                <div key={`${topic}-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                <div
+                  key={`${topic}-${index}`}
+                  className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700"
+                >
                   {compactText(topic, 180)}
                 </div>
               ))
             ) : (
-              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-400">
-                当前没有待表达主题，说明内心世界仍偏安静。
-              </div>
+              <EmptyStateCard
+                title="暂无待表达话题"
+                hint="说明当前内在世界相对平静。"
+                className="p-4"
+              />
             )}
           </div>
         </div>

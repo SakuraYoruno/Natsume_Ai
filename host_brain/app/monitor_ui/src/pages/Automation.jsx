@@ -1,31 +1,36 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { Workflow } from 'lucide-react'
 import {
-  fetchSchedulerTasks,
-  fetchSchedulerHealth,
-  enableSchedulerTask,
   disableSchedulerTask,
-  triggerSchedulerTask,
+  enableSchedulerTask,
+  fetchSchedulerHealth,
   fetchSchedulerHistory,
+  fetchSchedulerTasks,
+  triggerSchedulerTask,
 } from '../api/obs.js'
+import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../store/useAppStore.js'
 
-// ── 状态样式 ──────────────────────────────────────────────────────────────
 const STATUS_STYLES = {
-  PENDING:   { bg: 'bg-gray-100',   text: 'text-gray-600',   dot: 'bg-gray-400'   },
-  RUNNING:   { bg: 'bg-blue-100',   text: 'text-blue-700',   dot: 'bg-blue-500 animate-pulse' },
-  SUCCESS:   { bg: 'bg-green-100',  text: 'text-green-700',  dot: 'bg-green-500'  },
-  FAILED:    { bg: 'bg-red-100',    text: 'text-red-700',    dot: 'bg-red-500'    },
-  DISABLED:  { bg: 'bg-gray-100',   text: 'text-gray-400',   dot: 'bg-gray-300'   },
+  PENDING: { bg: 'bg-gray-100', text: 'text-gray-600', dot: 'bg-gray-400' },
+  RUNNING: { bg: 'bg-blue-100', text: 'text-blue-700', dot: 'bg-blue-500 animate-pulse' },
+  SUCCESS: { bg: 'bg-green-100', text: 'text-green-700', dot: 'bg-green-500' },
+  FAILED: { bg: 'bg-red-100', text: 'text-red-700', dot: 'bg-red-500' },
+  DISABLED: { bg: 'bg-gray-100', text: 'text-gray-400', dot: 'bg-gray-300' },
   CANCELLED: { bg: 'bg-yellow-100', text: 'text-yellow-700', dot: 'bg-yellow-400' },
 }
 
 const PRIORITY_STYLES = {
-  HIGH:   'text-red-600 bg-red-50',
+  HIGH: 'text-red-600 bg-red-50',
   MEDIUM: 'text-blue-600 bg-blue-50',
-  LOW:    'text-gray-500 bg-gray-50',
+  LOW: 'text-gray-500 bg-gray-50',
 }
 
-// ── 任务卡片 ──────────────────────────────────────────────────────────────
 function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
   const { task, health } = item
   const status = health?.status || 'PENDING'
@@ -33,65 +38,53 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
   const isLoading = actionLoading === task.task_id
 
   return (
-    <div className={`bg-white rounded-lg border p-4 space-y-3 ${task.enabled ? 'border-gray-200' : 'border-gray-100 opacity-70'}`}>
-      {/* 头部 */}
+    <div className={`space-y-3 rounded-lg border bg-white p-4 ${task.enabled ? 'border-gray-200' : 'border-gray-100 opacity-75'}`}>
       <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
-            <span className="font-medium text-sm text-gray-800 truncate">{task.task_id}</span>
+            <span className={`h-2 w-2 shrink-0 rounded-full ${style.dot}`} />
+            <span className="truncate text-sm font-medium text-gray-800">{task.task_id}</span>
           </div>
-          {task.description && (
-            <div className="text-xs text-gray-500 mt-0.5 ml-4 truncate">{task.description}</div>
-          )}
+          {task.description ? <div className="ml-4 mt-0.5 truncate text-xs text-gray-500">{task.description}</div> : null}
         </div>
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.MEDIUM}`}>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${PRIORITY_STYLES[task.priority] || PRIORITY_STYLES.MEDIUM}`}>
             {task.priority}
           </span>
-          <span className={`text-xs px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
-            {status}
-          </span>
+          <span className={`rounded px-1.5 py-0.5 text-xs ${style.bg} ${style.text}`}>{status}</span>
         </div>
       </div>
 
-      {/* 统计 */}
       <div className="grid grid-cols-3 gap-2 text-xs">
-        <div className="bg-gray-50 rounded p-2 text-center">
+        <div className="rounded bg-gray-50 p-2 text-center">
           <div className="font-bold text-gray-700">{health?.run_count ?? 0}</div>
           <div className="text-gray-400">执行次数</div>
         </div>
-        <div className="bg-gray-50 rounded p-2 text-center">
+        <div className="rounded bg-gray-50 p-2 text-center">
           <div className="font-bold text-gray-700">{health?.error_count ?? 0}</div>
           <div className="text-gray-400">失败次数</div>
         </div>
-        <div className="bg-gray-50 rounded p-2 text-center">
-          <div className="font-bold text-gray-700">{task.trigger_mode}</div>
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className="font-bold text-gray-700">{task.trigger_mode || '—'}</div>
           <div className="text-gray-400">触发模式</div>
         </div>
       </div>
 
-      {/* 最近错误 */}
-      {health?.last_error && (
-        <div className="text-xs text-red-600 bg-red-50 rounded p-2 truncate">
-          ✗ {health.last_error}
-        </div>
-      )}
+      {health?.last_error ? <NoticeBanner variant="error">✕ {health.last_error}</NoticeBanner> : null}
 
-      {/* 操作按钮 */}
       <div className="flex gap-2">
         <button
           onClick={() => onTrigger(task.task_id)}
           disabled={isLoading || !task.enabled}
-          className="flex-1 text-xs border border-blue-300 text-blue-600 rounded px-2 py-1.5 hover:bg-blue-50 disabled:opacity-40 transition-colors"
+          className="flex-1 rounded border border-blue-300 px-2 py-1.5 text-xs text-blue-600 transition-colors hover:bg-blue-50 disabled:opacity-40"
         >
-          {isLoading ? '...' : '▶ 立即触发'}
+          {isLoading ? '处理中…' : '▶ 立即触发'}
         </button>
         {task.enabled ? (
           <button
             onClick={() => onDisable(task.task_id)}
             disabled={isLoading}
-            className="flex-1 text-xs border border-gray-300 text-gray-600 rounded px-2 py-1.5 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+            className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-xs text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-40"
           >
             暂停
           </button>
@@ -99,7 +92,7 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
           <button
             onClick={() => onEnable(task.task_id)}
             disabled={isLoading}
-            className="flex-1 text-xs border border-green-300 text-green-600 rounded px-2 py-1.5 hover:bg-green-50 disabled:opacity-40 transition-colors"
+            className="flex-1 rounded border border-green-300 px-2 py-1.5 text-xs text-green-600 transition-colors hover:bg-green-50 disabled:opacity-40"
           >
             启用
           </button>
@@ -109,266 +102,365 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
   )
 }
 
-// ── 主页面 ────────────────────────────────────────────────────────────────
-export default function Automation() {
-  const pollingEnabled  = useAppStore(s => s.pollingEnabled)
-  const pollingInterval = useAppStore(s => s.pollingInterval)
-
-  const [tasks, setTasks]           = useState([])
-  const [health, setHealth]         = useState(null)
-  const [loading, setLoading]       = useState(false)
-  const [error, setError]           = useState(null)
-  const [actionLoading, setActionLoading] = useState(null)
-  const [actionResult, setActionResult]   = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [t, h] = await Promise.all([
-        fetchSchedulerTasks(),
-        fetchSchedulerHealth(),
-      ])
-      setTasks(Array.isArray(t) ? t : [])
-      setHealth(h)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const id = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(id)
-  }, [pollingEnabled, pollingInterval, load])
-
-  const handleAction = async (taskId, action) => {
-    setActionLoading(taskId)
-    setActionResult(null)
-    try {
-      if (action === 'enable')  await enableSchedulerTask(taskId)
-      if (action === 'disable') await disableSchedulerTask(taskId)
-      if (action === 'trigger') await triggerSchedulerTask(taskId)
-      setActionResult({ ok: true, taskId, action })
-      await load()
-    } catch (e) {
-      setActionResult({ ok: false, taskId, action, error: e.message })
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const enabledCount  = tasks.filter(t => t.task?.enabled).length
-  const runningCount  = tasks.filter(t => t.health?.status === 'RUNNING').length
-  const failedCount   = tasks.filter(t => t.health?.status === 'FAILED').length
-
-  return (
-    <div className="space-y-6">
-      {/* 标题 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-gray-800">自动化调度</h1>
-          <p className="text-sm text-gray-500 mt-0.5">HostTaskScheduler 常驻任务管理</p>
-        </div>
-        <button onClick={load} disabled={loading}
-          className="text-xs border border-gray-300 rounded px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50">
-          {loading ? '刷新中...' : '刷新'}
-        </button>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">{error}</div>
-      )}
-
-      {/* 统计卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: '调度器状态', value: health?.running ? '运行中' : '已停止', color: health?.running ? 'text-green-600' : 'text-red-500' },
-          { label: '任务总数', value: tasks.length, color: 'text-gray-800' },
-          { label: '已启用', value: enabledCount, color: 'text-blue-600' },
-          { label: '执行中', value: runningCount, color: runningCount > 0 ? 'text-blue-600' : 'text-gray-400' },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="bg-white rounded-lg border border-gray-200 p-3 text-center">
-            <div className={`text-xl font-bold ${color}`}>{value}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* 操作结果提示 */}
-      {actionResult && (
-        <div className={`p-3 rounded text-sm ${actionResult.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-          {actionResult.ok
-            ? `✓ 任务 ${actionResult.taskId} 操作成功（${actionResult.action}）`
-            : `✗ 任务 ${actionResult.taskId} 操作失败：${actionResult.error}`
-          }
-        </div>
-      )}
-
-      {/* 失败任务警告 */}
-      {failedCount > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
-          ⚠ 有 {failedCount} 个任务处于失败状态，请检查任务日志
-        </div>
-      )}
-
-      {/* 任务列表 */}
-      {tasks.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-400 text-sm">
-          {loading ? '加载中...' : '暂无注册任务'}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {tasks.map(item => (
-            <TaskCard
-              key={item.task?.task_id}
-              item={item}
-              onEnable={id => handleAction(id, 'enable')}
-              onDisable={id => handleAction(id, 'disable')}
-              onTrigger={id => handleAction(id, 'trigger')}
-              actionLoading={actionLoading}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* ===== Ref #55: TaskScheduler 执行历史趋势 ===== */}
-      <SchedulerHistorySection />
-    </div>
-  )
-}
-
-// ── Ref #87: 调度器执行历史时序图 ─────────────────────────────────────────
 function SchedulerTimelineChart({ tasks }) {
-  // 将各任务的 run_count/error_count 渲染为简单的水平条形图
   if (!tasks || tasks.length === 0) return null
-  const maxRun = Math.max(...tasks.map(t => t.run_count ?? 0), 1)
+  const maxRun = Math.max(...tasks.map((task) => task.run_count ?? 0), 1)
+
   return (
     <div className="mt-4">
-      <div className="text-xs font-semibold text-gray-600 mb-3">各任务执行量对比（近 24h）</div>
+      <div className="mb-3 text-xs font-semibold text-gray-600">各任务执行量对比（近 24h）</div>
       <div className="space-y-2">
-        {tasks.map((t) => {
-          const runPct = Math.max((t.run_count ?? 0) / maxRun * 100, 1)
-          const errPct = t.run_count > 0 ? Math.min((t.error_count ?? 0) / t.run_count * 100, 100) : 0
+        {tasks.map((task) => {
+          const runPct = Math.max(((task.run_count ?? 0) / maxRun) * 100, 1)
+          const errPct = task.run_count > 0 ? Math.min(((task.error_count ?? 0) / task.run_count) * 100, 100) : 0
           return (
-            <div key={t.task_id} className="flex items-center gap-2">
-              <div className="w-40 text-xs text-gray-600 truncate shrink-0" title={t.task_id}>
-                {t.task_id}
+            <div key={task.task_id} className="flex items-center gap-2">
+              <div className="w-40 shrink-0 truncate text-xs text-gray-600" title={task.task_id}>
+                {task.task_id}
               </div>
-              <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden relative">
-                {/* 成功部分（绿色） */}
-                <div
-                  className="absolute left-0 top-0 h-3 rounded-full bg-green-400 transition-all"
-                  style={{ width: `${runPct}%` }}
-                />
-                {/* 失败部分（红色叠加） */}
-                {errPct > 0 && (
-                  <div
-                    className="absolute left-0 top-0 h-3 rounded-full bg-red-400 transition-all"
-                    style={{ width: `${runPct * errPct / 100}%` }}
-                  />
-                )}
+              <div className="relative h-3 flex-1 overflow-hidden rounded-full bg-gray-100">
+                <div className="absolute left-0 top-0 h-3 rounded-full bg-green-400 transition-all" style={{ width: `${runPct}%` }} />
+                {errPct > 0 ? (
+                  <div className="absolute left-0 top-0 h-3 rounded-full bg-red-400 transition-all" style={{ width: `${(runPct * errPct) / 100}%` }} />
+                ) : null}
               </div>
-              <div className="w-20 text-xs text-right text-gray-500 shrink-0">
-                {t.run_count ?? 0} 次
-                {t.error_count > 0 && (
-                  <span className="text-red-500 ml-1">/ {t.error_count} 失败</span>
-                )}
+              <div className="w-20 shrink-0 text-right text-xs text-gray-500">
+                {task.run_count ?? 0} 次
+                {task.error_count > 0 ? <span className="ml-1 text-red-500">/ {task.error_count} 失败</span> : null}
               </div>
             </div>
           )
         })}
       </div>
-      <div className="flex items-center gap-4 mt-3 text-xs text-gray-400">
-        <span className="flex items-center gap-1"><span className="w-3 h-2 bg-green-400 rounded inline-block" />执行次数</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-2 bg-red-400 rounded inline-block" />失败次数（叠加）</span>
+      <div className="mt-3 flex items-center gap-4 text-xs text-gray-400">
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-3 rounded bg-green-400" />
+          执行次数
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-3 rounded bg-red-400" />
+          失败次数（叠加）
+        </span>
       </div>
     </div>
   )
 }
 
-// ── Ref #55: TaskScheduler 执行历史趋势子组件 ─────────────────────────────
 function SchedulerHistorySection() {
-  const [data, setData] = React.useState(null)
-  const [loading, setLoading] = React.useState(false)
-  React.useEffect(() => {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const loadHistory = useCallback(async () => {
     setLoading(true)
-    fetchSchedulerHistory({ window_minutes: 1440 })
-      .then(setData)
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    setError('')
+    try {
+      const history = await fetchSchedulerHistory({ window_minutes: 1440 })
+      setData(history)
+    } catch (fetchError) {
+      setError(fetchError.message || '加载执行历史失败')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
+  useEffect(() => {
+    loadHistory()
+  }, [loadHistory])
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold text-gray-700">📊 执行历史趋势（近 24h）</span>
-        {loading && <span className="text-xs text-gray-400">加载中...</span>}
+    <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-gray-700">执行历史趋势（近 24h）</div>
+        <button
+          onClick={loadHistory}
+          disabled={loading}
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
+        >
+          {loading ? '刷新中…' : '刷新'}
+        </button>
       </div>
-      {/* 汇总卡片 */}
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+
+      {loading && !data ? (
+        <NoticeBanner variant="info" title="加载中">
+          正在同步执行历史趋势…
+        </NoticeBanner>
+      ) : null}
+
+      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
         {[
           { label: '总任务', value: data?.total_tasks, color: 'text-gray-700' },
           { label: '运行中', value: data?.running_count, color: 'text-blue-600' },
           { label: '成功', value: data?.success_count, color: 'text-green-600' },
           { label: '失败', value: data?.failed_count, color: 'text-red-500' },
           { label: '已禁用', value: data?.disabled_count, color: 'text-gray-400' },
-          { label: '整体错误率', value: data?.overall_error_rate != null ? `${data.overall_error_rate}%` : '—', color: data?.overall_error_rate > 20 ? 'text-red-500' : 'text-green-600' },
+          {
+            label: '整体错误率',
+            value: data?.overall_error_rate != null ? `${data.overall_error_rate}%` : '—',
+            color: data?.overall_error_rate > 20 ? 'text-red-500' : 'text-green-600',
+          },
         ].map(({ label, value, color }) => (
-          <div key={label} className="bg-gray-50 rounded p-2 text-center">
+          <div key={label} className="rounded bg-gray-50 p-2 text-center">
             <div className={`text-lg font-bold ${color}`}>{value ?? '—'}</div>
-            <div className="text-xs text-gray-400 mt-0.5">{label}</div>
+            <div className="mt-0.5 text-xs text-gray-400">{label}</div>
           </div>
         ))}
       </div>
-      {/* 各任务详情 */}
-      {(data?.tasks ?? []).length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-gray-100">
-                <th className="text-left py-2 px-3 text-gray-500 font-medium">任务 ID</th>
-                <th className="text-center py-2 px-3 text-gray-500 font-medium">状态</th>
-                <th className="text-right py-2 px-3 text-gray-500 font-medium">执行次数</th>
-                <th className="text-right py-2 px-3 text-gray-500 font-medium">失败次数</th>
-                <th className="text-right py-2 px-3 text-gray-500 font-medium">错误率</th>
-                <th className="text-left py-2 px-3 text-gray-500 font-medium">最近错误</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {(data?.tasks ?? []).map((t) => (
-                <tr key={t.task_id} className="hover:bg-gray-50">
-                  <td className="py-2 px-3 font-mono text-blue-600">{t.task_id}</td>
-                  <td className="py-2 px-3 text-center">
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${
-                      t.status === 'SUCCESS' ? 'bg-green-100 text-green-700' :
-                      t.status === 'FAILED' ? 'bg-red-100 text-red-700' :
-                      t.status === 'RUNNING' ? 'bg-blue-100 text-blue-700' :
-                      'bg-gray-100 text-gray-500'
-                    }`}>{t.status}</span>
-                  </td>
-                  <td className="py-2 px-3 text-right text-gray-700">{t.run_count}</td>
-                  <td className="py-2 px-3 text-right text-red-500">{t.error_count}</td>
-                  <td className="py-2 px-3 text-right">
-                    <span className={t.error_rate > 20 ? 'text-red-500' : 'text-green-600'}>
-                      {t.error_rate != null ? `${t.error_rate}%` : '—'}
-                    </span>
-                  </td>
-                  <td className="py-2 px-3 text-gray-400 truncate max-w-xs">{t.last_error || '—'}</td>
+
+      {!loading && (data?.tasks ?? []).length > 0 ? (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="px-3 py-2 text-left font-medium text-gray-500">任务 ID</th>
+                  <th className="px-3 py-2 text-center font-medium text-gray-500">状态</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500">执行次数</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500">失败次数</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-500">错误率</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500">最近错误</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {(data?.tasks ?? []).map((task) => (
+                  <tr key={task.task_id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 font-mono text-blue-600">{task.task_id}</td>
+                    <td className="px-3 py-2 text-center">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-xs ${
+                          task.status === 'SUCCESS'
+                            ? 'bg-green-100 text-green-700'
+                            : task.status === 'FAILED'
+                              ? 'bg-red-100 text-red-700'
+                              : task.status === 'RUNNING'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-500'
+                        }`}
+                      >
+                        {task.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right text-gray-700">{task.run_count}</td>
+                    <td className="px-3 py-2 text-right text-red-500">{task.error_count}</td>
+                    <td className="px-3 py-2 text-right">
+                      <span className={task.error_rate > 20 ? 'text-red-500' : 'text-green-600'}>
+                        {task.error_rate != null ? `${task.error_rate}%` : '—'}
+                      </span>
+                    </td>
+                    <td className="max-w-xs truncate px-3 py-2 text-gray-400">{task.last_error || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <SchedulerTimelineChart tasks={data.tasks} />
+        </>
+      ) : !loading ? (
+        <EmptyStateCard title="暂无执行历史" hint="等待任务运行后会出现趋势数据。" className="p-6" />
+      ) : null}
+    </div>
+  )
+}
+
+function LoadingTasksNotice() {
+  return (
+    <NoticeBanner variant="info" title="加载中">
+      正在同步调度任务列表…
+    </NoticeBanner>
+  )
+}
+
+export default function Automation() {
+  const pollingEnabled = useAppStore((state) => state.pollingEnabled)
+  const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes: 60,
+  })
+
+  const [tasks, setTasks] = useState([])
+  const [health, setHealth] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [actionLoading, setActionLoading] = useState('')
+  const [actionResult, setActionResult] = useState(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const [taskList, schedulerHealth] = await Promise.all([fetchSchedulerTasks(), fetchSchedulerHealth()])
+      setTasks(Array.isArray(taskList) ? taskList : [])
+      setHealth(schedulerHealth)
+    } catch (fetchError) {
+      setError(fetchError.message || '加载调度数据失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    if (!pollingEnabled) return
+    const timer = setInterval(load, pollingInterval * 1000)
+    return () => clearInterval(timer)
+  }, [pollingEnabled, pollingInterval, load])
+
+  const handleAction = async (taskId, action) => {
+    setActionLoading(taskId)
+    setActionResult(null)
+    try {
+      if (action === 'enable') await enableSchedulerTask(taskId)
+      if (action === 'disable') await disableSchedulerTask(taskId)
+      if (action === 'trigger') await triggerSchedulerTask(taskId)
+      setActionResult({ ok: true, taskId, action })
+      await load()
+    } catch (actionError) {
+      setActionResult({
+        ok: false,
+        taskId,
+        action,
+        error: actionError.message || '任务操作失败',
+      })
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const enabledCount = useMemo(() => tasks.filter((item) => item.task?.enabled).length, [tasks])
+  const runningCount = useMemo(() => tasks.filter((item) => item.health?.status === 'RUNNING').length, [tasks])
+  const failedCount = useMemo(() => tasks.filter((item) => item.health?.status === 'FAILED').length, [tasks])
+  const schedulerState = useMemo(() => {
+    const rawStatus = String(health?.scheduler_status || '').toUpperCase()
+    if (typeof health?.running === 'boolean') {
+      if (!health.running) {
+        return { running: false, label: '已停止', title: '调度器当前未运行' }
+      }
+      if (rawStatus === 'DEGRADED') {
+        return { running: true, label: '降级运行', title: '调度器降级运行中' }
+      }
+      return { running: true, label: '运行中', title: '调度器正在运行' }
+    }
+    if (rawStatus === 'DEGRADED') {
+      return { running: true, label: '降级运行', title: '调度器降级运行中' }
+    }
+    if (['HEALTHY', 'RUNNING', 'UP', 'OK'].includes(rawStatus)) {
+      return { running: true, label: '运行中', title: '调度器正在运行' }
+    }
+    if (['STOPPED', 'DOWN', 'DISABLED', 'OFFLINE'].includes(rawStatus)) {
+      return { running: false, label: '已停止', title: '调度器当前未运行' }
+    }
+    return { running: false, label: '未知', title: '调度器状态未知' }
+  }, [health])
+
+  const actionNameMap = {
+    enable: '启用',
+    disable: '暂停',
+    trigger: '立即触发',
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-gray-800">自动化调度</h1>
+          <p className="mt-0.5 text-sm text-gray-500">统一查看 HostTaskScheduler 常驻任务的状态、历史和手动触发入口。</p>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
+        >
+          {loading ? '刷新中…' : '刷新'}
+        </button>
+      </div>
+
+      <DigitalLifeNav />
+
+      <PageHero
+        icon={Workflow}
+        eyebrow="自动化与调度"
+        title={schedulerState.title}
+        description="这里用于收口数字生命后台常驻任务，包括启停状态、执行次数、失败告警和近 24 小时历史趋势。"
+        gradientClass="from-violet-50 via-white to-sky-50"
+        metaItems={[
+          `任务总数：${tasks.length}`,
+          `已启用：${enabledCount}`,
+          `运行中：${runningCount}`,
+          `失败任务：${failedCount}`,
+        ]}
+      />
+
+      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+
+      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {[
+          {
+            label: '调度器状态',
+            value: schedulerState.label,
+            color: schedulerState.running ? 'text-green-600' : schedulerState.label === '未知' ? 'text-gray-500' : 'text-red-500',
+          },
+          { label: '任务总数', value: tasks.length, color: 'text-gray-800' },
+          { label: '已启用', value: enabledCount, color: 'text-blue-600' },
+          {
+            label: '运行中任务',
+            value: runningCount,
+            color: runningCount > 0 ? 'text-blue-600' : 'text-gray-400',
+          },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="rounded-lg border border-gray-200 bg-white p-3 text-center">
+            <div className={`text-xl font-bold ${color}`}>{value}</div>
+            <div className="mt-0.5 text-xs text-gray-500">{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {actionResult ? (
+        actionResult.ok ? (
+          <NoticeBanner variant="success">
+            任务 <code className="font-mono">{actionResult.taskId}</code> 已执行「{actionNameMap[actionResult.action] || actionResult.action}」。
+          </NoticeBanner>
+        ) : (
+          <NoticeBanner variant="error">
+            任务 <code className="font-mono">{actionResult.taskId}</code> 操作失败：{actionResult.error}
+          </NoticeBanner>
+        )
+      ) : null}
+
+      {failedCount > 0 ? (
+        <NoticeBanner variant="warning" title="检测到失败任务">
+          当前有 {failedCount} 个任务处于失败状态，请检查任务日志与依赖健康状态。
+        </NoticeBanner>
+      ) : null}
+
+      {loading && tasks.length === 0 ? (
+        <LoadingTasksNotice />
+      ) : tasks.length === 0 ? (
+        <EmptyStateCard title="暂无注册任务" hint="请确认调度任务已注册。" />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {tasks.map((item) => (
+            <TaskCard
+              key={item.task?.task_id}
+              item={item}
+              onEnable={(taskId) => handleAction(taskId, 'enable')}
+              onDisable={(taskId) => handleAction(taskId, 'disable')}
+              onTrigger={(taskId) => handleAction(taskId, 'trigger')}
+              actionLoading={actionLoading}
+            />
+          ))}
         </div>
       )}
 
-      {/* Ref #87: 调度器执行历史时序图 */}
-      {(data?.tasks ?? []).length > 0 && (
-        <SchedulerTimelineChart tasks={data.tasks} />
-      )}
+      <SchedulerHistorySection />
     </div>
   )
 }

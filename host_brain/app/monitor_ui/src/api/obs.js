@@ -480,6 +480,13 @@ export function fetchMemoryStats(params = {}) {
   return request(`/obs/memory/stats${qs ? '?' + qs : ''}`)
 }
 
+/**
+ * 记忆常驻设定 / 人格风格注入快照。
+ */
+export function fetchResidentMemoryContext() {
+  return request('/obs/memory/resident-context')
+}
+
 // ===== Ref #25: Scheduler 调度器管理 =====
 
 /** 列出所有调度任务（含健康状态） */
@@ -905,9 +912,9 @@ export function fetchSkillsHubStats() {
   return request('/obs/skills-hub/stats')
 }
 
-// ===== 系统运行模式管理 =====
+// ===== 存在状态 / sys_mode 管理 =====
 
-/** 获取当前系统运行模式状态 */
+/** 获取当前存在状态轴状态 */
 export function fetchSysModeStatus() {
   return request('/obs/sys-mode')
 }
@@ -920,7 +927,7 @@ export function fetchDigitalLifeRuntimeSnapshot(params = {}) {
   return request(`/obs/runtime-snapshot${qs ? '?' + qs : ''}`)
 }
 
-/** 切换系统运行模式 */
+/** 切换当前存在状态轴 */
 export function switchSysMode(body) {
   return request('/obs/sys-mode', {
     method: 'POST',
@@ -928,7 +935,7 @@ export function switchSysMode(body) {
   })
 }
 
-/** 获取模式切换历史 */
+/** 获取存在态切换历史 */
 export function fetchSysModeHistory(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
@@ -944,7 +951,7 @@ export function updateAutoRules(body) {
   })
 }
 
-/** 发送模式切换事件 */
+/** 发送存在态切换事件 */
 export function postSysModeEvent(eventType) {
   return request(`/obs/sys-mode/event?event_type=${encodeURIComponent(eventType)}`, {
     method: 'POST',

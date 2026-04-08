@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping
@@ -45,6 +47,21 @@ _LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"phatic", "affection"})
 _SHORT_CHAT_PERSONA_SCORE_FLOOR = 0.12
 
 _RUNTIME_GUIDANCE_TEMPLATES_DEFAULT: dict[str, Any] = {}
+_LATEST_PROMPT_CONTEXT_SNAPSHOT_LOCK = threading.Lock()
+_LATEST_PROMPT_CONTEXT_SNAPSHOT: dict[str, Any] = {}
+
+
+def _record_latest_prompt_context_snapshot(snapshot: Mapping[str, Any] | None) -> None:
+    if not isinstance(snapshot, Mapping):
+        return
+    with _LATEST_PROMPT_CONTEXT_SNAPSHOT_LOCK:
+        _LATEST_PROMPT_CONTEXT_SNAPSHOT.clear()
+        _LATEST_PROMPT_CONTEXT_SNAPSHOT.update(copy.deepcopy(dict(snapshot)))
+
+
+def get_latest_prompt_context_runtime_snapshot() -> dict[str, Any]:
+    with _LATEST_PROMPT_CONTEXT_SNAPSHOT_LOCK:
+        return copy.deepcopy(_LATEST_PROMPT_CONTEXT_SNAPSHOT)
 
 
 def _load_runtime_guidance_templates() -> dict[str, Any]:
@@ -1844,6 +1861,25 @@ def build_chat_prompt_runtime_payload(
     ).strip()
     if memory_recall_summary:
         runtime_payload["memory_recall_summary"] = memory_recall_summary
+    _record_latest_prompt_context_snapshot(
+        {
+            "request_id": str(runtime_input.request_id or "").strip(),
+            "session_id": str(runtime_input.session_id or "").strip(),
+            "thread_id": str(runtime_input.thread_id or "").strip(),
+            "render_target_lang": render_target_lang or None,
+            "ts_ms": int(time.time() * 1000),
+            "style_bindings": normalize_node_style_bindings(resolved_style_bindings),
+            "style_pack": (
+                dict(prompt_context.get("style_pack") or {})
+                if isinstance(prompt_context.get("style_pack"), Mapping)
+                else {}
+            ),
+            "memory_persona_signal": dict(memory_persona_signal or {}),
+            "memory_persona_evidence": [dict(item) for item in memory_persona_evidence],
+            "memory_recall_summary": memory_recall_summary,
+            "prompt_context_observability": dict(prompt_context_observability or {}),
+        }
+    )
     try:
         from host_brain.app.intelligent_runtime import build_prompt_intelligence  # noqa: PLC0415
 

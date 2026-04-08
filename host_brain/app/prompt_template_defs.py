@@ -2894,11 +2894,14 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
                     }
                 },
                 "recent_turn_answer": {
-                    "user_template": "已确认事实：用户上一句是「{latest_user}」。请直接告诉用户，不要再说看不到或没看到。",
-                    "assistant_template": "已确认事实：你上一句回复是「{latest_assistant}」。请直接告诉用户，不要再说看不到或没看到。",
-                    "both_user_item_template": "用户上一句是「{latest_user}」",
-                    "both_assistant_item_template": "你上一句回复是「{latest_assistant}」",
-                    "both_wrapper_template": "已确认事实：{facts}。请直接回答，不要再说看不到或没看到。"
+                    "user_template": "你上一句是「{latest_user}」。",
+                    "assistant_template": "我上一句说的是「{latest_assistant}」。",
+                    "both_user_item_template": "你上一句是「{latest_user}」",
+                    "both_assistant_item_template": "我上一句说的是「{latest_assistant}」",
+                    "both_wrapper_template": "{facts}。"
+                },
+                "clarification_direct_answer": {
+                    "assistant_meaning_template": "我刚才的意思是：{latest_assistant}"
                 },
                 "runtime_task_status": {
                     "pre_dispatch_detail": "正在整理上下文和检索记忆。",

@@ -114,12 +114,16 @@ if (Test-Path -Path $PidFile) {
   $pidText = (Get-Content -Path $PidFile -Raw -Encoding ascii).Trim()
   if ($pidText) {
     $hostPid = [int]$pidText
-    $ok = Stop-ProcessTree -ProcessId $hostPid
-    if ($ok) {
-      $stopped = $true
-      $detail = "host process stopped via pid file"
+    if (Is-HostProcess -ProcessId $hostPid) {
+      $ok = Stop-ProcessTree -ProcessId $hostPid
+      if ($ok) {
+        $stopped = $true
+        $detail = "host process stopped via pid file"
+      } else {
+        $detail = "failed to stop host process from pid file"
+      }
     } else {
-      $detail = "failed to stop host process from pid file"
+      $detail = "pid file points to non-host pid $hostPid, fallback to port probe"
     }
   } else {
     $detail = "host pid file is empty"

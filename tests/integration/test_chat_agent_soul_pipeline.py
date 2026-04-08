@@ -31,6 +31,7 @@ from edge_client.rpc.event_reporter import EdgeEventReporter
 from host_brain.app.chat_agent import ChatAgentInput, chat_agent_sse_generator
 from host_brain.app.dispatch_agent import dispatch_agent_sse_generator
 from host_brain.app.top_agent import top_agent_sse_generator
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.bond_stage_engine import BondRiftState, BondStageEngine
 from host_brain.bond.milestone_tracker import MilestoneRecord
 from host_brain.bond.shared_memory_index import SharedMemoryEntry, SharedMemoryResult
@@ -718,6 +719,41 @@ def _build_edge_events_transport(*, host_client: TestClient):
         return response.json()
 
     return _transport
+
+
+def test_runtime_lifespan_keeps_core_personality_ticks_when_proactive_push_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    ledger = SQLiteLedger(db_path=str(tmp_path / "startup-proactive-push-degraded.sqlite3"))
+    capture_lifespan = _patch_http_lifespan_runtime(
+        monkeypatch,
+        ledger=ledger,
+    )
+
+    def _raise_push_unavailable():
+        raise RuntimeError("proactive push unavailable during startup")
+
+    monkeypatch.setattr(
+        "host_brain.app.vision.proactive_push_client.build_proactive_push_client",
+        _raise_push_unavailable,
+    )
+
+    with TestClient(fastapi_app):
+        report = capture_lifespan["startup_reports"][-1]
+        assert report["status"] == "DEGRADED"
+        assert report["runtime_statuses"]["proactive_push_client"].startswith("DEGRADED")
+        assert report["runtime_statuses"]["proactive_talk_scheduler"].startswith("OK")
+        assert "inner_world_tick[enabled]" in report["runtime_statuses"]["personality_tick_registry"]
+        assert "silence_tick[enabled]" in report["runtime_statuses"]["personality_tick_registry"]
+        assert "body_sense_tick[enabled]" in report["runtime_statuses"]["personality_tick_registry"]
+        assert capture_lifespan["scheduler_started"] == 1
+        assert {
+            "proactive_talk_periodic",
+            "inner_world_tick",
+            "silence_tick",
+            "body_sense_tick",
+        }.issubset(set(capture_lifespan["scheduler_task_ids_at_start"]))
 
 
 @pytest.mark.asyncio

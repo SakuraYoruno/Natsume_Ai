@@ -502,6 +502,18 @@ if (-not $healthOk) {
 }
 
 $hostPid = [int]$proc.Id
+$listeningPid = $null
+for ($i = 0; $i -lt 20; $i++) {
+  $candidatePid = Get-ListeningPid -ProbePort $Port
+  if ($null -ne $candidatePid -and [int]$candidatePid -gt 0) {
+    $listeningPid = [int]$candidatePid
+    break
+  }
+  Start-Sleep -Milliseconds 250
+}
+if ($null -ne $listeningPid) {
+  $hostPid = [int]$listeningPid
+}
 Set-Content -Path $pidFile -Value ([string]$hostPid) -Encoding ascii
 
 # ── M8 TASK-0107: OBS / MCP 子系统健康探测 ──────────────────────────────

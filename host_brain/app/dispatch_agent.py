@@ -1160,13 +1160,20 @@ async def dispatch_agent_sse_generator(
             asyncio.create_task(_async_post_process(
                 request_id=request_id, person_id=person_id, session_id=session_id,
                 user_message=sanitized_message, narrative=narrative,
-                emotion_context=emotion_context, bond_summary={}, ts_ms=ts_ms,
+                emotion_context=emotion_context, bond_summary=bond_summary, ts_ms=ts_ms,
                 render_target_lang=render_target_lang, total_latency_ms=total_latency_ms,
                 llm_latency_ms=0, first_token_ms=None, provider_name="", model_id="",
                 buffer_stream=False, delegated_agents=[],
                 retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
                 gov_decision=governor_result, pii_ingress_stats=pii_ingress_stats,
                 pii_egress_stats={},
+                trace_stage_meta={
+                    "top_agent_used": True,
+                    "dispatch_agent_used": True,
+                    "chat_agent_used": False,
+                    "dispatch_route": "recent_turn",
+                    "dispatch_reason": route_reason,
+                },
             ))
             return
 
@@ -1227,7 +1234,20 @@ async def dispatch_agent_sse_generator(
         ts_ms=ts_ms,
         intent_draft=intent_draft,
         llm_runtime=llm_runtime,
+        trace_stage_meta={
+            "top_agent_used": True,
+            "dispatch_agent_used": True,
+        },
     )
+
+    def _update_trace_stage_meta(**updates: Any) -> None:
+        current = dict(getattr(chat_input, "trace_stage_meta", {}) or {})
+        for key, value in updates.items():
+            if value is None:
+                current.pop(key, None)
+            else:
+                current[key] = value
+        chat_input.trace_stage_meta = current
 
     # ── 5. 多步骤计划执行（优先于单步 skill/delegate）────────────────────
 
@@ -1269,9 +1289,28 @@ async def dispatch_agent_sse_generator(
         )
         if plan_ctx is not None:
             chat_input.sub_agent_context = plan_ctx
+            _update_trace_stage_meta(
+                dispatch_route="plan",
+                dispatch_reason=route_reason,
+                dispatch_target=str(getattr(plan_ctx, "agent_id", None) or "plan_runner"),
+                chat_agent_used=True,
+                chat_mode="sub_agent",
+                chat_sub_agent_id=str(getattr(plan_ctx, "agent_id", None) or "plan_runner"),
+            )
             async for event in chat_agent_sse_generator(chat_input):
                 yield event
             return
+
+    if route not in {"task_progress", "recent_turn"}:
+        _route_name = route if route in {"chat", "delegate", "skill"} else "fallback_chat"
+        _update_trace_stage_meta(
+            dispatch_route=_route_name,
+            dispatch_reason=route_reason or (None if _route_name == route else f"unknown:{route}"),
+            dispatch_target=target_id or None,
+            chat_agent_used=True,
+            chat_mode="sub_agent" if route in {"delegate", "skill"} else "direct",
+            chat_sub_agent_id=None,
+        )
 
     # ── 5. 路由分发 ───────────────────────────────────────────────────
 
@@ -1307,13 +1346,20 @@ async def dispatch_agent_sse_generator(
         asyncio.create_task(_async_post_process(
             request_id=request_id, person_id=person_id, session_id=session_id,
             user_message=sanitized_message, narrative=narrative,
-            emotion_context=emotion_context, bond_summary={}, ts_ms=ts_ms,
+            emotion_context=emotion_context, bond_summary=bond_summary, ts_ms=ts_ms,
             render_target_lang=render_target_lang, total_latency_ms=total_latency_ms,
             llm_latency_ms=0, first_token_ms=None, provider_name="", model_id="",
             buffer_stream=False, delegated_agents=[],
             retrieval_summary={"status": "SKIPPED", "reason_code": "TASK_PROGRESS_DIRECT"},
             gov_decision=governor_result, pii_ingress_stats=pii_ingress_stats,
             pii_egress_stats={},
+            trace_stage_meta={
+                "top_agent_used": True,
+                "dispatch_agent_used": True,
+                "chat_agent_used": False,
+                "dispatch_route": "task_progress",
+                "dispatch_reason": route_reason,
+            },
         ))
         return
 
@@ -1472,6 +1518,7 @@ async def dispatch_agent_sse_generator(
                 )
 
         # 子 Agent 结果注入 ChatAgent 渲染（P1 核心改造：不再用 _render_delegated_result_naturally）
+        chat_input.sub_agent_context = sub_ctx
         chat_input.sub_agent_context = sub_ctx
         async for event in chat_agent_sse_generator(chat_input):
             yield event

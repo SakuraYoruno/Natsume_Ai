@@ -18,41 +18,43 @@ import {
   Heart,
   Sparkles,
 } from 'lucide-react'
+import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
+import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import MetricCard from '../components/MetricCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import PageHero from '../components/PageHero.jsx'
+import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import useAppStore from '../store/useAppStore.js'
 
 function SourceBadge({ source }) {
   const cls = source === 'override'
     ? 'bg-green-100 text-green-700 border-green-200'
     : 'bg-gray-100 text-gray-600 border-gray-200'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{source}</span>
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{source === 'override' ? '已覆盖' : '默认'}</span>
 }
 
 function TypeBadge({ value }) {
   const cls = value === 'json'
     ? 'bg-purple-100 text-purple-700 border-purple-200'
     : 'bg-blue-100 text-blue-700 border-blue-200'
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{value}</span>
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{value === 'json' ? '结构化' : '文本'}</span>
 }
 
 function flattenEntries(bundles) {
-  return bundles.flatMap(bundle => bundle.entries || [])
-}
-
-function StatCard({ icon: Icon, label, value, hint, tone = 'text-gray-900' }) {
-  return (
-    <div className="card p-4">
-      <div className="flex items-center gap-2 text-xs text-gray-500">
-        <Icon size={14} />
-        <span>{label}</span>
-      </div>
-      <div className={`mt-2 text-2xl font-bold ${tone}`}>{value ?? '—'}</div>
-      <div className="mt-1 text-xs text-gray-400">{hint ?? '—'}</div>
-    </div>
-  )
+  return bundles.flatMap((bundle) => bundle.entries || [])
 }
 
 export default function PersonaPromptOps() {
   const navigate = useNavigate()
+  const pollingEnabled = useAppStore((s) => s.pollingEnabled)
+  const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+    pollingEnabled,
+    pollingInterval,
+    windowMinutes: 60,
+  })
+
   const [bundles, setBundles] = useState([])
   const [selectedId, setSelectedId] = useState('')
   const [selected, setSelected] = useState(null)
@@ -69,7 +71,7 @@ export default function PersonaPromptOps() {
       const data = await fetchPersonaFirstBatchCatalog()
       const nextBundles = data.bundles || []
       setBundles(nextBundles)
-      const entryIds = flattenEntries(nextBundles).map(entry => entry.template_id)
+      const entryIds = flattenEntries(nextBundles).map((entry) => entry.template_id)
       if (!entryIds.length) {
         setSelected(null)
         setDraftContent('')
@@ -81,7 +83,7 @@ export default function PersonaPromptOps() {
         return current
       })
     } catch (error) {
-      toast.error(`加载 Persona 文案目录失败：${error.message}`)
+      toast.error(`加载人格文案目录失败：${error.message}`)
     } finally {
       setLoadingCatalog(false)
     }
@@ -104,18 +106,18 @@ export default function PersonaPromptOps() {
   }, [])
 
   useEffect(() => {
-    loadCatalog()
+    void loadCatalog()
   }, [loadCatalog])
 
   useEffect(() => {
     if (selectedId) {
-      loadDetail(selectedId)
+      void loadDetail(selectedId)
     }
   }, [selectedId, loadDetail])
 
   const selectedEntry = useMemo(() => {
     for (const bundle of bundles) {
-      const entry = (bundle.entries || []).find(item => item.template_id === selectedId)
+      const entry = (bundle.entries || []).find((item) => item.template_id === selectedId)
       if (entry) {
         return { bundle, entry }
       }
@@ -150,7 +152,7 @@ export default function PersonaPromptOps() {
       setDraftContent(data.item.override_content ?? data.item.resolved_content ?? '')
       setDraftEnabled(Boolean(data.item.enabled))
       await loadCatalog()
-      toast.success('Persona 文案已保存')
+      toast.success('人格文案已保存')
     } catch (error) {
       toast.error(`保存失败：${error.message}`)
     } finally {
@@ -205,10 +207,8 @@ export default function PersonaPromptOps() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">Persona 文案运营</h1>
-          <p className="text-sm text-gray-500">
-            第一批开放给 WebUI 的人格文案：自我叙事、主动表达、表达适配。
-          </p>
+          <h1 className="text-xl font-semibold text-gray-900">人格文案运营</h1>
+          <p className="text-sm text-gray-500">首批面向人格体验的核心文案模板：自我叙事、表达风格与关系感。</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button className="btn-secondary" onClick={() => navigate('/prompt-config')}>
@@ -221,30 +221,26 @@ export default function PersonaPromptOps() {
       </div>
 
       <DigitalLifeNav />
+      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
-      <div className="rounded-2xl border border-primary-100 bg-gradient-to-r from-primary-50 via-white to-pink-50 p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-medium text-primary">
-              <Heart size={12} />
-              人格文案运营台
-            </div>
-            <div className="mt-3 text-2xl font-bold text-gray-900">{summary.entries}</div>
-            <div className="mt-1 text-sm text-gray-600">
-              当前页聚焦第一批最影响人格体验的模板，方便你直接调口吻、温度和关系感。
-            </div>
-          </div>
+      <PageHero
+        icon={Heart}
+        eyebrow="人格文案运营台"
+        title={summary.entries}
+        description="聚焦首批最影响人格体验的模板，直接调整语气、温度和关系感。"
+        gradientClass="from-primary-50 via-white to-pink-50"
+        aside={(
           <div className="max-w-xl rounded-xl border border-pink-100 bg-pink-50 px-4 py-3 text-xs leading-6 text-pink-800">
-            这里适合调“像不像夏目蓝”；不适合埋业务逻辑、状态机规则或破坏 JSON 结构。
+            这里适合调“像不像夏目蓝”的表达风格；不适合改业务逻辑、状态机规则或 JSON 结构。
           </div>
-        </div>
-      </div>
+        )}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard icon={Database} label="专题包" value={summary.bundles} hint="按人格域分组" tone="text-blue-600" />
-        <StatCard icon={Wand2} label="模板数" value={summary.entries} hint="首批 Persona 文案" tone="text-purple-600" />
-        <StatCard icon={Sparkles} label="已覆盖" value={summary.override} hint="当前 override 项" tone="text-green-600" />
-        <StatCard icon={FileText} label="JSON 模板" value={summary.json} hint="结构化运营模板" tone="text-orange-500" />
+        <MetricCard icon={Database} label="专题包" value={summary.bundles} hint="按人格域分组" tone="text-blue-600" />
+        <MetricCard icon={Wand2} label="模板数" value={summary.entries} hint="首批人格文案" tone="text-purple-600" />
+        <MetricCard icon={Sparkles} label="已覆盖" value={summary.override} hint="当前覆盖项" tone="text-green-600" />
+        <MetricCard icon={FileText} label="JSON 模板" value={summary.json} hint="结构化文案模板" tone="text-orange-500" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[380px,1fr] gap-4">
@@ -252,10 +248,10 @@ export default function PersonaPromptOps() {
           <div className="rounded-xl border border-primary-100 bg-primary-50 p-3 text-sm text-primary-900">
             <div className="flex items-center gap-2 font-medium">
               <Wand2 size={15} />
-              这一页只放第一批最值得运营调的模板
+              当前页聚焦首批高价值可运营模板
             </div>
             <div className="mt-2 text-xs leading-6 text-primary-800">
-              优先调语气、温度、关系感和节奏感；不要改 JSON 键名，不要把提示词写成系统命令。
+              优先调语气、温度、关系感和节奏感；不要改 JSON 键名，也不要把提示词写成系统命令。
             </div>
           </div>
 
@@ -309,16 +305,14 @@ export default function PersonaPromptOps() {
               </div>
             ))}
             {!loadingCatalog && bundles.length === 0 && (
-              <div className="text-sm text-gray-400 text-center py-8">当前没有可运营的 Persona 模板</div>
+              <EmptyStateCard title="暂无人格模板" hint="等待目录同步完成后重试。" className="p-4" />
             )}
           </div>
         </div>
 
         <div className="card p-5">
           {!selected || !selectedEntry ? (
-            <div className="h-full min-h-[420px] flex items-center justify-center text-gray-400">
-              请选择一个 Persona 模板开始编辑
-            </div>
+            <EmptyStateCard title="请选择人格模板" hint="从左侧列表选择模板后开始编辑。" className="min-h-[420px] flex flex-col items-center justify-center" />
           ) : (
             <div className="space-y-4">
               <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -345,7 +339,7 @@ export default function PersonaPromptOps() {
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
                     <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
                       <Database size={14} />
-                      运营关注键
+                      运营关注点
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {(selectedEntry.entry.focus_keys || []).map((key) => (
@@ -405,7 +399,7 @@ export default function PersonaPromptOps() {
                       <RotateCcw size={14} /> 恢复默认
                     </button>
                     {isDirty && <span className="text-xs text-orange-500">有未保存修改</span>}
-                    {loadingDetail && <span className="text-xs text-gray-400">正在刷新模板详情…</span>}
+                    {loadingDetail && <span className="text-xs text-gray-400">正在同步模板详情…</span>}
                   </div>
                 </div>
 
@@ -429,18 +423,19 @@ export default function PersonaPromptOps() {
                     <div>locale：{selected.locale}</div>
                     <div>source：{selected.source}</div>
                     <div>override：{selected.has_override ? 'yes' : 'no'}</div>
-                    <div>
-                      updated：
-                      {selected.updated_at_ts_ms
-                        ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN')
-                        : '—'}
-                    </div>
+                    <div>updated：{selected.updated_at_ts_ms ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN') : '-'}</div>
                     {selected.content_type === 'json' && (
-                      <div className="text-orange-500">JSON 类型模板需要提交合法 JSON。</div>
+                      <div className="text-orange-500">JSON 类型模板需提交合法 JSON。</div>
                     )}
                   </div>
                 </div>
               </div>
+
+              {loadingDetail && (
+                <NoticeBanner variant="info" title="模板刷新中">
+                  正在更新当前模板详情…
+                </NoticeBanner>
+              )}
             </div>
           )}
         </div>

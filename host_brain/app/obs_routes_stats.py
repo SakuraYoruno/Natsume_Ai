@@ -9,7 +9,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -734,6 +734,265 @@ async def get_memory_stats(
         guard_reject_rate=guard_reject_rate,
         compress_rate=comp_rate,
         distill_count=distill_success,
+        timestamp=now,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ref #126: GET /obs/memory/resident-context — 常驻设定 / 人格风格注入快照
+# ---------------------------------------------------------------------------
+def _truncate_memory_preview(value: Any, limit: int = 96) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}…"
+
+
+def _resolve_style_source_path(style_root: str, canon_id: str | None) -> str:
+    normalized = str(canon_id or "").strip()
+    if not normalized:
+        return os.path.join(style_root, "style_profile_v5.json")
+    if normalized.endswith("_v5") or normalized in {"natsume_ai_cn", "natsume_ai_ja"}:
+        return os.path.join(style_root, "style_profile_v5.json")
+    return os.path.join(style_root, f"{normalized}.json")
+
+
+class ResidentCanonFileItem(BaseModel):
+    kind: str
+    doc_id: str
+    title: Optional[str] = None
+    source_path: Optional[str] = None
+    version: Optional[int] = None
+    status: Optional[str] = None
+    updated_by: Optional[str] = None
+    ts_ms: Optional[int] = None
+    preview: Optional[str] = None
+
+
+class ResidentStyleBindingItem(BaseModel):
+    node_id: str
+    canon_id: Optional[str] = None
+    version: Optional[int] = None
+    citation: Optional[str] = None
+    source_path: Optional[str] = None
+    tone_only: bool = True
+    unsafe_as_fact: bool = True
+    preview: Optional[str] = None
+
+
+class ResidentMemoryPersonaEvidenceItem(BaseModel):
+    kind: Optional[str] = None
+    source_ref: Optional[str] = None
+    evidence_ref: Optional[str] = None
+    emotion_color_tag: Optional[str] = None
+    suppression_flag: bool = False
+    distortion_level: Optional[float] = None
+    content: Optional[str] = None
+
+
+class ResidentMemoryContextResponse(BaseModel):
+    world_canon_documents: List[ResidentCanonFileItem]
+    persona_resident_documents: List[ResidentCanonFileItem]
+    style_canon_documents: List[ResidentCanonFileItem]
+    active_style_bindings: List[ResidentStyleBindingItem]
+    latest_style_pack_rows: List[ResidentStyleBindingItem]
+    latest_memory_persona_evidence: List[ResidentMemoryPersonaEvidenceItem]
+    latest_memory_recall_summary: Optional[str] = None
+    latest_request_id: Optional[str] = None
+    latest_session_id: Optional[str] = None
+    latest_render_target_lang: Optional[str] = None
+    latest_selected_tier: Optional[str] = None
+    prompt_context_available: bool = False
+    timestamp: int
+
+
+@router.get("/memory/resident-context", response_model=ResidentMemoryContextResponse)
+async def get_memory_resident_context():
+    """Ref #126: 常驻设定文件、风格绑定与最新人格证据快照。"""
+    now = _now_ms()
+    ledger = _get_ledger()
+    world_root = str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip()
+    style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
+    character_profile_path = str(
+        os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
+        or os.path.join("host_brain", "canon", "character", "character_profile.json")
+    ).strip()
+
+    world_docs: List[ResidentCanonFileItem] = []
+    try:
+        from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
+
+        world_store = WorldCanonStore(world_root=world_root, ledger=ledger)
+        for doc in world_store.list_documents():
+            world_docs.append(
+                ResidentCanonFileItem(
+                    kind="world",
+                    doc_id=str(getattr(doc, "doc_id", "") or ""),
+                    title=str(getattr(doc, "title", "") or "").strip() or None,
+                    source_path=str(getattr(doc, "source_path", "") or "").strip() or None,
+                    version=int(getattr(doc, "version", 0) or 0) or None,
+                    status=str(getattr(doc, "status", "") or "").strip() or None,
+                    updated_by=str(getattr(doc, "updated_by", "") or "").strip() or None,
+                    ts_ms=int(getattr(doc, "ts_ms", 0) or 0) or None,
+                    preview=_truncate_memory_preview(getattr(doc, "body", ""), limit=120) or None,
+                )
+            )
+    except Exception as exc:
+        logger.debug("resident world canon context degraded: %s", exc)
+
+    persona_docs: List[ResidentCanonFileItem] = []
+    try:
+        with open(character_profile_path, "r", encoding="utf-8-sig") as fp:
+            character_payload = json.load(fp)
+        persona_docs.append(
+            ResidentCanonFileItem(
+                kind="persona",
+                doc_id=str(character_payload.get("doc_id") or "character-profile").strip(),
+                title=str(character_payload.get("title") or "角色人设常驻文件").strip() or None,
+                source_path=character_profile_path,
+                version=(int(character_payload.get("version")) if character_payload.get("version") not in (None, "") else None),
+                status=str(character_payload.get("status") or "ACTIVE").strip() or None,
+                updated_by="character_profile",
+                ts_ms=(int(os.path.getmtime(character_profile_path) * 1000) if os.path.exists(character_profile_path) else None),
+                preview=_truncate_memory_preview(character_payload.get("instruction_cn"), limit=120) or None,
+            )
+        )
+    except Exception as exc:
+        logger.debug("resident persona context degraded: %s", exc)
+
+    style_docs: List[ResidentCanonFileItem] = []
+    try:
+        from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
+
+        style_store = StyleCanonStore(style_root=style_root, ledger=ledger)
+        for entry in style_store.list_entries():
+            style_docs.append(
+                ResidentCanonFileItem(
+                    kind="style",
+                    doc_id=str(getattr(entry, "canon_id", "") or ""),
+                    title=str(getattr(entry, "canon_id", "") or "").strip() or None,
+                    source_path=_resolve_style_source_path(style_root, getattr(entry, "canon_id", None)),
+                    version=int(getattr(entry, "version", 0) or 0) or None,
+                    status="ACTIVE",
+                    updated_by=str(getattr(entry, "updated_by", "") or "").strip() or None,
+                    ts_ms=int(getattr(entry, "ts_ms", 0) or 0) or None,
+                    preview=_truncate_memory_preview(getattr(entry, "content", ""), limit=120) or None,
+                )
+            )
+    except Exception as exc:
+        logger.debug("resident style canon context degraded: %s", exc)
+
+    latest_snapshot: dict[str, Any] = {}
+    active_style_bindings_raw: Mapping[str, Any] | None = None
+    latest_render_target_lang = "zh"
+    try:
+        from host_brain.app.chat_context_builder import (  # noqa: PLC0415
+            build_node_style_bindings,
+            get_latest_prompt_context_runtime_snapshot,
+        )
+
+        latest_snapshot = dict(get_latest_prompt_context_runtime_snapshot() or {})
+        latest_render_target_lang = str(latest_snapshot.get("render_target_lang") or "zh").strip().lower() or "zh"
+        active_style_bindings_raw = latest_snapshot.get("style_bindings")
+        if not isinstance(active_style_bindings_raw, Mapping) or not active_style_bindings_raw:
+            active_style_bindings_raw = build_node_style_bindings(render_target_lang=latest_render_target_lang)
+    except Exception as exc:
+        logger.debug("resident prompt-context snapshot unavailable: %s", exc)
+        latest_snapshot = {}
+        active_style_bindings_raw = {}
+
+    active_style_bindings: List[ResidentStyleBindingItem] = []
+    for node_id, row in dict(active_style_bindings_raw or {}).items():
+        if not isinstance(row, Mapping):
+            continue
+        canon_id = str(row.get("canon_id") or "").strip() or None
+        active_style_bindings.append(
+            ResidentStyleBindingItem(
+                node_id=str(node_id),
+                canon_id=canon_id,
+                version=(int(row.get("version")) if row.get("version") not in (None, "") else None),
+                citation=str(row.get("citation") or "").strip() or None,
+                source_path=_resolve_style_source_path(style_root, canon_id),
+                tone_only=bool(row.get("tone_only", True)),
+                unsafe_as_fact=bool(row.get("unsafe_as_fact", True)),
+                preview=_truncate_memory_preview(
+                    row.get("style_instruction") or row.get("instruction"),
+                    limit=88,
+                ) or None,
+            )
+        )
+
+    style_pack_raw = latest_snapshot.get("style_pack")
+    style_pack = dict(style_pack_raw) if isinstance(style_pack_raw, Mapping) else {}
+    style_rows = list(style_pack.get("style_canon") or []) if isinstance(style_pack.get("style_canon"), list) else []
+    latest_style_pack_rows: List[ResidentStyleBindingItem] = []
+    for row in style_rows:
+        if not isinstance(row, Mapping):
+            continue
+        canon_id = str(row.get("canon_id") or "").strip() or None
+        latest_style_pack_rows.append(
+            ResidentStyleBindingItem(
+                node_id=str(row.get("node_id") or row.get("slot") or "style_pack"),
+                canon_id=canon_id,
+                version=(int(row.get("version")) if row.get("version") not in (None, "") else None),
+                citation=str(row.get("citation") or "").strip() or None,
+                source_path=_resolve_style_source_path(style_root, canon_id),
+                tone_only=bool(row.get("tone_only", True)),
+                unsafe_as_fact=bool(row.get("unsafe_as_fact", True)),
+                preview=_truncate_memory_preview(
+                    row.get("style_instruction") or row.get("instruction"),
+                    limit=88,
+                ) or None,
+            )
+        )
+
+    memory_persona_evidence_raw = latest_snapshot.get("memory_persona_evidence")
+    memory_persona_rows = (
+        list(memory_persona_evidence_raw)
+        if isinstance(memory_persona_evidence_raw, list)
+        else []
+    )
+    latest_memory_persona_evidence: List[ResidentMemoryPersonaEvidenceItem] = []
+    for row in memory_persona_rows:
+        if not isinstance(row, Mapping):
+            continue
+        latest_memory_persona_evidence.append(
+            ResidentMemoryPersonaEvidenceItem(
+                kind=str(row.get("kind") or "").strip() or None,
+                source_ref=str(row.get("source_ref") or "").strip() or None,
+                evidence_ref=str(row.get("evidence_ref") or "").strip() or None,
+                emotion_color_tag=str(row.get("emotion_color_tag") or "").strip() or None,
+                suppression_flag=bool(row.get("suppression_flag", False)),
+                distortion_level=(
+                    float(row.get("distortion_level"))
+                    if row.get("distortion_level") not in (None, "")
+                    else None
+                ),
+                content=_truncate_memory_preview(row.get("content"), limit=120) or None,
+            )
+        )
+
+    prompt_context_observability = (
+        dict(latest_snapshot.get("prompt_context_observability") or {})
+        if isinstance(latest_snapshot.get("prompt_context_observability"), Mapping)
+        else {}
+    )
+
+    return ResidentMemoryContextResponse(
+        world_canon_documents=world_docs,
+        persona_resident_documents=persona_docs,
+        style_canon_documents=style_docs,
+        active_style_bindings=active_style_bindings,
+        latest_style_pack_rows=latest_style_pack_rows,
+        latest_memory_persona_evidence=latest_memory_persona_evidence,
+        latest_memory_recall_summary=str(latest_snapshot.get("memory_recall_summary") or "").strip() or None,
+        latest_request_id=str(latest_snapshot.get("request_id") or "").strip() or None,
+        latest_session_id=str(latest_snapshot.get("session_id") or "").strip() or None,
+        latest_render_target_lang=latest_render_target_lang or None,
+        latest_selected_tier=str(prompt_context_observability.get("selected_tier") or "").strip() or None,
+        prompt_context_available=bool(latest_snapshot),
         timestamp=now,
     )
 

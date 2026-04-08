@@ -51,7 +51,7 @@ def _get_mode_transition_service():
                 get_hard_state as _dep_get_hard_state,
                 set_sys_mode as _dep_set_sys_mode,
             )
-            ledger = _get_ledger_instance()
+            ledger = _get_ledger()
             _mode_transition_service = ModeTransitionService(
                 get_hard_state=_dep_get_hard_state,
                 set_sys_mode=_dep_set_sys_mode,
@@ -207,6 +207,7 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     motive_state: Dict[str, Any] = Field(default_factory=dict)
     response_policy: Dict[str, Any] = Field(default_factory=dict)
     runtime_summary: Dict[str, Any] = Field(default_factory=dict)
+    background_runtime: Dict[str, Any] = Field(default_factory=dict)
     slot_status: Dict[str, str] = Field(default_factory=dict)
     degraded: bool = False
     degraded_reasons: List[str] = Field(default_factory=list)
