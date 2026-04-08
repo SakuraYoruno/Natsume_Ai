@@ -308,14 +308,19 @@ def compute_emotion_echo(
     _persona_modifiers: dict[str, Any] = {}
     if personality_traits is not None:
         try:
-            from host_brain.persona.emotion_reactivity import EmotionReactivityProfile  # noqa: PLC0415
-            modifiers = EmotionReactivityProfile.compute_modifiers(
-                personality_traits, user_emotion_tag, bond_stage,
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            reactivity_payload = dict(
+                get_limbic_agent().resolve_emotion_reactivity_profile(
+                    personality_traits=personality_traits,
+                    user_emotion_tag=str(user_emotion_tag or ""),
+                    bond_stage=str(bond_stage or ""),
+                    echo_weight=float(echo_weight),
+                )
+                or {}
             )
-            _effective_echo_weight = EmotionReactivityProfile.apply_to_echo_weight(
-                echo_weight, modifiers,
-            )
-            _persona_modifiers = modifiers.as_dict()
+            _effective_echo_weight = float(reactivity_payload.get("effective_echo_weight", echo_weight))
+            _persona_modifiers = dict(reactivity_payload.get("persona_modifiers") or {})
         except (ImportError, Exception):
             pass  # 降级：不使用人格调制
 

@@ -131,13 +131,46 @@ def test_get_persona_growth_tracker_handles_import_failure(monkeypatch) -> None:
     real_import = __import__
 
     def _fake_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: ANN001, A002
-        if name == "host_brain.persona.persona_growth":
+        if name == "host_brain.tribe.prefrontal_agent":
             raise ImportError("missing")
         return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr("builtins.__import__", _fake_import)
 
     assert engine._get_persona_growth_tracker() is None
+
+
+def test_get_persona_growth_tracker_uses_prefrontal_proxy(monkeypatch) -> None:
+    class _FakePrefrontal:
+        def apply_stage_promotion_growth(self, **kwargs):  # noqa: ANN003
+            return {"applied": True, "reason": f"stage:{kwargs.get('to_stage')}"}
+
+        def apply_milestone_growth(self, **kwargs):  # noqa: ANN003
+            return {"applied": True, "reason": f"milestone:{kwargs.get('milestone_key')}"}
+
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.get_prefrontal_agent",
+        lambda: _FakePrefrontal(),
+    )
+
+    engine = bond_mod.BondStageEngine()
+    tracker = engine._get_persona_growth_tracker()
+    promoted = tracker.on_stage_promoted(
+        user_id="user-x",
+        from_stage="FRIEND",
+        to_stage="CLOSE_FRIEND",
+        ts_ms=10,
+    )
+    milestone = tracker.on_milestone(
+        user_id="user-x",
+        milestone_key="stage_promoted",
+        ts_ms=11,
+    )
+
+    assert promoted.applied is True
+    assert promoted.reason == "stage:CLOSE_FRIEND"
+    assert milestone.applied is True
+    assert milestone.reason == "milestone:stage_promoted"
 
 
 def test_get_bond_state_uses_session_id_identity() -> None:
@@ -224,4 +257,3 @@ def test_log_transition_falls_back_to_system_event_and_initial_state_can_noop() 
 
     assert ledger.calls[0][1] == "BOND_STAGE_TRANSITION"
     assert ledger.calls[0][2]["user_id"] == "sys-user"
-

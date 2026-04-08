@@ -311,6 +311,40 @@ class StageTransitionResult:
     detail: str
 
 
+@dataclass(frozen=True)
+class _GrowthTrackerResult:
+    applied: bool = False
+    reason: str = ""
+
+
+class _PrefrontalGrowthTrackerProxy:
+    def __init__(self, prefrontal_agent: Any) -> None:
+        self._prefrontal_agent = prefrontal_agent
+
+    def on_stage_promoted(self, *, user_id: str, from_stage: str, to_stage: str, ts_ms: int) -> _GrowthTrackerResult:
+        payload = self._prefrontal_agent.apply_stage_promotion_growth(
+            user_id=user_id,
+            from_stage=from_stage,
+            to_stage=to_stage,
+            ts_ms=ts_ms,
+        )
+        return _GrowthTrackerResult(
+            applied=bool((payload or {}).get("applied")),
+            reason=str((payload or {}).get("reason") or ""),
+        )
+
+    def on_milestone(self, *, user_id: str, milestone_key: str, ts_ms: int) -> _GrowthTrackerResult:
+        payload = self._prefrontal_agent.apply_milestone_growth(
+            user_id=user_id,
+            milestone_key=milestone_key,
+            ts_ms=ts_ms,
+        )
+        return _GrowthTrackerResult(
+            applied=bool((payload or {}).get("applied")),
+            reason=str((payload or {}).get("reason") or ""),
+        )
+
+
 # ---------------------------------------------------------------------------
 # BondStageEngine
 # ---------------------------------------------------------------------------
@@ -535,11 +569,12 @@ class BondStageEngine:
         if self._persona_growth_tracker is not None:
             return self._persona_growth_tracker
         try:
-            from host_brain.persona.persona_growth import PersonaGrowthTracker  # noqa: PLC0415
-            self._persona_growth_tracker = PersonaGrowthTracker()
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+            self._persona_growth_tracker = _PrefrontalGrowthTrackerProxy(get_prefrontal_agent())
             return self._persona_growth_tracker
         except Exception as exc:
-            _logger.warning("PersonaGrowthTracker 不可用: %s", exc)
+            _logger.warning("Prefrontal growth proxy 不可用: %s", exc)
             return None
 
     def get_state(self, user_id: str) -> BondScoreState:

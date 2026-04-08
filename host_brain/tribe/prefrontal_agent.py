@@ -1,0 +1,542 @@
+from __future__ import annotations
+
+import datetime as _dt
+import logging
+from dataclasses import dataclass, field
+from typing import Any, Mapping
+
+from host_brain.tribe.base_agent import TribeAgentDescriptor
+
+_logger = logging.getLogger("Natsume.prefrontal_agent")
+
+
+@dataclass(slots=True)
+class PrefrontalAgent:
+    descriptor: TribeAgentDescriptor = field(
+        default_factory=lambda: TribeAgentDescriptor(
+            agent_id="prefrontal_agent",
+            family="prefrontal",
+            capabilities=("self_reflection", "drift_guard", "evolution"),
+        )
+    )
+    _drift_detector: Any | None = field(default=None, init=False, repr=False)
+    _growth_feedback_collector: Any | None = field(default=None, init=False, repr=False)
+    _persona_growth_tracker: Any | None = field(default=None, init=False, repr=False)
+    _evolution_orchestrator: Any | None = field(default=None, init=False, repr=False)
+    _bond_style_engine: Any | None = field(default=None, init=False, repr=False)
+    _self_reflection: Any | None = field(default=None, init=False, repr=False)
+
+    def describe(self) -> dict[str, Any]:
+        return self.descriptor.to_dict()
+
+    def resolve_self_reflection_context(
+        self,
+        *,
+        persona_user_id: str,
+        timeline_summary: Mapping[str, Any] | None,
+        timeline_diary: Mapping[str, Any] | None,
+        bond_state_obj: Any,
+        bond_summary: Mapping[str, Any] | None,
+        now_ms: int,
+        trigger_reason: str = "runtime_snapshot",
+    ) -> dict[str, Any]:
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+        from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
+
+        persona_engine = PersonaEngine.get_instance()
+        snapshot_obj = persona_engine.get_self_model_snapshot(
+            str(persona_user_id or "user_1"),
+            timeline_summary=dict(timeline_summary or {}),
+            timeline_diary=dict(timeline_diary or {}),
+            bond_state=bond_state_obj,
+            bond_summary=dict(bond_summary or {}),
+            last_deep_talk_ts_ms=int(getattr(bond_state_obj, "last_event_ts_ms", 0) or 0),
+            current_ts_ms=int(now_ms),
+        )
+        if hasattr(snapshot_obj, "as_dict"):
+            snapshot = dict(snapshot_obj.as_dict() or {})
+        elif isinstance(snapshot_obj, Mapping):
+            snapshot = dict(snapshot_obj)
+        else:
+            snapshot = {}
+        pulse = dict(
+            build_self_reflection_pulse(
+                snapshot,
+                trigger_reason=str(trigger_reason or "runtime_snapshot"),
+            )
+            or {}
+        ) if snapshot else {}
+        return {
+            "self_model_snapshot": snapshot,
+            "self_reflection_pulse": pulse,
+        }
+
+    def resolve_style_evolution_summary(self) -> dict[str, Any]:
+        from host_brain.persona.drift_detector import get_drift_detector  # noqa: PLC0415
+
+        summary = get_drift_detector().get_style_evolution_summary()
+        if isinstance(summary, Mapping):
+            return dict(summary)
+        return {}
+
+    def resolve_persona_traits(self, *, persona_user_id: str) -> Any:
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+        from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
+
+        try:
+            return PersonaEngine.get_instance().get_traits(str(persona_user_id or "user_1"))
+        except Exception:
+            return PersonalityTraits.from_baseline()
+
+    def resolve_persona_expression_hint(
+        self,
+        *,
+        persona_user_id: str,
+        bond_stage: str,
+        user_emotion_tag: str,
+        user_message: str,
+        valence: float,
+        arousal: float,
+        dominance: float,
+        ts_ms: int = 0,
+    ) -> dict[str, Any]:
+        from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+        from host_brain.persona.expression_adapter import PersonaExpressionAdapter  # noqa: PLC0415
+
+        adapter = PersonaExpressionAdapter()
+        traits = self.resolve_persona_traits(persona_user_id=persona_user_id)
+        emotion_vector = EmotionVector(
+            valence=float(valence),
+            arousal=float(arousal),
+            dominance=float(dominance),
+            ts_ms=int(ts_ms),
+        )
+        hint = adapter.adapt(
+            traits,
+            emotion_vector,
+            str(bond_stage or "STRANGER"),
+            user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
+            user_message=str(user_message or ""),
+        )
+        follow_up_tendency = getattr(
+            hint,
+            "follow_up_tendency",
+            getattr(hint, "追问倾向", 0.0),
+        )
+        return {
+            "style_hint": str(getattr(hint, "style_hint", "") or ""),
+            "tone": str(getattr(hint, "tone", "") or ""),
+            "echo_weight_modifier": float(getattr(hint, "echo_weight_modifier", 0.0) or 0.0),
+            "follow_up_tendency": float(follow_up_tendency or 0.0),
+            "pace_hint": str(getattr(hint, "pace_hint", "") or ""),
+        }
+
+    def resolve_bond_style_instruction(
+        self,
+        *,
+        bond_stage: str,
+        intimacy_score: float,
+        mood_state: str,
+        natsume_mood: str,
+        rift_active: bool,
+        rift_severity: str,
+        rift_progress: float,
+        bond_trend: str,
+        texture_hint: str = "",
+        shared_memory_hints: list[str] | None = None,
+    ) -> str:
+        payload = self.resolve_bond_style_payload(
+            bond_stage=bond_stage,
+            intimacy_score=intimacy_score,
+            mood_state=mood_state,
+            natsume_mood=natsume_mood,
+            rift_active=rift_active,
+            rift_severity=rift_severity,
+            rift_progress=rift_progress,
+            bond_trend=bond_trend,
+            texture_hint=texture_hint,
+            shared_memory_hints=shared_memory_hints,
+        )
+        return str(payload.get("prompt_injection") or "")
+
+    def resolve_bond_style_payload(
+        self,
+        *,
+        bond_stage: str,
+        intimacy_score: float,
+        mood_state: str,
+        natsume_mood: str,
+        rift_active: bool,
+        rift_severity: str,
+        rift_progress: float,
+        bond_trend: str,
+        texture_hint: str = "",
+        shared_memory_hints: list[str] | None = None,
+    ) -> dict[str, Any]:
+        from host_brain.persona.bond_aware_style import BondAwareStyleEngine  # noqa: PLC0415
+
+        if self._bond_style_engine is None:
+            self._bond_style_engine = BondAwareStyleEngine()
+        result = self._bond_style_engine.generate(
+            bond_stage=str(bond_stage or "STRANGER"),
+            intimacy_score=float(intimacy_score or 0.0),
+            mood_state=str(mood_state or "neutral"),
+            natsume_mood=str(natsume_mood or "NEUTRAL"),
+            rift_active=bool(rift_active),
+            rift_severity=str(rift_severity or "medium"),
+            rift_progress=float(rift_progress or 0.0),
+            bond_trend=str(bond_trend or ""),
+            texture_hint=str(texture_hint or ""),
+            shared_memory_hints=list(shared_memory_hints or []) or None,
+        )
+        as_dict_payload = {}
+        if hasattr(result, "as_dict"):
+            maybe = result.as_dict()
+            if isinstance(maybe, Mapping):
+                as_dict_payload = dict(maybe)
+        elif isinstance(result, Mapping):
+            as_dict_payload = dict(result)
+        return {
+            "as_dict": as_dict_payload,
+            "prompt_injection": str(getattr(result, "prompt_injection", "") or ""),
+            "forbidden_patterns": list(getattr(result, "forbidden_patterns", []) or []),
+            "intimacy_level": float(
+                getattr(
+                    result,
+                    "intimacy_level",
+                    as_dict_payload.get("intimacy_level", 0.0),
+                )
+                or 0.0
+            ),
+            "bond_stage": str(as_dict_payload.get("bond_stage") or bond_stage or "STRANGER"),
+        }
+
+    def run_self_reflection_cycle(
+        self,
+        *,
+        turn_count: int,
+        timeline_summary: Mapping[str, Any] | None,
+        timeline_diary: Mapping[str, Any] | None,
+        current_emotion: str,
+        bond_state: Any | None,
+        bond_summary: Mapping[str, Any] | None,
+        persona_changes: list[Any] | None,
+        last_deep_talk_ts_ms: int,
+        current_ts_ms: int,
+        growth_awareness: Mapping[str, Any] | None,
+        growth_summary: Mapping[str, Any] | None,
+        style_evolution: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from host_brain.persona.self_reflection import SelfReflection  # noqa: PLC0415
+
+        if self._self_reflection is None:
+            self._self_reflection = SelfReflection()
+        reflection = self._self_reflection
+        pulse = reflection.maybe_generate(
+            turn_count=int(turn_count),
+            timeline_summary=dict(timeline_summary or {}),
+            timeline_diary=dict(timeline_diary or {}),
+            current_emotion=str(current_emotion or ""),
+            bond_state=bond_state,
+            bond_summary=dict(bond_summary or {}),
+            persona_changes=list(persona_changes or []),
+            last_deep_talk_ts_ms=int(last_deep_talk_ts_ms),
+            current_ts_ms=int(current_ts_ms),
+            growth_awareness=dict(growth_awareness or {}),
+            growth_summary=dict(growth_summary or {}),
+            style_evolution=dict(style_evolution or {}),
+        )
+        snapshot: dict[str, Any] = {}
+        if isinstance(pulse, Mapping):
+            try:
+                snapshot_obj = reflection._model.build_snapshot(  # type: ignore[attr-defined]
+                    timeline_summary=dict(timeline_summary or {}),
+                    timeline_diary=dict(timeline_diary or {}),
+                    bond_state=bond_state,
+                    bond_summary=dict(bond_summary or {}),
+                    persona_changes=list(persona_changes or []),
+                    last_deep_talk_ts_ms=int(last_deep_talk_ts_ms),
+                    current_ts_ms=int(current_ts_ms),
+                )
+                snapshot = dict(snapshot_obj or {})
+                snapshot = dict(reflection._validate_consistency(snapshot, bond_state) or {})  # type: ignore[attr-defined]
+            except Exception:
+                snapshot = {}
+        return {
+            "self_reflection_pulse": dict(pulse or {}) if isinstance(pulse, Mapping) else {},
+            "snapshot": snapshot,
+        }
+
+    def align_self_reflection_pulse(
+        self,
+        *,
+        pulse: Mapping[str, Any] | None,
+        snapshot: Mapping[str, Any] | None = None,
+        offline_state: Mapping[str, Any] | None = None,
+        bond_summary: Mapping[str, Any] | None = None,
+        motive_state: Mapping[str, Any] | None = None,
+        response_policy: Mapping[str, Any] | None = None,
+        runtime_flags: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from host_brain.persona.self_reflection import align_self_reflection_pulse  # noqa: PLC0415
+
+        aligned = align_self_reflection_pulse(
+            dict(pulse or {}),
+            snapshot=dict(snapshot or {}),
+            offline_state=dict(offline_state or {}),
+            bond_summary=dict(bond_summary or {}),
+            motive_state=dict(motive_state or {}),
+            response_policy=dict(response_policy or {}),
+            runtime_flags=dict(runtime_flags or {}),
+        )
+        return dict(aligned or {})
+
+    def run_evolution_cycle(self, *, system_intent: dict[str, Any], logger: Any | None = None) -> dict[str, Any]:
+        runtime_logger = logger or _logger
+        try:
+            from host_brain.app.emotion_context import _global_emotion_timeline  # noqa: PLC0415
+            from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            orchestrator = EvolutionOrchestrator()
+            args = dict((system_intent or {}).get("args") or {})
+            user_id = str(args.get("user_id") or "user_1")
+            date = str(args.get("date") or _dt.date.today().isoformat())
+
+            timeline_summary: dict[str, Any] = {}
+            timeline_diary: dict[str, Any] = {}
+            try:
+                timeline_summary = _global_emotion_timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
+                timeline_diary = _global_emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
+            except Exception:
+                pass
+
+            bond_state = None
+            bond_summary: dict[str, Any] = {}
+            try:
+                social_snapshot = get_social_brain_agent().resolve_bond_snapshot(person_id=user_id)
+                bond_state = social_snapshot.get("bond_state_obj")
+                bond_summary = dict(social_snapshot.get("bond_summary") or {})
+                if not bond_summary:
+                    bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(
+                        session_id="default",
+                        user_id=user_id,
+                    )
+            except Exception:
+                pass
+
+            result = orchestrator.run_evolution_cycle(
+                user_id=user_id,
+                date=date,
+                timeline_summary=timeline_summary,
+                timeline_diary=timeline_diary,
+                bond_state=bond_state,
+                bond_summary=bond_summary,
+            )
+            runtime_logger.info(
+                "evolution cycle finished: date=%s traits_changed=%s errors=%d",
+                date,
+                result.traits_changed,
+                len(result.errors),
+            )
+            return {
+                "status": "OK",
+                "cycle_id": result.cycle_id,
+                "traits_changed": result.traits_changed,
+                "growth_awareness": result.growth_awareness,
+                "errors": result.errors,
+            }
+        except Exception as exc:
+            runtime_logger.warning("evolution cycle failed (degraded): %s", exc)
+            return {
+                "status": "DEGRADED",
+                "reason_code": "EVOLUTION_CYCLE_FAILED",
+                "detail": str(exc),
+            }
+
+    def resolve_persona_change_log(self, *, persona_user_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+
+        entries = PersonaEngine.get_instance().get_change_log(
+            str(persona_user_id or "user_1"),
+            limit=max(1, int(limit)),
+        )
+        if not isinstance(entries, list):
+            return []
+        return [dict(item) if isinstance(item, Mapping) else {"value": item} for item in entries]
+
+    def resolve_growth_awareness(self) -> dict[str, Any]:
+        orchestrator = self._get_evolution_orchestrator()
+        payload = orchestrator.get_last_growth_awareness()
+        if isinstance(payload, Mapping):
+            return dict(payload)
+        return {}
+
+    def resolve_growth_summary(self, *, persona_user_id: str, now_ts_ms: int) -> dict[str, Any]:
+        orchestrator = self._get_evolution_orchestrator()
+        payload = orchestrator.get_growth_summary(
+            str(persona_user_id or "user_1"),
+            now_ts_ms=int(now_ts_ms),
+        )
+        if isinstance(payload, Mapping):
+            return dict(payload)
+        return {}
+
+    def run_persona_drift_cycle(
+        self,
+        *,
+        llm_output_text: str,
+        user_input_text: str,
+    ) -> dict[str, Any]:
+        from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
+        from host_brain.persona.drift_detector import PersonaDriftDetector  # noqa: PLC0415
+
+        if self._drift_detector is None:
+            self._drift_detector = PersonaDriftDetector()
+        detector = self._drift_detector
+        result = detector.on_turn(
+            llm_output_text=str(llm_output_text or ""),
+            user_input_text=str(user_input_text or ""),
+        )
+        if result is None:
+            return {}
+        payload = {
+            "alert_level": str(getattr(result, "alert_level", "") or "").strip().upper(),
+            "drift_dims": list(getattr(result, "drift_dims", []) or []),
+            "correction_hint": str(getattr(result, "correction_hint", "") or ""),
+        }
+        if payload["alert_level"] in {"MODERATE", "SEVERE"}:
+            try:
+                hard_state = get_hard_state()
+                if hard_state is not None:
+                    hard_state.set("drift_correction_hint", payload["correction_hint"])
+            except Exception:
+                pass
+        return payload
+
+    def run_growth_feedback_cycle(
+        self,
+        *,
+        session_id: str,
+        user_message: str,
+        assistant_reply: str,
+    ) -> dict[str, Any]:
+        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+        from host_brain.persona.growth_feedback_collector import GrowthFeedbackCollector  # noqa: PLC0415
+
+        if self._growth_feedback_collector is None:
+            self._growth_feedback_collector = GrowthFeedbackCollector()
+        collector = self._growth_feedback_collector
+        tracker = self._get_persona_growth_tracker()
+        if tracker is None:
+            return {
+                "user_id": resolve_bond_user_id(session_id=str(session_id or "default")),
+                "feedback_count": 0,
+                "applied": False,
+                "triggered_rules": [],
+            }
+        user_id = resolve_bond_user_id(session_id=str(session_id or "default"))
+        feedbacks = list(
+            GrowthFeedbackCollector.extract_engagement_signals(str(user_message or ""))
+            or []
+        )
+        for feedback in feedbacks:
+            collector.add_feedback(user_id, feedback)
+
+        growth_result = None
+        if feedbacks:
+            growth_result = tracker.on_interaction_cycle(
+                user_id=user_id,
+                feedback_collector=collector,
+                user_message=str(user_message or ""),
+                assistant_reply=str(assistant_reply or ""),
+            )
+        return {
+            "user_id": user_id,
+            "feedback_count": len(feedbacks),
+            "applied": bool(getattr(growth_result, "applied", False)),
+            "triggered_rules": list(getattr(growth_result, "triggered_rules", []) or []),
+        }
+
+    def apply_stage_promotion_growth(
+        self,
+        *,
+        user_id: str,
+        from_stage: str,
+        to_stage: str,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        tracker = self._get_persona_growth_tracker()
+        if tracker is None:
+            return {"applied": False, "reason": "tracker_unavailable"}
+        try:
+            result = tracker.on_stage_promoted(
+                user_id=str(user_id or "user_1"),
+                from_stage=str(from_stage or "STRANGER"),
+                to_stage=str(to_stage or "STRANGER"),
+                ts_ms=int(ts_ms),
+            )
+            return {
+                "applied": bool(getattr(result, "applied", False)),
+                "reason": str(getattr(result, "reason", "") or ""),
+            }
+        except Exception as exc:
+            return {"applied": False, "reason": str(exc)}
+
+    def apply_milestone_growth(
+        self,
+        *,
+        user_id: str,
+        milestone_key: str,
+        ts_ms: int,
+    ) -> dict[str, Any]:
+        tracker = self._get_persona_growth_tracker()
+        if tracker is None:
+            return {"applied": False, "reason": "tracker_unavailable"}
+        try:
+            result = tracker.on_milestone(
+                user_id=str(user_id or "user_1"),
+                milestone_key=str(milestone_key or ""),
+                ts_ms=int(ts_ms),
+            )
+            return {
+                "applied": bool(getattr(result, "applied", False)),
+                "reason": str(getattr(result, "reason", "") or ""),
+            }
+        except Exception as exc:
+            return {"applied": False, "reason": str(exc)}
+
+    def _get_persona_growth_tracker(self) -> Any | None:
+        from host_brain.persona.persona_growth import PersonaGrowthTracker  # noqa: PLC0415
+
+        if self._persona_growth_tracker is None:
+            try:
+                self._persona_growth_tracker = PersonaGrowthTracker()
+            except Exception:
+                return None
+        return self._persona_growth_tracker
+
+    def _get_evolution_orchestrator(self) -> Any:
+        from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
+
+        if self._evolution_orchestrator is None:
+            self._evolution_orchestrator = EvolutionOrchestrator()
+        return self._evolution_orchestrator
+
+
+_PREFRONTAL_AGENT: PrefrontalAgent | None = None
+
+
+def get_prefrontal_agent() -> PrefrontalAgent:
+    global _PREFRONTAL_AGENT
+    if _PREFRONTAL_AGENT is None:
+        _PREFRONTAL_AGENT = PrefrontalAgent()
+    return _PREFRONTAL_AGENT
+
+
+def set_prefrontal_agent(agent: PrefrontalAgent | None) -> None:
+    global _PREFRONTAL_AGENT
+    _PREFRONTAL_AGENT = agent
+
+
+__all__ = ["PrefrontalAgent", "get_prefrontal_agent", "set_prefrontal_agent"]
