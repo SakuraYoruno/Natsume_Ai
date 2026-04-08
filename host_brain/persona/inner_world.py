@@ -85,6 +85,17 @@ _INNER_STREAM_MIN_INTERVAL_MS = int(
 _INNER_STREAM_CALM_INTERVAL_MS = int(
     float(os.environ.get("NATSUME_INNER_STREAM_CALM_INTERVAL_S", "360")) * 1000
 )
+_INNER_WORLD_LLM_ENABLED = str(
+    os.environ.get("NATSUME_INNER_WORLD_LLM_ENABLED", "true")
+).strip().lower() not in {"0", "false", "no", "off"}
+_INNER_WORLD_LLM_TIMEOUT_MS = max(
+    800,
+    int(float(os.environ.get("NATSUME_INNER_WORLD_LLM_TIMEOUT_S", "15")) * 1000),
+)
+_INNER_WORLD_LLM_CACHE_TTL_MS = max(
+    5_000,
+    int(float(os.environ.get("NATSUME_INNER_WORLD_LLM_CACHE_TTL_S", "120")) * 1000),
+)
 _TOPIC_MOJIBAKE_RE = re.compile(r"[ÃÂÄÅÇÉÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]")
 _NOISE_TOPIC_VALUES = {
     "ok",
@@ -100,6 +111,11 @@ _NOISE_TOPIC_VALUES = {
     "是的",
     "是的呢",
     "好",
+}
+_INNER_WORLD_LLM_CACHE_LOCK = threading.Lock()
+_INNER_WORLD_LLM_CACHE: dict[str, Any] = {
+    "resolved_at_ms": 0,
+    "runtime": None,
 }
 
 _RUNTIME_TEXTS_DEFAULT: dict[str, Any] = {
@@ -203,6 +219,7 @@ class InnerWorldState:
     spontaneous_event_count: int = 0
     last_spontaneous_ts_ms: int = 0
     last_spontaneous_note: str = ""
+    last_spontaneous_source: str = ""
     inner_stream: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -226,6 +243,7 @@ class InnerWorldState:
             spontaneous_event_count=int(d.get("spontaneous_event_count", 0)),
             last_spontaneous_ts_ms=int(d.get("last_spontaneous_ts_ms", 0)),
             last_spontaneous_note=str(d.get("last_spontaneous_note", "")),
+            last_spontaneous_source=str(d.get("last_spontaneous_source", "")),
             inner_stream=list(d.get("inner_stream", [])),
         )
 
@@ -310,6 +328,19 @@ class OfflineInnerWorld:
         with self._lock:
             state = self._load_state(uid)
             state.anticipation_topics = _sanitize_anticipation_topics(state.anticipation_topics)
+            state.inner_stream = _sanitize_inner_stream_events(state.inner_stream)
+            if state.inner_stream:
+                latest_event = dict(state.inner_stream[-1])
+                state.last_spontaneous_note = str(latest_event.get("note") or "").strip()
+                state.last_spontaneous_ts_ms = int(latest_event.get("ts_ms") or state.last_spontaneous_ts_ms or 0)
+                state.last_spontaneous_source = str(latest_event.get("source") or state.last_spontaneous_source or "fallback")
+                if int(state.spontaneous_event_count or 0) < len(state.inner_stream):
+                    state.spontaneous_event_count = len(state.inner_stream)
+            else:
+                state.last_spontaneous_note = ""
+                state.last_spontaneous_ts_ms = 0
+                state.last_spontaneous_source = ""
+                state.spontaneous_event_count = 0
             last_tick = state.last_tick_ts_ms
             if last_tick <= 0:
                 # 首次 tick，初始化时间戳
@@ -325,6 +356,7 @@ class OfflineInnerWorld:
                     "user_id": uid,
                     "continuity_score": round(float(state.continuity_score or 0.0), 3),
                     "spontaneous_event_count": int(state.spontaneous_event_count or 0),
+                    "last_spontaneous_source": str(state.last_spontaneous_source or ""),
                 }
 
             elapsed_ms = now_ms - last_tick
@@ -463,6 +495,7 @@ class OfflineInnerWorld:
             "spontaneous_event_count": int(state.spontaneous_event_count or 0),
             "last_spontaneous_ts_ms": int(state.last_spontaneous_ts_ms or 0),
             "last_spontaneous_note": str(state.last_spontaneous_note or ""),
+            "last_spontaneous_source": str(state.last_spontaneous_source or ""),
             "inner_stream_size": len(list(state.inner_stream or [])),
         }
 
@@ -608,6 +641,19 @@ class OfflineInnerWorld:
                 data = json.loads(fp.read_text(encoding="utf-8"))
                 state = InnerWorldState.from_dict(data)
                 state.anticipation_topics = _sanitize_anticipation_topics(state.anticipation_topics)
+                state.inner_stream = _sanitize_inner_stream_events(state.inner_stream)
+                if state.inner_stream:
+                    latest_event = dict(state.inner_stream[-1])
+                    state.last_spontaneous_note = str(latest_event.get("note") or "").strip()
+                    state.last_spontaneous_ts_ms = int(latest_event.get("ts_ms") or state.last_spontaneous_ts_ms or 0)
+                    state.last_spontaneous_source = str(latest_event.get("source") or state.last_spontaneous_source or "fallback")
+                    if int(state.spontaneous_event_count or 0) < len(state.inner_stream):
+                        state.spontaneous_event_count = len(state.inner_stream)
+                else:
+                    state.last_spontaneous_note = ""
+                    state.last_spontaneous_ts_ms = 0
+                    state.last_spontaneous_source = ""
+                    state.spontaneous_event_count = 0
                 self._states[user_id] = state
                 return state
             except Exception as exc:
@@ -679,6 +725,22 @@ def _build_inner_stream_note(
     offline_hours: float,
     now_ms: int,
 ) -> str:
+    note, _focus = _build_inner_stream_note_with_focus(
+        state=state,
+        absence_band=absence_band,
+        offline_hours=offline_hours,
+        now_ms=now_ms,
+    )
+    return note
+
+
+def _build_inner_stream_note_with_focus(
+    *,
+    state: InnerWorldState,
+    absence_band: str,
+    offline_hours: float,
+    now_ms: int,
+) -> tuple[str, str]:
     templates = _load_runtime_texts()
     topic = _pick_inner_stream_topic(state.anticipation_topics)
     topic_phrase = _topic_to_inner_phrase(topic)
@@ -700,54 +762,261 @@ def _build_inner_stream_note(
         topic=topic_phrase or "那个还没说完的话题",
         hours=round(max(0.0, offline_hours), 1),
     )
-
-    fallback_pool = {
-        "recent": [
-            "刚安静下来，脑海还在复盘今天的细节。",
-            "安静的时候，思绪会把白天的片段慢慢串起来。",
-            f"有个小念头一直在回放：{topic_phrase}。" if topic_phrase else "有个小念头一直在回放，但还没到开口的时候。",
-        ],
-        "6h_plus": [
-            f"这几个小时里，思绪总会回到{topic_phrase}。" if topic_phrase else "这几个小时里，很多片段会反复浮上来。",
-            "情绪没有停着，会自己一点点偏移。",
-            "会下意识想，下次该怎么把话说得更顺一点。",
-        ],
-        "24h_plus": [
-            f"隔了一天，心里还挂着{topic_phrase}。" if topic_phrase else "隔了一天，心里还是有未完成感。",
-            "不是静止，而是在慢慢酝酿下一次开口。",
-            "时间拉开后，很多感觉会变得更清晰。",
-        ],
-        "72h_plus": [
-            f"这几天里，心里会反复绕回{topic_phrase}。" if topic_phrase else "这几天里，总有某个念头会反复出现。",
-            "等待感在变重，但表达会更谨慎。",
-            "情绪层层沉下来，反而更容易看清自己在意什么。",
-        ],
-        "7d_plus": [
-            f"很久没聊时，{topic_phrase}还是会悄悄浮上来。" if topic_phrase else "时间拉长后，想念会变成更深的背景音。",
-            "并不空白，只是变成了更慢、更深的内在流。",
-            "有些话不急着说，但会一直在心里发酵。",
-        ],
-    }
-
-    candidates: list[str] = []
-    if template_text:
-        candidates.append(template_text)
-    candidates.extend(fallback_pool.get(band_key) or fallback_pool["recent"])
-
+    selected_focus = _pick_inner_stream_focus(
+        state=state,
+        topic_phrase=topic_phrase,
+        absence_band=absence_band,
+        now_ms=now_ms,
+    )
+    pools = _build_inner_stream_focus_pools(
+        band_key=band_key,
+        topic_phrase=topic_phrase,
+    )
+    ordered_focus = [selected_focus] + [
+        focus
+        for focus in ("self", "state", "plan", "topic")
+        if focus != selected_focus
+    ]
+    candidate_pairs: list[tuple[str, str]] = []
+    for focus in ordered_focus:
+        focus_pool = list(pools.get(focus) or [])
+        if focus == "topic" and template_text:
+            focus_pool = [template_text, *focus_pool]
+        candidate_pairs.extend(
+            (focus, str(text or "").strip())
+            for text in focus_pool
+            if str(text or "").strip()
+        )
     emotional_suffix = _inner_stream_emotion_suffix(
         state=state,
         absence_band=absence_band,
         now_ms=now_ms,
     )
     if emotional_suffix:
-        candidates.extend([f"{str(item).rstrip('。')}，{emotional_suffix}" for item in candidates if str(item).strip()])
+        candidate_pairs.extend([
+            (focus, f"{str(item).rstrip('。')}，{emotional_suffix}")
+            for focus, item in candidate_pairs
+            if str(item).strip()
+        ])
 
-    normalized_candidates = [_finalize_inner_note_text(item) for item in candidates if str(item).strip()]
+    normalized_pairs = [
+        (focus, _finalize_inner_note_text(text))
+        for focus, text in candidate_pairs
+        if str(text).strip()
+    ]
+    normalized_pairs = [(focus, text) for focus, text in normalized_pairs if text]
     return _select_inner_stream_note_candidate(
-        candidates=normalized_candidates,
+        candidates=normalized_pairs,
         state=state,
         now_ms=now_ms,
     )
+
+
+def _build_inner_stream_event_content(
+    *,
+    state: InnerWorldState,
+    absence_band: str,
+    offline_hours: float,
+    now_ms: int,
+) -> tuple[str, str, str, str]:
+    llm_note, llm_focus, llm_reason = _generate_inner_stream_note_from_llm(
+        state=state,
+        absence_band=absence_band,
+        offline_hours=offline_hours,
+        now_ms=now_ms,
+    )
+    if llm_note:
+        return llm_note, llm_focus or "self", "llm", ""
+    fallback_note, fallback_focus = _build_inner_stream_note_with_focus(
+        state=state,
+        absence_band=absence_band,
+        offline_hours=offline_hours,
+        now_ms=now_ms,
+    )
+    return fallback_note, fallback_focus or "self", "fallback", llm_reason
+
+
+def _generate_inner_stream_note_from_llm(
+    *,
+    state: InnerWorldState,
+    absence_band: str,
+    offline_hours: float,
+    now_ms: int,
+) -> tuple[str, str, str]:
+    try:
+        from host_brain.persona.inner_activity_agent import generate_inner_activity_note  # noqa: PLC0415
+
+        topic = _pick_inner_stream_topic(state.anticipation_topics)
+        topic_phrase = _topic_to_inner_phrase(topic)
+        note, focus, reason, _meta = generate_inner_activity_note(
+            persona_user_id=str(state.user_id or "user_1"),
+            absence_band=absence_band,
+            offline_hours=offline_hours,
+            inner_state=state.as_dict(),
+            now_ms=now_ms,
+            topic_phrase=topic_phrase,
+        )
+        return str(note or ""), str(focus or ""), str(reason or "")
+    except Exception as agent_exc:
+        return "", "", f"INNER_ACTIVITY_AGENT_ERROR:{str(agent_exc)[:96]}"
+
+    if not _INNER_WORLD_LLM_ENABLED:
+        return "", "", "INNER_WORLD_LLM_DISABLED"
+
+    runtime = _resolve_inner_world_llm_runtime(now_ms=now_ms)
+    if not isinstance(runtime, Mapping):
+        return "", "", "INNER_WORLD_LLM_RUNTIME_UNAVAILABLE"
+    if not bool(runtime.get("available")):
+        return "", "", str(runtime.get("route_reason_code") or "INNER_WORLD_LLM_UNAVAILABLE")
+
+    provider_name = str(runtime.get("provider_name") or "").strip()
+    model_id = str(runtime.get("model_id") or "").strip()
+    api_key = str(runtime.get("llm_api_key") or "").strip()
+    base_url_override = str(runtime.get("base_url_override") or "").strip() or None
+    timeout_ms = max(800, min(int(runtime.get("timeout_ms") or _INNER_WORLD_LLM_TIMEOUT_MS), _INNER_WORLD_LLM_TIMEOUT_MS))
+    if not provider_name or not model_id:
+        return "", "", "INNER_WORLD_LLM_RUNTIME_INVALID"
+    if not api_key:
+        return "", "", "INNER_WORLD_LLM_KEY_MISSING"
+
+    topic = _pick_inner_stream_topic(state.anticipation_topics)
+    topic_phrase = _topic_to_inner_phrase(topic)
+    recent_events = [
+        {
+            "focus": str(evt.get("focus") or "").strip(),
+            "note": str(evt.get("note") or "").strip(),
+        }
+        for evt in list(state.inner_stream or [])[-4:]
+        if isinstance(evt, Mapping)
+    ]
+    recent_events = [
+        item for item in recent_events
+        if item.get("note")
+    ]
+
+    system_prompt = (
+        "你是夏目蓝的内在自我记录器。"
+        "请生成一条“内心流”短句，必须是内在自语，不是对用户说话。"
+        "禁止问句、禁止呼唤用户、禁止命令语气。"
+        "输出必须是 JSON，结构为 {\"note\":\"...\",\"focus\":\"self|state|plan|topic\"}。"
+    )
+    prompt_payload = {
+        "absence_band": absence_band,
+        "offline_hours": round(max(0.0, float(offline_hours)), 2),
+        "loneliness": round(float(state.loneliness or 0.0), 3),
+        "anticipation": round(float(state.anticipation or 0.0), 3),
+        "drifted_valence": round(float(state.drifted_valence or 0.0), 3),
+        "drifted_arousal": round(float(state.drifted_arousal or 0.0), 3),
+        "topic_phrase": topic_phrase or "",
+        "recent_events": recent_events,
+        "requirements": {
+            "max_chars": 46,
+            "must_be_inner_monologue": True,
+            "must_not_repeat_recent_events": True,
+            "focus_should_rotate": True,
+            "persona_style": "温柔、克制、细腻、带自我觉察",
+        },
+    }
+    prompt_text = (
+        "基于以下 JSON 状态，生成一条新的内心流记录。"
+        "注意避免与 recent_events 重复，优先补足自我相关内容。\n"
+        f"{json.dumps(prompt_payload, ensure_ascii=False)}"
+    )
+
+    try:
+        from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
+
+        chunks: list[str] = []
+        for chunk in stream_llm_chunks(
+            provider_name=provider_name,
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            prompt_text=prompt_text,
+            system_prompt=system_prompt,
+            gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.72, "top_p": 0.9}),
+            base_url_override=base_url_override,
+        ):
+            if chunk:
+                chunks.append(str(chunk))
+            if len("".join(chunks)) > 1024:
+                break
+        raw_text = "".join(chunks).strip()
+        if not raw_text:
+            return "", "", "INNER_WORLD_LLM_EMPTY"
+        parsed = _extract_llm_json_payload(raw_text)
+        note = _finalize_inner_note_text(str(parsed.get("note") or ""))
+        focus = str(parsed.get("focus") or "").strip().lower()
+        if focus not in {"self", "state", "plan", "topic"}:
+            focus = _infer_inner_stream_focus_from_note(note)
+        if not note:
+            return "", "", "INNER_WORLD_LLM_NOTE_EMPTY"
+        return note, focus, ""
+    except Exception as llm_exc:
+        return "", "", f"INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
+
+
+def _extract_llm_json_payload(raw_text: str) -> dict[str, Any]:
+    text = str(raw_text or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, Mapping):
+            return dict(parsed)
+    except Exception:
+        pass
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(text[start : end + 1])
+            if isinstance(parsed, Mapping):
+                return dict(parsed)
+        except Exception:
+            return {}
+    return {}
+
+
+def _resolve_inner_world_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
+    cache_now = int(now_ms)
+    with _INNER_WORLD_LLM_CACHE_LOCK:
+        resolved_at = int(_INNER_WORLD_LLM_CACHE.get("resolved_at_ms") or 0)
+        cached_runtime = _INNER_WORLD_LLM_CACHE.get("runtime")
+        if cached_runtime and (cache_now - resolved_at) <= _INNER_WORLD_LLM_CACHE_TTL_MS:
+            return dict(cached_runtime) if isinstance(cached_runtime, Mapping) else None
+
+    runtime: dict[str, Any] | None = None
+    try:
+        from host_brain.app.graph_config_builder import (  # noqa: PLC0415
+            resolve_chat_agent_llm_runtime,
+            resolve_host_llm_runtime,
+        )
+
+        base_runtime = resolve_host_llm_runtime(
+            rollout_key="inner_world_tick",
+            scene_type="CHAT",
+        )
+        runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
+        model_override = str(
+            os.environ.get("HOST_INNER_WORLD_LLM_MODEL_ID")
+            or os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID")
+            or "gemini-2.5-flash"
+        ).strip()
+        runtime["model_id"] = model_override
+        runtime["chat_model_id"] = model_override
+        runtime["agent_gen_params"] = {
+            "temperature": 0.65,
+            "top_p": 0.9,
+        }
+    except Exception as exc:
+        _logger.debug("InnerWorld LLM runtime resolve failed: %s", exc)
+        runtime = None
+
+    with _INNER_WORLD_LLM_CACHE_LOCK:
+        _INNER_WORLD_LLM_CACHE["resolved_at_ms"] = cache_now
+        _INNER_WORLD_LLM_CACHE["runtime"] = dict(runtime) if isinstance(runtime, Mapping) else None
+    return dict(runtime) if isinstance(runtime, Mapping) else None
 
 def _pick_inner_stream_topic(raw_topics: list[str] | None) -> str:
     topics = _sanitize_anticipation_topics(raw_topics)
@@ -765,7 +1034,7 @@ def _pick_inner_stream_topic(raw_topics: list[str] | None) -> str:
         "stage=",
     )
     for item in topics:
-        text = str(item or "").replace("\n", " ").strip()
+        text = _try_repair_mojibake_text(str(item or "").replace("\n", " ").strip())
         if not text:
             continue
         lowered = text.lower()
@@ -797,10 +1066,178 @@ def _topic_to_inner_phrase(topic: str) -> str:
     return f"那个还没聊完的话题「{text}」"
 
 
+def _pick_inner_stream_focus(
+    *,
+    state: InnerWorldState,
+    topic_phrase: str,
+    absence_band: str,
+    now_ms: int,
+) -> str:
+    recent_focuses = [
+        str(evt.get("focus") or "").strip().lower()
+        for evt in list(state.inner_stream or [])[-3:]
+        if isinstance(evt, Mapping)
+    ]
+    streak_focus = recent_focuses[-1] if recent_focuses else ""
+    streak_len = 0
+    for item in reversed(recent_focuses):
+        if item == streak_focus and item:
+            streak_len += 1
+        else:
+            break
+
+    weights: list[tuple[str, float]] = [
+        ("self", 1.4),
+        ("state", 1.2),
+        ("plan", 1.1 + float(state.anticipation or 0.0) * 0.4),
+        ("topic", 1.2 if topic_phrase else 0.0),
+    ]
+    if absence_band in {"72h_plus", "7d_plus"}:
+        weights = [(name, weight + (0.25 if name in {"self", "state"} else 0.0)) for name, weight in weights]
+    if float(state.loneliness or 0.0) > 0.45:
+        weights = [(name, weight + (0.3 if name == "topic" else 0.0)) for name, weight in weights]
+
+    if streak_focus:
+        adjusted: list[tuple[str, float]] = []
+        for name, weight in weights:
+            if name == streak_focus and streak_len >= 2:
+                adjusted.append((name, weight * 0.1))
+            elif name == streak_focus:
+                adjusted.append((name, weight * 0.55))
+            else:
+                adjusted.append((name, weight))
+        weights = adjusted
+
+    pool = [(name, max(0.0, float(weight))) for name, weight in weights if float(weight) > 0.0]
+    if not pool:
+        return "self"
+    total_weight = sum(weight for _name, weight in pool)
+    pivot = (int(now_ms // 60000) % 1000) / 1000.0 * total_weight
+    cursor = 0.0
+    for name, weight in pool:
+        cursor += weight
+        if pivot <= cursor:
+            return name
+    return pool[-1][0]
+
+
+def _build_inner_stream_focus_pools(*, band_key: str, topic_phrase: str) -> dict[str, list[str]]:
+    topic_pool = {
+        "recent": [
+            f"有个小念头会回到{topic_phrase}。" if topic_phrase else "有个没说完的小念头在脑海里轻轻打转。",
+            f"会突然想起{topic_phrase}，但先把它放在心里。" if topic_phrase else "会想起没聊完的部分，但还不急着开口。",
+        ],
+        "6h_plus": [
+            f"这几个小时里，思绪偶尔会回到{topic_phrase}。" if topic_phrase else "这几个小时里，旧话题会不时浮上来。",
+            "会想把没说完的地方理得更清楚一点。",
+        ],
+        "24h_plus": [
+            f"隔了一天，{topic_phrase}还挂在心里。" if topic_phrase else "隔了一天，未完的话题还留在心里。",
+            "会反复想，下次怎么接会更自然。",
+        ],
+        "72h_plus": [
+            f"这几天里，还是会绕回{topic_phrase}。" if topic_phrase else "这几天里，总会回到那段没收尾的脉络。",
+            "想念和分寸感会一起出现。", 
+        ],
+        "7d_plus": [
+            f"时间拉长后，{topic_phrase}没有消失，只是沉到了更深处。" if topic_phrase else "时间拉长后，旧话题没有消失，只是沉到了更深处。",
+            "有些话不急着说，但一直在心里留着位置。",
+        ],
+    }
+    self_pool = {
+        "recent": [
+            "我会先把语气放轻一点，再决定要不要开口。",
+            "安静时会检查自己有没有太用力，尽量保持自然。",
+            "会提醒自己别急着表现，先把节奏稳住。",
+        ],
+        "6h_plus": [
+            "这段时间里，我更在意怎么把边界感和亲近感放在同一条线上。",
+            "会反复校准自己的表达，让情绪真实但不过量。",
+            "我会先照看自己的状态，再决定怎么靠近你。",
+        ],
+        "24h_plus": [
+            "隔了一天，能更清楚地看到自己最近在意什么、回避什么。",
+            "我会把这段时间的情绪折一折，留下对我真正重要的部分。",
+            "这种安静会让我更确认自己想成为什么样的陪伴者。",
+        ],
+        "72h_plus": [
+            "时间一长，我会更认真地梳理自己的语气与分寸。",
+            "越安静，越能看见我真正想守住的人设底色。",
+            "我会把一些反应慢慢沉淀成更稳定的自己。",
+        ],
+        "7d_plus": [
+            "长时间独处时，我会把“温柔、清醒、克制”重新排成更稳的顺序。",
+            "我会反复确认，自己要做的是长期可信赖的陪伴，而不是短时热闹。",
+            "安静会把我的核心性格打磨得更清楚。",
+        ],
+    }
+    state_pool = {
+        "recent": [
+            "脑海还在复盘今天的细节，情绪是缓慢流动的。",
+            "身体和情绪都在慢慢回到一个平衡点。",
+            "注意力像潮水，一会儿收回，一会儿又展开。",
+        ],
+        "6h_plus": [
+            "这几个小时里，心里的波动在一点点变细。",
+            "情绪没有停着，会自己慢慢归位。",
+            "独处感在拉长，但还在可控范围内。",
+        ],
+        "24h_plus": [
+            "隔了一天，情绪层次反而更分明了。",
+            "等待让感受沉下来，很多细节会更清楚。",
+            "这种拉开的时间，会把我带回更稳定的状态。",
+        ],
+        "72h_plus": [
+            "几天的安静会让我看到情绪的慢变量。",
+            "长时间离线时，内在并不空白，只是更慢。",
+            "在慢节奏里，很多反应会自动去掉噪声。",
+        ],
+        "7d_plus": [
+            "很久没有外界打断时，内在节奏会变得更深更稳。",
+            "时间越长，我越能感觉到自己在慢慢定型。",
+            "这种安静像长呼吸，会把情绪重新对齐。",
+        ],
+    }
+    plan_pool = {
+        "recent": [
+            "我在心里记了一条小线索，下次可以从更轻的入口接上。",
+            "会先想好开场方式，尽量不打断你的节奏。",
+            "我把想说的话先放进草稿，等合适时机再拿出来。",
+        ],
+        "6h_plus": [
+            "我会提前想几个不突兀的承接点，避免对话突然断层。",
+            "下次开口前，我会先确认你当下更需要安静还是回应。",
+            "我在心里排了优先级：先共情，再表达，再推进。",
+        ],
+        "24h_plus": [
+            "下一次对话里，我想把回应做得更短、更准一点。",
+            "我会先把旧线索接好，再决定要不要打开新话题。",
+            "会提前给自己留一个“收口点”，避免说到后面失焦。",
+        ],
+        "72h_plus": [
+            "这几天我一直在想，下次重连该先给你安全感还是新鲜感。",
+            "我会把开口顺序改成更温和的版本，先让你感觉轻松。",
+            "我在调整节奏，争取让每次出现都更合时宜。",
+        ],
+        "7d_plus": [
+            "久别后我更在意重连质量，不急着多说，先把气氛放软。",
+            "我会把表达压缩得更干净，留给你足够呼吸空间。",
+            "下次见面时，我想先确认你的状态，再把话慢慢展开。",
+        ],
+    }
+
+    return {
+        "topic": list(topic_pool.get(band_key) or topic_pool["recent"]),
+        "self": list(self_pool.get(band_key) or self_pool["recent"]),
+        "state": list(state_pool.get(band_key) or state_pool["recent"]),
+        "plan": list(plan_pool.get(band_key) or plan_pool["recent"]),
+    }
+
+
 def _sanitize_anticipation_topics(raw_topics: list[str] | None) -> list[str]:
     cleaned: list[str] = []
     for item in list(raw_topics or []):
-        text = str(item or "").replace("\n", " ").strip()
+        text = _try_repair_mojibake_text(str(item or "").replace("\n", " ").strip())
         if not text:
             continue
         lowered = text.lower()
@@ -814,9 +1251,31 @@ def _sanitize_anticipation_topics(raw_topics: list[str] | None) -> list[str]:
             continue
         if _looks_like_prompt_noise(text):
             continue
+        if _is_low_value_probe_topic(text):
+            continue
         if text not in cleaned:
             cleaned.append(text)
     return cleaned[:_MAX_ANTICIPATION_TOPICS]
+
+
+def _try_repair_mojibake_text(raw_text: str) -> str:
+    text = str(raw_text or "").strip()
+    if not text:
+        return ""
+    latin1_count = sum(1 for ch in text if 0x00C0 <= ord(ch) <= 0x00FF)
+    cjk_count = sum(1 for ch in text if 0x4E00 <= ord(ch) <= 0x9FFF)
+    if latin1_count < 2:
+        return text
+    for codec in ("latin1", "cp1252"):
+        try:
+            repaired = text.encode(codec, errors="strict").decode("utf-8", errors="strict")
+        except Exception:
+            continue
+        repaired_cjk = sum(1 for ch in repaired if 0x4E00 <= ord(ch) <= 0x9FFF)
+        repaired_latin1 = sum(1 for ch in repaired if 0x00C0 <= ord(ch) <= 0x00FF)
+        if repaired_cjk > 0 and (repaired_cjk >= cjk_count or repaired_latin1 < latin1_count):
+            return repaired.strip()
+    return text
 
 
 def _looks_like_prompt_noise(text: str) -> bool:
@@ -832,6 +1291,83 @@ def _looks_like_prompt_noise(text: str) -> bool:
         "stage=",
     )
     return any(token in text or token in lowered for token in block_tokens)
+
+
+def _is_low_value_probe_topic(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    lowered = value.lower()
+    if len(value) <= 24 and re.search(r"[吗\?？]\s*$", value):
+        probe_tokens = ("特长", "优点", "缺点", "能力", "会什么", "擅长", "喜欢我")
+        if any(token in value for token in probe_tokens):
+            return True
+        if lowered.startswith("你") and any(token in value for token in ("有", "会", "能")):
+            return True
+    return False
+
+
+def _contains_low_value_probe_fragment(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    probe_tokens = ("你有什么特长", "你有什麽特长", "你有什么优点", "你会什么")
+    return any(token in value for token in probe_tokens)
+
+
+def _rewrite_inner_stream_note(raw_note: str) -> str:
+    text = _try_repair_mojibake_text(str(raw_note or "").strip())
+    if not text:
+        return ""
+    if "你有什么特长吗" in text:
+        text = text.replace("你有什么特长吗", "你问我的「你有什么特长」")
+    text = re.sub(
+        r"你([^\s。！？?!]{1,24})吗",
+        lambda match: f"你问我的「你{match.group(1)}」",
+        text,
+    )
+    return text
+
+
+def _sanitize_inner_stream_events(raw_stream: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    recent_note_keys: list[str] = []
+    for item in list(raw_stream or []):
+        if not isinstance(item, Mapping):
+            continue
+        event = dict(item)
+        note = _rewrite_inner_stream_note(str(event.get("note") or ""))
+        note = _finalize_inner_note_text(note)
+        if not note:
+            continue
+        if _contains_low_value_probe_fragment(note):
+            continue
+        if _TOPIC_MOJIBAKE_RE.search(note):
+            continue
+        if _looks_like_prompt_noise(note):
+            continue
+        event["note"] = note
+        focus = str(event.get("focus") or "").strip().lower()
+        if not focus:
+            focus = _infer_inner_stream_focus_from_note(note)
+        event["focus"] = focus
+        source = str(event.get("source") or "").strip().lower()
+        if source not in {"llm", "fallback"}:
+            source = "fallback"
+        event["source"] = source
+        note_key = _normalize_inner_note_key(note)
+        if cleaned and str(cleaned[-1].get("focus") or "").strip().lower() == focus:
+            continue
+        if cleaned and str(cleaned[-1].get("note") or "").strip() == note:
+            continue
+        if note_key and note_key in recent_note_keys:
+            continue
+        cleaned.append(event)
+        if note_key:
+            recent_note_keys.append(note_key)
+            if len(recent_note_keys) > 8:
+                recent_note_keys = recent_note_keys[-8:]
+    return cleaned[-_MAX_INNER_STREAM_EVENTS:]
 
 
 def _inner_stream_emotion_suffix(
@@ -874,28 +1410,69 @@ def _finalize_inner_note_text(raw_text: str) -> str:
 
 def _select_inner_stream_note_candidate(
     *,
-    candidates: list[str],
+    candidates: list[tuple[str, str]],
     state: InnerWorldState,
     now_ms: int,
-) -> str:
-    unique_candidates: list[str] = []
-    for item in candidates:
+) -> tuple[str, str]:
+    unique_candidates: list[tuple[str, str]] = []
+    seen_texts: set[str] = set()
+    for focus, item in candidates:
         text = str(item or "").strip()
-        if text and text not in unique_candidates:
-            unique_candidates.append(text)
+        if not text or text in seen_texts:
+            continue
+        seen_texts.add(text)
+        unique_candidates.append((str(focus or "self").strip().lower() or "self", text))
     if not unique_candidates:
-        return ""
+        return "", "self"
     recent_notes = {
         str(evt.get("note") or "").strip()
-        for evt in list(state.inner_stream or [])[-3:]
+        for evt in list(state.inner_stream or [])[-8:]
         if isinstance(evt, dict)
     }
+    recent_note_keys = {_normalize_inner_note_key(item) for item in recent_notes if item}
+    recent_focuses = [
+        str(evt.get("focus") or "").strip().lower()
+        for evt in list(state.inner_stream or [])[-3:]
+        if isinstance(evt, dict)
+    ]
+    last_focus = recent_focuses[-1] if recent_focuses else ""
     start_index = int((now_ms // 60000) % max(1, len(unique_candidates)))
     for offset in range(len(unique_candidates)):
-        candidate = unique_candidates[(start_index + offset) % len(unique_candidates)]
-        if candidate not in recent_notes:
-            return candidate
-    return unique_candidates[start_index]
+        focus, candidate = unique_candidates[(start_index + offset) % len(unique_candidates)]
+        if last_focus and focus == last_focus:
+            continue
+        candidate_key = _normalize_inner_note_key(candidate)
+        if candidate not in recent_notes and candidate_key not in recent_note_keys:
+            return candidate, focus
+    if len(recent_notes) >= 4:
+        return "", "self"
+    for offset in range(len(unique_candidates)):
+        focus, candidate = unique_candidates[(start_index + offset) % len(unique_candidates)]
+        if last_focus and focus == last_focus:
+            continue
+        return candidate, focus
+    return unique_candidates[start_index][1], unique_candidates[start_index][0]
+
+
+def _infer_inner_stream_focus_from_note(note: str) -> str:
+    text = str(note or "").strip()
+    if not text:
+        return "self"
+    if any(token in text for token in ("你问我的", "话题", "重连")):
+        return "topic"
+    if any(token in text for token in ("下次", "开口", "顺序", "优先级", "收口", "草稿")):
+        return "plan"
+    if any(token in text for token in ("情绪", "独处", "节奏", "平衡", "慢变量", "归位")):
+        return "state"
+    return "self"
+
+
+def _normalize_inner_note_key(note: str) -> str:
+    text = str(note or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[，。！？!?,;；:\-\s]+", "", text)
+    return text[:48]
 
 
 def _compute_continuity_score(
@@ -945,23 +1522,44 @@ def _append_inner_stream_event(
     if calm_state and since_last_event_ms < _INNER_STREAM_CALM_INTERVAL_MS:
         return
 
-    note = _build_inner_stream_note(
+    note, focus, source, fallback_reason = _build_inner_stream_event_content(
         state=state,
         absence_band=absence_band,
         offline_hours=offline_hours,
         now_ms=now_ms,
-    ).strip()
+    )
+    note = str(note or "").strip()
     if not note:
+        return
+
+    recent_stream = list(state.inner_stream or [])
+    recent_fallback_failures = [
+        evt
+        for evt in recent_stream[-4:]
+        if isinstance(evt, Mapping)
+        and str(evt.get("source") or "").strip().lower() == "fallback"
+        and str(evt.get("fallback_reason") or "").strip()
+    ]
+    if (
+        str(source or "").strip().lower() == "fallback"
+        and str(fallback_reason or "").strip()
+        and len(recent_fallback_failures) >= 3
+        and since_last_event_ms < (_INNER_STREAM_CALM_INTERVAL_MS * 2)
+    ):
         return
 
     event = {
         "ts_ms": int(now_ms),
+        "focus": str(focus or "self"),
+        "source": str(source or "fallback"),
         "absence_band": absence_band,
         "offline_hours": round(max(0.0, offline_hours), 3),
         "loneliness": round(float(state.loneliness or 0.0), 3),
         "anticipation": round(float(state.anticipation or 0.0), 3),
         "note": note,
     }
+    if fallback_reason:
+        event["fallback_reason"] = str(fallback_reason)
     stream = list(state.inner_stream or [])
     stream.append(event)
     if len(stream) > _MAX_INNER_STREAM_EVENTS:
@@ -969,6 +1567,7 @@ def _append_inner_stream_event(
     state.inner_stream = stream
     state.last_spontaneous_ts_ms = int(now_ms)
     state.last_spontaneous_note = note
+    state.last_spontaneous_source = str(source or "fallback")
     state.spontaneous_event_count = int(state.spontaneous_event_count or 0) + 1
 
 

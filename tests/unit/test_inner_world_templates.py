@@ -6,10 +6,14 @@ from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_pr
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.inner_world import (
     InnerWorldState,
+    _build_inner_stream_event_content,
+    _build_inner_stream_note_with_focus,
     _build_inner_stream_note,
+    _extract_llm_json_payload,
     _build_awakening_hint,
     _describe_emotion_drift,
     _pick_inner_stream_topic,
+    _sanitize_inner_stream_events,
     _sanitize_anticipation_topics,
     _topic_to_inner_phrase,
 )
@@ -148,3 +152,130 @@ def test_build_inner_stream_note_avoids_immediate_repeat() -> None:
     )
     assert note != "刚刚安静下来，心里还在回放刚才的片段。"
     assert "？" not in note
+
+
+def test_sanitize_inner_stream_events_rewrites_old_question_note() -> None:
+    events = _sanitize_inner_stream_events(
+        [
+            {"ts_ms": 1, "note": "脑海里在把今天的细节重新排一遍。你有什么特长吗"},
+            {"ts_ms": 2, "note": "脑海里在把今天的细节重新排一遍。你有什么特长吗"},
+        ]
+    )
+    assert events == []
+
+
+def test_sanitize_inner_stream_events_collapses_same_focus_neighbors() -> None:
+    events = _sanitize_inner_stream_events(
+        [
+            {"ts_ms": 1, "focus": "plan", "note": "我把想说的话先放进草稿，等合适时机再拿出来。"},
+            {"ts_ms": 2, "focus": "plan", "note": "会先想好开场方式，尽量不打断你的节奏。"},
+            {"ts_ms": 3, "focus": "self", "note": "我会先把语气放轻一点，再决定要不要开口。"},
+        ]
+    )
+    assert [evt["focus"] for evt in events] == ["plan", "self"]
+
+
+def test_build_inner_stream_note_rotates_focus_after_topic_streak() -> None:
+    state = InnerWorldState(
+        user_id="u2",
+        anticipation_topics=["你有什么特长吗"],
+        loneliness=0.25,
+        anticipation=0.55,
+        inner_stream=[
+            {"focus": "topic", "note": "有个小念头会回到你问我的「你有什么特长」。"},
+            {"focus": "topic", "note": "会突然想起你问我的「你有什么特长」，但先把它放在心里。"},
+        ],
+    )
+    note, focus = _build_inner_stream_note_with_focus(
+        state=state,
+        absence_band="recent",
+        offline_hours=0.4,
+        now_ms=1775631000000,
+    )
+    assert focus != "topic"
+    assert "？" not in note
+
+
+def test_build_inner_stream_note_includes_self_related_candidates() -> None:
+    state = InnerWorldState(
+        user_id="u3",
+        anticipation_topics=["我们上次聊到的书单"],
+        loneliness=0.1,
+        anticipation=0.05,
+        inner_stream=[],
+    )
+    note, focus = _build_inner_stream_note_with_focus(
+        state=state,
+        absence_band="24h_plus",
+        offline_hours=24.0,
+        now_ms=1775631600000,
+    )
+    assert focus in {"self", "state", "plan", "topic"}
+    assert any(token in note for token in ("自己", "语气", "节奏", "状态", "下次", "优先级", "平衡", "沉淀", "定型", "草稿", "慢慢"))
+
+
+def test_build_inner_stream_note_avoids_same_focus_back_to_back() -> None:
+    state = InnerWorldState(
+        user_id="u4",
+        anticipation_topics=["我们上次聊到的书单"],
+        loneliness=0.2,
+        anticipation=0.35,
+        inner_stream=[{"focus": "plan", "note": "我把想说的话先放进草稿，等合适时机再拿出来。"}],
+    )
+    _note, focus = _build_inner_stream_note_with_focus(
+        state=state,
+        absence_band="recent",
+        offline_hours=0.3,
+        now_ms=1775632200000,
+    )
+    assert focus != "plan"
+
+
+def test_extract_llm_json_payload_handles_wrapped_text() -> None:
+    payload = _extract_llm_json_payload(
+        "noise... {\"note\":\"我会先把语气放轻一点。\",\"focus\":\"self\"} ...tail"
+    )
+    assert payload["note"] == "我会先把语气放轻一点。"
+    assert payload["focus"] == "self"
+
+
+def test_build_inner_stream_event_content_prefers_llm(monkeypatch) -> None:
+    import host_brain.persona.inner_world as inner_world_module
+
+    monkeypatch.setattr(
+        inner_world_module,
+        "_generate_inner_stream_note_from_llm",
+        lambda **_kwargs: ("我会先把语气放轻一点。", "self", ""),
+    )
+    state = InnerWorldState(user_id="u5", anticipation_topics=["我们上次聊到的书单"])
+    note, focus, source, reason = _build_inner_stream_event_content(
+        state=state,
+        absence_band="recent",
+        offline_hours=0.2,
+        now_ms=1775633000000,
+    )
+    assert note == "我会先把语气放轻一点。"
+    assert focus == "self"
+    assert source == "llm"
+    assert reason == ""
+
+
+def test_build_inner_stream_event_content_falls_back_when_llm_unavailable(monkeypatch) -> None:
+    import host_brain.persona.inner_world as inner_world_module
+
+    monkeypatch.setattr(
+        inner_world_module,
+        "_generate_inner_stream_note_from_llm",
+        lambda **_kwargs: ("", "", "INNER_WORLD_LLM_UNAVAILABLE"),
+    )
+    state = InnerWorldState(user_id="u6", anticipation_topics=["我们上次聊到的书单"])
+    note, focus, source, reason = _build_inner_stream_event_content(
+        state=state,
+        absence_band="recent",
+        offline_hours=0.2,
+        now_ms=1775633200000,
+    )
+    assert bool(note)
+    assert focus in {"self", "state", "plan", "topic"}
+    assert source == "fallback"
+    assert reason == "INNER_WORLD_LLM_UNAVAILABLE"
