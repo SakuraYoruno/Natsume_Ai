@@ -223,6 +223,10 @@ class PainRewardAgent:
           - INTERACTION_RECORDED：每轮对话结束后触发衰减
           - EMOTION_UPDATED：情绪更新时推断痛觉/奖励
           - IMMUNE_BLOCK：ImmuneAgent 拦截时记录 topic_blocked 痛觉
+          - BOND_PROGRESS：关系进展时记录 bond_progress 奖励（T-24）
+          - BOND_REGRESS：关系退步时记录 bond_regress 痛觉（T-24）
+          - TASK_SUCCESS：任务成功时记录 task_success 奖励（T-24）
+          - HUMOR_LANDED：幽默成功时记录 humor_landed 奖励（T-24）
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -231,6 +235,11 @@ class PainRewardAgent:
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
             bus.subscribe("EMOTION_UPDATED", self._on_emotion_updated)
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
+            # T-24：新增事件源
+            bus.subscribe("BOND_PROGRESS", self._on_bond_progress)
+            bus.subscribe("BOND_REGRESS", self._on_bond_regress)
+            bus.subscribe("TASK_SUCCESS", self._on_task_success)
+            bus.subscribe("HUMOR_LANDED", self._on_humor_landed)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.pain_reward_agent").warning(
@@ -277,6 +286,61 @@ class PainRewardAgent:
         except Exception:
             pass
 
+    # ── T-24：新增事件源 handler ──────────────────────────────────────────────
+
+    async def _on_bond_progress(self, event: Any) -> None:
+        """处理 BOND_PROGRESS 事件：关系进展 → bond_progress 奖励。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            # 根据 bond_stage 变化幅度调整奖励强度（默认 0.5）
+            intensity = float(payload.get("intensity") or 0.5)
+            self.record_reward(
+                source="bond_progress",
+                intensity=min(1.0, intensity),
+                metadata=payload,
+            )
+        except Exception:
+            pass
+
+    async def _on_bond_regress(self, event: Any) -> None:
+        """处理 BOND_REGRESS 事件：关系退步 → bond_regress 痛觉。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = float(payload.get("intensity") or 0.4)
+            self.record_pain(
+                source="bond_regress",
+                intensity=min(1.0, intensity),
+                metadata=payload,
+            )
+        except Exception:
+            pass
+
+    async def _on_task_success(self, event: Any) -> None:
+        """处理 TASK_SUCCESS 事件：任务成功 → task_success 奖励。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = float(payload.get("intensity") or 0.35)
+            self.record_reward(
+                source="task_success",
+                intensity=min(1.0, intensity),
+                metadata=payload,
+            )
+        except Exception:
+            pass
+
+    async def _on_humor_landed(self, event: Any) -> None:
+        """处理 HUMOR_LANDED 事件：幽默成功 → humor_landed 奖励。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = float(payload.get("intensity") or 0.3)
+            self.record_reward(
+                source="humor_landed",
+                intensity=min(1.0, intensity),
+                metadata=payload,
+            )
+        except Exception:
+            pass
+
     # ── 事件订阅（TribeEventBus）────────────────────────────────────────────
 
     def on_tribe_event(self, event: Any) -> None:
@@ -318,6 +382,40 @@ class PainRewardAgent:
                     intensity=0.2,
                     metadata=payload,
                 )
+
+            # T-24：新增事件源
+            elif event_type == "BOND_PROGRESS":
+                intensity = float(payload.get("intensity") or 0.5)
+                self.record_reward(
+                    source="bond_progress",
+                    intensity=min(1.0, intensity),
+                    metadata=payload,
+                )
+
+            elif event_type == "BOND_REGRESS":
+                intensity = float(payload.get("intensity") or 0.4)
+                self.record_pain(
+                    source="bond_regress",
+                    intensity=min(1.0, intensity),
+                    metadata=payload,
+                )
+
+            elif event_type == "TASK_SUCCESS":
+                intensity = float(payload.get("intensity") or 0.35)
+                self.record_reward(
+                    source="task_success",
+                    intensity=min(1.0, intensity),
+                    metadata=payload,
+                )
+
+            elif event_type == "HUMOR_LANDED":
+                intensity = float(payload.get("intensity") or 0.3)
+                self.record_reward(
+                    source="humor_landed",
+                    intensity=min(1.0, intensity),
+                    metadata=payload,
+                )
+
         except Exception:
             pass
 

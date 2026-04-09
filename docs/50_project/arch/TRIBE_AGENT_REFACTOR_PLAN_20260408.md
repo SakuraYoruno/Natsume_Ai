@@ -2023,3 +2023,94 @@ LLM 生成回复（受享乐状态影响）
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 2. **T-23**（新增）：前端/上层处理 `PAIN_SIGNAL`/`REWARD_SIGNAL` 事件，触发具体的主动情绪表达行为（如插入情绪化短句、调整回复风格）
 3. **T-24**（新增）：`PainRewardAgent` 接入更多事件源（如 `BOND_RIFT_DETECTED` → 高强度痛觉，`BOND_MILESTONE` → 高强度奖励）
+
+---
+
+### 2026-04-09 · 第八批开发（T-23 / T-24）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/app/chat_context_builder.py`（T-23：补充 hedonic_state 注入到 runtime_payload）
+- `host_brain/tribe/pain_reward_agent.py`（T-24：新增 4 个事件源订阅）
+
+---
+
+#### T-23：chat_context_builder 补充 hedonic_state 注入 ✅
+
+**问题**：T-12 接入 CortexAgent 时，`collect_tribe_context()` 已经返回 `hedonic_state` 完整快照（T-20 已注入），但 `chat_context_builder.py` 只将 `vital_signs` 写入 `runtime_payload["tribe_vital_signs"]`，没有将 `hedonic_state` 写入 `runtime_payload["hedonic_state"]`，导致下游消费者（如 prompt_builder）无法通过 `runtime_payload` 读取完整享乐状态快照。
+
+**改动**（`chat_context_builder.py`，T-12 代码块）：
+
+```python
+# T-23：将完整 hedonic_state 快照注入 runtime_payload
+_hedonic_state = dict(_tribe_ctx.get("hedonic_state") or {})
+if _hedonic_state:
+    runtime_payload["hedonic_state"] = _hedonic_state
+```
+
+同时更新 `logger.debug` 日志，追加 `hedonic_tone` 字段输出。
+
+**数据流**：
+```
+collect_tribe_context()["hedonic_state"]
+  → runtime_payload["hedonic_state"]
+  → prompt_builder（可通过 runtime_payload 读取完整快照）
+  → dispatch_agent 步骤 0.6（已通过 _tribe_ctx 读取，T-22）
+```
+
+---
+
+#### T-24：PainRewardAgent 接入更多事件源 ✅
+
+**问题**：`PainRewardAgent` 只订阅了 3 个事件（`INTERACTION_RECORDED`/`EMOTION_UPDATED`/`IMMUNE_BLOCK`），缺少关系进展/退步、任务成功、幽默成功等重要事件源，导致这些场景无法触发痛觉/奖励更新。
+
+**改动**（`pain_reward_agent.py`）：
+
+**新增 4 个 async handler 方法**：
+| handler | 事件 | 效果 | 默认强度 |
+|---|---|---|---|
+| `_on_bond_progress` | `BOND_PROGRESS` | `bond_progress` 奖励 | 0.5 |
+| `_on_bond_regress` | `BOND_REGRESS` | `bond_regress` 痛觉 | 0.4 |
+| `_on_task_success` | `TASK_SUCCESS` | `task_success` 奖励 | 0.35 |
+| `_on_humor_landed` | `HUMOR_LANDED` | `humor_landed` 奖励 | 0.3 |
+
+**`register_subscriptions()` 更新**：新增 4 个 `bus.subscribe()` 调用。
+
+**`on_tribe_event()` 更新**：在 `IMMUNE_BLOCK` 分支之后新增 4 个 `elif` 分支（同步路径，与 async handler 保持一致）。
+
+**强度设计**：
+- 所有 handler 支持从 `payload["intensity"]` 读取自定义强度，有默认值兜底
+- 强度上限 `min(1.0, intensity)` 防止溢出
+
+---
+
+#### 当前架构状态（2026-04-09 第八批）
+
+**PainRewardAgent 事件订阅全景**：
+
+| 事件 | 效果 | 强度 | 批次 |
+|---|---|---|---|
+| `INTERACTION_RECORDED` | `tick_decay()` 衰减 | — | T-13 |
+| `EMOTION_UPDATED` | 情绪标签 → 痛觉/奖励 | intensity×0.5 | T-13 |
+| `IMMUNE_BLOCK` | `topic_blocked` 痛觉 | 0.2 | T-13 |
+| `BOND_PROGRESS` | `bond_progress` 奖励 | 0.5（可配置） | T-24 |
+| `BOND_REGRESS` | `bond_regress` 痛觉 | 0.4（可配置） | T-24 |
+| `TASK_SUCCESS` | `task_success` 奖励 | 0.35（可配置） | T-24 |
+| `HUMOR_LANDED` | `humor_landed` 奖励 | 0.3（可配置） | T-24 |
+
+**runtime_payload 字段全景**（经 T-12/T-23 注入）：
+
+| 字段 | 来源 | 批次 |
+|---|---|---|
+| `tribe_vital_signs` | `collect_tribe_context()["vital_signs"]` | T-12 |
+| `tribe_route` | `route_intent()` | T-12 |
+| `voice_emotion_inference` | `collect_tribe_context()["voice_emotion"]` | T-12 |
+| `hedonic_state` | `collect_tribe_context()["hedonic_state"]` | T-23 |
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-25**（新增）：`SocialBrainAgent` 发布 `BOND_PROGRESS`/`BOND_REGRESS` 事件（T-24 的上游触发器）
+3. **T-26**（新增）：`PrefrontalAgent` 发布 `TASK_SUCCESS`/`HUMOR_LANDED` 事件（T-24 的上游触发器）

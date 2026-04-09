@@ -2559,15 +2559,21 @@ def build_chat_prompt_runtime_payload(
             tribe_context=_tribe_ctx,
         )
         runtime_payload["tribe_route"] = _tribe_route
+        # T-23：将完整 hedonic_state 快照注入 runtime_payload（T-20 已由 collect_tribe_context 写入）
+        # 供 prompt_builder Phase XIX 读取完整享乐状态（pain_level/reward_level/net_valence 等）
+        _hedonic_state = dict(_tribe_ctx.get("hedonic_state") or {})
+        if _hedonic_state:
+            runtime_payload["hedonic_state"] = _hedonic_state
         # 若 voice_emotion 有值，补充到 runtime_payload（T-09 闭环）
         _voice_emotion = dict(_tribe_ctx.get("voice_emotion") or {})
         if _voice_emotion and _voice_emotion.get("emotion_tag"):
             runtime_payload.setdefault("voice_emotion_inference", _voice_emotion)
         logger.debug(
-            "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s",
+            "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s",
             _vital_signs.get("gate_state"),
             _tribe_route.get("route"),
             _voice_emotion.get("emotion_tag"),
+            _hedonic_state.get("hedonic_tone"),
         )
     except Exception as _cortex_exc:
         logger.debug("CortexAgent Supervisor 收口降级: %s", _cortex_exc)
