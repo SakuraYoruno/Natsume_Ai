@@ -1206,4 +1206,121 @@ bond_vector = {
 - **有内在活动**：即使没人说话，也并非彻底静止
 - **有边界**：知道什么不能做、什么不该说、什么需要保护
 
-只有当这些东西逐步建立起来时，“多智能体族架构”才不只是工程拆分，而会真正朝着**数字生命架构**靠近。
+只有当这些东西逐步建立起来时，"多智能体族架构"才不只是工程拆分，而会真正朝着**数字生命架构**靠近。
+
+---
+
+## 十三、开发进展日志
+
+> 本章记录每次实际开发的落地情况，供后续迭代参考。
+
+---
+
+### 2026-04-09 · 本次开发（T-01 / T-02 / T-03 / T-04）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/event_bus.py`
+- `host_brain/tribe/limbic_agent.py`
+- `host_brain/tribe/prefrontal_agent.py`
+- `host_brain/tribe/social_brain_agent.py`
+- `host_brain/tribe/cortex_agent.py`
+- `host_brain/app/http_hooks.py`
+
+---
+
+#### T-01：TribeEventBus 增加 subscribe + dispatch_loop ✅
+
+**问题**：`InMemoryTribeEventBus` 只有 `publish` + `recent`，没有订阅机制，整个事件驱动架构处于"只写不读"状态。
+
+**改动**：
+- 新增 `EventHandler` 类型别名（`Callable[[TribeEvent], Awaitable[None]]`）
+- 新增 `subscribe(event_type, handler)` 方法（线程安全，支持通配符 `"*"`）
+- 新增 `asyncio.Queue[TribeEvent]`（maxsize=512）作为分发队列
+- 新增 `start()` / `stop()` 异步方法（在 lifespan 中调用）
+- 新增 `_dispatch_loop()` 异步分发循环（精确匹配 + 通配符 `"*"`）
+- `publish()` 增加 `queue.put_nowait(event)` 投递逻辑（队列满时记录 warning 并丢弃）
+- 新增 `is_running` 属性和 `subscriber_count()` 方法（供观测使用）
+
+**关键设计决策**：
+- `subscribe()` 可在任意线程调用（`_sub_lock` 保护），handler 在 asyncio 事件循环中被 await
+- `publish()` 保持同步（不破坏现有调用方），通过 `put_nowait` 非阻塞投递
+- `_dispatch_loop()` 使用 `asyncio.wait_for(..., timeout=1.0)` 避免永久阻塞，支持 `stop()` 优雅退出
+
+---
+
+#### T-02：各族 Agent 增加 register_subscriptions() ✅
+
+**问题**：各族 Agent 没有向 Bus 注册 handler 的机制，事件发布后无任何消费者。
+
+**改动**：
+
+**LimbicAgent**（订阅 4 个事件）：
+- `register_subscriptions()` → 订阅 `BODY_SENSE_UPDATED` / `INNER_WORLD_TICKED` / `CONVERSATION_STARTED` / `CONVERSATION_ENDED`
+- `_on_body_sense_updated()` → 更新沉默意愿惩罚（`apply_body_sense_penalty`）
+- `_on_inner_world_ticked()` → 记录内心世界 tick 状态到 TribeStateRegistry
+- `_on_conversation_started_event()` → 调用 `on_conversation_started()`（重置沉默意愿）
+- `_on_conversation_ended_event()` → 调用 `on_conversation_ended()`（session_end 收口）
+
+**PrefrontalAgent**（订阅 2 个事件）：
+- `register_subscriptions()` → 订阅 `EVOLUTION_CYCLE_TRIGGERED` / `INTERACTION_RECORDED`
+- `_on_evolution_cycle_triggered()` → 创建独立 asyncio.Task 异步执行 `run_evolution_cycle()`（避免阻塞 dispatch_loop）
+- `_run_evolution_cycle_async()` → 通过 `asyncio.to_thread` 执行同步的 evolution_cycle
+- `_on_interaction_recorded()` → 触发 `run_growth_feedback_cycle()`（人格成长反馈）
+
+**SocialBrainAgent**（订阅 1 个事件）：
+- `register_subscriptions()` → 订阅 `INTERACTION_RECORDED`
+- `_on_interaction_recorded()` → 记录事件（Bond 更新由 CortexAgent 负责，避免重复写入）
+
+**CortexAgent**（订阅 3 个事件）：
+- `register_subscriptions()` → 订阅 `SILENCE_WILLINGNESS_CHANGED` / `EMOTION_STATE_CHANGED` / `BOND_STAGE_CHANGED`
+- `_on_silence_willingness_changed()` → debug 日志记录
+- `_on_emotion_state_changed()` → debug 日志记录
+- `_on_bond_stage_changed()` → info 日志记录（Bond 阶段变化是重要事件）
+
+---
+
+#### T-03：http_hooks.py 启动时接入 dispatch_loop ✅
+
+**问题**：Bus 初始化后没有启动 dispatch_loop，也没有注册各族订阅。
+
+**改动**（在 Tribe 基础设施初始化块之后新增）：
+- `await _bus.start()` → 启动 dispatch_loop（创建 asyncio.Task）
+- 遍历 4 个族 Agent（LimbicAgent / PrefrontalAgent / SocialBrainAgent / CortexAgent），调用 `register_subscriptions()`
+- 新增 `new_module_statuses["tribe_dispatch_loop"]` 状态上报
+- shutdown 阶段新增 `await _shutdown_bus.stop()` → 优雅停止 dispatch_loop
+
+---
+
+#### T-04：HippocampusAgent 召回接口验证 ✅
+
+**验证结论**：
+- `HippocampusAgent.recall()` 已完整实现，通过 `RetrievalOrchestrator.arun()` 统一召回
+- `chat_context_builder.py` 的 `_build_retrieval_rows()` 已通过 `get_hippocampus_agent().build_prompt_retrieval_rows()` 调用
+- 主召回入口（`retrieval_summary` + `retrieval_evidence_items`）在上游 `dispatch_agent.py` 通过 `HippocampusAgent.recall()` 完成
+- **无需修改**，T-04 验证通过
+
+---
+
+#### 当前架构状态（2026-04-09）
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `TribeEventBus.subscribe + dispatch_loop` | ✅ 已实现 | asyncio.Queue 异步分发，支持通配符 |
+| `LimbicAgent.register_subscriptions` | ✅ 已实现 | 订阅 4 个事件，handler 完整 |
+| `PrefrontalAgent.register_subscriptions` | ✅ 已实现 | 订阅 2 个事件，evolution_cycle 异步执行 |
+| `SocialBrainAgent.register_subscriptions` | ✅ 已实现 | 订阅 1 个事件 |
+| `CortexAgent.register_subscriptions` | ✅ 已实现 | 订阅 3 个事件 |
+| `http_hooks.py bus.start()` | ✅ 已实现 | lifespan 启动时调用，shutdown 时停止 |
+| `HippocampusAgent.recall()` | ✅ 已验证 | 召回接口完全切换 |
+| `ANSAgent.emit_from_thread` | ✅ 已实现 | inner_world_skill / body_sense_skill 已调用 |
+
+---
+
+#### 下一步待开发（优先级排序）
+
+1. **T-06**：EndocrineAgent 接入调度门控（`NatsumeScheduler` 改为读取 `EndocrineAgent.resolve_vital_signs()`）
+2. **T-07**：ImmuneAgent 接入主链路前置拦截（`dispatch_agent.py` 入口调用 `inspect_text()`）
+3. **T-08**：`/internal/tribe_event` 端点接收 edge 事件后转发到 Bus（验证 EdgeTribeBridge 闭环）
+4. **T-09**：SomaticAgent 情绪推断结果上报 LimbicAgent（`voice_emotion_inferred` 事件闭环）
+5. **T-10**：`vital_signs` 统一生命体征聚合（`TribeStateRegistry.aggregate_vital_signs()`）

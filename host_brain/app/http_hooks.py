@@ -1089,6 +1089,16 @@ def runtime_lifespan(
             except Exception as _vts_loop_exc:
                 logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
 
+            # [ANSAgent] 注册主事件循环到 ANSAgent，使 Timer 线程可跨线程发布 Tribe 事件
+            # Phase 1：ANSAgent.emit_from_thread() 依赖此循环引用
+            try:
+                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+
+                get_ans_agent().set_event_loop(asyncio.get_running_loop())
+                logger.info("ANSAgent 主事件循环已注册")
+            except Exception as _ans_loop_exc:
+                logger.warning("ANSAgent 主事件循环注册失败（降级）: %s", _ans_loop_exc)
+
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
             _activity_monitor = None
             try:
@@ -1138,6 +1148,85 @@ def runtime_lifespan(
                 start_heartbeat(interval_sec=30.0)
             except Exception as hb_exc:
                 logger.warning("Service health heartbeat start skipped: %s", hb_exc)
+
+            # [Tribe 基础设施] 初始化 TribeEventBus 单例 + HostTribeRegistry 单例
+            # Phase 0：确保所有族 Agent 在启动时可以通过 get_tribe_event_bus() /
+            # get_host_tribe_registry() 拿到同一个实例，而不是各自懒加载出不同对象。
+            try:
+                from host_brain.app.internal_tribe_routes import (  # noqa: PLC0415
+                    get_tribe_event_bus,
+                    set_tribe_event_bus,
+                )
+                from host_brain.tribe.event_bus import InMemoryTribeEventBus  # noqa: PLC0415
+                from host_brain.tribe.registry import (  # noqa: PLC0415
+                    get_host_tribe_registry,
+                    set_host_tribe_registry,
+                    HostTribeRegistry,
+                )
+
+                # 强制创建单例（若已存在则复用）
+                _tribe_bus = get_tribe_event_bus()
+                if _tribe_bus is None:
+                    _tribe_bus = InMemoryTribeEventBus(max_events=2048)
+                    set_tribe_event_bus(_tribe_bus)
+
+                _tribe_registry = get_host_tribe_registry()
+                if _tribe_registry is None:
+                    _tribe_registry = HostTribeRegistry()
+                    set_host_tribe_registry(_tribe_registry)
+
+                _tribe_family_count = len(_tribe_registry.list_families())
+                _tribe_agent_count = len(_tribe_registry.list_agents())
+                new_module_statuses["tribe_infrastructure"] = (
+                    f"OK (families={_tribe_family_count}, agents={_tribe_agent_count})"
+                )
+                logger.info(
+                    "Tribe 基础设施已初始化: families=%d, agents=%d",
+                    _tribe_family_count,
+                    _tribe_agent_count,
+                )
+            except Exception as _tribe_exc:
+                new_module_statuses["tribe_infrastructure"] = f"DEGRADED: {_tribe_exc}"
+                logger.warning("Tribe 基础设施初始化失败（降级）: %s", _tribe_exc)
+
+            # [Tribe 分发循环] 启动 TribeEventBus dispatch_loop + 注册各族 Agent 订阅
+            # Phase 1：Bus 启动后，各族 Agent 的 handler 才能被正确触发
+            try:
+                from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+                _bus = get_tribe_event_bus()
+                await _bus.start()
+
+                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent）
+                _tribe_sub_errors: list[str] = []
+                for _agent_name, _agent_factory in [
+                    ("limbic_agent", "host_brain.tribe.limbic_agent.get_limbic_agent"),
+                    ("prefrontal_agent", "host_brain.tribe.prefrontal_agent.get_prefrontal_agent"),
+                    ("social_brain_agent", "host_brain.tribe.social_brain_agent.get_social_brain_agent"),
+                    ("cortex_agent", "host_brain.tribe.cortex_agent.get_cortex_agent"),
+                ]:
+                    try:
+                        _module_path, _func_name = _agent_factory.rsplit(".", 1)
+                        import importlib as _importlib  # noqa: PLC0415
+                        _mod = _importlib.import_module(_module_path)
+                        _agent = getattr(_mod, _func_name)()
+                        _agent.register_subscriptions()
+                        logger.info("Tribe 订阅已注册: %s", _agent_name)
+                    except Exception as _sub_exc:
+                        _tribe_sub_errors.append(f"{_agent_name}:{_sub_exc}")
+                        logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
+
+                _sub_status = (
+                    f"OK (dispatch_loop=running, subscriptions=4)"
+                    if not _tribe_sub_errors
+                    else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
+                )
+                new_module_statuses["tribe_dispatch_loop"] = _sub_status
+                logger.info("TribeEventBus dispatch_loop 已启动，订阅注册完成")
+            except Exception as _dispatch_exc:
+                new_module_statuses["tribe_dispatch_loop"] = f"DEGRADED: {_dispatch_exc}"
+                logger.warning("TribeEventBus dispatch_loop 启动失败（降级）: %s", _dispatch_exc)
+
         except Exception as exc:
             logger.warning("Startup probe degraded: %s", exc, exc_info=True)
         yield
@@ -1164,6 +1253,16 @@ def runtime_lifespan(
             await stop_heartbeat()
         except Exception:
             pass
+        # [Tribe 分发循环] 停止 TribeEventBus dispatch_loop
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            _shutdown_bus = get_tribe_event_bus()
+            if _shutdown_bus is not None:
+                await _shutdown_bus.stop()
+                logger.info("TribeEventBus dispatch_loop 已停止")
+        except Exception as _bus_stop_exc:
+            logger.warning("TribeEventBus dispatch_loop 停止失败: %s", _bus_stop_exc)
         logger.info("Natsume AI Host Brain shutting down ...")
 
     return _lifespan()

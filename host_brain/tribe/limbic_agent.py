@@ -827,6 +827,103 @@ class LimbicAgent:
         merged[str(key)] = value
         self.state_registry.set_state("limbic", merged, writer="limbic_agent")
 
+    # ── TribeEventBus 订阅注册（Phase 1）────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
+        各族 Agent 的 handler 能被正确触发。
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("BODY_SENSE_UPDATED", self._on_body_sense_updated)
+            bus.subscribe("INNER_WORLD_TICKED", self._on_inner_world_ticked)
+            bus.subscribe("CONVERSATION_STARTED", self._on_conversation_started_event)
+            bus.subscribe("CONVERSATION_ENDED", self._on_conversation_ended_event)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_body_sense_updated(self, event: Any) -> None:
+        """处理 BODY_SENSE_UPDATED 事件：更新沉默意愿惩罚。"""
+        try:
+            payload = dict(event.payload or {})
+            penalty = float(payload.get("willingness_penalty") or 0.0)
+            if penalty > 0.0:
+                self.apply_body_sense_penalty(penalty=penalty)
+            self._touch_state(
+                key="last_bus_body_sense_updated",
+                value={
+                    "source": str(event.source_agent or ""),
+                    "fatigue_level": str(payload.get("fatigue_level") or "normal"),
+                    "loneliness_level": str(payload.get("loneliness_level") or "none"),
+                    "willingness_penalty": penalty,
+                },
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_body_sense_updated 异常: %s", exc
+            )
+
+    async def _on_inner_world_ticked(self, event: Any) -> None:
+        """处理 INNER_WORLD_TICKED 事件：记录内心世界 tick 状态。"""
+        try:
+            payload = dict(event.payload or {})
+            self._touch_state(
+                key="last_bus_inner_world_ticked",
+                value={
+                    "source": str(event.source_agent or ""),
+                    "user_id": str(payload.get("user_id") or ""),
+                    "loneliness": payload.get("loneliness"),
+                    "anticipation": payload.get("anticipation"),
+                    "continuity_score": payload.get("continuity_score"),
+                },
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_inner_world_ticked 异常: %s", exc
+            )
+
+    async def _on_conversation_started_event(self, event: Any) -> None:
+        """处理 CONVERSATION_STARTED 事件：重置沉默意愿、捕获 body_sense 快照。"""
+        try:
+            payload = dict(event.payload or {})
+            self.on_conversation_started(
+                request_id=payload.get("request_id"),
+                session_id=payload.get("session_id"),
+                person_id=payload.get("user_id") or payload.get("person_id"),
+                emotion_tag=payload.get("emotion_tag"),
+                mood_state=payload.get("mood_state"),
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_conversation_started_event 异常: %s", exc
+            )
+
+    async def _on_conversation_ended_event(self, event: Any) -> None:
+        """处理 CONVERSATION_ENDED 事件：触发 session_end 收口。"""
+        try:
+            payload = dict(event.payload or {})
+            self.on_conversation_ended(
+                request_id=payload.get("request_id"),
+                session_id=payload.get("session_id"),
+                person_id=payload.get("user_id") or payload.get("person_id"),
+                duration_minutes=payload.get("duration_minutes"),
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_conversation_ended_event 异常: %s", exc
+            )
+
 
 _LIMBIC_AGENT: LimbicAgent | None = None
 

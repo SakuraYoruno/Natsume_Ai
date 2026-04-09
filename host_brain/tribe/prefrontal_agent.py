@@ -576,6 +576,84 @@ class PrefrontalAgent:
             )
         return self._emergent_growth_engine
 
+    # ── TribeEventBus 订阅注册（Phase 4）────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
+        PrefrontalAgent 的 handler 能被正确触发。
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("EVOLUTION_CYCLE_TRIGGERED", self._on_evolution_cycle_triggered)
+            bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+        except Exception as exc:
+            _logger.warning("PrefrontalAgent 订阅注册失败（降级）: %s", exc)
+
+    async def _on_evolution_cycle_triggered(self, event: Any) -> None:
+        """处理 EVOLUTION_CYCLE_TRIGGERED 事件：触发人格演化周期。
+
+        由 ANSAgent（inner_world_skill）或 LimbicAgent 发布，
+        PrefrontalAgent 订阅后异步执行 evolution_cycle。
+        """
+        try:
+            payload = dict(event.payload or {})
+            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            reason = str(payload.get("reason") or "event_triggered").strip()
+            _logger.info(
+                "PrefrontalAgent 收到 EVOLUTION_CYCLE_TRIGGERED: user_id=%s reason=%s",
+                user_id, reason,
+            )
+            # 异步执行 evolution_cycle（避免阻塞 dispatch_loop）
+            import asyncio  # noqa: PLC0415
+            asyncio.create_task(
+                self._run_evolution_cycle_async(user_id=user_id, reason=reason),
+                name=f"evolution_cycle_{user_id}",
+            )
+        except Exception as exc:
+            _logger.warning("PrefrontalAgent._on_evolution_cycle_triggered 异常: %s", exc)
+
+    async def _run_evolution_cycle_async(self, *, user_id: str, reason: str) -> None:
+        """在独立 task 中异步执行 evolution_cycle，避免阻塞事件分发循环。"""
+        try:
+            import asyncio  # noqa: PLC0415
+            result = await asyncio.to_thread(
+                self.run_evolution_cycle,
+                system_intent={
+                    "skill_name": "evolution_cycle",
+                    "args": {"user_id": user_id},
+                    "proposer_node_id": "tribe_event_bus",
+                },
+            )
+            _logger.info(
+                "PrefrontalAgent evolution_cycle 完成: user_id=%s reason=%s status=%s",
+                user_id, reason, result.get("status"),
+            )
+        except Exception as exc:
+            _logger.warning(
+                "PrefrontalAgent._run_evolution_cycle_async 异常: user_id=%s exc=%s",
+                user_id, exc,
+            )
+
+    async def _on_interaction_recorded(self, event: Any) -> None:
+        """处理 INTERACTION_RECORDED 事件：触发人格漂移检测。"""
+        try:
+            payload = dict(event.payload or {})
+            user_message = str(payload.get("user_message") or "").strip()
+            assistant_reply = str(payload.get("assistant_reply") or "").strip()
+            session_id = str(payload.get("session_id") or "default").strip() or "default"
+            if user_message and assistant_reply:
+                self.run_growth_feedback_cycle(
+                    session_id=session_id,
+                    user_message=user_message,
+                    assistant_reply=assistant_reply,
+                )
+        except Exception as exc:
+            _logger.warning("PrefrontalAgent._on_interaction_recorded 异常: %s", exc)
+
 
 _PREFRONTAL_AGENT: PrefrontalAgent | None = None
 

@@ -181,6 +181,52 @@ class SocialBrainAgent:
         except Exception:
             return None
 
+    # ── TribeEventBus 订阅注册（Phase 4）────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
+        SocialBrainAgent 的 handler 能被正确触发。
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_interaction_recorded(self, event: Any) -> None:
+        """处理 INTERACTION_RECORDED 事件：触发 Bond 动态更新。
+
+        由 CortexAgent 在对话结束后发布，SocialBrainAgent 订阅后
+        异步更新 Bond 状态（关系阶段、亲密度等）。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.social_brain_agent")
+            payload = dict(event.payload or {})
+            user_id = str(payload.get("user_id") or "").strip()
+            session_id = str(payload.get("session_id") or "default").strip() or "default"
+            emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            emotion_intensity = float(payload.get("emotion_intensity") or 0.5)
+            _log.debug(
+                "SocialBrainAgent 收到 INTERACTION_RECORDED: user_id=%s session_id=%s emotion=%s",
+                user_id, session_id, emotion_tag,
+            )
+            # Bond 更新由 CortexAgent.post_process_bond_update 负责，
+            # 此处仅记录事件，避免重复写入
+            # 未来可在此触发 bond_vector 更新（familiarity/trust/attachment 等）
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_interaction_recorded 异常: %s", exc
+            )
+
 
 _SOCIAL_BRAIN_AGENT: SocialBrainAgent | None = None
 
