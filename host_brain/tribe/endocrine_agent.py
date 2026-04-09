@@ -34,6 +34,26 @@ class EndocrineAgent:
             emotion_intensity=emotion_intensity,
         )
         payload = dict(state.as_dict())
+
+        # ── T-17：接入 PainRewardAgent 压力信号 ──────────────────────────
+        # 将痛觉/奖励系统的净压力变化量叠加到 cortisol_level，
+        # 使痛觉事件（被拒绝/被攻击/话题受挫等）能够影响内分泌状态。
+        # 叠加量上限 ±0.15，避免单次事件过度影响皮质醇。
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+
+            _pain_agent = get_pain_reward_agent()
+            _stress_signal = _pain_agent.get_stress_signal()
+            _net_stress_delta = float(_stress_signal.get("net_stress_delta") or 0.0)
+            if abs(_net_stress_delta) > 0.001:
+                _clamped_delta = max(-0.15, min(0.15, _net_stress_delta))
+                _cur_cortisol = _safe_float(payload.get("cortisol_level"), 0.0)
+                _new_cortisol = max(0.0, min(1.0, _cur_cortisol + _clamped_delta))
+                payload["cortisol_level"] = round(_new_cortisol, 4)
+                payload["_pain_stress_delta"] = round(_clamped_delta, 4)
+        except Exception:
+            pass
+
         self._last_state = dict(payload)
         return payload
 

@@ -1641,3 +1641,132 @@ dispatch_agent_sse_generator()
 1. **T-17**：`PainRewardAgent.get_stress_signal()` 接入 `EndocrineAgent`（让痛觉影响皮质醇）
 2. **T-18**：`PainRewardAgent.get_emotion_modulation()` 接入 `LimbicAgent`（让奖励影响情绪偏置）
 3. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+
+---
+
+### 2026-04-09 · 第五批开发（T-17 / T-18）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/endocrine_agent.py`（T-17：PainRewardAgent 压力信号接入）
+- `host_brain/tribe/limbic_agent.py`（T-18：PainRewardAgent 情绪调制接入）
+
+---
+
+#### T-17：PainRewardAgent.get_stress_signal() 接入 EndocrineAgent ✅
+
+**问题**：`PainRewardAgent` 已实现 `get_stress_signal()`，但 `EndocrineAgent` 没有读取这个信号，导致痛觉事件无法影响皮质醇水平。
+
+**改动**（`endocrine_agent.py`，`resolve_endocrine_state()` 函数）：
+- 在 `derive_endocrine_state()` 计算完基础内分泌状态后，调用 `PainRewardAgent.get_stress_signal()`
+- 将 `net_stress_delta`（痛觉压力 - 奖励缓解）叠加到 `cortisol_level`
+- 叠加量上限 ±0.15，避免单次事件过度影响皮质醇
+- 在 payload 中写入 `_pain_stress_delta` 字段（调试用）
+- 异常降级保护，不影响现有流程
+
+**数学模型**：
+```
+net_stress_delta = pain_stress_delta - reward_relief_delta
+                 = pain_level * 0.3 - reward_level * 0.2
+clamped_delta = clamp(net_stress_delta, -0.15, +0.15)
+new_cortisol = clamp(base_cortisol + clamped_delta, 0.0, 1.0)
+```
+
+**闭环**：
+```
+PainRewardAgent.record_pain(source="rejection", intensity=0.5)
+  → pain_level = 0.5
+  → get_stress_signal() → net_stress_delta = 0.5*0.3 = +0.15
+  → EndocrineAgent.resolve_endocrine_state()
+    → cortisol_level += 0.15 (上限 0.15)
+    → gate_state 可能从 "open" → "throttle"
+  → TribeStateRegistry.aggregate_vital_signs()
+    → stress_index 上升
+  → CortexAgent.route_intent()
+    → route = "throttle" 或 "silent"
+  → dispatch_agent 步骤 0.5 门控生效
+```
+
+---
+
+#### T-18：PainRewardAgent.get_emotion_modulation() 接入 LimbicAgent ✅
+
+**问题**：`PainRewardAgent` 已实现 `get_emotion_modulation()`，但 `LimbicAgent` 没有读取这个信号，导致奖励/痛觉事件无法影响情绪持久化。
+
+**改动**（`limbic_agent.py`，`resolve_persistent_emotion_state()` 函数）：
+- 在历史情绪融合之后、`persist()` 之前，调用 `PainRewardAgent.get_emotion_modulation()`
+- 将 `valence_bias` 叠加到 `cur_valence`（上限 ±0.20，权重 0.35）
+- 将 `arousal_boost` 叠加到 `cur_arousal`（上限 +0.15，权重 0.25）
+- 在 payload 中写入 `pain_valence_bias` / `pain_arousal_boost` / `pain_suggested_emotion_tag`（调试用）
+- 异常降级保护，不影响现有流程
+
+**数学模型**：
+```
+valence_bias = (reward_level - pain_level)  # 范围 -1 ~ +1
+arousal_boost = (pain_level + reward_level) * 0.6  # 范围 0 ~ 1
+
+# 叠加到情绪持久化（权重 0.35 / 0.25 避免过度影响）
+cur_valence += clamp(valence_bias * 0.35, -0.20, +0.20)
+cur_arousal += min(arousal_boost * 0.25, +0.15)
+```
+
+**闭环**：
+```
+PainRewardAgent.record_reward(source="recognized", intensity=0.6)
+  → reward_level = 0.6
+  → get_emotion_modulation() → valence_bias = +0.6, suggested_tag = "JOY"
+  → LimbicAgent.resolve_persistent_emotion_state()
+    → cur_valence += 0.6 * 0.35 = +0.21 (上限 +0.20)
+    → 情绪持久化写入更积极的 valence
+  → 下次对话时，历史情绪融合带入积极偏置
+  → LLM 生成更积极的回复
+```
+
+---
+
+#### 当前架构状态（2026-04-09 第五批）
+
+**PainRewardAgent 完整闭环已打通**：
+
+```
+外部事件（被拒绝/被认可/话题受挫/情感共鸣）
+  ↓ record_pain() / record_reward()
+PainRewardAgent
+  ├─ get_stress_signal() → net_stress_delta
+  │    ↓
+  │  EndocrineAgent.resolve_endocrine_state()
+  │    → cortisol_level 调整
+  │    → gate_state 变化（open/throttle/closed）
+  │    ↓
+  │  TribeStateRegistry.aggregate_vital_signs()
+  │    → stress_index 更新
+  │    ↓
+  │  CortexAgent.route_intent()
+  │    → route = silent/throttle/chat
+  │    ↓
+  │  dispatch_agent 步骤 0.5 门控
+  │    → 主动沉默 / 降速提示 / 正常分发
+  │
+  └─ get_emotion_modulation() → valence_bias / arousal_boost
+       ↓
+     LimbicAgent.resolve_persistent_emotion_state()
+       → cur_valence / cur_arousal 调整
+       → EmotionPersistence.persist() 写入
+       ↓
+     下次对话历史情绪融合
+       → LLM 情绪偏置影响回复风格
+```
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `PainRewardAgent` → `EndocrineAgent` | ✅ 已接入 | 痛觉 → 皮质醇叠加（±0.15 上限） |
+| `PainRewardAgent` → `LimbicAgent` | ✅ 已接入 | 奖励/痛觉 → 情绪效价偏置（±0.20 上限） |
+| 完整痛觉/奖励闭环 | ✅ 完成 | 外部事件 → 内分泌 → 路由门控 → 情绪持久化 → LLM |
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-19**（新增）：`PainRewardAgent` 接入 `TribeStateRegistry.aggregate_vital_signs()`，将 `hedonic_state` 纳入生命体征聚合
+3. **T-20**（新增）：`CortexAgent.collect_tribe_context()` 读取 `hedonic_state`，注入 `tribe_vital_signs`

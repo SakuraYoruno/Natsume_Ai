@@ -145,6 +145,30 @@ class LimbicAgent:
             cur_arousal = cur_arousal * weight_current + float(getattr(restored, "arousal", 0.3)) * weight_history
             cur_dominance = cur_dominance * weight_current + float(getattr(restored, "dominance", 0.0)) * weight_history
 
+        # ── T-18：接入 PainRewardAgent 情绪调制信号 ──────────────────────
+        # 将痛觉/奖励系统的效价偏置（valence_bias）和唤醒度提升（arousal_boost）
+        # 叠加到当前情绪状态，使奖励/痛觉事件能够影响情绪持久化。
+        # 叠加量上限 ±0.20（valence）/ +0.15（arousal），避免过度影响。
+        _pain_valence_bias: float = 0.0
+        _pain_arousal_boost: float = 0.0
+        _pain_suggested_tag: str | None = None
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+
+            _pain_agent = get_pain_reward_agent()
+            _modulation = _pain_agent.get_emotion_modulation()
+            _raw_valence_bias = float(_modulation.get("valence_bias") or 0.0)
+            _raw_arousal_boost = float(_modulation.get("arousal_boost") or 0.0)
+            _pain_suggested_tag = _modulation.get("suggested_emotion_tag") or None
+            if abs(_raw_valence_bias) > 0.02:
+                _pain_valence_bias = max(-0.20, min(0.20, _raw_valence_bias * 0.35))
+                cur_valence = max(-1.0, min(1.0, cur_valence + _pain_valence_bias))
+            if _raw_arousal_boost > 0.05:
+                _pain_arousal_boost = min(0.15, _raw_arousal_boost * 0.25)
+                cur_arousal = max(0.0, min(1.0, cur_arousal + _pain_arousal_boost))
+        except Exception:
+            pass
+
         self._emotion_persistence.persist(
             user_id=user_id,
             valence=cur_valence,
@@ -158,6 +182,16 @@ class LimbicAgent:
             "dominance": cur_dominance,
             "from_baseline": from_baseline,
             "reunion_type": reunion_type,
+            # T-18 痛觉/奖励调制信息（调试用，不影响主流程）
+            **(
+                {
+                    "pain_valence_bias": round(_pain_valence_bias, 4),
+                    "pain_arousal_boost": round(_pain_arousal_boost, 4),
+                    **({"pain_suggested_emotion_tag": _pain_suggested_tag} if _pain_suggested_tag else {}),
+                }
+                if abs(_pain_valence_bias) > 0.001 or _pain_arousal_boost > 0.001
+                else {}
+            ),
         }
         self._touch_state(
             key="last_emotion_persistence",
