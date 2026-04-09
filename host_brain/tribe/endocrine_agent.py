@@ -127,6 +127,8 @@ class EndocrineAgent:
             bus.subscribe("BOND_REGRESS", self._on_bond_regress)
             # T-57：订阅孤独感信号，孤独感触发 cortisol 轻微上升
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
+            # T-69：订阅任务成功事件，任务成功触发 cortisol 轻微下降
+            bus.subscribe("TASK_SUCCESS", self._on_task_success_endocrine)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.endocrine_agent").warning(
@@ -203,6 +205,27 @@ class EndocrineAgent:
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent LONELINESS_SIGNAL: cortisol+%.3f loneliness=%.2f",
                 cortisol_boost, loneliness,
+            )
+        except Exception:
+            pass
+
+    async def _on_task_success_endocrine(self, event: Any) -> None:
+        """处理 TASK_SUCCESS 事件：任务成功触发 cortisol 轻微下降。
+
+        T-69：任务成功时将 cortisol 减量写入缓冲，
+        在下次 resolve_endocrine_state() 时消费，模拟成就感带来的压力缓解。
+        cortisol 减量上限 0.05，避免单次事件过度影响内分泌状态。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.35)))
+            cortisol_relief = round(-min(0.05, intensity * 0.07), 4)  # 负值表示减少
+            with self._bond_lock:
+                self._bond_cortisol_delta += cortisol_relief
+            logging.getLogger("Natsume.tribe.endocrine_agent").debug(
+                "EndocrineAgent TASK_SUCCESS: cortisol%.3f intensity=%.2f",
+                cortisol_relief, intensity,
             )
         except Exception:
             pass

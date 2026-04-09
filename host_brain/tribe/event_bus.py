@@ -101,6 +101,24 @@ class InMemoryTribeEventBus:
             except ValueError:
                 return False
 
+    def get_subscriber_count(self) -> dict[str, int]:
+        """T-66：返回各事件类型的当前订阅数量，供诊断端点使用。
+
+        Returns:
+            dict: key 为事件类型（大写），value 为订阅 handler 数量。
+                  仅包含当前有订阅的事件类型，空事件类型不出现在结果中。
+
+        Examples:
+            >>> bus.get_subscriber_count()
+            {"INTERACTION_RECORDED": 3, "BOND_PROGRESS": 4, "LONELINESS_SIGNAL": 5}
+        """
+        with self._sub_lock:
+            return {
+                event_type: len(handlers)
+                for event_type, handlers in self._subscribers.items()
+                if handlers
+            }
+
     # ── 发布 ──────────────────────────────────────────────────────────────────
 
     def publish(self, event: TribeEvent) -> TribeEvent:

@@ -382,6 +382,8 @@ class CortexAgent:
             bus.subscribe("BOND_REGRESS", self._on_bond_regress_cortex)
             # T-58：订阅免疫拦截事件，写入 cortex_agent 快照
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
+            # T-65：订阅孤独感信号，写入 cortex_agent 快照
+            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -562,6 +564,39 @@ class CortexAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_immune_block 异常: %s", exc
+            )
+
+    async def _on_loneliness_signal(self, event: Any) -> None:
+        """处理 LONELINESS_SIGNAL 事件：将孤独感数据写入 cortex_agent 快照。
+
+        T-65：记录最近一次孤独感信号的强度和时间戳，
+        供路由决策和诊断使用（高孤独感时可触发主动关怀策略）。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            bond_stage = str(payload.get("bond_stage") or "").strip().lower()
+            self.state_registry.set_state(
+                "cortex_agent",
+                {
+                    "last_loneliness_level": round(loneliness, 4),
+                    "last_loneliness_ts_ms": ts_ms,
+                    "last_loneliness_bond_stage": bond_stage,
+                    # 高孤独感（>0.7）标记，供路由决策参考
+                    "high_loneliness_flag": loneliness > 0.7,
+                },
+                writer="cortex_agent",
+            )
+            logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                "CortexAgent LONELINESS_SIGNAL: loneliness=%.3f bond_stage=%s",
+                loneliness, bond_stage,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_loneliness_signal 异常: %s", exc
             )
 
 

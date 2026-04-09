@@ -229,6 +229,34 @@ class ImmuneAgent:
             "last_inspection": last,
         }
 
+    def reset_counters(self) -> dict[str, Any]:
+        """T-68：重置免疫计数器，支持运维手动清零。
+
+        将 total/block/report/allow 计数器全部归零，
+        同时清除最近一次检测记录（_last_inspection）。
+        返回重置前的计数器快照，供运维审计使用。
+
+        Returns:
+            dict: 重置前的计数器快照，包含 counters/block_rate/reset_at_ms 字段。
+        """
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+        with self._lock:
+            old_counters = dict(self._counters)
+            self._counters = {"total": 0, "block": 0, "report": 0, "allow": 0}
+            self._last_inspection = {}
+        total = max(1, int(old_counters.get("total") or 1))
+        old_block_rate = round(int(old_counters.get("block") or 0) / total, 4)
+        import logging  # noqa: PLC0415
+        logging.getLogger("Natsume.tribe.immune_agent").info(
+            "ImmuneAgent.reset_counters: 计数器已重置，重置前 total=%d block=%d block_rate=%.4f",
+            old_counters.get("total", 0), old_counters.get("block", 0), old_block_rate,
+        )
+        return {
+            "counters_before_reset": old_counters,
+            "block_rate_before_reset": old_block_rate,
+            "reset_at_ms": now_ms(),
+        }
+
     def _record_result(self, result: Mapping[str, Any]) -> None:
         decision = str(result.get("decision") or "ALLOW").strip().upper()
         with self._lock:

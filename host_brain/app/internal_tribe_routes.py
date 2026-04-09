@@ -186,3 +186,37 @@ async def list_tribe_state_by_family(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TRIBE_STATE_FAMILY_FAILED: {exc}") from exc
+
+
+# ── T-67：TribeEventBus 订阅数量诊断端点 ─────────────────────────────────────
+
+class TribeSubscribersResponse(BaseModel):
+    total_event_types: int
+    total_handlers: int
+    subscribers: dict[str, int]
+    ts_ms: int
+
+
+@router.get("/tribe_event/subscribers", response_model=TribeSubscribersResponse)
+async def list_tribe_event_subscribers(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-67：返回 TribeEventBus 各事件类型的当前订阅数量。
+
+    供开发调试和运维诊断使用，可快速确认各 Agent 的订阅是否正确注册。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        bus = get_tribe_event_bus()
+        subscribers = bus.get_subscriber_count()
+        total_handlers = sum(subscribers.values())
+        return TribeSubscribersResponse(
+            total_event_types=len(subscribers),
+            total_handlers=total_handlers,
+            subscribers=subscribers,
+            ts_ms=now_ms(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TRIBE_SUBSCRIBERS_FAILED: {exc}") from exc

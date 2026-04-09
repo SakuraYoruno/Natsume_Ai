@@ -131,6 +131,45 @@ class ANSAgent:
             clamped, user_id, self._bond_stage,
         )
 
+    def emit_task_success(
+        self,
+        *,
+        task_type: str = "general",
+        intensity: float = 0.35,
+        user_id: str = "user_1",
+        session_id: str = "default",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """T-63：发布 TASK_SUCCESS 事件，供 skill 完成任务时调用。
+
+        触发 PainRewardAgent / LimbicAgent / SocialBrainAgent 等的联动响应：
+        - PainRewardAgent：记录 task_success 奖励
+        - LimbicAgent：情绪效价小幅提升
+        - SocialBrainAgent：bond_trend_hint 设为 progress
+
+        Args:
+            task_type: 任务类型，如 "general"/"creative"/"helpful"/"humor" 等。
+            intensity: 任务成功强度，0.0 ~ 1.0，默认 0.35。
+            user_id: 用户 ID，默认 "user_1"。
+            session_id: 会话 ID，默认 "default"。
+            metadata: 附加元数据（可选）。
+        """
+        clamped = max(0.0, min(1.0, float(intensity)))
+        payload: dict[str, Any] = {
+            "task_type": str(task_type or "general").strip() or "general",
+            "intensity": round(clamped, 4),
+            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "session_id": str(session_id or "default").strip() or "default",
+            "bond_stage": self._bond_stage,
+        }
+        if metadata:
+            payload["metadata"] = dict(metadata)
+        self.emit_from_thread("TASK_SUCCESS", payload)
+        logger.debug(
+            "ANSAgent.emit_task_success: task_type=%s intensity=%.3f bond_stage=%s",
+            task_type, clamped, self._bond_stage,
+        )
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

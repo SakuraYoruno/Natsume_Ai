@@ -177,6 +177,18 @@ class PainRewardAgent:
         with self._lock:
             return self._build_state_dict()
 
+    def get_loneliness_level(self) -> float:
+        """T-64：返回当前孤独感强度（0.0 ~ 1.0）。
+
+        孤独感由 _on_loneliness_signal() 写入 _loneliness_level 字段，
+        供 ANSAgent.inner_world_skill 和诊断端点查询使用。
+
+        Returns:
+            float: 当前孤独感强度，0.0 表示无孤独感，1.0 表示极度孤独。
+                   若从未收到 LONELINESS_SIGNAL 事件则返回 0.0。
+        """
+        return float(getattr(self, "_loneliness_level", 0.0))
+
     def get_stress_signal(self) -> dict[str, Any]:
         """向 EndocrineAgent 提供压力信号。
 

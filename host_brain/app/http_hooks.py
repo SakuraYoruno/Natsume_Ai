@@ -1254,25 +1254,28 @@ def runtime_lifespan(
                         _tribe_sub_errors.append(f"{_agent_name}:{_sub_exc}")
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
-                # T-62（第十五批）：统计本次注册的订阅总数
+                # T-72（第十六批）：统计本次注册的订阅总数
                 # LimbicAgent:       INTERACTION_RECORDED / BODY_SENSE_UPDATED / INNER_WORLD_TICKED
                 #                    EMOTION_INFERENCE_UPDATED / BOND_PROGRESS / BOND_REGRESS
                 #                    TASK_SUCCESS(T-41) / HUMOR_LANDED(T-41) / LONELINESS_SIGNAL(T-51) = 9
                 # PrefrontalAgent:   EVOLUTION_CYCLE_TRIGGERED / INTERACTION_RECORDED
-                #                    BOND_STAGE_CHANGED(T-34) / LONELINESS_SIGNAL(T-47) = 4
+                #                    BOND_STAGE_CHANGED(T-34) / LONELINESS_SIGNAL(T-47)
+                #                    IMMUNE_BLOCK(T-71) = 5
                 # SocialBrainAgent:  INTERACTION_RECORDED / BOND_PROGRESS / BOND_REGRESS
                 #                    TASK_SUCCESS(T-48) / LONELINESS_SIGNAL(T-60) = 5
                 # CortexAgent:       SILENCE_WILLINGNESS_CHANGED / EMOTION_STATE_CHANGED / BOND_STAGE_CHANGED
-                #                    BOND_PROGRESS(T-33) / BOND_REGRESS(T-33) / IMMUNE_BLOCK(T-58) = 6
+                #                    BOND_PROGRESS(T-33) / BOND_REGRESS(T-33) / IMMUNE_BLOCK(T-58)
+                #                    LONELINESS_SIGNAL(T-65) = 7
                 # PainRewardAgent:   INTERACTION_RECORDED / EMOTION_UPDATED / IMMUNE_BLOCK
                 #                    BOND_PROGRESS / BOND_REGRESS / TASK_SUCCESS / HUMOR_LANDED
                 #                    LONELINESS_SIGNAL(T-40) = 8
-                # EndocrineAgent:    BOND_PROGRESS / BOND_REGRESS / LONELINESS_SIGNAL(T-57) = 3
+                # EndocrineAgent:    BOND_PROGRESS / BOND_REGRESS / LONELINESS_SIGNAL(T-57)
+                #                    TASK_SUCCESS(T-69) = 4
                 # ImmuneAgent:       INTERACTION_RECORDED(T-35) = 1
                 # HippocampusAgent:  INTERACTION_RECORDED(T-36) / LONELINESS_SIGNAL(T-61) = 2
                 # ANSAgent:          BOND_STAGE_CHANGED(T-37) = 1
-                # 合计: 9+4+5+6+8+3+1+2+1 = 39
-                _total_subscriptions = 39
+                # 合计: 9+5+5+7+8+4+1+2+1 = 42
+                _total_subscriptions = 42
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors

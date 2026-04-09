@@ -597,6 +597,8 @@ class PrefrontalAgent:
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_growth)
             # T-47：订阅孤独感信号，影响决策策略（降低主动性阈值）
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
+            # T-71：订阅免疫拦截事件，触发安全审查成长周期
+            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_growth)
         except Exception as exc:
             _logger.warning("PrefrontalAgent 订阅注册失败（降级）: %s", exc)
 
@@ -799,6 +801,39 @@ class PrefrontalAgent:
                 )
         except Exception as exc:
             _logger.warning("PrefrontalAgent._on_loneliness_signal 异常: %s", exc)
+
+    async def _on_immune_block_growth(self, event: Any) -> None:
+        """处理 IMMUNE_BLOCK 事件：拦截时触发安全审查成长周期。
+
+        T-71：ImmuneAgent 拦截有害内容时发布此事件，
+        PrefrontalAgent 订阅后触发 apply_safety_review_growth()，
+        将安全拦截转化为人格成长动力（提升边界感/自我保护意识）。
+        仅在 block_rate > 0.1 或 risk_level 为 high/critical 时触发，
+        避免低频拦截过度影响人格演化。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            risk_level = str(payload.get("risk_level") or "").strip().lower()
+            score = float(payload.get("score") or 0.0)
+            session_id = str(payload.get("session_id") or "default").strip() or "default"
+            # 仅高风险拦截才触发成长周期
+            if risk_level not in ("high", "critical") and score < 0.7:
+                return
+            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            _logger.info(
+                "PrefrontalAgent IMMUNE_BLOCK 触发安全审查成长: risk_level=%s score=%.3f session_id=%s",
+                risk_level, score, session_id,
+            )
+            import asyncio  # noqa: PLC0415
+            asyncio.create_task(
+                self._run_evolution_cycle_async(
+                    user_id=user_id,
+                    reason=f"immune_block_risk_{risk_level}",
+                ),
+                name=f"immune_block_growth_{session_id}",
+            )
+        except Exception as exc:
+            _logger.warning("PrefrontalAgent._on_immune_block_growth 异常: %s", exc)
 
 
 _PREFRONTAL_AGENT: PrefrontalAgent | None = None

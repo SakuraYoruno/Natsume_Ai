@@ -124,6 +124,26 @@ class TribeStateRegistry:
             reverse=True,
         )
 
+    def clear_namespace(self, namespace: str) -> bool:
+        """T-70：清除指定命名空间的状态快照，支持运维手动清零。
+
+        Args:
+            namespace: 要清除的命名空间名称，大小写敏感，与 set_state() 保持一致。
+
+        Returns:
+            True 表示成功清除（命名空间存在），False 表示命名空间不存在。
+        """
+        ns = str(namespace or "").strip() or "default"
+        with self._lock:
+            if ns not in self._states:
+                return False
+            del self._states[ns]
+        import logging  # noqa: PLC0415
+        logging.getLogger("Natsume.tribe.tribe_state").info(
+            "TribeStateRegistry.clear_namespace: 已清除命名空间 %s", ns
+        )
+        return True
+
     # ── T-29：持久化方法 ─────────────────────────────────────────────────────
 
     def save_snapshot(self) -> bool:
