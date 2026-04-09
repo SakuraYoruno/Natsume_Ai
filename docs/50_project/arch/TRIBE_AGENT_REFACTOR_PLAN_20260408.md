@@ -1436,3 +1436,105 @@ edge_client/voice_pipeline
 3. **T-12**：`ProprioceptionAgent`（本体感觉，Phase 5 后实施）
 4. **T-13**：`PainRewardAgent`（痛觉/奖励，需 EndocrineAgent 完成后实施）
 5. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+
+---
+
+### 2026-04-09 · 第三批开发（T-10 / T-11 / T-12）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/tribe_state.py`（`aggregate_vital_signs()` 新增）
+- `host_brain/tribe/cortex_agent.py`（`collect_tribe_context()` + `route_intent()` 新增）
+- `host_brain/app/chat_context_builder.py`（CortexAgent Supervisor 收口接入）
+
+---
+
+#### T-10：TribeStateRegistry.aggregate_vital_signs() ✅
+
+**问题**：各族 Agent 各自写入 `TribeStateRegistry`，但没有统一的聚合接口，外部消费者需要逐个读取各族状态。
+
+**改动**（`tribe_state.py`）：
+- 新增 `aggregate_vital_signs()` 方法，从各族 Agent 写入的状态快照中聚合统一生命体征
+- 聚合来源：
+  - `endocrine_agent` → `gate_state` / `stress_index` / `energy_reserve` / `homeostasis_ok`
+  - `limbic_agent` → `emotion_tag` / `mood_state` / `silence_willingness`
+  - `last_voice_emotion_inference`（T-09 写入）→ `voice_emotion_tag` / `voice_emotion_intensity`
+  - `social_brain_agent` → `bond_stage`
+- 新增模块级 `_safe_float()` 辅助函数
+- 返回字段包含 `ts_ms` 时间戳，便于下游判断数据新鲜度
+
+**架构意义**：`TribeStateRegistry` 从"分散的 KV 存储"升级为"可聚合的生命体征数据库"，为 CortexAgent Supervisor 提供统一数据源。
+
+---
+
+#### T-11：CortexAgent 增强为 Supervisor 角色 ✅
+
+**问题**：`CortexAgent` 只有对话生命周期事件发布能力，缺少 Supervisor 的核心职责：统一收口各族上下文 + 意图路由决策。
+
+**改动**（`cortex_agent.py`）：
+
+新增 `collect_tribe_context()` 方法：
+- 调用 `LimbicAgent.state_registry.aggregate_vital_signs()` 获取统一生命体征
+- 调用 `LimbicAgent.get_emotion_context()` 获取情绪上下文
+- 调用 `SocialBrainAgent.get_bond_context()` 获取 Bond/关系上下文
+- 调用 `EndocrineAgent.resolve_vital_signs()` 获取内分泌门控状态
+- 所有调用均有异常降级保护
+
+新增 `route_intent()` 方法：
+- 根据 `gate_state` / `silence_willingness` / `homeostasis_ok` 决定路由策略
+- 路由结果：`"chat"` | `"skill"` | `"silent"` | `"throttle"`
+- `gate_state == "pause"` → `throttle`（内分泌系统要求暂停）
+- `silence_willingness >= 0.85` → `silent`（主动沉默）
+- `gate_state == "throttle"` 或 `homeostasis_ok == False` → `throttle`
+- 其他 → `chat`（正常流程）
+
+**架构意义**：`CortexAgent` 正式成为 Tribe 架构的 Supervisor，负责统一收口各族上下文并做出路由决策，符合文档设计意图。
+
+---
+
+#### T-12：chat_context_builder.py 接入 CortexAgent Supervisor 收口 ✅
+
+**问题**：`build_chat_prompt_runtime_payload()` 虽然已经分散调用了各族 Agent，但没有通过 CortexAgent 统一收口，导致 `vital_signs` 聚合和意图路由结果无法注入 `runtime_payload`。
+
+**改动**（`chat_context_builder.py`）：
+- 在 `return runtime_payload` 之前增加 CortexAgent Supervisor 收口逻辑
+- 调用 `CortexAgent.collect_tribe_context()` 聚合各族上下文
+- 将 `vital_signs` 注入 `runtime_payload["tribe_vital_signs"]`
+- 将 `route_intent()` 结果注入 `runtime_payload["tribe_route"]`
+- 若有语音情绪推断结果，补充到 `runtime_payload["voice_emotion_inference"]`（T-09 闭环）
+- 所有逻辑均有异常降级保护，不影响现有流程
+
+**数据流**：
+```
+build_chat_prompt_runtime_payload()
+  → CortexAgent.collect_tribe_context()
+    → LimbicAgent.state_registry.aggregate_vital_signs()
+    → LimbicAgent.get_emotion_context()
+    → SocialBrainAgent.get_bond_context()
+    → EndocrineAgent.resolve_vital_signs()
+  → CortexAgent.route_intent()
+  → runtime_payload["tribe_vital_signs"] = vital_signs
+  → runtime_payload["tribe_route"] = route_result
+  → runtime_payload["voice_emotion_inference"] = voice_emotion (if any)
+```
+
+---
+
+#### 当前架构状态（2026-04-09 第三批）
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `TribeStateRegistry.aggregate_vital_signs()` | ✅ 已实现 | 统一聚合各族生命体征 |
+| `CortexAgent.collect_tribe_context()` | ✅ 已实现 | Supervisor 统一收口各族上下文 |
+| `CortexAgent.route_intent()` | ✅ 已实现 | 基于 vital_signs 的意图路由决策 |
+| `chat_context_builder` CortexAgent 收口 | ✅ 已接入 | tribe_vital_signs / tribe_route 注入 runtime_payload |
+| T-09 voice_emotion 闭环 | ✅ 已完成 | voice_emotion_inference 注入 runtime_payload |
+
+---
+
+#### 下一步待开发（优先级排序）
+
+1. **T-13**：`PainRewardAgent`（痛觉/奖励，需 EndocrineAgent 完成后实施）
+2. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+3. **T-15**：`tribe_route` 接入 `dispatch_agent.py`（让 CortexAgent 的路由决策影响实际分发）
+4. **T-16**：`tribe_vital_signs` 接入 prompt_builder（让生命体征影响 prompt 生成）

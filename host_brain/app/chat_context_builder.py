@@ -2539,6 +2539,39 @@ def build_chat_prompt_runtime_payload(
     except Exception as _context_pack_exc:
         logger.debug("build multi-agent context pack degraded: %s", _context_pack_exc)
 
+    # ── T-12：CortexAgent Supervisor 收口 ────────────────────────────────
+    # 通过 CortexAgent.collect_tribe_context() 聚合各族 Agent 的运行时状态，
+    # 注入 runtime_payload["tribe_vital_signs"] 和 runtime_payload["tribe_route"]
+    # 供 prompt_builder 和下游消费者读取。
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+        _cortex = get_cortex_agent()
+        _tribe_ctx = _cortex.collect_tribe_context(
+            session_id=str(runtime_input.session_id or "").strip() or None,
+            user_id=get_canonical_bond_user_id() or None,
+        )
+        _vital_signs = dict(_tribe_ctx.get("vital_signs") or {})
+        if _vital_signs:
+            runtime_payload["tribe_vital_signs"] = _vital_signs
+        _tribe_route = _cortex.route_intent(
+            message=str(runtime_input.user_message or ""),
+            tribe_context=_tribe_ctx,
+        )
+        runtime_payload["tribe_route"] = _tribe_route
+        # 若 voice_emotion 有值，补充到 runtime_payload（T-09 闭环）
+        _voice_emotion = dict(_tribe_ctx.get("voice_emotion") or {})
+        if _voice_emotion and _voice_emotion.get("emotion_tag"):
+            runtime_payload.setdefault("voice_emotion_inference", _voice_emotion)
+        logger.debug(
+            "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s",
+            _vital_signs.get("gate_state"),
+            _tribe_route.get("route"),
+            _voice_emotion.get("emotion_tag"),
+        )
+    except Exception as _cortex_exc:
+        logger.debug("CortexAgent Supervisor 收口降级: %s", _cortex_exc)
+
     return runtime_payload
 
 

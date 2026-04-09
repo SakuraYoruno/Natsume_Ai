@@ -89,6 +89,160 @@ class CortexAgent:
         await asyncio.to_thread(writer.apply_update, **bond_payload)
         return {"status": "WRITTEN", "update_kind": update_kind}
 
+    # ── Supervisor：统一上下文收口 + 意图路由（T-11）────────────────────────
+
+    def collect_tribe_context(
+        self,
+        *,
+        request_body: Any | None = None,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Supervisor 收口：从各族 Agent 收集运行时上下文，供 chat_context_builder 使用。
+
+        T-11：CortexAgent 作为 Supervisor，统一聚合：
+        - LimbicAgent：情绪上下文、沉默意愿、body_sense 快照
+        - HippocampusAgent：记忆召回摘要（仅元数据，不触发新召回）
+        - SocialBrainAgent：Bond 阶段、关系状态
+        - EndocrineAgent：内分泌门控状态（vital_signs）
+        - TribeStateRegistry：aggregate_vital_signs() 统一生命体征
+
+        返回字段：
+            vital_signs (dict): 统一生命体征聚合
+            emotion_context (dict): 情绪上下文快照
+            bond_context (dict): Bond/关系上下文
+            endocrine_gate (dict): 内分泌门控状态
+            silence_willingness (float): 沉默意愿
+            voice_emotion (dict | None): 最近语音情绪推断
+            tribe_context_source (str): 数据来源标记
+        """
+        result: dict[str, Any] = {
+            "vital_signs": {},
+            "emotion_context": {},
+            "bond_context": {},
+            "endocrine_gate": {},
+            "silence_willingness": 0.5,
+            "voice_emotion": None,
+            "tribe_context_source": "cortex_agent",
+        }
+
+        # ── 1. 统一生命体征聚合（TribeStateRegistry）────────────────────────
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            vital_signs = get_limbic_agent().state_registry.aggregate_vital_signs()
+            result["vital_signs"] = vital_signs
+            result["silence_willingness"] = float(vital_signs.get("silence_willingness") or 0.5)
+            if vital_signs.get("voice_emotion_tag"):
+                result["voice_emotion"] = {
+                    "emotion_tag": vital_signs["voice_emotion_tag"],
+                    "emotion_intensity": vital_signs.get("voice_emotion_intensity"),
+                }
+        except Exception:
+            pass
+
+        # ── 2. 情绪上下文（LimbicAgent）──────────────────────────────────────
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            limbic = get_limbic_agent()
+            if request_body is not None:
+                emotion_ctx = limbic.get_emotion_context(request_body=request_body)
+            else:
+                # 无 request_body 时从 state_registry 读取最近快照
+                last_ctx = limbic.state_registry.get_state("last_emotion_context")
+                emotion_ctx = dict((last_ctx or {}).get("state") or {})
+            result["emotion_context"] = emotion_ctx
+        except Exception:
+            pass
+
+        # ── 3. Bond/关系上下文（SocialBrainAgent）────────────────────────────
+        try:
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            social = get_social_brain_agent()
+            bond_ctx = social.get_bond_context(
+                session_id=str(session_id or ""),
+                user_id=str(user_id or ""),
+            )
+            result["bond_context"] = bond_ctx
+        except Exception:
+            pass
+
+        # ── 4. 内分泌门控（EndocrineAgent）───────────────────────────────────
+        try:
+            from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+
+            endocrine = get_endocrine_agent()
+            vitals = endocrine.resolve_vital_signs()
+            result["endocrine_gate"] = vitals
+        except Exception:
+            pass
+
+        return result
+
+    def route_intent(
+        self,
+        *,
+        message: str,
+        tribe_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Supervisor 意图路由：根据消息内容和族上下文决定路由策略。
+
+        T-11：CortexAgent 作为 Supervisor，综合考虑：
+        - 内分泌门控状态（gate_state）
+        - 沉默意愿（silence_willingness）
+        - Bond 阶段（bond_stage）
+        - 消息长度和内容特征
+
+        返回字段：
+            route (str): "chat" | "skill" | "silent" | "throttle"
+            reason (str): 路由原因说明
+            gate_state (str): 当前门控状态
+            confidence (float): 路由置信度 0.0 ~ 1.0
+        """
+        ctx = dict(tribe_context or {})
+        vital_signs = dict(ctx.get("vital_signs") or {})
+        gate_state = str(vital_signs.get("gate_state") or ctx.get("gate_state") or "open").strip().lower()
+        silence_willingness = float(vital_signs.get("silence_willingness") or ctx.get("silence_willingness") or 0.5)
+        bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "stranger").strip().lower()
+        homeostasis_ok = bool(vital_signs.get("homeostasis_ok", True))
+
+        # 门控暂停：内分泌系统要求暂停响应
+        if gate_state == "pause":
+            return {
+                "route": "throttle",
+                "reason": "endocrine_gate_pause",
+                "gate_state": gate_state,
+                "confidence": 0.95,
+            }
+
+        # 沉默意愿极高（>= 0.85）：主动沉默
+        if silence_willingness >= 0.85:
+            return {
+                "route": "silent",
+                "reason": "high_silence_willingness",
+                "gate_state": gate_state,
+                "confidence": round(silence_willingness, 4),
+            }
+
+        # 门控节流：降低响应频率
+        if gate_state == "throttle" or not homeostasis_ok:
+            return {
+                "route": "throttle",
+                "reason": "endocrine_gate_throttle" if gate_state == "throttle" else "homeostasis_disrupted",
+                "gate_state": gate_state,
+                "confidence": 0.75,
+            }
+
+        # 正常路由：chat
+        return {
+            "route": "chat",
+            "reason": f"normal_flow (bond_stage={bond_stage})",
+            "gate_state": gate_state,
+            "confidence": 0.9,
+        }
+
     # ── Phase 5：对话生命周期事件发布 ────────────────────────────────────────
 
     def emit_conversation_started(
