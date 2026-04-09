@@ -891,6 +891,8 @@ class LimbicAgent:
             # T-41：订阅任务成功/幽默成功事件，正向情绪偏置
             bus.subscribe("TASK_SUCCESS", self._on_task_success_emotion)
             bus.subscribe("HUMOR_LANDED", self._on_humor_landed_emotion)
+            # T-51：订阅孤独感信号，触发情绪效价下降
+            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal_emotion)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -1255,6 +1257,55 @@ class LimbicAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent._on_humor_landed_emotion 异常: %s", exc
+            )
+
+    async def _on_loneliness_signal_emotion(self, event: Any) -> None:
+        """处理 LONELINESS_SIGNAL 事件：孤独感触发情绪效价下降。
+
+        T-51：孤独感 > 0.5 时将情绪效价小幅下降（-0.03 ~ -0.06），
+        模拟孤独感带来的轻微负向情绪。孤独感极高（>0.8）时额外降低唤醒度。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
+            if loneliness <= 0.5:
+                return  # 低孤独感属于正常状态，不影响情绪
+            valence_drop = round(min(0.06, (loneliness - 0.5) * 0.12), 4)  # 0.5~1.0 → 0.0~0.06
+            arousal_drop = round(min(0.03, (loneliness - 0.8) * 0.10), 4) if loneliness > 0.8 else 0.0
+            if valence_drop > 0.01 and self._emotion_persistence is not None:
+                try:
+                    _ep = self._emotion_persistence
+                    _restored = _ep.restore(user_id="user_1")
+                    _cur_valence = float(getattr(_restored, "valence", 0.0))
+                    _cur_arousal = float(getattr(_restored, "arousal", 0.3))
+                    _cur_dominance = float(getattr(_restored, "dominance", 0.0))
+                    _new_valence = max(-1.0, min(1.0, _cur_valence - valence_drop))
+                    _new_arousal = max(0.0, min(1.0, _cur_arousal - arousal_drop))
+                    _ep.persist(
+                        user_id="user_1",
+                        valence=_new_valence,
+                        arousal=_new_arousal,
+                        dominance=_cur_dominance,
+                    )
+                except Exception:
+                    pass
+            self._touch_state(
+                key="last_loneliness_effect",
+                value={
+                    "loneliness": loneliness,
+                    "valence_drop": valence_drop,
+                    "arousal_drop": arousal_drop,
+                    "ts_ms": int(getattr(event, "ts_ms", 0) or 0),
+                },
+            )
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent LONELINESS_SIGNAL: valence-%.3f arousal-%.3f", valence_drop, arousal_drop,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_loneliness_signal_emotion 异常: %s", exc
             )
 
 

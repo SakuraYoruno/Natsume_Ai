@@ -61,6 +61,18 @@ class HippocampusAgent:
             session_state["bond_summary"] = dict(normalized_bond_summary)
         if normalized_motive_state:
             session_state["motive_state"] = dict(normalized_motive_state)
+        # T-49：将 ImmuneAgent 运行时状态注入 session_state，
+        # 供 RetrievalOrchestrator 在检索时参考安全状态（如 risk_level/block_rate）。
+        try:
+            from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+            _immune = get_immune_agent().export_runtime_state()
+            session_state["immune_state"] = {
+                "risk_level": _immune.get("risk_level", "none"),
+                "block_rate": _immune.get("block_rate", 0.0),
+                "last_decision": _immune.get("last_decision", "ALLOW"),
+            }
+        except Exception:
+            pass
 
         orchestrator = get_retrieval_orchestrator()
         result = await orchestrator.arun(

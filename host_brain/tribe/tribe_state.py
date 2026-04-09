@@ -83,6 +83,47 @@ class TribeStateRegistry:
             reverse=True,
         )
 
+    def get_state_by_family(self, family: str) -> list[dict[str, Any]]:
+        """T-50：按 Agent 族名查询所有匹配命名空间的快照列表。
+
+        命名空间命名约定为 "{family}_agent" 或 "{family}"，
+        此方法同时匹配两种格式，方便按族批量查询。
+
+        Args:
+            family: Agent 族名，如 "limbic"、"endocrine"、"social_brain" 等。
+                    大小写不敏感，自动转为小写匹配。
+
+        Returns:
+            按 updated_at_ms 降序排列的匹配命名空间快照列表。
+            若无匹配则返回空列表。
+
+        Examples:
+            >>> registry.get_state_by_family("limbic")
+            # 返回 namespace 为 "limbic_agent" 或 "limbic" 的快照
+            >>> registry.get_state_by_family("social_brain")
+            # 返回 namespace 为 "social_brain_agent" 或 "social_brain" 的快照
+        """
+        target = str(family or "").strip().lower()
+        if not target:
+            return []
+        # 匹配规则：namespace == target 或 namespace == f"{target}_agent"
+        # 或 namespace 以 f"{target}_" 开头（支持子族，如 "limbic_voice"）
+        with self._lock:
+            matched = [
+                dict(item)
+                for ns, item in self._states.items()
+                if isinstance(item, dict) and (
+                    ns == target
+                    or ns == f"{target}_agent"
+                    or ns.startswith(f"{target}_")
+                )
+            ]
+        return sorted(
+            matched,
+            key=lambda x: int(x.get("updated_at_ms") or 0),
+            reverse=True,
+        )
+
     # ── T-29：持久化方法 ─────────────────────────────────────────────────────
 
     def save_snapshot(self) -> bool:
@@ -310,6 +351,20 @@ class TribeStateRegistry:
             reward_level = _safe_float(_ps.get("reward_level"), 0.0)
             net_valence = _safe_float(_ps.get("net_valence"), 0.0)
 
+        # ── T-46：免疫状态（ImmuneAgent）────────────────────────────────────
+        # 从 immune_agent 命名空间读取计数器快照，
+        # 将 immune_block_count / immune_block_rate / immune_risk_level 纳入聚合。
+        immune_block_count = 0
+        immune_block_rate = 0.0
+        immune_risk_level = "none"
+        immune_ns = states.get("immune_agent")
+        if immune_ns:
+            _is = dict(immune_ns.get("state") or {})
+            _counters = dict(_is.get("counters") or {})
+            immune_block_count = int(_counters.get("block") or 0)
+            immune_block_rate = _safe_float(_is.get("block_rate"), 0.0)
+            immune_risk_level = str(_is.get("risk_level") or "none").strip().lower() or "none"
+
         return {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -328,6 +383,10 @@ class TribeStateRegistry:
             "pain_level": round(pain_level, 4),
             "reward_level": round(reward_level, 4),
             "net_valence": round(net_valence, 4),
+            # T-46 免疫状态
+            "immune_block_count": immune_block_count,
+            "immune_block_rate": round(immune_block_rate, 4),
+            "immune_risk_level": immune_risk_level,
             "ts_ms": now_ms(),
         }
 

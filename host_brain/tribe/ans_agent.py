@@ -78,9 +78,14 @@ class ANSAgent:
         """inner_world_skill 执行完成后调用，发布 INNER_WORLD_TICKED 事件。
 
         可从任意线程调用（Timer 线程或 asyncio 线程均可）。
+
+        T-43：自动将 _bond_stage 注入 payload，供 NatsumeScheduler 根据
+        关系亲密度动态调整 tick 间隔（stranger < acquaintance < friend < intimate）。
         """
         payload = dict(tick_result or {})
         payload.setdefault("source", "inner_world_skill")
+        # T-43：携带当前关系阶段，调度器可据此调整 tick 频率
+        payload.setdefault("bond_stage", self._bond_stage)
         self.emit_from_thread("INNER_WORLD_TICKED", payload)
 
     def emit_body_sense_updated(self, *, sense_result: dict[str, Any] | None = None) -> None:

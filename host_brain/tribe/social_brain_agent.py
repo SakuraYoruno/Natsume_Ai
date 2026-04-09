@@ -202,6 +202,8 @@ class SocialBrainAgent:
             # T-31：订阅关系进展/退步事件，更新 bond_summary 快照
             bus.subscribe("BOND_PROGRESS", self._on_bond_progress_snapshot)
             bus.subscribe("BOND_REGRESS", self._on_bond_regress_snapshot)
+            # T-48：订阅任务成功事件，影响 bond_trend 评估
+            bus.subscribe("TASK_SUCCESS", self._on_task_success_bond)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -373,6 +375,50 @@ class SocialBrainAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent._on_bond_regress_snapshot 异常: %s", exc
+            )
+
+
+    async def _on_task_success_bond(self, event: Any) -> None:
+        """处理 TASK_SUCCESS 事件：任务成功对 bond_trend 产生正向影响。
+
+        T-48：任务成功时，将 bond_trend 偏置为 PROGRESS，
+        并将 last_task_success 写入 social_brain_agent 快照，
+        供 aggregate_vital_signs() 和 chat_context_builder 参考。
+        任务成功是关系进展的正向信号，但不直接触发 BOND_PROGRESS
+        （避免与 _on_interaction_recorded 中的 bond_trend 逻辑重复）。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.social_brain_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            session_id = str(payload.get("session_id") or "default").strip() or "default"
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.35)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+
+            # 读取当前快照，记录最近一次任务成功
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state["last_task_success"] = {
+                "session_id": session_id,
+                "intensity": intensity,
+                "ts_ms": ts_ms,
+            }
+            # 任务成功时将 bond_trend_hint 设为 PROGRESS（hint 字段，不覆盖真实 bond_trend）
+            prev_state["bond_trend_hint"] = "progress"
+            prev_state["bond_trend_hint_ts_ms"] = ts_ms
+            self.state_registry.set_state(
+                "social_brain_agent",
+                prev_state,
+                writer="social_brain_agent",
+            )
+            _log.debug(
+                "SocialBrainAgent TASK_SUCCESS 快照更新: session_id=%s intensity=%.2f",
+                session_id, intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_task_success_bond 异常: %s", exc
             )
 
 

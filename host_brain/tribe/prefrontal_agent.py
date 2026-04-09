@@ -595,6 +595,8 @@ class PrefrontalAgent:
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
             # T-34：订阅关系阶段跃迁事件，触发人格成长
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_growth)
+            # T-47：订阅孤独感信号，影响决策策略（降低主动性阈值）
+            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
         except Exception as exc:
             _logger.warning("PrefrontalAgent 订阅注册失败（降级）: %s", exc)
 
@@ -747,6 +749,56 @@ class PrefrontalAgent:
                 )
         except Exception as exc:
             _logger.warning("PrefrontalAgent._on_bond_stage_changed_growth 异常: %s", exc)
+
+
+    async def _on_loneliness_signal(self, event: Any) -> None:
+        """处理 LONELINESS_SIGNAL 事件：孤独感影响决策策略。
+
+        T-47：当孤独感较高时（>0.6），降低主动发起话题的阈值，
+        触发 EVOLUTION_CYCLE_TRIGGERED 以加速人格成长（孤独感是成长催化剂）。
+        孤独感极高时（>0.8）还会触发 milestone 成长节点。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
+            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+
+            if loneliness > 0.6:
+                _logger.info(
+                    "PrefrontalAgent 孤独感触发决策调整: loneliness=%.2f user_id=%s",
+                    loneliness, user_id,
+                )
+                # 孤独感 > 0.6：触发演化周期（孤独感是人格成长的催化剂）
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+                    emit_tribe_event(
+                        event_type="EVOLUTION_CYCLE_TRIGGERED",
+                        source_agent="prefrontal_agent",
+                        payload={
+                            "user_id": user_id,
+                            "reason": "loneliness_signal",
+                            "loneliness": loneliness,
+                            "ts_ms": ts_ms,
+                        },
+                    )
+                except Exception:
+                    pass
+
+            if loneliness > 0.8:
+                # 孤独感极高：触发 milestone 成长节点（深度孤独体验）
+                import asyncio  # noqa: PLC0415
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        self.apply_milestone_growth,
+                        user_id=user_id,
+                        milestone_key="deep_loneliness_experience",
+                        ts_ms=ts_ms,
+                    ),
+                    name=f"loneliness_milestone_{user_id}",
+                )
+        except Exception as exc:
+            _logger.warning("PrefrontalAgent._on_loneliness_signal 异常: %s", exc)
 
 
 _PREFRONTAL_AGENT: PrefrontalAgent | None = None

@@ -1254,8 +1254,26 @@ def runtime_lifespan(
                         _tribe_sub_errors.append(f"{_agent_name}:{_sub_exc}")
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
+                # T-52：统计本次注册的订阅总数
+                # LimbicAgent:       INTERACTION_RECORDED / BODY_SENSE_UPDATED / INNER_WORLD_TICKED
+                #                    EMOTION_INFERENCE_UPDATED / BOND_PROGRESS / BOND_REGRESS
+                #                    TASK_SUCCESS(T-41) / HUMOR_LANDED(T-41) / LONELINESS_SIGNAL(T-51) = 9
+                # PrefrontalAgent:   EVOLUTION_CYCLE_TRIGGERED / INTERACTION_RECORDED
+                #                    BOND_STAGE_CHANGED(T-34) / LONELINESS_SIGNAL(T-47) = 4
+                # SocialBrainAgent:  INTERACTION_RECORDED / BOND_PROGRESS / BOND_REGRESS
+                #                    TASK_SUCCESS(T-48) = 4
+                # CortexAgent:       INTERACTION_RECORDED / BOND_PROGRESS(T-33) / BOND_REGRESS(T-33) = 3
+                # PainRewardAgent:   INTERACTION_RECORDED / EMOTION_UPDATED / IMMUNE_BLOCK
+                #                    BOND_PROGRESS / BOND_REGRESS / TASK_SUCCESS / HUMOR_LANDED
+                #                    LONELINESS_SIGNAL(T-40) = 8
+                # EndocrineAgent:    INTERACTION_RECORDED / EMOTION_UPDATED = 2
+                # ImmuneAgent:       INTERACTION_RECORDED(T-35) = 1
+                # HippocampusAgent:  INTERACTION_RECORDED(T-36) = 1
+                # ANSAgent:          BOND_STAGE_CHANGED(T-37) = 1
+                # 合计: 9+4+4+3+8+2+1+1+1 = 33
+                _total_subscriptions = 33
                 _sub_status = (
-                    f"OK (dispatch_loop=running, subscriptions=20)"
+                    f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors
                     else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
                 )

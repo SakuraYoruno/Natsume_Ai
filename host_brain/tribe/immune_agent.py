@@ -205,6 +205,13 @@ class ImmuneAgent:
             counters = dict(self._counters)
             last = dict(self._last_inspection or {})
         template_rule_count = max(0, len(rules) - len(_IMMUNE_RULES))
+        # T-44：基于最近一次检测的 score 计算当前 risk_level，
+        # 供 CortexAgent.collect_tribe_context() 的 immune_state 字段直接使用。
+        last_score = float(last.get("score") or 0.0)
+        current_risk_level = _risk_level(last_score)
+        # 累计 block_rate（防止除零）
+        total = max(1, int(counters.get("total") or 1))
+        block_rate = round(int(counters.get("block") or 0) / total, 4)
         return {
             "enabled": cfg.enabled,
             "blocking_enabled": cfg.blocking_enabled,
@@ -215,6 +222,10 @@ class ImmuneAgent:
             "template_rule_count": template_rule_count,
             "total_rule_count": len(rules),
             "counters": counters,
+            "block_rate": block_rate,
+            "risk_level": current_risk_level,       # T-44：当前风险等级（none/low/medium/high/critical）
+            "last_score": round(last_score, 4),     # T-44：最近一次检测分数
+            "last_decision": str(last.get("decision") or "ALLOW"),  # T-44：最近一次决策
             "last_inspection": last,
         }
 

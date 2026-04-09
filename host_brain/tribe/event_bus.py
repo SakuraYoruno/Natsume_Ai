@@ -91,6 +91,38 @@ class InMemoryTribeEventBus:
                 )
         return event
 
+    def publish_batch(self, events: list[TribeEvent]) -> list[TribeEvent]:
+        """T-45：批量发布事件，一次性写入环形缓冲区，减少高频场景的锁竞争。
+
+        与逐条调用 publish() 相比，批量写入只需获取一次 _lock，
+        适用于同一请求周期内需要连续发布多个事件的场景
+        （如 INTERACTION_RECORDED + EMOTION_UPDATED + BOND_PROGRESS 同时触发）。
+
+        Args:
+            events: 待发布的事件列表，空列表直接返回。
+
+        Returns:
+            已发布的事件列表（与入参相同）。
+        """
+        if not events:
+            return events
+        # 一次性写入环形缓冲区
+        with self._lock:
+            for event in events:
+                self._events.append(event)
+        # 逐一投递到分发队列（队列满时记录警告并跳过）
+        if self._queue is not None and self._running:
+            for event in events:
+                try:
+                    self._queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "TribeEventBus 分发队列已满（batch），丢弃事件: event_type=%s event_id=%s",
+                        event.event_type,
+                        event.event_id,
+                    )
+        return events
+
     # ── 分发循环 ──────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
