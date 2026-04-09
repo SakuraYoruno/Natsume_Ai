@@ -43,6 +43,7 @@ class TribeStateRegistry:
         - limbic_agent 写入的 emotion_tag / mood_state / silence_willingness
         - social_brain_agent 写入的 bond_stage
         - limbic_agent 写入的 last_voice_emotion_inference（语音情绪推断）
+        - pain_reward_agent 写入的 hedonic_tone / pain_level / reward_level / net_valence（T-19）
 
         返回字段：
             gate_state (str): "open" | "throttle" | "pause"
@@ -55,6 +56,10 @@ class TribeStateRegistry:
             bond_stage (str): 当前 Bond 阶段
             voice_emotion_tag (str | None): 最近语音情绪推断结果
             voice_emotion_intensity (float | None): 最近语音情绪强度
+            hedonic_tone (str): 享乐基调 "positive"|"neutral"|"negative"|"mixed"（T-19）
+            pain_level (float): 当前痛觉强度 0.0 ~ 1.0（T-19）
+            reward_level (float): 当前奖励强度 0.0 ~ 1.0（T-19）
+            net_valence (float): 净享乐效价 -1.0 ~ 1.0（T-19）
             ts_ms (int): 聚合时间戳
         """
         with self._lock:
@@ -107,6 +112,21 @@ class TribeStateRegistry:
             _ss = dict(social_ns.get("state") or {})
             bond_stage = str(_ss.get("bond_stage") or "stranger").strip().lower() or "stranger"
 
+        # ── T-19：享乐状态（PainRewardAgent）────────────────────────────────
+        # 从 pain_reward_agent 命名空间读取 hedonic_state，
+        # 将 hedonic_tone / pain_level / reward_level / net_valence 纳入聚合。
+        hedonic_tone = "neutral"
+        pain_level = 0.0
+        reward_level = 0.0
+        net_valence = 0.0
+        pain_ns = states.get("pain_reward_agent")
+        if pain_ns:
+            _ps = dict(pain_ns.get("state") or {})
+            hedonic_tone = str(_ps.get("hedonic_tone") or "neutral").strip().lower() or "neutral"
+            pain_level = _safe_float(_ps.get("pain_level"), 0.0)
+            reward_level = _safe_float(_ps.get("reward_level"), 0.0)
+            net_valence = _safe_float(_ps.get("net_valence"), 0.0)
+
         return {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -120,6 +140,11 @@ class TribeStateRegistry:
             "voice_emotion_intensity": (
                 round(voice_emotion_intensity, 4) if voice_emotion_intensity is not None else None
             ),
+            # T-19 享乐状态
+            "hedonic_tone": hedonic_tone,
+            "pain_level": round(pain_level, 4),
+            "reward_level": round(reward_level, 4),
+            "net_valence": round(net_valence, 4),
             "ts_ms": now_ms(),
         }
 

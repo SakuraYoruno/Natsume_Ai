@@ -106,14 +106,16 @@ class CortexAgent:
         - SocialBrainAgent：Bond 阶段、关系状态
         - EndocrineAgent：内分泌门控状态（vital_signs）
         - TribeStateRegistry：aggregate_vital_signs() 统一生命体征
+        - PainRewardAgent：完整享乐状态快照（T-20）
 
         返回字段：
-            vital_signs (dict): 统一生命体征聚合
+            vital_signs (dict): 统一生命体征聚合（含 hedonic_tone/pain_level/reward_level/net_valence）
             emotion_context (dict): 情绪上下文快照
             bond_context (dict): Bond/关系上下文
             endocrine_gate (dict): 内分泌门控状态
             silence_willingness (float): 沉默意愿
             voice_emotion (dict | None): 最近语音情绪推断
+            hedonic_state (dict): 完整享乐状态（pain_level/reward_level/net_valence/hedonic_tone/...）（T-20）
             tribe_context_source (str): 数据来源标记
         """
         result: dict[str, Any] = {
@@ -123,6 +125,7 @@ class CortexAgent:
             "endocrine_gate": {},
             "silence_willingness": 0.5,
             "voice_emotion": None,
+            "hedonic_state": {},
             "tribe_context_source": "cortex_agent",
         }
 
@@ -176,6 +179,19 @@ class CortexAgent:
             endocrine = get_endocrine_agent()
             vitals = endocrine.resolve_vital_signs()
             result["endocrine_gate"] = vitals
+        except Exception:
+            pass
+
+        # ── 5. 享乐状态（PainRewardAgent）T-20 ───────────────────────────────
+        # 直接从 PainRewardAgent 读取完整 hedonic_state，
+        # 包含 pain_level / reward_level / net_valence / hedonic_tone 等字段。
+        # vital_signs 中已通过 aggregate_vital_signs() 包含摘要字段（T-19），
+        # 此处提供完整快照供 chat_context_builder 精细化使用。
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+
+            pain_agent = get_pain_reward_agent()
+            result["hedonic_state"] = pain_agent.get_hedonic_state()
         except Exception:
             pass
 

@@ -1770,3 +1770,126 @@ PainRewardAgent
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 2. **T-19**（新增）：`PainRewardAgent` 接入 `TribeStateRegistry.aggregate_vital_signs()`，将 `hedonic_state` 纳入生命体征聚合
 3. **T-20**（新增）：`CortexAgent.collect_tribe_context()` 读取 `hedonic_state`，注入 `tribe_vital_signs`
+
+---
+
+### 2026-04-09 · 第六批开发（T-19 / T-20）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/tribe_state.py`（T-19：hedonic_state 纳入 aggregate_vital_signs）
+- `host_brain/tribe/cortex_agent.py`（T-20：collect_tribe_context 增加 hedonic_state 字段）
+
+---
+
+#### T-19：PainRewardAgent.hedonic_state 纳入 aggregate_vital_signs() ✅
+
+**问题**：`aggregate_vital_signs()` 聚合了内分泌/情绪/Bond 等状态，但缺少 `PainRewardAgent` 的享乐状态，导致 `vital_signs` 中没有 `hedonic_tone` / `pain_level` / `reward_level` / `net_valence` 字段。
+
+**改动**（`tribe_state.py`，`aggregate_vital_signs()` 函数）：
+- 增加 `pain_reward_agent` 命名空间的读取
+- 从 `state` 中提取 `hedonic_tone` / `pain_level` / `reward_level` / `net_valence`
+- 将这 4 个字段追加到返回的 `vital_signs` 字典中
+- 更新 docstring，补充新增字段说明
+
+**新增返回字段**：
+```python
+{
+    # ... 原有字段 ...
+    "hedonic_tone": "neutral",      # "positive"|"neutral"|"negative"|"mixed"
+    "pain_level": 0.0,              # 当前痛觉强度 0.0 ~ 1.0
+    "reward_level": 0.0,            # 当前奖励强度 0.0 ~ 1.0
+    "net_valence": 0.0,             # 净享乐效价 -1.0 ~ 1.0
+}
+```
+
+**数据流**：
+```
+PainRewardAgent._flush_state()
+  → state_registry.set_state("pain_reward_agent", {...})
+  → aggregate_vital_signs() 读取 states["pain_reward_agent"]
+  → vital_signs["hedonic_tone"] / ["pain_level"] / ["reward_level"] / ["net_valence"]
+```
+
+---
+
+#### T-20：CortexAgent.collect_tribe_context() 读取 hedonic_state 注入 tribe_vital_signs ✅
+
+**问题**：`collect_tribe_context()` 返回结构中没有 `hedonic_state` 字段，`chat_context_builder` 无法直接读取完整享乐状态。
+
+**改动**（`cortex_agent.py`，`collect_tribe_context()` 函数）：
+- 在返回结构初始化中增加 `"hedonic_state": {}` 字段
+- 增加第 5 步：调用 `PainRewardAgent.get_hedonic_state()` 读取完整快照
+- 更新 docstring，补充 `hedonic_state` 字段说明
+
+**返回结构变化**：
+```python
+# 新增字段
+{
+    "vital_signs": {
+        # T-19 已包含摘要字段
+        "hedonic_tone": "neutral",
+        "pain_level": 0.0,
+        "reward_level": 0.0,
+        "net_valence": 0.0,
+        # ...
+    },
+    # T-20 新增完整快照
+    "hedonic_state": {
+        "pain_level": 0.0,
+        "reward_level": 0.0,
+        "net_valence": 0.0,
+        "cumulative_pain": 0.0,
+        "cumulative_reward": 0.0,
+        "last_pain_source": None,
+        "last_reward_source": None,
+        "hedonic_tone": "neutral",
+        "ts_ms": 1234567890,
+    },
+}
+```
+
+**设计说明**：
+- `vital_signs` 中的 `hedonic_tone` 等字段（T-19）：摘要级别，供路由门控快速判断
+- `hedonic_state`（T-20）：完整快照，供 `chat_context_builder` 精细化使用（如注入 prompt）
+
+---
+
+#### 当前架构状态（2026-04-09 第六批）
+
+**hedonic_state 完整传播链已打通**：
+
+```
+PainRewardAgent._flush_state()
+  → state_registry.set_state("pain_reward_agent", {...})
+  ↓
+TribeStateRegistry.aggregate_vital_signs()  [T-19]
+  → vital_signs["hedonic_tone/pain_level/reward_level/net_valence"]
+  ↓
+CortexAgent.collect_tribe_context()  [T-20]
+  → result["vital_signs"]["hedonic_tone"]  (摘要)
+  → result["hedonic_state"]  (完整快照)
+  ↓
+chat_context_builder.build_chat_prompt_runtime_payload()  [T-12]
+  → runtime_payload["tribe_vital_signs"]["hedonic_tone"]
+  → runtime_payload["hedonic_state"]
+  ↓
+prompt_builder.py Phase XIX  [T-16]
+  → 高压/低享乐状态时注入 prompt 提示
+```
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `PainRewardAgent` → `TribeStateRegistry` | ✅ 已接入 | `_flush_state()` 写入 `pain_reward_agent` 命名空间 |
+| `TribeStateRegistry.aggregate_vital_signs()` | ✅ 已接入 | T-19：读取 `hedonic_tone/pain_level/reward_level/net_valence` |
+| `CortexAgent.collect_tribe_context()` | ✅ 已接入 | T-20：新增 `hedonic_state` 完整快照字段 |
+| `chat_context_builder` → `runtime_payload` | ✅ 已接入 | T-12：注入 `tribe_vital_signs` + `hedonic_state` |
+| `prompt_builder` Phase XIX | ✅ 已接入 | T-16：高压状态注入 prompt |
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-21**（新增）：`prompt_builder` Phase XIX 扩展——在 `hedonic_tone == "negative"` 时注入享乐状态提示（当前仅注入压力/门控状态）
+3. **T-22**（新增）：`dispatch_agent` 接入 `hedonic_state`，在 `pain_level >= 0.6` 时触发主动情绪表达
