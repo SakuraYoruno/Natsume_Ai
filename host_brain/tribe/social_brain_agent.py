@@ -677,6 +677,129 @@ class SocialBrainAgent:
                 "SocialBrainAgent._on_humor_landed_bond 异常: %s", exc
             )
 
+    # ── T-150：bond_narrative 族化入口 ───────────────────────────────────────
+
+    def resolve_bond_narrative(
+        self,
+        *,
+        user_id: str = "user_1",
+        bond_stage: str | None = None,
+        now_ts_ms: int | None = None,
+        first_interaction_ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """T-150：构建 Bond 叙事，将 BondNarrativeLayer 族化到 SocialBrainAgent。
+
+        SocialBrainAgent 作为 Bond 叙事的唯一构建入口，封装
+        `BondNarrativeLayer.build_narrative()` 调用。
+
+        Args:
+            user_id: 用户 ID，默认 "user_1"。
+            bond_stage: Bond 阶段（如 "FRIEND"/"INTIMATE" 等），None 时从内部状态读取。
+            now_ts_ms: 当前时间戳（毫秒），None 使用当前时间。
+            first_interaction_ts_ms: 首次互动时间戳（毫秒），可选。
+
+        Returns:
+            BondNarrativeResult.to_prompt_slot() 字典，或空字典（降级）。
+        """
+        try:
+            from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
+            from host_brain.app.dependencies import (  # noqa: PLC0415
+                get_shared_memory_index,
+                get_milestone_tracker,
+            )
+
+            resolved_stage = str(bond_stage or self._bond_stage or "STRANGER").strip().upper() or "STRANGER"
+            memory_index = get_shared_memory_index()
+            milestone_tracker = get_milestone_tracker()
+            layer = BondNarrativeLayer(
+                memory_index=memory_index,
+                milestone_tracker=milestone_tracker,
+            )
+            result = layer.build_narrative(
+                user_id=str(user_id or "user_1").strip() or "user_1",
+                bond_stage=resolved_stage,
+                now_ts_ms=int(now_ts_ms) if now_ts_ms is not None else None,
+                first_interaction_ts_ms=int(first_interaction_ts_ms) if first_interaction_ts_ms is not None else None,
+            )
+            slot = result.to_prompt_slot() if hasattr(result, "to_prompt_slot") else {}
+            slot["status"] = "OK"
+            slot["bond_stage"] = resolved_stage
+            self._touch_state(
+                key="last_bond_narrative",
+                value={
+                    "user_id": str(user_id or "user_1"),
+                    "bond_stage": resolved_stage,
+                    "narrative_count": len(slot.get("narrative_items") or []),
+                },
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent.resolve_bond_narrative: user=%s stage=%s items=%d",
+                user_id, resolved_stage, len(slot.get("narrative_items") or []),
+            )
+            return slot
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent.resolve_bond_narrative 失败（降级）: %s", exc
+            )
+            return {"status": "ERROR", "user_id": str(user_id or "user_1"), "error": str(exc)}
+
+    # ── T-151：shared_memory_index 族化入口 ──────────────────────────────────
+
+    def resolve_shared_memory_index(
+        self,
+        *,
+        max_entries: int = 5,
+        min_ts_ms: int = 0,
+    ) -> dict[str, Any]:
+        """T-151：查询共同记忆索引，将 SharedMemoryIndex 族化到 SocialBrainAgent。
+
+        SocialBrainAgent 作为共同记忆查询的唯一入口，封装
+        `SharedMemoryIndex.query()` 调用。
+
+        Args:
+            max_entries: 最大返回条数，默认 5。
+            min_ts_ms: 最早时间戳过滤（毫秒），默认 0（不过滤）。
+
+        Returns:
+            SharedMemoryResult.to_prompt_slot() 字典，或空字典（降级）。
+        """
+        try:
+            from host_brain.app.dependencies import get_shared_memory_index  # noqa: PLC0415
+
+            memory_index = get_shared_memory_index()
+            if memory_index is None:
+                return {"status": "NO_INDEX", "entries": []}
+
+            result = memory_index.query(
+                max_entries=int(max_entries),
+                min_ts_ms=int(min_ts_ms),
+            )
+            slot = result.to_prompt_slot() if hasattr(result, "to_prompt_slot") else {}
+            slot["status"] = "OK"
+            slot["entry_count"] = len(slot.get("entries") or [])
+            self._touch_state(
+                key="last_shared_memory_query",
+                value={
+                    "max_entries": int(max_entries),
+                    "entry_count": slot["entry_count"],
+                    "min_ts_ms": int(min_ts_ms),
+                },
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent.resolve_shared_memory_index: entries=%d max=%d",
+                slot["entry_count"], max_entries,
+            )
+            return slot
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent.resolve_shared_memory_index 失败（降级）: %s", exc
+            )
+            return {"status": "ERROR", "entries": [], "error": str(exc)}
+
 
 _SOCIAL_BRAIN_AGENT: SocialBrainAgent | None = None
 

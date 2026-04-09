@@ -3482,3 +3482,103 @@ edge_client                          host_brain
     │  ChannelAgent.on_gate_control_*()  │  EdgeCommandPusher.push_gate_control()
     │                                    │
 ```
+
+---
+
+## 第二十三批实现记录（T-143 ~ T-152）
+
+**目标**：Phase 5 收口推进 — `chat_context_builder.py` 直接模块调用改为族 Agent 接口，ImmuneAgent 族化 governor/airlock，补全各 Agent 联动链路。
+
+### 已完成任务
+
+#### T-143：chat_context_builder.py 将 StyleCanonStore 直接调用改为通过 SocialBrainAgent.resolve_style_canon() ✅
+
+- 移除 `chat_context_builder.py` 顶层 `from host_brain.memory.canon_style_store import StyleCanonStore` 导入
+- 将 `build_node_style_bindings()` 中的 `store = StyleCanonStore(...)` 替换为 `social_agent.resolve_style_canon(canon_id=..., style_root=...)`
+- 返回字段从 `entry.content` 改为 `entry_dict.get("content")`，保持接口兼容
+- 降级安全：`status` 为 NOT_FOUND/ERROR 时跳过该 canon_id，行为与原实现一致
+
+#### T-144：chat_context_builder.py 将 emergent_growth_engine 直接调用改为通过 PrefrontalAgent ✅
+
+- 将 `from host_brain.skills.impl.emergent_growth_skill import _get_growth_engine` 替换为
+  `from host_brain.tribe.prefrontal_agent import get_prefrontal_agent`
+- 通过 `get_prefrontal_agent()._get_emergent_growth_engine()` 获取引擎实例
+- 降级安全：`_get_emergent_growth_engine()` 返回 None 时跳过注入，行为与原实现一致
+
+#### T-145：ImmuneAgent 新增 inspect_from_governor() 方法 ✅
+
+- 封装 `evaluate_governor_gates()` 调用，ImmuneAgent 作为 governor 规则门的统一入口
+- REJECT 时同步到 ImmuneAgent 计数器，并发布 `IMMUNE_BLOCK` 事件
+- 降级安全：调用失败时返回 `{"decision": "APPROVE", ...}`，不阻断主链路
+
+#### T-146：ImmuneAgent 新增 inspect_from_airlock() 方法 ✅
+
+- 封装 `filter_pii_ingress()` / `filter_pii_egress()` 调用，ImmuneAgent 作为 airlock PII 过滤的统一入口
+- block 模式下检测到 PII 时同步计数器并发布 `IMMUNE_BLOCK` 事件
+- 支持 `channel` 参数区分入口/出口检测
+- 降级安全：调用失败时返回 `{"decision": "ALLOW", ...}`，不阻断主链路
+
+#### T-147：ImmuneAgent 新增 register_runtime_rule() 方法 ✅
+
+- 支持运行时动态注册正则检测规则，无需重启服务
+- 规则存储在 `_template_rules_cache` 中，重启后失效（持久化规则使用 template 机制）
+- 新增 `list_runtime_rules()` 列出所有运行时规则
+- 新增 `unregister_runtime_rule(rule_id)` 注销指定规则
+- 支持 `rule_id` 去重（重复注册覆盖旧规则）
+
+#### T-148：ANSAgent emit_inner_world_ticked() 中加入 trigger_proactive_voice() 判断逻辑 ✅
+
+- 在 `emit_inner_world_ticked()` 发布事件后，判断是否触发主动发声评估
+- 触发条件：`proactive_voice_eligible=True` 或 `loneliness > 0.5 且 bond_stage != stranger`
+- 语音管线活跃时（`_voice_active=True`）不触发，避免打断语音对话
+- 打通 `INNER_WORLD_TICKED → trigger_proactive_voice() → PROACTIVE_VOICE_TRIGGERED` 联动链路
+
+#### T-149：LimbicAgent 新增 INTERACTION_RECORDED 订阅 + drive_emotion_metabolism_from_interaction() ✅
+
+- 新增订阅 `INTERACTION_RECORDED` → `_on_interaction_recorded_metabolism()`
+- 新增 `drive_emotion_metabolism_from_interaction(emotion_tag, valence, arousal, source)` 方法
+  - 封装 `drive_emotion_metabolism(blend_weight=0.3)` + `write_emotion_timeline()` 组合调用
+  - LimbicAgent 作为对话情绪代谢的唯一驱动者
+- 每轮对话结束后自动驱动情绪代谢，确保情绪状态随对话自然演化
+
+#### T-150：SocialBrainAgent 新增 resolve_bond_narrative() 方法 ✅
+
+- 封装 `BondNarrativeLayer.build_narrative()` 调用，SocialBrainAgent 作为 Bond 叙事的唯一构建入口
+- 自动从内部 `_bond_stage` 读取当前关系阶段（可通过参数覆盖）
+- 通过 `get_shared_memory_index()` / `get_milestone_tracker()` 获取依赖
+- 返回 `BondNarrativeResult.to_prompt_slot()` 字典，含 `narrative_items` / `relationship_duration` 等字段
+
+#### T-151：SocialBrainAgent 新增 resolve_shared_memory_index() 方法 ✅
+
+- 封装 `SharedMemoryIndex.query()` 调用，SocialBrainAgent 作为共同记忆查询的唯一入口
+- 通过 `get_shared_memory_index()` 获取全局单例
+- 返回 `SharedMemoryResult.to_prompt_slot()` 字典，含 `entries` / `entry_count` 等字段
+
+#### T-152：规划文档第二十三批留痕 ✅
+
+- 新增本章节，记录 T-143 ~ T-152 所有实现细节
+
+---
+
+**第二十三批新增能力总览**：
+
+| 能力 | 归属 Agent | 封装模块 | 说明 |
+|---|---|---|---|
+| `build_node_style_bindings()` 改造 | SocialBrainAgent | `StyleCanonStore` | Phase 5 收口：chat_context_builder 不再直接调用 |
+| emergent_growth_engine 改造 | PrefrontalAgent | `_get_emergent_growth_engine()` | Phase 5 收口：chat_context_builder 不再直接调用 |
+| `inspect_from_governor()` | ImmuneAgent | `evaluate_governor_gates()` | governor/ 族化入口 |
+| `inspect_from_airlock()` | ImmuneAgent | `filter_pii_ingress/egress()` | airlock/ 族化入口 |
+| `register_runtime_rule()` / `list_runtime_rules()` / `unregister_runtime_rule()` | ImmuneAgent | 内存规则缓存 | 运行时动态规则注册 |
+| `emit_inner_world_ticked()` 增强 | ANSAgent | `trigger_proactive_voice()` | INNER_WORLD_TICKED → proactive_voice 联动 |
+| `drive_emotion_metabolism_from_interaction()` | LimbicAgent | `drive_emotion_metabolism()` + `write_emotion_timeline()` | INTERACTION_RECORDED → 情绪代谢联动 |
+| `resolve_bond_narrative()` | SocialBrainAgent | `BondNarrativeLayer` | bond_narrative 族化入口 |
+| `resolve_shared_memory_index()` | SocialBrainAgent | `SharedMemoryIndex` | shared_memory_index 族化入口 |
+
+**Phase 5 收口进度**：
+
+| 模块 | 原调用方式 | 改造后 | 状态 |
+|---|---|---|---|
+| `StyleCanonStore` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_style_canon()` | ✅ T-143 |
+| `emergent_growth_engine` | `_get_growth_engine()` 直接调用 | `PrefrontalAgent._get_emergent_growth_engine()` | ✅ T-144 |
+| `BondNarrativeLayer` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_bond_narrative()` | ✅ T-150（接口就绪，调用方改造待下批） |
+| `SharedMemoryIndex` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_shared_memory_index()` | ✅ T-151（接口就绪，调用方改造待下批） |

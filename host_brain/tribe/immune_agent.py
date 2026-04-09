@@ -298,6 +298,283 @@ class ImmuneAgent:
             return self._template_rules_cache
 
 
+    # ── T-145：governor 族化入口 ──────────────────────────────────────────────
+
+    def inspect_from_governor(
+        self,
+        *,
+        input_snapshot: dict[str, Any] | None = None,
+        source: str = "governor",
+    ) -> dict[str, Any]:
+        """T-145：通过 governor 规则门评估请求，将 governor/ 族化到 ImmuneAgent。
+
+        ImmuneAgent 作为 governor 规则门的统一调用入口，封装
+        `evaluate_governor_gates()` 调用，并在 REJECT 时发布 IMMUNE_BLOCK 事件。
+
+        Args:
+            input_snapshot: GateSnapshot 字段字典（trust_level/energy_level/sys_mode 等）。
+            source: 调用来源，用于日志追踪。
+
+        Returns:
+            evaluate_governor_gates() 的完整结果字典，含 decision/reason_code/trace。
+        """
+        try:
+            from host_brain.governor.rules import evaluate_governor_gates  # noqa: PLC0415
+
+            result = evaluate_governor_gates(dict(input_snapshot or {}))
+            decision = str(result.get("decision") or "APPROVE").strip().upper()
+            reason_code = str(result.get("reason_code") or "").strip()
+
+            if decision == "REJECT":
+                # 同步到 ImmuneAgent 计数器
+                with self._lock:
+                    self._counters["total"] = int(self._counters.get("total", 0)) + 1
+                    self._counters["block"] = int(self._counters.get("block", 0)) + 1
+                    self._last_inspection = {
+                        "decision": "BLOCK",
+                        "risk_level": "high",
+                        "score": 0.9,
+                        "reason_codes": [reason_code] if reason_code else ["GOVERNOR_REJECT"],
+                        "source": str(source or "governor"),
+                    }
+                # 发布 IMMUNE_BLOCK 事件
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+                    emit_tribe_event(
+                        event_type="IMMUNE_BLOCK",
+                        source_agent="immune_agent",
+                        payload={
+                            "source": str(source or "governor"),
+                            "risk_level": "high",
+                            "score": 0.9,
+                            "reason_codes": [reason_code] if reason_code else ["GOVERNOR_REJECT"],
+                            "decision": "BLOCK",
+                            "governor_reason": reason_code,
+                        },
+                    )
+                except Exception:
+                    pass
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").debug(
+                "ImmuneAgent.inspect_from_governor: decision=%s reason=%s source=%s",
+                decision, reason_code, source,
+            )
+            return result
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").warning(
+                "ImmuneAgent.inspect_from_governor 失败（降级）: %s", exc
+            )
+            return {"decision": "APPROVE", "reason_code": None, "error": str(exc), "source": str(source or "governor")}
+
+    # ── T-146：airlock 族化入口 ───────────────────────────────────────────────
+
+    def inspect_from_airlock(
+        self,
+        *,
+        text: str,
+        channel: str = "ingress",
+        source: str = "airlock",
+    ) -> dict[str, Any]:
+        """T-146：通过 airlock PII 过滤器检测文本，将 airlock/ 族化到 ImmuneAgent。
+
+        ImmuneAgent 作为 airlock PII 过滤的统一调用入口，封装
+        `filter_pii_ingress()` / `filter_pii_egress()` 调用，
+        并在检测到 PII 时发布 IMMUNE_BLOCK 事件（block 模式）。
+
+        Args:
+            text: 待检测文本。
+            channel: 检测通道，"ingress"（入口）或 "egress"（出口）。
+            source: 调用来源，用于日志追踪。
+
+        Returns:
+            {"text": str, "redacted": bool, "hits": list, "decision": str}
+        """
+        try:
+            from host_brain.airlock.pii_filter import filter_pii_ingress, filter_pii_egress  # noqa: PLC0415
+
+            resolved_channel = str(channel or "ingress").strip().lower()
+            if resolved_channel == "egress":
+                result = filter_pii_egress(str(text or ""))
+            else:
+                result = filter_pii_ingress(str(text or ""))
+
+            hits = list(result.get("hits") or [])
+            redacted = bool(result.get("redacted", False))
+            mode = str(result.get("mode") or "redact").strip().lower()
+
+            if hits and mode == "block":
+                # block 模式：同步到 ImmuneAgent 计数器并发布 IMMUNE_BLOCK
+                with self._lock:
+                    self._counters["total"] = int(self._counters.get("total", 0)) + 1
+                    self._counters["block"] = int(self._counters.get("block", 0)) + 1
+                    self._last_inspection = {
+                        "decision": "BLOCK",
+                        "risk_level": "medium",
+                        "score": 0.7,
+                        "reason_codes": ["PII_DETECTED"],
+                        "source": str(source or "airlock"),
+                        "channel": resolved_channel,
+                        "hit_count": len(hits),
+                    }
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+                    emit_tribe_event(
+                        event_type="IMMUNE_BLOCK",
+                        source_agent="immune_agent",
+                        payload={
+                            "source": str(source or "airlock"),
+                            "risk_level": "medium",
+                            "score": 0.7,
+                            "reason_codes": ["PII_DETECTED"],
+                            "decision": "BLOCK",
+                            "channel": resolved_channel,
+                            "hit_count": len(hits),
+                        },
+                    )
+                except Exception:
+                    pass
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").debug(
+                "ImmuneAgent.inspect_from_airlock: channel=%s redacted=%s hits=%d source=%s",
+                resolved_channel, redacted, len(hits), source,
+            )
+            return {
+                "text": str(result.get("text") or text or ""),
+                "redacted": redacted,
+                "hits": hits,
+                "decision": "BLOCK" if (hits and mode == "block") else "ALLOW",
+                "channel": resolved_channel,
+                "mode": mode,
+                "source": str(source or "airlock"),
+            }
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").warning(
+                "ImmuneAgent.inspect_from_airlock 失败（降级）: %s", exc
+            )
+            return {
+                "text": str(text or ""),
+                "redacted": False,
+                "hits": [],
+                "decision": "ALLOW",
+                "error": str(exc),
+                "source": str(source or "airlock"),
+            }
+
+    # ── T-147：运行时动态规则注册 ─────────────────────────────────────────────
+
+    def register_runtime_rule(
+        self,
+        *,
+        rule_id: str,
+        pattern: str,
+        reason_code: str = "RUNTIME_RULE_HIT",
+        score: float = 0.30,
+        flags: str = "IGNORECASE",
+        source: str = "runtime",
+    ) -> dict[str, Any]:
+        """T-147：运行时动态注册免疫规则，增强免疫系统可扩展性。
+
+        允许在运行时（不重启服务）动态添加新的检测规则，
+        规则存储在内存中，重启后失效（持久化规则请使用 template 机制）。
+
+        Args:
+            rule_id: 规则 ID（唯一标识，重复注册会覆盖）。
+            pattern: 正则表达式字符串。
+            reason_code: 命中时的原因码，默认 "RUNTIME_RULE_HIT"。
+            score: 风险分数 [0.01, 1.0]，默认 0.30。
+            flags: 正则标志（"IGNORECASE"/"DOTALL"/"MULTILINE"，逗号分隔），默认 "IGNORECASE"。
+            source: 规则来源标记，默认 "runtime"。
+
+        Returns:
+            {"status": "OK", "rule_id": str, "pattern": str} 或错误结果。
+        """
+        try:
+            import re as _re  # noqa: PLC0415
+
+            resolved_flags = _parse_regex_flags(str(flags or "IGNORECASE"))
+            compiled = _re.compile(str(pattern or "").strip()[:240], resolved_flags)
+            new_rule = _ImmuneRule(
+                rule_id=str(rule_id or "").strip() or f"runtime_{int(time.time() * 1000)}",
+                reason_code=str(reason_code or "RUNTIME_RULE_HIT").strip() or "RUNTIME_RULE_HIT",
+                pattern=compiled,
+                score=max(0.01, min(1.0, float(score))),
+                source=str(source or "runtime"),
+            )
+            with self._lock:
+                # 将运行时规则存入 _template_rules_cache（追加到末尾）
+                existing = list(self._template_rules_cache)
+                # 去重：如果 rule_id 已存在则替换
+                existing = [r for r in existing if r.rule_id != new_rule.rule_id]
+                existing.append(new_rule)
+                self._template_rules_cache = tuple(existing)
+                # 强制缓存永不过期（运行时规则持续有效）
+                self._template_cache_expires_at_ms = int(time.time() * 1000) + 86400 * 1000
+
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").info(
+                "ImmuneAgent.register_runtime_rule: rule_id=%s score=%.2f source=%s",
+                new_rule.rule_id, new_rule.score, source,
+            )
+            return {
+                "status": "OK",
+                "rule_id": new_rule.rule_id,
+                "pattern": str(pattern or ""),
+                "reason_code": new_rule.reason_code,
+                "score": new_rule.score,
+                "source": str(source or "runtime"),
+                "total_runtime_rules": len([r for r in self._template_rules_cache if r.source == "runtime"]),
+            }
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").warning(
+                "ImmuneAgent.register_runtime_rule 失败: %s", exc
+            )
+            return {"status": "ERROR", "rule_id": str(rule_id or ""), "error": str(exc)}
+
+    def list_runtime_rules(self) -> list[dict[str, Any]]:
+        """T-147：列出当前所有运行时动态注册的规则。
+
+        Returns:
+            运行时规则列表，每项含 rule_id/reason_code/score/source。
+        """
+        with self._lock:
+            rules = list(self._template_rules_cache)
+        return [
+            {
+                "rule_id": r.rule_id,
+                "reason_code": r.reason_code,
+                "score": r.score,
+                "source": r.source,
+                "pattern_preview": r.pattern.pattern[:60],
+            }
+            for r in rules
+            if r.source not in ("template_keyword", "template_regex")
+        ]
+
+    def unregister_runtime_rule(self, *, rule_id: str) -> dict[str, Any]:
+        """T-147：注销指定运行时规则。
+
+        Args:
+            rule_id: 要注销的规则 ID。
+
+        Returns:
+            {"status": "OK"/"NOT_FOUND", "rule_id": str}
+        """
+        with self._lock:
+            existing = list(self._template_rules_cache)
+            before_count = len(existing)
+            existing = [r for r in existing if r.rule_id != str(rule_id or "").strip()]
+            after_count = len(existing)
+            self._template_rules_cache = tuple(existing)
+        removed = before_count - after_count
+        return {
+            "status": "OK" if removed > 0 else "NOT_FOUND",
+            "rule_id": str(rule_id or ""),
+            "removed_count": removed,
+        }
+
     # ── T-35： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

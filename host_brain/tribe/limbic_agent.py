@@ -1068,6 +1068,8 @@ class LimbicAgent:
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal_emotion)
             # T-79：订阅免疫拦截事件，拦截时触发轻微负面情绪偏置
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_emotion)
+            # T-149：订阅对话记录事件，每轮对话结束后驱动情绪代谢
+            bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded_metabolism)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -1608,6 +1610,82 @@ class LimbicAgent:
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent._on_immune_block_emotion 异常: %s", exc
             )
+
+    # ── T-149：INTERACTION_RECORDED 情绪代谢 ─────────────────────────────────
+
+    async def _on_interaction_recorded_metabolism(self, event: Any) -> None:
+        """处理 INTERACTION_RECORDED 事件：每轮对话结束后驱动情绪代谢。
+
+        T-149：每轮对话结束后，根据对话的情绪信号（emotion_tag/valence/arousal）
+        驱动情绪代谢，并写入 emotion_timeline，确保情绪状态随对话自然演化。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            valence = float(payload.get("valence") or 0.0)
+            arousal = float(payload.get("arousal") or 0.3)
+            self.drive_emotion_metabolism_from_interaction(
+                emotion_tag=emotion_tag,
+                valence=valence,
+                arousal=arousal,
+                source="interaction_recorded",
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_interaction_recorded_metabolism 异常: %s", exc
+            )
+
+    def drive_emotion_metabolism_from_interaction(
+        self,
+        *,
+        emotion_tag: str = "NEUTRAL",
+        valence: float = 0.0,
+        arousal: float = 0.3,
+        source: str = "interaction_recorded",
+    ) -> dict[str, Any]:
+        """T-149：每轮对话结束后驱动情绪代谢，将对话情绪信号融入情绪状态。
+
+        封装 drive_emotion_metabolism() + write_emotion_timeline() 的组合调用，
+        LimbicAgent 作为对话情绪代谢的唯一驱动者。
+
+        Args:
+            emotion_tag: 对话情绪标签（如 "HAPPY"/"SAD"/"NEUTRAL" 等）。
+            valence: 效价 [-1.0, 1.0]，默认 0.0。
+            arousal: 唤醒度 [-1.0, 1.0]，默认 0.3。
+            source: 数据来源，默认 "interaction_recorded"。
+
+        Returns:
+            {"metabolism": dict, "timeline": dict}
+        """
+        try:
+            # 驱动情绪代谢（blend_weight=0.3 表示新信号占 30%，历史状态占 70%）
+            metabolism_result = self.drive_emotion_metabolism(
+                valence=float(valence),
+                arousal=float(arousal),
+                blend_weight=0.3,
+                event_kind="interaction",
+                source=str(source or "interaction_recorded"),
+            )
+            # 写入 emotion_timeline
+            timeline_result = self.write_emotion_timeline(
+                emotion_tag=str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
+                valence=float(valence),
+                arousal=float(arousal),
+                source=str(source or "interaction_recorded"),
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent.drive_emotion_metabolism_from_interaction: tag=%s valence=%.3f arousal=%.3f",
+                emotion_tag, valence, arousal,
+            )
+            return {"metabolism": metabolism_result, "timeline": timeline_result}
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent.drive_emotion_metabolism_from_interaction 失败（降级）: %s", exc
+            )
+            return {"metabolism": {}, "timeline": {}, "error": str(exc)}
 
 
 _LIMBIC_AGENT: LimbicAgent | None = None

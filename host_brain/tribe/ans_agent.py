@@ -81,12 +81,42 @@ class ANSAgent:
 
         T-43：自动将 _bond_stage 注入 payload，供 NatsumeScheduler 根据
         关系亲密度动态调整 tick 间隔（stranger < acquaintance < friend < intimate）。
+
+        T-148：在 tick 完成后，根据 tick_result 中的 proactive_voice_eligible 标志
+        判断是否触发主动发声评估，打通 INNER_WORLD_TICKED → proactive_voice 联动链路。
         """
         payload = dict(tick_result or {})
         payload.setdefault("source", "inner_world_skill")
         # T-43：携带当前关系阶段，调度器可据此调整 tick 频率
         payload.setdefault("bond_stage", self._bond_stage)
         self.emit_from_thread("INNER_WORLD_TICKED", payload)
+
+        # T-148：INNER_WORLD_TICKED 后判断是否触发主动发声
+        # 触发条件：tick_result 中 proactive_voice_eligible=True，
+        # 或者 loneliness > 0.5 且 bond_stage 不是 stranger
+        try:
+            _eligible = bool(payload.get("proactive_voice_eligible", False))
+            _loneliness = float(payload.get("loneliness") or 0.0)
+            _bond = str(self._bond_stage or "stranger").lower()
+            _voice_active = bool(getattr(self, "_voice_active", False))
+            _should_trigger = (
+                not _voice_active  # 语音管线空闲时才触发
+                and (
+                    _eligible
+                    or (_loneliness > 0.5 and _bond not in ("stranger",))
+                )
+            )
+            if _should_trigger:
+                self.trigger_proactive_voice(
+                    user_id="user_1",
+                    context={
+                        "bond_stage": _bond,
+                        "loneliness": _loneliness,
+                        "trigger_source": "inner_world_ticked",
+                    },
+                )
+        except Exception as _pv_exc:
+            logger.debug("ANSAgent emit_inner_world_ticked proactive_voice 触发失败（降级）: %s", _pv_exc)
 
     def emit_body_sense_updated(self, *, sense_result: dict[str, Any] | None = None) -> None:
         """body_sense_skill 执行完成后调用，发布 BODY_SENSE_UPDATED 事件。

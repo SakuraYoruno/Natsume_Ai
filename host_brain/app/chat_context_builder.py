@@ -28,7 +28,7 @@ from host_brain.core.prompt_context import (
     validate_prompt_context as validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
-from host_brain.memory.canon_style_store import StyleCanonStore
+# T-143: StyleCanonStore 直接调用已迁移到 SocialBrainAgent.resolve_style_canon()，此处不再直接 import
 
 
 CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
@@ -169,7 +169,10 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
         render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_JA_CANON_ID") or "natsume_ai_ja").strip()
     secondary_canon_id = str(os.environ.get("HOST_STYLE_SECONDARY_CANON_ID") or core_canon_id).strip()
 
-    store = StyleCanonStore(style_root=style_root, ledger=get_ledger())
+    # T-143: 通过 SocialBrainAgent.resolve_style_canon() 族化调用，不再直接实例化 StyleCanonStore
+    from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+    social_agent = get_social_brain_agent()
     resolved: dict[str, dict[str, Any]] = {}
     mapping = [
         ("core_reasoner_primary", core_canon_id),
@@ -181,19 +184,22 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
         if not canon_id:
             continue
         try:
-            entry = store.get(canon_id)
+            entry_dict = social_agent.resolve_style_canon(
+                canon_id=canon_id,
+                style_root=style_root,
+            )
         except Exception:
             continue
-        if entry is None:
+        if not entry_dict or entry_dict.get("status") in ("NOT_FOUND", "ERROR", "NO_AGENT"):
             continue
         resolved[node_id] = {
-            "canon_id": entry.canon_id,
-            "version": int(entry.version),
-            "hash": entry.hash,
-            "tone_only": bool(entry.tone_only),
-            "unsafe_as_fact": bool(entry.unsafe_as_fact),
-            "style_instruction": entry.content,
-            "citation": f"style_canon:{entry.canon_id}@v{entry.version}:{entry.hash[:12]}",
+            "canon_id": str(entry_dict.get("canon_id") or canon_id),
+            "version": int(entry_dict.get("version") or 0),
+            "hash": str(entry_dict.get("hash") or ""),
+            "tone_only": bool(entry_dict.get("tone_only", True)),
+            "unsafe_as_fact": bool(entry_dict.get("unsafe_as_fact", True)),
+            "style_instruction": str(entry_dict.get("content") or ""),
+            "citation": str(entry_dict.get("citation") or f"style_canon:{canon_id}"),
         }
     return resolved
 
@@ -2203,10 +2209,12 @@ def build_chat_prompt_runtime_payload(
             logger.debug("BodySenseModel 接入降级: %s", _bs_exc)
 
         # ── Phase XIX：涌现式成长叙事注入 self_reflection_pulse ──────────
+        # T-144: 改为通过 PrefrontalAgent._get_emergent_growth_engine() 族化调用
         try:
-            from host_brain.skills.impl.emergent_growth_skill import _get_growth_engine  # noqa: PLC0415
-            _eg_engine = _get_growth_engine()
-            _eg_note = _eg_engine.get_latest_growth_note(_persona_user_id)
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            _pf_agent = get_prefrontal_agent()
+            _eg_engine = _pf_agent._get_emergent_growth_engine()
+            _eg_note = _eg_engine.get_latest_growth_note(_persona_user_id) if _eg_engine is not None else None
             if _eg_note:
                 # 注入到 self_reflection_pulse（如果已有则追加 emergent_growth_note 字段）
                 _existing_pulse = runtime_payload.get("self_reflection_pulse")
@@ -2215,7 +2223,7 @@ def build_chat_prompt_runtime_payload(
                 else:
                     runtime_payload["emergent_growth_note"] = _eg_note
                 logger.debug(
-                    "EmergentGrowthEngine 成长叙事注入: user=%s note='%s'",
+                    "EmergentGrowthEngine 成长叙事注入（via PrefrontalAgent）: user=%s note='%s'",
                     _persona_user_id, _eg_note[:40],
                 )
         except Exception as _eg_exc:
