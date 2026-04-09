@@ -2604,6 +2604,27 @@ def build_chat_prompt_runtime_payload(
                 "suggest": "当前会话存在内容风险，回复需更加谨慎，避免触碰敏感话题",
             }
 
+        # T-105：接入 LanguageSystemAgent.get_language_style()，注入 runtime_payload["language_style"]
+        # 根据当前 bond_stage / emotion_tag / loneliness_level 动态生成语言风格建议，
+        # 供 prompt_builder Phase T-106 消费，影响回复的语气/措辞/句式选择。
+        try:
+            from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+
+            _lang_agent = get_language_system_agent()
+            _bond_stage_for_lang = str(_vital_signs.get("bond_stage") or "stranger").strip().lower()
+            _emotion_tag_for_lang = str(_vital_signs.get("emotion_tag") or "NEUTRAL").strip().upper()
+            _loneliness_for_lang = float(_vital_signs.get("loneliness_level") or 0.0)
+            _high_loneliness_for_lang = bool(_vital_signs.get("high_loneliness_flag", False))
+            _language_style = _lang_agent.get_language_style(
+                bond_stage=_bond_stage_for_lang,
+                emotion_tag=_emotion_tag_for_lang,
+                loneliness_level=_loneliness_for_lang,
+                high_loneliness_flag=_high_loneliness_for_lang,
+            )
+            runtime_payload["language_style"] = _language_style
+        except Exception as _lang_exc:
+            logger.debug("LanguageSystemAgent.get_language_style 降级: %s", _lang_exc)
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

@@ -1742,6 +1742,33 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 if isinstance(_lh, dict) and bool((_lh or {}).get("high_loneliness")) else ""
             )
         )()
+        # ── T-106：语言风格（language_style，影响语气/措辞/句式选择）────────
+        + (
+            lambda _ls=runtime_payload.get("language_style") or prompt_context.get("language_style"): (
+                f"- language_style: {str((_ls or {}).get('style') or 'neutral')}\n"
+                f"- language_tone: {str((_ls or {}).get('tone') or 'balanced')}\n"
+                f"- language_register: {str((_ls or {}).get('register') or 'standard')}\n"
+                + (f"- language_loneliness_hint: {str((_ls or {}).get('loneliness_hint'))}\n"
+                   if str((_ls or {}).get("loneliness_hint") or "").strip() else "")
+                if isinstance(_ls, dict) and bool(_ls) else ""
+            )
+        )()
+        # ── T-107：关系语气调整（bond_tone_adjust，warmer/cautious 影响语气指令）──
+        + (
+            lambda _bta=runtime_payload.get("bond_tone_adjust") or prompt_context.get("bond_tone_adjust"): (
+                f"- bond_tone_adjust: {str(_bta)}\n"
+                f"- bond_tone_directive: {'适当增加亲密感和温暖表达，关系正在升温' if str(_bta) == 'warmer' else '保持温和谨慎，关系面临退步风险，避免过于亲密或冒进的表达'}\n"
+                if _bta and str(_bta).strip() in ("warmer", "cautious") else ""
+            )
+        )()
+        # ── T-108：免疫谨慎度（immune_caution，注入谨慎度提示到 system prompt）──
+        + (
+            lambda _ic=runtime_payload.get("immune_caution") or prompt_context.get("immune_caution"): (
+                f"- immune_caution_risk: {str((_ic or {}).get('risk_level') or 'medium')}\n"
+                f"- immune_caution_directive: {str((_ic or {}).get('suggest') or '当前会话存在内容风险，回复需更加谨慎')}\n"
+                if isinstance(_ic, dict) and bool(_ic) else ""
+            )
+        )()
         # ── v1.12：身体感知（疲劳/困倦/孤独）────────────────────────────
         + (
             f"- fatigue_level: {_bs_fatigue_level}\n"
