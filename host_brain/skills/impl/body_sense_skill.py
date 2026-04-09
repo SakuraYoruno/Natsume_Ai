@@ -13,7 +13,21 @@ def execute_body_sense_tick(
         current_hour = int(current_hour_raw) if current_hour_raw is not None else None
     except (TypeError, ValueError):
         current_hour = None
-    return dict(get_limbic_agent().tick_body_sense(current_hour=current_hour) or {})
+    result = dict(get_limbic_agent().tick_body_sense(current_hour=current_hour) or {})
+    # Phase 1：向 TribeEventBus 发布 BODY_SENSE_UPDATED 事件，供订阅方（LimbicAgent 等）消费
+    try:
+        from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+
+        get_ans_agent().emit_body_sense_updated(sense_result={
+            "current_hour": current_hour,
+            "status": str(result.get("status") or "OK"),
+            "fatigue_level": result.get("fatigue_level"),
+            "loneliness_level": result.get("loneliness_level"),
+            "body_sense": dict(result.get("body_sense") or {}),
+        })
+    except Exception:
+        pass
+    return result
 
 
 def execute_body_sense_conversation_start(

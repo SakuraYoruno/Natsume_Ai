@@ -1536,6 +1536,19 @@ async def top_agent_sse_generator(
     recall_slot_text: dict[str, str] = {}
     bond_summary: dict[str, Any] = {}
 
+    # Phase 5：对话开始时向 TribeEventBus 发布 CONVERSATION_STARTED 事件
+    # LimbicAgent 订阅此事件以重置沉默意愿、捕获 body_sense 快照
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+        get_cortex_agent().emit_conversation_started(
+            user_id=str(person_id or ""),
+            session_id=str(session_id or ""),
+            request_id=str(request_id or ""),
+        )
+    except Exception:
+        pass
+
     task_progress_answer = _maybe_build_task_progress_fastpath(
         request_id=request_id,
         session_id=session_id,
@@ -2542,6 +2555,26 @@ async def _async_post_process(
         )
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process bond failed: %s", request_id, exc)
+
+    # Phase 5：对话结束时向 TribeEventBus 发布 CONVERSATION_ENDED + INTERACTION_RECORDED 事件
+    # PrefrontalAgent / SocialBrainAgent 订阅 INTERACTION_RECORDED 以触发人格/关系更新
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
+
+        _ec = dict(emotion_context or {})
+        _get_cortex().emit_conversation_ended(
+            user_id=str(person_id or ""),
+            session_id=str(session_id or ""),
+            request_id=str(request_id or ""),
+            emotion_tag=str(_ec.get("emotion_tag") or "NEUTRAL").strip().upper(),
+            emotion_intensity=float(_ec.get("emotion_intensity") or 0.5),
+            summary={
+                "user_message_preview": str(user_message or "")[:64],
+                "ts_ms": int(ts_ms),
+            },
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process conversation_ended tribe event failed: %s", request_id, exc)
 
     # ── VTS 情感驱动 ─────────────────────────────────────────────────
     try:

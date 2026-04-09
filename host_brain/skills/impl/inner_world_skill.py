@@ -76,6 +76,19 @@ def execute_inner_world_tick(
             )
         except Exception:
             pass
+    # Phase 1：向 TribeEventBus 发布 INNER_WORLD_TICKED 事件，供订阅方（LimbicAgent 等）消费
+    try:
+        from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+
+        get_ans_agent().emit_inner_world_ticked(tick_result={
+            "user_id": user_id,
+            "status": str(result.get("status") or "OK"),
+            "loneliness": result.get("loneliness"),
+            "anticipation": result.get("anticipation"),
+            "continuity_score": result.get("continuity_score"),
+        })
+    except Exception:
+        pass
     return result
 
 
