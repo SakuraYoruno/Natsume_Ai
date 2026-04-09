@@ -350,3 +350,107 @@ async def delete_tribe_state_namespace(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TRIBE_STATE_DELETE_FAILED: {exc}") from exc
+
+
+# ── T-131：EdgeCommandPusher 下行指令状态诊断端点 ─────────────────────────────
+
+class EdgeCommandPusherStatusResponse(BaseModel):
+    enabled: bool
+    edge_base_url: str
+    timeout_ms: int
+    ts_ms: int
+
+
+class EdgeCommandPushRequest(BaseModel):
+    command_type: str = Field(..., min_length=1, max_length=80)
+    target_agent: str = Field(..., min_length=1, max_length=120)
+    source_agent: str = Field(default="host_brain", max_length=120)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class EdgeCommandPushResponse(BaseModel):
+    ok: bool
+    command_id: Optional[str] = None
+    ts_ms: int
+    reason: Optional[str] = None
+    status_code: Optional[int] = None
+
+
+@router.get("/edge_command/status", response_model=EdgeCommandPusherStatusResponse)
+async def get_edge_command_pusher_status(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-131：返回 EdgeCommandPusher 当前状态（是否启用、目标地址、超时配置）。
+
+    供开发调试和运维诊断使用，确认下行指令链路是否正常初始化。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        pusher = get_edge_command_pusher()
+        if pusher is None:
+            raise HTTPException(status_code=503, detail="EDGE_COMMAND_PUSHER_NOT_INITIALIZED")
+        return EdgeCommandPusherStatusResponse(
+            enabled=pusher.enabled,
+            edge_base_url=pusher.edge_base_url,
+            timeout_ms=pusher.timeout_ms,
+            ts_ms=now_ms(),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"EDGE_COMMAND_STATUS_FAILED: {exc}") from exc
+
+
+@router.post("/edge_command/push", response_model=EdgeCommandPushResponse, status_code=202)
+async def post_edge_command_push(
+    body: EdgeCommandPushRequest,
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-131：手动向 edge_client 推送下行指令（运维/调试用途）。
+
+    通过 EdgeCommandPusher 向 edge_client /internal/tribe_command 发送指令，
+    记录推送结果日志，供运维验证下行链路是否畅通。
+
+    示例请求体：
+        {"command_type": "emotion_state_command", "target_agent": "edge.somatic",
+         "payload": {"emotion_tag": "JOY", "intensity": 0.8}}
+        {"command_type": "gate_control_command", "target_agent": "edge.channel",
+         "payload": {"gate_open": true, "reason": "manual_test"}}
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+        import logging  # noqa: PLC0415
+
+        _logger = logging.getLogger("Natsume.tribe.internal_tribe_routes")
+        pusher = get_edge_command_pusher()
+        if pusher is None:
+            raise HTTPException(status_code=503, detail="EDGE_COMMAND_PUSHER_NOT_INITIALIZED")
+
+        result = pusher.push_command(
+            command_type=body.command_type,
+            target_agent=body.target_agent,
+            source_agent=body.source_agent,
+            payload=body.payload,
+        )
+        _logger.info(
+            "手动下行指令推送: command_type=%s target=%s ok=%s",
+            body.command_type,
+            body.target_agent,
+            result.get("ok"),
+        )
+        return EdgeCommandPushResponse(
+            ok=bool(result.get("ok", False)),
+            command_id=result.get("command_id"),
+            ts_ms=int(result.get("ts_ms") or now_ms()),
+            reason=result.get("reason"),
+            status_code=result.get("status_code"),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"EDGE_COMMAND_PUSH_FAILED: {exc}") from exc

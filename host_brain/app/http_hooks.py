@@ -1258,8 +1258,32 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
 
+                # T-130：初始化 EdgeCommandPusher 单例，注入到 LimbicAgent 和 CortexAgent
+                # Phase 6 下行链路：host_brain → edge_client 情绪/门控指令推送
+                try:
+                    from host_brain.tribe.edge_command_pusher import init_edge_command_pusher  # noqa: PLC0415
+                    from host_brain.tribe.limbic_agent import get_limbic_agent as _get_limbic  # noqa: PLC0415
+                    from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
+
+                    _edge_cmd_pusher = init_edge_command_pusher()
+                    _get_limbic().set_edge_command_pusher(_edge_cmd_pusher)
+                    _get_cortex().set_edge_command_pusher(_edge_cmd_pusher)
+                    new_module_statuses["edge_command_pusher"] = (
+                        f"OK (enabled={_edge_cmd_pusher.enabled}, "
+                        f"edge_url={_edge_cmd_pusher.edge_base_url})"
+                    )
+                    logger.info(
+                        "EdgeCommandPusher 已初始化并注入 LimbicAgent/CortexAgent: enabled=%s url=%s",
+                        _edge_cmd_pusher.enabled,
+                        _edge_cmd_pusher.edge_base_url,
+                    )
+                except Exception as _ecp_exc:
+                    new_module_statuses["edge_command_pusher"] = f"DEGRADED: {_ecp_exc}"
+                    logger.warning("EdgeCommandPusher 初始化失败（降级）: %s", _ecp_exc)
+
                 # T-113~T-122: ANSAgent +VOICE_PIPELINE_STARTED/ENDED/CHANNEL_MESSAGE_RECEIVED(+3)
                 #              CortexAgent +PLATFORM_CONNECTED/DISCONNECTED(+2) = +5（第二十一批）
+                # T-123~T-132: EdgeCommandPusher 下行链路 + /edge_command 诊断端点（第二十二批）
                 _total_subscriptions = 65
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"

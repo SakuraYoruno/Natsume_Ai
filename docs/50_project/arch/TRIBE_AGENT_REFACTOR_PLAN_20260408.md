@@ -3336,3 +3336,121 @@ BOND_PROGRESS / BOND_REGRESS
 | `initialize(bridge=None)` | 幂等初始化，自动从环境变量构建 bridge |
 | `describe()` | 状态摘要，供健康检查使用 |
 | `get_edge_tribe_registry()` | 全局访问函数 |
+
+---
+
+## 第二十二批实现记录（T-123 ~ T-132）
+
+**目标**：实现 host_brain → edge_client 下行指令链路（EdgeCommandPusher），完成双向 Tribe 事件闭环。
+
+### 已完成任务
+
+#### T-123：edge_client/app/fastapi_app.py 新增 /internal/tribe_command POST 端点 ✅
+
+- 在 `edge_client/app/fastapi_app.py` 中新增 `/internal/tribe_command` POST 端点
+- 接收来自 host_brain 的下行指令（`command_type`、`target_agent`、`payload`）
+- 根据 `target_agent` 路由到对应的 edge_client Agent 处理方法
+- 支持 `emotion_state_command` → `SomaticAgent.on_emotion_state_command()`
+- 支持 `gate_control_command` → `ChannelAgent.on_gate_control_command()`
+- 内部鉴权：`X-Internal-Token` header 校验（与上行共用 `HOST_INTERNAL_TRIBE_TOKEN`）
+
+#### T-124：新建 host_brain/tribe/edge_command_pusher.py ✅
+
+- 新建 `host_brain/tribe/edge_command_pusher.py`，实现 `EdgeCommandPusher` HTTP 客户端
+- 通过 `requests.Session` 向 `edge_client /internal/tribe_command` 推送下行指令
+- 提供 `push_emotion_state()` 快捷方法（LimbicAgent 调用，驱动 vts_driver 表情）
+- 提供 `push_gate_control()` 快捷方法（CortexAgent 调用，控制 ChannelAgent 门控）
+- 提供 `push_command()` 通用方法，支持任意 `command_type` / `target_agent`
+- 从环境变量构建：`EDGE_COMMAND_BASE_URL` / `EDGE_RPC_HOST` / `EDGE_COMMAND_PORT` / `EDGE_COMMAND_PUSHER_ENABLED` / `EDGE_COMMAND_TIMEOUT_MS`
+- 全局单例：`init_edge_command_pusher()` / `get_edge_command_pusher()` / `set_edge_command_pusher()`
+
+#### T-125：LimbicAgent 处理 EMOTION_INFERENCE_UPDATED 后推送情绪指令 ✅
+
+- 修改 `host_brain/tribe/limbic_agent.py` 的 `_on_emotion_inference_updated()` handler
+- 情绪推断处理完成后，调用 `self._edge_command_pusher.push_emotion_state()` 推送下行指令
+- 推送字段：`emotion_tag`、`intensity`、`mood_state`、`session_id`
+- 非致命：推送失败仅记录 warning，不影响 LimbicAgent 主逻辑
+- 新增 `set_edge_command_pusher()` 注入方法，供 http_hooks.py 启动时注入
+
+#### T-126：edge_client/tribe/somatic_agent.py 新增 on_emotion_state_command() ✅
+
+- 修改 `edge_client/tribe/somatic_agent.py`，新增 `on_emotion_state_command()` 方法
+- 接收下行情绪指令，解析 `emotion_tag` / `intensity` / `mood_state`
+- 调用 `self._vts_driver.set_expression(emotion_tag, intensity)` 驱动 VTS 表情
+- 非致命：vts_driver 未注入或调用失败时仅记录 warning
+
+#### T-127：edge_client/runtime/bootstrap.py 将 vts_driver 注入到 SomaticAgent ✅
+
+- 修改 `edge_client/runtime/bootstrap.py` 的 `EdgeRuntime` 启动流程
+- 在 `EdgeTribeRegistry.initialize()` 之后，将 `vts_driver` 实例注入到 `SomaticAgent`
+- 调用 `registry.somatic.set_vts_driver(vts_driver)` 完成注入
+- 非致命：vts_driver 不可用时降级，SomaticAgent 仍可正常上报事件
+
+#### T-128：edge_client/tribe/channel_agent.py 新增 on_gate_control_command() ✅
+
+- 修改 `edge_client/tribe/channel_agent.py`，新增 `on_gate_control_command()` 方法
+- 接收下行门控指令，解析 `gate_open` / `reason` / `platform`
+- 更新内部 `_gate_open` 状态，影响后续消息路由决策
+- 提供 `is_gate_open()` 查询方法，供 `GatewayRouter` 在路由前检查门控状态
+
+#### T-129：CortexAgent 在 PLATFORM_CONNECTED/DISCONNECTED 后推送门控指令 ✅
+
+- 修改 `host_brain/tribe/cortex_agent.py` 的 `_on_platform_connected/disconnected()` handler
+- 平台连接时：调用 `self._edge_command_pusher.push_gate_control(gate_open=True, platform=platform)`
+- 平台断线时：调用 `push_gate_control(gate_open=False, reason="platform_disconnected", platform=platform)`
+- 新增 `set_edge_command_pusher()` 注入方法，供 http_hooks.py 启动时注入
+
+#### T-130：http_hooks.py 初始化 EdgeCommandPusher 单例，注入到 LimbicAgent 和 CortexAgent ✅
+
+- 在 `host_brain/app/http_hooks.py` 的 `runtime_lifespan` 中，Tribe 订阅注册完成后
+- 调用 `init_edge_command_pusher()` 初始化全局单例
+- 调用 `get_limbic_agent().set_edge_command_pusher(pusher)` 注入到 LimbicAgent
+- 调用 `get_cortex_agent().set_edge_command_pusher(pusher)` 注入到 CortexAgent
+- 启动状态写入 `new_module_statuses["edge_command_pusher"]`，含 `enabled` 和 `edge_url`
+
+#### T-131：internal_tribe_routes.py 扩展下行指令诊断端点 ✅
+
+- 在 `host_brain/app/internal_tribe_routes.py` 末尾新增两个诊断端点：
+- `GET /internal/edge_command/status`：返回 EdgeCommandPusher 当前状态（enabled/url/timeout）
+- `POST /internal/edge_command/push`：手动推送下行指令（运维/调试用途），记录推送结果日志
+- 两个端点均受 `X-Internal-Token` 鉴权保护
+
+#### T-132：http_hooks.py 第二十二批计数更新 + 文档留痕 ✅
+
+- 更新 http_hooks.py 注释，说明第二十二批新增 EdgeCommandPusher 下行链路和诊断端点
+- 订阅总数维持 65（本批无新增订阅，主要是下行链路和诊断端点）
+- 完成本文档第二十二批留痕
+
+---
+
+**第二十二批新增能力总览**：
+
+| 能力 | 方向 | 说明 |
+|---|---|---|
+| `EdgeCommandPusher` | host_brain → edge_client | HTTP 客户端，推送下行指令 |
+| `/internal/tribe_command` | edge_client 接收 | 接收并路由下行指令到对应 Agent |
+| `SomaticAgent.on_emotion_state_command()` | 执行层 | 接收情绪指令，驱动 vts_driver 表情 |
+| `ChannelAgent.on_gate_control_command()` | 执行层 | 接收门控指令，更新消息路由开关 |
+| `LimbicAgent` 情绪推送 | 触发层 | EMOTION_INFERENCE_UPDATED 后自动推送 |
+| `CortexAgent` 门控推送 | 触发层 | PLATFORM_CONNECTED/DISCONNECTED 后自动推送 |
+| `GET /internal/edge_command/status` | 诊断 | 查询 EdgeCommandPusher 初始化状态 |
+| `POST /internal/edge_command/push` | 诊断 | 手动推送下行指令，验证链路畅通 |
+
+**双向 Tribe 事件闭环完成**：
+
+```
+edge_client                          host_brain
+    │                                    │
+    │  上行：/internal/tribe_event POST  │
+    │ ──────────────────────────────→   │
+    │  SomaticAgent.publish_*()          │  LimbicAgent._on_emotion_inference_updated()
+    │  ChannelAgent.on_message_*()       │  CortexAgent._on_platform_*()
+    │  PeripheralAgent.publish_*()       │  ANSAgent._on_voice_pipeline_*()
+    │  VoiceAgent.publish_*()            │  ANSAgent._on_channel_message_*()
+    │                                    │
+    │  下行：/internal/tribe_command POST│
+    │ ←──────────────────────────────   │
+    │  SomaticAgent.on_emotion_state_*() │  EdgeCommandPusher.push_emotion_state()
+    │  ChannelAgent.on_gate_control_*()  │  EdgeCommandPusher.push_gate_control()
+    │                                    │
+```

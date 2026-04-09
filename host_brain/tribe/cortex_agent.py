@@ -671,6 +671,21 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").info(
                 "CortexAgent PLATFORM_CONNECTED: platform=%s", platform,
             )
+            # T-129：平台连接后向 ChannelAgent 推送开门指令（允许消息路由）
+            try:
+                from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
+                _pusher = get_edge_command_pusher()
+                if _pusher is not None and _pusher.enabled:
+                    _pusher.push_gate_control(
+                        gate_open=True,
+                        reason="platform_connected",
+                        platform=platform,
+                        source_agent="cortex_agent",
+                    )
+            except Exception as _push_exc:
+                logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                    "CortexAgent 推送开门指令失败（降级）: %s", _push_exc
+                )
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -703,6 +718,21 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").info(
                 "CortexAgent PLATFORM_DISCONNECTED: platform=%s", platform,
             )
+            # T-129：平台断线后向 ChannelAgent 推送关门指令（暂停该平台消息路由）
+            try:
+                from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
+                _pusher = get_edge_command_pusher()
+                if _pusher is not None and _pusher.enabled:
+                    _pusher.push_gate_control(
+                        gate_open=False,
+                        reason="platform_disconnected",
+                        platform=platform,
+                        source_agent="cortex_agent",
+                    )
+            except Exception as _push_exc:
+                logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                    "CortexAgent 推送关门指令失败（降级）: %s", _push_exc
+                )
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
