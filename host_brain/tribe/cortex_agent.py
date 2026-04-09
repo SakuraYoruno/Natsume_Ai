@@ -398,6 +398,9 @@ class CortexAgent:
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
             # T-88：订阅任务成功事件，写入 cortex_agent 快照
             bus.subscribe("TASK_SUCCESS", self._on_task_success_cortex)
+            # T-118：订阅躯干族平台连接/断线事件（来自 edge_client PeripheralAgent）
+            bus.subscribe("PLATFORM_CONNECTED", self._on_platform_connected)
+            bus.subscribe("PLATFORM_DISCONNECTED", self._on_platform_disconnected)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -640,6 +643,70 @@ class CortexAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_task_success_cortex 异常: %s", exc
+            )
+
+    async def _on_platform_connected(self, event: Any) -> None:
+        """处理 PLATFORM_CONNECTED 事件：记录平台连接状态。
+
+        T-118：来自 edge_client PeripheralAgent，平台适配器成功连接时触发。
+        将平台连接状态写入 cortex_agent 快照，供路由决策参考。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "").strip()
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            if not platform:
+                return
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            connected_platforms = list(prev_state.get("connected_platforms") or [])
+            if platform not in connected_platforms:
+                connected_platforms.append(platform)
+            prev_state.update({
+                "connected_platforms": connected_platforms,
+                f"platform_{platform}_connected_at_ms": ts_ms,
+            })
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+            logging.getLogger("Natsume.tribe.cortex_agent").info(
+                "CortexAgent PLATFORM_CONNECTED: platform=%s", platform,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_platform_connected 异常: %s", exc
+            )
+
+    async def _on_platform_disconnected(self, event: Any) -> None:
+        """处理 PLATFORM_DISCONNECTED 事件：记录平台断线状态。
+
+        T-118：来自 edge_client PeripheralAgent，平台适配器断线时触发。
+        从 cortex_agent 快照中移除该平台，供路由决策参考。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "").strip()
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            if not platform:
+                return
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            connected_platforms = list(prev_state.get("connected_platforms") or [])
+            if platform in connected_platforms:
+                connected_platforms.remove(platform)
+            prev_state.update({
+                "connected_platforms": connected_platforms,
+                f"platform_{platform}_disconnected_at_ms": ts_ms,
+            })
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+            logging.getLogger("Natsume.tribe.cortex_agent").info(
+                "CortexAgent PLATFORM_DISCONNECTED: platform=%s", platform,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_platform_disconnected 异常: %s", exc
             )
 
 

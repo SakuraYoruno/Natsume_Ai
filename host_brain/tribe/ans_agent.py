@@ -295,12 +295,17 @@ class ANSAgent:
 
         T-37：订阅 BOND_STAGE_CHANGED，关系阶段跃迁时记录当前阶段，
         供后续 inner_world tick 节奏调整参考（亲密度越高， tick 越频繁）。
+        T-119：订阅 VOICE_PIPELINE_STARTED/ENDED，语音管线状态变化时更新内部状态。
+        T-120：订阅 CHANNEL_MESSAGE_RECEIVED，消息到达时更新活跃度感知。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed)
+            bus.subscribe("VOICE_PIPELINE_STARTED", self._on_voice_pipeline_started)   # T-119
+            bus.subscribe("VOICE_PIPELINE_ENDED", self._on_voice_pipeline_ended)       # T-119
+            bus.subscribe("CHANNEL_MESSAGE_RECEIVED", self._on_channel_message_received)  # T-120
         except Exception as exc:
             logger.warning("ANSAgent 订阅注册失败（降级）: %s", exc)
 
@@ -332,6 +337,105 @@ class ANSAgent:
                 )
         except Exception as exc:
             logger.warning("ANSAgent._on_bond_stage_changed 异常: %s", exc)
+
+    async def _on_voice_pipeline_started(self, event: Any) -> None:
+        """T-119：处理 VOICE_PIPELINE_STARTED 事件：记录语音管线启动状态。
+
+        edge_client VoiceAgent 在语音管线启动时通过 EdgeTribeBridge 上报，
+        ANSAgent 感知后可用于调整后台节律（如暂停主动对话检查）。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            request_id = str(payload.get("request_id") or "")
+            session_id = str(payload.get("session_id") or "")
+            stage = str(payload.get("stage") or "")
+            logger.info(
+                "ANSAgent 感知语音管线启动: request_id=%s session_id=%s stage=%s",
+                request_id, session_id, stage,
+            )
+            # 写入 TribeStateRegistry，供后续调度门控读取
+            try:
+                from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+                registry = get_global_registry()
+                registry.write(
+                    namespace="ans_agent",
+                    writer="ANSAgent._on_voice_pipeline_started",
+                    state={
+                        "voice_pipeline_active": True,
+                        "voice_pipeline_request_id": request_id,
+                        "voice_pipeline_session_id": session_id,
+                        "voice_pipeline_stage": stage,
+                    },
+                )
+            except Exception as _reg_exc:
+                logger.debug("ANSAgent voice_pipeline_started 写入 registry 失败: %s", _reg_exc)
+        except Exception as exc:
+            logger.warning("ANSAgent._on_voice_pipeline_started 异常: %s", exc)
+
+    async def _on_voice_pipeline_ended(self, event: Any) -> None:
+        """T-119：处理 VOICE_PIPELINE_ENDED 事件：记录语音管线结束状态。
+
+        语音管线结束后清除活跃标记，恢复正常后台节律。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            request_id = str(payload.get("request_id") or "")
+            session_id = str(payload.get("session_id") or "")
+            status = str(payload.get("status") or "")
+            logger.info(
+                "ANSAgent 感知语音管线结束: request_id=%s session_id=%s status=%s",
+                request_id, session_id, status,
+            )
+            try:
+                from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+                registry = get_global_registry()
+                registry.write(
+                    namespace="ans_agent",
+                    writer="ANSAgent._on_voice_pipeline_ended",
+                    state={
+                        "voice_pipeline_active": False,
+                        "voice_pipeline_request_id": request_id,
+                        "voice_pipeline_session_id": session_id,
+                        "voice_pipeline_last_status": status,
+                    },
+                )
+            except Exception as _reg_exc:
+                logger.debug("ANSAgent voice_pipeline_ended 写入 registry 失败: %s", _reg_exc)
+        except Exception as exc:
+            logger.warning("ANSAgent._on_voice_pipeline_ended 异常: %s", exc)
+
+    async def _on_channel_message_received(self, event: Any) -> None:
+        """T-120：处理 CHANNEL_MESSAGE_RECEIVED 事件：更新活跃度感知。
+
+        edge_client ChannelAgent 在消息路由成功时上报，ANSAgent 感知后
+        更新最近消息时间戳，供 NatsumeScheduler 主动对话门控（idle_threshold）使用。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "")
+            ts_ms = int(payload.get("ts_ms") or 0)
+            routed_success = bool(payload.get("routed_success", True))
+            if not routed_success:
+                return  # 路由失败的消息不更新活跃度
+            logger.debug(
+                "ANSAgent 感知消息到达: platform=%s ts_ms=%d", platform, ts_ms,
+            )
+            try:
+                from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+                from host_brain.core.ids import now_ms  # noqa: PLC0415
+                registry = get_global_registry()
+                registry.write(
+                    namespace="ans_agent",
+                    writer="ANSAgent._on_channel_message_received",
+                    state={
+                        "last_channel_message_ts_ms": ts_ms or now_ms(),
+                        "last_channel_message_platform": platform,
+                    },
+                )
+            except Exception as _reg_exc:
+                logger.debug("ANSAgent channel_message_received 写入 registry 失败: %s", _reg_exc)
+        except Exception as exc:
+            logger.warning("ANSAgent._on_channel_message_received 异常: %s", exc)
 
 
 # ── 单例管理 ──────────────────────────────────────────────────────────────────
