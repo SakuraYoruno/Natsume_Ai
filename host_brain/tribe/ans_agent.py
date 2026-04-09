@@ -209,6 +209,85 @@ class ANSAgent:
             humor_type, clamped, self._bond_stage,
         )
 
+    def emit_bond_progress(
+        self,
+        *,
+        delta: float = 0.05,
+        reason: str = "general",
+        user_id: str = "user_1",
+        session_id: str = "default",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """T-84：发布 BOND_PROGRESS 事件，供 skill 触发关系进展时调用。
+
+        触发 SocialBrainAgent / LimbicAgent / CortexAgent / PainRewardAgent 等的联动响应：
+        - SocialBrainAgent：bond_trend_hint 设为 progress，更新关系进展快照
+        - LimbicAgent：情绪效价小幅提升
+        - CortexAgent：更新 bond_progress 快照
+        - PainRewardAgent：记录关系进展奖励
+
+        Args:
+            delta: 关系进展幅度，0.0 ~ 1.0，默认 0.05。
+            reason: 进展原因，如 "task_success"/"humor_landed"/"deep_talk" 等。
+            user_id: 用户 ID，默认 "user_1"。
+            session_id: 会话 ID，默认 "default"。
+            metadata: 附加元数据（可选）。
+        """
+        clamped = max(0.0, min(1.0, float(delta)))
+        payload: dict[str, Any] = {
+            "delta": round(clamped, 4),
+            "reason": str(reason or "general").strip() or "general",
+            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "session_id": str(session_id or "default").strip() or "default",
+            "bond_stage": self._bond_stage,
+        }
+        if metadata:
+            payload["metadata"] = dict(metadata)
+        self.emit_from_thread("BOND_PROGRESS", payload)
+        logger.debug(
+            "ANSAgent.emit_bond_progress: delta=%.3f reason=%s bond_stage=%s",
+            clamped, reason, self._bond_stage,
+        )
+
+    def emit_bond_regress(
+        self,
+        *,
+        delta: float = 0.05,
+        reason: str = "general",
+        user_id: str = "user_1",
+        session_id: str = "default",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """T-84：发布 BOND_REGRESS 事件，供 skill 触发关系退步时调用。
+
+        触发 SocialBrainAgent / LimbicAgent / CortexAgent / PainRewardAgent 等的联动响应：
+        - SocialBrainAgent：bond_trend_hint 设为 regress_risk
+        - LimbicAgent：情绪效价轻微下降
+        - CortexAgent：更新 bond_regress 快照
+
+        Args:
+            delta: 关系退步幅度，0.0 ~ 1.0，默认 0.05。
+            reason: 退步原因，如 "conflict"/"long_silence"/"immune_block" 等。
+            user_id: 用户 ID，默认 "user_1"。
+            session_id: 会话 ID，默认 "default"。
+            metadata: 附加元数据（可选）。
+        """
+        clamped = max(0.0, min(1.0, float(delta)))
+        payload: dict[str, Any] = {
+            "delta": round(clamped, 4),
+            "reason": str(reason or "general").strip() or "general",
+            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "session_id": str(session_id or "default").strip() or "default",
+            "bond_stage": self._bond_stage,
+        }
+        if metadata:
+            payload["metadata"] = dict(metadata)
+        self.emit_from_thread("BOND_REGRESS", payload)
+        logger.debug(
+            "ANSAgent.emit_bond_regress: delta=%.3f reason=%s bond_stage=%s",
+            clamped, reason, self._bond_stage,
+        )
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

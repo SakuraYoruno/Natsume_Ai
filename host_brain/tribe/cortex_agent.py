@@ -396,6 +396,8 @@ class CortexAgent:
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
             # T-65：订阅孤独感信号，写入 cortex_agent 快照
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
+            # T-88：订阅任务成功事件，写入 cortex_agent 快照
+            bus.subscribe("TASK_SUCCESS", self._on_task_success_cortex)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -609,6 +611,35 @@ class CortexAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_loneliness_signal 异常: %s", exc
+            )
+
+    async def _on_task_success_cortex(self, event: Any) -> None:
+        """处理 TASK_SUCCESS 事件：将任务成功写入 cortex_agent 快照。
+
+        T-88：任务成功时记录最近一次成功的时间戳和强度，
+        供路由决策参考（任务成功后适当提升 chat 路由置信度）。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            session_id = str(payload.get("session_id") or "").strip()
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.35)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "last_task_success_ts_ms": ts_ms,
+                "last_task_success_intensity": round(intensity, 4),
+                "last_task_success_session_id": session_id,
+            })
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+            logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                "CortexAgent TASK_SUCCESS: session_id=%s intensity=%.2f", session_id, intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_task_success_cortex 异常: %s", exc
             )
 
 

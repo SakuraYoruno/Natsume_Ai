@@ -1279,7 +1279,7 @@ def runtime_lifespan(
                 # SocialBrainAgent:  +IMMUNE_BLOCK(T-78) → 合计 6
                 # LimbicAgent:       +IMMUNE_BLOCK(T-79) → 合计 9
                 # 合计: 10+5+6+7+9+4+2+2+1 = 46 + PrefrontalAgent(T-71 IMMUNE_BLOCK) = 47
-                _total_subscriptions = 47
+    _total_subscriptions = 53
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors

@@ -144,6 +144,34 @@ class TribeStateRegistry:
         )
         return True
 
+    def get_state_summary(self) -> list[dict[str, Any]]:
+        """T-87：返回所有命名空间的轻量摘要，供诊断端点快速概览。
+
+        每个命名空间只返回 namespace / writer / updated_at_ms / state_keys，
+        不包含完整 state 数据，避免响应体过大。
+
+        Returns:
+            list[dict]: 按 updated_at_ms 降序排列的摘要列表，每项包含：
+            - namespace (str): 命名空间名称
+            - writer (str | None): 最后写入的 Agent
+            - updated_at_ms (int): 最后更新时间戳
+            - state_keys (list[str]): state 字典的 key 列表（不含值）
+        """
+        with self._lock:
+            items = list(self._states.values())
+        summaries = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            state = item.get("state") or {}
+            summaries.append({
+                "namespace": item.get("namespace", ""),
+                "writer": item.get("writer"),
+                "updated_at_ms": item.get("updated_at_ms", 0),
+                "state_keys": sorted(state.keys()) if isinstance(state, dict) else [],
+            })
+        return sorted(summaries, key=lambda x: int(x.get("updated_at_ms") or 0), reverse=True)
+
     def list_namespaces(self) -> list[str]:
         """T-77：返回所有已注册命名空间的名称列表，按字母顺序排列。
 
@@ -415,6 +443,11 @@ class TribeStateRegistry:
             _ps = dict(pain_ns.get("state") or {})
             loneliness_level = _safe_float(_ps.get("last_loneliness_level"), 0.0)
 
+        # ── T-90：high_loneliness_flag ────────────────────────────────────────
+        # loneliness_level > 0.7 时标记为高孤独感，
+        # 供 chat_context_builder 快速判断是否需要触发主动关怀策略。
+        high_loneliness_flag = loneliness_level > 0.7
+
         return {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -441,6 +474,8 @@ class TribeStateRegistry:
             "bond_trend_hint": bond_trend_hint,
             # T-80 孤独感强度
             "loneliness_level": round(loneliness_level, 4),
+            # T-90 高孤独感标记
+            "high_loneliness_flag": high_loneliness_flag,
             "ts_ms": now_ms(),
         }
 

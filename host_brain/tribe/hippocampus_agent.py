@@ -231,6 +231,8 @@ class HippocampusAgent:
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
             # T-61：订阅孤独感信号，写入 loneliness 快照
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
+            # T-85：订阅任务成功事件，将任务成功写入快照
+            bus.subscribe("TASK_SUCCESS", self._on_task_success)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.hippocampus_agent").warning(
@@ -279,6 +281,29 @@ class HippocampusAgent:
                     "last_loneliness_level": round(loneliness, 4),
                     "last_loneliness_ts_ms": ts_ms,
                     "last_loneliness_bond_stage": bond_stage,
+                },
+                writer="hippocampus_agent",
+            )
+        except Exception:
+            pass
+
+    async def _on_task_success(self, event: Any) -> None:
+        """处理 TASK_SUCCESS 事件：将任务成功写入 hippocampus_agent 快照。
+
+        T-85：记录最近一次任务成功的 task_type / intensity / ts_ms，
+        供 recall() 注入 session_state 和诊断端点查询使用。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            task_type = str(payload.get("task_type") or "unknown").strip().lower() or "unknown"
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.35)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            self.state_registry.set_state(
+                "hippocampus_agent",
+                {
+                    "last_task_success_type": task_type,
+                    "last_task_success_intensity": round(intensity, 4),
+                    "last_task_success_ts_ms": ts_ms,
                 },
                 writer="hippocampus_agent",
             )

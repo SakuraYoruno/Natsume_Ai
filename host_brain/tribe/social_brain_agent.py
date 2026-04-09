@@ -208,6 +208,8 @@ class SocialBrainAgent:
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal_bond)
             # T-78：订阅免疫拦截事件，拦截时将 bond_trend_hint 设为 regress_risk
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_bond)
+            # T-91：订阅幽默成功事件，幽默成功时 bond_trend_hint 设为 progress
+            bus.subscribe("HUMOR_LANDED", self._on_humor_landed_bond)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -498,6 +500,50 @@ class SocialBrainAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent._on_immune_block_bond 异常: %s", exc
+            )
+
+
+    def _touch_state(self, *, key: str, value: Any) -> None:
+        """辅助方法：合并更新 social_brain_agent 命名空间快照中的单个字段。"""
+        try:
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state[key] = value
+            self.state_registry.set_state("social_brain_agent", prev_state, writer="social_brain_agent")
+        except Exception:
+            pass
+
+    async def _on_humor_landed_bond(self, event: Any) -> None:
+        """处理 HUMOR_LANDED 事件：幽默成功时 bond_trend_hint 设为 progress。
+
+        T-91：幽默成功是关系升温的正向信号，
+        将 bond_trend_hint 设为 progress，供 chat_context_builder 参考。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "bond_trend_hint": "progress",
+                "bond_trend_hint_ts_ms": ts_ms,
+                "last_humor_landed": {
+                    "intensity": round(intensity, 4),
+                    "ts_ms": ts_ms,
+                },
+            })
+            self.state_registry.set_state("social_brain_agent", prev_state, writer="social_brain_agent")
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent HUMOR_LANDED: bond_trend_hint=progress intensity=%.2f", intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_humor_landed_bond 异常: %s", exc
             )
 
 

@@ -129,6 +129,8 @@ class EndocrineAgent:
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
             # T-69：订阅任务成功事件，任务成功触发 cortisol 轻微下降
             bus.subscribe("TASK_SUCCESS", self._on_task_success_endocrine)
+            # T-86：订阅免疫拦截事件，拦截时 cortisol 轻微上升
+            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_endocrine)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.endocrine_agent").warning(
@@ -226,6 +228,32 @@ class EndocrineAgent:
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent TASK_SUCCESS: cortisol%.3f intensity=%.2f",
                 cortisol_relief, intensity,
+            )
+        except Exception:
+            pass
+
+    async def _on_immune_block_endocrine(self, event: Any) -> None:
+        """处理 IMMUNE_BLOCK 事件：免疫拦截时 cortisol 轻微上升。
+
+        T-86：被拦截意味着输出受到抑制，模拟轻微的挫败感/压力反应。
+        cortisol 增量上限 0.04，避免单次拦截过度影响内分泌状态。
+        仅在 risk_level 为 medium/high/critical 时触发。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            risk_level = str(payload.get("risk_level") or "low").strip().lower()
+            # low 级别不触发压力反应
+            if risk_level == "low":
+                return
+            # medium → +0.02，high → +0.03，critical → +0.04
+            risk_boost_map = {"medium": 0.02, "high": 0.03, "critical": 0.04}
+            cortisol_boost = risk_boost_map.get(risk_level, 0.02)
+            with self._bond_lock:
+                self._bond_cortisol_delta += cortisol_boost
+            logging.getLogger("Natsume.tribe.endocrine_agent").debug(
+                "EndocrineAgent IMMUNE_BLOCK: cortisol+%.3f risk_level=%s",
+                cortisol_boost, risk_level,
             )
         except Exception:
             pass

@@ -252,6 +252,39 @@ async def post_immune_reset(
         raise HTTPException(status_code=500, detail=f"IMMUNE_RESET_FAILED: {exc}") from exc
 
 
+# ── T-83：TribeStateRegistry 命名空间列表端点 ─────────────────────────────────
+
+class TribeStateNamespacesResponse(BaseModel):
+    total: int
+    namespaces: list[str]
+    ts_ms: int
+
+
+@router.get("/tribe_state/namespaces", response_model=TribeStateNamespacesResponse)
+async def list_tribe_state_namespaces(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-83：返回 TribeStateRegistry 中所有已注册命名空间的名称列表。
+
+    仅返回命名空间名称，不含状态数据，供快速枚举当前活跃 Agent 命名空间使用。
+    按字母顺序排列。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        registry = get_global_registry()
+        namespaces = registry.list_namespaces()
+        return TribeStateNamespacesResponse(
+            total=len(namespaces),
+            namespaces=namespaces,
+            ts_ms=now_ms(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TRIBE_STATE_NAMESPACES_FAILED: {exc}") from exc
+
+
 # ── T-74：TribeStateRegistry 命名空间清除运维端点 ─────────────────────────────
 
 class TribeStateDeleteResponse(BaseModel):

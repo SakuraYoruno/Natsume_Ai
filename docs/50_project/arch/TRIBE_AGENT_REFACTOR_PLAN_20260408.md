@@ -2935,15 +2935,96 @@ BOND_PROGRESS / BOND_REGRESS
 
 ---
 
-#### 下一步待开发（第十八批 T-83 ~ T-92）
+---
 
-1. **T-83**：`internal_tribe_routes` 新增 `GET /internal/tribe_state/namespaces` 命名空间列表端点
-2. **T-84**：`ANSAgent` 新增 `emit_bond_progress()` 方法，供 skill 触发关系进展事件
-3. **T-85**：`HippocampusAgent` 订阅 `TASK_SUCCESS`，将任务成功写入快照
-4. **T-86**：`EndocrineAgent` 订阅 `IMMUNE_BLOCK`，拦截时 cortisol 轻微上升
-5. **T-87**：`TribeStateRegistry` 新增 `get_state_summary()`，返回所有命名空间的轻量摘要
-6. **T-88**：`CortexAgent` 订阅 `TASK_SUCCESS`，将任务成功写入 `cortex_agent` 快照
-7. **T-89**：`PainRewardAgent` 订阅 `HUMOR_LANDED`，幽默成功记录奖励
-8. **T-90**：`aggregate_vital_signs()` 补充 `high_loneliness_flag` 字段
-9. **T-91**：`SocialBrainAgent` 订阅 `HUMOR_LANDED`，幽默成功时 `bond_trend_hint` 设为 `progress`
-10. **T-92**：`http_hooks.py` 第十八批计数更新 + 文档留痕
+## 第十八批开发留痕（T-83 ~ T-92）
+
+#### T-83：internal_tribe_routes 新增 GET /internal/tribe_state/namespaces ✅
+
+- 新增 `GET /internal/tribe_state/namespaces` 端点
+- 调用 `TribeStateRegistry.list_namespaces()` 返回所有已注册命名空间名称列表
+- 响应格式：`{"namespaces": [...], "count": N}`
+
+#### T-84：ANSAgent 新增 emit_bond_progress() ✅
+
+- 新增 `emit_bond_progress(delta: float, reason: str)` 方法
+- 发布 `BOND_PROGRESS` 事件（delta > 0）或 `BOND_REGRESS` 事件（delta < 0）
+- 供 skill 侧（bond_skill / interaction_skill）触发关系进展事件
+
+#### T-85：HippocampusAgent 订阅 TASK_SUCCESS ✅
+
+- `register_subscriptions()` 追加 `TASK_SUCCESS` → `_on_task_success`
+- 任务成功时将 `task_type`、`task_score`、`timestamp` 写入 `hippocampus_agent` 快照
+- 累计 `task_success_count` 计数
+
+#### T-86：EndocrineAgent 订阅 IMMUNE_BLOCK ✅
+
+- `register_subscriptions()` 追加 `IMMUNE_BLOCK` → `_on_immune_block_endocrine`
+- 拦截时 cortisol 轻微上升（+0.03 ~ +0.06），写入 `endocrine_agent` 快照
+- 触发 `ENDOCRINE_UPDATED` 事件通知下游
+
+#### T-87：TribeStateRegistry 新增 get_state_summary() ✅
+
+- 新增 `get_state_summary()` 方法，返回所有命名空间的轻量摘要
+- 每个命名空间返回：`namespace`、`key_count`、`last_updated`、`top_keys`（前5个键名）
+- 线程安全，供诊断端点和监控使用
+
+#### T-88：CortexAgent 订阅 TASK_SUCCESS ✅
+
+- `register_subscriptions()` 追加 `TASK_SUCCESS` → `_on_task_success`
+- 任务成功时将 `last_task_type`、`last_task_score`、`task_success_count` 写入 `cortex_agent` 快照
+- 供 `collect_tribe_context()` 注入 prompt 构建时参考
+
+#### T-89：PainRewardAgent 订阅 HUMOR_LANDED ✅
+
+- `register_subscriptions()` 追加 `HUMOR_LANDED` → `_on_humor_landed`
+- 幽默成功时触发奖励：`reward_signal` +0.05 ~ +0.10，写入 `pain_reward_agent` 快照
+- 累计 `humor_success_count` 计数
+
+#### T-90：aggregate_vital_signs() 补充 high_loneliness_flag ✅
+
+- 从 `pain_reward_agent` 命名空间读取 `last_loneliness_level`
+- 当 `loneliness_level >= 0.7` 时，`high_loneliness_flag = True`，否则 `False`
+- 写入 `aggregate_vital_signs()` 返回值，供 chat_context_builder 参考
+
+#### T-91：SocialBrainAgent 订阅 HUMOR_LANDED ✅
+
+- `register_subscriptions()` 追加 `HUMOR_LANDED` → `_on_humor_landed`
+- 幽默成功时将 `bond_trend_hint` 设为 `progress`，写入 `social_brain_agent` 快照
+- 同时更新 `last_humor_landed_at` 时间戳
+
+#### T-92：http_hooks.py 第十八批更新 ✅
+
+- subscriptions 计数：47 → 53（新增 6 个订阅）
+- 新增：HippocampusAgent(TASK_SUCCESS)、EndocrineAgent(IMMUNE_BLOCK)、CortexAgent(TASK_SUCCESS)、PainRewardAgent(HUMOR_LANDED)、SocialBrainAgent(HUMOR_LANDED)、ANSAgent emit_bond_progress
+
+---
+
+**第十八批订阅总览（53 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 11 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 5 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, LONELINESS_SIGNAL, IMMUNE_BLOCK, **HUMOR_LANDED** | 7 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, IMMUNE_BLOCK, LONELINESS_SIGNAL, **TASK_SUCCESS** | 8 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, LONELINESS_SIGNAL, TASK_SUCCESS, **IMMUNE_BLOCK** | 5 |
+| ImmuneAgent | INTERACTION_RECORDED, BOND_STAGE_CHANGED | 2 |
+| HippocampusAgent | INTERACTION_RECORDED, LONELINESS_SIGNAL, **TASK_SUCCESS** | 3 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+
+---
+
+#### 下一步待开发（第十九批 T-93 ~ T-102）
+
+1. **T-93**：`inner_world_skill` 调用 `ANSAgent.emit_loneliness_signal()`，孤独感超阈值时触发事件
+2. **T-94**：`chat_skill` / `interaction_skill` 调用 `ANSAgent.emit_task_success()`，对话任务完成时触发
+3. **T-95**：`humor_skill` 调用 `ANSAgent.emit_humor_landed()`，幽默成功时触发事件
+4. **T-96**：`bond_skill` 调用 `ANSAgent.emit_bond_progress()`，关系进展时触发事件
+5. **T-97**：`chat_context_builder` 消费 `high_loneliness_flag`，孤独感高时调整 prompt 语气
+6. **T-98**：`chat_context_builder` 消费 `bond_trend_hint`，关系趋势影响话题选择
+7. **T-99**：`chat_context_builder` 消费 `immune_state`，免疫拦截状态影响 prompt 谨慎度
+8. **T-100**：`prompt_builder` 新增 `loneliness_hint` 注入，孤独感高时增加陪伴感表达
+9. **T-101**：`TribeStateRegistry` 新增 `get_state_summary()` 端点接入 `internal_tribe_routes`
+10. **T-102**：`http_hooks.py` 第十九批计数更新 + 文档留痕
