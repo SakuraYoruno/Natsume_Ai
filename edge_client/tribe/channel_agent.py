@@ -16,6 +16,8 @@ class ChannelAgent:
             capabilities=("message_ingress", "gateway_health"),
         )
     )
+    # T-128：门控状态，由 CortexAgent 下行指令控制
+    _gate_open: bool = field(default=True, init=False, repr=False)
 
     def set_bridge(self, bridge: Any | None) -> None:
         self.bridge = bridge
@@ -73,6 +75,48 @@ class ChannelAgent:
                 "cached": bool(cached),
             },
         )
+
+    def on_gate_control_command(
+        self,
+        *,
+        gate_open: bool,
+        reason: str | None = None,
+        platform: str | None = None,
+        ts_ms: int = 0,
+    ) -> dict[str, Any]:
+        """处理来自 CortexAgent 的门控指令（下行）。
+
+        T-128：CortexAgent 在平台连接/断线或进入谨慎模式时，
+        通过 EdgeCommandPusher 推送门控指令到 edge_client。
+        ChannelAgent 缓存门控状态，供 gateway/router.py 查询决策。
+
+        Args:
+            gate_open: True 表示开放消息路由，False 表示暂停路由
+            reason: 门控原因（调试用）
+            platform: 指定平台（None 表示全局门控）
+            ts_ms: 指令时间戳
+        """
+        import logging  # noqa: PLC0415
+        _log = logging.getLogger("Natsume.edge.tribe.channel_agent")
+        prev = self._gate_open
+        self._gate_open = bool(gate_open)
+        _log.info(
+            "ChannelAgent 门控状态变更: %s → %s reason=%s platform=%s ts_ms=%d",
+            prev, self._gate_open, reason, platform, int(ts_ms or 0),
+        )
+        return {
+            "accepted": True,
+            "gate_open": self._gate_open,
+            "prev_gate_open": prev,
+            "reason": reason,
+            "platform": platform,
+            "ts_ms": int(ts_ms or 0),
+        }
+
+    @property
+    def gate_open(self) -> bool:
+        """当前门控状态：True 表示允许消息路由，False 表示暂停。"""
+        return self._gate_open
 
     def _publish_event(
         self,

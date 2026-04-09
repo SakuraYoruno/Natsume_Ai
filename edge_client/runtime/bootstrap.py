@@ -25,7 +25,7 @@ from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
 from edge_client.senses.asr import AsrConfig, AsrService, AudioStreamCapture, DeviceRecoveryConfig
-from edge_client.tribe.registry import build_edge_tribe_bridge
+from edge_client.tribe.registry import build_edge_tribe_bridge, get_edge_tribe_registry
 
 
 LOGGER = logging.getLogger("Natsume.edge.runtime.bootstrap")
@@ -493,6 +493,19 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
             LOGGER.info("WxDbService 已初始化: %s", config.wx_decrypt_output_dir)
         except Exception as exc:
             LOGGER.warning("WxDbService 初始化失败（非致命）: %s", exc)
+
+    # T-127：初始化 EdgeTribeRegistry，将 vts_driver 注入到 SomaticAgent
+    # SomaticAgent 接收来自 host_brain LimbicAgent 的下行情绪指令后，
+    # 通过 vts_driver.set_expression() 驱动 VTubeStudio 表情，实现身心联动闭环
+    try:
+        _tribe_registry = get_edge_tribe_registry()
+        _tribe_registry.initialize()
+        somatic = _tribe_registry.somatic
+        if hasattr(somatic, "set_vts_driver"):
+            somatic.set_vts_driver(runtime.vts_driver)
+        LOGGER.info("EdgeTribeRegistry 已初始化，SomaticAgent vts_driver 注入完成")
+    except Exception as exc:
+        LOGGER.warning("EdgeTribeRegistry 初始化失败（非致命）: %s", exc)
 
     # 启动 Unified Message Gateway（若已启用）
     if config.gateway_enabled:

@@ -1026,6 +1026,29 @@ class LimbicAgent:
                     )
                 except Exception as _hs_exc:
                     _log.debug("LimbicAgent 同步 hard_state 失败（降级）: %s", _hs_exc)
+            # T-125：通过 EdgeCommandPusher 将情绪状态推送回 edge_client，驱动 vts_driver 表情
+            # 实现 LimbicAgent → SomaticAgent 的下行反馈闭环（身心联动）
+            try:
+                from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
+                _pusher = get_edge_command_pusher()
+                if _pusher is not None and _pusher.enabled:
+                    _push_result = _pusher.push_emotion_state(
+                        emotion_tag=emotion_tag,
+                        intensity=(
+                            float(emotion_intensity)
+                            if isinstance(emotion_intensity, (int, float))
+                            else None
+                        ),
+                        mood_state=mood_state,
+                        session_id=session_id or None,
+                        source_agent="limbic_agent",
+                    )
+                    _log.debug(
+                        "LimbicAgent 情绪指令已推送到 edge_client: emotion_tag=%s ok=%s",
+                        emotion_tag, _push_result.get("ok"),
+                    )
+            except Exception as _push_exc:
+                _log.debug("LimbicAgent 推送情绪指令失败（降级）: %s", _push_exc)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(

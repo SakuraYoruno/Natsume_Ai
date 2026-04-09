@@ -492,6 +492,118 @@ def create_edge_fastapi_app(
             handler=_handle_wx_moments,
         )
 
+    # ── T-123：Phase 6 下行链路 - host_brain → edge_client 指令端点 ────────
+    @app.post("/internal/tribe_command")
+    async def internal_tribe_command(request: Request) -> JSONResponse:
+        """接收来自 host_brain 的下行 Tribe 指令。
+
+        T-123：Phase 6 躯干族独立的下行链路。
+        host_brain 侧的 EdgeCommandPusher 通过此端点向 edge_client 推送指令，
+        例如：
+        - LimbicAgent 推送情绪状态变化 → SomaticAgent 驱动 vts_driver 表情
+        - CortexAgent 推送门控指令 → ChannelAgent 控制消息路由
+
+        请求体格式（JSON）：
+        {
+            "command_type": "EMOTION_STATE_CHANGED" | "GATE_CONTROL" | ...,
+            "source_agent": "limbic_agent" | "cortex_agent" | ...,
+            "target_agent": "edge.somatic" | "edge.channel" | ...,
+            "payload": {...},
+            "schema_version": "tribe.command.v1",
+            "ts_ms": 1234567890
+        }
+
+        鉴权：通过 X-Internal-Token 请求头校验（与 host_brain /internal/tribe_event 同一 token）。
+        """
+        import logging  # noqa: PLC0415
+        _log = logging.getLogger("Natsume.edge.tribe_command")
+        ts = int(clock())
+
+        # ── 鉴权：校验 X-Internal-Token ──────────────────────────────────
+        _internal_token = str(
+            getattr(runtime_config, "internal_tribe_token", None)
+            or __import__("os").environ.get("HOST_INTERNAL_TRIBE_TOKEN", "")
+        ).strip()
+        if _internal_token:
+            _req_token = str(request.headers.get("X-Internal-Token") or "").strip()
+            if _req_token != _internal_token:
+                _log.warning("tribe_command: token mismatch, rejected")
+                return JSONResponse(
+                    {"accepted": False, "reason": "UNAUTHORIZED", "ts_ms": ts},
+                    status_code=401,
+                )
+
+        # ── 解析请求体 ────────────────────────────────────────────────────
+        try:
+            body = await request.json()
+        except Exception as _parse_exc:
+            _log.warning("tribe_command: invalid JSON body: %s", _parse_exc)
+            return JSONResponse(
+                {"accepted": False, "reason": "INVALID_JSON", "ts_ms": ts},
+                status_code=400,
+            )
+
+        command_type = str(body.get("command_type") or "").strip().upper()
+        source_agent = str(body.get("source_agent") or "").strip()
+        target_agent = str(body.get("target_agent") or "").strip()
+        payload = dict(body.get("payload") or {})
+
+        if not command_type:
+            return JSONResponse(
+                {"accepted": False, "reason": "COMMAND_TYPE_REQUIRED", "ts_ms": ts},
+                status_code=400,
+            )
+
+        _log.debug(
+            "tribe_command received: type=%s source=%s target=%s",
+            command_type, source_agent, target_agent,
+        )
+
+        # ── 分发到对应的 Agent ────────────────────────────────────────────
+        try:
+            from edge_client.tribe.registry import get_edge_tribe_registry  # noqa: PLC0415
+            registry = get_edge_tribe_registry()
+
+            dispatched = False
+
+            # EMOTION_STATE_CHANGED → SomaticAgent（驱动 vts_driver 表情）
+            if command_type == "EMOTION_STATE_CHANGED" and (
+                not target_agent or target_agent in ("edge.somatic", "somatic_agent")
+            ):
+                if registry.initialized:
+                    registry.somatic.on_emotion_state_command(payload=payload)
+                    dispatched = True
+
+            # GATE_CONTROL → ChannelAgent（门控指令）
+            elif command_type == "GATE_CONTROL" and (
+                not target_agent or target_agent in ("edge.channel", "channel_agent")
+            ):
+                if registry.initialized:
+                    registry.channel.on_gate_control_command(payload=payload)
+                    dispatched = True
+
+            # 未知指令类型：记录日志但不报错（向前兼容）
+            else:
+                _log.info(
+                    "tribe_command: unhandled command_type=%s target=%s (ignored)",
+                    command_type, target_agent,
+                )
+                dispatched = False
+
+            return JSONResponse({
+                "accepted": True,
+                "dispatched": dispatched,
+                "command_type": command_type,
+                "ts_ms": ts,
+            })
+
+        except Exception as exc:
+            _log.warning("tribe_command dispatch error: %s", exc)
+            return JSONResponse(
+                {"accepted": False, "reason": "DISPATCH_ERROR", "detail": str(exc), "ts_ms": ts},
+                status_code=500,
+            )
+
     return app
 
 
