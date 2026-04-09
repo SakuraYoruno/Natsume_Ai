@@ -1,17 +1,42 @@
 from __future__ import annotations
 
+import json
+import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from host_brain.core.ids import now_ms
 
+# T-29：持久化文件路径（可通过环境变量覆盖）
+_DEFAULT_SNAPSHOT_PATH = Path(
+    os.environ.get(
+        "NATSUME_TRIBE_STATE_SNAPSHOT_PATH",
+        "host_brain/data/tribe_state_snapshot.json",
+    )
+)
+# T-29：节流：每 N 次 set_state 才写一次磁盘
+_SNAPSHOT_THROTTLE = 10
+
 
 class TribeStateRegistry:
-    """最小 Tribe 状态注册表：按命名空间保存状态快照。"""
+    """最小 Tribe 状态注册表：按命名空间保存状态快照。
 
-    def __init__(self) -> None:
+    T-29：支持跨会话持久化，重启后自动恢复所有 Agent 状态快照。
+    """
+
+    def __init__(
+        self,
+        *,
+        state_path: Path | None = None,
+        persist_throttle: int = _SNAPSHOT_THROTTLE,
+    ) -> None:
         self._states: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        # T-29：持久化控制
+        self._state_path: Path = state_path or _DEFAULT_SNAPSHOT_PATH
+        self._persist_throttle: int = max(1, int(persist_throttle))
+        self._persist_counter: int = 0
 
     def set_state(self, namespace: str, state: dict[str, Any], *, writer: str | None = None) -> dict[str, Any]:
         ns = str(namespace).strip() or "default"
@@ -23,7 +48,12 @@ class TribeStateRegistry:
                 "updated_at_ms": now_ms(),
             }
             self._states[ns] = snapshot
-            return dict(snapshot)
+            self._persist_counter += 1
+            should_persist = (self._persist_counter % self._persist_throttle == 0)
+        # T-29：节流持久化（在锁外执行，避免阻塞）
+        if should_persist:
+            self.save_snapshot()
+        return dict(snapshot)
 
     def get_state(self, namespace: str) -> dict[str, Any] | None:
         ns = str(namespace).strip() or "default"
@@ -34,6 +64,73 @@ class TribeStateRegistry:
     def snapshot(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             return {ns: dict(data) for ns, data in self._states.items()}
+
+    # ── T-29：持久化方法 ─────────────────────────────────────────────────────
+
+    def save_snapshot(self) -> bool:
+        """将当前所有命名空间状态快照持久化到磁盘 JSON 文件。
+
+        采用原子写入（.tmp → rename），避免写入中断导致文件损坏。
+
+        Returns:
+            True 表示保存成功，False 表示保存失败（降级，不抛异常）。
+        """
+        try:
+            with self._lock:
+                data = {ns: dict(snap) for ns, snap in self._states.items()}
+            persist_data = {
+                "version": 1,
+                "saved_at_ms": now_ms(),
+                "namespaces": data,
+            }
+            path = self._state_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(
+                json.dumps(persist_data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp_path.replace(path)
+            return True
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.tribe_state").debug(
+                "TribeStateRegistry.save_snapshot 失败（降级）: %s", exc
+            )
+            return False
+
+    def load_snapshot(self) -> bool:
+        """从磁盘 JSON 文件加载状态快照，恢复跨会话 Agent 状态。
+
+        Returns:
+            True 表示加载成功，False 表示文件不存在或加载失败（降级，不抛异常）。
+        """
+        try:
+            path = self._state_path
+            if not path.exists():
+                return False
+            raw = path.read_text(encoding="utf-8")
+            persist_data = json.loads(raw)
+            namespaces = dict(persist_data.get("namespaces") or {})
+            if not namespaces:
+                return False
+            with self._lock:
+                for ns, snap in namespaces.items():
+                    if isinstance(snap, dict):
+                        self._states[str(ns)] = snap
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.tribe_state").info(
+                "TribeStateRegistry 加载持久化快照: %d 个命名空间，saved_at_ms=%s",
+                len(namespaces),
+                persist_data.get("saved_at_ms"),
+            )
+            return True
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.tribe_state").debug(
+                "TribeStateRegistry.load_snapshot 失败（降级）: %s", exc
+            )
+            return False
 
     def aggregate_vital_signs(self) -> dict[str, Any]:
         """T-10：从各族 Agent 写入的状态快照中聚合统一生命体征。
@@ -156,4 +253,25 @@ def _safe_float(value: Any, default: float) -> float:
         return float(default)
 
 
-__all__ = ["TribeStateRegistry"]
+# ── T-29：全局单例 TribeStateRegistry ────────────────────────────────────────
+# 各族 Agent 共享同一个 registry 实例，确保状态快照跨 Agent 可见，
+# 并且持久化时能一次性保存所有命名空间。
+_GLOBAL_REGISTRY: TribeStateRegistry | None = None
+_GLOBAL_REGISTRY_LOCK = threading.Lock()
+
+
+def get_global_registry() -> TribeStateRegistry:
+    """获取全局共享的 TribeStateRegistry 单例。
+
+    T-29：所有族 Agent 应使用此函数获取 registry，
+    确保状态快照跨 Agent 可见，并支持统一持久化。
+    """
+    global _GLOBAL_REGISTRY
+    if _GLOBAL_REGISTRY is None:
+        with _GLOBAL_REGISTRY_LOCK:
+            if _GLOBAL_REGISTRY is None:
+                _GLOBAL_REGISTRY = TribeStateRegistry()
+    return _GLOBAL_REGISTRY
+
+
+__all__ = ["TribeStateRegistry", "get_global_registry"]

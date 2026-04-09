@@ -1215,6 +1215,18 @@ def runtime_lifespan(
                 _bus = get_tribe_event_bus()
                 await _bus.start()
 
+                # T-29：启动时从磁盘恢复 TribeStateRegistry 状态快照
+                try:
+                    from host_brain.tribe.tribe_state import get_global_registry as _get_global_registry  # noqa: PLC0415
+                    _registry = _get_global_registry()
+                    _loaded = _registry.load_snapshot()
+                    if _loaded:
+                        logger.info("TribeStateRegistry 状态快照已恢复（跨会话持久化）")
+                    else:
+                        logger.debug("TribeStateRegistry 无持久化快照（首次启动或文件不存在）")
+                except Exception as _snap_exc:
+                    logger.debug("TribeStateRegistry.load_snapshot 失败（降级）: %s", _snap_exc)
+
                 # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent → EndocrineAgent）
                 _tribe_sub_errors: list[str] = []
                 for _agent_name, _agent_factory in [
@@ -1237,7 +1249,7 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
                 _sub_status = (
-                    f"OK (dispatch_loop=running, subscriptions=7)"
+                    f"OK (dispatch_loop=running, subscriptions=9)"
                     if not _tribe_sub_errors
                     else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
                 )

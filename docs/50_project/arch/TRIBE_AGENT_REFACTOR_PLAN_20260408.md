@@ -2323,3 +2323,120 @@ BOND_REGRESS → EndocrineAgent._on_bond_regress()
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 2. **T-29**（新增）：`TribeStateRegistry` 持久化（跨会话保持所有 Agent 状态快照）
 3. **T-30**（新增）：`LimbicAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响情绪基线）
+
+---
+
+### 2026-04-09 · 第十一批开发（T-29 / T-30）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/tribe_state.py`（T-29：持久化 save_snapshot/load_snapshot + 全局单例 get_global_registry）
+- `host_brain/tribe/limbic_agent.py`（T-29：使用全局单例；T-30：BOND 事件 handler）
+- `host_brain/tribe/pain_reward_agent.py`（T-29：使用全局单例）
+- `host_brain/app/http_hooks.py`（T-29：启动时 load_snapshot；T-30：subscriptions 计数 7→9）
+
+---
+
+#### T-29：TribeStateRegistry 持久化 ✅
+
+**问题**：`TribeStateRegistry` 是纯内存存储，且各 Agent 各自持有独立实例（`default_factory=TribeStateRegistry`），导致：
+1. 重启后所有 Agent 状态快照丢失
+2. 各 Agent 的状态无法跨 Agent 共享（如 `CortexAgent` 只能通过 `get_limbic_agent().state_registry` 访问 LimbicAgent 的状态）
+
+**改动**（`tribe_state.py`）：
+
+1. **新增顶层常量**：
+   - `_DEFAULT_SNAPSHOT_PATH`：持久化文件路径（默认 `host_brain/data/tribe_state_snapshot.json`，可通过 `NATSUME_TRIBE_STATE_SNAPSHOT_PATH` 环境变量覆盖）
+   - `_SNAPSHOT_THROTTLE = 10`：每 10 次 `set_state` 才写一次磁盘（节流 IO）
+
+2. **修改 `TribeStateRegistry.__init__()`**：
+   - 新增 `state_path`/`persist_throttle` 参数
+   - 新增 `_persist_counter` 字段
+
+3. **修改 `set_state()`**：
+   - 每次写入递增 `_persist_counter`
+   - 节流触发 `save_snapshot()`（在锁外执行，避免阻塞）
+
+4. **新增 `save_snapshot()` 方法**：
+   - 原子写入（.tmp → rename）
+   - 持久化格式：`{"version": 1, "saved_at_ms": ..., "namespaces": {...}}`
+
+5. **新增 `load_snapshot()` 方法**：
+   - 从 JSON 文件恢复所有命名空间状态
+   - 文件不存在时返回 `False`（首次启动正常情况）
+
+6. **新增全局单例 `get_global_registry()`**：
+   - 双重检查锁（DCL）确保线程安全
+   - 所有族 Agent 共享同一个 `TribeStateRegistry` 实例
+
+**改动**（`limbic_agent.py` / `pain_reward_agent.py`）：
+- `state_registry` 字段 `default_factory` 从 `TribeStateRegistry` 改为 `get_global_registry`
+- 确保所有 Agent 写入同一个 registry，状态跨 Agent 可见
+
+**改动**（`http_hooks.py`）：
+- 在 `await _bus.start()` 之后，调用 `get_global_registry().load_snapshot()` 恢复状态
+
+**持久化文件格式**：
+```json
+{
+  "version": 1,
+  "saved_at_ms": 1744166400000,
+  "namespaces": {
+    "limbic_agent": {"namespace": "limbic_agent", "state": {...}, "writer": "...", "updated_at_ms": ...},
+    "pain_reward_agent": {"namespace": "pain_reward_agent", "state": {...}, ...},
+    "endocrine_agent": {"namespace": "endocrine_agent", "state": {...}, ...}
+  }
+}
+```
+
+---
+
+#### T-30：LimbicAgent 接入 BOND_PROGRESS/BOND_REGRESS 事件 ✅
+
+**问题**：`LimbicAgent` 目前不感知关系变化，`BOND_PROGRESS`/`BOND_REGRESS` 事件只影响 `PainRewardAgent`（痛觉/奖励）和 `EndocrineAgent`（激素），但不影响情绪基线（`valence`）和沉默意愿（`silence_willingness`）。
+
+**改动**（`limbic_agent.py`）：
+
+1. **修改 `register_subscriptions()`**：
+   - 追加订阅 `BOND_PROGRESS` → `_on_bond_progress`
+   - 追加订阅 `BOND_REGRESS` → `_on_bond_regress`
+
+2. **新增 `_on_bond_progress()` handler**：
+   - 效价提升：`min(0.10, intensity * 0.12)`
+   - 通过 `EmotionPersistence.persist()` 写入情绪持久化
+   - 通过 `silence_engine.update_emotion(emotion_tag="JOY", ...)` 降低沉默意愿
+   - 写入 `last_bond_progress_effect` 状态快照（调试用）
+
+3. **新增 `_on_bond_regress()` handler**：
+   - 效价降低：`min(0.08, intensity * 0.10)`
+   - 通过 `EmotionPersistence.persist()` 写入情绪持久化
+   - 通过 `apply_body_sense_penalty()` 提升沉默意愿
+   - 写入 `last_bond_regress_effect` 状态快照（调试用）
+
+**改动**（`http_hooks.py`）：
+- subscriptions 计数 7 → 9（LimbicAgent 新增 2 个订阅）
+
+**情绪影响量化**：
+
+| 事件 | 效价变化 | 沉默意愿变化 | 说明 |
+|---|---|---|---|
+| `BOND_PROGRESS`（intensity=0.3） | +0.036 | 降低（JOY 更新） | 普通关系进展 |
+| `BOND_PROGRESS`（intensity=0.7，stage升级） | +0.084 | 明显降低 | Stage 跃迁 |
+| `BOND_REGRESS`（intensity=0.4） | -0.04 | +0.024（惩罚） | 普通关系退步 |
+| `BOND_REGRESS`（intensity=0.6，stage降级） | -0.06 | +0.036（惩罚） | Stage 降级 |
+
+**完整 BOND 事件影响链（T-25/T-26 → T-28 → T-30）**：
+```
+BOND_PROGRESS / BOND_REGRESS
+  ├── PainRewardAgent（T-24）：pain_level / reward_level
+  ├── EndocrineAgent（T-28）：cortisol_level / oxytocin_level
+  └── LimbicAgent（T-30）：emotion_valence / silence_willingness
+```
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-31**（新增）：`SocialBrainAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响 bond_summary 快照更新频率）
+3. **T-32**（新增）：`TribeStateRegistry` 快照定时保存（每 N 分钟强制持久化，补充节流机制的盲区）

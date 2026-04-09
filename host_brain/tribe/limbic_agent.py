@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
-from host_brain.tribe.tribe_state import TribeStateRegistry
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 @dataclass(slots=True)
@@ -17,7 +17,7 @@ class LimbicAgent:
             capabilities=("emotion", "motive", "body_sense", "offline_continuity"),
         )
     )
-    state_registry: TribeStateRegistry = field(default_factory=TribeStateRegistry)
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-29：使用全局单例
     _emotion_persistence: Any | None = field(default=None, init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
@@ -868,6 +868,9 @@ class LimbicAgent:
 
         在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
         各族 Agent 的 handler 能被正确触发。
+
+        T-30：新增订阅 BOND_PROGRESS / BOND_REGRESS，
+        关系变化影响情绪效价（valence）和沉默意愿（silence_willingness）。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -882,6 +885,9 @@ class LimbicAgent:
             # event_type="emotion_inference_updated"，经 /internal/tribe_event 转发后
             # Bus 以大写 key 分发，此处用大写匹配
             bus.subscribe("EMOTION_INFERENCE_UPDATED", self._on_emotion_inference_updated)
+            # T-30：订阅关系进展/退步事件，影响情绪基线
+            bus.subscribe("BOND_PROGRESS", self._on_bond_progress)
+            bus.subscribe("BOND_REGRESS", self._on_bond_regress)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -1017,6 +1023,150 @@ class LimbicAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent._on_emotion_inference_updated 异常: %s", exc
+            )
+
+
+    async def _on_bond_progress(self, event: Any) -> None:
+        """处理 BOND_PROGRESS 事件：关系进展 → 情绪效价提升 + 沉默意愿降低。
+
+        T-30：关系进展（bond_stage 升级或 bond_trend 上升）时，
+        通过 EmotionPersistence 将正向效价偏置写入情绪持久化，
+        并降低沉默意愿（更愿意主动交流）。
+
+        效价提升：intensity * 0.12（上限 0.10）
+        沉默意愿降低：intensity * 0.08（上限 0.06）
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.limbic_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            reason = str(payload.get("reason") or "bond_progress")
+
+            # 效价提升（正向情绪偏置）
+            valence_boost = round(min(0.10, intensity * 0.12), 4)
+            # 沉默意愿降低（更愿意交流）
+            silence_relief = round(min(0.06, intensity * 0.08), 4)
+
+            # 通过 EmotionPersistence 写入情绪持久化（叠加到当前 valence）
+            if valence_boost > 0.01 and self._emotion_persistence is not None:
+                try:
+                    from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
+                    _ep = self._emotion_persistence
+                    _restored = _ep.restore(user_id="user_1")
+                    _cur_valence = float(getattr(_restored, "valence", 0.0))
+                    _cur_arousal = float(getattr(_restored, "arousal", 0.3))
+                    _cur_dominance = float(getattr(_restored, "dominance", 0.0))
+                    _new_valence = max(-1.0, min(1.0, _cur_valence + valence_boost))
+                    _ep.persist(
+                        user_id="user_1",
+                        valence=_new_valence,
+                        arousal=_cur_arousal,
+                        dominance=_cur_dominance,
+                    )
+                except Exception:
+                    pass
+
+            # 降低沉默意愿（通过 silence_engine 的 update_emotion 间接影响）
+            if silence_relief > 0.01:
+                try:
+                    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+                    _engine = get_silence_engine()
+                    # 以正向情绪更新沉默引擎，降低沉默意愿
+                    _engine.update_emotion(
+                        emotion_tag="JOY",
+                        emotion_valence=min(1.0, 0.3 + valence_boost * 2),
+                        emotion_arousal=0.5,
+                        mood_state="upbeat",
+                    )
+                except Exception:
+                    pass
+
+            self._touch_state(
+                key="last_bond_progress_effect",
+                value={
+                    "reason": reason,
+                    "intensity": intensity,
+                    "valence_boost": valence_boost,
+                    "silence_relief": silence_relief,
+                    "ts_ms": int(getattr(event, "ts_ms", 0) or 0),
+                },
+            )
+            _log.debug(
+                "LimbicAgent BOND_PROGRESS: valence+%.3f silence_relief=%.3f reason=%s",
+                valence_boost, silence_relief, reason,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_bond_progress 异常: %s", exc
+            )
+
+    async def _on_bond_regress(self, event: Any) -> None:
+        """处理 BOND_REGRESS 事件：关系退步 → 情绪效价降低 + 沉默意愿提升。
+
+        T-30：关系退步（bond_stage 降级或 bond_trend 下降）时，
+        通过 EmotionPersistence 将负向效价偏置写入情绪持久化，
+        并提升沉默意愿（更倾向沉默回避）。
+
+        效价降低：intensity * 0.10（上限 0.08）
+        沉默意愿提升：通过 apply_body_sense_penalty 施加惩罚
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.limbic_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
+            reason = str(payload.get("reason") or "bond_regress")
+
+            # 效价降低（负向情绪偏置）
+            valence_drop = round(min(0.08, intensity * 0.10), 4)
+            # 沉默意愿惩罚（通过 body_sense_penalty 提升沉默意愿）
+            silence_penalty = round(min(0.05, intensity * 0.06), 4)
+
+            # 通过 EmotionPersistence 写入情绪持久化（叠加到当前 valence）
+            if valence_drop > 0.01 and self._emotion_persistence is not None:
+                try:
+                    _ep = self._emotion_persistence
+                    _restored = _ep.restore(user_id="user_1")
+                    _cur_valence = float(getattr(_restored, "valence", 0.0))
+                    _cur_arousal = float(getattr(_restored, "arousal", 0.3))
+                    _cur_dominance = float(getattr(_restored, "dominance", 0.0))
+                    _new_valence = max(-1.0, min(1.0, _cur_valence - valence_drop))
+                    _ep.persist(
+                        user_id="user_1",
+                        valence=_new_valence,
+                        arousal=_cur_arousal,
+                        dominance=_cur_dominance,
+                    )
+                except Exception:
+                    pass
+
+            # 提升沉默意愿（施加惩罚）
+            if silence_penalty > 0.01:
+                try:
+                    self.apply_body_sense_penalty(penalty=silence_penalty)
+                except Exception:
+                    pass
+
+            self._touch_state(
+                key="last_bond_regress_effect",
+                value={
+                    "reason": reason,
+                    "intensity": intensity,
+                    "valence_drop": valence_drop,
+                    "silence_penalty": silence_penalty,
+                    "ts_ms": int(getattr(event, "ts_ms", 0) or 0),
+                },
+            )
+            _log.debug(
+                "LimbicAgent BOND_REGRESS: valence-%.3f silence_penalty=%.3f reason=%s",
+                valence_drop, silence_penalty, reason,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_bond_regress 异常: %s", exc
             )
 
 

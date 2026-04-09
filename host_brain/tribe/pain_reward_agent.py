@@ -26,7 +26,7 @@ from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
-from host_brain.tribe.tribe_state import TribeStateRegistry
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 # T-27：持久化文件路径（可通过环境变量覆盖）
 _DEFAULT_STATE_PATH = Path(
@@ -88,7 +88,7 @@ class PainRewardAgent:
             capabilities=("pain_sensing", "reward_sensing", "hedonic_state", "stress_signal"),
         )
     )
-    state_registry: TribeStateRegistry = field(default_factory=TribeStateRegistry, repr=False)
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)  # T-29：使用全局单例
 
     _pain_level: float = field(default=0.0, init=False, repr=False)
     _reward_level: float = field(default=0.0, init=False, repr=False)
