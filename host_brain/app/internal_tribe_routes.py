@@ -140,3 +140,49 @@ async def list_tribe_state_all(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TRIBE_STATE_ALL_FAILED: {exc}") from exc
+
+
+# ── T-55：TribeStateRegistry 按族快照诊断端点 ─────────────────────────────────
+
+class TribeStateFamilyResponse(BaseModel):
+    family: str
+    total: int
+    namespaces: list[dict[str, Any]]
+    ts_ms: int
+
+
+@router.get("/tribe_state/family/{family}", response_model=TribeStateFamilyResponse)
+async def list_tribe_state_by_family(
+    family: str,
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-55：返回指定族（family）的所有命名空间快照。
+
+    利用 TribeStateRegistry.get_state_by_family() 按族批量查询，
+    供开发调试和运维诊断使用，按 updated_at_ms 降序排列。
+
+    示例：
+        GET /internal/tribe_state/family/limbic
+        GET /internal/tribe_state/family/social_brain
+        GET /internal/tribe_state/family/immune
+    """
+    _validate_internal_token(x_internal_token)
+    family_clean = str(family or "").strip().lower()
+    if not family_clean:
+        raise HTTPException(status_code=400, detail="FAMILY_REQUIRED")
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        registry = get_global_registry()
+        namespaces = registry.get_state_by_family(family_clean)
+        return TribeStateFamilyResponse(
+            family=family_clean,
+            total=len(namespaces),
+            namespaces=namespaces,
+            ts_ms=now_ms(),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TRIBE_STATE_FAMILY_FAILED: {exc}") from exc

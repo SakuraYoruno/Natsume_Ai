@@ -365,6 +365,15 @@ class TribeStateRegistry:
             immune_block_rate = _safe_float(_is.get("block_rate"), 0.0)
             immune_risk_level = str(_is.get("risk_level") or "none").strip().lower() or "none"
 
+        # ── T-59：bond_trend_hint（SocialBrainAgent 快照）────────────────────
+        # 从 social_brain_agent 命名空间读取 bond_trend_hint，
+        # 供 chat_context_builder 在构建 prompt 时参考任务成功带来的关系倾向。
+        bond_trend_hint = ""
+        social_ns2 = states.get("social_brain_agent") or states.get("social_brain")
+        if social_ns2:
+            _ss2 = dict(social_ns2.get("state") or {})
+            bond_trend_hint = str(_ss2.get("bond_trend_hint") or "").strip().lower()
+
         return {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -387,6 +396,8 @@ class TribeStateRegistry:
             "immune_block_count": immune_block_count,
             "immune_block_rate": round(immune_block_rate, 4),
             "immune_risk_level": immune_risk_level,
+            # T-59 关系趋势提示
+            "bond_trend_hint": bond_trend_hint,
             "ts_ms": now_ms(),
         }
 

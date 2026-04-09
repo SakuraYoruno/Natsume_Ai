@@ -208,6 +208,21 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 7. bond_trend_hint（SocialBrainAgent 快照）T-54 ──────────────────
+        # 读取 SocialBrainAgent 写入的 bond_trend_hint 字段，
+        # 供 chat_context_builder 在构建 prompt 时参考任务成功带来的关系倾向。
+        try:
+            from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+
+            _sba_snap = get_global_registry().get_state("social_brain_agent") or {}
+            _sba_state = dict(_sba_snap.get("state") or {})
+            _hint = str(_sba_state.get("bond_trend_hint") or "").strip().lower()
+            if _hint:
+                result["bond_trend_hint"] = _hint
+                result["bond_trend_hint_ts_ms"] = int(_sba_state.get("bond_trend_hint_ts_ms") or 0)
+        except Exception:
+            pass
+
         return result
 
     def route_intent(
@@ -365,6 +380,8 @@ class CortexAgent:
             # T-33：订阅关系进展/退步事件，更新 cortex_agent 快照
             bus.subscribe("BOND_PROGRESS", self._on_bond_progress_cortex)
             bus.subscribe("BOND_REGRESS", self._on_bond_regress_cortex)
+            # T-58：订阅免疫拦截事件，写入 cortex_agent 快照
+            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -515,6 +532,36 @@ class CortexAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_bond_regress_cortex 异常: %s", exc
+            )
+
+    async def _on_immune_block(self, event: Any) -> None:
+        """处理 IMMUNE_BLOCK 事件：将免疫拦截记录写入 cortex_agent 快照。
+
+        T-58：ImmuneAgent 拦截有害内容时发布此事件，
+        CortexAgent 将拦截信息写入快照，供路由决策和诊断使用。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            self.state_registry.set_state(
+                "cortex_agent",
+                {
+                    "last_immune_block_ts_ms": ts_ms,
+                    "last_immune_block_reason": str(payload.get("reason") or "").strip(),
+                    "last_immune_block_score": float(payload.get("score") or 0.0),
+                    "last_immune_block_session_id": str(payload.get("session_id") or "").strip(),
+                },
+                writer="cortex_agent",
+            )
+            logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                "CortexAgent IMMUNE_BLOCK: reason=%s score=%.3f",
+                payload.get("reason"), payload.get("score"),
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_immune_block 异常: %s", exc
             )
 
 

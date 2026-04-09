@@ -204,6 +204,8 @@ class SocialBrainAgent:
             bus.subscribe("BOND_REGRESS", self._on_bond_regress_snapshot)
             # T-48：订阅任务成功事件，影响 bond_trend 评估
             bus.subscribe("TASK_SUCCESS", self._on_task_success_bond)
+            # T-60：订阅孤独感信号，孤独感影响 bond_trend 评估
+            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal_bond)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -419,6 +421,41 @@ class SocialBrainAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent._on_task_success_bond 异常: %s", exc
+            )
+
+    async def _on_loneliness_signal_bond(self, event: Any) -> None:
+        """处理 LONELINESS_SIGNAL 事件：孤独感影响 bond_trend 评估。
+
+        T-60：孤独感 > 0.6 时将 bond_trend_hint 设为 regress_risk，
+        提示 SocialBrainAgent 当前关系存在退步风险，供路由决策参考。
+        孤独感 > 0.8 时写入 high_loneliness 标记，触发更强的关系维护策略。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+            payload = dict(getattr(event, "payload", None) or {})
+            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
+            if loneliness <= 0.6:
+                return
+            ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
+            hint = "high_loneliness" if loneliness > 0.8 else "regress_risk"
+            self.state_registry.set_state(
+                "social_brain_agent",
+                {
+                    "bond_trend_hint": hint,
+                    "bond_trend_hint_ts_ms": ts_ms,
+                    "loneliness_level": round(loneliness, 4),
+                },
+                writer="social_brain_agent",
+            )
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent LONELINESS_SIGNAL: hint=%s loneliness=%.2f", hint, loneliness,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_loneliness_signal_bond 异常: %s", exc
             )
 
 

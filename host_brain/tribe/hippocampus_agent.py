@@ -229,6 +229,8 @@ class HippocampusAgent:
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+            # T-61：订阅孤独感信号，写入 loneliness 快照
+            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.hippocampus_agent").warning(
@@ -254,6 +256,29 @@ class HippocampusAgent:
                     "last_interaction_user_id": user_id,
                     "last_interaction_emotion_tag": emotion_tag,
                     "last_interaction_ts_ms": ts_ms,
+                },
+                writer="hippocampus_agent",
+            )
+        except Exception:
+            pass
+
+    async def _on_loneliness_signal(self, event: Any) -> None:
+        """处理 LONELINESS_SIGNAL 事件：将孤独感数据写入 hippocampus_agent 快照。
+
+        T-61：记录最近一次孤独感信号的强度和时间戳，
+        供 recall() 注入 session_state 和诊断端点查询使用。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            bond_stage = str(payload.get("bond_stage") or "").strip().lower()
+            self.state_registry.set_state(
+                "hippocampus_agent",
+                {
+                    "last_loneliness_level": round(loneliness, 4),
+                    "last_loneliness_ts_ms": ts_ms,
+                    "last_loneliness_bond_stage": bond_stage,
                 },
                 writer="hippocampus_agent",
             )

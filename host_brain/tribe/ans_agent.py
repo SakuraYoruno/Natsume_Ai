@@ -97,6 +97,40 @@ class ANSAgent:
         payload.setdefault("source", "body_sense_skill")
         self.emit_from_thread("BODY_SENSE_UPDATED", payload)
 
+    def emit_loneliness_signal(
+        self,
+        *,
+        loneliness: float,
+        user_id: str = "user_1",
+        source: str = "inner_world_skill",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """T-53：发布 LONELINESS_SIGNAL 事件，供各族 Agent 感知孤独感。
+
+        inner_world_skill 在检测到孤独感超过阈值时调用此方法，
+        触发 PainRewardAgent / LimbicAgent / PrefrontalAgent 等的联动响应。
+
+        Args:
+            loneliness: 孤独感强度，0.0 ~ 1.0。
+            user_id: 用户 ID，默认 "user_1"。
+            source: 信号来源，默认 "inner_world_skill"。
+            metadata: 附加元数据（可选）。
+        """
+        clamped = max(0.0, min(1.0, float(loneliness)))
+        payload: dict[str, Any] = {
+            "loneliness": round(clamped, 4),
+            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "source": str(source or "inner_world_skill").strip() or "inner_world_skill",
+            "bond_stage": self._bond_stage,
+        }
+        if metadata:
+            payload["metadata"] = dict(metadata)
+        self.emit_from_thread("LONELINESS_SIGNAL", payload)
+        logger.debug(
+            "ANSAgent.emit_loneliness_signal: loneliness=%.3f user_id=%s bond_stage=%s",
+            clamped, user_id, self._bond_stage,
+        )
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

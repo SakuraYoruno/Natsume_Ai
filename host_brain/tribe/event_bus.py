@@ -73,6 +73,34 @@ class InMemoryTribeEventBus:
             self._subscribers.setdefault(key, []).append(handler)
         logger.debug("TribeEventBus.subscribe: event_type=%s handler=%s", key, handler)
 
+    def unsubscribe(self, event_type: str, handler: EventHandler) -> bool:
+        """T-56：取消注册事件处理器，支持动态取消订阅。
+
+        可在任意线程调用（线程安全）。
+        若 handler 不存在则静默返回 False，不抛出异常。
+
+        Args:
+            event_type: 事件类型，大小写不敏感，自动转为大写匹配。
+            handler: 要取消的处理器函数，必须与 subscribe() 时传入的对象相同。
+
+        Returns:
+            True 表示成功取消，False 表示未找到对应 handler。
+        """
+        key = str(event_type or "").strip().upper() or "UNKNOWN"
+        with self._sub_lock:
+            handlers = self._subscribers.get(key)
+            if handlers is None:
+                return False
+            try:
+                handlers.remove(handler)
+                logger.debug("TribeEventBus.unsubscribe: event_type=%s handler=%s", key, handler)
+                # 若列表已空，清理 key 避免内存泄漏
+                if not handlers:
+                    del self._subscribers[key]
+                return True
+            except ValueError:
+                return False
+
     # ── 发布 ──────────────────────────────────────────────────────────────────
 
     def publish(self, event: TribeEvent) -> TribeEvent:
