@@ -513,6 +513,137 @@ class SocialBrainAgent:
         except Exception:
             pass
 
+    # ── T-140：canon_style_store 族化入口 ────────────────────────────────────
+
+    def resolve_style_canon(
+        self,
+        *,
+        canon_id: str = "natsume_ai_cn",
+        style_root: str | None = None,
+    ) -> dict[str, Any]:
+        """T-140：获取风格 Canon 条目，将 StyleCanonStore 族化到 SocialBrainAgent。
+
+        SocialBrainAgent 作为风格 Canon 的唯一访问入口，确保风格数据
+        不在 chat_context_builder 等模块中直接调用 StyleCanonStore。
+
+        Args:
+            canon_id: Canon ID，默认 "natsume_ai_cn"。
+            style_root: 风格文件根目录（可选，None 使用默认路径）。
+
+        Returns:
+            StyleCanonEntry.to_dict() 或空字典（降级）。
+        """
+        try:
+            from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
+
+            kwargs: dict[str, Any] = {}
+            if style_root is not None:
+                kwargs["style_root"] = style_root
+            store = StyleCanonStore(**kwargs)
+            entry = store.get(str(canon_id or "natsume_ai_cn").strip() or "natsume_ai_cn")
+            if entry is None:
+                return {"status": "NOT_FOUND", "canon_id": str(canon_id or "")}
+            result = entry.to_dict() if hasattr(entry, "to_dict") else {}
+            result["status"] = "OK"
+            self._touch_state(
+                key="last_style_canon",
+                value={
+                    "canon_id": str(canon_id or ""),
+                    "version": result.get("version"),
+                    "hash": str(result.get("hash") or "")[:16],
+                    "tone_only": result.get("tone_only"),
+                },
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent.resolve_style_canon: canon_id=%s version=%s",
+                canon_id, result.get("version"),
+            )
+            return result
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent.resolve_style_canon 失败（降级）: %s", exc
+            )
+            return {"status": "ERROR", "canon_id": str(canon_id or ""), "error": str(exc)}
+
+    def resolve_style_canon_content(
+        self,
+        *,
+        canon_id: str = "natsume_ai_cn",
+    ) -> str:
+        """T-140：获取风格 Canon 的纯文本内容（供 prompt 注入使用）。
+
+        Returns:
+            Canon 内容字符串，或空字符串（降级）。
+        """
+        result = self.resolve_style_canon(canon_id=canon_id)
+        return str(result.get("content") or "").strip()
+
+    # ── T-141：style_distiller 族化入口 ──────────────────────────────────────
+
+    def resolve_style_distillation(
+        self,
+        *,
+        lang: str = "cn",
+        cn_lines_path: str | None = None,
+        ja_lines_path: str | None = None,
+        top_n: int = 20,
+    ) -> dict[str, Any]:
+        """T-141：执行风格蒸馏，将 StyleDistiller 族化到 SocialBrainAgent。
+
+        SocialBrainAgent 作为风格蒸馏的唯一调用入口，确保蒸馏逻辑
+        不在 chat_context_builder 等模块中直接调用 StyleDistiller。
+
+        Args:
+            lang: 语言，"cn" 或 "ja"，默认 "cn"。
+            cn_lines_path: 中文台词文件路径（可选，None 使用默认路径）。
+            ja_lines_path: 日文台词文件路径（可选，None 使用默认路径）。
+            top_n: 返回的特征词汇数量，默认 20。
+
+        Returns:
+            StyleProfile 字典或空字典（降级）。
+        """
+        try:
+            from host_brain.retrieval.style_distiller import StyleDistiller  # noqa: PLC0415
+
+            kwargs: dict[str, Any] = {}
+            if cn_lines_path is not None:
+                kwargs["cn_lines_path"] = cn_lines_path
+            if ja_lines_path is not None:
+                kwargs["ja_lines_path"] = ja_lines_path
+            distiller = StyleDistiller(**kwargs)
+
+            resolved_lang = str(lang or "cn").strip().lower()
+            if resolved_lang == "ja":
+                profile = distiller.distill_ja(top_n=int(top_n))
+            else:
+                profile = distiller.distill_cn(top_n=int(top_n))
+
+            result = profile.to_dict() if hasattr(profile, "to_dict") else {}
+            result["status"] = "OK"
+            result["lang"] = resolved_lang
+            self._touch_state(
+                key="last_style_distillation",
+                value={
+                    "lang": resolved_lang,
+                    "sentence_patterns_count": len(result.get("sentence_patterns") or []),
+                    "vocab_count": len(result.get("characteristic_vocab") or []),
+                },
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent.resolve_style_distillation: lang=%s patterns=%d",
+                resolved_lang, len(result.get("sentence_patterns") or []),
+            )
+            return result
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent.resolve_style_distillation 失败（降级）: %s", exc
+            )
+            return {"status": "ERROR", "lang": str(lang or "cn"), "error": str(exc)}
+
     async def _on_humor_landed_bond(self, event: Any) -> None:
         """处理 HUMOR_LANDED 事件：幽默成功时 bond_trend_hint 设为 progress。
 

@@ -288,6 +288,269 @@ class ANSAgent:
             clamped, reason, self._bond_stage,
         )
 
+    # ── T-133：proactive_voice 族化入口 ──────────────────────────────────────
+
+    def trigger_proactive_voice(
+        self,
+        *,
+        user_id: str = "user_1",
+        traits: Any = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """T-133：触发主动发声评估，将 PersonaProactiveVoice 族化到 ANSAgent。
+
+        由 inner_world_skill / proactive_talk_skill 调用，ANSAgent 作为统一入口
+        封装 PersonaProactiveVoice.evaluate_scene()，并在触发时发布
+        PROACTIVE_VOICE_TRIGGERED 事件供 CortexAgent 感知。
+
+        Args:
+            user_id: 用户 ID，默认 "user_1"。
+            traits: PersonalityTraits 实例（可选）。
+            context: 场景上下文（可选），含 bond_stage / pending_followup_topics 等。
+
+        Returns:
+            {"triggered": bool, "expression": dict | None, "scene_type": str | None}
+        """
+        try:
+            from host_brain.persona.proactive_voice import PersonaProactiveVoice  # noqa: PLC0415
+
+            voice = PersonaProactiveVoice()
+            ctx = dict(context or {})
+            # 注入当前 bond_stage（从 ANSAgent 内部状态）
+            ctx.setdefault("bond_stage", self._bond_stage.upper())
+            expression = voice.evaluate_scene(
+                user_id=str(user_id or "user_1").strip() or "user_1",
+                traits=traits,
+                context=ctx,
+            )
+            if expression is None:
+                return {"triggered": False, "expression": None, "scene_type": None}
+
+            expr_dict = expression.as_dict() if hasattr(expression, "as_dict") else {}
+            scene_type = str(getattr(expression, "scene_type", "") or "")
+
+            # 发布 PROACTIVE_VOICE_TRIGGERED 事件，供 CortexAgent 感知
+            self.emit_from_thread(
+                "PROACTIVE_VOICE_TRIGGERED",
+                {
+                    "user_id": str(user_id or "user_1"),
+                    "scene_type": scene_type,
+                    "emotion_tag": str(getattr(expression, "emotion_tag", "") or "NEUTRAL"),
+                    "content_preview": str(getattr(expression, "content", "") or "")[:80],
+                    "bond_stage": self._bond_stage,
+                    "source": "ans_agent",
+                },
+            )
+            logger.info(
+                "ANSAgent.trigger_proactive_voice: scene=%s user_id=%s bond_stage=%s",
+                scene_type, user_id, self._bond_stage,
+            )
+            return {"triggered": True, "expression": expr_dict, "scene_type": scene_type}
+        except Exception as exc:
+            logger.warning("ANSAgent.trigger_proactive_voice 失败（降级）: %s", exc)
+            return {"triggered": False, "expression": None, "scene_type": None, "error": str(exc)}
+
+    # ── T-134：meta_learning_loop 族化入口 ───────────────────────────────────
+
+    def trigger_meta_learning_record(
+        self,
+        *,
+        module_name: str,
+        success: bool = True,
+        skipped: bool = False,
+        error: bool = False,
+        latency_ms: float = 0.0,
+        custom: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """T-134：记录模块调用指标到 MetaLearningLoop，将 meta_learning_loop 族化到 ANSAgent。
+
+        由各 Skill / Agent 在模块调用后调用，ANSAgent 作为统一入口
+        封装 MetaLearningLoop.record()，维护全局元学习循环单例。
+
+        Args:
+            module_name: 模块名称（如 "query_planner"/"reflection_chain" 等）。
+            success: 是否成功，默认 True。
+            skipped: 是否跳过，默认 False。
+            error: 是否出错，默认 False。
+            latency_ms: 调用延迟（毫秒），默认 0.0。
+            custom: 自定义指标字典（可选）。
+
+        Returns:
+            {"status": "OK", "module_name": str}
+        """
+        try:
+            from host_brain.core.meta_learning_loop import MetaLearningLoop  # noqa: PLC0415
+
+            if not hasattr(self, "_meta_learning_loop") or self._meta_learning_loop is None:
+                object.__setattr__(self, "_meta_learning_loop", MetaLearningLoop())
+            loop: MetaLearningLoop = self._meta_learning_loop  # type: ignore[attr-defined]
+            loop.record(
+                str(module_name or "unknown").strip() or "unknown",
+                success=bool(success),
+                skipped=bool(skipped),
+                error=bool(error),
+                latency_ms=float(latency_ms),
+                custom=dict(custom) if custom else None,
+            )
+            logger.debug(
+                "ANSAgent.trigger_meta_learning_record: module=%s success=%s latency=%.1fms",
+                module_name, success, latency_ms,
+            )
+            return {"status": "OK", "module_name": str(module_name or "")}
+        except Exception as exc:
+            logger.warning("ANSAgent.trigger_meta_learning_record 失败（降级）: %s", exc)
+            return {"status": "ERROR", "module_name": str(module_name or ""), "error": str(exc)}
+
+    def get_meta_learning_report(self, *, period_days: int = 7) -> dict[str, Any]:
+        """T-134：生成元学习进化报告。
+
+        Returns:
+            EvolutionReport.as_dict() 或空字典（降级）。
+        """
+        try:
+            if not hasattr(self, "_meta_learning_loop") or self._meta_learning_loop is None:
+                return {"status": "NO_DATA", "modules_count": 0}
+            loop = self._meta_learning_loop  # type: ignore[attr-defined]
+            report = loop.generate_report(period_days=int(period_days))
+            return report.as_dict() if hasattr(report, "as_dict") else {}
+        except Exception as exc:
+            logger.warning("ANSAgent.get_meta_learning_report 失败（降级）: %s", exc)
+            return {"status": "ERROR", "error": str(exc)}
+
+    # ── T-135：activity_monitor 族化入口 ─────────────────────────────────────
+
+    def trigger_activity_monitor_event(
+        self,
+        *,
+        event_type: str = "user_message_received",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """T-135：向 ActivityMonitor 发送活动事件，将 activity_monitor 族化到 ANSAgent。
+
+        由消息路由层 / 语音管线在用户有交互时调用，ANSAgent 作为统一入口
+        封装 ActivityMonitor.notify_user_interaction()，确保活动时间戳更新。
+
+        Args:
+            event_type: 事件类型，如 "user_message_received"/"voice_input_received"。
+            payload: 事件载荷（可选）。
+
+        Returns:
+            {"status": "OK", "event_type": str} 或降级结果。
+        """
+        try:
+            from host_brain.app.dependencies import get_activity_monitor  # noqa: PLC0415
+
+            monitor = get_activity_monitor()
+            if monitor is None:
+                return {"status": "NO_MONITOR", "event_type": str(event_type or "")}
+
+            # 通知用户有交互（更新活动时间戳）
+            if hasattr(monitor, "notify_user_interaction"):
+                monitor.notify_user_interaction()
+
+            # 如果 monitor 支持 on_event，也触发事件驱动逻辑
+            if hasattr(monitor, "_mode_service") and monitor._mode_service is not None:
+                if hasattr(monitor._mode_service, "on_event"):
+                    monitor._mode_service.on_event(
+                        str(event_type or "user_message_received"),
+                        dict(payload or {}),
+                    )
+
+            logger.debug(
+                "ANSAgent.trigger_activity_monitor_event: event_type=%s", event_type,
+            )
+            return {"status": "OK", "event_type": str(event_type or "")}
+        except Exception as exc:
+            logger.warning("ANSAgent.trigger_activity_monitor_event 失败（降级）: %s", exc)
+            return {"status": "ERROR", "event_type": str(event_type or ""), "error": str(exc)}
+
+    def get_activity_monitor_status(self) -> dict[str, Any]:
+        """T-135：获取 ActivityMonitor 当前状态。
+
+        Returns:
+            ActivityMonitor.get_status() 或空字典（降级）。
+        """
+        try:
+            from host_brain.app.dependencies import get_activity_monitor  # noqa: PLC0415
+
+            monitor = get_activity_monitor()
+            if monitor is None:
+                return {"status": "NO_MONITOR"}
+            return monitor.get_status() if hasattr(monitor, "get_status") else {}
+        except Exception as exc:
+            logger.warning("ANSAgent.get_activity_monitor_status 失败（降级）: %s", exc)
+            return {"status": "ERROR", "error": str(exc)}
+
+    # ── T-136：mode_transition 族化入口 ──────────────────────────────────────
+
+    def trigger_mode_transition(
+        self,
+        *,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """T-136：触发模式切换事件，将 mode_transition 族化到 ANSAgent。
+
+        由 ActivityMonitor 检测到游戏进程 / 空闲超时等事件时调用，
+        ANSAgent 作为统一入口封装 ModeTransitionService.on_event()。
+
+        Args:
+            event_type: 事件类型，如 "gaming_process_detected"/"idle_check" 等。
+            payload: 事件载荷（可选）。
+
+        Returns:
+            ModeTransitionService.on_event() 结果或降级结果。
+        """
+        try:
+            from host_brain.app.dependencies import get_mode_transition_service  # noqa: PLC0415
+
+            service = get_mode_transition_service()
+            if service is None:
+                return {"status": "NO_SERVICE", "event_type": str(event_type or "")}
+
+            result = service.on_event(
+                str(event_type or "").strip(),
+                dict(payload or {}),
+            )
+            if result is not None:
+                # 模式切换成功，发布 MODE_TRANSITION 事件
+                self.emit_from_thread(
+                    "MODE_TRANSITION",
+                    {
+                        "from_mode": str(result.get("from_mode") or ""),
+                        "to_mode": str(result.get("to_mode") or ""),
+                        "source": str(result.get("source") or "ans_agent"),
+                        "reason": str(result.get("reason") or ""),
+                        "success": bool(result.get("success", True)),
+                        "event_type": str(event_type or ""),
+                    },
+                )
+                logger.info(
+                    "ANSAgent.trigger_mode_transition: %s → %s (event=%s)",
+                    result.get("from_mode"), result.get("to_mode"), event_type,
+                )
+            return result or {"status": "NO_TRANSITION", "event_type": str(event_type or "")}
+        except Exception as exc:
+            logger.warning("ANSAgent.trigger_mode_transition 失败（降级）: %s", exc)
+            return {"status": "ERROR", "event_type": str(event_type or ""), "error": str(exc)}
+
+    def get_mode_transition_status(self) -> dict[str, Any]:
+        """T-136：获取 ModeTransitionService 当前状态。
+
+        Returns:
+            ModeTransitionService.get_current_status() 或空字典（降级）。
+        """
+        try:
+            from host_brain.app.dependencies import get_mode_transition_service  # noqa: PLC0415
+
+            service = get_mode_transition_service()
+            if service is None:
+                return {"status": "NO_SERVICE"}
+            return service.get_current_status() if hasattr(service, "get_current_status") else {}
+        except Exception as exc:
+            logger.warning("ANSAgent.get_mode_transition_status 失败（降级）: %s", exc)
+            return {"status": "ERROR", "error": str(exc)}
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

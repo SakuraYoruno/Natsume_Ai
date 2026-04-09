@@ -854,6 +854,179 @@ class LimbicAgent:
             "body_sense": payload,
         }
 
+    # ── T-137：情绪代谢族化入口 ──────────────────────────────────────────────
+
+    def drive_emotion_metabolism(
+        self,
+        *,
+        valence: float,
+        arousal: float,
+        dominance: float = 0.0,
+        decay_rate: float | None = None,
+        blend_weight: float | None = None,
+        event_kind: str = "interaction",
+        source: str = "limbic_agent",
+    ) -> dict[str, Any]:
+        """T-137：驱动情绪代谢，将 EmotionVector 代谢逻辑族化到 LimbicAgent。
+
+        封装 EmotionVector.decay() / blend() 调用，LimbicAgent 作为情绪代谢的
+        唯一驱动者，确保代谢逻辑不散落在 PrefrontalAgent 或其他模块中。
+
+        Args:
+            valence: 当前效价 [-1.0, 1.0]。
+            arousal: 当前唤醒度 [-1.0, 1.0]。
+            dominance: 当前支配感 [-1.0, 1.0]，默认 0.0。
+            decay_rate: 衰减速率 [0.0, 1.0]，None 使用默认值（0.05）。
+            blend_weight: 混合权重 [0.0, 1.0]，None 跳过混合步骤。
+            event_kind: 事件类型（"interaction"/"emotion_spike"/"emotion_calm"/"bond_deepen"）。
+            source: 调用来源，用于日志追踪。
+
+        Returns:
+            {"valence": float, "arousal": float, "dominance": float,
+             "emotion_tag": str, "mood_state": str, "decayed": bool}
+        """
+        try:
+            from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+            vec = EmotionVector(
+                valence=float(valence),
+                arousal=float(arousal),
+                dominance=float(dominance),
+                ts_ms=now_ms(),
+            )
+
+            # 执行衰减
+            if decay_rate is not None:
+                vec = vec.decay(rate=float(decay_rate))
+            else:
+                vec = vec.decay()
+
+            # 可选混合（将新情绪信号混入当前状态）
+            if blend_weight is not None:
+                # 以当前持久化情绪作为基础，混入新信号
+                try:
+                    if self._emotion_persistence is not None:
+                        restored = self._emotion_persistence.restore(user_id="user_1")
+                        base_vec = EmotionVector(
+                            valence=float(getattr(restored, "valence", 0.0)),
+                            arousal=float(getattr(restored, "arousal", 0.3)),
+                            dominance=float(getattr(restored, "dominance", 0.0)),
+                            ts_ms=now_ms(),
+                        )
+                        vec = base_vec.blend(vec, weight=float(blend_weight))
+                except Exception:
+                    pass
+
+            emotion_tag = vec.to_emotion_tag()
+            mood_state = vec.to_mood_state()
+
+            result = {
+                "valence": round(vec.valence, 4),
+                "arousal": round(vec.arousal, 4),
+                "dominance": round(vec.dominance, 4),
+                "emotion_tag": emotion_tag,
+                "mood_state": mood_state,
+                "decayed": True,
+                "event_kind": str(event_kind or "interaction"),
+                "source": str(source or "limbic_agent"),
+            }
+            self._touch_state(
+                key="last_emotion_metabolism",
+                value={
+                    "valence": result["valence"],
+                    "arousal": result["arousal"],
+                    "emotion_tag": emotion_tag,
+                    "mood_state": mood_state,
+                    "event_kind": str(event_kind or "interaction"),
+                },
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent.drive_emotion_metabolism: valence=%.3f arousal=%.3f tag=%s mood=%s",
+                vec.valence, vec.arousal, emotion_tag, mood_state,
+            )
+            return result
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent.drive_emotion_metabolism 失败（降级）: %s", exc
+            )
+            return {
+                "valence": float(valence),
+                "arousal": float(arousal),
+                "dominance": float(dominance),
+                "emotion_tag": "NEUTRAL",
+                "mood_state": "steady",
+                "decayed": False,
+                "error": str(exc),
+            }
+
+    # ── T-138：emotion_timeline 写入族化入口 ─────────────────────────────────
+
+    def write_emotion_timeline(
+        self,
+        *,
+        emotion_tag: str,
+        valence: float = 0.0,
+        arousal: float = 0.0,
+        source: str = "limbic_agent",
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """T-138：将情绪事件写入 EmotionTimeline，将 emotion_timeline 写入操作族化到 LimbicAgent。
+
+        LimbicAgent 作为 emotion_timeline 的唯一写入者，确保时间线写入
+        不散落在 PrefrontalAgent 或其他模块中。
+
+        Args:
+            emotion_tag: 情绪标签（如 "HAPPY"/"SAD"/"NEUTRAL" 等）。
+            valence: 效价 [-1.0, 1.0]，默认 0.0。
+            arousal: 唤醒度 [-1.0, 1.0]，默认 0.0。
+            source: 数据来源（"user_input"/"visual"/"proactive"/"bond_event"/"somatic_voice" 等）。
+            ts_ms: 时间戳（毫秒），None 使用当前时间。
+
+        Returns:
+            {"status": "OK", "emotion_tag": str, "ts_ms": int}
+        """
+        try:
+            from host_brain.app.dependencies import get_emotion_timeline  # noqa: PLC0415
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+            timeline = get_emotion_timeline()
+            if timeline is None:
+                return {"status": "NO_TIMELINE", "emotion_tag": str(emotion_tag or "")}
+
+            resolved_ts = int(ts_ms or now_ms())
+            timeline.append(
+                ts_ms=resolved_ts,
+                emotion_tag=str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
+                valence=float(valence),
+                arousal=float(arousal),
+                source=str(source or "limbic_agent").strip() or "limbic_agent",
+            )
+            self._touch_state(
+                key="last_emotion_timeline_write",
+                value={
+                    "emotion_tag": str(emotion_tag or "NEUTRAL").upper(),
+                    "valence": round(float(valence), 4),
+                    "arousal": round(float(arousal), 4),
+                    "source": str(source or "limbic_agent"),
+                    "ts_ms": resolved_ts,
+                },
+            )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent.write_emotion_timeline: tag=%s valence=%.3f source=%s",
+                emotion_tag, valence, source,
+            )
+            return {"status": "OK", "emotion_tag": str(emotion_tag or ""), "ts_ms": resolved_ts}
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent.write_emotion_timeline 失败（降级）: %s", exc
+            )
+            return {"status": "ERROR", "emotion_tag": str(emotion_tag or ""), "error": str(exc)}
+
     def _touch_state(self, *, key: str, value: Any) -> None:
         prev = self.state_registry.get_state("limbic") or {}
         prev_state = dict(prev.get("state") or {})
@@ -902,12 +1075,54 @@ class LimbicAgent:
             )
 
     async def _on_body_sense_updated(self, event: Any) -> None:
-        """处理 BODY_SENSE_UPDATED 事件：更新沉默意愿惩罚。"""
+        """处理 BODY_SENSE_UPDATED 事件：更新沉默意愿惩罚 + 驱动情绪代谢。
+
+        T-139：body_sense 更新时，除更新沉默意愿外，还通过 drive_emotion_metabolism()
+        将疲劳/孤独感转化为情绪代谢信号，打通 body_sense → LimbicAgent 联动链路。
+        """
         try:
             payload = dict(event.payload or {})
             penalty = float(payload.get("willingness_penalty") or 0.0)
             if penalty > 0.0:
                 self.apply_body_sense_penalty(penalty=penalty)
+
+            # T-139：body_sense 驱动情绪代谢
+            # 疲劳 → arousal 下降；孤独感 → valence 下降
+            fatigue = float(payload.get("fatigue") or 0.0)
+            loneliness = float(payload.get("loneliness") or 0.0)
+            if fatigue > 0.3 or loneliness > 0.3:
+                try:
+                    # 从当前持久化情绪读取基线
+                    base_valence = 0.0
+                    base_arousal = 0.3
+                    if self._emotion_persistence is not None:
+                        restored = self._emotion_persistence.restore(user_id="user_1")
+                        base_valence = float(getattr(restored, "valence", 0.0))
+                        base_arousal = float(getattr(restored, "arousal", 0.3))
+                    # 疲劳拉低唤醒度，孤独感拉低效价
+                    target_arousal = base_arousal - min(0.15, fatigue * 0.20)
+                    target_valence = base_valence - min(0.10, loneliness * 0.12)
+                    self.drive_emotion_metabolism(
+                        valence=target_valence,
+                        arousal=target_arousal,
+                        event_kind="emotion_calm" if fatigue > 0.5 else "interaction",
+                        source="body_sense_updated",
+                    )
+                    # 同步写入 emotion_timeline
+                    from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+                    _vec = EmotionVector(valence=target_valence, arousal=target_arousal)
+                    self.write_emotion_timeline(
+                        emotion_tag=_vec.to_emotion_tag(),
+                        valence=target_valence,
+                        arousal=target_arousal,
+                        source="body_sense_updated",
+                    )
+                except Exception as _meta_exc:
+                    import logging  # noqa: PLC0415
+                    logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                        "LimbicAgent body_sense 代谢更新失败（降级）: %s", _meta_exc
+                    )
+
             self._touch_state(
                 key="last_bus_body_sense_updated",
                 value={
@@ -915,6 +1130,8 @@ class LimbicAgent:
                     "fatigue_level": str(payload.get("fatigue_level") or "normal"),
                     "loneliness_level": str(payload.get("loneliness_level") or "none"),
                     "willingness_penalty": penalty,
+                    "fatigue": fatigue,
+                    "loneliness": loneliness,
                 },
             )
         except Exception as exc:
@@ -1026,6 +1243,18 @@ class LimbicAgent:
                     )
                 except Exception as _hs_exc:
                     _log.debug("LimbicAgent 同步 hard_state 失败（降级）: %s", _hs_exc)
+            # T-138：语音情绪推断自动写入 emotion_timeline
+            try:
+                self.write_emotion_timeline(
+                    emotion_tag=emotion_tag,
+                    valence=0.0,  # 语音推断暂无 VAD 数据，使用中性值
+                    arousal=float(emotion_intensity) * 0.5 if isinstance(emotion_intensity, (int, float)) else 0.0,
+                    source="somatic_voice",
+                    ts_ms=int(event.ts_ms or 0) or None,
+                )
+            except Exception as _tl_exc:
+                _log.debug("LimbicAgent write_emotion_timeline 失败（降级）: %s", _tl_exc)
+
             # T-125：通过 EdgeCommandPusher 将情绪状态推送回 edge_client，驱动 vts_driver 表情
             # 实现 LimbicAgent → SomaticAgent 的下行反馈闭环（身心联动）
             try:

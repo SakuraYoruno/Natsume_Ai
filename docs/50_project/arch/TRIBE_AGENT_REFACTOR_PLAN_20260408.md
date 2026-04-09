@@ -605,29 +605,57 @@ Phase 6（18周 → 22周）：躯干族独立（edge_client 内部族化）
 
 ## 七、模块归属决策表
 
-| 模块 | 归属族 | 理由 |
-|---|---|---|
-| `persona/evolution_orchestrator.py` | PrefrontalAgent | 人格演化编排，属于长期自我模型 |
-| `persona/persona_growth.py` | PrefrontalAgent | 人格成长记录 |
-| `persona/emergent_growth_engine.py` | PrefrontalAgent | 涌现成长，由 ANSAgent 定时触发 |
-| `persona/proactive_voice.py` | ANSAgent | 主动发声由调度器触发，属于后台节律 |
-| `persona/body_sense.py` | LimbicAgent | 身体感知影响情绪状态 |
-| `persona/expression_adapter.py` | SocialBrainAgent | 表达适配与 Bond 风格相关 |
-| `app/reply_form_decider.py` | CortexAgent | 回复形式决策属于主链路 |
-| `retrieval/style_distiller.py` | SocialBrainAgent | 风格蒸馏服务于 Bond 感知 |
-| `core/metabolism.py` | LimbicAgent | 情感代谢是情绪系统的基础 |
-| `core/emotion_timeline.py` | LimbicAgent | 情感时间线 |
-| `core/meta_learning_loop.py` | ANSAgent | 元学习循环属于后台节律 |
-| `core/activity_monitor.py` | ANSAgent | 活动监控（游戏检测）属于后台感知 |
-| `core/mode_transition.py` | ANSAgent | 系统模式切换由后台驱动 |
-| `memory/canon_style_store.py` | SocialBrainAgent | 风格 Canon 服务于风格适配 |
-| `memory/canon_world_store.py` | HippocampusAgent | 世界观 Canon 属于记忆检索 |
-| `retrieval/agentic_retrieval_loop.py` | HippocampusAgent | 主动检索循环 |
-| `app/vision/` | CortexAgent | 视觉子系统属于主链路能力 |
-| `governor/` | CortexAgent | 治理与安全属于主链路 |
-| `airlock/` | CortexAgent | 气闸隔离属于主链路 |
+> **最后对照更新**：2026-04-09（T-133 ~ T-142 批次）
+> 新增「实现状态」列，标注各模块族化的当前进度。
+
+| 模块 | 归属族 | 理由 | 实现状态 |
+|---|---|---|---|
+| `persona/evolution_orchestrator.py` | PrefrontalAgent | 人格演化编排，属于长期自我模型 | ✅ 已实现（`run_evolution_cycle()`） |
+| `persona/persona_growth.py` | PrefrontalAgent | 人格成长记录 | ✅ 已实现（`_get_persona_growth_tracker()`） |
+| `persona/emergent_growth_engine.py` | PrefrontalAgent | 涌现成长，由 ANSAgent 定时触发 | ✅ 已实现（`_get_emergent_growth_engine()`） |
+| `persona/proactive_voice.py` | ANSAgent | 主动发声由调度器触发，属于后台节律 | ✅ T-133 已实现（`trigger_proactive_voice()`） |
+| `persona/body_sense.py` | LimbicAgent | 身体感知影响情绪状态 | ✅ 已实现（`resolve_body_sense_state()` / `tick_body_sense()`），T-139 打通 BODY_SENSE_UPDATED → 情绪代谢联动 |
+| `persona/expression_adapter.py` | **PrefrontalAgent**（修正） | 输入依赖 PersonalityTraits + EmotionVector，均为 PrefrontalAgent 领域数据；规划文档原标注 SocialBrainAgent 有误 | ✅ 已实现（`resolve_persona_expression_hint()`），归属已修正 |
+| `app/reply_form_decider.py` | CortexAgent | 回复形式决策属于主链路 | ✅ 已实现（主链路直接调用） |
+| `retrieval/style_distiller.py` | SocialBrainAgent | 风格蒸馏服务于 Bond 感知 | ✅ T-141 已实现（`resolve_style_distillation()`） |
+| `core/metabolism.py` | LimbicAgent | 情感代谢是情绪系统的基础（EmotionVector.decay/blend） | ✅ T-137 已实现（`drive_emotion_metabolism()`） |
+| `core/emotion_timeline.py` | LimbicAgent | 情感时间线，LimbicAgent 为唯一写入者 | ✅ T-138 已实现（`write_emotion_timeline()`），EMOTION_INFERENCE_UPDATED / BODY_SENSE_UPDATED 时自动写入 |
+| `core/meta_learning_loop.py` | ANSAgent | 元学习循环属于后台节律 | ✅ T-134 已实现（`trigger_meta_learning_record()` / `get_meta_learning_report()`） |
+| `core/activity_monitor.py` | ANSAgent | 活动监控（游戏检测）属于后台感知 | ✅ T-135 已实现（`trigger_activity_monitor_event()` / `get_activity_monitor_status()`） |
+| `core/mode_transition.py` | ANSAgent | 系统模式切换由后台驱动 | ✅ T-136 已实现（`trigger_mode_transition()` / `get_mode_transition_status()`），切换成功时发布 MODE_TRANSITION 事件 |
+| `memory/canon_style_store.py` | SocialBrainAgent | 风格 Canon 服务于风格适配 | ✅ T-140 已实现（`resolve_style_canon()` / `resolve_style_canon_content()`） |
+| `memory/canon_world_store.py` | HippocampusAgent | 世界观 Canon 属于记忆检索 | ✅ 已实现（通过 `retrieval_orchestrator` 间接使用） |
+| `retrieval/agentic_retrieval_loop.py` | HippocampusAgent | 主动检索循环 | ✅ 已实现（`recall()` 通过 `get_retrieval_orchestrator()` 调用） |
+| `app/vision/` | CortexAgent | 视觉子系统属于主链路能力 | ✅ 已实现（主链路直接调用） |
+| `governor/` | ImmuneAgent（迁移中） | 治理与安全应独立于 CortexAgent，见第十一章 | ⚠️ 当前仍在 CortexAgent，待 ImmuneAgent 完善后迁移 |
+| `airlock/` | ImmuneAgent（迁移中） | 气闸隔离应独立于 CortexAgent，见第十一章 | ⚠️ 当前仍在 CortexAgent，待 ImmuneAgent 完善后迁移 |
+
+### 7.1 T-133 ~ T-142 批次族化实现记录
+
+本批次（2026-04-09）完成了以下模块的族化收口：
+
+**ANSAgent 新增方法（T-133 ~ T-136）**：
+- `trigger_proactive_voice(user_id, traits, context)` — 封装 `PersonaProactiveVoice.evaluate_scene()`，触发时发布 `PROACTIVE_VOICE_TRIGGERED` 事件
+- `trigger_meta_learning_record(module_name, ...)` — 封装 `MetaLearningLoop.record()`，维护全局元学习循环单例
+- `get_meta_learning_report(period_days)` — 生成元学习进化报告
+- `trigger_activity_monitor_event(event_type, payload)` — 封装 `ActivityMonitor.notify_user_interaction()`
+- `get_activity_monitor_status()` — 获取 ActivityMonitor 状态
+- `trigger_mode_transition(event_type, payload)` — 封装 `ModeTransitionService.on_event()`，切换成功时发布 `MODE_TRANSITION` 事件
+- `get_mode_transition_status()` — 获取 ModeTransitionService 状态
+
+**LimbicAgent 新增方法（T-137 ~ T-139）**：
+- `drive_emotion_metabolism(valence, arousal, dominance, ...)` — 封装 `EmotionVector.decay()` / `blend()`，LimbicAgent 作为情绪代谢唯一驱动者
+- `write_emotion_timeline(emotion_tag, valence, arousal, source, ts_ms)` — 封装 `EmotionTimeline.append()`，LimbicAgent 作为时间线唯一写入者
+- `_on_body_sense_updated` 增强 — 疲劳/孤独感触发 `drive_emotion_metabolism()` + `write_emotion_timeline()`，打通 body_sense → LimbicAgent 联动链路
+- `_on_emotion_inference_updated` 增强 — 语音情绪推断自动写入 `emotion_timeline`
+
+**SocialBrainAgent 新增方法（T-140 ~ T-141）**：
+- `resolve_style_canon(canon_id, style_root)` — 封装 `StyleCanonStore.get()`，SocialBrainAgent 作为风格 Canon 唯一访问入口
+- `resolve_style_canon_content(canon_id)` — 获取 Canon 纯文本内容（供 prompt 注入）
+- `resolve_style_distillation(lang, ...)` — 封装 `StyleDistiller.distill_cn()` / `distill_ja()`，SocialBrainAgent 作为风格蒸馏唯一调用入口
 
 ---
+
 
 ## 八、关键风险与缓解措施
 
