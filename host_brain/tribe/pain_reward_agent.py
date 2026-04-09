@@ -253,6 +253,8 @@ class PainRewardAgent:
             bus.subscribe("BOND_REGRESS", self._on_bond_regress)
             bus.subscribe("TASK_SUCCESS", self._on_task_success)
             bus.subscribe("HUMOR_LANDED", self._on_humor_landed)
+            # T-40：孤独感信号
+            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.pain_reward_agent").warning(
@@ -351,6 +353,27 @@ class PainRewardAgent:
                 intensity=min(1.0, intensity),
                 metadata=payload,
             )
+        except Exception:
+            pass
+
+    async def _on_loneliness_signal(self, event: Any) -> None:
+        """处理 LONELINESS_SIGNAL 事件：孤独感 → loneliness 痛觉。
+
+        T-40：ANSAgent 的 inner_world_skill 在检测到高孤独感时发布此事件，
+        PainRewardAgent 订阅后记录 loneliness 痛觉，影响 hedonic_state。
+        孤独感强度与 pain_level 正相关，但上限为 0.6（避免单次事件过度影响）。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.4)))
+            # 孤独感 > 0.5 才触发痛觉（低孤独感属于正常状态）
+            if loneliness > 0.5:
+                intensity = min(0.6, (loneliness - 0.5) * 1.2)  # 0.5~1.0 → 0.0~0.6
+                self.record_pain(
+                    source="loneliness",
+                    intensity=intensity,
+                    metadata={"loneliness": loneliness, **payload},
+                )
         except Exception:
             pass
 

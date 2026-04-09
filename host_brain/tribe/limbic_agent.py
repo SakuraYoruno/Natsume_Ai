@@ -888,6 +888,9 @@ class LimbicAgent:
             # T-30：订阅关系进展/退步事件，影响情绪基线
             bus.subscribe("BOND_PROGRESS", self._on_bond_progress)
             bus.subscribe("BOND_REGRESS", self._on_bond_regress)
+            # T-41：订阅任务成功/幽默成功事件，正向情绪偏置
+            bus.subscribe("TASK_SUCCESS", self._on_task_success_emotion)
+            bus.subscribe("HUMOR_LANDED", self._on_humor_landed_emotion)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -1167,6 +1170,91 @@ class LimbicAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent._on_bond_regress 异常: %s", exc
+            )
+
+    async def _on_task_success_emotion(self, event: Any) -> None:
+        """处理 TASK_SUCCESS 事件：任务成功 → 情绪效价小幅提升。
+
+        T-41：任务完成时将情绪效价小幅提升（+0.04 ~ +0.06），
+        模拟成就感带来的轻微正向情绪。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.35)))
+            valence_boost = round(min(0.06, intensity * 0.08), 4)
+            if valence_boost > 0.01 and self._emotion_persistence is not None:
+                try:
+                    _ep = self._emotion_persistence
+                    _restored = _ep.restore(user_id="user_1")
+                    _cur_valence = float(getattr(_restored, "valence", 0.0))
+                    _cur_arousal = float(getattr(_restored, "arousal", 0.3))
+                    _cur_dominance = float(getattr(_restored, "dominance", 0.0))
+                    _new_valence = max(-1.0, min(1.0, _cur_valence + valence_boost))
+                    _ep.persist(
+                        user_id="user_1",
+                        valence=_new_valence,
+                        arousal=_cur_arousal,
+                        dominance=_cur_dominance,
+                    )
+                except Exception:
+                    pass
+            self._touch_state(
+                key="last_task_success_effect",
+                value={"intensity": intensity, "valence_boost": valence_boost,
+                       "ts_ms": int(getattr(event, "ts_ms", 0) or 0)},
+            )
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent TASK_SUCCESS: valence+%.3f", valence_boost,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_task_success_emotion 异常: %s", exc
+            )
+
+    async def _on_humor_landed_emotion(self, event: Any) -> None:
+        """处理 HUMOR_LANDED 事件：幽默成功 → 情绪效价提升 + 唤醒度小幅提升。
+
+        T-41：幽默成功时将情绪效价提升（+0.05 ~ +0.08）和唤醒度小幅提升（+0.03），
+        模拟幽默带来的轻松感和活跃感。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            valence_boost = round(min(0.08, intensity * 0.10), 4)
+            arousal_boost = round(min(0.03, intensity * 0.04), 4)
+            if valence_boost > 0.01 and self._emotion_persistence is not None:
+                try:
+                    _ep = self._emotion_persistence
+                    _restored = _ep.restore(user_id="user_1")
+                    _cur_valence = float(getattr(_restored, "valence", 0.0))
+                    _cur_arousal = float(getattr(_restored, "arousal", 0.3))
+                    _cur_dominance = float(getattr(_restored, "dominance", 0.0))
+                    _new_valence = max(-1.0, min(1.0, _cur_valence + valence_boost))
+                    _new_arousal = max(0.0, min(1.0, _cur_arousal + arousal_boost))
+                    _ep.persist(
+                        user_id="user_1",
+                        valence=_new_valence,
+                        arousal=_new_arousal,
+                        dominance=_cur_dominance,
+                    )
+                except Exception:
+                    pass
+            self._touch_state(
+                key="last_humor_landed_effect",
+                value={"intensity": intensity, "valence_boost": valence_boost,
+                       "arousal_boost": arousal_boost,
+                       "ts_ms": int(getattr(event, "ts_ms", 0) or 0)},
+            )
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent HUMOR_LANDED: valence+%.3f arousal+%.3f", valence_boost, arousal_boost,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_humor_landed_emotion 异常: %s", exc
             )
 
 

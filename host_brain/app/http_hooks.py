@@ -1230,7 +1230,7 @@ def runtime_lifespan(
                 except Exception as _snap_exc:
                     logger.debug("TribeStateRegistry.load_snapshot 失败（降级）: %s", _snap_exc)
 
-                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent → EndocrineAgent）
+                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent → EndocrineAgent → ImmuneAgent → HippocampusAgent → ANSAgent）
                 _tribe_sub_errors: list[str] = []
                 for _agent_name, _agent_factory in [
                     ("limbic_agent", "host_brain.tribe.limbic_agent.get_limbic_agent"),
@@ -1239,6 +1239,9 @@ def runtime_lifespan(
                     ("cortex_agent", "host_brain.tribe.cortex_agent.get_cortex_agent"),
                     ("pain_reward_agent", "host_brain.tribe.pain_reward_agent.get_pain_reward_agent"),  # T-13
                     ("endocrine_agent", "host_brain.tribe.endocrine_agent.get_endocrine_agent"),  # T-28
+                    ("immune_agent", "host_brain.tribe.immune_agent.get_immune_agent"),  # T-35
+                    ("hippocampus_agent", "host_brain.tribe.hippocampus_agent.get_hippocampus_agent"),  # T-36
+                    ("ans_agent", "host_brain.tribe.ans_agent.get_ans_agent"),  # T-37
                 ]:
                     try:
                         _module_path, _func_name = _agent_factory.rsplit(".", 1)
@@ -1252,7 +1255,7 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
                 _sub_status = (
-                    f"OK (dispatch_loop=running, subscriptions=11)"
+                    f"OK (dispatch_loop=running, subscriptions=20)"
                     if not _tribe_sub_errors
                     else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
                 )

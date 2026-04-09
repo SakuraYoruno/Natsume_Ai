@@ -65,6 +65,24 @@ class TribeStateRegistry:
         with self._lock:
             return {ns: dict(data) for ns, data in self._states.items()}
 
+    def get_all_namespaces(self) -> list[dict[str, Any]]:
+        """T-39：返回所有命名空间的完整快照列表，供诊断端点使用。
+
+        Returns:
+            按 updated_at_ms 降序排列的命名空间快照列表，每项包含：
+            - namespace (str): 命名空间名称
+            - writer (str | None): 最后写入的 Agent
+            - updated_at_ms (int): 最后更新时间戳
+            - state (dict): 状态数据
+        """
+        with self._lock:
+            items = list(self._states.values())
+        return sorted(
+            [dict(item) for item in items if isinstance(item, dict)],
+            key=lambda x: int(x.get("updated_at_ms") or 0),
+            reverse=True,
+        )
+
     # ── T-29：持久化方法 ─────────────────────────────────────────────────────
 
     def save_snapshot(self) -> bool:

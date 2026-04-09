@@ -28,6 +28,7 @@ class ANSAgent:
         )
     )
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
+    _bond_stage: str = field(default="stranger", init=False, repr=False)  # T-37：记录当前关系阶段
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -90,6 +91,51 @@ class ANSAgent:
         payload = dict(sense_result or {})
         payload.setdefault("source", "body_sense_skill")
         self.emit_from_thread("BODY_SENSE_UPDATED", payload)
+
+    # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        T-37：订阅 BOND_STAGE_CHANGED，关系阶段跃迁时记录当前阶段，
+        供后续 inner_world tick 节奏调整参考（亲密度越高， tick 越频繁）。
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed)
+        except Exception as exc:
+            logger.warning("ANSAgent 订阅注册失败（降级）: %s", exc)
+
+    async def _on_bond_stage_changed(self, event: Any) -> None:
+        """处理 BOND_STAGE_CHANGED 事件：记录当前关系阶段。
+
+        T-37：当 bond stage 发生跃迁时，更新 _bond_stage 字段。
+        后续可在 emit_inner_world_ticked() 中将 bond_stage 带入 payload，
+        供 NatsumeScheduler 根据关系亲密度动态调整 tick 间隔。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            to_stage = str(payload.get("to_stage") or "").strip().upper()
+            if to_stage:
+                self._bond_stage = to_stage.lower()
+                logger.info(
+                    "ANSAgent 关系阶段更新: bond_stage=%s", self._bond_stage,
+                )
+                # 将关系阶段变化广播到 INNER_WORLD_TICKED，供 LimbicAgent 感知
+                self.emit_from_thread(
+                    "INNER_WORLD_TICKED",
+                    {
+                        "source": "ans_agent",
+                        "bond_stage_changed": True,
+                        "bond_stage": self._bond_stage,
+                        "from_stage": str(payload.get("from_stage") or "").strip().lower(),
+                        "to_stage": self._bond_stage,
+                    },
+                )
+        except Exception as exc:
+            logger.warning("ANSAgent._on_bond_stage_changed 异常: %s", exc)
 
 
 # ── 单例管理 ──────────────────────────────────────────────────────────────────

@@ -583,6 +583,9 @@ class PrefrontalAgent:
 
         在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
         PrefrontalAgent 的 handler 能被正确触发。
+
+        T-34：新增订阅 BOND_STAGE_CHANGED，
+        关系阶段跃迁时触发 apply_stage_promotion_growth，将关系进展转化为人格成长动力。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -590,6 +593,8 @@ class PrefrontalAgent:
             bus = get_tribe_event_bus()
             bus.subscribe("EVOLUTION_CYCLE_TRIGGERED", self._on_evolution_cycle_triggered)
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+            # T-34：订阅关系阶段跃迁事件，触发人格成长
+            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_growth)
         except Exception as exc:
             _logger.warning("PrefrontalAgent 订阅注册失败（降级）: %s", exc)
 
@@ -703,6 +708,45 @@ class PrefrontalAgent:
                     _logger.debug("PrefrontalAgent humor/task 事件发布跳过: %s", inner_exc)
         except Exception as exc:
             _logger.warning("PrefrontalAgent._on_interaction_recorded 异常: %s", exc)
+
+
+    async def _on_bond_stage_changed_growth(self, event: Any) -> None:
+        """处理 BOND_STAGE_CHANGED 事件：关系阶段跃迁触发人格成长。
+
+        T-34：当 bond stage 发生升级跃迁时，调用 apply_stage_promotion_growth()，
+        将关系进展转化为人格成长动力（如开放度提升、信任感增强等）。
+        降级跃迁不触发成长（但不会回滚已有成长）。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            from_stage = str(payload.get("from_stage") or "").strip().upper()
+            to_stage = str(payload.get("to_stage") or "").strip().upper()
+            user_id = str(payload.get("user_id") or "user_1").strip() or "user_1"
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+
+            _STAGE_ORDER = [
+                "STRANGER", "ACQUAINTANCE", "FRIEND",
+                "CLOSE_FRIEND", "INTIMATE", "SOULMATE",
+            ]
+            from_idx = _STAGE_ORDER.index(from_stage) if from_stage in _STAGE_ORDER else -1
+            to_idx = _STAGE_ORDER.index(to_stage) if to_stage in _STAGE_ORDER else -1
+
+            # 只处理升级跃迁
+            if from_idx >= 0 and to_idx > from_idx:
+                import asyncio  # noqa: PLC0415
+                result = await asyncio.to_thread(
+                    self.apply_stage_promotion_growth,
+                    user_id=user_id,
+                    from_stage=from_stage,
+                    to_stage=to_stage,
+                    ts_ms=ts_ms,
+                )
+                _logger.info(
+                    "PrefrontalAgent 关系阶段跃迁人格成长: %s→%s user_id=%s applied=%s",
+                    from_stage, to_stage, user_id, result.get("applied"),
+                )
+        except Exception as exc:
+            _logger.warning("PrefrontalAgent._on_bond_stage_changed_growth 异常: %s", exc)
 
 
 _PREFRONTAL_AGENT: PrefrontalAgent | None = None

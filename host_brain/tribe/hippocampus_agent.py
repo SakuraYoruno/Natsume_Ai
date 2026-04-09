@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 @dataclass(slots=True)
@@ -16,6 +17,7 @@ class HippocampusAgent:
             capabilities=("episodic_store", "recall_fusion", "retrieval_loop"),
         )
     )
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)  # T-36：使用全局单例
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -200,6 +202,51 @@ class HippocampusAgent:
             if row_score is not None and row_score < short_chat_score_floor:
                 return True
         return False
+
+
+    # ── T-36： TribeEventBus 订阅注册 ────────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        T-36：订阅 INTERACTION_RECORDED，每轮对话结束后将对话元数据写入
+        hippocampus_agent 命名空间快照，供诊断端点查询。
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.hippocampus_agent").warning(
+                "HippocampusAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_interaction_recorded(self, event: Any) -> None:
+        """处理 INTERACTION_RECORDED 事件：将对话元数据写入 hippocampus_agent 快照。
+
+        T-36：记录最近一次对话的 session_id/user_id/emotion_tag，
+        供诊断端点查询和调试使用。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            session_id = str(payload.get("session_id") or "default").strip() or "default"
+            user_id = str(payload.get("user_id") or "").strip()
+            emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            self.state_registry.set_state(
+                "hippocampus_agent",
+                {
+                    "last_interaction_session_id": session_id,
+                    "last_interaction_user_id": user_id,
+                    "last_interaction_emotion_tag": emotion_tag,
+                    "last_interaction_ts_ms": ts_ms,
+                },
+                writer="hippocampus_agent",
+            )
+        except Exception:
+            pass
 
 
 _HIPPOCAMPUS_AGENT: HippocampusAgent | None = None

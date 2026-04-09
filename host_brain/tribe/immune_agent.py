@@ -8,6 +8,7 @@ from threading import Lock
 from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 _IMMUNE_TEMPLATE_ID = "immune_agent.runtime_rules"
 _IMMUNE_TEMPLATE_MAX_RULES = 64
@@ -87,6 +88,7 @@ class ImmuneAgent:
             capabilities=("risk_scan", "prompt_guard", "input_gate"),
         )
     )
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)  # T-35：使用全局单例
     _lock: Lock = field(default_factory=Lock, init=False, repr=False)
     _counters: dict[str, int] = field(
         default_factory=lambda: {
@@ -177,6 +179,23 @@ class ImmuneAgent:
         }
         if record:
             self._record_result(result)
+            # T-35：如果决策为 BLOCK，发布 IMMUNE_BLOCK 事件通知其他 Agent
+            if decision == "BLOCK":
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+                    emit_tribe_event(
+                        event_type="IMMUNE_BLOCK",
+                        source_agent="immune_agent",
+                        payload={
+                            "source": str(source or "chat"),
+                            "risk_level": risk_level,
+                            "score": round(score, 4),
+                            "reason_codes": reason_codes,
+                            "text_length": len(normalized_text),
+                        },
+                    )
+                except Exception:
+                    pass
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:
@@ -238,6 +257,47 @@ class ImmuneAgent:
             self._template_rules_cache = tuple(template_rules)
             self._template_cache_expires_at_ms = now_ms + ttl_ms
             return self._template_rules_cache
+
+
+    # ── T-35： TribeEventBus 订阅注册 ────────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        T-35：订阅 INTERACTION_RECORDED，每轮对话结束后将当前会话计数快照
+        写入 TribeStateRegistry，供诊断端点查询。
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").warning(
+                "ImmuneAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_interaction_recorded(self, event: Any) -> None:
+        """处理 INTERACTION_RECORDED 事件：将当前免疫计数快照写入 TribeStateRegistry。
+
+        T-35：每轮对话结束后同步免疫计数快照，供诊断端点查询。
+        """
+        try:
+            with self._lock:
+                counters = dict(self._counters)
+            self.state_registry.set_state(
+                "immune_agent",
+                {
+                    "counters": counters,
+                    "block_rate": round(
+                        counters.get("block", 0) / max(1, counters.get("total", 1)), 4
+                    ),
+                },
+                writer="immune_agent",
+            )
+        except Exception:
+            pass
 
 
 def _load_template_rules_payload() -> tuple[_ImmuneRule, ...]:

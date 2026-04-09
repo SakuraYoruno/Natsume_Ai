@@ -108,3 +108,35 @@ async def list_tribe_events(
     ]
     timestamp = items[0]["ts_ms"] if items else 0
     return TribeRecentResponse(total=len(items), items=items, timestamp=int(timestamp))
+
+
+# ── T-39：TribeStateRegistry 全量快照诊断端点 ─────────────────────────────────
+
+class TribeStateAllResponse(BaseModel):
+    total: int
+    namespaces: list[dict[str, Any]]
+    ts_ms: int
+
+
+@router.get("/tribe_state/all", response_model=TribeStateAllResponse)
+async def list_tribe_state_all(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-39：返回 TribeStateRegistry 中所有命名空间的完整快照。
+
+    供开发调试和运维诊断使用，按 updated_at_ms 降序排列。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        registry = get_global_registry()
+        namespaces = registry.get_all_namespaces()
+        return TribeStateAllResponse(
+            total=len(namespaces),
+            namespaces=namespaces,
+            ts_ms=now_ms(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TRIBE_STATE_ALL_FAILED: {exc}") from exc

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 @dataclass(slots=True)
@@ -16,6 +17,7 @@ class CortexAgent:
             capabilities=("intent_route", "handoff", "reply"),
         )
     )
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)  # T-33：使用全局单例
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -126,6 +128,7 @@ class CortexAgent:
             "silence_willingness": 0.5,
             "voice_emotion": None,
             "hedonic_state": {},
+            "immune_state": {},  # T-38：ImmuneAgent 运行时状态（计数器/风险等级）
             "tribe_context_source": "cortex_agent",
         }
 
@@ -192,6 +195,16 @@ class CortexAgent:
 
             pain_agent = get_pain_reward_agent()
             result["hedonic_state"] = pain_agent.get_hedonic_state()
+        except Exception:
+            pass
+
+        # ── 6. 免疫状态（ImmuneAgent）T-38 ───────────────────────────────────
+        # 读取 ImmuneAgent 运行时状态（计数器/风险等级），
+        # 供 chat_context_builder 在构建 prompt 时参考安全状态。
+        try:
+            from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+            result["immune_state"] = get_immune_agent().export_runtime_state()
         except Exception:
             pass
 
@@ -338,6 +351,9 @@ class CortexAgent:
 
         在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
         CortexAgent 的 handler 能被正确触发。
+
+        T-33：新增订阅 BOND_PROGRESS / BOND_REGRESS，
+        将关系变化写入 cortex_agent 命名空间快照，供路由决策参考。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -346,6 +362,9 @@ class CortexAgent:
             bus.subscribe("SILENCE_WILLINGNESS_CHANGED", self._on_silence_willingness_changed)
             bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed)
+            # T-33：订阅关系进展/退步事件，更新 cortex_agent 快照
+            bus.subscribe("BOND_PROGRESS", self._on_bond_progress_cortex)
+            bus.subscribe("BOND_REGRESS", self._on_bond_regress_cortex)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -440,6 +459,63 @@ class CortexAgent:
                     )
         except Exception:
             pass
+
+
+    async def _on_bond_progress_cortex(self, event: Any) -> None:
+        """处理 BOND_PROGRESS 事件：将关系进展写入 cortex_agent 快照。
+
+        T-33：更新 cortex_agent 命名空间的 bond_trend/bond_stage 字段，
+        供 route_intent() 在路由决策时参考（关系越亲密，越倾向于 chat 路由）。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "bond_stage": bond_stage.lower(),
+                "bond_trend": "progress",
+                "last_bond_progress_intensity": intensity,
+            })
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+            logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                "CortexAgent 快照更新 BOND_PROGRESS: stage=%s intensity=%.2f", bond_stage, intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_bond_progress_cortex 异常: %s", exc
+            )
+
+    async def _on_bond_regress_cortex(self, event: Any) -> None:
+        """处理 BOND_REGRESS 事件：将关系退步写入 cortex_agent 快照。
+
+        T-33：更新 cortex_agent 命名空间的 bond_trend/bond_stage 字段，
+        供 route_intent() 在路由决策时参考（关系退步时适当提高 throttle 阈值）。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "bond_stage": bond_stage.lower(),
+                "bond_trend": "regress",
+                "last_bond_regress_intensity": intensity,
+            })
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+            logging.getLogger("Natsume.tribe.cortex_agent").debug(
+                "CortexAgent 快照更新 BOND_REGRESS: stage=%s intensity=%.2f", bond_stage, intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.cortex_agent").warning(
+                "CortexAgent._on_bond_regress_cortex 异常: %s", exc
+            )
 
 
 _CORTEX_AGENT: CortexAgent | None = None
