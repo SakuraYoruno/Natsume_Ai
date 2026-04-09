@@ -1142,6 +1142,74 @@ async def dispatch_agent_sse_generator(
             )
         except Exception as exc:
             _logger.debug("[%s] dispatch handoff record skipped: %s", request_id, exc)
+        # Phase 5：dispatch 路由决策完成后，向 TribeEventBus 发布 INTERACTION_RECORDED 事件
+        # PrefrontalAgent / SocialBrainAgent 订阅此事件以触发人格/关系更新
+        try:
+            from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+
+            emit_tribe_event(
+                event_type="INTERACTION_RECORDED",
+                source_agent="dispatch_agent",
+                payload={
+                    "request_id": str(request_id or ""),
+                    "session_id": str(session_id or ""),
+                    "route": str(handoff_route or ""),
+                    "target_id": str(handoff_target or ""),
+                    "reason": str(handoff_reason or ""),
+                },
+            )
+        except Exception as exc:
+            _logger.debug("[%s] dispatch INTERACTION_RECORDED tribe event skipped: %s", request_id, exc)
+
+    # ── 0. ImmuneAgent 前置拦截（T-07）──────────────────────────────
+    # 在硬规则路由之前，对用户消息进行风险扫描
+    # decision=BLOCK 时直接拒绝；decision=REPORT 时写入审计并继续
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+        _immune_result = get_immune_agent().inspect_text(
+            text=sanitized_message,
+            source="chat",
+            metadata={
+                "request_id": request_id,
+                "session_id": session_id,
+                "person_id": person_id,
+            },
+        )
+        _immune_decision = str(_immune_result.get("decision") or "ALLOW").strip().upper()
+        if _immune_decision == "BLOCK":
+            _logger.warning(
+                "[%s] ImmuneAgent BLOCK: risk_level=%s reason_codes=%s",
+                request_id,
+                _immune_result.get("risk_level"),
+                _immune_result.get("reason_codes"),
+            )
+            from host_brain.app.chat_agent import _sse  # noqa: PLC0415
+
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "narrative": "抱歉，我无法处理这条消息。",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "dispatch_agent:immune_block",
+                    "immune_decision": "BLOCK",
+                    "immune_risk_level": _immune_result.get("risk_level"),
+                    "immune_reason_codes": _immune_result.get("reason_codes"),
+                },
+            })
+            return
+        elif _immune_decision == "REPORT":
+            _logger.info(
+                "[%s] ImmuneAgent REPORT: risk_level=%s reason_codes=%s (继续处理)",
+                request_id,
+                _immune_result.get("risk_level"),
+                _immune_result.get("reason_codes"),
+            )
+    except Exception as _immune_exc:
+        _logger.debug("[%s] ImmuneAgent 前置拦截降级: %s", request_id, _immune_exc)
 
     # ── 1. 硬规则路由 ─────────────────────────────────────────────────
     route, target_id, route_reason = _hard_rule_route(sanitized_message)

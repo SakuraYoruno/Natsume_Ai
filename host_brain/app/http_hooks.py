@@ -38,23 +38,39 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
 
 
 def _build_scheduler_emotion_state() -> dict[str, Any]:
-    """构建调度器门控使用的情绪/内分泌快照。"""
+    """构建调度器门控使用的情绪/内分泌快照。
+
+    Phase T-06：优先通过 EndocrineAgent.resolve_vital_signs() 获取门控状态，
+    确保调度门控与 Tribe 架构保持一致。
+    """
     mood_state = "steady"
     emotion_tag = "NEUTRAL"
     emotion_intensity = 0.0
     endocrine_state: dict[str, Any] = {}
     try:
-        from host_brain.app.dependencies import get_endocrine_state, get_hard_state  # noqa: PLC0415
+        from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
+        from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
 
         hard_state = get_hard_state()
         mood_state = str(getattr(hard_state, "mood_state", "steady") or "steady").strip().lower() or "steady"
-        endocrine_state = dict(
-            get_endocrine_state(
-                emotion_tag=emotion_tag,
-                emotion_intensity=emotion_intensity,
-            )
-            or {}
+        emotion_tag = str(getattr(hard_state, "emotion_tag", "NEUTRAL") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        emotion_intensity = float(getattr(hard_state, "emotion_intensity", 0.0) or 0.0)
+
+        # T-06：通过 EndocrineAgent 统一解析内分泌状态（含 gate_state / stress_index / energy_reserve）
+        endocrine_agent = get_endocrine_agent()
+        raw_endocrine = endocrine_agent.resolve_endocrine_state(
+            hard_state=hard_state,
+            emotion_tag=emotion_tag,
+            emotion_intensity=emotion_intensity,
         )
+        vital_signs = endocrine_agent.resolve_vital_signs(endocrine_state=raw_endocrine)
+        # 将 vital_signs 合并到 endocrine_state，供 NatsumeScheduler 门控读取
+        endocrine_state = dict(raw_endocrine)
+        endocrine_state["gate_state"] = vital_signs.get("gate_state", "open")
+        endocrine_state["stress_index"] = vital_signs.get("stress_index", 0.0)
+        endocrine_state["energy_reserve"] = vital_signs.get("energy_reserve", 0.6)
+        endocrine_state["homeostasis_ok"] = vital_signs.get("homeostasis_ok", True)
+        endocrine_state["source"] = "endocrine_agent"
     except Exception:
         endocrine_state = {
             "dopamine_level": 0.5,
@@ -62,6 +78,8 @@ def _build_scheduler_emotion_state() -> dict[str, Any]:
             "cortisol_level": 0.25,
             "energy_reserve": 0.6,
             "gate_state": "open",
+            "stress_index": 0.0,
+            "homeostasis_ok": True,
             "source": "scheduler_fallback",
         }
     return {
@@ -1217,7 +1235,7 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
                 _sub_status = (
-                    f"OK (dispatch_loop=running, subscriptions=4)"
+                    f"OK (dispatch_loop=running, subscriptions=5)"
                     if not _tribe_sub_errors
                     else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
                 )

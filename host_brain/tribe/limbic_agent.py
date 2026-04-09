@@ -843,6 +843,11 @@ class LimbicAgent:
             bus.subscribe("INNER_WORLD_TICKED", self._on_inner_world_ticked)
             bus.subscribe("CONVERSATION_STARTED", self._on_conversation_started_event)
             bus.subscribe("CONVERSATION_ENDED", self._on_conversation_ended_event)
+            # T-09：订阅 SomaticAgent 通过 EdgeTribeBridge 上报的情绪推断事件
+            # edge_client 侧 SomaticAgent.publish_emotion_inference_updated() 发布
+            # event_type="emotion_inference_updated"，经 /internal/tribe_event 转发后
+            # Bus 以大写 key 分发，此处用大写匹配
+            bus.subscribe("EMOTION_INFERENCE_UPDATED", self._on_emotion_inference_updated)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -922,6 +927,62 @@ class LimbicAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent._on_conversation_ended_event 异常: %s", exc
+            )
+
+    async def _on_emotion_inference_updated(self, event: Any) -> None:
+        """处理 EMOTION_INFERENCE_UPDATED 事件：接收 SomaticAgent 的语音情绪推断结果。
+
+        T-09：SomaticAgent（edge_client）在语音处理完成后通过 EdgeTribeBridge 发布
+        emotion_inference_updated 事件，经 /internal/tribe_event 端点转发到 Bus，
+        LimbicAgent 订阅后更新情绪状态快照，供后续对话上下文使用。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.limbic_agent")
+            payload = dict(event.payload or {})
+            emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            emotion_intensity = payload.get("emotion_intensity")
+            mood_state = str(payload.get("mood_state") or "").strip().lower() or None
+            emotion_source = str(payload.get("emotion_source") or "somatic_voice").strip() or "somatic_voice"
+            session_id = str(payload.get("session_id") or "").strip()
+            _log.debug(
+                "LimbicAgent 收到 EMOTION_INFERENCE_UPDATED: emotion_tag=%s intensity=%s source=%s session=%s",
+                emotion_tag, emotion_intensity, emotion_source, session_id,
+            )
+            # 将语音情绪推断结果写入 TribeStateRegistry，供 chat_context_builder 读取
+            self._touch_state(
+                key="last_voice_emotion_inference",
+                value={
+                    "emotion_tag": emotion_tag,
+                    "emotion_intensity": emotion_intensity,
+                    "mood_state": mood_state,
+                    "emotion_source": emotion_source,
+                    "session_id": session_id,
+                    "source_agent": str(event.source_agent or ""),
+                    "ts_ms": int(event.ts_ms or 0),
+                },
+            )
+            # 若情绪强度较高（>= 0.6），同步更新情绪上下文（影响当前对话情绪感知）
+            if isinstance(emotion_intensity, (int, float)) and float(emotion_intensity) >= 0.6:
+                try:
+                    from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
+                    hard_state = get_hard_state()
+                    if hasattr(hard_state, "emotion_tag"):
+                        hard_state.emotion_tag = emotion_tag
+                    if hasattr(hard_state, "emotion_intensity"):
+                        hard_state.emotion_intensity = float(emotion_intensity)
+                    if mood_state and hasattr(hard_state, "mood_state"):
+                        hard_state.mood_state = mood_state
+                    _log.info(
+                        "LimbicAgent 语音情绪推断已同步到 hard_state: emotion_tag=%s intensity=%s",
+                        emotion_tag, emotion_intensity,
+                    )
+                except Exception as _hs_exc:
+                    _log.debug("LimbicAgent 同步 hard_state 失败（降级）: %s", _hs_exc)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_emotion_inference_updated 异常: %s", exc
             )
 
 

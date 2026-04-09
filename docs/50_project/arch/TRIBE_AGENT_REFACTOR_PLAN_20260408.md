@@ -1324,3 +1324,115 @@ bond_vector = {
 3. **T-08**：`/internal/tribe_event` 端点接收 edge 事件后转发到 Bus（验证 EdgeTribeBridge 闭环）
 4. **T-09**：SomaticAgent 情绪推断结果上报 LimbicAgent（`voice_emotion_inferred` 事件闭环）
 5. **T-10**：`vital_signs` 统一生命体征聚合（`TribeStateRegistry.aggregate_vital_signs()`）
+
+---
+
+### 2026-04-09 · 第二批开发（T-05 / T-06 / T-07 / T-08 / T-09）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/app/http_hooks.py`（`_build_scheduler_emotion_state` 改造）
+- `host_brain/app/dispatch_agent.py`（ImmuneAgent 前置拦截）
+- `host_brain/tribe/limbic_agent.py`（EMOTION_INFERENCE_UPDATED 订阅）
+
+---
+
+#### T-05：ANSAgent 接入 NatsumeScheduler 验证 ✅（无需修改）
+
+**验证结论**：
+- `inner_world_skill.py` 已调用 `get_ans_agent().emit_inner_world_ticked(tick_result=...)`
+- `body_sense_skill.py` 已调用 `get_ans_agent().emit_body_sense_updated(sense_result=...)`
+- `http_hooks.py` 已调用 `get_ans_agent().set_event_loop(asyncio.get_running_loop())`
+- **T-05 验证通过，无需修改**
+
+---
+
+#### T-06：EndocrineAgent 接入调度门控 ✅
+
+**问题**：`_build_scheduler_emotion_state()` 直接调用 `get_endocrine_state()`（底层函数），绕过了 `EndocrineAgent` 接口，导致 Tribe 架构的 `EndocrineAgent.resolve_vital_signs()` 形同虚设。
+
+**改动**（`http_hooks.py`）：
+- `_build_scheduler_emotion_state()` 改为通过 `get_endocrine_agent().resolve_endocrine_state()` 获取内分泌状态
+- 再通过 `endocrine_agent.resolve_vital_signs()` 获取 `gate_state` / `stress_index` / `energy_reserve` / `homeostasis_ok`
+- 将 `vital_signs` 合并到 `endocrine_state` 字典，供 `NatsumeScheduler._resolve_endocrine_gate_state()` 读取
+- 新增 `endocrine_state["source"] = "endocrine_agent"` 标记来源
+
+**架构意义**：`NatsumeScheduler` 的调度门控现在通过 `EndocrineAgent` 统一读取内分泌状态，而不是直接调用底层函数。`EndocrineAgent` 成为调度门控的唯一数据源。
+
+---
+
+#### T-07：ImmuneAgent 接入主链路前置拦截 ✅
+
+**问题**：`dispatch_agent.py` 的请求入口没有风险扫描，恶意 prompt 可以直接进入 LLM 处理链路。
+
+**改动**（`dispatch_agent.py`）：
+- 在 `dispatch_agent_sse_generator` 的**硬规则路由之前**（最前面）增加 ImmuneAgent 前置拦截
+- 调用 `get_immune_agent().inspect_text(text=sanitized_message, source="chat", metadata={...})`
+- `decision == "BLOCK"` 时：直接 yield REJECT 事件并 return，不进入任何路由
+- `decision == "REPORT"` 时：记录 info 日志并继续处理（审计已由 `ImmuneAgent._record_result()` 写入）
+- 异常时降级（不影响正常请求处理）
+
+**关键设计**：
+- `HOST_IMMUNE_GATE_BLOCKING=false`（默认）时，`BLOCK` 决策不会实际拦截（`inspect_text` 返回 `REPORT`）
+- 只有显式设置 `HOST_IMMUNE_GATE_BLOCKING=true` 时才真正拦截
+- 这确保了生产环境的安全性（默认只审计，不拦截）
+
+---
+
+#### T-08：/internal/tribe_event 端点转发验证 ✅（无需修改）
+
+**验证结论**：
+- `internal_tribe_routes.py` 的 `ingest_tribe_event` 端点已正确调用 `bus.publish(event)`
+- `EdgeTribeBridge.publish_event()` 已正确向 `{host_base_url}/internal/tribe_event` 发送 POST 请求
+- Edge → Host 的事件桥闭环已完整：`SomaticAgent._publish_event()` → `EdgeTribeBridge.publish_event()` → `/internal/tribe_event` → `bus.publish()` → `dispatch_loop` → handler
+- **T-08 验证通过，无需修改**
+
+---
+
+#### T-09：SomaticAgent 情绪推断上报 LimbicAgent ✅
+
+**问题**：`SomaticAgent.publish_emotion_inference_updated()` 已通过 `EdgeTribeBridge` 发布 `emotion_inference_updated` 事件，但 `LimbicAgent` 没有订阅此事件，导致语音情绪推断结果无法影响 host_brain 的情绪状态。
+
+**改动**（`limbic_agent.py`）：
+- `register_subscriptions()` 新增 `bus.subscribe("EMOTION_INFERENCE_UPDATED", self._on_emotion_inference_updated)`
+- 新增 `_on_emotion_inference_updated()` handler：
+  - 将语音情绪推断结果写入 `TribeStateRegistry`（key=`last_voice_emotion_inference`）
+  - 若 `emotion_intensity >= 0.6`（高强度情绪），同步更新 `hard_state.emotion_tag` / `emotion_intensity` / `mood_state`
+  - 异常时降级（不影响其他 handler）
+
+**事件流闭环**：
+```
+edge_client/voice_pipeline
+  → SomaticAgent.publish_emotion_inference_updated()
+  → EdgeTribeBridge.publish_event("emotion_inference_updated", ...)
+  → POST /internal/tribe_event
+  → InMemoryTribeEventBus.publish()
+  → dispatch_loop
+  → LimbicAgent._on_emotion_inference_updated()
+  → TribeStateRegistry["last_voice_emotion_inference"]
+  → (高强度时) hard_state.emotion_tag 更新
+```
+
+**注意**：Bus 的 `_dispatch_loop` 以大写 key 匹配，`SomaticAgent` 发布的 `emotion_inference_updated`（小写）经 `/internal/tribe_event` 端点的 `new_tribe_event()` 处理后，`event_type` 保持原始大小写。`InMemoryTribeEventBus.subscribe()` 中 key 转大写，`_dispatch_loop` 中也转大写匹配，因此 `EMOTION_INFERENCE_UPDATED` 能正确匹配。
+
+---
+
+#### 当前架构状态（2026-04-09 第二批）
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `_build_scheduler_emotion_state` → EndocrineAgent | ✅ 已接入 | 调度门控通过 EndocrineAgent 统一读取 |
+| `dispatch_agent.py` ImmuneAgent 前置拦截 | ✅ 已接入 | BLOCK 时拒绝，REPORT 时审计继续 |
+| `LimbicAgent` 订阅 `EMOTION_INFERENCE_UPDATED` | ✅ 已接入 | 语音情绪推断结果上报闭环 |
+| Edge → Host 事件桥闭环 | ✅ 已验证 | EdgeTribeBridge → /internal/tribe_event → Bus |
+| ANSAgent 接入 NatsumeScheduler | ✅ 已验证 | inner_world_skill/body_sense_skill 已调用 emit |
+
+---
+
+#### 下一步待开发（优先级排序）
+
+1. **T-10**：`vital_signs` 统一生命体征聚合（`TribeStateRegistry.aggregate_vital_signs()`）
+2. **T-11**：`CircadianAgent`（昼夜节律，可合并进 ANSAgent）
+3. **T-12**：`ProprioceptionAgent`（本体感觉，Phase 5 后实施）
+4. **T-13**：`PainRewardAgent`（痛觉/奖励，需 EndocrineAgent 完成后实施）
+5. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
