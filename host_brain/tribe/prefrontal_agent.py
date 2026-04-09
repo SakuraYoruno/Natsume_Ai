@@ -639,7 +639,11 @@ class PrefrontalAgent:
             )
 
     async def _on_interaction_recorded(self, event: Any) -> None:
-        """处理 INTERACTION_RECORDED 事件：触发人格漂移检测。"""
+        """处理 INTERACTION_RECORDED 事件：触发人格漂移检测。
+
+        T-26：通过 assistant_reply 内容检测 humor/task 成功信号，
+        发布 TASK_SUCCESS / HUMOR_LANDED 事件，供 PainRewardAgent 接收。
+        """
         try:
             payload = dict(event.payload or {})
             user_message = str(payload.get("user_message") or "").strip()
@@ -651,6 +655,52 @@ class PrefrontalAgent:
                     user_message=user_message,
                     assistant_reply=assistant_reply,
                 )
+
+            # T-26：检测 humor/task 成功信号并发布对应事件
+            if assistant_reply:
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+
+                    _reply_lower = assistant_reply.lower()
+                    # 幽默成功信号：回复中包含笑声/幽默标记词
+                    _HUMOR_SIGNALS = ["哈哈", "哈哈哈", "lol", "haha", "😄", "😂", "🤣", "笑死", "好笑", "哈哈哈哈"]
+                    _humor_hit = any(sig in _reply_lower or sig in assistant_reply for sig in _HUMOR_SIGNALS)
+                    if _humor_hit:
+                        emit_tribe_event(
+                            event_type="HUMOR_LANDED",
+                            source_agent="prefrontal_agent",
+                            payload={
+                                "session_id": session_id,
+                                "intensity": 0.3,
+                                "reason": "humor_signal_in_reply",
+                                "reply_preview": assistant_reply[:64],
+                            },
+                        )
+                        _logger.debug(
+                            "PrefrontalAgent 发布 HUMOR_LANDED: session_id=%s", session_id,
+                        )
+
+                    # 任务成功信号：用户消息包含任务请求词 + 回复包含完成标记词
+                    _TASK_REQUEST_SIGNALS = ["帮我", "帮忙", "请", "能不能", "可以", "写", "生成", "翻译", "总结", "分析"]
+                    _TASK_DONE_SIGNALS = ["好的", "完成", "已经", "这是", "如下", "以下", "done", "here", "sure"]
+                    _task_request = any(sig in user_message for sig in _TASK_REQUEST_SIGNALS)
+                    _task_done = any(sig in _reply_lower or sig in assistant_reply for sig in _TASK_DONE_SIGNALS)
+                    if _task_request and _task_done and not _humor_hit:
+                        emit_tribe_event(
+                            event_type="TASK_SUCCESS",
+                            source_agent="prefrontal_agent",
+                            payload={
+                                "session_id": session_id,
+                                "intensity": 0.35,
+                                "reason": "task_completion_signal",
+                                "user_message_preview": user_message[:64],
+                            },
+                        )
+                        _logger.debug(
+                            "PrefrontalAgent 发布 TASK_SUCCESS: session_id=%s", session_id,
+                        )
+                except Exception as inner_exc:
+                    _logger.debug("PrefrontalAgent humor/task 事件发布跳过: %s", inner_exc)
         except Exception as exc:
             _logger.warning("PrefrontalAgent._on_interaction_recorded 异常: %s", exc)
 

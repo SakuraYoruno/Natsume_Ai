@@ -2569,7 +2569,9 @@ async def _async_post_process(
             emotion_tag=str(_ec.get("emotion_tag") or "NEUTRAL").strip().upper(),
             emotion_intensity=float(_ec.get("emotion_intensity") or 0.5),
             summary={
+                "user_message": str(user_message or ""),
                 "user_message_preview": str(user_message or "")[:64],
+                "assistant_reply": str(narrative or "")[:512],  # T-26：供 PrefrontalAgent 检测 humor/task 信号
                 "ts_ms": int(ts_ms),
             },
         )

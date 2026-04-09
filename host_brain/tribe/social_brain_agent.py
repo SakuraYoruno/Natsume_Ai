@@ -205,6 +205,9 @@ class SocialBrainAgent:
 
         由 CortexAgent 在对话结束后发布，SocialBrainAgent 订阅后
         异步更新 Bond 状态（关系阶段、亲密度等）。
+
+        T-25：根据 bond_trend 发布 BOND_PROGRESS / BOND_REGRESS 事件，
+        供 PainRewardAgent 接收并更新享乐状态。
         """
         try:
             import logging  # noqa: PLC0415
@@ -221,6 +224,50 @@ class SocialBrainAgent:
             # Bond 更新由 CortexAgent.post_process_bond_update 负责，
             # 此处仅记录事件，避免重复写入
             # 未来可在此触发 bond_vector 更新（familiarity/trust/attachment 等）
+
+            # T-25：读取当前 bond 快照，根据 bond_trend 发布 BOND_PROGRESS / BOND_REGRESS
+            try:
+                from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+
+                snapshot = self.resolve_bond_snapshot(person_id=user_id or None)
+                bond_trend = str(snapshot.get("bond_trend") or "").strip().upper()
+                trend_intensity = float(snapshot.get("bond_trend_intensity") or 0.3)
+                bond_stage = str(snapshot.get("bond_stage") or "STRANGER").strip().upper()
+
+                if bond_trend == "PROGRESS":
+                    emit_tribe_event(
+                        event_type="BOND_PROGRESS",
+                        source_agent="social_brain_agent",
+                        payload={
+                            "user_id": user_id,
+                            "session_id": session_id,
+                            "bond_stage": bond_stage,
+                            "bond_trend": bond_trend,
+                            "intensity": min(1.0, trend_intensity),
+                        },
+                    )
+                    _log.debug(
+                        "SocialBrainAgent 发布 BOND_PROGRESS: user_id=%s stage=%s intensity=%.2f",
+                        user_id, bond_stage, trend_intensity,
+                    )
+                elif bond_trend == "REGRESS":
+                    emit_tribe_event(
+                        event_type="BOND_REGRESS",
+                        source_agent="social_brain_agent",
+                        payload={
+                            "user_id": user_id,
+                            "session_id": session_id,
+                            "bond_stage": bond_stage,
+                            "bond_trend": bond_trend,
+                            "intensity": min(1.0, trend_intensity),
+                        },
+                    )
+                    _log.debug(
+                        "SocialBrainAgent 发布 BOND_REGRESS: user_id=%s stage=%s intensity=%.2f",
+                        user_id, bond_stage, trend_intensity,
+                    )
+            except Exception as inner_exc:
+                _log.debug("SocialBrainAgent bond trend 事件发布跳过: %s", inner_exc)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(

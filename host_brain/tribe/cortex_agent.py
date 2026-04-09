@@ -378,16 +378,66 @@ class CortexAgent:
             pass
 
     async def _on_bond_stage_changed(self, event: Any) -> None:
-        """处理 BOND_STAGE_CHANGED 事件：记录 Bond 阶段变化。"""
+        """处理 BOND_STAGE_CHANGED 事件：记录 Bond 阶段变化。
+
+        T-25：当 bond stage 发生跃迁时，发布 BOND_PROGRESS / BOND_REGRESS 事件，
+        供 PainRewardAgent 接收并更新享乐状态（stage 跃迁强度高于普通 trend）。
+        """
         try:
             import logging  # noqa: PLC0415
+            from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+
             payload = dict(event.payload or {})
-            logging.getLogger("Natsume.tribe.cortex_agent").info(
+            _log = logging.getLogger("Natsume.tribe.cortex_agent")
+            from_stage = str(payload.get("from_stage") or "").strip().upper()
+            to_stage = str(payload.get("to_stage") or "").strip().upper()
+            user_id = str(payload.get("user_id") or "").strip()
+            _log.info(
                 "CortexAgent 收到 BOND_STAGE_CHANGED: from=%s to=%s user_id=%s",
-                payload.get("from_stage"),
-                payload.get("to_stage"),
-                payload.get("user_id"),
+                from_stage, to_stage, user_id,
             )
+            # Stage 跃迁顺序（越靠后越亲密）
+            _STAGE_ORDER = [
+                "STRANGER", "ACQUAINTANCE", "FRIEND",
+                "CLOSE_FRIEND", "INTIMATE", "SOULMATE",
+            ]
+            from_idx = _STAGE_ORDER.index(from_stage) if from_stage in _STAGE_ORDER else -1
+            to_idx = _STAGE_ORDER.index(to_stage) if to_stage in _STAGE_ORDER else -1
+            if from_idx >= 0 and to_idx >= 0 and from_idx != to_idx:
+                if to_idx > from_idx:
+                    # Stage 升级 → BOND_PROGRESS（强度 0.7，高于普通 trend）
+                    emit_tribe_event(
+                        event_type="BOND_PROGRESS",
+                        source_agent="cortex_agent",
+                        payload={
+                            "user_id": user_id,
+                            "from_stage": from_stage,
+                            "to_stage": to_stage,
+                            "intensity": 0.7,
+                            "reason": "stage_upgrade",
+                        },
+                    )
+                    _log.info(
+                        "CortexAgent 发布 BOND_PROGRESS (stage_upgrade): %s→%s user_id=%s",
+                        from_stage, to_stage, user_id,
+                    )
+                else:
+                    # Stage 降级 → BOND_REGRESS（强度 0.6）
+                    emit_tribe_event(
+                        event_type="BOND_REGRESS",
+                        source_agent="cortex_agent",
+                        payload={
+                            "user_id": user_id,
+                            "from_stage": from_stage,
+                            "to_stage": to_stage,
+                            "intensity": 0.6,
+                            "reason": "stage_downgrade",
+                        },
+                    )
+                    _log.info(
+                        "CortexAgent 发布 BOND_REGRESS (stage_downgrade): %s→%s user_id=%s",
+                        from_stage, to_stage, user_id,
+                    )
         except Exception:
             pass
 

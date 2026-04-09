@@ -2114,3 +2114,90 @@ collect_tribe_context()["hedonic_state"]
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 2. **T-25**（新增）：`SocialBrainAgent` 发布 `BOND_PROGRESS`/`BOND_REGRESS` 事件（T-24 的上游触发器）
 3. **T-26**（新增）：`PrefrontalAgent` 发布 `TASK_SUCCESS`/`HUMOR_LANDED` 事件（T-24 的上游触发器）
+
+---
+
+### 2026-04-09 · 第九批开发（T-25 / T-26）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/social_brain_agent.py`（T-25：`_on_interaction_recorded` 发布 BOND_PROGRESS/BOND_REGRESS）
+- `host_brain/tribe/cortex_agent.py`（T-25：`_on_bond_stage_changed` 发布 BOND_PROGRESS/BOND_REGRESS）
+- `host_brain/app/top_agent.py`（T-26：`emit_conversation_ended` 补充 assistant_reply/user_message 字段）
+- `host_brain/tribe/prefrontal_agent.py`（T-26：`_on_interaction_recorded` 发布 TASK_SUCCESS/HUMOR_LANDED）
+
+---
+
+#### T-25：SocialBrainAgent / CortexAgent 发布 BOND_PROGRESS/BOND_REGRESS ✅
+
+**问题**：T-24 为 `PainRewardAgent` 新增了 `BOND_PROGRESS`/`BOND_REGRESS` 事件订阅，但没有上游发布者，事件永远不会触发。
+
+**改动 1**（`social_brain_agent.py`，`_on_interaction_recorded`）：
+- 在处理 `INTERACTION_RECORDED` 事件时，调用 `resolve_bond_snapshot()` 获取当前 bond 快照
+- 根据 `bond_trend` 字段：`PROGRESS` → 发布 `BOND_PROGRESS`，`REGRESS` → 发布 `BOND_REGRESS`
+- 强度来自 `bond_trend_intensity`（默认 0.3）
+
+**改动 2**（`cortex_agent.py`，`_on_bond_stage_changed`）：
+- 在 bond stage 跃迁时，根据 stage 升降发布对应事件
+- Stage 升级 → `BOND_PROGRESS`（强度 0.7，高于普通 trend）
+- Stage 降级 → `BOND_REGRESS`（强度 0.6）
+- 使用 `_STAGE_ORDER` 列表判断升降方向
+
+**触发链**：
+```
+BondDynamicsWriter.apply_update()
+  → BOND_STAGE_CHANGED（CortexAgent 订阅）
+    → CortexAgent._on_bond_stage_changed()
+      → BOND_PROGRESS / BOND_REGRESS（PainRewardAgent 订阅）
+        → record_reward("bond_progress") / record_pain("bond_regress")
+
+INTERACTION_RECORDED（SocialBrainAgent 订阅）
+  → SocialBrainAgent._on_interaction_recorded()
+    → resolve_bond_snapshot() → bond_trend
+      → BOND_PROGRESS / BOND_REGRESS（PainRewardAgent 订阅）
+```
+
+---
+
+#### T-26：PrefrontalAgent 发布 TASK_SUCCESS/HUMOR_LANDED ✅
+
+**问题**：T-24 为 `PainRewardAgent` 新增了 `TASK_SUCCESS`/`HUMOR_LANDED` 事件订阅，但没有上游发布者。
+
+**改动 1**（`top_agent.py`，`emit_conversation_ended` 调用处）：
+- 在 `summary` 中补充 `user_message`（完整）和 `assistant_reply`（前 512 字符）字段
+- 这些字段通过 `INTERACTION_RECORDED` 事件 payload 传递给 `PrefrontalAgent`
+
+**改动 2**（`prefrontal_agent.py`，`_on_interaction_recorded`）：
+- 在 `run_growth_feedback_cycle` 之后，通过关键词检测判断 humor/task 成功
+- **幽默成功检测**：`assistant_reply` 中包含笑声/幽默标记词（哈哈/lol/😂 等）→ 发布 `HUMOR_LANDED`（强度 0.3）
+- **任务成功检测**：`user_message` 包含任务请求词 + `assistant_reply` 包含完成标记词 → 发布 `TASK_SUCCESS`（强度 0.35）
+- 两者互斥：humor 优先，避免重复触发
+
+**触发链**：
+```
+top_agent.post_process()
+  → emit_conversation_ended(summary={assistant_reply, user_message})
+    → INTERACTION_RECORDED（PrefrontalAgent 订阅）
+      → PrefrontalAgent._on_interaction_recorded()
+        → 关键词检测 → HUMOR_LANDED / TASK_SUCCESS（PainRewardAgent 订阅）
+          → record_reward("humor_landed") / record_reward("task_success")
+```
+
+---
+
+#### 完整事件发布/订阅全景（2026-04-09 第九批）
+
+| 事件 | 发布者 | 订阅者 | 触发条件 |
+|---|---|---|---|
+| `BOND_PROGRESS` | `SocialBrainAgent`（bond_trend=PROGRESS）<br>`CortexAgent`（stage 升级） | `PainRewardAgent` | 关系进展/stage 升级 |
+| `BOND_REGRESS` | `SocialBrainAgent`（bond_trend=REGRESS）<br>`CortexAgent`（stage 降级） | `PainRewardAgent` | 关系退步/stage 降级 |
+| `TASK_SUCCESS` | `PrefrontalAgent`（任务完成关键词检测） | `PainRewardAgent` | 用户请求任务 + AI 完成回复 |
+| `HUMOR_LANDED` | `PrefrontalAgent`（幽默关键词检测） | `PainRewardAgent` | AI 回复包含笑声/幽默标记 |
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-27**（新增）：`PainRewardAgent` 状态持久化（跨会话保持 hedonic_state，避免重启后归零）
+3. **T-28**（新增）：`EndocrineAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响催产素/皮质醇）
