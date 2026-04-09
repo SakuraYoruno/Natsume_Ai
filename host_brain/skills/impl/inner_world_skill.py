@@ -89,6 +89,21 @@ def execute_inner_world_tick(
         })
     except Exception:
         pass
+    # T-93：孤独感超阈值时向 TribeEventBus 发布 LONELINESS_SIGNAL 事件
+    try:
+        from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+
+        _loneliness_val = result.get("loneliness")
+        if _loneliness_val is not None:
+            _loneliness_float = float(_loneliness_val)
+            # 阈值 0.5：超过此值即认为孤独感显著，触发事件
+            if _loneliness_float >= 0.5:
+                get_ans_agent().emit_loneliness_signal(
+                    loneliness=_loneliness_float,
+                    user_id=user_id,
+                )
+    except Exception:
+        pass
     return result
 
 

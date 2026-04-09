@@ -269,6 +269,7 @@ async def _unified_chat_sse_generator(
         # 闲聊路径：Airlock → LLM → 反思链 → Airlock → 异步后处理
         # 执行路径：顶级 Agent 调度子 Agent → 子 Agent 内部走治理
         from host_brain.app.top_agent import top_agent_sse_generator  # noqa: PLC0415
+        _chat_committed = False
         async for event in top_agent_sse_generator(
             request_body=request_body,
             request_id=request_id,
@@ -282,6 +283,22 @@ async def _unified_chat_sse_generator(
             metrics=metrics,
         ):
             yield event
+            # T-94：检测 COMMIT done=True，对话完成后发布 TASK_SUCCESS 事件
+            try:
+                _ev = json.loads(event[len("data: "):].strip()) if event.startswith("data: ") else {}
+                if _ev.get("phase") == "COMMIT" and _ev.get("done") and not _chat_committed:
+                    _chat_committed = True
+                    try:
+                        from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+                        get_ans_agent().emit_task_success(
+                            session_id=session_id,
+                            task_type="chat",
+                            intensity=0.35,
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     except Exception as exc:
         import traceback as _tb

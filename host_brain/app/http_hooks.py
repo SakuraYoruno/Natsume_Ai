@@ -1279,6 +1279,10 @@ def runtime_lifespan(
                 # SocialBrainAgent:  +IMMUNE_BLOCK(T-78) → 合计 6
                 # LimbicAgent:       +IMMUNE_BLOCK(T-79) → 合计 9
                 # 合计: 10+5+6+7+9+4+2+2+1 = 46 + PrefrontalAgent(T-71 IMMUNE_BLOCK) = 47
+                # T-88: CortexAgent +TASK_SUCCESS, T-85: HippocampusAgent +TASK_SUCCESS
+                # T-86: EndocrineAgent +IMMUNE_BLOCK, T-89: PainRewardAgent +HUMOR_LANDED
+                # T-91: SocialBrainAgent +HUMOR_LANDED → 合计 53（第十八批）
+                # T-93~T-101: skill 侧 emit 接入 + chat_context_builder 消费字段（第十九批，无新增订阅）
     _total_subscriptions = 53
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"

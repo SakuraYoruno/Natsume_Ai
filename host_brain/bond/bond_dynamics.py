@@ -232,6 +232,18 @@ class BondDynamicsWriter:
             detail="bond update applied",
             ts_ms=now_value,
         )
+        # T-96：积分增加时向 TribeEventBus 发布 BOND_PROGRESS 事件
+        if stage_transition is not None and stage_transition.score_delta > 0:
+            try:
+                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+                get_ans_agent().emit_bond_progress(
+                    delta=float(stage_transition.score_delta),
+                    reason=str(update_kind),
+                    bond_stage=str(stage_transition.to_stage or stage_transition.from_stage or ""),
+                )
+            except Exception as _bp_exc:
+                _logger.debug("emit_bond_progress 调用失败（非致命）: %s", _bp_exc)
+
         return BondUpdateResult(
             success=True,
             status=STATUS_OK,

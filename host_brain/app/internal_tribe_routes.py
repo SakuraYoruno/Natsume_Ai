@@ -285,6 +285,39 @@ async def list_tribe_state_namespaces(
         raise HTTPException(status_code=500, detail=f"TRIBE_STATE_NAMESPACES_FAILED: {exc}") from exc
 
 
+# ── T-101：TribeStateRegistry 轻量摘要端点 ───────────────────────────────────
+
+class TribeStateSummaryResponse(BaseModel):
+    total: int
+    summaries: list[dict[str, Any]]
+    ts_ms: int
+
+
+@router.get("/tribe_state/summary", response_model=TribeStateSummaryResponse)
+async def get_tribe_state_summary(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-101：返回 TribeStateRegistry 所有命名空间的轻量摘要。
+
+    每个命名空间仅返回 namespace/writer/updated_at_ms/state_keys，
+    不含完整状态数据，适合快速巡检和监控大盘使用。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        registry = get_global_registry()
+        summaries = registry.get_state_summary()
+        return TribeStateSummaryResponse(
+            total=len(summaries),
+            summaries=summaries,
+            ts_ms=now_ms(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TRIBE_STATE_SUMMARY_FAILED: {exc}") from exc
+
+
 # ── T-74：TribeStateRegistry 命名空间清除运维端点 ─────────────────────────────
 
 class TribeStateDeleteResponse(BaseModel):

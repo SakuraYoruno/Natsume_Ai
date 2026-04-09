@@ -132,6 +132,19 @@ def _execute_bond_update(payload: dict[str, Any], context: dict[str, Any] | None
 
     ctx = context or {}
 
+    # T-95：humor_landed 事件 → 向 TribeEventBus 发布 HUMOR_LANDED
+    if event_type == "humor_landed":
+        try:
+            from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+            _intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            get_ans_agent().emit_humor_landed(
+                humor_type=str(payload.get("humor_type") or "general"),
+                intensity=_intensity,
+            )
+            _logger.debug("emit_humor_landed: intensity=%.2f", _intensity)
+        except Exception as exc:
+            _logger.debug("emit_humor_landed 调用失败: %s", exc)
+
     # 通过 bond_update_queue 写入 Bond 事件
     bond_update_queue = ctx.get("bond_update_queue")
     if bond_update_queue is not None:

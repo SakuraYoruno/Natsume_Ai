@@ -2568,12 +2568,52 @@ def build_chat_prompt_runtime_payload(
         _voice_emotion = dict(_tribe_ctx.get("voice_emotion") or {})
         if _voice_emotion and _voice_emotion.get("emotion_tag"):
             runtime_payload.setdefault("voice_emotion_inference", _voice_emotion)
+        # T-97：消费 high_loneliness_flag，孤独感高时注入 loneliness_hint 供 prompt_builder 调整语气
+        _high_loneliness = bool(_vital_signs.get("high_loneliness_flag", False))
+        _loneliness_level = float(_vital_signs.get("loneliness_level") or 0.0)
+        if _high_loneliness:
+            runtime_payload["loneliness_hint"] = {
+                "high_loneliness": True,
+                "loneliness_level": round(_loneliness_level, 4),
+                "suggest": "主动关怀，增加陪伴感表达，避免冷漠或过于简短的回复",
+            }
+        else:
+            runtime_payload.setdefault("loneliness_hint", {
+                "high_loneliness": False,
+                "loneliness_level": round(_loneliness_level, 4),
+            })
+
+        # T-98：消费 bond_trend_hint，关系趋势影响话题选择和回复倾向
+        _bond_trend = str(_vital_signs.get("bond_trend_hint") or "").strip().lower()
+        if _bond_trend:
+            runtime_payload["bond_trend_hint"] = _bond_trend
+            # progress：关系升温，可适当增加亲密感表达
+            # regress_risk：关系面临退步风险，回复需更谨慎温和
+            if _bond_trend == "progress":
+                runtime_payload.setdefault("bond_tone_adjust", "warmer")
+            elif _bond_trend in ("regress_risk", "regress"):
+                runtime_payload.setdefault("bond_tone_adjust", "cautious")
+
+        # T-99：消费 immune_risk_level，免疫拦截状态影响 prompt 谨慎度
+        _immune_risk = str(_vital_signs.get("immune_risk_level") or "none").strip().lower()
+        _immune_block_count = int(_vital_signs.get("immune_block_count") or 0)
+        if _immune_risk in ("medium", "high", "critical") or _immune_block_count >= 3:
+            runtime_payload["immune_caution"] = {
+                "risk_level": _immune_risk,
+                "block_count": _immune_block_count,
+                "suggest": "当前会话存在内容风险，回复需更加谨慎，避免触碰敏感话题",
+            }
+
         logger.debug(
-            "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s",
+            "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
+            "high_loneliness=%s bond_trend=%s immune_risk=%s",
             _vital_signs.get("gate_state"),
             _tribe_route.get("route"),
             _voice_emotion.get("emotion_tag"),
             _hedonic_state.get("hedonic_tone"),
+            _high_loneliness,
+            _bond_trend,
+            _immune_risk,
         )
     except Exception as _cortex_exc:
         logger.debug("CortexAgent Supervisor 收口降级: %s", _cortex_exc)

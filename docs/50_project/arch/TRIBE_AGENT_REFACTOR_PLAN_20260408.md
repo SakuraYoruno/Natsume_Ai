@@ -3028,3 +3028,114 @@ BOND_PROGRESS / BOND_REGRESS
 8. **T-100**：`prompt_builder` 新增 `loneliness_hint` 注入，孤独感高时增加陪伴感表达
 9. **T-101**：`TribeStateRegistry` 新增 `get_state_summary()` 端点接入 `internal_tribe_routes`
 10. **T-102**：`http_hooks.py` 第十九批计数更新 + 文档留痕
+
+---
+
+## 第十九批开发留痕（T-93 ~ T-102）
+
+#### T-93：inner_world_skill 调用 emit_loneliness_signal() ✅
+
+- 修改 `host_brain/skills/impl/inner_world_skill.py` 的 `execute_inner_world_tick()`
+- 在 `emit_inner_world_ticked()` 之后，检测 `loneliness >= 0.5` 时调用 `get_ans_agent().emit_loneliness_signal()`
+- 阈值 0.5：超过此值即认为孤独感显著，触发 LONELINESS_SIGNAL 事件流向各族 Agent
+
+#### T-94：chat_handler 调用 emit_task_success() ✅
+
+- 修改 `host_brain/app/chat_handler.py` 的 `_unified_chat_sse_generator()`
+- 在 `top_agent_sse_generator` 迭代过程中，检测 `phase=COMMIT done=True` 时调用 `emit_task_success(session_id, task_type="chat", intensity=0.35)`
+- 使用 `_chat_committed` 标志防止重复触发
+
+#### T-95：emotion_executor 调用 emit_humor_landed() ✅
+
+- 修改 `host_brain/skills/impl/emotion_executor.py` 的 `_execute_bond_update()`
+- 当 `event_type == "humor_landed"` 时，调用 `get_ans_agent().emit_humor_landed(humor_type, intensity)`
+- 在写入 bond_update_queue 之前触发，确保事件先于积分更新
+
+#### T-96：bond_dynamics 调用 emit_bond_progress() ✅
+
+- 修改 `host_brain/bond/bond_dynamics.py` 的 `apply_update()`
+- 在 `BondStageEngine.apply_event()` 成功后，当 `score_delta > 0` 时调用 `get_ans_agent().emit_bond_progress(delta, reason, bond_stage)`
+- 非致命：emit 失败不影响 Bond 积分写入
+
+#### T-97：chat_context_builder 消费 high_loneliness_flag ✅
+
+- 修改 `host_brain/app/chat_context_builder.py` 的 CortexAgent Supervisor 收口段
+- 读取 `_vital_signs["high_loneliness_flag"]`，为 True 时注入 `runtime_payload["loneliness_hint"]`
+- 包含 `high_loneliness=True`、`loneliness_level`、`suggest="主动关怀，增加陪伴感表达"`
+
+#### T-98：chat_context_builder 消费 bond_trend_hint ✅
+
+- 同上，读取 `_vital_signs["bond_trend_hint"]`，注入 `runtime_payload["bond_trend_hint"]`
+- `progress` → `bond_tone_adjust="warmer"`；`regress_risk/regress` → `bond_tone_adjust="cautious"`
+
+#### T-99：chat_context_builder 消费 immune_risk_level ✅
+
+- 同上，读取 `_vital_signs["immune_risk_level"]` 和 `immune_block_count`
+- 当 risk_level 为 medium/high/critical 或 block_count >= 3 时，注入 `runtime_payload["immune_caution"]`
+- 包含 `risk_level`、`block_count`、`suggest="回复需更加谨慎，避免触碰敏感话题"`
+
+#### T-100：prompt_builder 新增 loneliness_hint 注入 ✅
+
+- 修改 `host_brain/app/prompt_builder.py` 的 Phase XIX tribe_vital_signs 注入区域
+- 在 `_tv_hedonic_active` 注入块之后，追加 `loneliness_hint` 消费块
+- `high_loneliness=True` 时注入 `tribe_loneliness_level` 和 `tribe_loneliness_suggest` 到 system prompt
+
+#### T-101：internal_tribe_routes 新增 GET /internal/tribe_state/summary ✅
+
+- 在 `host_brain/app/internal_tribe_routes.py` 中新增 `TribeStateSummaryResponse` 模型
+- 新增 `GET /internal/tribe_state/summary` 端点，调用 `registry.get_state_summary()`
+- 返回所有命名空间的轻量摘要（namespace/writer/updated_at_ms/state_keys），适合监控大盘
+
+#### T-102：http_hooks.py 第十九批更新 ✅
+
+- 订阅计数维持 53（第十九批为 skill 侧 emit 接入 + context 消费，无新增 Agent 订阅）
+- 补充注释说明 T-93~T-101 的 skill 侧接入情况
+
+---
+
+**第十九批订阅总览（53 个，无新增）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 11 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 5 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, LONELINESS_SIGNAL, IMMUNE_BLOCK, HUMOR_LANDED | 7 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, IMMUNE_BLOCK, LONELINESS_SIGNAL, TASK_SUCCESS | 8 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, LONELINESS_SIGNAL, TASK_SUCCESS, IMMUNE_BLOCK | 5 |
+| ImmuneAgent | INTERACTION_RECORDED, BOND_STAGE_CHANGED | 2 |
+| HippocampusAgent | INTERACTION_RECORDED, LONELINESS_SIGNAL, TASK_SUCCESS | 3 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+
+**第十九批新增 skill 侧 emit 接入**：
+
+| 文件 | emit 方法 | 触发条件 |
+|---|---|---|
+| `inner_world_skill.py` | `emit_loneliness_signal()` | loneliness >= 0.5 |
+| `chat_handler.py` | `emit_task_success()` | COMMIT done=True |
+| `emotion_executor.py` | `emit_humor_landed()` | event_type == "humor_landed" |
+| `bond_dynamics.py` | `emit_bond_progress()` | score_delta > 0 |
+
+**第十九批新增 context 消费字段**：
+
+| 字段 | 消费位置 | 作用 |
+|---|---|---|
+| `high_loneliness_flag` | chat_context_builder | 注入 loneliness_hint |
+| `bond_trend_hint` | chat_context_builder | 注入 bond_tone_adjust |
+| `immune_risk_level` | chat_context_builder | 注入 immune_caution |
+| `loneliness_hint` | prompt_builder | 注入 tribe_loneliness_suggest |
+
+---
+
+#### 下一步待开发（第二十批 T-103 ~ T-112）
+
+1. **T-103**：`LanguageSystemAgent` 骨架（Phase 5）：注册订阅 EMOTION_STATE_CHANGED / BOND_STAGE_CHANGED / LONELINESS_SIGNAL，管理语言风格状态
+2. **T-104**：`LanguageSystemAgent` 新增 `get_language_style()` 方法，根据 bond_stage / emotion_tag 返回语言风格建议
+3. **T-105**：`chat_context_builder` 接入 `LanguageSystemAgent.get_language_style()`，注入 `runtime_payload["language_style"]`
+4. **T-106**：`prompt_builder` 消费 `language_style`，影响回复的语气/措辞/句式选择
+5. **T-107**：`bond_tone_adjust` 在 `prompt_builder` 中消费，warmer/cautious 影响 prompt 语气指令
+6. **T-108**：`immune_caution` 在 `prompt_builder` 中消费，注入谨慎度提示到 system prompt
+7. **T-109**：`SomaticAgent` 骨架（躯干族 Phase 6 预备）：注册订阅 BODY_SENSE_UPDATED / LONELINESS_SIGNAL
+8. **T-110**：`PeripheralAgent` 骨架（躯干族 Phase 6 预备）：注册订阅 EMOTION_STATE_CHANGED / IMMUNE_BLOCK
+9. **T-111**：`TribeStateRegistry` 新增 `export_snapshot()` 方法，支持完整快照导出为 JSON 文件
+10. **T-112**：`http_hooks.py` 第二十批计数更新 + 文档留痕

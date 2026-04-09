@@ -1734,6 +1734,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             if _tv_active else
             ""
         )
+        # ── T-100：孤独感提示（loneliness_hint，高孤独感时增加陪伴感表达）────
+        + (
+            lambda _lh=runtime_payload.get("loneliness_hint") or prompt_context.get("loneliness_hint"): (
+                f"- tribe_loneliness_level: {float((_lh or {}).get('loneliness_level') or 0.0):.2f}\n"
+                f"- tribe_loneliness_suggest: {str((_lh or {}).get('suggest') or '主动关怀，增加陪伴感表达')}\n"
+                if isinstance(_lh, dict) and bool((_lh or {}).get("high_loneliness")) else ""
+            )
+        )()
         # ── v1.12：身体感知（疲劳/困倦/孤独）────────────────────────────
         + (
             f"- fatigue_level: {_bs_fatigue_level}\n"
