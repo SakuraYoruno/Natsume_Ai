@@ -3580,5 +3580,96 @@ edge_client                          host_brain
 |---|---|---|---|
 | `StyleCanonStore` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_style_canon()` | ✅ T-143 |
 | `emergent_growth_engine` | `_get_growth_engine()` 直接调用 | `PrefrontalAgent._get_emergent_growth_engine()` | ✅ T-144 |
-| `BondNarrativeLayer` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_bond_narrative()` | ✅ T-150（接口就绪，调用方改造待下批） |
-| `SharedMemoryIndex` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_shared_memory_index()` | ✅ T-151（接口就绪，调用方改造待下批） |
+| `BondNarrativeLayer` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_bond_narrative()` | ✅ T-150/T-153 已完成 |
+| `SharedMemoryIndex` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_shared_memory_index()` | ✅ T-151 已完成 |
+
+---
+
+## 第二十四批实现记录（T-153 ~ T-162）
+
+**目标**：Phase 5 收口补完 + 新增族化入口（MilestoneTracker / BondUserId）+ 联动链路完善。
+
+### 已完成任务
+
+#### T-153：chat_context_builder.py BondNarrativeLayer 直接调用改为族化接口 ✅
+
+- 修改 `host_brain/app/chat_context_builder.py` 第 2349 行附近的 BondNarrativeLayer 接入块
+- 移除 `BondNarrativeLayer` / `SharedMemoryIndex` / `MilestoneTracker` 三个直接 import
+- 改为通过 `SocialBrainAgent.resolve_bond_narrative(user_id, bond_stage)` 族化调用
+- 从返回结果的 `prompt_slot` 字段读取 bond_narrative 注入 runtime_payload
+- Phase 5 收口：chat_context_builder 不再直接实例化 Bond 相关模块
+
+#### T-154：ImmuneAgent inspect_from_governor() ✅（T-145 已实现，本批确认）
+
+- `inspect_from_governor(input_snapshot, source)` 封装 `evaluate_governor_gates()` 调用
+- REJECT 时同步 ImmuneAgent 计数器并发布 `IMMUNE_BLOCK` 事件
+- ImmuneAgent 作为 governor 规则门的统一调用入口
+
+#### T-155：ImmuneAgent inspect_from_airlock() ✅（T-146 已实现，本批确认）
+
+- `inspect_from_airlock(text, channel, source)` 封装 `filter_pii_ingress/egress()` 调用
+- block 模式下同步 ImmuneAgent 计数器并发布 `IMMUNE_BLOCK` 事件
+- ImmuneAgent 作为 airlock PII 过滤的统一调用入口
+
+#### T-156：ImmuneAgent register_runtime_rule() ✅（T-147 已实现，本批确认）
+
+- `register_runtime_rule(rule_id, pattern, reason_code, score, flags, source)` 运行时动态注册规则
+- 规则存入 `_template_rules_cache`，支持去重覆盖，缓存永不过期
+- 增强免疫系统可扩展性，无需重启即可添加新检测规则
+
+#### T-157：ANSAgent emit_inner_world_ticked() bond_stage 注入完善 ✅（T-148 已实现，本批确认）
+
+- `emit_inner_world_ticked()` 已在 T-148 中完整实现 bond_stage 注入到 proactive_voice context
+- 触发条件：`proactive_voice_eligible=True` 或 `loneliness > 0.5 且 bond_stage != stranger`
+- 语音管线活跃时（`_voice_active=True`）自动跳过，避免打断语音
+
+#### T-158：LimbicAgent _on_interaction_recorded_metabolism() ✅（T-149 已实现，本批确认）
+
+- `_on_interaction_recorded_metabolism()` 处理 `INTERACTION_RECORDED` 事件
+- 调用 `drive_emotion_metabolism_from_interaction(emotion_tag, valence, arousal)` 驱动情绪代谢
+- 每轮对话结束后自动将对话情绪信号融入情绪状态（blend_weight=0.3）
+
+#### T-159：SocialBrainAgent resolve_milestone_tracker() ✅
+
+- 新增 `resolve_milestone_tracker(user_id, event_type, ts_ms, metadata)` 方法
+- 封装 `MilestoneTracker.on_event()` 调用，SocialBrainAgent 作为里程碑检测唯一入口
+- 支持纯查询模式（event_type=None）和事件触发模式
+- 新里程碑达成时写入 `last_milestone_achieved` 快照
+
+#### T-160：HippocampusAgent resolve_bond_user_id() ✅
+
+- 新增 `resolve_bond_user_id(fallback)` 方法
+- 封装 `get_canonical_bond_user_id()` 调用，HippocampusAgent 作为 Bond 用户 ID 唯一解析入口
+- 解析失败时降级返回 fallback（默认 "user_1"）
+
+#### T-161：LimbicAgent 订阅 INTERACTION_RECORDED 事件 ✅（T-149 已实现，本批确认）
+
+- `register_subscriptions()` 中已新增 `bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded_metabolism)`
+- LimbicAgent 订阅总数从 11 增加到 12
+
+#### T-162：规划文档第二十四批留痕 ✅
+
+- 更新七、模块归属决策表中 BondNarrativeLayer/SharedMemoryIndex 的实现状态
+- 新增本章第二十四批开发留痕
+
+---
+
+**第二十四批新增能力总览**：
+
+| 能力 | 归属 Agent | 封装模块 | 说明 |
+|---|---|---|---|
+| `chat_context_builder` BondNarrativeLayer 改造 | SocialBrainAgent | `resolve_bond_narrative()` | Phase 5 收口：不再直接实例化 BondNarrativeLayer |
+| `resolve_milestone_tracker()` | SocialBrainAgent | `MilestoneTracker.on_event()` | milestone_tracker 族化入口 |
+| `resolve_bond_user_id()` | HippocampusAgent | `get_canonical_bond_user_id()` | user_identity 族化入口 |
+| `_on_interaction_recorded_metabolism()` | LimbicAgent | `drive_emotion_metabolism_from_interaction()` | INTERACTION_RECORDED → 情绪代谢联动 |
+
+**Phase 5 收口最终进度**：
+
+| 模块 | 原调用方式 | 改造后 | 状态 |
+|---|---|---|---|
+| `StyleCanonStore` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_style_canon()` | ✅ T-143 |
+| `emergent_growth_engine` | `_get_growth_engine()` 直接调用 | `PrefrontalAgent._get_emergent_growth_engine()` | ✅ T-144 |
+| `BondNarrativeLayer` | `chat_context_builder.py` 直接实例化 | `SocialBrainAgent.resolve_bond_narrative()` | ✅ T-153 |
+| `SharedMemoryIndex` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_shared_memory_index()` | ✅ T-151 |
+| `MilestoneTracker` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_milestone_tracker()` | ✅ T-159 |
+| `get_canonical_bond_user_id()` | 多处直接调用 | `HippocampusAgent.resolve_bond_user_id()` | ✅ T-160 |

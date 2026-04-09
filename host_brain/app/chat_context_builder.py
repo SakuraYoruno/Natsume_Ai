@@ -2347,39 +2347,29 @@ def build_chat_prompt_runtime_payload(
         logger.debug("SelfReflection 接入降级: %s", _sr_exc)
 
     # ── P1-FIX：接入 BondNarrativeLayer ──────────────────────────────────
+    # T-153: 改为通过 SocialBrainAgent.resolve_bond_narrative() 族化调用，
+    # 不再直接实例化 BondNarrativeLayer / SharedMemoryIndex / MilestoneTracker
     # prompt_builder 通过 runtime_payload.get("bond_narrative") 读取
     try:
-        from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
-        from host_brain.bond.shared_memory_index import SharedMemoryIndex  # noqa: PLC0415
-        from host_brain.bond.milestone_tracker import MilestoneTracker  # noqa: PLC0415
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
         _user_id_bn = get_canonical_bond_user_id()
-        # 获取 bond_stage（复用上面已计算的值如果可用）
-        _bn_stage = runtime_payload.get("persona_expression_hint", {})
         _bn_bond_stage = "STRANGER"
         try:
-            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-
             _bn_bond_stage = get_social_brain_agent().resolve_bond_stage(
                 person_id=_user_id_bn,
                 default="STRANGER",
             )
         except Exception:
             pass
-        # 尝试获取 SharedMemoryIndex 和 MilestoneTracker
-        _smi = None
-        _mt = None
-        try:
-            from host_brain.app.dependencies import get_shared_memory_index, get_milestone_tracker  # noqa: PLC0415
-            _smi = get_shared_memory_index()
-            _mt = get_milestone_tracker()
-        except (ImportError, AttributeError):
-            pass
-        if _smi is not None or _mt is not None:
-            _bnl = BondNarrativeLayer(memory_index=_smi, milestone_tracker=_mt)
-            _bn_result = _bnl.build_narrative(user_id=_user_id_bn, bond_stage=_bn_bond_stage)
-            _bn_slot = _bn_result.to_prompt_slot()
-            if _bn_slot:
-                runtime_payload["bond_narrative"] = _bn_slot
+        # T-153: 通过族化接口获取 bond_narrative，内部封装 BondNarrativeLayer 构建逻辑
+        _bn_result = get_social_brain_agent().resolve_bond_narrative(
+            user_id=_user_id_bn,
+            bond_stage=_bn_bond_stage,
+        )
+        _bn_slot = _bn_result.get("prompt_slot") if isinstance(_bn_result, dict) else None
+        if _bn_slot:
+            runtime_payload["bond_narrative"] = _bn_slot
     except (ImportError, AttributeError, Exception) as _bn_exc:
         logger.debug("BondNarrativeLayer 接入降级: %s", _bn_exc)
 

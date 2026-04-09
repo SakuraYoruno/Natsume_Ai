@@ -801,6 +801,91 @@ class SocialBrainAgent:
             return {"status": "ERROR", "entries": [], "error": str(exc)}
 
 
+    # ── T-159：milestone_tracker 族化入口 ────────────────────────────────────
+
+    def resolve_milestone_tracker(
+        self,
+        *,
+        user_id: str = "user_1",
+        event_type: str | None = None,
+        ts_ms: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """T-159：触发里程碑检测，将 MilestoneTracker 族化到 SocialBrainAgent。
+
+        SocialBrainAgent 作为里程碑检测的唯一调用入口，封装
+        `MilestoneTracker.on_event()` 调用。
+
+        Args:
+            user_id: 用户 ID，默认 "user_1"。
+            event_type: Bond 事件类型（如 "INTERACTION_DEEP"/"STAGE_PROMOTED" 等），
+                        None 时仅查询已达成里程碑，不触发新检测。
+            ts_ms: 时间戳（毫秒），None 使用当前时间。
+            metadata: 额外信息（如 from_stage/to_stage），可选。
+
+        Returns:
+            {"status": "OK", "new_milestones": list, "achieved_count": int}
+        """
+        try:
+            from host_brain.app.dependencies import get_milestone_tracker  # noqa: PLC0415
+            from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
+
+            tracker = get_milestone_tracker()
+            if tracker is None:
+                return {"status": "NO_TRACKER", "new_milestones": [], "achieved_count": 0}
+
+            resolved_ts = int(ts_ms or _now_ms())
+            new_milestones: list[dict[str, Any]] = []
+
+            if event_type is not None:
+                raw_milestones = tracker.on_event(
+                    user_id=str(user_id or "user_1"),
+                    event_type=str(event_type or "").strip().upper(),
+                    ts_ms=resolved_ts,
+                    metadata=dict(metadata or {}),
+                )
+                new_milestones = [
+                    m.to_dict() if hasattr(m, "to_dict") else {"milestone_id": str(m)}
+                    for m in (raw_milestones or [])
+                ]
+
+            # 查询已达成里程碑总数
+            achieved_count = 0
+            if hasattr(tracker, "get_achieved"):
+                achieved_count = len(tracker.get_achieved(str(user_id or "user_1")) or [])
+
+            result = {
+                "status": "OK",
+                "user_id": str(user_id or "user_1"),
+                "new_milestones": new_milestones,
+                "new_milestone_count": len(new_milestones),
+                "achieved_count": achieved_count,
+                "event_type": str(event_type or ""),
+                "ts_ms": resolved_ts,
+            }
+            if new_milestones:
+                self._touch_state(
+                    key="last_milestone_achieved",
+                    value={
+                        "user_id": str(user_id or "user_1"),
+                        "new_milestones": [m.get("milestone_id") for m in new_milestones],
+                        "ts_ms": resolved_ts,
+                    },
+                )
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").debug(
+                "SocialBrainAgent.resolve_milestone_tracker: user=%s event=%s new=%d",
+                user_id, event_type, len(new_milestones),
+            )
+            return result
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent.resolve_milestone_tracker 失败（降级）: %s", exc
+            )
+            return {"status": "ERROR", "new_milestones": [], "achieved_count": 0, "error": str(exc)}
+
+
 _SOCIAL_BRAIN_AGENT: SocialBrainAgent | None = None
 
 

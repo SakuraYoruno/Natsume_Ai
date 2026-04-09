@@ -311,6 +311,38 @@ class HippocampusAgent:
             pass
 
 
+    # ── T-160：user_identity 族化入口 ────────────────────────────────────────
+
+    def resolve_bond_user_id(
+        self,
+        *,
+        fallback: str = "user_1",
+    ) -> str:
+        """T-160：获取规范化 Bond 用户 ID，将 user_identity 族化到 HippocampusAgent。
+
+        HippocampusAgent 作为 Bond 用户 ID 的唯一解析入口，封装
+        `get_canonical_bond_user_id()` 调用，确保用户 ID 解析逻辑不散落在
+        chat_context_builder 等模块中。
+
+        Args:
+            fallback: 解析失败时的降级值，默认 "user_1"。
+
+        Returns:
+            规范化 Bond 用户 ID 字符串。
+        """
+        try:
+            from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+
+            uid = get_canonical_bond_user_id()
+            return str(uid or fallback).strip() or str(fallback)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.hippocampus_agent").debug(
+                "HippocampusAgent.resolve_bond_user_id 失败（降级）: %s", exc
+            )
+            return str(fallback or "user_1")
+
+
 _HIPPOCAMPUS_AGENT: HippocampusAgent | None = None
 
 
