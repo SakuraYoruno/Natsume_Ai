@@ -2643,10 +2643,307 @@ BOND_PROGRESS / BOND_REGRESS
 
 ---
 
-#### 下一步待开发
+---
 
-1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
-2. **T-43**（新增）：`ANSAgent` 发布 `LONELINESS_SIGNAL` 事件（inner_world_skill 检测到高孤独感时）
-3. **T-44**（新增）：`TribeStateRegistry.aggregate_vital_signs()` 补充 `immune_state` 字段（block_rate/last_risk_level）
-4. **T-45**（新增）：`CortexAgent.route_intent()` 接入 `bond_trend` 快照（关系退步时提高 throttle 阈值）
-5. **T-46**（新增）：`chat_context_builder.py` 接入 `immune_state` 字段（安全状态影响 prompt 构建）
+### 第十四批（T-43 ~ T-52）✅ commit: c80e153
+
+#### T-43：ANSAgent.emit_inner_world_ticked() 携带 bond_stage 字段 ✅
+
+- `emit_inner_world_ticked()` payload 新增 `bond_stage` 字段
+- 供调度器动态调整 tick 间隔（关系越深，tick 越频繁）
+
+#### T-44：ImmuneAgent.export_runtime_state() 补充字段 ✅
+
+- 新增 `risk_level`、`block_rate`、`last_decision` 字段
+- 供诊断端点返回更完整的免疫运行时状态
+
+#### T-45：InMemoryTribeEventBus 新增 publish_batch() ✅
+
+- 批量发布接口，减少高频场景锁竞争
+- 支持一次调用发布多个事件，内部顺序 dispatch
+
+#### T-46：aggregate_vital_signs() 补充 immune 字段 ✅
+
+- 新增 `immune_block_count`、`immune_block_rate`、`immune_risk_level` 三个字段
+- 从 `immune_agent` 命名空间快照读取，供 chat_context_builder 参考安全状态
+
+#### T-47：PrefrontalAgent 订阅 LONELINESS_SIGNAL ✅
+
+- `register_subscriptions()` 追加 `LONELINESS_SIGNAL` → `_on_loneliness_signal`
+- 孤独感 > 0.6 触发演化周期，> 0.8 触发 milestone 成长节点
+
+#### T-48：SocialBrainAgent 订阅 TASK_SUCCESS ✅
+
+- `register_subscriptions()` 追加 `TASK_SUCCESS` → `_on_task_success`
+- 任务成功写入 `bond_trend_hint=progress` 快照，供 prompt 构建参考
+
+#### T-49：HippocampusAgent.recall() 注入 immune_state ✅
+
+- `recall()` 将 `immune_state` 注入 `session_state`
+- 供检索时参考当前安全状态，避免在高风险状态下召回敏感记忆
+
+#### T-50：TribeStateRegistry 新增 get_state_by_family() ✅
+
+- 按族批量查询方法，返回指定 family 下所有命名空间快照
+- 供 `/internal/tribe_state/family/{family}` 端点使用
+
+#### T-51：LimbicAgent 订阅 LONELINESS_SIGNAL ✅
+
+- `register_subscriptions()` 追加 `LONELINESS_SIGNAL` → `_on_loneliness_signal_emotion`
+- 孤独感 > 0.5 触发情绪效价下降（-0.03 ~ -0.06），写入 EmotionPersistence
+
+#### T-52：http_hooks.py 第十四批更新 ✅
+
+- 新增 `register_all_subscriptions()` 统一注册入口
+- subscriptions 计数：20 → 33（新增 13 个订阅）
+
+---
+
+**第十四批订阅总览（33 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, **LONELINESS_SIGNAL** | 10 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, **LONELINESS_SIGNAL** | 4 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, **TASK_SUCCESS** | 4 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS | 5 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS | 2 |
+| ImmuneAgent | INTERACTION_RECORDED | 1 |
+| HippocampusAgent | INTERACTION_RECORDED | 1 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+
+---
+
+### 第十五批（T-53 ~ T-62）✅ commit: 9549cac
+
+#### T-53：ANSAgent 新增 emit_loneliness_signal() ✅
+
+- 新增 `emit_loneliness_signal()` 方法，供 `inner_world_skill` 检测高孤独感时调用
+- payload 包含 `loneliness`、`user_id`、`session_id`、`bond_stage` 字段
+- 孤独感值 clamp 到 [0.0, 1.0]
+
+#### T-54：CortexAgent.collect_tribe_context() 补充 bond_trend_hint ✅
+
+- 从 `social_brain_agent` 命名空间快照读取 `bond_trend_hint`
+- 注入 tribe_context，供 prompt 构建时参考关系趋势
+
+#### T-55：internal_tribe_routes 新增按族诊断端点 ✅
+
+- 新增 `GET /internal/tribe_state/family/{family}` 端点
+- 返回指定族（如 `cognitive`/`emotional`/`social`）下所有命名空间快照
+- 支持 `X-Internal-Token` 鉴权
+
+#### T-56：InMemoryTribeEventBus 新增 unsubscribe() ✅
+
+- 支持动态取消订阅，传入事件类型和 handler 引用
+- 线程安全，使用 `_lock` 保护订阅列表
+
+#### T-57：EndocrineAgent 订阅 LONELINESS_SIGNAL ✅
+
+- `register_subscriptions()` 追加 `LONELINESS_SIGNAL` → `_on_loneliness_signal`
+- 孤独感 > 0.5 触发 cortisol 轻微上升，上限 +0.06（避免单次事件过度影响）
+
+#### T-58：CortexAgent 订阅 IMMUNE_BLOCK ✅
+
+- `register_subscriptions()` 追加 `IMMUNE_BLOCK` → `_on_immune_block`
+- 拦截时写入 `cortex_agent` 快照：`last_immune_block_reason`、`last_immune_block_ts_ms`、`last_immune_risk_level`
+
+#### T-59：aggregate_vital_signs() 补充 bond_trend_hint ✅
+
+- 从 `social_brain_agent` 命名空间读取 `bond_trend_hint`
+- 写入 `aggregate_vital_signs()` 返回值，供 chat_context_builder 参考
+
+#### T-60：SocialBrainAgent 订阅 LONELINESS_SIGNAL ✅
+
+- `register_subscriptions()` 追加 `LONELINESS_SIGNAL` → `_on_loneliness_signal`
+- 孤独感 > 0.6 写入 `regress_risk`/`high_loneliness` hint，供关系管理参考
+
+#### T-61：HippocampusAgent 订阅 LONELINESS_SIGNAL ✅
+
+- `register_subscriptions()` 追加 `LONELINESS_SIGNAL` → `_on_loneliness_signal`
+- 写入 `last_loneliness_level`、`ts_ms`、`bond_stage` 快照到 TribeStateRegistry
+
+#### T-62：http_hooks.py 第十五批更新 ✅
+
+- subscriptions 计数：33 → 39（新增 6 个订阅）
+- 新增：EndocrineAgent(LONELINESS_SIGNAL)、CortexAgent(IMMUNE_BLOCK)、SocialBrainAgent(LONELINESS_SIGNAL)、HippocampusAgent(LONELINESS_SIGNAL)
+
+---
+
+**第十五批订阅总览（39 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 10 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL | 4 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, **LONELINESS_SIGNAL** | 5 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, **IMMUNE_BLOCK** | 6 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, **LONELINESS_SIGNAL** | 3 |
+| ImmuneAgent | INTERACTION_RECORDED | 1 |
+| HippocampusAgent | INTERACTION_RECORDED, **LONELINESS_SIGNAL** | 2 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+
+---
+
+### 第十六批（T-63 ~ T-72）✅ commit: 874a01d
+
+#### T-63：ANSAgent 新增 emit_task_success() ✅
+
+- 新增 `emit_task_success()` 方法，供 skill 完成任务时发布 `TASK_SUCCESS` 事件
+- payload 包含 `task_type`、`intensity`、`user_id`、`session_id`、`bond_stage` 字段
+- intensity clamp 到 [0.0, 1.0]，默认 0.35
+
+#### T-64：PainRewardAgent 新增 get_loneliness_level() ✅
+
+- 新增 `get_loneliness_level()` 方法，返回当前孤独感强度（0.0 ~ 1.0）
+- 从内部状态读取 `last_loneliness_level`，线程安全
+
+#### T-65：CortexAgent 订阅 LONELINESS_SIGNAL ✅
+
+- `register_subscriptions()` 追加 `LONELINESS_SIGNAL` → `_on_loneliness_signal`
+- 写入 `last_loneliness_level`、`high_loneliness_flag` 到 `cortex_agent` 快照
+
+#### T-66：TribeEventBus 新增 get_subscriber_count() ✅
+
+- 新增 `get_subscriber_count()` 方法，返回各事件类型的订阅数量字典
+- 线程安全，供诊断端点查询
+
+#### T-67：internal_tribe_routes 新增订阅诊断端点 ✅
+
+- 新增 `GET /internal/tribe_event/subscribers` 端点
+- 返回各事件类型订阅数量，支持 `X-Internal-Token` 鉴权
+
+#### T-68：ImmuneAgent 新增 reset_counters() ✅
+
+- 新增 `reset_counters()` 方法，支持运维手动重置计数器
+- 返回重置前的计数器快照（`counters_before_reset`、`block_rate_before_reset`、`reset_at_ms`）
+
+#### T-69：EndocrineAgent 订阅 TASK_SUCCESS ✅
+
+- `register_subscriptions()` 追加 `TASK_SUCCESS` → `_on_task_success`
+- 任务成功触发 cortisol 轻微下降，上限 -0.05（成就感带来的压力释放）
+
+#### T-70：TribeStateRegistry 新增 clear_namespace() ✅
+
+- 新增 `clear_namespace(namespace)` 方法，支持运维清除单个命名空间
+- 线程安全，清除后从 `_states` 字典中移除对应键
+
+#### T-71：PrefrontalAgent 订阅 IMMUNE_BLOCK ✅
+
+- `register_subscriptions()` 追加 `IMMUNE_BLOCK` → `_on_immune_block`
+- 高风险拦截时触发安全审查成长周期（`safety_review` milestone）
+
+#### T-72：http_hooks.py 第十六批更新 ✅
+
+- subscriptions 计数：39 → 42（新增 3 个订阅）
+- 新增：CortexAgent(LONELINESS_SIGNAL)、EndocrineAgent(TASK_SUCCESS)、PrefrontalAgent(IMMUNE_BLOCK)
+
+---
+
+**第十六批订阅总览（42 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 10 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL, **IMMUNE_BLOCK** | 5 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, LONELINESS_SIGNAL | 5 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, IMMUNE_BLOCK, **LONELINESS_SIGNAL** | 7 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, LONELINESS_SIGNAL, **TASK_SUCCESS** | 4 |
+| ImmuneAgent | INTERACTION_RECORDED | 1 |
+| HippocampusAgent | INTERACTION_RECORDED, LONELINESS_SIGNAL | 2 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+
+---
+
+### 第十七批（T-73 ~ T-82）✅ commit: 8dd57b4
+
+#### T-73：internal_tribe_routes 新增 POST /internal/immune/reset ✅
+
+- 新增 `POST /internal/immune/reset` 运维重置端点
+- 调用 `ImmuneAgent.reset_counters()`，返回重置前快照（`counters_before_reset`/`block_rate_before_reset`/`reset_at_ms`）
+- 支持 `X-Internal-Token` 鉴权
+
+#### T-74：internal_tribe_routes 新增 DELETE /internal/tribe_state/{namespace} ✅
+
+- 新增 `DELETE /internal/tribe_state/{namespace}` 清除命名空间端点
+- 调用 `TribeStateRegistry.clear_namespace()`，返回被清除的命名空间名称和时间戳
+- 支持 `X-Internal-Token` 鉴权
+
+#### T-75：ANSAgent 新增 emit_humor_landed() ✅
+
+- 新增 `emit_humor_landed()` 方法，供 skill 幽默成功时发布 `HUMOR_LANDED` 事件
+- payload 包含 `humor_type`、`intensity`、`user_id`、`session_id`、`bond_stage` 字段
+
+#### T-76：CortexAgent.collect_tribe_context() 补充 loneliness_level ✅
+
+- 从 `pain_reward_agent` 命名空间快照读取 `last_loneliness_level`
+- 注入 tribe_context，供 prompt 构建时参考孤独感状态
+
+#### T-77：TribeStateRegistry 新增 list_namespaces() ✅
+
+- 新增 `list_namespaces()` 方法，返回所有已注册命名空间名称列表（`list[str]`）
+- 线程安全，供诊断端点和 `get_state_summary()` 使用
+
+#### T-78：SocialBrainAgent 订阅 IMMUNE_BLOCK ✅
+
+- `register_subscriptions()` 追加 `IMMUNE_BLOCK` → `_on_immune_block`
+- 拦截时将 `bond_trend_hint` 设为 `regress_risk`，写入 `social_brain_agent` 快照
+
+#### T-79：LimbicAgent 订阅 IMMUNE_BLOCK ✅
+
+- `register_subscriptions()` 追加 `IMMUNE_BLOCK` → `_on_immune_block_emotion`
+- 拦截时触发轻微负面情绪偏置（valence -0.02 ~ -0.04），写入 EmotionPersistence
+
+#### T-80：aggregate_vital_signs() 补充 loneliness_level ✅
+
+- 从 `pain_reward_agent` 命名空间读取 `last_loneliness_level`
+- 写入 `aggregate_vital_signs()` 返回值，供 chat_context_builder 参考孤独感状态
+
+#### T-81：ImmuneAgent 订阅 BOND_STAGE_CHANGED ✅
+
+- `register_subscriptions()` 追加 `BOND_STAGE_CHANGED` → `_on_bond_stage_changed_immune`
+- 关系阶段跃迁时动态调整拦截阈值：
+  - stranger/acquaintance：0.55（默认）
+  - friend：0.60
+  - close_friend：0.65
+  - intimate：0.70（high/critical 风险始终拦截）
+- 阈值变更写入 `immune_agent` 快照（`bond_stage`/`bond_stage_threshold`）
+
+#### T-82：http_hooks.py 第十七批更新 ✅
+
+- subscriptions 计数：42 → 47（新增 5 个订阅）
+- 新增：SocialBrainAgent(IMMUNE_BLOCK)、LimbicAgent(IMMUNE_BLOCK)、ImmuneAgent(BOND_STAGE_CHANGED)、ANSAgent emit 方法扩展
+
+---
+
+**第十七批订阅总览（47 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL, **IMMUNE_BLOCK** | 11 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 5 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, LONELINESS_SIGNAL, **IMMUNE_BLOCK** | 6 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, IMMUNE_BLOCK, LONELINESS_SIGNAL | 7 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, LONELINESS_SIGNAL, TASK_SUCCESS | 4 |
+| ImmuneAgent | INTERACTION_RECORDED, **BOND_STAGE_CHANGED** | 2 |
+| HippocampusAgent | INTERACTION_RECORDED, LONELINESS_SIGNAL | 2 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+
+---
+
+#### 下一步待开发（第十八批 T-83 ~ T-92）
+
+1. **T-83**：`internal_tribe_routes` 新增 `GET /internal/tribe_state/namespaces` 命名空间列表端点
+2. **T-84**：`ANSAgent` 新增 `emit_bond_progress()` 方法，供 skill 触发关系进展事件
+3. **T-85**：`HippocampusAgent` 订阅 `TASK_SUCCESS`，将任务成功写入快照
+4. **T-86**：`EndocrineAgent` 订阅 `IMMUNE_BLOCK`，拦截时 cortisol 轻微上升
+5. **T-87**：`TribeStateRegistry` 新增 `get_state_summary()`，返回所有命名空间的轻量摘要
+6. **T-88**：`CortexAgent` 订阅 `TASK_SUCCESS`，将任务成功写入 `cortex_agent` 快照
+7. **T-89**：`PainRewardAgent` 订阅 `HUMOR_LANDED`，幽默成功记录奖励
+8. **T-90**：`aggregate_vital_signs()` 补充 `high_loneliness_flag` 字段
+9. **T-91**：`SocialBrainAgent` 订阅 `HUMOR_LANDED`，幽默成功时 `bond_trend_hint` 设为 `progress`
+10. **T-92**：`http_hooks.py` 第十八批计数更新 + 文档留痕
