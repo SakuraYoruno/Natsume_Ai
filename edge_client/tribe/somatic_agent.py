@@ -141,6 +141,175 @@ class SomaticAgent:
             payload=payload,
         )
 
+    # ── T-164：下行指令统一入口 ───────────────────────────────────────────────
+
+    def handle_tribe_command(self, command: dict[str, Any]) -> dict[str, Any]:
+        """T-164：处理来自 host_brain 的下行 Tribe 指令，统一分发到对应处理方法。
+
+        由 EdgeTribeBridge.receive_command() 调用，根据 command_type 路由到：
+        - "emotion_state"  → on_emotion_state_command()（情绪表情驱动）
+        - "expression_set" → on_expression_set_command()（直接设置表情参数）
+        - "vts_hotkey"     → on_vts_hotkey_command()（触发 VTS 热键）
+
+        Args:
+            command: {
+                "command_type": str,   # 指令类型
+                "payload": dict,       # 指令载荷
+                "command_id": str,     # 指令 ID（调试用）
+                "source_agent": str,   # 来源 Agent
+            }
+
+        Returns:
+            {"ok": bool, "command_type": str, "command_id": str, "reason": str|None}
+        """
+        command_type = str(command.get("command_type") or "").strip().lower()
+        payload = dict(command.get("payload") or {})
+        command_id = str(command.get("command_id") or "").strip()
+        source_agent = str(command.get("source_agent") or "host_brain").strip()
+
+        _log.debug(
+            "SomaticAgent.handle_tribe_command: type=%s id=%s source=%s",
+            command_type, command_id, source_agent,
+        )
+
+        try:
+            if command_type == "emotion_state":
+                result = self.on_emotion_state_command(payload)
+            elif command_type == "expression_set":
+                result = self.on_expression_set_command(payload)
+            elif command_type == "vts_hotkey":
+                result = self.on_vts_hotkey_command(payload)
+            else:
+                _log.warning(
+                    "SomaticAgent.handle_tribe_command: 未知指令类型 command_type=%s", command_type
+                )
+                return {
+                    "ok": False,
+                    "command_type": command_type,
+                    "command_id": command_id,
+                    "reason": f"UNKNOWN_COMMAND_TYPE:{command_type}",
+                }
+            return {
+                "ok": bool(result.get("ok", True)),
+                "command_type": command_type,
+                "command_id": command_id,
+                "reason": result.get("reason"),
+            }
+        except Exception as exc:
+            _log.warning("SomaticAgent.handle_tribe_command 异常: %s", exc)
+            return {
+                "ok": False,
+                "command_type": command_type,
+                "command_id": command_id,
+                "reason": str(exc),
+            }
+
+    def on_expression_set_command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """T-164：直接设置 VTS 表情参数（精细控制）。
+
+        Args:
+            payload: {
+                "parameter_id": str,   # VTS 参数 ID
+                "value": float,        # 参数值
+                "weight": float|None,  # 混合权重（可选）
+            }
+
+        Returns:
+            {"ok": bool, "reason": str|None}
+        """
+        try:
+            driver = self.vts_driver
+            if driver is None:
+                return {"ok": False, "reason": "VTS_DRIVER_UNAVAILABLE"}
+            parameter_id = str(payload.get("parameter_id") or "").strip()
+            value = float(payload.get("value") or 0.0)
+            weight = payload.get("weight")
+            if not parameter_id:
+                return {"ok": False, "reason": "MISSING_PARAMETER_ID"}
+            if weight is not None and hasattr(driver, "set_parameter"):
+                driver.set_parameter(parameter_id, value=value, weight=float(weight))
+            elif hasattr(driver, "set_parameter"):
+                driver.set_parameter(parameter_id, value=value)
+            _log.debug(
+                "SomaticAgent.on_expression_set_command: param=%s value=%.3f", parameter_id, value
+            )
+            return {"ok": True, "reason": None}
+        except Exception as exc:
+            _log.warning("SomaticAgent.on_expression_set_command 异常: %s", exc)
+            return {"ok": False, "reason": str(exc)}
+
+    def on_vts_hotkey_command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """T-164：触发 VTubeStudio 热键。
+
+        Args:
+            payload: {
+                "hotkey_id": str,   # 热键 ID
+            }
+
+        Returns:
+            {"ok": bool, "reason": str|None}
+        """
+        try:
+            driver = self.vts_driver
+            if driver is None:
+                return {"ok": False, "reason": "VTS_DRIVER_UNAVAILABLE"}
+            hotkey_id = str(payload.get("hotkey_id") or "").strip()
+            if not hotkey_id:
+                return {"ok": False, "reason": "MISSING_HOTKEY_ID"}
+            if hasattr(driver, "trigger_hotkey"):
+                driver.trigger_hotkey(hotkey_id)
+            _log.debug("SomaticAgent.on_vts_hotkey_command: hotkey_id=%s", hotkey_id)
+            return {"ok": True, "reason": None}
+        except Exception as exc:
+            _log.warning("SomaticAgent.on_vts_hotkey_command 异常: %s", exc)
+            return {"ok": False, "reason": str(exc)}
+
+    # ── T-165：主动上报躯体状态快照 ───────────────────────────────────────────
+
+    def publish_somatic_state(
+        self,
+        *,
+        vts_connected: bool = False,
+        current_expression: str | None = None,
+        last_emotion_tag: str | None = None,
+        last_intensity: float | None = None,
+        error: str | None = None,
+    ) -> None:
+        """T-165：主动上报躯体状态快照到 host_brain SomaticAgent。
+
+        由 bootstrap 定时调用或在状态变更时触发，将 edge_client 侧的
+        VTS 连接状态、当前表情等信息上报到 host_brain，供 CortexAgent
+        的 collect_tribe_context() 读取。
+
+        Args:
+            vts_connected: VTubeStudio 是否已连接。
+            current_expression: 当前激活的表情名称（可选）。
+            last_emotion_tag: 最近一次情绪标签（可选）。
+            last_intensity: 最近一次情绪强度（可选）。
+            error: 错误信息（可选，用于上报异常状态）。
+        """
+        payload: dict[str, Any] = {
+            "vts_connected": bool(vts_connected),
+            "current_expression": str(current_expression or "").strip() or None,
+            "last_emotion_tag": str(last_emotion_tag or "").strip().upper() or None,
+            "last_intensity": (
+                round(max(0.0, min(1.0, float(last_intensity))), 4)
+                if isinstance(last_intensity, (int, float))
+                else None
+            ),
+            "error": str(error or "").strip() or None,
+            "source": "edge.somatic",
+        }
+        self._publish_event(
+            event_type="somatic_state_updated",
+            target_agent="somatic_agent",
+            payload=payload,
+        )
+        _log.debug(
+            "SomaticAgent.publish_somatic_state: vts_connected=%s expression=%s tag=%s",
+            vts_connected, current_expression, last_emotion_tag,
+        )
+
     def _publish_event(
         self,
         *,

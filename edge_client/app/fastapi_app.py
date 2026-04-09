@@ -559,36 +559,53 @@ def create_edge_fastapi_app(
             command_type, source_agent, target_agent,
         )
 
-        # ── 分发到对应的 Agent ────────────────────────────────────────────
+        # ── T-169：通过 EdgeTribeBridge.receive_command() 统一分发 ──────────
         try:
             from edge_client.tribe.registry import get_edge_tribe_registry  # noqa: PLC0415
+            from edge_client.tribe.edge_tribe_bridge import EdgeTribeBridge  # noqa: PLC0415
+
             registry = get_edge_tribe_registry()
 
-            dispatched = False
+            # 优先使用 registry 中已初始化的 bridge；否则降级为直接分发
+            bridge: EdgeTribeBridge | None = registry.bridge if registry.initialized else None
 
-            # EMOTION_STATE_CHANGED → SomaticAgent（驱动 vts_driver 表情）
-            if command_type == "EMOTION_STATE_CHANGED" and (
-                not target_agent or target_agent in ("edge.somatic", "somatic_agent")
-            ):
-                if registry.initialized:
-                    registry.somatic.on_emotion_state_command(payload=payload)
-                    dispatched = True
-
-            # GATE_CONTROL → ChannelAgent（门控指令）
-            elif command_type == "GATE_CONTROL" and (
-                not target_agent or target_agent in ("edge.channel", "channel_agent")
-            ):
-                if registry.initialized:
-                    registry.channel.on_gate_control_command(payload=payload)
-                    dispatched = True
-
-            # 未知指令类型：记录日志但不报错（向前兼容）
-            else:
-                _log.info(
-                    "tribe_command: unhandled command_type=%s target=%s (ignored)",
-                    command_type, target_agent,
+            if bridge is not None:
+                # T-169：通过 EdgeTribeBridge.receive_command() 统一路由
+                result = bridge.receive_command(
+                    command_type=command_type,
+                    source_agent=source_agent,
+                    target_agent=target_agent or None,
+                    payload=payload,
+                    command_id=str(body.get("command_id") or "").strip() or None,
+                    schema_version=str(body.get("schema_version") or "tribe.command.v1"),
+                    somatic_agent=registry.somatic if registry.initialized else None,
+                    peripheral_agent=registry.peripheral if registry.initialized else None,
                 )
+                dispatched = bool(result.get("dispatched", False))
+                _log.debug(
+                    "tribe_command dispatched via bridge: type=%s routed_to=%s ok=%s",
+                    command_type, result.get("routed_to"), result.get("ok"),
+                )
+            else:
+                # 降级：registry 未初始化时直接分发（向后兼容）
                 dispatched = False
+                if command_type == "EMOTION_STATE_CHANGED" and (
+                    not target_agent or target_agent in ("edge.somatic", "somatic_agent")
+                ):
+                    if registry.initialized and hasattr(registry, "somatic"):
+                        registry.somatic.on_emotion_state_command(payload=payload)
+                        dispatched = True
+                elif command_type == "GATE_CONTROL" and (
+                    not target_agent or target_agent in ("edge.channel", "channel_agent")
+                ):
+                    if registry.initialized and hasattr(registry, "channel"):
+                        registry.channel.on_gate_control_command(payload=payload)
+                        dispatched = True
+                else:
+                    _log.info(
+                        "tribe_command: unhandled command_type=%s target=%s (ignored)",
+                        command_type, target_agent,
+                    )
 
             return JSONResponse({
                 "accepted": True,

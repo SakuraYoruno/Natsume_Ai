@@ -48,6 +48,7 @@ class SomaticAgent:
         订阅：
         - BODY_SENSE_UPDATED：躯体感知更新时写入快照（来自 edge_client）
         - LONELINESS_SIGNAL：孤独感信号时记录躯体孤独感状态
+        - SOMATIC_STATE_UPDATED：接收 edge_client SomaticAgent 上报的状态快照（T-165）
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -55,6 +56,7 @@ class SomaticAgent:
             bus = get_tribe_event_bus()
             bus.subscribe("BODY_SENSE_UPDATED", self._on_body_sense_updated)
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
+            bus.subscribe("SOMATIC_STATE_UPDATED", self._on_somatic_state_updated)  # T-165
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.somatic_agent").warning(
@@ -112,9 +114,9 @@ class SomaticAgent:
         供躯体反馈系统（Phase 6）参考（如触觉反馈、体温调节等）。
         """
         try:
-            payload = dict(getattr(event, "payload", None) or {})
+            payload = dict(getattr(event, 'payload', None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
-            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            ts_ms = int(getattr(event, 'ts_ms', 0) or 0)
             prev = self.state_registry.get_state("somatic_agent") or {}
             prev_state = dict(prev.get("state") or {})
             prev_state.update({
@@ -126,6 +128,98 @@ class SomaticAgent:
             self.state_registry.set_state("somatic_agent", prev_state, writer="somatic_agent")
         except Exception:
             pass
+
+    # ── T-165：接收 edge_client 上报的躯体状态快照 ────────────────────────────
+
+    async def _on_somatic_state_updated(self, event: Any) -> None:
+        """处理 SOMATIC_STATE_UPDATED 事件：接收 edge_client SomaticAgent 上报的状态快照。
+
+        T-165：edge_client SomaticAgent.publish_somatic_state() 发布此事件，
+        host_brain SomaticAgent 接收后将 VTS 连接状态、当前表情等写入快照，
+        供 CortexAgent.collect_tribe_context() 读取。
+        """
+        try:
+            payload = dict(getattr(event, 'payload', None) or {})
+            ts_ms = int(getattr(event, 'ts_ms', 0) or 0)
+            prev = self.state_registry.get_state("somatic_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "vts_connected": bool(payload.get("vts_connected", False)),
+                "current_expression": str(payload.get("current_expression") or "").strip() or None,
+                "last_emotion_tag": str(payload.get("last_emotion_tag") or "").strip().upper() or None,
+                "last_intensity": (
+                    round(max(0.0, min(1.0, float(payload["last_intensity"]))), 4)
+                    if isinstance(payload.get("last_intensity"), (int, float))
+                    else None
+                ),
+                "edge_somatic_error": str(payload.get("error") or "").strip() or None,
+                "last_edge_somatic_report_ts_ms": ts_ms,
+            })
+            self.state_registry.set_state("somatic_agent", prev_state, writer="somatic_agent")
+        except Exception:
+            pass
+
+    # ── T-170：运行时状态导出 ─────────────────────────────────────────────────
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        """T-170：导出 SomaticAgent 运行时状态，供 CortexAgent.collect_tribe_context() 读取。
+
+        整合 state_registry 快照中的躯体感知数据，返回结构化状态字典，
+        包含 VTS 连接状态、当前表情、疲劳度、孤独感等关键字段。
+
+        Returns:
+            {
+                "vts_connected": bool,
+                "current_expression": str | None,
+                "last_emotion_tag": str | None,
+                "last_intensity": float | None,
+                "motion_level": float,
+                "fatigue_level": float,
+                "last_loneliness_level": float,
+                "somatic_comfort_needed": bool,
+                "heart_rate": float | None,
+                "edge_somatic_error": str | None,
+                "last_body_sense_ts_ms": int,
+                "last_edge_somatic_report_ts_ms": int,
+            }
+        """
+        try:
+            state = self.get_somatic_state()
+            return {
+                "vts_connected": bool(state.get("vts_connected", False)),
+                "current_expression": state.get("current_expression"),
+                "last_emotion_tag": state.get("last_emotion_tag"),
+                "last_intensity": state.get("last_intensity"),
+                "motion_level": float(state.get("motion_level") or 0.0),
+                "fatigue_level": float(state.get("fatigue_level") or 0.0),
+                "last_loneliness_level": float(state.get("last_loneliness_level") or 0.0),
+                "somatic_comfort_needed": bool(state.get("somatic_comfort_needed", False)),
+                "heart_rate": state.get("heart_rate"),
+                "skin_conductance": state.get("skin_conductance"),
+                "body_temp": state.get("body_temp"),
+                "edge_somatic_error": state.get("edge_somatic_error"),
+                "last_body_sense_ts_ms": int(state.get("last_body_sense_ts_ms") or 0),
+                "last_edge_somatic_report_ts_ms": int(
+                    state.get("last_edge_somatic_report_ts_ms") or 0
+                ),
+            }
+        except Exception:
+            return {
+                "vts_connected": False,
+                "current_expression": None,
+                "last_emotion_tag": None,
+                "last_intensity": None,
+                "motion_level": 0.0,
+                "fatigue_level": 0.0,
+                "last_loneliness_level": 0.0,
+                "somatic_comfort_needed": False,
+                "heart_rate": None,
+                "skin_conductance": None,
+                "body_temp": None,
+                "edge_somatic_error": None,
+                "last_body_sense_ts_ms": 0,
+                "last_edge_somatic_report_ts_ms": 0,
+            }
 
 
 _SOMATIC_AGENT: SomaticAgent | None = None
