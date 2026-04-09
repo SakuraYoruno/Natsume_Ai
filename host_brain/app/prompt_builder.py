@@ -1175,6 +1175,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     # 包含：gate_state / stress_index / energy_reserve / homeostasis_ok /
     #        emotion_tag / mood_state / silence_willingness / bond_stage /
     #        voice_emotion_tag / voice_emotion_intensity
+    #        hedonic_tone / pain_level / reward_level / net_valence（T-19/T-21）
     _tribe_vital_raw = runtime_payload.get("tribe_vital_signs") or prompt_context.get("tribe_vital_signs")
     _tribe_vital: dict = dict(_tribe_vital_raw) if isinstance(_tribe_vital_raw, Mapping) else {}
     _tv_gate_state = str(_tribe_vital.get("gate_state") or "open").strip().lower()
@@ -1185,13 +1186,25 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _tv_bond_stage = str(_tribe_vital.get("bond_stage") or "stranger").strip().lower()
     _tv_voice_emotion_tag = str(_tribe_vital.get("voice_emotion_tag") or "").strip().upper()
     _tv_voice_emotion_intensity = _tribe_vital.get("voice_emotion_intensity")
-    # 仅在有实质性生命体征数据时注入（gate_state 非 open 或 stress 较高或有语音情绪）
+    # T-21：享乐状态字段（来自 PainRewardAgent，经 T-19 纳入 aggregate_vital_signs）
+    _tv_hedonic_tone = str(_tribe_vital.get("hedonic_tone") or "neutral").strip().lower()
+    _tv_pain_level = float(_tribe_vital.get("pain_level") or 0.0)
+    _tv_reward_level = float(_tribe_vital.get("reward_level") or 0.0)
+    _tv_net_valence = float(_tribe_vital.get("net_valence") or 0.0)
+    # T-21：享乐状态激活条件（hedonic_tone 非 neutral/positive 或 pain 较高）
+    _tv_hedonic_active = (
+        _tv_hedonic_tone in ("negative", "dysphoric", "suffering", "mixed")
+        or _tv_pain_level >= 0.4
+        or _tv_reward_level >= 0.6  # 高奖励状态也值得注入（积极情绪影响表达）
+    )
+    # 仅在有实质性生命体征数据时注入（gate_state 非 open 或 stress 较高或有语音情绪或享乐异常）
     _tv_active = bool(_tribe_vital) and (
         _tv_gate_state != "open"
         or _tv_stress_index >= 0.4
         or not _tv_homeostasis_ok
         or bool(_tv_voice_emotion_tag)
         or _tv_mood_state not in ("steady", "normal", "")
+        or _tv_hedonic_active  # T-21：享乐状态异常时也触发注入
     )
     _body_sense_raw = runtime_payload.get("body_sense") or prompt_context.get("body_sense")
     _body_sense: dict = dict(_body_sense_raw) if isinstance(_body_sense_raw, Mapping) else {}
@@ -1693,7 +1706,7 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             ""
         )
         # ── Phase XIX：Tribe 生命体征（T-16）─────────────────────────────
-        # 仅在 gate_state 非 open / stress 较高 / homeostasis 异常 / 有语音情绪时注入
+        # 仅在 gate_state 非 open / stress 较高 / homeostasis 异常 / 有语音情绪 / 享乐异常时注入
         # 避免在正常状态下增加 prompt 长度
         + (
             f"- tribe_gate_state: {_tv_gate_state}\n"
@@ -1709,6 +1722,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                     if _tv_voice_emotion_intensity is not None else ""
                 )
                 if _tv_voice_emotion_tag else ""
+            )
+            # T-21：享乐状态注入（hedonic_tone=negative/dysphoric/suffering 或 pain 较高时）
+            + (
+                f"- tribe_hedonic_tone: {_tv_hedonic_tone}\n"
+                f"- tribe_pain_level: {_tv_pain_level:.2f}\n"
+                f"- tribe_reward_level: {_tv_reward_level:.2f}\n"
+                f"- tribe_net_valence: {_tv_net_valence:+.2f}\n"
+                if _tv_hedonic_active else ""
             )
             if _tv_active else
             ""

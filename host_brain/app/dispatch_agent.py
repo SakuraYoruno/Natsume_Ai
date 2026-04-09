@@ -1284,6 +1284,54 @@ async def dispatch_agent_sse_generator(
                 "tribe_throttle": True,
                 "tribe_gate_state": _tribe_gate_state,
             })
+
+        # ── 0.6. hedonic_state 痛觉信号（T-22）──────────────────────
+        # 在路由决策之后，读取 hedonic_state：
+        # - pain_level >= 0.6：高痛觉状态，发出 PAIN_SIGNAL 事件，
+        #   通知前端/上层可触发主动情绪表达（不中断流程）
+        # - reward_level >= 0.7：高奖励状态，发出 REWARD_SIGNAL 事件（积极情绪）
+        _hedonic_state = dict((_tribe_ctx.get("hedonic_state") or {}))
+        _hs_pain_level = float(_hedonic_state.get("pain_level") or 0.0)
+        _hs_reward_level = float(_hedonic_state.get("reward_level") or 0.0)
+        _hs_hedonic_tone = str(_hedonic_state.get("hedonic_tone") or "neutral").strip().lower()
+        _hs_net_valence = float(_hedonic_state.get("net_valence") or 0.0)
+
+        if _hs_pain_level >= 0.6:
+            # 高痛觉：主动情绪表达信号（不中断，仅通知）
+            _logger.info(
+                "[%s] hedonic PAIN_SIGNAL: pain_level=%.2f hedonic_tone=%s net_valence=%.2f",
+                request_id,
+                _hs_pain_level,
+                _hs_hedonic_tone,
+                _hs_net_valence,
+            )
+            yield _sse({
+                "phase": "PRESENCE",
+                "event": "PAIN_SIGNAL",
+                "request_id": request_id,
+                "hedonic_tone": _hs_hedonic_tone,
+                "pain_level": round(_hs_pain_level, 3),
+                "net_valence": round(_hs_net_valence, 3),
+                "last_pain_source": _hedonic_state.get("last_pain_source"),
+            })
+        elif _hs_reward_level >= 0.7:
+            # 高奖励：积极情绪表达信号（不中断，仅通知）
+            _logger.info(
+                "[%s] hedonic REWARD_SIGNAL: reward_level=%.2f hedonic_tone=%s net_valence=%.2f",
+                request_id,
+                _hs_reward_level,
+                _hs_hedonic_tone,
+                _hs_net_valence,
+            )
+            yield _sse({
+                "phase": "PRESENCE",
+                "event": "REWARD_SIGNAL",
+                "request_id": request_id,
+                "hedonic_tone": _hs_hedonic_tone,
+                "reward_level": round(_hs_reward_level, 3),
+                "net_valence": round(_hs_net_valence, 3),
+                "last_reward_source": _hedonic_state.get("last_reward_source"),
+            })
     except Exception as _tribe_route_exc:
         _logger.debug("[%s] CortexAgent 路由门控降级: %s", request_id, _tribe_route_exc)
 

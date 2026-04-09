@@ -1893,3 +1893,133 @@ prompt_builder.py Phase XIX  [T-16]
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 2. **T-21**（新增）：`prompt_builder` Phase XIX 扩展——在 `hedonic_tone == "negative"` 时注入享乐状态提示（当前仅注入压力/门控状态）
 3. **T-22**（新增）：`dispatch_agent` 接入 `hedonic_state`，在 `pain_level >= 0.6` 时触发主动情绪表达
+
+---
+
+### 2026-04-09 · 第七批开发（T-21 / T-22）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/app/prompt_builder.py`（T-21：Phase XIX 扩展，hedonic_tone 注入）
+- `host_brain/app/dispatch_agent.py`（T-22：hedonic_state 接入，PAIN_SIGNAL/REWARD_SIGNAL 事件）
+
+---
+
+#### T-21：prompt_builder Phase XIX 扩展——hedonic_tone=negative 时注入享乐状态提示 ✅
+
+**问题**：Phase XIX 已注入 `gate_state`/`stress_index`/`mood_state` 等生命体征，但缺少 `hedonic_tone`/`pain_level`/`reward_level`/`net_valence` 字段，导致 LLM 无法感知当前的享乐状态（痛觉/奖励水平）。
+
+**改动**（`prompt_builder.py`，Phase XIX 数据提取段 + 渲染段）：
+
+**数据提取段**（新增 4 个变量 + 1 个激活条件）：
+```python
+# T-21：享乐状态字段
+_tv_hedonic_tone = str(_tribe_vital.get("hedonic_tone") or "neutral").strip().lower()
+_tv_pain_level = float(_tribe_vital.get("pain_level") or 0.0)
+_tv_reward_level = float(_tribe_vital.get("reward_level") or 0.0)
+_tv_net_valence = float(_tribe_vital.get("net_valence") or 0.0)
+
+# 享乐状态激活条件
+_tv_hedonic_active = (
+    _tv_hedonic_tone in ("negative", "dysphoric", "suffering", "mixed")
+    or _tv_pain_level >= 0.4
+    or _tv_reward_level >= 0.6  # 高奖励也值得注入
+)
+```
+
+**`_tv_active` 激活条件更新**：新增 `or _tv_hedonic_active`，享乐状态异常时也触发整个 Phase XIX 注入。
+
+**渲染段**（在 voice_emotion 注入之后追加）：
+```
+- tribe_hedonic_tone: negative
+- tribe_pain_level: 0.72
+- tribe_reward_level: 0.10
+- tribe_net_valence: -0.62
+```
+仅在 `_tv_hedonic_active` 时输出，正常状态（neutral/positive）不注入。
+
+**注入策略**：
+- `hedonic_tone in ("negative", "dysphoric", "suffering", "mixed")` → 注入（消极享乐状态）
+- `pain_level >= 0.4` → 注入（中度以上痛觉）
+- `reward_level >= 0.6` → 注入（高奖励，积极情绪影响表达风格）
+- 其他（neutral/positive + pain<0.4 + reward<0.6）→ 不注入
+
+---
+
+#### T-22：dispatch_agent 接入 hedonic_state，pain_level >= 0.6 时触发主动情绪表达 ✅
+
+**问题**：`dispatch_agent` 的 T-15 路由门控已读取 `collect_tribe_context()`，但没有读取 `hedonic_state` 字段，导致高痛觉状态无法触发主动情绪表达信号。
+
+**改动**（`dispatch_agent.py`，步骤 0.5 路由门控之后，新增步骤 0.6）：
+
+**新增步骤 0.6 hedonic_state 痛觉信号**：
+- 从 `_tribe_ctx["hedonic_state"]` 读取完整享乐状态快照（T-20 已注入）
+- `pain_level >= 0.6`：发出 `PRESENCE/PAIN_SIGNAL` 事件（不中断流程）
+  - 携带 `hedonic_tone` / `pain_level` / `net_valence` / `last_pain_source`
+  - 前端/上层可据此触发主动情绪表达（如叹气、沉默、情绪化回复）
+- `reward_level >= 0.7`：发出 `PRESENCE/REWARD_SIGNAL` 事件（积极情绪信号）
+  - 携带 `hedonic_tone` / `reward_level` / `net_valence` / `last_reward_source`
+
+**SSE 事件格式**：
+```json
+{
+  "phase": "PRESENCE",
+  "event": "PAIN_SIGNAL",
+  "request_id": "xxx",
+  "hedonic_tone": "negative",
+  "pain_level": 0.72,
+  "net_valence": -0.62,
+  "last_pain_source": "topic_blocked"
+}
+```
+
+**设计说明**：
+- 步骤 0.6 在步骤 0.5（路由门控）之后执行，`_tribe_ctx` 已经获取，无需额外调用
+- 不中断流程（不 `return`），仅作为情绪信号通知前端
+- 阈值设计：`pain_level >= 0.6`（中高痛觉）/ `reward_level >= 0.7`（高奖励），避免频繁触发
+
+---
+
+#### 当前架构状态（2026-04-09 第七批）
+
+**hedonic_state 完整表达链已打通**：
+
+```
+PainRewardAgent._flush_state()
+  → state_registry("pain_reward_agent")
+  ↓
+aggregate_vital_signs() [T-19]
+  → vital_signs["hedonic_tone/pain_level/reward_level/net_valence"]
+  ↓
+collect_tribe_context() [T-20]
+  → result["vital_signs"]（摘要）
+  → result["hedonic_state"]（完整快照）
+  ↓
+dispatch_agent 步骤 0.6 [T-22]
+  → pain_level >= 0.6: PRESENCE/PAIN_SIGNAL（主动情绪表达信号）
+  → reward_level >= 0.7: PRESENCE/REWARD_SIGNAL（积极情绪信号）
+  ↓
+chat_context_builder → runtime_payload["tribe_vital_signs"]
+  ↓
+prompt_builder Phase XIX [T-21]
+  → hedonic_tone=negative/pain>=0.4/reward>=0.6 时注入:
+    tribe_hedonic_tone / tribe_pain_level / tribe_reward_level / tribe_net_valence
+  ↓
+LLM 生成回复（受享乐状态影响）
+```
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `PainRewardAgent` → `TribeStateRegistry` | ✅ 已接入 | `_flush_state()` 写入 `pain_reward_agent` 命名空间 |
+| `aggregate_vital_signs()` hedonic 字段 | ✅ 已接入 | T-19：4 个享乐字段纳入 vital_signs |
+| `collect_tribe_context()` hedonic_state | ✅ 已接入 | T-20：完整快照字段 |
+| `dispatch_agent` PAIN/REWARD_SIGNAL | ✅ 已接入 | T-22：pain>=0.6 / reward>=0.7 时发出情绪信号 |
+| `prompt_builder` Phase XIX hedonic 注入 | ✅ 已接入 | T-21：hedonic_tone=negative 时注入 4 个字段 |
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-23**（新增）：前端/上层处理 `PAIN_SIGNAL`/`REWARD_SIGNAL` 事件，触发具体的主动情绪表达行为（如插入情绪化短句、调整回复风格）
+3. **T-24**（新增）：`PainRewardAgent` 接入更多事件源（如 `BOND_RIFT_DETECTED` → 高强度痛觉，`BOND_MILESTONE` → 高强度奖励）
