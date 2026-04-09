@@ -16,14 +16,24 @@
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry
+
+# T-27：持久化文件路径（可通过环境变量覆盖）
+_DEFAULT_STATE_PATH = Path(
+    os.environ.get("NATSUME_PAIN_REWARD_STATE_PATH", "host_brain/data/pain_reward_state.json")
+)
+# 节流：每 N 次 flush 才写一次磁盘（避免频繁 IO）
+_PERSIST_THROTTLE = 5
 
 
 # ── 痛觉/奖励事件类型 ────────────────────────────────────────────────────────
@@ -87,6 +97,9 @@ class PainRewardAgent:
     _last_pain_source: str | None = field(default=None, init=False, repr=False)
     _last_reward_source: str | None = field(default=None, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+    # T-27：持久化节流计数器
+    _flush_counter: int = field(default=0, init=False, repr=False)
+    _state_path: Path = field(default_factory=lambda: _DEFAULT_STATE_PATH, init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -445,15 +458,94 @@ class PainRewardAgent:
         source: str,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """构建状态字典并写入 state_registry。"""
+        """构建状态字典并写入 state_registry。
+
+        T-27：每 _PERSIST_THROTTLE 次 flush 触发一次磁盘持久化，
+        确保重启后 hedonic_state 不归零。
+        """
         with self._lock:
             state = self._build_state_dict()
+            self._flush_counter += 1
+            should_persist = (self._flush_counter % _PERSIST_THROTTLE == 0)
         self.state_registry.set_state(
             "pain_reward_agent",
             {**state, "last_event_type": event_type, "last_event_source": source},
             writer="pain_reward_agent",
         )
+        # T-27：节流持久化到磁盘
+        if should_persist:
+            self.save_state()
         return state
+
+    # ── T-27：持久化方法 ─────────────────────────────────────────────────────
+
+    def save_state(self) -> bool:
+        """将当前 hedonic_state 持久化到磁盘 JSON 文件。
+
+        Returns:
+            True 表示保存成功，False 表示保存失败（降级，不抛异常）。
+        """
+        try:
+            with self._lock:
+                persist_data = {
+                    "pain_level": self._pain_level,
+                    "reward_level": self._reward_level,
+                    "cumulative_pain": self._cumulative_pain,
+                    "cumulative_reward": self._cumulative_reward,
+                    "last_pain_source": self._last_pain_source,
+                    "last_reward_source": self._last_reward_source,
+                    "saved_at_ms": now_ms(),
+                }
+            path = self._state_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # 原子写入：先写临时文件，再 rename
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(
+                json.dumps(persist_data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            tmp_path.replace(path)
+            return True
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.pain_reward_agent").debug(
+                "PainRewardAgent.save_state 失败（降级）: %s", exc
+            )
+            return False
+
+    def load_state(self) -> bool:
+        """从磁盘 JSON 文件加载 hedonic_state，恢复跨会话状态。
+
+        Returns:
+            True 表示加载成功，False 表示文件不存在或加载失败（降级，不抛异常）。
+        """
+        try:
+            path = self._state_path
+            if not path.exists():
+                return False
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            with self._lock:
+                self._pain_level = max(0.0, min(1.0, float(data.get("pain_level") or 0.0)))
+                self._reward_level = max(0.0, min(1.0, float(data.get("reward_level") or 0.0)))
+                self._cumulative_pain = max(0.0, float(data.get("cumulative_pain") or 0.0))
+                self._cumulative_reward = max(0.0, float(data.get("cumulative_reward") or 0.0))
+                _lps = data.get("last_pain_source")
+                self._last_pain_source = str(_lps).strip() if _lps else None
+                _lrs = data.get("last_reward_source")
+                self._last_reward_source = str(_lrs).strip() if _lrs else None
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.pain_reward_agent").info(
+                "PainRewardAgent 加载持久化状态: pain=%.3f reward=%.3f cumulative_pain=%.3f",
+                self._pain_level, self._reward_level, self._cumulative_pain,
+            )
+            return True
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.pain_reward_agent").debug(
+                "PainRewardAgent.load_state 失败（降级）: %s", exc
+            )
+            return False
 
     def export_runtime_state(self) -> dict[str, Any]:
         return {
@@ -484,6 +576,8 @@ def get_pain_reward_agent() -> PainRewardAgent:
     global _PAIN_REWARD_AGENT
     if _PAIN_REWARD_AGENT is None:
         _PAIN_REWARD_AGENT = PainRewardAgent()
+        # T-27：启动时自动加载持久化状态，避免重启后 hedonic_state 归零
+        _PAIN_REWARD_AGENT.load_state()
     return _PAIN_REWARD_AGENT
 
 

@@ -2199,5 +2199,127 @@ top_agent.post_process()
 #### 下一步待开发
 
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
-2. **T-27**（新增）：`PainRewardAgent` 状态持久化（跨会话保持 hedonic_state，避免重启后归零）
+2. **T-27**（新增）：`PainRewardAgent` 状态持久化（跨会话保持 `hedonic_state`，避免重启后归零）
 3. **T-28**（新增）：`EndocrineAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响催产素/皮质醇）
+
+---
+
+### 2026-04-09 · 第十批开发（T-27 / T-28）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/pain_reward_agent.py`（T-27：持久化 load_state/save_state + 节流 flush）
+- `host_brain/tribe/endocrine_agent.py`（T-28：register_subscriptions + BOND 事件 handler）
+- `host_brain/app/http_hooks.py`（T-28：EndocrineAgent 加入订阅注册列表）
+
+---
+
+#### T-27：PainRewardAgent 状态持久化 ✅
+
+**问题**：`PainRewardAgent` 的 `hedonic_state`（`pain_level`/`reward_level`/`cumulative_pain` 等）仅存在于内存中，进程重启后全部归零，导致长期情绪积累效果丢失。
+
+**改动**（`pain_reward_agent.py`）：
+
+1. **新增顶层常量**：
+   - `_DEFAULT_STATE_PATH`：持久化文件路径（默认 `host_brain/data/pain_reward_state.json`，可通过 `NATSUME_PAIN_REWARD_STATE_PATH` 环境变量覆盖）
+   - `_PERSIST_THROTTLE = 5`：每 5 次 flush 才写一次磁盘（避免频繁 IO）
+
+2. **新增 dataclass 字段**：
+   - `_flush_counter: int`：flush 计数器，用于节流
+   - `_state_path: Path`：持久化文件路径
+
+3. **修改 `_flush_state()`**：
+   - 每次 flush 递增 `_flush_counter`
+   - 当 `_flush_counter % _PERSIST_THROTTLE == 0` 时，调用 `save_state()` 写磁盘
+
+4. **新增 `save_state()` 方法**：
+   - 原子写入：先写 `.tmp` 临时文件，再 `rename` 替换，避免写入中断导致文件损坏
+   - 持久化字段：`pain_level`/`reward_level`/`cumulative_pain`/`cumulative_reward`/`last_pain_source`/`last_reward_source`/`saved_at_ms`
+   - 失败时降级（不抛异常，仅 debug 日志）
+
+5. **新增 `load_state()` 方法**：
+   - 从 JSON 文件加载状态，恢复所有持久化字段
+   - 对数值做范围校验（pain/reward 限制在 0~1）
+   - 文件不存在时返回 `False`（首次启动正常情况）
+
+6. **修改 `get_pain_reward_agent()`**：
+   - 初始化后自动调用 `load_state()`，实现启动时状态恢复
+
+**持久化文件格式**：
+```json
+{
+  "pain_level": 0.123,
+  "reward_level": 0.456,
+  "cumulative_pain": 2.345,
+  "cumulative_reward": 5.678,
+  "last_pain_source": "topic_blocked",
+  "last_reward_source": "humor_landed",
+  "saved_at_ms": 1744166400000
+}
+```
+
+---
+
+#### T-28：EndocrineAgent 接入 BOND_PROGRESS/BOND_REGRESS 事件 ✅
+
+**问题**：`EndocrineAgent` 目前只通过 `PainRewardAgent.get_stress_signal()` 间接感知情绪压力，无法直接响应关系变化（bond 进展/退步）对激素的影响。
+
+**改动**（`endocrine_agent.py`）：
+
+1. **新增 dataclass 字段**：
+   - `_bond_cortisol_delta: float`：bond 事件产生的皮质醇增量缓冲
+   - `_bond_oxytocin_delta: float`：bond 事件产生的催产素增量缓冲
+   - `_bond_lock: threading.RLock`：线程安全锁
+
+2. **修改 `resolve_endocrine_state()`**：
+   - 在 T-17 压力信号叠加之后，消费 `_bond_cortisol_delta` 和 `_bond_oxytocin_delta` 缓冲
+   - 消费后清零（避免重复叠加）
+   - 将 `_bond_cortisol_delta`/`_bond_oxytocin_delta` 写入 payload（供调试）
+
+3. **新增 `register_subscriptions()` 方法**：
+   - 订阅 `BOND_PROGRESS` 和 `BOND_REGRESS` 事件
+
+4. **新增 `_on_bond_progress()` handler**：
+   - 催产素增量：`min(0.12, intensity * 0.15)`（关系进展 → 催产素上升）
+   - 皮质醇减量：`-min(0.05, intensity * 0.05)`（关系进展 → 压力轻微降低）
+
+5. **新增 `_on_bond_regress()` handler**：
+   - 皮质醇增量：`min(0.08, intensity * 0.10)`（关系退步 → 压力上升）
+   - 催产素减量：`-min(0.06, intensity * 0.08)`（关系退步 → 催产素降低）
+
+**改动**（`http_hooks.py`）：
+- 将 `endocrine_agent` 加入订阅注册列表（第 6 个）
+- 更新 subscriptions 计数从 6 → 7
+
+**激素影响量化**：
+
+| 事件 | 皮质醇变化 | 催产素变化 | 说明 |
+|---|---|---|---|
+| `BOND_PROGRESS`（intensity=0.3） | -0.015 | +0.045 | 普通关系进展 |
+| `BOND_PROGRESS`（intensity=0.7，stage升级） | -0.035 | +0.105 | Stage 跃迁 |
+| `BOND_REGRESS`（intensity=0.4） | +0.04 | -0.032 | 普通关系退步 |
+| `BOND_REGRESS`（intensity=0.6，stage降级） | +0.06 | -0.048 | Stage 降级 |
+
+**完整激素调制链（T-17 + T-28）**：
+```
+PainRewardAgent.get_stress_signal()
+  → net_stress_delta → cortisol_level ±0.15（T-17）
+
+BOND_PROGRESS → EndocrineAgent._on_bond_progress()
+  → _bond_oxytocin_delta += 0.045~0.12
+  → _bond_cortisol_delta -= 0.015~0.05
+  → 下次 resolve_endocrine_state() 消费
+
+BOND_REGRESS → EndocrineAgent._on_bond_regress()
+  → _bond_cortisol_delta += 0.04~0.08
+  → _bond_oxytocin_delta -= 0.032~0.06
+  → 下次 resolve_endocrine_state() 消费
+```
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-29**（新增）：`TribeStateRegistry` 持久化（跨会话保持所有 Agent 状态快照）
+3. **T-30**（新增）：`LimbicAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响情绪基线）

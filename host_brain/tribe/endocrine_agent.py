@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -17,6 +18,10 @@ class EndocrineAgent:
         )
     )
     _last_state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    # T-28：bond 事件产生的激素增量缓冲（在下次 resolve_endocrine_state 时消费）
+    _bond_cortisol_delta: float = field(default=0.0, init=False, repr=False)
+    _bond_oxytocin_delta: float = field(default=0.0, init=False, repr=False)
+    _bond_lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -54,6 +59,32 @@ class EndocrineAgent:
         except Exception:
             pass
 
+        # ── T-28：消费 bond 事件产生的激素增量缓冲 ───────────────────────
+        # BOND_PROGRESS → 催产素增加（oxytocin_boost）+ 皮质醇轻微降低
+        # BOND_REGRESS  → 皮质醇增加（cortisol_boost）+ 催产素轻微降低
+        try:
+            with self._bond_lock:
+                _cortisol_delta = self._bond_cortisol_delta
+                _oxytocin_delta = self._bond_oxytocin_delta
+                # 消费后清零
+                self._bond_cortisol_delta = 0.0
+                self._bond_oxytocin_delta = 0.0
+
+            if abs(_cortisol_delta) > 0.001:
+                _cur_cortisol = _safe_float(payload.get("cortisol_level"), 0.0)
+                _new_cortisol = max(0.0, min(1.0, _cur_cortisol + _cortisol_delta))
+                payload["cortisol_level"] = round(_new_cortisol, 4)
+                payload["_bond_cortisol_delta"] = round(_cortisol_delta, 4)
+
+            if abs(_oxytocin_delta) > 0.001:
+                # oxytocin_level 可能不在 payload 中，先读取再叠加
+                _cur_oxytocin = _safe_float(payload.get("oxytocin_level"), 0.5)
+                _new_oxytocin = max(0.0, min(1.0, _cur_oxytocin + _oxytocin_delta))
+                payload["oxytocin_level"] = round(_new_oxytocin, 4)
+                payload["_bond_oxytocin_delta"] = round(_oxytocin_delta, 4)
+        except Exception:
+            pass
+
         self._last_state = dict(payload)
         return payload
 
@@ -75,6 +106,80 @@ class EndocrineAgent:
             "state": last_state,
             "vitals": self.resolve_vital_signs(endocrine_state=last_state),
         }
+
+    # ── T-28：TribeEventBus 订阅注册 ─────────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        T-28：订阅 BOND_PROGRESS / BOND_REGRESS 事件，
+        关系变化影响催产素（oxytocin）和皮质醇（cortisol）。
+
+        订阅事件：
+          - BOND_PROGRESS：关系进展 → 催产素增加 + 皮质醇轻微降低
+          - BOND_REGRESS：关系退步 → 皮质醇增加 + 催产素轻微降低
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("BOND_PROGRESS", self._on_bond_progress)
+            bus.subscribe("BOND_REGRESS", self._on_bond_regress)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.endocrine_agent").warning(
+                "EndocrineAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_bond_progress(self, event: Any) -> None:
+        """处理 BOND_PROGRESS 事件：关系进展 → 催产素增加 + 皮质醇轻微降低。
+
+        催产素增量：intensity * 0.15（上限 0.12）
+        皮质醇减量：intensity * 0.05（上限 0.05）
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            reason = str(payload.get("reason") or "bond_progress")
+            # 催产素增加（正值）
+            oxytocin_boost = round(min(0.12, intensity * 0.15), 4)
+            # 皮质醇降低（负值）
+            cortisol_relief = round(-min(0.05, intensity * 0.05), 4)
+            with self._bond_lock:
+                self._bond_oxytocin_delta += oxytocin_boost
+                self._bond_cortisol_delta += cortisol_relief
+            logging.getLogger("Natsume.tribe.endocrine_agent").debug(
+                "EndocrineAgent BOND_PROGRESS: oxytocin+%.3f cortisol%.3f reason=%s",
+                oxytocin_boost, cortisol_relief, reason,
+            )
+        except Exception:
+            pass
+
+    async def _on_bond_regress(self, event: Any) -> None:
+        """处理 BOND_REGRESS 事件：关系退步 → 皮质醇增加 + 催产素轻微降低。
+
+        皮质醇增量：intensity * 0.10（上限 0.08）
+        催产素减量：intensity * 0.08（上限 0.06）
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
+            reason = str(payload.get("reason") or "bond_regress")
+            # 皮质醇增加（正值）
+            cortisol_boost = round(min(0.08, intensity * 0.10), 4)
+            # 催产素降低（负值）
+            oxytocin_drop = round(-min(0.06, intensity * 0.08), 4)
+            with self._bond_lock:
+                self._bond_cortisol_delta += cortisol_boost
+                self._bond_oxytocin_delta += oxytocin_drop
+            logging.getLogger("Natsume.tribe.endocrine_agent").debug(
+                "EndocrineAgent BOND_REGRESS: cortisol+%.3f oxytocin%.3f reason=%s",
+                cortisol_boost, oxytocin_drop, reason,
+            )
+        except Exception:
+            pass
 
 
 def _safe_float(value: Any, default: float) -> float:
