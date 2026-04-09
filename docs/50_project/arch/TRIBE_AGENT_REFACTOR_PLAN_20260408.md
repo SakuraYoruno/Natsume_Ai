@@ -1538,3 +1538,106 @@ build_chat_prompt_runtime_payload()
 2. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 3. **T-15**：`tribe_route` 接入 `dispatch_agent.py`（让 CortexAgent 的路由决策影响实际分发）
 4. **T-16**：`tribe_vital_signs` 接入 prompt_builder（让生命体征影响 prompt 生成）
+
+---
+
+### 2026-04-09 · 第四批开发（T-15 / T-16 / T-13）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/app/dispatch_agent.py`（CortexAgent 路由门控接入）
+- `host_brain/app/prompt_builder.py`（Phase XIX tribe_vital_signs 注入）
+- `host_brain/tribe/pain_reward_agent.py`（新建，痛觉/奖励系统骨架）
+- `host_brain/tribe/__init__.py`（PainRewardAgent 导出）
+- `host_brain/app/http_hooks.py`（PainRewardAgent 订阅注册）
+
+---
+
+#### T-15：tribe_route 接入 dispatch_agent.py ✅
+
+**问题**：`CortexAgent.route_intent()` 已实现路由决策，但 `dispatch_agent.py` 没有读取这个决策，导致 `throttle`/`silent` 路由结果无法影响实际分发。
+
+**改动**（`dispatch_agent.py`）：
+- 在 ImmuneAgent 拦截（步骤 0）之后、硬规则路由（步骤 1）之前，增加 **步骤 0.5 CortexAgent 路由门控**
+- 调用 `CortexAgent.collect_tribe_context()` + `route_intent()` 获取路由决策
+- `route == "silent"`：主动沉默，返回 `decision=SILENT` 的空响应并 `return`
+- `route == "throttle"`：发出 `PRESENCE/THINKING` 提示后继续执行（不中断，未来可加实际延迟）
+- 所有逻辑均有异常降级保护
+
+**数据流**：
+```
+dispatch_agent_sse_generator()
+  → 步骤 0: ImmuneAgent.inspect_text()  [BLOCK/REPORT/ALLOW]
+  → 步骤 0.5: CortexAgent.route_intent()  [silent/throttle/chat]
+    → silent: yield COMMIT(SILENT) + return
+    → throttle: yield PRESENCE(THINKING) + continue
+    → chat: continue
+  → 步骤 1: _hard_rule_route()
+  → 步骤 2: recent_turn 回查
+  → 步骤 3: LLM 路由
+  → 步骤 4+: 正常分发
+```
+
+---
+
+#### T-16：tribe_vital_signs 接入 prompt_builder.py（Phase XIX）✅
+
+**问题**：`runtime_payload["tribe_vital_signs"]` 已由 CortexAgent Supervisor 写入，但 `prompt_builder.py` 没有读取这个字段，导致生命体征无法影响 prompt 生成。
+
+**改动**（`prompt_builder.py`）：
+
+**数据提取段**（Phase XVIII 之后）：
+- 新增 Phase XIX 数据提取：从 `runtime_payload["tribe_vital_signs"]` 读取
+  - `_tv_gate_state` / `_tv_stress_index` / `_tv_energy_reserve` / `_tv_homeostasis_ok`
+  - `_tv_mood_state` / `_tv_bond_stage` / `_tv_voice_emotion_tag` / `_tv_voice_emotion_intensity`
+- 激活条件（`_tv_active`）：`gate_state != "open"` 或 `stress_index >= 0.4` 或 `homeostasis_ok == False` 或有语音情绪或 `mood_state` 非基线
+- 正常状态下不注入，避免增加 prompt 长度
+
+**prompt 组装段**（Phase XVIII 输出之后）：
+- 新增 Phase XIX 输出块，在高压/异常状态时向 LLM 注入生命体征信息
+
+**架构意义**：生命体征现在完整流经 `TribeStateRegistry → CortexAgent → runtime_payload → prompt_builder → LLM`，形成完整的生理状态 → 语言表达闭环。
+
+---
+
+#### T-13：PainRewardAgent 骨架实现 ✅
+
+**新建文件**（`host_brain/tribe/pain_reward_agent.py`，约 280 行）：
+
+**核心数据结构**：
+- `pain_level (float 0~1)` / `reward_level (float 0~1)` / `net_valence (float -1~1)`
+- `cumulative_pain / cumulative_reward`（累积值，不衰减）
+- `hedonic_tone`：享乐基调（euphoric / pleasant / neutral / dysphoric / suffering）
+
+**核心方法**：
+- `record_pain(source, intensity)` — 非线性叠加痛觉
+- `record_reward(source, intensity)` — 非线性叠加奖励
+- `tick_decay()` — 每轮对话后自然衰减（12%/轮）
+- `get_stress_signal()` — 向 EndocrineAgent 提供压力信号
+- `get_emotion_modulation()` — 向 LimbicAgent 提供情绪调制信号
+
+**事件订阅**：
+- `INTERACTION_RECORDED` → `tick_decay()`
+- `EMOTION_UPDATED` → 负向情绪记录 pain，正向情绪记录 reward
+- `IMMUNE_BLOCK` → 记录 `topic_blocked` 痛觉
+
+**注册**：`tribe/__init__.py` 导出 + `http_hooks.py` 订阅注册（subscriptions=6）
+
+---
+
+#### 当前架构状态（2026-04-09 第四批）
+
+| 组件 | 状态 | 说明 |
+|---|---|---|
+| `dispatch_agent` CortexAgent 路由门控 | ✅ 已接入 | silent/throttle 路由决策影响实际分发 |
+| `prompt_builder` Phase XIX 生命体征 | ✅ 已接入 | tribe_vital_signs 影响 prompt 生成 |
+| `PainRewardAgent` 骨架 | ✅ 已实现 | 痛觉/奖励系统，订阅 INTERACTION_RECORDED/EMOTION_UPDATED |
+| Tribe 订阅数量 | 6 个 | limbic/prefrontal/social_brain/cortex/pain_reward |
+
+---
+
+#### 下一步待开发（优先级排序）
+
+1. **T-17**：`PainRewardAgent.get_stress_signal()` 接入 `EndocrineAgent`（让痛觉影响皮质醇）
+2. **T-18**：`PainRewardAgent.get_emotion_modulation()` 接入 `LimbicAgent`（让奖励影响情绪偏置）
+3. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）

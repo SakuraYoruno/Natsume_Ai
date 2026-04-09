@@ -1211,6 +1211,82 @@ async def dispatch_agent_sse_generator(
     except Exception as _immune_exc:
         _logger.debug("[%s] ImmuneAgent 前置拦截降级: %s", request_id, _immune_exc)
 
+    # ── 0.5. CortexAgent 路由门控（T-15）────────────────────────────
+    # 在硬规则路由之前，通过 CortexAgent.route_intent() 获取 Tribe 路由决策：
+    # - "throttle"：内分泌门控要求降速，注入 PRESENCE 提示后继续（不中断）
+    # - "silent"：沉默意愿极高，主动沉默（直接返回空响应）
+    # - "chat"：正常流程，继续执行
+    _tribe_route_result: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+        _cortex_agent = get_cortex_agent()
+        _tribe_ctx = _cortex_agent.collect_tribe_context(
+            session_id=session_id,
+            user_id=person_id,
+        )
+        _tribe_route_result = _cortex_agent.route_intent(
+            message=sanitized_message,
+            tribe_context=_tribe_ctx,
+        )
+        _tribe_route_decision = str(_tribe_route_result.get("route") or "chat").strip().lower()
+        _tribe_gate_state = str(_tribe_route_result.get("gate_state") or "open").strip().lower()
+        _logger.debug(
+            "[%s] CortexAgent tribe_route: route=%s gate_state=%s reason=%s",
+            request_id,
+            _tribe_route_decision,
+            _tribe_gate_state,
+            _tribe_route_result.get("reason"),
+        )
+
+        if _tribe_route_decision == "silent":
+            # 沉默意愿极高：主动沉默，不产生任何回复
+            _logger.info(
+                "[%s] CortexAgent SILENT: silence_willingness=%.2f reason=%s",
+                request_id,
+                float((_tribe_ctx.get("vital_signs") or {}).get("silence_willingness") or 0.0),
+                _tribe_route_result.get("reason"),
+            )
+            _record_dispatch_handoff(
+                handoff_route="silent",
+                handoff_target=None,
+                handoff_reason=str(_tribe_route_result.get("reason") or "high_silence_willingness"),
+            )
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "SILENT",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "dispatch_agent:tribe_silent",
+                    "tribe_route": _tribe_route_decision,
+                    "tribe_gate_state": _tribe_gate_state,
+                    "tribe_reason": _tribe_route_result.get("reason"),
+                },
+            })
+            return
+
+        elif _tribe_route_decision == "throttle":
+            # 内分泌门控节流：发出 THINKING 提示（表示正在处理），但继续执行
+            # 未来可在此处增加实际延迟或降级策略
+            _logger.info(
+                "[%s] CortexAgent THROTTLE: gate_state=%s reason=%s (继续处理)",
+                request_id,
+                _tribe_gate_state,
+                _tribe_route_result.get("reason"),
+            )
+            yield _sse({
+                "phase": "PRESENCE",
+                "event": "THINKING",
+                "request_id": request_id,
+                "tribe_throttle": True,
+                "tribe_gate_state": _tribe_gate_state,
+            })
+    except Exception as _tribe_route_exc:
+        _logger.debug("[%s] CortexAgent 路由门控降级: %s", request_id, _tribe_route_exc)
+
     # ── 1. 硬规则路由 ─────────────────────────────────────────────────
     route, target_id, route_reason = _hard_rule_route(sanitized_message)
 

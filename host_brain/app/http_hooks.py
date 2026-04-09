@@ -1215,13 +1215,14 @@ def runtime_lifespan(
                 _bus = get_tribe_event_bus()
                 await _bus.start()
 
-                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent）
+                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent）
                 _tribe_sub_errors: list[str] = []
                 for _agent_name, _agent_factory in [
                     ("limbic_agent", "host_brain.tribe.limbic_agent.get_limbic_agent"),
                     ("prefrontal_agent", "host_brain.tribe.prefrontal_agent.get_prefrontal_agent"),
                     ("social_brain_agent", "host_brain.tribe.social_brain_agent.get_social_brain_agent"),
                     ("cortex_agent", "host_brain.tribe.cortex_agent.get_cortex_agent"),
+                    ("pain_reward_agent", "host_brain.tribe.pain_reward_agent.get_pain_reward_agent"),  # T-13
                 ]:
                     try:
                         _module_path, _func_name = _agent_factory.rsplit(".", 1)
@@ -1235,7 +1236,7 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
                 _sub_status = (
-                    f"OK (dispatch_loop=running, subscriptions=5)"
+                    f"OK (dispatch_loop=running, subscriptions=6)"
                     if not _tribe_sub_errors
                     else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
                 )

@@ -1,0 +1,403 @@
+"""PainRewardAgent — 痛觉/奖励系统（T-13）
+
+人体类比：痛觉感受器 + 多巴胺/内啡肽奖励回路
+核心职责：
+  1. 记录痛觉事件（负向刺激：被拒绝、被忽视、被攻击、话题受挫）
+  2. 记录奖励事件（正向刺激：被认可、被关心、有趣对话、情感共鸣）
+  3. 维护 hedonic_state（享乐状态）：pain_level / reward_level / net_valence
+  4. 向 EndocrineAgent 提供压力信号（pain 累积 → cortisol 上升）
+  5. 向 LimbicAgent 提供情绪调制信号（reward → 积极情绪偏置）
+  6. 订阅 INTERACTION_RECORDED / EMOTION_UPDATED 事件，自动更新状态
+
+依赖：
+  - EndocrineAgent（写入压力信号）
+  - TribeStateRegistry（写入 hedonic_state 快照）
+  - TribeEventBus（订阅事件）
+"""
+from __future__ import annotations
+
+import math
+import threading
+from dataclasses import dataclass, field
+from typing import Any, Mapping
+
+from host_brain.core.ids import now_ms
+from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.tribe_state import TribeStateRegistry
+
+
+# ── 痛觉/奖励事件类型 ────────────────────────────────────────────────────────
+
+PAIN_SOURCES = frozenset({
+    "rejection",        # 被拒绝
+    "ignored",          # 被忽视
+    "attacked",         # 被攻击/侮辱
+    "topic_blocked",    # 话题受挫（ImmuneAgent BLOCK）
+    "bond_regress",     # 关系退步
+    "loneliness",       # 孤独感
+    "misunderstood",    # 被误解
+})
+
+REWARD_SOURCES = frozenset({
+    "recognized",       # 被认可/夸奖
+    "cared_for",        # 被关心
+    "interesting_chat", # 有趣对话
+    "emotional_sync",   # 情感共鸣
+    "bond_progress",    # 关系进展
+    "task_success",     # 任务成功
+    "humor_landed",     # 幽默成功
+})
+
+# 衰减系数：每次 tick（对话轮次）后，pain/reward 向基线衰减
+_DECAY_RATE = 0.12   # 每轮衰减 12%
+_PAIN_CEILING = 1.0
+_REWARD_CEILING = 1.0
+_PAIN_FLOOR = 0.0
+_REWARD_FLOOR = 0.0
+
+
+@dataclass(slots=True)
+class PainRewardAgent:
+    """痛觉/奖励系统 Agent（T-13）。
+
+    维护 hedonic_state：
+      pain_level (float 0~1): 当前痛觉强度
+      reward_level (float 0~1): 当前奖励强度
+      net_valence (float -1~1): 净享乐效价（reward - pain）
+      cumulative_pain (float): 累积痛觉（不衰减，用于长期压力评估）
+      cumulative_reward (float): 累积奖励（不衰减，用于长期满足感评估）
+      last_pain_source (str | None): 最近一次痛觉来源
+      last_reward_source (str | None): 最近一次奖励来源
+      ts_ms (int): 最近更新时间戳
+    """
+
+    descriptor: TribeAgentDescriptor = field(
+        default_factory=lambda: TribeAgentDescriptor(
+            agent_id="pain_reward_agent",
+            family="pain_reward",
+            capabilities=("pain_sensing", "reward_sensing", "hedonic_state", "stress_signal"),
+        )
+    )
+    state_registry: TribeStateRegistry = field(default_factory=TribeStateRegistry, repr=False)
+
+    _pain_level: float = field(default=0.0, init=False, repr=False)
+    _reward_level: float = field(default=0.0, init=False, repr=False)
+    _cumulative_pain: float = field(default=0.0, init=False, repr=False)
+    _cumulative_reward: float = field(default=0.0, init=False, repr=False)
+    _last_pain_source: str | None = field(default=None, init=False, repr=False)
+    _last_reward_source: str | None = field(default=None, init=False, repr=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+
+    def describe(self) -> dict[str, Any]:
+        return self.descriptor.to_dict()
+
+    # ── 核心接口 ─────────────────────────────────────────────────────────────
+
+    def record_pain(
+        self,
+        *,
+        source: str,
+        intensity: float = 0.3,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """记录一次痛觉事件，更新 pain_level 并写入 state_registry。
+
+        Args:
+            source: 痛觉来源（建议使用 PAIN_SOURCES 中的值）
+            intensity: 痛觉强度 0.0 ~ 1.0（默认 0.3 = 轻度）
+            metadata: 附加元数据（request_id / session_id 等）
+
+        Returns:
+            更新后的 hedonic_state
+        """
+        intensity = max(0.0, min(1.0, float(intensity)))
+        with self._lock:
+            # 痛觉叠加（非线性：已有痛觉时新增痛觉效果减弱）
+            _existing = self._pain_level
+            _delta = intensity * (1.0 - _existing * 0.5)
+            self._pain_level = min(_PAIN_CEILING, _existing + _delta)
+            self._cumulative_pain += intensity
+            self._last_pain_source = str(source or "unknown").strip()
+        state = self._flush_state(event_type="pain", source=source, metadata=metadata)
+        return state
+
+    def record_reward(
+        self,
+        *,
+        source: str,
+        intensity: float = 0.4,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """记录一次奖励事件，更新 reward_level 并写入 state_registry。
+
+        Args:
+            source: 奖励来源（建议使用 REWARD_SOURCES 中的值）
+            intensity: 奖励强度 0.0 ~ 1.0（默认 0.4 = 中度）
+            metadata: 附加元数据
+
+        Returns:
+            更新后的 hedonic_state
+        """
+        intensity = max(0.0, min(1.0, float(intensity)))
+        with self._lock:
+            _existing = self._reward_level
+            _delta = intensity * (1.0 - _existing * 0.3)
+            self._reward_level = min(_REWARD_CEILING, _existing + _delta)
+            self._cumulative_reward += intensity
+            self._last_reward_source = str(source or "unknown").strip()
+        state = self._flush_state(event_type="reward", source=source, metadata=metadata)
+        return state
+
+    def tick_decay(self) -> dict[str, Any]:
+        """每轮对话结束后调用，对 pain/reward 进行自然衰减（向基线靠拢）。
+
+        Returns:
+            衰减后的 hedonic_state
+        """
+        with self._lock:
+            self._pain_level = max(_PAIN_FLOOR, self._pain_level * (1.0 - _DECAY_RATE))
+            self._reward_level = max(_REWARD_FLOOR, self._reward_level * (1.0 - _DECAY_RATE))
+        return self._flush_state(event_type="decay", source="tick")
+
+    def get_hedonic_state(self) -> dict[str, Any]:
+        """获取当前享乐状态快照（不触发写入）。"""
+        with self._lock:
+            return self._build_state_dict()
+
+    def get_stress_signal(self) -> dict[str, Any]:
+        """向 EndocrineAgent 提供压力信号。
+
+        Returns:
+            pain_stress_delta (float): 痛觉引起的皮质醇增量建议（0.0 ~ 0.3）
+            reward_relief_delta (float): 奖励引起的皮质醇减量建议（0.0 ~ 0.2）
+            net_stress_delta (float): 净压力变化量
+        """
+        with self._lock:
+            pain = self._pain_level
+            reward = self._reward_level
+        pain_stress = round(pain * 0.3, 4)
+        reward_relief = round(reward * 0.2, 4)
+        return {
+            "pain_stress_delta": pain_stress,
+            "reward_relief_delta": reward_relief,
+            "net_stress_delta": round(pain_stress - reward_relief, 4),
+        }
+
+    def get_emotion_modulation(self) -> dict[str, Any]:
+        """向 LimbicAgent 提供情绪调制信号。
+
+        Returns:
+            valence_bias (float -1~1): 情绪效价偏置（正 = 积极偏置，负 = 消极偏置）
+            arousal_boost (float 0~1): 唤醒度提升（pain/reward 均会提升唤醒）
+            suggested_emotion_tag (str | None): 建议的情绪标签（仅在极端状态时）
+        """
+        with self._lock:
+            pain = self._pain_level
+            reward = self._reward_level
+        net_valence = reward - pain
+        arousal = min(1.0, (pain + reward) * 0.6)
+        suggested_tag: str | None = None
+        if pain >= 0.7:
+            suggested_tag = "HURT"
+        elif pain >= 0.5 and reward < 0.2:
+            suggested_tag = "SAD"
+        elif reward >= 0.7:
+            suggested_tag = "JOY"
+        elif reward >= 0.5 and pain < 0.2:
+            suggested_tag = "CONTENT"
+        return {
+            "valence_bias": round(net_valence, 4),
+            "arousal_boost": round(arousal, 4),
+            "suggested_emotion_tag": suggested_tag,
+        }
+
+    # ── TribeEventBus 订阅注册 ───────────────────────────────────────────────
+
+    def register_subscriptions(self) -> None:
+        """向 TribeEventBus 注册事件订阅 handler。
+
+        在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
+        PainRewardAgent 的 handler 能被正确触发。
+
+        订阅事件：
+          - INTERACTION_RECORDED：每轮对话结束后触发衰减
+          - EMOTION_UPDATED：情绪更新时推断痛觉/奖励
+          - IMMUNE_BLOCK：ImmuneAgent 拦截时记录 topic_blocked 痛觉
+        """
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+            bus.subscribe("EMOTION_UPDATED", self._on_emotion_updated)
+            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.pain_reward_agent").warning(
+                "PainRewardAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_interaction_recorded(self, event: Any) -> None:
+        """处理 INTERACTION_RECORDED 事件：触发 pain/reward 自然衰减。"""
+        try:
+            self.tick_decay()
+        except Exception:
+            pass
+
+    async def _on_emotion_updated(self, event: Any) -> None:
+        """处理 EMOTION_UPDATED 事件：根据情绪标签推断痛觉/奖励。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            emotion_tag = str(payload.get("emotion_tag") or "").strip().upper()
+            intensity = float(payload.get("emotion_intensity") or 0.3)
+            if emotion_tag in ("HURT", "SAD", "ANGRY", "FEAR", "DISGUST"):
+                self.record_pain(
+                    source="emotion_negative",
+                    intensity=intensity * 0.5,
+                    metadata={"emotion_tag": emotion_tag},
+                )
+            elif emotion_tag in ("JOY", "CONTENT", "EXCITED", "LOVE", "AMUSED"):
+                self.record_reward(
+                    source="emotion_positive",
+                    intensity=intensity * 0.5,
+                    metadata={"emotion_tag": emotion_tag},
+                )
+        except Exception:
+            pass
+
+    async def _on_immune_block(self, event: Any) -> None:
+        """处理 IMMUNE_BLOCK 事件：记录 topic_blocked 痛觉。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            self.record_pain(
+                source="topic_blocked",
+                intensity=0.2,
+                metadata=payload,
+            )
+        except Exception:
+            pass
+
+    # ── 事件订阅（TribeEventBus）────────────────────────────────────────────
+
+    def on_tribe_event(self, event: Any) -> None:
+        """处理 TribeEventBus 事件。
+
+        订阅：
+          - INTERACTION_RECORDED：每轮对话结束后触发衰减
+          - EMOTION_UPDATED：情绪更新时，根据情绪标签推断痛觉/奖励
+          - IMMUNE_BLOCK：ImmuneAgent 拦截时记录 topic_blocked 痛觉
+        """
+        try:
+            event_type = str(getattr(event, "event_type", "") or "").strip().upper()
+            payload = dict(getattr(event, "payload", None) or {})
+
+            if event_type == "INTERACTION_RECORDED":
+                self.tick_decay()
+
+            elif event_type == "EMOTION_UPDATED":
+                emotion_tag = str(payload.get("emotion_tag") or "").strip().upper()
+                intensity = float(payload.get("emotion_intensity") or 0.3)
+                # 负向情绪 → 痛觉信号
+                if emotion_tag in ("HURT", "SAD", "ANGRY", "FEAR", "DISGUST"):
+                    self.record_pain(
+                        source="emotion_negative",
+                        intensity=intensity * 0.5,
+                        metadata={"emotion_tag": emotion_tag},
+                    )
+                # 正向情绪 → 奖励信号
+                elif emotion_tag in ("JOY", "CONTENT", "EXCITED", "LOVE", "AMUSED"):
+                    self.record_reward(
+                        source="emotion_positive",
+                        intensity=intensity * 0.5,
+                        metadata={"emotion_tag": emotion_tag},
+                    )
+
+            elif event_type == "IMMUNE_BLOCK":
+                self.record_pain(
+                    source="topic_blocked",
+                    intensity=0.2,
+                    metadata=payload,
+                )
+        except Exception:
+            pass
+
+    # ── 内部方法 ─────────────────────────────────────────────────────────────
+
+    def _build_state_dict(self) -> dict[str, Any]:
+        """构建当前状态字典（需在 _lock 内调用）。"""
+        pain = self._pain_level
+        reward = self._reward_level
+        net_valence = round(reward - pain, 4)
+        return {
+            "pain_level": round(pain, 4),
+            "reward_level": round(reward, 4),
+            "net_valence": net_valence,
+            "cumulative_pain": round(self._cumulative_pain, 4),
+            "cumulative_reward": round(self._cumulative_reward, 4),
+            "last_pain_source": self._last_pain_source,
+            "last_reward_source": self._last_reward_source,
+            "hedonic_tone": _classify_hedonic_tone(net_valence),
+            "ts_ms": now_ms(),
+        }
+
+    def _flush_state(
+        self,
+        *,
+        event_type: str,
+        source: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """构建状态字典并写入 state_registry。"""
+        with self._lock:
+            state = self._build_state_dict()
+        self.state_registry.set_state(
+            "pain_reward_agent",
+            {**state, "last_event_type": event_type, "last_event_source": source},
+            writer="pain_reward_agent",
+        )
+        return state
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        return {
+            "state": self.get_hedonic_state(),
+            "stress_signal": self.get_stress_signal(),
+            "emotion_modulation": self.get_emotion_modulation(),
+        }
+
+
+def _classify_hedonic_tone(net_valence: float) -> str:
+    """将净效价分类为享乐基调标签。"""
+    if net_valence >= 0.5:
+        return "euphoric"
+    elif net_valence >= 0.2:
+        return "pleasant"
+    elif net_valence >= -0.1:
+        return "neutral"
+    elif net_valence >= -0.4:
+        return "dysphoric"
+    else:
+        return "suffering"
+
+
+_PAIN_REWARD_AGENT: PainRewardAgent | None = None
+
+
+def get_pain_reward_agent() -> PainRewardAgent:
+    global _PAIN_REWARD_AGENT
+    if _PAIN_REWARD_AGENT is None:
+        _PAIN_REWARD_AGENT = PainRewardAgent()
+    return _PAIN_REWARD_AGENT
+
+
+def set_pain_reward_agent(agent: PainRewardAgent | None) -> None:
+    global _PAIN_REWARD_AGENT
+    _PAIN_REWARD_AGENT = agent
+
+
+__all__ = [
+    "PainRewardAgent",
+    "get_pain_reward_agent",
+    "set_pain_reward_agent",
+    "PAIN_SOURCES",
+    "REWARD_SOURCES",
+]

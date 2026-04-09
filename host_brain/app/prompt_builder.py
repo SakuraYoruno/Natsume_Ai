@@ -1170,7 +1170,29 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     # 仅在非 NORMAL 状态或有话题抗拒时注入
     _silence_active = _silence_level != "NORMAL" or _silence_topic_active
 
-    # ── v1.12：身体感知（body_sense）────────────────────────────────────
+    # ── Phase XIX：Tribe 生命体征（tribe_vital_signs，T-16）──────────────
+    # 由 CortexAgent Supervisor 收口写入 runtime_payload["tribe_vital_signs"]
+    # 包含：gate_state / stress_index / energy_reserve / homeostasis_ok /
+    #        emotion_tag / mood_state / silence_willingness / bond_stage /
+    #        voice_emotion_tag / voice_emotion_intensity
+    _tribe_vital_raw = runtime_payload.get("tribe_vital_signs") or prompt_context.get("tribe_vital_signs")
+    _tribe_vital: dict = dict(_tribe_vital_raw) if isinstance(_tribe_vital_raw, Mapping) else {}
+    _tv_gate_state = str(_tribe_vital.get("gate_state") or "open").strip().lower()
+    _tv_stress_index = float(_tribe_vital.get("stress_index") or 0.0)
+    _tv_energy_reserve = float(_tribe_vital.get("energy_reserve") or 0.6)
+    _tv_homeostasis_ok = bool(_tribe_vital.get("homeostasis_ok", True))
+    _tv_mood_state = str(_tribe_vital.get("mood_state") or "steady").strip().lower()
+    _tv_bond_stage = str(_tribe_vital.get("bond_stage") or "stranger").strip().lower()
+    _tv_voice_emotion_tag = str(_tribe_vital.get("voice_emotion_tag") or "").strip().upper()
+    _tv_voice_emotion_intensity = _tribe_vital.get("voice_emotion_intensity")
+    # 仅在有实质性生命体征数据时注入（gate_state 非 open 或 stress 较高或有语音情绪）
+    _tv_active = bool(_tribe_vital) and (
+        _tv_gate_state != "open"
+        or _tv_stress_index >= 0.4
+        or not _tv_homeostasis_ok
+        or bool(_tv_voice_emotion_tag)
+        or _tv_mood_state not in ("steady", "normal", "")
+    )
     _body_sense_raw = runtime_payload.get("body_sense") or prompt_context.get("body_sense")
     _body_sense: dict = dict(_body_sense_raw) if isinstance(_body_sense_raw, Mapping) else {}
     _bs_fatigue_level = str(_body_sense.get("fatigue_level") or "FRESH").strip().upper()
@@ -1668,6 +1690,27 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             + (f"- silence_hint: {_silence_hint}\n" if _silence_hint else "")
             + (f"- topic_resistance_hint: {_silence_topic_hint}\n" if _silence_topic_active and _silence_topic_hint else "")
             if _silence_active else
+            ""
+        )
+        # ── Phase XIX：Tribe 生命体征（T-16）─────────────────────────────
+        # 仅在 gate_state 非 open / stress 较高 / homeostasis 异常 / 有语音情绪时注入
+        # 避免在正常状态下增加 prompt 长度
+        + (
+            f"- tribe_gate_state: {_tv_gate_state}\n"
+            f"- tribe_stress_index: {_tv_stress_index:.2f}\n"
+            f"- tribe_energy_reserve: {_tv_energy_reserve:.2f}\n"
+            f"- tribe_homeostasis_ok: {'true' if _tv_homeostasis_ok else 'false'}\n"
+            f"- tribe_mood_state: {_tv_mood_state}\n"
+            f"- tribe_bond_stage: {_tv_bond_stage}\n"
+            + (
+                f"- tribe_voice_emotion_tag: {_tv_voice_emotion_tag}\n"
+                + (
+                    f"- tribe_voice_emotion_intensity: {_tv_voice_emotion_intensity:.2f}\n"
+                    if _tv_voice_emotion_intensity is not None else ""
+                )
+                if _tv_voice_emotion_tag else ""
+            )
+            if _tv_active else
             ""
         )
         # ── v1.12：身体感知（疲劳/困倦/孤独）────────────────────────────

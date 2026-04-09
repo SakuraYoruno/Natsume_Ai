@@ -5,6 +5,7 @@ from .events import emit_tribe_event
 from .event_bus import InMemoryTribeEventBus, TribeEvent, new_tribe_event
 from .handoff import TribeHandoffCoordinator, get_tribe_handoff_coordinator
 from .endocrine_agent import EndocrineAgent, get_endocrine_agent, set_endocrine_agent
+from .pain_reward_agent import PainRewardAgent, get_pain_reward_agent, set_pain_reward_agent
 from .hippocampus_agent import HippocampusAgent, get_hippocampus_agent, set_hippocampus_agent
 from .immune_agent import ImmuneAgent, get_immune_agent, set_immune_agent
 from .limbic_agent import LimbicAgent, get_limbic_agent, set_limbic_agent
@@ -22,6 +23,7 @@ __all__ = [
     "InMemoryTribeEventBus",
     "ImmuneAgent",
     "LimbicAgent",
+    "PainRewardAgent",
     "PrefrontalAgent",
     "SocialBrainAgent",
     "TribeHandoffCoordinator",
@@ -36,6 +38,7 @@ __all__ = [
     "get_endocrine_agent",
     "get_hippocampus_agent",
     "get_immune_agent",
+    "get_pain_reward_agent",
     "set_hippocampus_agent",
     "get_host_tribe_registry",
     "get_tribe_handoff_coordinator",
@@ -45,5 +48,6 @@ __all__ = [
     "set_cortex_agent",
     "set_endocrine_agent",
     "set_immune_agent",
+    "set_pain_reward_agent",
     "new_tribe_event",
 ]
