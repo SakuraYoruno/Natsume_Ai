@@ -1230,7 +1230,7 @@ def runtime_lifespan(
                 except Exception as _snap_exc:
                     logger.debug("TribeStateRegistry.load_snapshot 失败（降级）: %s", _snap_exc)
 
-                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent → EndocrineAgent → ImmuneAgent → HippocampusAgent → ANSAgent）
+                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent → EndocrineAgent → ImmuneAgent → HippocampusAgent → ANSAgent → LanguageSystemAgent → SomaticAgent → PeripheralAgent）
                 _tribe_sub_errors: list[str] = []
                 for _agent_name, _agent_factory in [
                     ("limbic_agent", "host_brain.tribe.limbic_agent.get_limbic_agent"),
@@ -1242,6 +1242,9 @@ def runtime_lifespan(
                     ("immune_agent", "host_brain.tribe.immune_agent.get_immune_agent"),  # T-35
                     ("hippocampus_agent", "host_brain.tribe.hippocampus_agent.get_hippocampus_agent"),  # T-36
                     ("ans_agent", "host_brain.tribe.ans_agent.get_ans_agent"),  # T-37
+                    ("language_system_agent", "host_brain.tribe.language_system_agent.get_language_system_agent"),  # T-103
+                    ("somatic_agent", "host_brain.tribe.somatic_agent.get_somatic_agent"),  # T-109
+                    ("peripheral_agent", "host_brain.tribe.peripheral_agent.get_peripheral_agent"),  # T-110
                 ]:
                     try:
                         _module_path, _func_name = _agent_factory.rsplit(".", 1)
@@ -1254,36 +1257,8 @@ def runtime_lifespan(
                         _tribe_sub_errors.append(f"{_agent_name}:{_sub_exc}")
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
-                # T-72（第十六批）：统计本次注册的订阅总数
-                # LimbicAgent:       INTERACTION_RECORDED / BODY_SENSE_UPDATED / INNER_WORLD_TICKED
-                #                    EMOTION_INFERENCE_UPDATED / BOND_PROGRESS / BOND_REGRESS
-                #                    TASK_SUCCESS(T-41) / HUMOR_LANDED(T-41) / LONELINESS_SIGNAL(T-51) = 9
-                # PrefrontalAgent:   EVOLUTION_CYCLE_TRIGGERED / INTERACTION_RECORDED
-                #                    BOND_STAGE_CHANGED(T-34) / LONELINESS_SIGNAL(T-47)
-                #                    IMMUNE_BLOCK(T-71) = 5
-                # SocialBrainAgent:  INTERACTION_RECORDED / BOND_PROGRESS / BOND_REGRESS
-                #                    TASK_SUCCESS(T-48) / LONELINESS_SIGNAL(T-60) = 5
-                # CortexAgent:       SILENCE_WILLINGNESS_CHANGED / EMOTION_STATE_CHANGED / BOND_STAGE_CHANGED
-                #                    BOND_PROGRESS(T-33) / BOND_REGRESS(T-33) / IMMUNE_BLOCK(T-58)
-                #                    LONELINESS_SIGNAL(T-65) = 7
-                # PainRewardAgent:   INTERACTION_RECORDED / EMOTION_UPDATED / IMMUNE_BLOCK
-                #                    BOND_PROGRESS / BOND_REGRESS / TASK_SUCCESS / HUMOR_LANDED
-                #                    LONELINESS_SIGNAL(T-40) = 8
-                # EndocrineAgent:    BOND_PROGRESS / BOND_REGRESS / LONELINESS_SIGNAL(T-57)
-                #                    TASK_SUCCESS(T-69) = 4
-                # ImmuneAgent:       INTERACTION_RECORDED(T-35) / BOND_STAGE_CHANGED(T-81) = 2
-                # HippocampusAgent:  INTERACTION_RECORDED(T-36) / LONELINESS_SIGNAL(T-61) = 2
-                # ANSAgent:          BOND_STAGE_CHANGED(T-37) = 1
-                # ── 第十七批新增（T-73~T-82）──────────────────────────────────
-                # CortexAgent:       +LONELINESS_SIGNAL(T-65) → 合计 10
-                # SocialBrainAgent:  +IMMUNE_BLOCK(T-78) → 合计 6
-                # LimbicAgent:       +IMMUNE_BLOCK(T-79) → 合计 9
-                # 合计: 10+5+6+7+9+4+2+2+1 = 46 + PrefrontalAgent(T-71 IMMUNE_BLOCK) = 47
-                # T-88: CortexAgent +TASK_SUCCESS, T-85: HippocampusAgent +TASK_SUCCESS
-                # T-86: EndocrineAgent +IMMUNE_BLOCK, T-89: PainRewardAgent +HUMOR_LANDED
-                # T-91: SocialBrainAgent +HUMOR_LANDED → 合计 53（第十八批）
-                # T-93~T-101: skill 侧 emit 接入 + chat_context_builder 消费字段（第十九批，无新增订阅）
-    _total_subscriptions = 53
+
+                _total_subscriptions = 60
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors

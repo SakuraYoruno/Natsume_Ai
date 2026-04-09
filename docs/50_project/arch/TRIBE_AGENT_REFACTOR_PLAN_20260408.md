@@ -3127,15 +3127,100 @@ BOND_PROGRESS / BOND_REGRESS
 
 ---
 
-#### 下一步待开发（第二十批 T-103 ~ T-112）
+---
 
-1. **T-103**：`LanguageSystemAgent` 骨架（Phase 5）：注册订阅 EMOTION_STATE_CHANGED / BOND_STAGE_CHANGED / LONELINESS_SIGNAL，管理语言风格状态
-2. **T-104**：`LanguageSystemAgent` 新增 `get_language_style()` 方法，根据 bond_stage / emotion_tag 返回语言风格建议
-3. **T-105**：`chat_context_builder` 接入 `LanguageSystemAgent.get_language_style()`，注入 `runtime_payload["language_style"]`
-4. **T-106**：`prompt_builder` 消费 `language_style`，影响回复的语气/措辞/句式选择
-5. **T-107**：`bond_tone_adjust` 在 `prompt_builder` 中消费，warmer/cautious 影响 prompt 语气指令
-6. **T-108**：`immune_caution` 在 `prompt_builder` 中消费，注入谨慎度提示到 system prompt
-7. **T-109**：`SomaticAgent` 骨架（躯干族 Phase 6 预备）：注册订阅 BODY_SENSE_UPDATED / LONELINESS_SIGNAL
-8. **T-110**：`PeripheralAgent` 骨架（躯干族 Phase 6 预备）：注册订阅 EMOTION_STATE_CHANGED / IMMUNE_BLOCK
-9. **T-111**：`TribeStateRegistry` 新增 `export_snapshot()` 方法，支持完整快照导出为 JSON 文件
-10. **T-112**：`http_hooks.py` 第二十批计数更新 + 文档留痕
+## 第二十批开发留痕（T-103 ~ T-112）
+
+#### T-103：LanguageSystemAgent 骨架 ✅
+
+- 新建 `host_brain/tribe/language_system_agent.py`，实现 `LanguageSystemAgent` 单例
+- 注册订阅：`EMOTION_STATE_CHANGED`、`BOND_STAGE_CHANGED`、`LONELINESS_SIGNAL`
+- 内部状态：`_current_emotion_tag`、`_current_bond_stage`、`_loneliness_level`
+- 事件处理：`_on_emotion_changed()` / `_on_bond_stage_changed()` / `_on_loneliness_signal()`
+
+#### T-104：LanguageSystemAgent.get_language_style() ✅
+
+- 新增 `get_language_style()` 方法，根据 `bond_stage` / `emotion_tag` / `loneliness_level` 返回语言风格建议字典
+- 返回字段：`tone`（语气）、`formality`（正式度）、`warmth`（温暖度）、`style_hint`（自然语言风格提示）
+- bond_stage 越高 → 越亲密随意；emotion_tag 为负向 → 语气更温柔；loneliness 高 → 增加陪伴感措辞
+
+#### T-105：chat_context_builder 接入 get_language_style() ✅
+
+- 修改 `host_brain/app/chat_context_builder.py`，在 vital_signs 消费段之后调用 `get_language_system_agent().get_language_style()`
+- 注入 `runtime_payload["language_style"]`，包含 tone / formality / warmth / style_hint 四字段
+
+#### T-106：prompt_builder 消费 language_style ✅
+
+- 修改 `host_brain/app/prompt_builder.py`，在 tribe_vital_signs 注入区域新增 `language_style` 消费块
+- 将 `style_hint` 注入 system prompt 的语言风格指令段，影响回复的语气/措辞/句式
+
+#### T-107：bond_tone_adjust 在 prompt_builder 中消费 ✅
+
+- 同上，在 `language_style` 消费块之后追加 `bond_tone_adjust` 消费块
+- `warmer` → 注入"语气更温柔亲近，多用第一人称亲密表达"指令
+- `cautious` → 注入"语气更谨慎克制，避免过度亲密表达"指令
+
+#### T-108：immune_caution 在 prompt_builder 中消费 ✅
+
+- 同上，追加 `immune_caution` 消费块
+- `risk_level` 为 medium/high/critical 时，注入"当前话题敏感，回复需更加谨慎，避免触碰敏感内容"提示到 system prompt
+
+#### T-109：SomaticAgent 骨架 ✅
+
+- 新建 `host_brain/tribe/somatic_agent.py`，实现 `SomaticAgent` 单例（躯干族 Phase 6 预备）
+- 注册订阅：`BODY_SENSE_UPDATED`、`LONELINESS_SIGNAL`
+- 内部状态：`_fatigue_level`、`_drowsiness_level`、`_loneliness_level`
+- 事件处理：`_on_body_sense_updated()` / `_on_loneliness_signal()`
+
+#### T-110：PeripheralAgent 骨架 ✅
+
+- 新建 `host_brain/tribe/peripheral_agent.py`，实现 `PeripheralAgent` 单例（躯干族 Phase 6 预备）
+- 注册订阅：`EMOTION_STATE_CHANGED`、`IMMUNE_BLOCK`
+- 内部状态：`_emotion_tag`、`_immune_block_count`
+- 事件处理：`_on_emotion_changed()` / `_on_immune_block()`
+
+#### T-111：TribeStateRegistry.export_snapshot() ✅
+
+- 修改 `host_brain/tribe/tribe_state.py`，在 `stop_periodic_save()` 之后新增 `export_snapshot()` 方法
+- 支持自定义导出路径；默认在 `_state_path` 同目录生成带时间戳文件（`tribe_state_export_{ts_ms}.json`）
+- 导出格式：`{ version, export_type, exported_at_ms, namespace_count, namespaces }` 完整快照
+- 原子写入（先写 `.tmp` 再 `replace`），返回导出文件绝对路径字符串
+
+#### T-112：http_hooks.py 第二十批更新 ✅
+
+- 在 Agent 注册循环中新增 `language_system_agent`（T-103）、`somatic_agent`（T-109）、`peripheral_agent`（T-110）三个 Agent
+- 订阅计数从 53 更新为 60（LanguageSystemAgent +3、SomaticAgent +2、PeripheralAgent +2 = +7）
+- 更新注释说明第二十批新增 Agent 情况
+
+---
+
+**第二十批订阅总览（60 个，新增 7 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 11 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 5 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, LONELINESS_SIGNAL, IMMUNE_BLOCK, HUMOR_LANDED | 7 |
+| CortexAgent | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, IMMUNE_BLOCK, LONELINESS_SIGNAL, TASK_SUCCESS | 8 |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, LONELINESS_SIGNAL, TASK_SUCCESS, IMMUNE_BLOCK | 5 |
+| ImmuneAgent | INTERACTION_RECORDED, BOND_STAGE_CHANGED | 2 |
+| HippocampusAgent | INTERACTION_RECORDED, LONELINESS_SIGNAL, TASK_SUCCESS | 3 |
+| ANSAgent | BOND_STAGE_CHANGED | 1 |
+| **LanguageSystemAgent** *(新增 T-103)* | EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL | **3** |
+| **SomaticAgent** *(新增 T-109)* | BODY_SENSE_UPDATED, LONELINESS_SIGNAL | **2** |
+| **PeripheralAgent** *(新增 T-110)* | EMOTION_STATE_CHANGED, IMMUNE_BLOCK | **2** |
+
+**第二十批新增 prompt 消费字段**：
+
+| 字段 | 消费位置 | 作用 |
+|---|---|---|
+| `language_style` | chat_context_builder → prompt_builder | 语言风格指令（tone/formality/warmth/style_hint） |
+| `bond_tone_adjust` | prompt_builder | warmer/cautious 语气调整指令 |
+| `immune_caution` | prompt_builder | 谨慎度提示注入 system prompt |
+
+**第二十批新增运维能力**：
+
+| 能力 | 实现位置 | 说明 |
+|---|---|---|
+| `export_snapshot()` | TribeStateRegistry | 完整快照导出为 JSON，支持自定义路径，原子写入 |

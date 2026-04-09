@@ -319,6 +319,58 @@ class TribeStateRegistry:
         # 关闭前强制保存一次，确保最新状态落盘
         self.save_snapshot()
 
+    def export_snapshot(self, export_path: "Path | str | None" = None) -> str:
+        """T-111：将当前所有命名空间状态快照导出为 JSON 文件。
+
+        与 save_snapshot() 的区别：
+        - save_snapshot() 用于内部节流持久化，路径固定（_state_path）
+        - export_snapshot() 用于运维/诊断导出，支持自定义路径，
+          并在返回值中包含导出文件的绝对路径，方便调用方确认写入位置。
+
+        Args:
+            export_path: 导出目标路径（文件路径）。
+                         若为 None，则在 _state_path 同目录下生成带时间戳的文件，
+                         格式为 tribe_state_export_{ts_ms}.json。
+
+        Returns:
+            str: 导出文件的绝对路径字符串。
+
+        Raises:
+            OSError: 目录创建或文件写入失败时抛出（不降级，让调用方感知）。
+        """
+        ts_ms = now_ms()
+        if export_path is None:
+            _base_dir = self._state_path.parent
+            _filename = f"tribe_state_export_{ts_ms}.json"
+            resolved_path = _base_dir / _filename
+        else:
+            resolved_path = Path(export_path)
+
+        with self._lock:
+            data = {ns: dict(snap) for ns, snap in self._states.items()}
+
+        export_data = {
+            "version": 1,
+            "export_type": "full_snapshot",
+            "exported_at_ms": ts_ms,
+            "namespace_count": len(data),
+            "namespaces": data,
+        }
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = resolved_path.with_suffix(".tmp")
+        tmp_path.write_text(
+            json.dumps(export_data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        tmp_path.replace(resolved_path)
+        import logging  # noqa: PLC0415
+        logging.getLogger("Natsume.tribe.tribe_state").info(
+            "TribeStateRegistry.export_snapshot: 已导出 %d 个命名空间到 %s",
+            len(data),
+            resolved_path,
+        )
+        return str(resolved_path.resolve())
+
     def aggregate_vital_signs(self) -> dict[str, Any]:
         """T-10：从各族 Agent 写入的状态快照中聚合统一生命体征。
 
