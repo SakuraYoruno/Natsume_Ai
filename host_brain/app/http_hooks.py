@@ -1258,7 +1258,9 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
 
-                _total_subscriptions = 60
+                # T-113~T-122: ANSAgent +VOICE_PIPELINE_STARTED/ENDED/CHANNEL_MESSAGE_RECEIVED(+3)
+                #              CortexAgent +PLATFORM_CONNECTED/DISCONNECTED(+2) = +5（第二十一批）
+                _total_subscriptions = 65
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors

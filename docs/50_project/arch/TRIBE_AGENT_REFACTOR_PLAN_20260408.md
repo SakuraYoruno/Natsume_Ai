@@ -3224,3 +3224,115 @@ BOND_PROGRESS / BOND_REGRESS
 | 能力 | 实现位置 | 说明 |
 |---|---|---|
 | `export_snapshot()` | TribeStateRegistry | 完整快照导出为 JSON，支持自定义路径，原子写入 |
+
+---
+
+## 第二十一批开发留痕（T-113 ~ T-122）
+
+#### T-113：edge_client runtime/bootstrap.py 初始化 EdgeTribeBridge 单例 ✅
+
+- 修改 `edge_client/runtime/bootstrap.py`，在 lifespan 启动阶段调用 `EdgeTribeRegistry.get_instance().initialize()`
+- EdgeTribeBridge 从环境变量自动构建（`EDGE_TRIBE_HOST_BASE_URL` / `EDGE_RPC_HOST`）
+- 初始化后 bridge 自动注入到 SomaticAgent / PeripheralAgent / ChannelAgent / VoiceAgent 四个 Agent
+- 降级安全：初始化失败时仅记录 warning，不阻断 edge_client 启动
+
+#### T-114：runtime/emotion_inference.py 调用 SomaticAgent 上报 EMOTION_INFERENCE_UPDATED ✅
+
+- 修改 `edge_client/runtime/emotion_inference.py` 的 `infer_asr_emotion()` 函数
+- 推断完成后，通过 `EdgeTribeRegistry.get_instance().somatic.publish_emotion_inference_updated()` 上报
+- 上报字段：`emotion_tag`、`emotion_intensity`、`mood_state`、`emotion_source`、`emotion_terms`
+- 非致命：上报失败不影响推断结果返回
+
+#### T-115：gateway/router.py 调用 ChannelAgent 上报 CHANNEL_MESSAGE_RECEIVED ✅
+
+- 修改 `edge_client/gateway/router.py` 的消息路由主路径
+- 消息路由成功/失败后，调用 `EdgeTribeRegistry.get_instance().channel.on_message_received()` 上报
+- 上报字段：`platform`、`conversation_id`、`msg_id`、`msg_type`、`is_group`、`ts_ms`、`routed_success`、`cached`
+- 网关降级时调用 `on_gateway_degraded()` 上报 `GATEWAY_DEGRADED` 事件给 ANSAgent
+
+#### T-116：gateway/bootstrap.py 调用 PeripheralAgent 上报平台连接/断线事件 ✅
+
+- 修改 `edge_client/gateway/bootstrap.py` 的平台适配器初始化和关闭路径
+- 平台适配器成功连接时，调用 `EdgeTribeRegistry.get_instance().peripheral.publish_platform_connected()`
+- 平台适配器断线/关闭时，调用 `publish_platform_disconnected()`
+- 上报字段：`platform`（平台名称）、`detail`（可选详情）
+
+#### T-117：runtime/voice_pipeline.py 调用 VoiceAgent 上报 VOICE_PIPELINE_STARTED/ENDED ✅
+
+- 修改 `edge_client/runtime/voice_pipeline.py` 的语音管线启动和结束路径
+- 管线启动时调用 `EdgeTribeRegistry.get_instance().voice.publish_pipeline_started()`
+- 管线结束时调用 `publish_pipeline_ended()`
+- 上报字段：`request_id`、`session_id`、`ts_ms`、`status`、`reason_code`、`stage`
+
+#### T-118：host_brain CortexAgent 新增订阅 PLATFORM_CONNECTED/DISCONNECTED ✅
+
+- 修改 `host_brain/tribe/cortex_agent.py` 的 `register_subscriptions()` 方法
+- 新增订阅：`PLATFORM_CONNECTED` → `_on_platform_connected()`
+- 新增订阅：`PLATFORM_DISCONNECTED` → `_on_platform_disconnected()`
+- 处理逻辑：更新 `_vital_signs["platform_status"]`，平台断线时触发谨慎模式标记
+
+#### T-119：host_brain ANSAgent 新增订阅 VOICE_PIPELINE_STARTED/ENDED ✅
+
+- 修改 `host_brain/tribe/ans_agent.py` 的 `register_subscriptions()` 方法
+- 新增订阅：`VOICE_PIPELINE_STARTED` → `_on_voice_pipeline_started()`
+- 新增订阅：`VOICE_PIPELINE_ENDED` → `_on_voice_pipeline_ended()`
+- 处理逻辑：更新 `_voice_active` 标志，语音活跃时抑制主动对话调度
+
+#### T-120：host_brain ANSAgent 新增订阅 CHANNEL_MESSAGE_RECEIVED ✅
+
+- 同上，新增订阅：`CHANNEL_MESSAGE_RECEIVED` → `_on_channel_message_received()`
+- 处理逻辑：更新 `_last_channel_activity_ms`，用于主动对话空闲阈值判断
+- 与 ActivityMonitor 的 `_last_interaction_ms` 形成双重活跃度感知
+
+#### T-121：edge_client tribe/registry.py 完善为 EdgeTribeRegistry 单例管理 ✅
+
+- 重写 `edge_client/tribe/registry.py`，实现 `EdgeTribeRegistry` 完整单例类
+- 持有 bridge / somatic / peripheral / channel / voice 五个对象的单例引用
+- 提供 `initialize(bridge=None)` 统一初始化入口（幂等，重复调用安全）
+- 提供 `reinitialize()` 强制重新初始化（用于测试/热更新）
+- 提供 `describe()` 状态摘要，供健康检查端点调用
+- 新增 `get_edge_tribe_registry()` 全局访问函数，向后兼容保留 `build_edge_tribe_bridge()`
+- 同步更新 `edge_client/tribe/__init__.py` 导出 `EdgeTribeRegistry` 和 `get_edge_tribe_registry`
+
+#### T-122：http_hooks.py 第二十一批更新 ✅
+
+- 订阅计数从 60 更新为 65（ANSAgent +3、CortexAgent +2 = +5）
+- 更新注释说明第二十一批新增订阅情况
+
+---
+
+**第二十一批订阅总览（65 个，新增 5 个）**：
+
+| Agent | 订阅事件 | 数量 |
+|---|---|---|
+| LimbicAgent | BODY_SENSE_UPDATED, INNER_WORLD_TICKED, CONVERSATION_STARTED, CONVERSATION_ENDED, EMOTION_INFERENCE_UPDATED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 11 |
+| PrefrontalAgent | EVOLUTION_CYCLE_TRIGGERED, INTERACTION_RECORDED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL, IMMUNE_BLOCK | 5 |
+| SocialBrainAgent | INTERACTION_RECORDED, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, LONELINESS_SIGNAL, IMMUNE_BLOCK, HUMOR_LANDED | 7 |
+| **CortexAgent** | SILENCE_WILLINGNESS_CHANGED, EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, BOND_PROGRESS, BOND_REGRESS, IMMUNE_BLOCK, LONELINESS_SIGNAL, TASK_SUCCESS, **PLATFORM_CONNECTED, PLATFORM_DISCONNECTED** | **10** |
+| PainRewardAgent | INTERACTION_RECORDED, EMOTION_UPDATED, IMMUNE_BLOCK, BOND_PROGRESS, BOND_REGRESS, TASK_SUCCESS, HUMOR_LANDED, LONELINESS_SIGNAL | 8 |
+| EndocrineAgent | BOND_PROGRESS, BOND_REGRESS, LONELINESS_SIGNAL, TASK_SUCCESS, IMMUNE_BLOCK | 5 |
+| ImmuneAgent | INTERACTION_RECORDED, BOND_STAGE_CHANGED | 2 |
+| HippocampusAgent | INTERACTION_RECORDED, LONELINESS_SIGNAL, TASK_SUCCESS | 3 |
+| **ANSAgent** | BOND_STAGE_CHANGED, **VOICE_PIPELINE_STARTED, VOICE_PIPELINE_ENDED, CHANNEL_MESSAGE_RECEIVED** | **4** |
+| LanguageSystemAgent | EMOTION_STATE_CHANGED, BOND_STAGE_CHANGED, LONELINESS_SIGNAL | 3 |
+| SomaticAgent | BODY_SENSE_UPDATED, LONELINESS_SIGNAL | 2 |
+| PeripheralAgent | EMOTION_STATE_CHANGED, IMMUNE_BLOCK | 2 |
+
+**第二十一批新增 edge_client 侧 emit 接入**：
+
+| 文件 | Agent | emit 方法 | 触发条件 |
+|---|---|---|---|
+| `runtime/bootstrap.py` | EdgeTribeRegistry | `initialize()` | edge_client 启动时 |
+| `runtime/emotion_inference.py` | SomaticAgent | `publish_emotion_inference_updated()` | ASR 情绪推断完成 |
+| `gateway/router.py` | ChannelAgent | `on_message_received()` / `on_gateway_degraded()` | 消息路由成功/降级 |
+| `gateway/bootstrap.py` | PeripheralAgent | `publish_platform_connected/disconnected()` | 平台适配器连接/断线 |
+| `runtime/voice_pipeline.py` | VoiceAgent | `publish_pipeline_started/ended()` | 语音管线启停 |
+
+**第二十一批新增 EdgeTribeRegistry 能力**：
+
+| 能力 | 说明 |
+|---|---|
+| `EdgeTribeRegistry` 单例类 | 统一持有 bridge + 4 个 Agent，线程安全单例 |
+| `initialize(bridge=None)` | 幂等初始化，自动从环境变量构建 bridge |
+| `describe()` | 状态摘要，供健康检查使用 |
+| `get_edge_tribe_registry()` | 全局访问函数 |
