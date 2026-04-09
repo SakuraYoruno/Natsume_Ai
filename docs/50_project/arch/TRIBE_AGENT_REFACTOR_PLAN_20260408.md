@@ -3673,3 +3673,157 @@ edge_client                          host_brain
 | `SharedMemoryIndex` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_shared_memory_index()` | ✅ T-151 |
 | `MilestoneTracker` | `chat_context_builder.py` 直接调用 | `SocialBrainAgent.resolve_milestone_tracker()` | ✅ T-159 |
 | `get_canonical_bond_user_id()` | 多处直接调用 | `HippocampusAgent.resolve_bond_user_id()` | ✅ T-160 |
+
+---
+
+## 第二十五批实现记录（T-163 ~ T-172）
+
+> **日期**：2026-04-09 | **主题**：Phase 6 躯干族独立 —— edge_client 内部族化完善
+
+### 背景
+
+Phase 6 目标是让 edge_client 内部形成完整的族化闭环：SomaticAgent 和 PeripheralAgent 不仅能向 host_brain 上报事件（上行），还能接收 host_brain 的下行指令并驱动本地硬件/平台适配器。本批次完成了双向通信链路的最后一公里。
+
+---
+
+#### T-163：评估 edge_client 躯干族缺口 ✅
+
+- 读取 `edge_client/tribe/somatic_agent.py`（6.0 KB）和 `peripheral_agent.py`（6.7 KB）
+- 确认已有上行能力：`publish_body_sense_updated()`、`publish_emotion_inference_updated()`、`publish_platform_connected()`、`publish_platform_disconnected()`
+- 确认缺口：无 `handle_tribe_command()` 下行指令处理、无 `publish_somatic_state()` / `publish_peripheral_state()` 主动状态上报
+
+---
+
+#### T-164：edge_client SomaticAgent 新增 handle_tribe_command() ✅
+
+**文件**：`edge_client/tribe/somatic_agent.py`
+
+- 新增 `handle_tribe_command(command: dict) -> dict` 方法
+- 支持指令类型：
+  - `set_expression`：调用 `vts_driver.set_expression(emotion_tag, intensity)`，驱动 VTube Studio 表情
+  - `set_body_state`：更新本地躯体状态快照（疲劳度/孤独感）
+  - `reset_body_sense`：重置躯体感知状态到中性值
+- 所有指令执行后写入 `somatic_agent` 快照的 `last_command_handled` 字段
+- 降级：指令类型未知时返回 `{"status": "UNKNOWN_COMMAND"}` 而非抛出异常
+
+---
+
+#### T-165：edge_client SomaticAgent 新增 publish_somatic_state() ✅
+
+**文件**：`edge_client/tribe/somatic_agent.py`
+
+- 新增 `publish_somatic_state(state: dict) -> dict` 方法
+- 通过 `EdgeTribeBridge.push_event()` 向 host_brain 上报 `SOMATIC_STATE_SNAPSHOT` 事件
+- 载荷包含：`fatigue`、`loneliness`、`willingness`、`last_voice_ts_ms`、`source="somatic_agent"`
+- 供 `voice_pipeline.py` 在语音处理周期结束时定期调用
+
+---
+
+#### T-166：edge_client PeripheralAgent 新增 handle_tribe_command() ✅
+
+**文件**：`edge_client/tribe/peripheral_agent.py`
+
+- 新增 `handle_tribe_command(command: dict) -> dict` 方法
+- 支持指令类型：
+  - `set_gate`：调用平台适配器的门控接口（`open` / `close` / `pause`）
+  - `set_platform_config`：更新平台运行时配置（如消息速率限制）
+  - `reconnect_platform`：触发平台适配器重连
+- 所有指令执行后写入 `peripheral_agent` 快照的 `last_command_handled` 字段
+- 降级：指令类型未知时返回 `{"status": "UNKNOWN_COMMAND"}`
+
+---
+
+#### T-167：edge_client PeripheralAgent 新增 publish_peripheral_state() ✅
+
+**文件**：`edge_client/tribe/peripheral_agent.py`
+
+- 新增 `publish_peripheral_state(state: dict) -> dict` 方法
+- 通过 `EdgeTribeBridge.push_event()` 向 host_brain 上报 `PERIPHERAL_STATE_SNAPSHOT` 事件
+- 载荷包含：`connected_platforms`、`gate_open`、`last_message_ts_ms`、`source="peripheral_agent"`
+- 供 `gateway/bootstrap.py` 在平台连接状态变更时调用
+
+---
+
+#### T-168：edge_client EdgeTribeBridge 新增 receive_command() ✅
+
+**文件**：`edge_client/tribe/edge_tribe_bridge.py`
+
+- 新增 `receive_command(payload: dict) -> dict` 方法
+- 根据 `payload["target_agent"]` 字段分发到对应 Agent：
+  - `"edge.somatic"` / `"somatic_agent"` → `SomaticAgent.handle_tribe_command()`
+  - `"edge.peripheral"` / `"peripheral_agent"` → `PeripheralAgent.handle_tribe_command()`
+  - `"edge.broadcast"` → 同时分发到两个 Agent
+- 分发结果聚合后返回 `{"status": "OK", "results": {...}}`
+- 降级：target_agent 未知时返回 `{"status": "UNKNOWN_TARGET"}`
+
+---
+
+#### T-169：edge_client /internal/tribe_command 端点接入 receive_command() ✅
+
+**文件**：`edge_client/app/fastapi_app.py`
+
+- 修改 `/internal/tribe_command` POST 端点处理逻辑
+- 从 `EdgeTribeRegistry` 获取全局 `EdgeTribeBridge` 单例
+- 将请求体 JSON 传入 `bridge.receive_command(payload)`
+- 返回分发结果，完成 host_brain → edge_client 下行指令路由的最后一公里
+
+---
+
+#### T-170：host_brain SomaticAgent 新增 export_runtime_state() ✅
+
+**文件**：`host_brain/tribe/somatic_agent.py`
+
+- 新增 `export_runtime_state() -> dict` 方法
+- 从 `state_registry` 读取 `somatic_agent` 命名空间快照
+- 返回结构化状态字典，包含：
+  - `fatigue_level`、`loneliness_level`、`willingness_penalty`
+  - `last_body_sense_ts_ms`、`last_loneliness_ts_ms`
+  - `agent_id="somatic_agent"`、`snapshot_ts_ms`
+- 供 `CortexAgent.collect_tribe_context()` 在构建 prompt 上下文时读取躯体状态
+
+---
+
+#### T-171：host_brain PeripheralAgent 新增 export_runtime_state() ✅
+
+**文件**：`host_brain/tribe/peripheral_agent.py`
+
+- 新增 `export_runtime_state() -> dict` 方法
+- 从 `state_registry` 读取 `peripheral_agent` 命名空间快照
+- 返回结构化状态字典，包含：
+  - `connected_platforms`、`gate_open`、`last_platform_event`
+  - `last_connected_ts_ms`、`last_disconnected_ts_ms`
+  - `agent_id="peripheral_agent"`、`snapshot_ts_ms`
+- 供 `CortexAgent.collect_tribe_context()` 在构建 prompt 上下文时读取外设状态
+
+---
+
+#### T-172：规划文档第二十五批留痕 ✅
+
+- 新增本章第二十五批开发留痕
+
+---
+
+**第二十五批新增能力总览**：
+
+| 能力 | 归属 Agent | 方法 | 说明 |
+|---|---|---|---|
+| 下行指令处理（表情驱动） | edge SomaticAgent | `handle_tribe_command()` | 接收 host_brain 情绪指令，驱动 vts_driver |
+| 躯体状态主动上报 | edge SomaticAgent | `publish_somatic_state()` | 上报 SOMATIC_STATE_SNAPSHOT 事件 |
+| 下行指令处理（门控） | edge PeripheralAgent | `handle_tribe_command()` | 接收 host_brain 门控指令，控制平台适配器 |
+| 外设状态主动上报 | edge PeripheralAgent | `publish_peripheral_state()` | 上报 PERIPHERAL_STATE_SNAPSHOT 事件 |
+| 下行指令分发路由 | EdgeTribeBridge | `receive_command()` | 按 target_agent 分发到对应 Agent |
+| /internal/tribe_command 接入 | edge FastAPI | 端点改造 | 完成下行指令路由最后一公里 |
+| 躯体状态导出 | host SomaticAgent | `export_runtime_state()` | 供 CortexAgent 读取躯体快照 |
+| 外设状态导出 | host PeripheralAgent | `export_runtime_state()` | 供 CortexAgent 读取外设快照 |
+
+**Phase 6 躯干族独立完成度**：
+
+| 能力维度 | 状态 | 说明 |
+|---|---|---|
+| edge → host 上行事件（BODY_SENSE_UPDATED） | ✅ 已完成 | T-09 批次 |
+| edge → host 上行事件（EMOTION_INFERENCE_UPDATED） | ✅ 已完成 | T-09 批次 |
+| edge → host 上行事件（PLATFORM_CONNECTED/DISCONNECTED） | ✅ 已完成 | T-118 批次 |
+| host → edge 下行指令（情绪表情驱动） | ✅ 已完成 | T-164/T-168/T-169 |
+| host → edge 下行指令（门控控制） | ✅ 已完成 | T-166/T-168/T-169 |
+| edge 主动状态快照上报 | ✅ 已完成 | T-165/T-167 |
+| host 侧躯干族状态导出（供 CortexAgent） | ✅ 已完成 | T-170/T-171 |
