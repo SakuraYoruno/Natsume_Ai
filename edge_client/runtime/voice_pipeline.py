@@ -21,6 +21,8 @@ from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
 from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import EVENT_ASR_CHUNK, VoiceRpcContract, VoiceRpcResult
 from edge_client.runtime.emotion_inference import infer_asr_emotion
+from edge_client.tribe.somatic_agent import SomaticAgent
+from edge_client.tribe.voice_agent import VoiceAgent
 from host_brain.core.errors import VOICE_INTERRUPTED, VOICE_PLAYBACK_FAILED
 from host_brain.core.ids import now_ms
 
@@ -63,12 +65,16 @@ class EdgeVoicePipeline:
         event_reporter: EdgeEventReporter,
         vts_driver: VTubeStudioDriver | None = None,
         resource_gate: VoiceResourceGate | None = None,
+        tribe_bridge: Any | None = None,
     ) -> None:
         self.voice_rpc = voice_rpc
         self.speech_queue = speech_queue
         self.event_reporter = event_reporter
         self.vts_driver = vts_driver
         self.resource_gate = resource_gate
+        self.tribe_bridge = tribe_bridge
+        self._somatic_agent = SomaticAgent(bridge=tribe_bridge)
+        self._voice_agent = VoiceAgent(bridge=tribe_bridge)
         self._mouth_sync_stop = threading.Event()
         self._mouth_sync_thread: threading.Thread | None = None
         self._mouth_sync_debug: dict[str, Any] = {
@@ -305,7 +311,33 @@ class EdgeVoicePipeline:
             report_event["emotion_tag"] = emotion_tag
         if isinstance(emotion_intensity, (int, float)):
             report_event["emotion_intensity"] = max(0.0, min(1.0, float(emotion_intensity)))
-        return self.event_reporter.report([report_event])
+        report_result = self.event_reporter.report([report_event])
+
+        self._somatic_agent.publish_body_sense_updated(
+            request_id=str(request_id or ""),
+            session_id=session_id,
+            seq=event.get("seq"),
+            ts_ms=int(event.get("ts_ms") or now_ms()),
+            resource_metrics=self._resource_metrics(),
+            upstream_status=str(rpc_result.status or ""),
+            upstream_reason_code=rpc_result.reason_code,
+        )
+        if emotion_tag or mood_state:
+            self._somatic_agent.publish_emotion_inference_updated(
+                request_id=str(request_id or ""),
+                session_id=session_id,
+                seq=event.get("seq"),
+                emotion_tag=emotion_tag or "NEUTRAL",
+                emotion_intensity=(
+                    max(0.0, min(1.0, float(emotion_intensity)))
+                    if isinstance(emotion_intensity, (int, float))
+                    else None
+                ),
+                mood_state=mood_state or None,
+                emotion_source=emotion_source or None,
+                emotion_terms=list(matched_terms) if isinstance(matched_terms, list) else [],
+            )
+        return report_result
 
     def _report_voice_queue_result(
         self,
@@ -340,6 +372,24 @@ class EdgeVoicePipeline:
         report_result = self.event_reporter.report([report_event])
         if report_result.success:
             self.event_reporter.flush_cache()
+        if event_type == EVENT_TTS_PLAYBACK_STARTED:
+            self._voice_agent.publish_pipeline_started(
+                request_id=str(event.get("request_id") or request_id or ""),
+                session_id=session_id,
+                ts_ms=int(event.get("ts_ms") or now_ms()),
+                status=result.status,
+                reason_code=result.reason_code,
+                stage=result.stage,
+            )
+        elif event_type == EVENT_TTS_PLAYBACK_FINISHED:
+            self._voice_agent.publish_pipeline_ended(
+                request_id=str(event.get("request_id") or request_id or ""),
+                session_id=session_id,
+                ts_ms=int(event.get("ts_ms") or now_ms()),
+                status=result.status,
+                reason_code=result.reason_code,
+                stage=result.stage,
+            )
         return report_result
 
     def _resource_metrics(self) -> dict[str, Any]:

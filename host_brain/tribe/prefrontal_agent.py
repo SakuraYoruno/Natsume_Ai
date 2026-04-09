@@ -25,6 +25,7 @@ class PrefrontalAgent:
     _evolution_orchestrator: Any | None = field(default=None, init=False, repr=False)
     _bond_style_engine: Any | None = field(default=None, init=False, repr=False)
     _self_reflection: Any | None = field(default=None, init=False, repr=False)
+    _emergent_growth_engine: Any | None = field(default=None, init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -516,12 +517,64 @@ class PrefrontalAgent:
                 return None
         return self._persona_growth_tracker
 
+    def run_emergent_growth_weekly(
+        self,
+        *,
+        user_id: str,
+        lookback_days: int,
+        episodic_store: Any,
+        llm_fn: Any | None = None,
+    ) -> dict[str, Any]:
+        from host_brain.persona.interaction_pattern_analyzer import InteractionPatternAnalyzer  # noqa: PLC0415
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+
+        persona_engine = PersonaEngine.get_instance()
+        analyzer = InteractionPatternAnalyzer(llm_fn=llm_fn)
+        pattern_result = analyzer.analyze(
+            user_id=str(user_id or "user_1"),
+            episodic_store=episodic_store,
+            current_traits=persona_engine.get_traits(str(user_id or "user_1")),
+            lookback_days=max(1, int(lookback_days or 7)),
+        )
+        growth_result = self._get_emergent_growth_engine().apply(
+            user_id=str(user_id or "user_1"),
+            pattern_result=pattern_result,
+        )
+        return {
+            "status": "OK" if bool(getattr(growth_result, "applied", False)) else "SKIPPED",
+            "user_id": str(user_id or "user_1"),
+            "lookback_days": max(1, int(lookback_days or 7)),
+            "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
+            "growth_result": dict(growth_result.as_dict() if hasattr(growth_result, "as_dict") else {}),
+        }
+
+    def resolve_emergent_growth_status(self, *, user_id: str, recent_limit: int = 5) -> dict[str, Any]:
+        engine = self._get_emergent_growth_engine()
+        recent = max(1, int(recent_limit or 5))
+        growth_log = [record.as_dict() for record in engine.get_growth_log(str(user_id or "user_1"))[-recent:]]
+        return {
+            "status": "OK",
+            "user_id": str(user_id or "user_1"),
+            "growth_summary": engine.get_growth_summary(str(user_id or "user_1")),
+            "recent_growth_log": growth_log,
+        }
+
     def _get_evolution_orchestrator(self) -> Any:
         from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
 
         if self._evolution_orchestrator is None:
             self._evolution_orchestrator = EvolutionOrchestrator()
         return self._evolution_orchestrator
+
+    def _get_emergent_growth_engine(self) -> Any:
+        from host_brain.persona.emergent_growth_engine import EmergentGrowthEngine  # noqa: PLC0415
+        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+
+        if self._emergent_growth_engine is None:
+            self._emergent_growth_engine = EmergentGrowthEngine(
+                persona_engine=PersonaEngine.get_instance(),
+            )
+        return self._emergent_growth_engine
 
 
 _PREFRONTAL_AGENT: PrefrontalAgent | None = None

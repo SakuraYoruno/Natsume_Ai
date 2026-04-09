@@ -26,6 +26,7 @@ export default function InnerContinuityCard({ runtimeSnapshot }) {
     Math.floor(resolveNumber(offlineState.spontaneous_event_count, innerWorldState.spontaneous_event_count)),
   )
   const lastNote = String(offlineState.last_spontaneous_note || innerWorldState.last_spontaneous_note || '').trim()
+  const lastSource = String(offlineState.last_spontaneous_source || innerWorldState.last_spontaneous_source || '').trim().toLowerCase()
   const lastTs = resolveNumber(offlineState.last_spontaneous_ts_ms, innerWorldState.last_spontaneous_ts_ms)
   const stream = asArray(offlineState.inner_stream).length > 0
     ? asArray(offlineState.inner_stream)
@@ -57,6 +58,7 @@ export default function InnerContinuityCard({ runtimeSnapshot }) {
         <div className="mt-3 space-y-2">
           <KeyValueRow label="自发活动次数" value={eventCount} />
           <KeyValueRow label="最后活动时间" value={formatDateTime(lastTs)} />
+          <KeyValueRow label="生成来源" value={lastSource === 'llm' ? 'LLM' : (lastSource ? 'Fallback' : '—')} />
           <KeyValueRow label="最后活动内容" value={lastNote || '—'} />
         </div>
       </div>
@@ -73,12 +75,13 @@ export default function InnerContinuityCard({ runtimeSnapshot }) {
               const tsLabel = formatDateTime(event?.ts_ms)
               const bandLabel = formatAbsenceBand(event?.absence_band)
               const hourText = formatNumber(event?.offline_hours, 2)
+              const sourceLabel = String(event?.source || '').toLowerCase() === 'llm' ? 'LLM' : 'Fallback'
               return (
                 <div
                   key={`${event?.ts_ms || 'evt'}-${index}`}
                   className="rounded-xl border border-gray-200 bg-white px-3 py-2"
                 >
-                  <div className="text-xs text-gray-500">{tsLabel} · {bandLabel} · {hourText}h</div>
+                  <div className="text-xs text-gray-500">{tsLabel} · {bandLabel} · {hourText}h · {sourceLabel}</div>
                   <div className="mt-1 text-sm text-gray-700">{note || '—'}</div>
                 </div>
               )

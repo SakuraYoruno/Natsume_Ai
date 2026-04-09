@@ -102,6 +102,25 @@ def _is_invalid_gateway_conversation_id(value: str | None) -> bool:
     return normalized in _PLACEHOLDER_GATEWAY_CONVERSATIONS
 
 
+def _evaluate_immune_gate_for_input(
+    *,
+    text: str,
+    source: str,
+    session_id: str,
+    person_id: str | None = None,
+) -> dict[str, Any]:
+    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+    return get_immune_agent().inspect_text(
+        text=text,
+        source=f"http.v1.host.input.{str(source or '').lower()}",
+        metadata={
+            "session_id": str(session_id or "").strip() or None,
+            "person_id": str(person_id or "").strip() or None,
+        },
+    )
+
+
 @router.post("/input", response_model=InputResponse)
 async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     _ = request
@@ -164,6 +183,53 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         )
 
     payload = body.model_dump(exclude_none=True)
+    immune_result: dict[str, Any] = {}
+    try:
+        immune_result = _evaluate_immune_gate_for_input(
+            text=text,
+            source=source,
+            session_id=session_id,
+            person_id=str(body.person_id or "").strip() or None,
+        )
+    except Exception as exc:
+        _logger.warning("input_routes: immune gate evaluate degraded request_id=%s: %s", request_id, exc)
+        immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
+    immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
+    payload["immune_gate"] = {
+        "decision": immune_decision,
+        "risk_level": immune_result.get("risk_level"),
+        "score": immune_result.get("score"),
+        "reason_codes": list(immune_result.get("reason_codes") or []),
+    }
+    if immune_decision == "BLOCK":
+        _log_input_event(
+            ledger=_get_ledger_safe(),
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="REJECTED",
+            status="REJECTED",
+            reason_code="IMMUNE_BLOCKED_HIGH_RISK",
+            detail="immune gate blocked high-risk input",
+            ts_ms=ts_ms,
+        )
+        return InputResponse(
+            success=False,
+            request_id=request_id,
+            source=source,
+            status="REJECTED",
+            detail="immune gate blocked high-risk input",
+            ts_ms=ts_ms,
+        )
+    if immune_decision == "REPORT":
+        _logger.warning(
+            "input_routes: immune gate report request_id=%s source=%s reasons=%s",
+            request_id,
+            source,
+            immune_result.get("reason_codes"),
+        )
+
     try:
         from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
         from host_brain.app.dependencies import notify_user_interaction  # noqa: PLC0415

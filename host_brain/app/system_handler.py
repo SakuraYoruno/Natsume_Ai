@@ -38,7 +38,6 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
-from host_brain.bond.user_identity import resolve_bond_user_id
 from host_brain.observability.routes import build_obs_metrics_response
 
 ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
@@ -721,11 +720,7 @@ def receive_edge_events_response(
     if _emotion_events:
         try:
             import asyncio as _asyncio
-            from host_brain.app.dependencies import (
-                get_bond_stage_engine,
-                get_bond_update_queue,
-            )
-            from host_brain.bond.bond_dynamics import BondDynamicsWriter
+            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
             for ev in _emotion_events:
                 _ev_request_id = ev["request_id"]
@@ -737,32 +732,67 @@ def receive_edge_events_response(
 
                 # Bond 更新
                 try:
-                    _update_kind = BondDynamicsWriter.classify_interaction(
-                        text=_ev_text,
-                        emotion_intensity=_ev_emotion_intensity,
-                    )
-                    _bond_payload = {
-                        "request_id": _ev_request_id,
-                        "intent_id": _ev_request_id,
-                        "session_id": _ev_session_id,
-                        "seq": 1,
-                        "user_id": resolve_bond_user_id(session_id=_ev_session_id),
-                        "topic_id": _ev_text[:64],
-                        "capability_hint": "edge_event_bond",
-                        "update_kind": _update_kind,
-                        "evidence_refs": [_ev_request_id],
-                        "emotion_tag": _ev_emotion_tag,
-                        "emotion_intensity": _ev_emotion_intensity,
-                        "ts_ms": _ev_ts_ms,
-                    }
-                    _bond_queue = get_bond_update_queue()
-                    _queue_result = _bond_queue.enqueue(_bond_payload)
-                    if str(_queue_result.get("status") or "") != "QUEUED":
-                        _bond_writer = BondDynamicsWriter(
-                            ledger=ledger,
-                            stage_engine=get_bond_stage_engine(),
+                    async def _fire_bond(
+                        req_id: str,
+                        sess_id: str,
+                        text: str,
+                        etag: str,
+                        intensity: float,
+                        ev_ts: int,
+                    ) -> None:
+                        try:
+                            await get_cortex_agent().post_process_bond_update(
+                                request_id=req_id,
+                                session_id=sess_id,
+                                user_message=text,
+                                emotion_context={
+                                    "emotion_tag": etag,
+                                    "emotion_intensity": intensity,
+                                },
+                                ts_ms=ev_ts,
+                            )
+                        except Exception as bond_exc:
+                            logger.debug(
+                                "edge event bond update skipped: %s (request_id=%s)",
+                                bond_exc,
+                                req_id,
+                            )
+
+                    try:
+                        loop = _asyncio.get_running_loop()
+                        if loop.is_running():
+                            _asyncio.ensure_future(
+                                _fire_bond(
+                                    _ev_request_id,
+                                    _ev_session_id,
+                                    _ev_text,
+                                    _ev_emotion_tag,
+                                    _ev_emotion_intensity,
+                                    _ev_ts_ms,
+                                )
+                            )
+                        else:
+                            _asyncio.run(
+                                _fire_bond(
+                                    _ev_request_id,
+                                    _ev_session_id,
+                                    _ev_text,
+                                    _ev_emotion_tag,
+                                    _ev_emotion_intensity,
+                                    _ev_ts_ms,
+                                )
+                            )
+                    except RuntimeError:
+                        _asyncio.run(
+                            _fire_bond(
+                                _ev_request_id,
+                                _ev_session_id,
+                                _ev_text,
+                                _ev_emotion_tag,
+                                _ev_emotion_intensity,
+                                _ev_ts_ms,
+                            )
                         )
-                        _bond_writer.apply_update(**_bond_payload)
                 except Exception as bond_exc:
                     logger.debug(
                         "edge event bond update skipped: %s (request_id=%s)",

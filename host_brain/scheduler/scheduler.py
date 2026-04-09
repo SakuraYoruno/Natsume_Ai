@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import threading
 import time
 import uuid
@@ -68,6 +69,94 @@ IntentDispatcher = Callable[[dict[str, Any]], dict[str, Any]]
 # ConditionChecker 接收 task_config 和当前 sys_mode，返回 (allowed: bool, reason_code: str | None)
 ConditionChecker = Callable[[SchedulerTaskConfig, str], tuple[bool, str | None]]
 
+_DEFAULT_ENDOCRINE_LOW_RISK_ALLOWLIST = {
+    "inner_world_tick",
+    "silence_tick",
+    "body_sense_tick",
+}
+_DEFAULT_ENDOCRINE_PROACTIVE_TASKS = {
+    "proactive_talk_periodic",
+}
+_DEFAULT_IMMUNE_PROACTIVE_TASKS = {
+    "proactive_talk_periodic",
+    "gaming_companion_tick",
+}
+
+
+def _parse_task_id_set(raw: str | None, *, default_values: set[str]) -> set[str]:
+    text = str(raw or "").strip()
+    if not text:
+        return set(default_values)
+    parsed: set[str] = set()
+    for part in text.split(","):
+        task_id = str(part or "").strip().lower()
+        if task_id:
+            parsed.add(task_id)
+    return parsed or set(default_values)
+
+
+def _coerce_float(value: Any, *, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _coerce_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_env(name: str, *, default: int, low: int, high: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else int(default)
+    except ValueError:
+        value = int(default)
+    return max(int(low), min(int(high), value))
+
+
+def _resolve_endocrine_gate_state(emotion_state: dict[str, Any]) -> str:
+    raw = emotion_state.get("endocrine_state")
+    endocrine_state = dict(raw) if isinstance(raw, dict) else {}
+    gate_state = str(endocrine_state.get("gate_state") or "").strip().lower()
+    if gate_state in {"protective", "cautious", "open"}:
+        return gate_state
+
+    cortisol_level = _coerce_float(endocrine_state.get("cortisol_level"), default=0.0)
+    energy_reserve = _coerce_float(endocrine_state.get("energy_reserve"), default=1.0)
+    if cortisol_level >= 0.78 or energy_reserve <= 0.12:
+        return "protective"
+    if cortisol_level >= 0.62 or energy_reserve <= 0.22:
+        return "cautious"
+    return "open"
+
+
+def _task_id_key(task_id: str | None) -> str:
+    return str(task_id or "").strip().lower()
+
+
+def _load_runtime_immune_gate_state() -> dict[str, Any]:
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+        return dict(get_immune_agent().export_runtime_state() or {})
+    except Exception:
+        return {}
+
 
 class NatsumeScheduler:
     """轻量级定时调度器。
@@ -87,6 +176,8 @@ class NatsumeScheduler:
         persist_tasks: bool = True,
         # M29-N（OPT-?）：心跳感知情感状态
         get_emotion_state: Callable[[], dict[str, Any]] | None = None,
+        # C6：免疫门禁快照（仅用于主动任务抑制，不影响被动聊天链路）
+        get_immune_gate_state: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._registry = registry
         self._health = health_reporter
@@ -96,6 +187,33 @@ class NatsumeScheduler:
         self._persist_tasks = persist_tasks  # F-40：是否启用任务持久化
         # M29-N：情感状态获取函数（返回 {"mood_state": ..., "emotion_tag": ...}）
         self._get_emotion_state = get_emotion_state or (lambda: {"mood_state": "steady", "emotion_tag": "NEUTRAL"})
+        self._get_immune_gate_state = get_immune_gate_state or _load_runtime_immune_gate_state
+        self._endocrine_low_risk_allowlist = _parse_task_id_set(
+            os.environ.get("HOST_ENDOCRINE_LOW_RISK_TASK_ALLOWLIST"),
+            default_values=_DEFAULT_ENDOCRINE_LOW_RISK_ALLOWLIST,
+        )
+        self._endocrine_proactive_tasks = _parse_task_id_set(
+            os.environ.get("HOST_ENDOCRINE_PROACTIVE_TASK_IDS"),
+            default_values=_DEFAULT_ENDOCRINE_PROACTIVE_TASKS,
+        )
+        self._immune_proactive_tasks = _parse_task_id_set(
+            os.environ.get("HOST_SCHEDULER_IMMUNE_PROACTIVE_TASK_IDS"),
+            default_values=_DEFAULT_IMMUNE_PROACTIVE_TASKS,
+        )
+        self._immune_proactive_gate_enabled = _parse_bool_env(
+            "HOST_SCHEDULER_IMMUNE_PROACTIVE_GATE_ENABLED",
+            default=True,
+        )
+        self._immune_proactive_block_on_report = _parse_bool_env(
+            "HOST_SCHEDULER_IMMUNE_PROACTIVE_BLOCK_ON_REPORT",
+            default=False,
+        )
+        self._immune_proactive_cooldown_ms = _parse_int_env(
+            "HOST_SCHEDULER_IMMUNE_PROACTIVE_COOLDOWN_MS",
+            default=900000,
+            low=0,
+            high=86_400_000,
+        )
 
         # 运行时状态
         self._running = False
@@ -273,37 +391,203 @@ class NatsumeScheduler:
                 status=STATUS_OK,
                 last_run_ts=trigger_ts,
                 last_reason_code=reason,
+                last_gate_state="sys_mode",
             )
             return {"status": "REJECTED", "reason_code": reason, "task_id": task_id, "sys_mode": current_mode}
 
-        # M29-N（OPT-?）：情感状态感知门控——critical 状态下跳过非紧急任务
-        emotion_state = self._get_emotion_state()
+        # M29-N（OPT-?）：情感状态感知门控
+        # - 主动任务：优先按 endocrine gate_state 判定（cautious/protective 均收敛）
+        # - 低风险白名单：允许在 protective 态继续运行（维持内在连续性）
+        # - 其他任务：保持原有 critical/protective 非紧急阻断策略
+        emotion_state = dict(self._get_emotion_state() or {})
         mood_state = str(emotion_state.get("mood_state") or "steady").lower()
-        if mood_state == "critical" and task.priority not in (TaskPriority.HIGH,):
-            reason = "EMOTION_GATE_BLOCKED"
+        gate_state = _resolve_endocrine_gate_state(dict(emotion_state or {}))
+        endocrine_state_for_gate = (
+            dict(emotion_state.get("endocrine_state") or {})
+            if isinstance(emotion_state.get("endocrine_state"), dict)
+            else {}
+        )
+        endocrine_cortisol = _coerce_float(endocrine_state_for_gate.get("cortisol_level"), default=0.0)
+        endocrine_energy = _coerce_float(endocrine_state_for_gate.get("energy_reserve"), default=0.0)
+        task_key = _task_id_key(task.task_id)
+        is_non_urgent = task.priority not in (TaskPriority.HIGH,)
+        is_low_risk_allowlisted = task_key in self._endocrine_low_risk_allowlist
+        is_proactive_task = task_key in self._endocrine_proactive_tasks
+        is_immune_proactive_task = task_key in self._immune_proactive_tasks
+        immune_decision: str | None = None
+        immune_risk_level: str | None = None
+        immune_reason_codes: list[str] = []
+
+        if (
+            self._immune_proactive_gate_enabled
+            and is_non_urgent
+            and is_immune_proactive_task
+        ):
+            immune_runtime_state: dict[str, Any] = {}
+            try:
+                immune_runtime_state = dict(self._get_immune_gate_state() or {})
+            except Exception as exc:
+                logger.debug("scheduler immune gate degraded: %s", exc)
+                immune_runtime_state = {}
+
+            last_inspection = (
+                dict(immune_runtime_state.get("last_inspection") or {})
+                if isinstance(immune_runtime_state.get("last_inspection"), dict)
+                else {}
+            )
+            immune_decision = str(last_inspection.get("decision") or "").strip().upper() or None
+            immune_risk_level = str(last_inspection.get("risk_level") or "").strip().lower() or None
+            immune_reason_codes = [
+                str(code).strip()
+                for code in list(last_inspection.get("reason_codes") or [])
+                if str(code).strip()
+            ]
+            immune_ts_ms = _coerce_int(last_inspection.get("ts_ms"), default=0)
+            immune_age_ms = (trigger_ts - immune_ts_ms) if immune_ts_ms > 0 else None
+            report_as_block = (
+                immune_decision == "REPORT"
+                and self._immune_proactive_block_on_report
+                and immune_risk_level in {"high", "critical"}
+            )
+            should_block_by_immune = immune_decision == "BLOCK" or report_as_block
+            is_recent_immune_signal = (
+                immune_age_ms is None
+                or self._immune_proactive_cooldown_ms <= 0
+                or immune_age_ms <= self._immune_proactive_cooldown_ms
+            )
+            if should_block_by_immune and is_recent_immune_signal:
+                reason = "IMMUNE_PROACTIVE_SUPPRESSED"
+                immune_gate_state = f"immune:{str(immune_decision or 'BLOCK').lower()}"
+                self._log_scheduler_event(
+                    task_id=task_id,
+                    trigger_ts=trigger_ts,
+                    status="REJECTED",
+                    reason_code=reason,
+                    mode_at_trigger=current_mode,
+                    error_detail=(
+                        f"task skipped by immune proactive gate: task_id={task.task_id}, "
+                        f"immune_decision={immune_decision}, immune_risk={immune_risk_level}, "
+                        f"immune_age_ms={immune_age_ms}, cooldown_ms={self._immune_proactive_cooldown_ms}"
+                    ),
+                )
+                self._health.update_task_state(
+                    task_id,
+                    status=STATUS_OK,
+                    last_run_ts=trigger_ts,
+                    error_count=error_count,
+                    last_reason_code=reason,
+                    last_gate_state=immune_gate_state,
+                    last_mood_state=mood_state,
+                    last_endocrine_cortisol=endocrine_cortisol,
+                    last_endocrine_energy=endocrine_energy,
+                    last_immune_decision=immune_decision,
+                    last_immune_risk_level=immune_risk_level,
+                    last_immune_reason_codes=immune_reason_codes,
+                )
+                return {
+                    "status": "REJECTED",
+                    "reason_code": reason,
+                    "task_id": task_id,
+                    "mood_state": mood_state,
+                    "gate_state": immune_gate_state,
+                    "immune_decision": immune_decision,
+                    "immune_risk_level": immune_risk_level,
+                    "immune_reason_codes": immune_reason_codes,
+                }
+
+        if is_non_urgent and is_proactive_task and gate_state in {"cautious", "protective"}:
+            reason = "ENDOCRINE_PROACTIVE_BLOCKED"
             self._log_scheduler_event(
                 task_id=task_id,
                 trigger_ts=trigger_ts,
                 status="REJECTED",
                 reason_code=reason,
                 mode_at_trigger=current_mode,
-                error_detail=f"task skipped: mood_state=critical, priority={task.priority.value}",
+                error_detail=(
+                    f"task skipped by endocrine proactive gate: task_id={task.task_id}, "
+                    f"gate_state={gate_state}, mood_state={mood_state}, priority={task.priority.value}"
+                ),
             )
-            return {"status": "REJECTED", "reason_code": reason, "task_id": task_id, "mood_state": mood_state}
+            self._health.update_task_state(
+                task_id,
+                status=STATUS_OK,
+                last_run_ts=trigger_ts,
+                error_count=error_count,
+                last_reason_code=reason,
+                last_gate_state=gate_state,
+                last_mood_state=mood_state,
+                last_endocrine_cortisol=endocrine_cortisol,
+                last_endocrine_energy=endocrine_energy,
+                last_immune_decision=immune_decision,
+                last_immune_risk_level=immune_risk_level,
+                last_immune_reason_codes=immune_reason_codes,
+            )
+            return {
+                "status": "REJECTED",
+                "reason_code": reason,
+                "task_id": task_id,
+                "mood_state": mood_state,
+                "gate_state": gate_state,
+            }
+        if (
+            is_non_urgent
+            and not is_low_risk_allowlisted
+            and not is_proactive_task
+            and (mood_state == "critical" or gate_state == "protective")
+        ):
+            reason = "EMOTION_GATE_BLOCKED" if mood_state == "critical" else "ENDOCRINE_GATE_BLOCKED"
+            self._log_scheduler_event(
+                task_id=task_id,
+                trigger_ts=trigger_ts,
+                status="REJECTED",
+                reason_code=reason,
+                mode_at_trigger=current_mode,
+                error_detail=(
+                    f"task skipped: mood_state={mood_state}, gate_state={gate_state}, "
+                    f"priority={task.priority.value}"
+                ),
+            )
+            self._health.update_task_state(
+                task_id,
+                status=STATUS_OK,
+                last_run_ts=trigger_ts,
+                error_count=error_count,
+                last_reason_code=reason,
+                last_gate_state=gate_state,
+                last_mood_state=mood_state,
+                last_endocrine_cortisol=endocrine_cortisol,
+                last_endocrine_energy=endocrine_energy,
+                last_immune_decision=immune_decision,
+                last_immune_risk_level=immune_risk_level,
+                last_immune_reason_codes=immune_reason_codes,
+            )
+            return {
+                "status": "REJECTED",
+                "reason_code": reason,
+                "task_id": task_id,
+                "mood_state": mood_state,
+                "gate_state": gate_state,
+            }
 
         # 生成 system_initiated_intent
         intent_id = new_intent_id()
         request_id = new_request_id()
         # M27-K：从情感状态获取函数中读取当前情感状态，传入 Intent
-        emotion_state = self._get_emotion_state()
+        emotion_state = dict(emotion_state or self._get_emotion_state() or {})
         emotion_tag = str(emotion_state.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         mood_state_val = str(emotion_state.get("mood_state") or "steady").strip().lower() or "steady"
+        endocrine_state = (
+            dict(emotion_state.get("endocrine_state") or {})
+            if isinstance(emotion_state.get("endocrine_state"), dict)
+            else {}
+        )
         system_intent = self._build_system_intent(
             task,
             intent_id=intent_id,
             request_id=request_id,
             emotion_tag=emotion_tag,
             mood_state=mood_state_val,
+            endocrine_state=endocrine_state,
         )
 
         # 分发执行
@@ -360,6 +644,13 @@ class NatsumeScheduler:
             error_count=new_error_count,
             suspended_reason=suspended_reason,
             last_reason_code=exec_reason,
+            last_gate_state=gate_state,
+            last_mood_state=mood_state_val,
+            last_endocrine_cortisol=_coerce_float(endocrine_state.get("cortisol_level"), default=0.0),
+            last_endocrine_energy=_coerce_float(endocrine_state.get("energy_reserve"), default=0.0),
+            last_immune_decision=immune_decision,
+            last_immune_risk_level=immune_risk_level,
+            last_immune_reason_codes=immune_reason_codes,
         )
 
         # 审计日志
@@ -391,6 +682,7 @@ class NatsumeScheduler:
         request_id: str,
         emotion_tag: str = "NEUTRAL",
         mood_state: str = "steady",
+        endocrine_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """根据任务模板生成 system_initiated_intent。
 
@@ -423,6 +715,7 @@ class NatsumeScheduler:
             # M27-K：情感状态字段
             "emotion_tag": emotion_tag,
             "mood_state": mood_state,
+            "endocrine_state": dict(endocrine_state or {}),
             # 方向 B：主动情感触发器结果
             "triggered_emotions": triggered_emotions,
         }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
   fetchPromptTemplates,
@@ -42,6 +42,7 @@ function TypeBadge({ value }) {
 }
 
 export default function PromptConfig() {
+  const [searchParams] = useSearchParams()
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
@@ -50,12 +51,12 @@ export default function PromptConfig() {
     windowMinutes: 60,
   })
 
-  const [filters, setFilters] = useState({
-    keyword: '',
-    scope: '',
-    category: '',
-    source: '',
-  })
+  const [filters, setFilters] = useState(() => ({
+    keyword: String(searchParams.get('keyword') || ''),
+    scope: String(searchParams.get('scope') || ''),
+    category: String(searchParams.get('category') || ''),
+    source: String(searchParams.get('source') || ''),
+  }))
   const [items, setItems] = useState([])
   const [loadingList, setLoadingList] = useState(false)
   const [selectedId, setSelectedId] = useState('')

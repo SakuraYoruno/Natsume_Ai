@@ -37,6 +37,41 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _build_scheduler_emotion_state() -> dict[str, Any]:
+    """构建调度器门控使用的情绪/内分泌快照。"""
+    mood_state = "steady"
+    emotion_tag = "NEUTRAL"
+    emotion_intensity = 0.0
+    endocrine_state: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_endocrine_state, get_hard_state  # noqa: PLC0415
+
+        hard_state = get_hard_state()
+        mood_state = str(getattr(hard_state, "mood_state", "steady") or "steady").strip().lower() or "steady"
+        endocrine_state = dict(
+            get_endocrine_state(
+                emotion_tag=emotion_tag,
+                emotion_intensity=emotion_intensity,
+            )
+            or {}
+        )
+    except Exception:
+        endocrine_state = {
+            "dopamine_level": 0.5,
+            "serotonin_level": 0.5,
+            "cortisol_level": 0.25,
+            "energy_reserve": 0.6,
+            "gate_state": "open",
+            "source": "scheduler_fallback",
+        }
+    return {
+        "mood_state": mood_state,
+        "emotion_tag": emotion_tag,
+        "emotion_intensity": emotion_intensity,
+        "endocrine_state": endocrine_state,
+    }
+
+
 def _build_audit_retention_task_config() -> Any:
     from host_brain.scheduler.task_registry import (  # noqa: PLC0415
         SchedulerTaskConfig,
@@ -156,6 +191,7 @@ def _bootstrap_personality_scheduler(
         registry=registry,
         health_reporter=health_reporter,
         intent_dispatcher=_intent_dispatcher,
+        get_emotion_state=_build_scheduler_emotion_state,
     )
 
     def _register_task(
@@ -707,6 +743,7 @@ def runtime_lifespan(
                     registry=_proactive_registry,
                     health_reporter=_health_reporter,
                     intent_dispatcher=_proactive_intent_dispatcher,
+                    get_emotion_state=_build_scheduler_emotion_state,
                 )
 
                 # ── 注册进化周期任务（Phase XVI）：每日凌晨 3:00 触发 ──────
@@ -1114,11 +1151,12 @@ def runtime_lifespan(
             logger.warning("ActivityMonitor 停止失败: %s", _am_stop_exc)
         # 优雅关闭 BondUpdateQueue（drain 等待队列排空 + shutdown 停止 worker）
         try:
-            from host_brain.app.dependencies import get_bond_update_queue  # noqa: PLC0415
-            _bond_queue = get_bond_update_queue()
-            _drained = _bond_queue.drain(timeout_s=3.0)
-            _bond_queue.shutdown()
-            logger.info("BondUpdateQueue 已优雅关闭 (drained=%s)", _drained)
+            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+            get_cortex_agent().shutdown_bond_update_queue(
+                logger=logger,
+                timeout_s=3.0,
+            )
         except Exception as _bq_exc:
             logger.warning("BondUpdateQueue 关闭失败: %s", _bq_exc)
         try:

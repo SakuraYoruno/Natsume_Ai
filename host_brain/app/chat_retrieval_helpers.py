@@ -10,14 +10,11 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Any, Dict, Mapping, Optional
 
-from host_brain.app.dependencies import get_retrieval_orchestrator
 from host_brain.app.prompt_builder import _truncate_for_prompt
 from host_brain.retrieval.orchestrator import (
-    RetrievalOrchestratorRequest,
     build_degraded_retrieval_summary as _orchestrator_degraded_summary,
     build_skipped_retrieval_summary as _orchestrator_skipped_summary,
 )
@@ -188,45 +185,19 @@ async def _run_retrieval(
     motive_state: Mapping[str, Any] | None = None,
 ) -> tuple[Dict[str, Any], list[dict[str, Any]]]:
     """并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。"""
-    try:
-        _retr_top_k = int(str(os.environ.get("HOST_RETR_TOP_K") or "8").strip())
-    except ValueError:
-        _retr_top_k = 8
-    normalized_bond_summary = dict(bond_summary) if isinstance(bond_summary, Mapping) and bond_summary else None
-    normalized_motive_state = dict(motive_state) if isinstance(motive_state, Mapping) and motive_state else None
-    session_state = {
-        "person_id": person_id,
-        "session_id": session_id,
-        "emotion_tag": emotion_tag,
-    }
-    if mood_state:
-        session_state["mood_state"] = mood_state
-    if normalized_bond_summary:
-        session_state["bond_summary"] = dict(normalized_bond_summary)
-    if normalized_motive_state:
-        session_state["motive_state"] = dict(normalized_motive_state)
+    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
 
-    orchestrator = get_retrieval_orchestrator()
-    orchestrator_result = await orchestrator.arun(
-        request=RetrievalOrchestratorRequest(
-            trace_id=request_id,
-            query=message,
-            session_state=session_state,
-            request_id=request_id,
-            person_id=person_id,
-            session_id=session_id,
-            top_k=_retr_top_k,
-            ts_ms=ts_ms,
-            emotion_context=emotion_tag,
-            mood_state=mood_state,
-            bond_summary=normalized_bond_summary,
-            motive_state=normalized_motive_state,
-            render_target_lang=render_target_lang,
-        )
-    )
-    return (
-        dict(orchestrator_result.retrieval_summary),
-        list(orchestrator_result.retrieval_evidence_items),
+    return await get_hippocampus_agent().recall(
+        request_id=request_id,
+        message=message,
+        person_id=person_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        emotion_tag=emotion_tag,
+        render_target_lang=render_target_lang,
+        mood_state=mood_state,
+        bond_summary=bond_summary,
+        motive_state=motive_state,
     )
 
 

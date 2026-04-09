@@ -34,6 +34,7 @@ def _reset_host_brain_singletons():
         dep._recall_pack_builder = None
         dep._memory_guard = None
         dep._state_arbiter = None
+        dep._state_write_arbiter = None
         dep._distillation_engine = None
         dep._semantic_recaller = None
         dep._context_compressor = None

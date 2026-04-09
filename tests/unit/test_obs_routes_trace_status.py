@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from host_brain.app.obs_routes import TraceNode
 from host_brain.app.obs_routes_core import (
+    _build_voice_trace_nodes,
     _build_trace_summary,
     _coalesce_trace_status,
     _extract_recall_summary_from_trace_nodes_raw,
     _normalize_trace_node_status,
+    _voice_event_node_type,
 )
 
 
@@ -150,3 +152,32 @@ def test_extract_recall_summary_from_trace_nodes_raw_uses_recall_fusion_snapshot
     assert summary["candidate_count"] == 0
     assert summary["route_count"] == 2
     assert summary["stages"][0]["status"] == "OK"
+
+
+def test_voice_event_node_type_recognizes_immune_gate() -> None:
+    node_type, display_name = _voice_event_node_type("IMMUNE_CHAT_GATE")
+    assert node_type == "immune"
+    assert display_name == "Immune Gate"
+
+
+def test_build_voice_trace_nodes_maps_immune_reason_codes() -> None:
+    nodes = _build_voice_trace_nodes(
+        [
+            {
+                "event_type": "IMMUNE_CHAT_GATE",
+                "direction": "INGRESS",
+                "status": "DEGRADED",
+                "reason_code": None,
+                "payload": {
+                    "decision": "REPORT",
+                    "reason_codes": ["PROMPT_INJECTION_DETECTED"],
+                    "score": 0.63,
+                },
+                "ts_ms": 1000,
+            }
+        ]
+    )
+    assert len(nodes) == 1
+    assert nodes[0].node_type == "immune"
+    assert nodes[0].side == "host"
+    assert nodes[0].reason_code == "PROMPT_INJECTION_DETECTED"

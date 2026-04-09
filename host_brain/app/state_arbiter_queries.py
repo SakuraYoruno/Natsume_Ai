@@ -206,9 +206,9 @@ async def _resolve_state_arbiter_bond_fact(
         "fact_key": "bond_graph_state",
     }
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-        _bond_engine = get_bond_stage_engine()
+        _bond_engine = get_social_brain_agent().resolve_stage_engine()
         if _bond_engine is None:
             summary["reason_code"] = "BOND_ENGINE_NOT_AVAILABLE"
             return summary, None
@@ -250,7 +250,7 @@ async def _resolve_state_arbiter_bond_fact(
                 "bond_stage": bond_stage,
                 "bond_score": bond_score,
                 "interaction_count": interaction_count,
-                "source": "bond_stage_engine",
+                "source": "social_brain_agent",
             },
         }
         summary["status"] = "APPLIED"

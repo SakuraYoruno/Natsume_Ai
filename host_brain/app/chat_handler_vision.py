@@ -31,8 +31,6 @@ from host_brain.airlock.image_filter import (
     filter_image_egress,
 )
 from host_brain.app.dependencies import (
-    get_bond_stage_engine,
-    get_bond_update_queue,
     get_episodic_store,
     get_ledger,
 )
@@ -44,7 +42,6 @@ from host_brain.app.graph_config_builder import (
 from host_brain.app.observability_persist import persist_chat_episodic_memory
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.schemas import ChatRequest
-from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.integrations.llm_helpers import PROVIDER_GEMINI
 
 _logger = logging.getLogger("Natsume.chat_handler_vision")

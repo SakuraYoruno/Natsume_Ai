@@ -5,7 +5,7 @@ import asyncio
 from host_brain.app.sub_agent_protocol import SubAgentDispatcher, SubAgentRequest
 
 
-def test_dispatcher_merges_request_context_into_handler_context(monkeypatch) -> None:
+def test_dispatcher_merges_request_context_into_handler_context() -> None:
     dispatcher = SubAgentDispatcher()
     captured: dict[str, object] = {}
 
@@ -40,20 +40,19 @@ def test_dispatcher_merges_request_context_into_handler_context(monkeypatch) -> 
     assert captured["context"]["custom"] == "VALUE"
 
 
-def test_dispatcher_repair_agent_success_uses_can_retry_true(monkeypatch) -> None:
-    """repair_agent 修复成功（can_retry=True）时，SubAgentResponse.success 应为 True。"""
+def test_dispatcher_repair_agent_success_uses_can_retry_true() -> None:
     dispatcher = SubAgentDispatcher()
 
     def _repair_handler(payload, context):  # noqa: ANN001
         return {
             "agent_artifacts": {
                 "repair_agent": {
-                    "summary": "修复完成，可以重试。",
+                    "summary": "repair done",
                     "confidence": 0.9,
                     "risk_flags": [],
                 }
             },
-            "react_scratchpad": {"final_answer": "修复完成，可以重试。"},
+            "react_scratchpad": {"final_answer": "repair done"},
             "repair_agent_trace": {
                 "agent_id": "repair_agent",
                 "success": True,
@@ -70,28 +69,27 @@ def test_dispatcher_repair_agent_success_uses_can_retry_true(monkeypatch) -> Non
 
     req = SubAgentRequest(
         agent_id="repair_agent",
-        task="修复 requests 缺失",
+        task="repair requests missing",
         request_id="req-repair-001",
     )
     result = asyncio.run(dispatcher.dispatch(req))
 
-    assert result.success is True, "can_retry=True 时 success 应为 True"
+    assert result.success is True
 
 
-def test_dispatcher_repair_agent_success_uses_can_retry_false(monkeypatch) -> None:
-    """repair_agent 修复失败（can_retry=False）时，SubAgentResponse.success 应为 False，即使有 final_answer。"""
+def test_dispatcher_repair_agent_success_uses_can_retry_false() -> None:
     dispatcher = SubAgentDispatcher()
 
     def _repair_handler(payload, context):  # noqa: ANN001
         return {
             "agent_artifacts": {
                 "repair_agent": {
-                    "summary": "所有修复步骤均失败，无法自动重试。",
+                    "summary": "repair failed",
                     "confidence": 0.4,
                     "risk_flags": [],
                 }
             },
-            "react_scratchpad": {"final_answer": "所有修复步骤均失败，无法自动重试。"},
+            "react_scratchpad": {"final_answer": "repair failed"},
             "repair_agent_trace": {
                 "agent_id": "repair_agent",
                 "success": False,
@@ -108,9 +106,51 @@ def test_dispatcher_repair_agent_success_uses_can_retry_false(monkeypatch) -> No
 
     req = SubAgentRequest(
         agent_id="repair_agent",
-        task="修复某依赖",
+        task="repair dependency",
         request_id="req-repair-002",
     )
     result = asyncio.run(dispatcher.dispatch(req))
 
-    assert result.success is False, "can_retry=False 时 success 应为 False，即使 final_answer 非空"
+    assert result.success is False
+
+
+def test_dispatcher_attaches_subgraph_metadata_to_audit_refs() -> None:
+    dispatcher = SubAgentDispatcher()
+
+    def _intent_handler(payload, context):  # noqa: ANN001
+        return {
+            "agent_artifacts": {
+                "intent_agent": {
+                    "summary": "intent ok",
+                    "confidence": 0.73,
+                    "risk_flags": [],
+                }
+            },
+            "react_scratchpad": {"final_answer": "intent ok"},
+            "subgraph_trace": [
+                {"node_id": "planner_constraints", "status": "OK", "ts_ms": 1, "detail": "ok"},
+            ],
+            "subgraph_commit_summary": {
+                "subgraph_id": "intent_agent_subgraph",
+                "node_count": 1,
+                "success_count": 1,
+                "fail_count": 0,
+                "committed_at_ms": 1,
+                "graph_trace_flat": [
+                    {"node_id": "planner_constraints", "status": "OK", "ts_ms": 1, "detail": "ok"},
+                ],
+            },
+        }
+
+    dispatcher._handler_map = {"intent_agent": _intent_handler}
+    req = SubAgentRequest(
+        agent_id="intent_agent",
+        task="plan the next step",
+        request_id="req-subgraph-001",
+    )
+
+    result = asyncio.run(dispatcher.dispatch(req))
+
+    assert result.success is True
+    assert result.audit_refs["subgraph_commit_summary"]["subgraph_id"] == "intent_agent_subgraph"
+    assert result.audit_refs["subgraph_trace"][0]["node_id"] == "planner_constraints"

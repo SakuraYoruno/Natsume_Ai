@@ -1752,9 +1752,17 @@ async def chat_agent_sse_generator(
                 model_id=model_id,
                 buffer_stream=buffer_stream,
                 delegated_agents=(
-                    [{"agent_id": sub_agent_ctx.agent_id,
-                      "success": sub_agent_ctx.success,
-                      "latency_ms": sub_agent_ctx.latency_ms}]
+                    [{
+                        "agent_id": sub_agent_ctx.agent_id,
+                        "success": sub_agent_ctx.success,
+                        "latency_ms": sub_agent_ctx.latency_ms,
+                        "error": sub_agent_ctx.error,
+                        "audit_refs": (
+                            dict((sub_agent_ctx.payload or {}).get("audit_refs") or {})
+                            if isinstance(sub_agent_ctx.payload, dict)
+                            else {}
+                        ),
+                    }]
                     if sub_agent_ctx else []
                 ),
                 retrieval_summary=retrieval_summary,

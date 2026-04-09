@@ -49,6 +49,7 @@ def build_offline_state_from_inner_state(
     spontaneous_event_count = int(current.get("spontaneous_event_count") or 0)
     last_spontaneous_ts_ms = int(current.get("last_spontaneous_ts_ms") or 0)
     last_spontaneous_note = str(current.get("last_spontaneous_note") or "").strip()
+    last_spontaneous_source = str(current.get("last_spontaneous_source") or "").strip()
 
     raw_inner_stream = list(current.get("inner_stream") or [])
     inner_stream_tail: list[dict[str, Any]] = []
@@ -67,6 +68,7 @@ def build_offline_state_from_inner_state(
         "spontaneous_event_count": spontaneous_event_count,
         "last_spontaneous_ts_ms": last_spontaneous_ts_ms,
         "last_spontaneous_note": last_spontaneous_note,
+        "last_spontaneous_source": last_spontaneous_source,
         "inner_stream": inner_stream_tail,
     }
 
@@ -93,18 +95,34 @@ def compute_runtime_motive_state(
     body_sense_dict = _coerce_mapping(body_sense)
     inner_state_dict = _coerce_mapping(inner_state)
 
+    _limbic_agent = None
+    if not silence_state_dict or not body_sense_dict:
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        _limbic_agent = get_limbic_agent()
+
     if not silence_state_dict:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-
-        silence_state_dict = get_silence_engine().get_silence_state(current_topic=current_topic_text).as_dict()
+        silence_state_dict = _coerce_mapping(
+            _limbic_agent.resolve_silence_state(current_topic=current_topic_text)
+            if _limbic_agent is not None
+            else {}
+        )
     if not body_sense_dict:
-        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
-
-        body_sense_dict = get_body_sense_model().get_state().as_dict()
+        body_sense_dict = _coerce_mapping(
+            _limbic_agent.resolve_body_sense_state()
+            if _limbic_agent is not None
+            else {}
+        )
     if not inner_state_dict:
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+        if _limbic_agent is None:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        inner_state_dict = get_inner_world().get_state(resolved_user_id)
+            _limbic_agent = get_limbic_agent()
+        inner_state_dict = _coerce_mapping(
+            _limbic_agent.resolve_inner_world_state(person_id=resolved_user_id)
+            if _limbic_agent is not None
+            else {}
+        )
 
     offline_state = build_offline_state_from_inner_state(inner_state_dict, now_ms=now_ms)
     pending_followup_topics = list(pending_topics or offline_state.get("anticipation_topics") or [])

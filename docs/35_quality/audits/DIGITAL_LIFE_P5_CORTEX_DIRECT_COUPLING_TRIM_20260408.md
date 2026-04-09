@@ -594,3 +594,102 @@ Date: 2026-04-08
   - Aggregate regression:
     - `pytest -q tests/unit/test_limbic_agent.py tests/unit/test_prefrontal_agent.py tests/unit/test_chat_context_builder_helpers_extra.py tests/unit/test_http_hooks_runtime_helpers.py tests/unit/test_top_agent_post_process.py tests/unit/test_top_agent_sse.py tests/unit/test_motive_runtime_limbic_integration.py tests/unit/test_motive_runtime_background.py tests/unit/test_limbic_coupling_boundary_guard.py tests/unit/test_offline_continuity_coupling_boundary_guard.py tests/unit/test_inner_world_coupling_boundary_guard.py tests/unit/test_motive_policy_coupling_boundary_guard.py tests/unit/test_prefrontal_coupling_boundary_guard.py tests/unit/test_intelligent_runtime.py tests/unit/test_app_persona_direct_coupling_boundary_guard.py tests/unit/test_bond_stage_engine_helpers_extra.py tests/unit/test_bond_stage_engine.py tests/unit/test_emotion_echo.py tests/unit/test_persona_phase2.py tests/unit/test_non_tribe_persona_coupling_boundary_guard.py`
     - Result: `201 passed`
+
+## Incremental Continuation XV (same day)
+- `host_brain/skills/impl/body_sense_skill.py`
+  - Removed direct `persona.body_sense` dependency.
+  - Skill execution now delegates to limbic-family wrappers:
+    - `tick_body_sense(...)`
+    - `capture_conversation_body_sense(...)`
+    - `on_conversation_ended(...)`
+    - `update_body_sense_loneliness(...)`
+- `host_brain/skills/impl/silence_skill.py`
+  - Removed direct `persona.emotional_silence` dependency.
+  - Skill execution now delegates to limbic-family wrappers:
+    - `tick_silence(...)`
+    - `update_silence_emotion(...)`
+    - `add_silence_topic_resistance(...)`
+- `host_brain/skills/impl/inner_world_skill.py`
+  - Removed direct `persona.inner_world` dependency.
+  - Skill execution now delegates to limbic-family wrappers:
+    - `tick_inner_world(...)`
+    - `on_user_awaken(...)`
+    - `on_session_end(...)`
+- `host_brain/skills/impl/emergent_growth_skill.py`
+  - Removed direct `persona.emergent_growth_engine / interaction_pattern_analyzer / persona_engine` dependencies.
+  - Skill execution now delegates to prefrontal-family wrappers:
+    - `run_emergent_growth_weekly(...)`
+    - `resolve_emergent_growth_status(...)`
+
+- `host_brain/tribe/limbic_agent.py`
+  - Added skill-facing wrapper entrypoints:
+    - `tick_body_sense(...)`
+    - `update_body_sense_loneliness(...)`
+    - `tick_inner_world(...)`
+    - `tick_silence(...)`
+    - `update_silence_emotion(...)`
+    - `add_silence_topic_resistance(...)`
+  - Extended `on_session_end(...)` to pass optional `mood_baseline`.
+- `host_brain/tribe/prefrontal_agent.py`
+  - Added emergent-growth wrapper entrypoints:
+    - `run_emergent_growth_weekly(...)`
+    - `resolve_emergent_growth_status(...)`
+    - `_get_emergent_growth_engine(...)` internal accessor.
+
+- Added / Updated tests:
+  - `tests/unit/test_body_sense_skill_tribe_events.py`
+    - aligned to limbic wrapper surface.
+  - `tests/unit/test_inner_world_skill_tribe_events.py`
+    - aligned to limbic wrapper surface.
+    - added awaken-path assertion.
+  - `tests/unit/test_silence_skill_limbic_integration.py` (new)
+  - `tests/unit/test_emergent_growth_skill_prefrontal_integration.py` (new)
+  - `tests/unit/test_prefrontal_agent.py`
+    - added emergent growth wrapper coverage.
+  - `tests/unit/test_limbic_agent.py`
+    - existing suite now covers newly introduced wrapper behaviors by regression.
+  - `tests/unit/test_limbic_coupling_boundary_guard.py`
+    - extended scan roots to include `host_brain/skills/impl`.
+  - `tests/unit/test_inner_world_coupling_boundary_guard.py`
+    - extended scan roots to include `host_brain/skills/impl`.
+  - `tests/unit/test_non_tribe_persona_coupling_boundary_guard.py`
+    - upgraded to full-host scan (`host_brain/**`) excluding only `persona` and `tribe`.
+
+- Verified:
+  - Coupling sweep:
+    - `rg -n --pcre2 "^\s*(from\s+host_brain\.persona(\.|\s+import)|import\s+host_brain\.persona(\.|$))" host_brain/skills/impl`
+    - Result: `0` (no direct persona imports in skill impl layer).
+  - Focused regression:
+    - `pytest -q tests/unit/test_body_sense_skill_tribe_events.py tests/unit/test_inner_world_skill_tribe_events.py tests/unit/test_silence_skill_limbic_integration.py tests/unit/test_emergent_growth_skill_prefrontal_integration.py tests/unit/test_limbic_agent.py tests/unit/test_prefrontal_agent.py tests/unit/test_limbic_coupling_boundary_guard.py tests/unit/test_inner_world_coupling_boundary_guard.py tests/unit/test_non_tribe_persona_coupling_boundary_guard.py`
+    - Result: `48 passed`
+  - Aggregate regression:
+    - `pytest -q tests/unit/test_limbic_agent.py tests/unit/test_prefrontal_agent.py tests/unit/test_chat_context_builder_helpers_extra.py tests/unit/test_http_hooks_runtime_helpers.py tests/unit/test_top_agent_post_process.py tests/unit/test_top_agent_sse.py tests/unit/test_motive_runtime_limbic_integration.py tests/unit/test_motive_runtime_background.py tests/unit/test_limbic_coupling_boundary_guard.py tests/unit/test_offline_continuity_coupling_boundary_guard.py tests/unit/test_inner_world_coupling_boundary_guard.py tests/unit/test_motive_policy_coupling_boundary_guard.py tests/unit/test_prefrontal_coupling_boundary_guard.py tests/unit/test_intelligent_runtime.py tests/unit/test_app_persona_direct_coupling_boundary_guard.py tests/unit/test_bond_stage_engine_helpers_extra.py tests/unit/test_bond_stage_engine.py tests/unit/test_emotion_echo.py tests/unit/test_persona_phase2.py tests/unit/test_non_tribe_persona_coupling_boundary_guard.py tests/unit/test_body_sense_skill_tribe_events.py tests/unit/test_inner_world_skill_tribe_events.py tests/unit/test_silence_skill_limbic_integration.py tests/unit/test_emergent_growth_skill_prefrontal_integration.py`
+    - Result: `215 passed`
+
+- Coupling sweep snapshot:
+  - `rg -n --pcre2 "^\s*(from\s+host_brain\.persona(\.|\s+import)|import\s+host_brain\.persona(\.|$))" host_brain --glob '!host_brain/persona/**'`
+  - Result: remaining direct persona imports are confined to tribe wrappers only.
+
+## Incremental Continuation XVI (same day)
+- `host_brain/app/obs_routes_core.py`
+  - Enhanced trace fallback/supplement path so stage-level chain is observable even when `graph_run_trace.nodes_json` is partial:
+    - retrieval synthesis now surfaces `query_planner` + `agentic_rag` from `PIPELINE` payload (`query_plan` / `agentic_meta`).
+    - added persona-stage synthesis from audit snapshot (`emotion_context` / `persona_resident_memory` / `motive_state`).
+    - added orchestration-stage synthesis (`response_policy` / `top_agent` / `dispatch_agent` / `chat_agent`) with failure-aware status.
+    - when native graph nodes exist, missing stage nodes are supplemented (no duplicate node_id) before voice-tail extension.
+- `host_brain/app/monitor_ui/src/components/trace/traceNodeText.js`
+  - Removed retrieval-node collapsing to a single `recall_fusion` bucket.
+  - Preserved explicit mapping for:
+    - `retrieval_embedding`
+    - `retrieval_rerank`
+    - `retrieval_evidence_pack`
+    - `retrieval_pipeline`
+    - compatibility aliases: `retrieval_query_planner -> query_planner`, `retrieval_agentic_rag -> agentic_rag`.
+- `tests/integration/test_obs_routes_integration.py`
+  - Extended fallback fixture with `PIPELINE` retrieval event carrying `query_plan` + `agentic_meta`.
+  - Strengthened fallback trace assertion to require chain nodes:
+    - `query_planner`
+    - `agentic_rag`
+    - `top_agent`
+    - `chat_agent`
+    - (with existing `host_input / recall_fusion / llm_gateway` checks retained).

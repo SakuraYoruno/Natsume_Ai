@@ -53,16 +53,15 @@ def execute_silence_tick(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     user_id = _resolve_user_id(args, context)
     current_topic = _resolve_current_topic(args, context)
     bond_summary = _resolve_bond_summary(args, context)
     emotion_context = _resolve_emotion_context(args, context)
 
-    engine = get_silence_engine()
-    result = dict(
-        engine.tick(
+    return dict(
+        get_limbic_agent().tick_silence(
             user_id=user_id,
             current_topic=current_topic,
             bond_summary=bond_summary,
@@ -70,16 +69,13 @@ def execute_silence_tick(
         )
         or {}
     )
-    result.setdefault("status", "OK")
-    result["silence_state"] = engine.get_silence_state(current_topic=current_topic).as_dict()
-    return result
 
 
 def execute_silence_update_emotion(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     emotion_tag = str((args or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
     mood_state = str((args or {}).get("mood_state") or "steady").strip().lower() or "steady"
@@ -92,42 +88,38 @@ def execute_silence_update_emotion(
     except (TypeError, ValueError):
         emotion_arousal = 0.3
 
-    engine = get_silence_engine()
-    willingness = engine.update_emotion(
-        emotion_tag=emotion_tag,
-        emotion_valence=emotion_valence,
-        emotion_arousal=emotion_arousal,
-        mood_state=mood_state,
+    return dict(
+        get_limbic_agent().update_silence_emotion(
+            emotion_tag=emotion_tag,
+            mood_state=mood_state,
+            emotion_valence=emotion_valence,
+            emotion_arousal=emotion_arousal,
+            current_topic=_resolve_current_topic(args, context),
+        )
+        or {
+            "status": "OK",
+            "willingness": 0.0,
+            "silence_state": {},
+        }
     )
-    return {
-        "status": "OK",
-        "willingness": willingness,
-        "silence_state": engine.get_silence_state(current_topic=_resolve_current_topic(args, context)).as_dict(),
-    }
 
 
 def execute_silence_add_resistance(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     topic_label = str((args or {}).get("topic_label") or (args or {}).get("current_topic") or "").strip()
-    if not topic_label:
-        return {
-            "status": "REJECTED",
-            "reason_code": "SILENCE_TOPIC_REQUIRED",
-        }
     try:
         strength = float((args or {}).get("strength") or 0.7)
     except (TypeError, ValueError):
         strength = 0.7
 
-    engine = get_silence_engine()
-    engine.add_topic_resistance(topic_label, strength=strength)
-    return {
-        "status": "OK",
-        "topic_label": topic_label,
-        "strength": max(0.0, min(1.0, strength)),
-        "silence_state": engine.get_silence_state(current_topic=topic_label).as_dict(),
-    }
+    return dict(
+        get_limbic_agent().add_silence_topic_resistance(
+            topic_label=topic_label,
+            strength=strength,
+        )
+        or {}
+    )

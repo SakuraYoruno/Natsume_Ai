@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 
@@ -36,12 +37,45 @@ def execute_inner_world_tick(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     user_id = _resolve_user_id(args, context)
-    result = dict(get_inner_world().tick(user_id=user_id) or {})
+    limbic = get_limbic_agent()
+    result = dict(limbic.tick_inner_world(person_id=user_id) or {})
     result.setdefault("status", "OK")
     result.setdefault("user_id", user_id)
+    payload = {
+        "user_id": user_id,
+        "status": str(result.get("status") or "OK"),
+        "loneliness": result.get("loneliness"),
+        "anticipation": result.get("anticipation"),
+        "continuity_score": result.get("continuity_score"),
+    }
+    try:
+            limbic.handle_signal(
+                event_type="INNER_WORLD_TICKED",
+                source_agent="ans_agent",
+                target_agent="limbic_agent",
+                payload=payload,
+            )
+    except Exception:
+        pass
+    last_spontaneous_ts_ms = int(result.get("last_spontaneous_ts_ms") or 0)
+    now_ms = int(time.time() * 1000)
+    if last_spontaneous_ts_ms > 0 and (now_ms - last_spontaneous_ts_ms) <= 120_000:
+        try:
+            limbic.handle_signal(
+                event_type="EVOLUTION_CYCLE_TRIGGERED",
+                source_agent="ans_agent",
+                target_agent="prefrontal_agent",
+                payload={
+                    "user_id": user_id,
+                    "reason": "inner_world_spontaneous_activity",
+                    "continuity_score": result.get("continuity_score"),
+                },
+            )
+        except Exception:
+            pass
     return result
 
 
@@ -49,14 +83,14 @@ def execute_inner_world_awaken(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     user_id = _resolve_user_id(args, context)
-    snapshot = get_inner_world().on_user_awaken(user_id=user_id)
+    snapshot = dict(get_limbic_agent().on_user_awaken(person_id=user_id) or {})
     return {
         "status": "OK",
         "user_id": user_id,
-        "offline_state": snapshot.as_dict(),
+        "offline_state": snapshot,
     }
 
 
@@ -64,7 +98,7 @@ def execute_inner_world_session_end(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     user_id = _resolve_user_id(args, context)
     try:
@@ -82,17 +116,34 @@ def execute_inner_world_session_end(
         mood_baseline = None
     pending_topics = _normalize_topics((args or {}).get("pending_topics"))
 
-    inner_world = get_inner_world()
-    inner_world.on_session_end(
-        user_id=user_id,
-        valence=valence,
-        arousal=arousal,
-        pending_topics=pending_topics,
-        mood_baseline=mood_baseline,
+    limbic = get_limbic_agent()
+    inner_world_state = dict(
+        limbic.on_session_end(
+            person_id=user_id,
+            valence=valence,
+            arousal=arousal,
+            pending_topics=pending_topics,
+            mood_baseline=mood_baseline,
+        )
+        or {}
     )
+    try:
+        limbic.handle_signal(
+            event_type="INNER_WORLD_SESSION_ENDED",
+            source_agent="cortex_agent",
+            target_agent="limbic_agent",
+            payload={
+                "user_id": user_id,
+                "valence": float(valence),
+                "arousal": float(arousal),
+                "pending_topics": list(pending_topics),
+            },
+        )
+    except Exception:
+        pass
     return {
         "status": "OK",
         "user_id": user_id,
         "pending_topics": pending_topics,
-        "inner_world_state": inner_world.get_state(user_id),
+        "inner_world_state": inner_world_state,
     }

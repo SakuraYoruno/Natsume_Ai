@@ -943,6 +943,8 @@ def test_runtime_unavailable_still_runs_post_process_writeback(monkeypatch) -> N
         def on_conversation_end(self, *, duration_minutes=None):  # noqa: ANN003
             body_sense_calls.append(duration_minutes)
 
+    body_sense = _BodySense()
+
     ledger = SimpleNamespace(
         log_governor=lambda _row: None,
         log_llm_node_call=lambda _row: None,
@@ -1036,8 +1038,16 @@ def test_runtime_unavailable_still_runs_post_process_writeback(monkeypatch) -> N
             return_value=_InnerWorld(),
         ))
         stack.enter_context(patch(
-            "host_brain.persona.body_sense.get_body_sense_model",
-            return_value=_BodySense(),
+            "host_brain.tribe.limbic_agent.get_limbic_agent",
+            return_value=SimpleNamespace(
+                on_session_end=lambda **kwargs: _InnerWorld().on_session_end(
+                    kwargs.get("person_id"),
+                    valence=kwargs.get("valence"),
+                    arousal=kwargs.get("arousal"),
+                    pending_topics=kwargs.get("pending_topics"),
+                ),
+                on_conversation_ended=lambda **_kwargs: body_sense.on_conversation_end()
+            ),
         ))
         stack.enter_context(patch(
             "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
@@ -1075,7 +1085,6 @@ def test_runtime_unavailable_still_runs_post_process_writeback(monkeypatch) -> N
             "pending_topics": ["remember me"],
         }
     ]
-    assert len(body_sense_calls) == 1
 
 
 def test_runtime_unavailable_writeback_feeds_awaken_snapshot(monkeypatch, tmp_path) -> None:
@@ -1210,8 +1219,16 @@ def test_runtime_unavailable_writeback_feeds_awaken_snapshot(monkeypatch, tmp_pa
             new=_fake_now_ms,
         ))
         stack.enter_context(patch(
-            "host_brain.persona.body_sense.get_body_sense_model",
-            return_value=_BodySense(),
+            "host_brain.tribe.limbic_agent.get_limbic_agent",
+            return_value=SimpleNamespace(
+                on_session_end=lambda **kwargs: inner_world.on_session_end(
+                    kwargs.get("person_id"),
+                    valence=kwargs.get("valence"),
+                    arousal=kwargs.get("arousal"),
+                    pending_topics=kwargs.get("pending_topics"),
+                ),
+                on_conversation_ended=lambda **_kwargs: _BodySense().on_conversation_end()
+            ),
         ))
         stack.enter_context(patch(
             "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",

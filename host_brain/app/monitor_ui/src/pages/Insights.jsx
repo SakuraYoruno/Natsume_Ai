@@ -27,6 +27,8 @@ import {
   fetchUIAssertionStats,
   fetchFailureStats,
   fetchPermissionStats,
+  fetchSchedulerHistory,
+  fetchTribeEvents,
   fetchMemoryGuardStats,
   fetchStateArbiterStats,
   fetchContextCompressorStats,
@@ -676,8 +678,10 @@ export default function Insights() {
         )}
       </InsightSection>
               <PermissionStatsSection windowMinutes={windowMinutes} />
+              <SchedulerGateStatsSection windowMinutes={windowMinutes} />
               <MemoryGuardStatsSection windowMinutes={windowMinutes} />
               <UIAssertionSection windowMinutes={windowMinutes} />
+              <TribeEventsSection windowMinutes={windowMinutes} />
             </>
           )}
 
@@ -776,6 +780,155 @@ export default function Insights() {
 }
 
 // ===== Ref #47: 路由决策统计子组件 =====
+function TribeEventsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  const [eventTypeFilter, setEventTypeFilter] = React.useState('')
+  const [sourceFilter, setSourceFilter] = React.useState('')
+  const [targetFilter, setTargetFilter] = React.useState('')
+  const [loading, setLoading] = React.useState(false)
+
+  const load = React.useCallback(() => {
+    setLoading(true)
+    return fetchTribeEvents({
+      limit: 20,
+      event_type: eventTypeFilter || undefined,
+      source_agent: sourceFilter || undefined,
+      target_agent: targetFilter || undefined,
+    })
+      .then(setData)
+      .catch(() => setData({ total: 0, items: [] }))
+      .finally(() => setLoading(false))
+  }, [eventTypeFilter, sourceFilter, targetFilter])
+
+  React.useEffect(() => {
+    load()
+  }, [windowMinutes, load])
+
+  const items = data?.items ?? []
+  const eventTypeCounter = new Map()
+  for (const event of items) {
+    const type = String(event?.event_type || 'unknown')
+    eventTypeCounter.set(type, (eventTypeCounter.get(type) || 0) + 1)
+  }
+  const topEventTypes = Array.from(eventTypeCounter.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+
+  return (
+    <InsightSection icon={GitBranch} title="Tribe 事件总线观测" color="text-emerald-700">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="最近事件数" value={loading ? '...' : (data?.total ?? '—')} color="text-gray-700" />
+        <StatCard label="窗口分钟" value={windowMinutes} color="text-gray-700" />
+        <StatCard label="事件类型数" value={eventTypeCounter.size} color="text-blue-600" />
+        <StatCard
+          label="最近事件时间"
+          value={items.length > 0 ? formatTime(items[0]?.ts_ms) : '—'}
+          color="text-gray-600"
+        />
+      </div>
+
+      <div className="card p-4 mb-4">
+        <div className="text-xs font-semibold text-gray-600 mb-3">过滤条件</div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <input
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            placeholder="event_type"
+            value={eventTypeFilter}
+            onChange={(e) => setEventTypeFilter(e.target.value)}
+          />
+          <input
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            placeholder="source_agent"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+          />
+          <input
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            placeholder="target_agent"
+            value={targetFilter}
+            onChange={(e) => setTargetFilter(e.target.value)}
+          />
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary text-xs" onClick={load} disabled={loading}>
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              刷新
+            </button>
+            <button
+              className="btn-secondary text-xs"
+              onClick={() => {
+                setEventTypeFilter('')
+                setSourceFilter('')
+                setTargetFilter('')
+              }}
+              disabled={loading}
+            >
+              清空
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {topEventTypes.length > 0 && (
+        <div className="card p-4 mb-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">事件类型 Top</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {topEventTypes.map(([eventType, count]) => (
+              <div key={eventType} className="flex items-center justify-between text-xs border border-gray-200 rounded px-3 py-2">
+                <span className="font-mono text-gray-700 truncate pr-2" title={eventType}>{eventType}</span>
+                <span className="text-emerald-700 font-semibold">{count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {items.length > 0 ? (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+            最近 Tribe 事件
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                {['时间', '事件类型', 'source', 'target', 'payload'].map((h) => (
+                  <th key={h} className="px-4 py-2 text-left text-xs font-medium text-gray-500">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {items.map((event) => {
+                const payload = event?.payload ?? {}
+                const payloadPreview = JSON.stringify(payload)
+                return (
+                  <tr key={event.event_id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
+                      {formatTime(event.ts_ms)}
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono text-emerald-700">
+                      {event.event_type}
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono text-blue-600">
+                      {event.source_agent || '—'}
+                    </td>
+                    <td className="px-4 py-2 text-xs font-mono text-purple-600">
+                      {event.target_agent || '—'}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500 max-w-md truncate" title={payloadPreview}>
+                      {payloadPreview}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <EmptyStateCard title="暂无 Tribe 事件数据" hint="当前窗口未采集到事件。" />
+      )}
+    </InsightSection>
+  )
+}
+
 function RouteStatsSection({ windowMinutes }) {
   const [data, setData] = React.useState(null)
   React.useEffect(() => {
@@ -934,6 +1087,110 @@ function PermissionStatsSection({ windowMinutes }) {
           </div>
         </div>
       )}
+    </InsightSection>
+  )
+}
+
+function SchedulerGateStatsSection({ windowMinutes }) {
+  const [data, setData] = React.useState(null)
+  const navigate = useNavigate()
+  React.useEffect(() => {
+    fetchSchedulerHistory({ window_minutes: windowMinutes }).then(setData).catch(() => {})
+  }, [windowMinutes])
+  const goAutomation = React.useCallback(
+    (params = {}) => {
+      const search = new URLSearchParams()
+      Object.entries(params).forEach(([key, value]) => {
+        const normalized = String(value || '').trim()
+        if (normalized) search.set(key, normalized)
+      })
+      const query = search.toString()
+      navigate(`/automation${query ? `?${query}` : ''}`)
+    },
+    [navigate],
+  )
+
+  return (
+    <InsightSection icon={ShieldAlert} title="调度门控统计" color="text-amber-600">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="门控拦截" value={data?.gate_blocked_total ?? '—'} color="text-orange-500" />
+        <StatCard
+          label="门控拦截率"
+          value={data?.gate_blocked_rate != null ? `${data.gate_blocked_rate}%` : '—'}
+          color={(data?.gate_blocked_rate ?? 0) > 25 ? 'text-red-500' : 'text-green-600'}
+        />
+        <StatCard label="运行中任务" value={data?.running_count ?? '—'} color="text-blue-600" />
+        <StatCard label="失败任务" value={data?.failed_count ?? '—'} color="text-red-600" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <InsightChartCard
+          title="门控原因 Top"
+          hasData={(data?.blocked_reason_codes?.length ?? 0) > 0}
+          emptyIcon={ShieldAlert}
+          emptyText="暂无门控拦截记录"
+          emptyIconClassName="text-green-400"
+        >
+          <BarChart
+            title="门控原因 Top"
+            direction="horizontal"
+            categories={(data?.blocked_reason_codes ?? []).map((item) => item.reason_code)}
+            series={[{ name: '次数', data: (data?.blocked_reason_codes ?? []).map((item) => item.count), color: '#F79009' }]}
+          />
+        </InsightChartCard>
+        <InsightChartCard
+          title="Gate 状态分布"
+          hasData={(data?.gate_states?.length ?? 0) > 0}
+          emptyIcon={ShieldAlert}
+          emptyText="暂无 Gate 状态数据"
+          emptyIconClassName="text-gray-400"
+        >
+          <BarChart
+            title="Gate 状态分布"
+            direction="horizontal"
+            categories={(data?.gate_states ?? []).map((item) => item.gate_state)}
+            series={[{ name: '次数', data: (data?.gate_states ?? []).map((item) => item.count), color: '#2E90FA' }]}
+          />
+        </InsightChartCard>
+      </div>
+      <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs text-amber-800">需要任务级阻断明细时，可直接跳转自动化页继续下钻。</div>
+          <button
+            onClick={() => goAutomation()}
+            className="rounded border border-amber-200 bg-white px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-100"
+          >
+            前往自动化页
+          </button>
+        </div>
+        {(data?.blocked_reason_codes?.length ?? 0) > 0 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {(data?.blocked_reason_codes ?? []).slice(0, 3).map((item) => (
+              <button
+                key={item.reason_code}
+                onClick={() => goAutomation({ reason_code: item.reason_code })}
+                className="rounded bg-orange-100 px-2 py-1 text-[11px] font-mono text-orange-700 hover:bg-orange-200"
+                title={`按原因筛选：${item.reason_code}`}
+              >
+                reason={item.reason_code}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {(data?.gate_states?.length ?? 0) > 0 ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {(data?.gate_states ?? []).slice(0, 3).map((item) => (
+              <button
+                key={item.gate_state}
+                onClick={() => goAutomation({ gate_state: item.gate_state })}
+                className="rounded bg-blue-100 px-2 py-1 text-[11px] font-mono text-blue-700 hover:bg-blue-200"
+                title={`按 Gate 筛选：${item.gate_state}`}
+              >
+                gate={item.gate_state}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </InsightSection>
   )
 }

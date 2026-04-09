@@ -499,6 +499,24 @@ export function fetchSchedulerHealth() {
   return request('/scheduler/health')
 }
 
+export function fetchImmuneGateStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/immune-gate/stats${qs ? '?' + qs : ''}`)
+}
+
+export function fetchImmuneGateReplay(requestId, params = {}) {
+  const rid = String(requestId || '').trim()
+  if (!rid) {
+    throw new Error('request_id is required')
+  }
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/immune-gate/replay/${encodeURIComponent(rid)}${qs ? '?' + qs : ''}`)
+}
+
 /**
  * 启用调度任务
  * @param {string} taskId
@@ -739,6 +757,19 @@ export function fetchSchedulerHistory(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/obs/scheduler/history${qs ? '?' + qs : ''}`)
+}
+
+// ===== Ref #DL-TRIBE-OBS: Tribe 事件观测 =====
+
+/**
+ * Tribe 事件观测（最近事件窗口）
+ * @param {object} params - { limit, event_type, source_agent, target_agent, request_id, session_id, conversation_id }
+ */
+export function fetchTribeEvents(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/tribe/events${qs ? '?' + qs : ''}`)
 }
 
 // ===== Ref #56: ActionPlan 执行成功率/指令类型分布 =====

@@ -38,6 +38,13 @@ class SchedulerHealthReporter:
         error_count: int = 0,
         suspended_reason: str | None = None,
         last_reason_code: str | None = None,
+        last_gate_state: str | None = None,
+        last_mood_state: str | None = None,
+        last_endocrine_cortisol: float | None = None,
+        last_endocrine_energy: float | None = None,
+        last_immune_decision: str | None = None,
+        last_immune_risk_level: str | None = None,
+        last_immune_reason_codes: list[str] | None = None,
     ) -> None:
         """更新单个任务的运行状态。"""
         self._task_states[task_id] = {
@@ -48,6 +55,13 @@ class SchedulerHealthReporter:
             "error_count": error_count,
             "suspended_reason": suspended_reason,
             "last_reason_code": last_reason_code,
+            "last_gate_state": last_gate_state,
+            "last_mood_state": last_mood_state,
+            "last_endocrine_cortisol": last_endocrine_cortisol,
+            "last_endocrine_energy": last_endocrine_energy,
+            "last_immune_decision": last_immune_decision,
+            "last_immune_risk_level": last_immune_risk_level,
+            "last_immune_reason_codes": list(last_immune_reason_codes or []),
             "updated_ts": now_ms(),
         }
 
@@ -89,6 +103,13 @@ class SchedulerHealthReporter:
                 "error_count": state.get("error_count", 0),
                 "suspended_reason": state.get("suspended_reason"),
                 "last_reason_code": state.get("last_reason_code"),
+                "last_gate_state": state.get("last_gate_state"),
+                "last_mood_state": state.get("last_mood_state"),
+                "last_endocrine_cortisol": state.get("last_endocrine_cortisol"),
+                "last_endocrine_energy": state.get("last_endocrine_energy"),
+                "last_immune_decision": state.get("last_immune_decision"),
+                "last_immune_risk_level": state.get("last_immune_risk_level"),
+                "last_immune_reason_codes": list(state.get("last_immune_reason_codes") or []),
             })
 
         return {

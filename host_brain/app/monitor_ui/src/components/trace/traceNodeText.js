@@ -5,6 +5,7 @@ const TRACE_NODE_NAME_BY_ID = {
   input_reporter: '输入上报',
   airlock_ingress: '入口净化',
   governor: '入口守护',
+  immune_gate: 'Immune Gate',
   query_planner: '查询规划器',
   agentic_rag: 'Agentic RAG',
   recall_fusion: '召回融合',
@@ -40,6 +41,7 @@ const TRACE_DISPLAY_NAME_ALIASES = {
   'ASR 语音识别': '语音识别',
   'Airlock Ingress': '入口净化',
   Governor: '入口守护',
+  'Immune Gate': 'Immune Gate',
   'Query Planner': '查询规划器',
   'Agentic RAG': 'Agentic RAG',
   'Recall Fusion': '召回融合',
@@ -69,6 +71,7 @@ const TRACE_DISPLAY_NAME_ALIASES = {
 const TRACE_NODE_TYPE_LABELS = {
   intent: '意图',
   governor: '守护',
+  immune: '免疫',
   skill: '技能',
   asr: '语音',
   tts: '合成',
@@ -98,8 +101,10 @@ export function normalizeTraceNodeKey(nodeId = '') {
   if (raw.startsWith('voice_tts_')) return 'tts'
   if (raw.startsWith('voice_vts_')) return 'vts_driver'
   if (raw.startsWith('voice_asr_')) return 'asr'
+  if (raw.startsWith('voice_immune_')) return 'immune_gate'
   if (raw.startsWith('voice_edge_')) return 'input_reporter'
   if (raw.startsWith('voice_')) return 'input_reporter'
+  if (raw === 'immune_gate' || raw === 'immune') return 'immune_gate'
   if (raw.startsWith('episodic_store')) return 'episodic_store'
   if (raw.startsWith('bond_update')) return 'bond_update'
   if (raw.startsWith('sub_agent:code') || raw === 'sub_agent_code') return 'sub_agent_code'
@@ -109,7 +114,14 @@ export function normalizeTraceNodeKey(nodeId = '') {
   if (raw.startsWith('airlock')) return raw.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
   if (raw === 'host_input') return 'airlock_ingress'
   if (raw === 'llm_gateway' || raw === 'top_agent_llm_stream') return 'llm_stream'
-  if (raw.startsWith('retrieval_') || raw === 'recall_fusion') return 'recall_fusion'
+  if (raw === 'recall_fusion') return 'recall_fusion'
+  if (raw.startsWith('retrieval_query_planner')) return 'query_planner'
+  if (raw.startsWith('retrieval_agentic_rag')) return 'agentic_rag'
+  if (raw.startsWith('retrieval_embedding')) return 'retrieval_embedding'
+  if (raw.startsWith('retrieval_rerank')) return 'retrieval_rerank'
+  if (raw.startsWith('retrieval_evidence_pack')) return 'retrieval_evidence_pack'
+  if (raw.startsWith('retrieval_pipeline')) return 'retrieval_pipeline'
+  if (raw.startsWith('retrieval_')) return raw
   return raw
 }
 

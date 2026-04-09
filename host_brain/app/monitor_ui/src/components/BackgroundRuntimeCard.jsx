@@ -27,6 +27,20 @@ function formatTaskStatus(task) {
   return String(task.status || 'UNKNOWN').toUpperCase()
 }
 
+function formatReasonCode(task) {
+  const reason = String(task?.last_reason_code || '').trim()
+  return reason || '—'
+}
+
+function formatGateState(task) {
+  const key = String(task?.last_gate_state || '').toLowerCase()
+  if (!key) return '—'
+  if (key === 'open') return 'open'
+  if (key === 'cautious') return 'cautious'
+  if (key === 'protective') return 'protective'
+  return key
+}
+
 export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
   const background = runtimeSnapshot?.background_runtime
   if (!background) return null
@@ -41,6 +55,8 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
   const schedulerStatus = String(background.scheduler_status || 'UNAVAILABLE').toUpperCase()
   const personaAligned = Boolean(background.persona_user_alignment_ok)
   const missingTicks = Array.isArray(background.core_ticks_missing) ? background.core_ticks_missing : []
+  const blockedTasks = Array.isArray(background.gate_blocked_tasks) ? background.gate_blocked_tasks : []
+  const proactiveTask = background.proactive_task || null
 
   return (
     <div className="card p-5">
@@ -63,6 +79,9 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
       {!isAdvancing ? (
         <NoticeBanner className="mt-4" variant="warning" title="后台推进告警">
           Tick Health: {tickHealth} · Scheduler: {schedulerStatus}
+          {blockedTasks.length > 0 ? (
+            <span className="ml-1">· Gate Blocked: {blockedTasks.join(', ')}</span>
+          ) : null}
         </NoticeBanner>
       ) : null}
 
@@ -78,6 +97,8 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
             <KeyValueRow label="Core Ticks" value={background.core_ticks_registered ? 'Registered' : 'Missing'} />
             <KeyValueRow label="Inner Tick Ago" value={formatDuration(background.seconds_since_inner_world_tick)} />
             <KeyValueRow label="Persona Align" value={personaAligned ? 'OK' : 'MISMATCH'} />
+            <KeyValueRow label="Proactive Task" value={formatTaskStatus(proactiveTask)} />
+            <KeyValueRow label="Proactive Gate" value={formatGateState(proactiveTask)} />
           </div>
         </div>
 
@@ -85,8 +106,11 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
           <div className="text-xs text-gray-500">核心 Tick</div>
           <div className="mt-3 space-y-2">
             <KeyValueRow label="inner_world_tick" value={formatTaskStatus(innerTick)} />
+            <KeyValueRow label="inner reason" value={formatReasonCode(innerTick)} />
             <KeyValueRow label="silence_tick" value={formatTaskStatus(silenceTick)} />
+            <KeyValueRow label="silence reason" value={formatReasonCode(silenceTick)} />
             <KeyValueRow label="body_sense_tick" value={formatTaskStatus(bodySenseTick)} />
+            <KeyValueRow label="body reason" value={formatReasonCode(bodySenseTick)} />
           </div>
         </div>
 
@@ -107,4 +131,3 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
     </div>
   )
 }
-

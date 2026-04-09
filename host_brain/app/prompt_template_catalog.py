@@ -74,6 +74,26 @@ PERSONA_FIRST_BATCH_BUNDLES: tuple[PersonaTemplateCatalogBundleDefinition, ...] 
         ),
     ),
     PersonaTemplateCatalogBundleDefinition(
+        bundle_id="immune_gate",
+        title="Immune 门禁规则",
+        description="用于运营调整高风险输入识别（关键词/正则）并降低误拦截。",
+        entries=(
+            PersonaTemplateCatalogEntryDefinition(
+                template_id="immune_agent.runtime_rules",
+                title="Immune Runtime Rules",
+                description="控制关键词与正则命中后的 reason_code 和 score 权重。",
+                focus_keys=(
+                    "keyword_rules",
+                    "regex_rules",
+                ),
+                operator_notes=(
+                    "优先追加关键词规则并小步验证，再考虑高风险正则。",
+                    "不要把普通闲聊词设为高风险命中项，避免影响正常会话。",
+                ),
+            ),
+        ),
+    ),
+    PersonaTemplateCatalogBundleDefinition(
         bundle_id="expression_adapter",
         title="表达适配文案",
         description="影响回复时的风格提示、节奏提示和表达策略说明。",

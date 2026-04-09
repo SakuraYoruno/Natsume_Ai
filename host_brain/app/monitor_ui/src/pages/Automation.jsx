@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Workflow } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import {
   disableSchedulerTask,
   enableSchedulerTask,
+  fetchImmuneGateReplay,
+  fetchImmuneGateStats,
   fetchSchedulerHealth,
   fetchSchedulerHistory,
   fetchSchedulerTasks,
@@ -36,6 +39,20 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
   const status = health?.status || 'PENDING'
   const style = STATUS_STYLES[status] || STATUS_STYLES.PENDING
   const isLoading = actionLoading === task.task_id
+  const lastReasonCode = String(health?.last_reason_code || '').trim()
+  const lastGateState = String(health?.last_gate_state || '').trim()
+  const lastMoodState = String(health?.last_mood_state || '').trim()
+  const lastImmuneDecision = String(health?.last_immune_decision || '').trim().toUpperCase()
+  const lastImmuneRisk = String(health?.last_immune_risk_level || '').trim().toLowerCase()
+  const lastImmuneReasonCodes = Array.isArray(health?.last_immune_reason_codes)
+    ? health.last_immune_reason_codes.filter((code) => String(code || '').trim()).slice(0, 3)
+    : []
+  const lastCortisol = Number.isFinite(Number(health?.last_endocrine_cortisol))
+    ? Number(health?.last_endocrine_cortisol).toFixed(2)
+    : '—'
+  const lastEnergy = Number.isFinite(Number(health?.last_endocrine_energy))
+    ? Number(health?.last_endocrine_energy).toFixed(2)
+    : '—'
 
   return (
     <div className={`space-y-3 rounded-lg border bg-white p-4 ${task.enabled ? 'border-gray-200' : 'border-gray-100 opacity-75'}`}>
@@ -71,6 +88,16 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
       </div>
 
       {health?.last_error ? <NoticeBanner variant="error">✕ {health.last_error}</NoticeBanner> : null}
+      {lastReasonCode ? (
+        <NoticeBanner variant={lastReasonCode.includes('BLOCKED') ? 'warning' : 'info'}>
+          reason={lastReasonCode}
+          {lastGateState ? ` · gate=${lastGateState}` : ''}
+          {lastMoodState ? ` · mood=${lastMoodState}` : ''}
+          {lastImmuneDecision ? ` · immune=${lastImmuneDecision}${lastImmuneRisk ? `/${lastImmuneRisk}` : ''}` : ''}
+          {lastImmuneReasonCodes.length > 0 ? ` · immune_reason=${lastImmuneReasonCodes.join('|')}` : ''}
+          {` · cortisol=${lastCortisol} · energy=${lastEnergy}`}
+        </NoticeBanner>
+      ) : null}
 
       <div className="flex gap-2">
         <button
@@ -146,6 +173,285 @@ function SchedulerTimelineChart({ tasks }) {
   )
 }
 
+function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequestId = '' }) {
+  const [windowMinutes, setWindowMinutes] = useState(60)
+  const [stats, setStats] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [replayRequestId, setReplayRequestId] = useState('')
+  const [replayLoading, setReplayLoading] = useState(false)
+  const [replayError, setReplayError] = useState('')
+  const [replayPayload, setReplayPayload] = useState(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const payload = await fetchImmuneGateStats({ window_minutes: windowMinutes, limit: 12 })
+      setStats(payload)
+    } catch (fetchError) {
+      setError(fetchError.message || 'immune gate stats load failed')
+    } finally {
+      setLoading(false)
+    }
+  }, [windowMinutes])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    if (!pollingEnabled) return
+    const timer = setInterval(() => {
+      load()
+    }, Math.max(15, pollingInterval) * 1000)
+    return () => clearInterval(timer)
+  }, [pollingEnabled, pollingInterval, load])
+
+  const loadReplay = useCallback(async (requestId) => {
+    const rid = String(requestId || replayRequestId || '').trim()
+    if (!rid) return
+    setReplayLoading(true)
+    setReplayError('')
+    try {
+      const payload = await fetchImmuneGateReplay(rid, { limit: 120 })
+      setReplayPayload(payload)
+      setReplayRequestId(rid)
+    } catch (fetchError) {
+      setReplayPayload(null)
+      setReplayError(fetchError.message || 'immune gate replay load failed')
+    } finally {
+      setReplayLoading(false)
+    }
+  }, [replayRequestId])
+
+  useEffect(() => {
+    const rid = String(initialReplayRequestId || '').trim()
+    if (!rid) return
+    setReplayRequestId(rid)
+    void loadReplay(rid)
+  }, [initialReplayRequestId, loadReplay])
+
+  const runtimeState = stats?.runtime_state || {}
+  const counters = runtimeState?.counters || {}
+  const reasonCodes = Array.isArray(stats?.reason_codes) ? stats.reason_codes : []
+  const recent = Array.isArray(stats?.recent) ? stats.recent : []
+  const runtimeStatus = String(runtimeState?.status || 'unknown').toLowerCase()
+  const statusClass = runtimeStatus === 'live'
+    ? 'border-green-200 bg-green-50 text-green-700'
+    : runtimeStatus === 'degraded'
+      ? 'border-orange-200 bg-orange-50 text-orange-700'
+      : 'border-gray-200 bg-gray-50 text-gray-600'
+
+  return (
+    <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <div className="text-sm font-semibold text-gray-700">Immune Gate Ops</div>
+          <div className="text-xs text-gray-500">Runtime state, event stats, and top reasons.</div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            className="rounded border border-gray-300 px-2 py-1 text-xs"
+            value={windowMinutes}
+            onChange={(event) => setWindowMinutes(Number(event.target.value))}
+          >
+            <option value={60}>60m</option>
+            <option value={360}>6h</option>
+            <option value={1440}>24h</option>
+            <option value={10080}>7d</option>
+          </select>
+          <button
+            onClick={load}
+            disabled={loading}
+            className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
+          >
+            {loading ? 'Loading...' : 'Refresh'}
+          </button>
+          <input
+            value={replayRequestId}
+            onChange={(event) => setReplayRequestId(event.target.value)}
+            placeholder="request_id"
+            className="w-44 rounded border border-gray-300 px-2 py-1 text-xs"
+          />
+          <button
+            onClick={() => loadReplay(replayRequestId)}
+            disabled={replayLoading || !String(replayRequestId || '').trim()}
+            className="rounded border border-violet-300 px-3 py-1.5 text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-40"
+          >
+            {replayLoading ? 'Replaying...' : 'Replay'}
+          </button>
+          <a
+            href="#/prompt-config?keyword=immune_agent.runtime_rules&scope=immune_agent"
+            className="rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100"
+          >
+            Edit Rules
+          </a>
+        </div>
+      </div>
+
+      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {replayError ? <NoticeBanner variant="error">{replayError}</NoticeBanner> : null}
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClass}`}>
+            {runtimeStatus.toUpperCase() || 'UNKNOWN'}
+          </div>
+          <div className="mt-1 text-xs text-gray-400">runtime</div>
+        </div>
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className="text-lg font-bold text-gray-700">{stats?.total ?? 0}</div>
+          <div className="text-xs text-gray-400">events</div>
+        </div>
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className="text-lg font-bold text-green-600">{stats?.allow ?? 0}</div>
+          <div className="text-xs text-gray-400">allow</div>
+        </div>
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className="text-lg font-bold text-amber-600">{stats?.report ?? 0}</div>
+          <div className="text-xs text-gray-400">report</div>
+        </div>
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className="text-lg font-bold text-red-500">{stats?.block ?? 0}</div>
+          <div className="text-xs text-gray-400">block</div>
+        </div>
+        <div className="rounded bg-gray-50 p-2 text-center">
+          <div className="text-lg font-bold text-red-500">{stats?.block_rate ?? 0}%</div>
+          <div className="text-xs text-gray-400">block rate</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="rounded border border-gray-200 bg-gray-50 p-3 text-xs space-y-1.5">
+          <div className="font-semibold text-gray-700">Runtime Config</div>
+          <div>enabled: {String(runtimeState?.enabled ?? '-')}</div>
+          <div>blocking_enabled: {String(runtimeState?.blocking_enabled ?? '-')}</div>
+          <div>warn/block threshold: {runtimeState?.warn_threshold ?? '-'} / {runtimeState?.block_threshold ?? '-'}</div>
+          <div>rules: {runtimeState?.template_rule_count ?? 0} template / {runtimeState?.total_rule_count ?? 0} total</div>
+          <div>counter(total/allow/report/block): {counters.total ?? 0} / {counters.allow ?? 0} / {counters.report ?? 0} / {counters.block ?? 0}</div>
+          <div>last decision: {runtimeState?.last_decision || '-'}</div>
+          <div>last risk: {runtimeState?.last_risk_level || '-'}</div>
+        </div>
+
+        <div className="rounded border border-gray-200 bg-gray-50 p-3">
+          <div className="mb-2 text-xs font-semibold text-gray-700">Top Reason Codes</div>
+          {reasonCodes.length > 0 ? (
+            <div className="space-y-1.5">
+              {reasonCodes.slice(0, 6).map((item) => (
+                <div key={item.reason_code} className="flex items-center justify-between text-xs">
+                  <span className="font-mono text-orange-600">{item.reason_code}</span>
+                  <span className="text-gray-500">{item.count} ({item.pct}%)</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyStateCard title="No reason data yet" hint="Wait for immune events to accumulate." className="p-4" />
+          )}
+        </div>
+      </div>
+
+      <div className="rounded border border-gray-200 bg-white p-3">
+        <div className="mb-2 text-xs font-semibold text-gray-700">Recent Events</div>
+        {recent.length > 0 ? (
+          <div className="space-y-2 max-h-52 overflow-y-auto">
+            {recent.map((item, index) => (
+              <div key={`${item.request_id}-${item.ts_ms}-${index}`} className="rounded border border-gray-100 bg-gray-50 px-2.5 py-2 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-mono text-blue-600">{item.request_id || '-'}</div>
+                  <div className="text-gray-500">{item.decision} / {item.risk_level || 'none'}</div>
+                </div>
+                <div className="mt-1 text-gray-500">
+                  {item.event_type} · score={item.score ?? '-'} · {item.reason_codes?.join(', ') || '-'}
+                </div>
+                <div className="mt-2">
+                  <button
+                    onClick={() => loadReplay(item.request_id)}
+                    className="rounded border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700 hover:bg-violet-100"
+                  >
+                    Replay {item.request_id}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyStateCard title="No immune events" hint="No immune gate events in selected window." className="p-4" />
+        )}
+      </div>
+
+      {replayLoading || replayPayload ? (
+        <div className="rounded border border-violet-200 bg-violet-50/30 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-violet-800">Immune Replay</div>
+            {replayPayload?.request_id ? (
+              <a
+                href={`#/trace/${encodeURIComponent(replayPayload.request_id)}`}
+                className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100"
+              >
+                Open Trace
+              </a>
+            ) : null}
+          </div>
+          {replayLoading && !replayPayload ? (
+            <div className="text-xs text-gray-500">Loading replay timeline...</div>
+          ) : null}
+          {replayPayload ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded border border-violet-100 bg-white px-2 py-1">
+                  request_id: <span className="font-mono">{replayPayload.request_id}</span>
+                </div>
+                <div className="rounded border border-violet-100 bg-white px-2 py-1">
+                  session_id: <span className="font-mono">{replayPayload.session_id || '-'}</span>
+                </div>
+                <div className="rounded border border-violet-100 bg-white px-2 py-1">
+                  first→last: {replayPayload.summary?.first_decision || '-'} → {replayPayload.summary?.last_decision || '-'}
+                </div>
+                <div className="rounded border border-violet-100 bg-white px-2 py-1">
+                  events/max_score: {replayPayload.summary?.event_count ?? 0} / {replayPayload.summary?.max_score ?? '-'}
+                </div>
+              </div>
+              {replayPayload.input_preview ? (
+                <div className="rounded border border-violet-100 bg-white px-2 py-1.5 text-xs text-gray-700">
+                  input_preview: {replayPayload.input_preview}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-1.5">
+                {(replayPayload.summary?.reason_codes || []).slice(0, 8).map((reasonCode) => (
+                  <span key={`replay-reason-${reasonCode}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
+                    {reasonCode}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(replayPayload.summary?.matched_rules || []).slice(0, 6).map((rule) => (
+                  <span key={`replay-rule-${rule}`} className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
+                    {rule}
+                  </span>
+                ))}
+              </div>
+              <div className="max-h-56 space-y-1.5 overflow-y-auto rounded border border-violet-100 bg-white p-2">
+                {(replayPayload.decisions || []).map((item, index) => (
+                  <div key={`${item.ts_ms}-${item.event_type}-${index}`} className="rounded border border-gray-100 bg-gray-50 px-2 py-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-mono text-gray-700">{item.event_type}</div>
+                      <div className="text-gray-500">{item.decision} / {item.risk_level || 'none'}</div>
+                    </div>
+                    <div className="mt-1 text-gray-500">
+                      {item.stage || '-'} · score={item.score ?? '-'} · {item.reason_codes?.join(', ') || '-'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function SchedulerHistorySection() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -201,6 +507,16 @@ function SchedulerHistorySection() {
             value: data?.overall_error_rate != null ? `${data.overall_error_rate}%` : '—',
             color: data?.overall_error_rate > 20 ? 'text-red-500' : 'text-green-600',
           },
+          {
+            label: '门控拦截',
+            value: data?.gate_blocked_total ?? '—',
+            color: (data?.gate_blocked_total ?? 0) > 0 ? 'text-orange-500' : 'text-green-600',
+          },
+          {
+            label: '门控拦截率',
+            value: data?.gate_blocked_rate != null ? `${data.gate_blocked_rate}%` : '—',
+            color: (data?.gate_blocked_rate ?? 0) > 20 ? 'text-red-500' : 'text-gray-500',
+          },
         ].map(({ label, value, color }) => (
           <div key={label} className="rounded bg-gray-50 p-2 text-center">
             <div className={`text-lg font-bold ${color}`}>{value ?? '—'}</div>
@@ -208,6 +524,33 @@ function SchedulerHistorySection() {
           </div>
         ))}
       </div>
+
+      {(data?.blocked_reason_codes?.length > 0 || data?.gate_states?.length > 0) ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="rounded border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-2 text-xs font-semibold text-gray-600">门控原因 Top</div>
+            <div className="space-y-1.5">
+              {(data?.blocked_reason_codes || []).slice(0, 5).map((item) => (
+                <div key={item.reason_code} className="flex items-center justify-between text-xs">
+                  <span className="font-mono text-orange-600">{item.reason_code}</span>
+                  <span className="text-gray-500">{item.count} ({item.pct}%)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-2 text-xs font-semibold text-gray-600">Gate 分布</div>
+            <div className="space-y-1.5">
+              {(data?.gate_states || []).slice(0, 5).map((item) => (
+                <div key={item.gate_state} className="flex items-center justify-between text-xs">
+                  <span className="font-mono text-blue-600">{item.gate_state}</span>
+                  <span className="text-gray-500">{item.count} ({item.pct}%)</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {!loading && (data?.tasks ?? []).length > 0 ? (
         <>
@@ -220,6 +563,10 @@ function SchedulerHistorySection() {
                   <th className="px-3 py-2 text-right font-medium text-gray-500">执行次数</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-500">失败次数</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-500">错误率</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500">最近原因</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500">Gate</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500">Immune</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-500">Immune Reason</th>
                   <th className="px-3 py-2 text-left font-medium text-gray-500">最近错误</th>
                 </tr>
               </thead>
@@ -249,6 +596,18 @@ function SchedulerHistorySection() {
                         {task.error_rate != null ? `${task.error_rate}%` : '—'}
                       </span>
                     </td>
+                    <td className="max-w-[180px] truncate px-3 py-2 font-mono text-orange-600">{task.last_reason_code || '—'}</td>
+                    <td className="max-w-[120px] truncate px-3 py-2 font-mono text-blue-600">{task.last_gate_state || '—'}</td>
+                    <td className="max-w-[120px] truncate px-3 py-2 font-mono text-violet-600">
+                      {task.last_immune_decision
+                        ? `${task.last_immune_decision}${task.last_immune_risk_level ? `/${task.last_immune_risk_level}` : ''}`
+                        : '—'}
+                    </td>
+                    <td className="max-w-[220px] truncate px-3 py-2 font-mono text-violet-500">
+                      {Array.isArray(task.last_immune_reason_codes) && task.last_immune_reason_codes.length > 0
+                        ? task.last_immune_reason_codes.join(', ')
+                        : '—'}
+                    </td>
                     <td className="max-w-xs truncate px-3 py-2 text-gray-400">{task.last_error || '—'}</td>
                   </tr>
                 ))}
@@ -273,6 +632,7 @@ function LoadingTasksNotice() {
 }
 
 export default function Automation() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
@@ -287,6 +647,10 @@ export default function Automation() {
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState('')
   const [actionResult, setActionResult] = useState(null)
+  const reasonFilter = String(searchParams.get('reason_code') || '').trim().toUpperCase()
+  const gateFilter = String(searchParams.get('gate_state') || '').trim().toLowerCase()
+  const immuneReplayRequestId = String(searchParams.get('immune_replay_request_id') || '').trim()
+  const hasTaskFilters = Boolean(reasonFilter || gateFilter)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -333,9 +697,28 @@ export default function Automation() {
     }
   }
 
+  const clearTaskFilters = useCallback(() => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('reason_code')
+    next.delete('gate_state')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  const filteredTasks = useMemo(() => {
+    if (!hasTaskFilters) return tasks
+    return tasks.filter((item) => {
+      const taskReason = String(item?.health?.last_reason_code || '').trim().toUpperCase()
+      const taskGate = String(item?.health?.last_gate_state || '').trim().toLowerCase()
+      if (reasonFilter && taskReason !== reasonFilter) return false
+      if (gateFilter && taskGate !== gateFilter) return false
+      return true
+    })
+  }, [tasks, hasTaskFilters, reasonFilter, gateFilter])
+
   const enabledCount = useMemo(() => tasks.filter((item) => item.task?.enabled).length, [tasks])
   const runningCount = useMemo(() => tasks.filter((item) => item.health?.status === 'RUNNING').length, [tasks])
   const failedCount = useMemo(() => tasks.filter((item) => item.health?.status === 'FAILED').length, [tasks])
+  const filteredCount = filteredTasks.length
   const schedulerState = useMemo(() => {
     const rawStatus = String(health?.scheduler_status || '').toUpperCase()
     if (typeof health?.running === 'boolean') {
@@ -400,8 +783,30 @@ export default function Automation() {
       {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      <ImmuneGateOpsPanel
+        pollingEnabled={pollingEnabled}
+        pollingInterval={pollingInterval}
+        initialReplayRequestId={immuneReplayRequestId}
+      />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      {hasTaskFilters ? (
+        <NoticeBanner variant="info" title="已应用调度筛选">
+          <span className="font-mono">
+            {reasonFilter ? `reason=${reasonFilter}` : ''}
+            {reasonFilter && gateFilter ? ' · ' : ''}
+            {gateFilter ? `gate=${gateFilter}` : ''}
+          </span>
+          <span className="mx-1">，当前命中 {filteredCount} 个任务。</span>
+          <button
+            onClick={clearTaskFilters}
+            className="rounded border border-blue-200 bg-white px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
+          >
+            清除筛选
+          </button>
+        </NoticeBanner>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {[
           {
             label: '调度器状态',
@@ -409,6 +814,7 @@ export default function Automation() {
             color: schedulerState.running ? 'text-green-600' : schedulerState.label === '未知' ? 'text-gray-500' : 'text-red-500',
           },
           { label: '任务总数', value: tasks.length, color: 'text-gray-800' },
+          { label: '当前展示', value: filteredCount, color: hasTaskFilters ? 'text-violet-600' : 'text-gray-500' },
           { label: '已启用', value: enabledCount, color: 'text-blue-600' },
           {
             label: '运行中任务',
@@ -445,9 +851,11 @@ export default function Automation() {
         <LoadingTasksNotice />
       ) : tasks.length === 0 ? (
         <EmptyStateCard title="暂无注册任务" hint="请确认调度任务已注册。" />
+      ) : filteredTasks.length === 0 ? (
+        <EmptyStateCard title="筛选条件无匹配任务" hint="可清除 reason/gate 筛选后重试。" />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {tasks.map((item) => (
+          {filteredTasks.map((item) => (
             <TaskCard
               key={item.task?.task_id}
               item={item}

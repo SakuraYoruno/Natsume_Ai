@@ -25,6 +25,7 @@ import { getTraceNodeDisplayName } from './traceNodeText.js'
 const NODE_TYPE_CONFIG = {
   intent:    { icon: MessageSquare, color: '#2970FF', bg: '#EEF4FF', label: '意图' },
   governor:  { icon: Shield,        color: '#7C3AED', bg: '#F5F3FF', label: '守护' },
+  immune:    { icon: Shield,        color: '#EA580C', bg: '#FFF7ED', label: '免疫' },
   skill:     { icon: Wrench,        color: '#0891B2', bg: '#ECFEFF', label: '技能' },
   asr:       { icon: Mic,           color: '#059669', bg: '#ECFDF5', label: '语音' },
   tts:       { icon: Volume2,       color: '#D97706', bg: '#FFFBEB', label: '合成' },

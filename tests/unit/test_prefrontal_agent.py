@@ -232,6 +232,71 @@ def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
     assert milestone == {"applied": True, "reason": "milestone-ok"}
 
 
+def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
+    class _PatternResult:
+        def as_dict(self):
+            return {"relationship_signal_density": 0.8}
+
+    class _GrowthResult:
+        applied = True
+
+        def as_dict(self):
+            return {"applied": True, "reason": "weekly"}
+
+    class _Analyzer:
+        def __init__(self, llm_fn=None):  # noqa: ANN001
+            assert llm_fn is None
+
+        def analyze(self, **kwargs):  # noqa: ANN003
+            assert kwargs["user_id"] == "user-eg"
+            assert kwargs["lookback_days"] == 7
+            return _PatternResult()
+
+    class _Engine:
+        def get_traits(self, user_id: str):
+            assert user_id == "user-eg"
+            return {"warmth": 0.5}
+
+    class _EmergentEngine:
+        def apply(self, **kwargs):  # noqa: ANN003
+            assert kwargs["user_id"] == "user-eg"
+            return _GrowthResult()
+
+        def get_growth_log(self, user_id: str):
+            assert user_id == "user-eg"
+            return [SimpleNamespace(as_dict=lambda: {"cycle": 1})]
+
+        def get_growth_summary(self, user_id: str):
+            assert user_id == "user-eg"
+            return {"weekly_cycles": 1}
+
+    monkeypatch.setattr(
+        "host_brain.persona.persona_engine.PersonaEngine.get_instance",
+        classmethod(lambda cls: _Engine()),
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.interaction_pattern_analyzer.InteractionPatternAnalyzer",
+        _Analyzer,
+    )
+
+    agent = PrefrontalAgent()
+    agent._emergent_growth_engine = _EmergentEngine()
+
+    weekly = agent.run_emergent_growth_weekly(
+        user_id="user-eg",
+        lookback_days=7,
+        episodic_store=object(),
+        llm_fn=None,
+    )
+    status = agent.resolve_emergent_growth_status(user_id="user-eg", recent_limit=5)
+
+    assert weekly["status"] == "OK"
+    assert weekly["pattern_result"]["relationship_signal_density"] == 0.8
+    assert weekly["growth_result"]["applied"] is True
+    assert status["growth_summary"]["weekly_cycles"] == 1
+    assert status["recent_growth_log"][0]["cycle"] == 1
+
+
 def test_prefrontal_resolve_persona_change_and_growth_payloads(monkeypatch) -> None:
     class _Engine:
         def get_change_log(self, user_id: str, limit: int = 5):

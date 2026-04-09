@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from edge_client.actuators.speech import (
+    EVENT_TTS_PLAYBACK_FINISHED,
     EVENT_TTS_PLAYBACK_STARTED,
     EVENT_TTS_QUEUED,
     S_VOICE_TTS_QUEUE,
@@ -138,6 +139,15 @@ class _AliveThread:
         return True
 
 
+class _StubTribeBridge:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    def publish_event(self, **kwargs):  # noqa: ANN003
+        self.events.append(dict(kwargs))
+        return {"ok": True}
+
+
 class TestEdgeVoicePipelineHelpers(unittest.TestCase):
     def setUp(self) -> None:
         self.rpc = VoiceRpcContract(asr_min_interval_ms=0)
@@ -151,12 +161,18 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
             max_retry=1,
         )
 
-    def _build_pipeline(self, *, vts_driver: _MockVtsDriver | None = None) -> EdgeVoicePipeline:
+    def _build_pipeline(
+        self,
+        *,
+        vts_driver: _MockVtsDriver | None = None,
+        tribe_bridge: _StubTribeBridge | None = None,
+    ) -> EdgeVoicePipeline:
         return EdgeVoicePipeline(
             voice_rpc=self.rpc,
             speech_queue=self.queue,
             event_reporter=self.reporter,
             vts_driver=vts_driver,
+            tribe_bridge=tribe_bridge,
         )
 
     def test_on_asr_rpc_result_flushes_and_report_helpers_guard_missing_session(self) -> None:
@@ -566,6 +582,79 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
             )
         infer_mock.assert_called_once_with(text="慢慢说", confidence=0.8, final=True)
         self.assertEqual("CALM", inferred["emotion_tag"])
+
+    def test_voice_queue_reports_publish_tribe_voice_pipeline_events(self) -> None:
+        bridge = _StubTribeBridge()
+        pipeline = self._build_pipeline(tribe_bridge=bridge)
+
+        pipeline._report_voice_queue_result(
+            request_id="req-voice-start",
+            result=SpeechQueueResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage=S_VOICE_TTS_QUEUE,
+                detail="playback started",
+                event={
+                    "event_type": EVENT_TTS_PLAYBACK_STARTED,
+                    "request_id": "req-voice-start",
+                    "session_id": "sess-voice",
+                    "ts_ms": 1000,
+                },
+            ),
+        )
+
+        pipeline._report_voice_queue_result(
+            request_id="req-voice-end",
+            result=SpeechQueueResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=None,
+                stage=S_VOICE_TTS_QUEUE,
+                detail="playback finished",
+                event={
+                    "event_type": EVENT_TTS_PLAYBACK_FINISHED,
+                    "request_id": "req-voice-end",
+                    "session_id": "sess-voice",
+                    "ts_ms": 1001,
+                },
+            ),
+        )
+
+        event_types = [str(item.get("event_type")) for item in bridge.events]
+        self.assertIn("voice_pipeline_started", event_types)
+        self.assertIn("voice_pipeline_ended", event_types)
+
+    def test_asr_report_publishes_emotion_and_body_sense_events(self) -> None:
+        bridge = _StubTribeBridge()
+        pipeline = self._build_pipeline(tribe_bridge=bridge)
+        rpc_result = VoiceRpcResult(
+            success=True,
+            status=STATUS_ACCEPTED,
+            reason_code=None,
+            stage="S_VOICE_ASR_INGRESS",
+            detail="ok",
+            event={
+                "event_type": EVENT_ASR_CHUNK,
+                "request_id": "req-asr-tribe",
+                "session_id": "sess-asr-tribe",
+                "ts_ms": 2000,
+                "seq": 2,
+                "text": "我有点开心",
+                "confidence": 0.9,
+                "final": True,
+            },
+        )
+
+        report = pipeline._report_asr_rpc_result(
+            request_id="req-asr-tribe",
+            rpc_result=rpc_result,
+        )
+
+        self.assertIsNotNone(report)
+        event_types = [str(item.get("event_type")) for item in bridge.events]
+        self.assertIn("body_sense_updated", event_types)
+        self.assertIn("emotion_inference_updated", event_types)
 
 
 if __name__ == "__main__":

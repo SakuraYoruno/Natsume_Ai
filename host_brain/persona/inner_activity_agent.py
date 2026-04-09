@@ -372,9 +372,9 @@ def _build_inner_activity_context(
 
 def _collect_silence_state(*, topic_phrase: str) -> dict[str, Any]:
     try:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        return dict(get_silence_engine().get_silence_state(current_topic=str(topic_phrase or "")).as_dict())
+        return dict(get_limbic_agent().resolve_silence_state(current_topic=str(topic_phrase or "")))
     except Exception as exc:
         _logger.debug("inner_activity silence_state degraded: %s", exc)
         return {}
@@ -382,9 +382,9 @@ def _collect_silence_state(*, topic_phrase: str) -> dict[str, Any]:
 
 def _collect_body_sense() -> dict[str, Any]:
     try:
-        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        return dict(get_body_sense_model().get_state().as_dict())
+        return dict(get_limbic_agent().resolve_body_sense_state())
     except Exception as exc:
         _logger.debug("inner_activity body_sense degraded: %s", exc)
         return {}
@@ -392,15 +392,13 @@ def _collect_body_sense() -> dict[str, Any]:
 
 def _collect_bond_context(*, persona_user_id: str) -> tuple[dict[str, Any], Any | None]:
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-        engine = get_bond_stage_engine()
-        if engine is None:
-            return {}, None
-        state = engine.get_state(str(persona_user_id or "user_1").strip() or "user_1")
-        if state is None:
-            return {}, None
-        summary_raw = state.to_summary() if hasattr(state, "to_summary") else {}
+        snapshot = get_social_brain_agent().resolve_bond_snapshot(
+            person_id=str(persona_user_id or "user_1").strip() or "user_1",
+        )
+        state = snapshot.get("bond_state_obj")
+        summary_raw = snapshot.get("bond_summary")
         if isinstance(summary_raw, Mapping):
             return dict(summary_raw), state
         return {}, state
@@ -411,16 +409,12 @@ def _collect_bond_context(*, persona_user_id: str) -> tuple[dict[str, Any], Any 
 
 def _collect_emotion_timeline() -> tuple[dict[str, Any], dict[str, Any], str]:
     try:
-        from host_brain.app.dependencies import get_emotion_timeline  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        timeline = get_emotion_timeline()
-        if timeline is None:
-            return {}, {}, "NEUTRAL"
-        summary = timeline.rebuild_summary() if hasattr(timeline, "rebuild_summary") else {}
-        diary = timeline.build_daily_diary() if hasattr(timeline, "build_daily_diary") else {}
-        summary_dict = dict(summary) if isinstance(summary, Mapping) else {}
-        diary_dict = dict(diary) if isinstance(diary, Mapping) else {}
-        emotion = str(summary_dict.get("dominant_emotion") or diary_dict.get("dominant_emotion") or "NEUTRAL").upper()
+        snapshot = get_limbic_agent().resolve_emotion_timeline_snapshot()
+        summary_dict = dict(snapshot.get("summary") or {})
+        diary_dict = dict(snapshot.get("diary") or {})
+        emotion = str(snapshot.get("dominant_emotion") or "NEUTRAL").strip().upper() or "NEUTRAL"
         return summary_dict, diary_dict, emotion
     except Exception as exc:
         _logger.debug("inner_activity emotion_timeline degraded: %s", exc)

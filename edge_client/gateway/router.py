@@ -9,11 +9,11 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 from edge_client.channels.input_reporter import EdgeInputReporter, InputReportResult
 from edge_client.gateway.models import UnifiedMessage
+from edge_client.tribe.channel_agent import ChannelAgent
 
 logger = logging.getLogger("Natsume.edge.gateway.router")
 
@@ -28,13 +28,19 @@ class GatewayRouter:
         reporter: EdgeInputReporter 实例（由外部注入，避免重复创建连接）
     """
 
-    def __init__(self, reporter: EdgeInputReporter) -> None:
+    def __init__(self, reporter: EdgeInputReporter, tribe_bridge: Any | None = None) -> None:
         self._reporter = reporter
+        self._tribe_bridge = tribe_bridge
+        self._channel_agent = ChannelAgent(bridge=tribe_bridge)
         self._stats: dict[str, int] = {
             "routed": 0,
             "failed": 0,
             "cached": 0,
         }
+
+    def set_tribe_bridge(self, bridge: Any | None) -> None:
+        self._tribe_bridge = bridge
+        self._channel_agent.set_bridge(bridge)
 
     def route(self, msg: UnifiedMessage) -> InputReportResult:
         """将消息路由到 Host Brain。
@@ -62,6 +68,25 @@ class GatewayRouter:
             msg.platform.value, msg.msg_id,
             "ok" if result.success else ("cached" if result.cached else "failed"),
         )
+        self._channel_agent.on_message_received(
+            platform=msg.platform.value,
+            conversation_id=msg.conversation_id,
+            msg_id=msg.msg_id,
+            msg_type=msg.msg_type.value,
+            is_group=bool(msg.is_group),
+            ts_ms=int(msg.ts_ms),
+            routed_success=bool(result.success),
+            cached=bool(result.cached),
+        )
+        if (not result.success) or bool(result.cached):
+            self._channel_agent.on_gateway_degraded(
+                platform=msg.platform.value,
+                conversation_id=msg.conversation_id,
+                msg_id=msg.msg_id,
+                reason_code=result.reason_code,
+                detail=result.detail,
+                cached=bool(result.cached),
+            )
         return result
 
     def stats(self) -> dict[str, Any]:

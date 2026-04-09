@@ -209,17 +209,18 @@ class SubAgentDispatcher:
             latency_ms = int(time.time() * 1000) - started_ms
 
             # 从 handler 返回的 state 中提取结果
-            artifacts = result.get("agent_artifacts") or {}
+            result_payload = dict(result or {}) if isinstance(result, Mapping) else {}
+            artifacts = result_payload.get("agent_artifacts") or {}
             agent_artifact = artifacts.get(req.agent_id) or {}
             summary = str(agent_artifact.get("summary") or "").strip()
 
             # 也从 react_scratchpad 提取 final_answer
-            scratchpad = result.get("react_scratchpad") or {}
+            scratchpad = result_payload.get("react_scratchpad") or {}
             final_answer = str(scratchpad.get("final_answer") or summary or "").strip()
 
             if not final_answer:
                 # 兜底：从 narrative 提取
-                narrative_raw = result.get("narrative") or result.get("output") or {}
+                narrative_raw = result_payload.get("narrative") or result_payload.get("output") or {}
                 if isinstance(narrative_raw, dict):
                     final_answer = str(narrative_raw.get("text") or "").strip()
                 elif isinstance(narrative_raw, str):
@@ -229,20 +230,46 @@ class SubAgentDispatcher:
             # 不能用 final_answer 是否非空来判断（修复失败时也会有 summary 文本），
             # 必须读取 repair_agent_trace.can_retry 才能知道修复是否真正成功、是否允许重试。
             if req.agent_id == AGENT_REPAIR:
-                repair_trace = result.get("repair_agent_trace") or {}
+                repair_trace = result_payload.get("repair_agent_trace") or {}
                 repair_success = bool(repair_trace.get("can_retry", repair_trace.get("success", bool(final_answer))))
             else:
                 repair_success = bool(final_answer)
+
+            subgraph_commit_summary = (
+                dict(result_payload.get("subgraph_commit_summary") or {})
+                if isinstance(result_payload.get("subgraph_commit_summary"), Mapping)
+                else {}
+            )
+            subgraph_trace_raw = result_payload.get("subgraph_trace")
+            subgraph_trace = (
+                [dict(entry) for entry in subgraph_trace_raw if isinstance(entry, Mapping)]
+                if isinstance(subgraph_trace_raw, list)
+                else []
+            )
+            if len(subgraph_trace) > 64:
+                subgraph_trace = subgraph_trace[-64:]
+            intent_agent_trace = (
+                dict(result_payload.get("intent_agent_trace") or {})
+                if isinstance(result_payload.get("intent_agent_trace"), Mapping)
+                else {}
+            )
+            audit_refs: dict[str, Any] = {
+                "agent_id": req.agent_id,
+                "confidence": agent_artifact.get("confidence"),
+                "risk_flags": agent_artifact.get("risk_flags"),
+            }
+            if subgraph_commit_summary:
+                audit_refs["subgraph_commit_summary"] = subgraph_commit_summary
+            if subgraph_trace:
+                audit_refs["subgraph_trace"] = subgraph_trace
+            if intent_agent_trace:
+                audit_refs["intent_agent_trace"] = intent_agent_trace
 
             resp = SubAgentResponse(
                 success=repair_success,
                 agent_id=req.agent_id,
                 result=final_answer,
-                audit_refs={
-                    "agent_id": req.agent_id,
-                    "confidence": agent_artifact.get("confidence"),
-                    "risk_flags": agent_artifact.get("risk_flags"),
-                },
+                audit_refs=audit_refs,
                 latency_ms=latency_ms,
             )
             self._log_dispatch(req, resp)

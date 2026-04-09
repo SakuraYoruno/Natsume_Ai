@@ -34,6 +34,30 @@ class _FakeThread:
         self.started = True
 
 
+class _FakeRouter:
+    def __init__(self, reporter) -> None:  # noqa: ANN001
+        self.reporter = reporter
+        self.bridge = None
+
+    def set_tribe_bridge(self, bridge) -> None:  # noqa: ANN001
+        self.bridge = bridge
+
+
+class _FakeBridge:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    def publish_event(self, **kwargs):  # noqa: ANN003
+        self.events.append(dict(kwargs))
+        return {"ok": True}
+
+
+class _FakeQQAdapter:
+    def __init__(self, api_base: str, self_id: str | None = None) -> None:
+        self.api_base = api_base
+        self.self_id = self_id
+
+
 def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> None:
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
     monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
@@ -77,3 +101,63 @@ def test_legacy_uia_backend_falls_back_to_wxautox4(monkeypatch, caplog) -> None:
 
     assert _wechat_bridge_backend() == "wxautox4"
     assert "no longer supported" in caplog.text
+
+
+def test_start_gateway_emits_platform_connected_and_disconnected(monkeypatch) -> None:
+    bridge = _FakeBridge()
+    monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
+    monkeypatch.setattr("edge_client.gateway.normalizer.MessageNormalizer", lambda: object())
+    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", _FakeRouter)
+    monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
+    monkeypatch.setattr("edge_client.gateway.adapters.qq_adapter.QQAdapter", _FakeQQAdapter)
+    monkeypatch.setattr("edge_client.tribe.registry.build_edge_tribe_bridge", lambda: bridge)
+    monkeypatch.setattr(
+        "edge_client.gateway.server.create_gateway_app",
+        lambda *, router, normalizer, adapters, outbound: object(),
+    )
+    monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
+
+    instance = start_gateway(
+        GatewayConfig(
+            host_url="http://127.0.0.1:18080",
+            gateway_port=19000,
+            enabled_platforms=("qq",),
+            qq_onebot_api_base="http://127.0.0.1:5700",
+        )
+    )
+
+    event_types = [str(item.get("event_type")) for item in bridge.events]
+    assert "platform_connected" in event_types
+
+    instance.stop()
+
+    event_types = [str(item.get("event_type")) for item in bridge.events]
+    assert "platform_disconnected" in event_types
+
+
+def test_start_gateway_emits_platform_disconnected_when_config_missing(monkeypatch) -> None:
+    bridge = _FakeBridge()
+    monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
+    monkeypatch.setattr("edge_client.gateway.normalizer.MessageNormalizer", lambda: object())
+    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", _FakeRouter)
+    monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
+    monkeypatch.setattr("edge_client.tribe.registry.build_edge_tribe_bridge", lambda: bridge)
+    monkeypatch.setattr(
+        "edge_client.gateway.server.create_gateway_app",
+        lambda *, router, normalizer, adapters, outbound: object(),
+    )
+    monkeypatch.setattr("edge_client.gateway.bootstrap.threading.Thread", _FakeThread)
+
+    instance = start_gateway(
+        GatewayConfig(
+            host_url="http://127.0.0.1:18080",
+            gateway_port=19000,
+            enabled_platforms=("qq",),
+            qq_onebot_api_base=None,
+        )
+    )
+
+    event_types = [str(item.get("event_type")) for item in bridge.events]
+    assert "platform_disconnected" in event_types
+    assert "platform_connected" not in event_types
+    instance.stop()

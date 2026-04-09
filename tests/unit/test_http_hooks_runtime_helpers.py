@@ -152,6 +152,26 @@ def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypat
         _FakeTimeline(),
     )
     monkeypatch.setattr(
+        "host_brain.tribe.immune_agent.get_immune_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "enabled": True,
+                "blocking_enabled": False,
+                "warn_threshold": 0.55,
+                "block_threshold": 0.85,
+                "ruleset_version": "immune_v1",
+                "counters": {"total": 12, "allow": 10, "report": 2, "block": 0},
+                "last_inspection": {"decision": "ALLOW"},
+            },
+            inspect_text=lambda **_kwargs: {
+                "decision": "ALLOW",
+                "risk_level": "none",
+                "score": 0.0,
+                "reason_codes": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
         "host_brain.bond.user_identity.get_canonical_bond_user_id",
         lambda: "persona-user-001",
     )
@@ -160,39 +180,47 @@ def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypat
         lambda **_kwargs: {"reach_out_drive": 0.62, "dominant_motive": "reach_out"},
     )
     monkeypatch.setattr(
-        "host_brain.persona.inner_world.get_inner_world",
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
         lambda: SimpleNamespace(
-            get_state=lambda _user_id: {
+            compute_runtime_motive_state=lambda **_kwargs: {
+                "reach_out_drive": 0.62,
+                "dominant_motive": "reach_out",
+            },
+            resolve_inner_world_state=lambda person_id=None: {
                 "last_interaction_ts_ms": 0,
                 "total_offline_hours": 2.5,
                 "loneliness": 0.35,
                 "anticipation": 0.2,
                 "anticipation_topics": ["上次没说完的话题"],
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.emotional_silence.get_silence_engine",
-        lambda: SimpleNamespace(
-            get_silence_state=lambda current_topic="": _AsDictWrapper(
-                {
-                    "response_willingness": 0.42,
-                    "willingness_level": "RELUCTANT",
-                    "resistant_topic": current_topic,
-                }
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.body_sense.get_body_sense_model",
-        lambda: SimpleNamespace(
-            get_state=lambda: _AsDictWrapper(
-                {
-                    "fatigue": 0.25,
-                    "drowsiness": 0.1,
-                    "loneliness": 0.35,
-                }
-            )
+                "user_id": person_id,
+            },
+            resolve_offline_state=lambda person_id=None, now_ms=None: {
+                "offline_hours": 2.5,
+                "offline_duration_ms": int(2.5 * 3600 * 1000),
+                "absence_band": "recent",
+                "loneliness_level": 0.35,
+                "anticipation_level": 0.2,
+                "anticipation_topics": ["上次没说完的话题"],
+            },
+            resolve_offline_reconnect_profile=lambda offline_state=None: {
+                "absence_band": "6h_plus",
+                "reconnect_style": "soft_resume",
+            },
+            resolve_silence_state=lambda current_topic="": {
+                "response_willingness": 0.42,
+                "willingness_level": "RELUCTANT",
+                "resistant_topic": current_topic,
+            },
+            resolve_body_sense_state=lambda: {
+                "fatigue": 0.25,
+                "drowsiness": 0.1,
+                "loneliness": 0.35,
+            },
+            decide_response_policy=lambda **_kwargs: {
+                "allow_proactive_after_reply": False,
+                "should_be_withdrawn": True,
+                "policy_reason_tags": ["willingness:LOW"],
+            },
         ),
     )
     monkeypatch.setattr(
@@ -395,52 +423,54 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
         lambda: _FakeBondEngine(),
     )
     monkeypatch.setattr(
-        "host_brain.persona.inner_world.get_inner_world",
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
         lambda: SimpleNamespace(
-            get_state=lambda _user_id: {
-                "user_id": "persona-user-001",
+            compute_motive_state=lambda **_kwargs: {
+                "reach_out_drive": 0.48,
+                "care_drive": 0.31,
+                "withdraw_drive": 0.12,
+                "continuity_drive": 0.57,
+                "self_protect_drive": 0.09,
+                "dominant_motive": "continuity",
+            },
+            resolve_inner_world_state=lambda person_id=None: {
+                "user_id": str(person_id or "persona-user-001"),
                 "last_interaction_ts_ms": 1700000000000,
                 "last_tick_ts_ms": 1700000009000,
                 "total_offline_hours": 12.0,
                 "loneliness": 0.42,
                 "anticipation": 0.35,
                 "anticipation_topics": ["那个项目"],
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
-        lambda _inner_state: {
-            "offline_hours": 12.0,
-            "loneliness_level": 0.42,
-            "anticipation_level": 0.35,
-            "anticipation_topics": ["那个项目"],
-            "should_express_waiting": True,
-        },
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.emotional_silence.get_silence_engine",
-        lambda: SimpleNamespace(
-            get_silence_state=lambda current_topic="": _AsDictWrapper(
-                {
-                    "response_willingness": 0.66,
-                    "willingness_level": "NORMAL",
-                    "resistant_topic": current_topic,
-                }
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.body_sense.get_body_sense_model",
-        lambda: SimpleNamespace(
-            get_state=lambda: _AsDictWrapper(
-                {
-                    "fatigue": 0.18,
-                    "fatigue_level": "FRESH",
-                    "drowsiness": 0.12,
-                    "drowsiness_level": "AWAKE",
-                }
-            )
+            },
+            resolve_offline_state=lambda person_id=None, now_ms=None: {
+                "offline_hours": 12.0,
+                "loneliness_level": 0.42,
+                "anticipation_level": 0.35,
+                "anticipation_topics": ["那个项目"],
+                "should_express_waiting": True,
+            },
+            resolve_offline_reconnect_profile=lambda offline_state=None: {
+                "absence_band": "6h_plus",
+                "reconnect_style": "soft_resume",
+            },
+            resolve_silence_state=lambda current_topic="": {
+                "response_willingness": 0.66,
+                "willingness_level": "NORMAL",
+                "resistant_topic": current_topic,
+            },
+            resolve_body_sense_state=lambda: {
+                "fatigue": 0.18,
+                "fatigue_level": "FRESH",
+                "drowsiness": 0.12,
+                "drowsiness_level": "AWAKE",
+            },
+            decide_response_policy=lambda **_kwargs: {
+                "max_chars": 180,
+                "allow_followup": True,
+                "allow_topic_shift": False,
+                "allow_proactive_after_reply": True,
+                "should_be_withdrawn": False,
+            },
         ),
     )
     monkeypatch.setattr(
@@ -538,6 +568,7 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["sys_mode"] == "focus"
     assert snapshot["hard_state"]["mood_state"] == "engaged"
     assert snapshot["activity_monitor"]["running"] is True
+    assert snapshot["immune_state"]["enabled"] is True
     assert snapshot["bond_state"]["current_stage"] == "FRIEND"
     assert snapshot["offline_state"]["offline_hours"] == 12.0
     assert snapshot["silence_state"]["resistant_topic"] == "那个项目"
@@ -562,8 +593,13 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["background_runtime"]["scheduler_status"] == "HEALTHY"
     assert snapshot["background_runtime"]["core_ticks_registered"] is True
     assert snapshot["background_runtime"]["core_tick_tasks"]["inner_world_tick"]["status"] == "OK"
+    assert snapshot["background_runtime"]["core_tick_tasks"]["inner_world_tick"]["last_reason_code"] is None
+    assert snapshot["background_runtime"]["proactive_task"]["task_id"] == "proactive_talk_periodic"
+    assert snapshot["background_runtime"]["proactive_task"]["status"] == "MISSING"
+    assert snapshot["background_runtime"]["gate_blocked_tasks"] == []
     assert snapshot["background_runtime"]["persona_user_alignment_ok"] is True
     assert snapshot["background_runtime"]["tick_health"] == "fresh"
     assert snapshot["background_runtime"]["is_advancing"] is True
+    assert snapshot["slot_status"]["immune_state"] == "live"
     assert snapshot["slot_status"]["response_policy"] == "live"
     assert snapshot["degraded"] is False

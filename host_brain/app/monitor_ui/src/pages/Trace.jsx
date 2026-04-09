@@ -39,6 +39,7 @@ import {
   fetchChainStats,
   fetchObsMetrics,
   fetchSessions,
+  fetchTribeEvents,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -66,6 +67,17 @@ const GROUPS = [
     border: '#CBD5E1',
     nodeIds: ['airlock_ingress', 'governor'],
     traceNodeIds: ['airlock_ingress', 'governor', 'host_input'],
+  },
+  {
+    id: 'immune',
+    label: '免疫门禁',
+    desc: 'Immune Gate · 风险扫描',
+    icon: Shield,
+    color: '#EA580C',
+    bg: '#FFF7ED',
+    border: '#FDBA74',
+    nodeIds: ['immune_gate'],
+    traceNodeIds: ['immune_gate'],
   },
   {
     id: 'retrieval',
@@ -143,6 +155,7 @@ const FULL_CHAIN_SCHEMA = {
     { node_id: 'input_reporter', node_type: 'system', display_name: '输入上报', layer: 'edge' },
     { node_id: 'airlock_ingress', node_type: 'governor', display_name: '入口净化', layer: 'host' },
     { node_id: 'governor', node_type: 'governor', display_name: '入口守护', layer: 'host' },
+    { node_id: 'immune_gate', node_type: 'immune', display_name: 'Immune Gate', layer: 'host' },
     { node_id: 'query_planner', node_type: 'retrieval', display_name: '查询规划器', layer: 'host' },
     { node_id: 'agentic_rag', node_type: 'retrieval', display_name: 'Agentic RAG', layer: 'host' },
     { node_id: 'recall_fusion', node_type: 'recall', display_name: '召回融合', layer: 'host' },
@@ -171,7 +184,8 @@ const FULL_CHAIN_SCHEMA = {
     { source: 'gateway_webhook', target: 'airlock_ingress' },
     { source: 'input_reporter', target: 'airlock_ingress' },
     { source: 'airlock_ingress', target: 'governor' },
-    { source: 'governor', target: 'query_planner' },
+    { source: 'governor', target: 'immune_gate' },
+    { source: 'immune_gate', target: 'query_planner' },
     { source: 'query_planner', target: 'agentic_rag' },
     { source: 'agentic_rag', target: 'recall_fusion' },
     { source: 'recall_fusion', target: 'emotion_context' },
@@ -214,6 +228,7 @@ function normalizeTraceGroupNodeId(nodeId = '', nodeType = '') {
   if (normalizedType === 'tts' || normalized.startsWith('voice_tts_')) return 'tts'
   if (normalizedType === 'vts' || normalized.startsWith('voice_vts_')) return 'vts_driver'
   if (normalizedType === 'asr' || normalized.startsWith('voice_asr_')) return 'asr'
+  if (normalizedType === 'immune' || normalized.startsWith('voice_immune_')) return 'immune_gate'
   if (normalized.startsWith('voice_edge_')) return 'input_reporter'
   if (normalized.startsWith('voice_')) return 'input_reporter'
   if (normalized.startsWith('episodic_store')) return 'episodic_store'
@@ -372,7 +387,7 @@ function getObservedTraceSchema(traceData) {
   }
 }
 
-const LIVE_TRACE_GROUP_ORDER = ['edge', 'entry', 'retrieval', 'persona', 'orchestration', 'agent', 'llm', 'postprocess']
+const LIVE_TRACE_GROUP_ORDER = ['edge', 'entry', 'immune', 'retrieval', 'persona', 'orchestration', 'agent', 'llm', 'postprocess']
 
 function normalizeBadgeStatus(status) {
   const value = String(status || '').toUpperCase()
@@ -387,6 +402,7 @@ function getLiveTraceStageLabel(groupId) {
   return {
     edge: '输入',
     entry: '入口',
+    immune: '免疫',
     retrieval: '检索',
     persona: '人格',
     orchestration: '编排',
@@ -401,6 +417,46 @@ function getLatestTraceNode(traceData) {
   if (nodes.length === 0) return null
   nodes.sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
   return nodes[nodes.length - 1]
+}
+
+function buildImmuneStageMeta(groupNodes = []) {
+  const orderedNodes = [...(Array.isArray(groupNodes) ? groupNodes : [])]
+    .sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
+
+  let decision = ''
+  let riskLevel = ''
+  const reasonTags = []
+  const seenReasonTags = new Set()
+
+  const pushReasonTag = (value) => {
+    const normalized = String(value || '').trim()
+    if (!normalized || seenReasonTags.has(normalized)) return
+    seenReasonTags.add(normalized)
+    reasonTags.push(normalized)
+  }
+
+  orderedNodes.forEach((node) => {
+    const payload = (node?.output_data && typeof node.output_data === 'object') ? node.output_data : {}
+    const nestedImmune = (payload?.immune_gate && typeof payload.immune_gate === 'object') ? payload.immune_gate : {}
+    const mergedPayload = { ...nestedImmune, ...payload }
+
+    const payloadDecision = String(mergedPayload.decision || '').trim().toUpperCase()
+    const payloadRisk = String(mergedPayload.risk_level || '').trim().toLowerCase()
+    if (payloadDecision) decision = payloadDecision
+    if (payloadRisk) riskLevel = payloadRisk
+
+    const reasonCode = String(node?.reason_code || mergedPayload.reason_code || '').trim()
+    if (reasonCode) pushReasonTag(reasonCode)
+
+    const reasonCodes = Array.isArray(mergedPayload.reason_codes) ? mergedPayload.reason_codes : []
+    reasonCodes.forEach((code) => pushReasonTag(code))
+  })
+
+  return {
+    decision: decision || null,
+    riskLevel: riskLevel || null,
+    reasonTags: reasonTags.slice(0, 3),
+  }
 }
 
 function isOptionalTraceNode(node) {
@@ -435,6 +491,7 @@ function getLiveTraceFlow(traceData) {
       const traceGroupState = getTraceGroupState(group, traceData)
       const hasError = traceGroupState.groupNodes.some((node) => ['FAIL', 'ERROR', 'DOWN'].includes(String(node.status || '').toUpperCase()))
       const isCurrent = latestGroupId ? latestGroupId === group.id : (latestNormalizedNodeId ? getTraceGroupNodeIds(group).includes(latestNormalizedNodeId) : false)
+      const immuneMeta = group.id === 'immune' ? buildImmuneStageMeta(traceGroupState.groupNodes) : null
       let status = 'idle'
       if (traceGroupState.activeCount > 0) {
         status = hasError ? 'error' : (isCurrent ? 'running' : 'done')
@@ -445,6 +502,9 @@ function getLiveTraceFlow(traceData) {
         count: traceGroupState.activeCount,
         total: Math.max(getTraceGroupNodeIds(group).length, 1),
         status,
+        immuneDecision: immuneMeta?.decision ?? null,
+        immuneRiskLevel: immuneMeta?.riskLevel ?? null,
+        immuneReasonTags: immuneMeta?.reasonTags ?? [],
       }
     })
 }
@@ -460,6 +520,36 @@ function getLiveTraceStageClasses(stage, group) {
     return ''
   }
   return 'border-gray-200 bg-gray-50 text-gray-400'
+}
+
+function renderImmuneStageTags(stage, keyPrefix) {
+  if (stage.groupId !== 'immune') return null
+  const decision = String(stage.immuneDecision || '').trim().toUpperCase()
+  const riskLevel = String(stage.immuneRiskLevel || '').trim().toLowerCase()
+  const reasonTags = Array.isArray(stage.immuneReasonTags) ? stage.immuneReasonTags : []
+  if (!decision && !riskLevel && reasonTags.length === 0) return null
+
+  return (
+    <>
+      {(decision || riskLevel) ? (
+        <span
+          key={`${keyPrefix}-immune-meta`}
+          className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-1 text-[11px] font-medium text-orange-700"
+        >
+          {decision || 'IMMUNE'}
+          {riskLevel ? `/${riskLevel}` : ''}
+        </span>
+      ) : null}
+      {reasonTags.slice(0, 2).map((code, index) => (
+        <span
+          key={`${keyPrefix}-immune-reason-${index}`}
+          className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700"
+        >
+          {code}
+        </span>
+      ))}
+    </>
+  )
 }
 
 function getLiveTraceOutputPreview(traceData) {
@@ -485,6 +575,7 @@ function getLiveTraceCurrentLabel(traceData) {
 const LIVE_TRACE_KEY_NODE_IDS = [
   'airlock_ingress',
   'governor',
+  'immune_gate',
   'query_planner',
   'agentic_rag',
   'recall_fusion',
@@ -791,14 +882,16 @@ const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSele
             ? { background: group.bg, color: group.color, borderColor: group.border }
             : undefined
           return (
-            <span
-              key={`${session.request_id}-${stage.groupId}`}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
-              style={style}
-            >
-              {stage.label}
-              {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
-            </span>
+            <div key={`${session.request_id}-${stage.groupId}`} className="inline-flex items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
+                style={style}
+              >
+                {stage.label}
+                {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
+              </span>
+              {renderImmuneStageTags(stage, `${session.request_id}-${stage.groupId}`)}
+            </div>
           )
         })}
       </div>
@@ -869,14 +962,16 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
               ? { background: group.bg, color: group.color, borderColor: group.border }
               : undefined
             return (
-              <span
-                key={`preview-${session.request_id}-${stage.groupId}`}
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
-                style={style}
-              >
-                {stage.label}
-                {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
-              </span>
+              <div key={`preview-${session.request_id}-${stage.groupId}`} className="inline-flex items-center gap-1.5">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
+                  style={style}
+                >
+                  {stage.label}
+                  {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
+                </span>
+                {renderImmuneStageTags(stage, `preview-${session.request_id}-${stage.groupId}`)}
+              </div>
             )
           })}
         </div>
@@ -975,14 +1070,16 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
               ? { background: group.bg, color: group.color, borderColor: group.border }
               : undefined
             return (
-              <span
-                key={`preview-stream-${session.request_id}-${stage.groupId}`}
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
-                style={style}
-              >
-                {stage.label}
-                {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
-              </span>
+              <div key={`preview-stream-${session.request_id}-${stage.groupId}`} className="inline-flex items-center gap-1.5">
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
+                  style={style}
+                >
+                  {stage.label}
+                  {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
+                </span>
+                {renderImmuneStageTags(stage, `preview-stream-${session.request_id}-${stage.groupId}`)}
+              </div>
             )
           })}
         </div>
@@ -1118,6 +1215,7 @@ function computeGanttTimeline(traceData) {
 
 const NODE_TYPE_COLOR = {
   intent: '#2970FF', governor: '#7A5AF8', memory: '#0BA5EC',
+  immune: '#EA580C',
   llm: '#F79009', tts: '#12B76A', vts: '#EE46BC',
   recall: '#0891B2', retrieval: '#0891B2', bond: '#D97706',
   asr: '#059669', system: '#475467', agent: '#7C3AED',
@@ -1228,6 +1326,9 @@ function GroupDagView({ groupId, traceData, onSelectNode }) {
   const Icon = group.icon
   const activeCount = traceGroupState ? traceGroupState.activeCount : 0
   const totalNodeCount = traceData ? getTraceGroupNodeIds(group).length : group.nodeIds.length
+  const immuneGroupMeta = group.id === 'immune'
+    ? buildImmuneStageMeta(traceGroupState?.groupNodes ?? [])
+    : null
 
   return (
     <div className="flex flex-col h-full flex-1">
@@ -1256,6 +1357,17 @@ function GroupDagView({ groupId, traceData, onSelectNode }) {
               style={{ background: group.bg, color: group.color }}>
               {activeCount} / {totalNodeCount} 节点激活
             </span>
+            {immuneGroupMeta && (immuneGroupMeta.decision || immuneGroupMeta.riskLevel) ? (
+              <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-1 font-medium text-orange-700">
+                {(immuneGroupMeta.decision || 'IMMUNE').toUpperCase()}
+                {immuneGroupMeta.riskLevel ? `/${String(immuneGroupMeta.riskLevel).toLowerCase()}` : ''}
+              </span>
+            ) : null}
+            {(immuneGroupMeta?.reasonTags || []).slice(0, 2).map((reasonCode) => (
+              <span key={`immune-group-meta-${reasonCode}`} className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-700">
+                {reasonCode}
+              </span>
+            ))}
           </div>
         )}
         {/* 视图切换 */}
@@ -1481,14 +1593,16 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
             ? { background: group.bg, color: group.color, borderColor: group.border }
             : undefined
           return (
-            <span
-              key={`overview-${traceData.request_id}-${stage.groupId}`}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
-              style={style}
-            >
-              {stage.label}
-              {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
-            </span>
+            <div key={`overview-${traceData.request_id}-${stage.groupId}`} className="inline-flex items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
+                style={style}
+              >
+                {stage.label}
+                {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
+              </span>
+              {renderImmuneStageTags(stage, `overview-${traceData.request_id}-${stage.groupId}`)}
+            </div>
           )
         })}
       </div>
@@ -1561,6 +1675,9 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const [liveTraceError, setLiveTraceError] = useState(null)
   const [liveFeedConnected, setLiveFeedConnected] = useState(false)
   const [liveFeedLastTs, setLiveFeedLastTs] = useState(null)
+  const [tribeEvents, setTribeEvents] = useState([])
+  const [tribeEventsLoading, setTribeEventsLoading] = useState(false)
+  const [tribeEventsError, setTribeEventsError] = useState(null)
   const inlineOverviewRef = useRef(null)
   const navigate = useNavigate()
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
@@ -1623,6 +1740,52 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
     const timer = setInterval(() => loadRecentRequests(recentKeyword), pollingInterval * 1000)
     return () => clearInterval(timer)
   }, [pollingEnabled, pollingInterval, loadRecentRequests, recentKeyword])
+
+  const loadTribeEvents = useCallback(async () => {
+    setTribeEventsLoading(true)
+    try {
+      const selectedSession =
+        liveTraceItems.find((item) => item?.session?.request_id === selectedRequestId)?.session
+        ?? recentRequests.find((item) => item?.request_id === selectedRequestId)
+        ?? null
+      const sessionId = String(
+        selectedSession?.session_id
+        ?? traceData?.summary?.session_id
+        ?? ''
+      ).trim()
+      const conversationId = String(
+        selectedSession?.conversation_id
+        ?? traceData?.summary?.conversation_id
+        ?? ''
+      ).trim()
+      const params = { limit: selectedRequestId ? 200 : 60 }
+      if (selectedRequestId) {
+        params.request_id = selectedRequestId
+      } else if (sessionId) {
+        params.session_id = sessionId
+      } else if (conversationId) {
+        params.conversation_id = conversationId
+      }
+      const data = await fetchTribeEvents(params)
+      setTribeEvents(Array.isArray(data?.items) ? data.items : [])
+      setTribeEventsError(null)
+    } catch (loadError) {
+      setTribeEvents([])
+      setTribeEventsError(loadError.message || 'Tribe 事件加载失败')
+    } finally {
+      setTribeEventsLoading(false)
+    }
+  }, [liveTraceItems, recentRequests, selectedRequestId, traceData])
+
+  useEffect(() => {
+    loadTribeEvents()
+  }, [loadTribeEvents])
+
+  useEffect(() => {
+    if (!pollingEnabled) return
+    const timer = setInterval(loadTribeEvents, Math.max(pollingInterval, 10) * 1000)
+    return () => clearInterval(timer)
+  }, [pollingEnabled, pollingInterval, loadTribeEvents])
 
   const liveTraceLimit = recentKeyword ? 12 : 6
 
@@ -1809,7 +1972,10 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
     const hasError = traceGroupState
       ? traceGroupState.groupNodes.some(n => ['FAIL', 'ERROR', 'DOWN'].includes((n.status ?? '').toUpperCase()))
       : false
-    return { ...g, activeCount, totalNodeCount, hasError }
+    const immuneMeta = g.id === 'immune'
+      ? buildImmuneStageMeta(traceGroupState?.groupNodes ?? [])
+      : null
+    return { ...g, activeCount, totalNodeCount, hasError, immuneMeta }
   })
 
   const openRequestTrace = (requestId) => {
@@ -1862,6 +2028,24 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const selectedLiveTraceTimelineEntries = selectedLiveTraceItem?.session?.request_id
     ? (liveTraceTimelineEntries[selectedLiveTraceItem.session.request_id] ?? [])
     : []
+  const selectedSessionId = String(
+    selectedSessionFallback?.session_id
+    ?? selectedTraceTitleSource?.summary?.session_id
+    ?? ''
+  ).trim()
+  const selectedConversationId = String(
+    selectedSessionFallback?.conversation_id
+    ?? selectedTraceTitleSource?.summary?.conversation_id
+    ?? ''
+  ).trim()
+  const linkedTribeEvents = selectedRequestId
+    ? tribeEvents.filter((event) => isTribeEventLinkedToSelection(event, {
+      requestId: selectedRequestId,
+      sessionId: selectedSessionId,
+      conversationId: selectedConversationId,
+    }))
+    : []
+  const linkedTribeEventList = linkedTribeEvents.slice(0, 20)
   const isHistorySearchMode = Boolean(recentKeyword.trim())
   const shouldAutoShowHistory = !isHistorySearchMode && (!liveFeedConnected || liveTraceItems.length === 0 || Boolean(liveTraceError))
   const showHistoryPanel = !isHistorySearchMode && (historyExpanded || shouldAutoShowHistory)
@@ -2051,6 +2235,93 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               打开详情
             </button>
           </div>
+        </div>
+      )}
+
+      {selectedRequestId && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 md:p-5">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-emerald-900">Tribe 事件联动</h2>
+              <p className="text-xs text-emerald-700/80 mt-1">
+                当前请求关联：{linkedTribeEvents.length} 条（request/session/conversation 维度匹配）
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                className="btn-secondary text-xs"
+                onClick={loadTribeEvents}
+                disabled={tribeEventsLoading}
+              >
+                <RefreshCw size={12} className={tribeEventsLoading ? 'animate-spin' : ''} />
+                刷新事件
+              </button>
+              <button
+                className="btn-secondary text-xs"
+                onClick={() => navigate('/insights/safety')}
+              >
+                打开 Insights
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center gap-3 text-xs text-emerald-800/90 flex-wrap">
+            <span>request_id: {selectedRequestId}</span>
+            {selectedSessionId ? <span>session_id: {selectedSessionId}</span> : null}
+            {selectedConversationId ? <span>conversation_id: {selectedConversationId}</span> : null}
+          </div>
+
+          {tribeEventsError && (
+            <NoticeBanner variant="error" title="Tribe 事件读取失败" className="mt-3">
+              {tribeEventsError}
+            </NoticeBanner>
+          )}
+
+          {!tribeEventsLoading && !tribeEventsError && linkedTribeEventList.length === 0 && (
+            <EmptyStateCard
+              title="当前请求暂无 Tribe 事件"
+              hint="若请求刚开始执行，可稍后刷新；也可到 Insights 查看全局事件窗口。"
+              className="mt-3 p-4 bg-white"
+            />
+          )}
+
+          {linkedTribeEventList.length > 0 && (
+            <div className="mt-3 rounded-xl border border-emerald-100 bg-white overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-emerald-50 border-b border-emerald-100">
+                  <tr>
+                    {['时间', '事件', 'source', 'target', 'payload'].map((head) => (
+                      <th key={head} className="px-4 py-2 text-left text-xs font-medium text-emerald-800">{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {linkedTribeEventList.map((event) => {
+                    const payloadPreview = JSON.stringify(event?.payload ?? {})
+                    return (
+                      <tr key={event.event_id} className="hover:bg-emerald-50/40">
+                        <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
+                          {formatRecentTraceTime(event.ts_ms)}
+                        </td>
+                        <td className="px-4 py-2 text-xs font-mono text-emerald-700">
+                          {event.event_type}
+                        </td>
+                        <td className="px-4 py-2 text-xs font-mono text-blue-600">
+                          {event.source_agent || '—'}
+                        </td>
+                        <td className="px-4 py-2 text-xs font-mono text-purple-600">
+                          {event.target_agent || '—'}
+                        </td>
+                        <td className="px-4 py-2 text-xs text-gray-500 max-w-md truncate" title={payloadPreview}>
+                          {payloadPreview}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -2307,6 +2578,21 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
                     </div>
                     <div className="font-semibold text-gray-900 text-sm mb-1">{g.label}</div>
                     <div className="text-xs text-gray-500 leading-relaxed line-clamp-2">{g.desc}</div>
+                    {g.id === 'immune' && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {g.immuneMeta?.decision || g.immuneMeta?.riskLevel ? (
+                          <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+                            {(g.immuneMeta?.decision || 'IMMUNE').toUpperCase()}
+                            {g.immuneMeta?.riskLevel ? `/${String(g.immuneMeta.riskLevel).toLowerCase()}` : ''}
+                          </span>
+                        ) : null}
+                        {(g.immuneMeta?.reasonTags || []).slice(0, 2).map((reasonCode) => (
+                          <span key={`${g.id}-${reasonCode}`} className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                            {reasonCode}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {traceData && (
                       <div className="mt-3 h-1 rounded-full bg-gray-100 overflow-hidden">
                         <div
@@ -2379,6 +2665,29 @@ function formatRecentTraceTime(tsMs) {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+function normalizeOptionalKeyValue(payload, keys) {
+  if (!payload || typeof payload !== 'object') return ''
+  for (const key of keys) {
+    const value = payload[key]
+    if (value == null) continue
+    const normalized = String(value).trim()
+    if (normalized) return normalized
+  }
+  return ''
+}
+
+function isTribeEventLinkedToSelection(event, { requestId, sessionId, conversationId }) {
+  const payload = event?.payload ?? {}
+  const payloadRequestId = normalizeOptionalKeyValue(payload, ['request_id', 'requestId'])
+  const payloadSessionId = normalizeOptionalKeyValue(payload, ['session_id', 'sessionId'])
+  const payloadConversationId = normalizeOptionalKeyValue(payload, ['conversation_id', 'conversationId'])
+
+  if (requestId && payloadRequestId === requestId) return true
+  if (sessionId && payloadSessionId === sessionId) return true
+  if (conversationId && payloadConversationId === conversationId) return true
+  return false
 }
 
 // ===== 主导出：Trace 路由容器 =====

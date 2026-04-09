@@ -60,6 +60,7 @@ def _make_scheduler(
     health: SchedulerHealthReporter,
     *,
     sys_mode: str = "normal",
+    emotion_state: dict[str, Any] | None = None,
     dispatcher_result: dict[str, Any] | None = None,
     dispatcher_raises: Exception | None = None,
     ledger: Any = None,
@@ -78,6 +79,7 @@ def _make_scheduler(
         health_reporter=health,
         intent_dispatcher=_dispatcher,
         get_sys_mode=lambda: sys_mode,
+        get_emotion_state=(lambda: emotion_state) if emotion_state is not None else None,
         ledger=ledger,
     )
     sched._dispatched = dispatched  # 暴露给测试断言
@@ -248,6 +250,38 @@ class TestSchedHealthSnapshot:
 
         snapshot = health.build_health_snapshot()
         assert snapshot["scheduler_status"] == "HEALTHY"
+
+    def test_health_snapshot_surfaces_endocrine_gate_metadata(self) -> None:
+        registry, health = _make_registry_and_health()
+        registry.register(_make_interval_task("proactive_talk_periodic", priority=TaskPriority.LOW))
+        sched = _make_scheduler(
+            registry,
+            health,
+            emotion_state={
+                "mood_state": "steady",
+                "emotion_tag": "NEUTRAL",
+                "endocrine_state": {
+                    "gate_state": "cautious",
+                    "cortisol_level": 0.71,
+                    "energy_reserve": 0.33,
+                },
+            },
+        )
+
+        result = sched.trigger_task_by_id("proactive_talk_periodic")
+        assert result["status"] == "REJECTED"
+        assert result["reason_code"] == "ENDOCRINE_PROACTIVE_BLOCKED"
+
+        snapshot = health.build_health_snapshot()
+        task_state = next(t for t in snapshot["tasks"] if t["task_id"] == "proactive_talk_periodic")
+        assert task_state["last_reason_code"] == "ENDOCRINE_PROACTIVE_BLOCKED"
+        assert task_state["last_gate_state"] == "cautious"
+        assert task_state["last_mood_state"] == "steady"
+        assert float(task_state["last_endocrine_cortisol"]) == 0.71
+        assert float(task_state["last_endocrine_energy"]) == 0.33
+        assert "last_immune_decision" in task_state
+        assert "last_immune_risk_level" in task_state
+        assert "last_immune_reason_codes" in task_state
 
 
 # ── T-SCHED-06 ──

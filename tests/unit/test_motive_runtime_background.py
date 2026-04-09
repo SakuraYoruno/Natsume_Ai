@@ -35,6 +35,7 @@ def test_build_offline_state_from_inner_state_uses_elapsed_hours() -> None:
     assert offline_state["continuity_score"] == pytest.approx(0.0, abs=1e-6)
     assert offline_state["spontaneous_event_count"] == 0
     assert offline_state["inner_stream"] == []
+    assert offline_state["last_spontaneous_source"] == ""
 
 
 def test_build_offline_state_from_inner_state_classifies_long_absence_bands() -> None:
@@ -76,6 +77,7 @@ def test_build_offline_state_from_inner_state_includes_continuity_tail() -> None
             "spontaneous_event_count": 11,
             "last_spontaneous_ts_ms": now_ms - 30_000,
             "last_spontaneous_note": "latest-note",
+            "last_spontaneous_source": "llm",
             "inner_stream": inner_stream,
         },
         now_ms=now_ms,
@@ -84,6 +86,7 @@ def test_build_offline_state_from_inner_state_includes_continuity_tail() -> None
     assert offline_state["continuity_score"] == pytest.approx(0.64, abs=1e-6)
     assert offline_state["spontaneous_event_count"] == 11
     assert offline_state["last_spontaneous_note"] == "latest-note"
+    assert offline_state["last_spontaneous_source"] == "llm"
     assert len(offline_state["inner_stream"]) == 8
     assert offline_state["inner_stream"][0]["note"] == "note-2"
     assert offline_state["inner_stream"][-1]["note"] == "note-9"

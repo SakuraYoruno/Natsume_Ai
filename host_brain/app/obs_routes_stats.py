@@ -2662,6 +2662,26 @@ class SchedulerTaskItem(BaseModel):
     error_rate: Optional[float]
     last_run_ts: Optional[float]
     last_error: Optional[str]
+    last_reason_code: Optional[str]
+    last_gate_state: Optional[str]
+    last_mood_state: Optional[str]
+    last_endocrine_cortisol: Optional[float]
+    last_endocrine_energy: Optional[float]
+    last_immune_decision: Optional[str]
+    last_immune_risk_level: Optional[str]
+    last_immune_reason_codes: List[str] = Field(default_factory=list)
+
+
+class SchedulerReasonItem(BaseModel):
+    reason_code: str
+    count: int
+    pct: float
+
+
+class SchedulerGateItem(BaseModel):
+    gate_state: str
+    count: int
+    pct: float
 
 class SchedulerHistoryResponse(BaseModel):
     window_minutes: int
@@ -2671,6 +2691,10 @@ class SchedulerHistoryResponse(BaseModel):
     failed_count: int
     disabled_count: int
     overall_error_rate: Optional[float]
+    gate_blocked_total: int
+    gate_blocked_rate: Optional[float]
+    blocked_reason_codes: List[SchedulerReasonItem]
+    gate_states: List[SchedulerGateItem]
     tasks: List[SchedulerTaskItem]
     run_trend: List[Dict[str, Any]]
     timestamp: int
@@ -2694,15 +2718,26 @@ async def get_scheduler_history(
         except Exception:
             continue
 
-    # 尝试从全局调度器单例获取实时快照
+    # 优先从 scheduler_routes 获取统一健康快照（包含 reason/gate 元数据）
     scheduler_tasks: list[dict] = []
     try:
-        from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
-        _sched = get_scheduler()
-        health = _sched.health()
-        scheduler_tasks = health.get("tasks") or []
+        from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe  # noqa: PLC0415
+
+        scheduler_snapshot = dict(get_scheduler_health_snapshot_safe() or {})
+        scheduler_tasks = list(scheduler_snapshot.get("tasks") or [])
     except Exception:
         pass
+
+    # 兼容旧版调度器快照来源
+    if not scheduler_tasks:
+        try:
+            from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
+
+            _sched = get_scheduler()
+            health = _sched.health()
+            scheduler_tasks = health.get("tasks") or []
+        except Exception:
+            pass
 
     # 若无实时数据，从日志中聚合
     if not scheduler_tasks:
@@ -2735,20 +2770,95 @@ async def get_scheduler_history(
     total_errors = sum(int(t.get("error_count") or 0) for t in scheduler_tasks)
     overall_error_rate = round(total_errors / total_runs * 100, 1) if total_runs > 0 else None
 
-    tasks = [
-        SchedulerTaskItem(
-            task_id=str(t.get("task_id") or ""),
-            name=t.get("name"),
-            status=str(t.get("status") or "UNKNOWN").upper(),
-            run_count=int(t.get("run_count") or 0),
-            error_count=int(t.get("error_count") or 0),
-            error_rate=round(
-                int(t.get("error_count") or 0) / int(t.get("run_count") or 1) * 100, 1
-            ) if int(t.get("run_count") or 0) > 0 else None,
-            last_run_ts=float(t["last_run_ts"]) if t.get("last_run_ts") else None,
-            last_error=str(t["last_error"])[:200] if t.get("last_error") else None,
+    tasks: list[SchedulerTaskItem] = []
+    for t in scheduler_tasks:
+        raw_immune_reason_codes = t.get("last_immune_reason_codes")
+        if isinstance(raw_immune_reason_codes, (list, tuple, set)):
+            immune_reason_codes = [
+                str(code).strip().upper()[:80]
+                for code in raw_immune_reason_codes
+                if str(code).strip()
+            ][:6]
+        elif raw_immune_reason_codes:
+            immune_reason_codes = [str(raw_immune_reason_codes).strip().upper()[:80]]
+        else:
+            immune_reason_codes = []
+
+        tasks.append(
+            SchedulerTaskItem(
+                task_id=str(t.get("task_id") or ""),
+                name=t.get("name"),
+                status=str(t.get("status") or "UNKNOWN").upper(),
+                run_count=int(t.get("run_count") or 0),
+                error_count=int(t.get("error_count") or 0),
+                error_rate=round(
+                    int(t.get("error_count") or 0) / int(t.get("run_count") or 1) * 100, 1
+                ) if int(t.get("run_count") or 0) > 0 else None,
+                last_run_ts=float(t["last_run_ts"]) if t.get("last_run_ts") else None,
+                last_error=str(t["last_error"])[:200] if t.get("last_error") else None,
+                last_reason_code=(
+                    str(t.get("last_reason_code") or "").strip()[:80] if t.get("last_reason_code") else None
+                ),
+                last_gate_state=(
+                    str(t.get("last_gate_state") or "").strip().lower()[:32] if t.get("last_gate_state") else None
+                ),
+                last_mood_state=(
+                    str(t.get("last_mood_state") or "").strip().lower()[:32] if t.get("last_mood_state") else None
+                ),
+                last_endocrine_cortisol=(
+                    float(t["last_endocrine_cortisol"]) if t.get("last_endocrine_cortisol") is not None else None
+                ),
+                last_endocrine_energy=(
+                    float(t["last_endocrine_energy"]) if t.get("last_endocrine_energy") is not None else None
+                ),
+                last_immune_decision=(
+                    str(t.get("last_immune_decision") or "").strip().upper()[:16]
+                    if t.get("last_immune_decision")
+                    else None
+                ),
+                last_immune_risk_level=(
+                    str(t.get("last_immune_risk_level") or "").strip().lower()[:16]
+                    if t.get("last_immune_risk_level")
+                    else None
+                ),
+                last_immune_reason_codes=immune_reason_codes,
+            )
         )
-        for t in scheduler_tasks
+
+    from collections import Counter
+
+    reason_counter: Counter[str] = Counter()
+    gate_counter: Counter[str] = Counter()
+    for task in tasks:
+        reason_code = str(task.last_reason_code or "").strip().upper()
+        gate_state = str(task.last_gate_state or "").strip().lower()
+        if reason_code:
+            reason_counter[reason_code] += 1
+        if gate_state:
+            gate_counter[gate_state] += 1
+
+    blocked_reason_total = sum(
+        cnt
+        for code, cnt in reason_counter.items()
+        if code.endswith("_BLOCKED") or code in {"SYSMODE_FORBIDDEN", "IMMUNE_PROACTIVE_SUPPRESSED"}
+    )
+    gate_blocked_rate = round(blocked_reason_total / total_tasks * 100, 1) if total_tasks > 0 else None
+    blocked_reason_codes = [
+        SchedulerReasonItem(
+            reason_code=code,
+            count=cnt,
+            pct=round(cnt / total_tasks * 100, 1) if total_tasks > 0 else 0.0,
+        )
+        for code, cnt in reason_counter.most_common(10)
+        if code.endswith("_BLOCKED") or code in {"SYSMODE_FORBIDDEN", "IMMUNE_PROACTIVE_SUPPRESSED"}
+    ]
+    gate_states = [
+        SchedulerGateItem(
+            gate_state=gate_state,
+            count=cnt,
+            pct=round(cnt / total_tasks * 100, 1) if total_tasks > 0 else 0.0,
+        )
+        for gate_state, cnt in gate_counter.most_common(10)
     ]
 
     # 执行趋势（从日志按小时分桶）
@@ -2779,6 +2889,10 @@ async def get_scheduler_history(
         failed_count=failed_count,
         disabled_count=disabled_count,
         overall_error_rate=overall_error_rate,
+        gate_blocked_total=blocked_reason_total,
+        gate_blocked_rate=gate_blocked_rate,
+        blocked_reason_codes=blocked_reason_codes,
+        gate_states=gate_states,
         tasks=tasks,
         run_trend=run_trend,
         timestamp=now,
@@ -3827,6 +3941,416 @@ async def get_semantic_recall_stats():
 
 # ---------------------------------------------------------------------------
 # GET /obs/retrieval/runtime — 当前检索 embedding/rerank 配置 + 最近实际生效模型/降级情况
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# GET /obs/immune-gate/stats
+# ---------------------------------------------------------------------------
+class ImmuneGateReasonItem(BaseModel):
+    reason_code: str
+    count: int
+    pct: float
+
+
+class ImmuneGateRiskItem(BaseModel):
+    risk_level: str
+    count: int
+    pct: float
+
+
+class ImmuneGateRecentItem(BaseModel):
+    request_id: str
+    session_id: Optional[str] = None
+    event_type: str
+    decision: str
+    risk_level: Optional[str] = None
+    score: Optional[float] = None
+    reason_codes: List[str] = Field(default_factory=list)
+    detail: Optional[str] = None
+    ts_ms: int
+
+
+class ImmuneGateReplayDecisionItem(BaseModel):
+    event_type: str
+    stage: Optional[str] = None
+    direction: Optional[str] = None
+    phase: Optional[str] = None
+    decision: str
+    risk_level: Optional[str] = None
+    score: Optional[float] = None
+    reason_codes: List[str] = Field(default_factory=list)
+    matched_rules: List[str] = Field(default_factory=list)
+    input_preview: Optional[str] = None
+    detail: Optional[str] = None
+    ts_ms: int
+
+
+class ImmuneGateReplaySummary(BaseModel):
+    event_count: int
+    first_decision: Optional[str] = None
+    last_decision: Optional[str] = None
+    max_score: Optional[float] = None
+    reason_codes: List[str] = Field(default_factory=list)
+    matched_rules: List[str] = Field(default_factory=list)
+
+
+class ImmuneGateReplayResponse(BaseModel):
+    request_id: str
+    session_id: Optional[str] = None
+    input_preview: Optional[str] = None
+    decisions: List[ImmuneGateReplayDecisionItem]
+    summary: ImmuneGateReplaySummary
+    timestamp: int
+
+
+class ImmuneGateRuntimeState(BaseModel):
+    status: str
+    enabled: Optional[bool] = None
+    blocking_enabled: Optional[bool] = None
+    warn_threshold: Optional[float] = None
+    block_threshold: Optional[float] = None
+    template_id: Optional[str] = None
+    template_rule_count: int = 0
+    total_rule_count: int = 0
+    counters: Dict[str, int] = Field(default_factory=dict)
+    last_decision: Optional[str] = None
+    last_risk_level: Optional[str] = None
+    last_score: Optional[float] = None
+    last_reason_codes: List[str] = Field(default_factory=list)
+    detail: Optional[str] = None
+
+
+class ImmuneGateStatsResponse(BaseModel):
+    window_minutes: int
+    total: int
+    allow: int
+    report: int
+    block: int
+    block_rate: float
+    reason_codes: List[ImmuneGateReasonItem]
+    risk_levels: List[ImmuneGateRiskItem]
+    recent: List[ImmuneGateRecentItem]
+    runtime_state: ImmuneGateRuntimeState
+    timestamp: int
+
+
+def _build_immune_gate_runtime_state() -> ImmuneGateRuntimeState:
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+        raw = dict(get_immune_agent().export_runtime_state() or {})
+        counters = dict(raw.get("counters") or {})
+        last = dict(raw.get("last_inspection") or {})
+        return ImmuneGateRuntimeState(
+            status="live",
+            enabled=bool(raw.get("enabled", True)),
+            blocking_enabled=bool(raw.get("blocking_enabled", False)),
+            warn_threshold=(float(raw.get("warn_threshold")) if raw.get("warn_threshold") is not None else None),
+            block_threshold=(float(raw.get("block_threshold")) if raw.get("block_threshold") is not None else None),
+            template_id=(str(raw.get("template_id") or "").strip() or None),
+            template_rule_count=int(raw.get("template_rule_count") or 0),
+            total_rule_count=int(raw.get("total_rule_count") or 0),
+            counters={
+                "total": int(counters.get("total") or 0),
+                "allow": int(counters.get("allow") or 0),
+                "report": int(counters.get("report") or 0),
+                "block": int(counters.get("block") or 0),
+            },
+            last_decision=(str(last.get("decision") or "").strip().upper() or None),
+            last_risk_level=(str(last.get("risk_level") or "").strip().lower() or None),
+            last_score=(float(last.get("score")) if last.get("score") is not None else None),
+            last_reason_codes=[str(code).strip() for code in list(last.get("reason_codes") or []) if str(code).strip()],
+        )
+    except Exception as exc:
+        return ImmuneGateRuntimeState(
+            status="degraded",
+            detail=str(exc)[:160],
+        )
+
+
+def _extract_immune_gate_event_fields(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    event_type = str(row.get("event_type") or "").strip().upper()
+    payload = _safe_json(row.get("payload"))
+    payload_dict = dict(payload) if isinstance(payload, dict) else {}
+
+    source_payload: Dict[str, Any] | None = None
+    if event_type == "IMMUNE_CHAT_GATE":
+        source_payload = payload_dict
+    elif event_type.startswith("INPUT_"):
+        gate_payload = payload_dict.get("immune_gate")
+        if isinstance(gate_payload, dict):
+            source_payload = dict(gate_payload)
+    if source_payload is None:
+        return None
+
+    decision = str(source_payload.get("decision") or "").strip().upper()
+    if decision not in {"ALLOW", "REPORT", "BLOCK"}:
+        reason_code = str(row.get("reason_code") or "").strip().upper()
+        if "IMMUNE_BLOCKED" in reason_code:
+            decision = "BLOCK"
+        else:
+            decision = "ALLOW"
+
+    risk_level = str(source_payload.get("risk_level") or "").strip().lower() or None
+    score: float | None = None
+    try:
+        if source_payload.get("score") is not None:
+            score = float(source_payload.get("score"))
+    except (TypeError, ValueError):
+        score = None
+
+    raw_reason_codes = source_payload.get("reason_codes")
+    reason_codes: list[str] = []
+    if isinstance(raw_reason_codes, list):
+        reason_codes = [str(code).strip() for code in raw_reason_codes if str(code).strip()]
+    elif raw_reason_codes is not None:
+        normalized = str(raw_reason_codes).strip()
+        if normalized:
+            reason_codes = [normalized]
+
+    row_reason_code = str(row.get("reason_code") or "").strip()
+    if row_reason_code and row_reason_code not in reason_codes and row_reason_code.upper().startswith("IMMUNE_"):
+        reason_codes.append(row_reason_code)
+
+    raw_matched_rules = source_payload.get("matched_rules")
+    matched_rules: list[str] = []
+    if isinstance(raw_matched_rules, list):
+        matched_rules = [str(rule).strip() for rule in raw_matched_rules if str(rule).strip()]
+    elif raw_matched_rules is not None:
+        normalized_rule = str(raw_matched_rules).strip()
+        if normalized_rule:
+            matched_rules = [normalized_rule]
+
+    input_preview = None
+    for candidate in (
+        payload_dict.get("input_preview"),
+        payload_dict.get("text_preview"),
+        payload_dict.get("raw_text"),
+        source_payload.get("input_preview"),
+    ):
+        normalized_candidate = str(candidate or "").strip()
+        if normalized_candidate:
+            input_preview = normalized_candidate[:240]
+            break
+
+    return {
+        "request_id": str(row.get("request_id") or ""),
+        "session_id": (str(row.get("session_id") or "").strip() or None),
+        "event_type": event_type,
+        "stage": (str(row.get("stage") or "").strip() or None),
+        "direction": (str(row.get("direction") or "").strip() or None),
+        "phase": (str(payload_dict.get("phase") or "").strip() or None),
+        "decision": decision,
+        "risk_level": risk_level,
+        "score": score,
+        "reason_codes": reason_codes,
+        "matched_rules": matched_rules,
+        "input_preview": input_preview,
+        "detail": (str(row.get("detail") or "").strip() or None),
+        "ts_ms": int(row.get("ts_ms") or 0),
+    }
+
+
+def _dedupe_ordered_values(values: List[str], *, limit: int) -> List[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+@router.get("/immune-gate/stats", response_model=ImmuneGateStatsResponse)
+async def get_immune_gate_stats(
+    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
+    limit: int = Query(20, ge=1, le=200, description="最近事件返回条数"),
+):
+    ledger = _get_ledger()
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+
+    try:
+        rows = ledger.fetch_by_time_range("voice_event_log", start_ms=since_ms, end_ms=now)
+    except Exception:
+        rows = []
+
+    observed: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        item = _extract_immune_gate_event_fields(row)
+        if item is not None:
+            observed.append(item)
+
+    total = len(observed)
+    allow = sum(1 for item in observed if item.get("decision") == "ALLOW")
+    report = sum(1 for item in observed if item.get("decision") == "REPORT")
+    block = sum(1 for item in observed if item.get("decision") == "BLOCK")
+    block_rate = round(block / total * 100, 1) if total > 0 else 0.0
+
+    from collections import Counter
+
+    reason_counter = Counter()
+    risk_counter = Counter()
+    for item in observed:
+        for reason_code in list(item.get("reason_codes") or []):
+            reason_counter[reason_code] += 1
+        risk_level = str(item.get("risk_level") or "").strip().lower()
+        if risk_level:
+            risk_counter[risk_level] += 1
+
+    reason_codes = [
+        ImmuneGateReasonItem(
+            reason_code=code,
+            count=cnt,
+            pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
+        )
+        for code, cnt in reason_counter.most_common(10)
+    ]
+    risk_levels = [
+        ImmuneGateRiskItem(
+            risk_level=level,
+            count=cnt,
+            pct=round(cnt / total * 100, 1) if total > 0 else 0.0,
+        )
+        for level, cnt in risk_counter.most_common(10)
+    ]
+
+    recent_rows = sorted(observed, key=lambda item: int(item.get("ts_ms") or 0), reverse=True)[:limit]
+    recent = [
+        ImmuneGateRecentItem(
+            request_id=str(item.get("request_id") or ""),
+            session_id=item.get("session_id"),
+            event_type=str(item.get("event_type") or ""),
+            decision=str(item.get("decision") or "ALLOW"),
+            risk_level=item.get("risk_level"),
+            score=item.get("score"),
+            reason_codes=[str(code) for code in list(item.get("reason_codes") or [])],
+            detail=item.get("detail"),
+            ts_ms=int(item.get("ts_ms") or 0),
+        )
+        for item in recent_rows
+    ]
+
+    return ImmuneGateStatsResponse(
+        window_minutes=window_minutes,
+        total=total,
+        allow=allow,
+        report=report,
+        block=block,
+        block_rate=block_rate,
+        reason_codes=reason_codes,
+        risk_levels=risk_levels,
+        recent=recent,
+        runtime_state=_build_immune_gate_runtime_state(),
+        timestamp=now,
+    )
+
+
+@router.get("/immune-gate/replay/{request_id}", response_model=ImmuneGateReplayResponse)
+async def get_immune_gate_replay(
+    request_id: str,
+    limit: int = Query(120, ge=1, le=500, description="回放最多返回多少条 immune 相关事件"),
+):
+    request_key = str(request_id or "").strip()
+    if not request_key:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason_code": "IMMUNE_REPLAY_INVALID_REQUEST_ID", "detail": "request_id is required"},
+        )
+
+    ledger = _get_ledger()
+    try:
+        if hasattr(ledger, "fetch_by_request_id"):
+            rows = ledger.fetch_by_request_id("voice_event_log", request_key)
+        else:
+            rows = []
+    except Exception:
+        rows = []
+
+    observed: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        extracted = _extract_immune_gate_event_fields(row)
+        if extracted is not None:
+            observed.append(extracted)
+
+    if not observed:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "reason_code": "IMMUNE_REPLAY_NOT_FOUND",
+                "detail": f"no immune gate events for request_id={request_key}",
+            },
+        )
+
+    ordered_rows = sorted(observed, key=lambda item: int(item.get("ts_ms") or 0))
+    if len(ordered_rows) > limit:
+        ordered_rows = ordered_rows[-limit:]
+
+    decision_items = [
+        ImmuneGateReplayDecisionItem(
+            event_type=str(item.get("event_type") or ""),
+            stage=item.get("stage"),
+            direction=item.get("direction"),
+            phase=item.get("phase"),
+            decision=str(item.get("decision") or "ALLOW"),
+            risk_level=item.get("risk_level"),
+            score=item.get("score"),
+            reason_codes=[str(code) for code in list(item.get("reason_codes") or [])][:8],
+            matched_rules=[str(rule) for rule in list(item.get("matched_rules") or [])][:8],
+            input_preview=item.get("input_preview"),
+            detail=item.get("detail"),
+            ts_ms=int(item.get("ts_ms") or 0),
+        )
+        for item in ordered_rows
+    ]
+
+    score_values = [float(item.score) for item in decision_items if item.score is not None]
+    all_reason_codes = [
+        str(code)
+        for item in decision_items
+        for code in list(item.reason_codes or [])
+    ]
+    all_matched_rules = [
+        str(rule)
+        for item in decision_items
+        for rule in list(item.matched_rules or [])
+    ]
+
+    session_id = next(
+        (str(item.get("session_id")).strip() for item in ordered_rows if str(item.get("session_id") or "").strip()),
+        None,
+    )
+    input_preview = next(
+        (str(item.get("input_preview")).strip() for item in ordered_rows if str(item.get("input_preview") or "").strip()),
+        None,
+    )
+
+    return ImmuneGateReplayResponse(
+        request_id=request_key,
+        session_id=session_id,
+        input_preview=input_preview,
+        decisions=decision_items,
+        summary=ImmuneGateReplaySummary(
+            event_count=len(decision_items),
+            first_decision=(decision_items[0].decision if decision_items else None),
+            last_decision=(decision_items[-1].decision if decision_items else None),
+            max_score=(max(score_values) if score_values else None),
+            reason_codes=_dedupe_ordered_values(all_reason_codes, limit=12),
+            matched_rules=_dedupe_ordered_values(all_matched_rules, limit=12),
+        ),
+        timestamp=_now_ms(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /obs/retrieval/runtime
 # ---------------------------------------------------------------------------
 class RetrievalRuntimeRouteItem(BaseModel):
     route_id: str

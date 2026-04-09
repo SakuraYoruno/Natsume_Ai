@@ -298,3 +298,65 @@ def test_schedule_edge_asr_bridge_dedups_same_text_same_seq(
     )
 
     assert len(scheduled) == 1
+
+
+def test_edge_events_emotion_triggers_cortex_bond_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = _LedgerStub()
+
+    class _CortexAgent:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def post_process_bond_update(
+            self,
+            *,
+            request_id: str,
+            session_id: str,
+            user_message: str,
+            emotion_context: dict[str, object] | None,
+            ts_ms: int,
+        ) -> dict[str, object]:
+            self.calls.append(
+                {
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "user_message": user_message,
+                    "emotion_context": dict(emotion_context or {}),
+                    "ts_ms": int(ts_ms),
+                }
+            )
+            return {"status": "QUEUED", "update_kind": "INTERACTION_ENGAGED"}
+
+    fake_cortex = _CortexAgent()
+    monkeypatch.setattr(
+        "host_brain.tribe.cortex_agent.get_cortex_agent",
+        lambda: fake_cortex,
+    )
+
+    request_body = EdgeEventsRequest(
+        events=[
+            {
+                "event_type": "EMOTION_DETECTED",
+                "ts_ms": int(time.time() * 1000),
+                "request_id": "req-edge-emotion-1",
+                "session_id": "sess-edge-emotion-1",
+                "emotion_tag": "joy",
+                "emotion_intensity": 0.78,
+                "text": "今天真的很开心",
+            }
+        ]
+    )
+
+    response = receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=lambda: ledger,
+        logger=_LedgerStub(),
+    )
+
+    assert response.accepted == 1
+    assert len(fake_cortex.calls) == 1
+    call = fake_cortex.calls[0]
+    assert call["request_id"] == "req-edge-emotion-1"
+    assert call["session_id"] == "sess-edge-emotion-1"
+    assert call["user_message"] == "今天真的很开心"
+    assert call["emotion_context"]["emotion_tag"] == "JOY"

@@ -189,7 +189,6 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
     try:
         from host_brain.bond.shared_memory_index import SharedMemoryIndex  # noqa: PLC0415
         from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
         _smi: Any = None
         _mt: Any = None
         try:

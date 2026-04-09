@@ -196,6 +196,30 @@ def ledger():
         "detail": "evidence pack built",
         "ts_ms": now - 2400,
     })
+    db.log_retrieval_event({
+        "request_id": "req-int-002",
+        "intent_id": "i2",
+        "op_kind": "PIPELINE",
+        "status": "OK",
+        "reason_code": None,
+        "stage": "S_RET_PIPELINE",
+        "payload": {
+            "fallback_embedding_used": False,
+            "selected_refs": ["evd://episodic/001"],
+            "query_plan": {
+                "intent": "companion_chat",
+                "route": "episodic",
+                "top_k": 8,
+            },
+            "agentic_meta": {
+                "mode": "QUERY_PLANNER",
+                "selected_route": "episodic",
+                "turn_index": 1,
+            },
+        },
+        "detail": "pipeline completed",
+        "ts_ms": now - 2350,
+    })
     db.log_bond_update({
         "request_id": "req-int-002",
         "intent_id": "i2",
@@ -840,7 +864,11 @@ def test_trace_fallback_contains_summary_and_recall(client):
     assert data["summary"]["recall"]["evidence_topk"][0]["snippet"] == "fallback hello evidence snippet"
     node_ids = {node["node_id"] for node in data["nodes"]}
     assert "host_input" in node_ids
+    assert "query_planner" in node_ids
+    assert "agentic_rag" in node_ids
     assert "recall_fusion" in node_ids
+    assert "top_agent" in node_ids
+    assert "chat_agent" in node_ids
     assert "llm_gateway" in node_ids
 
 

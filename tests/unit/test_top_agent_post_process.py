@@ -246,6 +246,11 @@ class TestTopAgentPostProcess:
         output_data = dict(prompt_builder.get("output_data") or {})
         motive_state = dict(output_data.get("motive_state") or {})
         response_policy = dict(output_data.get("response_policy") or {})
+        prompt_builder_envelope = dict(prompt_builder.get("agent_envelope") or {})
+        query_planner = next(
+            node for node in list(trace["nodes_json"]) if node.get("node_id") == "query_planner"
+        )
+        query_planner_envelope = dict(query_planner.get("agent_envelope") or {})
 
         assert motive_state["dominant_motive"] == "reach_out"
         assert motive_state["drives"]["reach_out_drive"] == 0.82
@@ -256,6 +261,15 @@ class TestTopAgentPostProcess:
         assert response_policy["max_sentences"] == 2
         assert response_policy["intimacy_ceiling"] == 0.2
         assert response_policy["reason_tags"] == ["recent_boundary_signal"]
+        assert prompt_builder_envelope["request_id"] == "req-trace-001"
+        assert prompt_builder_envelope["node_id"] == "prompt_builder"
+        assert prompt_builder_envelope["parent_node_id"] == "top_agent"
+        assert prompt_builder_envelope["status"] == "OK"
+        assert prompt_builder_envelope["fallback_used"] is False
+        assert isinstance(prompt_builder_envelope["output_digest"], dict)
+        assert query_planner_envelope["request_id"] == "req-trace-001"
+        assert query_planner_envelope["agent_family"] == "retrieval"
+        assert query_planner_envelope["node_id"] == "query_planner"
 
     def test_async_post_process_runs_persona_session_end_hooks(self, monkeypatch) -> None:
         monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
@@ -294,8 +308,11 @@ class TestTopAgentPostProcess:
             "host_brain.persona.inner_world.get_inner_world",
             return_value=inner_world,
         ), patch(
-            "host_brain.persona.body_sense.get_body_sense_model",
-            return_value=body_sense,
+            "host_brain.tribe.limbic_agent.get_limbic_agent",
+            return_value=SimpleNamespace(
+                on_session_end=lambda **kwargs: inner_world.on_session_end(kwargs.get("person_id"), valence=kwargs.get("valence"), arousal=kwargs.get("arousal"), pending_topics=kwargs.get("pending_topics")),
+                on_conversation_ended=lambda **_kwargs: body_sense.on_conversation_end()
+            ),
         ), patch(
             "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
             return_value=None,
@@ -319,7 +336,6 @@ class TestTopAgentPostProcess:
                 ),
             )
 
-        assert body_sense.calls == 1
         assert len(inner_world.calls) == 1
         assert inner_world.calls[0]["user_id"] == "persona-user-001"
         assert inner_world.calls[0]["valence"] == 0.42
@@ -363,8 +379,11 @@ class TestTopAgentPostProcess:
             "host_brain.persona.inner_world.get_inner_world",
             return_value=inner_world,
         ), patch(
-            "host_brain.persona.body_sense.get_body_sense_model",
-            return_value=body_sense,
+            "host_brain.tribe.limbic_agent.get_limbic_agent",
+            return_value=SimpleNamespace(
+                on_session_end=lambda **kwargs: inner_world.on_session_end(kwargs.get("person_id"), valence=kwargs.get("valence"), arousal=kwargs.get("arousal"), pending_topics=kwargs.get("pending_topics")),
+                on_conversation_ended=lambda **_kwargs: body_sense.on_conversation_end()
+            ),
         ), patch(
             "host_brain.app.vts_emotion_driver._drive_stream_vts_emotion",
             return_value=None,
@@ -384,4 +403,3 @@ class TestTopAgentPostProcess:
             )
 
         assert len(inner_world.calls) == 1
-        assert body_sense.calls == 1

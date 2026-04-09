@@ -14,11 +14,6 @@ import time
 from pathlib import Path
 from typing import Any, Mapping
 
-from host_brain.persona.offline_continuity import (
-    reconnect_style_for_absence_band,
-    resolve_absence_band as resolve_offline_absence_band,
-)
-
 logger = logging.getLogger(__name__)
 
 from host_brain.app.dependencies import get_ledger
@@ -91,6 +86,28 @@ def _template_text(
         return text.format(**kwargs)
     except Exception:
         return text
+
+
+def _resolve_offline_reconnect_profile(offline_state: Mapping[str, Any] | None) -> dict[str, str]:
+    try:
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        payload = get_limbic_agent().resolve_offline_reconnect_profile(
+            offline_state=dict(offline_state or {}),
+        )
+        if isinstance(payload, Mapping):
+            absence_band = str(payload.get("absence_band") or "recent").strip() or "recent"
+            reconnect_style = str(payload.get("reconnect_style") or "").strip()
+            return {
+                "absence_band": absence_band,
+                "reconnect_style": reconnect_style,
+            }
+    except Exception:
+        pass
+    return {
+        "absence_band": "recent",
+        "reconnect_style": "soft_resume",
+    }
 
 
 def normalize_node_style_bindings(
@@ -319,59 +336,10 @@ def build_chat_context_pack(
             )
             authoritative_rows = []
 
-    retrieval_rows: list[dict[str, Any]] = []
-    query_plan_intent = _extract_query_plan_intent(retrieval_summary)
-    query_plan_text_len = _extract_query_plan_text_len(retrieval_summary)
-    for row in retrieval_evidence_items[:10]:
-        if not isinstance(row, Mapping):
-            continue
-        snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
-        if not snippet:
-            continue
-        metadata_raw = row.get("metadata")
-        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
-        store_id = str(
-            row.get("store_id")
-            or metadata.get("store_id")
-            or ""
-        ).strip().lower()
-        if _should_drop_persona_row(
-            store_id=store_id,
-            score=row.get("score"),
-            confidence=row.get("confidence"),
-            query_plan_intent=query_plan_intent,
-            query_plan_text_len=query_plan_text_len,
-        ):
-            continue
-        retrieval_kind = "persona_utterance" if store_id == "persona_utterance" else "episodic"
-        _emotion_color_tag = str(
-            metadata.get("emotion_color_tag") or metadata.get("emotion_tag") or ""
-        ).strip().upper() or None
-        _suppression_flag = _coerce_optional_bool(metadata.get("suppression_flag"))
-        _distortion_level = _coerce_optional_float(metadata.get("distortion_level"))
-        if _distortion_level is not None:
-            _distortion_level = round(_clamp_float(float(_distortion_level), minimum=0.0, maximum=1.0), 4)
-        retrieval_rows.append(
-            {
-                "slot": "retrieval",
-                "kind": retrieval_kind,
-                "source_ref": str(row.get("source_ref") or "").strip() or None,
-                "evidence_ref": str(row.get("evidence_ref") or "").strip() or None,
-                "content": snippet,
-                "score": row.get("score"),
-                "confidence": row.get("confidence"),
-                "store_id": store_id or None,
-                "canon_id": str(metadata.get("canon_id") or "").strip() or None,
-                "lang": str(metadata.get("lang") or "").strip().lower() or None,
-                "speaker": str(metadata.get("speaker") or "").strip() or None,
-                "file_rel_path": str(metadata.get("file_rel_path") or "").strip() or None,
-                "block_id": str(metadata.get("block_id") or "").strip() or None,
-                "line_index": metadata.get("line_index"),
-                "emotion_color_tag": _emotion_color_tag,
-                "suppression_flag": _suppression_flag,
-                "distortion_level": _distortion_level,
-            }
-        )
+    retrieval_rows = _build_retrieval_rows(
+        retrieval_summary=retrieval_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+    )
 
     mood_state = str(normalized_emotion_context.get("mood_state") or "steady")
     emotion_tag = str(normalized_emotion_context.get("emotion_tag") or "NEUTRAL")
@@ -414,20 +382,18 @@ def build_chat_context_pack(
     runtime_guidance_templates = _load_runtime_guidance_templates()
     # Phase 4: 注入 BondEmotionalTexture 亲密温度和裂痕状态（让关系有温度）
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-        _bse = get_bond_stage_engine()
-        if _bse is not None:
-            _user_id = get_canonical_bond_user_id()
-            _bond_state = _bse.get_state(_user_id)
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+        _user_id = get_canonical_bond_user_id()
+        _social_snapshot = get_social_brain_agent().resolve_bond_snapshot(
+            person_id=_user_id,
+            bond_summary=resolved_bond_summary,
+        )
+        _bond_state = _social_snapshot.get("bond_state_obj")
+        if _bond_state is not None:
             if not resolved_bond_summary:
-                try:
-                    _raw_summary = _bond_state.to_summary()
-                    if isinstance(_raw_summary, Mapping):
-                        resolved_bond_summary = normalize_bond_summary(dict(_raw_summary))
-                except Exception:
-                    pass
-            bond_texture["bond_stage"] = _bond_state.current_stage
-            bond_texture["bond_trend"] = _bond_state.trend()
+                resolved_bond_summary = dict(_social_snapshot.get("bond_summary") or {})
+            bond_texture["bond_stage"] = str(_social_snapshot.get("bond_stage") or "")
+            bond_texture["bond_trend"] = str(_social_snapshot.get("bond_trend") or "")
             # 亲密温度
             _texture = _bond_state.texture
             bond_texture["intimacy_temperature"] = round(_texture.intimacy_temperature, 3)
@@ -962,7 +928,8 @@ def _apply_offline_state_to_persona_expression_hint(
     if not hint or not offline_state:
         return hint
 
-    absence_band = resolve_offline_absence_band(offline_state)
+    reconnect_profile = _resolve_offline_reconnect_profile(offline_state)
+    absence_band = str(reconnect_profile.get("absence_band") or "recent").strip() or "recent"
     if absence_band == "recent":
         return hint
 
@@ -975,7 +942,7 @@ def _apply_offline_state_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     offline_guidance: list[str] = []
-    reconnect_style = reconnect_style_for_absence_band(absence_band)
+    reconnect_style = str(reconnect_profile.get("reconnect_style") or "").strip()
     runtime_guidance_templates = _load_runtime_guidance_templates()
 
     if absence_band == "6h_plus":
@@ -1492,6 +1459,89 @@ def _should_drop_persona_row(
     return False
 
 
+def _build_retrieval_rows_fallback(
+    *,
+    retrieval_summary: Mapping[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    retrieval_rows: list[dict[str, Any]] = []
+    query_plan_intent = _extract_query_plan_intent(retrieval_summary)
+    query_plan_text_len = _extract_query_plan_text_len(retrieval_summary)
+    for row in retrieval_evidence_items[:10]:
+        if not isinstance(row, Mapping):
+            continue
+        snippet = _truncate_for_prompt(row.get("snippet"), limit=240)
+        if not snippet:
+            continue
+        metadata_raw = row.get("metadata")
+        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
+        store_id = str(
+            row.get("store_id")
+            or metadata.get("store_id")
+            or ""
+        ).strip().lower()
+        if _should_drop_persona_row(
+            store_id=store_id,
+            score=row.get("score"),
+            confidence=row.get("confidence"),
+            query_plan_intent=query_plan_intent,
+            query_plan_text_len=query_plan_text_len,
+        ):
+            continue
+        retrieval_kind = "persona_utterance" if store_id == "persona_utterance" else "episodic"
+        emotion_color_tag = str(
+            metadata.get("emotion_color_tag") or metadata.get("emotion_tag") or ""
+        ).strip().upper() or None
+        suppression_flag = _coerce_optional_bool(metadata.get("suppression_flag"))
+        distortion_level = _coerce_optional_float(metadata.get("distortion_level"))
+        if distortion_level is not None:
+            distortion_level = round(_clamp_float(float(distortion_level), minimum=0.0, maximum=1.0), 4)
+        retrieval_rows.append(
+            {
+                "slot": "retrieval",
+                "kind": retrieval_kind,
+                "source_ref": str(row.get("source_ref") or "").strip() or None,
+                "evidence_ref": str(row.get("evidence_ref") or "").strip() or None,
+                "content": snippet,
+                "score": row.get("score"),
+                "confidence": row.get("confidence"),
+                "store_id": store_id or None,
+                "canon_id": str(metadata.get("canon_id") or "").strip() or None,
+                "lang": str(metadata.get("lang") or "").strip().lower() or None,
+                "speaker": str(metadata.get("speaker") or "").strip() or None,
+                "file_rel_path": str(metadata.get("file_rel_path") or "").strip() or None,
+                "block_id": str(metadata.get("block_id") or "").strip() or None,
+                "line_index": metadata.get("line_index"),
+                "emotion_color_tag": emotion_color_tag,
+                "suppression_flag": suppression_flag,
+                "distortion_level": distortion_level,
+            }
+        )
+    return retrieval_rows
+
+
+def _build_retrieval_rows(
+    *,
+    retrieval_summary: Mapping[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+
+        return get_hippocampus_agent().build_prompt_retrieval_rows(
+            retrieval_summary=retrieval_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
+            max_items=10,
+            snippet_limit=240,
+        )
+    except Exception as exc:
+        logger.debug("hippocampus retrieval row build failed, fallback local logic: %s", exc)
+        return _build_retrieval_rows_fallback(
+            retrieval_summary=retrieval_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
+        )
+
+
 def _count_kind(rows: list[Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in rows:
@@ -1769,6 +1819,100 @@ def build_chat_generation_prompt_payload(
     }
 
 
+def _copy_mapping_payload(raw: Any) -> dict[str, Any]:
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _copy_mapping_list(raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+    return [dict(item) for item in raw if isinstance(item, Mapping)]
+
+
+def _build_multi_agent_context_pack(
+    *,
+    runtime_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        from host_brain.app.schemas.context_pack import ContextPack  # noqa: PLC0415
+    except Exception:
+        return {}
+
+    payload = dict(runtime_payload or {})
+    request_section = _copy_mapping_payload(payload.get("request"))
+    retrieval_section = _copy_mapping_payload(payload.get("retrieval"))
+    retrieval_section["evidence_items"] = _copy_mapping_list(retrieval_section.get("evidence_items"))
+
+    planner_section: dict[str, Any] = {
+        "graph": _copy_mapping_payload(payload.get("graph")),
+        "scene_awareness": _copy_mapping_payload(payload.get("scene_awareness")),
+        "intent_draft": _copy_mapping_payload(payload.get("intent_draft")),
+    }
+
+    soul_state: dict[str, Any] = {
+        "bond_summary": _copy_mapping_payload(payload.get("bond_summary")),
+        "offline_state": _copy_mapping_payload(payload.get("offline_state")),
+        "self_model_snapshot": _copy_mapping_payload(payload.get("self_model_snapshot")),
+        "self_reflection_pulse": _copy_mapping_payload(payload.get("self_reflection_pulse")),
+        "persona_expression_hint": _copy_mapping_payload(payload.get("persona_expression_hint")),
+    }
+
+    runtime_state: dict[str, Any] = {
+        "emotion_vector": _copy_mapping_payload(payload.get("emotion_vector")),
+        "emotion_timeline": _copy_mapping_payload(payload.get("emotion_timeline")),
+        "triggered_emotions": _copy_mapping_payload(payload.get("triggered_emotions")),
+        "endocrine_state": _copy_mapping_payload(payload.get("endocrine_state")),
+        "silence_state": _copy_mapping_payload(payload.get("silence_state")),
+        "body_sense": _copy_mapping_payload(payload.get("body_sense")),
+        "runtime_mode": _copy_mapping_payload(payload.get("runtime_mode")),
+        "activity_monitor": _copy_mapping_payload(payload.get("activity_monitor")),
+    }
+
+    prompt_context = _copy_mapping_payload(payload.get("prompt_context"))
+    prompt_context_payload = _copy_mapping_payload(prompt_context.get("payload"))
+    memory_state: dict[str, Any] = {
+        "prompt_context_payload": prompt_context_payload,
+        "memory_persona_signal": _copy_mapping_payload(payload.get("memory_persona_signal")),
+        "memory_persona_evidence": _copy_mapping_list(payload.get("memory_persona_evidence")),
+        "memory_recall_summary": str(payload.get("memory_recall_summary") or "").strip(),
+        "bond_narrative": _copy_mapping_payload(payload.get("bond_narrative")),
+    }
+
+    trace_refs: list[str] = []
+    request_id = str(request_section.get("request_id") or "").strip()
+    if request_id:
+        trace_refs.append(f"request:{request_id}")
+
+    request_meta = {
+        "request_id": request_id,
+        "person_id": str(request_section.get("person_id") or "").strip(),
+        "session_id": str(request_section.get("session_id") or "").strip(),
+        "thread_id": str(request_section.get("thread_id") or "").strip(),
+        "target_lang": str(_copy_mapping_payload(payload.get("render")).get("target_lang") or "").strip(),
+    }
+
+    context_pack = ContextPack(
+        request_meta=request_meta,
+        planner=planner_section,
+        retrieval=retrieval_section,
+        motive=_copy_mapping_payload(payload.get("motive_state")),
+        response_policy=_copy_mapping_payload(payload.get("response_policy")),
+        soul_state=soul_state,
+        offline_state=_copy_mapping_payload(payload.get("offline_state")),
+        runtime_state=runtime_state,
+        memory_state=memory_state,
+        trace_refs=trace_refs,
+        extensions={
+            "version": str(payload.get("version") or "").strip(),
+            "sys_mode": str(payload.get("sys_mode") or "").strip(),
+            "endocrine_gate": str(
+                _copy_mapping_payload(payload.get("endocrine_state")).get("gate_state") or ""
+            ).strip(),
+        },
+    )
+    return context_pack.model_dump()
+
+
 def build_chat_prompt_runtime_payload(
     *,
     runtime_input: Any,
@@ -1910,16 +2054,41 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["user_emotion_profile"] = _full_emotion_ctx["user_emotion_profile"]
     if _full_emotion_ctx.get("triggered_emotions"):
         runtime_payload["triggered_emotions"] = _full_emotion_ctx["triggered_emotions"]
+    if _full_emotion_ctx.get("endocrine_state"):
+        runtime_payload["endocrine_state"] = dict(_full_emotion_ctx.get("endocrine_state") or {})
+
+    if not isinstance(runtime_payload.get("endocrine_state"), Mapping):
+        try:
+            from host_brain.app.dependencies import get_endocrine_state  # noqa: PLC0415
+
+            runtime_payload["endocrine_state"] = dict(
+                get_endocrine_state(
+                    emotion_tag=str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL"),
+                    emotion_intensity=float(_full_emotion_ctx.get("emotion_intensity") or 0.0),
+                )
+                or {}
+            )
+        except Exception:
+            pass
+
+    if isinstance(runtime_payload.get("endocrine_state"), Mapping):
+        merged_emotion_context = dict(runtime_payload.get("emotion_context") or {})
+        merged_emotion_context["endocrine_state"] = dict(runtime_payload.get("endocrine_state") or {})
+        runtime_payload["emotion_context"] = merged_emotion_context
 
     # emotion_timeline: 从全局单例获取最新摘要（因为 timeline 是 append-only，
     # 每次 normalize 都会追加，此时已经是最新状态）
     _tl_summary: dict[str, Any] = {}
     _tl_diary: dict[str, Any] = {}
     try:
-        from host_brain.app.emotion_context import get_emotion_timeline  # noqa: PLC0415
-        _tl = get_emotion_timeline()
-        _tl_summary = dict(_tl.rebuild_summary(window_ms=300_000) or {})
-        _tl_diary = dict(_tl.build_daily_diary(window_ms=24 * 3600 * 1000) or {})
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        _tl_snapshot = get_limbic_agent().resolve_emotion_timeline_snapshot(
+            summary_window_ms=300_000,
+            diary_window_ms=24 * 3600 * 1000,
+        )
+        _tl_summary = dict(_tl_snapshot.get("summary") or {})
+        _tl_diary = dict(_tl_snapshot.get("diary") or {})
         if _tl_summary and _tl_summary.get("entry_count", 0) > 0:
             runtime_payload["emotion_timeline"] = _tl_summary
     except Exception:
@@ -1929,114 +2098,105 @@ def build_chat_prompt_runtime_payload(
     # prompt_builder 通过 runtime_payload.get("persona_expression_hint") 读取
     _emotion_reunion_type = ""
     try:
-        from host_brain.persona.expression_adapter import PersonaExpressionAdapter  # noqa: PLC0415
-        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
-        from host_brain.persona.personality_traits import PersonalityTraits  # noqa: PLC0415
-        from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
-        from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
-        _adapter = PersonaExpressionAdapter()
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+        _prefrontal_agent = get_prefrontal_agent()
         _persona_user_id = get_canonical_bond_user_id()
-        try:
-            _traits = PersonaEngine.get_instance().get_traits(_persona_user_id)
-        except Exception:
-            _traits = PersonalityTraits.from_baseline()
         # 获取当前 EmotionVector
         _vad = _full_emotion_ctx.get("vad_vector") or {}
         _cur_valence = float(_vad.get("valence") or 0.0)
         _cur_arousal = float(_vad.get("arousal") or 0.0)
         _cur_dominance = float(_vad.get("dominance") or 0.0)
 
-        # ── 接入 EmotionPersistence：恢复跨会话情感状态 ──────────────
-        # 用跨会话恢复值与当前 VAD 融合（当前 VAD 权重 0.7，历史恢复权重 0.3）
-        # 若当前 VAD 为零向量（无情感信号），则完全使用恢复值
+        # ── 接入 EmotionPersistence（经 limbic 包装层）──────────────────
         try:
-            if not hasattr(build_chat_prompt_runtime_payload, "_emotion_persistence"):
-                build_chat_prompt_runtime_payload._emotion_persistence = EmotionPersistence()
-            _ep: EmotionPersistence = build_chat_prompt_runtime_payload._emotion_persistence
-            _ep_user_id = _persona_user_id
-            _restored = _ep.restore(user_id=_ep_user_id)
-            if not _restored.from_baseline:
-                # 有历史情感记录：与当前 VAD 加权融合
-                _has_cur_signal = abs(_cur_valence) > 0.05 or abs(_cur_arousal - 0.3) > 0.05
-                _w_cur = 0.7 if _has_cur_signal else 0.0
-                _w_hist = 1.0 - _w_cur
-                _cur_valence = _cur_valence * _w_cur + _restored.valence * _w_hist
-                _cur_arousal = _cur_arousal * _w_cur + _restored.arousal * _w_hist
-                _cur_dominance = _cur_dominance * _w_cur + _restored.dominance * _w_hist
-            # 注入重逢信息到 runtime_payload（供 prompt_builder 使用）
-            if _restored.reunion_type:
-                _emotion_reunion_type = str(_restored.reunion_type or "").strip()
-                runtime_payload["emotion_reunion_type"] = _emotion_reunion_type
-            # 持久化当前情感（用融合后的值，以便下次恢复）
-            _ep.persist(
-                user_id=_ep_user_id,
-                valence=_cur_valence,
-                arousal=_cur_arousal,
-                dominance=_cur_dominance,
+            _ep_payload = dict(
+                get_limbic_agent().resolve_persistent_emotion_state(
+                    person_id=_persona_user_id,
+                    valence=_cur_valence,
+                    arousal=_cur_arousal,
+                    dominance=_cur_dominance,
+                )
+                or {}
             )
+            _cur_valence = float(_ep_payload.get("valence") or _cur_valence)
+            _cur_arousal = float(_ep_payload.get("arousal") or _cur_arousal)
+            _cur_dominance = float(_ep_payload.get("dominance") or _cur_dominance)
+            _emotion_reunion_type = str(_ep_payload.get("reunion_type") or "").strip()
+            if _emotion_reunion_type:
+                runtime_payload["emotion_reunion_type"] = _emotion_reunion_type
         except Exception as _ep_exc:
             logger.debug("EmotionPersistence 接入降级: %s", _ep_exc)
 
         # ── Phase XVI：离线内心世界唤醒快照注入 ──────────────────────────
         try:
-            from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-            _inner_world = get_inner_world()
-            _iw_snapshot = _inner_world.on_user_awaken(user_id=_persona_user_id)
-            if _iw_snapshot.offline_hours >= 1.0 or _iw_snapshot.awakening_hint:
-                runtime_payload["offline_state"] = _iw_snapshot.as_dict()
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            _iw_snapshot = dict(get_limbic_agent().on_user_awaken(person_id=_persona_user_id) or {})
+            _iw_offline_hours = float(_iw_snapshot.get("offline_hours") or 0.0)
+            _iw_hint = str(_iw_snapshot.get("awakening_hint") or "")
+            if _iw_offline_hours >= 1.0 or _iw_hint:
+                runtime_payload["offline_state"] = _iw_snapshot
                 logger.debug(
                     "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
                     _persona_user_id,
-                    _iw_snapshot.offline_hours,
-                    _iw_snapshot.awakening_hint[:30] if _iw_snapshot.awakening_hint else "",
+                    _iw_offline_hours,
+                    _iw_hint[:30] if _iw_hint else "",
                 )
         except Exception as _iw_exc:
             logger.debug("OfflineInnerWorld 接入降级: %s", _iw_exc)
 
         # ── Phase XVIII：沉默引擎状态快照注入 ────────────────────────────
         try:
-            from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-            _silence_engine = get_silence_engine()
-            _silence_snapshot = _silence_engine.get_silence_state()
-            if _silence_snapshot.willingness_level != "NORMAL" or _silence_snapshot.topic_resistance_active:
-                runtime_payload["silence_state"] = _silence_snapshot.as_dict()
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            _silence_state = dict(get_limbic_agent().resolve_silence_state())
+            _silence_level = str(_silence_state.get("willingness_level") or "NORMAL").strip().upper() or "NORMAL"
+            _topic_resistance_active = bool(_silence_state.get("topic_resistance_active"))
+            if _silence_level != "NORMAL" or _topic_resistance_active:
+                runtime_payload["silence_state"] = _silence_state
                 logger.debug(
                     "EmotionalSilenceEngine 状态注入: user=%s willingness=%.2f level=%s",
                     _persona_user_id,
-                    _silence_snapshot.response_willingness,
-                    _silence_snapshot.willingness_level,
+                    float(_silence_state.get("response_willingness") or 0.0),
+                    _silence_level,
                 )
         except Exception as _silence_exc:
             logger.debug("EmotionalSilenceEngine 接入降级: %s", _silence_exc)
 
         # ── v1.12：身体感知状态快照注入 + 疲劳惩罚接入沉默引擎 ──────────
         try:
-            from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
-            _bs_model = get_body_sense_model()
-            # 注入孤独感（来自 OfflineInnerWorld.LonelinessAccumulator）
-            _iw_loneliness = float(
-                (runtime_payload.get("offline_state") or {}).get("loneliness_level") or 0.0
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+            _limbic_agent = get_limbic_agent()
+            _bs_result = _limbic_agent.capture_conversation_body_sense(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=_persona_user_id,
+                emotion_tag=_full_emotion_ctx.get("emotion_tag"),
+                mood_state=_full_emotion_ctx.get("mood_state"),
+                offline_loneliness=(runtime_payload.get("offline_state") or {}).get("loneliness_level"),
             )
-            if _iw_loneliness > 0.0:
-                _bs_model.update_loneliness(_iw_loneliness)
-            # 对话开始：启动疲劳计时
-            _bs_model.on_conversation_start()
-            # 获取状态快照
-            _bs_state = _bs_model.get_state()
-            if _bs_state.is_active:
-                runtime_payload["body_sense"] = _bs_state.as_dict()
+            _bs_payload = dict(_bs_result.get("body_sense") or {})
+            if bool(_bs_result.get("is_active")):
+                runtime_payload["body_sense"] = _bs_payload
                 logger.debug(
                     "BodySenseModel 状态注入: user=%s fatigue=%s drowsiness=%s loneliness=%s",
                     _persona_user_id,
-                    _bs_state.fatigue_level,
-                    _bs_state.drowsiness_level,
-                    _bs_state.loneliness_level,
+                    _bs_payload.get("fatigue_level"),
+                    _bs_payload.get("drowsiness_level"),
+                    _bs_payload.get("loneliness_level"),
                 )
             # 疲劳惩罚接入沉默引擎（断链6修复）
-            if _bs_state.willingness_penalty > 0.0:
+            try:
+                _bs_penalty = float(_bs_result.get("willingness_penalty") or 0.0)
+            except (TypeError, ValueError):
+                _bs_penalty = 0.0
+            if _bs_penalty > 0.0:
                 try:
-                    from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-                    get_silence_engine().apply_body_sense_penalty(_bs_state.willingness_penalty)
+                    _limbic_agent.apply_body_sense_penalty(
+                        penalty=_bs_penalty,
+                    )
                 except Exception:
                     pass
         except Exception as _bs_exc:
@@ -2061,59 +2221,42 @@ def build_chat_prompt_runtime_payload(
         except Exception as _eg_exc:
             logger.debug("EmergentGrowthEngine 接入降级: %s", _eg_exc)
 
-        _emo_vec = EmotionVector(
-            valence=_cur_valence,
-            arousal=_cur_arousal,
-            dominance=_cur_dominance,
-            ts_ms=int(_vad.get("ts_ms") or 0),
-        ) if (_vad or True) else None
         # 获取 bond_stage
         _bond_stage = "STRANGER"
         try:
-            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-            _bse = get_bond_stage_engine()
-            if _bse is not None:
-                _user_id = get_canonical_bond_user_id()
-                _bond_state = _bse.get_state(_user_id)
-                _bond_stage = _bond_state.current_stage
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+            _user_id = get_canonical_bond_user_id()
+            _bond_stage = get_social_brain_agent().resolve_bond_stage(person_id=_user_id, default="STRANGER")
         except Exception:
             pass
         _user_tag = str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL").strip().upper()
         # 获取当前用户消息（用于对话节奏推断）
         _user_msg_for_pace = str(generation_payload.get("user_message") or "").strip()
-        _hint = _adapter.adapt(
-            _traits, _emo_vec, _bond_stage,
-            user_emotion_tag=_user_tag,
-            user_message=_user_msg_for_pace,
+        _persona_expression_hint = dict(
+            _prefrontal_agent.resolve_persona_expression_hint(
+                persona_user_id=_persona_user_id,
+                bond_stage=_bond_stage,
+                user_emotion_tag=_user_tag,
+                user_message=_user_msg_for_pace,
+                valence=_cur_valence,
+                arousal=_cur_arousal,
+                dominance=_cur_dominance,
+                ts_ms=int(_vad.get("ts_ms") or 0),
+            )
+            or {}
         )
-        runtime_payload["persona_expression_hint"] = {
-            "style_hint": _hint.style_hint,
-            "tone": _hint.tone,
-            "echo_weight_modifier": _hint.echo_weight_modifier,
-            "follow_up_tendency": _hint.追问倾向,
-            "pace_hint": _hint.pace_hint,
-        }
+        runtime_payload["persona_expression_hint"] = _persona_expression_hint
     except (ImportError, AttributeError, Exception) as _pe_exc:
         logger.debug("PersonaExpressionAdapter 接入降级: %s", _pe_exc)
 
     # ── P1-FIX：接入 SelfReflection ──────────────────────────────────────
     # prompt_builder 通过 runtime_payload.get("self_reflection_pulse") 读取
-    _sr_for_alignment = None
-    _sr_align_pulse = None
-    _sr_snapshot_inputs: dict[str, Any] = {}
+    _sr_alignment_snapshot: dict[str, Any] = {}
+    _prefrontal_agent_for_sr = None
     try:
-        from host_brain.persona.self_reflection import (  # noqa: PLC0415
-            SelfReflection as _SelfReflection,
-            align_self_reflection_pulse as _align_self_reflection_pulse,
-        )
-        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
-        from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
-        if not hasattr(build_chat_prompt_runtime_payload, "_self_reflection"):
-            build_chat_prompt_runtime_payload._self_reflection = _SelfReflection()
-        if not hasattr(build_chat_prompt_runtime_payload, "_evolution_orchestrator"):
-            build_chat_prompt_runtime_payload._evolution_orchestrator = EvolutionOrchestrator()
-        _sr: _SelfReflection = build_chat_prompt_runtime_payload._self_reflection
-        _evo: EvolutionOrchestrator = build_chat_prompt_runtime_payload._evolution_orchestrator
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+        _prefrontal_agent = get_prefrontal_agent()
+        _prefrontal_agent_for_sr = _prefrontal_agent
         # 获取当前轮次（从 session 状态推断，或使用递增计数器）
         if not hasattr(build_chat_prompt_runtime_payload, "_turn_counter"):
             build_chat_prompt_runtime_payload._turn_counter = 0
@@ -2124,15 +2267,16 @@ def build_chat_prompt_runtime_payload(
         _sr_bond_summary = dict((dict(prompt_context or {}).get("bond_summary") or {}))
         _sr_last_deep_talk_ts_ms = 0
         try:
-            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-            _sr_bse = get_bond_stage_engine()
-            if _sr_bse is not None:
-                _sr_bond_state = _sr_bse.get_state(_sr_user_id)
-                if not _sr_bond_summary:
-                    _sr_raw_summary = _sr_bond_state.to_summary()
-                    if isinstance(_sr_raw_summary, Mapping):
-                        _sr_bond_summary = dict(_sr_raw_summary)
-                _sr_last_deep_talk_ts_ms = int(getattr(_sr_bond_state, "last_event_ts_ms", 0) or 0)
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            _sr_social = get_social_brain_agent().resolve_bond_snapshot(
+                person_id=_sr_user_id,
+                bond_summary=_sr_bond_summary,
+            )
+            _sr_bond_state = _sr_social.get("bond_state_obj")
+            if not _sr_bond_summary:
+                _sr_bond_summary = dict(_sr_social.get("bond_summary") or {})
+            _sr_last_deep_talk_ts_ms = int(_sr_social.get("last_event_ts_ms") or 0)
         except Exception:
             pass
         _sr_current_ts_ms = int(_full_emotion_ctx.get("emotion_ts_ms") or 0) or int(time.time() * 1000)
@@ -2142,15 +2286,27 @@ def build_chat_prompt_runtime_payload(
             elif _emotion_reunion_type == "short_absence":
                 _sr_last_deep_talk_ts_ms = _sr_current_ts_ms - 4 * 24 * 3600 * 1000
         try:
-            _sr_persona_changes = PersonaEngine.get_instance().get_change_log(_sr_user_id, limit=5)
+            _sr_persona_changes = list(
+                _prefrontal_agent.resolve_persona_change_log(
+                    persona_user_id=_sr_user_id,
+                    limit=5,
+                )
+                or []
+            )
         except Exception:
             _sr_persona_changes = []
         try:
-            _sr_growth_awareness = dict(_evo.get_last_growth_awareness() or {})
+            _sr_growth_awareness = dict(_prefrontal_agent.resolve_growth_awareness() or {})
         except Exception:
             _sr_growth_awareness = {}
         try:
-            _sr_growth_summary = dict(_evo.get_growth_summary(_sr_user_id, now_ts_ms=_sr_current_ts_ms) or {})
+            _sr_growth_summary = dict(
+                _prefrontal_agent.resolve_growth_summary(
+                    persona_user_id=_sr_user_id,
+                    now_ts_ms=_sr_current_ts_ms,
+                )
+                or {}
+            )
         except Exception:
             _sr_growth_summary = {}
         _tl_summary_for_sr = dict(runtime_payload.get("emotion_timeline") or _tl_summary or {})
@@ -2158,22 +2314,10 @@ def build_chat_prompt_runtime_payload(
         # ── 断链5修复（v1.12）：获取风格演变摘要，注入自省感知 ──────────
         _sr_style_evolution: dict | None = None
         try:
-            from host_brain.persona.drift_detector import get_drift_detector  # noqa: PLC0415
-            _sr_style_evolution = get_drift_detector().get_style_evolution_summary()
+            _sr_style_evolution = dict(_prefrontal_agent.resolve_style_evolution_summary() or {})
         except Exception:
             pass
-        _sr_for_alignment = _sr
-        _sr_align_pulse = _align_self_reflection_pulse
-        _sr_snapshot_inputs = {
-            "timeline_summary": _tl_summary_for_sr,
-            "timeline_diary": _tl_diary_for_sr,
-            "bond_state": _sr_bond_state,
-            "bond_summary": _sr_bond_summary,
-            "persona_changes": _sr_persona_changes,
-            "last_deep_talk_ts_ms": _sr_last_deep_talk_ts_ms,
-            "current_ts_ms": _sr_current_ts_ms,
-        }
-        _pulse = _sr.maybe_generate(
+        _sr_cycle_payload = _prefrontal_agent.run_self_reflection_cycle(
             turn_count=_turn,
             timeline_summary=_tl_summary_for_sr,
             timeline_diary=_tl_diary_for_sr,
@@ -2187,6 +2331,8 @@ def build_chat_prompt_runtime_payload(
             growth_summary=_sr_growth_summary,
             style_evolution=_sr_style_evolution,
         )
+        _pulse = dict(_sr_cycle_payload.get("self_reflection_pulse") or {})
+        _sr_alignment_snapshot = dict(_sr_cycle_payload.get("snapshot") or {})
         if _pulse:
             runtime_payload["self_reflection_pulse"] = _pulse
     except (ImportError, AttributeError, Exception) as _sr_exc:
@@ -2203,11 +2349,12 @@ def build_chat_prompt_runtime_payload(
         _bn_stage = runtime_payload.get("persona_expression_hint", {})
         _bn_bond_stage = "STRANGER"
         try:
-            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-            _bse_bn = get_bond_stage_engine()
-            if _bse_bn is not None:
-                _bn_bond_state = _bse_bn.get_state(_user_id_bn)
-                _bn_bond_stage = _bn_bond_state.current_stage
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            _bn_bond_stage = get_social_brain_agent().resolve_bond_stage(
+                person_id=_user_id_bn,
+                default="STRANGER",
+            )
         except Exception:
             pass
         # 尝试获取 SharedMemoryIndex 和 MilestoneTracker
@@ -2231,8 +2378,9 @@ def build_chat_prompt_runtime_payload(
     # ── 接入 BondAwareStyleEngine：Bond 阶段感知风格指令 ──────────────
     # prompt_builder 通过 runtime_payload.get("bond_style_instruction") 读取
     try:
-        from host_brain.persona.bond_aware_style import BondAwareStyleEngine  # noqa: PLC0415
-        _bas_engine = BondAwareStyleEngine()
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+        _prefrontal_agent = get_prefrontal_agent()
         _bas_user_id = get_canonical_bond_user_id()
         _bas_bond_stage = "STRANGER"
         _bas_intimacy = 0.0
@@ -2242,19 +2390,21 @@ def build_chat_prompt_runtime_payload(
         _bas_bond_trend = ""
         _bas_shared_hints: list[str] = []
         try:
-            from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-            _bse_bas = get_bond_stage_engine()
-            if _bse_bas is not None:
-                _bas_state = _bse_bas.get_state(_bas_user_id)
-                _bas_bond_stage = _bas_state.current_stage
-                _bas_intimacy = float(getattr(_bas_state, "intimacy_score", 0.0) or 0.0)
-                _bas_bond_trend = str(getattr(_bas_state, "trend", "") or "")
-                # 裂痕状态
-                _bas_rift = getattr(_bas_state, "rift", None)
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            _bas_social = get_social_brain_agent().resolve_bond_snapshot(person_id=_bas_user_id)
+            _bas_state = _bas_social.get("bond_state_obj")
+            _bas_bond_stage = str(_bas_social.get("bond_stage") or "STRANGER")
+            _bas_intimacy = float(_bas_social.get("intimacy_score") or 0.0)
+            _bas_bond_trend = str(_bas_social.get("bond_trend") or "")
+            if True:
+                _bas_rift = _bas_social.get("rift")
                 if _bas_rift is not None and getattr(_bas_rift, "is_active", lambda: False)():
                     _bas_rift_active = True
                     _bas_rift_severity = str(getattr(_bas_rift, "severity", "medium") or "medium")
                     _bas_rift_progress = float(getattr(_bas_rift, "repair_progress", 0.0) or 0.0)
+                # 裂痕状态
+                _bas_rift = getattr(_bas_state, "rift", None)
         except Exception:
             pass
         # 从 bond_narrative 中提取共同记忆提示
@@ -2272,7 +2422,7 @@ def build_chat_prompt_runtime_payload(
                 _bas_mood = "negative"
         # Natsume 自身情绪标签
         _bas_natsume_mood = str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL").strip().upper()
-        _bas_result = _bas_engine.generate(
+        _bond_style_instruction = _prefrontal_agent.resolve_bond_style_instruction(
             bond_stage=_bas_bond_stage,
             intimacy_score=_bas_intimacy,
             mood_state=_bas_mood,
@@ -2283,8 +2433,8 @@ def build_chat_prompt_runtime_payload(
             bond_trend=_bas_bond_trend,
             shared_memory_hints=_bas_shared_hints or None,
         )
-        if _bas_result.prompt_injection:
-            runtime_payload["bond_style_instruction"] = _bas_result.prompt_injection
+        if _bond_style_instruction:
+            runtime_payload["bond_style_instruction"] = _bond_style_instruction
     except (ImportError, AttributeError, Exception) as _bas_exc:
         logger.debug("BondAwareStyleEngine 接入降级: %s", _bas_exc)
 
@@ -2293,8 +2443,7 @@ def build_chat_prompt_runtime_payload(
     # 注入 runtime_payload["motive_state"] 和 runtime_payload["response_policy"]
     # 供 prompt_builder / post_processor / proactive_voice 消费。
     try:
-        from host_brain.persona.motive_engine import compute_motive_state, MotiveInput  # noqa: PLC0415
-        from host_brain.persona.response_policy import decide_response_policy, ResponsePolicyInput  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         _pending_topics = list(
             (runtime_payload.get("offline_state") or {}).get("anticipation_topics") or []
@@ -2303,7 +2452,8 @@ def build_chat_prompt_runtime_payload(
             (runtime_payload.get("bond_summary") or {}).get("shared_memory_count") or 0
         )
 
-        _motive_inp = MotiveInput(
+        _limbic_agent = get_limbic_agent()
+        runtime_payload["motive_state"] = _limbic_agent.compute_motive_state(
             silence_state=runtime_payload.get("silence_state"),
             body_sense=runtime_payload.get("body_sense"),
             offline_state=runtime_payload.get("offline_state"),
@@ -2312,12 +2462,10 @@ def build_chat_prompt_runtime_payload(
             emotion_context=runtime_payload.get("triggered_emotions"),
             pending_followup_topics=_pending_topics,
             shared_memory_count=_shared_count,
+            user_message=str(runtime_input.user_message or ""),
             runtime_flags=runtime_payload.get("runtime_mode"),
         )
-        _motive_state = compute_motive_state(_motive_inp)
-        runtime_payload["motive_state"] = _motive_state.as_dict()
-
-        _policy_inp = ResponsePolicyInput(
+        runtime_payload["response_policy"] = _limbic_agent.decide_response_policy(
             silence_state=runtime_payload.get("silence_state"),
             body_sense=runtime_payload.get("body_sense"),
             offline_state=runtime_payload.get("offline_state"),
@@ -2329,24 +2477,21 @@ def build_chat_prompt_runtime_payload(
             user_message=str(runtime_input.user_message or ""),
             runtime_flags=runtime_payload.get("runtime_mode"),
         )
-        _policy_decision = decide_response_policy(_policy_inp)
-        runtime_payload["response_policy"] = _policy_decision.as_dict()
         runtime_payload["persona_expression_hint"] = _apply_motive_state_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("motive_state"),
         )
-        if runtime_payload.get("self_reflection_pulse") and _sr_for_alignment is not None and _sr_align_pulse is not None:
+        if (
+            runtime_payload.get("self_reflection_pulse")
+            and _prefrontal_agent_for_sr is not None
+            and _sr_alignment_snapshot
+        ):
             try:
-                _sr_snapshot = _sr_for_alignment._model.build_snapshot(**_sr_snapshot_inputs)
-                _sr_snapshot = _sr_for_alignment._validate_consistency(
-                    _sr_snapshot,
-                    _sr_snapshot_inputs.get("bond_state"),
-                )
-                runtime_payload["self_reflection_pulse"] = _sr_align_pulse(
-                    runtime_payload.get("self_reflection_pulse"),
-                    snapshot=_sr_snapshot,
+                runtime_payload["self_reflection_pulse"] = _prefrontal_agent_for_sr.align_self_reflection_pulse(
+                    pulse=runtime_payload.get("self_reflection_pulse"),
+                    snapshot=_sr_alignment_snapshot,
                     offline_state=runtime_payload.get("offline_state"),
-                    bond_summary=runtime_payload.get("bond_summary") or _sr_snapshot_inputs.get("bond_summary"),
+                    bond_summary=runtime_payload.get("bond_summary"),
                     motive_state=runtime_payload.get("motive_state"),
                     response_policy=runtime_payload.get("response_policy"),
                     runtime_flags=runtime_payload.get("runtime_mode"),
@@ -2386,6 +2531,13 @@ def build_chat_prompt_runtime_payload(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("runtime_mode"),
         )
+
+    try:
+        _agent_context_pack = _build_multi_agent_context_pack(runtime_payload=runtime_payload)
+        if _agent_context_pack:
+            runtime_payload["context_pack"] = _agent_context_pack
+    except Exception as _context_pack_exc:
+        logger.debug("build multi-agent context pack degraded: %s", _context_pack_exc)
 
     return runtime_payload
 

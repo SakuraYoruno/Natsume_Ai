@@ -39,7 +39,6 @@ from host_brain.memory.episodic import EpisodicStore
 from host_brain.mcp.tool_broker import MCPToolBroker
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.observability.metrics import MetricsCollector
-from host_brain.persona.bond_aware_style import BondAwareStyleEngine
 from host_brain.retrieval.pipeline import (
     RetrievalPipelineContract,
     build_retrieval_pipeline_from_env,
@@ -68,6 +67,7 @@ from host_brain.app.llm.routing_matrix import RoutingMatrix
 from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard
 from host_brain.app.memory.state_arbiter import StateArbiter
+from host_brain.app.memory.state_write_arbiter import StateWriteArbiter
 from host_brain.app.memory.distillation_engine import DistillationEngine
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 from host_brain.app.prompt_template_store import PromptTemplateStore
@@ -109,12 +109,13 @@ _routing_matrix: Optional[RoutingMatrix] = None
 _recall_pack_builder: Optional[RecallPackBuilder] = None
 _memory_guard: Optional[MemoryGuard] = None
 _state_arbiter: Optional[StateArbiter] = None
+_state_write_arbiter: Optional[StateWriteArbiter] = None
 _distillation_engine: Optional[DistillationEngine] = None
 _semantic_recaller: Optional[SemanticRecaller] = None
 _prompt_template_store: Optional[PromptTemplateStore] = None
 _context_compressor: Optional[Any] = None
 _emotion_timeline: Optional[Any] = None
-_bond_aware_style_engine: Optional[BondAwareStyleEngine] = None
+_bond_aware_style_engine: Optional[Any] = None
 _reflection_chain: Optional[ReflectionChain] = None
 _tts_context_router: Optional[TtsContextRouter] = None
 _multimodal_processor: Optional[MultimodalProcessor] = None
@@ -728,6 +729,28 @@ def get_state_arbiter() -> StateArbiter:
     return _state_arbiter
 
 
+def get_state_write_arbiter() -> StateWriteArbiter:
+    """获取状态写权限仲裁器单例（延迟初始化）。"""
+    global _state_write_arbiter
+    if _state_write_arbiter is None:
+        ledger = get_ledger()
+
+        def _audit_writer(event: str, detail: dict) -> None:
+            try:
+                ledger.log_error(
+                    request_id=str(detail.get("request_id") or "state_write_arbiter"),
+                    stage=event,
+                    reason_code=str(detail.get("reason_code") or event),
+                    detail=str(detail),
+                )
+            except Exception as exc:
+                _logger.warning("StateWriteArbiter 审计写入失败: %s", exc)
+
+        _state_write_arbiter = StateWriteArbiter(audit_writer=_audit_writer)
+        _logger.info("StateWriteArbiter 已初始化（SoulState 默认仅 persona_core 可写）")
+    return _state_write_arbiter
+
+
 # ---------------------------------------------------------------------------
 # 蒸馏引擎 + 语义召回器工厂
 # ---------------------------------------------------------------------------
@@ -791,10 +814,54 @@ def get_semantic_recaller() -> SemanticRecaller:
     return _semantic_recaller
 
 
-def get_bond_aware_style_engine() -> BondAwareStyleEngine:
+class _BondAwareStyleResultView:
+    def __init__(self, payload: Mapping[str, Any] | None = None) -> None:
+        raw = dict(payload or {})
+        self._as_dict = dict(raw.get("as_dict") or {})
+        self.prompt_injection = str(raw.get("prompt_injection") or "")
+        self.forbidden_patterns = tuple(str(item) for item in list(raw.get("forbidden_patterns") or []))
+        self.intimacy_level = float(raw.get("intimacy_level") or self._as_dict.get("intimacy_level") or 0.0)
+
+    def as_dict(self) -> dict[str, Any]:
+        return dict(self._as_dict)
+
+
+class _BondAwareStyleEngineProxy:
+    def generate(
+        self,
+        *,
+        bond_stage: str,
+        mood_state: str,
+        rift_active: bool = False,
+        bond_trend: str = "",
+        texture_hint: str = "",
+        shared_memory_hints: list[str] | None = None,
+        intimacy_score: float = 0.0,
+        natsume_mood: str = "NEUTRAL",
+        rift_severity: str = "medium",
+        rift_progress: float = 0.0,
+    ) -> _BondAwareStyleResultView:
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+        payload = get_prefrontal_agent().resolve_bond_style_payload(
+            bond_stage=str(bond_stage or "STRANGER"),
+            intimacy_score=float(intimacy_score or 0.0),
+            mood_state=str(mood_state or "neutral"),
+            natsume_mood=str(natsume_mood or "NEUTRAL"),
+            rift_active=bool(rift_active),
+            rift_severity=str(rift_severity or "medium"),
+            rift_progress=float(rift_progress or 0.0),
+            bond_trend=str(bond_trend or ""),
+            texture_hint=str(texture_hint or ""),
+            shared_memory_hints=list(shared_memory_hints or []) or None,
+        )
+        return _BondAwareStyleResultView(payload)
+
+
+def get_bond_aware_style_engine() -> Any:
     global _bond_aware_style_engine
     if _bond_aware_style_engine is None:
-        _bond_aware_style_engine = BondAwareStyleEngine()
+        _bond_aware_style_engine = _BondAwareStyleEngineProxy()
     return _bond_aware_style_engine
 
 
@@ -960,6 +1027,32 @@ def set_sys_mode(target_mode: str) -> dict:
         "to_mode": _hard_state.sys_mode,
         "ts_ms": ts,
     }
+
+
+def get_endocrine_state(
+    *,
+    emotion_tag: str | None = None,
+    emotion_intensity: float | None = None,
+) -> dict[str, Any]:
+    """基于当前 HardState 派生内分泌基调状态（EndocrineAgent 最小版）。"""
+    try:
+        from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+
+        return get_endocrine_agent().resolve_endocrine_state(
+            hard_state=get_hard_state(),
+            emotion_tag=emotion_tag,
+            emotion_intensity=emotion_intensity,
+        )
+    except Exception as exc:
+        _logger.warning("EndocrineState 计算失败（降级）: %s", exc)
+        return {
+            "dopamine_level": 0.5,
+            "serotonin_level": 0.5,
+            "cortisol_level": 0.25,
+            "energy_reserve": 0.6,
+            "gate_state": "open",
+            "source": "endocrine_fallback",
+        }
 
 
 def get_context_compressor():

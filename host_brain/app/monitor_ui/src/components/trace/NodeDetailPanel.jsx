@@ -136,9 +136,19 @@ function buildNodeSummaryMetrics(node) {
 
 function buildNodeSummaryTags(node) {
   const output = (node?.output_data && typeof node.output_data === 'object') ? node.output_data : {}
+  const nestedImmune = (output?.immune_gate && typeof output.immune_gate === 'object') ? output.immune_gate : {}
+  const immuneReasonCodes = [
+    ...(Array.isArray(output.reason_codes) ? output.reason_codes : []),
+    ...(Array.isArray(nestedImmune.reason_codes) ? nestedImmune.reason_codes : []),
+    output.reason_code,
+    nestedImmune.reason_code,
+    node?.reason_code,
+  ].filter(Boolean)
   return [
     { label: '目标存储', items: normalizeTagItems(output.target_stores || output.query_plan?.target_stores) },
     { label: '原因标签', items: normalizeTagItems(output.reason_tags || output.policy_reason_tags || output.motive_reason_tags) },
+    { label: 'Immune 原因', items: normalizeTagItems(immuneReasonCodes) },
+    { label: 'Immune 规则', items: normalizeTagItems(output.matched_rules || nestedImmune.matched_rules) },
     { label: '缺失维度', items: normalizeTagItems(output.final_evaluation?.missing_aspects) },
     { label: '证据引用', items: normalizeTagItems(output.selected_refs || output.evidence_refs) },
   ].filter((group) => group.items.length > 0)

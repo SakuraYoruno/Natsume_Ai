@@ -69,6 +69,8 @@ def _safe_json(text: Any) -> Any:
 
 def _voice_event_node_type(event_type: str) -> tuple[str, str]:
     normalized = str(event_type or "").strip().upper()
+    if "IMMUNE" in normalized:
+        return "immune", "Immune Gate"
     if "TTS" in normalized:
         return "tts", "TTS"
     if "VTS" in normalized:
@@ -103,6 +105,10 @@ def _build_voice_trace_nodes(rows: List[Dict[str, Any]]) -> List[TraceNode]:
             str(payload_dict.get("reason_code") or row.get("reason_code") or "").strip()
             or None
         )
+        if reason_code is None and node_type == "immune":
+            reason_codes = list(payload_dict.get("reason_codes") or [])
+            first_reason = str(reason_codes[0] if reason_codes else "").strip()
+            reason_code = first_reason or None
         latency_ms = payload_dict.get("latency_ms")
         if latency_ms is None:
             latency_ms = payload_dict.get("roundtrip_latency_ms")
@@ -130,7 +136,7 @@ def _build_voice_trace_nodes(rows: List[Dict[str, Any]]) -> List[TraceNode]:
                 node_id=f"voice_{node_type}_{int(row.get('seq') or idx)}",
                 node_type=node_type,
                 display_name=display_name,
-                side="edge",
+                side=("host" if node_type == "immune" else "edge"),
                 status=status,
                 reason_code=reason_code,
                 latency_ms=latency_ms,
@@ -354,6 +360,152 @@ def _build_trace_subgraphs(request_id: str) -> List[Dict[str, Any]]:
             }
         )
     return subgraphs
+
+
+def _build_trace_subgraphs_from_nodes_raw(nodes_raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    subgraphs: List[Dict[str, Any]] = []
+    for idx, node_row in enumerate(nodes_raw, start=1):
+        if not isinstance(node_row, dict):
+            continue
+        owner_node_id = str(node_row.get("node_id") or "").strip() or f"sub_agent_{idx}"
+        output_data = node_row.get("output_data")
+        if not isinstance(output_data, dict):
+            continue
+        audit_refs = output_data.get("audit_refs")
+        if not isinstance(audit_refs, dict):
+            continue
+
+        summary = (
+            dict(audit_refs.get("subgraph_commit_summary") or {})
+            if isinstance(audit_refs.get("subgraph_commit_summary"), dict)
+            else {}
+        )
+        flat_rows_raw = summary.get("graph_trace_flat")
+        flat_rows = (
+            [dict(entry) for entry in flat_rows_raw if isinstance(entry, dict)]
+            if isinstance(flat_rows_raw, list)
+            else []
+        )
+        if not flat_rows:
+            trace_rows_raw = audit_refs.get("subgraph_trace")
+            flat_rows = (
+                [dict(entry) for entry in trace_rows_raw if isinstance(entry, dict)]
+                if isinstance(trace_rows_raw, list)
+                else []
+            )
+        if not flat_rows:
+            continue
+
+        subgraph_id = (
+            str(summary.get("subgraph_id") or audit_refs.get("subgraph_id") or "").strip()
+            or f"{owner_node_id}_subgraph"
+        )
+        nodes: List[Dict[str, Any]] = []
+        prev_node_id: Optional[str] = None
+        for step_index, entry in enumerate(flat_rows, start=1):
+            raw_node_id = str(entry.get("node_id") or f"step_{step_index}").strip() or f"step_{step_index}"
+            node_id = f"{subgraph_id}:{raw_node_id}:{step_index}"
+            reason_code = str(entry.get("reason_code") or "").strip() or None
+            detail = str(entry.get("detail") or "").strip() or None
+            node = TraceNode(
+                node_id=node_id,
+                node_type=str(entry.get("node_type") or "agent"),
+                display_name=str(entry.get("display_name") or raw_node_id),
+                side="host",
+                status=_normalize_trace_node_status(
+                    entry.get("status", "UNKNOWN"),
+                    node_type=str(entry.get("node_type") or "agent"),
+                    reason_code=reason_code,
+                    output_data={"detail": detail} if detail else None,
+                ),
+                reason_code=reason_code,
+                input_data={
+                    "raw_node_id": raw_node_id,
+                    "step_index": step_index,
+                },
+                output_data={
+                    "detail": detail,
+                    "entry": dict(entry),
+                },
+                ts_ms=entry.get("ts_ms"),
+                error=reason_code,
+                group_id="agent",
+                owner_node_id=owner_node_id,
+                subgraph_id=subgraph_id,
+                parent_node_id=prev_node_id,
+            )
+            nodes.append(_model_dump_compat(node))
+            prev_node_id = node_id
+
+        edges = [
+            {"source": nodes[index]["node_id"], "target": nodes[index + 1]["node_id"]}
+            for index in range(len(nodes) - 1)
+        ]
+        try:
+            node_count = int(summary.get("node_count") or len(nodes))
+        except (TypeError, ValueError):
+            node_count = len(nodes)
+        try:
+            success_count = int(summary.get("success_count") or 0)
+        except (TypeError, ValueError):
+            success_count = 0
+        if success_count <= 0:
+            success_count = sum(
+                1
+                for entry in flat_rows
+                if str(entry.get("status") or "").strip().upper() in {"OK", "SUCCESS"}
+            )
+        try:
+            fail_count = int(summary.get("fail_count") or 0)
+        except (TypeError, ValueError):
+            fail_count = 0
+        if fail_count <= 0:
+            fail_count = sum(
+                1
+                for entry in flat_rows
+                if str(entry.get("status") or "").strip().upper() in {"FAILED", "ERROR", "DEGRADED"}
+            )
+        try:
+            committed_at_ms = int(summary.get("committed_at_ms") or node_row.get("ts_ms") or _now_ms())
+        except (TypeError, ValueError):
+            committed_at_ms = _now_ms()
+
+        subgraphs.append(
+            {
+                "subgraph_id": subgraph_id,
+                "owner_node_id": owner_node_id,
+                "node_count": node_count,
+                "success_count": success_count,
+                "fail_count": fail_count,
+                "committed_at_ms": committed_at_ms,
+                "nodes": nodes,
+                "edges": edges,
+                "graph_trace_flat": flat_rows,
+            }
+        )
+    return subgraphs
+
+
+def _merge_trace_subgraphs(
+    base_subgraphs: List[Dict[str, Any]],
+    extra_subgraphs: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    merged = list(base_subgraphs)
+    existing_ids = {
+        str(item.get("subgraph_id") or "").strip()
+        for item in merged
+        if isinstance(item, dict)
+    }
+    for item in extra_subgraphs:
+        if not isinstance(item, dict):
+            continue
+        subgraph_id = str(item.get("subgraph_id") or "").strip()
+        if subgraph_id and subgraph_id in existing_ids:
+            continue
+        merged.append(item)
+        if subgraph_id:
+            existing_ids.add(subgraph_id)
+    return merged
 
 
 def _build_trace_stream_events(request_id: str) -> List[Dict[str, Any]]:
@@ -913,6 +1065,8 @@ def _build_retrieval_trace_nodes(
 
     node_timings_ms = dict(summary.get("node_timings_ms") or {})
     display_names = {
+        "QUERY_PLANNER": "Query Planner",
+        "AGENTIC_RAG": "Agentic RAG",
         "EMBEDDING": "Recall Embedding",
         "RECALL": "Recall Fusion",
         "RERANK": "Recall Rerank",
@@ -920,6 +1074,8 @@ def _build_retrieval_trace_nodes(
         "PIPELINE": "Retrieval Pipeline",
     }
     node_ids = {
+        "QUERY_PLANNER": "query_planner",
+        "AGENTIC_RAG": "agentic_rag",
         "EMBEDDING": "retrieval_embedding",
         "RECALL": "recall_fusion",
         "RERANK": "retrieval_rerank",
@@ -928,6 +1084,8 @@ def _build_retrieval_trace_nodes(
     }
 
     nodes: List[TraceNode] = []
+    query_planner_emitted = False
+    agentic_rag_emitted = False
     for row in retrieval_rows:
         op_kind = str(row.get("op_kind") or "").strip().upper() or "UNKNOWN"
         payload = _safe_json(row.get("payload"))
@@ -935,6 +1093,57 @@ def _build_retrieval_trace_nodes(
         latency_ms = payload_dict.get("latency_ms")
         if latency_ms is None and op_kind in ("RECALL", "PIPELINE"):
             latency_ms = node_timings_ms.get("recall_fusion")
+        if op_kind == "QUERY_PLANNER":
+            query_planner_emitted = True
+        if op_kind == "AGENTIC_RAG":
+            agentic_rag_emitted = True
+
+        if op_kind == "PIPELINE" and isinstance(payload_dict.get("query_plan"), dict) and not query_planner_emitted:
+            nodes.append(
+                TraceNode(
+                    node_id="query_planner",
+                    node_type="retrieval",
+                    display_name="Query Planner",
+                    side="host",
+                    status=_normalize_trace_node_status(
+                        row.get("status"),
+                        node_type="retrieval",
+                        reason_code=row.get("reason_code"),
+                        output_data=payload_dict.get("query_plan"),
+                    ),
+                    reason_code=row.get("reason_code"),
+                    latency_ms=node_timings_ms.get("query_planner"),
+                    input_data={"stage": row.get("stage"), "op_kind": "QUERY_PLANNER"},
+                    output_data=payload_dict.get("query_plan"),
+                    ts_ms=row.get("ts_ms"),
+                    error=row.get("reason_code"),
+                )
+            )
+            query_planner_emitted = True
+
+        if op_kind == "PIPELINE" and isinstance(payload_dict.get("agentic_meta"), dict) and not agentic_rag_emitted:
+            nodes.append(
+                TraceNode(
+                    node_id="agentic_rag",
+                    node_type="retrieval",
+                    display_name="Agentic RAG",
+                    side="host",
+                    status=_normalize_trace_node_status(
+                        row.get("status"),
+                        node_type="retrieval",
+                        reason_code=row.get("reason_code"),
+                        output_data=payload_dict.get("agentic_meta"),
+                    ),
+                    reason_code=row.get("reason_code"),
+                    latency_ms=node_timings_ms.get("agentic_rag"),
+                    input_data={"stage": row.get("stage"), "op_kind": "AGENTIC_RAG"},
+                    output_data=payload_dict.get("agentic_meta"),
+                    ts_ms=row.get("ts_ms"),
+                    error=row.get("reason_code"),
+                )
+            )
+            agentic_rag_emitted = True
+
         nodes.append(
             TraceNode(
                 node_id=node_ids.get(op_kind, f"retrieval_{op_kind.lower()}"),
@@ -967,6 +1176,175 @@ def _build_retrieval_trace_nodes(
             )
         )
     return nodes
+
+
+def _build_persona_trace_nodes(summary: Dict[str, Any]) -> List[TraceNode]:
+    audit_snapshot = dict(summary.get("audit_snapshot") or {})
+    node_timings_ms = dict(summary.get("node_timings_ms") or {})
+    ts_ms = audit_snapshot.get("ts_ms")
+    emotion_context = audit_snapshot.get("emotion_context")
+    if not isinstance(emotion_context, dict):
+        emotion_context = {}
+    emotion_tags = list(summary.get("emotion_tags") or [])
+    if emotion_tags and not emotion_context:
+        emotion_context = {"emotion_tags": emotion_tags}
+
+    resident_memory = audit_snapshot.get("persona_resident_memory")
+    if resident_memory is None:
+        resident_memory = audit_snapshot.get("resident_memory")
+    motive_state = audit_snapshot.get("motive_state")
+    if not isinstance(motive_state, dict):
+        motive_state = {}
+
+    nodes: List[TraceNode] = []
+    if emotion_context:
+        nodes.append(
+            TraceNode(
+                node_id="emotion_context",
+                node_type="system",
+                display_name="Emotion Context",
+                side="host",
+                status="OK",
+                latency_ms=node_timings_ms.get("emotion_context"),
+                output_data=emotion_context,
+                ts_ms=ts_ms,
+            )
+        )
+    if resident_memory:
+        nodes.append(
+            TraceNode(
+                node_id="persona_resident_memory",
+                node_type="memory",
+                display_name="Persona Resident Memory",
+                side="host",
+                status="OK",
+                latency_ms=node_timings_ms.get("persona_resident_memory"),
+                output_data=resident_memory,
+                ts_ms=ts_ms,
+            )
+        )
+    if motive_state:
+        nodes.append(
+            TraceNode(
+                node_id="motive_state",
+                node_type="system",
+                display_name="Motive State",
+                side="host",
+                status="OK",
+                latency_ms=node_timings_ms.get("motive_state"),
+                output_data=motive_state,
+                ts_ms=ts_ms,
+            )
+        )
+    return nodes
+
+
+def _build_orchestration_trace_nodes(
+    summary: Dict[str, Any],
+    subgraphs: List[Dict[str, Any]],
+) -> List[TraceNode]:
+    audit_snapshot = dict(summary.get("audit_snapshot") or {})
+    node_timings_ms = dict(summary.get("node_timings_ms") or {})
+    ts_ms = audit_snapshot.get("ts_ms") or _now_ms()
+    failure_event = summary.get("failure_event")
+    response_policy = audit_snapshot.get("response_policy")
+
+    nodes: List[TraceNode] = []
+    if isinstance(response_policy, dict) and response_policy:
+        nodes.append(
+            TraceNode(
+                node_id="response_policy",
+                node_type="system",
+                display_name="Response Policy",
+                side="host",
+                status="OK",
+                latency_ms=node_timings_ms.get("response_policy"),
+                output_data=response_policy,
+                ts_ms=ts_ms,
+            )
+        )
+
+    if summary.get("routing_selected") or summary.get("output_text") or failure_event:
+        nodes.append(
+            TraceNode(
+                node_id="top_agent",
+                node_type="agent",
+                display_name="Top Agent",
+                side="host",
+                status="FAIL" if failure_event else "OK",
+                reason_code=failure_event,
+                latency_ms=node_timings_ms.get("top_agent"),
+                output_data={
+                    "routing_selected": summary.get("routing_selected"),
+                    "final_response_chars": summary.get("final_response_chars"),
+                    "output_text": summary.get("output_text"),
+                },
+                ts_ms=ts_ms,
+                error=failure_event,
+            )
+        )
+
+    if subgraphs:
+        has_subgraph_fail = any(int(item.get("fail_count") or 0) > 0 for item in subgraphs if isinstance(item, dict))
+        nodes.append(
+            TraceNode(
+                node_id="dispatch_agent",
+                node_type="agent",
+                display_name="Dispatch Agent",
+                side="host",
+                status="DEGRADED" if has_subgraph_fail else "OK",
+                latency_ms=node_timings_ms.get("dispatch_agent"),
+                output_data={
+                    "subgraph_count": len(subgraphs),
+                    "subgraph_ids": [
+                        str(item.get("subgraph_id") or "")
+                        for item in subgraphs
+                        if isinstance(item, dict)
+                    ],
+                },
+                ts_ms=ts_ms,
+                error="SUBGRAPH_FAILED" if has_subgraph_fail else None,
+            )
+        )
+
+    if summary.get("output_text") or failure_event:
+        nodes.append(
+            TraceNode(
+                node_id="chat_agent",
+                node_type="agent",
+                display_name="Chat Agent",
+                side="host",
+                status="FAIL" if failure_event else "OK",
+                reason_code=failure_event,
+                latency_ms=node_timings_ms.get("chat_agent"),
+                output_data={
+                    "final_response": summary.get("output_text"),
+                    "final_response_chars": summary.get("final_response_chars"),
+                },
+                ts_ms=ts_ms,
+                error=failure_event,
+            )
+        )
+    return nodes
+
+
+def _append_missing_trace_nodes(
+    existing_nodes: List[TraceNode],
+    candidate_nodes: List[TraceNode],
+) -> List[TraceNode]:
+    known_ids = {
+        str(node.node_id or "").strip()
+        for node in existing_nodes
+        if str(node.node_id or "").strip()
+    }
+    appended: List[TraceNode] = []
+    for node in candidate_nodes:
+        node_id = str(node.node_id or "").strip()
+        if not node_id or node_id in known_ids:
+            continue
+        appended.append(node)
+        known_ids.add(node_id)
+    return appended
 
 
 def _build_llm_trace_nodes(
@@ -1350,6 +1728,23 @@ class SessionsResponse(BaseModel):
     items: List[SessionItem]
     timestamp: int
 
+
+class TribeEventItem(BaseModel):
+    event_id: str
+    event_type: str
+    source_agent: str
+    target_agent: Optional[str] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    schema_version: str
+    ts_ms: int
+
+
+class TribeEventsResponse(BaseModel):
+    total: int
+    items: List[TribeEventItem]
+    timestamp: int
+
+
 class TraceNode(BaseModel):
     node_id: str
     node_type: str  # "edge" | "llm_node" | "system"
@@ -1564,6 +1959,11 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
             trace_recall = _extract_recall_summary_from_trace_nodes_raw(nodes_raw if isinstance(nodes_raw, list) else [])
             if trace_recall:
                 summary["recall"] = trace_recall
+        if isinstance(nodes_raw, list):
+            subgraphs = _merge_trace_subgraphs(
+                subgraphs,
+                _build_trace_subgraphs_from_nodes_raw(nodes_raw),
+            )
 
         nodes = []
         for node_row in nodes_raw:
@@ -1595,7 +1995,28 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
                 parent_node_id=node_row.get("parent_node_id"),
             ))
 
+        supplement_nodes: List[TraceNode] = []
+        intent_node = _build_intent_trace_node(intent_rows[-1] if intent_rows else {})
+        if intent_node is not None:
+            supplement_nodes.append(intent_node)
+        governor_node = _build_governor_trace_node(governor_rows[-1] if governor_rows else {}, summary)
+        if governor_node is not None:
+            supplement_nodes.append(governor_node)
+        supplement_nodes.extend(_build_airlock_trace_nodes(airlock_rows, summary))
+        supplement_nodes.extend(_build_retrieval_trace_nodes(retrieval_rows, summary))
+        supplement_nodes.extend(_build_persona_trace_nodes(summary))
+        supplement_nodes.extend(_build_orchestration_trace_nodes(summary, subgraphs))
+        supplement_nodes.extend(_build_llm_trace_nodes(llm_rows, summary))
+        supplement_nodes.extend(_build_bond_trace_nodes(bond_rows))
+        supplement_nodes.extend(_build_memory_trace_nodes(memory_rows, summary))
+        audit_snapshot_node = _build_audit_snapshot_node(summary)
+        if audit_snapshot_node is not None:
+            supplement_nodes.append(audit_snapshot_node)
+        supplement_nodes = _append_missing_trace_nodes(nodes, supplement_nodes)
+
         edges = [TraceEdge(source=edge.get("source", ""), target=edge.get("target", "")) for edge in edges_raw]
+        edges = _build_trace_edges(nodes, edges, supplement_nodes)
+        nodes.extend(supplement_nodes)
         voice_nodes = _build_voice_trace_nodes(voice_rows)
         edges = _build_trace_edges(nodes, edges, voice_nodes)
         nodes.extend(voice_nodes)
@@ -1626,6 +2047,8 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
         synthesized_nodes.append(governor_node)
     synthesized_nodes.extend(_build_airlock_trace_nodes(airlock_rows, summary))
     synthesized_nodes.extend(_build_retrieval_trace_nodes(retrieval_rows, summary))
+    synthesized_nodes.extend(_build_persona_trace_nodes(summary))
+    synthesized_nodes.extend(_build_orchestration_trace_nodes(summary, subgraphs))
     synthesized_nodes.extend(_build_llm_trace_nodes(llm_rows, summary))
     synthesized_nodes.extend(_build_bond_trace_nodes(bond_rows))
     synthesized_nodes.extend(_build_memory_trace_nodes(memory_rows, summary))
@@ -2198,6 +2621,45 @@ async def get_sessions(
         status=status,
         window_minutes=window_minutes,
         keyword=keyword,
+    )
+
+
+@router.get("/tribe/events", response_model=TribeEventsResponse)
+async def get_tribe_events(
+    limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
+    event_type: Optional[str] = Query(None, description="按事件类型过滤"),
+    source_agent: Optional[str] = Query(None, description="按 source_agent 过滤"),
+    target_agent: Optional[str] = Query(None, description="按 target_agent 过滤"),
+    request_id: Optional[str] = Query(None, description="按 request_id 过滤"),
+    session_id: Optional[str] = Query(None, description="按 session_id 过滤"),
+    conversation_id: Optional[str] = Query(None, description="按 conversation_id 过滤"),
+):
+    """Tribe 事件观测窗口（Host 内存总线最近事件）。"""
+    try:
+        from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+        bus = get_tribe_event_bus()
+        items = [
+            TribeEventItem(**event.to_dict())
+            for event in bus.recent(
+                limit=limit,
+                event_type=event_type,
+                source_agent=source_agent,
+                target_agent=target_agent,
+                request_id=request_id,
+                session_id=session_id,
+                conversation_id=conversation_id,
+            )
+        ]
+    except Exception as exc:
+        logger.debug("get_tribe_events degraded: %s", exc)
+        items = []
+
+    timestamp = items[0].ts_ms if items else _now_ms()
+    return TribeEventsResponse(
+        total=len(items),
+        items=items,
+        timestamp=int(timestamp),
     )
 
 # ---------------------------------------------------------------------------

@@ -4267,6 +4267,39 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
+    "immune_agent.runtime_rules": PromptTemplateDefinition(
+        template_id="immune_agent.runtime_rules",
+        category="governance",
+        scope="immune_agent",
+        locale="*",
+        content_type="json",
+        description="ImmuneAgent 可运营规则覆盖（关键词/正则）",
+        default_content=_json_text(
+            {
+                "keyword_rules": [
+                    {
+                        "rule_id": "template_prompt_injection_cn",
+                        "reason_code": "PROMPT_INJECTION_DETECTED",
+                        "score": 0.32,
+                        "keywords": [
+                            "忽略之前的指令",
+                            "绕过安全规则",
+                            "无视系统提示",
+                        ],
+                    }
+                ],
+                "regex_rules": [
+                    {
+                        "rule_id": "template_exfiltration_cn",
+                        "reason_code": "PROMPT_EXFILTRATION_ATTEMPT",
+                        "score": 0.46,
+                        "pattern": "(泄露|输出|展示).{0,24}(系统提示词|密钥|token|密码)",
+                        "flags": "IGNORECASE|DOTALL",
+                    }
+                ],
+            }
+        ),
+    ),
     "core.qa.fallback_texts": PromptTemplateDefinition(
         template_id="core.qa.fallback_texts",
         category="fallback",

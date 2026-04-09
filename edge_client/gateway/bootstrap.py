@@ -74,10 +74,22 @@ class GatewayInstance:
         self.server_thread: threading.Thread | None = None
         self.wechat_bridge_process: subprocess.Popen | None = None
         self.wechat_bridge_watchdog: threading.Thread | None = None
+        self.peripheral_agent = None
+        self.connected_platforms: set[str] = set()
         self._shutdown = threading.Event()
 
     def stop(self) -> None:
         self._shutdown.set()
+        if self.peripheral_agent is not None and self.connected_platforms:
+            for platform in sorted(self.connected_platforms):
+                try:
+                    self.peripheral_agent.publish_platform_disconnected(
+                        platform=platform,
+                        detail="gateway_stopped",
+                    )
+                except Exception as exc:
+                    logger.debug("Gateway: platform_disconnected emit degraded: %s", exc)
+            self.connected_platforms.clear()
         if self.wechat_bridge_process is not None:
             try:
                 self.wechat_bridge_process.terminate()
@@ -248,6 +260,8 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     from edge_client.gateway.outbound import OutboundDispatcher
     from edge_client.gateway.router import GatewayRouter
     from edge_client.gateway.server import create_gateway_app
+    from edge_client.tribe.peripheral_agent import PeripheralAgent
+    from edge_client.tribe.registry import build_edge_tribe_bridge
 
     instance = GatewayInstance()
     enabled_platforms = _normalize_platforms(config.enabled_platforms)
@@ -259,10 +273,46 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     reporter.start_retry_loop()
     instance.reporter = reporter
 
+    tribe_bridge = None
+    try:
+        tribe_bridge = build_edge_tribe_bridge()
+    except Exception as exc:  # pragma: no cover - non-blocking sidecar
+        logger.debug("Gateway: tribe bridge build degraded: %s", exc)
+    instance.peripheral_agent = PeripheralAgent(bridge=tribe_bridge)
+
     normalizer = MessageNormalizer()
     router = GatewayRouter(reporter)
+    try:
+        router.set_tribe_bridge(tribe_bridge)
+    except Exception as exc:  # pragma: no cover - non-blocking sidecar
+        logger.debug("Gateway: tribe bridge init degraded: %s", exc)
     outbound = OutboundDispatcher()
     adapters: dict[str, Any] = {}
+
+    def _mark_platform_connected(platform: str, detail: str | None = None) -> None:
+        normalized = str(platform or "").strip().lower()
+        if not normalized:
+            return
+        instance.connected_platforms.add(normalized)
+        try:
+            instance.peripheral_agent.publish_platform_connected(
+                platform=normalized,
+                detail=detail,
+            )
+        except Exception as exc:  # pragma: no cover - non-blocking sidecar
+            logger.debug("Gateway: platform_connected emit degraded: %s", exc)
+
+    def _mark_platform_unavailable(platform: str, reason: str) -> None:
+        normalized = str(platform or "").strip().lower()
+        if not normalized:
+            return
+        try:
+            instance.peripheral_agent.publish_platform_disconnected(
+                platform=normalized,
+                detail=reason,
+            )
+        except Exception as exc:  # pragma: no cover - non-blocking sidecar
+            logger.debug("Gateway: platform_unavailable emit degraded: %s", exc)
 
     if "wechat" in enabled_platforms:
         from edge_client.gateway.adapters.wechat_adapter import WeChatAdapter
@@ -281,6 +331,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             logger.warning(
                 "Gateway: wechat 已启用但既未配置 WECHAT_DECRYPT_OUTPUT_DIR，也未启用 EDGE_WECHAT_BRIDGE_ENABLED，跳过注册"
             )
+            _mark_platform_unavailable(
+                Platform.WECHAT.value,
+                "wechat_missing_decrypt_output_or_bridge",
+            )
         else:
             wx_adapter = WeChatAdapter(
                 wx_svc,
@@ -291,6 +345,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             )
             outbound.register(wx_adapter)
             adapters[Platform.WECHAT.value] = wx_adapter
+            _mark_platform_connected(
+                Platform.WECHAT.value,
+                "adapter_registered",
+            )
 
             if bridge_mode:
                 logger.info(
@@ -345,8 +403,16 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             )
             outbound.register(qq_adapter)
             adapters[Platform.QQ.value] = qq_adapter
+            _mark_platform_connected(
+                Platform.QQ.value,
+                "adapter_registered",
+            )
         else:
             logger.warning("Gateway: qq 已启用但缺少 QQ_ONEBOT_API_BASE，跳过注册")
+            _mark_platform_unavailable(
+                Platform.QQ.value,
+                "qq_missing_api_base",
+            )
 
     if "feishu" in enabled_platforms:
         if config.feishu_app_id and config.feishu_app_secret:
@@ -360,8 +426,16 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             )
             outbound.register(feishu_adapter)
             adapters[Platform.FEISHU.value] = feishu_adapter
+            _mark_platform_connected(
+                Platform.FEISHU.value,
+                "adapter_registered",
+            )
         else:
             logger.warning("Gateway: feishu 已启用但缺少 FEISHU_APP_ID/FEISHU_APP_SECRET，跳过注册")
+            _mark_platform_unavailable(
+                Platform.FEISHU.value,
+                "feishu_missing_app_credentials",
+            )
 
     if "wecom" in enabled_platforms:
         if config.wecom_corp_id and config.wecom_corp_secret and config.wecom_agent_id:
@@ -376,8 +450,16 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             )
             outbound.register(wecom_adapter)
             adapters[Platform.WECOM.value] = wecom_adapter
+            _mark_platform_connected(
+                Platform.WECOM.value,
+                "adapter_registered",
+            )
         else:
             logger.warning("Gateway: wecom 已启用但缺少 corp 配置，跳过注册")
+            _mark_platform_unavailable(
+                Platform.WECOM.value,
+                "wecom_missing_corp_credentials",
+            )
 
     if "telegram" in enabled_platforms:
         if config.telegram_api_id and config.telegram_api_hash:
@@ -404,6 +486,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             )
             outbound.register(tg_adapter)
             adapters[Platform.TELEGRAM.value] = tg_adapter
+            _mark_platform_connected(
+                Platform.TELEGRAM.value,
+                "adapter_registered",
+            )
 
             # 异步连接 + 注册消息监听
             import asyncio as _aio
@@ -426,6 +512,10 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             logger.info("Gateway: Telegram Userbot 适配器已注册 session=%s", config.telegram_session_name)
         else:
             logger.warning("Gateway: telegram 已启用但缺少 TELEGRAM_API_ID/TELEGRAM_API_HASH，跳过注册")
+            _mark_platform_unavailable(
+                Platform.TELEGRAM.value,
+                "telegram_missing_api_credentials",
+            )
 
     if "line" in enabled_platforms:
         if config.line_channel_access_token and config.line_channel_secret:
@@ -438,8 +528,16 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
             outbound.register(line_adapter)
             adapters[Platform.LINE.value] = line_adapter
             logger.info("Gateway: LINE Messaging API 适配器已注册")
+            _mark_platform_connected(
+                Platform.LINE.value,
+                "adapter_registered",
+            )
         else:
             logger.warning("Gateway: line 已启用但缺少 LINE_CHANNEL_ACCESS_TOKEN/LINE_CHANNEL_SECRET，跳过注册")
+            _mark_platform_unavailable(
+                Platform.LINE.value,
+                "line_missing_channel_credentials",
+            )
 
     app = create_gateway_app(
         router=router,

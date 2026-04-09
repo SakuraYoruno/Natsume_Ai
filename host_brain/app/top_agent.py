@@ -210,7 +210,7 @@ async def _run_persona_session_end_hooks(
     """统一触发人格 session_end/conversation_end 收口。"""
     try:
         from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         persona_user_id = get_canonical_bond_user_id()
         valence, arousal = _resolve_persona_session_emotion(emotion_context)
@@ -219,8 +219,8 @@ async def _run_persona_session_end_hooks(
         if topic_preview:
             pending_topics = [topic_preview]
         await asyncio.to_thread(
-            get_inner_world().on_session_end,
-            persona_user_id,
+            get_limbic_agent().on_session_end,
+            person_id=persona_user_id,
             valence=valence,
             arousal=arousal,
             pending_topics=pending_topics,
@@ -229,9 +229,14 @@ async def _run_persona_session_end_hooks(
         _logger.debug("[%s] persona inner_world session_end failed: %s", request_id, exc)
 
     try:
-        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        await asyncio.to_thread(get_body_sense_model().on_conversation_end)
+        await asyncio.to_thread(
+            get_limbic_agent().on_conversation_ended,
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+        )
     except Exception as exc:
         _logger.debug("[%s] persona body_sense conversation_end failed: %s", request_id, exc)
 
@@ -643,6 +648,138 @@ def _normalize_trace_stage_meta(trace_stage_meta: Mapping[str, Any] | None) -> d
     return normalized
 
 
+def _resolve_envelope_confidence(status: str) -> float:
+    normalized = str(status or "").strip().upper()
+    if normalized == "OK":
+        return 1.0
+    if normalized == "SKIPPED":
+        return 0.6
+    if normalized == "DEGRADED":
+        return 0.35
+    if normalized in {"FAILED", "ERROR"}:
+        return 0.0
+    return 0.5
+
+
+def _build_trace_output_digest(output_data: Any) -> dict[str, Any]:
+    if isinstance(output_data, Mapping):
+        digest: dict[str, Any] = {"field_count": len(output_data)}
+        scalar_count = 0
+        for key, value in list(output_data.items())[:8]:
+            key_text = str(key).strip()
+            if not key_text:
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                digest[key_text] = value
+                scalar_count += 1
+                continue
+            if isinstance(value, list):
+                digest[f"{key_text}_count"] = len(value)
+                continue
+            if isinstance(value, Mapping):
+                digest[f"{key_text}_keys"] = list(value.keys())[:5]
+        if scalar_count == 0 and len(digest) == 1:
+            digest["kind"] = "mapping"
+        return digest
+
+    if isinstance(output_data, list):
+        return {"kind": "list", "count": len(output_data)}
+
+    if isinstance(output_data, str):
+        text = output_data.strip()
+        return {"kind": "text", "length": len(text), "preview": text[:120]}
+
+    if output_data is None:
+        return {}
+
+    return {"kind": type(output_data).__name__}
+
+
+def _detect_trace_fallback_used(
+    *,
+    reason_code: str | None,
+    degrade_code: str | None,
+    output_data: Any,
+) -> bool:
+    for token in (str(reason_code or ""), str(degrade_code or "")):
+        if "FALLBACK" in token.upper():
+            return True
+    if isinstance(output_data, Mapping):
+        for key, value in output_data.items():
+            key_text = str(key).strip().lower()
+            if "fallback" in key_text and bool(value):
+                return True
+    return False
+
+
+def _build_trace_agent_envelope(
+    *,
+    request_id: str,
+    node_id: str,
+    parent_node_id: str | None,
+    node_type: str,
+    status: str,
+    reason_code: str | None,
+    output_data: Any,
+    fallback_used: bool,
+    degrade_code: str | None,
+    ts_ms: int,
+) -> dict[str, Any]:
+    status_text = str(status or "OK").strip().upper() or "OK"
+    reason_code_text = str(reason_code or "").strip() or None
+    degrade_code_text = str(degrade_code or "").strip() or None
+    reason_text = reason_code_text or ""
+    output_digest = _build_trace_output_digest(output_data)
+
+    fallback_marked = bool(fallback_used) or _detect_trace_fallback_used(
+        reason_code=reason_code_text,
+        degrade_code=degrade_code_text,
+        output_data=output_data,
+    )
+    if degrade_code_text is None and status_text in {"DEGRADED", "FAILED", "ERROR"}:
+        degrade_code_text = reason_code_text
+
+    try:
+        from host_brain.app.schemas.agent_envelope import AgentEnvelope  # noqa: PLC0415
+
+        envelope_model = AgentEnvelope(
+            agent_id=node_id,
+            agent_family=str(node_type or "system").strip().lower() or "system",
+            status=status_text,
+            confidence=_resolve_envelope_confidence(status_text),
+            reason=reason_text,
+            reason_code=reason_code_text,
+            request_id=str(request_id or "").strip(),
+            node_id=node_id,
+            parent_node_id=(str(parent_node_id).strip() if parent_node_id else None),
+            output_digest=output_digest,
+            fallback_used=fallback_marked,
+            degrade_code=degrade_code_text,
+            ts_ms=int(ts_ms or 0),
+        )
+        envelope = envelope_model.as_trace_dict()
+        envelope["request_id"] = envelope_model.request_id
+        envelope["reason"] = envelope_model.reason
+        return envelope
+    except Exception:
+        return {
+            "agent_id": node_id,
+            "agent_family": str(node_type or "system").strip().lower() or "system",
+            "node_id": node_id,
+            "parent_node_id": (str(parent_node_id).strip() if parent_node_id else None),
+            "request_id": str(request_id or "").strip(),
+            "status": status_text,
+            "confidence": _resolve_envelope_confidence(status_text),
+            "reason": reason_text,
+            "reason_code": reason_code_text,
+            "fallback_used": fallback_marked,
+            "degrade_code": degrade_code_text,
+            "output_digest": output_digest,
+            "schema_version": "1.0",
+            "ts_ms": int(ts_ms or 0),
+        }
+
+
 def _build_trace_stage_node(
     *,
     node_id: str,
@@ -651,7 +788,11 @@ def _build_trace_stage_node(
     ts_ms: int,
     status: str = "OK",
     side: str = "host",
+    request_id: str = "",
+    parent_node_id: str | None = None,
     reason_code: str | None = None,
+    fallback_used: bool = False,
+    degrade_code: str | None = None,
     latency_ms: int | None = None,
     provider: str | None = None,
     model_id: str | None = None,
@@ -681,6 +822,18 @@ def _build_trace_stage_node(
         node["output_data"] = output_data
     if error:
         node["error"] = error
+    node["agent_envelope"] = _build_trace_agent_envelope(
+        request_id=request_id,
+        node_id=node_id,
+        parent_node_id=parent_node_id,
+        node_type=node_type,
+        status=status,
+        reason_code=reason_code,
+        output_data=output_data,
+        fallback_used=fallback_used,
+        degrade_code=degrade_code,
+        ts_ms=ts_ms,
+    )
     return node
 
 
@@ -1274,7 +1427,7 @@ async def _prefetch_retrieval_persona_inputs(
         _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
 
     try:
-        from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         retrieval_emotion_context = dict(emotion_context or {})
         if mood_state and not str(retrieval_emotion_context.get("mood_state") or "").strip():
@@ -1288,7 +1441,7 @@ async def _prefetch_retrieval_persona_inputs(
         if resolved_sys_mode:
             runtime_flags["sys_mode"] = resolved_sys_mode
         motive_state_raw = await asyncio.to_thread(
-            compute_runtime_motive_state,
+            get_limbic_agent().compute_runtime_motive_state,
             persona_user_id=person_id,
             current_topic=user_message,
             bond_summary=bond_summary,
@@ -2280,6 +2433,29 @@ async def _async_post_process(
                 "output_data": _pii_detail, "ts_ms": _now,
             })
 
+        _prev_node_id: str | None = None
+        for _node in trace_nodes:
+            _node_id = str(_node.get("node_id") or "").strip()
+            _node_type = str(_node.get("node_type") or "system").strip().lower() or "system"
+            _node_status = str(_node.get("status") or "OK").strip().upper() or "OK"
+            _node_reason = str(_node.get("reason_code") or "").strip() or None
+            _node_output = _node.get("output_data")
+            _node_ts = int(_node.get("ts_ms") or ts_ms)
+            _node["agent_envelope"] = _build_trace_agent_envelope(
+                request_id=request_id,
+                node_id=_node_id,
+                parent_node_id=_prev_node_id,
+                node_type=_node_type,
+                status=_node_status,
+                reason_code=_node_reason,
+                output_data=_node_output,
+                fallback_used=False,
+                degrade_code=None,
+                ts_ms=_node_ts,
+            )
+            if _node_id:
+                _prev_node_id = _node_id
+
         trace_edges = [
             {"source": trace_nodes[i]["node_id"], "target": trace_nodes[i + 1]["node_id"]}
             for i in range(len(trace_nodes) - 1)
@@ -2355,36 +2531,15 @@ async def _async_post_process(
 
     # ── Bond 更新 ────────────────────────────────────────────────────
     try:
-        from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
-        from host_brain.app.dependencies import get_ledger, get_bond_stage_engine, get_bond_update_queue  # noqa: PLC0415
-        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
-        etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
-        intensity = float(emotion_context.get("emotion_intensity") or 0.5)
-        update_kind = BondDynamicsWriter.classify_interaction(
-            text=user_message, emotion_intensity=intensity,
+        await get_cortex_agent().post_process_bond_update(
+            request_id=request_id,
+            session_id=session_id,
+            user_message=user_message,
+            emotion_context=emotion_context,
+            ts_ms=ts_ms,
         )
-        bond_payload = {
-            "request_id": request_id,
-            "intent_id": request_id,
-            "session_id": session_id,
-            "seq": 1,
-            "user_id": resolve_bond_user_id(session_id=session_id),
-            "topic_id": user_message[:64],
-            "capability_hint": "bond_memory",
-            "update_kind": update_kind,
-            "evidence_refs": [request_id],
-            "emotion_tag": etag,
-            "emotion_intensity": intensity,
-            "ts_ms": ts_ms,
-        }
-        queue = get_bond_update_queue()
-        result = queue.enqueue(bond_payload)
-        if str(result.get("status") or "") != "QUEUED":
-            writer = BondDynamicsWriter(
-                ledger=get_ledger(), stage_engine=get_bond_stage_engine(),
-            )
-            await asyncio.to_thread(writer.apply_update, **bond_payload)
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process bond failed: %s", request_id, exc)
 
@@ -2461,27 +2616,20 @@ async def _async_post_process(
     # ── PersonaDriftDetector：人格漂移检测 ───────────────────────────
     # 每轮对话后检测 LLM 输出是否偏离人格基线，生成校正提示供下轮注入
     try:
-        from host_brain.persona.drift_detector import PersonaDriftDetector  # noqa: PLC0415
-        if not hasattr(_async_post_process, "_drift_detector"):
-            _async_post_process._drift_detector = PersonaDriftDetector()
-        _dd: PersonaDriftDetector = _async_post_process._drift_detector
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
         _drift_result = await asyncio.to_thread(
-            _dd.on_turn,
+            get_prefrontal_agent().run_persona_drift_cycle,
             llm_output_text=narrative,
             user_input_text=user_message,
         )
-        if _drift_result is not None and _drift_result.alert_level in ("MODERATE", "SEVERE"):
-            # 将校正提示写入全局状态，供下轮 chat_context_builder 注入
-            try:
-                from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
-                _hs = get_hard_state()
-                if _hs is not None:
-                    _hs.set("drift_correction_hint", _drift_result.correction_hint or "")
-            except Exception:
-                pass
+        _drift_level = str(dict(_drift_result or {}).get("alert_level") or "").strip().upper()
+        if _drift_level in ("MODERATE", "SEVERE"):
             _logger.info(
                 "[%s] 人格漂移检测: level=%s dims=%s",
-                request_id, _drift_result.alert_level, _drift_result.drift_dims,
+                request_id,
+                _drift_level,
+                dict(_drift_result or {}).get("drift_dims"),
             )
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process drift_detector failed: %s", request_id, exc)
@@ -2489,36 +2637,20 @@ async def _async_post_process(
     # ── GrowthFeedbackCollector：隐式成长反馈 ────────────────────────
     # 从用户消息中提取隐式参与度信号，驱动 PersonaGrowthTracker 微调人格特质
     try:
-        from host_brain.persona.growth_feedback_collector import GrowthFeedbackCollector  # noqa: PLC0415
-        from host_brain.persona.persona_growth import PersonaGrowthTracker  # noqa: PLC0415
-        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
-        if not hasattr(_async_post_process, "_growth_feedback_collector"):
-            _async_post_process._growth_feedback_collector = GrowthFeedbackCollector()
-        if not hasattr(_async_post_process, "_persona_growth_tracker"):
-            _async_post_process._persona_growth_tracker = PersonaGrowthTracker()
-        _gfc: GrowthFeedbackCollector = _async_post_process._growth_feedback_collector
-        _pgt: PersonaGrowthTracker = _async_post_process._persona_growth_tracker
-        _gfc_user_id = resolve_bond_user_id(session_id=session_id)
-        # 提取隐式反馈信号
-        _feedbacks = await asyncio.to_thread(
-            GrowthFeedbackCollector.extract_engagement_signals,
-            user_message,
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+        _growth_payload = await asyncio.to_thread(
+            get_prefrontal_agent().run_growth_feedback_cycle,
+            session_id=session_id,
+            user_message=user_message,
+            assistant_reply=narrative,
         )
-        for _fb in _feedbacks:
-            _gfc.add_feedback(_gfc_user_id, _fb)
-        # 触发成长周期（每轮对话）
-        if _feedbacks:
-            _growth_result = await asyncio.to_thread(
-                _pgt.on_interaction_cycle,
-                user_id=_gfc_user_id,
-                feedback_collector=_gfc,
-                user_message=user_message,
-                assistant_reply=narrative,
+        if bool(dict(_growth_payload or {}).get("applied")):
+            _logger.info(
+                "[%s] 人格成长: user=%s rules=%s",
+                request_id,
+                dict(_growth_payload or {}).get("user_id"),
+                dict(_growth_payload or {}).get("triggered_rules"),
             )
-            if _growth_result and _growth_result.applied:
-                _logger.info(
-                    "[%s] 人格成长: user=%s rules=%s",
-                    request_id, _gfc_user_id, _growth_result.triggered_rules,
-                )
     except Exception as exc:
         _logger.debug("[%s] top_agent post_process growth_feedback failed: %s", request_id, exc)

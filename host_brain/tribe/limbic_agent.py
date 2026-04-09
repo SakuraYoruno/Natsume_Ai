@@ -239,6 +239,72 @@ class LimbicAgent:
         )
         return payload
 
+    def tick_body_sense(self, *, current_hour: int | None = None) -> dict[str, Any]:
+        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+
+        model = get_body_sense_model()
+        result = dict(model.tick(current_hour=current_hour) or {})
+        result.setdefault("status", "OK")
+        state = model.get_state()
+        payload = dict(state.as_dict() if hasattr(state, "as_dict") else {})
+        self._touch_state(
+            key="last_body_sense_state",
+            value={
+                "fatigue_level": str(payload.get("fatigue_level") or "normal"),
+                "drowsiness_level": str(payload.get("drowsiness_level") or "normal"),
+                "loneliness_level": str(payload.get("loneliness_level") or "none"),
+            },
+        )
+        try:
+            self.handle_signal(
+                event_type="BODY_SENSE_UPDATED",
+                source_agent="ans_agent",
+                target_agent="limbic_agent",
+                payload={
+                    "status": str(result.get("status") or "OK"),
+                    "fatigue": payload.get("fatigue"),
+                    "drowsiness": payload.get("drowsiness"),
+                    "loneliness": payload.get("loneliness"),
+                    "willingness_penalty": payload.get("willingness_penalty"),
+                },
+            )
+        except Exception:
+            pass
+        result["body_sense"] = payload
+        return result
+
+    def update_body_sense_loneliness(self, *, loneliness_value: float) -> dict[str, Any]:
+        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+
+        model = get_body_sense_model()
+        model.update_loneliness(loneliness_value=float(loneliness_value))
+        state = model.get_state()
+        payload = dict(state.as_dict() if hasattr(state, "as_dict") else {})
+        self._touch_state(
+            key="last_body_sense_state",
+            value={
+                "fatigue_level": str(payload.get("fatigue_level") or "normal"),
+                "drowsiness_level": str(payload.get("drowsiness_level") or "normal"),
+                "loneliness_level": str(payload.get("loneliness_level") or "none"),
+            },
+        )
+        try:
+            self.handle_signal(
+                event_type="BODY_SENSE_UPDATED",
+                source_agent="ans_agent",
+                target_agent="limbic_agent",
+                payload={
+                    "loneliness": payload.get("loneliness"),
+                    "loneliness_level": payload.get("loneliness_level"),
+                },
+            )
+        except Exception:
+            pass
+        return {
+            "status": "OK",
+            "body_sense": payload,
+        }
+
     def capture_conversation_body_sense(
         self,
         *,
@@ -362,6 +428,24 @@ class LimbicAgent:
         )
         return payload
 
+    def tick_inner_world(self, *, person_id: str | None) -> dict[str, Any]:
+        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
+
+        user_id = str(person_id or "user_1").strip() or "user_1"
+        payload = dict(get_inner_world().tick(user_id=user_id) or {})
+        payload.setdefault("status", "OK")
+        payload.setdefault("user_id", user_id)
+        self._touch_state(
+            key="last_inner_world_tick",
+            value={
+                "user_id": user_id,
+                "status": str(payload.get("status") or "OK"),
+                "continuity_score": float(payload.get("continuity_score") or 0.0),
+                "anticipation": float(payload.get("anticipation") or 0.0),
+            },
+        )
+        return payload
+
     def on_user_awaken(self, *, person_id: str | None) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
@@ -379,6 +463,78 @@ class LimbicAgent:
         )
         return payload
 
+    def tick_silence(
+        self,
+        *,
+        user_id: str,
+        current_topic: str,
+        bond_summary: Mapping[str, Any] | None = None,
+        emotion_context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+
+        engine = get_silence_engine()
+        result = dict(
+            engine.tick(
+                user_id=str(user_id or "user_1"),
+                current_topic=str(current_topic or ""),
+                bond_summary=dict(bond_summary or {}) or None,
+                emotion_context=dict(emotion_context or {}) or None,
+            )
+            or {}
+        )
+        result.setdefault("status", "OK")
+        result["silence_state"] = self.resolve_silence_state(current_topic=current_topic)
+        return result
+
+    def update_silence_emotion(
+        self,
+        *,
+        emotion_tag: str,
+        mood_state: str,
+        emotion_valence: float,
+        emotion_arousal: float,
+        current_topic: str = "",
+    ) -> dict[str, Any]:
+        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+
+        engine = get_silence_engine()
+        willingness = engine.update_emotion(
+            emotion_tag=str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
+            emotion_valence=float(emotion_valence),
+            emotion_arousal=float(emotion_arousal),
+            mood_state=str(mood_state or "steady").strip().lower() or "steady",
+        )
+        return {
+            "status": "OK",
+            "willingness": willingness,
+            "silence_state": self.resolve_silence_state(current_topic=current_topic),
+        }
+
+    def add_silence_topic_resistance(
+        self,
+        *,
+        topic_label: str,
+        strength: float = 0.7,
+    ) -> dict[str, Any]:
+        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+
+        resolved_topic = str(topic_label or "").strip()
+        if not resolved_topic:
+            return {
+                "status": "REJECTED",
+                "reason_code": "SILENCE_TOPIC_REQUIRED",
+            }
+        bounded_strength = max(0.0, min(1.0, float(strength)))
+        engine = get_silence_engine()
+        engine.add_topic_resistance(resolved_topic, strength=bounded_strength)
+        return {
+            "status": "OK",
+            "topic_label": resolved_topic,
+            "strength": bounded_strength,
+            "silence_state": self.resolve_silence_state(current_topic=resolved_topic),
+        }
+
     def on_session_end(
         self,
         *,
@@ -386,6 +542,7 @@ class LimbicAgent:
         valence: float,
         arousal: float,
         pending_topics: list[str] | None = None,
+        mood_baseline: float | None = None,
     ) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
@@ -395,6 +552,7 @@ class LimbicAgent:
             valence=float(valence),
             arousal=float(arousal),
             pending_topics=list(pending_topics or []),
+            mood_baseline=float(mood_baseline) if mood_baseline is not None else None,
         )
         payload = self.resolve_inner_world_state(person_id=user_id)
         try:

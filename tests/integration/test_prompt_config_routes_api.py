@@ -70,10 +70,10 @@ def test_prompt_config_routes_persona_first_batch_catalog(monkeypatch) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total_templates"] == 4
+    assert payload["total_templates"] == 5
 
     bundle_ids = [bundle["bundle_id"] for bundle in payload["bundles"]]
-    assert bundle_ids == ["self_model", "proactive_voice", "expression_adapter"]
+    assert bundle_ids == ["self_model", "proactive_voice", "immune_gate", "expression_adapter"]
 
     template_ids = [
         entry["template_id"]
@@ -83,6 +83,7 @@ def test_prompt_config_routes_persona_first_batch_catalog(monkeypatch) -> None:
     assert template_ids == [
         "self_model.narrative_text_pools",
         "proactive_voice.runtime_texts",
+        "immune_agent.runtime_rules",
         "expression_adapter.prompt_section.templates",
         "expression_adapter.style_hint.templates",
     ]

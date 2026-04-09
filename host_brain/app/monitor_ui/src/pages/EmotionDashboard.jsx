@@ -53,6 +53,27 @@ const WINDOW_OPTIONS = [
   { label: '7d', value: 10080 },
 ]
 
+const GATE_LABELS = {
+  open: '开放',
+  cautious: '谨慎',
+  protective: '保护',
+}
+
+function HormoneBar({ label, value, color }) {
+  const numeric = Math.max(0, Math.min(1, Number(value || 0)))
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-600">{label}</span>
+        <span className="font-mono font-semibold" style={{ color }}>{numeric.toFixed(2)}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+        <div className="h-full rounded-full" style={{ width: `${(numeric * 100).toFixed(0)}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  )
+}
+
 function Gauge({ label, value, color }) {
   const numeric = Number(value || 0)
   const percent = ((numeric + 1) / 2) * 100
@@ -132,6 +153,7 @@ export default function EmotionDashboard() {
   const selfModel = runtimeSnapshot?.self_model_snapshot || {}
   const bondState = runtimeSnapshot?.bond_state || {}
   const topEmotions = vtsData?.top_emotions || []
+  const endocrineState = runtimeSnapshot?.endocrine_state || emotionContext?.endocrine_state || {}
   const emotionIntensity = Number(
     emotionContext.emotion_intensity ?? emotionContext?.emotion_timeline_summary?.avg_intensity ?? 0
   )
@@ -154,6 +176,9 @@ export default function EmotionDashboard() {
   const moodStyle = MOOD_STYLES[emotionState.mood] || MOOD_STYLES.steady
   const MoodIcon = moodStyle.icon
   const emotionTagLabel = formatEmotionTag(emotionState.emotionTag)
+  const gateState = String(endocrineState?.gate_state || 'open').toLowerCase()
+  const gateLabel = GATE_LABELS[gateState] || gateState
+  const gateTone = gateState === 'protective' ? 'text-red-600' : gateState === 'cautious' ? 'text-orange-500' : 'text-green-600'
 
   return (
     <div className="space-y-6">
@@ -191,8 +216,8 @@ export default function EmotionDashboard() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="当前情绪" value={emotionTagLabel} hint={moodStyle.label} tone="text-pink-600" />
         <MetricCard label="关系阶段" value={formatStage(emotionState.bondStage)} hint={`事件 ${bondEventCount} 次`} tone="text-purple-600" />
-        <MetricCard label="表情降级率" value={`${vtsData?.degrade_rate ?? 0}%`} hint={`应用率 ${vtsData?.apply_rate ?? 0}%`} tone={vtsData?.degrade_rate > 10 ? 'text-orange-500' : 'text-green-600'} />
-        <MetricCard label="对话放行" value={vtsData?.talk_gate_allowed ?? 0} hint={`记忆子系统 ${memoryData?.subsystems?.length ?? 0} 个`} tone="text-blue-600" />
+        <MetricCard label="内分泌门控" value={gateLabel} hint={`cortisol ${(Number(endocrineState?.cortisol_level || 0)).toFixed(2)}`} tone={gateTone} />
+        <MetricCard label="对话放行" value={vtsData?.talk_gate_allowed ?? 0} hint={`表情降级率 ${vtsData?.degrade_rate ?? 0}%`} tone="text-blue-600" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -219,6 +244,16 @@ export default function EmotionDashboard() {
             <Gauge label="效价" value={emotionState.valence} color="text-green-600" />
             <Gauge label="唤醒" value={emotionState.arousal} color="text-blue-600" />
             <Gauge label="稳定度" value={emotionState.dominance} color="text-purple-600" />
+          </div>
+          <div className="space-y-2 border-t pt-3">
+            <div className="text-xs font-medium text-gray-600">内分泌基调（Endocrine）</div>
+            <HormoneBar label="Dopamine" value={endocrineState?.dopamine_level} color="#c026d3" />
+            <HormoneBar label="Serotonin" value={endocrineState?.serotonin_level} color="#059669" />
+            <HormoneBar label="Cortisol" value={endocrineState?.cortisol_level} color="#d97706" />
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-gray-500">Gate</span>
+              <span className={`font-semibold ${gateTone}`}>{gateLabel}</span>
+            </div>
           </div>
         </div>
 

@@ -39,9 +39,11 @@ class TestSchedulerBuildSystemIntent:
             request_id="req-001",
             emotion_tag="HAPPY",
             mood_state="engaged",
+            endocrine_state={"gate_state": "open", "cortisol_level": 0.3},
         )
         assert intent["emotion_tag"] == "HAPPY"
         assert intent["mood_state"] == "engaged"
+        assert intent["endocrine_state"]["gate_state"] == "open"
 
     def test_build_system_intent_default_emotion_fields(self):
         """T-SCHED-EMO-02：_build_system_intent 默认 emotion_tag="NEUTRAL", mood_state="steady" """
@@ -54,3 +56,4 @@ class TestSchedulerBuildSystemIntent:
         )
         assert intent["emotion_tag"] == "NEUTRAL"
         assert intent["mood_state"] == "steady"
+        assert intent["endocrine_state"] == {}

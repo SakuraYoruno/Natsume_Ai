@@ -336,6 +336,73 @@ def test_build_chat_prompt_runtime_payload_carries_episodic_vector_recall_slot(
     )
 
 
+def test_build_chat_prompt_runtime_payload_uses_limbic_timeline_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "HAPPY",
+                "emotion_intensity": 0.7,
+                "emotion_range_hint": "warm",
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+
+    class _Limbic:
+        def resolve_emotion_timeline_snapshot(self, *, summary_window_ms: int | None, diary_window_ms: int | None):
+            assert summary_window_ms == 300_000
+            assert diary_window_ms == 24 * 3600 * 1000
+            return {
+                "summary": {"entry_count": 2, "dominant_emotion": "CALM"},
+                "diary": {"dominant_emotion": "CALM"},
+                "dominant_emotion": "CALM",
+            }
+
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _Limbic(),
+    )
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-limbic-timeline",
+        person_id="person-limbic-timeline",
+        session_id="session-limbic-timeline",
+        thread_id=None,
+        user_message="hello",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.7},
+        recall_slot_text={},
+        bond_summary={},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    assert dict(runtime_payload.get("emotion_timeline") or {})["entry_count"] == 2
+
+
 def test_build_memory_persona_signal_summarizes_humanized_recall_metadata() -> None:
     signal = ccb._build_memory_persona_signal(
         [
@@ -1785,18 +1852,26 @@ def test_build_chat_prompt_runtime_payload_passes_growth_summary_into_self_refle
         lambda **_kwargs: {},
     )
 
-    class _FakeReflection:
-        def maybe_generate(self, **kwargs):  # noqa: ANN003
+    class _FakePrefrontal:
+        def resolve_persona_traits(self, *, persona_user_id: str):  # noqa: ARG002
+            return SimpleNamespace()
+
+        def resolve_persona_expression_hint(self, **_kwargs):  # noqa: ANN003
             return {
-                "self_awareness": "ok",
-                "growth_summary": dict(kwargs.get("growth_summary") or {}),
+                "style_hint": "自然回应",
+                "tone": "gentle",
+                "echo_weight_modifier": 0.0,
+                "follow_up_tendency": 0.0,
+                "pace_hint": "steady",
             }
 
-    class _FakeEvolutionOrchestrator:
-        def get_last_growth_awareness(self):
+        def resolve_persona_change_log(self, *, persona_user_id: str, limit: int = 5):  # noqa: ARG002
+            return []
+
+        def resolve_growth_awareness(self):
             return {}
 
-        def get_growth_summary(self, user_id, *, now_ts_ms=0):  # noqa: ANN001
+        def resolve_growth_summary(self, *, persona_user_id: str, now_ts_ms: int = 0):  # noqa: ARG002
             return {
                 "daily_summary": "今天更会把关系接稳。",
                 "weekly_summary": "这周更敢表达在意。",
@@ -1804,6 +1879,21 @@ def test_build_chat_prompt_runtime_payload_passes_growth_summary_into_self_refle
                 "active_themes": ["recent_change", "desire"],
                 "last_cycle_date": "2026-04-04",
             }
+
+        def resolve_style_evolution_summary(self):
+            return {}
+
+        def run_self_reflection_cycle(self, **kwargs):  # noqa: ANN003
+            return {
+                "self_reflection_pulse": {
+                    "self_awareness": "ok",
+                    "growth_summary": dict(kwargs.get("growth_summary") or {}),
+                },
+                "snapshot": {},
+            }
+
+        def align_self_reflection_pulse(self, *, pulse, **_kwargs):  # noqa: ANN003
+            return dict(pulse or {})
 
     class _FakeAdapter:
         def adapt(self, *_args, **_kwargs):  # noqa: ANN001
@@ -1839,8 +1929,7 @@ def test_build_chat_prompt_runtime_payload_passes_growth_summary_into_self_refle
     monkeypatch.setattr("host_brain.persona.persona_engine.PersonaEngine", _FakePersonaEngine)
     monkeypatch.setattr("host_brain.persona.motive_engine.compute_motive_state", lambda _inp: _FakeMotiveState())
     monkeypatch.setattr("host_brain.persona.response_policy.decide_response_policy", lambda _inp: _FakePolicy())
-    monkeypatch.setattr(ccb.build_chat_prompt_runtime_payload, "_self_reflection", _FakeReflection(), raising=False)
-    monkeypatch.setattr(ccb.build_chat_prompt_runtime_payload, "_evolution_orchestrator", _FakeEvolutionOrchestrator(), raising=False)
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_prefrontal_agent", lambda: _FakePrefrontal())
 
     runtime_input = build_chat_runtime_input(
         request_id="req-growth-summary-pass",

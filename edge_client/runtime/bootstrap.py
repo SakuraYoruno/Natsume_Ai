@@ -25,6 +25,7 @@ from edge_client.rpc.resource_gate import VoiceResourceGate
 from edge_client.rpc.voice import VoiceRpcContract
 from edge_client.runtime.voice_pipeline import EdgeVoicePipeline
 from edge_client.senses.asr import AsrConfig, AsrService, AudioStreamCapture, DeviceRecoveryConfig
+from edge_client.tribe.registry import build_edge_tribe_bridge
 
 
 LOGGER = logging.getLogger("Natsume.edge.runtime.bootstrap")
@@ -45,6 +46,7 @@ class EdgeRuntime:
     tts_model: SoVITSModelManager | None
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
+    tribe_bridge: Any | None
 
     @property
     def asr(self) -> AsrService | None:
@@ -320,6 +322,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         event_reporter=event_reporter,
         vts_driver=vts_driver,
         resource_gate=resource_gate,
+        tribe_bridge=build_edge_tribe_bridge(),
     )
     if playback_device is not None:
         playback_device.set_on_playback_finished(lambda: voice_pipeline.complete_playback())
@@ -466,6 +469,7 @@ def build_edge_runtime(config: EdgeConfig) -> EdgeRuntime:
         tts_model=tts_model,
         tts_playback_device=playback_device,
         vts_driver=vts_driver,
+        tribe_bridge=getattr(voice_pipeline, "tribe_bridge", None),
     )
 
 

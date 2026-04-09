@@ -14,12 +14,6 @@ from typing import Any, Callable, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
-from host_brain.persona.offline_continuity import (
-    reconnect_style_for_absence_band,
-    resolve_absence_band as resolve_offline_absence_band,
-)
-
-
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
@@ -213,6 +207,7 @@ def _build_background_runtime_snapshot(
     scheduler_status = str(scheduler_snapshot.get("scheduler_status") or "UNAVAILABLE").strip().upper()
     scheduler_active = scheduler_status in {"HEALTHY", "DEGRADED", "RUNNING", "UP", "OK"}
     core_tick_ids = ["inner_world_tick", "silence_tick", "body_sense_tick"]
+    proactive_task_id = "proactive_talk_periodic"
     tasks_by_id: dict[str, dict[str, Any]] = {}
     for item in list(scheduler_snapshot.get("tasks") or []):
         if not isinstance(item, dict):
@@ -239,7 +234,40 @@ def _build_background_runtime_snapshot(
             "last_run_ts": last_run_ts,
             "expected_interval_s": expected_interval_s,
             "seconds_since_last_run": _seconds_since_timestamp(ts_ms=last_run_ts, now_ms=now_ms),
+            "last_reason_code": str(task_health.get("last_reason_code") or "").strip() or None,
+            "last_gate_state": str(task_health.get("last_gate_state") or "").strip().lower() or None,
+            "last_mood_state": str(task_health.get("last_mood_state") or "").strip().lower() or None,
+            "last_endocrine_cortisol": _coerce_float(task_health.get("last_endocrine_cortisol"), 0.0),
+            "last_endocrine_energy": _coerce_float(task_health.get("last_endocrine_energy"), 0.0),
         }
+
+    proactive_task_health = tasks_by_id.get(proactive_task_id, {})
+    proactive_last_run_ts = _coerce_int(proactive_task_health.get("last_run_ts"), 0)
+    if proactive_last_run_ts <= 0:
+        proactive_last_run_ts = None
+    proactive_task_snapshot = {
+        "task_id": proactive_task_id,
+        "status": str(proactive_task_health.get("status") or "MISSING").strip().upper() or "MISSING",
+        "enabled": bool(proactive_task_health.get("enabled", False)) if proactive_task_health else False,
+        "last_run_ts": proactive_last_run_ts,
+        "seconds_since_last_run": _seconds_since_timestamp(ts_ms=proactive_last_run_ts, now_ms=now_ms),
+        "last_reason_code": str(proactive_task_health.get("last_reason_code") or "").strip() or None,
+        "last_gate_state": str(proactive_task_health.get("last_gate_state") or "").strip().lower() or None,
+        "last_mood_state": str(proactive_task_health.get("last_mood_state") or "").strip().lower() or None,
+        "last_endocrine_cortisol": _coerce_float(proactive_task_health.get("last_endocrine_cortisol"), 0.0),
+        "last_endocrine_energy": _coerce_float(proactive_task_health.get("last_endocrine_energy"), 0.0),
+    }
+
+    gate_block_reason_codes = {
+        "EMOTION_GATE_BLOCKED",
+        "ENDOCRINE_GATE_BLOCKED",
+        "ENDOCRINE_PROACTIVE_BLOCKED",
+    }
+    gate_blocked_tasks: list[str] = []
+    for task_id, task_health in tasks_by_id.items():
+        reason_code = str(task_health.get("last_reason_code") or "").strip().upper()
+        if reason_code in gate_block_reason_codes:
+            gate_blocked_tasks.append(task_id)
 
     last_inner_world_tick_ts_ms = _coerce_int(inner_world_state.get("last_tick_ts_ms"), 0)
     if last_inner_world_tick_ts_ms <= 0:
@@ -278,6 +306,8 @@ def _build_background_runtime_snapshot(
         "core_ticks_registered": core_ticks_registered,
         "core_ticks_missing": core_ticks_missing,
         "core_tick_tasks": core_tick_tasks,
+        "proactive_task": proactive_task_snapshot,
+        "gate_blocked_tasks": gate_blocked_tasks,
         "last_inner_world_tick_ts_ms": last_inner_world_tick_ts_ms,
         "seconds_since_inner_world_tick": seconds_since_inner_world_tick,
         "tick_health": tick_health,
@@ -288,8 +318,25 @@ def _build_background_runtime_snapshot(
     }
 
 
+def _resolve_offline_reconnect_profile(offline_state: dict[str, Any]) -> tuple[str, str]:
+    try:
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        payload = get_limbic_agent().resolve_offline_reconnect_profile(
+            offline_state=dict(offline_state or {}),
+        )
+        if isinstance(payload, Mapping):
+            absence_band = str(payload.get("absence_band") or "recent").strip() or "recent"
+            reconnect_style = str(payload.get("reconnect_style") or "soft_resume").strip() or "soft_resume"
+            return absence_band, reconnect_style
+    except Exception:
+        pass
+    return "recent", "soft_resume"
+
+
 def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
-    return resolve_offline_absence_band(offline_state)
+    absence_band, _ = _resolve_offline_reconnect_profile(offline_state)
+    return absence_band
 
 
 def _derive_reply_posture(response_policy: dict[str, Any]) -> str:
@@ -327,8 +374,7 @@ def _build_runtime_summary(
     slot_status: dict[str, str],
     degraded_reasons: list[str],
 ) -> dict[str, Any]:
-    absence_band = _resolve_absence_band(offline_state)
-    offline_reconnect_style = reconnect_style_for_absence_band(absence_band)
+    absence_band, offline_reconnect_style = _resolve_offline_reconnect_profile(offline_state)
     bond_stage = str(
         bond_state.get("current_stage")
         or bond_summary.get("stage")
@@ -677,37 +723,77 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             detail=str(exc)[:120],
         )
 
+    endocrine_state: dict[str, Any] = {}
+    try:
+        from host_brain.app.dependencies import get_endocrine_state  # noqa: PLC0415
+
+        endocrine_state = dict(
+            get_endocrine_state(
+                emotion_tag=str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                emotion_intensity=float(emotion_context.get("emotion_intensity") or 0.0),
+            )
+            or {}
+        )
+        emotion_context["endocrine_state"] = endocrine_state
+        slot_status["endocrine_state"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="endocrine_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    immune_state: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+        immune_agent = get_immune_agent()
+        immune_state = dict(immune_agent.export_runtime_state() or {})
+        if normalized_topic:
+            preview = immune_agent.inspect_text(
+                text=normalized_topic,
+                source="obs.runtime_snapshot.preview",
+                metadata={"persona_user_id": persona_user_id},
+                record=False,
+            )
+            immune_state["preview"] = {
+                "decision": preview.get("decision"),
+                "risk_level": preview.get("risk_level"),
+                "score": preview.get("score"),
+                "reason_codes": list(preview.get("reason_codes") or []),
+            }
+        slot_status["immune_state"] = "live"
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="immune_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
     bond_state: dict[str, Any] = {}
     bond_summary: dict[str, Any] = {}
     bond_summary_human: dict[str, Any] = {}
     bond_state_obj: Any = None
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine  # noqa: PLC0415
-        from host_brain.bond.summarizer import derive_bond_summary  # noqa: PLC0415
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-        bond_engine = get_bond_stage_engine()
-        if bond_engine is not None:
-            bond_state_obj = bond_engine.get_state(persona_user_id)
-            bond_summary = derive_bond_summary(None, bond_score_state=bond_state_obj)
-            bond_summary_human = _as_plain_dict(bond_state_obj.to_summary() if hasattr(bond_state_obj, "to_summary") else bond_state_obj)
+        social_snapshot = get_social_brain_agent().resolve_bond_snapshot(person_id=persona_user_id)
+        bond_state_obj = social_snapshot.get("bond_state_obj")
+        bond_summary = dict(social_snapshot.get("bond_summary") or {})
+        bond_summary_human = _as_plain_dict(
+            bond_state_obj.to_summary() if (bond_state_obj is not None and hasattr(bond_state_obj, "to_summary")) else {}
+        )
+        if bond_state_obj is not None:
             bond_state = {
                 "user_id": persona_user_id,
-                "current_stage": str(getattr(bond_state_obj, "current_stage", "") or "").strip() or "STRANGER",
-                "trend": (
-                    bond_state_obj.trend()
-                    if callable(getattr(bond_state_obj, "trend", None))
-                    else str((bond_summary or {}).get("trend") or "")
-                ),
-                "trend_intensity": (
-                    bond_state_obj.trend_intensity()
-                    if callable(getattr(bond_state_obj, "trend_intensity", None))
-                    else ""
-                ),
-                "capability_hint": (
-                    bond_state_obj.capability_hint()
-                    if callable(getattr(bond_state_obj, "capability_hint", None))
-                    else str((bond_summary or {}).get("capability_hint") or "")
-                ),
+                "current_stage": str(social_snapshot.get("bond_stage") or "STRANGER").strip() or "STRANGER",
+                "trend": str(social_snapshot.get("bond_trend") or "").strip(),
+                "trend_intensity": str(social_snapshot.get("bond_trend_intensity") or "").strip(),
+                "capability_hint": str(social_snapshot.get("capability_hint") or "").strip(),
                 "event_count": int(getattr(bond_state_obj, "event_count", 0) or 0),
                 "last_event_ts_ms": int(getattr(bond_state_obj, "last_event_ts_ms", 0) or 0),
             }
@@ -726,11 +812,11 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
     inner_world_state: dict[str, Any] = {}
     offline_state: dict[str, Any] = {}
     try:
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        inner_world_state = dict(get_inner_world().get_state(persona_user_id) or {})
-        offline_state = dict(build_offline_state_from_inner_state(inner_world_state) or {})
+        limbic_agent = get_limbic_agent()
+        inner_world_state = dict(limbic_agent.resolve_inner_world_state(person_id=persona_user_id) or {})
+        offline_state = dict(limbic_agent.resolve_offline_state(person_id=persona_user_id) or {})
         slot_status["inner_world_state"] = "live"
         slot_status["offline_state"] = "live"
     except Exception as exc:
@@ -745,10 +831,10 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
 
     silence_state: dict[str, Any] = {}
     try:
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         silence_state = _as_plain_dict(
-            get_silence_engine().get_silence_state(current_topic=normalized_topic)
+            get_limbic_agent().resolve_silence_state(current_topic=normalized_topic)
         )
         slot_status["silence_state"] = "live"
     except Exception as exc:
@@ -762,9 +848,9 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
 
     body_sense: dict[str, Any] = {}
     try:
-        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        body_sense = _as_plain_dict(get_body_sense_model().get_state())
+        body_sense = _as_plain_dict(get_limbic_agent().resolve_body_sense_state())
         slot_status["body_sense"] = "live"
     except Exception as exc:
         _record_snapshot_status(
@@ -778,28 +864,19 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
     self_model_snapshot: dict[str, Any] = {}
     self_reflection_pulse: dict[str, Any] = {}
     try:
-        from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
-        from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
-        persona_engine = PersonaEngine.get_instance()
-        snapshot_obj = persona_engine.get_self_model_snapshot(
-            persona_user_id,
+        reflection_payload = get_prefrontal_agent().resolve_self_reflection_context(
+            persona_user_id=persona_user_id,
             timeline_summary=timeline_summary,
             timeline_diary=timeline_diary,
-            bond_state=bond_state_obj,
+            bond_state_obj=bond_state_obj,
             bond_summary=bond_summary,
-            last_deep_talk_ts_ms=int(getattr(bond_state_obj, "last_event_ts_ms", 0) or 0),
-            current_ts_ms=now_ms,
+            now_ms=now_ms,
+            trigger_reason="runtime_snapshot",
         )
-        self_model_snapshot = _as_plain_dict(snapshot_obj)
-        if self_model_snapshot:
-            self_reflection_pulse = dict(
-                build_self_reflection_pulse(
-                    self_model_snapshot,
-                    trigger_reason="runtime_snapshot",
-                )
-                or {}
-            )
+        self_model_snapshot = _as_plain_dict(reflection_payload.get("self_model_snapshot"))
+        self_reflection_pulse = _as_plain_dict(reflection_payload.get("self_reflection_pulse"))
         slot_status["self_model_snapshot"] = "live"
         slot_status["self_reflection_pulse"] = "live"
     except Exception as exc:
@@ -855,26 +932,24 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
 
     motive_state: dict[str, Any] = {}
     try:
-        from host_brain.persona.motive_engine import MotiveInput, compute_motive_state  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        motive_state = compute_motive_state(
-            MotiveInput(
-                silence_state=silence_state or None,
-                body_sense=body_sense or None,
-                offline_state=offline_state or None,
-                bond_summary=bond_summary or None,
-                self_reflection_pulse=self_reflection_pulse or None,
-                emotion_context=emotion_context or None,
-                pending_followup_topics=list(offline_state.get("anticipation_topics") or []),
-                shared_memory_count=shared_memory_count,
-                user_message=normalized_topic,
-                runtime_flags={
-                    "source": "obs_runtime_snapshot",
-                    "sys_mode": sys_mode,
-                    "activity_monitor": activity_monitor,
-                },
-            )
-        ).as_dict()
+        motive_state = get_limbic_agent().compute_motive_state(
+            silence_state=silence_state or None,
+            body_sense=body_sense or None,
+            offline_state=offline_state or None,
+            bond_summary=bond_summary or None,
+            self_reflection_pulse=self_reflection_pulse or None,
+            emotion_context=emotion_context or None,
+            pending_followup_topics=list(offline_state.get("anticipation_topics") or []),
+            shared_memory_count=shared_memory_count,
+            user_message=normalized_topic,
+            runtime_flags={
+                "source": "obs_runtime_snapshot",
+                "sys_mode": sys_mode,
+                "activity_monitor": activity_monitor,
+            },
+        )
         slot_status["motive_state"] = "live"
     except Exception as exc:
         _record_snapshot_status(
@@ -887,25 +962,23 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
 
     response_policy: dict[str, Any] = {}
     try:
-        from host_brain.persona.response_policy import ResponsePolicyInput, decide_response_policy  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        response_policy = decide_response_policy(
-            ResponsePolicyInput(
-                silence_state=silence_state or None,
-                body_sense=body_sense or None,
-                offline_state=offline_state or None,
-                bond_summary=bond_summary or None,
-                self_reflection_pulse=self_reflection_pulse or None,
-                emotion_context=emotion_context or None,
-                motive_state=motive_state or None,
-                user_message=normalized_topic,
-                runtime_flags={
-                    "source": "obs_runtime_snapshot",
-                    "sys_mode": sys_mode,
-                    "activity_monitor": activity_monitor,
-                },
-            )
-        ).as_dict()
+        response_policy = get_limbic_agent().decide_response_policy(
+            silence_state=silence_state or None,
+            body_sense=body_sense or None,
+            offline_state=offline_state or None,
+            bond_summary=bond_summary or None,
+            self_reflection_pulse=self_reflection_pulse or None,
+            emotion_context=emotion_context or None,
+            motive_state=motive_state or None,
+            user_message=normalized_topic,
+            runtime_flags={
+                "source": "obs_runtime_snapshot",
+                "sys_mode": sys_mode,
+                "activity_monitor": activity_monitor,
+            },
+        )
         slot_status["response_policy"] = "live"
     except Exception as exc:
         _record_snapshot_status(
@@ -945,6 +1018,8 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         "hard_state": hard_state,
         "activity_monitor": activity_monitor,
         "emotion_context": emotion_context,
+        "endocrine_state": endocrine_state,
+        "immune_state": immune_state,
         "bond_state": bond_state,
         "bond_summary": bond_summary,
         "bond_summary_human": bond_summary_human,
@@ -1023,17 +1098,9 @@ def run_proactive_intent_dispatch(
 
     bond_summary: dict[str, Any] = {}
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine as _get_bse  # noqa: PLC0415
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-        bse = _get_bse()
-        if bse is not None:
-            bond_state = bse.get_bond_state(session_id="default")
-            if bond_state is not None:
-                bond_summary = {
-                    "stage": str(getattr(bond_state, "stage", "") or "").strip(),
-                    "trend": str(getattr(bond_state, "trend", "") or "").strip(),
-                    "capability_hint": str(getattr(bond_state, "capability_hint", "") or "").strip(),
-                }
+        bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(session_id="default")
     except Exception:
         pass
 
@@ -1091,11 +1158,11 @@ def run_proactive_intent_dispatch(
 
     motive_state: dict[str, Any] = {}
     try:
-        from host_brain.persona.motive_runtime import compute_runtime_motive_state  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         current_topic = recent_topics[0] if recent_topics else ""
         pending_topics = list(recent_topics[:3])
-        motive_state = compute_runtime_motive_state(
+        motive_state = get_limbic_agent().compute_runtime_motive_state(
             persona_user_id=persona_user_id,
             current_topic=current_topic,
             bond_summary=bond_summary,
@@ -1108,29 +1175,23 @@ def run_proactive_intent_dispatch(
 
     response_policy: dict[str, Any] = {}
     try:
-        from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
-        from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
-        from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
-        from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
-        from host_brain.persona.response_policy import ResponsePolicyInput, decide_response_policy  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         current_topic = recent_topics[0] if recent_topics else ""
-        inner_state = get_inner_world().get_state(persona_user_id or "user_1")
-        offline_state = build_offline_state_from_inner_state(inner_state)
-        silence_state = get_silence_engine().get_silence_state(current_topic=current_topic).as_dict()
-        body_sense = get_body_sense_model().get_state().as_dict()
-        response_policy = decide_response_policy(
-            ResponsePolicyInput(
-                silence_state=silence_state,
-                body_sense=body_sense,
-                offline_state=offline_state,
-                bond_summary=bond_summary,
-                emotion_context=emotion_context,
-                motive_state=motive_state,
-                user_message=current_topic,
-                runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
-            )
-        ).as_dict()
+        limbic_agent = get_limbic_agent()
+        offline_state = limbic_agent.resolve_offline_state(person_id=persona_user_id or "user_1")
+        silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
+        body_sense = limbic_agent.resolve_body_sense_state()
+        response_policy = limbic_agent.decide_response_policy(
+            silence_state=silence_state,
+            body_sense=body_sense,
+            offline_state=offline_state,
+            bond_summary=bond_summary,
+            emotion_context=emotion_context,
+            motive_state=motive_state,
+            user_message=current_topic,
+            runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
+        )
     except Exception as policy_exc:
         logger.debug("proactive response_policy compute failed（忽略）: %s", policy_exc)
 
@@ -1198,17 +1259,9 @@ def _run_personality_scheduler_skill(
 
     bond_summary: dict[str, Any] = {}
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine as _get_bse  # noqa: PLC0415
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-        bse = _get_bse()
-        if bse is not None:
-            bond_state = bse.get_bond_state(session_id="default")
-            if bond_state is not None:
-                bond_summary = {
-                    "stage": str(getattr(bond_state, "stage", "") or "").strip(),
-                    "trend": str(getattr(bond_state, "trend", "") or "").strip(),
-                    "capability_hint": str(getattr(bond_state, "capability_hint", "") or "").strip(),
-                }
+        bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(session_id="default")
     except Exception as exc:
         logger.debug("personality skill bond summary unavailable: %s", exc)
 
@@ -1274,61 +1327,14 @@ def run_long_term_distillation_handler(args: dict[str, Any], _ctx: dict[str, Any
 
 def _run_evolution_cycle(*, system_intent: dict[str, Any], logger: Any) -> dict[str, Any]:
     try:
-        from host_brain.app.dependencies import get_bond_stage_engine as _get_bse_evo  # noqa: PLC0415
-        from host_brain.app.emotion_context import _global_emotion_timeline  # noqa: PLC0415
-        from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
-        orchestrator = EvolutionOrchestrator()
-        args = dict(system_intent.get("args") or {})
-        user_id = str(args.get("user_id") or "user_1")
-        date = str(args.get("date") or _dt.date.today().isoformat())
-
-        timeline_summary: dict[str, Any] = {}
-        timeline_diary: dict[str, Any] = {}
-        try:
-            timeline_summary = _global_emotion_timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
-            timeline_diary = _global_emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
-        except Exception:
-            pass
-
-        bond_state = None
-        bond_summary: dict[str, Any] = {}
-        try:
-            bse = _get_bse_evo()
-            if bse is not None:
-                bond_state = bse.get_bond_state(session_id="default")
-                if bond_state is not None:
-                    bond_summary = {
-                        "stage": str(getattr(bond_state, "stage", "") or "").strip(),
-                        "trend": str(getattr(bond_state, "trend", "") or "").strip(),
-                        "capability_hint": str(getattr(bond_state, "capability_hint", "") or "").strip(),
-                    }
-        except Exception:
-            pass
-
-        result = orchestrator.run_evolution_cycle(
-            user_id=user_id,
-            date=date,
-            timeline_summary=timeline_summary,
-            timeline_diary=timeline_diary,
-            bond_state=bond_state,
-            bond_summary=bond_summary,
+        return get_prefrontal_agent().run_evolution_cycle(
+            system_intent=system_intent,
+            logger=logger,
         )
-        logger.info(
-            "进化周期完成: date=%s traits_changed=%s errors=%d",
-            date,
-            result.traits_changed,
-            len(result.errors),
-        )
-        return {
-            "status": "OK",
-            "cycle_id": result.cycle_id,
-            "traits_changed": result.traits_changed,
-            "growth_awareness": result.growth_awareness,
-            "errors": result.errors,
-        }
     except Exception as exc:
-        logger.warning("evolution_cycle 执行失败（降级）: %s", exc)
+        logger.warning("evolution_cycle execution failed (degraded): %s", exc)
         return {
             "status": "DEGRADED",
             "reason_code": "EVOLUTION_CYCLE_FAILED",

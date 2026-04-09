@@ -66,6 +66,48 @@ def _get_health() -> SchedulerHealthReporter:
     return _health_reporter
 
 
+def _build_immune_gate_state() -> Dict[str, Any]:
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+        raw = dict(get_immune_agent().export_runtime_state() or {})
+        counters = dict(raw.get("counters") or {})
+        last = dict(raw.get("last_inspection") or {})
+        return {
+            "status": "live",
+            "enabled": bool(raw.get("enabled", True)),
+            "blocking_enabled": bool(raw.get("blocking_enabled", False)),
+            "warn_threshold": raw.get("warn_threshold"),
+            "block_threshold": raw.get("block_threshold"),
+            "template_id": raw.get("template_id"),
+            "template_rule_count": int(raw.get("template_rule_count") or 0),
+            "total_rule_count": int(raw.get("total_rule_count") or 0),
+            "counters": {
+                "total": int(counters.get("total") or 0),
+                "allow": int(counters.get("allow") or 0),
+                "report": int(counters.get("report") or 0),
+                "block": int(counters.get("block") or 0),
+            },
+            "last_decision": str(last.get("decision") or "").strip().upper() or None,
+            "last_risk_level": str(last.get("risk_level") or "").strip().lower() or None,
+            "last_score": last.get("score"),
+            "last_reason_codes": list(last.get("reason_codes") or []),
+        }
+    except Exception as exc:
+        return {
+            "status": "degraded",
+            "enabled": None,
+            "blocking_enabled": None,
+            "detail": str(exc)[:160],
+        }
+
+
+def _attach_immune_gate_state(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(snapshot or {})
+    merged["immune_gate_state"] = _build_immune_gate_state()
+    return merged
+
+
 # ── Pydantic 模型 ──
 
 def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
@@ -73,7 +115,7 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
     health = _health_reporter
 
     if registry is None and health is None:
-        return {
+        return _attach_immune_gate_state({
             "scheduler_status": "UNAVAILABLE",
             "total_tasks": 0,
             "enabled_tasks": 0,
@@ -81,7 +123,7 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
             "error_tasks": 0,
             "tasks": [],
             "ts_ms": now_ms(),
-        }
+        })
 
     if registry is not None and health is None:
         tasks = [
@@ -97,10 +139,17 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
                 "error_count": 0,
                 "suspended_reason": None,
                 "last_reason_code": None,
+                "last_gate_state": None,
+                "last_mood_state": None,
+                "last_endocrine_cortisol": None,
+                "last_endocrine_energy": None,
+                "last_immune_decision": None,
+                "last_immune_risk_level": None,
+                "last_immune_reason_codes": [],
             }
             for task in registry.all_tasks()
         ]
-        return {
+        return _attach_immune_gate_state({
             "scheduler_status": "UNAVAILABLE",
             "total_tasks": len(tasks),
             "enabled_tasks": sum(1 for item in tasks if item["enabled"]),
@@ -108,7 +157,7 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
             "error_tasks": 0,
             "tasks": tasks,
             "ts_ms": now_ms(),
-        }
+        })
 
     try:
         snapshot = health.build_health_snapshot() if health is not None else {}
@@ -129,10 +178,17 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
                     "error_count": 0,
                     "suspended_reason": None,
                     "last_reason_code": str(exc)[:120],
+                    "last_gate_state": None,
+                    "last_mood_state": None,
+                    "last_endocrine_cortisol": None,
+                    "last_endocrine_energy": None,
+                    "last_immune_decision": None,
+                    "last_immune_risk_level": None,
+                    "last_immune_reason_codes": [],
                 }
                 for task in registry.all_tasks()
             ]
-        return {
+        return _attach_immune_gate_state({
             "scheduler_status": "ERROR",
             "total_tasks": len(tasks),
             "enabled_tasks": sum(1 for item in tasks if item["enabled"]),
@@ -140,7 +196,7 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
             "error_tasks": len(tasks) if tasks else 1,
             "tasks": tasks,
             "ts_ms": now_ms(),
-        }
+        })
 
     normalized = dict(snapshot or {})
     task_items: list[dict[str, Any]] = []
@@ -156,6 +212,9 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
                 task_copy.setdefault("enabled", task_config.enabled)
                 task_copy.setdefault("priority", task_config.priority.value)
                 task_copy.setdefault("trigger_mode", task_config.trigger_mode.value)
+        task_copy.setdefault("last_immune_decision", None)
+        task_copy.setdefault("last_immune_risk_level", None)
+        task_copy.setdefault("last_immune_reason_codes", [])
         task_items.append(task_copy)
     normalized["tasks"] = task_items
     normalized.setdefault("ts_ms", now_ms())
@@ -164,7 +223,7 @@ def get_scheduler_health_snapshot_safe() -> Dict[str, Any]:
     normalized.setdefault("enabled_tasks", sum(1 for item in task_items if item.get("enabled")))
     normalized.setdefault("suspended_tasks", 0)
     normalized.setdefault("error_tasks", 0)
-    return normalized
+    return _attach_immune_gate_state(normalized)
 
 
 class TaskCreateRequest(BaseModel):
@@ -401,4 +460,4 @@ async def disable_task(task_id: str) -> TaskResponse:
 async def scheduler_health() -> Dict[str, Any]:
     """GET /scheduler/health — 所有任务健康快照（T-SCHED-05）。"""
     health = _get_health()
-    return health.build_health_snapshot()
+    return _attach_immune_gate_state(dict(health.build_health_snapshot() or {}))

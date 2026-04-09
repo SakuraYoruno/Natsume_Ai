@@ -14,6 +14,7 @@ import {
   Clock3,
   Database,
   Filter,
+  GitBranch,
   Layers3,
   MessageSquareText,
   RefreshCw,
@@ -23,6 +24,8 @@ import {
 } from 'lucide-react'
 import {
   connectTraceRequestLive,
+  fetchImmuneGateReplay,
+  fetchTribeEvents,
   fetchTraceNodes,
   fetchTraceStreamEvents,
   fetchRetrievalRuntime,
@@ -54,6 +57,13 @@ const TRACE_STAGE_GROUPS = [
     description: '输入进入 Host 后的净化与 Governor 判定。',
     icon: ShieldAlert,
     nodeIds: ['host_input', 'airlock_ingress', 'governor'],
+  },
+  {
+    id: 'immune',
+    label: '免疫门禁',
+    description: 'Immune Gate 风险扫描与拦截/报告决策。',
+    icon: ShieldAlert,
+    nodeIds: ['immune_gate'],
   },
   {
     id: 'retrieval',
@@ -249,6 +259,14 @@ function getEventPreview(event) {
   )
 }
 
+function getTribePayloadPreview(payload) {
+  if (!payload || typeof payload !== 'object') return ''
+  return (
+    pickPreviewText(payload)
+    || truncateText(safeStringify(payload, 0), 180)
+  )
+}
+
 function getStatusSeverity(status) {
   const normalized = normalizeStatus(status)
   return {
@@ -315,6 +333,46 @@ function buildStageSnapshots(nodes) {
   })
 }
 
+function buildImmuneStageMeta(nodes = []) {
+  const orderedNodes = [...(Array.isArray(nodes) ? nodes : [])]
+    .sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
+
+  let decision = ''
+  let riskLevel = ''
+  const reasonTags = []
+  const seenReasonTags = new Set()
+
+  const pushReasonTag = (value) => {
+    const normalized = String(value || '').trim()
+    if (!normalized || seenReasonTags.has(normalized)) return
+    seenReasonTags.add(normalized)
+    reasonTags.push(normalized)
+  }
+
+  orderedNodes.forEach((node) => {
+    const payload = (node?.output_data && typeof node.output_data === 'object') ? node.output_data : {}
+    const nestedImmune = (payload?.immune_gate && typeof payload.immune_gate === 'object') ? payload.immune_gate : {}
+    const mergedPayload = { ...nestedImmune, ...payload }
+
+    const payloadDecision = String(mergedPayload.decision || '').trim().toUpperCase()
+    const payloadRisk = String(mergedPayload.risk_level || '').trim().toLowerCase()
+    if (payloadDecision) decision = payloadDecision
+    if (payloadRisk) riskLevel = payloadRisk
+
+    const reasonCode = String(node?.reason_code || mergedPayload.reason_code || '').trim()
+    if (reasonCode) pushReasonTag(reasonCode)
+
+    const reasonCodes = Array.isArray(mergedPayload.reason_codes) ? mergedPayload.reason_codes : []
+    reasonCodes.forEach((code) => pushReasonTag(code))
+  })
+
+  return {
+    decision: decision || null,
+    riskLevel: riskLevel || null,
+    reasonTags: reasonTags.slice(0, 3),
+  }
+}
+
 function resolveTraceStageGroupId(node) {
   const normalizedId = normalizeTraceStageNodeId(node)
   const explicitOwner = TRACE_STAGE_OWNER_BY_NODE_ID[normalizedId]
@@ -355,6 +413,78 @@ function buildStageTimelineSections(nodes) {
       }
     })
     .filter(Boolean)
+}
+
+const STABLE_STAGE_LABEL_BY_ID = {
+  edge: '边缘输入',
+  entry: '入口守护',
+  immune: '免疫门禁',
+  retrieval: '检索规划',
+  persona: '人格上下文',
+  orchestration: '编排决策',
+  agent: '代理调度',
+  llm: '提示与模型',
+  postprocess: '收口输出',
+  other: '其他',
+}
+
+function getStableStageLabel(stageId) {
+  return STABLE_STAGE_LABEL_BY_ID[stageId] || stageId || '其他'
+}
+
+function resolveTribeEventStageId(event) {
+  const eventType = String(event?.event_type || '').toLowerCase()
+  const sourceAgent = String(event?.source_agent || '').toLowerCase()
+  const targetAgent = String(event?.target_agent || '').toLowerCase()
+  const payload = event?.payload && typeof event.payload === 'object' ? event.payload : {}
+  const payloadText = safeStringify(payload, 0).toLowerCase()
+  const merged = `${eventType} ${sourceAgent} ${targetAgent} ${payloadText}`
+
+  if (merged.includes('voice_') || merged.includes('asr') || merged.includes('gateway') || merged.includes('channel_message')) return 'edge'
+  if (merged.includes('airlock') || merged.includes('governor') || merged.includes('ingress')) return 'entry'
+  if (merged.includes('immune')) return 'immune'
+  if (merged.includes('query_planner') || merged.includes('agentic_rag') || merged.includes('retrieval') || merged.includes('recall')) return 'retrieval'
+  if (merged.includes('emotion') || merged.includes('body_sense') || merged.includes('motive') || merged.includes('persona') || merged.includes('limbic')) return 'persona'
+  if (merged.includes('response_policy') || merged.includes('top_agent') || merged.includes('cortex_agent')) return 'orchestration'
+  if (merged.includes('dispatch') || merged.includes('sub_agent') || merged.includes('chat_agent') || merged.includes('ans_agent')) return 'agent'
+  if (merged.includes('prompt') || merged.includes('llm')) return 'llm'
+  if (merged.includes('egress') || merged.includes('pii') || merged.includes('episodic') || merged.includes('bond') || merged.includes('tts') || merged.includes('vts')) return 'postprocess'
+  return 'other'
+}
+
+function resolveTribeEventStatus(event) {
+  const text = String(event?.event_type || '').toLowerCase()
+  if (text.includes('degraded') || text.includes('fail') || text.includes('error') || text.includes('reject') || text.includes('blocked')) return 'DEGRADED'
+  if (text.includes('start') || text.includes('received') || text.includes('update') || text.includes('end') || text.includes('complete')) return 'OK'
+  return 'UNKNOWN'
+}
+
+function buildUnifiedTimelineItems(nodes, tribeEvents) {
+  const nodeItems = (Array.isArray(nodes) ? nodes : []).map((node, index) => ({
+    type: 'node',
+    key: `node:${node.node_id}:${node.ts_ms ?? 0}:${index}`,
+    ts_ms: Number(node?.ts_ms || 0),
+    stageId: resolveTraceStageGroupId(node),
+    title: getTraceNodeDisplayName(node),
+    subtitle: node?.node_id || '-',
+    preview: getNodePreview(node),
+    status: String(node?.status || 'UNKNOWN'),
+    node,
+  }))
+
+  const tribeItems = (Array.isArray(tribeEvents) ? tribeEvents : []).map((event, index) => ({
+    type: 'tribe',
+    key: `tribe:${event.event_id || index}`,
+    ts_ms: Number(event?.ts_ms || 0),
+    stageId: resolveTribeEventStageId(event),
+    title: event?.event_type || '-',
+    subtitle: `${event?.source_agent || '-'} -> ${event?.target_agent || '-'}`,
+    preview: getTribePayloadPreview(event?.payload),
+    status: resolveTribeEventStatus(event),
+    event,
+  }))
+
+  return [...nodeItems, ...tribeItems].sort((a, b) => (b.ts_ms ?? 0) - (a.ts_ms ?? 0))
 }
 
 function buildRetrievalRuntimeMeta(retrievalRuntime) {
@@ -665,6 +795,7 @@ function StageOverviewPanel({ nodes, selectedNode, onSelectNode }) {
           const activeNodeId = selectedNode?.node_id
           const isSelected = stage.observedNodes.some((node) => node.node_id === activeNodeId)
           const latestNode = stage.latestNode
+          const immuneMeta = stage.id === 'immune' ? buildImmuneStageMeta(stage.observedNodes) : null
           return (
             <div
               key={stage.id}
@@ -683,6 +814,21 @@ function StageOverviewPanel({ nodes, selectedNode, onSelectNode }) {
                   </div>
                   <div className="mt-1 text-xs leading-5 text-gray-500">{stage.description}</div>
                   {stage.preview ? <div className="mt-2 break-all text-sm leading-6 text-gray-700">{stage.preview}</div> : null}
+                  {immuneMeta && (immuneMeta.decision || immuneMeta.riskLevel || immuneMeta.reasonTags.length > 0) ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {(immuneMeta.decision || immuneMeta.riskLevel) ? (
+                        <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+                          {(immuneMeta.decision || 'IMMUNE').toUpperCase()}
+                          {immuneMeta.riskLevel ? `/${String(immuneMeta.riskLevel).toLowerCase()}` : ''}
+                        </span>
+                      ) : null}
+                      {immuneMeta.reasonTags.slice(0, 2).map((reasonCode) => (
+                        <span key={`${stage.id}-${reasonCode}`} className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                          {reasonCode}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     {stage.expectedEntries.map((entry) => (
@@ -749,6 +895,150 @@ function StreamEventsPanel({ events, loading, error }) {
               {getEventPreview(event) ? <div className="mt-2 break-all text-sm text-gray-700">{getEventPreview(event)}</div> : null}
             </div>
           ))}
+        </div>
+      ) : null}
+    </SectionCard>
+  )
+}
+
+function ImmuneReplayPanel({ replay, loading, error, requestId, onReload }) {
+  const summary = replay?.summary || {}
+  const decisions = Array.isArray(replay?.decisions) ? replay.decisions : []
+  const reasonCodes = Array.isArray(summary?.reason_codes) ? summary.reason_codes : []
+  const matchedRules = Array.isArray(summary?.matched_rules) ? summary.matched_rules : []
+
+  return (
+    <SectionCard
+      icon={ShieldAlert}
+      title="Immune 回放"
+      description="按当前 request 回放免疫决策链，快速定位误拦截与规则命中。"
+      aside={(
+        <button className="btn-secondary text-xs" onClick={onReload} disabled={loading}>
+          {loading ? '加载中...' : '刷新回放'}
+        </button>
+      )}
+    >
+      {loading ? <NoticeBanner variant="info" title="加载中">正在拉取 immune replay…</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error" title="回放拉取失败">{error}</NoticeBanner> : null}
+      {!loading && !error && !replay ? (
+        <EmptyStateCard title="当前请求暂无 immune 回放" hint="若未命中免疫流程，这里会保持为空。" className="p-4" />
+      ) : null}
+      {replay ? (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MiniStat label="request_id" value={requestId || '-'} />
+            <MiniStat label="会话" value={replay?.session_id || '-'} />
+            <MiniStat label="首/末决策" value={`${summary?.first_decision || '-'} → ${summary?.last_decision || '-'}`} />
+            <MiniStat label="事件数 / max_score" value={`${summary?.event_count ?? 0} / ${summary?.max_score ?? '-'}`} />
+          </div>
+
+          {replay?.input_preview ? (
+            <TextPreviewCard
+              label="输入预览"
+              text={String(replay.input_preview || '')}
+              emptyLabel="暂无输入预览"
+            />
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <TagList label="Reason Codes" items={reasonCodes} emptyLabel="暂无 reason code" tone="warn" />
+            <TagList label="Matched Rules" items={matchedRules} emptyLabel="暂无规则命中" />
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="mb-2 text-xs font-medium text-gray-500">决策时间线</div>
+            {decisions.length === 0 ? (
+              <div className="text-sm text-gray-400">暂无决策事件</div>
+            ) : (
+              <div className="space-y-2">
+                {decisions.map((item, index) => (
+                  <div key={`${item.ts_ms}-${item.event_type}-${index}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
+                        {item.event_type || '-'}
+                      </span>
+                      <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs text-orange-700">
+                        {item.decision || '-'}{item.risk_level ? `/${item.risk_level}` : ''}
+                      </span>
+                      <span className="text-xs text-gray-500">score={item.score ?? '-'}</span>
+                      <span className="ml-auto text-xs text-gray-400">{formatDateTime(item.ts_ms)}</span>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {(item.stage || '-')}{item.phase ? ` · ${item.phase}` : ''}{item.direction ? ` · ${item.direction}` : ''}
+                    </div>
+                    {Array.isArray(item.reason_codes) && item.reason_codes.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {item.reason_codes.slice(0, 4).map((code) => (
+                          <span key={`${item.ts_ms}-reason-${code}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
+                            {code}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {Array.isArray(item.matched_rules) && item.matched_rules.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {item.matched_rules.slice(0, 3).map((rule) => (
+                          <span key={`${item.ts_ms}-rule-${rule}`} className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] text-sky-700">
+                            {rule}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </SectionCard>
+  )
+}
+
+function TribeEventsPanel({ requestId, events, loading, error }) {
+  const latestEvent = events[0] ?? null
+
+  return (
+    <SectionCard
+      icon={GitBranch}
+      title="Tribe 事件联动"
+      description="展示当前 request 关联的跨智能体事件，帮助对齐 Edge/Host 之间的状态衔接。"
+      aside={<div className="text-xs text-gray-400">{latestEvent ? `最新 ${formatDateTime(latestEvent.ts_ms)}` : '等待事件'}</div>}
+    >
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MiniStat label="关联 request_id" value={requestId || '-'} />
+        <MiniStat label="事件数" value={events.length} hint={latestEvent?.event_type || '暂无事件'} />
+        <MiniStat
+          label="最新 source -> target"
+          value={latestEvent ? `${latestEvent.source_agent || '-'} -> ${latestEvent.target_agent || '-'}` : '-'}
+          hint={latestEvent ? formatDateTime(latestEvent.ts_ms) : '等待事件'}
+        />
+      </div>
+
+      {loading ? <NoticeBanner variant="info" title="加载中">正在拉取 Tribe 事件…</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error" title="Tribe 事件拉取失败">{error}</NoticeBanner> : null}
+      {!loading && !error && events.length === 0 ? (
+        <EmptyStateCard title="暂无 Tribe 事件" hint="当前请求暂未观测到跨智能体事件。" className="p-4" />
+      ) : null}
+      {!loading && !error && events.length > 0 ? (
+        <div className="space-y-2">
+          {events.map((event) => {
+            const payloadPreview = getTribePayloadPreview(event?.payload)
+            return (
+              <div key={event.event_id} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                    {event.event_type || '-'}
+                  </span>
+                  <span className="font-mono">{event.source_agent || '-'}</span>
+                  <span>{'->'}</span>
+                  <span className="font-mono">{event.target_agent || '-'}</span>
+                  <span className="ml-auto">{formatDateTime(event.ts_ms)}</span>
+                </div>
+                {payloadPreview ? <div className="mt-2 break-all text-sm text-gray-700">{payloadPreview}</div> : null}
+              </div>
+            )
+          })}
         </div>
       ) : null}
     </SectionCard>
@@ -913,6 +1203,122 @@ function LiveEntriesPanel({ liveEntries, liveConnected, liveLastTs }) {
   )
 }
 
+function UnifiedTimelinePanel({ nodes, tribeEvents, selectedNode, onSelectNode }) {
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [stageFilter, setStageFilter] = useState('all')
+  const [keyword, setKeyword] = useState('')
+
+  const items = useMemo(
+    () => buildUnifiedTimelineItems(nodes, tribeEvents),
+    [nodes, tribeEvents]
+  )
+  const stageOptions = useMemo(() => {
+    const stageIds = new Set(items.map((item) => item.stageId).filter(Boolean))
+    const ordered = TRACE_TIMELINE_STAGE_ORDER.filter((stageId) => stageIds.has(stageId))
+    const extras = [...stageIds].filter((stageId) => !ordered.includes(stageId)).sort()
+    return [...ordered, ...extras]
+  }, [items])
+  const filteredItems = useMemo(() => {
+    const targetKeyword = keyword.trim().toLowerCase()
+    return items.filter((item) => {
+      if (typeFilter !== 'all' && item.type !== typeFilter) return false
+      if (stageFilter !== 'all' && item.stageId !== stageFilter) return false
+      if (!targetKeyword) return true
+      const text = `${item.title || ''} ${item.subtitle || ''} ${item.preview || ''} ${getStableStageLabel(item.stageId)} ${item.type || ''}`.toLowerCase()
+      return text.includes(targetKeyword)
+    })
+  }, [items, keyword, stageFilter, typeFilter])
+
+  return (
+    <SectionCard
+      icon={Clock3}
+      title="同轴时间线（节点 + Tribe）"
+      description="把节点执行与 Tribe 事件放到同一时间轴，快速定位跨层状态衔接是否顺滑。"
+      aside={<div className="text-xs text-gray-400">{filteredItems.length} / {items.length} 条</div>}
+    >
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <MiniStat label="节点条目" value={nodes.length} />
+        <MiniStat label="Tribe 条目" value={tribeEvents.length} />
+        <MiniStat label="最新时间" value={items[0]?.ts_ms ? formatDateTime(items[0].ts_ms) : '-'} />
+      </div>
+
+      <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[8rem_12rem_minmax(0,1fr)_auto]">
+          <select
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+          >
+            <option value="all">全部类型</option>
+            <option value="node">仅节点</option>
+            <option value="tribe">仅Tribe</option>
+          </select>
+          <select
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            value={stageFilter}
+            onChange={(event) => setStageFilter(event.target.value)}
+          >
+            <option value="all">全部阶段</option>
+            {stageOptions.map((stageId) => (
+              <option key={stageId} value={stageId}>{getStableStageLabel(stageId)}</option>
+            ))}
+          </select>
+          <input
+            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            placeholder="搜索标题、节点ID、payload 关键词"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+          />
+          <button
+            className="btn-secondary text-xs"
+            onClick={() => {
+              setTypeFilter('all')
+              setStageFilter('all')
+              setKeyword('')
+            }}
+          >
+            重置
+          </button>
+        </div>
+      </div>
+
+      {filteredItems.length === 0 ? (
+        <EmptyStateCard title="暂无可对齐数据" hint="等待节点执行或 Tribe 事件上报后会自动出现。" className="p-4" />
+      ) : (
+        <div className="space-y-2">
+          {filteredItems.map((item) => {
+            const stageLabel = getStableStageLabel(item.stageId)
+            const isNode = item.type === 'node'
+            const isSelectedNode = isNode && selectedNode?.node_id === item?.node?.node_id
+            const containerClassName = isNode
+              ? (isSelectedNode ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50')
+              : 'border-emerald-200 bg-emerald-50/60'
+            return (
+              <button
+                key={item.key}
+                className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${containerClassName}`}
+                onClick={() => { if (isNode) onSelectNode?.(item.node) }}
+              >
+                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                  <span className={`rounded-full border px-2 py-0.5 ${isNode ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                    {isNode ? 'NODE' : 'TRIBE'}
+                  </span>
+                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-gray-600">{stageLabel}</span>
+                  <StatusBadge status={normalizeStatus(item.status)} />
+                  <span className="ml-auto">{formatDateTime(item.ts_ms)}</span>
+                </div>
+                <div className="mt-2 text-sm font-semibold text-gray-900 break-all">{item.title}</div>
+                <div className="mt-1 text-xs font-mono text-gray-500 break-all">{item.subtitle}</div>
+                {item.preview ? <div className="mt-2 text-sm text-gray-700 break-all">{item.preview}</div> : null}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
 function NodeTimelinePanel({ nodes, selectedNode, onSelectNode }) {
   const sections = useMemo(() => buildStageTimelineSections(nodes), [nodes])
 
@@ -992,15 +1398,21 @@ export default function TraceRequestDetail() {
   const { requestId } = useParams()
   const [traceData, setTraceData] = useState(null)
   const [fallbackEvents, setFallbackEvents] = useState([])
+  const [tribeEvents, setTribeEvents] = useState([])
   const [retrievalRuntime, setRetrievalRuntime] = useState(null)
+  const [immuneReplay, setImmuneReplay] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [liveEntries, setLiveEntries] = useState([])
   const [liveConnected, setLiveConnected] = useState(false)
   const [liveLastTs, setLiveLastTs] = useState(null)
   const [loading, setLoading] = useState(true)
   const [eventsLoading, setEventsLoading] = useState(false)
+  const [tribeEventsLoading, setTribeEventsLoading] = useState(false)
+  const [immuneReplayLoading, setImmuneReplayLoading] = useState(false)
   const [error, setError] = useState(null)
   const [eventsError, setEventsError] = useState(null)
+  const [tribeEventsError, setTribeEventsError] = useState(null)
+  const [immuneReplayError, setImmuneReplayError] = useState(null)
 
   const loadTrace = useCallback(async ({ showLoading = false } = {}) => {
     if (!requestId) return
@@ -1037,12 +1449,64 @@ export default function TraceRequestDetail() {
     }
   }, [requestId])
 
+  const loadTribeEvents = useCallback(async ({ showLoading = false } = {}) => {
+    if (!requestId) return
+    if (showLoading) setTribeEventsLoading(true)
+    try {
+      const data = await fetchTribeEvents({ request_id: requestId, limit: 120 })
+      setTribeEvents(Array.isArray(data?.items) ? data.items : [])
+      setTribeEventsError(null)
+    } catch (err) {
+      setTribeEvents([])
+      setTribeEventsError(err.message)
+    } finally {
+      if (showLoading) setTribeEventsLoading(false)
+    }
+  }, [requestId])
+
+  const loadImmuneReplay = useCallback(async ({ showLoading = false } = {}) => {
+    if (!requestId) return
+    if (showLoading) setImmuneReplayLoading(true)
+    try {
+      const payload = await fetchImmuneGateReplay(requestId, { limit: 160 })
+      setImmuneReplay(payload)
+      setImmuneReplayError(null)
+    } catch (err) {
+      const message = String(err?.message || '')
+      if (message.includes('HTTP 404')) {
+        setImmuneReplay(null)
+        setImmuneReplayError(null)
+      } else {
+        setImmuneReplay(null)
+        setImmuneReplayError(message || 'immune replay load failed')
+      }
+    } finally {
+      if (showLoading) setImmuneReplayLoading(false)
+    }
+  }, [requestId])
+
   useEffect(() => {
     if (!requestId) return
     setLoading(true)
     setEventsLoading(true)
-    Promise.all([loadTrace(), loadEvents({ showLoading: true })]).finally(() => setLoading(false))
-  }, [requestId, loadTrace, loadEvents])
+    setTribeEventsLoading(true)
+    setImmuneReplayLoading(true)
+    Promise.all([
+      loadTrace(),
+      loadEvents({ showLoading: true }),
+      loadTribeEvents({ showLoading: true }),
+      loadImmuneReplay({ showLoading: true }),
+    ]).finally(() => setLoading(false))
+  }, [requestId, loadTrace, loadEvents, loadTribeEvents, loadImmuneReplay])
+
+  useEffect(() => {
+    if (!requestId) return undefined
+    const timer = setInterval(() => {
+      void loadTribeEvents()
+      void loadImmuneReplay()
+    }, 10000)
+    return () => clearInterval(timer)
+  }, [requestId, loadTribeEvents, loadImmuneReplay])
 
   useEffect(() => {
     if (!requestId) return undefined
@@ -1137,7 +1601,15 @@ export default function TraceRequestDetail() {
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           {traceData ? <StatusBadge status={normalizeStatus(traceData.status)} label={traceData.status} /> : null}
-          <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => { void loadTrace({ showLoading: true }); void loadEvents({ showLoading: true }) }}>
+          {requestId ? (
+            <a
+              href={`#/automation?immune_replay_request_id=${encodeURIComponent(requestId)}`}
+              className="btn-secondary text-xs"
+            >
+              打开 Immune Ops
+            </a>
+          ) : null}
+          <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => { void loadTrace({ showLoading: true }); void loadEvents({ showLoading: true }); void loadTribeEvents({ showLoading: true }); void loadImmuneReplay({ showLoading: true }) }}>
             <RefreshCw size={12} />
             刷新
           </button>
@@ -1159,6 +1631,14 @@ export default function TraceRequestDetail() {
           </div>
 
           <StageOverviewPanel nodes={nodes} selectedNode={selectedNode} onSelectNode={setSelectedNode} />
+
+          <ImmuneReplayPanel
+            replay={immuneReplay}
+            loading={immuneReplayLoading}
+            error={immuneReplayError}
+            requestId={requestId}
+            onReload={() => { void loadImmuneReplay({ showLoading: true }) }}
+          />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
             <SectionCard
@@ -1224,9 +1704,22 @@ export default function TraceRequestDetail() {
             <StreamEventsPanel events={streamEvents} loading={eventsLoading} error={eventsError} />
           </div>
 
+          <TribeEventsPanel
+            requestId={requestId}
+            events={tribeEvents}
+            loading={tribeEventsLoading}
+            error={tribeEventsError}
+          />
+
           <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_20rem]">
             <div className="space-y-4">
               <LiveEntriesPanel liveEntries={liveEntries} liveConnected={liveConnected} liveLastTs={liveLastTs} />
+              <UnifiedTimelinePanel
+                nodes={nodes}
+                tribeEvents={tribeEvents}
+                selectedNode={selectedNode}
+                onSelectNode={setSelectedNode}
+              />
               <NodeTimelinePanel nodes={nodes} selectedNode={selectedNode} onSelectNode={setSelectedNode} />
             </div>
 

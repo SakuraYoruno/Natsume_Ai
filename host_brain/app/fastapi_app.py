@@ -7,11 +7,12 @@ TASK-0065: HTTP 服务框架落地 — FastAPI 路由绑定 + 健康检测 + 链
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Callable, Dict, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, Mapping, Optional
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,11 +39,11 @@ from host_brain.app.health_routes import router as health_router
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.input_routes import router as input_router
 from host_brain.app.prompt_config_routes import router as prompt_config_router
+from host_brain.app.internal_tribe_routes import router as internal_tribe_router
 from host_brain.app.dependencies import (
     get_ledger as _get_ledger_dep,
     get_tool_catalog,
     get_tool_broker,
-    get_bond_stage_engine,
 )
 from host_brain.app.http_hooks import (
     runtime_lifespan,
@@ -65,6 +66,82 @@ def _get_ledger_compat():
     if _ledger is not None:
         return _ledger
     return _get_ledger_dep()
+
+
+def _get_bond_engine_via_social_brain():
+    from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+    return get_social_brain_agent().resolve_stage_engine()
+
+
+def _sse_single_commit(payload: dict[str, Any]) -> StreamingResponse:
+    async def _single_event():
+        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _single_event(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _evaluate_immune_gate_for_chat(request_body: ChatRequest) -> dict[str, Any]:
+    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+    return get_immune_agent().inspect_text(
+        text=str(request_body.message or ""),
+        source="http.v1.chat",
+        metadata={
+            "session_id": str(request_body.session_id or "").strip() or None,
+            "person_id": str(request_body.person_id or "").strip() or None,
+            "input_source": str(request_body.input_source or "").strip() or None,
+        },
+    )
+
+
+def _log_chat_immune_gate_event(
+    *,
+    request_id: str,
+    request_body: ChatRequest,
+    immune_result: Mapping[str, Any],
+) -> None:
+    try:
+        ledger = _get_ledger_compat()
+    except Exception:
+        return
+    if ledger is None:
+        return
+    decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
+    status = "OK"
+    if decision == "REPORT":
+        status = "DEGRADED"
+    elif decision == "BLOCK":
+        status = "REJECTED"
+    try:
+        ledger.log_voice_event(
+            {
+                "request_id": request_id,
+                "session_id": str(request_body.session_id or "").strip() or None,
+                "event_type": "IMMUNE_CHAT_GATE",
+                "direction": "INGRESS",
+                "status": status,
+                "reason_code": "IMMUNE_BLOCKED_HIGH_RISK" if decision == "BLOCK" else None,
+                "stage": "chat.immune_gate",
+                "detail": f"decision={decision} risk={immune_result.get('risk_level')} score={immune_result.get('score')}",
+                "payload": {
+                    "decision": decision,
+                    "risk_level": immune_result.get("risk_level"),
+                    "score": immune_result.get("score"),
+                    "reason_codes": list(immune_result.get("reason_codes") or []),
+                    "matched_rules": list(immune_result.get("matched_rules") or [])[:6],
+                    "input_source": str(request_body.input_source or "").strip() or None,
+                    "person_id": str(request_body.person_id or "").strip() or None,
+                },
+                "ts_ms": int(time.time() * 1000),
+            }
+        )
+    except Exception as exc:
+        _logger.debug("chat immune gate audit skipped: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +193,7 @@ _set_tool_providers(
     catalog_provider=get_tool_catalog,
     ledger_provider=_get_ledger_compat,
 )
-_set_bond_engine_provider(get_bond_stage_engine)
+_set_bond_engine_provider(_get_bond_engine_via_social_brain)
 try:
     from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
     from host_brain.scheduler.health import SchedulerHealthReporter  # noqa: PLC0415
@@ -206,6 +283,11 @@ app.include_router(prompt_config_router)
 app.include_router(input_router)
 
 # ---------------------------------------------------------------------------
+# 注册 Tribe 内部事件入口（Host/Edge 事件桥）
+# ---------------------------------------------------------------------------
+app.include_router(internal_tribe_router)
+
+# ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）
 # ---------------------------------------------------------------------------
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -271,6 +353,47 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
         notify_user_interaction()
     except Exception:
         pass
+    request_id = getattr(request.state, "request_id", None) or new_request_id()
+    request.state.request_id = request_id
+    try:
+        immune_result = _evaluate_immune_gate_for_chat(request_body)
+    except Exception as exc:
+        _logger.warning("immune gate evaluate degraded: %s", exc)
+        immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
+    request.state.immune_inspection = immune_result
+    _log_chat_immune_gate_event(
+        request_id=request_id,
+        request_body=request_body,
+        immune_result=immune_result,
+    )
+    immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
+    if immune_decision == "BLOCK":
+        _logger.warning(
+            "immune gate blocked /v1/chat request_id=%s reasons=%s",
+            request_id,
+            immune_result.get("reason_codes"),
+        )
+        return _sse_single_commit(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "IMMUNE_BLOCKED_HIGH_RISK",
+                "narrative": "我先停一下，这条输入里有高风险指令模式。换个表达我会继续接住你。",
+                "request_id": request_id,
+                "immune": {
+                    "risk_level": immune_result.get("risk_level"),
+                    "reason_codes": immune_result.get("reason_codes"),
+                    "score": immune_result.get("score"),
+                },
+            }
+        )
+    if immune_decision == "REPORT":
+        _logger.info(
+            "immune gate report /v1/chat request_id=%s reasons=%s",
+            request_id,
+            immune_result.get("reason_codes"),
+        )
     return await handle_chat(request_body=request_body, request=request, metrics=_metrics)
 
 

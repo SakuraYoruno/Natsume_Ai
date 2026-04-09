@@ -1120,6 +1120,29 @@ async def dispatch_agent_sse_generator(
         _sse,
     )
 
+    def _record_dispatch_handoff(
+        *,
+        handoff_route: str,
+        handoff_target: str | None,
+        handoff_reason: str | None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            from host_brain.tribe.handoff import get_tribe_handoff_coordinator  # noqa: PLC0415
+
+            coordinator = get_tribe_handoff_coordinator()
+            coordinator.record_dispatch_handoff(
+                request_id=request_id,
+                session_id=session_id,
+                route=handoff_route,
+                target_id=handoff_target,
+                reason=handoff_reason,
+                source_family="cortex",
+                extra=extra,
+            )
+        except Exception as exc:
+            _logger.debug("[%s] dispatch handoff record skipped: %s", request_id, exc)
+
     # ── 1. 硬规则路由 ─────────────────────────────────────────────────
     route, target_id, route_reason = _hard_rule_route(sanitized_message)
 
@@ -1147,6 +1170,11 @@ async def dispatch_agent_sse_generator(
         if recent_answer:
             narrative = _airlock_sanitize_output(recent_answer)
             total_latency_ms = int(time.time() * 1000) - ts_ms
+            _record_dispatch_handoff(
+                handoff_route="recent_turn",
+                handoff_target=None,
+                handoff_reason=route_reason,
+            )
             yield _sse({
                 "phase": "COMMIT", "done": True, "decision": "APPROVE",
                 "narrative": narrative, "request_id": request_id,
@@ -1297,6 +1325,11 @@ async def dispatch_agent_sse_generator(
                 chat_mode="sub_agent",
                 chat_sub_agent_id=str(getattr(plan_ctx, "agent_id", None) or "plan_runner"),
             )
+            _record_dispatch_handoff(
+                handoff_route="plan",
+                handoff_target=str(getattr(plan_ctx, "agent_id", None) or "plan_runner"),
+                handoff_reason=route_reason,
+            )
             async for event in chat_agent_sse_generator(chat_input):
                 yield event
             return
@@ -1333,6 +1366,11 @@ async def dispatch_agent_sse_generator(
             ).strip()
         )
         total_latency_ms = int(time.time() * 1000) - ts_ms
+        _record_dispatch_handoff(
+            handoff_route="task_progress",
+            handoff_target=None,
+            handoff_reason=route_reason,
+        )
         yield _sse({
             "phase": "COMMIT", "done": True, "decision": "APPROVE",
             "narrative": narrative, "request_id": request_id,
@@ -1366,6 +1404,11 @@ async def dispatch_agent_sse_generator(
     if route == "chat":
         # 闲聊路径：直接交给 ChatAgent
         _logger.info("[%s] DispatchAgent → chat (reason=%s)", request_id, route_reason)
+        _record_dispatch_handoff(
+            handoff_route="chat",
+            handoff_target=None,
+            handoff_reason=route_reason,
+        )
         async for event in chat_agent_sse_generator(chat_input):
             yield event
         return
@@ -1373,6 +1416,11 @@ async def dispatch_agent_sse_generator(
     elif route == "delegate":
         # 子 Agent 委托路径
         _logger.info("[%s] DispatchAgent → delegate: %s (reason=%s)", request_id, target_id, route_reason)
+        _record_dispatch_handoff(
+            handoff_route="delegate",
+            handoff_target=target_id or None,
+            handoff_reason=route_reason,
+        )
         yield _sse({"phase": "PRESENCE", "event": "DELEGATING", "agent": target_id, "request_id": request_id})
 
         delegate_runtime_texts = _mapping_section(_load_runtime_texts(), "delegate_runtime")
@@ -1527,6 +1575,11 @@ async def dispatch_agent_sse_generator(
     elif route == "skill":
         # Skill 执行路径
         _logger.info("[%s] DispatchAgent → skill: %s (reason=%s)", request_id, target_id, route_reason)
+        _record_dispatch_handoff(
+            handoff_route="skill",
+            handoff_target=target_id or None,
+            handoff_reason=route_reason,
+        )
         yield _sse({"phase": "PRESENCE", "event": "SKILL_RUNNING", "skill_id": target_id, "request_id": request_id})
 
         skill_runtime_texts = _mapping_section(_load_runtime_texts(), "skill_runtime")
@@ -1743,6 +1796,12 @@ async def dispatch_agent_sse_generator(
     else:
         # 未知路由，降级到闲聊
         _logger.warning("[%s] DispatchAgent unknown route=%s, fallback to chat", request_id, route)
+        _record_dispatch_handoff(
+            handoff_route="fallback_chat",
+            handoff_target=None,
+            handoff_reason=route_reason or f"unknown:{route}",
+            extra={"original_route": route},
+        )
         async for event in chat_agent_sse_generator(chat_input):
             yield event
 
@@ -1826,6 +1885,7 @@ async def _dispatch_to_sub_agent(
             context=task_context,
         ))
         latency_ms = int(time.time() * 1000) - started_ms
+        audit_refs = dict(getattr(sub_resp, "audit_refs", {}) or {})
         return SubAgentContext(
             agent_id=sub_resp.agent_id,
             task=task,
@@ -1833,6 +1893,9 @@ async def _dispatch_to_sub_agent(
             success=bool(sub_resp.success),
             latency_ms=latency_ms,
             error="" if sub_resp.success else str(getattr(sub_resp, "error", "") or ""),
+            payload={
+                "audit_refs": audit_refs,
+            } if audit_refs else {},
         )
     except Exception as exc:
         latency_ms = int(time.time() * 1000) - started_ms
