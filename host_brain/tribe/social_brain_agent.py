@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
 @dataclass(slots=True)
@@ -15,6 +16,7 @@ class SocialBrainAgent:
             capabilities=("bond", "style_adapter", "expression"),
         )
     )
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-31：使用全局单例
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -188,12 +190,18 @@ class SocialBrainAgent:
 
         在 http_hooks.py lifespan 中调用，确保 Bus 的 dispatch_loop 启动后
         SocialBrainAgent 的 handler 能被正确触发。
+
+        T-31：新增订阅 BOND_PROGRESS / BOND_REGRESS，
+        将关系变化写入 TribeStateRegistry 快照，供 aggregate_vital_signs() 读取。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+            # T-31：订阅关系进展/退步事件，更新 bond_summary 快照
+            bus.subscribe("BOND_PROGRESS", self._on_bond_progress_snapshot)
+            bus.subscribe("BOND_REGRESS", self._on_bond_regress_snapshot)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -272,6 +280,99 @@ class SocialBrainAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent._on_interaction_recorded 异常: %s", exc
+            )
+
+
+    async def _on_bond_progress_snapshot(self, event: Any) -> None:
+        """处理 BOND_PROGRESS 事件：将关系进展写入 TribeStateRegistry 快照。
+
+        T-31：BOND_PROGRESS 触发时，从 payload 中读取最新 bond_stage/bond_trend，
+        写入 social_brain_agent 命名空间，供 aggregate_vital_signs() 读取。
+
+        同时记录最近一次关系进展的时间戳和强度，用于调试和上下文构建。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.social_brain_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            user_id = str(payload.get("user_id") or "").strip()
+            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_trend = str(payload.get("bond_trend") or "PROGRESS").strip().upper()
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.3)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+
+            # 读取当前快照，合并更新
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "bond_stage": bond_stage.lower(),
+                "bond_trend": bond_trend.lower(),
+                "last_bond_progress": {
+                    "user_id": user_id,
+                    "bond_stage": bond_stage,
+                    "intensity": intensity,
+                    "ts_ms": ts_ms,
+                },
+            })
+            self.state_registry.set_state(
+                "social_brain_agent",
+                prev_state,
+                writer="social_brain_agent",
+            )
+            _log.debug(
+                "SocialBrainAgent 快照更新 BOND_PROGRESS: stage=%s intensity=%.2f",
+                bond_stage, intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_bond_progress_snapshot 异常: %s", exc
+            )
+
+    async def _on_bond_regress_snapshot(self, event: Any) -> None:
+        """处理 BOND_REGRESS 事件：将关系退步写入 TribeStateRegistry 快照。
+
+        T-31：BOND_REGRESS 触发时，从 payload 中读取最新 bond_stage/bond_trend，
+        写入 social_brain_agent 命名空间，供 aggregate_vital_signs() 读取。
+
+        同时记录最近一次关系退步的时间戳和强度，用于调试和上下文构建。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.social_brain_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            user_id = str(payload.get("user_id") or "").strip()
+            bond_stage = str(payload.get("bond_stage") or "STRANGER").strip().upper() or "STRANGER"
+            bond_trend = str(payload.get("bond_trend") or "REGRESS").strip().upper()
+            intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.4)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+
+            # 读取当前快照，合并更新
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "bond_stage": bond_stage.lower(),
+                "bond_trend": bond_trend.lower(),
+                "last_bond_regress": {
+                    "user_id": user_id,
+                    "bond_stage": bond_stage,
+                    "intensity": intensity,
+                    "ts_ms": ts_ms,
+                },
+            })
+            self.state_registry.set_state(
+                "social_brain_agent",
+                prev_state,
+                writer="social_brain_agent",
+            )
+            _log.debug(
+                "SocialBrainAgent 快照更新 BOND_REGRESS: stage=%s intensity=%.2f",
+                bond_stage, intensity,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_bond_regress_snapshot 异常: %s", exc
             )
 
 

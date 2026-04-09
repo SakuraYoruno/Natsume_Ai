@@ -1224,6 +1224,9 @@ def runtime_lifespan(
                         logger.info("TribeStateRegistry 状态快照已恢复（跨会话持久化）")
                     else:
                         logger.debug("TribeStateRegistry 无持久化快照（首次启动或文件不存在）")
+                    # T-32：启动定时保存（默认每 5 分钟，可通过 NATSUME_TRIBE_STATE_SAVE_INTERVAL 覆盖）
+                    _registry.start_periodic_save()
+                    logger.info("TribeStateRegistry 定时保存已启动")
                 except Exception as _snap_exc:
                     logger.debug("TribeStateRegistry.load_snapshot 失败（降级）: %s", _snap_exc)
 
@@ -1249,7 +1252,7 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
                 _sub_status = (
-                    f"OK (dispatch_loop=running, subscriptions=9)"
+                    f"OK (dispatch_loop=running, subscriptions=11)"
                     if not _tribe_sub_errors
                     else f"DEGRADED: {'; '.join(_tribe_sub_errors)}"
                 )
@@ -1295,6 +1298,13 @@ def runtime_lifespan(
                 logger.info("TribeEventBus dispatch_loop 已停止")
         except Exception as _bus_stop_exc:
             logger.warning("TribeEventBus dispatch_loop 停止失败: %s", _bus_stop_exc)
+        # T-32：停止 TribeStateRegistry 定时保存（并强制最后一次落盘）
+        try:
+            from host_brain.tribe.tribe_state import get_global_registry as _get_global_registry_shutdown  # noqa: PLC0415
+            _get_global_registry_shutdown().stop_periodic_save()
+            logger.info("TribeStateRegistry 定时保存已停止，最终快照已落盘")
+        except Exception as _periodic_stop_exc:
+            logger.debug("TribeStateRegistry.stop_periodic_save 失败（降级）: %s", _periodic_stop_exc)
         logger.info("Natsume AI Host Brain shutting down ...")
 
     return _lifespan()

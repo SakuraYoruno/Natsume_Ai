@@ -2440,3 +2440,94 @@ BOND_PROGRESS / BOND_REGRESS
 1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
 2. **T-31**（新增）：`SocialBrainAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响 bond_summary 快照更新频率）
 3. **T-32**（新增）：`TribeStateRegistry` 快照定时保存（每 N 分钟强制持久化，补充节流机制的盲区）
+
+---
+
+### 2026-04-09 · 第十二批开发（T-31 / T-32）
+
+**开发者**：AI 配对编程
+**涉及文件**：
+- `host_brain/tribe/social_brain_agent.py`（T-31：BOND 事件快照更新 handler + 全局 registry）
+- `host_brain/tribe/tribe_state.py`（T-32：start_periodic_save / stop_periodic_save）
+- `host_brain/app/http_hooks.py`（T-31：subscriptions 计数 9→11；T-32：启动/停止定时保存）
+
+---
+
+#### T-31：SocialBrainAgent 接入 BOND_PROGRESS/BOND_REGRESS 事件 ✅
+
+**问题**：`SocialBrainAgent` 自己会发布 `BOND_PROGRESS`/`BOND_REGRESS` 事件，但不订阅这两个事件，导致 `TribeStateRegistry` 的 `social_brain_agent` 命名空间快照中的 `bond_stage`/`bond_trend` 字段只在 `INTERACTION_RECORDED` 时更新，而不是在 bond 变化时实时更新。
+
+**改动**（`social_brain_agent.py`）：
+
+1. **新增导入**：`from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry`
+
+2. **新增 `state_registry` 字段**：
+   - `state_registry: TribeStateRegistry = field(default_factory=get_global_registry)`
+   - 使用全局单例，与 LimbicAgent/PainRewardAgent 共享同一个 registry
+
+3. **修改 `register_subscriptions()`**：
+   - 追加订阅 `BOND_PROGRESS` → `_on_bond_progress_snapshot`
+   - 追加订阅 `BOND_REGRESS` → `_on_bond_regress_snapshot`
+
+4. **新增 `_on_bond_progress_snapshot()` handler**：
+   - 从 payload 读取 `bond_stage`/`bond_trend`/`intensity`
+   - 读取当前 `social_brain_agent` 命名空间快照，合并更新
+   - 写入 `bond_stage`（小写）、`bond_trend`（小写）、`last_bond_progress`（调试信息）
+   - 通过 `state_registry.set_state()` 持久化到全局 registry
+
+5. **新增 `_on_bond_regress_snapshot()` handler**：
+   - 同上，写入 `last_bond_regress` 调试信息
+
+**改动**（`http_hooks.py`）：
+- subscriptions 计数 9 → 11（SocialBrainAgent 新增 BOND_PROGRESS/BOND_REGRESS）
+
+**效果**：`aggregate_vital_signs()` 中的 `bond_stage` 字段现在能在 bond 变化时实时更新，而不是只在对话结束时更新。
+
+---
+
+#### T-32：TribeStateRegistry 快照定时保存 ✅
+
+**问题**：T-29 的节流机制（每 10 次 `set_state` 写一次磁盘）在低频写入场景下存在盲区：
+- 如果 Agent 长时间不写入状态（如夜间无对话），最新状态可能长时间未落盘
+- 进程异常退出时，最后 N 次写入的状态会丢失
+
+**改动**（`tribe_state.py`）：
+
+1. **新增 `start_periodic_save(interval_seconds=300.0)` 方法**：
+   - 启动后台守护线程（`daemon=True`），每隔 `interval_seconds` 秒调用 `save_snapshot()`
+   - 支持通过 `NATSUME_TRIBE_STATE_SAVE_INTERVAL` 环境变量覆盖间隔（最小 30 秒）
+   - 如果已有定时线程在运行，先停止旧线程再启动新线程
+   - 线程名：`TribeStateRegistry-PeriodicSave`
+
+2. **新增 `stop_periodic_save()` 方法**：
+   - 设置 stop_event，通知定时线程退出
+   - 调用 `save_snapshot()` 强制最后一次落盘（确保进程退出前状态完整）
+
+**改动**（`http_hooks.py`）：
+
+- **Startup 阶段**：在 `load_snapshot()` 之后调用 `_registry.start_periodic_save()`
+- **Shutdown 阶段**：在停止 TribeEventBus 之后调用 `_get_global_registry_shutdown().stop_periodic_save()`
+
+**持久化时序**：
+```
+启动 → load_snapshot() → start_periodic_save()
+                              ↓ 每 5 分钟
+                         save_snapshot()（定时）
+                              ↓ 每 10 次 set_state
+                         save_snapshot()（节流）
+关闭 → stop_periodic_save() → save_snapshot()（最终落盘）
+```
+
+**环境变量**：
+| 变量名 | 默认值 | 说明 |
+|---|---|---|
+| `NATSUME_TRIBE_STATE_SNAPSHOT_PATH` | `host_brain/data/tribe_state_snapshot.json` | 持久化文件路径 |
+| `NATSUME_TRIBE_STATE_SAVE_INTERVAL` | `300`（秒） | 定时保存间隔，最小 30 秒 |
+
+---
+
+#### 下一步待开发
+
+1. **T-14**：`LanguageSystemAgent`（语言系统解耦，Phase 5 后实施）
+2. **T-33**（新增）：`CortexAgent` 接入 `BOND_PROGRESS`/`BOND_REGRESS` 事件（关系变化影响认知评估权重）
+3. **T-34**（新增）：`PrefrontalAgent` 接入 `BOND_STAGE_CHANGED` 事件（关系阶段跃迁影响决策策略）

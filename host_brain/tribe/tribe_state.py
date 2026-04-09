@@ -132,6 +132,74 @@ class TribeStateRegistry:
             )
             return False
 
+    # ── T-32：定时保存 ────────────────────────────────────────────────────────
+
+    def start_periodic_save(self, interval_seconds: float = 300.0) -> None:
+        """启动后台守护线程，每隔 interval_seconds 秒强制持久化一次快照。
+
+        T-32：补充节流机制的盲区——当 set_state 调用频率较低时，
+        节流计数可能长时间未达到阈值，导致最新状态未持久化。
+        定时保存确保即使低频写入场景下，状态也能定期落盘。
+
+        Args:
+            interval_seconds: 保存间隔（秒），默认 300 秒（5 分钟）。
+                              可通过 NATSUME_TRIBE_STATE_SAVE_INTERVAL 环境变量覆盖。
+        """
+        import logging  # noqa: PLC0415
+        _log = logging.getLogger("Natsume.tribe.tribe_state")
+
+        # 支持环境变量覆盖间隔
+        env_interval = os.environ.get("NATSUME_TRIBE_STATE_SAVE_INTERVAL")
+        if env_interval:
+            try:
+                interval_seconds = max(30.0, float(env_interval))
+            except (TypeError, ValueError):
+                pass
+
+        interval_seconds = max(30.0, float(interval_seconds))
+
+        with self._lock:
+            # 如果已有定时线程在运行，先停止
+            if getattr(self, "_periodic_stop_event", None) is not None:
+                self._periodic_stop_event.set()  # type: ignore[attr-defined]
+
+        stop_event = threading.Event()
+        self._periodic_stop_event = stop_event  # type: ignore[attr-defined]
+
+        def _periodic_worker() -> None:
+            _log.info(
+                "TribeStateRegistry 定时保存已启动，间隔=%.0f 秒",
+                interval_seconds,
+            )
+            while not stop_event.wait(timeout=interval_seconds):
+                ok = self.save_snapshot()
+                _log.debug(
+                    "TribeStateRegistry 定时保存: %s",
+                    "成功" if ok else "失败（降级）",
+                )
+            _log.info("TribeStateRegistry 定时保存已停止")
+
+        t = threading.Thread(
+            target=_periodic_worker,
+            name="TribeStateRegistry-PeriodicSave",
+            daemon=True,
+        )
+        t.start()
+        self._periodic_thread = t  # type: ignore[attr-defined]
+        _log.debug("TribeStateRegistry 定时保存线程已启动: interval=%.0fs", interval_seconds)
+
+    def stop_periodic_save(self) -> None:
+        """停止后台定时保存线程。
+
+        T-32：在 http_hooks.py lifespan shutdown 阶段调用，
+        确保进程退出前完成最后一次持久化。
+        """
+        stop_event = getattr(self, "_periodic_stop_event", None)
+        if stop_event is not None:
+            stop_event.set()
+        # 关闭前强制保存一次，确保最新状态落盘
+        self.save_snapshot()
+
     def aggregate_vital_signs(self) -> dict[str, Any]:
         """T-10：从各族 Agent 写入的状态快照中聚合统一生命体征。
 
