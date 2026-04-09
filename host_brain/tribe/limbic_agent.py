@@ -893,6 +893,8 @@ class LimbicAgent:
             bus.subscribe("HUMOR_LANDED", self._on_humor_landed_emotion)
             # T-51：订阅孤独感信号，触发情绪效价下降
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal_emotion)
+            # T-79：订阅免疫拦截事件，拦截时触发轻微负面情绪偏置
+            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_emotion)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
@@ -1306,6 +1308,53 @@ class LimbicAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent._on_loneliness_signal_emotion 异常: %s", exc
+            )
+
+    async def _on_immune_block_emotion(self, event: Any) -> None:
+        """处理 IMMUNE_BLOCK 事件：拦截时触发轻微负面情绪偏置。
+
+        T-79：ImmuneAgent 拦截有害内容时，将情绪效价小幅下降（-0.02 ~ -0.04），
+        模拟面对越界行为时的轻微不适感。仅在 risk_level 为 medium/high/critical 时触发。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            payload = dict(getattr(event, "payload", None) or {})
+            risk_level = str(payload.get("risk_level") or "").strip().lower()
+            score = float(payload.get("score") or 0.0)
+            # 仅中等及以上风险才影响情绪
+            if risk_level not in ("medium", "high", "critical") and score < 0.55:
+                return
+            # 风险越高，情绪效价下降越多
+            risk_weight = {"medium": 0.02, "high": 0.03, "critical": 0.04}.get(risk_level, 0.02)
+            valence_drop = round(min(0.04, risk_weight + score * 0.01), 4)
+            if valence_drop > 0.01 and self._emotion_persistence is not None:
+                try:
+                    _ep = self._emotion_persistence
+                    _restored = _ep.restore(user_id="user_1")
+                    _cur_valence = float(getattr(_restored, "valence", 0.0))
+                    _cur_arousal = float(getattr(_restored, "arousal", 0.3))
+                    _cur_dominance = float(getattr(_restored, "dominance", 0.0))
+                    _new_valence = max(-1.0, min(1.0, _cur_valence - valence_drop))
+                    _ep.persist(
+                        user_id="user_1",
+                        valence=_new_valence,
+                        arousal=_cur_arousal,
+                        dominance=_cur_dominance,
+                    )
+                except Exception:
+                    pass
+            self._touch_state(
+                key="last_immune_block_emotion_effect",
+                value={"risk_level": risk_level, "valence_drop": valence_drop,
+                       "ts_ms": int(getattr(event, "ts_ms", 0) or 0)},
+            )
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent IMMUNE_BLOCK: valence-%.3f risk_level=%s", valence_drop, risk_level,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent._on_immune_block_emotion 异常: %s", exc
             )
 
 

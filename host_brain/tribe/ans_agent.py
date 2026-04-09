@@ -170,6 +170,45 @@ class ANSAgent:
             task_type, clamped, self._bond_stage,
         )
 
+    def emit_humor_landed(
+        self,
+        *,
+        humor_type: str = "general",
+        intensity: float = 0.3,
+        user_id: str = "user_1",
+        session_id: str = "default",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """T-75：发布 HUMOR_LANDED 事件，供 skill 幽默成功时调用。
+
+        触发 PainRewardAgent / LimbicAgent / EndocrineAgent 等的联动响应：
+        - PainRewardAgent：记录 humor_landed 奖励
+        - LimbicAgent：情绪效价 + 唤醒度小幅提升
+        - EndocrineAgent：cortisol 轻微下降（通过 TASK_SUCCESS 路径）
+
+        Args:
+            humor_type: 幽默类型，如 "general"/"wordplay"/"self_deprecating"/"absurd" 等。
+            intensity: 幽默成功强度，0.0 ~ 1.0，默认 0.3。
+            user_id: 用户 ID，默认 "user_1"。
+            session_id: 会话 ID，默认 "default"。
+            metadata: 附加元数据（可选）。
+        """
+        clamped = max(0.0, min(1.0, float(intensity)))
+        payload: dict[str, Any] = {
+            "humor_type": str(humor_type or "general").strip() or "general",
+            "intensity": round(clamped, 4),
+            "user_id": str(user_id or "user_1").strip() or "user_1",
+            "session_id": str(session_id or "default").strip() or "default",
+            "bond_stage": self._bond_stage,
+        }
+        if metadata:
+            payload["metadata"] = dict(metadata)
+        self.emit_from_thread("HUMOR_LANDED", payload)
+        logger.debug(
+            "ANSAgent.emit_humor_landed: humor_type=%s intensity=%.3f bond_stage=%s",
+            humor_type, clamped, self._bond_stage,
+        )
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

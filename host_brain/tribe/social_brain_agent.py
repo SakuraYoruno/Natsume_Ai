@@ -206,6 +206,8 @@ class SocialBrainAgent:
             bus.subscribe("TASK_SUCCESS", self._on_task_success_bond)
             # T-60：订阅孤独感信号，孤独感影响 bond_trend 评估
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal_bond)
+            # T-78：订阅免疫拦截事件，拦截时将 bond_trend_hint 设为 regress_risk
+            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_bond)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -456,6 +458,46 @@ class SocialBrainAgent:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent._on_loneliness_signal_bond 异常: %s", exc
+            )
+
+    async def _on_immune_block_bond(self, event: Any) -> None:
+        """处理 IMMUNE_BLOCK 事件：拦截时将 bond_trend_hint 设为 regress_risk。
+
+        T-78：ImmuneAgent 拦截有害内容时，说明用户可能存在越界行为，
+        将 bond_trend_hint 设为 regress_risk，提示关系可能面临退步风险，
+        供 CortexAgent.collect_tribe_context() 的 bond_trend_hint 字段使用。
+        仅在 risk_level 为 medium/high/critical 时触发，低风险拦截不影响关系评估。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.social_brain_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            risk_level = str(payload.get("risk_level") or "").strip().lower()
+            score = float(payload.get("score") or 0.0)
+            # 仅中等及以上风险才影响关系评估
+            if risk_level not in ("medium", "high", "critical") and score < 0.55:
+                return
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            self._touch_state(
+                key="bond_trend_hint",
+                value="regress_risk",
+            )
+            self._touch_state(
+                key="last_immune_block_risk_level",
+                value=risk_level,
+            )
+            self._touch_state(
+                key="last_immune_block_ts_ms",
+                value=ts_ms,
+            )
+            _log.info(
+                "SocialBrainAgent IMMUNE_BLOCK: bond_trend_hint=regress_risk risk_level=%s score=%.3f",
+                risk_level, score,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.social_brain_agent").warning(
+                "SocialBrainAgent._on_immune_block_bond 异常: %s", exc
             )
 
 

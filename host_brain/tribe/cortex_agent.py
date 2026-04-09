@@ -129,6 +129,7 @@ class CortexAgent:
             "voice_emotion": None,
             "hedonic_state": {},
             "immune_state": {},  # T-38：ImmuneAgent 运行时状态（计数器/风险等级）
+            "loneliness_level": 0.0,  # T-76：当前孤独感强度（来自 PainRewardAgent）
             "tribe_context_source": "cortex_agent",
         }
 
@@ -207,6 +208,17 @@ class CortexAgent:
             result["immune_state"] = get_immune_agent().export_runtime_state()
         except Exception:
             pass
+
+        # ── 7. 孤独感强度（PainRewardAgent）T-76 ─────────────────────────────
+        # 读取当前孤独感强度，供 chat_context_builder 在高孤独感时触发主动关怀策略。
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+
+            result["loneliness_level"] = get_pain_reward_agent().get_loneliness_level()
+        except Exception:
+            pass
+
+        return result
 
         # ── 7. bond_trend_hint（SocialBrainAgent 快照）T-54 ──────────────────
         # 读取 SocialBrainAgent 写入的 bond_trend_hint 字段，

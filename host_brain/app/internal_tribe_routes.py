@@ -220,3 +220,67 @@ async def list_tribe_event_subscribers(
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"TRIBE_SUBSCRIBERS_FAILED: {exc}") from exc
+
+
+# ── T-73：ImmuneAgent 计数器重置运维端点 ─────────────────────────────────────
+
+class ImmuneResetResponse(BaseModel):
+    counters_before_reset: dict[str, Any]
+    block_rate_before_reset: float
+    reset_at_ms: int
+
+
+@router.post("/immune/reset", response_model=ImmuneResetResponse)
+async def post_immune_reset(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-73：重置 ImmuneAgent 计数器，供运维手动清零使用。
+
+    返回重置前的计数器快照，供审计记录。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+
+        result = get_immune_agent().reset_counters()
+        return ImmuneResetResponse(
+            counters_before_reset=result["counters_before_reset"],
+            block_rate_before_reset=result["block_rate_before_reset"],
+            reset_at_ms=result["reset_at_ms"],
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"IMMUNE_RESET_FAILED: {exc}") from exc
+
+
+# ── T-74：TribeStateRegistry 命名空间清除运维端点 ─────────────────────────────
+
+class TribeStateDeleteResponse(BaseModel):
+    namespace: str
+    deleted: bool
+    ts_ms: int
+
+
+@router.delete("/tribe_state/{namespace}", response_model=TribeStateDeleteResponse)
+async def delete_tribe_state_namespace(
+    namespace: str,
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    """T-74：清除 TribeStateRegistry 中指定命名空间的状态快照。
+
+    供运维手动清零单个 Agent 的状态缓存，不影响其他命名空间。
+    返回 deleted=True 表示成功清除，deleted=False 表示命名空间不存在。
+    """
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        registry = get_global_registry()
+        deleted = registry.clear_namespace(namespace)
+        return TribeStateDeleteResponse(
+            namespace=namespace,
+            deleted=deleted,
+            ts_ms=now_ms(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"TRIBE_STATE_DELETE_FAILED: {exc}") from exc

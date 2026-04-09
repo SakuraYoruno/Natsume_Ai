@@ -144,6 +144,18 @@ class TribeStateRegistry:
         )
         return True
 
+    def list_namespaces(self) -> list[str]:
+        """T-77：返回所有已注册命名空间的名称列表，按字母顺序排列。
+
+        供诊断端点和调试工具快速枚举当前活跃的 Agent 命名空间，
+        不包含状态数据，仅返回名称列表。
+
+        Returns:
+            list[str]: 命名空间名称列表，按字母顺序排列。
+        """
+        with self._lock:
+            return sorted(self._states.keys())
+
     # ── T-29：持久化方法 ─────────────────────────────────────────────────────
 
     def save_snapshot(self) -> bool:
@@ -394,6 +406,15 @@ class TribeStateRegistry:
             _ss2 = dict(social_ns2.get("state") or {})
             bond_trend_hint = str(_ss2.get("bond_trend_hint") or "").strip().lower()
 
+        # ── T-80：loneliness_level（PainRewardAgent 快照）────────────────────
+        # 从 pain_reward_agent 命名空间读取最近一次孤独感强度，
+        # 供 chat_context_builder 在高孤独感时触发主动关怀策略。
+        loneliness_level = 0.0
+        pain_ns = states.get("pain_reward_agent") or states.get("pain_reward")
+        if pain_ns:
+            _ps = dict(pain_ns.get("state") or {})
+            loneliness_level = _safe_float(_ps.get("last_loneliness_level"), 0.0)
+
         return {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -418,6 +439,8 @@ class TribeStateRegistry:
             "immune_risk_level": immune_risk_level,
             # T-59 关系趋势提示
             "bond_trend_hint": bond_trend_hint,
+            # T-80 孤独感强度
+            "loneliness_level": round(loneliness_level, 4),
             "ts_ms": now_ms(),
         }
 

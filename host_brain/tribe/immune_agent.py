@@ -311,6 +311,8 @@ class ImmuneAgent:
 
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
+            # T-81：订阅关系阶段变更事件，关系阶段跃迁时动态调整拦截阈值
+            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").warning(
@@ -337,6 +339,53 @@ class ImmuneAgent:
             )
         except Exception:
             pass
+
+    async def _on_bond_stage_changed_immune(self, event: Any) -> None:
+        """处理 BOND_STAGE_CHANGED 事件：关系阶段跃迁时动态调整拦截阈值。
+
+        T-81：关系阶段越深（如 intimate），对越界内容的容忍度可适当提高，
+        但对高风险内容的拦截始终保持严格。具体策略：
+        - stranger/acquaintance：维持默认阈值（0.55）
+        - friend：阈值略微放宽至 0.60（允许更多玩笑性内容）
+        - close_friend：阈值放宽至 0.65
+        - intimate：阈值放宽至 0.70（但 critical 风险始终拦截）
+        阈值变更写入 TribeStateRegistry，供诊断端点查询。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.immune_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            new_stage = str(payload.get("new_stage") or "").strip().lower()
+            if not new_stage:
+                return
+            # 各阶段对应的拦截阈值（仅影响 medium 风险，high/critical 始终拦截）
+            _stage_threshold_map = {
+                "stranger": 0.55,
+                "acquaintance": 0.55,
+                "friend": 0.60,
+                "close_friend": 0.65,
+                "intimate": 0.70,
+            }
+            new_threshold = _stage_threshold_map.get(new_stage, 0.55)
+            with self._lock:
+                self._bond_stage_threshold = new_threshold
+            self.state_registry.set_state(
+                "immune_agent",
+                {
+                    "bond_stage": new_stage,
+                    "bond_stage_threshold": new_threshold,
+                },
+                writer="immune_agent",
+            )
+            _log.info(
+                "ImmuneAgent BOND_STAGE_CHANGED: new_stage=%s threshold=%.2f",
+                new_stage, new_threshold,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").warning(
+                "ImmuneAgent._on_bond_stage_changed_immune 异常: %s", exc
+            )
 
 
 def _load_template_rules_payload() -> tuple[_ImmuneRule, ...]:

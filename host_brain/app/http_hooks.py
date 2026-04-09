@@ -1271,11 +1271,15 @@ def runtime_lifespan(
                 #                    LONELINESS_SIGNAL(T-40) = 8
                 # EndocrineAgent:    BOND_PROGRESS / BOND_REGRESS / LONELINESS_SIGNAL(T-57)
                 #                    TASK_SUCCESS(T-69) = 4
-                # ImmuneAgent:       INTERACTION_RECORDED(T-35) = 1
+                # ImmuneAgent:       INTERACTION_RECORDED(T-35) / BOND_STAGE_CHANGED(T-81) = 2
                 # HippocampusAgent:  INTERACTION_RECORDED(T-36) / LONELINESS_SIGNAL(T-61) = 2
                 # ANSAgent:          BOND_STAGE_CHANGED(T-37) = 1
-                # 合计: 9+5+5+7+8+4+1+2+1 = 42
-                _total_subscriptions = 42
+                # ── 第十七批新增（T-73~T-82）──────────────────────────────────
+                # CortexAgent:       +LONELINESS_SIGNAL(T-65) → 合计 10
+                # SocialBrainAgent:  +IMMUNE_BLOCK(T-78) → 合计 6
+                # LimbicAgent:       +IMMUNE_BLOCK(T-79) → 合计 9
+                # 合计: 10+5+6+7+9+4+2+2+1 = 46 + PrefrontalAgent(T-71 IMMUNE_BLOCK) = 47
+                _total_subscriptions = 47
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors
