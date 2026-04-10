@@ -104,6 +104,21 @@ class SomaticAgent:
             prev_state = dict(prev.get("state") or {})
             prev_state.update(state)
             self.state_registry.set_state("somatic_agent", prev_state, writer="somatic_agent")
+
+            # T-293：高疲劳(>=0.60)时联动 InteroceptionAgent 注入外部压力
+            if fatigue_level >= 0.60:
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "inject_external_stress"):
+                        _fatigue_stress = round(min(0.50, (fatigue_level - 0.60) * 1.25), 4)
+                        _intero.inject_external_stress(
+                            source=f"somatic_high_fatigue:{round(fatigue_level, 3)}",
+                            intensity=_fatigue_stress,
+                            ts_ms=ts_ms,
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 

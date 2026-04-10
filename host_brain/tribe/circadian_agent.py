@@ -126,6 +126,21 @@ class CircadianAgent:
                             )
                 except Exception:
                     pass
+
+            # T-292：日间/黎明相位切换时联动 ANSAgent 恢复 proactive_multiplier
+            if next_phase in {"day", "dawn"}:
+                try:
+                    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+                    _ans = get_ans_agent()
+                    if hasattr(_ans, "_recovery_mode") and _ans._recovery_mode:
+                        _ans._recovery_mode = False
+                        import logging  # noqa: PLC0415
+                        logging.getLogger("Natsume.tribe.circadian_agent").debug(
+                            "CircadianAgent T-292: phase=%s → ANSAgent recovery_mode=False",
+                            next_phase,
+                        )
+                except Exception:
+                    pass
         self._last_phase = next_phase
         return prev_state
 

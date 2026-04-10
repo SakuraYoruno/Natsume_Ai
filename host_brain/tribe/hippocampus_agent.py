@@ -456,6 +456,23 @@ class HippocampusAgent:
             reason="semantic_memory_write",
             input_refs=[str(request_id or "").strip()] if str(request_id or "").strip() else None,
         )
+
+        # T-291：写入语义记忆后联动 DefaultModeAgent 更新连续性（记忆写入增强自我连续感）
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+            _dma = get_default_mode_agent()
+            _prev_dma = _dma.state_registry.get_state("default_mode_agent") or {}
+            _dma_state = dict(_prev_dma.get("state") or {})
+            _offline = dict(_dma_state.get("last_offline_state") or {})
+            _old_continuity = float(_offline.get("continuity_score") or 0.5)
+            # 语义记忆写入轻微提升连续性（+0.04，上限 0.95）
+            _new_continuity = round(min(0.95, _old_continuity + 0.04), 4)
+            _offline["continuity_score"] = _new_continuity
+            _dma_state["last_offline_state"] = _offline
+            _dma.state_registry.set_state("default_mode_agent", _dma_state, writer="hippocampus_agent")
+        except Exception:
+            pass
+
         return {"layer": "semantic", "arbiter": arbiter_result, "payload": payload["semantic_last"]}
 
     def write_autobiographical_memory(

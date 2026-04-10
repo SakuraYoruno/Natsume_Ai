@@ -2976,6 +2976,48 @@ def build_chat_prompt_runtime_payload(
                     "suggest": "当前身体预算不足，回复应更简短、更温和，避免高能量输出",
                 })
 
+        # T-285：注入 motor_cortex_state（运动皮层执行快照）
+        _motor_state = dict(tribe_context.get("motor_cortex_state") or {})
+        if _motor_state:
+            runtime_payload["motor_cortex_state"] = {
+                "execution_health": round(float(_motor_state.get("execution_health") or 1.0), 4),
+                "last_action_type": str(_motor_state.get("last_action_type") or ""),
+                "last_result": str(_motor_state.get("last_result") or ""),
+                "retry_count": int(_motor_state.get("retry_count") or 0),
+                "failure_rate": round(float(_motor_state.get("failure_rate") or 0.0), 4),
+            }
+
+        # T-285：注入 cerebellum_state（小脑纠偏快照）
+        _cerebellum_state = dict(tribe_context.get("cerebellum_state") or {})
+        if _cerebellum_state:
+            runtime_payload["cerebellum_state"] = {
+                "correction_rate": round(float(_cerebellum_state.get("correction_rate") or 0.0), 4),
+                "last_correction_type": str(_cerebellum_state.get("last_correction_type") or ""),
+                "correction_count": int(_cerebellum_state.get("correction_count") or 0),
+                "total_interactions": int(_cerebellum_state.get("total_interactions") or 0),
+            }
+
+        # T-285：注入 glymphatic_state（淋巴清除/恢复周期快照）
+        _glymphatic_state = dict(tribe_context.get("glymphatic_state") or {})
+        if _glymphatic_state:
+            runtime_payload["glymphatic_state"] = {
+                "phase": str(_glymphatic_state.get("phase") or "day"),
+                "sleep_pressure": round(float(_glymphatic_state.get("sleep_pressure") or 0.0), 4),
+                "consolidation_score": round(float(_glymphatic_state.get("consolidation_score") or 0.0), 4),
+                "homeostasis_status": str(_glymphatic_state.get("homeostasis_status") or "stable"),
+                "cycle_count": int(_glymphatic_state.get("cycle_count") or 0),
+            }
+
+        # T-286：注入 proprioception_state（本体感觉/打断频率快照）
+        _proprio_state = dict(tribe_context.get("proprioception_state") or {})
+        if _proprio_state:
+            _interrupt_count = int(_proprio_state.get("interrupt_count_5m") or 0)
+            runtime_payload["proprioception_state"] = {
+                "interrupt_count_5m": _interrupt_count,
+                "last_interrupt_source": str(_proprio_state.get("last_interrupt_source") or ""),
+                "high_interrupt_flag": _interrupt_count >= 6,
+            }
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

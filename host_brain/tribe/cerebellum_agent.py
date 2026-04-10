@@ -95,6 +95,21 @@ class CerebellumAgent:
             source_agent="cerebellum_agent",
             payload=decision,
         )
+
+        # T-288：高纠偏策略时联动 EndocrineAgent 记录压力事件（执行失败是内在压力源）
+        if strategy in {"RETRY_ONCE", "SAFE_FALLBACK"}:
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                _endo = get_endocrine_agent()
+                if hasattr(_endo, "record_stress_event"):
+                    _stress_intensity = 0.18 if strategy == "RETRY_ONCE" else 0.28
+                    _endo.record_stress_event(
+                        source=f"cerebellum_{strategy.lower()}:{str(reason or 'unknown')[:24]}",
+                        intensity=_stress_intensity,
+                    )
+            except Exception:
+                pass
+
         return decision
 
     def export_runtime_state(self) -> dict[str, Any]:

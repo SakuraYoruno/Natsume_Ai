@@ -115,6 +115,25 @@ class GlymphaticAgent:
             source_agent="glymphatic_agent",
             payload=result,
         )
+
+        # T-290：恢复周期完成且巩固分数达标时，联动 LimbicAgent 触发轻度正向情绪偏移（恢复感）
+        if recovery_window and consolidation_score >= 0.45:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _recovery_warmth = min(0.18, consolidation_score * 0.20)
+                    _limbic.drive_emotion_metabolism(
+                        valence=round(_recovery_warmth * 0.65, 4),
+                        arousal=round(-_recovery_warmth * 0.30, 4),  # 恢复后略微降低唤醒
+                        dominance=0.04,
+                        blend_weight=0.12,
+                        event_kind=f"glymphatic_recovery:score={round(consolidation_score, 3)}",
+                        source="glymphatic_agent",
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

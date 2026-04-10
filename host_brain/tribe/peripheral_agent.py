@@ -160,6 +160,20 @@ class PeripheralAgent:
                 "last_connected_ts_ms": ts_ms,
             })
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+
+            # T-294：外设连接成功时联动 InteroceptionAgent 降低 recovery_urgency（连接恢复减轻压力）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    # 注入负强度（降低 recovery_urgency），intensity 为负表示恢复信号
+                    _intero.inject_external_stress(
+                        source=f"peripheral_connected:{platform}",
+                        intensity=-0.10,  # 负值表示恢复信号，降低 recovery_urgency
+                        ts_ms=ts_ms,
+                    )
+            except Exception:
+                pass
         except Exception:
             pass
 

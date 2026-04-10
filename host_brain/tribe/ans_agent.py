@@ -659,10 +659,11 @@ class ANSAgent:
         )
 
     def export_runtime_state(self) -> dict[str, Any]:
-        """T-254：导出 ANSAgent 当前运行时状态快照。
+        """T-254/T-289：导出 ANSAgent 当前运行时状态快照，并写入 state_registry。
 
-        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
-        不触发任何副作用（不 emit 事件，不写 state_registry）。
+        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用。
+        T-289：同时将快照写入 state_registry["ans_agent"]，
+        使 vital_signs.aggregate_vital_signs() 能读取 ans_recovery_mode/ans_proactive_multiplier。
 
         Returns:
             dict: 包含 bond_stage/recovery_mode/proactive_multiplier 等关键字段。
@@ -679,7 +680,7 @@ class ANSAgent:
         proactive_multiplier = _stage_multiplier.get(str(self._bond_stage or "stranger"), 0.70)
         if self._recovery_mode:
             proactive_multiplier = round(proactive_multiplier * 0.35, 4)
-        return {
+        snapshot = {
             "bond_stage": str(self._bond_stage or "stranger"),
             "recovery_mode": bool(self._recovery_mode),
             "recovery_mode_ts_ms": int(self._recovery_mode_ts_ms or 0),
@@ -687,6 +688,12 @@ class ANSAgent:
             "loop_registered": self._loop is not None,
             "ts_ms": _now_ms(),
         }
+        # T-289：写入 state_registry，供 vital_signs 聚合读取
+        try:
+            self.state_registry.set_state("ans_agent", snapshot, writer="ans_agent")
+        except Exception:
+            pass
+        return snapshot
 
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 

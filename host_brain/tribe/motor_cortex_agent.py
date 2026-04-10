@@ -127,6 +127,21 @@ class MotorCortexAgent:
                     "ts_ms": resolved_ts,
                 },
             )
+            # T-287：执行失败时联动 LimbicAgent 触发轻度挫败感情绪偏移
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _limbic.drive_emotion_metabolism(
+                        valence=-0.12,
+                        arousal=0.08,
+                        dominance=-0.06,
+                        blend_weight=0.15,
+                        event_kind=f"motor_execution_failed:{str(reason or 'unknown')[:32]}",
+                        source="motor_cortex_agent",
+                    )
+            except Exception:
+                pass
 
         return {"ok": bool(ok), "plan_id": resolved_plan_id, "matched": matched}
 
