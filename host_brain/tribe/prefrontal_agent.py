@@ -686,6 +686,30 @@ class PrefrontalAgent:
 
     # ── TribeEventBus 订阅注册（Phase 4）────────────────────────────────────
 
+    def export_runtime_state(self) -> dict[str, Any]:
+        """T-274：导出 PrefrontalAgent 当前运行时状态快照。
+
+        读取 state_registry 中的 prefrontal_agent 命名空间快照，
+        不触发任何副作用（不 emit 事件，不写 state_registry）。
+
+        Returns:
+            dict: 包含 alert_level/drift_dims/correction_hint/session_count 等关键字段。
+        """
+        snap = self.state_registry.get_state("prefrontal_agent") or {}
+        state = dict(snap.get("state") or {})
+        last_drift = dict(state.get("last_drift_result") or {})
+        return {
+            "alert_level": str(last_drift.get("alert_level") or "NONE").strip().upper() or "NONE",
+            "drift_dims": list(last_drift.get("drift_dims") or []),
+            "correction_hint": str(last_drift.get("correction_hint") or ""),
+            "drift_score": round(float(last_drift.get("drift_score") or 0.0), 4),
+            "correction_applied": bool(last_drift.get("correction_applied", False)),
+            "last_correction_reason": str(last_drift.get("correction_reason") or ""),
+            "session_count": int(state.get("session_count") or 0),
+            "evolution_cycle_count": int(state.get("evolution_cycle_count") or 0),
+            "last_drift_ts_ms": int(last_drift.get("ts_ms") or 0),
+        }
+
     def register_subscriptions(self) -> None:
         """向 TribeEventBus 注册事件订阅 handler。
 
@@ -789,6 +813,18 @@ class PrefrontalAgent:
                                 blend_weight=0.25,
                                 event_kind=f"persona_drift:{drift_alert.lower()}",
                                 source="prefrontal_agent",
+                            )
+                    except Exception:
+                        pass
+                    # T-279：高漂移时联动 EndocrineAgent 记录压力事件（人格漂移是内在压力源）
+                    try:
+                        from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                        _endo = get_endocrine_agent()
+                        if hasattr(_endo, "record_stress_event"):
+                            _drift_intensity = 0.20 if drift_alert == "MODERATE" else 0.35
+                            _endo.record_stress_event(
+                                source=f"persona_drift:{drift_alert.lower()}",
+                                intensity=_drift_intensity,
                             )
                     except Exception:
                         pass

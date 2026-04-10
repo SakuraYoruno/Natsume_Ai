@@ -710,6 +710,31 @@ class TribeStateRegistry:
         _ig_total = max(1, initiative_block_count + initiative_defer_count + initiative_approve_count)
         initiative_block_rate = round(initiative_block_count / _ig_total, 4)
 
+        # ── T-278：PrefrontalAgent 漂移快照（drift_alert_level）──────────────
+        drift_alert_level = "NONE"
+        prefrontal_ns = states.get("prefrontal_agent")
+        if prefrontal_ns:
+            _pf = dict(prefrontal_ns.get("state") or {})
+            _last_drift = dict(_pf.get("last_drift_result") or {})
+            drift_alert_level = str(_last_drift.get("alert_level") or "NONE").strip().upper() or "NONE"
+
+        # ── T-278：SocialBrainAgent 关系修复快照（bond_repair_needed）─────────
+        bond_repair_needed = False
+        social_brain_ns = states.get("social_brain_agent")
+        if social_brain_ns:
+            _sb = dict(social_brain_ns.get("state") or {})
+            _repair = dict(_sb.get("repair_state") or {})
+            bond_repair_needed = bool(_repair.get("repair_needed", False))
+
+        # ── T-283：ANSAgent 节律快照（recovery_mode / proactive_multiplier）──
+        ans_recovery_mode = False
+        ans_proactive_multiplier = 0.70
+        ans_ns = states.get("ans_agent")
+        if ans_ns:
+            _ans = dict(ans_ns.get("state") or {})
+            ans_recovery_mode = bool(_ans.get("recovery_mode", False))
+            ans_proactive_multiplier = _safe_float(_ans.get("proactive_multiplier"), 0.70)
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -790,6 +815,13 @@ class TribeStateRegistry:
             "initiative_block_rate": initiative_block_rate,
             "initiative_defer_count": initiative_defer_count,
             "initiative_approve_count": initiative_approve_count,
+            # T-278 PrefrontalAgent 漂移快照
+            "drift_alert_level": drift_alert_level,
+            # T-278 SocialBrainAgent 关系修复快照
+            "bond_repair_needed": bond_repair_needed,
+            # T-283 ANSAgent 节律快照
+            "ans_recovery_mode": ans_recovery_mode,
+            "ans_proactive_multiplier": round(ans_proactive_multiplier, 4),
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

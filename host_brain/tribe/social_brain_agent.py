@@ -719,6 +719,24 @@ class SocialBrainAgent:
             state["bond_trend_hint_ts_ms"] = ts_ms
             self.state_registry.set_state("social_brain_agent", state, writer="social_brain_agent")
             self._refresh_bond_vector(user_id=payload.get("user_id"))
+
+            # T-280：关系修复时联动 LimbicAgent 触发温暖情绪偏移（修复带来正向情绪）
+            if effort >= 0.30:
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _warmth = min(0.30, effort * 0.35)
+                        _limbic.drive_emotion_metabolism(
+                            valence=round(_warmth * 0.70, 4),
+                            arousal=round(_warmth * 0.20, 4),
+                            dominance=0.05,
+                            blend_weight=0.18,
+                            event_kind=f"bond_repair_action:{round(effort, 3)}",
+                            source="social_brain_agent",
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1108,7 +1126,32 @@ class SocialBrainAgent:
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent.resolve_milestone_tracker 失败（降级）: %s", exc
             )
-            return {"status": "ERROR", "new_milestones": [], "achieved_count": 0, "error": str(exc)}
+    def export_runtime_state(self) -> dict[str, Any]:
+        """T-275：导出 SocialBrainAgent 当前运行时状态快照。
+
+        读取 state_registry 中的 social_brain_agent 命名空间快照，
+        不触发任何副作用（不 emit 事件，不写 state_registry）。
+
+        Returns:
+            dict: 包含 bond_stage/bond_vector/repair_needed 等关键字段。
+        """
+        snap = self.state_registry.get_state("social_brain_agent") or {}
+        state = dict(snap.get("state") or {})
+        bond_vector = dict(state.get("bond_vector") or {})
+        repair_state = dict(state.get("repair_state") or {})
+        last_milestone = dict(state.get("last_milestone_achieved") or {})
+        return {
+            "bond_stage": str(state.get("bond_stage") or "STRANGER").strip().upper(),
+            "bond_trend": str(state.get("bond_trend") or "stable").strip().lower(),
+            "bond_vector_intimacy": round(float(bond_vector.get("intimacy") or 0.0), 4),
+            "bond_vector_trust": round(float(bond_vector.get("trust") or 0.0), 4),
+            "bond_vector_dependency": round(float(bond_vector.get("dependency") or 0.0), 4),
+            "repair_needed": bool(repair_state.get("repair_needed", False)),
+            "repair_reason": str(repair_state.get("repair_reason") or ""),
+            "last_milestone_ids": list(last_milestone.get("new_milestones") or []),
+            "milestone_achieved_count": int(state.get("milestone_achieved_count") or 0),
+            "last_updated_ts_ms": int(state.get("ts_ms") or 0),
+        }
 
 
 _SOCIAL_BRAIN_AGENT: SocialBrainAgent | None = None

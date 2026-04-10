@@ -443,6 +443,30 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 23. T-276：DefaultModeAgent 连续性快照 + SocialBrainAgent 关系快照 ──
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+            result["default_mode_state"] = get_default_mode_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+            result["social_brain_state"] = get_social_brain_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            result["prefrontal_state"] = get_prefrontal_agent().export_runtime_state()
+        except Exception:
+            pass
+
+        # ── 24. T-282：InteroceptionAgent 身体预算快照 ──────────────────────
+        try:
+            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+            result["interoception_state"] = get_interoception_agent().export_runtime_state()
+        except Exception:
+            pass
+
         return result
 
     def route_intent(

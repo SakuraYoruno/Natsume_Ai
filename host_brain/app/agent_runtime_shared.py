@@ -7,10 +7,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
+import re
+import time
 from collections.abc import Mapping
 from typing import Any
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+
 
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
 
@@ -78,7 +85,904 @@ _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
 ]
 
 
+
+def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = dict(summary or {})
+    route_rows = list(raw.get("route_rows") or []) if isinstance(raw.get("route_rows"), list) else []
+    route_count = raw.get("route_count")
+    if route_count in (None, ""):
+        route_count = len(route_rows)
+    candidate_count = int(raw.get("candidate_count") or 0)
+    rerank_topk = int(raw.get("rerank_topk") or 0)
+    reason_code = str(raw.get("reason_code") or "").strip() or None
+    error_text = str(raw.get("error") or "").strip() or None
+    explicit_status = str(raw.get("status") or "").strip().upper()
+
+    if explicit_status in {"OK", "SKIPPED", "DEGRADED"}:
+        status = explicit_status
+    elif reason_code or error_text or bool(raw.get("degraded", False)):
+        status = "DEGRADED"
+    elif candidate_count > 0 or int(route_count) > 0 or rerank_topk > 0 or route_rows:
+        status = "OK"
+    else:
+        status = "SKIPPED"
+
+    degraded = status == "DEGRADED" or bool(raw.get("degraded", False))
+
+    raw["status"] = status
+    raw["route_count"] = int(route_count)
+    raw["candidate_count"] = candidate_count
+    raw["rerank_topk"] = rerank_topk
+    raw["degraded"] = degraded
+    raw["reason_code"] = reason_code
+    raw["error"] = error_text
+    return raw
+
+
+
+def _coerce_trace_mapping(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        return {}
+    return dict(raw)
+
+
+
+def _coerce_trace_score(raw: Any) -> float | None:
+    try:
+        return round(float(raw), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+
+def _coerce_trace_bool(raw: Any) -> bool | None:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return None
+
+
+
+def _summarize_motive_state_for_trace(motive_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(motive_state)
+    if not raw:
+        return {}
+
+    summary: dict[str, Any] = {}
+    dominant_motive = str(raw.get("dominant_motive") or "").strip()
+    if dominant_motive:
+        summary["dominant_motive"] = dominant_motive
+
+    drives: dict[str, float] = {}
+    for key in (
+        "reach_out_drive",
+        "care_drive",
+        "withdraw_drive",
+        "continuity_drive",
+        "self_protect_drive",
+    ):
+        score = _coerce_trace_score(raw.get(key))
+        if score is not None:
+            drives[key] = score
+    if drives:
+        summary["drives"] = drives
+
+    reason_tags = [
+        str(tag).strip()
+        for tag in list(raw.get("motive_reason_tags") or [])
+        if str(tag).strip()
+    ]
+    if reason_tags:
+        summary["reason_tags"] = reason_tags[:8]
+    return summary
+
+
+
+def _summarize_response_policy_for_trace(response_policy: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(response_policy)
+    if not raw:
+        return {}
+
+    summary: dict[str, Any] = {}
+
+    for key in ("max_chars", "max_sentences", "min_sentences"):
+        try:
+            value = int(raw.get(key))
+        except (TypeError, ValueError):
+            continue
+        summary[key] = value
+
+    for key in (
+        "allow_followup",
+        "allow_topic_shift",
+        "allow_proactive_after_reply",
+        "should_be_brief",
+        "should_be_withdrawn",
+    ):
+        value = _coerce_trace_bool(raw.get(key))
+        if value is not None:
+            summary[key] = value
+
+    for key in ("warmth_floor", "warmth_ceiling", "intimacy_ceiling", "humor_ceiling"):
+        value = _coerce_trace_score(raw.get(key))
+        if value is not None:
+            summary[key] = value
+
+    for key in ("confession_guard", "withdrawal_guard"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+
+    reason_tags = [
+        str(tag).strip()
+        for tag in list(raw.get("policy_reason_tags") or [])
+        if str(tag).strip()
+    ]
+    if reason_tags:
+        summary["reason_tags"] = reason_tags[:8]
+    return summary
+
+
+
+def _summarize_emotion_context_for_trace(emotion_context: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(emotion_context)
+    if not raw:
+        return {}
+
+    summary: dict[str, Any] = {}
+    for key in ("emotion_tag", "mood_state", "emotion_range_hint"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+
+    for key in ("emotion_intensity", "valence", "arousal"):
+        score = _coerce_trace_score(raw.get(key))
+        if score is not None:
+            summary[key] = score
+
+    vad_vector = raw.get("vad_vector")
+    if isinstance(vad_vector, Mapping):
+        vad_summary: dict[str, float] = {}
+        for key in ("valence", "arousal", "dominance"):
+            score = _coerce_trace_score(vad_vector.get(key))
+            if score is not None:
+                vad_summary[key] = score
+        if vad_summary:
+            summary["vad_vector"] = vad_summary
+
+    triggered = [
+        str(item).strip()
+        for item in list(raw.get("triggered_emotions") or [])
+        if str(item).strip()
+    ]
+    if triggered:
+        summary["triggered_emotions"] = triggered[:8]
+    return summary
+
+
+
+def _summarize_persona_resident_memory_for_trace(
+    *,
+    bond_summary: Mapping[str, Any] | None,
+    retrieval_summary: Mapping[str, Any] | None,
+    retrieval_evidence_items: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+
+    bond_raw = _coerce_trace_mapping(bond_summary)
+    if bond_raw:
+        bond_info: dict[str, Any] = {}
+        for key in ("stage", "trend", "user_id"):
+            value = str(bond_raw.get(key) or "").strip()
+            if value:
+                bond_info[key] = value
+        score = _coerce_trace_score(bond_raw.get("score"))
+        if score is not None:
+            bond_info["score"] = score
+        if bond_info:
+            summary["bond"] = bond_info
+
+    retrieval_raw = _coerce_trace_mapping(retrieval_summary)
+    if retrieval_raw:
+        retrieval_info: dict[str, Any] = {}
+        for key in ("status", "reason_code", "pack_id"):
+            value = str(retrieval_raw.get(key) or "").strip()
+            if value:
+                retrieval_info[key] = value
+        for key in ("candidate_count", "route_count", "rerank_topk"):
+            try:
+                retrieval_info[key] = int(retrieval_raw.get(key) or 0)
+            except (TypeError, ValueError):
+                continue
+        target_stores = [
+            str(item).strip()
+            for item in list(retrieval_raw.get("target_stores") or [])
+            if str(item).strip()
+        ]
+        if target_stores:
+            retrieval_info["target_stores"] = target_stores
+        if retrieval_info:
+            summary["retrieval"] = retrieval_info
+
+    evidence_items = [item for item in list(retrieval_evidence_items or []) if isinstance(item, Mapping)]
+    if evidence_items:
+        summary["evidence_count"] = len(evidence_items)
+        store_ids = sorted(
+            {
+                str(item.get("store_id") or item.get("source_type") or item.get("kind") or "").strip()
+                for item in evidence_items
+                if str(item.get("store_id") or item.get("source_type") or item.get("kind") or "").strip()
+            }
+        )
+        if store_ids:
+            summary["evidence_store_ids"] = store_ids
+    return summary
+
+
+
+def _normalize_trace_stage_meta(trace_stage_meta: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(trace_stage_meta, Mapping):
+        return {}
+
+    normalized: dict[str, Any] = {}
+    for key, value in dict(trace_stage_meta).items():
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        if isinstance(value, (list, dict)) and not value:
+            continue
+        normalized[str(key)] = value
+    return normalized
+
+
+
+def _resolve_envelope_confidence(status: str) -> float:
+    normalized = str(status or "").strip().upper()
+    if normalized == "OK":
+        return 1.0
+    if normalized == "SKIPPED":
+        return 0.6
+    if normalized == "DEGRADED":
+        return 0.35
+    if normalized in {"FAILED", "ERROR"}:
+        return 0.0
+    return 0.5
+
+
+
+def _build_trace_output_digest(output_data: Any) -> dict[str, Any]:
+    if isinstance(output_data, Mapping):
+        digest: dict[str, Any] = {"field_count": len(output_data)}
+        scalar_count = 0
+        for key, value in list(output_data.items())[:8]:
+            key_text = str(key).strip()
+            if not key_text:
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                digest[key_text] = value
+                scalar_count += 1
+                continue
+            if isinstance(value, list):
+                digest[f"{key_text}_count"] = len(value)
+                continue
+            if isinstance(value, Mapping):
+                digest[f"{key_text}_keys"] = list(value.keys())[:5]
+        if scalar_count == 0 and len(digest) == 1:
+            digest["kind"] = "mapping"
+        return digest
+
+    if isinstance(output_data, list):
+        return {"kind": "list", "count": len(output_data)}
+
+    if isinstance(output_data, str):
+        text = output_data.strip()
+        return {"kind": "text", "length": len(text), "preview": text[:120]}
+
+    if output_data is None:
+        return {}
+
+    return {"kind": type(output_data).__name__}
+
+
+
+def _detect_trace_fallback_used(
+    *,
+    reason_code: str | None,
+    degrade_code: str | None,
+    output_data: Any,
+) -> bool:
+    for token in (str(reason_code or ""), str(degrade_code or "")):
+        if "FALLBACK" in token.upper():
+            return True
+    if isinstance(output_data, Mapping):
+        for key, value in output_data.items():
+            key_text = str(key).strip().lower()
+            if "fallback" in key_text and bool(value):
+                return True
+    return False
+
+
+
+def _build_trace_agent_envelope(
+    *,
+    request_id: str,
+    node_id: str,
+    parent_node_id: str | None,
+    node_type: str,
+    status: str,
+    reason_code: str | None,
+    output_data: Any,
+    fallback_used: bool,
+    degrade_code: str | None,
+    ts_ms: int,
+) -> dict[str, Any]:
+    status_text = str(status or "OK").strip().upper() or "OK"
+    reason_code_text = str(reason_code or "").strip() or None
+    degrade_code_text = str(degrade_code or "").strip() or None
+    reason_text = reason_code_text or ""
+    output_digest = _build_trace_output_digest(output_data)
+
+    fallback_marked = bool(fallback_used) or _detect_trace_fallback_used(
+        reason_code=reason_code_text,
+        degrade_code=degrade_code_text,
+        output_data=output_data,
+    )
+    if degrade_code_text is None and status_text in {"DEGRADED", "FAILED", "ERROR"}:
+        degrade_code_text = reason_code_text
+
+    try:
+        from host_brain.app.schemas.agent_envelope import AgentEnvelope  # noqa: PLC0415
+
+        envelope_model = AgentEnvelope(
+            agent_id=node_id,
+            agent_family=str(node_type or "system").strip().lower() or "system",
+            status=status_text,
+            confidence=_resolve_envelope_confidence(status_text),
+            reason=reason_text,
+            reason_code=reason_code_text,
+            request_id=str(request_id or "").strip(),
+            node_id=node_id,
+            parent_node_id=(str(parent_node_id).strip() if parent_node_id else None),
+            output_digest=output_digest,
+            fallback_used=fallback_marked,
+            degrade_code=degrade_code_text,
+            ts_ms=int(ts_ms or 0),
+        )
+        envelope = envelope_model.as_trace_dict()
+        envelope["request_id"] = envelope_model.request_id
+        envelope["reason"] = envelope_model.reason
+        return envelope
+    except Exception:
+        return {
+            "agent_id": node_id,
+            "agent_family": str(node_type or "system").strip().lower() or "system",
+            "node_id": node_id,
+            "parent_node_id": (str(parent_node_id).strip() if parent_node_id else None),
+            "request_id": str(request_id or "").strip(),
+            "status": status_text,
+            "confidence": _resolve_envelope_confidence(status_text),
+            "reason": reason_text,
+            "reason_code": reason_code_text,
+            "fallback_used": fallback_marked,
+            "degrade_code": degrade_code_text,
+            "output_digest": output_digest,
+            "schema_version": "1.0",
+            "ts_ms": int(ts_ms or 0),
+        }
+
+
+
+def _build_trace_stage_node(
+    *,
+    node_id: str,
+    node_type: str,
+    display_name: str,
+    ts_ms: int,
+    status: str = "OK",
+    side: str = "host",
+    request_id: str = "",
+    parent_node_id: str | None = None,
+    reason_code: str | None = None,
+    fallback_used: bool = False,
+    degrade_code: str | None = None,
+    latency_ms: int | None = None,
+    provider: str | None = None,
+    model_id: str | None = None,
+    input_data: Any = None,
+    output_data: Any = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    node: dict[str, Any] = {
+        "node_id": node_id,
+        "node_type": node_type,
+        "display_name": display_name,
+        "side": side,
+        "status": status,
+        "ts_ms": ts_ms,
+    }
+    if reason_code:
+        node["reason_code"] = reason_code
+    if latency_ms is not None:
+        node["latency_ms"] = latency_ms
+    if provider:
+        node["provider"] = provider
+    if model_id:
+        node["model_id"] = model_id
+    if input_data not in (None, {}, []):
+        node["input_data"] = input_data
+    if output_data not in (None, {}, []):
+        node["output_data"] = output_data
+    if error:
+        node["error"] = error
+    node["agent_envelope"] = _build_trace_agent_envelope(
+        request_id=request_id,
+        node_id=node_id,
+        parent_node_id=parent_node_id,
+        node_type=node_type,
+        status=status,
+        reason_code=reason_code,
+        output_data=output_data,
+        fallback_used=fallback_used,
+        degrade_code=degrade_code,
+        ts_ms=ts_ms,
+    )
+    return node
+
+
+
+async def _persist_post_process_audit(
+    *,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    narrative: str,
+    bond_summary: dict[str, Any] | None,
+    ts_ms: int,
+    total_latency_ms: int = 0,
+    llm_latency_ms: int = 0,
+    first_token_ms: int | None = None,
+    provider_name: str = "",
+    model_id: str = "",
+    buffer_stream: bool = False,
+    delegated_agents: list[dict[str, Any]] | None = None,
+    retrieval_summary: dict[str, Any] | None = None,
+    gov_decision: dict[str, Any] | None = None,
+    pii_ingress_stats: dict[str, Any] | None = None,
+    pii_egress_stats: dict[str, Any] | None = None,
+    llm_input_digest: str | None = None,
+    retrieval_evidence_items: list[dict[str, Any]] | None = None,
+    motive_state: Mapping[str, Any] | None = None,
+    response_policy: Mapping[str, Any] | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> None:
+    from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+    from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+    ledger = get_ledger()
+    _now = int(time.time() * 1000)
+
+    if gov_decision:
+        ledger.log_governor(
+            {
+                "request_id": request_id,
+                "intent_id": request_id,
+                "session_id": session_id,
+                "decision": gov_decision.get("decision", "APPROVE"),
+                "reason_code": gov_decision.get("reason_code"),
+                "rule_trace": json.dumps(gov_decision.get("rule_trace", []), ensure_ascii=False, default=str),
+                "latency_ms": gov_decision.get("latency_ms", 0),
+                "ts_ms": ts_ms,
+            }
+        )
+
+    try:
+        runtime_task_registry = get_runtime_task_registry()
+        runtime_task = runtime_task_registry.get_by_request_id(request_id)
+        if runtime_task is not None and str(runtime_task.status).upper() in {"RUNNING", "RECOVERING"}:
+            runtime_task_status_templates = _mapping_section(_load_runtime_texts(), "runtime_task_status")
+            has_failure = bool(runtime_task.error or runtime_task.result_code)
+            if has_failure:
+                runtime_task_registry.mark_failed(
+                    runtime_task.task_id,
+                    detail=_mapping_text(
+                        runtime_task_status_templates,
+                        "failed_detail",
+                        default="整条回复已经完成，但执行阶段有失败。",
+                    ),
+                    error=str(runtime_task.error or "").strip(),
+                    result_code=str(runtime_task.result_code or "").strip() or None,
+                    result_text=narrative,
+                )
+            else:
+                runtime_task_registry.mark_completed(
+                    runtime_task.task_id,
+                    detail=_mapping_text(
+                        runtime_task_status_templates,
+                        "completed_detail",
+                        default="整条回复已经完成。",
+                    ),
+                    result_text=narrative,
+                )
+    except Exception as exc:
+        _logger.debug("[%s] runtime task finalize failed: %s", request_id, exc)
+
+    ledger.log_llm_node_call(
+        {
+            "request_id": request_id,
+            "node_id": "top_agent_llm_stream",
+            "provider": provider_name,
+            "model_id": model_id,
+            "status": "OK" if narrative.strip() else "DEGRADED",
+            "reason_code": None if narrative.strip() else "LLM_EMPTY_OUTPUT",
+            "latency_ms": llm_latency_ms,
+            "input_digest": (llm_input_digest or "")[:500] or None,
+            "output_digest": (narrative or "")[:400] or None,
+            "ts_ms": _now,
+        }
+    )
+
+    _normalized_retrieval_summary = _normalize_retrieval_summary_for_audit(retrieval_summary)
+    _evidence_items = list(retrieval_evidence_items or [])
+    _rs = _normalized_retrieval_summary
+    if _evidence_items or _rs.get("status") == "OK":
+        _query_plan = _rs.get("query_plan") or {}
+        _topk_snippets = [
+            {
+                "evidence_ref": str(item.get("evidence_ref") or ""),
+                "store_id": str(item.get("store_id") or ""),
+                "snippet": str(item.get("snippet") or "")[:200],
+                "score": item.get("score"),
+            }
+            for item in _evidence_items[:8]
+        ]
+        ledger.log_retrieval_event(
+            {
+                "request_id": request_id,
+                "intent_id": request_id,
+                "op_kind": "PIPELINE",
+                "status": _rs.get("status", "OK"),
+                "reason_code": _rs.get("reason_code"),
+                "stage": "top_agent._async_post_process",
+                "payload": {
+                    "candidate_count": _rs.get("candidate_count", 0),
+                    "route_count": _rs.get("route_count", 0),
+                    "rerank_topk": _rs.get("rerank_topk", 0),
+                    "degraded": bool(_rs.get("degraded", False)),
+                    "query_plan": _query_plan,
+                    "topk": _topk_snippets,
+                    "agentic_meta": _rs.get("agentic_meta"),
+                    "embedding_model_id": _rs.get("embedding_model_id"),
+                    "embedding_provider": _rs.get("embedding_provider"),
+                    "effective_embedding_provider": _rs.get("effective_embedding_provider"),
+                    "fallback_embedding_used": bool(_rs.get("fallback_embedding_used", False)),
+                    "fallback_embedding_reason_code": _rs.get("fallback_embedding_reason_code"),
+                    "rerank_model_id": _rs.get("rerank_model_id"),
+                    "rerank_provider": _rs.get("rerank_provider"),
+                    "effective_rerank_provider": _rs.get("effective_rerank_provider"),
+                    "fallback_reranker_used": bool(_rs.get("fallback_reranker_used", False)),
+                    "fallback_reranker_reason_code": _rs.get("fallback_reranker_reason_code"),
+                },
+                "detail": (
+                    f"candidate={_rs.get('candidate_count', 0)} "
+                    f"topk={len(_topk_snippets)} "
+                    f"intent={_query_plan.get('intent', 'unknown')}"
+                ),
+                "ts_ms": _now,
+            }
+        )
+
+    _trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
+    _retrieval_status = _normalized_retrieval_summary.get("status", "SKIPPED")
+    _retrieval_count = _normalized_retrieval_summary.get("candidate_count", 0)
+    _retrieval_reason = str(_normalized_retrieval_summary.get("reason_code") or "").strip() or None
+    _retrieval_output = {
+        "candidate_count": _retrieval_count,
+        "status": _retrieval_status,
+        "reason_code": _retrieval_reason,
+        "error": _normalized_retrieval_summary.get("error"),
+        "route_count": _normalized_retrieval_summary.get("route_count"),
+        "rerank_topk": _normalized_retrieval_summary.get("rerank_topk"),
+        "degraded": _normalized_retrieval_summary.get("degraded"),
+        "target_stores": _normalized_retrieval_summary.get("target_stores"),
+        "query_plan": _normalized_retrieval_summary.get("query_plan"),
+        "agentic_meta": _normalized_retrieval_summary.get("agentic_meta"),
+        "embedding_model_id": _normalized_retrieval_summary.get("embedding_model_id"),
+        "embedding_provider": _normalized_retrieval_summary.get("embedding_provider"),
+        "effective_embedding_provider": _normalized_retrieval_summary.get("effective_embedding_provider"),
+        "fallback_embedding_used": bool(_normalized_retrieval_summary.get("fallback_embedding_used", False)),
+        "fallback_embedding_reason_code": _normalized_retrieval_summary.get("fallback_embedding_reason_code"),
+        "rerank_model_id": _normalized_retrieval_summary.get("rerank_model_id"),
+        "rerank_provider": _normalized_retrieval_summary.get("rerank_provider"),
+        "effective_rerank_provider": _normalized_retrieval_summary.get("effective_rerank_provider"),
+        "fallback_reranker_used": bool(_normalized_retrieval_summary.get("fallback_reranker_used", False)),
+        "fallback_reranker_reason_code": _normalized_retrieval_summary.get("fallback_reranker_reason_code"),
+    }
+    _query_plan_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("query_plan"))
+    _agentic_rag_output = _coerce_trace_mapping(_normalized_retrieval_summary.get("agentic_meta"))
+    _emotion_trace = _summarize_emotion_context_for_trace(emotion_context)
+    _persona_memory_trace = _summarize_persona_resident_memory_for_trace(
+        bond_summary=bond_summary,
+        retrieval_summary=_normalized_retrieval_summary,
+        retrieval_evidence_items=_evidence_items,
+    )
+    _motive_trace = _summarize_motive_state_for_trace(motive_state)
+    _response_policy_trace = _summarize_response_policy_for_trace(response_policy)
+    _prompt_builder_output: dict[str, Any] = {}
+    if _motive_trace:
+        _prompt_builder_output["motive_state"] = _motive_trace
+    if _response_policy_trace:
+        _prompt_builder_output["response_policy"] = _response_policy_trace
+    _prompt_builder_status = "OK" if (llm_input_digest or _prompt_builder_output) else "SKIPPED"
+    _prompt_builder_node = _build_trace_stage_node(
+        node_id="prompt_builder",
+        node_type="system",
+        display_name="Prompt Builder",
+        status=_prompt_builder_status,
+        ts_ms=ts_ms,
+        output_data=_prompt_builder_output,
+    )
+
+    _dispatch_used = bool(_trace_stage_meta.get("dispatch_agent_used"))
+    _chat_used = bool(_trace_stage_meta.get("chat_agent_used"))
+    _path = str(
+        _trace_stage_meta.get("dispatch_route")
+        or ("delegate" if delegated_agents else "chat_direct")
+    ).strip() or ("delegate" if delegated_agents else "chat_direct")
+    _dispatch_reason = str(_trace_stage_meta.get("dispatch_reason") or "").strip() or None
+    _dispatch_target = str(_trace_stage_meta.get("dispatch_target") or "").strip() or None
+    _chat_mode = str(
+        _trace_stage_meta.get("chat_mode")
+        or ("sub_agent" if delegated_agents else "direct")
+    ).strip() or ("sub_agent" if delegated_agents else "direct")
+    _chat_sub_agent_id = str(_trace_stage_meta.get("chat_sub_agent_id") or "").strip() or None
+    _dispatch_output = {
+        "route": _path,
+        "reason": _dispatch_reason,
+        "target": _dispatch_target,
+    }
+    _chat_output = {
+        "mode": _chat_mode,
+        "sub_agent_id": _chat_sub_agent_id,
+        "delegated_agent_count": len(list(delegated_agents or [])),
+    }
+    _top_agent_output = {
+        "path": _path,
+        "retrieval_status": _retrieval_status,
+        "retrieval_candidate_count": _retrieval_count,
+        "delegated_agent_count": len(list(delegated_agents or [])),
+        "trace_stage_meta": _trace_stage_meta,
+    }
+
+    _trace_nodes_v2: list[dict[str, Any]] = [
+        _build_trace_stage_node(
+            node_id="airlock_ingress",
+            node_type="governor",
+            display_name="Airlock Ingress",
+            ts_ms=ts_ms,
+            status="OK",
+        ),
+        _build_trace_stage_node(
+            node_id="governor",
+            node_type="governor",
+            display_name="Governor",
+            ts_ms=ts_ms,
+            status=gov_decision.get("decision", "APPROVE") if gov_decision else "OK",
+            latency_ms=gov_decision.get("latency_ms", 0) if gov_decision else 0,
+            reason_code=gov_decision.get("reason_code") if gov_decision else None,
+            output_data={"rule_trace": gov_decision.get("rule_trace")} if gov_decision else None,
+        ),
+        _build_trace_stage_node(
+            node_id="query_planner",
+            node_type="retrieval",
+            display_name="Query Planner",
+            ts_ms=ts_ms,
+            status=_retrieval_status if (_query_plan_output or _retrieval_status != "SKIPPED") else "SKIPPED",
+            reason_code=_retrieval_reason,
+            output_data=_query_plan_output,
+        ),
+        _build_trace_stage_node(
+            node_id="agentic_rag",
+            node_type="retrieval",
+            display_name="Agentic RAG",
+            ts_ms=ts_ms,
+            status=_retrieval_status if (_agentic_rag_output or _retrieval_status != "SKIPPED") else "SKIPPED",
+            reason_code=_retrieval_reason,
+            output_data=_agentic_rag_output,
+        ),
+        _build_trace_stage_node(
+            node_id="recall_fusion",
+            node_type="recall",
+            display_name="Recall Fusion",
+            ts_ms=ts_ms,
+            status=_retrieval_status,
+            reason_code=_retrieval_reason,
+            output_data=_retrieval_output,
+        ),
+        _build_trace_stage_node(
+            node_id="emotion_context",
+            node_type="system",
+            display_name="Emotion Context",
+            ts_ms=ts_ms,
+            status="OK" if _emotion_trace else "SKIPPED",
+            output_data=_emotion_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="persona_resident_memory",
+            node_type="memory",
+            display_name="Persona Resident Memory",
+            ts_ms=ts_ms,
+            status="OK" if _persona_memory_trace else "SKIPPED",
+            output_data=_persona_memory_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="motive_state",
+            node_type="system",
+            display_name="Motive State",
+            ts_ms=ts_ms,
+            status="OK" if _motive_trace else "SKIPPED",
+            output_data=_motive_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="response_policy",
+            node_type="system",
+            display_name="Response Policy",
+            ts_ms=ts_ms,
+            status="OK" if _response_policy_trace else "SKIPPED",
+            output_data=_response_policy_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="top_agent",
+            node_type="system",
+            display_name="Top Agent",
+            ts_ms=ts_ms,
+            status="OK" if narrative.strip() else "DEGRADED",
+            output_data=_top_agent_output,
+        ),
+    ]
+    if _dispatch_used:
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="dispatch_agent",
+                node_type="agent",
+                display_name="Dispatch Agent",
+                ts_ms=ts_ms,
+                status="OK",
+                reason_code=_dispatch_reason,
+                output_data=_dispatch_output,
+            )
+        )
+    for da in (delegated_agents or []):
+        _agent_id = str(da.get("agent_id") or "?")
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id=f"sub_agent:{_agent_id}",
+                node_type="agent",
+                display_name=f"Sub Agent: {_agent_id}",
+                ts_ms=ts_ms,
+                status="OK" if da.get("success") else "FAILED",
+                latency_ms=da.get("latency_ms", 0),
+                error=da.get("error"),
+                output_data={
+                    "agent_id": _agent_id,
+                    "audit_refs": da.get("audit_refs"),
+                },
+            )
+        )
+    if _chat_used:
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="chat_agent",
+                node_type="agent",
+                display_name="Chat Agent",
+                ts_ms=ts_ms,
+                status="OK" if narrative.strip() else "DEGRADED",
+                output_data=_chat_output,
+            )
+        )
+    _trace_nodes_v2.append(_prompt_builder_node)
+    _trace_nodes_v2.append(
+        _build_trace_stage_node(
+            node_id="llm_stream",
+            node_type="llm",
+            display_name="LLM Stream",
+            ts_ms=ts_ms,
+            status="OK" if narrative.strip() else "DEGRADED",
+            latency_ms=llm_latency_ms,
+            provider=provider_name,
+            model_id=model_id,
+            input_data={
+                "first_token_ms": first_token_ms,
+                "buffer_stream": buffer_stream,
+                "input_digest": (llm_input_digest or "")[:300] or None,
+            },
+            output_data={
+                "final_response": (narrative or "")[:800] or None,
+            },
+        )
+    )
+    _trace_nodes_v2.append(
+        _build_trace_stage_node(
+            node_id="airlock_egress",
+            node_type="governor",
+            display_name="Airlock Egress",
+            ts_ms=_now,
+            status="OK",
+        )
+    )
+
+    trace_nodes = list(_trace_nodes_v2)
+    _pii_detail: dict[str, Any] = {}
+    if pii_ingress_stats:
+        _pii_detail["ingress"] = pii_ingress_stats
+    if pii_egress_stats:
+        _pii_detail["egress"] = pii_egress_stats
+    if _pii_detail:
+        trace_nodes.append(
+            {
+                "node_id": "pii_filter",
+                "node_type": "governor",
+                "display_name": "PII 过滤",
+                "side": "host",
+                "status": "OK",
+                "output_data": _pii_detail,
+                "ts_ms": _now,
+            }
+        )
+
+    _prev_node_id: str | None = None
+    for _node in trace_nodes:
+        _node_id = str(_node.get("node_id") or "").strip()
+        _node_type = str(_node.get("node_type") or "system").strip().lower() or "system"
+        _node_status = str(_node.get("status") or "OK").strip().upper() or "OK"
+        _node_reason = str(_node.get("reason_code") or "").strip() or None
+        _node_output = _node.get("output_data")
+        _node_ts = int(_node.get("ts_ms") or ts_ms)
+        _node["agent_envelope"] = _build_trace_agent_envelope(
+            request_id=request_id,
+            node_id=_node_id,
+            parent_node_id=_prev_node_id,
+            node_type=_node_type,
+            status=_node_status,
+            reason_code=_node_reason,
+            output_data=_node_output,
+            fallback_used=False,
+            degrade_code=None,
+            ts_ms=_node_ts,
+        )
+        if _node_id:
+            _prev_node_id = _node_id
+
+    trace_edges = [
+        {"source": trace_nodes[i]["node_id"], "target": trace_nodes[i + 1]["node_id"]}
+        for i in range(len(trace_nodes) - 1)
+    ]
+
+    ledger.log_graph_run_trace(
+        {
+            "request_id": request_id,
+            "session_id": session_id,
+            "total_latency_ms": total_latency_ms,
+            "status": "OK" if narrative.strip() else "DEGRADED",
+            "reason_code": None,
+            "node_count": len(trace_nodes),
+            "nodes_json": trace_nodes,
+            "edges_json": trace_edges,
+            "ts_ms": _now,
+        }
+    )
+
+
+
 def _airlock_sanitize_output(text: str) -> str:
+
 
     """出口净化：null byte + 长度截断。"""
     text = text.replace("\x00", "").strip()
@@ -480,6 +1384,16 @@ async def _async_post_process(
 
 
 __all__ = [
+    "_normalize_retrieval_summary_for_audit",
+    "_coerce_trace_mapping",
+    "_summarize_motive_state_for_trace",
+    "_summarize_response_policy_for_trace",
+    "_summarize_emotion_context_for_trace",
+    "_summarize_persona_resident_memory_for_trace",
+    "_normalize_trace_stage_meta",
+    "_build_trace_agent_envelope",
+    "_build_trace_stage_node",
+    "_persist_post_process_audit",
     "_airlock_sanitize_output",
     "_build_reply_preview",
     "_build_subagent_gateway_from_runtime",
@@ -489,4 +1403,5 @@ __all__ = [
     "_infer_emotion_tag_for_tts",
     "_async_post_process",
 ]
+
 

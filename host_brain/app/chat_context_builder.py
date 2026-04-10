@@ -2923,6 +2923,59 @@ def build_chat_prompt_runtime_payload(
                 "approve_count": int(_ig_state.get("approve_count") or 0),
             }
 
+        # T-277：注入 default_mode_state（默认模式网络连续性快照）
+        _dma_state = dict(tribe_context.get("default_mode_state") or {})
+        if _dma_state:
+            _continuity_score = round(float(_dma_state.get("continuity_score") or 0.0), 4)
+            runtime_payload["default_mode_state"] = {
+                "continuity_score": _continuity_score,
+                "idle_depth": round(float(_dma_state.get("idle_depth") or 0.0), 4),
+                "last_idle_topic": str(_dma_state.get("last_idle_topic") or ""),
+                "recovery_triggered": bool(_dma_state.get("recovery_triggered", False)),
+                "cycle_count": int(_dma_state.get("cycle_count") or 0),
+            }
+
+        # T-277：注入 social_brain_state（社交关系快照）
+        _sba_state = dict(tribe_context.get("social_brain_state") or {})
+        if _sba_state:
+            _repair_needed = bool(_sba_state.get("repair_needed", False))
+            runtime_payload["social_brain_state"] = {
+                "bond_stage": str(_sba_state.get("bond_stage") or "STRANGER"),
+                "bond_trend": str(_sba_state.get("bond_trend") or "stable"),
+                "bond_vector_intimacy": round(float(_sba_state.get("bond_vector_intimacy") or 0.0), 4),
+                "bond_vector_trust": round(float(_sba_state.get("bond_vector_trust") or 0.0), 4),
+                "repair_needed": _repair_needed,
+                "repair_reason": str(_sba_state.get("repair_reason") or ""),
+                "milestone_achieved_count": int(_sba_state.get("milestone_achieved_count") or 0),
+            }
+            # 需要关系修复时注入 repair_hint 供 prompt_builder 参考
+            if _repair_needed:
+                runtime_payload.setdefault("repair_hint", {
+                    "repair_needed": True,
+                    "repair_reason": str(_sba_state.get("repair_reason") or ""),
+                    "suggest": "当前关系需要修复，回复应更温柔、更有耐心，主动表达关心",
+                })
+
+        # T-282：注入 interoception_state（身体预算快照）
+        _intero_state = dict(tribe_context.get("interoception_state") or {})
+        if _intero_state:
+            _body_budget = round(float(_intero_state.get("body_budget") or 0.5), 4)
+            _recovery_urgency = round(float(_intero_state.get("recovery_urgency") or 0.0), 4)
+            runtime_payload["interoception_state"] = {
+                "body_budget": _body_budget,
+                "recovery_urgency": _recovery_urgency,
+                "fatigue_level": round(float(_intero_state.get("fatigue_level") or 0.0), 4),
+                "stress_load": round(float(_intero_state.get("stress_load") or 0.0), 4),
+                "homeostasis_ok": bool(_intero_state.get("homeostasis_ok", True)),
+            }
+            # 低身体预算时注入 low_budget_hint 供 prompt_builder 参考
+            if _body_budget < 0.30:
+                runtime_payload.setdefault("low_budget_hint", {
+                    "body_budget": _body_budget,
+                    "recovery_urgency": _recovery_urgency,
+                    "suggest": "当前身体预算不足，回复应更简短、更温和，避免高能量输出",
+                })
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

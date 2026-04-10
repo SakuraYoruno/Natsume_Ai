@@ -1880,6 +1880,35 @@ async def top_agent_sse_generator(
 # 异步后处理
 # ---------------------------------------------------------------------------
 
+from host_brain.app.agent_runtime_shared import (  # noqa: E402
+    _build_trace_agent_envelope as _shared_build_trace_agent_envelope,
+    _build_trace_stage_node as _shared_build_trace_stage_node,
+    _coerce_trace_mapping as _shared_coerce_trace_mapping,
+    _infer_emotion_tag_for_tts as _shared_infer_emotion_tag_for_tts,
+    _normalize_retrieval_summary_for_audit as _shared_normalize_retrieval_summary_for_audit,
+    _normalize_trace_stage_meta as _shared_normalize_trace_stage_meta,
+    _persist_post_process_audit as _shared_persist_post_process_audit,
+    _resolve_persona_session_emotion as _shared_resolve_persona_session_emotion,
+    _run_persona_session_end_hooks as _shared_run_persona_session_end_hooks,
+    _summarize_emotion_context_for_trace as _shared_summarize_emotion_context_for_trace,
+    _summarize_motive_state_for_trace as _shared_summarize_motive_state_for_trace,
+    _summarize_persona_resident_memory_for_trace as _shared_summarize_persona_resident_memory_for_trace,
+    _summarize_response_policy_for_trace as _shared_summarize_response_policy_for_trace,
+)
+
+_normalize_retrieval_summary_for_audit = _shared_normalize_retrieval_summary_for_audit
+_coerce_trace_mapping = _shared_coerce_trace_mapping
+_summarize_motive_state_for_trace = _shared_summarize_motive_state_for_trace
+_summarize_response_policy_for_trace = _shared_summarize_response_policy_for_trace
+_summarize_emotion_context_for_trace = _shared_summarize_emotion_context_for_trace
+_summarize_persona_resident_memory_for_trace = _shared_summarize_persona_resident_memory_for_trace
+_normalize_trace_stage_meta = _shared_normalize_trace_stage_meta
+_build_trace_agent_envelope = _shared_build_trace_agent_envelope
+_build_trace_stage_node = _shared_build_trace_stage_node
+_resolve_persona_session_emotion = _shared_resolve_persona_session_emotion
+_run_persona_session_end_hooks = _shared_run_persona_session_end_hooks
+_infer_emotion_tag_for_tts = _shared_infer_emotion_tag_for_tts
+
 async def _async_post_process(
     *,
     request_id: str,
