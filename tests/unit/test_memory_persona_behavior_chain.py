@@ -15,6 +15,66 @@ def _ts_at_hour(hour: int, minute: int = 0) -> int:
     return int(datetime.datetime(2026, 4, 4, hour, minute, 0).timestamp() * 1000)
 
 
+def _stabilize_limbic_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep chat runtime policy tests isolated from live silence/body carry-over."""
+
+    import host_brain.tribe.limbic_agent as limbic_agent_module
+    import host_brain.tribe.prefrontal_agent as prefrontal_agent_module
+    import host_brain.tribe.social_brain_agent as social_brain_agent_module
+
+    monkeypatch.setattr(
+        limbic_agent_module.LimbicAgent,
+        "resolve_silence_state",
+        lambda self, **_kwargs: {
+            "response_willingness": 1.0,
+            "willingness_level": "NORMAL",
+            "topic_resistance_active": False,
+            "topic_resistance_hint": "",
+        },
+    )
+    monkeypatch.setattr(
+        limbic_agent_module.LimbicAgent,
+        "capture_conversation_body_sense",
+        lambda self, **_kwargs: {
+            "status": "OK",
+            "willingness_penalty": 0.0,
+            "body_sense": {
+                "fatigue_level": "FRESH",
+                "drowsiness_level": "AWAKE",
+                "loneliness_level": "NONE",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        limbic_agent_module.LimbicAgent,
+        "apply_body_sense_penalty",
+        lambda self, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        prefrontal_agent_module.PrefrontalAgent,
+        "run_self_reflection_cycle",
+        lambda self, **_kwargs: {"self_reflection_pulse": {}, "snapshot": {}},
+    )
+    monkeypatch.setattr(
+        social_brain_agent_module.SocialBrainAgent,
+        "resolve_bond_stage",
+        lambda self, person_id=None, default="STRANGER": "FRIEND",
+    )
+    monkeypatch.setattr(
+        social_brain_agent_module.SocialBrainAgent,
+        "resolve_bond_snapshot",
+        lambda self, **_kwargs: {
+            "bond_state_obj": None,
+            "bond_summary": {"stage": "FRIEND", "shared_memory_count": 0},
+            "bond_stage": "FRIEND",
+            "intimacy_score": 0.5,
+            "bond_trend": "steady",
+            "last_event_ts_ms": 0,
+            "rift": None,
+        },
+    )
+
+
 def test_response_policy_memory_signal_restrains_followup_and_proactive() -> None:
     policy = decide_response_policy(
         ResponsePolicyInput(
@@ -413,6 +473,8 @@ def _build_runtime_payload_from_memory_case(
     memory_signal: dict[str, object],
     motive_state: dict[str, float | str],
 ) -> dict[str, object]:
+    _stabilize_limbic_baseline(monkeypatch)
+
     monkeypatch.setattr(
         ccb,
         "build_chat_generation_prompt_payload",
@@ -499,6 +561,8 @@ def _build_runtime_payload_from_recall_pack(
     retrieval_evidence_items: list[dict[str, object]],
     motive_state: dict[str, float | str],
 ) -> dict[str, object]:
+    _stabilize_limbic_baseline(monkeypatch)
+
     import host_brain.app.dependencies as deps
     import host_brain.app.emotion_context as emotion_context
 
@@ -666,7 +730,9 @@ def test_memory_persona_reply_runtime_regression_matrix(
     hint = dict(runtime_payload.get("persona_expression_hint") or {})
     memory_summary = str(runtime_payload.get("memory_recall_summary") or "")
 
-    assert response_policy["allow_followup"] is expectations["allow_followup"], case_name
+    assert response_policy["allow_followup"] is expectations["allow_followup"], (
+        f"{case_name} response_policy={response_policy}"
+    )
     assert response_policy["allow_proactive_after_reply"] is expectations["allow_proactive_after_reply"], case_name
     assert response_policy["allow_topic_shift"] is expectations["allow_topic_shift"], case_name
     assert expectations["reason_tag"] in response_policy["policy_reason_tags"], case_name

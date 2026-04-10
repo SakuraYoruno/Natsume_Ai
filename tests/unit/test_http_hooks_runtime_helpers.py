@@ -525,6 +525,154 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
             }
         ),
     )
+    monkeypatch.setattr(
+        "host_brain.tribe.somatic_agent.get_somatic_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "vts_connected": True,
+                "last_emotion_tag": "NEUTRAL",
+                "fatigue_level": 0.16,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.peripheral_agent.get_peripheral_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "connected_platforms": ["wechat"],
+                "suppressed": False,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.circadian_agent.get_circadian_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "phase": "dusk",
+                "proactive_multiplier": 0.68,
+                "sleep_pressure": 0.55,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.proprioception_agent.get_proprioception_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "cognitive_load_index": 0.31,
+                "readiness_hint": 0.62,
+                "continuity_hint": 0.71,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.initiative_governor_agent.get_initiative_governor_agent",
+        lambda: SimpleNamespace(
+            get_last_decision=lambda: {
+                "decision": "ALLOW",
+                "reason_code": "PASS_ALL_GATES",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.get_default_mode_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "last_focus": "project",
+                "continuity_score": 0.66,
+                "tick_count": 3,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.mirror_neuron_agent.get_mirror_neuron_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "last_resonance_strength": 0.43,
+                "last_co_regulation_hint": "resonate",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.hippocampus_agent.get_hippocampus_agent",
+        lambda: SimpleNamespace(
+            resolve_memory_layer_snapshot=lambda: {
+                "episodic": {"id": "ep-1"},
+                "semantic": {"id": "sm-1"},
+                "autobiographical": {"id": "ab-1"},
+                "last_write_type": "episodic",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.language_system_agent.get_language_system_agent",
+        lambda: SimpleNamespace(
+            state_registry=SimpleNamespace(
+                get_state=lambda _ns: {
+                    "state": {
+                        "last_dual_system": {
+                            "wernicke": {"intent_type": "question"},
+                            "broca": {"response_mode": "direct_answer"},
+                            "style": {"style": "warm", "tone": "balanced"},
+                        }
+                    }
+                }
+            ),
+            resolve_dual_system=lambda **_kwargs: {
+                "wernicke": {"intent_type": "question"},
+                "broca": {"response_mode": "direct_answer"},
+                "style": {"style": "warm", "tone": "balanced"},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.interoception_agent.get_interoception_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "interoceptive_index": 0.31,
+                "body_budget": 0.72,
+                "recovery_urgency": 0.28,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.motor_cortex_agent.get_motor_cortex_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "last_plan_id": "motor_plan_1",
+                "last_dispatch_ok": True,
+                "last_dispatch_reason": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.cerebellum_agent.get_cerebellum_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "last_strategy": "NO_ADJUST",
+                "last_urgency": 0.18,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.glymphatic_agent.get_glymphatic_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "executed": True,
+                "reason_code": "RECOVERY_WINDOW_OPEN",
+                "phase": "night",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.vestibular_agent.get_vestibular_agent",
+        lambda: SimpleNamespace(
+            export_runtime_state=lambda: {
+                "stability_state": "stable",
+                "jitter_index": 0.24,
+                "route_bias": "normal",
+            }
+        ),
+    )
 
     monkeypatch.setattr("host_brain.app.http_hooks_runtime_helpers._time.time", lambda: 1700000010.0)
     monkeypatch.setattr(
@@ -600,6 +748,23 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["background_runtime"]["persona_user_alignment_ok"] is True
     assert snapshot["background_runtime"]["tick_health"] == "fresh"
     assert snapshot["background_runtime"]["is_advancing"] is True
+    assert snapshot["somatic_state"]["vts_connected"] is True
+    assert snapshot["peripheral_state"]["connected_platforms"] == ["wechat"]
+    assert snapshot["circadian_state"]["phase"] == "dusk"
+    assert snapshot["proprioception_state"]["cognitive_load_index"] == 0.31
+    assert snapshot["initiative_decision"]["decision"] == "ALLOW"
+    assert snapshot["default_mode_state"]["last_focus"] == "project"
+    assert snapshot["mirror_neuron_state"]["last_co_regulation_hint"] == "resonate"
+    assert snapshot["memory_layers"]["last_write_type"] == "episodic"
+    assert snapshot["language_dual_system"]["broca"]["response_mode"] == "direct_answer"
+    assert snapshot["interoception_state"]["interoceptive_index"] == 0.31
+    assert snapshot["motor_cortex_state"]["last_plan_id"] == "motor_plan_1"
+    assert snapshot["cerebellum_state"]["last_strategy"] == "NO_ADJUST"
+    assert snapshot["glymphatic_state"]["executed"] is True
+    assert snapshot["vestibular_state"]["stability_state"] == "stable"
     assert snapshot["slot_status"]["immune_state"] == "live"
     assert snapshot["slot_status"]["response_policy"] == "live"
+    assert snapshot["slot_status"]["homeostasis_report"] == "live"
+    assert snapshot["slot_status"]["interoception_state"] == "live"
+    assert snapshot["slot_status"]["vestibular_state"] == "live"
     assert snapshot["degraded"] is False

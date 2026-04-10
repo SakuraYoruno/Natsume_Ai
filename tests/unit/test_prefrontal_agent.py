@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
+from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
 class _FakeLogger:
@@ -435,3 +436,49 @@ def test_prefrontal_resolve_bond_style_instruction(monkeypatch) -> None:
     assert kwargs["bond_stage"] == "FRIEND"
     assert kwargs["intimacy_score"] == 0.62
     assert kwargs["shared_memory_hints"] == ["一起调试过前端"]
+
+
+def test_prefrontal_autobiographical_gate_and_commit(monkeypatch) -> None:
+    registry = TribeStateRegistry()
+    registry.set_state(
+        "endocrine_agent",
+        {"gate_state": "open", "stress_index": 0.21, "energy_reserve": 0.83, "homeostasis_ok": True},
+        writer="unit",
+    )
+    registry.set_state("immune_agent", {"risk_level": "none", "block_rate": 0.0, "counters": {"block": 0}}, writer="unit")
+
+    class _FakeSocial:
+        def get_bond_context(self, *, session_id: str, user_id: str):  # noqa: ANN001
+            assert session_id == "sess-autobio"
+            assert user_id == "u-autobio"
+            return {"bond_vector": {"trust": 0.74, "repair_confidence": 0.68}}
+
+    class _FakeHippocampus:
+        def write_autobiographical_memory(self, **kwargs):  # noqa: ANN003
+            assert kwargs["person_id"] == "u-autobio"
+            assert kwargs["gate_result"]["decision"] == "ALLOW"
+            return {"layer": "autobiographical", "payload": {"narrative": kwargs["narrative"]}}
+
+    monkeypatch.setattr("host_brain.tribe.tribe_state.get_global_registry", lambda: registry)
+    monkeypatch.setattr("host_brain.tribe.social_brain_agent.get_social_brain_agent", lambda: _FakeSocial())
+    monkeypatch.setattr("host_brain.tribe.hippocampus_agent.get_hippocampus_agent", lambda: _FakeHippocampus())
+
+    agent = PrefrontalAgent(state_registry=registry)
+    gate = agent.evaluate_autobiographical_memory_gate(
+        persona_user_id="u-autobio",
+        narrative="这是我们一起推进系统的一次重要记忆。",
+        source_agent="default_mode_agent",
+        context={"session_id": "sess-autobio"},
+    )
+    committed = agent.commit_autobiographical_memory(
+        persona_user_id="u-autobio",
+        narrative="这是我们一起推进系统的一次重要记忆。",
+        source_agent="default_mode_agent",
+        context={"session_id": "sess-autobio"},
+        request_id="req-autobio",
+    )
+
+    assert gate["decision"] == "ALLOW"
+    assert gate["reason_code"] == "PASS"
+    assert committed["status"] == "OK"
+    assert committed["write_result"]["layer"] == "autobiographical"

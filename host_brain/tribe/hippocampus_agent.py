@@ -14,7 +14,7 @@ class HippocampusAgent:
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="hippocampus_agent",
             family="hippocampus",
-            capabilities=("episodic_store", "recall_fusion", "retrieval_loop"),
+            capabilities=("episodic_store", "semantic_memory", "autobiographical_memory", "recall_fusion", "retrieval_loop"),
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)  # T-36：使用全局单例
@@ -341,6 +341,177 @@ class HippocampusAgent:
                 "HippocampusAgent.resolve_bond_user_id 失败（降级）: %s", exc
             )
             return str(fallback or "user_1")
+
+    def _write_memory_scope(
+        self,
+        *,
+        writer_agent_id: str,
+        payload: Mapping[str, Any],
+        request_id: str = "",
+    ) -> dict[str, Any]:
+        from host_brain.app.dependencies import get_state_write_arbiter  # noqa: PLC0415
+        from host_brain.app.memory.state_write_arbiter import StateScope  # noqa: PLC0415
+
+        arbiter = get_state_write_arbiter()
+        result = arbiter.write(
+            scope=StateScope.MEMORY_STATE,
+            writer_agent_id=str(writer_agent_id or "").strip(),
+            payload=dict(payload or {}),
+            request_id=str(request_id or "").strip(),
+            merge=True,
+        )
+        return {
+            "status": str(result.status or "ERROR"),
+            "written": bool(result.written),
+            "state_version": int(result.state_version or 0),
+            "reason_code": result.reason_code,
+            "detail": result.detail,
+            "payload": dict(result.payload or {}),
+        }
+
+    def _merge_memory_layers(
+        self,
+        *,
+        updates: Mapping[str, Any],
+        last_write_type: str,
+    ) -> dict[str, Any]:
+        snapshot = self.state_registry.get_state("hippocampus_agent") or {}
+        state = dict(snapshot.get("state") or {})
+        memory_layers = dict(state.get("memory_layers") or {})
+        for key, value in dict(updates or {}).items():
+            if isinstance(value, Mapping):
+                memory_layers[str(key)] = dict(value)
+            else:
+                memory_layers[str(key)] = value
+        memory_layers["last_write_type"] = str(last_write_type or "").strip()
+        return memory_layers
+
+    def write_episodic_memory_trace(
+        self,
+        *,
+        person_id: str,
+        session_id: str,
+        content: str,
+        metadata: Mapping[str, Any] | None = None,
+        request_id: str = "",
+    ) -> dict[str, Any]:
+        payload = {
+            "episodic_last": {
+                "person_id": str(person_id or "user_1").strip() or "user_1",
+                "session_id": str(session_id or "default").strip() or "default",
+                "content": str(content or "").strip(),
+                "metadata": dict(metadata or {}),
+            }
+        }
+        arbiter_result = self._write_memory_scope(
+            writer_agent_id="episodic_memory_agent",
+            payload=payload,
+            request_id=request_id,
+        )
+        self.state_registry.write(
+            namespace="hippocampus_agent",
+            state={
+                "memory_layers": self._merge_memory_layers(
+                    updates={"last_episodic": payload["episodic_last"]},
+                    last_write_type="episodic",
+                )
+            },
+            writer="hippocampus_agent",
+            merge=True,
+            reason="episodic_memory_write",
+            input_refs=[str(request_id or "").strip()] if str(request_id or "").strip() else None,
+        )
+        return {"layer": "episodic", "arbiter": arbiter_result, "payload": payload["episodic_last"]}
+
+    def write_semantic_memory_fact(
+        self,
+        *,
+        person_id: str,
+        fact: str,
+        source_refs: list[str] | None = None,
+        request_id: str = "",
+    ) -> dict[str, Any]:
+        payload = {
+            "semantic_last": {
+                "person_id": str(person_id or "user_1").strip() or "user_1",
+                "fact": str(fact or "").strip(),
+                "source_refs": [str(item).strip() for item in list(source_refs or []) if str(item).strip()],
+            }
+        }
+        arbiter_result = self._write_memory_scope(
+            writer_agent_id="semantic_memory_agent",
+            payload=payload,
+            request_id=request_id,
+        )
+        self.state_registry.write(
+            namespace="hippocampus_agent",
+            state={
+                "memory_layers": self._merge_memory_layers(
+                    updates={"last_semantic": payload["semantic_last"]},
+                    last_write_type="semantic",
+                )
+            },
+            writer="hippocampus_agent",
+            merge=True,
+            reason="semantic_memory_write",
+            input_refs=[str(request_id or "").strip()] if str(request_id or "").strip() else None,
+        )
+        return {"layer": "semantic", "arbiter": arbiter_result, "payload": payload["semantic_last"]}
+
+    def write_autobiographical_memory(
+        self,
+        *,
+        person_id: str,
+        narrative: str,
+        gate_result: Mapping[str, Any] | None = None,
+        request_id: str = "",
+    ) -> dict[str, Any]:
+        gate = dict(gate_result or {})
+        allow = str(gate.get("decision") or "").strip().upper() == "ALLOW"
+        if not allow:
+            return {
+                "layer": "autobiographical",
+                "status": "BLOCKED",
+                "reason_code": str(gate.get("reason_code") or "AUTOBIO_GATE_BLOCKED"),
+            }
+        payload = {
+            "autobiographical_last": {
+                "person_id": str(person_id or "user_1").strip() or "user_1",
+                "narrative": str(narrative or "").strip(),
+                "gate_trace_id": str(gate.get("trace_id") or "").strip() or None,
+            }
+        }
+        arbiter_result = self._write_memory_scope(
+            writer_agent_id="resident_memory_agent",
+            payload=payload,
+            request_id=request_id,
+        )
+        self.state_registry.write(
+            namespace="hippocampus_agent",
+            state={
+                "memory_layers": self._merge_memory_layers(
+                    updates={"last_autobiographical": payload["autobiographical_last"]},
+                    last_write_type="autobiographical",
+                )
+            },
+            writer="hippocampus_agent",
+            merge=True,
+            reason="autobiographical_memory_write",
+            input_refs=[str(request_id or "").strip()] if str(request_id or "").strip() else None,
+            decision_trace_id=str(gate.get("trace_id") or "").strip() or None,
+        )
+        return {"layer": "autobiographical", "arbiter": arbiter_result, "payload": payload["autobiographical_last"]}
+
+    def resolve_memory_layer_snapshot(self) -> dict[str, Any]:
+        snap = self.state_registry.get_state("hippocampus_agent") or {}
+        state = dict(snap.get("state") or {})
+        layers = dict(state.get("memory_layers") or {})
+        return {
+            "episodic": dict(layers.get("last_episodic") or {}),
+            "semantic": dict(layers.get("last_semantic") or {}),
+            "autobiographical": dict(layers.get("last_autobiographical") or {}),
+            "last_write_type": str(layers.get("last_write_type") or ""),
+        }
 
 
 _HIPPOCAMPUS_AGENT: HippocampusAgent | None = None

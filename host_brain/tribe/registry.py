@@ -23,6 +23,20 @@ _DEFAULT_FAMILY_SPECS: tuple[TribeFamilySpec, ...] = (
     TribeFamilySpec("social_brain", "SocialBrainAgent"),
     TribeFamilySpec("endocrine", "EndocrineAgent"),
     TribeFamilySpec("immune", "ImmuneAgent"),
+    TribeFamilySpec("pain_reward", "PainRewardAgent"),
+    TribeFamilySpec("language", "LanguageSystemAgent"),
+    TribeFamilySpec("somatic", "SomaticAgent"),
+    TribeFamilySpec("peripheral", "PeripheralAgent"),
+    TribeFamilySpec("circadian", "CircadianAgent"),
+    TribeFamilySpec("proprioception", "ProprioceptionAgent"),
+    TribeFamilySpec("initiative_governor", "InitiativeGovernorAgent"),
+    TribeFamilySpec("default_mode", "DefaultModeAgent"),
+    TribeFamilySpec("mirror_neuron", "MirrorNeuronAgent"),
+    TribeFamilySpec("interoception", "InteroceptionAgent"),
+    TribeFamilySpec("motor_cortex", "MotorCortexAgent"),
+    TribeFamilySpec("cerebellum", "CerebellumAgent"),
+    TribeFamilySpec("glymphatic", "GlymphaticAgent"),
+    TribeFamilySpec("vestibular", "VestibularAgent"),
 )
 
 
@@ -44,6 +58,20 @@ class HostTribeRegistry:
             TribeAgentDescriptor("social_brain_agent", "social_brain", capabilities=("bond", "style_adapter")),
             TribeAgentDescriptor("endocrine_agent", "endocrine", capabilities=("hormone_baseline", "gate_state")),
             TribeAgentDescriptor("immune_agent", "immune", capabilities=("risk_scan", "prompt_guard", "input_gate")),
+            TribeAgentDescriptor("pain_reward_agent", "pain_reward", capabilities=("pain", "reward", "hedonic")),
+            TribeAgentDescriptor("language_system_agent", "language", capabilities=("language_style", "tone_adapt")),
+            TribeAgentDescriptor("somatic_agent", "somatic", capabilities=("body_sense", "somatic_state")),
+            TribeAgentDescriptor("peripheral_agent", "peripheral", capabilities=("platform_adapter", "motor_gate")),
+            TribeAgentDescriptor("circadian_agent", "circadian", capabilities=("circadian_phase", "proactive_budget")),
+            TribeAgentDescriptor("proprioception_agent", "proprioception", capabilities=("cognitive_load", "session_state")),
+            TribeAgentDescriptor("initiative_governor_agent", "initiative_governor", capabilities=("motive", "readiness", "continuity")),
+            TribeAgentDescriptor("default_mode_agent", "default_mode", capabilities=("inner_activity", "continuity_stream")),
+            TribeAgentDescriptor("mirror_neuron_agent", "mirror_neuron", capabilities=("emotion_resonance", "co_regulation")),
+            TribeAgentDescriptor("interoception_agent", "interoception", capabilities=("interoceptive_index", "body_budget", "recovery_urgency")),
+            TribeAgentDescriptor("motor_cortex_agent", "motor_cortex", capabilities=("action_plan", "command_dispatch", "execution_trace")),
+            TribeAgentDescriptor("cerebellum_agent", "cerebellum", capabilities=("error_correction", "latency_compensation", "retry_strategy")),
+            TribeAgentDescriptor("glymphatic_agent", "glymphatic", capabilities=("recovery_cycle", "memory_consolidation", "noise_decay")),
+            TribeAgentDescriptor("vestibular_agent", "vestibular", capabilities=("stability_index", "jitter_damping", "route_balance")),
         )
         for descriptor in default_agents:
             self.register_agent(descriptor)
@@ -91,10 +119,38 @@ class HostTribeRegistry:
                 return "hippocampus"
             if "episodic" in normalized_target or "canon" in normalized_target or "distill" in normalized_target:
                 return "hippocampus"
+            if "language" in normalized_target or "wernicke" in normalized_target or "broca" in normalized_target:
+                return "language"
+            if "pain" in normalized_target or "reward" in normalized_target or "hedonic" in normalized_target:
+                return "pain_reward"
             if "emotion" in normalized_target or "motive" in normalized_target or "inner_world" in normalized_target:
                 return "limbic"
             if "silence" in normalized_target or "body_sense" in normalized_target:
                 return "limbic"
+            if "somatic" in normalized_target:
+                return "somatic"
+            if "peripheral" in normalized_target or "platform" in normalized_target:
+                return "peripheral"
+            if "circadian" in normalized_target or "day_night" in normalized_target or "sleep_pressure" in normalized_target:
+                return "circadian"
+            if "proprioception" in normalized_target or "cognitive_load" in normalized_target or "session_load" in normalized_target:
+                return "proprioception"
+            if "initiative" in normalized_target or "motive" in normalized_target or "readiness" in normalized_target or "continuity" in normalized_target:
+                return "initiative_governor"
+            if "default_mode" in normalized_target or "idle_reflection" in normalized_target or "inner_activity" in normalized_target:
+                return "default_mode"
+            if "mirror" in normalized_target or "resonance" in normalized_target or "empathy" in normalized_target:
+                return "mirror_neuron"
+            if "interoception" in normalized_target or "interoceptive" in normalized_target or "body_budget" in normalized_target:
+                return "interoception"
+            if "motor_cortex" in normalized_target or "action_plan" in normalized_target or "command_dispatch" in normalized_target:
+                return "motor_cortex"
+            if "cerebellum" in normalized_target or "latency_compensation" in normalized_target or "error_correction" in normalized_target:
+                return "cerebellum"
+            if "glymphatic" in normalized_target or "recovery_cycle" in normalized_target or "memory_consolidation" in normalized_target:
+                return "glymphatic"
+            if "vestibular" in normalized_target or "stability_index" in normalized_target or "route_balance" in normalized_target:
+                return "vestibular"
             if "growth" in normalized_target or "evolution" in normalized_target:
                 return "prefrontal"
             if "drift" in normalized_target or "self_model" in normalized_target or "reflection" in normalized_target:

@@ -4405,6 +4405,25 @@ class RetrievalRuntimeResponse(BaseModel):
     timestamp: int
 
 
+def _extract_default_embedding_write_hints(embed_cfg: Any) -> tuple[Optional[str], Optional[str]]:
+    if embed_cfg is None:
+        return None, None
+    default_route_id = str(getattr(embed_cfg, "default_route", "") or "").strip()
+    routes = getattr(embed_cfg, "routes", None)
+    if not default_route_id or not isinstance(routes, Mapping):
+        return None, None
+    route = routes.get(default_route_id)
+    if route is None:
+        return None, None
+    if isinstance(route, Mapping):
+        model_id = str(route.get("model_id") or "").strip() or None
+        provider = str(route.get("provider") or "").strip() or None
+        return model_id, provider
+    model_id = str(getattr(route, "model_id", "") or "").strip() or None
+    provider = str(getattr(route, "provider", "") or "").strip() or None
+    return model_id, provider
+
+
 def _build_retrieval_runtime_route_items(config: Any, *, kind: str) -> List[RetrievalRuntimeRouteItem]:
     routes = []
     for route_id, route in sorted(dict(getattr(config, "routes", {}) or {}).items()):
@@ -4517,15 +4536,23 @@ async def get_retrieval_runtime(
     if latest_item is None and recent_items:
         latest_item = recent_items[0]
 
-    episodic_write_model_id = None
-    episodic_write_provider = None
-    try:
-        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
-        episodic_store = get_episodic_store()
-        episodic_write_model_id = getattr(episodic_store, "embedding_model_id_hint", None)
-        episodic_write_provider = getattr(episodic_store, "embedding_provider_hint", None)
-    except Exception:
-        episodic_store = None
+    cfg_model_id, cfg_provider = _extract_default_embedding_write_hints(embed_cfg)
+    episodic_write_model_id = cfg_model_id
+    episodic_write_provider = cfg_provider
+    # 优先使用 runtime config；仅当配置缺失时再读取写侧 store hint，避免触发重型依赖初始化
+    if not episodic_write_model_id or not episodic_write_provider:
+        try:
+            import host_brain.app.dependencies as _deps  # noqa: PLC0415
+
+            episodic_store = _deps.get_episodic_store()
+            store_model_id = getattr(episodic_store, "embedding_model_id_hint", None)
+            store_provider = getattr(episodic_store, "embedding_provider_hint", None)
+            if not episodic_write_model_id:
+                episodic_write_model_id = store_model_id
+            if not episodic_write_provider:
+                episodic_write_provider = store_provider
+        except Exception:
+            pass
 
     latest_embed_model = latest_item.embedding_model_id if latest_item is not None else None
     return RetrievalRuntimeResponse(

@@ -15,7 +15,9 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.bond.async_queue import BondUpdateQueue
 from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.bond_stage_engine import BondStageEngine
+from host_brain.bond.milestone_tracker import MilestoneTracker
 from host_brain.bond.neo4j_client import InMemoryNeo4jBondClient, SqliteBondClient, build_neo4j_bond_client, load_neo4j_runtime_config  # 修复审计问题 #10
+from host_brain.bond.shared_memory_index import SharedMemoryIndex
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.policy_cache import GovernorPolicyCache
 from host_brain.governor.tokens import TokenService
@@ -127,6 +129,8 @@ _meta_learning_loop: Optional[MetaLearningLoop] = None
 _planning_agent: Optional[PlanningAgent] = None
 _skill_composer: Optional[SkillComposer] = None
 _runtime_task_registry: Optional[RuntimeTaskRegistry] = None
+_shared_memory_index: Optional[SharedMemoryIndex] = None
+_milestone_tracker: Optional[MilestoneTracker] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -498,6 +502,25 @@ def get_bond_stage_engine() -> BondStageEngine:
             score_map=score_map,
         )
     return _bond_stage_engine
+
+
+def get_shared_memory_index() -> SharedMemoryIndex:
+    global _shared_memory_index
+    episodic_store = None
+    try:
+        episodic_store = get_episodic_store()
+    except Exception:
+        episodic_store = None
+    if _shared_memory_index is None or getattr(_shared_memory_index, "_store", None) is not episodic_store:
+        _shared_memory_index = SharedMemoryIndex(store=episodic_store)
+    return _shared_memory_index
+
+
+def get_milestone_tracker() -> MilestoneTracker:
+    global _milestone_tracker
+    if _milestone_tracker is None:
+        _milestone_tracker = MilestoneTracker()
+    return _milestone_tracker
 
 
 def get_bond_neo4j_client():

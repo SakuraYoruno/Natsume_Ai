@@ -671,19 +671,33 @@ async def _dispatch_to_graph(
         ts_ms=ts_ms,
     )
 
-    asyncio.create_task(
-        _dispatch_to_graph_worker(
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            text=text,
-            payload=payload,
-            ts_ms=ts_ms,
-            ledger=ledger,
-            dispatch_mode=dispatch_mode,
-            run_in_thread=run_in_thread,
-        )
-    ).add_done_callback(_log_dispatch_task_exception)
+    if run_in_thread:
+        asyncio.create_task(
+            _dispatch_to_graph_worker(
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                text=text,
+                payload=payload,
+                ts_ms=ts_ms,
+                ledger=ledger,
+                dispatch_mode=dispatch_mode,
+                run_in_thread=run_in_thread,
+            )
+        ).add_done_callback(_log_dispatch_task_exception)
+        return
+
+    await _dispatch_to_graph_worker(
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        text=text,
+        payload=payload,
+        ts_ms=ts_ms,
+        ledger=ledger,
+        dispatch_mode=dispatch_mode,
+        run_in_thread=run_in_thread,
+    )
 
 
 async def _dispatch_to_graph_worker(

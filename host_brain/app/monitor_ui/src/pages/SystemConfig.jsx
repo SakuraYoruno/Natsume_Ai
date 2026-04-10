@@ -104,8 +104,8 @@ export default function SystemConfig() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">系统底座</h1>
-          <p className="text-sm text-gray-500">查看模型路由、检索运行时、限流后端与基础服务状态。</p>
+          <h1 className="text-xl font-semibold text-gray-900">神经系统底座</h1>
+          <p className="text-sm text-gray-500">查看模型路由、检索运行时、限流后端与基础器官状态。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -123,13 +123,13 @@ export default function SystemConfig() {
 
       <PageHero
         icon={Settings}
-        eyebrow="系统运行底座"
+        eyebrow="神经系统运行底座"
         title={sysMode}
         description={`当前硬状态为 ${sysMode}，回复姿态为 ${replyPosture}，未在线槽位数量为 ${notLiveSlots}。`}
         gradientClass="from-primary-50 via-white to-sky-50"
         metaItems={[
-          `服务：${healthData ? `${healthData.up}/${healthData.total}` : FALLBACK_TEXT}`,
-          `未知服务：${healthData?.unknown ?? FALLBACK_TEXT}`,
+          `器官：${healthData ? `${healthData.up}/${healthData.total}` : FALLBACK_TEXT}`,
+          `未知器官：${healthData?.unknown ?? FALLBACK_TEXT}`,
           `限流后端：${rateData?.backend_type || FALLBACK_TEXT}`,
           `检索套件：${retrievalRuntime?.suite_profile || '自定义'}`,
         ]}
@@ -191,7 +191,7 @@ export default function SystemConfig() {
           tone="text-purple-600"
         />
         <MetricCard
-          label="健康服务"
+          label="器官健康"
           value={healthData?.up ?? FALLBACK_TEXT}
           icon={Zap}
           variant="stacked"

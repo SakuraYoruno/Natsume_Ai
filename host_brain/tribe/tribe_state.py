@@ -4,7 +4,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
 
@@ -38,13 +38,30 @@ class TribeStateRegistry:
         self._persist_throttle: int = max(1, int(persist_throttle))
         self._persist_counter: int = 0
 
-    def set_state(self, namespace: str, state: dict[str, Any], *, writer: str | None = None) -> dict[str, Any]:
+    def set_state(
+        self,
+        namespace: str,
+        state: dict[str, Any],
+        *,
+        writer: str | None = None,
+        schema_version: str = "tribe.state.v2",
+        reason: str | None = None,
+        input_refs: list[str] | None = None,
+        decision_trace_id: str | None = None,
+    ) -> dict[str, Any]:
         ns = str(namespace).strip() or "default"
+        audit = {
+            "reason": str(reason or "").strip() or None,
+            "input_refs": [str(item).strip() for item in list(input_refs or []) if str(item).strip()],
+            "decision_trace_id": str(decision_trace_id or "").strip() or None,
+        }
         with self._lock:
             snapshot = {
                 "namespace": ns,
                 "state": dict(state or {}),
                 "writer": (str(writer).strip() or None) if writer is not None else None,
+                "schema_version": str(schema_version or "tribe.state.v2").strip() or "tribe.state.v2",
+                "audit": audit,
                 "updated_at_ms": now_ms(),
             }
             self._states[ns] = snapshot
@@ -54,6 +71,36 @@ class TribeStateRegistry:
         if should_persist:
             self.save_snapshot()
         return dict(snapshot)
+
+    def write(
+        self,
+        *,
+        namespace: str,
+        state: dict[str, Any],
+        writer: str | None = None,
+        merge: bool = True,
+        schema_version: str = "tribe.state.v2",
+        reason: str | None = None,
+        input_refs: list[str] | None = None,
+        decision_trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """兼容写入口：支持 merge 更新并携带审计信息。"""
+        ns = str(namespace).strip() or "default"
+        next_state = dict(state or {})
+        if merge:
+            prev = self.get_state(ns) or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update(next_state)
+            next_state = prev_state
+        return self.set_state(
+            ns,
+            next_state,
+            writer=writer,
+            schema_version=schema_version,
+            reason=reason,
+            input_refs=input_refs,
+            decision_trace_id=decision_trace_id,
+        )
 
     def get_state(self, namespace: str) -> dict[str, Any] | None:
         ns = str(namespace).strip() or "default"
@@ -443,10 +490,21 @@ class TribeStateRegistry:
 
         # ── Bond 阶段 ────────────────────────────────────────────────────────
         bond_stage = "stranger"
+        bond_vector: dict[str, Any] = {}
         social_ns = states.get("social_brain_agent") or states.get("social_brain")
         if social_ns:
             _ss = dict(social_ns.get("state") or {})
             bond_stage = str(_ss.get("bond_stage") or "stranger").strip().lower() or "stranger"
+            raw_bond_vector = _ss.get("bond_vector")
+            if isinstance(raw_bond_vector, dict):
+                bond_vector = {
+                    "trust": _safe_float(raw_bond_vector.get("trust"), 0.5),
+                    "affinity": _safe_float(raw_bond_vector.get("affinity"), 0.5),
+                    "safety": _safe_float(raw_bond_vector.get("safety"), 0.5),
+                    "novelty": _safe_float(raw_bond_vector.get("novelty"), 0.4),
+                    "dependency": _safe_float(raw_bond_vector.get("dependency"), 0.3),
+                    "repair_confidence": _safe_float(raw_bond_vector.get("repair_confidence"), 0.5),
+                }
 
         # ── T-19：享乐状态（PainRewardAgent）────────────────────────────────
         # 从 pain_reward_agent 命名空间读取 hedonic_state，
@@ -500,7 +558,34 @@ class TribeStateRegistry:
         # 供 chat_context_builder 快速判断是否需要触发主动关怀策略。
         high_loneliness_flag = loneliness_level > 0.7
 
-        return {
+        # ── Circadian / Proprioception（系统层）──────────────────────────────
+        circadian_phase = "day"
+        circadian_proactive_multiplier = 1.0
+        sleep_pressure = 0.2
+        circadian_ns = states.get("circadian_agent") or states.get("circadian")
+        if circadian_ns:
+            _cs = dict(circadian_ns.get("state") or {})
+            circadian_phase = str(_cs.get("phase") or "day").strip().lower() or "day"
+            circadian_proactive_multiplier = _safe_float(_cs.get("proactive_multiplier"), 1.0)
+            sleep_pressure = _safe_float(_cs.get("sleep_pressure"), 0.2)
+
+        cognitive_load_index = 0.2
+        readiness_hint = 0.8
+        continuity_hint = 0.2
+        proprio_ns = states.get("proprioception_agent") or states.get("proprioception")
+        if proprio_ns:
+            _psp = dict(proprio_ns.get("state") or {})
+            cognitive_load_index = _safe_float(_psp.get("cognitive_load_index"), 0.2)
+            readiness_hint = _safe_float(_psp.get("readiness_hint"), 0.8)
+            continuity_hint = _safe_float(_psp.get("continuity_hint"), 0.2)
+
+        interoceptive_index = 0.0
+        intero_ns = states.get("interoception_agent") or states.get("interoception")
+        if intero_ns:
+            _ins = dict(intero_ns.get("state") or {})
+            interoceptive_index = _safe_float(_ins.get("interoceptive_index"), 0.0)
+
+        result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
             "energy_reserve": round(energy_reserve, 4),
@@ -509,6 +594,7 @@ class TribeStateRegistry:
             "mood_state": mood_state,
             "silence_willingness": round(silence_willingness, 4),
             "bond_stage": bond_stage,
+            "bond_vector": bond_vector,
             "voice_emotion_tag": voice_emotion_tag,
             "voice_emotion_intensity": (
                 round(voice_emotion_intensity, 4) if voice_emotion_intensity is not None else None
@@ -528,7 +614,137 @@ class TribeStateRegistry:
             "loneliness_level": round(loneliness_level, 4),
             # T-90 高孤独感标记
             "high_loneliness_flag": high_loneliness_flag,
+            # 系统层节律与本体感知
+            "circadian_phase": circadian_phase,
+            "circadian_proactive_multiplier": round(circadian_proactive_multiplier, 4),
+            "sleep_pressure": round(sleep_pressure, 4),
+            "cognitive_load_index": round(cognitive_load_index, 4),
+            "readiness_hint": round(readiness_hint, 4),
+            "continuity_hint": round(continuity_hint, 4),
+            "interoceptive_index": round(interoceptive_index, 4),
             "ts_ms": now_ms(),
+        }
+        self._record_homeostasis_sample(vital_signs=result)
+        result["homeostasis_report"] = self.get_homeostasis_report(now_ts_ms=int(result["ts_ms"]))
+        return result
+
+    def _record_homeostasis_sample(self, *, vital_signs: Mapping[str, Any]) -> None:
+        ts_ms = int(vital_signs.get("ts_ms") or now_ms())
+        minute_sample = {
+            "ts_ms": ts_ms,
+            "stress_index": _safe_float(vital_signs.get("stress_index"), 0.0),
+            "energy_reserve": _safe_float(vital_signs.get("energy_reserve"), 0.6),
+            "cognitive_load_index": _safe_float(vital_signs.get("cognitive_load_index"), 0.2),
+            "loneliness_level": _safe_float(vital_signs.get("loneliness_level"), 0.0),
+            "homeostasis_ok": bool(vital_signs.get("homeostasis_ok", True)),
+        }
+        hour_key = ts_ms // (3600 * 1000)
+        day_key = ts_ms // (24 * 3600 * 1000)
+        with self._lock:
+            row = dict(self._states.get("homeostasis_history") or {})
+            state = dict(row.get("state") or {})
+            minute_samples = [dict(item) for item in list(state.get("minute_samples") or []) if isinstance(item, dict)]
+            minute_samples.append(minute_sample)
+            minute_samples = minute_samples[-180:]  # 最近 3 小时（分钟级）
+
+            hourly_samples = [dict(item) for item in list(state.get("hourly_samples") or []) if isinstance(item, dict)]
+            _upsert_bucket_sample(
+                samples=hourly_samples,
+                key_name="hour_key",
+                key_value=hour_key,
+                sample=minute_sample,
+                max_items=168,  # 最近 7 天（小时级）
+            )
+
+            daily_samples = [dict(item) for item in list(state.get("daily_samples") or []) if isinstance(item, dict)]
+            _upsert_bucket_sample(
+                samples=daily_samples,
+                key_name="day_key",
+                key_value=day_key,
+                sample=minute_sample,
+                max_items=56,  # 最近 8 周（日级）
+            )
+
+            history_state = {
+                "minute_samples": minute_samples,
+                "hourly_samples": hourly_samples,
+                "daily_samples": daily_samples,
+                "last_sample_ts_ms": ts_ms,
+            }
+            self._states["homeostasis_history"] = {
+                "namespace": "homeostasis_history",
+                "state": history_state,
+                "writer": "tribe_state_registry",
+                "schema_version": "tribe.state.v2",
+                "audit": {"reason": "aggregate_vital_signs", "input_refs": [], "decision_trace_id": None},
+                "updated_at_ms": ts_ms,
+            }
+
+    def get_homeostasis_report(self, *, now_ts_ms: int | None = None) -> dict[str, Any]:
+        ts_ms = int(now_ts_ms or now_ms())
+        with self._lock:
+            row = dict(self._states.get("homeostasis_history") or {})
+            state = dict(row.get("state") or {})
+            minute_samples = [dict(item) for item in list(state.get("minute_samples") or []) if isinstance(item, dict)]
+            hourly_samples = [dict(item) for item in list(state.get("hourly_samples") or []) if isinstance(item, dict)]
+            daily_samples = [dict(item) for item in list(state.get("daily_samples") or []) if isinstance(item, dict)]
+
+        minute_recent = [item for item in minute_samples if ts_ms - int(item.get("ts_ms") or 0) <= 30 * 60 * 1000]
+        hourly_recent = [item for item in hourly_samples if ts_ms - int(item.get("ts_ms") or 0) <= 24 * 3600 * 1000]
+        daily_recent = [item for item in daily_samples if ts_ms - int(item.get("ts_ms") or 0) <= 14 * 24 * 3600 * 1000]
+
+        minute_stress = _avg_field(minute_recent, "stress_index")
+        minute_load = _avg_field(minute_recent, "cognitive_load_index")
+        hourly_stress = _avg_field(hourly_recent, "stress_index")
+        hourly_energy = _avg_field(hourly_recent, "energy_reserve")
+        daily_ok_ratio = _avg_bool_field(daily_recent, "homeostasis_ok")
+        daily_loneliness = _avg_field(daily_recent, "loneliness_level")
+
+        chronic_overload = hourly_stress >= 0.62 and minute_load >= 0.55
+        chronic_low_energy = hourly_energy <= 0.42 and minute_stress >= 0.45
+        social_withdraw_risk = daily_loneliness >= 0.58 and daily_ok_ratio < 0.85
+        status = "stable"
+        if chronic_overload or chronic_low_energy:
+            status = "warning"
+        if (chronic_overload and chronic_low_energy) or daily_ok_ratio < 0.55:
+            status = "critical"
+        return {
+            "status": status,
+            "minute_window": {
+                "window_minutes": 30,
+                "samples": len(minute_recent),
+                "avg_stress_index": round(minute_stress, 4),
+                "avg_cognitive_load_index": round(minute_load, 4),
+            },
+            "hour_window": {
+                "window_hours": 24,
+                "samples": len(hourly_recent),
+                "avg_stress_index": round(hourly_stress, 4),
+                "avg_energy_reserve": round(hourly_energy, 4),
+            },
+            "day_window": {
+                "window_days": 14,
+                "samples": len(daily_recent),
+                "homeostasis_ok_ratio": round(daily_ok_ratio, 4),
+                "avg_loneliness_level": round(daily_loneliness, 4),
+            },
+            "alerts": {
+                "chronic_overload": chronic_overload,
+                "chronic_low_energy": chronic_low_energy,
+                "social_withdraw_risk": social_withdraw_risk,
+            },
+            "ts_ms": ts_ms,
+        }
+
+    def export_homeostasis_history(self) -> dict[str, Any]:
+        with self._lock:
+            row = dict(self._states.get("homeostasis_history") or {})
+            state = dict(row.get("state") or {})
+        return {
+            "minute_samples": [dict(item) for item in list(state.get("minute_samples") or []) if isinstance(item, dict)],
+            "hourly_samples": [dict(item) for item in list(state.get("hourly_samples") or []) if isinstance(item, dict)],
+            "daily_samples": [dict(item) for item in list(state.get("daily_samples") or []) if isinstance(item, dict)],
+            "last_sample_ts_ms": int(state.get("last_sample_ts_ms") or 0),
         }
 
 
@@ -537,6 +753,61 @@ def _safe_float(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _avg_field(rows: list[dict[str, Any]], key: str) -> float:
+    if not rows:
+        return 0.0
+    total = 0.0
+    count = 0
+    for row in rows:
+        try:
+            total += float(row.get(key) or 0.0)
+            count += 1
+        except (TypeError, ValueError):
+            continue
+    return (total / count) if count > 0 else 0.0
+
+
+def _avg_bool_field(rows: list[dict[str, Any]], key: str) -> float:
+    if not rows:
+        return 1.0
+    total = 0.0
+    for row in rows:
+        total += 1.0 if bool(row.get(key, False)) else 0.0
+    return total / len(rows)
+
+
+def _upsert_bucket_sample(
+    *,
+    samples: list[dict[str, Any]],
+    key_name: str,
+    key_value: int,
+    sample: Mapping[str, Any],
+    max_items: int,
+) -> None:
+    for idx in range(len(samples) - 1, -1, -1):
+        if int(samples[idx].get(key_name) or -1) != int(key_value):
+            continue
+        prev_count = max(1, int(samples[idx].get("count") or 1))
+        merged_count = prev_count + 1
+        samples[idx] = {
+            key_name: int(key_value),
+            "ts_ms": int(sample.get("ts_ms") or 0),
+            "stress_index": round((float(samples[idx].get("stress_index") or 0.0) * prev_count + float(sample.get("stress_index") or 0.0)) / merged_count, 6),
+            "energy_reserve": round((float(samples[idx].get("energy_reserve") or 0.0) * prev_count + float(sample.get("energy_reserve") or 0.0)) / merged_count, 6),
+            "cognitive_load_index": round((float(samples[idx].get("cognitive_load_index") or 0.0) * prev_count + float(sample.get("cognitive_load_index") or 0.0)) / merged_count, 6),
+            "loneliness_level": round((float(samples[idx].get("loneliness_level") or 0.0) * prev_count + float(sample.get("loneliness_level") or 0.0)) / merged_count, 6),
+            "homeostasis_ok": bool(sample.get("homeostasis_ok", True)) and bool(samples[idx].get("homeostasis_ok", True)),
+            "count": merged_count,
+        }
+        return
+    appended = dict(sample)
+    appended[key_name] = int(key_value)
+    appended["count"] = 1
+    samples.append(appended)
+    if len(samples) > max_items:
+        del samples[:-max_items]
 
 
 # ── T-29：全局单例 TribeStateRegistry ────────────────────────────────────────

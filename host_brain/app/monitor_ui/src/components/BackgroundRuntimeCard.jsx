@@ -15,16 +15,23 @@ function formatDuration(seconds) {
 
 function formatTickHealth(value) {
   const key = String(value || '').toLowerCase()
-  if (key === 'fresh') return 'Fresh'
-  if (key === 'delayed') return 'Delayed'
-  if (key === 'stalled') return 'Stalled'
-  if (key === 'inactive') return 'Inactive'
-  return 'Unknown'
+  if (key === 'fresh') return '新鲜'
+  if (key === 'delayed') return '延迟'
+  if (key === 'stalled') return '停滞'
+  if (key === 'inactive') return '空闲'
+  return '未知'
 }
 
 function formatTaskStatus(task) {
-  if (!task) return 'MISSING'
-  return String(task.status || 'UNKNOWN').toUpperCase()
+  if (!task) return '缺失'
+  const key = String(task.status || '').toLowerCase()
+  if (!key || key === 'unknown') return '未知'
+  if (['ok', 'healthy', 'done', 'success'].includes(key)) return '正常'
+  if (['running', 'active', 'processing'].includes(key)) return '运行中'
+  if (['blocked', 'canceled', 'cancelled'].includes(key)) return '受阻'
+  if (['failed', 'error'].includes(key)) return '异常'
+  if (key === 'missing') return '缺失'
+  return key.toUpperCase()
 }
 
 function formatReasonCode(task) {
@@ -35,9 +42,9 @@ function formatReasonCode(task) {
 function formatGateState(task) {
   const key = String(task?.last_gate_state || '').toLowerCase()
   if (!key) return '—'
-  if (key === 'open') return 'open'
-  if (key === 'cautious') return 'cautious'
-  if (key === 'protective') return 'protective'
+  if (key === 'open') return '开放'
+  if (key === 'cautious') return '谨慎'
+  if (key === 'protective') return '保护'
   return key
 }
 
@@ -64,23 +71,23 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
             <Activity size={15} className="text-gray-500" />
-            <span>后台推进状态</span>
+            <span>内在推进节律</span>
           </div>
           <div className="mt-2 text-sm text-gray-600">
-            {isAdvancing ? '内在世界正在后台持续推进。' : '后台推进未达预期，请检查调度与用户对齐。'}
+            {isAdvancing ? '内在世界正在持续推进。' : '推进未达预期，请检查节律与人格对齐。'}
           </div>
         </div>
         <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${isAdvancing ? 'border-green-200 bg-green-50 text-green-700' : 'border-orange-200 bg-orange-50 text-orange-700'}`}>
           {isAdvancing ? <ShieldCheck size={12} /> : <ShieldX size={12} />}
-          {isAdvancing ? 'Advancing' : 'Not Advancing'}
+          {isAdvancing ? '正在推进' : '推进暂停'}
         </div>
       </div>
 
       {!isAdvancing ? (
-        <NoticeBanner className="mt-4" variant="warning" title="后台推进告警">
-          Tick Health: {tickHealth} · Scheduler: {schedulerStatus}
+        <NoticeBanner className="mt-4" variant="warning" title="推进节律告警">
+          节律健康：{tickHealth} · 调度器：{schedulerStatus}
           {blockedTasks.length > 0 ? (
-            <span className="ml-1">· Gate Blocked: {blockedTasks.join(', ')}</span>
+            <span className="ml-1">· 闸门阻塞：{blockedTasks.join(', ')}</span>
           ) : null}
         </NoticeBanner>
       ) : null}
@@ -92,25 +99,25 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
             <span>调度总览</span>
           </div>
           <div className="mt-3 space-y-2">
-            <KeyValueRow label="Scheduler" value={schedulerStatus} />
-            <KeyValueRow label="Tick Health" value={tickHealth} />
-            <KeyValueRow label="Core Ticks" value={background.core_ticks_registered ? 'Registered' : 'Missing'} />
-            <KeyValueRow label="Inner Tick Ago" value={formatDuration(background.seconds_since_inner_world_tick)} />
-            <KeyValueRow label="Persona Align" value={personaAligned ? 'OK' : 'MISMATCH'} />
-            <KeyValueRow label="Proactive Task" value={formatTaskStatus(proactiveTask)} />
-            <KeyValueRow label="Proactive Gate" value={formatGateState(proactiveTask)} />
+            <KeyValueRow label="调度器" value={schedulerStatus} />
+            <KeyValueRow label="节律健康" value={tickHealth} />
+            <KeyValueRow label="核心 Tick" value={background.core_ticks_registered ? '已注册' : '缺失'} />
+            <KeyValueRow label="内在世界 Tick 间隔" value={formatDuration(background.seconds_since_inner_world_tick)} />
+            <KeyValueRow label="人格对齐" value={personaAligned ? '一致' : '不一致'} />
+            <KeyValueRow label="主动任务" value={formatTaskStatus(proactiveTask)} />
+            <KeyValueRow label="主动闸门" value={formatGateState(proactiveTask)} />
           </div>
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-          <div className="text-xs text-gray-500">核心 Tick</div>
+          <div className="text-xs text-gray-500">核心节律</div>
           <div className="mt-3 space-y-2">
             <KeyValueRow label="inner_world_tick" value={formatTaskStatus(innerTick)} />
-            <KeyValueRow label="inner reason" value={formatReasonCode(innerTick)} />
+            <KeyValueRow label="内在世界原因" value={formatReasonCode(innerTick)} />
             <KeyValueRow label="silence_tick" value={formatTaskStatus(silenceTick)} />
-            <KeyValueRow label="silence reason" value={formatReasonCode(silenceTick)} />
+            <KeyValueRow label="沉默原因" value={formatReasonCode(silenceTick)} />
             <KeyValueRow label="body_sense_tick" value={formatTaskStatus(bodySenseTick)} />
-            <KeyValueRow label="body reason" value={formatReasonCode(bodySenseTick)} />
+            <KeyValueRow label="身体感知原因" value={formatReasonCode(bodySenseTick)} />
           </div>
         </div>
 
@@ -123,7 +130,7 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
           </div>
           {missingTicks.length > 0 ? (
             <div className="mt-3 text-xs text-orange-600">
-              Missing: {missingTicks.join(', ')}
+              缺失：{missingTicks.join(', ')}
             </div>
           ) : null}
         </div>

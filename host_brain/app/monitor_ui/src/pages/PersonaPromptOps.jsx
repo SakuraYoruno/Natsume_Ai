@@ -207,7 +207,7 @@ export default function PersonaPromptOps() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">人格文案运营</h1>
+          <h1 className="text-xl font-semibold text-gray-900">语言系统文案运营</h1>
           <p className="text-sm text-gray-500">首批面向人格体验的核心文案模板：自我叙事、表达风格与关系感。</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -225,7 +225,7 @@ export default function PersonaPromptOps() {
 
       <PageHero
         icon={Heart}
-        eyebrow="人格文案运营台"
+        eyebrow="语言系统文案运营台"
         title={summary.entries}
         description="聚焦首批最影响人格体验的模板，直接调整语气、温度和关系感。"
         gradientClass="from-primary-50 via-white to-pink-50"

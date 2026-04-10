@@ -41,7 +41,7 @@ export default function DigitalLifeRuntimeCard({ runtimeSnapshot, promptStats = 
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-medium text-primary">
             <Sparkles size={12} />
-            数字生命运行摘要
+            数字生命体运行摘要
           </div>
           <div className="mt-3 text-lg font-semibold text-gray-900">
             {summary.headline || `当前处于${summary.mode}，关系阶段为${summary.bondStage}，回复姿态为${summary.replyPosture}。`}
@@ -57,7 +57,7 @@ export default function DigitalLifeRuntimeCard({ runtimeSnapshot, promptStats = 
 
         {!compact ? (
           <div className="flex flex-wrap gap-2">
-            <Link to="/digital-life" className="btn-secondary text-sm">数字生命总览</Link>
+            <Link to="/digital-life" className="btn-secondary text-sm">数字生命体总览</Link>
             <Link to="/response-policy" className="btn-secondary text-sm">回复策略</Link>
             <Link to="/self-model" className="btn-secondary text-sm">自我模型</Link>
           </div>
@@ -94,7 +94,7 @@ export default function DigitalLifeRuntimeCard({ runtimeSnapshot, promptStats = 
       ) : (
         <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700">
           <ShieldCheck size={12} />
-          当前没有检测到明显的数字生命运行风险
+          当前没有检测到明显的生命体运行风险
         </div>
       )}
     </div>

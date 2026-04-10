@@ -135,7 +135,7 @@ function SchedulerTimelineChart({ tasks }) {
 
   return (
     <div className="mt-4">
-      <div className="mb-3 text-xs font-semibold text-gray-600">各任务执行量对比（近 24h）</div>
+      <div className="mb-3 text-xs font-semibold text-gray-600">各节律执行量对比（近 24h）</div>
       <div className="space-y-2">
         {tasks.map((task) => {
           const runPct = Math.max(((task.run_count ?? 0) / maxRun) * 100, 1)
@@ -247,8 +247,8 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
     <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <div className="text-sm font-semibold text-gray-700">Immune Gate Ops</div>
-          <div className="text-xs text-gray-500">Runtime state, event stats, and top reasons.</div>
+          <div className="text-sm font-semibold text-gray-700">护栏与回放</div>
+          <div className="text-xs text-gray-500">运行态、事件统计与原因排行。</div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <select
@@ -723,23 +723,23 @@ export default function Automation() {
     const rawStatus = String(health?.scheduler_status || '').toUpperCase()
     if (typeof health?.running === 'boolean') {
       if (!health.running) {
-        return { running: false, label: '已停止', title: '调度器当前未运行' }
+        return { running: false, label: '已停止', title: '节律当前未运行' }
       }
       if (rawStatus === 'DEGRADED') {
-        return { running: true, label: '降级运行', title: '调度器降级运行中' }
+        return { running: true, label: '降级运行', title: '节律降级运行中' }
       }
-      return { running: true, label: '运行中', title: '调度器正在运行' }
+      return { running: true, label: '运行中', title: '节律正在运行' }
     }
     if (rawStatus === 'DEGRADED') {
-      return { running: true, label: '降级运行', title: '调度器降级运行中' }
+      return { running: true, label: '降级运行', title: '节律降级运行中' }
     }
     if (['HEALTHY', 'RUNNING', 'UP', 'OK'].includes(rawStatus)) {
-      return { running: true, label: '运行中', title: '调度器正在运行' }
+      return { running: true, label: '运行中', title: '节律正在运行' }
     }
     if (['STOPPED', 'DOWN', 'DISABLED', 'OFFLINE'].includes(rawStatus)) {
-      return { running: false, label: '已停止', title: '调度器当前未运行' }
+      return { running: false, label: '已停止', title: '节律当前未运行' }
     }
-    return { running: false, label: '未知', title: '调度器状态未知' }
+    return { running: false, label: '未知', title: '节律状态未知' }
   }, [health])
 
   const actionNameMap = {
@@ -752,8 +752,8 @@ export default function Automation() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-800">自动化调度</h1>
-          <p className="mt-0.5 text-sm text-gray-500">统一查看 HostTaskScheduler 常驻任务的状态、历史和手动触发入口。</p>
+          <h1 className="text-xl font-bold text-gray-800">器官执行台</h1>
+          <p className="mt-0.5 text-sm text-gray-500">统一查看数字生命体常驻节律任务的状态、历史和手动触发入口。</p>
         </div>
         <button
           onClick={load}
@@ -768,15 +768,15 @@ export default function Automation() {
 
       <PageHero
         icon={Workflow}
-        eyebrow="自动化与调度"
+        eyebrow="节律执行与回放"
         title={schedulerState.title}
-        description="这里用于收口数字生命后台常驻任务，包括启停状态、执行次数、失败告警和近 24 小时历史趋势。"
+        description="这里用于收口数字生命体的后台节律任务，包括启停状态、执行次数、失败告警和近 24 小时历史趋势。"
         gradientClass="from-violet-50 via-white to-sky-50"
         metaItems={[
-          `任务总数：${tasks.length}`,
+          `节律任务总数：${tasks.length}`,
           `已启用：${enabledCount}`,
-          `运行中：${runningCount}`,
-          `失败任务：${failedCount}`,
+          `推进中：${runningCount}`,
+          `异常任务：${failedCount}`,
         ]}
       />
 
@@ -790,7 +790,7 @@ export default function Automation() {
       />
 
       {hasTaskFilters ? (
-        <NoticeBanner variant="info" title="已应用调度筛选">
+        <NoticeBanner variant="info" title="已应用节律筛选">
           <span className="font-mono">
             {reasonFilter ? `reason=${reasonFilter}` : ''}
             {reasonFilter && gateFilter ? ' · ' : ''}
@@ -809,7 +809,7 @@ export default function Automation() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {[
           {
-            label: '调度器状态',
+            label: '节律状态',
             value: schedulerState.label,
             color: schedulerState.running ? 'text-green-600' : schedulerState.label === '未知' ? 'text-gray-500' : 'text-red-500',
           },
@@ -817,7 +817,7 @@ export default function Automation() {
           { label: '当前展示', value: filteredCount, color: hasTaskFilters ? 'text-violet-600' : 'text-gray-500' },
           { label: '已启用', value: enabledCount, color: 'text-blue-600' },
           {
-            label: '运行中任务',
+            label: '推进中任务',
             value: runningCount,
             color: runningCount > 0 ? 'text-blue-600' : 'text-gray-400',
           },
@@ -832,25 +832,25 @@ export default function Automation() {
       {actionResult ? (
         actionResult.ok ? (
           <NoticeBanner variant="success">
-            任务 <code className="font-mono">{actionResult.taskId}</code> 已执行「{actionNameMap[actionResult.action] || actionResult.action}」。
+            节律 <code className="font-mono">{actionResult.taskId}</code> 已执行「{actionNameMap[actionResult.action] || actionResult.action}」。
           </NoticeBanner>
         ) : (
           <NoticeBanner variant="error">
-            任务 <code className="font-mono">{actionResult.taskId}</code> 操作失败：{actionResult.error}
+            节律 <code className="font-mono">{actionResult.taskId}</code> 操作失败：{actionResult.error}
           </NoticeBanner>
         )
       ) : null}
 
       {failedCount > 0 ? (
-        <NoticeBanner variant="warning" title="检测到失败任务">
-          当前有 {failedCount} 个任务处于失败状态，请检查任务日志与依赖健康状态。
+        <NoticeBanner variant="warning" title="检测到异常节律">
+          当前有 {failedCount} 个任务处于失败状态，请检查对应日志与依赖状态。
         </NoticeBanner>
       ) : null}
 
       {loading && tasks.length === 0 ? (
         <LoadingTasksNotice />
       ) : tasks.length === 0 ? (
-        <EmptyStateCard title="暂无注册任务" hint="请确认调度任务已注册。" />
+        <EmptyStateCard title="暂无登记任务" hint="请确认节律任务已注册。" />
       ) : filteredTasks.length === 0 ? (
         <EmptyStateCard title="筛选条件无匹配任务" hint="可清除 reason/gate 筛选后重试。" />
       ) : (

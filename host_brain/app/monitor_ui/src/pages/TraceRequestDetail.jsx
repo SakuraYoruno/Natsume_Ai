@@ -32,6 +32,7 @@ import {
 } from '../api/obs.js'
 import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
@@ -1571,6 +1572,44 @@ export default function TraceRequestDetail() {
   const runningNodeCount = nodes.filter((node) => RUNNING_STATUSES.has(String(node.status || '').toUpperCase())).length
   const retrievalMeta = buildRetrievalRuntimeMeta(retrievalRuntime)
   const liveModeText = liveConnected ? 'SSE 实时流已连接' : '实时流重连中 / 轮询补齐'
+  const tracePulseNodes = [
+    {
+      label: '请求状态',
+      value: traceData?.status || '待加载',
+      tone: 'primary',
+      active: Boolean(traceData?.status),
+    },
+    {
+      label: '节点覆盖',
+      value: `${traceData?.node_count ?? nodes.length}`,
+      tone: 'teal',
+      active: (traceData?.node_count ?? nodes.length) > 0,
+    },
+    {
+      label: '异常节点',
+      value: String(issueNodeCount),
+      tone: 'rose',
+      active: issueNodeCount > 0,
+    },
+    {
+      label: '流式事件',
+      value: String(streamEvents.length),
+      tone: 'violet',
+      active: streamEvents.length > 0,
+    },
+    {
+      label: 'Tribe 联动',
+      value: String(tribeEvents.length),
+      tone: 'amber',
+      active: tribeEvents.length > 0,
+    },
+    {
+      label: '实时模式',
+      value: liveModeText,
+      tone: 'gray',
+      active: liveConnected,
+    },
+  ]
 
   return (
     <div className="space-y-4">
@@ -1588,6 +1627,12 @@ export default function TraceRequestDetail() {
           `异常/降级：${issueNodeCount}`,
           liveModeText,
         ]}
+      />
+
+      <LivingPulseStrip
+        title="请求脉冲"
+        subtitle="这条 request 的生命流已经收束到单页里，先看它现在的节奏，再继续下钻到节点和事件。"
+        nodes={tracePulseNodes}
       />
 
       <div className="flex items-center gap-3 flex-wrap">

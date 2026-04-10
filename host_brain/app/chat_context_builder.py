@@ -29,6 +29,10 @@ from host_brain.core.prompt_context import (
 )
 from host_brain.core.qa import check_wcanon_slot_violation
 # T-143: StyleCanonStore 直接调用已迁移到 SocialBrainAgent.resolve_style_canon()，此处不再直接 import
+try:
+    from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
+except Exception:  # pragma: no cover - optional compatibility seam
+    StyleCanonStore = None  # type: ignore[assignment]
 
 
 CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
@@ -169,10 +173,24 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
         render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_JA_CANON_ID") or "natsume_ai_ja").strip()
     secondary_canon_id = str(os.environ.get("HOST_STYLE_SECONDARY_CANON_ID") or core_canon_id).strip()
 
-    # T-143: 通过 SocialBrainAgent.resolve_style_canon() 族化调用，不再直接实例化 StyleCanonStore
-    from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+    # 兼容路径：允许通过 StyleCanonStore seam 覆写（用于回归测试与低耦合场景）
+    legacy_store = None
+    if callable(StyleCanonStore):
+        try:
+            legacy_store = StyleCanonStore(style_root=style_root, ledger=get_ledger())
+        except Exception:
+            legacy_store = None
 
-    social_agent = get_social_brain_agent()
+    # T-143: 默认通过 SocialBrainAgent.resolve_style_canon() 族化调用
+    social_agent = None
+    if legacy_store is None:
+        try:
+            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+            social_agent = get_social_brain_agent()
+        except Exception:
+            social_agent = None
+
     resolved: dict[str, dict[str, Any]] = {}
     mapping = [
         ("core_reasoner_primary", core_canon_id),
@@ -183,14 +201,33 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
     for node_id, canon_id in mapping:
         if not canon_id:
             continue
-        try:
-            entry_dict = social_agent.resolve_style_canon(
-                canon_id=canon_id,
-                style_root=style_root,
-            )
-        except Exception:
-            continue
-        if not entry_dict or entry_dict.get("status") in ("NOT_FOUND", "ERROR", "NO_AGENT"):
+        entry_dict = None
+        if legacy_store is not None:
+            try:
+                entry = legacy_store.get(canon_id)
+            except Exception:
+                entry = None
+            if entry is not None:
+                entry_dict = {
+                    "canon_id": getattr(entry, "canon_id", canon_id),
+                    "version": getattr(entry, "version", 0),
+                    "hash": getattr(entry, "hash", ""),
+                    "tone_only": getattr(entry, "tone_only", True),
+                    "unsafe_as_fact": getattr(entry, "unsafe_as_fact", True),
+                    "content": getattr(entry, "content", ""),
+                    "citation": f"style_canon:{canon_id}",
+                }
+        if entry_dict is None and social_agent is not None:
+            try:
+                entry_dict = social_agent.resolve_style_canon(
+                    canon_id=canon_id,
+                    style_root=style_root,
+                )
+            except Exception:
+                entry_dict = None
+            if not entry_dict or entry_dict.get("status") in ("NOT_FOUND", "ERROR", "NO_AGENT"):
+                entry_dict = None
+        if entry_dict is None:
             continue
         resolved[node_id] = {
             "canon_id": str(entry_dict.get("canon_id") or canon_id),
@@ -2107,6 +2144,13 @@ def build_chat_prompt_runtime_payload(
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
         _prefrontal_agent = get_prefrontal_agent()
+        _limbic_agent_for_ep = get_limbic_agent()
+        _injected_emotion_persistence = getattr(build_chat_prompt_runtime_payload, "_emotion_persistence", None)
+        if _injected_emotion_persistence is not None:
+            try:
+                _limbic_agent_for_ep._emotion_persistence = _injected_emotion_persistence
+            except Exception:
+                pass
         _persona_user_id = get_canonical_bond_user_id()
         # 获取当前 EmotionVector
         _vad = _full_emotion_ctx.get("vad_vector") or {}
@@ -2117,7 +2161,7 @@ def build_chat_prompt_runtime_payload(
         # ── 接入 EmotionPersistence（经 limbic 包装层）──────────────────
         try:
             _ep_payload = dict(
-                get_limbic_agent().resolve_persistent_emotion_state(
+                _limbic_agent_for_ep.resolve_persistent_emotion_state(
                     person_id=_persona_user_id,
                     valence=_cur_valence,
                     arousal=_cur_arousal,
@@ -2265,6 +2309,18 @@ def build_chat_prompt_runtime_payload(
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
         _prefrontal_agent = get_prefrontal_agent()
         _prefrontal_agent_for_sr = _prefrontal_agent
+        _injected_self_reflection = getattr(build_chat_prompt_runtime_payload, "_self_reflection", None)
+        if _injected_self_reflection is not None:
+            try:
+                _prefrontal_agent._self_reflection = _injected_self_reflection
+            except Exception:
+                pass
+        _injected_evolution_orchestrator = getattr(build_chat_prompt_runtime_payload, "_evolution_orchestrator", None)
+        if _injected_evolution_orchestrator is not None:
+            try:
+                _prefrontal_agent._evolution_orchestrator = _injected_evolution_orchestrator
+            except Exception:
+                pass
         # 获取当前轮次（从 session 状态推断，或使用递增计数器）
         if not hasattr(build_chat_prompt_runtime_payload, "_turn_counter"):
             build_chat_prompt_runtime_payload._turn_counter = 0
@@ -2368,6 +2424,9 @@ def build_chat_prompt_runtime_payload(
             bond_stage=_bn_bond_stage,
         )
         _bn_slot = _bn_result.get("prompt_slot") if isinstance(_bn_result, dict) else None
+        if not _bn_slot and isinstance(_bn_result, Mapping):
+            if _bn_result.get("narrative_items") or _bn_result.get("bond_narrative"):
+                _bn_slot = dict(_bn_result)
         if _bn_slot:
             runtime_payload["bond_narrative"] = _bn_slot
     except (ImportError, AttributeError, Exception) as _bn_exc:
@@ -2552,6 +2611,49 @@ def build_chat_prompt_runtime_payload(
         _vital_signs = dict(_tribe_ctx.get("vital_signs") or {})
         if _vital_signs:
             runtime_payload["tribe_vital_signs"] = _vital_signs
+        _homeostasis_report = dict(
+            _tribe_ctx.get("homeostasis_report")
+            or _vital_signs.get("homeostasis_report")
+            or {}
+        )
+        if _homeostasis_report:
+            runtime_payload["homeostasis_report"] = _homeostasis_report
+        _default_mode_state = dict(_tribe_ctx.get("default_mode_state") or {})
+        if _default_mode_state:
+            runtime_payload["default_mode_state"] = _default_mode_state
+        _mirror_neuron_state = dict(_tribe_ctx.get("mirror_neuron_state") or {})
+        if _mirror_neuron_state:
+            runtime_payload["mirror_neuron_state"] = _mirror_neuron_state
+        _memory_layers = dict(_tribe_ctx.get("memory_layers") or {})
+        if _memory_layers:
+            runtime_payload["memory_layers"] = _memory_layers
+        _language_dual_system = dict(_tribe_ctx.get("language_dual_system") or {})
+        if _language_dual_system:
+            runtime_payload["language_dual_system"] = _language_dual_system
+        _circadian_state = dict(_tribe_ctx.get("circadian_state") or {})
+        if _circadian_state:
+            runtime_payload["circadian_state"] = _circadian_state
+        _proprioception_state = dict(_tribe_ctx.get("proprioception_state") or {})
+        if _proprioception_state:
+            runtime_payload["proprioception_state"] = _proprioception_state
+        _initiative_decision = dict(_tribe_ctx.get("initiative_decision") or {})
+        if _initiative_decision:
+            runtime_payload["initiative_decision"] = _initiative_decision
+        _interoception_state = dict(_tribe_ctx.get("interoception_state") or {})
+        if _interoception_state:
+            runtime_payload["interoception_state"] = _interoception_state
+        _motor_cortex_state = dict(_tribe_ctx.get("motor_cortex_state") or {})
+        if _motor_cortex_state:
+            runtime_payload["motor_cortex_state"] = _motor_cortex_state
+        _cerebellum_state = dict(_tribe_ctx.get("cerebellum_state") or {})
+        if _cerebellum_state:
+            runtime_payload["cerebellum_state"] = _cerebellum_state
+        _glymphatic_state = dict(_tribe_ctx.get("glymphatic_state") or {})
+        if _glymphatic_state:
+            runtime_payload["glymphatic_state"] = _glymphatic_state
+        _vestibular_state = dict(_tribe_ctx.get("vestibular_state") or {})
+        if _vestibular_state:
+            runtime_payload["vestibular_state"] = _vestibular_state
         _tribe_route = _cortex.route_intent(
             message=str(runtime_input.user_message or ""),
             tribe_context=_tribe_ctx,
@@ -2618,8 +2720,13 @@ def build_chat_prompt_runtime_payload(
                 emotion_tag=_emotion_tag_for_lang,
                 loneliness_level=_loneliness_for_lang,
                 high_loneliness_flag=_high_loneliness_for_lang,
+                user_text=str(runtime_input.user_message or ""),
+                response_goal="chat_reply",
             )
             runtime_payload["language_style"] = _language_style
+            _dual_system = dict(_language_style.get("dual_system") or {})
+            if _dual_system:
+                runtime_payload["language_dual_system"] = _dual_system
         except Exception as _lang_exc:
             logger.debug("LanguageSystemAgent.get_language_style 降级: %s", _lang_exc)
 

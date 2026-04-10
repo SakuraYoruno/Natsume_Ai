@@ -234,6 +234,19 @@ def test_limbic_agent_resolve_persistent_emotion_state(monkeypatch) -> None:
         "host_brain.persona.emotion_persistence.EmotionPersistence",
         _EmotionPersistence,
     )
+    # 隔离 PainRewardAgent 的持久化历史状态，确保该用例只验证 EmotionPersistence 混合逻辑
+    class _PainAgent:
+        def get_emotion_modulation(self):
+            return {
+                "valence_bias": 0.0,
+                "arousal_boost": 0.0,
+                "suggested_emotion_tag": None,
+            }
+
+    monkeypatch.setattr(
+        "host_brain.tribe.pain_reward_agent.get_pain_reward_agent",
+        lambda: _PainAgent(),
+    )
     agent = LimbicAgent()
 
     payload = agent.resolve_persistent_emotion_state(
@@ -254,6 +267,66 @@ def test_limbic_agent_resolve_persistent_emotion_state(monkeypatch) -> None:
     last = dict((registry.get("state") or {}).get("last_emotion_persistence") or {})
     assert last["user_id"] == "user-ep"
     assert last["reunion_type"] == "reunion"
+
+
+def test_limbic_agent_resolve_persistent_emotion_state_with_pain_modulation(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Restored:
+        from_baseline = False
+        valence = 0.8
+        arousal = 0.6
+        dominance = 0.2
+        reunion_type = "reunion"
+
+    class _EmotionPersistence:
+        def restore(self, *, user_id: str):
+            captured["user_id"] = user_id
+            return _Restored()
+
+        def persist(self, *, user_id: str, valence: float, arousal: float, dominance: float) -> None:
+            captured["persist"] = {
+                "user_id": user_id,
+                "valence": valence,
+                "arousal": arousal,
+                "dominance": dominance,
+            }
+
+    class _PainAgent:
+        def get_emotion_modulation(self):
+            return {
+                "valence_bias": -0.4,
+                "arousal_boost": 0.8,
+                "suggested_emotion_tag": "SAD",
+            }
+
+    monkeypatch.setattr(
+        "host_brain.persona.emotion_persistence.EmotionPersistence",
+        _EmotionPersistence,
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.pain_reward_agent.get_pain_reward_agent",
+        lambda: _PainAgent(),
+    )
+    agent = LimbicAgent()
+
+    payload = agent.resolve_persistent_emotion_state(
+        person_id="user-ep",
+        valence=0.2,
+        arousal=0.4,
+        dominance=0.1,
+    )
+
+    assert captured["user_id"] == "user-ep"
+    assert round(payload["valence"], 4) == 0.24
+    assert round(payload["arousal"], 4) == 0.61
+    assert round(payload["dominance"], 4) == 0.13
+    assert payload["pain_valence_bias"] == -0.14
+    assert payload["pain_arousal_boost"] == 0.15
+    assert payload["pain_suggested_emotion_tag"] == "SAD"
+    persisted = dict(captured["persist"] or {})
+    assert round(float(persisted["valence"]), 4) == 0.24
+    assert round(float(persisted["arousal"]), 4) == 0.61
 
 
 def test_limbic_agent_resolve_offline_reconnect_profile(monkeypatch) -> None:

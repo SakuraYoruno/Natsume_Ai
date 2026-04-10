@@ -92,7 +92,7 @@ export default function SelfModelDashboard() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">自我模型</h1>
+          <h1 className="text-xl font-semibold text-gray-900">前额叶自我模型</h1>
           <p className="text-sm text-gray-500">自我模型、反思脉冲、成长里程碑与叙事护栏。</p>
         </div>
         <button className="btn-secondary" onClick={reload} disabled={loading}>
@@ -105,7 +105,7 @@ export default function SelfModelDashboard() {
 
       <PageHero
         icon={Brain}
-        eyebrow="人格与成长专题"
+        eyebrow="前额叶人格与成长"
         title={recentMoodTrendLabel}
         description={compactText(growthHeadline, 220)}
         gradientClass="from-primary-50 via-white to-violet-50"
@@ -223,11 +223,11 @@ export default function SelfModelDashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="card p-5">
-          <div className="flex items-center gap-2">
-            <Brain size={15} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">自我模型</h2>
-          </div>
+      <div className="card p-5">
+        <div className="flex items-center gap-2">
+          <Brain size={15} className="text-gray-500" />
+          <h2 className="text-sm font-semibold text-gray-800">前额叶自我模型</h2>
+        </div>
           <div className="mt-4 space-y-3">
             <KeyValueRow label="最近情绪趋势" value={recentMoodTrendLabel} />
             <KeyValueRow label="主导近期情绪" value={dominantEmotionLabel} />

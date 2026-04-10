@@ -153,7 +153,7 @@ export default function Metrics() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">指标大盘</h1>
+          <h1 className="text-xl font-semibold text-gray-900">代谢指标大盘</h1>
           {isMock && (
             <span className="text-xs text-orange-500 mt-0.5 block">⚠ 后端不可用，显示模拟数据</span>
           )}
@@ -186,9 +186,9 @@ export default function Metrics() {
 
       <PageHero
         icon={Activity}
-        eyebrow="核心指标总览"
-        title="请求量、拒绝率与关键链路指标"
-        description="统一查看请求趋势、守卫拒绝、记忆压缩、提词构建与状态仲裁等核心指标。"
+        eyebrow="生命体代谢指标"
+        title="请求量、拒绝率与器官级关键指标"
+        description="统一查看请求趋势、守卫拒绝、记忆压缩、提词构建与状态仲裁等生命体核心指标。"
         gradientClass="from-cyan-50 via-white to-indigo-50"
         metaItems={[
           `时间窗口：${timeRange}`,

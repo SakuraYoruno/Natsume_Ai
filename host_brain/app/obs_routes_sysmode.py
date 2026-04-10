@@ -35,6 +35,20 @@ _mode_transition_service = None
 _mode_transition_lock = threading.Lock()
 
 
+def _sync_obs_routes_compat_handles() -> None:
+    """保持 obs_routes 兼容导出的句柄与本模块单例同步。"""
+    import sys
+
+    obs_routes_mod = sys.modules.get("host_brain.app.obs_routes")
+    if obs_routes_mod is None:
+        return
+    try:
+        setattr(obs_routes_mod, "_mode_transition_lock", _mode_transition_lock)
+        setattr(obs_routes_mod, "_mode_transition_service", _mode_transition_service)
+    except Exception:
+        pass
+
+
 def _get_mode_transition_service():
     """获取或初始化 ModeTransitionService 单例。"""
     global _mode_transition_service
@@ -62,6 +76,7 @@ def _get_mode_transition_service():
             # 降级：返回一个最小化的 fallback 服务
             _mode_transition_service = _FallbackModeService()
 
+    _sync_obs_routes_compat_handles()
     return _mode_transition_service
 
 
@@ -194,6 +209,8 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     hard_state: Dict[str, Any] = Field(default_factory=dict)
     activity_monitor: Dict[str, Any] = Field(default_factory=dict)
     emotion_context: Dict[str, Any] = Field(default_factory=dict)
+    endocrine_state: Dict[str, Any] = Field(default_factory=dict)
+    immune_state: Dict[str, Any] = Field(default_factory=dict)
     bond_state: Dict[str, Any] = Field(default_factory=dict)
     bond_summary: Dict[str, Any] = Field(default_factory=dict)
     bond_summary_human: Dict[str, Any] = Field(default_factory=dict)
@@ -206,6 +223,21 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     bond_narrative: Dict[str, Any] = Field(default_factory=dict)
     motive_state: Dict[str, Any] = Field(default_factory=dict)
     response_policy: Dict[str, Any] = Field(default_factory=dict)
+    somatic_state: Dict[str, Any] = Field(default_factory=dict)
+    peripheral_state: Dict[str, Any] = Field(default_factory=dict)
+    circadian_state: Dict[str, Any] = Field(default_factory=dict)
+    proprioception_state: Dict[str, Any] = Field(default_factory=dict)
+    initiative_decision: Dict[str, Any] = Field(default_factory=dict)
+    default_mode_state: Dict[str, Any] = Field(default_factory=dict)
+    mirror_neuron_state: Dict[str, Any] = Field(default_factory=dict)
+    memory_layers: Dict[str, Any] = Field(default_factory=dict)
+    language_dual_system: Dict[str, Any] = Field(default_factory=dict)
+    homeostasis_report: Dict[str, Any] = Field(default_factory=dict)
+    interoception_state: Dict[str, Any] = Field(default_factory=dict)
+    motor_cortex_state: Dict[str, Any] = Field(default_factory=dict)
+    cerebellum_state: Dict[str, Any] = Field(default_factory=dict)
+    glymphatic_state: Dict[str, Any] = Field(default_factory=dict)
+    vestibular_state: Dict[str, Any] = Field(default_factory=dict)
     runtime_summary: Dict[str, Any] = Field(default_factory=dict)
     background_runtime: Dict[str, Any] = Field(default_factory=dict)
     slot_status: Dict[str, str] = Field(default_factory=dict)

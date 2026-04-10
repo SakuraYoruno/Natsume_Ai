@@ -16,6 +16,8 @@ class PeripheralAgent:
             capabilities=("platform_adapter",),
         )
     )
+    _gate_state: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _mute_state: dict[str, bool] = field(default_factory=dict, init=False, repr=False)
 
     def set_bridge(self, bridge: Any | None) -> None:
         self.bridge = bridge
@@ -125,10 +127,7 @@ class PeripheralAgent:
         _log = logging.getLogger("Natsume.edge.tribe.peripheral_agent")
         platform = str(payload.get("platform") or "all").strip().lower() or "all"
         reason = str(payload.get("reason") or "").strip() or None
-        # 将门控状态写入内部字段（供 bootstrap 读取）
-        if not hasattr(self, "_gate_state"):
-            object.__setattr__(self, "_gate_state", {})
-        self._gate_state[platform] = "open"  # type: ignore[attr-defined]
+        self._gate_state[platform] = "open"
         _log.info("PeripheralAgent.on_gate_open_command: platform=%s reason=%s", platform, reason)
         # 上报门控状态变更
         self._publish_event(
@@ -154,9 +153,7 @@ class PeripheralAgent:
         _log = logging.getLogger("Natsume.edge.tribe.peripheral_agent")
         platform = str(payload.get("platform") or "all").strip().lower() or "all"
         reason = str(payload.get("reason") or "").strip() or None
-        if not hasattr(self, "_gate_state"):
-            object.__setattr__(self, "_gate_state", {})
-        self._gate_state[platform] = "closed"  # type: ignore[attr-defined]
+        self._gate_state[platform] = "closed"
         _log.info("PeripheralAgent.on_gate_close_command: platform=%s reason=%s", platform, reason)
         self._publish_event(
             event_type="gate_state_changed",
@@ -183,9 +180,7 @@ class PeripheralAgent:
         platform = str(payload.get("platform") or "all").strip().lower() or "all"
         mute = bool(payload.get("mute", True))
         duration_s = payload.get("duration_s")
-        if not hasattr(self, "_mute_state"):
-            object.__setattr__(self, "_mute_state", {})
-        self._mute_state[platform] = mute  # type: ignore[attr-defined]
+        self._mute_state[platform] = mute
         _log.info(
             "PeripheralAgent.on_platform_mute_command: platform=%s mute=%s duration_s=%s",
             platform, mute, duration_s,
@@ -224,8 +219,8 @@ class PeripheralAgent:
 
         payload: dict[str, Any] = {
             "connected_platforms": list(connected_platforms or []),
-            "gate_state": dict(gate_state or getattr(self, "_gate_state", {})),
-            "mute_state": dict(mute_state or getattr(self, "_mute_state", {})),
+            "gate_state": dict(gate_state or self._gate_state),
+            "mute_state": dict(mute_state or self._mute_state),
             "error": str(error or "").strip() or None,
             "source": "edge.peripheral",
         }

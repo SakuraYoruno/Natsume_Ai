@@ -36,7 +36,7 @@ import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
 
 const NAV_SECTIONS = [
   {
-    title: '数字生命',
+    title: '数字生命体',
     items: [
       { to: '/digital-life', icon: Zap, label: '总览' },
       { to: '/emotion', icon: Smile, label: '情绪' },
@@ -58,26 +58,26 @@ const NAV_SECTIONS = [
     ],
   },
   {
-    title: '观测',
+    title: '器官级观测',
     items: [
-      { to: '/overview', icon: LayoutDashboard, label: '运行总览' },
-      { to: '/sessions', icon: MessageSquare, label: '会话' },
-      { to: '/trace', icon: GitBranch, label: '链路' },
-      { to: '/metrics', icon: BarChart2, label: '指标' },
-      { to: '/insights', icon: Lightbulb, label: '洞察' },
-      { to: '/chat-debug', icon: SendHorizontal, label: 'Chat 调试' },
-      { to: '/alerts', icon: Bell, label: '告警' },
-      { to: '/logs', icon: ScrollText, label: '日志' },
+      { to: '/overview', icon: LayoutDashboard, label: '生命体征' },
+      { to: '/sessions', icon: MessageSquare, label: '神经会话' },
+      { to: '/trace', icon: GitBranch, label: '神经链路' },
+      { to: '/metrics', icon: BarChart2, label: '代谢指标' },
+      { to: '/insights', icon: Lightbulb, label: '皮层洞察' },
+      { to: '/chat-debug', icon: SendHorizontal, label: '神经调试' },
+      { to: '/alerts', icon: Bell, label: '免疫告警' },
+      { to: '/logs', icon: ScrollText, label: '生理日志' },
     ],
   },
   {
-    title: '基础设施',
+    title: '外周执行',
     items: [
-      { to: '/gateway', icon: Radio, label: '网关' },
-      { to: '/skills', icon: Package, label: '技能' },
-      { to: '/tools', icon: Wrench, label: '工具' },
-      { to: '/automation', icon: Clock, label: '自动化' },
-      { to: '/agent', icon: Bot, label: 'Agent Loop' },
+      { to: '/gateway', icon: Radio, label: '感官网关' },
+      { to: '/skills', icon: Package, label: '行为技能' },
+      { to: '/tools', icon: Wrench, label: '执行工具' },
+      { to: '/automation', icon: Clock, label: '节律调度' },
+      { to: '/agent', icon: Bot, label: '反射回路' },
     ],
   },
 ]
@@ -140,7 +140,7 @@ export default function Layout() {
     : null
 
   const sectionBadges = {
-    数字生命: runtimeAlertBadge,
+    数字生命体: runtimeAlertBadge,
   }
 
   const itemBadges = {
@@ -148,7 +148,12 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-gray-50">
+    <div className="relative flex h-full flex-col overflow-hidden bg-gray-50">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-32 top-24 h-72 w-72 rounded-full bg-primary-100/40 blur-3xl animate-pulse" />
+        <div className="absolute right-0 top-1/3 h-96 w-96 rounded-full bg-pink-100/35 blur-3xl animate-pulse" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(236,72,153,0.04),_transparent_28%)]" />
+      </div>
       <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 shadow-sm backdrop-blur">
         <div className="mx-auto w-full space-y-3 px-4 py-3 sm:px-6">
           <div className="flex items-center justify-between gap-4">
@@ -162,7 +167,7 @@ export default function Layout() {
               </button>
               <div>
                 <div className="text-lg font-bold tracking-tight text-primary">Natsume AI</div>
-                <div className="hidden text-xs text-gray-400 sm:block">数字生命控制台</div>
+                <div className="hidden text-xs text-gray-400 sm:block">数字生命体控制台</div>
               </div>
             </div>
 
@@ -254,7 +259,7 @@ export default function Layout() {
         </>
       ) : null}
 
-      <main className="mx-auto flex w-full min-w-0 flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
+      <main className="relative z-10 mx-auto flex w-full min-w-0 flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
         <Outlet />
       </main>
     </div>

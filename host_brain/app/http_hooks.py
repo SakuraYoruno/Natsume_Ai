@@ -1230,7 +1230,11 @@ def runtime_lifespan(
                 except Exception as _snap_exc:
                     logger.debug("TribeStateRegistry.load_snapshot 失败（降级）: %s", _snap_exc)
 
-                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent → PainRewardAgent → EndocrineAgent → ImmuneAgent → HippocampusAgent → ANSAgent → LanguageSystemAgent → SomaticAgent → PeripheralAgent）
+                # 注册各族 Agent 订阅（顺序：LimbicAgent → PrefrontalAgent → SocialBrainAgent → CortexAgent
+                # → PainRewardAgent → EndocrineAgent → ImmuneAgent → HippocampusAgent → ANSAgent
+                # → LanguageSystemAgent → SomaticAgent → PeripheralAgent → CircadianAgent
+                # → ProprioceptionAgent → InitiativeGovernorAgent → DefaultModeAgent → MirrorNeuronAgent
+                # → InteroceptionAgent → MotorCortexAgent → CerebellumAgent → GlymphaticAgent → VestibularAgent）
                 _tribe_sub_errors: list[str] = []
                 for _agent_name, _agent_factory in [
                     ("limbic_agent", "host_brain.tribe.limbic_agent.get_limbic_agent"),
@@ -1245,6 +1249,16 @@ def runtime_lifespan(
                     ("language_system_agent", "host_brain.tribe.language_system_agent.get_language_system_agent"),  # T-103
                     ("somatic_agent", "host_brain.tribe.somatic_agent.get_somatic_agent"),  # T-109
                     ("peripheral_agent", "host_brain.tribe.peripheral_agent.get_peripheral_agent"),  # T-110
+                    ("circadian_agent", "host_brain.tribe.circadian_agent.get_circadian_agent"),
+                    ("proprioception_agent", "host_brain.tribe.proprioception_agent.get_proprioception_agent"),
+                    ("initiative_governor_agent", "host_brain.tribe.initiative_governor_agent.get_initiative_governor_agent"),
+                    ("default_mode_agent", "host_brain.tribe.default_mode_agent.get_default_mode_agent"),
+                    ("mirror_neuron_agent", "host_brain.tribe.mirror_neuron_agent.get_mirror_neuron_agent"),
+                    ("interoception_agent", "host_brain.tribe.interoception_agent.get_interoception_agent"),
+                    ("motor_cortex_agent", "host_brain.tribe.motor_cortex_agent.get_motor_cortex_agent"),
+                    ("cerebellum_agent", "host_brain.tribe.cerebellum_agent.get_cerebellum_agent"),
+                    ("glymphatic_agent", "host_brain.tribe.glymphatic_agent.get_glymphatic_agent"),
+                    ("vestibular_agent", "host_brain.tribe.vestibular_agent.get_vestibular_agent"),
                 ]:
                     try:
                         _module_path, _func_name = _agent_factory.rsplit(".", 1)
@@ -1284,7 +1298,7 @@ def runtime_lifespan(
                 # T-113~T-122: ANSAgent +VOICE_PIPELINE_STARTED/ENDED/CHANNEL_MESSAGE_RECEIVED(+3)
                 #              CortexAgent +PLATFORM_CONNECTED/DISCONNECTED(+2) = +5（第二十一批）
                 # T-123~T-132: EdgeCommandPusher 下行链路 + /edge_command 诊断端点（第二十二批）
-                _total_subscriptions = 65
+                _total_subscriptions = 88
                 _sub_status = (
                     f"OK (dispatch_loop=running, subscriptions={_total_subscriptions})"
                     if not _tribe_sub_errors

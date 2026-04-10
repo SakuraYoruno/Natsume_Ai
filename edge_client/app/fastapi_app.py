@@ -38,6 +38,7 @@ from host_brain.core.errors import (
     SERVICE_UNAVAILABLE_DEPENDENCY,
     SERVICE_UNAVAILABLE_EDGE_RPC,
     SERVICE_UNAVAILABLE_GENERIC,
+    VTS_EXPRESSION_TIMEOUT,
     VOICE_SCHEMA_INVALID,
 )
 from host_brain.core.ids import now_ms
@@ -580,6 +581,7 @@ def create_edge_fastapi_app(
                     schema_version=str(body.get("schema_version") or "tribe.command.v1"),
                     somatic_agent=registry.somatic if registry.initialized else None,
                     peripheral_agent=registry.peripheral if registry.initialized else None,
+                    channel_agent=registry.channel if registry.initialized else None,
                 )
                 dispatched = bool(result.get("dispatched", False))
                 _log.debug(
@@ -589,17 +591,25 @@ def create_edge_fastapi_app(
             else:
                 # 降级：registry 未初始化时直接分发（向后兼容）
                 dispatched = False
-                if command_type == "EMOTION_STATE_CHANGED" and (
+                if command_type in {"EMOTION_STATE_CHANGED", "EMOTION_STATE_COMMAND"} and (
                     not target_agent or target_agent in ("edge.somatic", "somatic_agent")
                 ):
                     if registry.initialized and hasattr(registry, "somatic"):
                         registry.somatic.on_emotion_state_command(payload=payload)
                         dispatched = True
-                elif command_type == "GATE_CONTROL" and (
+                elif command_type in {"GATE_CONTROL", "GATE_CONTROL_COMMAND"} and (
                     not target_agent or target_agent in ("edge.channel", "channel_agent")
                 ):
                     if registry.initialized and hasattr(registry, "channel"):
-                        registry.channel.on_gate_control_command(payload=payload)
+                        gate_open = bool(payload.get("gate_open", True))
+                        if "gate" in payload:
+                            gate_open = str(payload.get("gate") or "").strip().lower() != "closed"
+                        registry.channel.on_gate_control_command(
+                            gate_open=gate_open,
+                            reason=payload.get("reason"),
+                            platform=payload.get("platform"),
+                            ts_ms=int(payload.get("ts_ms") or 0),
+                        )
                         dispatched = True
                 else:
                     _log.info(
@@ -852,6 +862,25 @@ def _handle_vts(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> EdgeGatewayR
                     event=event,
                 )
         result = runtime.vts_driver.set_expression(emotion)
+        if (
+            not result.success
+            and result.reason_code == VTS_EXPRESSION_TIMEOUT
+        ):
+            try:
+                runtime.vts_driver.trigger_reconnect()
+            except Exception:
+                pass
+            event = result.as_dict()
+            event["degraded"] = True
+            event["degraded_reason"] = "VTS_EXPRESSION_TIMEOUT"
+            return EdgeGatewayResult(
+                success=True,
+                status=STATUS_ACCEPTED,
+                reason_code=VTS_EXPRESSION_TIMEOUT,
+                stage="S_EDGE_VTS",
+                detail=f"{result.detail} (degraded accepted, reconnect scheduled)",
+                event=event,
+            )
     elif action == "reset":
         result = runtime.vts_driver.reset_to_neutral()
     else:

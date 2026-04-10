@@ -118,6 +118,26 @@ def _record_snapshot_status(
         degraded_reasons.append(reason)
 
 
+def _record_snapshot_slot_from_payload(
+    slot_status: dict[str, str],
+    degraded_reasons: list[str],
+    *,
+    slot: str,
+    payload: Mapping[str, Any] | None,
+    allow_empty_live: bool = False,
+) -> None:
+    normalized = dict(payload or {})
+    if normalized or allow_empty_live:
+        slot_status[slot] = "live"
+        return
+    _record_snapshot_status(
+        slot_status,
+        degraded_reasons,
+        slot=slot,
+        status="unavailable",
+    )
+
+
 def _coerce_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -989,6 +1009,271 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             detail=str(exc)[:120],
         )
 
+    somatic_state: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: PLC0415
+
+        somatic_state = dict(get_somatic_agent().export_runtime_state() or {})
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="somatic_state",
+            payload=somatic_state,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="somatic_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    peripheral_state: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.peripheral_agent import get_peripheral_agent  # noqa: PLC0415
+
+        peripheral_state = dict(get_peripheral_agent().export_runtime_state() or {})
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="peripheral_state",
+            payload=peripheral_state,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="peripheral_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    circadian_state: dict[str, Any] = {}
+    proprioception_state: dict[str, Any] = {}
+    initiative_decision: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
+        from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
+        from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
+
+        circadian_state = dict(get_circadian_agent().export_runtime_state() or {})
+        proprioception_state = dict(get_proprioception_agent().export_runtime_state() or {})
+        initiative_decision = dict(get_initiative_governor_agent().get_last_decision() or {})
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="circadian_state",
+            payload=circadian_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="proprioception_state",
+            payload=proprioception_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="initiative_decision",
+            payload=initiative_decision,
+            allow_empty_live=True,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="circadian_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+        slot_status.setdefault("proprioception_state", "degraded")
+        slot_status.setdefault("initiative_decision", "degraded")
+
+    default_mode_state: dict[str, Any] = {}
+    mirror_neuron_state: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+        from host_brain.tribe.mirror_neuron_agent import get_mirror_neuron_agent  # noqa: PLC0415
+
+        default_mode_state = dict(get_default_mode_agent().export_runtime_state() or {})
+        mirror_neuron_state = dict(get_mirror_neuron_agent().export_runtime_state() or {})
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="default_mode_state",
+            payload=default_mode_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="mirror_neuron_state",
+            payload=mirror_neuron_state,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="default_mode_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+        slot_status.setdefault("mirror_neuron_state", "degraded")
+
+    memory_layers: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+
+        memory_layers = dict(get_hippocampus_agent().resolve_memory_layer_snapshot() or {})
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="memory_layers",
+            payload=memory_layers,
+            allow_empty_live=True,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="memory_layers",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    language_dual_system: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+
+        language_agent = get_language_system_agent()
+        language_row = language_agent.state_registry.get_state("language_system_agent") or {}
+        language_state = dict(language_row.get("state") or {})
+        language_dual_system = dict(language_state.get("last_dual_system") or {})
+        if not language_dual_system and normalized_topic:
+            bond_stage = str(
+                bond_state.get("current_stage")
+                or bond_summary.get("stage")
+                or "stranger"
+            ).strip().lower() or "stranger"
+            emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+            loneliness_level = _coerce_float(
+                body_sense.get("loneliness"),
+                _coerce_float(offline_state.get("loneliness_level"), 0.0),
+            )
+            language_dual_system = dict(
+                language_agent.resolve_dual_system(
+                    user_text=normalized_topic,
+                    bond_stage=bond_stage,
+                    emotion_tag=emotion_tag,
+                    loneliness_level=loneliness_level,
+                    high_loneliness_flag=loneliness_level >= 0.7,
+                    response_goal="obs_runtime_snapshot",
+                )
+                or {}
+            )
+        if not language_dual_system:
+            fallback_style = dict(language_state.get("last_language_style") or {})
+            if fallback_style:
+                language_dual_system = {"style": fallback_style}
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="language_dual_system",
+            payload=language_dual_system,
+            allow_empty_live=True,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="language_dual_system",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    homeostasis_report: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+
+        homeostasis_report = dict(
+            get_global_registry().get_homeostasis_report(now_ts_ms=now_ms)
+            or {}
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="homeostasis_report",
+            payload=homeostasis_report,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="homeostasis_report",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+
+    interoception_state: dict[str, Any] = {}
+    motor_cortex_state: dict[str, Any] = {}
+    cerebellum_state: dict[str, Any] = {}
+    glymphatic_state: dict[str, Any] = {}
+    vestibular_state: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+        from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
+        from host_brain.tribe.cerebellum_agent import get_cerebellum_agent  # noqa: PLC0415
+        from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+        from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
+
+        interoception_state = dict(get_interoception_agent().export_runtime_state() or {})
+        motor_cortex_state = dict(get_motor_cortex_agent().export_runtime_state() or {})
+        cerebellum_state = dict(get_cerebellum_agent().export_runtime_state() or {})
+        glymphatic_state = dict(get_glymphatic_agent().export_runtime_state() or {})
+        vestibular_state = dict(get_vestibular_agent().export_runtime_state() or {})
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="interoception_state",
+            payload=interoception_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="motor_cortex_state",
+            payload=motor_cortex_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="cerebellum_state",
+            payload=cerebellum_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="glymphatic_state",
+            payload=glymphatic_state,
+        )
+        _record_snapshot_slot_from_payload(
+            slot_status,
+            degraded_reasons,
+            slot="vestibular_state",
+            payload=vestibular_state,
+        )
+    except Exception as exc:
+        _record_snapshot_status(
+            slot_status,
+            degraded_reasons,
+            slot="interoception_state",
+            status="degraded",
+            detail=str(exc)[:120],
+        )
+        slot_status.setdefault("motor_cortex_state", "degraded")
+        slot_status.setdefault("cerebellum_state", "degraded")
+        slot_status.setdefault("glymphatic_state", "degraded")
+        slot_status.setdefault("vestibular_state", "degraded")
+
     runtime_summary = _build_runtime_summary(
         current_topic=normalized_topic,
         sys_mode=sys_mode,
@@ -1032,6 +1317,21 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         "bond_narrative": bond_narrative,
         "motive_state": motive_state,
         "response_policy": response_policy,
+        "somatic_state": somatic_state,
+        "peripheral_state": peripheral_state,
+        "circadian_state": circadian_state,
+        "proprioception_state": proprioception_state,
+        "initiative_decision": initiative_decision,
+        "default_mode_state": default_mode_state,
+        "mirror_neuron_state": mirror_neuron_state,
+        "memory_layers": memory_layers,
+        "language_dual_system": language_dual_system,
+        "homeostasis_report": homeostasis_report,
+        "interoception_state": interoception_state,
+        "motor_cortex_state": motor_cortex_state,
+        "cerebellum_state": cerebellum_state,
+        "glymphatic_state": glymphatic_state,
+        "vestibular_state": vestibular_state,
         "runtime_summary": runtime_summary,
         "background_runtime": background_runtime,
         "slot_status": slot_status,

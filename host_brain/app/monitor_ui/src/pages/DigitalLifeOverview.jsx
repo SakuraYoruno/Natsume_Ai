@@ -24,9 +24,11 @@ import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import KeyValueRow from '../components/KeyValueRow.jsx'
 import MetricCard from '../components/MetricCard.jsx'
+import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../store/useAppStore.js'
 import { getGrowthSignals } from '../utils/growthSignals.js'
@@ -35,7 +37,6 @@ import {
   formatAbsenceBand,
   formatDominantMotive,
   formatEmotionTag,
-  formatNumber,
   formatReplyPosture,
   formatRiskLevel,
   formatSlotLabel,
@@ -136,7 +137,7 @@ export default function DigitalLifeOverview() {
       setServicesData(servicesRes)
       setSubsystemsData(subsystemsRes)
     } catch (loadError) {
-      setError(loadError.message || '数字生命总览加载失败')
+      setError(loadError.message || '数字生命体总览加载失败')
     } finally {
       setLoading(false)
     }
@@ -180,16 +181,25 @@ export default function DigitalLifeOverview() {
   const riskLevel = formatRiskLevel(runtimeSnapshot?.self_reflection_pulse?.narrative_guardrails?.risk_level)
   const absenceBand = formatAbsenceBand(offlineState.absence_band)
   const growthSignals = getGrowthSignals(runtimeSnapshot)
+  const pulseNodes = [
+    { label: '存在态', value: modeMeta.label, tone: 'primary', active: true },
+    { label: '关系', value: currentBondStage, tone: 'rose', active: Boolean(bondState.current_stage) },
+    { label: '情绪', value: currentEmotion, tone: 'pink', active: Boolean(topEmotion) },
+    { label: '回复', value: replyPosture, tone: 'violet', active: Boolean(replyPosture) },
+    { label: '记忆', value: avgMemorySuccessRate != null ? `${avgMemorySuccessRate}% · ${memorySubsystems.length} 轴` : '—', tone: 'teal', active: avgMemorySuccessRate != null },
+    { label: '内在世界', value: offlineState.absence_band ? absenceBand : '在线', tone: 'amber', active: Boolean(offlineState.absence_band) },
+    { label: '自我模型', value: growthSignals.hasAnyGrowth ? '已形成样本' : '待成形', tone: 'gray', active: growthSignals.hasAnyGrowth },
+  ]
 
   const wiredDomains = useMemo(
     () => [
       {
         icon: Orbit,
-        title: '存在状态轴',
+        title: '存在态轴',
         desc: `${modeMeta.emoji} ${modeMeta.label} · ${modeMeta.desc}`,
         status: 'wired',
         actionTo: '/runtime-mode',
-        actionLabel: '查看状态轴',
+        actionLabel: '查看存在态轴',
       },
       {
         icon: Heart,
@@ -255,13 +265,13 @@ export default function DigitalLifeOverview() {
       },
       {
         icon: Settings,
-        title: '系统底座',
+        title: '神经底座',
         desc: servicesData
           ? `降级 ${servicesData.degraded ?? 0} · 离线 ${servicesData.down ?? 0} · 未知 ${servicesData.unknown ?? 0} · 活跃子系统 ${activeSubsystemCount}`
-          : '系统底座状态暂时不可见。',
+          : '神经底座状态暂时不可见。',
         status: servicesData ? 'wired' : 'degraded',
         actionTo: '/system',
-        actionLabel: '查看底座',
+        actionLabel: '查看神经底座',
       },
     ],
     [
@@ -292,8 +302,8 @@ export default function DigitalLifeOverview() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">数字生命总览</h1>
-          <p className="text-sm text-gray-500">围绕当前运行态、关系、情绪、记忆与策略的统一快照。</p>
+          <h1 className="text-xl font-semibold text-gray-900">数字生命体总览</h1>
+          <p className="text-sm text-gray-500">以数字生命体为主体，整合关系、情绪、记忆、策略与器官级稳态快照。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -308,9 +318,9 @@ export default function DigitalLifeOverview() {
 
       <PageHero
         icon={Sparkles}
-        eyebrow="数字生命运行态"
+        eyebrow="数字生命体运行态"
         title={`${modeMeta.emoji} ${modeMeta.label}`}
-        description={compactText(runtimeSnapshot?.runtime_summary?.headline || modeMeta.semantic, 160)}
+        description={compactText(runtimeSnapshot?.runtime_summary?.headline || `${modeMeta.semantic} 生命流正在穿过关系、情绪、记忆与回复层。`, 160)}
         gradientClass="from-primary-50 via-white to-pink-50"
         metaItems={[
           `关系：${currentBondStage}`,
@@ -320,18 +330,25 @@ export default function DigitalLifeOverview() {
         ]}
       />
 
+      <LivingPulseStrip
+        title="生命流"
+        subtitle="把当前瞬时状态串成一条能读的脉冲流，先看它怎么流动，再往下看各层器官。"
+        nodes={pulseNodes}
+      />
+
       {error ? <NoticeBanner variant="error" title="总览统计加载失败">{error}</NoticeBanner> : null}
       {runtimeError ? <NoticeBanner variant="warning" title="运行快照加载异常">{runtimeError}</NoticeBanner> : null}
 
       {runtimeSnapshot ? (
         <>
           <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} />
+          <VitalLoopSummaryPanel runtimeSnapshot={runtimeSnapshot} showDetailLink />
           <BackgroundRuntimeCard runtimeSnapshot={runtimeSnapshot} />
         </>
       ) : !runtimeLoading ? (
         <EmptyStateCard
-          title="暂时没有数字生命快照"
-          hint="请先产生一次完整对话或等待运行态采样完成。"
+          title="暂时没有数字生命体快照"
+          hint="请先产生一次完整对话或等待采样完成。"
         />
       ) : null}
 

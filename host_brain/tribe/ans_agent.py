@@ -107,14 +107,32 @@ class ANSAgent:
                 )
             )
             if _should_trigger:
-                self.trigger_proactive_voice(
-                    user_id="user_1",
+                from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
+
+                decision = get_initiative_governor_agent().evaluate_initiative(
+                    action="proactive_voice",
+                    motive=_loneliness,
+                    session_id=str(payload.get("session_id") or "default"),
+                    user_id=str(payload.get("user_id") or "user_1"),
                     context={
                         "bond_stage": _bond,
                         "loneliness": _loneliness,
                         "trigger_source": "inner_world_ticked",
+                        "pending_followup_count": int(payload.get("pending_followup_count") or 0),
+                        "session_id": str(payload.get("session_id") or "default"),
+                        "active_topic_id": str(payload.get("topic_id") or "").strip() or None,
                     },
                 )
+                if str(decision.get("decision") or "").upper() == "ALLOW":
+                    self.trigger_proactive_voice(
+                        user_id=str(payload.get("user_id") or "user_1"),
+                        context={
+                            "bond_stage": _bond,
+                            "loneliness": _loneliness,
+                            "trigger_source": "inner_world_ticked",
+                            "initiative_trace_id": decision.get("trace_id"),
+                        },
+                    )
         except Exception as _pv_exc:
             logger.debug("ANSAgent emit_inner_world_ticked proactive_voice 触发失败（降级）: %s", _pv_exc)
 
@@ -342,7 +360,25 @@ class ANSAgent:
             {"triggered": bool, "expression": dict | None, "scene_type": str | None}
         """
         try:
+            from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
             from host_brain.persona.proactive_voice import PersonaProactiveVoice  # noqa: PLC0415
+
+            decision = get_initiative_governor_agent().evaluate_initiative(
+                action="proactive_voice",
+                motive=context.get("motive") if isinstance(context, dict) else None,
+                user_id=str(user_id or "user_1").strip() or "user_1",
+                session_id=str((context or {}).get("session_id") or "default"),
+                context=dict(context or {}),
+            )
+            if str(decision.get("decision") or "").upper() != "ALLOW":
+                return {
+                    "triggered": False,
+                    "expression": None,
+                    "scene_type": None,
+                    "reason": f"initiative_{str(decision.get('decision') or '').lower()}",
+                    "reason_code": decision.get("reason_code"),
+                    "trace_id": decision.get("trace_id"),
+                }
 
             voice = PersonaProactiveVoice()
             ctx = dict(context or {})

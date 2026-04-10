@@ -127,8 +127,13 @@ class EdgeCommandPusher:
                 )
                 return {"ok": False, "reason": "HTTP_REJECTED", "status_code": response.status_code}
             data = response.json() if response.content else {}
+            accepted = bool(data.get("accepted", True))
+            # 优先读取 edge 回包的 dispatched 字段；未提供时与 accepted 保持一致
+            dispatched = bool(data["dispatched"]) if "dispatched" in data else accepted
             return {
-                "ok": bool(data.get("accepted", True)),
+                "ok": bool(accepted and dispatched),
+                "accepted": accepted,
+                "dispatched": dispatched,
                 "command_id": data.get("command_id"),
                 "ts_ms": int(data.get("ts_ms") or now_ms()),
                 "status_code": response.status_code,

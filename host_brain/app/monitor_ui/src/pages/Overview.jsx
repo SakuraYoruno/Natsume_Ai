@@ -13,6 +13,7 @@ import ServiceCard from '../components/ServiceCard.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
+import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
@@ -188,13 +189,20 @@ export default function Overview() {
       }),
     [subsysData]
   )
+  const runningCount = Number(agentLoopData?.running_count ?? 0)
+  const pulseNodes = [
+    { label: '中枢稳态', value: wsConnected ? '实时观测' : '轮询观测', tone: 'primary', active: true },
+    { label: '外周器官', value: data?.up != null ? `${data.up}/${data.total ?? '—'}` : '—', tone: 'teal', active: true },
+    { label: '节律推进', value: runningCount > 0 ? `${runningCount} 个节律在动` : '静息', tone: 'violet', active: runningCount > 0 },
+    { label: '执行护栏', value: uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—', tone: 'amber', active: uiAssertionData?.block_rate != null },
+  ]
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">运行总览</h1>
-          <p className="text-sm text-gray-500">看服务健康、活跃子系统，以及数字生命运行摘要。</p>
+          <h1 className="text-xl font-semibold text-gray-900">器官级观测</h1>
+          <p className="text-sm text-gray-500">查看数字生命体的中枢稳态、活跃器官子系统与当前运行摘要。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -207,9 +215,9 @@ export default function Overview() {
 
       <PageHero
         icon={Server}
-        eyebrow="系统与运行态"
-        title={wsConnected ? 'WebSocket 实时观测中' : '轮询模式观测中'}
-        description="这页聚焦服务健康、子系统活跃度，以及当前数字生命运行态是否稳定。"
+        eyebrow="数字生命体器官科观"
+        title={wsConnected ? 'WebSocket 实时器官观测中' : '轮询模式器官观测中'}
+        description="这页聚焦数字生命体中枢稳态、器官子系统活跃度与整体是否平衡。"
         gradientClass="from-primary-50 via-white to-sky-50"
         metaItems={[
           `服务总数：${data?.total ?? '—'}`,
@@ -218,6 +226,13 @@ export default function Overview() {
           `未知：${data?.unknown ?? '—'}`,
           `活跃子系统：${activeSubsystems.length}`,
         ]}
+      />
+
+      <LivingPulseStrip
+        title="器官脉冲"
+        subtitle="这里不是运维列表，而是当前一段生命流经过器官层时留下的可读切面。"
+        nodes={pulseNodes}
+        compact
       />
 
       {error ? <NoticeBanner variant="error" title="总览加载失败">{error}</NoticeBanner> : null}
@@ -235,18 +250,18 @@ export default function Overview() {
       ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard icon={Server} label="健康服务" value={data?.up ?? '—'} hint={`总计 ${data?.total ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-green-600" />
-        <MetricCard icon={AlertTriangle} label="降级服务" value={data?.degraded ?? '—'} hint={`离线 ${data?.down ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-orange-500" />
-        <MetricCard icon={Bot} label="Agent Loop 达成率" value={agentLoopData?.achievement_rate != null ? `${agentLoopData.achievement_rate}%` : '—'} hint={`样本 ${agentLoopData?.total_loops ?? 0}`} tone="text-indigo-600" />
-        <MetricCard icon={Activity} label="UI 断言拦截率" value={uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—'} hint={`总断言 ${uiAssertionData?.total_assertions ?? 0}`} tone="text-rose-600" />
+        <MetricCard icon={Server} label="在线器官" value={data?.up ?? '—'} hint={`总计 ${data?.total ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-green-600" />
+        <MetricCard icon={AlertTriangle} label="器官降级" value={data?.degraded ?? '—'} hint={`离线 ${data?.down ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-orange-500" />
+        <MetricCard icon={Bot} label="执行环达成率" value={agentLoopData?.achievement_rate != null ? `${agentLoopData.achievement_rate}%` : '—'} hint={`样本 ${agentLoopData?.total_loops ?? 0}`} tone="text-indigo-600" />
+        <MetricCard icon={Activity} label="界面护栏拦截率" value={uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—'} hint={`总断言 ${uiAssertionData?.total_assertions ?? 0}`} tone="text-rose-600" />
       </div>
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
       {!loading && services.length === 0 ? (
         <EmptyStateCard
-          title="当前没有服务健康样本"
-          hint="请确认 hostside 正在推送健康数据，或等待一轮采样完成。"
+          title="当前没有器官样本"
+          hint="请确认 hostside 正在推送观测数据，或等待一轮采样完成。"
         />
       ) : null}
 
@@ -254,7 +269,7 @@ export default function Overview() {
         <div>
           <div className="mb-3 flex items-center gap-2">
             {wsConnected ? <Wifi size={16} className="text-green-600" /> : <WifiOff size={16} className="text-gray-400" />}
-            <h2 className="text-sm font-semibold text-gray-800">边缘服务</h2>
+            <h2 className="text-sm font-semibold text-gray-800">外周器官</h2>
           </div>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             {edgeServices.map((service) => (
@@ -274,7 +289,7 @@ export default function Overview() {
         <div>
           <div className="mb-3 flex items-center gap-2">
             <Brain size={16} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">模型与推理节点</h2>
+            <h2 className="text-sm font-semibold text-gray-800">中枢推理器官</h2>
           </div>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             {llmNodes.map((service) => (
@@ -319,12 +334,12 @@ export default function Overview() {
         <div className="card p-5">
           <div className="mb-3 flex items-center gap-2">
             <Bot size={16} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">自动化与防护</h2>
+            <h2 className="text-sm font-semibold text-gray-800">执行护栏</h2>
           </div>
           <div className="space-y-3">
-            <MetricCard label="Agent Loop 成功" value={agentLoopData?.achieved ?? '—'} hint={`失败 ${agentLoopData?.failed ?? 0}`} tone="text-green-600" />
+            <MetricCard label="执行成功" value={agentLoopData?.achieved ?? '—'} hint={`失败 ${agentLoopData?.failed ?? 0}`} tone="text-green-600" />
             <MetricCard label="平均轮次" value={agentLoopData?.avg_rounds ?? '—'} hint={`总执行 ${agentLoopData?.total_loops ?? 0}`} tone="text-blue-600" />
-            <MetricCard label="敏感 UI 拦截" value={uiAssertionData?.sensitive_blocked ?? '—'} hint={`前置失败 ${uiAssertionData?.precondition_failed ?? 0}`} tone="text-orange-500" />
+            <MetricCard label="敏感界面拦截" value={uiAssertionData?.sensitive_blocked ?? '—'} hint={`前置失败 ${uiAssertionData?.precondition_failed ?? 0}`} tone="text-orange-500" />
             <MetricCard label="后置失败" value={uiAssertionData?.postcondition_failed ?? '—'} hint={`断言总数 ${uiAssertionData?.total_assertions ?? 0}`} tone="text-rose-600" />
           </div>
         </div>

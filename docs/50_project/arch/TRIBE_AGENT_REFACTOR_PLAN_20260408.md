@@ -3827,3 +3827,376 @@ Phase 6 目标是让 edge_client 内部形成完整的族化闭环：SomaticAgen
 | host → edge 下行指令（门控控制） | ✅ 已完成 | T-166/T-168/T-169 |
 | edge 主动状态快照上报 | ✅ 已完成 | T-165/T-167 |
 | host 侧躯干族状态导出（供 CortexAgent） | ✅ 已完成 | T-170/T-171 |
+
+---
+
+## 第二十六批实现记录（T-173 ~ T-176）
+
+> **日期**：2026-04-09 | **主题**：P0 收口（注册表一致性 + Peripheral 主机侧补齐）
+
+### 已完成任务
+
+#### T-173：HostTribeRegistry 新增已落地族注册 ✅
+
+- 文件：`host_brain/tribe/registry.py`
+- 新增族：`pain_reward`、`language`、`somatic`、`peripheral`
+- 新增默认 Agent：
+  - `pain_reward_agent`
+  - `language_system_agent`
+  - `somatic_agent`
+  - `peripheral_agent`
+- `resolve_target_family()` 新增上述族关键词映射，避免“代码已实现但注册表不可见”。
+
+#### T-174：host_brain PeripheralAgent 补齐状态接收与导出 ✅
+
+- 文件：`host_brain/tribe/peripheral_agent.py`
+- 新增订阅：
+  - `PLATFORM_CONNECTED`
+  - `PLATFORM_DISCONNECTED`
+  - `PERIPHERAL_STATE_UPDATED`
+  - `GATE_STATE_CHANGED`
+  - `PLATFORM_MUTE_CHANGED`
+- 新增状态导出：
+  - `export_runtime_state()`
+- 结果：edge 上报的外设状态可稳定写入 `peripheral_agent` 命名空间并供上层读取。
+
+#### T-175：CortexAgent 收口补齐 somatic/peripheral 状态，并修复不可达逻辑 ✅
+
+- 文件：`host_brain/tribe/cortex_agent.py`
+- `collect_tribe_context()` 新增：
+  - `somatic_state`
+  - `peripheral_state`
+- 修复：原函数中提前 `return` 导致后续逻辑不可达，现已收口为单出口返回。
+
+#### T-176：回归测试补齐 ✅
+
+- 新增：`tests/unit/test_peripheral_agent.py`
+- 更新：`tests/unit/test_tribe_registry.py`
+- 通过：
+  - `python -m pytest tests/unit/test_tribe_registry.py tests/unit/test_peripheral_agent.py`
+  - `python -m pytest tests/unit/test_cortex_agent.py`
+  - `python -m pytest tests/unit/test_edge_tribe_agents.py tests/unit/test_tribe_handoff.py`
+
+---
+
+## 第二十七批实现记录（T-177 ~ T-180）
+
+> **日期**：2026-04-09 | **主题**：P0-4 主链路回归（Host↔Edge 指令与状态回流）
+
+### 已完成任务
+
+#### T-177：EdgeTribeBridge 下行指令兼容与路由修复 ✅
+
+- 文件：`edge_client/tribe/edge_tribe_bridge.py`
+- 修复点：
+  - 新增 `EMOTION_STATE_COMMAND` → `emotion_state` 映射（兼容 `EdgeCommandPusher.push_emotion_state()`）。
+  - 新增 `GATE_CONTROL_COMMAND` → `gate_control` 映射。
+  - 新增 `PLATFORM_MUTE_COMMAND` → `platform_mute` 映射。
+  - 扩展 `receive_command()`：支持 `channel_agent` 路由，`edge.channel/channel_agent/channel` 可接收门控指令。
+  - `GATE_CONTROL(_COMMAND)` 兼容 `payload.gate` 与 `payload.gate_open` 两种格式。
+
+#### T-178：edge /internal/tribe_command 分发接线修复 ✅
+
+- 文件：`edge_client/app/fastapi_app.py`
+- 修复点：
+  - 调用 `EdgeTribeBridge.receive_command()` 时注入 `channel_agent`。
+  - 降级分发路径兼容 `EMOTION_STATE_COMMAND` / `GATE_CONTROL_COMMAND`。
+  - 修复 ChannelAgent 降级调用参数，改为显式 `gate_open/reason/platform/ts_ms`，避免参数不匹配。
+
+#### T-179：EdgeCommandPusher 成功判定收紧 ✅
+
+- 文件：`host_brain/tribe/edge_command_pusher.py`
+- 修复点：
+  - `push_command()` 新增对 `dispatched` 字段消费。
+  - 返回值补充 `accepted/dispatched`，并将 `ok` 定义为 `accepted && dispatched`（若无 dispatched 字段则降级按 accepted 处理）。
+
+#### T-180：Host↔Edge 双向回归测试补齐 ✅
+
+- 新增：`tests/integration/test_host_edge_roundtrip.py`
+- 覆盖场景：
+  - Host → Edge：`push_emotion_state()`、`push_gate_control()` 下行指令分发与执行。
+  - Edge → Host：`publish_somatic_state()`、`publish_peripheral_state()` 及门控/静音事件回流后，Host Somatic/Peripheral 快照可读。
+- 同步修复：
+  - 文件：`edge_client/tribe/peripheral_agent.py`
+  - 为 dataclass(slots=True) 显式声明 `_gate_state/_mute_state`，修复门控与静音指令写状态时报 `AttributeError` 的问题。
+
+### 本地验证
+
+- `python -m pytest tests/integration/test_host_edge_roundtrip.py`
+- `python -m pytest tests/integration/test_host_edge_roundtrip.py tests/unit/test_edge_tribe_agents.py`
+- `python -m pytest tests/unit/test_edge_tribe_bridge.py tests/unit/test_tribe_registry.py tests/unit/test_peripheral_agent.py tests/unit/test_cortex_agent.py tests/integration/test_internal_tribe_routes.py tests/integration/test_host_edge_roundtrip.py`
+
+---
+
+## 第二十八批实现记录（T-181 ~ T-186）
+
+> **日期**：2026-04-09 | **主题**：P1 全量系统层一次成型（Circadian + Proprioception + 三问门禁 + bond_vector）
+
+### 已完成任务
+
+#### T-181：CircadianAgent 完整落地 ✅
+
+- 新增文件：`host_brain/tribe/circadian_agent.py`
+- 能力：
+  - 昼夜相位判定（dawn/day/dusk/night）
+  - 主动预算（`proactive_multiplier`）
+  - 恢复偏置（`recovery_bias`）与睡眠压力（`sleep_pressure`）
+  - 相位更新事件 `CIRCADIAN_PHASE_UPDATED`
+
+#### T-182：ProprioceptionAgent 完整落地 ✅
+
+- 新增文件：`host_brain/tribe/proprioception_agent.py`
+- 能力：
+  - `active_user/active_session/active_task_count`
+  - 中断窗口统计（`interrupt_count_5m`）
+  - 认知负荷指数（`cognitive_load_index`）
+  - 就绪度与连续性提示（`readiness_hint/continuity_hint`）
+  - 状态更新事件 `PROPRIOCEPTION_UPDATED`
+
+#### T-183：InitiativeGovernorAgent 完整落地 ✅
+
+- 新增文件：`host_brain/tribe/initiative_governor_agent.py`
+- 能力：
+  - 统一执行 `motive/readiness/continuity` 三问门禁
+  - 产出 `ALLOW/DEFER/BLOCK` 与 `reason_code`
+  - 事件与审计：`INITIATIVE_DECISION_MADE` + `trace_id`
+
+#### T-184：SocialBrain bond_vector 连续化 ✅
+
+- 文件：`host_brain/tribe/social_brain_agent.py`
+- 新增：
+  - `resolve_bond_vector()`
+  - `get_bond_context()`（含 `bond_vector`）
+  - `BOND_VECTOR_UPDATED` 事件链路
+- 修复：
+  - 增补 `_bond_stage` 内部状态字段，避免旧路径隐式属性缺失
+
+#### T-185：系统收口与状态聚合升级 ✅
+
+- 文件：
+  - `host_brain/tribe/tribe_state.py`
+  - `host_brain/tribe/cortex_agent.py`
+  - `host_brain/tribe/ans_agent.py`
+  - `host_brain/app/http_hooks.py`
+  - `host_brain/tribe/registry.py`
+- 关键变更：
+  - `TribeStateRegistry` 新增 `write()`，`set_state()` 补充 schema/audit 字段
+  - `aggregate_vital_signs()` 聚合 `bond_vector + circadian + proprioception`
+  - `CortexAgent.collect_tribe_context()` 新增：
+    - `bond_vector`
+    - `circadian_state`
+    - `proprioception_state`
+    - `initiative_decision`
+  - `ANSAgent` 主动发声入口统一过三问门禁
+  - 生命周期接线新增：
+    - `circadian_agent`
+    - `proprioception_agent`
+    - `initiative_governor_agent`
+  - HostTribeRegistry 新增族与默认 Agent：
+    - `circadian`
+    - `proprioception`
+    - `initiative_governor`
+
+#### T-186：测试矩阵补齐 ✅
+
+- 新增：
+  - `tests/unit/test_circadian_agent.py`
+  - `tests/unit/test_proprioception_agent.py`
+  - `tests/unit/test_initiative_governor_agent.py`
+  - `tests/integration/test_bond_vector_integration.py`
+- 更新：
+  - `tests/unit/test_tribe_registry.py`
+- 通过：
+  - `python -m pytest tests/unit/test_circadian_agent.py tests/unit/test_proprioception_agent.py tests/unit/test_initiative_governor_agent.py tests/integration/test_bond_vector_integration.py tests/unit/test_tribe_registry.py tests/unit/test_cortex_agent.py tests/unit/test_social_brain_agent.py tests/integration/test_host_edge_roundtrip.py`
+  - `python -m pytest tests/unit/test_fastapi_app_bond_provider_social_brain.py tests/unit/test_http_hooks_runtime_helpers_social_brain_integration.py tests/unit/test_inner_activity_agent_social_brain_integration.py tests/unit/test_state_arbiter_queries_social_brain_integration.py tests/unit/test_limbic_agent.py tests/unit/test_edge_tribe_bridge.py tests/unit/test_edge_tribe_agents.py tests/integration/test_internal_tribe_routes.py tests/integration/test_host_edge_roundtrip.py`
+
+---
+
+## 第二十九批实现记录（T-187 ~ T-192）
+
+> **日期**：2026-04-10 | **主题**：P2/P3 全量收口（DefaultMode + MirrorNeuron + 语言双系统 + 记忆三分层 + 稳态长期治理）
+
+### 已完成任务
+
+#### T-187：DefaultModeAgent 族化落地 ✅
+
+- 新增文件：`host_brain/tribe/default_mode_agent.py`
+- 能力：
+  - 订阅 `INNER_WORLD_TICKED` / `CONVERSATION_ENDED`
+  - 输出空闲周期内在活动（`note/focus/offline_state`）
+  - 事件：`DEFAULT_MODE_TICKED`
+  - 导出：`export_runtime_state()`
+
+#### T-188：MirrorNeuronAgent 族化落地 ✅
+
+- 新增文件：`host_brain/tribe/mirror_neuron_agent.py`
+- 能力：
+  - 订阅 `EMOTION_INFERENCE_UPDATED` / `INTERACTION_RECORDED` / `EMOTION_STATE_CHANGED`
+  - 共鸣计算：`compute_resonance()`
+  - 共鸣应用：`apply_resonance()`
+  - 事件：`MIRROR_RESONANCE_UPDATED`
+  - 导出：`export_runtime_state()`
+
+#### T-189：LanguageSystemAgent 双系统化 ✅
+
+- 文件：`host_brain/tribe/language_system_agent.py`
+- 新增能力：
+  - 理解侧：`wernicke_understand()`
+  - 生成侧：`broca_generate_plan()`
+  - 双系统收口：`resolve_dual_system()`
+  - 兼容入口：`get_language_style()` 保持兼容并支持携带 `user_text` 输出 dual-system。
+
+#### T-190：记忆三分层 + 自传体门禁收口 ✅
+
+- 文件：
+  - `host_brain/tribe/hippocampus_agent.py`
+  - `host_brain/tribe/prefrontal_agent.py`
+- 新增能力：
+  - Hippocampus：`write_episodic_memory_trace()` / `write_semantic_memory_fact()` / `write_autobiographical_memory()`
+  - Prefrontal：`evaluate_autobiographical_memory_gate()` / `commit_autobiographical_memory()`
+- 修复：
+  - 三分层写入由浅覆盖改为“按层合并”，保留 `episodic/semantic/autobiographical` 同时可见。
+
+#### T-191：稳态长期治理（分钟/小时/日）✅
+
+- 文件：`host_brain/tribe/tribe_state.py`
+- 新增能力：
+  - `_record_homeostasis_sample()`
+  - `get_homeostasis_report()`
+  - `export_homeostasis_history()`
+- `aggregate_vital_signs()` 现在直接返回 `homeostasis_report`。
+
+#### T-192：Supervisor 与 runtime payload 收口补齐 ✅
+
+- 文件：
+  - `host_brain/tribe/cortex_agent.py`
+  - `host_brain/app/chat_context_builder.py`
+- `collect_tribe_context()` 新增：
+  - `default_mode_state`
+  - `mirror_neuron_state`
+  - `memory_layers`
+  - `language_dual_system`
+  - `homeostasis_report`
+- `chat_context_builder` 注入新块到 `runtime_payload`，并将语言风格调用升级为携带 `user_text` 同步生成 dual-system。
+
+### 本地验证
+
+- 新增测试：
+  - `tests/unit/test_default_mode_agent.py`
+  - `tests/unit/test_mirror_neuron_agent.py`
+  - `tests/unit/test_language_system_agent.py`
+  - `tests/unit/test_tribe_state_homeostasis.py`
+  - `tests/unit/test_cortex_collect_context_extensions.py`
+- 更新测试：
+  - `tests/unit/test_tribe_registry.py`
+  - `tests/unit/test_hippocampus_agent.py`
+  - `tests/unit/test_prefrontal_agent.py`
+- 通过：
+  - `python -m pytest tests/unit/test_hippocampus_agent.py tests/unit/test_prefrontal_agent.py tests/unit/test_default_mode_agent.py tests/unit/test_mirror_neuron_agent.py tests/unit/test_language_system_agent.py tests/unit/test_tribe_state_homeostasis.py tests/unit/test_cortex_collect_context_extensions.py tests/unit/test_tribe_registry.py`
+  - `python -m pytest tests/unit/test_cortex_agent.py tests/unit/test_limbic_agent.py tests/unit/test_circadian_agent.py tests/unit/test_proprioception_agent.py tests/unit/test_initiative_governor_agent.py tests/integration/test_bond_vector_integration.py`
+  - `python -m pytest tests/integration/test_host_edge_roundtrip.py tests/integration/test_internal_tribe_routes.py`
+
+---
+
+## 十一章状态校正（2026-04-10）
+
+> 11 章“缺失族”是初版差距分析结果。当前代码基线下，以下族已转为已实现状态：
+
+| 族 | 原章节状态 | 当前状态 |
+|---|---|---|
+| `ImmuneAgent` | 缺失（高优先级） | ✅ 已实现并接入主链路 |
+| `EndocrineAgent` | 缺失（高优先级） | ✅ 已实现并接入门控 |
+| `CircadianAgent` | 缺失（中优先级） | ✅ 已实现 |
+| `ProprioceptionAgent` | 缺失（中优先级） | ✅ 已实现 |
+| `PainRewardAgent` | 缺失（低优先级） | ✅ 已实现 |
+| `LanguageSystemAgent` | 缺失（低优先级） | ✅ 已实现，且完成双系统拆分 |
+| `MirrorNeuronAgent` | 缺失（低优先级） | ✅ 已实现 |
+| `DefaultModeAgent` | 缺失（低优先级） | ✅ 已实现 |
+
+---
+
+## 面向“完整人体”目标的扩充族（新增规划）
+
+| 族名 | 人体类比 | 核心职责 | 规划优先级 |
+|---|---|---|---|
+| `InteroceptionAgent` | 内感受系统 | 统一体内感受指数（疲劳/压力/负荷）并驱动情绪与门禁 | 🔴 高 |
+| `MotorCortexAgent` | 运动皮层 | 将意图转为动作计划并统一编排 host→edge 执行 | 🔴 高 |
+| `CerebellumAgent` | 小脑 | 执行误差校正、延迟补偿、平台差异自适应 | 🟡 中 |
+| `GlymphaticAgent` | 睡眠恢复系统 | 离线时段记忆巩固、噪声衰减、稳态恢复 | 🟡 中 |
+| `VestibularAgent` | 前庭平衡系统 | 抑制模式抖动，维持跨平台上下文稳定 | 🟢 中低 |
+
+---
+
+## 第三十批实现记录（T-193 ~ T-197）
+
+> **日期**：2026-04-10 | **主题**：完整人体扩充族首批落地（Interoception + MotorCortex + Cerebellum + Glymphatic + Vestibular）
+
+### 已完成任务
+
+#### T-193：InteroceptionAgent 落地 ✅
+
+- 新增文件：`host_brain/tribe/interoception_agent.py`
+- 能力：
+  - 体内感受指数 `interoceptive_index`
+  - 体能预算 `body_budget`
+  - 恢复紧迫度 `recovery_urgency`
+  - 事件：`INTEROCEPTION_UPDATED`
+
+#### T-194：MotorCortexAgent 落地 ✅
+
+- 新增文件：`host_brain/tribe/motor_cortex_agent.py`
+- 能力：
+  - 动作规划 `plan_action()`
+  - 动作分发 `dispatch_action()`
+  - 可选主动门禁联动（InitiativeGovernor）
+  - 事件：`MOTOR_ACTION_PLANNED` / `MOTOR_ACTION_DISPATCHED`
+
+#### T-195：CerebellumAgent 落地 ✅
+
+- 新增文件：`host_brain/tribe/cerebellum_agent.py`
+- 能力：
+  - 执行反馈纠偏策略评估
+  - 延迟补偿与重试建议
+  - 事件：`CEREBELLUM_CORRECTION_DECIDED`
+
+#### T-196：GlymphaticAgent 落地 ✅
+
+- 新增文件：`host_brain/tribe/glymphatic_agent.py`
+- 能力：
+  - 恢复窗口判断（昼夜/压力/负荷）
+  - 记忆巩固评分 `consolidation_score`
+  - 噪声衰减系数 `noise_decay_factor`
+  - 事件：`GLYMPHATIC_CYCLE_COMPLETED`
+
+#### T-197：VestibularAgent 落地 ✅
+
+- 新增文件：`host_brain/tribe/vestibular_agent.py`
+- 能力：
+  - 模式与平台抖动监测
+  - 稳定性指数 `jitter_index`
+  - 路由偏置与阻尼系数
+  - 事件：`VESTIBULAR_STABILITY_UPDATED`
+
+### 系统接线同步
+
+- `host_brain/tribe/registry.py`：新增 5 个族及默认 Agent 注册
+- `host_brain/tribe/__init__.py`：新增 5 个 Agent 导出
+- `host_brain/app/http_hooks.py`：新增 5 个 Agent 启动订阅注册
+- `host_brain/tribe/cortex_agent.py`：Supervisor 收口新增 5 族状态导出
+- `host_brain/app/chat_context_builder.py`：runtime_payload 新增 5 族状态块注入
+- `host_brain/tribe/tribe_state.py`：vital_signs 新增 `interoceptive_index` 聚合字段
+
+### 本地验证
+
+- 新增测试：
+  - `tests/unit/test_interoception_agent.py`
+  - `tests/unit/test_motor_cortex_agent.py`
+  - `tests/unit/test_cerebellum_agent.py`
+  - `tests/unit/test_glymphatic_agent.py`
+  - `tests/unit/test_vestibular_agent.py`
+- 更新测试：
+  - `tests/unit/test_tribe_registry.py`
+  - `tests/unit/test_cortex_collect_context_extensions.py`
+- 通过：
+  - `python -m pytest tests/unit/test_interoception_agent.py tests/unit/test_motor_cortex_agent.py tests/unit/test_cerebellum_agent.py tests/unit/test_glymphatic_agent.py tests/unit/test_vestibular_agent.py tests/unit/test_tribe_registry.py tests/unit/test_cortex_collect_context_extensions.py tests/unit/test_cortex_agent.py tests/unit/test_chat_context_builder_helpers_extra.py`
+  - `python -m pytest tests/unit/test_default_mode_agent.py tests/unit/test_mirror_neuron_agent.py tests/unit/test_language_system_agent.py tests/unit/test_tribe_state_homeostasis.py tests/unit/test_cortex_collect_context_extensions.py tests/unit/test_interoception_agent.py tests/unit/test_motor_cortex_agent.py tests/unit/test_cerebellum_agent.py tests/unit/test_glymphatic_agent.py tests/unit/test_vestibular_agent.py tests/unit/test_hippocampus_agent.py tests/unit/test_prefrontal_agent.py tests/unit/test_tribe_registry.py tests/unit/test_chat_context_builder_hippocampus_integration.py tests/unit/test_chat_context_builder_helpers_extra.py tests/unit/test_context_pack_runtime_integration.py tests/unit/test_node_style_bindings_prompt.py tests/unit/test_memory_persona_behavior_chain.py tests/unit/test_limbic_agent.py tests/unit/test_cortex_agent.py tests/unit/test_circadian_agent.py tests/unit/test_proprioception_agent.py tests/unit/test_initiative_governor_agent.py tests/integration/test_bond_vector_integration.py tests/integration/test_host_edge_roundtrip.py tests/integration/test_internal_tribe_routes.py`

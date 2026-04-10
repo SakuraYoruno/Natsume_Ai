@@ -268,7 +268,7 @@ export default function AgentLoop() {
               <textarea
                 className="w-full resize-none rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-300"
                 rows={4}
-                placeholder="例如：打开设置页，切换到数字生命总览，确认运行摘要卡可见。"
+                placeholder="例如：打开设置页，切换到数字生命体总览，确认运行摘要卡可见。"
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 disabled={running}

@@ -20,6 +20,7 @@ import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -828,6 +829,17 @@ function getLiveTraceChangeBadgeClass(changeType) {
   if (changeType === 'added') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (changeType === 'updated') return 'border-blue-200 bg-blue-50 text-blue-700'
   return 'border-gray-200 bg-gray-50 text-gray-500'
+}
+
+function formatEventPayloadPreview(payload, maxLength = 180) {
+  if (!payload || typeof payload !== 'object') return '暂无 payload'
+  try {
+    const raw = JSON.stringify(payload)
+    if (!raw) return '暂无 payload'
+    return raw.length > maxLength ? `${raw.slice(0, maxLength)}...` : raw
+  } catch {
+    return 'payload 无法序列化'
+  }
 }
 
 function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 'text-gray-900' }) {
@@ -2071,6 +2083,38 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const liveModeCaption = liveFeedLastTs
     ? `最近事件 ${formatRecentTraceTime(liveFeedLastTs)}`
     : (liveTraceItems.length > 0 ? `${liveTraceItems.length} 条活跃请求` : '等待活跃请求')
+  const tracePulseNodes = [
+    {
+      label: '当前请求',
+      value: selectedLiveTraceTitle || '等待选中',
+      tone: 'primary',
+      active: Boolean(selectedLiveTraceTitle),
+    },
+    {
+      label: '当前节点',
+      value: selectedCurrentNodeLabel,
+      tone: 'teal',
+      active: Boolean(selectedCurrentNodeLabel && selectedCurrentNodeLabel !== '等待选中请求'),
+    },
+    {
+      label: '阶段覆盖',
+      value: `${selectedTraceStageMeta.activeStageCount}/${GROUPS.length}`,
+      tone: 'violet',
+      active: selectedTraceStageMeta.activeStageCount > 0,
+    },
+    {
+      label: '实时模式',
+      value: liveModeLabel,
+      tone: 'amber',
+      active: pollingEnabled,
+    },
+    {
+      label: '联动事件',
+      value: `${linkedTribeEvents.length} 条`,
+      tone: 'rose',
+      active: linkedTribeEvents.length > 0,
+    },
+  ]
 
   const focusRequestOverview = useCallback((requestId) => {
     if (!requestId) return
@@ -2102,9 +2146,9 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
       <PageHero
         icon={Activity}
-        eyebrow="全链路 Trace"
-        title="数字生命请求链路可视化"
-        description="从输入边缘、Query Planner、Agentic RAG、人格上下文到 Top Agent / Dispatch / Chat Agent，统一查看当前请求的完整路径。"
+        eyebrow="神经传导 Trace"
+        title="数字生命体神经链路可视化"
+        description="从感官输入、检索规划、人格上下文到响应输出，统一查看当前请求的完整神经传导路径。"
         gradientClass="from-blue-50 via-white to-violet-50"
         metaItems={[
           `活跃请求：${liveTraceItems.length}`,
@@ -2112,6 +2156,12 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           selectedRequestId ? '已选中请求' : '未选中请求',
           currentTraceHealthy ? '当前链路：健康' : '当前链路：待关注',
         ]}
+      />
+
+      <LivingPulseStrip
+        title="链路脉冲"
+        subtitle="先看这一条神经流现在怎么流动，再下钻到单条请求或节点细节。"
+        nodes={tracePulseNodes}
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -2286,40 +2336,43 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           )}
 
           {linkedTribeEventList.length > 0 && (
-            <div className="mt-3 rounded-xl border border-emerald-100 bg-white overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-emerald-50 border-b border-emerald-100">
-                  <tr>
-                    {['时间', '事件', 'source', 'target', 'payload'].map((head) => (
-                      <th key={head} className="px-4 py-2 text-left text-xs font-medium text-emerald-800">{head}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {linkedTribeEventList.map((event) => {
-                    const payloadPreview = JSON.stringify(event?.payload ?? {})
-                    return (
-                      <tr key={event.event_id} className="hover:bg-emerald-50/40">
-                        <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
-                          {formatRecentTraceTime(event.ts_ms)}
-                        </td>
-                        <td className="px-4 py-2 text-xs font-mono text-emerald-700">
-                          {event.event_type}
-                        </td>
-                        <td className="px-4 py-2 text-xs font-mono text-blue-600">
-                          {event.source_agent || '—'}
-                        </td>
-                        <td className="px-4 py-2 text-xs font-mono text-purple-600">
-                          {event.target_agent || '—'}
-                        </td>
-                        <td className="px-4 py-2 text-xs text-gray-500 max-w-md truncate" title={payloadPreview}>
+            <div className="mt-3 space-y-3">
+              {linkedTribeEventList.map((event) => {
+                const payloadPreview = formatEventPayloadPreview(event?.payload, 220)
+                return (
+                  <div key={event.event_id} className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400 ring-4 ring-emerald-50" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-sm font-semibold text-emerald-900">
+                            {event.event_type}
+                          </div>
+                          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                            {formatRecentTraceTime(event.ts_ms)}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                          <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-1 font-medium text-blue-700">
+                            source {event.source_agent || '—'}
+                          </span>
+                          <span className="rounded-full border border-purple-100 bg-purple-50 px-2 py-1 font-medium text-purple-700">
+                            target {event.target_agent || '—'}
+                          </span>
+                          {event.request_id ? (
+                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-gray-600">
+                              {String(event.request_id).slice(0, 18)}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-3 rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-gray-600 break-all">
                           {payloadPreview}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

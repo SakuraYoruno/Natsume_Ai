@@ -50,7 +50,7 @@ export default function InnerWorldDashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">内在世界</h1>
+          <h1 className="text-xl font-semibold text-gray-900">默认模式网络</h1>
           <p className="text-sm text-gray-500">观察独处状态、离线演化、期待话题与内在漂移。</p>
         </div>
         <button className="btn-secondary" onClick={reload} disabled={loading}>
@@ -63,7 +63,7 @@ export default function InnerWorldDashboard() {
 
       <PageHero
         icon={MoonStar}
-        eyebrow="内在世界专题"
+        eyebrow="默认模式网络专题"
         title={absenceBandLabel === '—' ? '近期在线' : absenceBandLabel}
         description={
           anticipationTopics.length > 0

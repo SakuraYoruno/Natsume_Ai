@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from host_brain.core.ids import now_ms
+from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.events import emit_tribe_event
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
+
+
+def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, float(value)))
+
+
+@dataclass(slots=True)
+class GlymphaticAgent:
+    descriptor: TribeAgentDescriptor = field(
+        default_factory=lambda: TribeAgentDescriptor(
+            agent_id="glymphatic_agent",
+            family="glymphatic",
+            execution_side="host",
+            owner_domain="brain",
+            capabilities=("recovery_cycle", "memory_consolidation", "noise_decay"),
+        )
+    )
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)
+
+    def describe(self) -> dict[str, Any]:
+        return self.descriptor.to_dict()
+
+    def register_subscriptions(self) -> None:
+        try:
+            from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
+
+            bus = get_tribe_event_bus()
+            bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_circadian_phase_updated)
+            bus.subscribe("CONVERSATION_ENDED", self._on_conversation_ended)
+            bus.subscribe("DEFAULT_MODE_TICKED", self._on_default_mode_ticked)
+        except Exception:
+            pass
+
+    def run_recovery_cycle(
+        self,
+        *,
+        source: str = "runtime",
+        force: bool = False,
+        now_ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        resolved_ts = int(now_ts_ms or now_ms())
+        vital_signs = self.state_registry.aggregate_vital_signs()
+        phase = str(vital_signs.get("circadian_phase") or "day").strip().lower()
+        sleep_pressure = _clamp(float(vital_signs.get("sleep_pressure") or 0.2))
+        recovery_window = force or phase in {"night", "dusk"} or sleep_pressure >= 0.62
+        homeostasis = self.state_registry.get_homeostasis_report(now_ts_ms=resolved_ts)
+        status = str(homeostasis.get("status") or "stable").strip().lower()
+        try:
+            from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+
+            memory_layers = get_hippocampus_agent().resolve_memory_layer_snapshot()
+        except Exception:
+            memory_layers = {}
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+
+            default_mode_state = get_default_mode_agent().export_runtime_state()
+        except Exception:
+            default_mode_state = {}
+
+        continuity = _clamp(float(default_mode_state.get("continuity_score") or vital_signs.get("continuity_hint") or 0.2))
+        stress = _clamp(float(vital_signs.get("stress_index") or 0.0))
+        load = _clamp(float(vital_signs.get("cognitive_load_index") or 0.2))
+        loneliness = _clamp(float(vital_signs.get("loneliness_level") or 0.0))
+
+        consolidation_score = _clamp((continuity * 0.36) + ((1.0 - stress) * 0.28) + ((1.0 - load) * 0.24) + ((1.0 - loneliness) * 0.12))
+        noise_decay_factor = _clamp((sleep_pressure * 0.45) + (0.25 if status != "stable" else 0.08) + (load * 0.15))
+        result = {
+            "executed": bool(recovery_window),
+            "reason_code": "RECOVERY_WINDOW_OPEN" if recovery_window else "RECOVERY_WINDOW_CLOSED",
+            "phase": phase,
+            "sleep_pressure": round(sleep_pressure, 4),
+            "consolidation_score": round(consolidation_score if recovery_window else 0.0, 4),
+            "noise_decay_factor": round(noise_decay_factor if recovery_window else 0.0, 4),
+            "memory_layers_available": bool(memory_layers),
+            "memory_write_type": str(memory_layers.get("last_write_type") or ""),
+            "homeostasis_status": status,
+            "source": str(source or "runtime"),
+            "ts_ms": resolved_ts,
+        }
+        prev = self.state_registry.get_state("glymphatic_agent") or {}
+        prev_state = dict(prev.get("state") or {})
+        prev_state["last_cycle"] = result
+        prev_state["cycle_count"] = int(prev_state.get("cycle_count") or 0) + 1
+        self.state_registry.set_state("glymphatic_agent", prev_state, writer="glymphatic_agent")
+        emit_tribe_event(
+            event_type="GLYMPHATIC_CYCLE_COMPLETED",
+            source_agent="glymphatic_agent",
+            payload=result,
+        )
+        return result
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        result = self.run_recovery_cycle(source="export_runtime_state", force=False)
+        return {
+            "executed": bool(result.get("executed", False)),
+            "reason_code": str(result.get("reason_code") or ""),
+            "phase": str(result.get("phase") or "day"),
+            "sleep_pressure": float(result.get("sleep_pressure") or 0.0),
+            "consolidation_score": float(result.get("consolidation_score") or 0.0),
+            "noise_decay_factor": float(result.get("noise_decay_factor") or 0.0),
+            "homeostasis_status": str(result.get("homeostasis_status") or "stable"),
+            "last_updated_ts_ms": int(result.get("ts_ms") or now_ms()),
+        }
+
+    async def _on_circadian_phase_updated(self, event: Any) -> None:
+        self.run_recovery_cycle(
+            source="circadian_phase_updated",
+            now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
+        )
+
+    async def _on_conversation_ended(self, event: Any) -> None:
+        self.run_recovery_cycle(
+            source="conversation_ended",
+            now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
+        )
+
+    async def _on_default_mode_ticked(self, event: Any) -> None:
+        self.run_recovery_cycle(
+            source="default_mode_ticked",
+            now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
+        )
+
+
+_GLYMPHATIC_AGENT: GlymphaticAgent | None = None
+
+
+def get_glymphatic_agent() -> GlymphaticAgent:
+    global _GLYMPHATIC_AGENT
+    if _GLYMPHATIC_AGENT is None:
+        _GLYMPHATIC_AGENT = GlymphaticAgent()
+    return _GLYMPHATIC_AGENT
+
+
+def set_glymphatic_agent(agent: GlymphaticAgent | None) -> None:
+    global _GLYMPHATIC_AGENT
+    _GLYMPHATIC_AGENT = agent
+
+
+__all__ = ["GlymphaticAgent", "get_glymphatic_agent", "set_glymphatic_agent"]

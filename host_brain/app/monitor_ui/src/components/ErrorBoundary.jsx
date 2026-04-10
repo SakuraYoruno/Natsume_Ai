@@ -42,7 +42,7 @@ export default class ErrorBoundary extends React.Component {
             <div>
               <h1 className="text-xl font-semibold text-gray-900">页面渲染出错</h1>
               <p className="mt-2 text-sm text-gray-500">
-                监控面板遇到了一个意外错误。你可以尝试重新加载当前页面。
+                控制台遇到了一个意外错误。你可以尝试重新加载当前页面。
               </p>
             </div>
             {this.state.error && (

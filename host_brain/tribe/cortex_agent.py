@@ -124,12 +124,28 @@ class CortexAgent:
             "vital_signs": {},
             "emotion_context": {},
             "bond_context": {},
+            "bond_vector": {},
             "endocrine_gate": {},
             "silence_willingness": 0.5,
             "voice_emotion": None,
             "hedonic_state": {},
             "immune_state": {},  # T-38：ImmuneAgent 运行时状态（计数器/风险等级）
             "loneliness_level": 0.0,  # T-76：当前孤独感强度（来自 PainRewardAgent）
+            "somatic_state": {},
+            "peripheral_state": {},
+            "circadian_state": {},
+            "proprioception_state": {},
+            "initiative_decision": {},
+            "default_mode_state": {},
+            "mirror_neuron_state": {},
+            "memory_layers": {},
+            "language_dual_system": {},
+            "homeostasis_report": {},
+            "interoception_state": {},
+            "motor_cortex_state": {},
+            "cerebellum_state": {},
+            "glymphatic_state": {},
+            "vestibular_state": {},
             "tribe_context_source": "cortex_agent",
         }
 
@@ -139,6 +155,7 @@ class CortexAgent:
 
             vital_signs = get_limbic_agent().state_registry.aggregate_vital_signs()
             result["vital_signs"] = vital_signs
+            result["homeostasis_report"] = dict(vital_signs.get("homeostasis_report") or {})
             result["silence_willingness"] = float(vital_signs.get("silence_willingness") or 0.5)
             if vital_signs.get("voice_emotion_tag"):
                 result["voice_emotion"] = {
@@ -173,6 +190,7 @@ class CortexAgent:
                 user_id=str(user_id or ""),
             )
             result["bond_context"] = bond_ctx
+            result["bond_vector"] = dict(bond_ctx.get("bond_vector") or {})
         except Exception:
             pass
 
@@ -218,9 +236,23 @@ class CortexAgent:
         except Exception:
             pass
 
-        return result
+        # ── 8. 躯体状态（SomaticAgent）───────────────────────────────────────
+        try:
+            from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: PLC0415
 
-        # ── 7. bond_trend_hint（SocialBrainAgent 快照）T-54 ──────────────────
+            result["somatic_state"] = get_somatic_agent().export_runtime_state()
+        except Exception:
+            pass
+
+        # ── 9. 外周状态（PeripheralAgent）────────────────────────────────────
+        try:
+            from host_brain.tribe.peripheral_agent import get_peripheral_agent  # noqa: PLC0415
+
+            result["peripheral_state"] = get_peripheral_agent().export_runtime_state()
+        except Exception:
+            pass
+
+        # ── 10. bond_trend_hint（SocialBrainAgent 快照）T-54 ─────────────────
         # 读取 SocialBrainAgent 写入的 bond_trend_hint 字段，
         # 供 chat_context_builder 在构建 prompt 时参考任务成功带来的关系倾向。
         try:
@@ -232,6 +264,98 @@ class CortexAgent:
             if _hint:
                 result["bond_trend_hint"] = _hint
                 result["bond_trend_hint_ts_ms"] = int(_sba_state.get("bond_trend_hint_ts_ms") or 0)
+        except Exception:
+            pass
+
+        # ── 11. Circadian / Proprioception / InitiativeGovernor──────────────
+        try:
+            from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
+            from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
+            from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
+
+            result["circadian_state"] = get_circadian_agent().export_runtime_state()
+            result["proprioception_state"] = get_proprioception_agent().export_runtime_state()
+            result["initiative_decision"] = get_initiative_governor_agent().get_last_decision()
+        except Exception:
+            pass
+
+        # ── 12. DefaultMode / MirrorNeuron（内在生活 + 共情共振）──────────────
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+            from host_brain.tribe.mirror_neuron_agent import get_mirror_neuron_agent  # noqa: PLC0415
+
+            result["default_mode_state"] = get_default_mode_agent().export_runtime_state()
+            result["mirror_neuron_state"] = get_mirror_neuron_agent().export_runtime_state()
+        except Exception:
+            pass
+
+        # ── 13. Memory Layers（三分层记忆快照）────────────────────────────────
+        try:
+            from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+
+            result["memory_layers"] = get_hippocampus_agent().resolve_memory_layer_snapshot()
+        except Exception:
+            pass
+
+        # ── 14. Language Dual System（Wernicke/Broca）──────────────────────
+        try:
+            from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+
+            language_agent = get_language_system_agent()
+            latest_state_row = language_agent.state_registry.get_state("language_system_agent") or {}
+            latest_state = dict(latest_state_row.get("state") or {})
+            dual_snapshot = dict(latest_state.get("last_dual_system") or {})
+
+            if not dual_snapshot:
+                user_text = ""
+                if isinstance(request_body, dict):
+                    user_text = str(
+                        request_body.get("user_message")
+                        or request_body.get("message")
+                        or request_body.get("text")
+                        or ""
+                    ).strip()
+                elif request_body is not None:
+                    user_text = str(
+                        getattr(request_body, "user_message", None)
+                        or getattr(request_body, "message", None)
+                        or getattr(request_body, "text", None)
+                        or ""
+                    ).strip()
+                if user_text:
+                    vital_signs = dict(result.get("vital_signs") or {})
+                    dual_snapshot = language_agent.resolve_dual_system(
+                        user_text=user_text,
+                        bond_stage=str(vital_signs.get("bond_stage") or "stranger"),
+                        emotion_tag=str(vital_signs.get("emotion_tag") or "NEUTRAL"),
+                        loneliness_level=float(vital_signs.get("loneliness_level") or 0.0),
+                        high_loneliness_flag=bool(vital_signs.get("high_loneliness_flag", False)),
+                        response_goal="chat_reply",
+                    )
+            result["language_dual_system"] = dual_snapshot
+        except Exception:
+            pass
+
+        # ── 15. Homeostasis fallback（当 vital_signs 未携带报告时）───────────
+        if not result.get("homeostasis_report"):
+            try:
+                result["homeostasis_report"] = self.state_registry.get_homeostasis_report()
+            except Exception:
+                pass
+
+        # ── 16. 扩充族（Interoception/Motor/Cerebellum/Glymphatic/Vestibular）──
+        try:
+            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+            from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
+            from host_brain.tribe.cerebellum_agent import get_cerebellum_agent  # noqa: PLC0415
+            from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+            from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
+
+            result["interoception_state"] = get_interoception_agent().export_runtime_state()
+            result["motor_cortex_state"] = get_motor_cortex_agent().export_runtime_state()
+            result["cerebellum_state"] = get_cerebellum_agent().export_runtime_state()
+            result["glymphatic_state"] = get_glymphatic_agent().export_runtime_state()
+            result["vestibular_state"] = get_vestibular_agent().export_runtime_state()
         except Exception:
             pass
 
@@ -263,6 +387,39 @@ class CortexAgent:
         silence_willingness = float(vital_signs.get("silence_willingness") or ctx.get("silence_willingness") or 0.5)
         bond_stage = str(vital_signs.get("bond_stage") or ctx.get("bond_stage") or "stranger").strip().lower()
         homeostasis_ok = bool(vital_signs.get("homeostasis_ok", True))
+        interoception_state = dict(ctx.get("interoception_state") or {})
+        vestibular_state = dict(ctx.get("vestibular_state") or {})
+        interoceptive_index = float(interoception_state.get("interoceptive_index") or vital_signs.get("interoceptive_index") or 0.0)
+        vestibular_jitter = float(vestibular_state.get("jitter_index") or 0.0)
+
+        # 系统层门禁：主动行为统一经过 motive/readiness/continuity 三问。
+        if bool(ctx.get("initiative_request", False)):
+            try:
+                from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
+
+                decision = get_initiative_governor_agent().evaluate_initiative(
+                    action=str(ctx.get("initiative_action") or "proactive_talk"),
+                    motive=ctx.get("motive"),
+                    session_id=str(ctx.get("session_id") or ""),
+                    user_id=str(ctx.get("user_id") or ""),
+                    context=ctx,
+                )
+                if decision.get("decision") == "BLOCK":
+                    return {
+                        "route": "throttle",
+                        "reason": f"initiative_block:{decision.get('reason_code')}",
+                        "gate_state": gate_state,
+                        "confidence": 0.92,
+                    }
+                if decision.get("decision") == "DEFER":
+                    return {
+                        "route": "silent",
+                        "reason": f"initiative_defer:{decision.get('reason_code')}",
+                        "gate_state": gate_state,
+                        "confidence": 0.78,
+                    }
+            except Exception:
+                pass
 
         # 门控暂停：内分泌系统要求暂停响应
         if gate_state == "pause":
@@ -271,6 +428,22 @@ class CortexAgent:
                 "reason": "endocrine_gate_pause",
                 "gate_state": gate_state,
                 "confidence": 0.95,
+            }
+
+        if interoceptive_index >= 0.82:
+            return {
+                "route": "throttle",
+                "reason": "interoceptive_overload",
+                "gate_state": gate_state,
+                "confidence": min(0.95, max(0.75, interoceptive_index)),
+            }
+
+        if vestibular_jitter >= 0.78:
+            return {
+                "route": "throttle",
+                "reason": "vestibular_instability",
+                "gate_state": gate_state,
+                "confidence": min(0.9, max(0.7, vestibular_jitter)),
             }
 
         # 沉默意愿极高（>= 0.85）：主动沉默
@@ -401,6 +574,9 @@ class CortexAgent:
             # T-118：订阅躯干族平台连接/断线事件（来自 edge_client PeripheralAgent）
             bus.subscribe("PLATFORM_CONNECTED", self._on_platform_connected)
             bus.subscribe("PLATFORM_DISCONNECTED", self._on_platform_disconnected)
+            bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_circadian_phase_updated)
+            bus.subscribe("PROPRIOCEPTION_UPDATED", self._on_proprioception_updated)
+            bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision_made)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -644,6 +820,56 @@ class CortexAgent:
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
                 "CortexAgent._on_task_success_cortex 异常: %s", exc
             )
+
+    async def _on_circadian_phase_updated(self, event: Any) -> None:
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update(
+                {
+                    "circadian_phase": str(payload.get("to_phase") or "").strip().lower() or None,
+                    "circadian_sleep_pressure": float(payload.get("sleep_pressure") or 0.0),
+                    "circadian_last_update_ts_ms": int(payload.get("ts_ms") or 0),
+                }
+            )
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+        except Exception:
+            pass
+
+    async def _on_proprioception_updated(self, event: Any) -> None:
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update(
+                {
+                    "cognitive_load_index": float(payload.get("cognitive_load_index") or 0.0),
+                    "readiness_hint": float(payload.get("readiness_hint") or 0.0),
+                    "continuity_hint": float(payload.get("continuity_hint") or 0.0),
+                    "proprioception_last_update_ts_ms": int(payload.get("ts_ms") or 0),
+                }
+            )
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+        except Exception:
+            pass
+
+    async def _on_initiative_decision_made(self, event: Any) -> None:
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            prev = self.state_registry.get_state("cortex_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state["last_initiative_decision"] = {
+                "trace_id": str(payload.get("trace_id") or "").strip() or None,
+                "action": str(payload.get("action") or "").strip() or None,
+                "decision": str(payload.get("decision") or "").strip().upper() or None,
+                "reason_code": str(payload.get("reason_code") or "").strip().upper() or None,
+                "scores": dict(payload.get("scores") or {}),
+                "ts_ms": int(getattr(event, "ts_ms", 0) or 0),
+            }
+            self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
+        except Exception:
+            pass
 
     async def _on_platform_connected(self, event: Any) -> None:
         """处理 PLATFORM_CONNECTED 事件：记录平台连接状态。

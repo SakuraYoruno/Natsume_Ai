@@ -27,7 +27,7 @@ export default function DigitalLifeNav() {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
       <div className="mb-2 text-xs font-medium tracking-wide text-gray-400">
-        数字生命导航
+        数字生命体导航
       </div>
       <div className="flex flex-wrap gap-2">
         {ITEMS.map(({ to, label, icon: Icon }) => (

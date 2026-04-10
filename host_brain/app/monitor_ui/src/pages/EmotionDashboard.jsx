@@ -184,7 +184,7 @@ export default function EmotionDashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">情绪仪表盘</h1>
+          <h1 className="text-xl font-semibold text-gray-900">边缘系统</h1>
           <p className="text-sm text-gray-500">统一查看情绪三维、表情分布与关系温度。</p>
         </div>
         <div className="flex items-center gap-2">
@@ -200,7 +200,7 @@ export default function EmotionDashboard() {
 
       <PageHero
         icon={Heart}
-        eyebrow="情绪快照"
+        eyebrow="边缘系统快照"
         title={moodStyle.label}
         description={`主情绪 ${emotionTagLabel} · 关系阶段 ${formatStage(emotionState.bondStage)} · 数据来自运行快照与 VTS 聚合。`}
         gradientClass="from-primary-50 via-white to-rose-50"
@@ -222,10 +222,10 @@ export default function EmotionDashboard() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="card space-y-4 p-5">
-          <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
-            <Heart size={14} className="text-pink-500" />
+            <h2 className="flex items-center gap-1 text-sm font-semibold text-gray-700">
+              <Heart size={14} className="text-pink-500" />
             当前状态
-          </h2>
+            </h2>
           <div className="py-4 text-center">
             <div className={`inline-flex items-center gap-2 rounded-full px-4 py-2 ${moodStyle.bg}`}>
               <MoodIcon size={20} className={moodStyle.color} />
@@ -246,7 +246,7 @@ export default function EmotionDashboard() {
             <Gauge label="稳定度" value={emotionState.dominance} color="text-purple-600" />
           </div>
           <div className="space-y-2 border-t pt-3">
-            <div className="text-xs font-medium text-gray-600">内分泌基调（Endocrine）</div>
+            <div className="text-xs font-medium text-gray-600">边缘系统基调（Endocrine）</div>
             <HormoneBar label="Dopamine" value={endocrineState?.dopamine_level} color="#c026d3" />
             <HormoneBar label="Serotonin" value={endocrineState?.serotonin_level} color="#059669" />
             <HormoneBar label="Cortisol" value={endocrineState?.cortisol_level} color="#d97706" />

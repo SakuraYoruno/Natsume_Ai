@@ -1,25 +1,22 @@
-"""全局测试配置：在每个测试后重置 host_brain 全局单例，防止测试间污染。"""
+"""Global pytest configuration and cross-test runtime state isolation."""
+
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import inspect
+import os
+import sys
 
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _reset_host_brain_singletons():
-    """每个测试前后重置 host_brain.app.dependencies 中的全局单例。
+def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = None) -> None:
+    """Best-effort singleton/runtime reset to reduce cross-test contamination."""
 
-    这解决了以下问题：
-    - 某些测试修改了 _intent_engine / _ledger / _skill_registry / _policy_cache
-    - 导致后续测试使用了被污染的单例
-    """
-    yield
-    # 测试结束后重置
     try:
         import host_brain.app.dependencies as dep
+
         dep._intent_engine = None
         dep._skill_registry = None
         dep._policy_cache = None
@@ -42,11 +39,17 @@ def _reset_host_brain_singletons():
         dep._tool_catalog = None
         dep._tool_broker = None
         dep._mcp_tool_broker = None
+        dep._shared_memory_index = None
+        dep._milestone_tracker = None
+        dep._hard_state = None
+        dep._activity_monitor_ref = None
+
         mcp_registry = getattr(dep, "_mcp_tool_registry", None)
         if mcp_registry is not None:
             with contextlib.suppress(Exception):
                 mcp_registry.close()
         dep._mcp_tool_registry = None
+
         bond_queue = getattr(dep, "_bond_update_queue", None)
         if bond_queue is not None:
             with contextlib.suppress(Exception):
@@ -54,6 +57,100 @@ def _reset_host_brain_singletons():
         dep._bond_update_queue = None
     except Exception:
         pass
+
+    try:
+        bond_routes = sys.modules.get("host_brain.app.bond_routes")
+        fastapi_app = sys.modules.get("host_brain.app.fastapi_app")
+        if bond_routes is not None:
+            if fastapi_app is not None and hasattr(fastapi_app, "_get_bond_engine_via_social_brain"):
+                bond_routes.set_bond_engine_provider(fastapi_app._get_bond_engine_via_social_brain)
+            else:
+                bond_routes.set_bond_engine_provider(None)
+    except Exception:
+        pass
+
+    try:
+        obs_routes_sysmode = sys.modules.get("host_brain.app.obs_routes_sysmode")
+        obs_routes = sys.modules.get("host_brain.app.obs_routes")
+        if obs_routes_sysmode is not None:
+            obs_routes_sysmode._mode_transition_service = None
+        if obs_routes is not None and obs_routes_sysmode is not None:
+            obs_routes._mode_transition_lock = obs_routes_sysmode._mode_transition_lock
+            obs_routes._mode_transition_service = obs_routes_sysmode._mode_transition_service
+    except Exception:
+        pass
+
+    try:
+        tribe_state = sys.modules.get("host_brain.tribe.tribe_state")
+        if tribe_state is not None:
+            tribe_state._GLOBAL_REGISTRY = None
+
+        limbic_agent = sys.modules.get("host_brain.tribe.limbic_agent")
+        if limbic_agent is not None:
+            limbic_agent._LIMBIC_AGENT = None
+
+        prefrontal_agent = sys.modules.get("host_brain.tribe.prefrontal_agent")
+        if prefrontal_agent is not None:
+            prefrontal_agent._PREFRONTAL_AGENT = None
+
+        social_brain_agent = sys.modules.get("host_brain.tribe.social_brain_agent")
+        if social_brain_agent is not None:
+            social_brain_agent._SOCIAL_BRAIN_AGENT = None
+
+        endocrine_agent = sys.modules.get("host_brain.tribe.endocrine_agent")
+        if endocrine_agent is not None:
+            endocrine_agent._ENDOCRINE_AGENT = None
+
+        pain_reward_agent = sys.modules.get("host_brain.tribe.pain_reward_agent")
+        if pain_reward_agent is not None:
+            pain_reward_agent._PAIN_REWARD_AGENT = None
+
+        body_sense = sys.modules.get("host_brain.persona.body_sense")
+        if body_sense is not None:
+            body_sense._GLOBAL_BODY_SENSE = None
+
+        silence = sys.modules.get("host_brain.persona.emotional_silence")
+        if silence is not None:
+            silence._GLOBAL_SILENCE_ENGINE = None
+
+        inner_world = sys.modules.get("host_brain.persona.inner_world")
+        if inner_world is not None:
+            inner_world._global_inner_world = None
+
+        response_policy = sys.modules.get("host_brain.persona.response_policy")
+        if response_policy is not None:
+            response_policy._layer = None
+
+        drift_detector = sys.modules.get("host_brain.persona.drift_detector")
+        if drift_detector is not None:
+            drift_detector._GLOBAL_DRIFT_DETECTOR = None
+    except Exception:
+        pass
+
+    try:
+        system_handler = sys.modules.get("host_brain.app.system_handler")
+        if system_handler is not None:
+            system_handler._EDGE_ASR_BRIDGE_RECENT.clear()
+            system_handler._EDGE_ASR_BRIDGE_LAST_TEXT.clear()
+    except Exception:
+        pass
+
+    if env_snapshot is not None:
+        try:
+            os.environ.clear()
+            os.environ.update(env_snapshot)
+        except Exception:
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_host_brain_singletons():
+    """Reset runtime state before and after each test."""
+
+    env_snapshot = dict(os.environ)
+    _reset_host_brain_runtime_state()
+    yield
+    _reset_host_brain_runtime_state(env_snapshot=env_snapshot)
 
 
 def pytest_configure(config: pytest.Config) -> None:

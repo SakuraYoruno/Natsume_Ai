@@ -454,6 +454,12 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["runtime_summary"]["core_slots"]["response_policy"]["reply_posture"] == "focused"
     assert data["runtime_summary"]["why_reply"][0] == "mode:focus"
     assert data["slot_status"]["sys_mode_status"] == "live"
+    assert "interoception_state" in data
+    assert "motor_cortex_state" in data
+    assert "cerebellum_state" in data
+    assert "glymphatic_state" in data
+    assert "vestibular_state" in data
+    assert "homeostasis_report" in data
 
 
 # ---------------------------------------------------------------------------

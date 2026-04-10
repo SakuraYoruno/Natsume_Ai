@@ -293,8 +293,8 @@ export default function ChatDebug() {
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-gray-900">Chat 调试</h1>
-            <p className="text-xs text-gray-500">直接发消息，实时看事件流、请求 ID 和 Trace 入口。</p>
+            <h1 className="text-xl font-semibold text-gray-900">神经反射调试</h1>
+            <p className="text-xs text-gray-500">直接发消息，实时看反射事件流、请求 ID 和神经链路入口。</p>
           </div>
           {stats ? (
             <div className="flex items-center gap-3 text-xs text-gray-500">
@@ -309,9 +309,9 @@ export default function ChatDebug() {
         <div className="mt-3">
           <PageHero
             icon={Sparkles}
-            eyebrow="对话实时调试"
-            title={streaming ? '当前正在流式调试' : '手动发起一次对话调试'}
-            description="适合联调 SSE 事件流、回复生成、链路节点推进以及请求到 Trace 的跳转闭环。"
+            eyebrow="神经反射实时调试"
+            title={streaming ? '当前正在流式反射调试' : '手动发起一次神经反射调试'}
+            description="适合联调 SSE 事件流、回复生成、神经节点推进以及请求到 Trace 的跳转联动。"
             gradientClass="from-pink-50 via-white to-blue-50"
             metaItems={[
               `历史消息：${chatHistory.length}`,
@@ -521,7 +521,7 @@ export default function ChatDebug() {
           ) : (
             <EmptyStateCard
               title="等待聊天请求"
-              hint="发起请求后，这里会展示数字生命链路、决策与流式事件。"
+              hint="发起请求后，这里会展示数字生命体神经链路、决策与流式事件。"
               className="p-6"
             />
           )}

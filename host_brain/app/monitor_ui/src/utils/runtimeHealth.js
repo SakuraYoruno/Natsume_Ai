@@ -76,8 +76,8 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       reason_code: 'RUNTIME_MODE_DEGRADED',
       title: formatAlertTitle('RUNTIME_MODE_DEGRADED'),
       detail: degradedReason
-        ? `存在状态轴当前处于降级状态：${degradedReason}`
-        : '存在状态轴当前处于降级状态。',
+        ? `生命体存在态轴当前处于降级状态：${degradedReason}`
+        : '生命体存在态轴当前处于降级状态。',
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
@@ -227,6 +227,78 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
         to: '/inner-world',
       })
     }
+  }
+
+  const interoceptionState = snapshot.interoception_state || {}
+  const interoceptiveIndex = Number(interoceptionState.interoceptive_index || 0)
+  const recoveryUrgency = Number(interoceptionState.recovery_urgency || 0)
+  if (interoceptiveIndex >= 0.82 || recoveryUrgency >= 0.78) {
+    alerts.push({
+      reason_code: 'INTEROCEPTION_OVERLOAD',
+      title: formatAlertTitle('INTEROCEPTION_OVERLOAD'),
+      detail: compactText(
+        `内感受负载升高：interoceptive_index=${interoceptiveIndex.toFixed(3)}，recovery_urgency=${recoveryUrgency.toFixed(3)}。`,
+        180
+      ),
+      ts_ms: tsMs,
+      severity: interoceptiveIndex >= 0.88 || recoveryUrgency >= 0.85 ? 'critical' : 'warning',
+      source: 'runtime',
+      to: '/overview',
+    })
+  }
+
+  const vestibularState = snapshot.vestibular_state || {}
+  const vestibularJitter = Number(vestibularState.jitter_index || 0)
+  const vestibularStability = String(vestibularState.stability_state || '').toLowerCase()
+  if (vestibularStability === 'critical' || vestibularStability === 'unstable' || vestibularJitter >= 0.72) {
+    alerts.push({
+      reason_code: 'VESTIBULAR_INSTABILITY',
+      title: formatAlertTitle('VESTIBULAR_INSTABILITY'),
+      detail: compactText(
+        `前庭稳定性异常：state=${vestibularStability || 'unknown'}，jitter=${vestibularJitter.toFixed(3)}。`,
+        180
+      ),
+      ts_ms: tsMs,
+      severity: vestibularStability === 'critical' || vestibularJitter >= 0.82 ? 'critical' : 'warning',
+      source: 'runtime',
+      to: '/overview',
+    })
+  }
+
+  const motorCortexState = snapshot.motor_cortex_state || {}
+  if (
+    motorCortexState.last_plan_id
+    && motorCortexState.last_dispatch_ok === false
+  ) {
+    alerts.push({
+      reason_code: 'MOTOR_DISPATCH_DEGRADED',
+      title: formatAlertTitle('MOTOR_DISPATCH_DEGRADED'),
+      detail: compactText(
+        `动作分发失败：plan=${motorCortexState.last_plan_id}，reason=${motorCortexState.last_dispatch_reason || 'unknown'}。`,
+        180
+      ),
+      ts_ms: tsMs,
+      severity: 'warning',
+      source: 'runtime',
+      to: '/overview',
+    })
+  }
+
+  const homeostasisReport = snapshot.homeostasis_report || {}
+  const homeostasisStatus = String(homeostasisReport.status || '').toLowerCase()
+  if (homeostasisStatus === 'warning' || homeostasisStatus === 'critical') {
+    alerts.push({
+      reason_code: 'HOMEOSTASIS_WARNING',
+      title: formatAlertTitle('HOMEOSTASIS_WARNING'),
+      detail: compactText(
+        `生命体稳态告警：status=${homeostasisStatus}，minute_load=${homeostasisReport?.minute_window?.avg_cognitive_load_index ?? 'n/a'}，hour_stress=${homeostasisReport?.hour_window?.avg_stress_index ?? 'n/a'}。`,
+        180
+      ),
+      ts_ms: tsMs,
+      severity: homeostasisStatus === 'critical' ? 'critical' : 'warning',
+      source: 'runtime',
+      to: '/overview',
+    })
   }
 
   return alerts.sort((a, b) => {

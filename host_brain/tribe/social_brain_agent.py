@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
@@ -17,6 +18,7 @@ class SocialBrainAgent:
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-31：使用全局单例
+    _bond_stage: str = field(default="stranger", init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -183,6 +185,91 @@ class SocialBrainAgent:
         except Exception:
             return None
 
+    def resolve_bond_vector(
+        self,
+        *,
+        person_id: str | None,
+        bond_summary: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        snapshot = self.resolve_bond_snapshot(person_id=person_id, bond_summary=bond_summary)
+        stage = str(snapshot.get("bond_stage") or "STRANGER").strip().upper()
+        intimacy = max(0.0, min(1.0, float(snapshot.get("intimacy_score") or 0.0)))
+
+        stage_baseline = {
+            "STRANGER": {"trust": 0.25, "affinity": 0.20, "safety": 0.32, "novelty": 0.72, "dependency": 0.06},
+            "ACQUAINTANCE": {"trust": 0.38, "affinity": 0.34, "safety": 0.45, "novelty": 0.62, "dependency": 0.14},
+            "FRIEND": {"trust": 0.58, "affinity": 0.60, "safety": 0.64, "novelty": 0.48, "dependency": 0.32},
+            "CLOSE_FRIEND": {"trust": 0.68, "affinity": 0.72, "safety": 0.74, "novelty": 0.42, "dependency": 0.44},
+            "INTIMATE": {"trust": 0.82, "affinity": 0.86, "safety": 0.82, "novelty": 0.36, "dependency": 0.62},
+            "SOULMATE": {"trust": 0.92, "affinity": 0.94, "safety": 0.90, "novelty": 0.28, "dependency": 0.76},
+        }
+        base = dict(stage_baseline.get(stage, stage_baseline["STRANGER"]))
+        trend_hint = str((snapshot.get("bond_trend") or snapshot.get("bond_summary", {}).get("trend") or "")).strip().lower()
+        if trend_hint in {"up", "progress"}:
+            base["trust"] += 0.06
+            base["affinity"] += 0.06
+            base["safety"] += 0.04
+        elif trend_hint in {"down", "regress", "regress_risk"}:
+            base["trust"] -= 0.08
+            base["safety"] -= 0.06
+            base["novelty"] += 0.04
+
+        # intimacy_score 作为连续校准项，防止只靠 stage 离散跳变
+        base["trust"] += (intimacy - 0.5) * 0.30
+        base["affinity"] += (intimacy - 0.5) * 0.28
+        base["dependency"] += (intimacy - 0.5) * 0.20
+        # P2-3: repair_confidence 动态闭环（受损负载 + 修复进度）
+        repair_state = self.resolve_relationship_repair_state(person_id=person_id)
+        rupture_load = float(repair_state.get("rupture_load") or 0.0)
+        repair_progress = float(repair_state.get("repair_progress") or 0.0)
+        base["repair_confidence"] = max(
+            0.0,
+            min(
+                1.0,
+                0.55
+                + base["safety"] * 0.25
+                - max(0.0, 0.5 - base["trust"]) * 0.35
+                - rupture_load * 0.30
+                + repair_progress * 0.28,
+            ),
+        )
+
+        vector = {
+            "trust": round(max(0.0, min(1.0, base["trust"])), 4),
+            "affinity": round(max(0.0, min(1.0, base["affinity"])), 4),
+            "safety": round(max(0.0, min(1.0, base["safety"])), 4),
+            "novelty": round(max(0.0, min(1.0, base["novelty"])), 4),
+            "dependency": round(max(0.0, min(1.0, base["dependency"])), 4),
+            "repair_confidence": round(max(0.0, min(1.0, base["repair_confidence"])), 4),
+            "rupture_load": round(max(0.0, min(1.0, rupture_load)), 4),
+            "repair_progress": round(max(0.0, min(1.0, repair_progress)), 4),
+            "bond_stage": stage.lower(),
+        }
+        return vector
+
+    def get_bond_context(
+        self,
+        *,
+        session_id: str = "default",
+        user_id: str = "",
+    ) -> dict[str, Any]:
+        resolved_user_id = str(user_id or "").strip() or None
+        snapshot = self.resolve_bond_snapshot(person_id=resolved_user_id)
+        vector = self.resolve_bond_vector(person_id=resolved_user_id, bond_summary=snapshot.get("bond_summary"))
+        self._bond_stage = str(snapshot.get("bond_stage") or "STRANGER").strip().lower() or "stranger"
+        self._touch_state(key="bond_stage", value=self._bond_stage)
+        self._touch_state(key="bond_vector", value=vector)
+        return {
+            "session_id": str(session_id or "default").strip() or "default",
+            "user_id": resolved_user_id,
+            "bond_stage": self._bond_stage,
+            "bond_trend": str(snapshot.get("bond_trend") or "").strip().lower(),
+            "capability_hint": str(snapshot.get("capability_hint") or "").strip(),
+            "intimacy_score": float(snapshot.get("intimacy_score") or 0.0),
+            "bond_vector": vector,
+            "bond_summary": dict(snapshot.get("bond_summary") or {}),
+        }
+
     # ── TribeEventBus 订阅注册（Phase 4）────────────────────────────────────
 
     def register_subscriptions(self) -> None:
@@ -202,6 +289,7 @@ class SocialBrainAgent:
             # T-31：订阅关系进展/退步事件，更新 bond_summary 快照
             bus.subscribe("BOND_PROGRESS", self._on_bond_progress_snapshot)
             bus.subscribe("BOND_REGRESS", self._on_bond_regress_snapshot)
+            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed)
             # T-48：订阅任务成功事件，影响 bond_trend 评估
             bus.subscribe("TASK_SUCCESS", self._on_task_success_bond)
             # T-60：订阅孤独感信号，孤独感影响 bond_trend 评估
@@ -210,6 +298,9 @@ class SocialBrainAgent:
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_bond)
             # T-91：订阅幽默成功事件，幽默成功时 bond_trend_hint 设为 progress
             bus.subscribe("HUMOR_LANDED", self._on_humor_landed_bond)
+            # P2-3：关系受损-修复闭环
+            bus.subscribe("BOND_RUPTURE_SIGNAL", self._on_bond_rupture_signal)
+            bus.subscribe("BOND_REPAIR_ACTION", self._on_bond_repair_action)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -327,6 +418,8 @@ class SocialBrainAgent:
                 prev_state,
                 writer="social_brain_agent",
             )
+            self._bond_stage = bond_stage.lower()
+            self._refresh_bond_vector(user_id=user_id)
             _log.debug(
                 "SocialBrainAgent 快照更新 BOND_PROGRESS: stage=%s intensity=%.2f",
                 bond_stage, intensity,
@@ -336,6 +429,16 @@ class SocialBrainAgent:
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent._on_bond_progress_snapshot 异常: %s", exc
             )
+
+    async def _on_bond_stage_changed(self, event: Any) -> None:
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            to_stage = str(payload.get("to_stage") or "STRANGER").strip().lower() or "stranger"
+            self._bond_stage = to_stage
+            self._touch_state(key="bond_stage", value=to_stage)
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
+        except Exception:
+            pass
 
     async def _on_bond_regress_snapshot(self, event: Any) -> None:
         """处理 BOND_REGRESS 事件：将关系退步写入 TribeStateRegistry 快照。
@@ -373,6 +476,8 @@ class SocialBrainAgent:
                 prev_state,
                 writer="social_brain_agent",
             )
+            self._bond_stage = bond_stage.lower()
+            self._refresh_bond_vector(user_id=user_id)
             _log.debug(
                 "SocialBrainAgent 快照更新 BOND_REGRESS: stage=%s intensity=%.2f",
                 bond_stage, intensity,
@@ -417,6 +522,7 @@ class SocialBrainAgent:
                 prev_state,
                 writer="social_brain_agent",
             )
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
             _log.debug(
                 "SocialBrainAgent TASK_SUCCESS 快照更新: session_id=%s intensity=%.2f",
                 session_id, intensity,
@@ -453,6 +559,7 @@ class SocialBrainAgent:
                 },
                 writer="social_brain_agent",
             )
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
             logging.getLogger("Natsume.tribe.social_brain_agent").debug(
                 "SocialBrainAgent LONELINESS_SIGNAL: hint=%s loneliness=%.2f", hint, loneliness,
             )
@@ -492,6 +599,7 @@ class SocialBrainAgent:
                 key="last_immune_block_ts_ms",
                 value=ts_ms,
             )
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
             _log.info(
                 "SocialBrainAgent IMMUNE_BLOCK: bond_trend_hint=regress_risk risk_level=%s score=%.3f",
                 risk_level, score,
@@ -510,6 +618,87 @@ class SocialBrainAgent:
             prev_state = dict(prev.get("state") or {})
             prev_state[key] = value
             self.state_registry.set_state("social_brain_agent", prev_state, writer="social_brain_agent")
+        except Exception:
+            pass
+
+    def _refresh_bond_vector(self, *, user_id: Any = None) -> None:
+        try:
+            resolved_user = str(user_id or "").strip() or None
+            vector = self.resolve_bond_vector(person_id=resolved_user)
+            self._touch_state(key="bond_vector", value=vector)
+            emit_tribe_event(
+                event_type="BOND_VECTOR_UPDATED",
+                source_agent="social_brain_agent",
+                payload={
+                    "user_id": resolved_user,
+                    "bond_stage": vector.get("bond_stage"),
+                    "bond_vector": vector,
+                },
+            )
+        except Exception:
+            pass
+
+    def resolve_relationship_repair_state(self, *, person_id: str | None = None) -> dict[str, Any]:
+        snap = self.state_registry.get_state("social_brain_agent") or {}
+        state = dict(snap.get("state") or {})
+        repair_state = dict(state.get("relationship_repair") or {})
+        return {
+            "person_id": str(person_id or "").strip() or None,
+            "rupture_load": max(0.0, min(1.0, float(repair_state.get("rupture_load") or 0.0))),
+            "repair_progress": max(0.0, min(1.0, float(repair_state.get("repair_progress") or 0.0))),
+            "last_rupture_ts_ms": int(repair_state.get("last_rupture_ts_ms") or 0),
+            "last_repair_ts_ms": int(repair_state.get("last_repair_ts_ms") or 0),
+        }
+
+    async def _on_bond_rupture_signal(self, event: Any) -> None:
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            severity = max(0.0, min(1.0, float(payload.get("severity") or payload.get("intensity") or 0.4)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            state = dict(prev.get("state") or {})
+            repair_state = dict(state.get("relationship_repair") or {})
+            rupture_load = max(0.0, min(1.0, float(repair_state.get("rupture_load") or 0.0) + severity * 0.55))
+            repair_progress = max(0.0, min(1.0, float(repair_state.get("repair_progress") or 0.0) - severity * 0.35))
+            repair_state.update(
+                {
+                    "rupture_load": round(rupture_load, 4),
+                    "repair_progress": round(repair_progress, 4),
+                    "last_rupture_ts_ms": ts_ms,
+                    "last_rupture_reason": str(payload.get("reason") or "").strip() or None,
+                }
+            )
+            state["relationship_repair"] = repair_state
+            state["bond_trend_hint"] = "regress_risk"
+            state["bond_trend_hint_ts_ms"] = ts_ms
+            self.state_registry.set_state("social_brain_agent", state, writer="social_brain_agent")
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
+        except Exception:
+            pass
+
+    async def _on_bond_repair_action(self, event: Any) -> None:
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            effort = max(0.0, min(1.0, float(payload.get("effort") or payload.get("intensity") or 0.4)))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            prev = self.state_registry.get_state("social_brain_agent") or {}
+            state = dict(prev.get("state") or {})
+            repair_state = dict(state.get("relationship_repair") or {})
+            rupture_load = max(0.0, min(1.0, float(repair_state.get("rupture_load") or 0.0) - effort * 0.45))
+            repair_progress = max(0.0, min(1.0, float(repair_state.get("repair_progress") or 0.0) + effort * 0.62))
+            repair_state.update(
+                {
+                    "rupture_load": round(rupture_load, 4),
+                    "repair_progress": round(repair_progress, 4),
+                    "last_repair_ts_ms": ts_ms,
+                    "last_repair_action": str(payload.get("action") or "").strip() or None,
+                }
+            )
+            state["relationship_repair"] = repair_state
+            state["bond_trend_hint"] = "progress" if effort >= 0.4 else str(state.get("bond_trend_hint") or "")
+            state["bond_trend_hint_ts_ms"] = ts_ms
+            self.state_registry.set_state("social_brain_agent", state, writer="social_brain_agent")
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
         except Exception:
             pass
 
@@ -668,6 +857,7 @@ class SocialBrainAgent:
                 },
             })
             self.state_registry.set_state("social_brain_agent", prev_state, writer="social_brain_agent")
+            self._refresh_bond_vector(user_id=payload.get("user_id"))
             logging.getLogger("Natsume.tribe.social_brain_agent").debug(
                 "SocialBrainAgent HUMOR_LANDED: bond_trend_hint=progress intensity=%.2f", intensity,
             )
@@ -722,28 +912,43 @@ class SocialBrainAgent:
                 first_interaction_ts_ms=int(first_interaction_ts_ms) if first_interaction_ts_ms is not None else None,
             )
             slot = result.to_prompt_slot() if hasattr(result, "to_prompt_slot") else {}
-            slot["status"] = "OK"
-            slot["bond_stage"] = resolved_stage
+            slot_payload = dict(slot) if isinstance(slot, dict) else {}
+            slot_payload["status"] = "OK"
+            slot_payload["bond_stage"] = resolved_stage
+            payload = {
+                "status": "OK",
+                "user_id": str(user_id or "user_1").strip() or "user_1",
+                "bond_stage": resolved_stage,
+                "prompt_slot": slot_payload,
+                "narrative_count": len(slot_payload.get("narrative_items") or []),
+            }
+            # 兼容旧调用方：保留扁平键访问
+            payload.update(slot_payload)
             self._touch_state(
                 key="last_bond_narrative",
                 value={
                     "user_id": str(user_id or "user_1"),
                     "bond_stage": resolved_stage,
-                    "narrative_count": len(slot.get("narrative_items") or []),
+                    "narrative_count": len(slot_payload.get("narrative_items") or []),
                 },
             )
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").debug(
                 "SocialBrainAgent.resolve_bond_narrative: user=%s stage=%s items=%d",
-                user_id, resolved_stage, len(slot.get("narrative_items") or []),
+                user_id, resolved_stage, len(slot_payload.get("narrative_items") or []),
             )
-            return slot
+            return payload
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
                 "SocialBrainAgent.resolve_bond_narrative 失败（降级）: %s", exc
             )
-            return {"status": "ERROR", "user_id": str(user_id or "user_1"), "error": str(exc)}
+            return {
+                "status": "ERROR",
+                "user_id": str(user_id or "user_1"),
+                "prompt_slot": {},
+                "error": str(exc),
+            }
 
     # ── T-151：shared_memory_index 族化入口 ──────────────────────────────────
 

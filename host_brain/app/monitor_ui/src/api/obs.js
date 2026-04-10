@@ -29,7 +29,7 @@ function timeRangeToMinutes(range) {
 
 // ===== Overview =====
 
-/** 聚合双端所有服务健康状态 */
+/** 聚合双端所有器官健康状态 */
 export function fetchServicesHealth(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
@@ -945,12 +945,12 @@ export function fetchSkillsHubStats() {
 
 // ===== 存在状态 / sys_mode 管理 =====
 
-/** 获取当前存在状态轴状态 */
+/** 获取当前生命体存在态轴状态 */
 export function fetchSysModeStatus() {
   return request('/obs/sys-mode')
 }
 
-/** 获取统一数字生命 runtime snapshot */
+/** 获取统一数字生命体 runtime snapshot */
 export function fetchDigitalLifeRuntimeSnapshot(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
@@ -958,7 +958,7 @@ export function fetchDigitalLifeRuntimeSnapshot(params = {}) {
   return request(`/obs/runtime-snapshot${qs ? '?' + qs : ''}`)
 }
 
-/** 切换当前存在状态轴 */
+/** 切换当前生命体存在态轴 */
 export function switchSysMode(body) {
   return request('/obs/sys-mode', {
     method: 'POST',

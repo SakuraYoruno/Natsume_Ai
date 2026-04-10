@@ -5,7 +5,7 @@ export const MODE_META = {
     emoji: '🟢',
     label: '正常',
     desc: '全功能在线',
-    semantic: '数字生命完整在线，允许主动对话、记忆更新与情绪表达。',
+    semantic: '数字生命体完整在线，允许主动对话、记忆更新与情绪表达。',
     scheduler: 'HIGH + MEDIUM + LOW',
     behaviorSummary: '全部子系统可按需参与。',
     highlights: ['主动对话正常触发', '记忆、情感、VTS 按需工作', '夜间与日记任务保持调度'],
@@ -116,9 +116,11 @@ export const RECONNECT_STYLE_LABELS = {
 export const SLOT_LABELS = {
   persona_user_id: '用户身份',
   hard_state: '硬状态',
-  sys_mode_status: '存在状态轴',
+  sys_mode_status: '生命体存在态轴',
   activity_monitor: '活动感知',
   emotion_context: '情绪上下文',
+  endocrine_state: '内分泌状态',
+  immune_state: '免疫状态',
   bond_state: '关系状态',
   inner_world_state: '内在世界',
   offline_state: '离线状态',
@@ -129,6 +131,21 @@ export const SLOT_LABELS = {
   bond_narrative: '关系叙事',
   motive_state: '动机系统',
   response_policy: '回复策略',
+  somatic_state: '躯体状态',
+  peripheral_state: '外周状态',
+  circadian_state: '昼夜节律',
+  proprioception_state: '本体感觉',
+  initiative_decision: '主动门禁',
+  default_mode_state: '默认模式',
+  mirror_neuron_state: '镜像神经元',
+  memory_layers: '记忆分层',
+  language_dual_system: '语言双系统',
+  homeostasis_report: '稳态报告',
+  interoception_state: '内感受',
+  motor_cortex_state: '运动皮层',
+  cerebellum_state: '小脑校正',
+  glymphatic_state: '恢复清除',
+  vestibular_state: '前庭平衡',
 }
 
 export const SLOT_STATUS_LABELS = {
@@ -174,7 +191,7 @@ export const ALLOWED_STYLE_LABELS = {
 }
 
 export const ALERT_TITLES = {
-  RUNTIME_MODE_DEGRADED: '存在状态轴降级',
+  RUNTIME_MODE_DEGRADED: '生命体存在态轴降级',
   RUNTIME_SNAPSHOT_DEGRADED: '运行快照存在缺口',
   RUNTIME_SLOT_NOT_LIVE: '关键槽位未在线',
   REFLECTION_GUARD_ACTIVE: '自我反思护栏生效',
@@ -184,6 +201,13 @@ export const ALERT_TITLES = {
   PROMPT_HIGH_RISK_BUILD: '检测到高风险 Prompt 构建',
   SERVICE_DEGRADED: '服务降级',
   SERVICE_DOWN: '服务离线',
+  BACKGROUND_RUNTIME_NOT_ADVANCING: '后台推进异常',
+  BACKGROUND_CORE_TICK_MISSING: '后台核心任务缺失',
+  BACKGROUND_PERSONA_MISMATCH: '后台人格对齐异常',
+  INTEROCEPTION_OVERLOAD: '内感受负载过高',
+  VESTIBULAR_INSTABILITY: '前庭平衡不稳',
+  MOTOR_DISPATCH_DEGRADED: '动作分发降级',
+  HOMEOSTASIS_WARNING: '稳态风险上升',
 }
 
 export const EMOTION_TAG_LABELS = {

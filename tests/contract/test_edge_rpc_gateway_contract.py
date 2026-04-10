@@ -1,9 +1,11 @@
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+from edge_client.actuators.vts_driver import VtsDriverResult, VtsState
 from edge_client.app.fastapi_app import create_edge_fastapi_app
 from edge_client.config import load_edge_config
 from edge_client.rpc.auth import build_edge_rpc_signature
@@ -12,6 +14,7 @@ from host_brain.core.errors import (
     EDGE_RPC_AUTH_INVALID,
     EDGE_RPC_SCHEMA_INVALID,
     SERVICE_UNAVAILABLE_DEPENDENCY,
+    VTS_EXPRESSION_TIMEOUT,
 )
 
 try:
@@ -124,6 +127,53 @@ class TestEdgeRpcGatewayContract(unittest.TestCase):
         self.assertFalse(body["success"])
         self.assertEqual("REJECTED", body["status"])
         self.assertEqual(SERVICE_UNAVAILABLE_DEPENDENCY, body["reason_code"])
+
+    def test_t_edge_rpc_02_vts_timeout_degrades_to_accepted(self) -> None:
+        client = self._build_client()
+        runtime = client.app.state.edge_runtime
+        self.assertIsNotNone(runtime.vts_driver)
+        runtime.vts_driver._state = VtsState.AUTHENTICATED
+        runtime.vts_driver._vts = object()
+
+        timeout_result = VtsDriverResult(
+            success=False,
+            reason_code=VTS_EXPRESSION_TIMEOUT,
+            detail="expression timeout: simulated",
+            action="set_expression",
+            expression_id="exp_neutral_01",
+            emotion_tag="NEUTRAL",
+        )
+        runtime.vts_driver.set_expression = MagicMock(return_value=timeout_result)
+        runtime.vts_driver.trigger_reconnect = MagicMock(return_value=VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="reconnect started",
+            action="trigger_reconnect",
+        ))
+
+        payload = _build_signed_envelope(
+            {
+                "request_id": "req-edge-vts-timeout-001",
+                "ts_ms": 1_800_101_000_000,
+                "nonce": "nonce-edge-vts-timeout-001",
+                "payload": {
+                    "action": "set_expression",
+                    "emotion_tag": "NEUTRAL",
+                },
+            },
+            shared_key="edge-shared-key",
+        )
+
+        response = client.post("/v1/edge/vts", json=payload)
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+
+        self.assertTrue(body["success"])
+        self.assertEqual("ACCEPTED", body["status"])
+        self.assertEqual(VTS_EXPRESSION_TIMEOUT, body["reason_code"])
+        self.assertEqual("set_expression", body["event"]["action"])
+        self.assertTrue(body["event"]["degraded"])
+        runtime.vts_driver.trigger_reconnect.assert_called_once()
 
 
 if __name__ == "__main__":

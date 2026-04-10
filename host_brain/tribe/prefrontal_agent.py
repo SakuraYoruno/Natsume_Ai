@@ -5,7 +5,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.events import emit_tribe_event
+from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 _logger = logging.getLogger("Natsume.prefrontal_agent")
 
@@ -16,7 +19,7 @@ class PrefrontalAgent:
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="prefrontal_agent",
             family="prefrontal",
-            capabilities=("self_reflection", "drift_guard", "evolution"),
+            capabilities=("self_reflection", "drift_guard", "evolution", "autobiographical_gate"),
         )
     )
     _drift_detector: Any | None = field(default=None, init=False, repr=False)
@@ -26,6 +29,7 @@ class PrefrontalAgent:
     _bond_style_engine: Any | None = field(default=None, init=False, repr=False)
     _self_reflection: Any | None = field(default=None, init=False, repr=False)
     _emergent_growth_engine: Any | None = field(default=None, init=False, repr=False)
+    state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -458,6 +462,110 @@ class PrefrontalAgent:
             "applied": bool(getattr(growth_result, "applied", False)),
             "triggered_rules": list(getattr(growth_result, "triggered_rules", []) or []),
         }
+
+    def evaluate_autobiographical_memory_gate(
+        self,
+        *,
+        persona_user_id: str,
+        narrative: str,
+        source_agent: str = "default_mode_agent",
+        context: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+
+        user_id = str(persona_user_id or "user_1").strip() or "user_1"
+        narrative_text = str(narrative or "").strip()
+        ctx = dict(context or {})
+        trace_id = f"autobio_gate_{now_ms()}"
+        registry = get_global_registry()
+        vitals = registry.aggregate_vital_signs()
+        gate_state = str(vitals.get("gate_state") or "open").strip().lower()
+        immune_risk = str(vitals.get("immune_risk_level") or "none").strip().lower()
+        stress_index = float(vitals.get("stress_index") or 0.0)
+        bond_ctx = get_social_brain_agent().get_bond_context(
+            session_id=str(ctx.get("session_id") or "default"),
+            user_id=user_id,
+        )
+        bond_vector = dict(bond_ctx.get("bond_vector") or {})
+        trust = float(bond_vector.get("trust") or 0.4)
+        repair_confidence = float(bond_vector.get("repair_confidence") or 0.5)
+
+        decision = "ALLOW"
+        reason_code = "PASS"
+        if gate_state == "pause":
+            decision, reason_code = "BLOCK", "ENDOCRINE_GATE_PAUSE"
+        elif immune_risk in {"high", "critical"}:
+            decision, reason_code = "BLOCK", "IMMUNE_RISK_HIGH"
+        elif stress_index > 0.78:
+            decision, reason_code = "DEFER", "HIGH_STRESS"
+        elif len(narrative_text) > 80 and trust < 0.32:
+            decision, reason_code = "DEFER", "LOW_TRUST_LONG_NARRATIVE"
+        elif repair_confidence < 0.25 and len(narrative_text) > 40:
+            decision, reason_code = "DEFER", "REPAIR_CONFIDENCE_LOW"
+        elif not narrative_text:
+            decision, reason_code = "BLOCK", "EMPTY_NARRATIVE"
+
+        payload = {
+            "trace_id": trace_id,
+            "user_id": user_id,
+            "source_agent": str(source_agent or "default_mode_agent"),
+            "decision": decision,
+            "reason_code": reason_code,
+            "narrative_chars": len(narrative_text),
+            "gate_state": gate_state,
+            "immune_risk_level": immune_risk,
+            "stress_index": round(stress_index, 4),
+            "bond_vector": {
+                "trust": round(trust, 4),
+                "repair_confidence": round(repair_confidence, 4),
+            },
+            "ts_ms": now_ms(),
+        }
+        self.state_registry.write(
+            namespace="prefrontal_agent",
+            state={"last_autobiographical_gate": payload},
+            writer="prefrontal_agent",
+            merge=True,
+            reason="autobiographical_gate_decision",
+            decision_trace_id=trace_id,
+        )
+        try:
+            emit_tribe_event(
+                event_type="AUTOBIOGRAPHICAL_GATE_DECISION",
+                source_agent="prefrontal_agent",
+                payload=payload,
+            )
+        except Exception:
+            pass
+        return payload
+
+    def commit_autobiographical_memory(
+        self,
+        *,
+        persona_user_id: str,
+        narrative: str,
+        source_agent: str = "default_mode_agent",
+        context: Mapping[str, Any] | None = None,
+        request_id: str = "",
+    ) -> dict[str, Any]:
+        from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+
+        gate = self.evaluate_autobiographical_memory_gate(
+            persona_user_id=persona_user_id,
+            narrative=narrative,
+            source_agent=source_agent,
+            context=context,
+        )
+        if str(gate.get("decision") or "").upper() != "ALLOW":
+            return {"status": "BLOCKED", "gate": gate}
+        write_result = get_hippocampus_agent().write_autobiographical_memory(
+            person_id=str(persona_user_id or "user_1"),
+            narrative=str(narrative or ""),
+            gate_result=gate,
+            request_id=request_id,
+        )
+        return {"status": "OK", "gate": gate, "write_result": write_result}
 
     def apply_stage_promotion_growth(
         self,

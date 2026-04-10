@@ -206,7 +206,7 @@ export default function PromptConfig() {
 
       <PageHero
         icon={FileText}
-        eyebrow="数字生命提示运营台"
+        eyebrow="数字生命体提示运营台"
         title={summary.total}
         description="当前模板池覆盖主链路提示词、守卫型兜底与部分可运营文案。"
         gradientClass="from-primary-50 via-white to-indigo-50"

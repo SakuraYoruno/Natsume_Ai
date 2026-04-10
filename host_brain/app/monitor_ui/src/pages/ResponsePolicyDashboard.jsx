@@ -14,6 +14,7 @@ import KeyValueRow from '../components/KeyValueRow.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
+import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import useAppStore from '../store/useAppStore.js'
 import {
@@ -115,6 +116,8 @@ export default function ResponsePolicyDashboard() {
       />
 
       {error ? <NoticeBanner variant="error" title="回复策略加载失败">{error}</NoticeBanner> : null}
+
+      {runtimeSnapshot ? <VitalLoopSummaryPanel runtimeSnapshot={runtimeSnapshot} compact showDetailLink={false} /> : null}
 
       {!runtimeSnapshot && !loading && !error ? (
         <EmptyStateCard

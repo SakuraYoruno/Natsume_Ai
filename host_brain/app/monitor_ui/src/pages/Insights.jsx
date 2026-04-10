@@ -9,6 +9,7 @@ import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import InsightChartCard from '../components/insights/InsightChartCard.jsx'
 import InsightSection from '../components/insights/InsightSection.jsx'
 import MetricCard from '../components/MetricCard.jsx'
+import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
@@ -96,9 +97,9 @@ const WINDOW_OPTIONS = [
 ]
 
 const INSIGHT_GROUPS = [
-  { id: 'global', title: '全局与错误', icon: AlertTriangle, desc: '入口守护决策、全局错误追踪、热力图、请求链路统计、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
-  { id: 'memory', title: '子系统与记忆', icon: Database, desc: '子系统健康、记忆统计、情景写入、上下文压缩', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
-  { id: 'llm', title: '多代理与推理', icon: Bot, desc: '自动化循环、模型成本、路由决策、提示构建、召回包', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
+  { id: 'global', title: '全局与异常', icon: AlertTriangle, desc: '入口守护决策、全局异常追踪、热力图、请求链路统计、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
+  { id: 'memory', title: '器官与记忆', icon: Database, desc: '器官健康、记忆统计、情景写入、上下文压缩', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
+  { id: 'llm', title: '执行与推理', icon: Bot, desc: '执行循环、模型成本、路由决策、提示构建、召回包', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
   { id: 'safety', title: '安全与护栏', icon: ShieldCheck, desc: '质检违规、权限拒绝、规则校验、界面断言安全', color: 'text-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-100', iconBg: 'bg-emerald-100' },
   { id: 'state', title: '状态与规范', icon: GitMerge, desc: '关系查询统计、主设定提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
   { id: 'vts', title: '表情通道', icon: Tv, desc: '表情通道统计', color: 'text-pink-700', bg: 'bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-100', iconBg: 'bg-pink-100' },
@@ -136,6 +137,44 @@ export default function Insights() {
     pollingInterval,
     windowMinutes,
   })
+  const insightPulseNodes = [
+    {
+      label: '窗口',
+      value: `${windowMinutes}m`,
+      tone: 'primary',
+      active: true,
+    },
+    {
+      label: '全局异常',
+      value: String(errData?.total_errors ?? 0),
+      tone: 'rose',
+      active: (errData?.total_errors ?? 0) > 0,
+    },
+    {
+      label: '记忆器官',
+      value: String(memoryData?.subsystems?.length ?? 0),
+      tone: 'teal',
+      active: Boolean(memoryData?.subsystems?.length),
+    },
+    {
+      label: '执行循环',
+      value: String(agentData?.total_loops ?? 0),
+      tone: 'violet',
+      active: (agentData?.total_loops ?? 0) > 0,
+    },
+    {
+      label: '表情通道',
+      value: String(vtsData?.total_events ?? 0),
+      tone: 'pink',
+      active: (vtsData?.total_events ?? 0) > 0,
+    },
+    {
+      label: '模型呼吸',
+      value: String(llmCallData?.total_calls ?? 0),
+      tone: 'amber',
+      active: (llmCallData?.total_calls ?? 0) > 0,
+    },
+  ]
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -178,8 +217,8 @@ export default function Insights() {
     <div className="space-y-8">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">监控洞察</h1>
-          <p className="mt-0.5 text-sm text-gray-500">把全链路监控、记忆链路、多代理推理与数字生命状态收敛到同一套观测面。</p>
+          <h1 className="text-xl font-semibold text-gray-900">皮层洞察</h1>
+          <p className="mt-0.5 text-sm text-gray-500">把神经链路、记忆链路、执行推理与生命体运行状态收敛到同一套洞察面。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -194,11 +233,11 @@ export default function Insights() {
 
       <PageHero
         icon={currentGroupMeta?.icon || Activity}
-        eyebrow={isRoot ? '数字生命综合洞察' : `${currentGroupMeta?.title || '监控分组'} 深度洞察`}
-        title={isRoot ? '全链路观测面板' : currentGroupMeta?.title || '监控分组'}
+        eyebrow={isRoot ? '数字生命体综合洞察' : `${currentGroupMeta?.title || '器官分组'} 深度洞察`}
+        title={isRoot ? '数字生命体器官级洞察面板' : currentGroupMeta?.title || '器官分组'}
         description={
           isRoot
-            ? '从全局错误、记忆系统、安全守卫到 VTS 通道，先看总览，再按分组继续下钻。'
+            ? '从全局异常、记忆器官、安全守卫到 VTS 通道，先看总览，再按分组继续下钻。'
             : currentGroupMeta?.desc || '查看该分组下的详细指标、图表与最近事件。'
         }
         gradientClass="from-amber-50 via-white to-sky-50"
@@ -210,6 +249,14 @@ export default function Insights() {
           `VTS 事件：${vtsData?.total_events ?? 0}`,
         ]}
       />
+
+      {isRoot ? (
+        <LivingPulseStrip
+          title="器官脉冲"
+          subtitle="先看全局生命节律，再下钻到各个器官分区。"
+          nodes={insightPulseNodes}
+        />
+      ) : null}
 
       {error && <NoticeBanner variant="error">加载失败：{error}</NoticeBanner>}
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptBuilderData} compact={!isRoot} />
@@ -355,8 +402,8 @@ export default function Insights() {
 
           {currentGroup === 'memory' && (
             <>
-              {/* ===== P2: 子系统健康矩阵 ===== */}
-      <InsightSection icon={Cpu} title="子系统健康矩阵" color="text-purple-600">
+              {/* ===== P2: 器官健康矩阵 ===== */}
+      <InsightSection icon={Cpu} title="器官健康矩阵" color="text-purple-600">
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {(subsysData?.subsystems ?? []).map((s) => (
             <div
@@ -383,12 +430,12 @@ export default function Insights() {
             </div>
           ))}
           {(subsysData?.subsystems ?? []).length === 0 && (
-            <EmptyStateCard title="暂无子系统数据" hint="当前窗口未采集到子系统健康样本。" className="col-span-full" />
+            <EmptyStateCard title="暂无器官数据" hint="当前窗口未采集到器官健康样本。" className="col-span-full" />
           )}
         </div>
       </InsightSection>
               {/* ===== Ref #32: Memory 子系统统计 ===== */}
-      <InsightSection icon={Database} title="记忆子系统统计" color="text-teal-600">
+      <InsightSection icon={Database} title="记忆器官统计" color="text-teal-600">
         {/* 聚合指标卡片 */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard
@@ -455,7 +502,7 @@ export default function Insights() {
           {currentGroup === 'llm' && (
             <>
               {/* ===== P3: Agent Loop 统计 ===== */}
-      <InsightSection icon={Bot} title="自动化循环统计" color="text-indigo-600">
+      <InsightSection icon={Bot} title="执行循环统计" color="text-indigo-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard label="总执行次数"  value={agentData?.total_loops} />
           <StatCard label="目标达成"    value={agentData?.achieved}    color="text-green-600" />
@@ -508,11 +555,11 @@ export default function Insights() {
           </div>
         )}
       {(agentData?.total_loops ?? 0) === 0 && (
-          <EmptyStateCard title="暂无自动化循环执行记录" hint="待有会话执行后展示统计明细。" icon={Bot} />
+          <EmptyStateCard title="暂无执行循环记录" hint="待有会话执行后展示统计明细。" icon={Bot} />
         )}
       </InsightSection>
               {/* ===== Ref #41: LLM 调用成本统计 ===== */}
-      <InsightSection icon={Zap} title="模型调用成本统计" color="text-amber-600">
+      <InsightSection icon={Zap} title="推理成本统计" color="text-amber-600">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
           <StatCard label="总调用次数" value={llmCallData?.total_calls ?? '—'} />
           <StatCard
@@ -1068,7 +1115,7 @@ function PermissionStatsSection({ windowMinutes }) {
         <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
         <StatCard label="允许次数" value={data?.allowed_count ?? '—'} color="text-green-600" />
         <StatCard label="拒绝次数" value={data?.denied_count ?? '—'} color="text-red-600" />
-        <StatCard label="调度器拒绝" value={data?.scheduler_denied_count ?? '—'} color="text-orange-500" />
+        <StatCard label="节律拒绝" value={data?.scheduler_denied_count ?? '—'} color="text-orange-500" />
       </div>
       {(data?.top_denied_tools ?? []).length > 0 && (
         <div className="card p-4">
@@ -1111,7 +1158,7 @@ function SchedulerGateStatsSection({ windowMinutes }) {
   )
 
   return (
-    <InsightSection icon={ShieldAlert} title="调度门控统计" color="text-amber-600">
+    <InsightSection icon={ShieldAlert} title="节律门控统计" color="text-amber-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="门控拦截" value={data?.gate_blocked_total ?? '—'} color="text-orange-500" />
         <StatCard
@@ -1119,8 +1166,8 @@ function SchedulerGateStatsSection({ windowMinutes }) {
           value={data?.gate_blocked_rate != null ? `${data.gate_blocked_rate}%` : '—'}
           color={(data?.gate_blocked_rate ?? 0) > 25 ? 'text-red-500' : 'text-green-600'}
         />
-        <StatCard label="运行中任务" value={data?.running_count ?? '—'} color="text-blue-600" />
-        <StatCard label="失败任务" value={data?.failed_count ?? '—'} color="text-red-600" />
+        <StatCard label="推进中任务" value={data?.running_count ?? '—'} color="text-blue-600" />
+        <StatCard label="异常任务" value={data?.failed_count ?? '—'} color="text-red-600" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <InsightChartCard
@@ -1154,12 +1201,12 @@ function SchedulerGateStatsSection({ windowMinutes }) {
       </div>
       <div className="mt-4 rounded-lg border border-amber-100 bg-amber-50/60 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-xs text-amber-800">需要任务级阻断明细时，可直接跳转自动化页继续下钻。</div>
+          <div className="text-xs text-amber-800">需要任务级阻断明细时，可直接跳转执行页继续下钻。</div>
           <button
             onClick={() => goAutomation()}
             className="rounded border border-amber-200 bg-white px-2.5 py-1 text-xs text-amber-700 hover:bg-amber-100"
           >
-            前往自动化页
+            前往执行页
           </button>
         </div>
         {(data?.blocked_reason_codes?.length ?? 0) > 0 ? (

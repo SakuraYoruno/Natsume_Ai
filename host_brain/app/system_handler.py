@@ -234,18 +234,12 @@ def _extract_edge_asr_bridge_candidate(
     }
 
 
-def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        _log_if_available(
-            logger,
-            "debug",
-            "edge event ASR bridge skipped: no running loop request_id=%s",
-            candidate.get("request_id"),
-        )
-        return
-
+def _schedule_edge_asr_bridge(
+    *,
+    candidate: Mapping[str, Any],
+    logger: Any,
+    inline_waiters: list[Any] | None = None,
+) -> None:
     request_id = str(candidate.get("request_id") or "").strip()
     session_id = str(candidate.get("session_id") or "").strip()
     text = str(candidate.get("text") or "").strip()
@@ -338,6 +332,22 @@ def _schedule_edge_asr_bridge(*, candidate: Mapping[str, Any], logger: Any) -> N
                 request_id,
                 exc,
             )
+
+    run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
+    if not run_in_thread and inline_waiters is not None:
+        inline_waiters.append(_dispatch())
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _log_if_available(
+            logger,
+            "debug",
+            "edge event ASR bridge skipped: no running loop request_id=%s",
+            candidate.get("request_id"),
+        )
+        return
 
     loop.create_task(_dispatch())
 
@@ -612,6 +622,7 @@ def receive_edge_events_response(
     request_body: EdgeEventsRequest,
     get_ledger: Callable[[], Any],
     logger: Any,
+    inline_waiters: list[Any] | None = None,
 ) -> EdgeEventsResponse:
     ts_ms = int(time.time() * 1000)
     raw_events = request_body.events
@@ -840,7 +851,14 @@ def receive_edge_events_response(
             logger.warning("edge event post-processing failed: %s", post_exc)
 
     for candidate in bridge_candidates:
-        _schedule_edge_asr_bridge(candidate=candidate, logger=logger)
+        if inline_waiters is None:
+            _schedule_edge_asr_bridge(candidate=candidate, logger=logger)
+        else:
+            _schedule_edge_asr_bridge(
+                candidate=candidate,
+                logger=logger,
+                inline_waiters=inline_waiters,
+            )
 
     rejected_count = len(rejected_indices)
     total = len(raw_events)

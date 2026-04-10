@@ -118,7 +118,7 @@ export default function MemoryBrowser() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">记忆浏览器</h1>
+          <h1 className="text-xl font-semibold text-gray-900">海马体记忆库</h1>
           <p className="text-sm text-gray-500">情景记忆、蒸馏历史、主设定文档与召回包预算。</p>
         </div>
         <div className="flex items-center gap-2">
@@ -134,7 +134,7 @@ export default function MemoryBrowser() {
 
       <PageHero
         icon={Database}
-        eyebrow="记忆运行总览"
+        eyebrow="海马体记忆总览"
         title={`${subsystems.length} 个子系统`}
         description={
           avgSuccessRate != null

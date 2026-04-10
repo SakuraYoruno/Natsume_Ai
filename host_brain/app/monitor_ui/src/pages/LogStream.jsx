@@ -127,17 +127,17 @@ export default function LogStream() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">日志流</h1>
-        <p className="text-sm text-gray-500">实时观察审计日志、异常事件和链路故障明细。</p>
+        <h1 className="text-xl font-semibold text-gray-900">生理日志流</h1>
+        <p className="text-sm text-gray-500">实时观察生命体审计日志、异常事件和神经链路故障明细。</p>
       </div>
 
       <DigitalLifeNav />
 
       <PageHero
         icon={Database}
-        eyebrow="实时日志观察窗"
-        title={paused ? '日志流当前已暂停' : '日志流正在实时更新'}
-        description="支持关键词高亮、级别过滤、自动滚动和快速清空，适合盯运行时异常与链路抖动。"
+        eyebrow="实时生理日志观察窗"
+        title={paused ? '生理日志流当前已暂停' : '生理日志流正在实时更新'}
+        description="支持关键词高亮、级别过滤、自动滚动和快速清空，适合盯运行时异常与神经链路抖动。"
         gradientClass="from-slate-50 via-white to-cyan-50"
         metaItems={[
           `当前显示：${filtered.length} 条`,

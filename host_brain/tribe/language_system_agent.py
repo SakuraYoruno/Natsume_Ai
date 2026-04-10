@@ -1,54 +1,211 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
-# ── 语言风格映射表 ────────────────────────────────────────────────────────────
-# bond_stage → 基础语言风格
 _BOND_STYLE_MAP: dict[str, str] = {
-    "stranger":   "formal",
-    "acquaint":   "neutral",
-    "friend":     "warm",
-    "close":      "intimate",
-    "partner":    "intimate",
+    "stranger": "formal",
+    "acquaint": "neutral",
+    "acquaintance": "neutral",
+    "friend": "warm",
+    "close_friend": "warm",
+    "close": "intimate",
+    "partner": "intimate",
+    "intimate": "intimate",
+    "soulmate": "intimate",
 }
 
-# emotion_tag → 语气修饰
 _EMOTION_TONE_MAP: dict[str, str] = {
-    "JOY":        "playful",
-    "HAPPY":      "cheerful",
-    "EXCITED":    "energetic",
-    "SAD":        "gentle",
-    "LONELY":     "caring",
-    "ANXIOUS":    "calm",
-    "ANGRY":      "measured",
-    "NEUTRAL":    "balanced",
+    "JOY": "playful",
+    "HAPPY": "cheerful",
+    "EXCITED": "energetic",
+    "SAD": "gentle",
+    "LONELY": "caring",
+    "ANXIOUS": "calm",
+    "ANGRY": "measured",
+    "FEAR": "grounded",
+    "NEUTRAL": "balanced",
 }
+
+_QUESTION_MARKERS = ("?", "？", "吗", "么", "嘛", "如何", "怎么", "为什么")
+_TASK_MARKERS = ("请", "帮我", "帮忙", "生成", "总结", "翻译", "分析", "写", "做", "整理")
+_EMOTIVE_MARKERS = ("难过", "开心", "生气", "焦虑", "孤独", "害怕", "委屈", "崩溃")
+
+
+def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
+    return max(low, min(high, float(value)))
 
 
 @dataclass(slots=True)
 class LanguageSystemAgent:
-    """T-103/T-104：语言系统 Agent。
+    """语言系统（理解侧 + 生成侧）。
 
-    负责根据当前 bond_stage / emotion_tag / loneliness_level 等状态，
-    动态生成语言风格建议（language_style），供 chat_context_builder 注入 prompt。
+    - Wernicke（理解侧）：意图分类、语义槽位抽取、语义压力估计
+    - Broca（生成侧）：语气/风格/句法输出计划
     """
 
     descriptor: TribeAgentDescriptor = field(
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="language_system_agent",
             family="language",
-            capabilities=("language_style", "tone_adapt", "register_shift"),
+            capabilities=("language_style", "wernicke_understand", "broca_generate"),
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    def wernicke_understand(
+        self,
+        *,
+        user_text: str,
+        emotion_tag: str = "NEUTRAL",
+        bond_stage: str = "stranger",
+    ) -> dict[str, Any]:
+        text = str(user_text or "").strip()
+        text_lower = text.lower()
+        emotion = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+        stage = str(bond_stage or "stranger").strip().lower() or "stranger"
+
+        is_question = any(marker in text for marker in _QUESTION_MARKERS)
+        is_task = any(marker in text for marker in _TASK_MARKERS)
+        is_emotive = any(marker in text for marker in _EMOTIVE_MARKERS) or emotion in {
+            "SAD",
+            "LONELY",
+            "ANXIOUS",
+            "ANGRY",
+            "FEAR",
+        }
+        if is_task:
+            intent_type = "task_request"
+        elif is_question:
+            intent_type = "question"
+        elif is_emotive:
+            intent_type = "emotional_disclosure"
+        else:
+            intent_type = "chat"
+
+        semantic_slots = {
+            "contains_question": is_question,
+            "contains_task_request": is_task,
+            "contains_emotive_signal": is_emotive,
+            "message_length": len(text),
+            "bond_stage": stage,
+        }
+        urgency = 0.2
+        if "!" in text or "！" in text:
+            urgency += 0.15
+        if any(x in text_lower for x in ("马上", "立刻", "紧急", "urgent", "asap")):
+            urgency += 0.35
+        if emotion in {"ANXIOUS", "ANGRY", "FEAR"}:
+            urgency += 0.2
+        emotional_pressure = 0.15 + (0.35 if is_emotive else 0.0) + (0.2 if emotion in {"SAD", "LONELY"} else 0.0)
+        understanding = {
+            "intent_type": intent_type,
+            "emotion_tag": emotion,
+            "semantic_slots": semantic_slots,
+            "urgency_score": round(_clamp(urgency), 4),
+            "emotional_pressure": round(_clamp(emotional_pressure), 4),
+            "confidence": round(_clamp(0.62 + (0.1 if is_task or is_question else 0.0)), 4),
+        }
+        return understanding
+
+    def broca_generate_plan(
+        self,
+        *,
+        understanding: Mapping[str, Any],
+        language_style: Mapping[str, Any] | None = None,
+        response_goal: str = "chat_reply",
+    ) -> dict[str, Any]:
+        parsed = dict(understanding or {})
+        style = dict(language_style or {})
+        intent_type = str(parsed.get("intent_type") or "chat")
+        urgency = float(parsed.get("urgency_score") or 0.0)
+        emotional_pressure = float(parsed.get("emotional_pressure") or 0.0)
+
+        response_mode = "normal"
+        if intent_type == "task_request":
+            response_mode = "structured"
+        elif intent_type == "emotional_disclosure":
+            response_mode = "supportive"
+        elif intent_type == "question":
+            response_mode = "direct_answer"
+
+        sentence_count = 2
+        if response_mode == "structured":
+            sentence_count = 3
+        elif response_mode == "supportive":
+            sentence_count = 2 if emotional_pressure < 0.7 else 3
+        if urgency >= 0.65:
+            sentence_count = max(1, sentence_count - 1)
+
+        warmth = _clamp(0.45 + (0.22 if response_mode == "supportive" else 0.0) + emotional_pressure * 0.18)
+        precision = _clamp(0.55 + (0.20 if response_mode in {"structured", "direct_answer"} else 0.0))
+        plan = {
+            "response_goal": str(response_goal or "chat_reply"),
+            "response_mode": response_mode,
+            "tone": str(style.get("tone") or "balanced"),
+            "register": str(style.get("register") or "standard"),
+            "style": str(style.get("style") or "neutral"),
+            "target_sentence_count": sentence_count,
+            "target_max_chars": 220 if response_mode == "structured" else 160,
+            "warmth_weight": round(warmth, 4),
+            "precision_weight": round(precision, 4),
+            "avoid_patterns": ["机械复述", "过度说教"] if response_mode == "supportive" else [],
+        }
+        return plan
+
+    def resolve_dual_system(
+        self,
+        *,
+        user_text: str,
+        bond_stage: str = "stranger",
+        emotion_tag: str = "NEUTRAL",
+        loneliness_level: float = 0.0,
+        high_loneliness_flag: bool = False,
+        response_goal: str = "chat_reply",
+    ) -> dict[str, Any]:
+        style = self.get_language_style(
+            bond_stage=bond_stage,
+            emotion_tag=emotion_tag,
+            loneliness_level=loneliness_level,
+            high_loneliness_flag=high_loneliness_flag,
+            user_text=None,
+        )
+        wernicke = self.wernicke_understand(
+            user_text=user_text,
+            emotion_tag=emotion_tag,
+            bond_stage=bond_stage,
+        )
+        broca = self.broca_generate_plan(
+            understanding=wernicke,
+            language_style=style,
+            response_goal=response_goal,
+        )
+        payload = {
+            "wernicke": wernicke,
+            "broca": broca,
+            "style": style,
+        }
+        try:
+            self.state_registry.set_state(
+                "language_system_agent",
+                {
+                    "last_wernicke": wernicke,
+                    "last_broca": broca,
+                    "last_language_style": style,
+                    "last_dual_system": payload,
+                },
+                writer="language_system_agent",
+            )
+        except Exception:
+            pass
+        return payload
 
     def get_language_style(
         self,
@@ -57,36 +214,33 @@ class LanguageSystemAgent:
         emotion_tag: str = "NEUTRAL",
         loneliness_level: float = 0.0,
         high_loneliness_flag: bool = False,
+        user_text: str | None = None,
+        response_goal: str = "chat_reply",
     ) -> dict[str, Any]:
-        """T-104：根据 bond_stage / emotion_tag / loneliness_level 返回语言风格建议。
-
-        返回字段：
-            style (str): "formal" | "neutral" | "warm" | "intimate"
-            tone (str): "balanced" | "gentle" | "playful" | "caring" | ...
-            register (str): "standard" | "casual" | "affectionate"
-            loneliness_hint (str): 高孤独感时的陪伴感提示
-        """
         stage = str(bond_stage or "stranger").strip().lower()
         etag = str(emotion_tag or "NEUTRAL").strip().upper()
 
         style = _BOND_STYLE_MAP.get(stage, "neutral")
         tone = _EMOTION_TONE_MAP.get(etag, "balanced")
 
-        # 高孤独感时强制升温
         if high_loneliness_flag or loneliness_level > 0.7:
-            if style in ("formal", "neutral"):
+            if style in {"formal", "neutral"}:
                 style = "warm"
             tone = "caring"
 
-        # register 由 style 推导
-        register_map = {"formal": "standard", "neutral": "standard", "warm": "casual", "intimate": "affectionate"}
+        register_map = {
+            "formal": "standard",
+            "neutral": "standard",
+            "warm": "casual",
+            "intimate": "affectionate",
+        }
         register = register_map.get(style, "standard")
 
         loneliness_hint = ""
         if high_loneliness_flag or loneliness_level > 0.7:
-            loneliness_hint = "用户当前孤独感较高，请在回复中增加陪伴感和温暖表达，避免冷漠或简短的回应。"
+            loneliness_hint = "用户孤独感较高，回复要显式增加陪伴感与连接感。"
         elif loneliness_level > 0.4:
-            loneliness_hint = "用户当前有轻微孤独感，可适当增加关怀语气。"
+            loneliness_hint = "可适当增加关怀语气，避免冰冷信息化表达。"
 
         result = {
             "style": style,
@@ -96,27 +250,28 @@ class LanguageSystemAgent:
             "bond_stage": stage,
             "emotion_tag": etag,
         }
-        # 写入快照供诊断
-        try:
-            self.state_registry.set_state(
-                "language_system_agent",
-                {"last_language_style": result},
-                writer="language_system_agent",
+        if user_text is not None:
+            dual = self.resolve_dual_system(
+                user_text=str(user_text or ""),
+                bond_stage=stage,
+                emotion_tag=etag,
+                loneliness_level=loneliness_level,
+                high_loneliness_flag=high_loneliness_flag,
+                response_goal=response_goal,
             )
-        except Exception:
-            pass
+            result["dual_system"] = dual
+        else:
+            try:
+                self.state_registry.set_state(
+                    "language_system_agent",
+                    {"last_language_style": result},
+                    writer="language_system_agent",
+                )
+            except Exception:
+                pass
         return result
 
-    # ── T-103：TribeEventBus 订阅注册 ────────────────────────────────────────
-
     def register_subscriptions(self) -> None:
-        """T-103：向 TribeEventBus 注册事件订阅。
-
-        订阅：
-        - EMOTION_STATE_CHANGED：情绪变化时更新语言风格快照
-        - BOND_STAGE_CHANGED：关系阶段跃迁时更新语言风格快照
-        - LONELINESS_SIGNAL：孤独感信号时更新 loneliness_hint
-        """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
 
@@ -124,18 +279,13 @@ class LanguageSystemAgent:
             bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed)
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.language_system_agent").warning(
-                "LanguageSystemAgent 订阅注册失败（降级）: %s", exc
-            )
+        except Exception:
+            pass
 
     async def _on_emotion_state_changed(self, event: Any) -> None:
-        """处理 EMOTION_STATE_CHANGED：情绪变化时刷新语言风格快照。"""
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
-            # 读取当前 bond_stage
             prev = self.state_registry.get_state("language_system_agent") or {}
             prev_state = dict(prev.get("state") or {})
             last_style = dict(prev_state.get("last_language_style") or {})
@@ -145,7 +295,6 @@ class LanguageSystemAgent:
             pass
 
     async def _on_bond_stage_changed(self, event: Any) -> None:
-        """处理 BOND_STAGE_CHANGED：关系阶段跃迁时刷新语言风格快照。"""
         try:
             payload = dict(getattr(event, "payload", None) or {})
             bond_stage = str(payload.get("new_stage") or payload.get("bond_stage") or "stranger").strip().lower()
@@ -158,10 +307,9 @@ class LanguageSystemAgent:
             pass
 
     async def _on_loneliness_signal(self, event: Any) -> None:
-        """处理 LONELINESS_SIGNAL：孤独感信号时刷新 loneliness_hint。"""
         try:
             payload = dict(getattr(event, "payload", None) or {})
-            loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
+            loneliness = _clamp(float(payload.get("loneliness") or 0.0))
             bond_stage = str(payload.get("bond_stage") or "stranger").strip().lower()
             prev = self.state_registry.get_state("language_system_agent") or {}
             prev_state = dict(prev.get("state") or {})

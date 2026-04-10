@@ -338,7 +338,7 @@ export default function Bond() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">关系状态</h1>
+          <h1 className="text-xl font-semibold text-gray-900">社交脑</h1>
           <p className="text-sm text-gray-500">查看关系阶段、趋势、用户详情与事件补录入口。</p>
         </div>
         <button className="btn-secondary" onClick={load} disabled={loading}>
@@ -351,12 +351,12 @@ export default function Bond() {
 
       <PageHero
         icon={Heart}
-        eyebrow="关系引擎快照"
+        eyebrow="社交脑快照"
         title={selectedUser || formatHealthStatus(health?.status)}
         description={
           selectedUser
             ? '当前正在查看该用户的关系阶段、趋势与能力提示。'
-            : '这里集中展示关系引擎健康度、阶段分布与关系事件录入。'
+            : '这里集中展示社交脑健康度、阶段分布与关系事件录入。'
         }
         gradientClass="from-primary-50 via-white to-rose-50"
         metaItems={[

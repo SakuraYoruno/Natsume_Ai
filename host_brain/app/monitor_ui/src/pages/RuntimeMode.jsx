@@ -79,8 +79,8 @@ const AUTO_RULE_DEFS = {
 
 const STATE_AXIS_ITEMS = [
   {
-    title: '存在状态轴',
-    desc: '决定现在以什么硬状态存在，是数字生命最外层的开关。',
+    title: '生命体存在态轴',
+    desc: '决定当前处于什么硬状态，是数字生命体最外层的状态开关。',
   },
   {
     title: '离线时长',
@@ -153,7 +153,7 @@ export default function RuntimeMode() {
       setStatus(data)
       setError(null)
     } catch (fetchError) {
-      setError(fetchError.message || '存在状态轴加载失败')
+      setError(fetchError.message || '生命体存在态轴加载失败')
     }
   }, [])
 
@@ -226,7 +226,7 @@ export default function RuntimeMode() {
     return (
       <div className="space-y-4">
         <DigitalLifeNav />
-        <NoticeBanner variant="error" title="存在状态轴加载失败">{error}</NoticeBanner>
+        <NoticeBanner variant="error" title="生命体存在态轴加载失败">{error}</NoticeBanner>
         <button className="btn-primary" onClick={loadStatus}>重试</button>
       </div>
     )
@@ -236,7 +236,7 @@ export default function RuntimeMode() {
     return (
       <div className="space-y-4">
         <DigitalLifeNav />
-        <NoticeBanner variant="info" title="加载中">正在同步存在状态轴快照…</NoticeBanner>
+        <NoticeBanner variant="info" title="加载中">正在同步生命体存在态轴快照…</NoticeBanner>
       </div>
     )
   }
@@ -245,8 +245,8 @@ export default function RuntimeMode() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">存在状态轴</h1>
-          <p className="text-sm text-gray-500">管理数字生命的硬状态，不直接覆盖离线时长、动机和回复姿态。</p>
+          <h1 className="text-xl font-semibold text-gray-900">生命体存在态轴</h1>
+          <p className="text-sm text-gray-500">管理数字生命体的硬状态，不直接覆盖离线时长、动机和回复姿态。</p>
         </div>
         <button className="btn-secondary" onClick={() => Promise.allSettled([loadStatus(), loadHistory()])} disabled={switching}>
           <RefreshCw size={14} className={switching ? 'animate-spin' : ''} />
@@ -258,7 +258,7 @@ export default function RuntimeMode() {
 
       <PageHero
         icon={Zap}
-        eyebrow="当前存在态"
+        eyebrow="当前生命体状态"
         title={`${currentMeta.emoji} ${currentMeta.label}`}
         description={currentMeta.semantic}
         gradientClass="from-primary-50 via-white to-indigo-50"
@@ -287,7 +287,7 @@ export default function RuntimeMode() {
         <MetricCard label="当前模式" value={currentMeta.label} hint={currentMeta.scheduler} tone="text-primary" />
         <MetricCard label="空闲时间" value={`${status?.idle_minutes ?? 0} 分钟`} hint="用于辅助自动切换" tone="text-blue-600" />
         <MetricCard label="时间窗口" value={status?.is_night_time ? '夜间' : '日间'} hint={status?.is_night_time ? '适合睡眠态' : '适合在线态'} tone="text-indigo-600" />
-        <MetricCard label="自动规则" value={`${enabledRules}/${Object.keys(AUTO_RULE_DEFS).length}`} hint={status?.degraded ? '当前状态轴降级' : '状态轴正常'} tone={status?.degraded ? 'text-orange-500' : 'text-green-600'} />
+        <MetricCard label="自动规则" value={`${enabledRules}/${Object.keys(AUTO_RULE_DEFS).length}`} hint={status?.degraded ? '当前生命体存在态轴降级' : '生命体存在态轴正常'} tone={status?.degraded ? 'text-orange-500' : 'text-green-600'} />
       </div>
 
       <div className="card p-5 shadow-sm">
@@ -340,7 +340,7 @@ export default function RuntimeMode() {
         </div>
 
         <div className="card p-5 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold text-gray-800">不是只有状态轴</h2>
+          <h2 className="mb-3 text-sm font-semibold text-gray-800">不是只有存在态轴</h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {STATE_AXIS_ITEMS.map((item) => (
               <div key={item.title} className="rounded-xl border border-gray-200 bg-gray-50 p-4">

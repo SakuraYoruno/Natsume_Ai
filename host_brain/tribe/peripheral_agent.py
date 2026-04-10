@@ -47,6 +47,9 @@ class PeripheralAgent:
         订阅：
         - EMOTION_STATE_CHANGED：情绪变化时更新外周表达状态（表情/语调建议）
         - IMMUNE_BLOCK：免疫拦截时触发外周抑制信号（降低输出活跃度）
+        - PLATFORM_CONNECTED / PLATFORM_DISCONNECTED：平台连通性变更
+        - PERIPHERAL_STATE_UPDATED：接收 edge_client 外设状态快照
+        - GATE_STATE_CHANGED / PLATFORM_MUTE_CHANGED：接收 edge 门控与静音状态变更
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -54,6 +57,11 @@ class PeripheralAgent:
             bus = get_tribe_event_bus()
             bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
+            bus.subscribe("PLATFORM_CONNECTED", self._on_platform_connected)
+            bus.subscribe("PLATFORM_DISCONNECTED", self._on_platform_disconnected)
+            bus.subscribe("PERIPHERAL_STATE_UPDATED", self._on_peripheral_state_updated)
+            bus.subscribe("GATE_STATE_CHANGED", self._on_gate_state_changed)
+            bus.subscribe("PLATFORM_MUTE_CHANGED", self._on_platform_mute_changed)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.peripheral_agent").warning(
@@ -129,6 +137,175 @@ class PeripheralAgent:
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
         except Exception:
             pass
+
+    async def _on_platform_connected(self, event: Any) -> None:
+        """处理 PLATFORM_CONNECTED 事件：记录平台连通状态。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "").strip().lower()
+            detail = str(payload.get("detail") or "").strip() or None
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            if not platform:
+                return
+            prev = self.state_registry.get_state("peripheral_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            connected = list(prev_state.get("connected_platforms") or [])
+            if platform not in connected:
+                connected.append(platform)
+            prev_state.update({
+                "connected_platforms": sorted({item for item in connected if isinstance(item, str)}),
+                "last_platform_event": "connected",
+                "last_connected_platform": platform,
+                "last_connected_detail": detail,
+                "last_connected_ts_ms": ts_ms,
+            })
+            self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+        except Exception:
+            pass
+
+    async def _on_platform_disconnected(self, event: Any) -> None:
+        """处理 PLATFORM_DISCONNECTED 事件：记录平台断开状态。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "").strip().lower()
+            detail = str(payload.get("detail") or "").strip() or None
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            if not platform:
+                return
+            prev = self.state_registry.get_state("peripheral_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            connected = [item for item in list(prev_state.get("connected_platforms") or []) if item != platform]
+            prev_state.update({
+                "connected_platforms": sorted({item for item in connected if isinstance(item, str)}),
+                "last_platform_event": "disconnected",
+                "last_disconnected_platform": platform,
+                "last_disconnected_detail": detail,
+                "last_disconnected_ts_ms": ts_ms,
+            })
+            self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+        except Exception:
+            pass
+
+    async def _on_peripheral_state_updated(self, event: Any) -> None:
+        """处理 PERIPHERAL_STATE_UPDATED：接收 edge_client 外设状态快照。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            prev = self.state_registry.get_state("peripheral_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            connected_platforms = payload.get("connected_platforms")
+            if isinstance(connected_platforms, list):
+                prev_state["connected_platforms"] = [
+                    str(item).strip().lower()
+                    for item in connected_platforms
+                    if str(item).strip()
+                ]
+            gate_state = payload.get("gate_state")
+            if isinstance(gate_state, dict):
+                prev_state["gate_state"] = {
+                    str(key).strip().lower(): str(value).strip().lower()
+                    for key, value in gate_state.items()
+                    if str(key).strip()
+                }
+            mute_state = payload.get("mute_state")
+            if isinstance(mute_state, dict):
+                prev_state["mute_state"] = {
+                    str(key).strip().lower(): bool(value)
+                    for key, value in mute_state.items()
+                    if str(key).strip()
+                }
+            prev_state.update({
+                "edge_peripheral_error": str(payload.get("error") or "").strip() or None,
+                "last_edge_peripheral_report_ts_ms": ts_ms,
+            })
+            self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+        except Exception:
+            pass
+
+    async def _on_gate_state_changed(self, event: Any) -> None:
+        """处理 GATE_STATE_CHANGED：同步平台门控状态。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "all").strip().lower() or "all"
+            gate = str(payload.get("gate") or "").strip().lower()
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            if gate not in {"open", "closed", "pause"}:
+                return
+            prev = self.state_registry.get_state("peripheral_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            gate_state = dict(prev_state.get("gate_state") or {})
+            gate_state[platform] = gate
+            prev_state.update({
+                "gate_state": gate_state,
+                "last_gate_change_ts_ms": ts_ms,
+            })
+            self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+        except Exception:
+            pass
+
+    async def _on_platform_mute_changed(self, event: Any) -> None:
+        """处理 PLATFORM_MUTE_CHANGED：同步平台静音状态。"""
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            platform = str(payload.get("platform") or "all").strip().lower() or "all"
+            mute = bool(payload.get("mute", True))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            prev = self.state_registry.get_state("peripheral_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            mute_state = dict(prev_state.get("mute_state") or {})
+            mute_state[platform] = mute
+            prev_state.update({
+                "mute_state": mute_state,
+                "last_mute_change_ts_ms": ts_ms,
+            })
+            self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+        except Exception:
+            pass
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        """导出 Peripheral 运行时状态，供 CortexAgent 收口与监控使用。"""
+        try:
+            state = self.get_peripheral_state()
+            return {
+                "connected_platforms": list(state.get("connected_platforms") or []),
+                "gate_state": dict(state.get("gate_state") or {}),
+                "mute_state": dict(state.get("mute_state") or {}),
+                "suppressed": bool(state.get("suppressed", False)),
+                "suppressed_risk_level": state.get("suppressed_risk_level"),
+                "current_emotion_tag": state.get("current_emotion_tag"),
+                "current_intensity": _to_float(state.get("current_intensity"), 0.0),
+                "voice_tone": state.get("voice_tone"),
+                "motion_scale": _to_float(state.get("motion_scale"), 0.0),
+                "last_platform_event": state.get("last_platform_event"),
+                "last_connected_ts_ms": int(state.get("last_connected_ts_ms") or 0),
+                "last_disconnected_ts_ms": int(state.get("last_disconnected_ts_ms") or 0),
+                "last_edge_peripheral_report_ts_ms": int(state.get("last_edge_peripheral_report_ts_ms") or 0),
+                "edge_peripheral_error": state.get("edge_peripheral_error"),
+            }
+        except Exception:
+            return {
+                "connected_platforms": [],
+                "gate_state": {},
+                "mute_state": {},
+                "suppressed": False,
+                "suppressed_risk_level": None,
+                "current_emotion_tag": None,
+                "current_intensity": 0.0,
+                "voice_tone": None,
+                "motion_scale": 0.0,
+                "last_platform_event": None,
+                "last_connected_ts_ms": 0,
+                "last_disconnected_ts_ms": 0,
+                "last_edge_peripheral_report_ts_ms": 0,
+                "edge_peripheral_error": None,
+            }
+
+
+def _to_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 _PERIPHERAL_AGENT: PeripheralAgent | None = None

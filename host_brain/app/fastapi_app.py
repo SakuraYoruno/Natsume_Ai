@@ -7,6 +7,7 @@ TASK-0065: HTTP 服务框架落地 — FastAPI 路由绑定 + 健康检测 + 链
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -403,11 +404,16 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
 @app.post("/v1/edge/events", response_model=EdgeEventsResponse)
 async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
     """接收 Edge 端批量上报的事件 — 委托给 system_handler.receive_edge_events_response。"""
-    return receive_edge_events_response(
+    bridge_waiters: list[Any] = []
+    response = receive_edge_events_response(
         request_body=request_body,
         get_ledger=_get_ledger_compat,
         logger=_logger,
+        inline_waiters=bridge_waiters,
     )
+    if bridge_waiters:
+        await asyncio.gather(*bridge_waiters)
+    return response
 
 
 @app.get("/metrics", response_model=MetricsResponse)

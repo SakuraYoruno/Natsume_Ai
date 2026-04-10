@@ -253,15 +253,15 @@ export default function Alerts() {
   const heroDescription = filterCode
     ? `已按 ${formatAlertTitle(filterCode)} 过滤，方便集中处理同类问题。`
     : filteredAlerts.length > 0
-      ? '已聚合数字生命运行时告警、服务健康异常和错误事件，便于按严重度快速收敛。'
-      : '当前时间窗口内未发现运行时异常、服务离线或高优先级错误。'
+      ? '已聚合数字生命体运行时告警、器官异常和错误事件，便于按严重度快速收敛。'
+      : '当前时间窗口内未发现运行时异常、器官离线或高优先级错误。'
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">告警中心</h1>
-          <p className="text-sm text-gray-500">统一收敛运行时、服务健康和错误日志告警。</p>
+          <h1 className="text-xl font-semibold text-gray-900">免疫告警中心</h1>
+          <p className="text-sm text-gray-500">统一收敛生命体运行时、器官异常和错误日志告警。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -276,14 +276,14 @@ export default function Alerts() {
 
       <PageHero
         icon={Siren}
-        eyebrow="数字生命告警总览"
+        eyebrow="数字生命体免疫告警总览"
         title={heroTitle}
         description={heroDescription}
         gradientClass="from-rose-50 via-white to-orange-50"
         metaItems={[
           `时间窗口：${windowMinutes} 分钟`,
           `运行时告警：${runtimeAlerts.length}`,
-          `服务异常：${serviceAlerts.length}`,
+          `器官异常：${serviceAlerts.length}`,
           `错误事件：${alerts.length}`,
         ]}
       />
@@ -301,7 +301,7 @@ export default function Alerts() {
         <MetricCard icon={ShieldAlert} label="严重" value={criticalCount} hint="优先处理" tone="text-red-600" />
         <MetricCard icon={AlertTriangle} label="警告" value={warningCount} hint="建议跟进" tone="text-orange-500" />
         <MetricCard icon={BellOff} label="提示" value={infoCount} hint="信息性事件" tone="text-blue-600" />
-        <MetricCard icon={Wrench} label="服务异常" value={serviceAlerts.length} hint="来自 health probe" tone="text-purple-600" />
+        <MetricCard icon={Wrench} label="器官异常" value={serviceAlerts.length} hint="来自 health probe" tone="text-purple-600" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">

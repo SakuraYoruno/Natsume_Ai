@@ -113,6 +113,7 @@ class EdgeTribeBridge:
         schema_version: str = "tribe.command.v1",
         somatic_agent: Any | None = None,
         peripheral_agent: Any | None = None,
+        channel_agent: Any | None = None,
     ) -> dict[str, Any]:
         """T-168：接收来自 host_brain 的下行 Tribe 指令并分发到对应 Agent。
 
@@ -122,7 +123,9 @@ class EdgeTribeBridge:
         路由规则：
         - command_type in ("EMOTION_STATE_CHANGED", "EXPRESSION_SET", "VTS_HOTKEY")
           → SomaticAgent.handle_tribe_command()
-        - command_type in ("GATE_CONTROL", "GATE_OPEN", "GATE_CLOSE", "PLATFORM_MUTE")
+        - command_type in ("GATE_CONTROL", "GATE_CONTROL_COMMAND")
+          → ChannelAgent.on_gate_control_command()
+        - command_type in ("GATE_OPEN", "GATE_CLOSE", "PLATFORM_MUTE")
           → PeripheralAgent.handle_tribe_command()
         - target_agent 精确匹配优先于 command_type 路由
 
@@ -135,6 +138,7 @@ class EdgeTribeBridge:
             schema_version: 协议版本，默认 "tribe.command.v1"。
             somatic_agent: SomaticAgent 实例（可选，由调用方注入）。
             peripheral_agent: PeripheralAgent 实例（可选，由调用方注入）。
+            channel_agent: ChannelAgent 实例（可选，由调用方注入）。
 
         Returns:
             {"ok": bool, "dispatched": bool, "command_type": str,
@@ -149,12 +153,15 @@ class EdgeTribeBridge:
         # command_type 转为小写 snake_case 供 Agent 内部路由
         _type_map: dict[str, str] = {
             "EMOTION_STATE_CHANGED": "emotion_state",
+            "EMOTION_STATE_COMMAND": "emotion_state",
             "EXPRESSION_SET": "expression_set",
             "VTS_HOTKEY": "vts_hotkey",
             "GATE_CONTROL": "gate_open",   # 兼容旧格式，payload 中含 gate 字段
+            "GATE_CONTROL_COMMAND": "gate_control",
             "GATE_OPEN": "gate_open",
             "GATE_CLOSE": "gate_close",
             "PLATFORM_MUTE": "platform_mute",
+            "PLATFORM_MUTE_COMMAND": "platform_mute",
         }
         agent_command_type = _type_map.get(resolved_type, resolved_type.lower())
 
@@ -170,8 +177,10 @@ class EdgeTribeBridge:
         # 1. target_agent 精确匹配
         _somatic_targets = {"edge.somatic", "somatic_agent", "somatic"}
         _peripheral_targets = {"edge.peripheral", "peripheral_agent", "peripheral"}
+        _channel_targets = {"edge.channel", "channel_agent", "channel"}
         _somatic_types = {"emotion_state", "expression_set", "vts_hotkey"}
-        _peripheral_types = {"gate_open", "gate_close", "gate_control", "platform_mute"}
+        _peripheral_types = {"gate_open", "gate_close", "platform_mute"}
+        _channel_types = {"gate_control"}
 
         use_somatic = (
             resolved_target in _somatic_targets
@@ -181,9 +190,13 @@ class EdgeTribeBridge:
             resolved_target in _peripheral_targets
             or (not resolved_target and agent_command_type in _peripheral_types)
         )
+        use_channel = (
+            resolved_target in _channel_targets
+            or (not resolved_target and agent_command_type in _channel_types)
+        )
 
         # GATE_CONTROL 旧格式：根据 payload.gate 字段决定 open/close
-        if resolved_type == "GATE_CONTROL" and "gate" in resolved_payload:
+        if resolved_type in {"GATE_CONTROL", "GATE_CONTROL_COMMAND"} and "gate" in resolved_payload:
             gate_val = str(resolved_payload.get("gate") or "open").strip().lower()
             command_pkg["command_type"] = "gate_close" if gate_val == "closed" else "gate_open"
 
@@ -198,7 +211,28 @@ class EdgeTribeBridge:
                     "reason": result.get("reason"),
                     "routed_to": "somatic_agent",
                 }
+            elif use_channel and channel_agent is not None:
+                gate_open = bool(resolved_payload.get("gate_open", True))
+                if "gate" in resolved_payload:
+                    gate_open = str(resolved_payload.get("gate") or "").strip().lower() != "closed"
+                result = channel_agent.on_gate_control_command(
+                    gate_open=gate_open,
+                    reason=resolved_payload.get("reason"),
+                    platform=resolved_payload.get("platform"),
+                    ts_ms=int(resolved_payload.get("ts_ms") or 0),
+                )
+                return {
+                    "ok": bool(result.get("accepted", True)),
+                    "dispatched": True,
+                    "command_type": resolved_type,
+                    "command_id": resolved_id,
+                    "reason": result.get("reason"),
+                    "routed_to": "channel_agent",
+                }
             elif use_peripheral and peripheral_agent is not None:
+                if command_pkg.get("command_type") == "gate_control":
+                    gate_open = bool(resolved_payload.get("gate_open", True))
+                    command_pkg["command_type"] = "gate_open" if gate_open else "gate_close"
                 result = peripheral_agent.handle_tribe_command(command_pkg)
                 return {
                     "ok": bool(result.get("ok", True)),

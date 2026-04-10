@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 from host_brain.tribe.hippocampus_agent import HippocampusAgent
+from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
 def _run(coro):
@@ -84,3 +85,60 @@ def test_hippocampus_agent_build_prompt_retrieval_rows() -> None:
     assert rows[0]["emotion_color_tag"] == "HAPPY"
     assert rows[0]["suppression_flag"] is False
     assert rows[0]["distortion_level"] == 0.1234
+
+
+def test_hippocampus_agent_memory_layers_write_paths(monkeypatch) -> None:
+    class _Result:
+        status = "OK"
+        written = True
+        state_version = 7
+        reason_code = "NONE"
+        detail = None
+        payload = {"write": "ok"}
+
+    class _Arbiter:
+        def write(self, **kwargs):  # noqa: ANN003
+            assert kwargs["writer_agent_id"] in {
+                "episodic_memory_agent",
+                "semantic_memory_agent",
+                "resident_memory_agent",
+            }
+            return _Result()
+
+    monkeypatch.setattr("host_brain.app.dependencies.get_state_write_arbiter", lambda: _Arbiter())
+
+    agent = HippocampusAgent(state_registry=TribeStateRegistry())
+    episodic = agent.write_episodic_memory_trace(
+        person_id="u-memory",
+        session_id="s-memory",
+        content="今天一起修了核心链路。",
+        metadata={"source": "unit"},
+        request_id="req-episodic",
+    )
+    semantic = agent.write_semantic_memory_fact(
+        person_id="u-memory",
+        fact="用户偏好在复杂任务里先看执行清单。",
+        source_refs=["dialog:1"],
+        request_id="req-semantic",
+    )
+    blocked = agent.write_autobiographical_memory(
+        person_id="u-memory",
+        narrative="",
+        gate_result={"decision": "BLOCK", "reason_code": "EMPTY"},
+        request_id="req-autobio-block",
+    )
+    autobio = agent.write_autobiographical_memory(
+        person_id="u-memory",
+        narrative="我会把今天的推进当作重要里程碑。",
+        gate_result={"decision": "ALLOW", "trace_id": "trace_autobio"},
+        request_id="req-autobio",
+    )
+    layers = agent.resolve_memory_layer_snapshot()
+
+    assert episodic["layer"] == "episodic"
+    assert semantic["layer"] == "semantic"
+    assert blocked["status"] == "BLOCKED"
+    assert autobio["layer"] == "autobiographical"
+    assert layers["last_write_type"] == "autobiographical"
+    assert layers["episodic"]["session_id"] == "s-memory"
+    assert "用户偏好" in layers["semantic"]["fact"]
