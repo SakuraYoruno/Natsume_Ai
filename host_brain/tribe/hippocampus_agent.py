@@ -530,6 +530,19 @@ class HippocampusAgent:
             input_refs=[str(request_id or "").strip()] if str(request_id or "").strip() else None,
             decision_trace_id=str(gate.get("trace_id") or "").strip() or None,
         )
+
+        # T-319：自传体记忆写入后联动 DefaultModeAgent 提升连续性（自传体记忆是最强的连续性来源）
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+            _dma = get_default_mode_agent()
+            if hasattr(_dma, "tick_idle_cycle"):
+                _dma.tick_idle_cycle(
+                    source="hippocampus_autobiographical_write",
+                    user_id=str(person_id or "").strip() or None,
+                )
+        except Exception:
+            pass
+
         return {"layer": "autobiographical", "arbiter": arbiter_result, "payload": payload["autobiographical_last"]}
 
     def resolve_memory_layer_snapshot(self) -> dict[str, Any]:

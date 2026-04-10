@@ -1115,6 +1115,24 @@ class SocialBrainAgent:
                         "ts_ms": resolved_ts,
                     },
                 )
+                # T-318：里程碑达成时联动 PainRewardAgent 记录高强度奖励事件（里程碑是重要正向强化）
+                try:
+                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                    _pr = get_pain_reward_agent()
+                    if hasattr(_pr, "record_reward_event"):
+                        _milestone_reward = round(min(0.90, 0.60 + len(new_milestones) * 0.10), 4)
+                        _pr.record_reward_event(
+                            source=f"milestone_achieved:{len(new_milestones)}",
+                            reward_level=_milestone_reward,
+                            metadata={
+                                "user_id": str(user_id or "user_1"),
+                                "milestone_ids": [m.get("milestone_id") for m in new_milestones],
+                                "achieved_count": achieved_count,
+                                "ts_ms": resolved_ts,
+                            },
+                        )
+                except Exception:
+                    pass
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").debug(
                 "SocialBrainAgent.resolve_milestone_tracker: user=%s event=%s new=%d",

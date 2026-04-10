@@ -105,6 +105,18 @@ class EndocrineAgent:
                     )
             except Exception:
                 pass
+            # T-320：高皮质醇时联动 InteroceptionAgent 注入内分泌压力（cortisol 升高消耗身体预算）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _endo_stress = round(min(0.40, (_cortisol - 0.65) * 1.33), 4)
+                    _intero.inject_external_stress(
+                        source=f"high_cortisol:{round(_cortisol, 3)}",
+                        intensity=_endo_stress,
+                    )
+            except Exception:
+                pass
 
         return payload
 

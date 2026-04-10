@@ -249,6 +249,25 @@ class InitiativeGovernorAgent:
             except Exception:
                 pass
 
+        # T-317：APPROVE 时联动 PainRewardAgent 记录奖励事件（主动发声被批准是正向强化信号）
+        if decision == "APPROVE":
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward_event"):
+                    _approve_reward = round(min(0.65, motive_score * 0.75), 4)
+                    _pr.record_reward_event(
+                        source=f"initiative_approved:{action}",
+                        reward_level=_approve_reward,
+                        metadata={
+                            "action": action,
+                            "motive_score": round(motive_score, 4),
+                            "readiness_score": round(readiness_score, 4),
+                        },
+                    )
+            except Exception:
+                pass
+
         return result
 
     def get_last_decision(self) -> dict[str, Any]:

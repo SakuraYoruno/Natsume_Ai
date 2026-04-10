@@ -75,8 +75,23 @@ def _mapping_text(
 _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
 _RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
 _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
+_DELEGATE_RE = re.compile(r"\[DELEGATE:(\w+?)(?::(.+?))?\]", re.DOTALL)
+_DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
+_CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢)[!！。…~]*$")
+_GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+_PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+_ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+_TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
+_TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
+_TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
+_TASK_CONTEXT_KEYWORDS = (
+    "思路", "方案", "步骤", "实现", "代码", "函数", "模块", "接口", "逻辑", "架构", "设计",
+    "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
+    "贪吃蛇", "codeagent", "code_agent", "agent", "work", "tool", "翻译", "实现思路",
+)
 
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
+
     ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった"),
     ("SAD", "难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん"),
     ("ANGRY", "生气|气死|烦|腹立|むかつく"),
@@ -1079,15 +1094,23 @@ def _build_subagent_gateway_from_runtime(llm_runtime: Mapping[str, Any]) -> Any 
 
 
 
-def _detect_recent_turn_query_role(user_message: str) -> str | None:
+def _detect_recent_turn_query_role(
+    user_message: str,
+    user_query_re: Any | None = None,
+    assistant_query_re: Any | None = None,
+    generic_query_re: Any | None = None,
+) -> str | None:
     normalized = str(user_message or "").strip()
     if not normalized:
         return None
-    if _RECENT_TURN_USER_QUERY_RE.search(normalized):
+    _user_query_re = user_query_re or _RECENT_TURN_USER_QUERY_RE
+    _assistant_query_re = assistant_query_re or _RECENT_TURN_ASSISTANT_QUERY_RE
+    _generic_query_re = generic_query_re or _RECENT_TURN_GENERIC_QUERY_RE
+    if _user_query_re.search(normalized):
         return "user"
-    if _RECENT_TURN_ASSISTANT_QUERY_RE.search(normalized):
+    if _assistant_query_re.search(normalized):
         return "assistant"
-    if _RECENT_TURN_GENERIC_QUERY_RE.search(normalized):
+    if _generic_query_re.search(normalized):
         return "both"
     return None
 
@@ -1324,8 +1347,1121 @@ def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
     return "NEUTRAL"
 
 
-async def _async_post_process(
+def _parse_bool_env(key: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(key, "")).strip().lower()
+    return raw in ("1", "true", "yes", "on") if raw else default
 
+
+def _sse(data: dict[str, Any]) -> str:
+    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _airlock_sanitize_input(message: str) -> tuple[str, bool]:
+    sanitized = message.replace("\x00", "").strip()
+    return sanitized, bool(sanitized)
+
+
+def _looks_like_active_task_context(turns: list[dict[str, str]]) -> bool:
+    if not turns:
+        return False
+    recent_turns = list(turns[-8:])
+    joined = "\n".join(str(turn.get("content") or "") for turn in recent_turns).lower()
+    if any(keyword.lower() in joined for keyword in _TASK_CONTEXT_KEYWORDS):
+        return True
+    latest_assistant = next(
+        (
+            str(turn.get("content") or "").strip()
+            for turn in reversed(recent_turns)
+            if str(turn.get("role") or "").strip().lower() == "assistant"
+        ),
+        "",
+    )
+    if len(latest_assistant) >= 40 and any(
+        phrase in latest_assistant
+        for phrase in ("从哪里开始", "具体", "下一步", "准备好", "继续", "展开", "思路", "方案")
+    ):
+        return True
+    return False
+
+
+def _pick_non_repeating_variant(*, variants: list[str], last_reply: str, request_id: str) -> str:
+    if not variants:
+        templates = _mapping_section(_load_runtime_texts(), "variant_selection")
+        return _mapping_text(templates, "empty_variants_fallback")
+    normalized_last = str(last_reply or "").strip()
+    start = sum(ord(ch) for ch in str(request_id or "")) % len(variants)
+    ordered = variants[start:] + variants[:start]
+    for variant in ordered:
+        if str(variant).strip() != normalized_last:
+            return variant
+    return ordered[0]
+
+
+def _maybe_build_phatic_fastpath_reply(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+    load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
+    looks_like_active_task_context: Callable[[list[dict[str, str]]], bool] | None = None,
+    continuation_query_re: Any | None = None,
+    greeting_fastpath_re: Any | None = None,
+    presence_fastpath_re: Any | None = None,
+    ack_fastpath_re: Any | None = None,
+) -> str | None:
+
+    normalized = str(user_message or "").strip()
+    if not normalized:
+        return None
+
+    _load_turns = load_continuity_turns or _load_continuity_turns
+    _looks_active = looks_like_active_task_context or _looks_like_active_task_context
+    turns = _load_turns(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        render_target_lang=render_target_lang,
+        fetch_limit=24,
+    )
+    active_task = _looks_active(turns)
+
+    if _CONTINUATION_QUERY_RE.match(normalized):
+        if active_task:
+            return None
+        category = "followup"
+    elif _GREETING_FASTPATH_RE.match(normalized):
+        category = "greeting"
+    elif _PRESENCE_FASTPATH_RE.match(normalized):
+        category = "presence"
+    elif _ack_fastpath_re.match(normalized):
+
+        if active_task:
+            return None
+        category = "ack"
+    else:
+        return None
+
+    last_assistant = next(
+        (
+            str(turn.get("content") or "").strip()
+            for turn in reversed(turns)
+            if str(turn.get("role") or "").strip().lower() == "assistant"
+        ),
+        "",
+    )
+
+    templates = _mapping_section(_load_runtime_texts(), "phatic_fastpath")
+    category_notes = _mapping_section(templates, "category_notes")
+    repeated_warning = ""
+    if last_assistant:
+        repeated_warning = _mapping_text(
+            templates,
+            "repeated_warning_template",
+            last_assistant=last_assistant,
+        )
+    return _mapping_text(category_notes, category) + repeated_warning
+
+
+def _extract_delegate_visible_text(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    try:
+        from host_brain.app.intelligent_runtime import _normalize_narrative_payload  # noqa: PLC0415
+
+        normalized = _normalize_narrative_payload(normalized)
+    except Exception:
+        pass
+    return str(normalized or "").strip()
+
+
+def _render_delegated_result_naturally(
+    *,
+    agent_id: str,
+    result_text: str,
+    reply_template: str | None,
+    extract_delegate_visible_text: Callable[[str], str] | None = None,
+) -> str:
+    _extract_visible = extract_delegate_visible_text or _extract_delegate_visible_text
+    visible = _extract_visible(result_text)
+    templates = _mapping_section(_load_runtime_texts(), "delegated_result")
+    empty_visible_templates = _mapping_section(templates, "empty_visible_result")
+    if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
+        if agent_id == "code_agent":
+            return _mapping_text(empty_visible_templates, "code_agent")
+        return _mapping_text(empty_visible_templates, "default")
+
+    if reply_template and "{agent_result}" in reply_template:
+        rendered = reply_template.replace("{agent_result}", visible).strip()
+        if rendered:
+            return rendered
+    if agent_id == "code_agent":
+        return _mapping_text(
+            templates,
+            "code_agent_prefix_template",
+            agent_result=visible,
+        ).strip()
+    return visible
+
+
+def _resolve_retrieval_timeout_seconds() -> float:
+    raw = str(os.environ.get("HOST_TOP_AGENT_RETRIEVAL_TIMEOUT_MS") or "").strip()
+    try:
+        timeout_ms = int(raw) if raw else 20_000
+    except ValueError:
+        timeout_ms = 20_000
+    timeout_ms = max(500, min(timeout_ms, 60_000))
+    return timeout_ms / 1000.0
+
+
+def _maybe_build_task_progress_fastpath(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized or not (_TASK_PROGRESS_QUERY_RE.search(normalized) or _TASK_FAILURE_QUERY_RE.search(normalized)):
+        return None
+    try:
+        from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+        summary = get_runtime_task_registry().summarize_for_chat(
+            person_id=person_id,
+            session_id=session_id,
+            exclude_request_id=request_id,
+        )
+    except Exception:
+        summary = None
+    templates = _mapping_section(_load_runtime_texts(), "task_progress")
+    default_labels = _mapping_section(templates, "defaults")
+    if not summary:
+        return _mapping_text(templates, "no_summary")
+
+    child_tasks = [dict(item or {}) for item in list(summary.get("child_tasks") or []) if isinstance(item, dict)]
+    step_match = _TASK_STEP_INDEX_RE.search(normalized)
+    ask_failure = bool(_TASK_FAILURE_QUERY_RE.search(normalized))
+
+    selected_child = None
+    if step_match:
+        wanted_step = int(step_match.group(1))
+        for child in child_tasks:
+            meta = dict(child.get("meta") or {}) if isinstance(child.get("meta"), dict) else {}
+            if int(meta.get("step_index") or 0) == wanted_step:
+                selected_child = child
+                break
+    elif ask_failure:
+        for child in child_tasks:
+            if str(child.get("status") or "").strip().upper() in {"FAILED", "RECOVERING"}:
+                selected_child = child
+                break
+
+    if selected_child is not None:
+        selected_child_templates = _mapping_section(templates, "selected_child")
+        meta = dict(selected_child.get("meta") or {}) if isinstance(selected_child.get("meta"), dict) else {}
+        step_index = int(meta.get("step_index") or 0)
+        default_step_label = _mapping_text(default_labels, "step_label")
+        target_id = str(
+            selected_child.get("target_id")
+            or meta.get("target_id")
+            or default_step_label
+        ).strip() or default_step_label
+        step_desc = str(meta.get("description") or selected_child.get("detail") or "").strip()
+        child_status = str(selected_child.get("status") or "UNKNOWN").strip().upper()
+        child_error = str(selected_child.get("error") or "").strip()
+        recovery_text = str(selected_child.get("recovery_result_text") or "").strip()
+        if child_status in {"FAILED", "RECOVERING"}:
+            parts = [
+                _mapping_text(
+                    selected_child_templates,
+                    "failed_intro_template",
+                    step_index=step_index,
+                    target_id=target_id,
+                ),
+                _mapping_text(selected_child_templates, "failed_status"),
+            ]
+            if step_desc:
+                parts.append(
+                    _mapping_text(
+                        selected_child_templates,
+                        "failed_detail_template",
+                        step_desc=step_desc,
+                    )
+                )
+            if child_error:
+                parts.append(
+                    _mapping_text(
+                        selected_child_templates,
+                        "failed_error_template",
+                        error_text=child_error,
+                    )
+                )
+            if recovery_text:
+                parts.append(
+                    _mapping_text(
+                        selected_child_templates,
+                        "failed_recovery_template",
+                        recovery_text=recovery_text,
+                    )
+                )
+            return "".join(parts)
+        parts = [
+            _mapping_text(
+                selected_child_templates,
+                "completed_intro_template",
+                step_index=step_index,
+                target_id=target_id,
+            ),
+            _mapping_text(selected_child_templates, "completed_status"),
+        ]
+        if step_desc:
+            parts.append(
+                _mapping_text(
+                    selected_child_templates,
+                    "completed_detail_template",
+                    step_desc=step_desc,
+                )
+            )
+        return "".join(parts)
+
+    status = str(summary.get("status") or "UNKNOWN").strip().upper()
+    if ask_failure and status in {"FAILED", "RECOVERING"}:
+        failed_summary_templates = _mapping_section(templates, "failed_summary")
+        default_task_label = _mapping_text(default_labels, "task_label")
+        target_id = str(summary.get("target_id") or default_task_label).strip() or default_task_label
+        error_text = str(summary.get("error") or "").strip()
+        recovery_text = str(summary.get("recovery_result_text") or "").strip()
+        parts = [
+            _mapping_text(
+                failed_summary_templates,
+                "intro_template",
+                target_id=target_id,
+            )
+        ]
+        if error_text:
+            parts.append(
+                _mapping_text(
+                    failed_summary_templates,
+                    "error_template",
+                    error_text=error_text,
+                )
+            )
+        if recovery_text:
+            parts.append(
+                _mapping_text(
+                    failed_summary_templates,
+                    "recovery_template",
+                    recovery_text=recovery_text,
+                )
+            )
+        return "".join(parts)
+    default_task_label = _mapping_text(default_labels, "task_label")
+    target_id = str(summary.get("target_id") or default_task_label).strip() or default_task_label
+    progress_message = str(summary.get("progress_message") or summary.get("detail") or "").strip()
+    recovery_result_text = str(summary.get("recovery_result_text") or "").strip()
+    if status in {"RUNNING", "RECOVERING"}:
+        running_summary_templates = _mapping_section(templates, "running_summary")
+        parts = [
+            _mapping_text(
+                running_summary_templates,
+                "intro_template",
+                target_id=target_id,
+            )
+        ]
+        if progress_message:
+            parts.append(
+                _mapping_text(
+                    running_summary_templates,
+                    "progress_template",
+                    progress_message=progress_message,
+                )
+            )
+        if recovery_result_text:
+            parts.append(
+                _mapping_text(
+                    running_summary_templates,
+                    "recovery_template",
+                    recovery_text=recovery_result_text,
+                )
+            )
+        return "".join(parts)
+    finished_summary_templates = _mapping_section(templates, "finished_summary")
+    parts = [
+        _mapping_text(
+            finished_summary_templates,
+            "intro_template",
+            target_id=target_id,
+            status_text=status.lower(),
+        )
+    ]
+    if progress_message:
+        parts.append(
+            _mapping_text(
+                finished_summary_templates,
+                "progress_template",
+                progress_message=progress_message,
+            )
+        )
+    if recovery_result_text:
+        parts.append(
+            _mapping_text(
+                finished_summary_templates,
+                "recovery_template",
+                recovery_text=recovery_result_text,
+            )
+        )
+    return "".join(parts)
+
+
+def _maybe_build_previous_meaning_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized or not _CLARIFICATION_DIRECT_QUERY_RE.match(normalized):
+        return None
+
+    turns = _load_continuity_turns(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        render_target_lang=render_target_lang,
+        fetch_limit=24,
+    )
+    if not turns:
+        return None
+
+    latest_assistant = next(
+        (
+            str(turn.get("content") or "").strip()
+            for turn in reversed(turns)
+            if str(turn.get("role") or "").strip().lower() == "assistant"
+            and str(turn.get("content") or "").strip()
+        ),
+        "",
+    )
+    if not latest_assistant:
+        return None
+
+    templates = _mapping_section(_load_runtime_texts(), "clarification_direct_answer")
+    return _mapping_text(
+        templates,
+        "assistant_meaning_template",
+        latest_assistant=latest_assistant,
+        default="我刚才的意思是：{latest_assistant}",
+    )
+
+
+def _should_buffer_stream_output(
+    *,
+    emotion_context: Mapping[str, Any] | None,
+    bond_summary: Mapping[str, Any] | None,
+) -> bool:
+    if not _parse_bool_env("HOST_STREAM_REFLECTION_BUFFER_ENABLED", default=True):
+        return False
+    try:
+        from host_brain.app.dependencies import get_reflection_chain  # noqa: PLC0415
+
+        reflection = get_reflection_chain()
+        return bool(
+            reflection.should_reflect(
+                emotion_tag=str((emotion_context or {}).get("emotion_tag") or ""),
+                intent=str((bond_summary or {}).get("intent") or ""),
+                bond_stage=str((bond_summary or {}).get("stage") or "STRANGER"),
+                turn_count=int((emotion_context or {}).get("turn_count") or 1),
+            )
+        )
+    except Exception:
+        return False
+
+
+def _extract_delegate_from_llm_output(full_text: str) -> tuple[str | None, str | None, str | None]:
+    m = _DELEGATE_RE.search(full_text)
+    if m:
+        agent_id = m.group(1).strip()
+        task = (m.group(2) or "").strip()
+        before = full_text[: m.start()].strip()
+        after = full_text[m.end():].strip()
+        template = f"{before}\n{{agent_result}}\n{after}".strip()
+        if agent_id in ALL_AGENT_IDS:
+            return agent_id, task, template
+
+    try:
+        json_text = full_text.strip()
+        if json_text.startswith("```"):
+            lines = json_text.split("\n")
+            json_lines: list[str] = []
+            in_block = False
+            for line in lines:
+                if line.strip().startswith("```") and not in_block:
+                    in_block = True
+                    continue
+                if line.strip() == "```" and in_block:
+                    break
+                if in_block:
+                    json_lines.append(line)
+            json_text = "\n".join(json_lines)
+
+        parsed = json.loads(json_text)
+        if isinstance(parsed, dict):
+            delegate = parsed.get("delegate")
+            if isinstance(delegate, dict):
+                agent_id = str(delegate.get("agent") or "").strip()
+                task = str(delegate.get("task") or "").strip()
+                template = str(parsed.get("reply_template") or "").strip()
+                if agent_id in ALL_AGENT_IDS and task:
+                    return agent_id, task, template or None
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+
+    return None, None, None
+
+
+def _extract_visible_text(raw: str) -> str:
+    text = raw.strip()
+    if not text:
+        return ""
+    if text.startswith("{"):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                narrative = parsed.get("narrative")
+                if isinstance(narrative, dict):
+                    return str(narrative.get("text_zh") or "").strip()
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text
+
+
+def _build_retrieval_bond_summary(summary_raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(summary_raw)
+    bond_stage = str(raw.get("bond_stage") or raw.get("stage") or "").strip()
+    if not bond_stage:
+        return {}
+
+    bond_summary: dict[str, Any] = {
+        "stage": bond_stage,
+        "trend": str(raw.get("trend") or "").strip(),
+        "capability_hint": str(raw.get("capability_hint") or "").strip(),
+    }
+    bond_score = _coerce_trace_score(raw.get("bond_score"))
+    if bond_score is not None:
+        bond_summary["score"] = bond_score
+        bond_summary["bond_score"] = bond_score
+    try:
+        interaction_count = int(raw.get("interaction_count") or 0)
+    except (TypeError, ValueError):
+        interaction_count = 0
+    if interaction_count > 0:
+        bond_summary["interaction_count"] = interaction_count
+    return bond_summary
+
+
+async def _prefetch_retrieval_persona_inputs(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    emotion_context: Mapping[str, Any],
+    mood_state: str | None,
+    governor_decision: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
+    bond_summary: dict[str, Any] = {}
+    bond_evidence: dict[str, Any] | None = None
+    motive_state: dict[str, Any] = {}
+
+    try:
+        from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact  # noqa: PLC0415
+
+        bond_summary_raw, bond_evidence = await _resolve_state_arbiter_bond_fact(
+            session_id=session_id,
+            request_id=request_id,
+        )
+        bond_summary = _build_retrieval_bond_summary(bond_summary_raw)
+    except Exception as exc:
+        _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
+
+    try:
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        retrieval_emotion_context = dict(emotion_context or {})
+        if mood_state and not str(retrieval_emotion_context.get("mood_state") or "").strip():
+            retrieval_emotion_context["mood_state"] = mood_state
+        runtime_flags = {"source": "top_agent_retrieval"}
+        resolved_sys_mode = str(
+            (governor_decision or {}).get("sys_mode")
+            or (governor_decision or {}).get("mood_state")
+            or ""
+        ).strip().lower()
+        if resolved_sys_mode:
+            runtime_flags["sys_mode"] = resolved_sys_mode
+        motive_state_raw = await asyncio.to_thread(
+            get_limbic_agent().compute_runtime_motive_state,
+            persona_user_id=person_id,
+            current_topic=user_message,
+            bond_summary=bond_summary,
+            emotion_context=retrieval_emotion_context,
+            pending_topics=[user_message] if user_message else [],
+            runtime_flags=runtime_flags,
+            now_ms=None,
+        )
+        motive_state = dict(motive_state_raw) if isinstance(motive_state_raw, Mapping) else {}
+    except Exception as exc:
+        _logger.debug("[%s] retrieval persona motive prefetch failed: %s", request_id, exc)
+
+    return bond_summary, bond_evidence, motive_state
+
+
+async def _top_agent_sse_generator_impl(
+    *,
+    request_body: Any,
+    request_id: str,
+    session_id: str,
+    ts_ms: int,
+    intent_draft: dict[str, Any],
+    emotion_context: dict[str, Any],
+    emotion_snapshot: dict[str, Any],
+    governor_result: dict[str, Any],
+    intent_id: str | None,
+    metrics: Any,
+    sse_fn: Callable[[dict[str, Any]], str] | None = None,
+    airlock_sanitize_input_fn: Callable[[str], tuple[str, bool]] | None = None,
+    airlock_sanitize_output_fn: Callable[[str], str] | None = None,
+    maybe_build_task_progress_fastpath_fn: Callable[..., str | None] | None = None,
+    maybe_build_recent_turn_answer_fn: Callable[..., str | None] | None = None,
+    maybe_build_previous_meaning_answer_fn: Callable[..., str | None] | None = None,
+    maybe_build_phatic_fastpath_reply_fn: Callable[..., str | None] | None = None,
+    async_post_process_fn: Callable[..., Any] | None = None,
+    resolve_retrieval_timeout_seconds_fn: Callable[[], float] | None = None,
+    prefetch_retrieval_persona_inputs_fn: Callable[..., Any] | None = None,
+) -> AsyncGenerator[str, None]:
+    _emit_sse = sse_fn or _sse
+    _sanitize_input = airlock_sanitize_input_fn or _airlock_sanitize_input
+    _sanitize_output = airlock_sanitize_output_fn or _airlock_sanitize_output
+    _task_progress_fastpath = maybe_build_task_progress_fastpath_fn or _maybe_build_task_progress_fastpath
+    _recent_turn_answer = maybe_build_recent_turn_answer_fn or _maybe_build_recent_turn_answer
+    _previous_meaning_answer = maybe_build_previous_meaning_answer_fn or _maybe_build_previous_meaning_answer
+    _phatic_fastpath = maybe_build_phatic_fastpath_reply_fn or _maybe_build_phatic_fastpath_reply
+    _post_process = async_post_process_fn or _async_post_process
+    _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
+    _prefetch_persona_inputs = prefetch_retrieval_persona_inputs_fn or _prefetch_retrieval_persona_inputs
+
+    user_message = str(request_body.message or "").strip()
+    thread_id = getattr(request_body, "thread_id", None)
+    person_id = resolve_person_id(
+        getattr(request_body, "person_id", None),
+        session_id=session_id,
+        platform=getattr(request_body, "reply_channel", None),
+        conversation_id=getattr(request_body, "reply_target", None),
+    )
+
+    sanitized_message, airlock_passed = _sanitize_input(user_message)
+    if not airlock_passed:
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "AIRLOCK_EMPTY_MESSAGE",
+                "request_id": request_id,
+            }
+        )
+        return
+
+    _pii_ingress_stats: dict[str, Any] = {}
+    try:
+        from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
+
+        if _check_channel("INGRESS"):
+            _pii_result = pii_scrub_text(sanitized_message, context="ingress")
+            sanitized_message = _pii_result.scrubbed_text
+            if _pii_result.has_pii:
+                _pii_ingress_stats = {
+                    "detections": _pii_result.total_detections,
+                    "rules": sorted({d["rule_id"] for d in _pii_result.detections}),
+                }
+    except Exception:
+        pass
+
+    yield _emit_sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
+
+    gov = chat_lite_governor(session_id=session_id, request_id=request_id)
+    if gov["decision"] != "APPROVE":
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": gov.get("reason_code", "REJECTED"),
+                "request_id": request_id,
+            }
+        )
+        return
+
+    recall_slot_text: dict[str, str] = {}
+    bond_summary: dict[str, Any] = {}
+
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+        get_cortex_agent().emit_conversation_started(
+            user_id=str(person_id or ""),
+            session_id=str(session_id or ""),
+            request_id=str(request_id or ""),
+        )
+    except Exception:
+        pass
+
+    task_progress_answer = _task_progress_fastpath(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+    )
+    if task_progress_answer:
+        narrative = _sanitize_output(str(task_progress_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "top_agent:task_progress_direct",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+        asyncio.create_task(
+            _post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang="zh",
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "TASK_PROGRESS_DIRECT"},
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                trace_stage_meta={
+                    "top_agent_used": True,
+                    "dispatch_agent_used": False,
+                    "chat_agent_used": False,
+                    "top_agent_mode": "task_progress_direct",
+                },
+            )
+        )
+        return
+
+    recent_turn_answer = _recent_turn_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang="zh",
+    )
+    if recent_turn_answer:
+        narrative = _sanitize_output(str(recent_turn_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "top_agent:recent_turn_direct",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+        asyncio.create_task(
+            _post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang="zh",
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                trace_stage_meta={
+                    "top_agent_used": True,
+                    "dispatch_agent_used": False,
+                    "chat_agent_used": False,
+                    "top_agent_mode": "recent_turn_direct",
+                },
+            )
+        )
+        return
+
+    clarification_direct_answer = _previous_meaning_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang="zh",
+    )
+    if clarification_direct_answer:
+        narrative = _sanitize_output(str(clarification_direct_answer).strip())
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "top_agent:clarification_direct",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+        asyncio.create_task(
+            _post_process(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary={},
+                ts_ms=ts_ms,
+                render_target_lang="zh",
+                total_latency_ms=total_latency_ms,
+                llm_latency_ms=0,
+                first_token_ms=None,
+                provider_name="",
+                model_id="",
+                buffer_stream=False,
+                delegated_agents=[],
+                retrieval_summary={"status": "SKIPPED", "reason_code": "CLARIFICATION_DIRECT"},
+                gov_decision=governor_result,
+                pii_ingress_stats=_pii_ingress_stats,
+                pii_egress_stats={},
+                trace_stage_meta={
+                    "top_agent_used": True,
+                    "dispatch_agent_used": False,
+                    "chat_agent_used": False,
+                    "top_agent_mode": "clarification_direct",
+                },
+            )
+        )
+        return
+
+    phatic_fastpath_reply = _phatic_fastpath(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang="zh",
+    )
+    if phatic_fastpath_reply:
+        from host_brain.app.chat_agent import (  # noqa: PLC0415
+            ChatAgentInput,
+            SubAgentContext,
+            chat_agent_sse_generator,
+        )
+
+        phatic_ctx = SubAgentContext(
+            agent_id="phatic_fastpath",
+            task="根据当前寒暄语境生成简短自然回复",
+            result_text=str(phatic_fastpath_reply).strip(),
+            success=True,
+            latency_ms=0,
+        )
+        chat_input = ChatAgentInput(
+            request_id=request_id,
+            session_id=session_id,
+            user_message=sanitized_message,
+            person_id=person_id,
+            emotion_context=emotion_context,
+            emotion_snapshot=emotion_snapshot,
+            bond_summary=bond_summary,
+            recall_slot_text=recall_slot_text,
+            retrieval_evidence_items=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "PHATIC_FASTPATH"},
+            sub_agent_context=phatic_ctx,
+            render_target_lang="zh",
+            reply_channel=getattr(request_body, "reply_channel", None),
+            suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
+            suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
+            reply_depth_policy=(
+                "gateway" if str(getattr(request_body, "reply_channel", "") or "").upper() == "GATEWAY"
+                else "normal"
+            ),
+            thread_id=thread_id,
+            ts_ms=ts_ms,
+            intent_draft={**intent_draft, "fastpath_type": "phatic"},
+            llm_runtime=None,
+            trace_stage_meta={
+                "top_agent_used": True,
+                "dispatch_agent_used": False,
+                "chat_agent_used": True,
+                "chat_mode": "sub_agent",
+                "chat_sub_agent_id": "phatic_fastpath",
+                "top_agent_mode": "phatic_fastpath",
+            },
+        )
+        async for event in chat_agent_sse_generator(chat_input):
+            yield event
+        return
+
+    try:
+        from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+        runtime_task_status_templates = _mapping_section(_load_runtime_texts(), "runtime_task_status")
+        runtime_task_registry = get_runtime_task_registry()
+        if runtime_task_registry.get_by_request_id(request_id) is None:
+            runtime_task_registry.create_task(
+                task_kind="chat_request",
+                target_id="top_agent",
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                user_message=sanitized_message,
+                detail=_mapping_text(
+                    runtime_task_status_templates,
+                    "pre_dispatch_detail",
+                    default="正在整理上下文和检索记忆。",
+                ),
+                progress_message=_mapping_text(
+                    runtime_task_status_templates,
+                    "pre_dispatch_progress",
+                    default="我正在整理上下文和检索记忆。",
+                ),
+                meta={"stage": "top_agent_pre_dispatch"},
+            )
+    except Exception as task_exc:
+        _logger.debug("[%s] top_agent runtime task init failed: %s", request_id, task_exc)
+
+    retrieval_task: asyncio.Task | None = None
+    retrieval_evidence_items: list[dict[str, Any]] = []
+    retrieval_summary: dict[str, Any] = {"status": "SKIPPED"}
+    bond_evidence: dict[str, Any] | None = None
+    retrieval_motive_state: dict[str, Any] = {}
+    _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
+    render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
+    _hard_state_summary = gov.get("hard_state_summary") if isinstance(gov.get("hard_state_summary"), Mapping) else {}
+    retrieval_mood_state = (
+        str(
+            emotion_snapshot.get("mood_state")
+            or emotion_context.get("mood_state")
+            or gov.get("mood_state")
+            or _hard_state_summary.get("mood_state")
+            or ""
+        ).strip().lower()
+        or None
+    )
+
+    bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        emotion_context=emotion_context,
+        mood_state=retrieval_mood_state,
+        governor_decision=gov,
+    )
+
+    try:
+        from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
+        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+
+        if not _injected_lang:
+            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
+        retrieval_task = asyncio.create_task(
+            _run_retrieval(
+                request_id=request_id,
+                message=sanitized_message,
+                person_id=person_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
+                render_target_lang=render_target_lang,
+                mood_state=retrieval_mood_state,
+                bond_summary=bond_summary or None,
+                motive_state=retrieval_motive_state or None,
+            )
+        )
+    except Exception as retrieval_exc:
+        _logger.debug("[%s] top_agent retrieval init failed: %s", request_id, retrieval_exc)
+
+    if retrieval_task is not None:
+        try:
+            retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
+                retrieval_task,
+                timeout=_resolve_timeout(),
+            )
+        except (asyncio.TimeoutError, Exception) as retrieval_exc:
+            retrieval_summary = {"status": "DEGRADED", "error": str(retrieval_exc)[:100]}
+            _logger.debug("[%s] top_agent retrieval failed/timeout: %s", request_id, retrieval_exc)
+
+    if bond_evidence is not None:
+        retrieval_evidence_items.append(bond_evidence)
+    try:
+        from host_brain.app.chat_retrieval_helpers import filter_retrieval_evidence_items_for_prompt  # noqa: PLC0415
+
+        filtered_evidence_items, prompt_filter_meta = filter_retrieval_evidence_items_for_prompt(
+            user_message=sanitized_message,
+            retrieval_summary=retrieval_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
+        )
+        if prompt_filter_meta.get("applied"):
+            retrieval_evidence_items = filtered_evidence_items
+            retrieval_summary = dict(retrieval_summary or {})
+            retrieval_summary["prompt_filter"] = dict(prompt_filter_meta)
+    except Exception as prompt_filter_exc:
+        _logger.debug("[%s] top_agent prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
+
+    try:
+        from host_brain.app.chat_retrieval_helpers import _build_recall_pack_inputs  # noqa: PLC0415
+        from host_brain.app.dependencies import get_recall_pack_builder  # noqa: PLC0415
+
+        cpb = get_recall_pack_builder()
+        if retrieval_evidence_items:
+            recall_results = _build_recall_pack_inputs(retrieval_evidence_items)
+            if recall_results:
+                from host_brain.app.schemas.recall_pack import RECALL_SLOT_PRIORITY  # noqa: PLC0415
+
+                try:
+                    pack = cpb.build(recall_results, task_type="chat", request_id=request_id)
+                except TypeError:
+                    pack = cpb.build(recall_results, task_type="chat")
+                for slot_name in RECALL_SLOT_PRIORITY:
+                    slot = pack.get_slot(slot_name)
+                    if slot and str(getattr(slot, "content", "") or "").strip():
+                        recall_slot_text[slot_name] = str(slot.content).strip()
+    except Exception as cpb_exc:
+        _logger.debug("[%s] top_agent recall_pack failed: %s", request_id, cpb_exc)
+
+    from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
+
+    llm_runtime = await resolve_host_llm_runtime_async(
+        rollout_key=session_id,
+        scene_type="CHAT",
+    )
+
+    if not llm_runtime.get("available"):
+        fallback_narrative = _mapping_text(
+            _load_runtime_texts(),
+            "llm_unavailable_fallback",
+        )
+        total_latency_ms = int(time.time() * 1000) - ts_ms
+        try:
+            asyncio.create_task(
+                _post_process(
+                    request_id=request_id,
+                    person_id=person_id,
+                    session_id=session_id,
+                    user_message=sanitized_message,
+                    narrative=fallback_narrative,
+                    emotion_context=emotion_context,
+                    bond_summary=bond_summary,
+                    ts_ms=ts_ms,
+                    render_target_lang=render_target_lang,
+                    total_latency_ms=total_latency_ms,
+                    llm_latency_ms=0,
+                    first_token_ms=None,
+                    provider_name=str(llm_runtime.get("provider_name") or "fallback"),
+                    model_id=str(llm_runtime.get("model_id") or "llm-unavailable-fallback"),
+                    buffer_stream=False,
+                    delegated_agents=[],
+                    retrieval_summary=(retrieval_summary or {"status": "SKIPPED", "reason_code": "LLM_UNAVAILABLE"}),
+                    gov_decision=governor_result,
+                    pii_ingress_stats=_pii_ingress_stats,
+                    pii_egress_stats={},
+                    retrieval_evidence_items=list(retrieval_evidence_items or []),
+                    trace_stage_meta={
+                        "top_agent_used": True,
+                        "dispatch_agent_used": False,
+                        "chat_agent_used": False,
+                        "top_agent_mode": "llm_unavailable",
+                    },
+                )
+            )
+        except Exception as post_process_exc:
+            _logger.debug("[%s] top_agent llm unavailable post_process failed: %s", request_id, post_process_exc)
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "LLM_UNAVAILABLE",
+                "request_id": request_id,
+                "narrative": fallback_narrative,
+            }
+        )
+        return
+
+    from host_brain.app.dispatch_agent import dispatch_agent_sse_generator  # noqa: PLC0415
+
+    async for event in dispatch_agent_sse_generator(
+        request_body=request_body,
+        request_id=request_id,
+        session_id=session_id,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        governor_result=gov,
+        intent_id=intent_id,
+        metrics=metrics,
+        person_id=person_id,
+        sanitized_message=sanitized_message,
+        recall_slot_text=recall_slot_text,
+        bond_summary=bond_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        retrieval_summary=retrieval_summary,
+        render_target_lang=render_target_lang,
+        llm_runtime=llm_runtime,
+        pii_ingress_stats=_pii_ingress_stats,
+    ):
+        yield event
+
+
+async def _async_post_process(
     *,
     request_id: str,
     person_id: str,
@@ -1353,52 +2489,271 @@ async def _async_post_process(
     response_policy: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
-    from host_brain.app.top_agent import _async_post_process as _legacy_post_process  # noqa: PLC0415
+    try:
+        await _persist_post_process_audit(
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            narrative=narrative,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary,
+            ts_ms=ts_ms,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=llm_latency_ms,
+            first_token_ms=first_token_ms,
+            provider_name=provider_name,
+            model_id=model_id,
+            buffer_stream=buffer_stream,
+            delegated_agents=delegated_agents,
+            retrieval_summary=retrieval_summary,
+            gov_decision=gov_decision,
+            pii_ingress_stats=pii_ingress_stats,
+            pii_egress_stats=pii_egress_stats,
+            llm_input_digest=llm_input_digest,
+            retrieval_evidence_items=retrieval_evidence_items,
+            motive_state=motive_state,
+            response_policy=response_policy,
+            trace_stage_meta=trace_stage_meta,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process audit persist failed: %s", request_id, exc)
 
-    await _legacy_post_process(
-        request_id=request_id,
-        person_id=person_id,
-        session_id=session_id,
-        user_message=user_message,
-        narrative=narrative,
-        emotion_context=emotion_context,
-        bond_summary=bond_summary,
-        ts_ms=ts_ms,
-        render_target_lang=render_target_lang,
-        total_latency_ms=total_latency_ms,
-        llm_latency_ms=llm_latency_ms,
-        first_token_ms=first_token_ms,
-        provider_name=provider_name,
-        model_id=model_id,
-        buffer_stream=buffer_stream,
-        delegated_agents=delegated_agents,
-        retrieval_summary=retrieval_summary,
-        gov_decision=gov_decision,
-        pii_ingress_stats=pii_ingress_stats,
-        pii_egress_stats=pii_egress_stats,
-        llm_input_digest=llm_input_digest,
-        retrieval_evidence_items=retrieval_evidence_items,
-        motive_state=motive_state,
-        response_policy=response_policy,
-        trace_stage_meta=trace_stage_meta,
-    )
+    try:
+        from host_brain.airlock.quarantine import classify_ingress  # noqa: PLC0415
+
+        await asyncio.to_thread(classify_ingress, narrative)
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process airlock classify failed: %s", request_id, exc)
+
+    try:
+        from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
+        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+
+        store = get_episodic_store()
+        if store is not None:
+            mem_user = user_message
+            mem_narrative = narrative
+            try:
+                from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
+
+                if _check_channel("MEMORY"):
+                    mem_user = pii_scrub_if_enabled(user_message, context="memory_write_user")
+                    mem_narrative = pii_scrub_if_enabled(narrative, context="memory_write_ai")
+            except Exception:
+                pass
+
+            await asyncio.to_thread(
+                persist_chat_episodic_memory,
+                request_id=request_id,
+                intent_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=mem_user,
+                assistant_reply=mem_narrative,
+                emotion_context=emotion_context,
+                ts_ms=ts_ms,
+                episodic_store=store,
+            )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process episodic failed: %s", request_id, exc)
+
+    try:
+        await _run_persona_session_end_hooks(
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            user_message=user_message,
+            emotion_context=emotion_context,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process persona session_end failed: %s", request_id, exc)
+
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
+
+        await get_cortex_agent().post_process_bond_update(
+            request_id=request_id,
+            session_id=session_id,
+            user_message=user_message,
+            emotion_context=emotion_context,
+            ts_ms=ts_ms,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process bond failed: %s", request_id, exc)
+
+    try:
+        from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
+
+        ec = dict(emotion_context or {})
+        _get_cortex().emit_conversation_ended(
+            user_id=str(person_id or ""),
+            session_id=str(session_id or ""),
+            request_id=str(request_id or ""),
+            emotion_tag=str(ec.get("emotion_tag") or "NEUTRAL").strip().upper(),
+            emotion_intensity=float(ec.get("emotion_intensity") or 0.5),
+            summary={
+                "user_message": str(user_message or ""),
+                "user_message_preview": str(user_message or "")[:64],
+                "assistant_reply": str(narrative or "")[:512],
+                "ts_ms": int(ts_ms),
+            },
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process conversation_ended tribe event failed: %s", request_id, exc)
+
+    try:
+        from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion  # noqa: PLC0415
+
+        await _drive_stream_vts_emotion(
+            request_id=request_id,
+            emotion_context=emotion_context,
+            ts_ms=ts_ms,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process vts failed: %s", request_id, exc)
+
+    try:
+        tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
+        tts_sentence_stream = str(os.environ.get("HOST_TTS_SENTENCE_STREAM_ENABLED") or "true").strip().lower()
+        skip_bulk_tts = tts_sentence_stream in ("1", "true", "yes", "on")
+        if tts_enabled in ("1", "true", "yes", "on") and narrative.strip() and not skip_bulk_tts:
+            from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+            from host_brain.app.intelligent_runtime import resolve_tts_route  # noqa: PLC0415
+
+            base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
+            tts_route = resolve_tts_route(
+                text=narrative,
+                emotion_context={**dict(emotion_context), "emotion_tag": base_etag},
+                bond_summary=bond_summary or None,
+            )
+            etag = str(tts_route.get("emotion_tag") or _infer_emotion_tag_for_tts(narrative, base_etag)).strip()
+            intensity_raw = emotion_context.get("emotion_intensity")
+            intensity: float | None = None
+            if intensity_raw is not None:
+                try:
+                    intensity = max(0.0, min(1.0, float(intensity_raw)))
+                except (TypeError, ValueError):
+                    pass
+            tts_result = await post_speak(
+                text=narrative,
+                request_id=request_id,
+                session_id=session_id,
+                speed=float(tts_route.get("speed") or 1.0),
+                pitch=float(tts_route.get("pitch") or 0.0),
+                emotion_tag=etag,
+                emotion_intensity=intensity,
+                style_note=str(tts_route.get("style_note") or ""),
+                lang_hint=str(tts_route.get("lang_hint") or render_target_lang),
+            )
+
+            try:
+                from host_brain.app.dependencies import get_ledger as _get_tts_ledger  # noqa: PLC0415
+
+                _get_tts_ledger().log_voice_event(
+                    {
+                        "request_id": request_id,
+                        "session_id": session_id,
+                        "event_type": "TTS_SPEAK",
+                        "direction": "EGRESS",
+                        "status": str(getattr(tts_result, "status", "OK")),
+                        "latency_ms": int(getattr(tts_result, "latency_ms", 0)),
+                        "payload": {
+                            "text_len": len(narrative),
+                            "emotion_tag": etag,
+                            "speed": float(tts_route.get("speed") or 1.0),
+                            "pitch": float(tts_route.get("pitch") or 0.0),
+                            "lang_hint": str(tts_route.get("lang_hint") or render_target_lang),
+                        },
+                        "ts_ms": int(time.time() * 1000),
+                    }
+                )
+            except Exception:
+                pass
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process tts failed: %s", request_id, exc)
+
+    try:
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+        drift_result = await asyncio.to_thread(
+            get_prefrontal_agent().run_persona_drift_cycle,
+            llm_output_text=narrative,
+            user_input_text=user_message,
+        )
+        drift_level = str(dict(drift_result or {}).get("alert_level") or "").strip().upper()
+        if drift_level in ("MODERATE", "SEVERE"):
+            _logger.info(
+                "[%s] 人格漂移检测: level=%s dims=%s",
+                request_id,
+                drift_level,
+                dict(drift_result or {}).get("drift_dims"),
+            )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process drift_detector failed: %s", request_id, exc)
+
+    try:
+        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+        growth_payload = await asyncio.to_thread(
+            get_prefrontal_agent().run_growth_feedback_cycle,
+            session_id=session_id,
+            user_message=user_message,
+            assistant_reply=narrative,
+        )
+        if bool(dict(growth_payload or {}).get("applied")):
+            _logger.info(
+                "[%s] 人格成长: user=%s rules=%s",
+                request_id,
+                dict(growth_payload or {}).get("user_id"),
+                dict(growth_payload or {}).get("triggered_rules"),
+            )
+    except Exception as exc:
+        _logger.debug("[%s] top_agent post_process growth_feedback failed: %s", request_id, exc)
 
 
 __all__ = [
+    "_format_template_text",
+    "_load_template_mapping",
+    "_load_runtime_texts",
+    "_mapping_section",
+    "_mapping_text",
+    "_parse_bool_env",
+    "_sse",
+    "_airlock_sanitize_input",
+    "_airlock_sanitize_output",
+    "_build_reply_preview",
+    "_load_continuity_turns",
+    "_detect_recent_turn_query_role",
+    "_looks_like_active_task_context",
+    "_pick_non_repeating_variant",
+    "_maybe_build_phatic_fastpath_reply",
+    "_extract_delegate_visible_text",
+    "_render_delegated_result_naturally",
+    "_resolve_retrieval_timeout_seconds",
     "_normalize_retrieval_summary_for_audit",
     "_coerce_trace_mapping",
+    "_coerce_trace_score",
+    "_coerce_trace_bool",
     "_summarize_motive_state_for_trace",
     "_summarize_response_policy_for_trace",
     "_summarize_emotion_context_for_trace",
     "_summarize_persona_resident_memory_for_trace",
     "_normalize_trace_stage_meta",
+    "_resolve_envelope_confidence",
+    "_build_trace_output_digest",
+    "_detect_trace_fallback_used",
     "_build_trace_agent_envelope",
     "_build_trace_stage_node",
     "_persist_post_process_audit",
-    "_airlock_sanitize_output",
-    "_build_reply_preview",
     "_build_subagent_gateway_from_runtime",
+    "_maybe_build_task_progress_fastpath",
     "_maybe_build_recent_turn_answer",
+    "_maybe_build_previous_meaning_answer",
+    "_should_buffer_stream_output",
+    "_extract_delegate_from_llm_output",
+    "_extract_visible_text",
+    "_build_retrieval_bond_summary",
+    "_prefetch_retrieval_persona_inputs",
     "_resolve_persona_session_emotion",
     "_run_persona_session_end_hooks",
     "_infer_emotion_tag_for_tts",

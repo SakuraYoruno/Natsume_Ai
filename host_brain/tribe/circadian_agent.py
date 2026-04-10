@@ -141,6 +141,39 @@ class CircadianAgent:
                         )
                 except Exception:
                     pass
+
+            # T-313：夜间相位切换时联动 InteroceptionAgent 降低 recovery_urgency（夜间是恢复窗口）
+            if next_phase == "night":
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "reduce_recovery_urgency"):
+                        _intero.reduce_recovery_urgency(
+                            source="circadian_night_phase",
+                            relief=0.40,
+                            ts_ms=int(profile.get("ts_ms") or now_ms()),
+                        )
+                except Exception:
+                    pass
+
+            # T-314：夜间/黄昏相位切换时联动 LimbicAgent 降低唤醒（夜间应降低情绪激活）
+            if next_phase in {"night", "dusk"}:
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _arousal_drop = -0.18 if next_phase == "night" else -0.10
+                        _limbic.drive_emotion_metabolism(
+                            valence=0.0,
+                            arousal=_arousal_drop,
+                            dominance=0.0,
+                            blend_weight=0.15,
+                            event_kind=f"circadian_phase:{next_phase}",
+                            source="circadian_agent",
+                        )
+                except Exception:
+                    pass
+
         self._last_phase = next_phase
         return prev_state
 

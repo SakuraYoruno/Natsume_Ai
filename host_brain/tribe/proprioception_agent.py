@@ -127,6 +127,18 @@ class ProprioceptionAgent:
                     )
             except Exception:
                 pass
+            # T-315：高认知负荷时联动 InteroceptionAgent 注入认知压力（认知过载是身体预算消耗）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _cog_stress = round(min(0.35, (cognitive_load - 0.65) * 1.00), 4)
+                    _intero.inject_external_stress(
+                        source=f"cognitive_overload:{round(cognitive_load, 3)}",
+                        intensity=_cog_stress,
+                    )
+            except Exception:
+                pass
 
         return state
 
@@ -248,6 +260,19 @@ class ProprioceptionAgent:
                 "last_task_success_ts_ms": ts_ms,
             },
         )
+
+        # T-316：任务成功时联动 PainRewardAgent 记录奖励事件（任务完成是正向强化信号）
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+            _pr = get_pain_reward_agent()
+            if hasattr(_pr, "record_reward_event"):
+                _pr.record_reward_event(
+                    source="task_success",
+                    reward_level=round(min(0.80, intensity * 0.90), 4),
+                    metadata={"active_task_count": task_count, "ts_ms": ts_ms},
+                )
+        except Exception:
+            pass
 
 
 _PROPRIOCEPTION_AGENT: ProprioceptionAgent | None = None
