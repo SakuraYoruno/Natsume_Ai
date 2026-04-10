@@ -14,9 +14,11 @@ import os
 import re
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Callable
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
+from host_brain.bond.user_identity import resolve_person_id
 
 
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
@@ -1070,7 +1072,10 @@ class _SubAgentGatewayAdapter:
 
 
 
-def _build_subagent_gateway_from_runtime(llm_runtime: Mapping[str, Any]) -> Any | None:
+def _build_subagent_gateway_from_runtime(
+    llm_runtime: Mapping[str, Any],
+    adapter_class: type[Any] | None = None,
+) -> Any | None:
     try:
         if not bool(llm_runtime.get("available")):
             return None
@@ -1081,7 +1086,8 @@ def _build_subagent_gateway_from_runtime(llm_runtime: Mapping[str, Any]) -> Any 
         base_url_override = str(llm_runtime.get("base_url_override") or "").strip() or None
         if not provider_name or not model_id:
             return None
-        return _SubAgentGatewayAdapter(
+        _adapter_class = adapter_class or _SubAgentGatewayAdapter
+        return _adapter_class(
             provider_name=provider_name,
             model_id=model_id,
             api_key=api_key,
@@ -1149,18 +1155,23 @@ def _maybe_build_recent_turn_answer(
     person_id: str,
     user_message: str,
     render_target_lang: str,
+    detect_recent_turn_query_role: Callable[[str], str | None] | None = None,
+    load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
 ) -> str | None:
-    query_role = _detect_recent_turn_query_role(user_message)
+    _detect_query_role = detect_recent_turn_query_role or _detect_recent_turn_query_role
+    _load_turns = load_continuity_turns or _load_continuity_turns
+    query_role = _detect_query_role(user_message)
     if query_role is None:
         return None
 
-    turns = _load_continuity_turns(
+    turns = _load_turns(
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
         render_target_lang=render_target_lang,
         fetch_limit=24,
     )
+
     if not turns:
         return None
 
@@ -1336,12 +1347,17 @@ async def _run_persona_session_end_hooks(
 
 
 
-def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
+def _infer_emotion_tag_for_tts(
+    narrative: str,
+    current_tag: str,
+    emotion_infer_keywords: list[tuple[str, str]] | None = None,
+) -> str:
     """当 current_tag 为 NEUTRAL 时，根据回复文案推断 emotion_tag。"""
     if not narrative or str(current_tag or "").strip().upper() != "NEUTRAL":
         return str(current_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     text = (narrative or "")[:500]
-    for tag, pattern in _EMOTION_INFER_KEYWORDS:
+    _emotion_infer_keywords = emotion_infer_keywords or _EMOTION_INFER_KEYWORDS
+    for tag, pattern in _emotion_infer_keywords:
         if re.search(pattern, text, re.IGNORECASE):
             return tag
     return "NEUTRAL"
@@ -1418,6 +1434,10 @@ def _maybe_build_phatic_fastpath_reply(
 
     _load_turns = load_continuity_turns or _load_continuity_turns
     _looks_active = looks_like_active_task_context or _looks_like_active_task_context
+    _continuation_query_re = continuation_query_re or _CONTINUATION_QUERY_RE
+    _greeting_fastpath_re = greeting_fastpath_re or _GREETING_FASTPATH_RE
+    _presence_fastpath_re = presence_fastpath_re or _PRESENCE_FASTPATH_RE
+    _ack_fastpath_re = ack_fastpath_re or _ACK_FASTPATH_RE
     turns = _load_turns(
         request_id=request_id,
         session_id=session_id,
@@ -1427,21 +1447,21 @@ def _maybe_build_phatic_fastpath_reply(
     )
     active_task = _looks_active(turns)
 
-    if _CONTINUATION_QUERY_RE.match(normalized):
+    if _continuation_query_re.match(normalized):
         if active_task:
             return None
         category = "followup"
-    elif _GREETING_FASTPATH_RE.match(normalized):
+    elif _greeting_fastpath_re.match(normalized):
         category = "greeting"
-    elif _PRESENCE_FASTPATH_RE.match(normalized):
+    elif _presence_fastpath_re.match(normalized):
         category = "presence"
     elif _ack_fastpath_re.match(normalized):
-
         if active_task:
             return None
         category = "ack"
     else:
         return None
+
 
     last_assistant = next(
         (
@@ -1522,10 +1542,17 @@ def _maybe_build_task_progress_fastpath(
     session_id: str,
     person_id: str,
     user_message: str,
+    task_progress_query_re: Any | None = None,
+    task_failure_query_re: Any | None = None,
+    task_step_index_re: Any | None = None,
 ) -> str | None:
     normalized = str(user_message or "").strip()
-    if not normalized or not (_TASK_PROGRESS_QUERY_RE.search(normalized) or _TASK_FAILURE_QUERY_RE.search(normalized)):
+    _task_progress_query_re = task_progress_query_re or _TASK_PROGRESS_QUERY_RE
+    _task_failure_query_re = task_failure_query_re or _TASK_FAILURE_QUERY_RE
+    _task_step_index_re = task_step_index_re or _TASK_STEP_INDEX_RE
+    if not normalized or not (_task_progress_query_re.search(normalized) or _task_failure_query_re.search(normalized)):
         return None
+
     try:
         from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
@@ -1542,8 +1569,9 @@ def _maybe_build_task_progress_fastpath(
         return _mapping_text(templates, "no_summary")
 
     child_tasks = [dict(item or {}) for item in list(summary.get("child_tasks") or []) if isinstance(item, dict)]
-    step_match = _TASK_STEP_INDEX_RE.search(normalized)
-    ask_failure = bool(_TASK_FAILURE_QUERY_RE.search(normalized))
+    step_match = _task_step_index_re.search(normalized)
+    ask_failure = bool(_task_failure_query_re.search(normalized))
+
 
     selected_child = None
     if step_match:

@@ -41,7 +41,7 @@ from host_brain.app.agent_runtime_shared import (
     _mapping_text,
     _maybe_build_phatic_fastpath_reply as _shared_maybe_build_phatic_fastpath_reply,
     _maybe_build_previous_meaning_answer,
-    _maybe_build_recent_turn_answer,
+    _maybe_build_recent_turn_answer as _shared_maybe_build_recent_turn_answer,
     _maybe_build_task_progress_fastpath as _shared_maybe_build_task_progress_fastpath,
     _normalize_retrieval_summary_for_audit,
     _normalize_trace_stage_meta,
@@ -128,6 +128,25 @@ def _maybe_build_task_progress_fastpath(
         task_progress_query_re=_TASK_PROGRESS_QUERY_RE,
         task_failure_query_re=_TASK_FAILURE_QUERY_RE,
         task_step_index_re=_TASK_STEP_INDEX_RE,
+    )
+
+
+def _maybe_build_recent_turn_answer(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    user_message: str,
+    render_target_lang: str,
+) -> str | None:
+    return _shared_maybe_build_recent_turn_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=user_message,
+        render_target_lang=render_target_lang,
+        detect_recent_turn_query_role=_detect_recent_turn_query_role,
+        load_continuity_turns=_load_continuity_turns,
     )
 
 

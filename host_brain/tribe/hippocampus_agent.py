@@ -429,7 +429,7 @@ class HippocampusAgent:
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
                     source="hippocampus_episodic_write",
-                    user_id=str(person_id or "").strip() or None,
+                    person_id=str(person_id or "").strip() or "user_1",
                 )
         except Exception:
             pass
@@ -538,7 +538,7 @@ class HippocampusAgent:
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
                     source="hippocampus_autobiographical_write",
-                    user_id=str(person_id or "").strip() or None,
+                    person_id=str(person_id or "").strip() or "user_1",
                 )
         except Exception:
             pass

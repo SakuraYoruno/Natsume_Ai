@@ -160,8 +160,8 @@ class DefaultModeAgent:
             try:
                 from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
                 _ans = get_ans_agent()
-                if hasattr(_ans, "_recovery_mode") and _ans._recovery_mode:
-                    _ans._recovery_mode = False
+                if hasattr(_ans, "set_recovery_mode"):
+                    _ans.set_recovery_mode(False, source="default_mode_high_continuity")
                     import logging  # noqa: PLC0415
                     logging.getLogger("Natsume.tribe.default_mode_agent").debug(
                         "DefaultModeAgent T-281: continuity_score=%.3f → ANSAgent recovery_mode=False",

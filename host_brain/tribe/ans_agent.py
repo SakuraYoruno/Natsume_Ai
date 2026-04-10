@@ -658,6 +658,36 @@ class ANSAgent:
             },
         )
 
+    def set_recovery_mode(self, enabled: bool, *, source: str = "external") -> None:
+        """T-330：公开方法，供外部族安全地设置 recovery_mode 标志。
+
+        避免外部族（DefaultModeAgent/CircadianAgent 等）直接访问私有属性 _recovery_mode。
+        当 enabled=False 时（如日间相位恢复、高连续性恢复），退出恢复模式，
+        恢复正常主动发声倾向。
+
+        Args:
+            enabled: True=进入恢复模式，False=退出恢复模式
+            source: 调用来源标识（用于日志追踪）
+        """
+        prev = self._recovery_mode
+        self._recovery_mode = bool(enabled)
+        if prev != self._recovery_mode:
+            logger.info(
+                "ANSAgent.set_recovery_mode: %s → %s source=%s",
+                prev, self._recovery_mode, source,
+            )
+            if not self._recovery_mode:
+                # 退出恢复模式时发布通知，恢复正常节律
+                self.emit_from_thread(
+                    "INNER_WORLD_TICKED",
+                    {
+                        "source": "ans_agent_recovery_exit",
+                        "recovery_mode": False,
+                        "proactive_multiplier": 1.0,
+                        "trigger_source": str(source or "external"),
+                    },
+                )
+
     def export_runtime_state(self) -> dict[str, Any]:
         """T-254/T-289：导出 ANSAgent 当前运行时状态快照，并写入 state_registry。
 

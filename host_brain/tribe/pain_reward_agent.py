@@ -161,6 +161,32 @@ class PainRewardAgent:
         state = self._flush_state(event_type="reward", source=source, metadata=metadata)
         return state
 
+    def record_reward_event(
+        self,
+        *,
+        source: str,
+        reward_level: float = 0.4,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """T-324：record_reward 的别名方法，支持 reward_level 参数名。
+
+        供 ProprioceptionAgent（T-316）、InitiativeGovernorAgent（T-317）、
+        SocialBrainAgent（T-318）等外部族调用，统一使用 reward_level 语义。
+
+        Args:
+            source: 奖励来源标识
+            reward_level: 奖励强度 0.0 ~ 1.0（默认 0.4）
+            metadata: 附加元数据
+
+        Returns:
+            更新后的 hedonic_state
+        """
+        return self.record_reward(
+            source=source,
+            intensity=reward_level,
+            metadata=metadata,
+        )
+
     def tick_decay(self) -> dict[str, Any]:
         """每轮对话结束后调用，对 pain/reward 进行自然衰减（向基线靠拢）。
 
