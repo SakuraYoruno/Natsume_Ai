@@ -1070,13 +1070,20 @@ class LimbicAgent:
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_emotion)
             # T-149：订阅对话记录事件，每轮对话结束后驱动情绪代谢
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded_metabolism)
+            # T-208：订阅体内感受更新事件，高负荷时主动驱动情绪偏移
+            bus.subscribe("INTEROCEPTION_UPDATED", self._on_interoception_updated)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.limbic_agent").warning(
                 "LimbicAgent 订阅注册失败（降级）: %s", exc
             )
 
-    async def _on_body_sense_updated(self, event: Any) -> None:
+    async def _on_interoception_updated(self, event: Any) -> None:
+        """T-208\uff1a\u5904\u7406 INTEROCEPTION_UPDATED \u4e8b\u4ef6\uff0c\u9ad8\u8d1f\u8377\u65f6\u4e3b\u52a8\u9a71\u52a8\u60c5\u7eea\u504f\u79fb\u3002
+
+        - interoceptive_index >= 0.70\uff1a\u9ad8\u8d1f\u8377\uff0c\u60c5\u7eea\u5411\u4f4e\u6548\u4ef7/\u4f4e\u5524\u9192\u504f\u79fb
+        - body_budget >= 0.75 \u4e14 interoceptive_index <= 0.30\uff1a\u4f53\u80fd\u5145\u8db3\uff0c\u8f7b\u5fae\u6b63\u6548\u4ef7\u504f\u79fb
+        \"\"\"\n        try:\n            payload = dict(getattr(event, \"payload\", None) or {})\n            interoceptive_index = float(payload.get(\"interoceptive_index\") or 0.0)\n            body_budget = float(payload.get(\"body_budget\") or 0.5)\n\n            if interoceptive_index >= 0.70:\n                # \u9ad8\u8d1f\u8377\uff1a\u60c5\u7eea\u5411\u4f4e\u6548\u4ef7/\u4f4e\u5524\u9192\u504f\u79fb\n                valence_shift = -((interoceptive_index - 0.70) * 0.8)   # \u6700\u5927 -0.24\n                arousal_shift = -((interoceptive_index - 0.70) * 0.5)   # \u6700\u5927 -0.15\n                self.drive_emotion_metabolism(\n                    valence=valence_shift,\n                    arousal=arousal_shift,\n                    dominance=0.0,\n                    blend_weight=0.35,\n                    event_kind=\"interoceptive_overload\",\n                    source=\"interoception_agent\",\n                )\n            elif body_budget >= 0.75 and interoceptive_index <= 0.30:\n                # \u4f53\u80fd\u5145\u8db3\uff1a\u8f7b\u5fae\u6b63\u6548\u4ef7\u504f\u79fb\n                self.drive_emotion_metabolism(\n                    valence=0.08,\n                    arousal=0.05,\n                    dominance=0.0,\n                    blend_weight=0.20,\n                    event_kind=\"body_budget_surplus\",\n                    source=\"interoception_agent\",\n                )\n        except Exception as exc:\n            import logging  # noqa: PLC0415\n            logging.getLogger(\"Natsume.tribe.limbic_agent\").debug(\n                \"LimbicAgent._on_interoception_updated \u5f02\u5e38: %s\", exc\n            )\n\n    async def _on_body_sense_updated(self, event: Any) -> None:
         """处理 BODY_SENSE_UPDATED 事件：更新沉默意愿惩罚 + 驱动情绪代谢。
 
         T-139：body_sense 更新时，除更新沉默意愿外，还通过 drive_emotion_metabolism()

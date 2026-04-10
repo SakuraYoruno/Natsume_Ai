@@ -1231,12 +1231,16 @@ async def dispatch_agent_sse_generator(
         )
         _tribe_route_decision = str(_tribe_route_result.get("route") or "chat").strip().lower()
         _tribe_gate_state = str(_tribe_route_result.get("gate_state") or "open").strip().lower()
+        # T-212：读取 VestibularAgent 路由偏置
+        _vestibular_bias = str(_tribe_route_result.get("vestibular_bias") or "normal").strip().lower()
+        _damping_factor = float(_tribe_route_result.get("damping_factor") or 1.0)
         _logger.debug(
-            "[%s] CortexAgent tribe_route: route=%s gate_state=%s reason=%s",
+            "[%s] CortexAgent tribe_route: route=%s gate_state=%s reason=%s vestibular_bias=%s",
             request_id,
             _tribe_route_decision,
             _tribe_gate_state,
             _tribe_route_result.get("reason"),
+            _vestibular_bias,
         )
 
         if _tribe_route_decision == "silent":
@@ -1342,6 +1346,17 @@ async def dispatch_agent_sse_generator(
         "[%s] DispatchAgent hard_rule_route: route=%s target=%s reason=%s",
         request_id, route, target_id, route_reason,
     )
+
+    # T-212：VestibularAgent conservative 偏置：跳过 Skill/Delegate 路由，强制走 chat
+    if _vestibular_bias == "conservative" and route in {"skill", "delegate"}:
+        _logger.info(
+            "[%s] VestibularAgent conservative bias: 跳过 %s 路由（target=%s），降级为 chat",
+            request_id, route, target_id,
+        )
+        route, target_id, route_reason = "chat", "", f"vestibular_conservative:{route_reason}"
+    # T-212：safe_only 偏置：已由 route_intent 返回 chat，此处仅记录审计
+    if _vestibular_bias == "safe_only":
+        _logger.info("[%s] VestibularAgent safe_only bias: 仅允许 chat（已由 CortexAgent 处理）", request_id)
 
     # ── 2. 近期对话回查（最高优先级，绕过 LLM）──────────────────────
     if route == "recent_turn":

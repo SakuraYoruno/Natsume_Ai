@@ -29,6 +29,8 @@ class ANSAgent:
     )
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
     _bond_stage: str = field(default="stranger", init=False, repr=False)  # T-37：记录当前关系阶段
+    _recovery_mode: bool = field(default=False, init=False, repr=False)  # T-203：Glymphatic 恢复窗口标志
+    _recovery_mode_ts_ms: int = field(default=0, init=False, repr=False)  # T-203：恢复窗口开始时间戳
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -89,6 +91,10 @@ class ANSAgent:
         payload.setdefault("source", "inner_world_skill")
         # T-43：携带当前关系阶段，调度器可据此调整 tick 频率
         payload.setdefault("bond_stage", self._bond_stage)
+        # T-203：恢复窗口期间，降低主动发声倾向（注入 proactive_multiplier）
+        if self._recovery_mode:
+            payload.setdefault("proactive_multiplier", 0.35)
+            payload.setdefault("recovery_mode", True)
         self.emit_from_thread("INNER_WORLD_TICKED", payload)
 
         # T-148：INNER_WORLD_TICKED 后判断是否触发主动发声
@@ -635,10 +641,17 @@ class ANSAgent:
             bus.subscribe("VOICE_PIPELINE_STARTED", self._on_voice_pipeline_started)   # T-119
             bus.subscribe("VOICE_PIPELINE_ENDED", self._on_voice_pipeline_ended)       # T-119
             bus.subscribe("CHANNEL_MESSAGE_RECEIVED", self._on_channel_message_received)  # T-120
+            bus.subscribe("GLYMPHATIC_CYCLE_COMPLETED", self._on_glymphatic_cycle)  # T-203
         except Exception as exc:
             logger.warning("ANSAgent 订阅注册失败（降级）: %s", exc)
 
-    async def _on_bond_stage_changed(self, event: Any) -> None:
+    async def _on_glymphatic_cycle(self, event: Any) -> None:
+        """T-203\uff1a\u5904\u7406 GLYMPHATIC_CYCLE_COMPLETED \u4e8b\u4ef6\uff0c\u611f\u77e5\u6062\u590d\u7a97\u53e3\u5e76\u8c03\u6574\u8282\u5f8b\u3002
+
+        \u6062\u590d\u7a97\u53e3\u671f\u95f4\uff1a\u5c06 _recovery_mode \u8bbe\u4e3a True\uff0c\u540e\u7eed emit_inner_world_ticked \u4f1a\u81ea\u52a8
+        \u964d\u4f4e proactive_multiplier \u81f3 0.35\uff0c\u51cf\u5c11\u4e3b\u52a8\u53d1\u58f0\u9891\u7387\u3002
+        \u6062\u590d\u7a97\u53e3\u5173\u95ed\u65f6\uff1a\u5c06 _recovery_mode \u8bbe\u4e3a False\uff0c\u6062\u590d\u6b63\u5e38\u8282\u5f8b\u3002
+        \"\"\"\n        try:\n            payload = dict(getattr(event, \"payload\", None) or {})\n            executed = bool(payload.get(\"executed\", False))\n            ts_ms = int(getattr(event, \"ts_ms\", 0) or 0)\n            self._recovery_mode = executed\n            self._recovery_mode_ts_ms = ts_ms\n            logger.info(\n                \"ANSAgent._on_glymphatic_cycle: recovery_mode=%s consolidation_score=%.3f\",\n                executed,\n                float(payload.get(\"consolidation_score\") or 0.0),\n            )\n        except Exception as exc:\n            logger.debug(\"ANSAgent._on_glymphatic_cycle \u5f02\u5e38: %s\", exc)\n\n    async def _on_bond_stage_changed(self, event: Any) -> None:
         """处理 BOND_STAGE_CHANGED 事件：记录当前关系阶段。
 
         T-37：当 bond stage 发生跃迁时，更新 _bond_stage 字段。

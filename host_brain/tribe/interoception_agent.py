@@ -102,6 +102,19 @@ class InteroceptionAgent:
                 "ts_ms": resolved_ts,
             },
         )
+
+        # T-210：高恢复紧迫度时主动触发 GlymphaticAgent 恢复周期
+        if recovery_urgency >= 0.75:
+            try:
+                from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+                get_glymphatic_agent().run_recovery_cycle(
+                    source="interoception_urgency",
+                    force=True,
+                    now_ts_ms=resolved_ts,
+                )
+            except Exception:
+                pass
+
         return dict(prev_state)
 
     def export_runtime_state(self) -> dict[str, Any]:

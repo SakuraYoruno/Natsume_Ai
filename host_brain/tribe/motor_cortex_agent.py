@@ -37,8 +37,98 @@ class MotorCortexAgent:
             bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision)
             bus.subscribe("PLATFORM_CONNECTED", self._on_platform_signal)
             bus.subscribe("PLATFORM_DISCONNECTED", self._on_platform_signal)
+            # T-199：订阅 Edge 侧执行反馈事件
+            bus.subscribe("MOTOR_EXECUTION_FEEDBACK", self._on_execution_feedback)
+            # T-206：订阅 Cerebellum 重试请求事件
+            bus.subscribe("MOTOR_RETRY_REQUESTED", self._on_retry_requested)
         except Exception:
             pass
+
+    def receive_execution_feedback(
+        self,
+        *,
+        plan_id: str,
+        ok: bool,
+        latency_ms: int,
+        reason: str | None = None,
+        source: str = "edge_feedback",
+    ) -> dict[str, Any]:
+        """T-199：接收 Edge 侧执行反馈，更新 last_dispatch_outcome。
+
+        由 MOTOR_EXECUTION_FEEDBACK 事件触发，将 Edge 侧实际执行结果回写到
+        state_registry，并在失败时发布 MOTOR_EXECUTION_FAILED 事件以供
+        CerebellumAgent 订阅并触发纠偏。
+
+        Args:
+            plan_id: Host 侧计划 ID，用于匹配 last_plan。
+            ok: Edge 侧实际执行是否成功。
+            latency_ms: Edge 侧执行耗时（毫秒）。
+            reason: 失败原因（可选）。
+            source: 反馈来源标识。
+
+        Returns:
+            {"ok": bool, "plan_id": str, "matched": bool}
+        """
+        resolved_plan_id = str(plan_id or "").strip()
+        resolved_ts = now_ms()
+
+        # 从 state_registry 读取当前 last_dispatch_outcome
+        snap = self.state_registry.get_state("motor_cortex_agent") or {}
+        state = dict(snap.get("state") or {})
+        last_dispatch = dict(state.get("last_dispatch_outcome") or {})
+        last_plan = dict(state.get("last_plan") or {})
+
+        # 按 plan_id 匹配，将 Edge 实际执行结果回写到 last_dispatch_outcome
+        matched = (last_dispatch.get("plan_id") == resolved_plan_id or
+                   last_plan.get("plan_id") == resolved_plan_id)
+        updated_outcome = dict(last_dispatch)
+        updated_outcome.update({
+            "plan_id": resolved_plan_id,
+            "ok": bool(ok),
+            "edge_ok": bool(ok),
+            "edge_latency_ms": max(0, int(latency_ms or 0)),
+            "edge_reason": str(reason or "").strip() or None,
+            "edge_feedback_source": str(source or "edge_feedback"),
+            "edge_feedback_ts_ms": resolved_ts,
+        })
+        self.state_registry.write(
+            namespace="motor_cortex_agent",
+            state={"last_dispatch_outcome": updated_outcome},
+            writer="motor_cortex_agent",
+            merge=True,
+            reason="motor_execution_feedback",
+            decision_trace_id=resolved_plan_id,
+        )
+
+        # T-199：发布 MOTOR_EXECUTION_FEEDBACK 事件（供 CerebellumAgent 订阅）
+        emit_tribe_event(
+            event_type="MOTOR_EXECUTION_FEEDBACK",
+            source_agent="motor_cortex_agent",
+            payload={
+                "plan_id": resolved_plan_id,
+                "ok": bool(ok),
+                "latency_ms": max(0, int(latency_ms or 0)),
+                "reason": str(reason or "").strip() or None,
+                "source": str(source or "edge_feedback"),
+                "ts_ms": resolved_ts,
+            },
+        )
+
+        # T-199：失败时额外发布 MOTOR_EXECUTION_FAILED
+        if not ok:
+            emit_tribe_event(
+                event_type="MOTOR_EXECUTION_FAILED",
+                source_agent="motor_cortex_agent",
+                payload={
+                    "plan_id": resolved_plan_id,
+                    "reason": str(reason or "").strip() or "EDGE_EXECUTION_FAILED",
+                    "latency_ms": max(0, int(latency_ms or 0)),
+                    "source": str(source or "edge_feedback"),
+                    "ts_ms": resolved_ts,
+                },
+            )
+
+        return {"ok": bool(ok), "plan_id": resolved_plan_id, "matched": matched}
 
     def plan_action(
         self,
@@ -204,6 +294,42 @@ class MotorCortexAgent:
             "last_dispatch_latency_ms": int(last_dispatch.get("latency_ms") or 0),
             "last_updated_ts_ms": int(last_dispatch.get("ts_ms") or state.get("last_plan_ts_ms") or 0),
         }
+
+    async def _on_execution_feedback(self, event: Any) -> None:
+        """T-199：处理 MOTOR_EXECUTION_FEEDBACK 事件（来自 Edge 侧或 Cerebellum）。"""
+        payload = dict(getattr(event, "payload", None) or {})
+        plan_id = str(payload.get("plan_id") or "").strip()
+        ok = bool(payload.get("ok", True))
+        latency_ms = int(payload.get("latency_ms") or 0)
+        reason = str(payload.get("reason") or "").strip() or None
+        source = str(payload.get("source") or "event_bus").strip()
+        if plan_id:
+            self.receive_execution_feedback(
+                plan_id=plan_id,
+                ok=ok,
+                latency_ms=latency_ms,
+                reason=reason,
+                source=source,
+            )
+
+    async def _on_retry_requested(self, event: Any) -> None:
+        """T-206：处理 MOTOR_RETRY_REQUESTED 事件，自动重新执行 dispatch_action。"""
+        payload = dict(getattr(event, "payload", None) or {})
+        plan_id = str(payload.get("plan_id") or "").strip()
+        if not plan_id:
+            return
+        # 从 state_registry 恢复 last_plan
+        snap = self.state_registry.get_state("motor_cortex_agent") or {}
+        state = dict(snap.get("state") or {})
+        last_plan = dict(state.get("last_plan") or {})
+        if last_plan.get("plan_id") == plan_id:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.motor_cortex_agent")
+            _log.info(
+                "MotorCortexAgent._on_retry_requested: plan_id=%s 自动重试 dispatch_action",
+                plan_id,
+            )
+            self.dispatch_action(plan=last_plan)
 
     async def _on_initiative_decision(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})

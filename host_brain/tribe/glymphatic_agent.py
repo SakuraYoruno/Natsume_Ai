@@ -87,6 +87,23 @@ class GlymphaticAgent:
             "source": str(source or "runtime"),
             "ts_ms": resolved_ts,
         }
+
+        # T-202：恢复窗口期且巩固分数达标时，实际写入语义记忆
+        memory_written = False
+        if recovery_window and consolidation_score >= 0.45:
+            try:
+                from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+                hippocampus = get_hippocampus_agent()
+                if hasattr(hippocampus, "write_semantic_memory_fact"):
+                    hippocampus.write_semantic_memory_fact(
+                        fact=f"glymphatic_consolidation:{resolved_ts}",
+                        confidence=round(consolidation_score, 4),
+                        source="glymphatic_agent",
+                    )
+                    memory_written = True
+            except Exception:
+                pass
+        result["memory_written"] = memory_written
         prev = self.state_registry.get_state("glymphatic_agent") or {}
         prev_state = dict(prev.get("state") or {})
         prev_state["last_cycle"] = result

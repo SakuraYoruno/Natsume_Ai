@@ -585,6 +585,37 @@ class TribeStateRegistry:
             _ins = dict(intero_ns.get("state") or {})
             interoceptive_index = _safe_float(_ins.get("interoceptive_index"), 0.0)
 
+        # ── T-200：Motor 执行健康度（MotorCortexAgent 快照）──────────────────
+        # 从 motor_cortex_agent 命名空间读取最近一次 dispatch 结果，
+        # 将 motor_execution_ok / motor_last_latency_ms 纳入聚合。
+        motor_execution_ok = True
+        motor_last_latency_ms = 0
+        motor_ns = states.get("motor_cortex_agent")
+        if motor_ns:
+            _ms = dict(motor_ns.get("state") or {})
+            _last_dispatch = dict(_ms.get("last_dispatch_outcome") or {})
+            # 优先读取 edge_ok（T-199 回流结果），其次读取 ok（Host 侧推送结果）
+            if "edge_ok" in _last_dispatch:
+                motor_execution_ok = bool(_last_dispatch.get("edge_ok", True))
+                motor_last_latency_ms = int(_last_dispatch.get("edge_latency_ms") or 0)
+            else:
+                motor_execution_ok = bool(_last_dispatch.get("ok", True))
+                motor_last_latency_ms = int(_last_dispatch.get("latency_ms") or 0)
+
+        # ── T-207：Cerebellum 纠偏频率（CerebellumAgent 快照）───────────────
+        # 从 cerebellum_agent 命名空间读取纠偏计数和最近策略，
+        # 将 cerebellum_correction_count / cerebellum_last_strategy 纳入聚合。
+        cerebellum_correction_count = 0
+        cerebellum_last_strategy = "NO_ADJUST"
+        cerebellum_ns = states.get("cerebellum_agent")
+        if cerebellum_ns:
+            _cbs = dict(cerebellum_ns.get("state") or {})
+            cerebellum_correction_count = int(_cbs.get("correction_count") or 0)
+            _last_correction = dict(_cbs.get("last_correction") or {})
+            cerebellum_last_strategy = str(
+                _last_correction.get("strategy") or _cbs.get("last_strategy") or "NO_ADJUST"
+            ).strip().upper() or "NO_ADJUST"
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -622,6 +653,12 @@ class TribeStateRegistry:
             "readiness_hint": round(readiness_hint, 4),
             "continuity_hint": round(continuity_hint, 4),
             "interoceptive_index": round(interoceptive_index, 4),
+            # T-200 Motor 执行健康度
+            "motor_execution_ok": motor_execution_ok,
+            "motor_last_latency_ms": motor_last_latency_ms,
+            # T-207 Cerebellum 纠偏频率
+            "cerebellum_correction_count": cerebellum_correction_count,
+            "cerebellum_last_strategy": cerebellum_last_strategy,
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

@@ -47,13 +47,124 @@ class PeripheralAgent:
 
     # ── T-166：下行指令统一入口 ───────────────────────────────────────────────
 
+    # ── T-198：Motor 执行结果回流 ─────────────────────────────────────────────
+
+    def report_motor_execution_result(
+        self,
+        *,
+        plan_id: str,
+        action: str,
+        ok: bool,
+        latency_ms: int,
+        reason: str | None = None,
+        detail: str | None = None,
+    ) -> dict[str, Any]:
+        """T-198：将 Edge 侧 motor_action_command 执行结果回传 Host。
+
+        Edge 侧执行完 motor_action_command 后调用此方法，通过 EdgeTribeBridge
+        向 Host 的 MotorCortexAgent 发布 MOTOR_EXECUTION_FEEDBACK 事件，
+        打通 MotorCortex → Edge → 反馈回流 的完整执行闭环。
+
+        Args:
+            plan_id: Host 侧生成的计划 ID（来自 motor_action_command.plan_id）。
+            action: 执行的动作名称。
+            ok: Edge 侧实际执行是否成功。
+            latency_ms: Edge 侧执行耗时（毫秒）。
+            reason: 失败原因（可选）。
+            detail: 详细信息（可选）。
+
+        Returns:
+            {"ok": bool, "plan_id": str, "published": bool}
+        """
+        import logging  # noqa: PLC0415
+        _log = logging.getLogger("Natsume.edge.tribe.peripheral_agent")
+
+        resolved_plan_id = str(plan_id or "").strip()
+        resolved_action = str(action or "").strip()
+        resolved_latency = max(0, int(latency_ms or 0))
+
+        payload: dict[str, Any] = {
+            "plan_id": resolved_plan_id,
+            "action": resolved_action,
+            "ok": bool(ok),
+            "latency_ms": resolved_latency,
+            "reason": str(reason or "").strip() or None,
+            "detail": str(detail or "").strip() or None,
+            "source": "edge.peripheral",
+        }
+        self._publish_event(
+            event_type="motor_execution_feedback",
+            target_agent="motor_cortex_agent",
+            payload=payload,
+        )
+        _log.info(
+            "PeripheralAgent.report_motor_execution_result: plan_id=%s ok=%s latency_ms=%d",
+            resolved_plan_id, ok, resolved_latency,
+        )
+        return {"ok": bool(ok), "plan_id": resolved_plan_id, "published": True}
+
+    def on_motor_action_command(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """T-198：执行来自 MotorCortexAgent 的动作指令，并自动回传执行结果。
+
+        Args:
+            payload: {
+                "plan_id": str,    # Host 侧计划 ID
+                "action": str,     # 动作名称
+                "args": dict,      # 动作参数
+                "urgency": float,  # 紧迫度（0~1）
+            }
+
+        Returns:
+            {"ok": bool, "plan_id": str, "action": str, "latency_ms": int}
+        """
+        import logging  # noqa: PLC0415
+        import time  # noqa: PLC0415
+        _log = logging.getLogger("Natsume.edge.tribe.peripheral_agent")
+
+        plan_id = str(payload.get("plan_id") or "").strip()
+        action = str(payload.get("action") or "").strip()
+        args = dict(payload.get("args") or {})
+        urgency = float(payload.get("urgency") or 0.5)
+
+        started_ms = int(time.time() * 1000)
+        ok = False
+        reason: str | None = None
+        try:
+            _log.info(
+                "PeripheralAgent.on_motor_action_command: plan_id=%s action=%s urgency=%.2f",
+                plan_id, action, urgency,
+            )
+            # 实际执行逻辑：通过 bridge 向平台发送动作指令
+            bridge = self.bridge
+            if bridge is not None and hasattr(bridge, "execute_motor_action"):
+                bridge.execute_motor_action(action=action, args=args, urgency=urgency)
+            ok = True
+        except Exception as exc:
+            reason = str(exc)[:200]
+            _log.warning(
+                "PeripheralAgent.on_motor_action_command 执行失败: plan_id=%s action=%s error=%s",
+                plan_id, action, exc,
+            )
+        finally:
+            latency_ms = int(time.time() * 1000) - started_ms
+            # T-198：自动回传执行结果
+            self.report_motor_execution_result(
+                plan_id=plan_id,
+                action=action,
+                ok=ok,
+                latency_ms=latency_ms,
+                reason=reason,
+            )
+        return {"ok": ok, "plan_id": plan_id, "action": action, "latency_ms": latency_ms}
+
     def handle_tribe_command(self, command: dict[str, Any]) -> dict[str, Any]:
         """T-166：处理来自 host_brain 的下行 Tribe 门控指令，统一分发到对应处理方法。
 
         由 EdgeTribeBridge.receive_command() 调用，根据 command_type 路由到：
-        - "gate_open"    → on_gate_open_command()（开启平台输出门控）
-        - "gate_close"   → on_gate_close_command()（关闭平台输出门控）
-        - "platform_mute"→ on_platform_mute_command()（静音指定平台）
+        - "gate_open"         → on_gate_open_command()（开启平台输出门控）
+        - "gate_close"        → on_gate_close_command()（关闭平台输出门控）
+        - "platform_mute"     → on_platform_mute_command()（静音指定平台）
+        - "motor_action_command" → on_motor_action_command()（T-198：执行 Motor 动作指令）
 
         Args:
             command: {
@@ -86,6 +197,8 @@ class PeripheralAgent:
                 result = self.on_gate_close_command(payload)
             elif command_type == "platform_mute":
                 result = self.on_platform_mute_command(payload)
+            elif command_type == "motor_action_command":
+                result = self.on_motor_action_command(payload)
             else:
                 _log.warning(
                     "PeripheralAgent.handle_tribe_command: 未知指令类型 command_type=%s", command_type

@@ -25,6 +25,7 @@ class InitiativeGovernorAgent:
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)
+    _recovery_mode: bool = field(default=False, init=False, repr=False)  # T-204：Glymphatic 恢复窗口标志
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -37,8 +38,23 @@ class InitiativeGovernorAgent:
             bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_state_signal)
             bus.subscribe("PROPRIOCEPTION_UPDATED", self._on_state_signal)
             bus.subscribe("BOND_VECTOR_UPDATED", self._on_state_signal)
+            bus.subscribe("GLYMPHATIC_CYCLE_COMPLETED", self._on_glymphatic_cycle)  # T-204
         except Exception:
             pass
+
+    async def _on_glymphatic_cycle(self, event: Any) -> None:
+        """T-204：处理 GLYMPHATIC_CYCLE_COMPLETED 事件，恢复窗口期间提高 DEFER 阈値。"""
+        payload = dict(getattr(event, "payload", None) or {})
+        executed = bool(payload.get("executed", False))
+        self._recovery_mode = executed
+        # 将恢复模式写入 state_registry，供外部读取
+        self.state_registry.write(
+            namespace="initiative_governor_agent",
+            state={"recovery_mode": executed},
+            writer="initiative_governor_agent",
+            merge=True,
+            reason="glymphatic_recovery_window",
+        )
 
     async def _on_state_signal(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
@@ -138,6 +154,23 @@ class InitiativeGovernorAgent:
         reason_code = "PASS_ALL_GATES"
         gate_state = str(vitals.get("gate_state") or "open").strip().lower()
         immune_risk = str(vitals.get("immune_risk_level") or "none").strip().lower()
+
+        # T-209：读取 body_budget，体能耗尽时降低主动意愿
+        body_budget = 0.5
+        try:
+            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+            intero_state = get_interoception_agent().export_runtime_state()
+            body_budget = _clamp(float(intero_state.get("body_budget") or 0.5))
+        except Exception:
+            pass
+        if body_budget <= 0.25:
+            motive_score = _clamp(motive_score * 0.6)
+
+        # T-204：恢复窗口期间，提高 readiness 阈値（更容易 DEFER）
+        readiness_threshold = 0.45
+        if self._recovery_mode:
+            readiness_threshold = 0.60  # 恢复期提高阈値 +0.15
+
         if gate_state == "pause":
             decision, reason_code = "BLOCK", "GATE_PAUSE"
         elif immune_risk in {"high", "critical"}:
@@ -146,8 +179,8 @@ class InitiativeGovernorAgent:
             decision, reason_code = "DEFER", "LOW_MOTIVE"
         elif readiness_score < 0.30:
             decision, reason_code = "BLOCK", "LOW_READINESS"
-        elif readiness_score < 0.45:
-            decision, reason_code = "DEFER", "READINESS_THROTTLE"
+        elif readiness_score < readiness_threshold:
+            decision, reason_code = "DEFER", "READINESS_THROTTLE" + ("_RECOVERY" if self._recovery_mode else "")
         elif continuity_score < 0.35:
             decision, reason_code = "DEFER", "LOW_CONTINUITY"
 
@@ -162,7 +195,7 @@ class InitiativeGovernorAgent:
                 "readiness": round(readiness_score, 4),
                 "continuity": round(continuity_score, 4),
             },
-            "thresholds": {"motive_min": 0.35, "readiness_min": 0.45, "continuity_min": 0.35},
+            "thresholds": {"motive_min": 0.35, "readiness_min": readiness_threshold, "continuity_min": 0.35},
             "gate_state": gate_state,
             "immune_risk_level": immune_risk,
             "session_id": str(session_id or "").strip() or None,

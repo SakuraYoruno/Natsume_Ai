@@ -444,6 +444,24 @@ class CortexAgent:
                 "reason": "vestibular_instability",
                 "gate_state": gate_state,
                 "confidence": min(0.9, max(0.7, vestibular_jitter)),
+                "vestibular_bias": "throttle",
+                "vestibular_jitter": round(vestibular_jitter, 4),
+            }
+
+        # T-211：读取 route_bias 和 damping_factor，消费 VestibularAgent 的偏置决策
+        route_bias = str(vestibular_state.get("route_bias") or "normal").strip().lower()
+        damping_factor = float(vestibular_state.get("damping_factor") or 1.0)
+
+        # safe_only 偏置：强制 chat，禁止 Skill（jitter >= 0.72）
+        if route_bias == "safe_only":
+            return {
+                "route": "chat",
+                "reason": "vestibular_safe_only",
+                "gate_state": gate_state,
+                "confidence": 0.85,
+                "vestibular_bias": "safe_only",
+                "vestibular_jitter": round(vestibular_jitter, 4),
+                "damping_factor": round(damping_factor, 4),
             }
 
         # 沉默意愿极高（>= 0.85）：主动沉默
@@ -453,6 +471,9 @@ class CortexAgent:
                 "reason": "high_silence_willingness",
                 "gate_state": gate_state,
                 "confidence": round(silence_willingness, 4),
+                "vestibular_bias": route_bias,
+                "vestibular_jitter": round(vestibular_jitter, 4),
+                "damping_factor": round(damping_factor, 4),
             }
 
         # 门控节流：降低响应频率
@@ -462,14 +483,20 @@ class CortexAgent:
                 "reason": "endocrine_gate_throttle" if gate_state == "throttle" else "homeostasis_disrupted",
                 "gate_state": gate_state,
                 "confidence": 0.75,
+                "vestibular_bias": route_bias,
+                "vestibular_jitter": round(vestibular_jitter, 4),
+                "damping_factor": round(damping_factor, 4),
             }
 
-        # 正常路由：chat
+        # 正常路由：chat（附加 vestibular_bias 供 dispatch_agent 消费）
         return {
             "route": "chat",
             "reason": f"normal_flow (bond_stage={bond_stage})",
             "gate_state": gate_state,
             "confidence": 0.9,
+            "vestibular_bias": route_bias,  # "normal" | "conservative"
+            "vestibular_jitter": round(vestibular_jitter, 4),
+            "damping_factor": round(damping_factor, 4),
         }
 
     # ── Phase 5：对话生命周期事件发布 ────────────────────────────────────────
