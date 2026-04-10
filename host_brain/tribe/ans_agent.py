@@ -657,6 +657,19 @@ class ANSAgent:
                 "trigger_source": str(source or "proprioception_agent"),
             },
         )
+        # T-371：高打断频率（交感过度激活）时联动 InteroceptionAgent 注入内在压力
+        # 频繁打断 = 交感神经持续激活 = 身体预算持续消耗（内在压力源）
+        try:
+            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+            _intero = get_interoception_agent()
+            if hasattr(_intero, "inject_external_stress"):
+                _ans_stress = round(min(0.35, math.log1p(interrupt_count - 5) * 0.18), 4)
+                _intero.inject_external_stress(
+                    source=f"ans_high_interrupt:{interrupt_count}",
+                    intensity=_ans_stress,
+                )
+        except Exception:
+            pass
 
     def set_recovery_mode(self, enabled: bool, *, source: str = "external") -> None:
         """T-330：公开方法，供外部族安全地设置 recovery_mode 标志。
@@ -699,6 +712,18 @@ class ANSAgent:
                             blend_weight=0.10,
                             event_kind=f"ans_recovery_exit:{str(source or 'external')[:24]}",
                             source="ans_agent",
+                        )
+                except Exception:
+                    pass
+                # T-372：退出恢复模式时联动 InteroceptionAgent 降低 recovery_urgency
+                # 副交感恢复激活 = 身体预算重新充盈，应主动释放内在压力
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "reduce_recovery_urgency"):
+                        _intero.reduce_recovery_urgency(
+                            source=f"ans_parasympathetic_recovery:{str(source or 'external')[:24]}",
+                            relief=0.30,
                         )
                 except Exception:
                     pass

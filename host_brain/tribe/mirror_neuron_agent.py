@@ -237,6 +237,18 @@ class MirrorNeuronAgent:
                         )
                 except Exception:
                     pass
+            # T-378：高共情时联动 DefaultModeAgent.tick_idle_cycle()
+            # 共情他人的情绪是自我叙事的重要素材（"我感受到了对方的感受"）
+            try:
+                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+                _dma = get_default_mode_agent()
+                if hasattr(_dma, "tick_idle_cycle"):
+                    _dma.tick_idle_cycle(
+                        source=f"mirror_high_resonance:{str(result.get('emotion_tag') or 'neutral').lower()}",
+                        person_id="user_1",
+                    )
+            except Exception:
+                pass
 
         # T-352：高共情负荷（负向情绪 + 高共情强度）时联动 EndocrineAgent 记录共情压力事件
         # 高强度共情负向情绪（悲伤/愤怒/恐惧）会消耗内分泌储备（共情疲劳）

@@ -164,6 +164,19 @@ class VestibularAgent:
                     )
             except Exception:
                 pass
+            # T-380：严重失衡时联动 InteroceptionAgent 注入躯体内在压力
+            # 系统抖动 = 执行层不稳定 = 身体预算持续消耗（类似晕眩感的内在压力）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _vestibular_stress = round(min(0.30, (jitter - 0.72) * 1.07), 4)
+                    _intero.inject_external_stress(
+                        source=f"vestibular_critical_jitter:{round(jitter, 3)}",
+                        intensity=_vestibular_stress,
+                    )
+            except Exception:
+                pass
 
         return dict(prev_state)
 

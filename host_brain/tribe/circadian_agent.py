@@ -178,6 +178,18 @@ class CircadianAgent:
                         )
                 except Exception:
                     pass
+                # T-377：日间/黎明相位切换时联动 DefaultModeAgent.tick_idle_cycle()
+                # 日间清醒是自我叙事的重要节点（"新的一天开始了"），应更新连续性
+                try:
+                    from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+                    _dma = get_default_mode_agent()
+                    if hasattr(_dma, "tick_idle_cycle"):
+                        _dma.tick_idle_cycle(
+                            source=f"circadian_wake:{next_phase}",
+                            person_id="user_1",
+                        )
+                except Exception:
+                    pass
 
             # T-313：夜间相位切换时联动 InteroceptionAgent 降低 recovery_urgency（夜间是恢复窗口）
             if next_phase == "night":
@@ -209,6 +221,21 @@ class CircadianAgent:
                                     "local_hour": profile.get("local_hour"),
                                     "phase": next_phase,
                                 },
+                            )
+                    except Exception:
+                        pass
+                # T-376：夜间低睡眠压力（sleep_pressure<0.30，深度睡眠状态）时联动 InteroceptionAgent 降低 recovery_urgency
+                # 深度睡眠是最强的身体预算恢复信号，应大幅释放内在压力
+                if _sleep_pressure < 0.30:
+                    try:
+                        from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                        _intero_deep = get_interoception_agent()
+                        if hasattr(_intero_deep, "reduce_recovery_urgency"):
+                            _deep_relief = round(min(0.55, (0.30 - _sleep_pressure) * 1.83), 4)
+                            _intero_deep.reduce_recovery_urgency(
+                                source=f"circadian_deep_sleep:{round(_sleep_pressure, 3)}",
+                                relief=_deep_relief,
+                                ts_ms=int(profile.get("ts_ms") or now_ms()),
                             )
                     except Exception:
                         pass

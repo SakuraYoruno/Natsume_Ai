@@ -257,6 +257,19 @@ class LanguageSystemAgent:
                     )
             except Exception:
                 pass
+            # T-373：高情绪压力时联动 InteroceptionAgent 注入认知压力
+            # 语言层面的情绪压力（悲伤/孤独/焦虑）消耗认知资源，是内在压力源
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _lang_intero_stress = round(min(0.30, (emotional_pressure - 0.55) * 0.67), 4)
+                    _intero.inject_external_stress(
+                        source=f"language_emotional_pressure:{round(emotional_pressure, 3)}",
+                        intensity=_lang_intero_stress,
+                    )
+            except Exception:
+                pass
 
         return payload
 

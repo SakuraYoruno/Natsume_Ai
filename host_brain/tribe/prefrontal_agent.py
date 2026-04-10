@@ -845,6 +845,22 @@ class PrefrontalAgent:
                             )
                     except Exception:
                         pass
+                    # T-374：严重漂移（SEVERE）时联动 InteroceptionAgent 注入深层内在压力
+                    # 人格/价值观漂移是最深层的内在压力源（自我认同危机消耗大量认知资源）
+                    if drift_alert == "SEVERE":
+                        try:
+                            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                            _intero = get_interoception_agent()
+                            if hasattr(_intero, "inject_external_stress"):
+                                _drift_intero = round(min(0.40, len(
+                                    list(drift_result.get("drift_dims") or [])
+                                ) * 0.10 + 0.20), 4)
+                                _intero.inject_external_stress(
+                                    source=f"prefrontal_severe_drift:{session_id[:16]}",
+                                    intensity=_drift_intero,
+                                )
+                        except Exception:
+                            pass
 
             # T-26：检测 humor/task 成功信号并发布对应事件
             if assistant_reply:

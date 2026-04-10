@@ -147,6 +147,30 @@ class CerebellumAgent:
                     )
             except Exception:
                 pass
+            # T-375：纠偏成功（NO_ADJUST）时联动 InteroceptionAgent 降低 recovery_urgency
+            # 执行顺畅 = 认知资源充足，应主动释放身体预算压力
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "reduce_recovery_urgency"):
+                    _intero.reduce_recovery_urgency(
+                        source="cerebellum_no_adjust_smooth",
+                        relief=0.15,
+                    )
+            except Exception:
+                pass
+            # T-379：纠偏成功（NO_ADJUST）时联动 DefaultModeAgent.tick_idle_cycle()
+            # 执行顺畅是"我能做到"的自我能力叙事，应强化连续性
+            try:
+                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+                _dma = get_default_mode_agent()
+                if hasattr(_dma, "tick_idle_cycle"):
+                    _dma.tick_idle_cycle(
+                        source="cerebellum_no_adjust_smooth",
+                        person_id="user_1",
+                    )
+            except Exception:
+                pass
 
         # T-342：持续高纠偏时联动 InteroceptionAgent 注入躯体压力（持续纠偏消耗身体预算）
         if strategy in {"RETRY_ONCE", "SAFE_FALLBACK"}:

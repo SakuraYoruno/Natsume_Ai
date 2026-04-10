@@ -180,6 +180,21 @@ class GlymphaticAgent:
                     )
             except Exception:
                 pass
+            # T-381：极深度清理（consolidation_score>=0.70）时额外联动 InteroceptionAgent 强力恢复
+            # 高质量清理是最强的身体预算恢复信号，T-302 已有通用恢复，此处补充额外强化
+            if consolidation_score >= 0.70:
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero_deep = get_interoception_agent()
+                    if hasattr(_intero_deep, "reduce_recovery_urgency"):
+                        _deep_relief = round(min(0.35, (consolidation_score - 0.70) * 1.17), 4)
+                        _intero_deep.reduce_recovery_urgency(
+                            source=f"glymphatic_deep_clean_bonus:score={round(consolidation_score, 3)}",
+                            relief=_deep_relief,
+                            ts_ms=resolved_ts,
+                        )
+                except Exception:
+                    pass
 
         return result
 
