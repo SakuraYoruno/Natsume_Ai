@@ -248,6 +248,25 @@ class PeripheralAgent:
                         )
                 except Exception:
                     pass
+                # T-355：外设高延迟（>=2000ms）或错误时联动 PainRewardAgent 记录行动受阻痛苦
+                # 外周高延迟/错误是行动受阻的直接体验（想说话却说不出来）
+                if _error or _latency_ms >= 2000:
+                    try:
+                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                        _pr = get_pain_reward_agent()
+                        if hasattr(_pr, "record_pain"):
+                            _pain = 0.20 if _error else round(min(0.25, (_latency_ms - 2000) / 8000.0), 4)
+                            _pr.record_pain(
+                                source=f"peripheral_blocked:{_error[:24] if _error else f'latency_{_latency_ms}ms'}",
+                                intensity=_pain,
+                                metadata={
+                                    "error": _error or None,
+                                    "latency_ms": _latency_ms,
+                                    "ts_ms": ts_ms,
+                                },
+                            )
+                    except Exception:
+                        pass
         except Exception:
             pass
 

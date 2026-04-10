@@ -218,6 +218,23 @@ class MirrorNeuronAgent:
             except Exception:
                 pass
 
+        # T-352：高共情负荷（负向情绪 + 高共情强度）时联动 EndocrineAgent 记录共情压力事件
+        # 高强度共情负向情绪（悲伤/愤怒/恐惧）会消耗内分泌储备（共情疲劳）
+        _neg_tags = {"SAD", "LONELY", "ANGRY", "ANXIOUS", "FEAR"}
+        _resonance_tag = str(result.get("emotion_tag") or "NEUTRAL").upper()
+        if resonance_strength >= 0.65 and _resonance_tag in _neg_tags:
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                _endo = get_endocrine_agent()
+                if hasattr(_endo, "record_stress_event"):
+                    _empathy_stress = round(min(0.35, (resonance_strength - 0.65) * 1.00), 4)
+                    _endo.record_stress_event(
+                        source=f"mirror_empathy_fatigue:{_resonance_tag.lower()}",
+                        intensity=_empathy_stress,
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

@@ -434,6 +434,18 @@ class SocialBrainAgent:
                 )
             except Exception:
                 pass
+            # T-348：Bond 进展时联动 DefaultModeAgent.tick_idle_cycle()
+            # 关系进展是自我连续性的重要来源（"我与他人的关系"是自我叙事的核心）
+            try:
+                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+                _dma = get_default_mode_agent()
+                if hasattr(_dma, "tick_idle_cycle"):
+                    _dma.tick_idle_cycle(
+                        source=f"social_bond_progress:{bond_stage.lower()}",
+                        person_id=str(user_id or "user_1") or "user_1",
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(

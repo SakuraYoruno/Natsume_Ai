@@ -234,6 +234,30 @@ class LanguageSystemAgent:
             except Exception:
                 pass
 
+        # T-353：高情绪压力（emotional_pressure>=0.55）时联动 LimbicAgent 触发情绪代谢
+        # 语言层面的情绪压力（悲伤/孤独/焦虑）应反馈到情绪代谢系统，形成完整的情绪回路
+        if emotional_pressure >= 0.55:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _intent = str(wernicke.get("intent_type") or "chat")
+                    _etag = str(wernicke.get("emotion_tag") or "NEUTRAL").upper()
+                    # 情绪性表达（emotional_disclosure）时情绪代谢更强
+                    _blend = 0.14 if _intent == "emotional_disclosure" else 0.09
+                    _valence = round(-(emotional_pressure - 0.55) * 0.60, 4)  # 高压力→负向情绪偏移
+                    _arousal = round((emotional_pressure - 0.55) * 0.40, 4)   # 高压力→略微提升唤醒
+                    _limbic.drive_emotion_metabolism(
+                        valence=_valence,
+                        arousal=_arousal,
+                        dominance=-0.03,
+                        blend_weight=_blend,
+                        event_kind=f"language_emotional_pressure:{_etag.lower()}",
+                        source="language_system_agent",
+                    )
+            except Exception:
+                pass
+
         return payload
 
     def get_language_style(

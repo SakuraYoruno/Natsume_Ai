@@ -185,6 +185,26 @@ class DefaultModeAgent:
             except Exception:
                 pass
 
+        # T-357：高连续性(>=0.70)时联动 PainRewardAgent 记录自我完整感奖励
+        # 高连续性意味着自我叙事完整，是深层的正向强化（"我是完整的我"）
+        if continuity_score >= 0.70:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward"):
+                    _continuity_reward = round(min(0.40, (continuity_score - 0.70) * 1.33), 4)
+                    _pr.record_reward(
+                        source=f"default_mode_high_continuity:{round(continuity_score, 3)}",
+                        intensity=_continuity_reward,
+                        metadata={
+                            "continuity_score": round(continuity_score, 4),
+                            "user_id": user_id,
+                            "proactive_candidate": proactive_candidate,
+                        },
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

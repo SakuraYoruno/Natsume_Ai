@@ -147,6 +147,22 @@ class SomaticAgent:
                         )
                 except Exception:
                     pass
+                # T-350：低疲劳时联动 LimbicAgent 触发轻度舒适情绪（躯体恢复带来身体愉悦感）
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _comfort = round(min(0.15, (0.30 - fatigue_level) * 0.50), 4)
+                        _limbic.drive_emotion_metabolism(
+                            valence=_comfort,
+                            arousal=round(-_comfort * 0.40, 4),  # 低疲劳时略微降低唤醒（放松感）
+                            dominance=0.03,
+                            blend_weight=0.10,
+                            event_kind=f"somatic_recovery:fatigue={round(fatigue_level, 3)}",
+                            source="somatic_agent",
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 

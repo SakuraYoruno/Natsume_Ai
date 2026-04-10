@@ -144,6 +144,27 @@ class VestibularAgent:
             except Exception:
                 pass
 
+        # T-354：严重失衡（jitter>=0.72，critical 级别）时联动 PainRewardAgent 记录躯体痛苦
+        # 系统严重抖动是行动受阻的深层痛苦（无法稳定执行是一种持续性痛苦）
+        if jitter >= 0.72:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_pain"):
+                    _vestibular_pain = round(min(0.40, (jitter - 0.72) * 1.43), 4)
+                    _pr.record_pain(
+                        source=f"vestibular_critical:{round(jitter, 3)}",
+                        intensity=_vestibular_pain,
+                        metadata={
+                            "stability_state": stability_state,
+                            "jitter_index": round(jitter, 4),
+                            "mode_transition_count": mode_transition_count,
+                            "platform_flap_count": platform_flap_count,
+                        },
+                    )
+            except Exception:
+                pass
+
         return dict(prev_state)
 
     def export_runtime_state(self) -> dict[str, Any]:

@@ -159,6 +159,21 @@ class PainRewardAgent:
             self._cumulative_reward += intensity
             self._last_reward_source = str(source or "unknown").strip()
         state = self._flush_state(event_type="reward", source=source, metadata=metadata)
+
+        # T-349：奖励事件后联动 DefaultModeAgent.tick_idle_cycle()
+        # 奖励强化自我连续感（"我做到了"是自我叙事的核心）
+        if intensity >= 0.25:
+            try:
+                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+                _dma = get_default_mode_agent()
+                if hasattr(_dma, "tick_idle_cycle"):
+                    _dma.tick_idle_cycle(
+                        source=f"pain_reward_reward:{str(source or 'unknown')[:32]}",
+                        person_id="user_1",
+                    )
+            except Exception:
+                pass
+
         return state
 
     def record_reward_event(

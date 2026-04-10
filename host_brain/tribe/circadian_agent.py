@@ -143,6 +143,24 @@ class CircadianAgent:
                         )
                 except Exception:
                     pass
+                # T-356：日间/黎明相位切换时联动 PainRewardAgent 记录清醒奖励
+                # 日间清醒是轻度正向奖励（类似早晨醒来的清爽感）
+                try:
+                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                    _pr = get_pain_reward_agent()
+                    if hasattr(_pr, "record_reward"):
+                        _wake_reward = 0.18 if next_phase == "day" else 0.12
+                        _pr.record_reward(
+                            source=f"circadian_phase:{next_phase}",
+                            intensity=_wake_reward,
+                            metadata={
+                                "from_phase": previous_phase,
+                                "to_phase": next_phase,
+                                "local_hour": profile.get("local_hour"),
+                            },
+                        )
+                except Exception:
+                    pass
 
             # T-313：夜间相位切换时联动 InteroceptionAgent 降低 recovery_urgency（夜间是恢复窗口）
             if next_phase == "night":

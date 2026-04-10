@@ -168,6 +168,19 @@ class GlymphaticAgent:
             except Exception:
                 pass
 
+            # T-347：深度清理完成后联动 DefaultModeAgent.tick_idle_cycle()
+            # 深度清理是连续性的重要来源（类似睡眠后的自我整合感）
+            try:
+                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+                _dma = get_default_mode_agent()
+                if hasattr(_dma, "tick_idle_cycle"):
+                    _dma.tick_idle_cycle(
+                        source=f"glymphatic_deep_clean:score={round(consolidation_score, 3)}",
+                        person_id="system",
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

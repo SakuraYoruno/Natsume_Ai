@@ -514,6 +514,22 @@ class HippocampusAgent:
         except Exception:
             pass
 
+        # T-351：语义记忆巩固成功后联动 LimbicAgent 触发轻度满足感（学习成就感）
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+            _limbic = get_limbic_agent()
+            if hasattr(_limbic, "drive_emotion_metabolism"):
+                _limbic.drive_emotion_metabolism(
+                    valence=0.10,
+                    arousal=0.02,
+                    dominance=0.04,
+                    blend_weight=0.08,
+                    event_kind="hippocampus_semantic_consolidation",
+                    source="hippocampus_agent",
+                )
+        except Exception:
+            pass
+
         return {"layer": "semantic", "arbiter": arbiter_result, "payload": payload["semantic_last"]}
 
     def write_autobiographical_memory(
@@ -596,6 +612,22 @@ class HippocampusAgent:
                 _intero.reduce_recovery_urgency(
                     source="hippocampus_autobiographical_consolidation",
                     relief=0.25,
+                )
+        except Exception:
+            pass
+
+        # T-351：自传体记忆巩固成功后联动 LimbicAgent 触发中度满足感（自我叙事完整感）
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+            _limbic = get_limbic_agent()
+            if hasattr(_limbic, "drive_emotion_metabolism"):
+                _limbic.drive_emotion_metabolism(
+                    valence=0.18,
+                    arousal=-0.04,  # 自传体记忆巩固后略微降低唤醒（沉静满足感）
+                    dominance=0.06,
+                    blend_weight=0.12,
+                    event_kind="hippocampus_autobiographical_consolidation",
+                    source="hippocampus_agent",
                 )
         except Exception:
             pass
