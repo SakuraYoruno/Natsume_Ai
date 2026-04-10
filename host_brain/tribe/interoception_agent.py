@@ -147,19 +147,56 @@ class InteroceptionAgent:
 
         由 SomaticAgent（孤独感）、ProprioceptionAgent（高打断）等外部族调用，
         将外部压力信号写入 interoception_agent 快照，下次 evaluate_profile 时生效。
+
+        注意：intensity 仅接受正值（0.0~1.0），负值请使用 reduce_recovery_urgency()。
         """
         resolved_ts = int(ts_ms or now_ms())
-        clamped = _clamp(float(intensity))
+        # 仅处理正向压力，负值静默忽略（负值应使用 reduce_recovery_urgency）
+        raw = float(intensity)
+        if raw <= 0.0:
+            return
+        clamped = _clamp(raw)
         prev = self.state_registry.get_state("interoception_agent") or {}
         prev_state = dict(prev.get("state") or {})
         # 叠加外部压力（最大不超过 0.85）
         current_urgency = _clamp(float(prev_state.get("recovery_urgency") or 0.0))
-        new_urgency = _clamp(current_urgency + clamped * 0.35)
+        new_urgency = _clamp(current_urgency + clamped * 0.35, high=0.85)
         prev_state.update({
             "recovery_urgency": round(new_urgency, 4),
             "last_external_stress_source": str(source or "unknown"),
             "last_external_stress_intensity": round(clamped, 4),
             "last_external_stress_ts_ms": resolved_ts,
+        })
+        self.state_registry.set_state("interoception_agent", prev_state, writer="interoception_agent")
+
+    def reduce_recovery_urgency(
+        self,
+        *,
+        source: str,
+        relief: float,
+        ts_ms: int | None = None,
+    ) -> None:
+        """T-296：外部族注入恢复/缓解信号，降低 recovery_urgency。
+
+        由 PeripheralAgent（外设恢复）、GlymphaticAgent（恢复周期完成）等外部族调用，
+        将恢复信号写入 interoception_agent 快照，下次 evaluate_profile 时生效。
+
+        Args:
+            source: 恢复信号来源标识（如 "peripheral_connected:qq"）。
+            relief: 缓解强度（0.0~1.0），实际降幅 = relief * 0.30，最低降至 0.0。
+            ts_ms: 时间戳（毫秒），默认使用当前时间。
+        """
+        resolved_ts = int(ts_ms or now_ms())
+        clamped_relief = _clamp(float(relief))
+        prev = self.state_registry.get_state("interoception_agent") or {}
+        prev_state = dict(prev.get("state") or {})
+        current_urgency = _clamp(float(prev_state.get("recovery_urgency") or 0.0))
+        new_urgency = _clamp(current_urgency - clamped_relief * 0.30)
+        prev_state.update({
+            "recovery_urgency": round(new_urgency, 4),
+            "last_relief_source": str(source or "unknown"),
+            "last_relief_intensity": round(clamped_relief, 4),
+            "last_relief_ts_ms": resolved_ts,
         })
         self.state_registry.set_state("interoception_agent", prev_state, writer="interoception_agent")
 
