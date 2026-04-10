@@ -148,6 +148,26 @@ class GlymphaticAgent:
             except Exception:
                 pass
 
+            # T-339：恢复周期完成且巩固分数达标时，联动 PainRewardAgent 记录深度清理奖励
+            # 深度清理是最强的正向强化之一（类似睡眠后的清醒感）
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward"):
+                    _reward_intensity = round(min(0.55, consolidation_score * 0.60), 4)
+                    _pr.record_reward(
+                        source=f"glymphatic_deep_clean:score={round(consolidation_score, 3)}",
+                        intensity=_reward_intensity,
+                        metadata={
+                            "consolidation_score": round(consolidation_score, 4),
+                            "noise_decay_factor": round(noise_decay_factor, 4),
+                            "phase": phase,
+                            "memory_written": memory_written,
+                        },
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

@@ -828,6 +828,23 @@ class PrefrontalAgent:
                             )
                     except Exception:
                         pass
+                    # T-336：高漂移时联动 PainRewardAgent 记录深层痛苦（价值漂移是自我认同的痛苦）
+                    try:
+                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                        _pr = get_pain_reward_agent()
+                        if hasattr(_pr, "record_pain"):
+                            _pain_intensity = 0.22 if drift_alert == "MODERATE" else 0.38
+                            _pr.record_pain(
+                                source=f"persona_drift:{drift_alert.lower()}",
+                                intensity=_pain_intensity,
+                                metadata={
+                                    "drift_alert": drift_alert,
+                                    "session_id": session_id,
+                                    "drift_dims": list(drift_result.get("drift_dims") or []),
+                                },
+                            )
+                    except Exception:
+                        pass
 
             # T-26：检测 humor/task 成功信号并发布对应事件
             if assistant_reply:

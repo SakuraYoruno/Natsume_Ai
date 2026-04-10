@@ -502,6 +502,20 @@ class SocialBrainAgent:
                 )
             except Exception:
                 pass
+            # T-343：Bond 退步/社交冲突时联动 InteroceptionAgent 注入躯体压力
+            # 社交关系退步是强烈的躯体压力源（社交痛苦与躯体痛苦共享神经回路）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _social_stress = round(min(0.45, intensity * 0.50), 4)
+                    _intero.inject_external_stress(
+                        source=f"social_bond_regress:{bond_stage.lower()}",
+                        intensity=_social_stress,
+                        ts_ms=ts_ms,
+                    )
+            except Exception:
+                pass
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(

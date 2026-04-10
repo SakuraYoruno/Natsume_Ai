@@ -1079,11 +1079,44 @@ class LimbicAgent:
             )
 
     async def _on_interoception_updated(self, event: Any) -> None:
-        """T-208\uff1a\u5904\u7406 INTEROCEPTION_UPDATED \u4e8b\u4ef6\uff0c\u9ad8\u8d1f\u8377\u65f6\u4e3b\u52a8\u9a71\u52a8\u60c5\u7eea\u504f\u79fb\u3002
+        """T-208：处理 INTEROCEPTION_UPDATED 事件，高负荷时主动驱动情绪偏移。
 
-        - interoceptive_index >= 0.70\uff1a\u9ad8\u8d1f\u8377\uff0c\u60c5\u7eea\u5411\u4f4e\u6548\u4ef7/\u4f4e\u5524\u9192\u504f\u79fb
-        - body_budget >= 0.75 \u4e14 interoceptive_index <= 0.30\uff1a\u4f53\u80fd\u5145\u8db3\uff0c\u8f7b\u5fae\u6b63\u6548\u4ef7\u504f\u79fb
-        \"\"\"\n        try:\n            payload = dict(getattr(event, \"payload\", None) or {})\n            interoceptive_index = float(payload.get(\"interoceptive_index\") or 0.0)\n            body_budget = float(payload.get(\"body_budget\") or 0.5)\n\n            if interoceptive_index >= 0.70:\n                # \u9ad8\u8d1f\u8377\uff1a\u60c5\u7eea\u5411\u4f4e\u6548\u4ef7/\u4f4e\u5524\u9192\u504f\u79fb\n                valence_shift = -((interoceptive_index - 0.70) * 0.8)   # \u6700\u5927 -0.24\n                arousal_shift = -((interoceptive_index - 0.70) * 0.5)   # \u6700\u5927 -0.15\n                self.drive_emotion_metabolism(\n                    valence=valence_shift,\n                    arousal=arousal_shift,\n                    dominance=0.0,\n                    blend_weight=0.35,\n                    event_kind=\"interoceptive_overload\",\n                    source=\"interoception_agent\",\n                )\n            elif body_budget >= 0.75 and interoceptive_index <= 0.30:\n                # \u4f53\u80fd\u5145\u8db3\uff1a\u8f7b\u5fae\u6b63\u6548\u4ef7\u504f\u79fb\n                self.drive_emotion_metabolism(\n                    valence=0.08,\n                    arousal=0.05,\n                    dominance=0.0,\n                    blend_weight=0.20,\n                    event_kind=\"body_budget_surplus\",\n                    source=\"interoception_agent\",\n                )\n        except Exception as exc:\n            import logging  # noqa: PLC0415\n            logging.getLogger(\"Natsume.tribe.limbic_agent\").debug(\n                \"LimbicAgent._on_interoception_updated \u5f02\u5e38: %s\", exc\n            )\n\n    async def _on_body_sense_updated(self, event: Any) -> None:
+        - interoceptive_index >= 0.70：高负荷，情绪向低效价/低唤醒偏移
+        - body_budget >= 0.75 且 interoceptive_index <= 0.30：体能充足，轻微正效价偏移
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            interoceptive_index = float(payload.get("interoceptive_index") or 0.0)
+            body_budget = float(payload.get("body_budget") or 0.5)
+
+            if interoceptive_index >= 0.70:
+                valence_shift = -((interoceptive_index - 0.70) * 0.8)
+                arousal_shift = -((interoceptive_index - 0.70) * 0.5)
+                self.drive_emotion_metabolism(
+                    valence=valence_shift,
+                    arousal=arousal_shift,
+                    dominance=0.0,
+                    blend_weight=0.35,
+                    event_kind="interoceptive_overload",
+                    source="interoception_agent",
+                )
+            elif body_budget >= 0.75 and interoceptive_index <= 0.30:
+                self.drive_emotion_metabolism(
+                    valence=0.08,
+                    arousal=0.05,
+                    dominance=0.0,
+                    blend_weight=0.20,
+                    event_kind="body_budget_surplus",
+                    source="interoception_agent",
+                )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+
+            logging.getLogger("Natsume.tribe.limbic_agent").debug(
+                "LimbicAgent._on_interoception_updated 异常: %s", exc
+            )
+
+    async def _on_body_sense_updated(self, event: Any) -> None:
         """处理 BODY_SENSE_UPDATED 事件：更新沉默意愿惩罚 + 驱动情绪代谢。
 
         T-139：body_sense 更新时，除更新沉默意愿外，还通过 drive_emotion_metabolism()

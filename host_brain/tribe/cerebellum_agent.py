@@ -110,6 +110,63 @@ class CerebellumAgent:
             except Exception:
                 pass
 
+        # T-335：高纠偏策略时联动 PainRewardAgent 记录认知痛苦（持续纠偏是认知负担）
+        if strategy in {"RETRY_ONCE", "SAFE_FALLBACK"}:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_pain"):
+                    _pain_intensity = 0.20 if strategy == "RETRY_ONCE" else 0.32
+                    _pr.record_pain(
+                        source=f"cerebellum_{strategy.lower()}:{str(reason or 'unknown')[:24]}",
+                        intensity=_pain_intensity,
+                        metadata={
+                            "strategy": strategy,
+                            "urgency": round(urgency, 4),
+                            "reason": str(reason or ""),
+                            "plan_id": str(decision.get("plan_id") or ""),
+                        },
+                    )
+            except Exception:
+                pass
+
+        # T-341：低纠偏（NO_ADJUST）时联动 PainRewardAgent 记录技能奖励（执行顺畅是正向强化）
+        if strategy == "NO_ADJUST":
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward"):
+                    _pr.record_reward(
+                        source="cerebellum_no_adjust",
+                        intensity=0.18,
+                        metadata={
+                            "strategy": "NO_ADJUST",
+                            "latency_ms": latency_ms,
+                            "plan_id": str(decision.get("plan_id") or ""),
+                        },
+                    )
+            except Exception:
+                pass
+
+        # T-342：持续高纠偏时联动 InteroceptionAgent 注入躯体压力（持续纠偏消耗身体预算）
+        if strategy in {"RETRY_ONCE", "SAFE_FALLBACK"}:
+            try:
+                _prev_snap = self.state_registry.get_state("cerebellum_agent") or {}
+                _prev_st = dict(_prev_snap.get("state") or {})
+                _correction_count = int(_prev_st.get("correction_count") or 0)
+                # 连续纠偏次数 >= 3 时才注入躯体压力（避免单次纠偏过度触发）
+                if _correction_count >= 3:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "inject_external_stress"):
+                        _somatic_stress = round(min(0.35, urgency * 0.38), 4)
+                        _intero.inject_external_stress(
+                            source=f"cerebellum_persistent_correction:count={_correction_count}",
+                            intensity=_somatic_stress,
+                        )
+            except Exception:
+                pass
+
         return decision
 
     def export_runtime_state(self) -> dict[str, Any]:

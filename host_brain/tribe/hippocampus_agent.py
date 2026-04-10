@@ -486,6 +486,34 @@ class HippocampusAgent:
         except Exception:
             pass
 
+        # T-340：语义记忆写入成功时联动 PainRewardAgent 记录学习奖励（记忆巩固是学习成就感）
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+            _pr = get_pain_reward_agent()
+            if hasattr(_pr, "record_reward"):
+                _pr.record_reward(
+                    source="hippocampus_semantic_write",
+                    intensity=0.20,
+                    metadata={
+                        "person_id": str(person_id or "user_1"),
+                        "fact_preview": str(fact or "")[:48],
+                    },
+                )
+        except Exception:
+            pass
+
+        # T-344：语义记忆写入后联动 InteroceptionAgent 降低 recovery_urgency（记忆巩固后身体预算恢复）
+        try:
+            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+            _intero = get_interoception_agent()
+            if hasattr(_intero, "reduce_recovery_urgency"):
+                _intero.reduce_recovery_urgency(
+                    source="hippocampus_semantic_consolidation",
+                    relief=0.12,
+                )
+        except Exception:
+            pass
+
         return {"layer": "semantic", "arbiter": arbiter_result, "payload": payload["semantic_last"]}
 
     def write_autobiographical_memory(
@@ -539,6 +567,35 @@ class HippocampusAgent:
                 _dma.tick_idle_cycle(
                     source="hippocampus_autobiographical_write",
                     person_id=str(person_id or "").strip() or "user_1",
+                )
+        except Exception:
+            pass
+
+        # T-340：自传体记忆写入成功时联动 PainRewardAgent 记录强学习奖励（自传体记忆是最深层的成就感）
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+            _pr = get_pain_reward_agent()
+            if hasattr(_pr, "record_reward"):
+                _pr.record_reward(
+                    source="hippocampus_autobiographical_write",
+                    intensity=0.35,
+                    metadata={
+                        "person_id": str(person_id or "user_1"),
+                        "gate_trace_id": str(gate.get("trace_id") or ""),
+                        "narrative_chars": len(str(narrative or "")),
+                    },
+                )
+        except Exception:
+            pass
+
+        # T-344：自传体记忆写入后联动 InteroceptionAgent 降低 recovery_urgency（深度记忆巩固后身体预算显著恢复）
+        try:
+            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+            _intero = get_interoception_agent()
+            if hasattr(_intero, "reduce_recovery_urgency"):
+                _intero.reduce_recovery_urgency(
+                    source="hippocampus_autobiographical_consolidation",
+                    relief=0.25,
                 )
         except Exception:
             pass

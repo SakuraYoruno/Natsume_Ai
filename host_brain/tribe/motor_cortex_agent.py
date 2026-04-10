@@ -153,6 +153,22 @@ class MotorCortexAgent:
                     )
             except Exception:
                 pass
+            # T-338：执行失败时联动 PainRewardAgent 记录行动痛苦（执行失败是行动受阻的痛苦）
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_pain"):
+                    _pr.record_pain(
+                        source=f"motor_execution_failed:{str(reason or 'unknown')[:32]}",
+                        intensity=0.22,
+                        metadata={
+                            "plan_id": resolved_plan_id,
+                            "reason": str(reason or ""),
+                            "latency_ms": max(0, int(latency_ms or 0)),
+                        },
+                    )
+            except Exception:
+                pass
 
         return {"ok": bool(ok), "plan_id": resolved_plan_id, "matched": matched}
 

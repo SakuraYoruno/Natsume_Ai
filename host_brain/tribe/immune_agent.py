@@ -235,6 +235,24 @@ class ImmuneAgent:
                         )
                 except Exception:
                     pass
+                # T-337：BLOCK 时联动 PainRewardAgent 记录防御性痛苦（拦截有害内容是边界被侵犯的痛苦）
+                try:
+                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                    _pr = get_pain_reward_agent()
+                    if hasattr(_pr, "record_pain"):
+                        _pain_intensity = round(min(0.50, score * 0.55), 4)
+                        _pr.record_pain(
+                            source=f"immune_block:{risk_level}",
+                            intensity=_pain_intensity,
+                            metadata={
+                                "risk_level": risk_level,
+                                "score": round(score, 4),
+                                "reason_codes": reason_codes[:3],
+                                "source": str(source or "chat"),
+                            },
+                        )
+                except Exception:
+                    pass
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

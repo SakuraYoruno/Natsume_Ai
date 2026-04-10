@@ -748,12 +748,27 @@ class ANSAgent:
             logger.warning("ANSAgent 订阅注册失败（降级）: %s", exc)
 
     async def _on_glymphatic_cycle(self, event: Any) -> None:
-        """T-203\uff1a\u5904\u7406 GLYMPHATIC_CYCLE_COMPLETED \u4e8b\u4ef6\uff0c\u611f\u77e5\u6062\u590d\u7a97\u53e3\u5e76\u8c03\u6574\u8282\u5f8b\u3002
+        """T-203：处理 GLYMPHATIC_CYCLE_COMPLETED 事件，感知恢复窗口并调整节律。
 
-        \u6062\u590d\u7a97\u53e3\u671f\u95f4\uff1a\u5c06 _recovery_mode \u8bbe\u4e3a True\uff0c\u540e\u7eed emit_inner_world_ticked \u4f1a\u81ea\u52a8
-        \u964d\u4f4e proactive_multiplier \u81f3 0.35\uff0c\u51cf\u5c11\u4e3b\u52a8\u53d1\u58f0\u9891\u7387\u3002
-        \u6062\u590d\u7a97\u53e3\u5173\u95ed\u65f6\uff1a\u5c06 _recovery_mode \u8bbe\u4e3a False\uff0c\u6062\u590d\u6b63\u5e38\u8282\u5f8b\u3002
-        \"\"\"\n        try:\n            payload = dict(getattr(event, \"payload\", None) or {})\n            executed = bool(payload.get(\"executed\", False))\n            ts_ms = int(getattr(event, \"ts_ms\", 0) or 0)\n            self._recovery_mode = executed\n            self._recovery_mode_ts_ms = ts_ms\n            logger.info(\n                \"ANSAgent._on_glymphatic_cycle: recovery_mode=%s consolidation_score=%.3f\",\n                executed,\n                float(payload.get(\"consolidation_score\") or 0.0),\n            )\n        except Exception as exc:\n            logger.debug(\"ANSAgent._on_glymphatic_cycle \u5f02\u5e38: %s\", exc)\n\n    async def _on_bond_stage_changed(self, event: Any) -> None:
+        恢复窗口期间：将 _recovery_mode 设为 True，后续 emit_inner_world_ticked 会自动
+        降低 proactive_multiplier 至 0.35，减少主动发声频率。
+        恢复窗口关闭时：将 _recovery_mode 设为 False，恢复正常节律。
+        """
+        try:
+            payload = dict(getattr(event, "payload", None) or {})
+            executed = bool(payload.get("executed", False))
+            ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            self._recovery_mode = executed
+            self._recovery_mode_ts_ms = ts_ms
+            logger.info(
+                "ANSAgent._on_glymphatic_cycle: recovery_mode=%s consolidation_score=%.3f",
+                executed,
+                float(payload.get("consolidation_score") or 0.0),
+            )
+        except Exception as exc:
+            logger.debug("ANSAgent._on_glymphatic_cycle 异常: %s", exc)
+
+    async def _on_bond_stage_changed(self, event: Any) -> None:
         """处理 BOND_STAGE_CHANGED 事件：记录当前关系阶段。
 
         T-37：当 bond stage 发生跃迁时，更新 _bond_stage 字段。

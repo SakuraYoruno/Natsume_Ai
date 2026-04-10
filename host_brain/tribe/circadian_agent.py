@@ -131,10 +131,12 @@ class CircadianAgent:
             if next_phase in {"day", "dawn"}:
                 try:
                     from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+
                     _ans = get_ans_agent()
-                if hasattr(_ans, "set_recovery_mode"):
-                    _ans.set_recovery_mode(False, source="circadian_day_phase")
+                    if hasattr(_ans, "set_recovery_mode"):
+                        _ans.set_recovery_mode(False, source="circadian_day_phase")
                         import logging  # noqa: PLC0415
+
                         logging.getLogger("Natsume.tribe.circadian_agent").debug(
                             "CircadianAgent T-292: phase=%s → ANSAgent recovery_mode=False",
                             next_phase,

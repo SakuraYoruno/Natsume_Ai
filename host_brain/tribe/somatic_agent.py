@@ -131,6 +131,22 @@ class SomaticAgent:
                         )
                 except Exception:
                     pass
+
+            # T-345：低疲劳（< 0.30）时联动 InteroceptionAgent 降低 recovery_urgency
+            # 躯体恢复良好是最直接的恢复信号，应主动释放身体预算压力
+            if fatigue_level < 0.30:
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "reduce_recovery_urgency"):
+                        _relief = round(min(0.35, (0.30 - fatigue_level) * 1.17), 4)
+                        _intero.reduce_recovery_urgency(
+                            source=f"somatic_low_fatigue:{round(fatigue_level, 3)}",
+                            relief=_relief,
+                            ts_ms=ts_ms,
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 
