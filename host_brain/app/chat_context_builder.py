@@ -2831,6 +2831,57 @@ def build_chat_prompt_runtime_payload(
                 "last_stability_score": round(float(_vestibular_state.get("last_stability_score") or 1.0), 4),
             }
 
+        # T-256：注入 circadian_state（日节律快照）
+        _circadian_state = dict(tribe_context.get("circadian_state") or {})
+        if _circadian_state:
+            _phase = str(_circadian_state.get("phase") or "day")
+            runtime_payload["circadian_state"] = {
+                "phase": _phase,
+                "local_hour": int(_circadian_state.get("local_hour") or 12),
+                "phase_energy_baseline": round(float(_circadian_state.get("phase_energy_baseline") or 0.8), 4),
+                "proactive_multiplier": round(float(_circadian_state.get("proactive_multiplier") or 1.0), 4),
+                "recovery_bias": round(float(_circadian_state.get("recovery_bias") or 0.3), 4),
+                "sleep_pressure": round(float(_circadian_state.get("sleep_pressure") or 0.2), 4),
+                "response_latency_ms": int(_circadian_state.get("response_latency_ms") or 400),
+            }
+            # 夜间相位时注入 night_hint 供 prompt_builder 参考
+            if _phase == "night":
+                runtime_payload.setdefault("night_hint", {
+                    "phase": "night",
+                    "suggest": "当前为夜间时段，回复应更温柔、简短，避免高能量话题",
+                    "sleep_pressure": round(float(_circadian_state.get("sleep_pressure") or 0.2), 4),
+                })
+
+        # T-256：注入 ans_state（自主神经节律快照）
+        _ans_state = dict(tribe_context.get("ans_state") or {})
+        if _ans_state:
+            runtime_payload["ans_state"] = {
+                "bond_stage": str(_ans_state.get("bond_stage") or "stranger"),
+                "recovery_mode": bool(_ans_state.get("recovery_mode", False)),
+                "proactive_multiplier": round(float(_ans_state.get("proactive_multiplier") or 0.7), 4),
+            }
+
+        # T-256：注入 mirror_neuron_state（共情共鸣快照）
+        _mirror_state = dict(tribe_context.get("mirror_neuron_state") or {})
+        if _mirror_state:
+            _resonance_strength = round(float(_mirror_state.get("last_resonance_strength") or 0.0), 4)
+            runtime_payload["mirror_neuron_state"] = {
+                "last_emotion_tag": str(_mirror_state.get("last_emotion_tag") or "NEUTRAL"),
+                "last_resonance_strength": _resonance_strength,
+                "last_valence_shift": round(float(_mirror_state.get("last_valence_shift") or 0.0), 4),
+                "last_arousal_shift": round(float(_mirror_state.get("last_arousal_shift") or 0.0), 4),
+                "co_regulation_hint": str(_mirror_state.get("last_co_regulation_hint") or "resonate"),
+                "resonance_count": int(_mirror_state.get("resonance_count") or 0),
+            }
+            # 高共情时注入 empathy_hint 供 prompt_builder 参考
+            if _resonance_strength >= 0.55:
+                runtime_payload.setdefault("empathy_hint", {
+                    "resonance_strength": _resonance_strength,
+                    "emotion_tag": str(_mirror_state.get("last_emotion_tag") or "NEUTRAL"),
+                    "co_regulation_hint": str(_mirror_state.get("last_co_regulation_hint") or "resonate"),
+                    "suggest": "当前共情共鸣强烈，回复应充分体现情感同频，优先情感支持",
+                })
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

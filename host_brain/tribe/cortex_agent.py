@@ -402,6 +402,23 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 20. T-255：CircadianAgent 日节律 + ANSAgent 节律状态 + MirrorNeuronAgent 共情快照 ──
+        try:
+            from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
+            result["circadian_state"] = get_circadian_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+            result["ans_state"] = get_ans_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.mirror_neuron_agent import get_mirror_neuron_agent  # noqa: PLC0415
+            result["mirror_neuron_state"] = get_mirror_neuron_agent().export_runtime_state()
+        except Exception:
+            pass
+
         return result
 
     def route_intent(

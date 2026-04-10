@@ -1308,7 +1308,7 @@ async def chat_agent_sse_generator(
             model_id: str = "llm-unavailable-fallback",
         ) -> None:
             try:
-                from host_brain.app.top_agent import _async_post_process  # noqa: PLC0415
+                from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
 
                 total_latency_ms = int(time.time() * 1000) - ts_ms
                 asyncio.create_task(
@@ -1731,9 +1731,9 @@ async def chat_agent_sse_generator(
     })
 
     # ── 9. 异步后处理（fire-and-forget）─────────────────────────────
-    # 复用 top_agent._async_post_process（不动后处理逻辑）
+    # 先走中性共享模块，逐步把旧 top_agent 兼容能力从调用侧切出去
     try:
-        from host_brain.app.top_agent import _async_post_process  # noqa: PLC0415
+        from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
         asyncio.create_task(
             _async_post_process(
                 request_id=request_id,

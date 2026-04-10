@@ -113,6 +113,19 @@ class CircadianAgent:
                     )
                 except Exception:
                     pass
+                # T-258：夜间相位时联动 EndocrineAgent 降低 cortisol（夜间应降低压力激素）
+                try:
+                    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                    _endo = get_endocrine_agent()
+                    if hasattr(_endo, "_bond_cortisol_delta"):
+                        # 注入负 delta（降低 cortisol），通过 _bond_cortisol_delta 缓冲消费
+                        with _endo._bond_lock:
+                            _endo._bond_cortisol_delta = max(
+                                -0.08,
+                                float(_endo._bond_cortisol_delta) - 0.06,
+                            )
+                except Exception:
+                    pass
         self._last_phase = next_phase
         return prev_state
 

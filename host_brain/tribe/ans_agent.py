@@ -658,6 +658,36 @@ class ANSAgent:
             },
         )
 
+    def export_runtime_state(self) -> dict[str, Any]:
+        """T-254：导出 ANSAgent 当前运行时状态快照。
+
+        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        不触发任何副作用（不 emit 事件，不写 state_registry）。
+
+        Returns:
+            dict: 包含 bond_stage/recovery_mode/proactive_multiplier 等关键字段。
+        """
+        from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
+        # 根据 bond_stage 推算 proactive_multiplier
+        _stage_multiplier = {
+            "stranger": 0.55,
+            "acquaintance": 0.70,
+            "friend": 0.85,
+            "close_friend": 0.95,
+            "intimate": 1.00,
+        }
+        proactive_multiplier = _stage_multiplier.get(str(self._bond_stage or "stranger"), 0.70)
+        if self._recovery_mode:
+            proactive_multiplier = round(proactive_multiplier * 0.35, 4)
+        return {
+            "bond_stage": str(self._bond_stage or "stranger"),
+            "recovery_mode": bool(self._recovery_mode),
+            "recovery_mode_ts_ms": int(self._recovery_mode_ts_ms or 0),
+            "proactive_multiplier": round(proactive_multiplier, 4),
+            "loop_registered": self._loop is not None,
+            "ts_ms": _now_ms(),
+        }
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

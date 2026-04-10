@@ -11,8 +11,9 @@ Phase XV 架构：
   chat_agent : 人格渲染（完整 prompt + 流式 LLM + 反思链 + 净化）
 
 向后兼容：
-  _async_post_process、_SubAgentGatewayAdapter 等工具函数保留，
-  被 dispatch_agent 和 chat_agent 依赖。
+  旧共享 helper 仍在本文件保留，但调用侧已开始通过
+  `host_brain.app.agent_runtime_shared` 这一中性模块切走，
+  后续将继续向 tribe / observability / airlock 等稳定归属下沉。
 """
 
 from __future__ import annotations

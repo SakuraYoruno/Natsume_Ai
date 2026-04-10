@@ -99,18 +99,56 @@ class VestibularAgent:
                 "ts_ms": resolved_ts,
             },
         )
+
+        # T-251：高抖动时联动 LimbicAgent 触发警觉性情绪偏移
+        if jitter >= 0.35:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _alert_intensity = min(0.35, (jitter - 0.35) * 1.43)
+                    _limbic.drive_emotion_metabolism(
+                        valence=round(-_alert_intensity * 0.40, 4),
+                        arousal=round(_alert_intensity * 0.55, 4),
+                        dominance=-0.05,
+                        blend_weight=0.12,
+                        event_kind=f"vestibular_jitter:{round(jitter, 3)}",
+                        source="vestibular_agent",
+                    )
+            except Exception:
+                pass
+
+        # T-252：高抖动时联动 ANSAgent 降低主动发声节律
+        if jitter >= 0.35:
+            try:
+                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+                _ans = get_ans_agent()
+                if hasattr(_ans, "adjust_rhythm_for_high_interrupt"):
+                    _virtual_interrupt = int(6 + (jitter - 0.35) * 20)
+                    _ans.adjust_rhythm_for_high_interrupt(
+                        interrupt_count=_virtual_interrupt,
+                        source=f"vestibular_jitter:{round(jitter, 3)}",
+                    )
+            except Exception:
+                pass
+
         return dict(prev_state)
 
     def export_runtime_state(self) -> dict[str, Any]:
-        state = self.evaluate_stability(source="export_runtime_state")
+        """T-250：读取 state_registry 快照，不触发 evaluate_stability()（避免副作用）。"""
+        snap = self.state_registry.get_state("vestibular_agent") or {}
+        state = dict(snap.get("state") or {})
         return {
             "stability_state": str(state.get("stability_state") or "stable"),
             "route_bias": str(state.get("route_bias") or "normal"),
             "jitter_index": float(state.get("jitter_index") or 0.0),
             "damping_factor": float(state.get("damping_factor") or 1.0),
+            "conservative_mode": str(state.get("route_bias") or "normal") in {"conservative", "safe_only"},
+            "last_stability_score": round(1.0 - float(state.get("jitter_index") or 0.0), 4),
             "mode_transition_count_10m": int(state.get("mode_transition_count_10m") or 0),
             "platform_flap_count_10m": int(state.get("platform_flap_count_10m") or 0),
             "initiative_defer_count_10m": int(state.get("initiative_defer_count_10m") or 0),
+            "sample_count": int(state.get("sample_count") or 0),
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 

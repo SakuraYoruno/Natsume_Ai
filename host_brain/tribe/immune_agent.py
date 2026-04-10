@@ -627,17 +627,23 @@ class ImmuneAgent:
         """处理 INTERACTION_RECORDED 事件：将当前免疫计数快照写入 TribeStateRegistry。
 
         T-35：每轮对话结束后同步免疫计数快照，供诊断端点查询。
+        T-253：同步写入 risk_level/last_score/last_decision，供 vital_signs 聚合使用。
         """
         try:
             with self._lock:
                 counters = dict(self._counters)
+                last = dict(self._last_inspection or {})
+            total = max(1, int(counters.get("total") or 1))
+            block_rate = round(int(counters.get("block") or 0) / total, 4)
+            last_score = float(last.get("score") or 0.0)
             self.state_registry.set_state(
                 "immune_agent",
                 {
                     "counters": counters,
-                    "block_rate": round(
-                        counters.get("block", 0) / max(1, counters.get("total", 1)), 4
-                    ),
+                    "block_rate": block_rate,
+                    "risk_level": _risk_level(last_score),
+                    "last_score": round(last_score, 4),
+                    "last_decision": str(last.get("decision") or "ALLOW"),
                 },
                 writer="immune_agent",
             )

@@ -684,6 +684,19 @@ class TribeStateRegistry:
             vestibular_damping_factor = _safe_float(_vest.get("damping_factor"), 0.0)
             vestibular_route_bias = str(_vest.get("route_bias") or "normal").strip().lower() or "normal"
 
+        # ── T-257：CircadianAgent 日节律快照（phase / proactive_multiplier / recovery_bias）──
+        circadian_phase = "day"
+        circadian_proactive_multiplier = 1.0
+        circadian_recovery_bias = 0.3
+        circadian_sleep_pressure = 0.2
+        circadian_ns = states.get("circadian_agent")
+        if circadian_ns:
+            _circ = dict(circadian_ns.get("state") or {})
+            circadian_phase = str(_circ.get("phase") or "day").strip().lower() or "day"
+            circadian_proactive_multiplier = _safe_float(_circ.get("proactive_multiplier"), 1.0)
+            circadian_recovery_bias = _safe_float(_circ.get("recovery_bias"), 0.3)
+            circadian_sleep_pressure = _safe_float(_circ.get("sleep_pressure"), 0.2)
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -748,6 +761,11 @@ class TribeStateRegistry:
             # T-243 VestibularAgent 路由偏置快照
             "vestibular_damping_factor": round(vestibular_damping_factor, 4),
             "vestibular_route_bias": vestibular_route_bias,
+            # T-257 CircadianAgent 日节律快照
+            "circadian_phase": circadian_phase,
+            "circadian_proactive_multiplier": round(circadian_proactive_multiplier, 4),
+            "circadian_recovery_bias": round(circadian_recovery_bias, 4),
+            "circadian_sleep_pressure": round(circadian_sleep_pressure, 4),
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

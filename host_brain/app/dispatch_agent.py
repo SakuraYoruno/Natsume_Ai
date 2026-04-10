@@ -1360,12 +1360,11 @@ async def dispatch_agent_sse_generator(
 
     # ── 2. 近期对话回查（最高优先级，绕过 LLM）──────────────────────
     if route == "recent_turn":
-        # 直接复用 top_agent 的 _maybe_build_recent_turn_answer
-        from host_brain.app.top_agent import (  # noqa: PLC0415
+        # 近期回查能力先走中性共享模块，逐步把这类兼容 helper 从 top_agent 切出去
+        from host_brain.app.agent_runtime_shared import (  # noqa: PLC0415
             _maybe_build_recent_turn_answer,
             _airlock_sanitize_output,
             _async_post_process,
-            _build_reply_preview,
         )
         recent_answer = _maybe_build_recent_turn_answer(
             request_id=request_id,
@@ -1556,7 +1555,7 @@ async def dispatch_agent_sse_generator(
 
     if route == "task_progress":
         _logger.info("[%s] DispatchAgent → task_progress (reason=%s)", request_id, route_reason)
-        from host_brain.app.top_agent import _airlock_sanitize_output, _async_post_process  # noqa: PLC0415
+        from host_brain.app.agent_runtime_shared import _airlock_sanitize_output, _async_post_process  # noqa: PLC0415
         progress_ctx = _build_task_progress_sub_context(
             request_id=request_id,
             session_id=session_id,
@@ -2043,7 +2042,7 @@ async def _dispatch_to_sub_agent(
     from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
         SubAgentRequest, get_sub_agent_dispatcher, ALL_AGENT_IDS,
     )
-    from host_brain.app.top_agent import _build_subagent_gateway_from_runtime  # noqa: PLC0415
+    from host_brain.app.agent_runtime_shared import _build_subagent_gateway_from_runtime  # noqa: PLC0415
 
     # 验证 agent_id 合法性
     if agent_id not in ALL_AGENT_IDS:
