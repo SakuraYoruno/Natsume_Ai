@@ -131,6 +131,18 @@ class VestibularAgent:
                     )
             except Exception:
                 pass
+            # T-307：高抖动时联动 EndocrineAgent 记录系统不稳定压力事件
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                _endo = get_endocrine_agent()
+                if hasattr(_endo, "record_stress_event"):
+                    _jitter_stress = round(min(0.35, (jitter - 0.35) * 0.80), 4)
+                    _endo.record_stress_event(
+                        source=f"vestibular_jitter:{round(jitter, 3)}",
+                        intensity=_jitter_stress,
+                    )
+            except Exception:
+                pass
 
         return dict(prev_state)
 

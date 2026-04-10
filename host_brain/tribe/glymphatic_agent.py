@@ -134,6 +134,20 @@ class GlymphaticAgent:
             except Exception:
                 pass
 
+            # T-302：恢复周期完成时联动 InteroceptionAgent 降低 recovery_urgency（身体压力缓解）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "reduce_recovery_urgency"):
+                    _relief = min(0.60, consolidation_score * 0.65)
+                    _intero.reduce_recovery_urgency(
+                        source=f"glymphatic_recovery:score={round(consolidation_score, 3)}",
+                        relief=round(_relief, 4),
+                        ts_ms=resolved_ts,
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

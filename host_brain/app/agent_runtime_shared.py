@@ -544,6 +544,7 @@ async def _persist_post_process_audit(
     person_id: str,
     session_id: str,
     narrative: str,
+    emotion_context: Mapping[str, Any] | None = None,
     bond_summary: dict[str, Any] | None,
     ts_ms: int,
     total_latency_ms: int = 0,

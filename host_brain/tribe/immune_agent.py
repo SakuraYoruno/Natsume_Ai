@@ -223,6 +223,18 @@ class ImmuneAgent:
                         )
                 except Exception:
                     pass
+                # T-308：BLOCK 时联动 EndocrineAgent 记录免疫拦截压力事件（高风险内容触发应激）
+                try:
+                    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                    _endo = get_endocrine_agent()
+                    if hasattr(_endo, "record_stress_event"):
+                        _immune_stress = round(min(0.45, score * 0.50), 4)
+                        _endo.record_stress_event(
+                            source=f"immune_block:{risk_level}",
+                            intensity=_immune_stress,
+                        )
+                except Exception:
+                    pass
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

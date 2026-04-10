@@ -204,6 +204,19 @@ class MirrorNeuronAgent:
                         )
             except Exception:
                 pass
+            # T-305：高共情时联动 InteroceptionAgent 降低 recovery_urgency（共情是正向信号，缓解身体压力）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "reduce_recovery_urgency"):
+                    _relief = round(min(0.40, (resonance_strength - 0.60) * 0.50), 4)
+                    _intero.reduce_recovery_urgency(
+                        source=f"mirror_high_resonance:{round(resonance_strength, 3)}",
+                        relief=_relief,
+                        ts_ms=resolved_ts,
+                    )
+            except Exception:
+                pass
 
         return result
 

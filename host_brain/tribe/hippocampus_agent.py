@@ -421,6 +421,19 @@ class HippocampusAgent:
             reason="episodic_memory_write",
             input_refs=[str(request_id or "").strip()] if str(request_id or "").strip() else None,
         )
+
+        # T-311：情节记忆写入后联动 DefaultModeAgent 提升连续性评分（情节记忆是连续性的重要来源）
+        try:
+            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
+            _dma = get_default_mode_agent()
+            if hasattr(_dma, "tick_idle_cycle"):
+                _dma.tick_idle_cycle(
+                    source="hippocampus_episodic_write",
+                    user_id=str(person_id or "").strip() or None,
+                )
+        except Exception:
+            pass
+
         return {"layer": "episodic", "arbiter": arbiter_result, "payload": payload["episodic_last"]}
 
     def write_semantic_memory_fact(

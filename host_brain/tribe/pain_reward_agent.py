@@ -565,6 +565,21 @@ class PainRewardAgent:
             except Exception:
                 pass
 
+        # T-306：高奖励(reward_level>=0.55)时联动 InteroceptionAgent 降低 recovery_urgency（奖励是正向信号）
+        reward_level = float(state.get("reward_level") or 0.0)
+        if event_type == "reward" and reward_level >= 0.55:
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "reduce_recovery_urgency"):
+                    _relief = round(min(0.45, (reward_level - 0.55) * 0.60), 4)
+                    _intero.reduce_recovery_urgency(
+                        source=f"pain_reward_high_reward:{source}",
+                        relief=_relief,
+                    )
+            except Exception:
+                pass
+
         return state
 
     # ── T-27：持久化方法 ─────────────────────────────────────────────────────

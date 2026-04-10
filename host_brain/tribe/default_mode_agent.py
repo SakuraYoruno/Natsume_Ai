@@ -170,6 +170,21 @@ class DefaultModeAgent:
             except Exception:
                 pass
 
+        # T-310：高连续性(>=0.55)时联动 InteroceptionAgent 降低 recovery_urgency（默认模式恢复是正向信号）
+        if continuity_score >= 0.55:
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "reduce_recovery_urgency"):
+                    _relief = round(min(0.35, (continuity_score - 0.55) * 0.70), 4)
+                    _intero.reduce_recovery_urgency(
+                        source=f"default_mode_continuity:{round(continuity_score, 3)}",
+                        relief=_relief,
+                        ts_ms=ts_ms,
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

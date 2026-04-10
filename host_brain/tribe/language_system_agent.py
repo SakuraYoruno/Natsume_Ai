@@ -219,6 +219,21 @@ class LanguageSystemAgent:
             except Exception:
                 pass
 
+        # T-309：高紧迫度(urgency_score>=0.65)时联动 EndocrineAgent 记录语言压力事件
+        urgency_score = float(wernicke.get("urgency_score") or 0.0)
+        if urgency_score >= 0.65:
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                _endo = get_endocrine_agent()
+                if hasattr(_endo, "record_stress_event"):
+                    _lang_stress = round(min(0.40, (urgency_score - 0.65) * 1.14), 4)
+                    _endo.record_stress_event(
+                        source=f"language_high_urgency:{round(urgency_score, 3)}",
+                        intensity=_lang_stress,
+                    )
+            except Exception:
+                pass
+
         return payload
 
     def get_language_style(

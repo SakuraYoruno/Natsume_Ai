@@ -119,6 +119,18 @@ class SomaticAgent:
                         )
                 except Exception:
                     pass
+                # T-304：高疲劳时联动 EndocrineAgent 记录躯体压力事件（疲劳是内在压力源）
+                try:
+                    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                    _endo = get_endocrine_agent()
+                    if hasattr(_endo, "record_stress_event"):
+                        _somatic_stress = round(min(0.40, (fatigue_level - 0.60) * 1.00), 4)
+                        _endo.record_stress_event(
+                            source=f"somatic_high_fatigue:{round(fatigue_level, 3)}",
+                            intensity=_somatic_stress,
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 

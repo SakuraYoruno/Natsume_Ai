@@ -142,6 +142,17 @@ class MotorCortexAgent:
                     )
             except Exception:
                 pass
+            # T-303：执行失败时联动 EndocrineAgent 记录执行压力事件
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                _endo = get_endocrine_agent()
+                if hasattr(_endo, "record_stress_event"):
+                    _endo.record_stress_event(
+                        source=f"motor_execution_failed:{str(reason or 'unknown')[:32]}",
+                        intensity=0.18,
+                    )
+            except Exception:
+                pass
 
         return {"ok": bool(ok), "plan_id": resolved_plan_id, "matched": matched}
 
