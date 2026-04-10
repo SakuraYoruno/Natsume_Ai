@@ -510,6 +510,61 @@ class PainRewardAgent:
         # T-27：节流持久化到磁盘
         if should_persist:
             self.save_state()
+
+        # T-215：高痛觉时主动驱动 LimbicAgent 情绪偏移
+        pain_level = float(state.get("pain_level") or 0.0)
+        reward_level = float(state.get("reward_level") or 0.0)
+        if event_type == "pain" and pain_level >= 0.55:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                limbic = get_limbic_agent()
+                if hasattr(limbic, "drive_emotion_metabolism"):
+                    valence_shift = -((pain_level - 0.55) * 1.2)   # 最大 -0.54
+                    arousal_shift = (pain_level - 0.55) * 0.6       # 最大 +0.27
+                    limbic.drive_emotion_metabolism(
+                        valence=round(valence_shift, 4),
+                        arousal=round(arousal_shift, 4),
+                        dominance=0.0,
+                        blend_weight=0.30,
+                        event_kind=f"pain_overload:{source}",
+                        source="pain_reward_agent",
+                    )
+            except Exception:
+                pass
+        elif event_type == "reward" and reward_level >= 0.60:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                limbic = get_limbic_agent()
+                if hasattr(limbic, "drive_emotion_metabolism"):
+                    valence_shift = (reward_level - 0.60) * 0.9    # 最大 +0.36
+                    limbic.drive_emotion_metabolism(
+                        valence=round(valence_shift, 4),
+                        arousal=0.05,
+                        dominance=0.0,
+                        blend_weight=0.25,
+                        event_kind=f"reward_surge:{source}",
+                        source="pain_reward_agent",
+                    )
+            except Exception:
+                pass
+
+        # T-216：累积痛觉实际写入 EndocrineAgent cortisol
+        cumulative_pain = float(state.get("cumulative_pain") or 0.0)
+        if event_type == "pain" and cumulative_pain >= 1.0:
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                endocrine = get_endocrine_agent()
+                if hasattr(endocrine, "record_stress_event"):
+                    # 将累积痛觉转换为压力事件强度（对数压缩，避免无限增长）
+                    import math  # noqa: PLC0415
+                    stress_intensity = min(0.85, math.log1p(cumulative_pain) * 0.25)
+                    endocrine.record_stress_event(
+                        source=f"pain_reward:{source}",
+                        intensity=round(stress_intensity, 4),
+                    )
+            except Exception:
+                pass
+
         return state
 
     # ── T-27：持久化方法 ─────────────────────────────────────────────────────

@@ -616,6 +616,27 @@ class TribeStateRegistry:
                 _last_correction.get("strategy") or _cbs.get("last_strategy") or "NO_ADJUST"
             ).strip().upper() or "NO_ADJUST"
 
+        # ── T-221：PainReward 享乐状态（PainRewardAgent 快照）──────────────────
+        pain_level = 0.0
+        reward_level = 0.0
+        net_valence = 0.0
+        pain_ns = states.get("pain_reward_agent")
+        if pain_ns:
+            _ps = dict(pain_ns.get("state") or {})
+            pain_level = _safe_float(_ps.get("pain_level"), 0.0)
+            reward_level = _safe_float(_ps.get("reward_level"), 0.0)
+            net_valence = _safe_float(_ps.get("net_valence"), 0.0)
+
+        # ── T-222：MirrorNeuron 共情强度（MirrorNeuronAgent 快照）─────────────
+        mirror_resonance_strength = 0.0
+        mirror_ns = states.get("mirror_neuron_agent")
+        if mirror_ns:
+            _mn = dict(mirror_ns.get("state") or {})
+            _last_resonance = dict(_mn.get("last_resonance") or {})
+            mirror_resonance_strength = _safe_float(
+                _last_resonance.get("resonance_strength") or _mn.get("last_resonance_strength"), 0.0
+            )
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -659,6 +680,12 @@ class TribeStateRegistry:
             # T-207 Cerebellum 纠偏频率
             "cerebellum_correction_count": cerebellum_correction_count,
             "cerebellum_last_strategy": cerebellum_last_strategy,
+            # T-221 PainReward 享乐状态
+            "pain_level": round(pain_level, 4),
+            "reward_level": round(reward_level, 4),
+            "net_valence": round(net_valence, 4),
+            # T-222 MirrorNeuron 共情强度
+            "mirror_resonance_strength": round(mirror_resonance_strength, 4),
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

@@ -359,6 +359,18 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 17. T-223：PainReward 完整快照 + MirrorNeuron 共情快照 ──────────
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+            result["pain_reward_state"] = get_pain_reward_agent().get_hedonic_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.mirror_neuron_agent import get_mirror_neuron_agent  # noqa: PLC0415
+            result["mirror_neuron_resonance"] = get_mirror_neuron_agent().export_runtime_state()
+        except Exception:
+            pass
+
         return result
 
     def route_intent(

@@ -95,10 +95,11 @@ class GlymphaticAgent:
                 from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
                 hippocampus = get_hippocampus_agent()
                 if hasattr(hippocampus, "write_semantic_memory_fact"):
+                    # T-214：修复：补充 person_id 参数，confidence 通过 source_refs 携带
                     hippocampus.write_semantic_memory_fact(
-                        fact=f"glymphatic_consolidation:{resolved_ts}",
-                        confidence=round(consolidation_score, 4),
-                        source="glymphatic_agent",
+                        person_id="system",
+                        fact=f"glymphatic_consolidation:{resolved_ts}:score={round(consolidation_score, 4)}",
+                        source_refs=[f"consolidation_score:{round(consolidation_score, 4)}"],
                     )
                     memory_written = True
             except Exception:

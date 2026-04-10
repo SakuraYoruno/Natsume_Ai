@@ -767,11 +767,31 @@ class PrefrontalAgent:
             assistant_reply = str(payload.get("assistant_reply") or "").strip()
             session_id = str(payload.get("session_id") or "default").strip() or "default"
             if user_message and assistant_reply:
-                self.run_growth_feedback_cycle(
+                drift_result = self.run_growth_feedback_cycle(
                     session_id=session_id,
                     user_message=user_message,
                     assistant_reply=assistant_reply,
                 )
+
+                # T-219：漂移检测结果联动 LimbicAgent 情绪调整
+                drift_alert = str(drift_result.get("drift_alert_level") or "").strip().upper()
+                if drift_alert in {"MODERATE", "SEVERE"}:
+                    try:
+                        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                        limbic = get_limbic_agent()
+                        if hasattr(limbic, "drive_emotion_metabolism"):
+                            # 漂移时情绪向不安/焦虑偏移
+                            severity = 0.15 if drift_alert == "MODERATE" else 0.28
+                            limbic.drive_emotion_metabolism(
+                                valence=-severity,
+                                arousal=severity * 0.6,
+                                dominance=-0.05,
+                                blend_weight=0.25,
+                                event_kind=f"persona_drift:{drift_alert.lower()}",
+                                source="prefrontal_agent",
+                            )
+                    except Exception:
+                        pass
 
             # T-26：检测 humor/task 成功信号并发布对应事件
             if assistant_reply:

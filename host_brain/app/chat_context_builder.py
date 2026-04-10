@@ -2730,6 +2730,37 @@ def build_chat_prompt_runtime_payload(
         except Exception as _lang_exc:
             logger.debug("LanguageSystemAgent.get_language_style 降级: %s", _lang_exc)
 
+        # T-224：注入 pain_reward_state（享乐状态完整快照）
+        _pain_reward_state = dict(tribe_context.get("pain_reward_state") or {})
+        if _pain_reward_state:
+            runtime_payload["pain_reward_state"] = {
+                "pain_level": round(float(_pain_reward_state.get("pain_level") or 0.0), 4),
+                "reward_level": round(float(_pain_reward_state.get("reward_level") or 0.0), 4),
+                "net_valence": round(float(_pain_reward_state.get("net_valence") or 0.0), 4),
+                "hedonic_tone": str(_pain_reward_state.get("hedonic_tone") or "neutral"),
+                "last_pain_source": str(_pain_reward_state.get("last_pain_source") or ""),
+                "last_reward_source": str(_pain_reward_state.get("last_reward_source") or ""),
+            }
+            # 高痛觉时注入 pain_hint 供 prompt_builder 参考
+            _pain_level = float(_pain_reward_state.get("pain_level") or 0.0)
+            if _pain_level >= 0.55:
+                runtime_payload.setdefault("pain_hint", {
+                    "high_pain": True,
+                    "pain_level": round(_pain_level, 4),
+                    "suggest": "当前痛觉较高，回复需更温柔体贴，避免加重负面情绪",
+                })
+
+        # T-224：注入 mirror_neuron_resonance（共情共振快照）
+        _mirror_resonance = dict(tribe_context.get("mirror_neuron_resonance") or {})
+        if _mirror_resonance:
+            runtime_payload["mirror_neuron_resonance"] = {
+                "resonance_strength": round(float(_mirror_resonance.get("last_resonance_strength") or 0.0), 4),
+                "last_emotion_tag": str(_mirror_resonance.get("last_emotion_tag") or "NEUTRAL"),
+                "last_valence_shift": round(float(_mirror_resonance.get("last_valence_shift") or 0.0), 4),
+                "last_arousal_shift": round(float(_mirror_resonance.get("last_arousal_shift") or 0.0), 4),
+                "co_regulation_hint": str(_mirror_resonance.get("last_co_regulation_hint") or "resonate"),
+            }
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

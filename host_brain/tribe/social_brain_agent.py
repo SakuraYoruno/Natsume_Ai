@@ -424,6 +424,16 @@ class SocialBrainAgent:
                 "SocialBrainAgent 快照更新 BOND_PROGRESS: stage=%s intensity=%.2f",
                 bond_stage, intensity,
             )
+            # T-220：Bond 进展联动 PainRewardAgent 记录 bond_progress 奖励
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                get_pain_reward_agent().record_reward(
+                    source="bond_progress",
+                    intensity=round(intensity * 0.85, 4),
+                    metadata={"user_id": user_id, "bond_stage": bond_stage, "ts_ms": ts_ms},
+                )
+            except Exception:
+                pass
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(
@@ -482,6 +492,16 @@ class SocialBrainAgent:
                 "SocialBrainAgent 快照更新 BOND_REGRESS: stage=%s intensity=%.2f",
                 bond_stage, intensity,
             )
+            # T-220：Bond 退步联动 PainRewardAgent 记录 bond_regress 痛觉
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                get_pain_reward_agent().record_pain(
+                    source="bond_regress",
+                    intensity=round(intensity * 0.8, 4),
+                    metadata={"user_id": user_id, "bond_stage": bond_stage, "ts_ms": ts_ms},
+                )
+            except Exception:
+                pass
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.social_brain_agent").warning(

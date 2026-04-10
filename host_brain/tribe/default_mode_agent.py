@@ -142,6 +142,19 @@ class DefaultModeAgent:
                 "ts_ms": ts_ms,
             },
         )
+
+        # T-218：默认模式激活且连续性分数达标时，触发 GlymphaticAgent 恢复周期
+        if continuity_score >= 0.55:
+            try:
+                from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+                get_glymphatic_agent().run_recovery_cycle(
+                    source="default_mode_activated",
+                    force=False,
+                    now_ts_ms=ts_ms,
+                )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

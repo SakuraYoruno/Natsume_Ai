@@ -170,6 +170,25 @@ class MirrorNeuronAgent:
                 "ts_ms": resolved_ts,
             },
         )
+
+        # T-217：共情强度达标时，将共情结果回写 LimbicAgent 情绪代谢
+        resonance_strength = float(result.get("resonance_strength") or 0.0)
+        if resonance_strength >= 0.45:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                limbic = get_limbic_agent()
+                if hasattr(limbic, "drive_emotion_metabolism"):
+                    limbic.drive_emotion_metabolism(
+                        valence=round(float(result.get("valence_shift") or 0.0), 4),
+                        arousal=round(float(result.get("arousal_shift") or 0.0), 4),
+                        dominance=0.0,
+                        blend_weight=round(resonance_strength * 0.40, 4),
+                        event_kind=f"mirror_resonance:{result.get('emotion_tag', 'NEUTRAL')}",
+                        source="mirror_neuron_agent",
+                    )
+            except Exception:
+                pass
+
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:
