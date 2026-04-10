@@ -204,6 +204,22 @@ class DefaultModeAgent:
                     )
             except Exception:
                 pass
+            # T-365：高连续性时联动 LimbicAgent 触发温和正向情绪（自我完整感带来平静满足）
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _cont_valence = round(min(0.14, (continuity_score - 0.70) * 0.47), 4)
+                    _limbic.drive_emotion_metabolism(
+                        valence=_cont_valence,
+                        arousal=round(-_cont_valence * 0.30, 4),  # 高连续性时略微降低唤醒（平静感）
+                        dominance=0.05,
+                        blend_weight=0.09,
+                        event_kind=f"default_mode_continuity:{round(continuity_score, 3)}",
+                        source="default_mode_agent",
+                    )
+            except Exception:
+                pass
 
         return result
 

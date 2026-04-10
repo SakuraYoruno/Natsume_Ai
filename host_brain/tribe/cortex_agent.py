@@ -678,6 +678,30 @@ class CortexAgent:
         except Exception:
             pass
 
+        # T-369：对话结束时联动 PainRewardAgent 记录对话完成奖励
+        # 成功完成一次对话是最直接的正向强化（"我帮助了对方"是核心奖励）
+        try:
+            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+            _pr = get_pain_reward_agent()
+            if hasattr(_pr, "record_reward"):
+                _emotion_tag = str(emotion_tag or "NEUTRAL").strip().upper()
+                # 正向情绪结束的对话奖励更高
+                _pos_tags = {"JOY", "HAPPY", "EXCITED", "CONTENT", "GRATEFUL", "AMUSED"}
+                _base_reward = 0.22 if _emotion_tag in _pos_tags else 0.12
+                _reward = round(min(0.40, _base_reward * float(emotion_intensity or 0.5) * 2.0), 4)
+                _pr.record_reward(
+                    source=f"cortex_conversation_ended:{_emotion_tag.lower()}",
+                    intensity=_reward,
+                    metadata={
+                        "user_id": str(user_id or ""),
+                        "session_id": str(session_id or ""),
+                        "emotion_tag": _emotion_tag,
+                        "emotion_intensity": round(float(emotion_intensity or 0.5), 4),
+                    },
+                )
+        except Exception:
+            pass
+
 
     # ── TribeEventBus 订阅注册（Phase 5）────────────────────────────────────
 

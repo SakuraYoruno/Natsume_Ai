@@ -131,6 +131,24 @@ class SomaticAgent:
                         )
                 except Exception:
                     pass
+                # T-359：高疲劳（>=0.75）时联动 PainRewardAgent 记录躯体痛苦
+                # 极度疲劳是持续性躯体痛苦（身体预算严重透支）
+                if fatigue_level >= 0.75:
+                    try:
+                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                        _pr = get_pain_reward_agent()
+                        if hasattr(_pr, "record_pain"):
+                            _fatigue_pain = round(min(0.45, (fatigue_level - 0.75) * 1.80), 4)
+                            _pr.record_pain(
+                                source=f"somatic_extreme_fatigue:{round(fatigue_level, 3)}",
+                                intensity=_fatigue_pain,
+                                metadata={
+                                    "fatigue_level": round(fatigue_level, 4),
+                                    "ts_ms": ts_ms,
+                                },
+                            )
+                    except Exception:
+                        pass
 
             # T-345：低疲劳（< 0.30）时联动 InteroceptionAgent 降低 recovery_urgency
             # 躯体恢复良好是最直接的恢复信号，应主动释放身体预算压力

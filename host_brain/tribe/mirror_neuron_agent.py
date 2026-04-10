@@ -217,6 +217,26 @@ class MirrorNeuronAgent:
                     )
             except Exception:
                 pass
+            # T-362：高正向共情（JOY/HAPPY/EXCITED）时联动 PainRewardAgent 记录共情快乐奖励
+            # 共情他人的快乐本身就是一种奖励（镜像神经元激活带来的愉悦感）
+            _pos_tags = {"JOY", "HAPPY", "EXCITED", "CONTENT", "GRATEFUL"}
+            _resonance_tag_pos = str(result.get("emotion_tag") or "NEUTRAL").upper()
+            if _resonance_tag_pos in _pos_tags:
+                try:
+                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                    _pr = get_pain_reward_agent()
+                    if hasattr(_pr, "record_reward"):
+                        _empathy_reward = round(min(0.35, (resonance_strength - 0.60) * 0.875), 4)
+                        _pr.record_reward(
+                            source=f"mirror_empathy_joy:{_resonance_tag_pos.lower()}",
+                            intensity=_empathy_reward,
+                            metadata={
+                                "resonance_strength": round(resonance_strength, 4),
+                                "emotion_tag": _resonance_tag_pos,
+                            },
+                        )
+                except Exception:
+                    pass
 
         # T-352：高共情负荷（负向情绪 + 高共情强度）时联动 EndocrineAgent 记录共情压力事件
         # 高强度共情负向情绪（悲伤/愤怒/恐惧）会消耗内分泌储备（共情疲劳）

@@ -161,6 +161,23 @@ class CircadianAgent:
                         )
                 except Exception:
                     pass
+                # T-366：日间/黎明相位切换时联动 LimbicAgent 触发轻度活力情绪（日间清醒带来活力感）
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _wake_valence = 0.12 if next_phase == "day" else 0.08
+                        _wake_arousal = 0.10 if next_phase == "day" else 0.06
+                        _limbic.drive_emotion_metabolism(
+                            valence=_wake_valence,
+                            arousal=_wake_arousal,
+                            dominance=0.04,
+                            blend_weight=0.10,
+                            event_kind=f"circadian_wake:{next_phase}",
+                            source="circadian_agent",
+                        )
+                except Exception:
+                    pass
 
             # T-313：夜间相位切换时联动 InteroceptionAgent 降低 recovery_urgency（夜间是恢复窗口）
             if next_phase == "night":
@@ -175,6 +192,26 @@ class CircadianAgent:
                         )
                 except Exception:
                     pass
+                # T-361：夜间高睡眠压力（sleep_pressure>=0.70）时联动 PainRewardAgent 记录疲惫痛苦
+                # 极度睡眠压力是躯体痛苦（强烈的困倦感是一种身体预算透支的痛苦）
+                _sleep_pressure = float(profile.get("sleep_pressure") or 0.0)
+                if _sleep_pressure >= 0.70:
+                    try:
+                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                        _pr = get_pain_reward_agent()
+                        if hasattr(_pr, "record_pain"):
+                            _sleep_pain = round(min(0.30, (_sleep_pressure - 0.70) * 1.00), 4)
+                            _pr.record_pain(
+                                source=f"circadian_high_sleep_pressure:{round(_sleep_pressure, 3)}",
+                                intensity=_sleep_pain,
+                                metadata={
+                                    "sleep_pressure": round(_sleep_pressure, 4),
+                                    "local_hour": profile.get("local_hour"),
+                                    "phase": next_phase,
+                                },
+                            )
+                    except Exception:
+                        pass
 
             # T-314：夜间/黄昏相位切换时联动 LimbicAgent 降低唤醒（夜间应降低情绪激活）
             if next_phase in {"night", "dusk"}:

@@ -117,6 +117,23 @@ class EndocrineAgent:
                     )
             except Exception:
                 pass
+            # T-360：极高皮质醇（>=0.80）时联动 PainRewardAgent 记录持续压力痛苦
+            # 持续高 cortisol 是深层躯体痛苦（慢性压力的内在体验）
+            if _cortisol >= 0.80:
+                try:
+                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                    _pr = get_pain_reward_agent()
+                    if hasattr(_pr, "record_pain"):
+                        _cortisol_pain = round(min(0.40, (_cortisol - 0.80) * 2.00), 4)
+                        _pr.record_pain(
+                            source=f"endocrine_high_cortisol:{round(_cortisol, 3)}",
+                            intensity=_cortisol_pain,
+                            metadata={
+                                "cortisol_level": round(_cortisol, 4),
+                            },
+                        )
+                except Exception:
+                    pass
 
         return payload
 

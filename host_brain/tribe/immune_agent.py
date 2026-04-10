@@ -253,6 +253,24 @@ class ImmuneAgent:
                         )
                 except Exception:
                     pass
+        # T-363：ALLOW 且风险极低（score < 0.15）时联动 PainRewardAgent 记录安全感奖励
+        # 成功通过免疫检测是一种安全感的正向强化（"环境是安全的"）
+        if decision == "ALLOW" and score < 0.15:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward"):
+                    _safety_reward = round(min(0.15, (0.15 - score) * 1.00), 4)
+                    _pr.record_reward(
+                        source="immune_safe_pass",
+                        intensity=_safety_reward,
+                        metadata={
+                            "score": round(score, 4),
+                            "source": str(source or "chat"),
+                        },
+                    )
+            except Exception:
+                pass
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

@@ -687,6 +687,21 @@ class ANSAgent:
                         "trigger_source": str(source or "external"),
                     },
                 )
+                # T-364：退出恢复模式时联动 LimbicAgent 触发轻度舒适情绪（恢复后的清爽感）
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _limbic.drive_emotion_metabolism(
+                            valence=0.12,
+                            arousal=0.05,
+                            dominance=0.04,
+                            blend_weight=0.10,
+                            event_kind=f"ans_recovery_exit:{str(source or 'external')[:24]}",
+                            source="ans_agent",
+                        )
+                except Exception:
+                    pass
 
     def export_runtime_state(self) -> dict[str, Any]:
         """T-254/T-289：导出 ANSAgent 当前运行时状态快照，并写入 state_registry。
