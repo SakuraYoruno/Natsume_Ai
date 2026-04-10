@@ -666,6 +666,24 @@ class TribeStateRegistry:
             body_budget = _safe_float(_ins2.get("body_budget"), 0.5)
             recovery_urgency = _safe_float(_ins2.get("recovery_urgency"), 0.0)
 
+        # ── T-242：ImmuneAgent 风险快照（immune_risk_level / block_rate）──────
+        immune_risk_level = "none"
+        immune_block_rate = 0.0
+        immune_ns = states.get("immune_agent")
+        if immune_ns:
+            _imm = dict(immune_ns.get("state") or {})
+            immune_risk_level = str(_imm.get("risk_level") or "none").strip().lower() or "none"
+            immune_block_rate = _safe_float(_imm.get("block_rate"), 0.0)
+
+        # ── T-243：VestibularAgent 路由偏置快照（damping_factor / route_bias）──
+        vestibular_damping_factor = 0.0
+        vestibular_route_bias = "normal"
+        vestibular_ns = states.get("vestibular_agent")
+        if vestibular_ns:
+            _vest = dict(vestibular_ns.get("state") or {})
+            vestibular_damping_factor = _safe_float(_vest.get("damping_factor"), 0.0)
+            vestibular_route_bias = str(_vest.get("route_bias") or "normal").strip().lower() or "normal"
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -724,6 +742,12 @@ class TribeStateRegistry:
             # T-234 InteroceptionAgent 完整快照
             "body_budget": round(body_budget, 4),
             "recovery_urgency": round(recovery_urgency, 4),
+            # T-242 ImmuneAgent 风险快照
+            "immune_risk_level": immune_risk_level,
+            "immune_block_rate": round(immune_block_rate, 4),
+            # T-243 VestibularAgent 路由偏置快照
+            "vestibular_damping_factor": round(vestibular_damping_factor, 4),
+            "vestibular_route_bias": vestibular_route_bias,
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

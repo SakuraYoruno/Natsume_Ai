@@ -2800,6 +2800,37 @@ def build_chat_prompt_runtime_payload(
                     "loneliness_hint": str(_last_style.get("loneliness_hint") or ""),
                 }
 
+        # T-245：注入 immune_state（免疫风险快照）
+        _immune_state = dict(tribe_context.get("immune_state") or {})
+        if _immune_state:
+            _last_decision = str(_immune_state.get("last_decision") or "ALLOW").strip().upper()
+            _risk_level = str(_immune_state.get("risk_level") or "none").strip().lower()
+            runtime_payload["immune_state"] = {
+                "enabled": bool(_immune_state.get("enabled", True)),
+                "risk_level": _risk_level,
+                "last_score": round(float(_immune_state.get("last_score") or 0.0), 4),
+                "last_decision": _last_decision,
+                "block_rate": round(float((_immune_state.get("counters") or {}).get("block", 0) /
+                    max(1, (_immune_state.get("counters") or {}).get("total", 1))), 4),
+            }
+            # 高风险时注入 immune_alert 供 prompt_builder 参考
+            if _risk_level in {"medium", "high", "critical"}:
+                runtime_payload.setdefault("immune_alert", {
+                    "risk_level": _risk_level,
+                    "last_decision": _last_decision,
+                    "suggest": "当前输入存在风险信号，回复应保持谨慎，避免配合敏感操作",
+                })
+
+        # T-245：注入 vestibular_state（前庭路由偏置快照）
+        _vestibular_state = dict(tribe_context.get("vestibular_state") or {})
+        if _vestibular_state:
+            runtime_payload["vestibular_state"] = {
+                "damping_factor": round(float(_vestibular_state.get("damping_factor") or 0.0), 4),
+                "route_bias": str(_vestibular_state.get("route_bias") or "normal"),
+                "conservative_mode": bool(_vestibular_state.get("conservative_mode", False)),
+                "last_stability_score": round(float(_vestibular_state.get("last_stability_score") or 1.0), 4),
+            }
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

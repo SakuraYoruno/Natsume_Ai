@@ -86,7 +86,52 @@ class EndocrineAgent:
             pass
 
         self._last_state = dict(payload)
+
+        # T-246：高皮质醇时联动 LimbicAgent 触发压力性情绪偏移（焦虑/低唤醒）
+        _cortisol = float(payload.get("cortisol_level") or 0.0)
+        if _cortisol >= 0.65:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _stress_intensity = (_cortisol - 0.65) * 1.43  # 0.65→0, 0.95→0.43
+                    _limbic.drive_emotion_metabolism(
+                        valence=round(-_stress_intensity * 0.45, 4),
+                        arousal=round(_stress_intensity * 0.30, 4),
+                        dominance=-0.08,
+                        blend_weight=0.15,
+                        event_kind=f"high_cortisol:{round(_cortisol, 3)}",
+                        source="endocrine_agent",
+                    )
+            except Exception:
+                pass
+
         return payload
+
+    def record_stress_event(
+        self,
+        *,
+        source: str,
+        intensity: float = 0.20,
+    ) -> None:
+        """T-238：外部族注入压力事件，叠加到 cortisol 缓冲区。
+
+        由 ProprioceptionAgent（高打断）、LanguageSystemAgent（高情绪压力）等外部族调用，
+        将压力信号写入 _bond_cortisol_delta 缓冲，下次 resolve_endocrine_state() 时消费。
+
+        Args:
+            source: 压力来源标识（用于日志追踪）
+            intensity: 压力强度 0.0 ~ 1.0，叠加到 cortisol 的增量上限 0.10
+        """
+        clamped = max(0.0, min(1.0, float(intensity)))
+        cortisol_boost = round(min(0.10, clamped * 0.12), 4)
+        with self._bond_lock:
+            self._bond_cortisol_delta += cortisol_boost
+        import logging  # noqa: PLC0415
+        logging.getLogger("Natsume.tribe.endocrine_agent").debug(
+            "EndocrineAgent.record_stress_event: source=%s intensity=%.3f cortisol+%.4f",
+            source, clamped, cortisol_boost,
+        )
 
     def resolve_vital_signs(self, *, endocrine_state: Mapping[str, Any] | None = None) -> dict[str, Any]:
         state = dict(endocrine_state or self._last_state or {})

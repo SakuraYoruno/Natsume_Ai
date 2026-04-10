@@ -118,16 +118,21 @@ class GlymphaticAgent:
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:
-        result = self.run_recovery_cycle(source="export_runtime_state", force=False)
+        """T-241：读取 state_registry 快照，不触发 run_recovery_cycle（避免副作用）。"""
+        prev = self.state_registry.get_state("glymphatic_agent") or {}
+        prev_state = dict(prev.get("state") or {})
+        last_cycle = dict(prev_state.get("last_cycle") or {})
         return {
-            "executed": bool(result.get("executed", False)),
-            "reason_code": str(result.get("reason_code") or ""),
-            "phase": str(result.get("phase") or "day"),
-            "sleep_pressure": float(result.get("sleep_pressure") or 0.0),
-            "consolidation_score": float(result.get("consolidation_score") or 0.0),
-            "noise_decay_factor": float(result.get("noise_decay_factor") or 0.0),
-            "homeostasis_status": str(result.get("homeostasis_status") or "stable"),
-            "last_updated_ts_ms": int(result.get("ts_ms") or now_ms()),
+            "executed": bool(last_cycle.get("executed", False)),
+            "reason_code": str(last_cycle.get("reason_code") or "RECOVERY_WINDOW_CLOSED"),
+            "phase": str(last_cycle.get("phase") or "day"),
+            "sleep_pressure": float(last_cycle.get("sleep_pressure") or 0.0),
+            "consolidation_score": float(last_cycle.get("consolidation_score") or 0.0),
+            "noise_decay_factor": float(last_cycle.get("noise_decay_factor") or 0.0),
+            "homeostasis_status": str(last_cycle.get("homeostasis_status") or "stable"),
+            "memory_written": bool(last_cycle.get("memory_written", False)),
+            "cycle_count": int(prev_state.get("cycle_count") or 0),
+            "last_updated_ts_ms": int(last_cycle.get("ts_ms") or 0),
         }
 
     async def _on_circadian_phase_updated(self, event: Any) -> None:

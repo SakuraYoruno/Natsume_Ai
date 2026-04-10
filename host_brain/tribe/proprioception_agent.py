@@ -206,6 +206,15 @@ class ProprioceptionAgent:
                     )
             except Exception:
                 pass
+            # T-247：高打断频率时联动 ANSAgent 降低主动发声节律
+            try:
+                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+                get_ans_agent().adjust_rhythm_for_high_interrupt(
+                    interrupt_count=interrupt_count,
+                    source="proprioception_agent",
+                )
+            except Exception:
+                pass
 
     async def _on_voice_pipeline_started(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())

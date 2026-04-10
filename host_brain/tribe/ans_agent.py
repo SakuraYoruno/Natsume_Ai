@@ -623,6 +623,41 @@ class ANSAgent:
             logger.warning("ANSAgent.get_mode_transition_status 失败（降级）: %s", exc)
             return {"status": "ERROR", "error": str(exc)}
 
+    def adjust_rhythm_for_high_interrupt(
+        self,
+        *,
+        interrupt_count: int,
+        source: str = "proprioception_agent",
+    ) -> None:
+        """T-247：高打断频率时调整 ANS 节律，降低主动发声倾向。
+
+        由 ProprioceptionAgent 在 interrupt_count_5m >= 6 时调用，
+        临时将 _recovery_mode 设为 True，使后续 emit_inner_world_ticked
+        自动降低 proactive_multiplier，减少主动打扰。
+
+        Args:
+            interrupt_count: 5分钟内打断次数
+            source: 调用来源标识
+        """
+        import math  # noqa: PLC0415
+        # 打断次数越多，恢复模式持续时间越长（但最多标记一次，由下次 glymphatic 事件重置）
+        self._recovery_mode = True
+        logger.info(
+            "ANSAgent.adjust_rhythm_for_high_interrupt: interrupt_count=%d source=%s → recovery_mode=True",
+            interrupt_count, source,
+        )
+        # 发布 INNER_WORLD_TICKED 通知节律降低
+        self.emit_from_thread(
+            "INNER_WORLD_TICKED",
+            {
+                "source": "ans_agent_high_interrupt",
+                "recovery_mode": True,
+                "proactive_multiplier": max(0.20, 1.0 - math.log1p(interrupt_count - 5) * 0.25),
+                "interrupt_count": interrupt_count,
+                "trigger_source": str(source or "proprioception_agent"),
+            },
+        )
+
     # ── T-37： TribeEventBus 订阅注册 ────────────────────────────────────────
 
     def register_subscriptions(self) -> None:

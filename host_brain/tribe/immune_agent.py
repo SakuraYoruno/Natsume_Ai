@@ -196,6 +196,33 @@ class ImmuneAgent:
                     )
                 except Exception:
                     pass
+                # T-239：BLOCK 时联动 LimbicAgent 触发防御性情绪偏移（警觉/不安）
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _defense_intensity = min(0.40, score * 0.45)
+                        _limbic.drive_emotion_metabolism(
+                            valence=round(-_defense_intensity * 0.6, 4),
+                            arousal=round(_defense_intensity * 0.5, 4),
+                            dominance=-0.10,
+                            blend_weight=0.25,
+                            event_kind=f"immune_block:{risk_level}",
+                            source="immune_agent",
+                        )
+                except Exception:
+                    pass
+                # T-240：BLOCK 时联动 InteroceptionAgent 提高 recovery_urgency
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "inject_external_stress"):
+                        _intero.inject_external_stress(
+                            source=f"immune_block:{risk_level}",
+                            intensity=round(score * 0.35, 4),
+                        )
+                except Exception:
+                    pass
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:

@@ -390,6 +390,18 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 19. T-244：ImmuneAgent 风险快照 + VestibularAgent 路由偏置快照 ──
+        try:
+            from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+            result["immune_state"] = get_immune_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
+            result["vestibular_state"] = get_vestibular_agent().export_runtime_state()
+        except Exception:
+            pass
+
         return result
 
     def route_intent(
