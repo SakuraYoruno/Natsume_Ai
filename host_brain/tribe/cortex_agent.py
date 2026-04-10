@@ -419,6 +419,30 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 21. T-262：PrefrontalAgent 漂移快照 + PeripheralAgent 外设感知快照 ──
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            result["prefrontal_state"] = get_prefrontal_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.peripheral_agent import get_peripheral_agent  # noqa: PLC0415
+            result["peripheral_state"] = get_peripheral_agent().export_runtime_state()
+        except Exception:
+            pass
+
+        # ── 22. T-263：HippocampusAgent 记忆快照 + InitiativeGovernorAgent 门控快照 ──
+        try:
+            from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+            result["hippocampus_state"] = get_hippocampus_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
+            result["initiative_governor_state"] = get_initiative_governor_agent().export_runtime_state()
+        except Exception:
+            pass
+
         return result
 
     def route_intent(

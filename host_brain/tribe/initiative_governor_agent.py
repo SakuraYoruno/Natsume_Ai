@@ -231,12 +231,57 @@ class InitiativeGovernorAgent:
                 "user_id": result["user_id"],
             },
         )
+
+        # T-270：BLOCK/DEFER 时联动 VestibularAgent 记录主动推迟事件（增加 initiative_defer_count）
+        if decision in {"BLOCK", "DEFER"}:
+            try:
+                from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
+                _vest = get_vestibular_agent()
+                if hasattr(_vest, "state_registry"):
+                    _vest_snap = _vest.state_registry.get_state("vestibular_agent") or {}
+                    _vest_state = dict(_vest_snap.get("state") or {})
+                    _vest_state["initiative_defer_count_10m"] = int(
+                        _vest_state.get("initiative_defer_count_10m") or 0
+                    ) + 1
+                    _vest.state_registry.set_state(
+                        "vestibular_agent", _vest_state, writer="initiative_governor_agent"
+                    )
+            except Exception:
+                pass
+
         return result
 
     def get_last_decision(self) -> dict[str, Any]:
         snap = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(snap.get("state") or {})
         return dict(state.get("last_decision") or {})
+
+    def export_runtime_state(self) -> dict[str, Any]:
+        """T-272：导出 InitiativeGovernorAgent 当前运行时状态快照。
+
+        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        不触发任何副作用（不 emit 事件，不写 state_registry）。
+
+        Returns:
+            dict: 包含 last_decision/block_count/defer_count/approve_count 等关键字段。
+        """
+        snap = self.state_registry.get_state("initiative_governor_agent") or {}
+        state = dict(snap.get("state") or {})
+        last = dict(state.get("last_decision") or {})
+        scores = dict(last.get("scores") or {})
+        return {
+            "last_decision": str(last.get("decision") or "APPROVE").strip().upper(),
+            "last_reason_code": str(last.get("reason_code") or ""),
+            "last_action": str(last.get("action") or ""),
+            "last_motive_score": round(float(scores.get("motive") or 0.0), 4),
+            "last_readiness_score": round(float(scores.get("readiness") or 0.0), 4),
+            "last_continuity_score": round(float(scores.get("continuity") or 0.0), 4),
+            "block_count": int(state.get("block_count") or 0),
+            "defer_count": int(state.get("defer_count") or 0),
+            "approve_count": int(state.get("approve_count") or 0),
+            "recovery_mode": bool(self._recovery_mode),
+            "last_ts_ms": int(last.get("ts_ms") or 0),
+        }
 
 
 _INITIATIVE_GOVERNOR_AGENT: InitiativeGovernorAgent | None = None

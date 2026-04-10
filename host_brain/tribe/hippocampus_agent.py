@@ -513,6 +513,32 @@ class HippocampusAgent:
             "last_write_type": str(layers.get("last_write_type") or ""),
         }
 
+    def export_runtime_state(self) -> dict[str, Any]:
+        """T-271：导出 HippocampusAgent 当前运行时状态快照。
+
+        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        不触发任何副作用（不 emit 事件，不写 state_registry）。
+
+        Returns:
+            dict: 包含 last_write_type/episodic_count/semantic_count 等关键字段。
+        """
+        snap = self.state_registry.get_state("hippocampus_agent") or {}
+        state = dict(snap.get("state") or {})
+        layers = dict(state.get("memory_layers") or {})
+        last_episodic = dict(layers.get("last_episodic") or {})
+        last_semantic = dict(layers.get("last_semantic") or {})
+        last_autobiographical = dict(layers.get("last_autobiographical") or {})
+        return {
+            "last_write_type": str(layers.get("last_write_type") or ""),
+            "has_episodic": bool(last_episodic),
+            "has_semantic": bool(last_semantic),
+            "has_autobiographical": bool(last_autobiographical),
+            "last_episodic_session_id": str(last_episodic.get("session_id") or ""),
+            "last_semantic_person_id": str(last_semantic.get("person_id") or ""),
+            "last_autobiographical_person_id": str(last_autobiographical.get("person_id") or ""),
+            "write_count": int(state.get("write_count") or 0),
+        }
+
 
 _HIPPOCAMPUS_AGENT: HippocampusAgent | None = None
 

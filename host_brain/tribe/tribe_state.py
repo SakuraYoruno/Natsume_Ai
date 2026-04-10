@@ -697,6 +697,19 @@ class TribeStateRegistry:
             circadian_recovery_bias = _safe_float(_circ.get("recovery_bias"), 0.3)
             circadian_sleep_pressure = _safe_float(_circ.get("sleep_pressure"), 0.2)
 
+        # ── T-272：InitiativeGovernorAgent 门控快照（block_rate / defer_count）──
+        initiative_block_count = 0
+        initiative_defer_count = 0
+        initiative_approve_count = 0
+        initiative_ns = states.get("initiative_governor_agent")
+        if initiative_ns:
+            _ig = dict(initiative_ns.get("state") or {})
+            initiative_block_count = int(_ig.get("block_count") or 0)
+            initiative_defer_count = int(_ig.get("defer_count") or 0)
+            initiative_approve_count = int(_ig.get("approve_count") or 0)
+        _ig_total = max(1, initiative_block_count + initiative_defer_count + initiative_approve_count)
+        initiative_block_rate = round(initiative_block_count / _ig_total, 4)
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -740,6 +753,13 @@ class TribeStateRegistry:
             # T-207 Cerebellum 纠偏频率
             "cerebellum_correction_count": cerebellum_correction_count,
             "cerebellum_last_strategy": cerebellum_last_strategy,
+            # T-267 Cerebellum 纠偏率（correction_count / max(1, total_interactions)）
+            "cerebellum_correction_rate": round(
+                min(1.0, cerebellum_correction_count / max(1, int(
+                    (states.get("cortex_agent") or {}).get("state", {}).get("interaction_count") or
+                    cerebellum_correction_count or 1
+                ))), 4
+            ),
             # T-221 PainReward 享乐状态
             "pain_level": round(pain_level, 4),
             "reward_level": round(reward_level, 4),
@@ -766,6 +786,10 @@ class TribeStateRegistry:
             "circadian_proactive_multiplier": round(circadian_proactive_multiplier, 4),
             "circadian_recovery_bias": round(circadian_recovery_bias, 4),
             "circadian_sleep_pressure": round(circadian_sleep_pressure, 4),
+            # T-272 InitiativeGovernorAgent 门控快照
+            "initiative_block_rate": initiative_block_rate,
+            "initiative_defer_count": initiative_defer_count,
+            "initiative_approve_count": initiative_approve_count,
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

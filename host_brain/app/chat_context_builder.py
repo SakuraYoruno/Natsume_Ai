@@ -2882,6 +2882,47 @@ def build_chat_prompt_runtime_payload(
                     "suggest": "当前共情共鸣强烈，回复应充分体现情感同频，优先情感支持",
                 })
 
+        # T-265：注入 prefrontal_state（前额叶漂移快照）
+        _prefrontal_state = dict(tribe_context.get("prefrontal_state") or {})
+        if _prefrontal_state:
+            _drift_level = str(_prefrontal_state.get("drift_level") or "NONE").strip().upper()
+            runtime_payload["prefrontal_state"] = {
+                "drift_level": _drift_level,
+                "drift_score": round(float(_prefrontal_state.get("drift_score") or 0.0), 4),
+                "correction_applied": bool(_prefrontal_state.get("correction_applied", False)),
+                "last_correction_reason": str(_prefrontal_state.get("last_correction_reason") or ""),
+                "session_count": int(_prefrontal_state.get("session_count") or 0),
+            }
+            # 高漂移时注入 prefrontal_hint 供 prompt_builder 参考
+            if _drift_level in {"MODERATE", "SEVERE"}:
+                runtime_payload.setdefault("prefrontal_hint", {
+                    "drift_level": _drift_level,
+                    "drift_score": round(float(_prefrontal_state.get("drift_score") or 0.0), 4),
+                    "suggest": "当前人格漂移较严重，回复应主动向核心人格特征靠拢，避免偏离角色设定",
+                })
+
+        # T-264：注入 peripheral_state（外设感知快照）
+        _peripheral_state = dict(tribe_context.get("peripheral_state") or {})
+        if _peripheral_state:
+            runtime_payload["peripheral_state"] = {
+                "connected_platforms": list(_peripheral_state.get("connected_platforms") or []),
+                "active_platform_count": int(_peripheral_state.get("active_platform_count") or 0),
+                "last_latency_ms": int(_peripheral_state.get("last_latency_ms") or 0),
+                "last_platform": str(_peripheral_state.get("last_platform") or ""),
+            }
+
+        # T-266：注入 initiative_governor_state（主动发声门控快照）
+        _ig_state = dict(tribe_context.get("initiative_governor_state") or {})
+        if _ig_state:
+            _ig_last_decision = str(_ig_state.get("last_decision") or "APPROVE").strip().upper()
+            runtime_payload["initiative_governor_state"] = {
+                "last_decision": _ig_last_decision,
+                "last_reason_code": str(_ig_state.get("last_reason_code") or ""),
+                "block_count": int(_ig_state.get("block_count") or 0),
+                "defer_count": int(_ig_state.get("defer_count") or 0),
+                "approve_count": int(_ig_state.get("approve_count") or 0),
+            }
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

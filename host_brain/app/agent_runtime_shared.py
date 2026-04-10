@@ -15,7 +15,71 @@ from typing import Any
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
 
 
+class _SafeTemplateDict(dict[str, Any]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict(
+        {
+            str(key): "" if value is None else str(value)
+            for key, value in kwargs.items()
+        }
+    )
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+
+def _load_template_mapping(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+
+def _load_runtime_texts() -> dict[str, Any]:
+    return _load_template_mapping("top_agent.runtime_texts")
+
+
+
+def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+    raw = mapping.get(key)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+
+def _mapping_text(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    return _format_template_text(mapping.get(key, default), **kwargs)
+
+
+_RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
+_RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
+_RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
+
+_EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
+    ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった"),
+    ("SAD", "难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん"),
+    ("ANGRY", "生气|气死|烦|腹立|むかつく"),
+    ("LOVING", "谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった"),
+    ("SURPRISED", "哇|真的吗|竟然|びっくり|えっ|本当"),
+]
+
+
 def _airlock_sanitize_output(text: str) -> str:
+
     """出口净化：null byte + 长度截断。"""
     text = text.replace("\x00", "").strip()
     max_chars = int(os.environ.get("HOST_QA_MAX_RESPONSE_CHARS") or "4000")
@@ -110,6 +174,46 @@ def _build_subagent_gateway_from_runtime(llm_runtime: Mapping[str, Any]) -> Any 
 
 
 
+def _detect_recent_turn_query_role(user_message: str) -> str | None:
+    normalized = str(user_message or "").strip()
+    if not normalized:
+        return None
+    if _RECENT_TURN_USER_QUERY_RE.search(normalized):
+        return "user"
+    if _RECENT_TURN_ASSISTANT_QUERY_RE.search(normalized):
+        return "assistant"
+    if _RECENT_TURN_GENERIC_QUERY_RE.search(normalized):
+        return "both"
+    return None
+
+
+
+def _load_continuity_turns(
+    *,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    render_target_lang: str,
+    fetch_limit: int = 24,
+) -> list[dict[str, str]]:
+    try:
+        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
+        from host_brain.app.top_agent_prompt import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
+
+        rows = _fetch_continuity_rows(
+            ledger=get_ledger(),
+            session_id=session_id,
+            person_id=person_id,
+            request_id=request_id,
+            fetch_limit=fetch_limit,
+        )
+        return _voice_rows_to_turns(rows=rows, render_target_lang=render_target_lang)
+    except Exception as exc:
+        _logger.debug("[%s] continuity lookup failed: %s", request_id, exc)
+        return []
+
+
+
 def _maybe_build_recent_turn_answer(
     *,
     request_id: str,
@@ -118,18 +222,205 @@ def _maybe_build_recent_turn_answer(
     user_message: str,
     render_target_lang: str,
 ) -> str | None:
-    from host_brain.app.top_agent import _maybe_build_recent_turn_answer as _legacy_recent_turn_answer  # noqa: PLC0415
+    query_role = _detect_recent_turn_query_role(user_message)
+    if query_role is None:
+        return None
 
-    return _legacy_recent_turn_answer(
+    turns = _load_continuity_turns(
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
-        user_message=user_message,
         render_target_lang=render_target_lang,
+        fetch_limit=24,
     )
+    if not turns:
+        return None
+
+    def _finalize_recent_turn_text(candidate: str, *, fallback: str) -> str:
+        normalized = str(candidate or "").strip()
+        if not normalized:
+            return fallback
+        if any(
+            token in normalized
+            for token in ("已确认事实", "请直接告诉用户", "请直接回答", "不要再说看不到", "不要再说没看到")
+        ):
+            return fallback
+        return normalized
+
+    latest_user = next(
+        (
+            str(turn.get("content") or "").strip()
+            for turn in reversed(turns)
+            if str(turn.get("role") or "").strip().lower() == "user"
+            and str(turn.get("content") or "").strip()
+        ),
+        "",
+    )
+    latest_assistant = next(
+        (
+            str(turn.get("content") or "").strip()
+            for turn in reversed(turns)
+            if str(turn.get("role") or "").strip().lower() == "assistant"
+            and str(turn.get("content") or "").strip()
+        ),
+        "",
+    )
+
+    templates = _mapping_section(_load_runtime_texts(), "recent_turn_answer")
+    if query_role == "user" and latest_user:
+        fallback = f"你上一句是「{latest_user}」。"
+        return _finalize_recent_turn_text(
+            _mapping_text(
+                templates,
+                "user_template",
+                latest_user=latest_user,
+                default=fallback,
+            ),
+            fallback=fallback,
+        )
+    if query_role == "assistant" and latest_assistant:
+        fallback = f"我上一句说的是「{latest_assistant}」。"
+        return _finalize_recent_turn_text(
+            _mapping_text(
+                templates,
+                "assistant_template",
+                latest_assistant=latest_assistant,
+                default=fallback,
+            ),
+            fallback=fallback,
+        )
+    if query_role == "both":
+        parts: list[str] = []
+        if latest_user:
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "both_user_item_template",
+                    latest_user=latest_user,
+                    default="你上一句是「{latest_user}」",
+                )
+            )
+        if latest_assistant:
+            parts.append(
+                _mapping_text(
+                    templates,
+                    "both_assistant_item_template",
+                    latest_assistant=latest_assistant,
+                    default="我上一句说的是「{latest_assistant}」",
+                )
+            )
+        if parts:
+            fallback = "；".join(parts) + "。"
+            return _finalize_recent_turn_text(
+                _mapping_text(
+                    templates,
+                    "both_wrapper_template",
+                    facts="；".join(parts),
+                    default=fallback,
+                ),
+                fallback=fallback,
+            )
+    return None
+
+
+
+def _resolve_persona_session_emotion(emotion_context: Mapping[str, Any]) -> tuple[float, float]:
+    """为人格 session_end 提取可用的 valence / arousal。"""
+    payload = dict(emotion_context or {})
+    vad_payload = payload.get("vad") if isinstance(payload.get("vad"), Mapping) else {}
+
+    raw_valence = payload.get("valence")
+    if raw_valence is None:
+        raw_valence = vad_payload.get("valence")
+
+    raw_arousal = payload.get("arousal")
+    if raw_arousal is None:
+        raw_arousal = vad_payload.get("arousal")
+
+    def _coerce(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    if raw_valence is not None or raw_arousal is not None:
+        valence = max(-1.0, min(1.0, _coerce(raw_valence, 0.0)))
+        arousal = max(0.0, min(1.0, _coerce(raw_arousal, 0.3)))
+        return valence, arousal
+
+    emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
+    intensity = max(0.0, min(1.0, _coerce(payload.get("emotion_intensity"), 0.5)))
+    fallback_vad = {
+        "HAPPY": (0.7, 0.65),
+        "LOVING": (0.8, 0.45),
+        "EXCITED": (0.75, 0.85),
+        "SURPRISED": (0.2, 0.8),
+        "SAD": (-0.6, 0.25),
+        "ANGRY": (-0.7, 0.8),
+        "NEUTRAL": (0.0, 0.3),
+    }
+    base_valence, base_arousal = fallback_vad.get(emotion_tag, (0.0, 0.3))
+    valence = max(-1.0, min(1.0, float(base_valence) * max(0.4, intensity)))
+    arousal = max(0.0, min(1.0, max(float(base_arousal), intensity)))
+    return valence, arousal
+
+
+async def _run_persona_session_end_hooks(
+    *,
+    request_id: str,
+    person_id: str,
+    session_id: str,
+    user_message: str,
+    emotion_context: Mapping[str, Any],
+) -> None:
+    """统一触发人格 session_end/conversation_end 收口。"""
+    try:
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        persona_user_id = get_canonical_bond_user_id()
+        valence, arousal = _resolve_persona_session_emotion(emotion_context)
+        pending_topics = []
+        topic_preview = _build_reply_preview(user_message, limit=64)
+        if topic_preview:
+            pending_topics = [topic_preview]
+        await asyncio.to_thread(
+            get_limbic_agent().on_session_end,
+            person_id=persona_user_id,
+            valence=valence,
+            arousal=arousal,
+            pending_topics=pending_topics,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] persona inner_world session_end failed: %s", request_id, exc)
+
+    try:
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        await asyncio.to_thread(
+            get_limbic_agent().on_conversation_ended,
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+        )
+    except Exception as exc:
+        _logger.debug("[%s] persona body_sense conversation_end failed: %s", request_id, exc)
+
+
+
+def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
+    """当 current_tag 为 NEUTRAL 时，根据回复文案推断 emotion_tag。"""
+    if not narrative or str(current_tag or "").strip().upper() != "NEUTRAL":
+        return str(current_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    text = (narrative or "")[:500]
+    for tag, pattern in _EMOTION_INFER_KEYWORDS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return tag
+    return "NEUTRAL"
 
 
 async def _async_post_process(
+
     *,
     request_id: str,
     person_id: str,
@@ -193,5 +484,9 @@ __all__ = [
     "_build_reply_preview",
     "_build_subagent_gateway_from_runtime",
     "_maybe_build_recent_turn_answer",
+    "_resolve_persona_session_emotion",
+    "_run_persona_session_end_hooks",
+    "_infer_emotion_tag_for_tts",
     "_async_post_process",
 ]
+

@@ -142,6 +142,22 @@ class CerebellumAgent:
                     "ts_ms": now_ms(),
                 },
             )
+            # T-268：RETRY_ONCE 时联动 LimbicAgent 触发轻度焦虑情绪偏移
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _anxiety_intensity = min(0.25, urgency * 0.28)
+                    _limbic.drive_emotion_metabolism(
+                        valence=round(-_anxiety_intensity * 0.50, 4),
+                        arousal=round(_anxiety_intensity * 0.40, 4),
+                        dominance=-0.05,
+                        blend_weight=0.10,
+                        event_kind=f"cerebellum_retry:{plan_id[:16] if plan_id else 'unknown'}",
+                        source="cerebellum_agent",
+                    )
+            except Exception:
+                pass
 
     async def _on_platform_disconnected(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})

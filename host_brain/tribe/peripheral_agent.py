@@ -219,6 +219,22 @@ class PeripheralAgent:
                 "last_edge_peripheral_report_ts_ms": ts_ms,
             })
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+
+            # T-269：外设报告错误时联动 InteroceptionAgent 提高 recovery_urgency
+            _error = str(payload.get("error") or "").strip()
+            _latency_ms = int(payload.get("latency_ms") or 0)
+            if _error or _latency_ms >= 1500:
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    _intero = get_interoception_agent()
+                    if hasattr(_intero, "inject_external_stress"):
+                        _stress = 0.25 if _error else min(0.20, (_latency_ms - 1500) / 5000.0)
+                        _intero.inject_external_stress(
+                            source=f"peripheral_error:{_error[:32] if _error else f'latency_{_latency_ms}ms'}",
+                            intensity=round(_stress, 4),
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 

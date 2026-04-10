@@ -205,41 +205,20 @@ def _resolve_persona_session_emotion(emotion_context: Mapping[str, Any]) -> tupl
 async def _run_persona_session_end_hooks(
     *,
     request_id: str,
+    person_id: str,
+    session_id: str,
     user_message: str,
     emotion_context: Mapping[str, Any],
 ) -> None:
-    """统一触发人格 session_end/conversation_end 收口。"""
-    try:
-        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+    from host_brain.app.agent_runtime_shared import _run_persona_session_end_hooks as _shared_run_persona_session_end_hooks  # noqa: PLC0415
 
-        persona_user_id = get_canonical_bond_user_id()
-        valence, arousal = _resolve_persona_session_emotion(emotion_context)
-        pending_topics = []
-        topic_preview = _build_reply_preview(user_message, limit=64)
-        if topic_preview:
-            pending_topics = [topic_preview]
-        await asyncio.to_thread(
-            get_limbic_agent().on_session_end,
-            person_id=persona_user_id,
-            valence=valence,
-            arousal=arousal,
-            pending_topics=pending_topics,
-        )
-    except Exception as exc:
-        _logger.debug("[%s] persona inner_world session_end failed: %s", request_id, exc)
-
-    try:
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
-
-        await asyncio.to_thread(
-            get_limbic_agent().on_conversation_ended,
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-        )
-    except Exception as exc:
-        _logger.debug("[%s] persona body_sense conversation_end failed: %s", request_id, exc)
+    await _shared_run_persona_session_end_hooks(
+        request_id=request_id,
+        person_id=person_id,
+        session_id=session_id,
+        user_message=user_message,
+        emotion_context=emotion_context,
+    )
 
 
 def _load_continuity_turns(
@@ -1129,98 +1108,15 @@ def _maybe_build_recent_turn_answer(
     user_message: str,
     render_target_lang: str,
 ) -> str | None:
-    query_role = _detect_recent_turn_query_role(user_message)
-    if query_role is None:
-        return None
+    from host_brain.app.agent_runtime_shared import _maybe_build_recent_turn_answer as _shared_recent_turn_answer  # noqa: PLC0415
 
-    try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.app.top_agent_prompt import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
-
-        rows = _fetch_continuity_rows(
-            ledger=get_ledger(),
-            session_id=session_id,
-            person_id=person_id,
-            request_id=request_id,
-            fetch_limit=24,
-        )
-        turns = _voice_rows_to_turns(rows=rows, render_target_lang=render_target_lang)
-    except Exception as exc:
-        _logger.debug("[%s] recent turn continuity lookup failed: %s", request_id, exc)
-        return None
-
-    if not turns:
-        return None
-
-    def _finalize_recent_turn_text(candidate: str, *, fallback: str) -> str:
-        normalized = str(candidate or "").strip()
-        if not normalized:
-            return fallback
-        if any(
-            token in normalized
-            for token in ("已确认事实", "请直接告诉用户", "请直接回答", "不要再说看不到", "不要再说没看到")
-        ):
-            return fallback
-        return normalized
-
-    latest_user = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "user" and str(turn.get("content") or "").strip()), "")
-    latest_assistant = next((str(turn.get("content") or "").strip() for turn in reversed(turns) if str(turn.get("role") or "").strip().lower() == "assistant" and str(turn.get("content") or "").strip()), "")
-
-    templates = _mapping_section(_load_runtime_texts(), "recent_turn_answer")
-    if query_role == "user" and latest_user:
-        fallback = f"你上一句是「{latest_user}」。"
-        return _finalize_recent_turn_text(
-            _mapping_text(
-                templates,
-                "user_template",
-                latest_user=latest_user,
-                default=fallback,
-            ),
-            fallback=fallback,
-        )
-    if query_role == "assistant" and latest_assistant:
-        fallback = f"我上一句说的是「{latest_assistant}」。"
-        return _finalize_recent_turn_text(
-            _mapping_text(
-                templates,
-                "assistant_template",
-                latest_assistant=latest_assistant,
-                default=fallback,
-            ),
-            fallback=fallback,
-        )
-    if query_role == "both":
-        parts: list[str] = []
-        if latest_user:
-            parts.append(
-                _mapping_text(
-                    templates,
-                    "both_user_item_template",
-                    latest_user=latest_user,
-                    default="你上一句是「{latest_user}」",
-                )
-            )
-        if latest_assistant:
-            parts.append(
-                _mapping_text(
-                    templates,
-                    "both_assistant_item_template",
-                    latest_assistant=latest_assistant,
-                    default="我上一句说的是「{latest_assistant}」",
-                )
-            )
-        if parts:
-            fallback = "；".join(parts) + "。"
-            return _finalize_recent_turn_text(
-                _mapping_text(
-                    templates,
-                    "both_wrapper_template",
-                    facts="；".join(parts),
-                    default=fallback,
-                ),
-                fallback=fallback,
-            )
-    return None
+    return _shared_recent_turn_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=user_message,
+        render_target_lang=render_target_lang,
+    )
 
 
 def _maybe_build_previous_meaning_answer(
@@ -1267,15 +1163,9 @@ def _maybe_build_previous_meaning_answer(
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
-    """当 current_tag 为 NEUTRAL 时，根据回复文案推断 emotion_tag（从旧链路归并）。"""
-    import re as _re
-    if not narrative or str(current_tag or "").strip().upper() != "NEUTRAL":
-        return str(current_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-    text = (narrative or "")[:500]
-    for tag, pattern in _EMOTION_INFER_KEYWORDS:
-        if _re.search(pattern, text, _re.IGNORECASE):
-            return tag
-    return "NEUTRAL"
+    from host_brain.app.agent_runtime_shared import _infer_emotion_tag_for_tts as _shared_infer_emotion_tag_for_tts  # noqa: PLC0415
+
+    return _shared_infer_emotion_tag_for_tts(narrative, current_tag)
 
 
 def _should_buffer_stream_output(
@@ -2537,6 +2427,8 @@ async def _async_post_process(
     try:
         await _run_persona_session_end_hooks(
             request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
             user_message=user_message,
             emotion_context=emotion_context,
         )
