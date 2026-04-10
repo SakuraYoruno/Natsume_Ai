@@ -205,6 +205,20 @@ class LanguageSystemAgent:
             )
         except Exception:
             pass
+
+        # T-229：高情绪压力时联动 PainRewardAgent 记录 emotional_pressure 痛觉
+        emotional_pressure = float(wernicke.get("emotional_pressure") or 0.0)
+        if emotional_pressure >= 0.55:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                get_pain_reward_agent().record_pain(
+                    source="language_emotional_pressure",
+                    intensity=round(emotional_pressure * 0.7, 4),
+                    metadata={"intent_type": wernicke.get("intent_type"), "urgency": wernicke.get("urgency_score")},
+                )
+            except Exception:
+                pass
+
         return payload
 
     def get_language_style(

@@ -371,6 +371,25 @@ class CortexAgent:
         except Exception:
             pass
 
+        # ── 18. T-236：SomaticAgent 躯体感知快照 + LanguageSystemAgent 双系统快照 ──
+        try:
+            from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: PLC0415
+            result["somatic_state"] = get_somatic_agent().export_runtime_state()
+        except Exception:
+            pass
+        try:
+            from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+            _lang_agent = get_language_system_agent()
+            _lang_snap = _lang_agent.state_registry.get_state("language_system_agent") or {}
+            _lang_state = dict(_lang_snap.get("state") or {})
+            result["language_system_state"] = {
+                "last_wernicke": dict(_lang_state.get("last_wernicke") or {}),
+                "last_broca": dict(_lang_state.get("last_broca") or {}),
+                "last_language_style": dict(_lang_state.get("last_language_style") or {}),
+            }
+        except Exception:
+            pass
+
         return result
 
     def route_intent(

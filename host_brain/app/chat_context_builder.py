@@ -2761,6 +2761,45 @@ def build_chat_prompt_runtime_payload(
                 "co_regulation_hint": str(_mirror_resonance.get("last_co_regulation_hint") or "resonate"),
             }
 
+        # T-235：注入 somatic_state（躯体感知快照）
+        _somatic_state = dict(tribe_context.get("somatic_state") or {})
+        if _somatic_state:
+            runtime_payload["somatic_state"] = {
+                "vts_connected": bool(_somatic_state.get("vts_connected", False)),
+                "current_expression": _somatic_state.get("current_expression"),
+                "fatigue_level": round(float(_somatic_state.get("fatigue_level") or 0.0), 4),
+                "last_loneliness_level": round(float(_somatic_state.get("last_loneliness_level") or 0.0), 4),
+                "somatic_comfort_needed": bool(_somatic_state.get("somatic_comfort_needed", False)),
+                "motion_level": round(float(_somatic_state.get("motion_level") or 0.0), 4),
+            }
+            # 高疲劳时注入 fatigue_hint 供 prompt_builder 参考
+            _fatigue = float(_somatic_state.get("fatigue_level") or 0.0)
+            if _fatigue >= 0.60:
+                runtime_payload.setdefault("fatigue_hint", {
+                    "high_fatigue": True,
+                    "fatigue_level": round(_fatigue, 4),
+                    "suggest": "当前疲劳度较高，回复应简洁温柔，避免信息过载",
+                })
+
+        # T-235：注入 language_dual_system（语言双系统快照）
+        _lang_state = dict(tribe_context.get("language_system_state") or {})
+        if _lang_state:
+            _last_wernicke = dict(_lang_state.get("last_wernicke") or {})
+            _last_broca = dict(_lang_state.get("last_broca") or {})
+            _last_style = dict(_lang_state.get("last_language_style") or {})
+            if _last_wernicke or _last_broca:
+                runtime_payload["language_dual_system"] = {
+                    "intent_type": str(_last_wernicke.get("intent_type") or "chat"),
+                    "urgency_score": round(float(_last_wernicke.get("urgency_score") or 0.0), 4),
+                    "emotional_pressure": round(float(_last_wernicke.get("emotional_pressure") or 0.0), 4),
+                    "response_mode": str(_last_broca.get("response_mode") or "normal"),
+                    "target_sentence_count": int(_last_broca.get("target_sentence_count") or 2),
+                    "warmth_weight": round(float(_last_broca.get("warmth_weight") or 0.45), 4),
+                    "style": str(_last_style.get("style") or "neutral"),
+                    "tone": str(_last_style.get("tone") or "balanced"),
+                    "loneliness_hint": str(_last_style.get("loneliness_hint") or ""),
+                }
+
         logger.debug(
             "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
             "high_loneliness=%s bond_trend=%s immune_risk=%s",

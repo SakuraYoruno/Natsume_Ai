@@ -108,6 +108,26 @@ class ProprioceptionAgent:
                 "ts_ms": resolved_ts,
             },
         )
+
+        # T-228：高认知负荷时主动驱动 LimbicAgent 情绪偏移（疲惫/低唤醒）
+        cognitive_load = float(state.get("cognitive_load_index") or 0.0)
+        if cognitive_load >= 0.65:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                limbic = get_limbic_agent()
+                if hasattr(limbic, "drive_emotion_metabolism"):
+                    severity = (cognitive_load - 0.65) * 1.2   # 最大 0.42
+                    limbic.drive_emotion_metabolism(
+                        valence=round(-severity * 0.5, 4),
+                        arousal=round(-severity * 0.4, 4),
+                        dominance=-0.05,
+                        blend_weight=0.20,
+                        event_kind=f"cognitive_overload:{source}",
+                        source="proprioception_agent",
+                    )
+            except Exception:
+                pass
+
         return state
 
     def export_runtime_state(self) -> dict[str, Any]:
@@ -170,6 +190,22 @@ class ProprioceptionAgent:
         if payload.get("conversation_id"):
             state["active_session_id"] = str(payload.get("conversation_id"))
         self._update_state(source="channel_message_received", ts_ms=ts_ms, changes=state)
+
+        # T-230：高打断频率时联动 EndocrineAgent 记录压力事件
+        interrupt_count = len(self._interrupt_ts_ms)
+        if interrupt_count >= 6:
+            try:
+                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
+                endocrine = get_endocrine_agent()
+                if hasattr(endocrine, "record_stress_event"):
+                    import math  # noqa: PLC0415
+                    stress_intensity = min(0.70, math.log1p(interrupt_count - 5) * 0.20)
+                    endocrine.record_stress_event(
+                        source=f"high_interrupt_rate:{interrupt_count}",
+                        intensity=round(stress_intensity, 4),
+                    )
+            except Exception:
+                pass
 
     async def _on_voice_pipeline_started(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())

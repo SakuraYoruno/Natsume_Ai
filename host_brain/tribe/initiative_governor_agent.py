@@ -166,6 +166,13 @@ class InitiativeGovernorAgent:
         if body_budget <= 0.25:
             motive_score = _clamp(motive_score * 0.6)
 
+        # T-231：读取 sleep_pressure，夜间高睡眠压力时降低主动意愿
+        sleep_pressure = _clamp(float(circadian_state.get("sleep_pressure") or 0.2))
+        if sleep_pressure >= 0.65:
+            # 睡眠压力高时，主动意愿打折（最大折扣 40%）
+            sleep_discount = 1.0 - (sleep_pressure - 0.65) * 1.14  # 0.65→1.0, 0.90→0.71
+            motive_score = _clamp(motive_score * max(0.60, sleep_discount))
+
         # T-204：恢复窗口期间，提高 readiness 阈値（更容易 DEFER）
         readiness_threshold = 0.45
         if self._recovery_mode:

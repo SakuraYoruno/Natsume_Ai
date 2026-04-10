@@ -637,6 +637,35 @@ class TribeStateRegistry:
                 _last_resonance.get("resonance_strength") or _mn.get("last_resonance_strength"), 0.0
             )
 
+        # ── T-232：SomaticAgent 躯体感知（somatic_comfort_needed / fatigue_level）──
+        somatic_comfort_needed = False
+        somatic_fatigue_level = 0.0
+        somatic_ns = states.get("somatic_agent")
+        if somatic_ns:
+            _som = dict(somatic_ns.get("state") or {})
+            somatic_comfort_needed = bool(_som.get("somatic_comfort_needed", False))
+            somatic_fatigue_level = _safe_float(_som.get("fatigue_level"), 0.0)
+
+        # ── T-233：LanguageSystemAgent 双系统快照（urgency_score / response_mode）──
+        language_urgency_score = 0.0
+        language_response_mode = "normal"
+        language_ns = states.get("language_system_agent")
+        if language_ns:
+            _lang = dict(language_ns.get("state") or {})
+            _last_wernicke = dict(_lang.get("last_wernicke") or {})
+            _last_broca = dict(_lang.get("last_broca") or {})
+            language_urgency_score = _safe_float(_last_wernicke.get("urgency_score"), 0.0)
+            language_response_mode = str(_last_broca.get("response_mode") or "normal").strip().lower() or "normal"
+
+        # ── T-234：InteroceptionAgent 完整快照（body_budget / recovery_urgency）──
+        body_budget = 0.5
+        recovery_urgency = 0.0
+        intero_ns2 = states.get("interoception_agent")
+        if intero_ns2:
+            _ins2 = dict(intero_ns2.get("state") or {})
+            body_budget = _safe_float(_ins2.get("body_budget"), 0.5)
+            recovery_urgency = _safe_float(_ins2.get("recovery_urgency"), 0.0)
+
         result = {
             "gate_state": gate_state,
             "stress_index": round(stress_index, 4),
@@ -686,6 +715,15 @@ class TribeStateRegistry:
             "net_valence": round(net_valence, 4),
             # T-222 MirrorNeuron 共情强度
             "mirror_resonance_strength": round(mirror_resonance_strength, 4),
+            # T-232 SomaticAgent 躯体感知
+            "somatic_comfort_needed": somatic_comfort_needed,
+            "somatic_fatigue_level": round(somatic_fatigue_level, 4),
+            # T-233 LanguageSystemAgent 双系统快照
+            "language_urgency_score": round(language_urgency_score, 4),
+            "language_response_mode": language_response_mode,
+            # T-234 InteroceptionAgent 完整快照
+            "body_budget": round(body_budget, 4),
+            "recovery_urgency": round(recovery_urgency, 4),
             "ts_ms": now_ms(),
         }
         self._record_homeostasis_sample(vital_signs=result)

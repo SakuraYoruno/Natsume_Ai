@@ -119,13 +119,28 @@ class SomaticAgent:
             ts_ms = int(getattr(event, 'ts_ms', 0) or 0)
             prev = self.state_registry.get_state("somatic_agent") or {}
             prev_state = dict(prev.get("state") or {})
+            comfort_needed = loneliness > 0.65
             prev_state.update({
                 "last_loneliness_level": round(loneliness, 4),
                 "last_loneliness_ts_ms": ts_ms,
                 # 高孤独感时标记需要躯体安抚反馈
-                "somatic_comfort_needed": loneliness > 0.65,
+                "somatic_comfort_needed": comfort_needed,
             })
             self.state_registry.set_state("somatic_agent", prev_state, writer="somatic_agent")
+
+            # T-226：高孤独感时通知 InteroceptionAgent 提高 recovery_urgency
+            if comfort_needed:
+                try:
+                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                    intero = get_interoception_agent()
+                    if hasattr(intero, "inject_external_stress"):
+                        intero.inject_external_stress(
+                            source="somatic_loneliness",
+                            intensity=round(loneliness * 0.6, 4),
+                            ts_ms=ts_ms,
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 

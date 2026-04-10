@@ -136,6 +136,33 @@ class InteroceptionAgent:
     async def _on_state_signal(self, event: Any) -> None:
         self.evaluate_profile(source=str(getattr(event, "event_type", "") or "signal"), ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()))
 
+    def inject_external_stress(
+        self,
+        *,
+        source: str,
+        intensity: float,
+        ts_ms: int | None = None,
+    ) -> None:
+        """T-226：外部族注入压力信号，叠加到 recovery_urgency 上。
+
+        由 SomaticAgent（孤独感）、ProprioceptionAgent（高打断）等外部族调用，
+        将外部压力信号写入 interoception_agent 快照，下次 evaluate_profile 时生效。
+        """
+        resolved_ts = int(ts_ms or now_ms())
+        clamped = _clamp(float(intensity))
+        prev = self.state_registry.get_state("interoception_agent") or {}
+        prev_state = dict(prev.get("state") or {})
+        # 叠加外部压力（最大不超过 0.85）
+        current_urgency = _clamp(float(prev_state.get("recovery_urgency") or 0.0))
+        new_urgency = _clamp(current_urgency + clamped * 0.35)
+        prev_state.update({
+            "recovery_urgency": round(new_urgency, 4),
+            "last_external_stress_source": str(source or "unknown"),
+            "last_external_stress_intensity": round(clamped, 4),
+            "last_external_stress_ts_ms": resolved_ts,
+        })
+        self.state_registry.set_state("interoception_agent", prev_state, writer="interoception_agent")
+
 
 _INTEROCEPTION_AGENT: InteroceptionAgent | None = None
 

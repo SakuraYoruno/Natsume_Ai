@@ -102,6 +102,17 @@ class CircadianAgent:
                     "ts_ms": profile.get("ts_ms"),
                 },
             )
+            # T-227：相位切换到 night 时，主动触发 GlymphaticAgent 恢复周期
+            if next_phase == "night":
+                try:
+                    from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+                    get_glymphatic_agent().run_recovery_cycle(
+                        source="circadian_night_phase",
+                        force=False,
+                        now_ts_ms=int(profile.get("ts_ms") or now_ms()),
+                    )
+                except Exception:
+                    pass
         self._last_phase = next_phase
         return prev_state
 
