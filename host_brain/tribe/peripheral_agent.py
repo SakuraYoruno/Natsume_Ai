@@ -106,6 +106,25 @@ class PeripheralAgent:
                 "suppressed": prev_state.get("suppressed", False),
             })
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+            # T-388：高强度正向情绪（JOY/HAPPY/EXCITED，intensity>=0.65）时联动 LimbicAgent
+            # 外周接收到高强度正向情绪信号，应反馈到情绪代谢系统形成正向回路
+            _pos_emotion_tags = {"JOY", "HAPPY", "EXCITED", "CONTENT", "GRATEFUL"}
+            if emotion_tag in _pos_emotion_tags and intensity >= 0.65:
+                try:
+                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                    _limbic = get_limbic_agent()
+                    if hasattr(_limbic, "drive_emotion_metabolism"):
+                        _periph_valence = round(min(0.15, (intensity - 0.65) * 0.43), 4)
+                        _limbic.drive_emotion_metabolism(
+                            valence=_periph_valence,
+                            arousal=round(_periph_valence * 0.50, 4),
+                            dominance=0.03,
+                            blend_weight=0.08,
+                            event_kind=f"peripheral_positive_emotion:{emotion_tag.lower()}",
+                            source="peripheral_agent",
+                        )
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -135,6 +154,20 @@ class PeripheralAgent:
                 "motion_scale": 0.1,
             })
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+            # T-387：免疫拦截（medium/high/critical）时联动 InteroceptionAgent 注入压力
+            # 被迫抑制外周输出是一种行动受阻的内在压力（想表达却被拦截）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _immune_stress = {"medium": 0.12, "high": 0.22, "critical": 0.32}.get(risk_level, 0.12)
+                    _intero.inject_external_stress(
+                        source=f"peripheral_immune_block:{risk_level}",
+                        intensity=_immune_stress,
+                        ts_ms=ts_ms,
+                    )
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -173,6 +206,24 @@ class PeripheralAgent:
                     )
             except Exception:
                 pass
+
+            # T-389：平台连接恢复时联动 PainRewardAgent 记录通道恢复奖励
+            # 外设重新连通意味着表达/行动通道恢复，是轻度正向奖励
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward"):
+                    _pr.record_reward(
+                        source=f"peripheral_connected:{platform}",
+                        intensity=0.12,
+                        metadata={
+                            "platform": platform,
+                            "detail": detail,
+                            "ts_ms": ts_ms,
+                        },
+                    )
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -196,6 +247,18 @@ class PeripheralAgent:
                 "last_disconnected_ts_ms": ts_ms,
             })
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
+            # T-386：平台断开时联动 InteroceptionAgent 注入压力（失去连接=行动通道受阻）
+            try:
+                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+                _intero = get_interoception_agent()
+                if hasattr(_intero, "inject_external_stress"):
+                    _intero.inject_external_stress(
+                        source=f"peripheral_disconnected:{platform}",
+                        intensity=0.20,
+                        ts_ms=ts_ms,
+                    )
+            except Exception:
+                pass
         except Exception:
             pass
 

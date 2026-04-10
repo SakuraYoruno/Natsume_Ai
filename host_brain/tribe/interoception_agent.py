@@ -115,6 +115,66 @@ class InteroceptionAgent:
             except Exception:
                 pass
 
+        # T-383：高内感受压力（interoceptive_index>=0.70）时联动 LimbicAgent 触发负向情绪偏移
+        # 身体预算严重透支时，内感受信号会直接影响情绪基调（疲惫/焦虑/不适感）
+        if interoceptive_index >= 0.70:
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _intero_valence = round(-(interoceptive_index - 0.70) * 0.50, 4)
+                    _intero_arousal = round((interoceptive_index - 0.70) * 0.30, 4)
+                    _limbic.drive_emotion_metabolism(
+                        valence=_intero_valence,
+                        arousal=_intero_arousal,
+                        dominance=-0.04,
+                        blend_weight=0.10,
+                        event_kind=f"interoception_high_load:{round(interoceptive_index, 3)}",
+                        source="interoception_agent",
+                    )
+            except Exception:
+                pass
+
+        # T-384：高恢复紧迫度（recovery_urgency>=0.75）时联动 PainRewardAgent 记录身体预算透支痛苦
+        # 极度疲惫/睡眠压力是一种持续性躯体痛苦（身体预算严重透支）
+        if recovery_urgency >= 0.75:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_pain"):
+                    _urgency_pain = round(min(0.35, (recovery_urgency - 0.75) * 1.40), 4)
+                    _pr.record_pain(
+                        source=f"interoception_high_urgency:{round(recovery_urgency, 3)}",
+                        intensity=_urgency_pain,
+                        metadata={
+                            "recovery_urgency": round(recovery_urgency, 4),
+                            "interoceptive_index": round(interoceptive_index, 4),
+                            "body_budget": round(body_budget, 4),
+                        },
+                    )
+            except Exception:
+                pass
+
+        # T-385：低恢复紧迫度（recovery_urgency<0.20）时联动 PainRewardAgent 记录身体舒适奖励
+        # 身体预算充盈、压力极低时是一种轻度正向奖励（舒适感/活力感）
+        if recovery_urgency < 0.20:
+            try:
+                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                _pr = get_pain_reward_agent()
+                if hasattr(_pr, "record_reward"):
+                    _comfort_reward = round(min(0.20, (0.20 - recovery_urgency) * 1.00), 4)
+                    _pr.record_reward(
+                        source=f"interoception_low_urgency:{round(recovery_urgency, 3)}",
+                        intensity=_comfort_reward,
+                        metadata={
+                            "recovery_urgency": round(recovery_urgency, 4),
+                            "body_budget": round(body_budget, 4),
+                            "energy_reserve": round(energy, 4),
+                        },
+                    )
+            except Exception:
+                pass
+
         return dict(prev_state)
 
     def export_runtime_state(self) -> dict[str, Any]:

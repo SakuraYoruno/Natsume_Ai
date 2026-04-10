@@ -181,6 +181,24 @@ class SomaticAgent:
                         )
                 except Exception:
                     pass
+                # T-390：低疲劳（fatigue<0.25）时联动 PainRewardAgent 记录躯体舒适奖励
+                # 身体充盈、疲劳极低是一种轻度正向奖励（类似运动后的清爽感）
+                if fatigue_level < 0.25:
+                    try:
+                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
+                        _pr = get_pain_reward_agent()
+                        if hasattr(_pr, "record_reward"):
+                            _somatic_reward = round(min(0.18, (0.25 - fatigue_level) * 0.72), 4)
+                            _pr.record_reward(
+                                source=f"somatic_low_fatigue:{round(fatigue_level, 3)}",
+                                intensity=_somatic_reward,
+                                metadata={
+                                    "fatigue_level": round(fatigue_level, 4),
+                                    "ts_ms": ts_ms,
+                                },
+                            )
+                    except Exception:
+                        pass
         except Exception:
             pass
 
