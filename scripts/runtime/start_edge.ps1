@@ -339,10 +339,10 @@ function Start-EdgeProcess {
     ArgumentList = @("-m", "edge_client")
     WorkingDirectory = $RepoRoot
     PassThru = $true
-    RedirectStandardOutput = $StdoutLog
-    RedirectStandardError = $StderrLog
   }
   if (-not $ShowConsoleWindow) {
+    $startProcessArgs["RedirectStandardOutput"] = $StdoutLog
+    $startProcessArgs["RedirectStandardError"] = $StderrLog
     $startProcessArgs["WindowStyle"] = "Hidden"
   }
   return (Start-Process @startProcessArgs)
