@@ -13,7 +13,12 @@ param(
   [int]$ChromaWaitSeconds = 30,
   [switch]$ForceRestart,
   [switch]$StartupCheck,
-  [switch]$ShowConsoleWindow
+  [switch]$ShowConsoleWindow,
+  [switch]$EnableMonitorProxy,
+  [switch]$DisableMonitorProxy,
+  [string]$MonitorProxyHost = "",
+  [int]$MonitorProxyPort = 0,
+  [string]$NginxExe = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -351,6 +356,14 @@ if ($Port -le 0) {
 }
 
 $probeHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
+$monitorProxyEnabled = $false
+if ($DisableMonitorProxy.IsPresent) {
+  $monitorProxyEnabled = $false
+} elseif ($EnableMonitorProxy.IsPresent) {
+  $monitorProxyEnabled = $true
+} else {
+  $monitorProxyEnabled = Parse-BoolValue -Value $(if ($envValues.ContainsKey("HOST_MONITOR_PROXY_ENABLED")) { $envValues["HOST_MONITOR_PROXY_ENABLED"] } else { $env:HOST_MONITOR_PROXY_ENABLED }) -Default $true
+}
 
 $localServices = $null
 $localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
@@ -393,6 +406,8 @@ if (Test-Path -Path $pidFile) {
         env_file = $EnvFile
         local_services = $localServices
         local_ollama = $localOllama
+        monitor_proxy_enabled = $monitorProxyEnabled
+        monitor_proxy_status = "unknown"
       }
       $result | ConvertTo-Json -Depth 10
       exit 0
@@ -423,6 +438,8 @@ if ($null -ne $listeningPid) {
         env_file = $EnvFile
         local_services = $localServices
         local_ollama = $localOllama
+        monitor_proxy_enabled = $monitorProxyEnabled
+        monitor_proxy_status = "unknown"
       }
       $result | ConvertTo-Json -Depth 10
       exit 0
@@ -588,6 +605,79 @@ if ($canonSyncStatus -eq "degraded") {
 }
 # ────────────────────────────────────────────────────────────────────────────
 
+$monitorProxyResult = [ordered]@{
+  side = "monitor_proxy"
+  status = if ($monitorProxyEnabled) { "disabled" } else { "disabled_by_config" }
+  host = $MonitorProxyHost
+  port = $MonitorProxyPort
+}
+
+if ($monitorProxyEnabled) {
+  $startMonitorScript = Join-Path $PSScriptRoot "start_monitor_proxy.ps1"
+  if (-not (Test-Path -Path $startMonitorScript)) {
+    $monitorProxyResult = [ordered]@{
+      side = "monitor_proxy"
+      status = "degraded"
+      reason = "start_script_not_found"
+      script = $startMonitorScript
+    }
+    $startupWarnings += "STARTUP_MONITOR_PROXY_DEGRADED"
+  } else {
+    try {
+      $monitorArgs = @{
+        EnvFile = $EnvFile
+        UpstreamHost = $probeHost
+        UpstreamPort = $Port
+      }
+      if ($MonitorProxyHost) {
+        $monitorArgs["BindHost"] = $MonitorProxyHost
+      }
+      if ($MonitorProxyPort -gt 0) {
+        $monitorArgs["Port"] = $MonitorProxyPort
+      }
+      if ($NginxExe) {
+        $monitorArgs["NginxExe"] = $NginxExe
+      }
+      if ($ForceRestart.IsPresent) {
+        $monitorArgs["ForceRestart"] = $true
+      }
+
+      $monitorRaw = & $startMonitorScript @monitorArgs
+      $monitorJson = ($monitorRaw | Out-String).Trim()
+      if ($monitorJson) {
+        try {
+          $monitorProxyResult = $monitorJson | ConvertFrom-Json
+        } catch {
+          $monitorProxyResult = [ordered]@{
+            side = "monitor_proxy"
+            status = "degraded"
+            reason = "invalid_json_output"
+            raw = $monitorJson
+          }
+        }
+      } else {
+        $monitorProxyResult = [ordered]@{
+          side = "monitor_proxy"
+          status = "degraded"
+          reason = "empty_output"
+        }
+      }
+    } catch {
+      $monitorProxyResult = [ordered]@{
+        side = "monitor_proxy"
+        status = "degraded"
+        reason = "start_failed"
+        detail = $_.Exception.Message
+      }
+    }
+  }
+
+  $proxyStatus = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
+  if ($proxyStatus -eq "degraded") {
+    $startupWarnings += "STARTUP_MONITOR_PROXY_DEGRADED"
+  }
+}
+
 $result = [ordered]@{
   side = "host"
   status = "started"
@@ -605,6 +695,9 @@ $result = [ordered]@{
   obs_status = $obsStatus
   mcp_registry_status = $mcpRegistryStatus
   canon_sync_status = $canonSyncStatus
+  monitor_proxy_enabled = $monitorProxyEnabled
+  monitor_proxy_status = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
+  monitor_proxy = $monitorProxyResult
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10

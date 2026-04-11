@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -247,7 +248,8 @@ class DefaultModeAgent:
     async def _on_inner_world_ticked(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        self.tick_idle_cycle(
+        await asyncio.to_thread(
+            self.tick_idle_cycle,
             person_id=str(payload.get("user_id") or "user_1"),
             topic_phrase=str(payload.get("topic_id") or ""),
             source="inner_world_ticked",
@@ -257,7 +259,8 @@ class DefaultModeAgent:
     async def _on_conversation_ended(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        self.tick_idle_cycle(
+        await asyncio.to_thread(
+            self.tick_idle_cycle,
             person_id=str(payload.get("user_id") or "user_1"),
             topic_phrase="",
             source="conversation_ended",

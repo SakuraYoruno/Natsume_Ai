@@ -14,7 +14,6 @@ import {
   switchSysMode,
   updateAutoRules,
 } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -225,7 +224,6 @@ export default function RuntimeMode() {
   if (error && !status) {
     return (
       <div className="space-y-4">
-        <DigitalLifeNav />
         <NoticeBanner variant="error" title="生命体存在态轴加载失败">{error}</NoticeBanner>
         <button className="btn-primary" onClick={loadStatus}>重试</button>
       </div>
@@ -235,7 +233,6 @@ export default function RuntimeMode() {
   if (!status && !error) {
     return (
       <div className="space-y-4">
-        <DigitalLifeNav />
         <NoticeBanner variant="info" title="加载中">正在同步生命体存在态轴快照…</NoticeBanner>
       </div>
     )
@@ -253,8 +250,6 @@ export default function RuntimeMode() {
           刷新
         </button>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Zap}

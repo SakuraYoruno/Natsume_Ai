@@ -19,7 +19,6 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -201,7 +200,6 @@ export default function PromptConfig() {
         </div>
       </div>
 
-      <DigitalLifeNav />
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
       <PageHero

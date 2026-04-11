@@ -2,7 +2,6 @@ import React, { useEffect, useCallback } from 'react'
 import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Layers, Search } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -181,8 +180,6 @@ export default function Metrics() {
           </button>
         </div>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Activity}

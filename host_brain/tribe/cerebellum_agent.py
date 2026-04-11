@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -208,7 +209,8 @@ class CerebellumAgent:
 
     async def _on_motor_action_dispatched(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
-        decision = self.evaluate_correction(
+        decision = await asyncio.to_thread(
+            self.evaluate_correction,
             execution_feedback=payload,
             source="motor_action_dispatched",
             ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
@@ -257,7 +259,8 @@ class CerebellumAgent:
 
     async def _on_platform_disconnected(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
-        self.evaluate_correction(
+        await asyncio.to_thread(
+            self.evaluate_correction,
             execution_feedback={
                 "accepted": False,
                 "dispatched": False,

@@ -10,16 +10,16 @@ export default function PageHero({
   aside = null,
 }) {
   return (
-    <div className={`relative overflow-hidden rounded-2xl border border-primary-100 bg-gradient-to-r ${gradientClass} p-5 shadow-sm`}>
+    <div className={`relative overflow-hidden rounded-3xl border border-white/70 bg-gradient-to-r ${gradientClass} p-5 shadow-card backdrop-blur-sm`}>
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-white/40 blur-2xl" />
-        <div className="absolute bottom-0 left-1/3 h-24 w-24 rounded-full bg-primary-100/40 blur-2xl" />
+        <div className="absolute -right-10 -top-8 h-36 w-36 rounded-full bg-white/50 blur-2xl" />
+        <div className="absolute bottom-0 left-1/3 h-28 w-28 rounded-full bg-primary-100/40 blur-2xl" />
         <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary-200/70 to-transparent" />
       </div>
       <div className="relative flex items-start justify-between gap-4 flex-wrap">
         <div className="min-w-0">
           {eyebrow ? (
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-medium text-primary">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary-100/80 bg-white/80 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
               {Icon ? <Icon size={12} /> : null}
               {eyebrow}
             </div>
@@ -33,12 +33,23 @@ export default function PageHero({
         ) : metaItems.length > 0 ? (
           <div className="flex flex-wrap gap-2 text-xs text-gray-500">
             {metaItems.map((item) => (
-              <span key={item} className="rounded-full border border-gray-200 bg-white px-3 py-1">
+              <span key={item} className="rounded-full border border-white/80 bg-white/75 px-3 py-1 shadow-sm">
                 {item}
               </span>
             ))}
           </div>
         ) : null}
+      </div>
+
+      <div className="relative mt-4 hidden h-8 items-center overflow-hidden rounded-xl border border-white/75 bg-white/70 px-3 backdrop-blur-sm sm:flex">
+        <div className="lifeline-wave absolute inset-0 opacity-65" />
+        <div className="relative flex w-full items-center justify-between">
+          <span className="lifeline-node" style={{ animationDelay: '0s' }} />
+          <span className="lifeline-node" style={{ animationDelay: '0.4s' }} />
+          <span className="lifeline-node" style={{ animationDelay: '0.8s' }} />
+          <span className="lifeline-node" style={{ animationDelay: '1.2s' }} />
+          <span className="lifeline-node" style={{ animationDelay: '1.6s' }} />
+        </div>
       </div>
     </div>
   )

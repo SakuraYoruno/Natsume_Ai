@@ -228,6 +228,88 @@ def test_edge_events_placeholder_asr_text_skips_bridge_candidate(monkeypatch: py
     assert scheduled == []
 
 
+def test_edge_events_low_confidence_asr_chunk_skips_bridge_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = _LedgerStub()
+    logger = _LedgerStub()
+    scheduled: list[dict] = []
+
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE", "0.85")
+    monkeypatch.setattr(
+        system_handler,
+        "_schedule_edge_asr_bridge",
+        lambda *, candidate, logger: scheduled.append(dict(candidate)),
+    )
+
+    request_body = EdgeEventsRequest(
+        events=[
+            {
+                "event_type": "ASR_CHUNK",
+                "ts_ms": int(time.time() * 1000),
+                "request_id": "req-edge-bridge-low-conf",
+                "session_id": "sess-edge-bridge-low-conf",
+                "payload": {
+                    "text": "hello bridge",
+                    "confidence": 0.80,
+                    "final": True,
+                    "seq": 9,
+                },
+            }
+        ]
+    )
+
+    response = receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=lambda: ledger,
+        logger=logger,
+    )
+
+    assert response.accepted == 1
+    assert scheduled == []
+
+
+def test_edge_events_disallow_chunk_skips_bridge_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = _LedgerStub()
+    logger = _LedgerStub()
+    scheduled: list[dict] = []
+
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ALLOW_CHUNK", "false")
+    monkeypatch.setattr(
+        system_handler,
+        "_schedule_edge_asr_bridge",
+        lambda *, candidate, logger: scheduled.append(dict(candidate)),
+    )
+
+    request_body = EdgeEventsRequest(
+        events=[
+            {
+                "event_type": "ASR_CHUNK",
+                "ts_ms": int(time.time() * 1000),
+                "request_id": "req-edge-bridge-chunk-disabled",
+                "session_id": "sess-edge-bridge-chunk-disabled",
+                "payload": {
+                    "text": "hello bridge",
+                    "confidence": 0.96,
+                    "final": True,
+                    "seq": 10,
+                },
+            }
+        ]
+    )
+
+    response = receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=lambda: ledger,
+        logger=logger,
+    )
+
+    assert response.accepted == 1
+    assert scheduled == []
+
+
 def test_schedule_edge_asr_bridge_allows_same_text_with_new_seq(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

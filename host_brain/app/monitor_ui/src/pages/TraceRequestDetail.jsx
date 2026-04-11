@@ -30,7 +30,6 @@ import {
   fetchTraceStreamEvents,
   fetchRetrievalRuntime,
 } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -523,14 +522,14 @@ function buildRetrievalRuntimeMeta(retrievalRuntime) {
 function JsonBlock({ data, emptyLabel = '暂无数据' }) {
   if (data == null || data === '') return <div className="text-xs text-gray-400">{emptyLabel}</div>
   const text = typeof data === 'string' ? data : safeStringify(data)
-  return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">{text}</pre>
+  return <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-primary-100/70 bg-white/75 p-3 text-xs text-gray-700">{text}</pre>
 }
 
 function SectionCard({ icon: Icon, title, description, aside = null, children, className = '' }) {
   return (
-    <section className={`overflow-hidden rounded-2xl border border-gray-200 bg-white ${className}`}>
-      <div className="flex items-start gap-3 border-b border-gray-100 px-4 py-4">
-        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-blue-600">
+    <section className={`card overflow-hidden rounded-2xl ${className}`}>
+      <div className="flex items-start gap-3 border-b border-primary-100/70 px-4 py-4">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary-100/70 bg-white/80 text-blue-600">
           <Icon size={18} />
         </span>
         <div className="min-w-0 flex-1">
@@ -539,6 +538,9 @@ function SectionCard({ icon: Icon, title, description, aside = null, children, c
         </div>
         {aside}
       </div>
+      <div className="lifeline-rail mx-4 mt-3 h-1.5">
+        <div className="lifeline-wave h-full w-full" />
+      </div>
       <div className="p-4">{children}</div>
     </section>
   )
@@ -546,7 +548,7 @@ function SectionCard({ icon: Icon, title, description, aside = null, children, c
 
 function MetricCard({ label, value, hint = null, valueClassName = '' }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div className="rounded-xl border border-primary-100/70 bg-white/82 p-4">
       <div className="text-xs font-medium text-gray-500">{label}</div>
       <div className={`mt-1 break-all text-lg font-semibold text-gray-900 ${valueClassName}`}>{value ?? '-'}</div>
       {hint ? <div className="mt-1 text-xs text-gray-400">{hint}</div> : null}
@@ -556,7 +558,7 @@ function MetricCard({ label, value, hint = null, valueClassName = '' }) {
 
 function MiniStat({ label, value, hint = null, toneClassName = 'text-gray-900' }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+    <div className="rounded-xl border border-primary-100/70 bg-white/72 p-3">
       <div className="text-xs font-medium text-gray-500">{label}</div>
       <div className={`mt-1 break-all text-sm font-semibold ${toneClassName}`}>{value ?? '-'}</div>
       {hint ? <div className="mt-1 text-xs text-gray-500">{hint}</div> : null}
@@ -566,8 +568,8 @@ function MiniStat({ label, value, hint = null, toneClassName = 'text-gray-900' }
 
 function TextPreviewCard({ label, text, emptyLabel, tone = 'default' }) {
   const toneClassName = tone === 'error'
-    ? 'border-red-200 bg-red-50/70'
-    : 'border-gray-200 bg-gray-50'
+    ? 'border-red-200 bg-red-50/65'
+    : 'border-primary-100/70 bg-white/72'
   const labelToneClassName = tone === 'error' ? 'text-red-600' : 'text-gray-500'
   return (
     <div className={`rounded-xl border p-4 ${toneClassName}`}>
@@ -587,9 +589,9 @@ function TagList({ label, items, emptyLabel = '暂无', tone = 'default' }) {
     ? 'border-amber-200 bg-amber-50 text-amber-700'
     : tone === 'error'
       ? 'border-red-200 bg-red-50 text-red-700'
-      : 'border-gray-200 bg-gray-50 text-gray-700'
+      : 'border-primary-200 bg-primary-50/65 text-primary-700'
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div className="rounded-xl border border-primary-100/70 bg-white/82 p-4">
       <div className="text-xs font-medium text-gray-500">{label}</div>
       {values.length === 0 ? (
         <div className="mt-2 text-sm text-gray-400">{emptyLabel}</div>
@@ -608,11 +610,11 @@ function TagList({ label, items, emptyLabel = '暂无', tone = 'default' }) {
 
 function RawJsonDetails({ title, data, emptyLabel = '暂无数据' }) {
   return (
-    <details className="rounded-xl border border-gray-200 bg-white">
+    <details className="rounded-xl border border-primary-100/70 bg-white/82">
       <summary className="cursor-pointer list-none px-4 py-3 text-sm font-medium text-gray-700">
         {title}
       </summary>
-      <div className="border-t border-gray-100 p-4">
+      <div className="border-t border-primary-100/70 p-4">
         <JsonBlock data={data} emptyLabel={emptyLabel} />
       </div>
     </details>
@@ -658,14 +660,17 @@ function RecallSummaryPanel({ recall }) {
         <TagList label="Selected Refs" items={selectedRefs.length > 0 ? selectedRefs : evidenceRefs} emptyLabel="暂无证据引用" />
       </div>
 
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <div className="rounded-xl border border-primary-100/70 bg-white/78 p-4">
         <div className="text-xs font-medium text-gray-500">Top 召回片段</div>
+        <div className="lifeline-rail mt-2 h-1">
+          <div className="lifeline-wave h-full w-full" />
+        </div>
         {topItems.length === 0 ? (
           <div className="mt-2 text-sm text-gray-400">暂无可展示片段</div>
         ) : (
           <div className="mt-3 space-y-3">
             {topItems.map((item, index) => (
-              <div key={`recall-top-${index}`} className="rounded-lg border border-gray-200 bg-white p-3">
+              <div key={`recall-top-${index}`} className="rounded-lg border border-primary-100/70 bg-white/92 p-3">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                   <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-blue-700">#{index + 1}</span>
                   {item?.score != null ? <span>score {item.score}</span> : null}
@@ -800,10 +805,10 @@ function StageOverviewPanel({ nodes, selectedNode, onSelectNode }) {
           return (
             <div
               key={stage.id}
-              className={`rounded-2xl border p-4 transition-colors ${isSelected ? 'border-blue-300 bg-blue-50/70' : 'border-gray-200 bg-gray-50/70'}`}
+              className={`rounded-2xl border p-4 transition-colors ${isSelected ? 'border-blue-300 bg-blue-50/55 shadow-[0_10px_24px_rgba(59,130,246,0.12)]' : 'border-primary-100/80 bg-white/82 hover:border-primary-200/80'}`}
             >
               <div className="flex items-start gap-3">
-                <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${stage.observedNodes.length > 0 ? 'bg-white text-blue-600 shadow-sm' : 'bg-gray-100 text-gray-400'}`}>
+                <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${stage.observedNodes.length > 0 ? 'border border-primary-100/70 bg-white/95 text-blue-600 shadow-sm' : 'border border-primary-100/70 bg-primary-50/70 text-primary-300'}`}>
                   <Icon size={18} />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -835,7 +840,7 @@ function StageOverviewPanel({ nodes, selectedNode, onSelectNode }) {
                     {stage.expectedEntries.map((entry) => (
                       <button
                         key={entry.nodeId}
-                        className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs transition-colors ${entry.hit ? 'border-blue-200 bg-white text-gray-700 hover:border-blue-300' : 'border-dashed border-gray-200 bg-gray-100 text-gray-400'}`}
+                        className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs transition-colors ${entry.hit ? 'border-blue-200 bg-white text-gray-700 hover:border-blue-300' : 'border-dashed border-primary-200/70 bg-primary-50/45 text-primary-400'}`}
                         onClick={() => entry.node && onSelectNode?.(entry.node)}
                         disabled={!entry.node}
                       >
@@ -886,7 +891,7 @@ function StreamEventsPanel({ events, loading, error }) {
       {!loading && !error && events.length > 0 ? (
         <div className="space-y-2">
           {events.map((event, index) => (
-            <div key={`${event.event_type}-${event.ts_ms}-${index}`} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+            <div key={`${event.event_type}-${event.ts_ms}-${index}`} className="rounded-xl border border-primary-100/70 bg-white/78 px-3 py-3">
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                 <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-700">{event.phase || '-'}</span>
                 <span>{event.event_type || '-'}</span>
@@ -946,14 +951,14 @@ function ImmuneReplayPanel({ replay, loading, error, requestId, onReload }) {
             <TagList label="Matched Rules" items={matchedRules} emptyLabel="暂无规则命中" />
           </div>
 
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="rounded-xl border border-primary-100/70 bg-white/74 p-4">
             <div className="mb-2 text-xs font-medium text-gray-500">决策时间线</div>
             {decisions.length === 0 ? (
               <div className="text-sm text-gray-400">暂无决策事件</div>
             ) : (
               <div className="space-y-2">
                 {decisions.map((item, index) => (
-                  <div key={`${item.ts_ms}-${item.event_type}-${index}`} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                  <div key={`${item.ts_ms}-${item.event_type}-${index}`} className="rounded-lg border border-primary-100/70 bg-white/85 px-3 py-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
                         {item.event_type || '-'}
@@ -1026,7 +1031,7 @@ function TribeEventsPanel({ requestId, events, loading, error }) {
           {events.map((event) => {
             const payloadPreview = getTribePayloadPreview(event?.payload)
             return (
-              <div key={event.event_id} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+              <div key={event.event_id} className="rounded-xl border border-primary-100/70 bg-white/76 px-3 py-3">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
                     {event.event_type || '-'}
@@ -1087,7 +1092,7 @@ function SubgraphMiniFlow({ subgraph, selectedNode, onSelectNode }) {
   }
 
   return (
-    <div className="h-64 overflow-hidden rounded-xl border border-gray-200 bg-white">
+    <div className="h-64 overflow-hidden rounded-xl border border-primary-100/70 bg-white/86">
       <ReactFlow
         nodes={flow.nodes}
         edges={flow.edges}
@@ -1123,7 +1128,7 @@ function SubgraphsPanel({ subgraphs, selectedNode, onSelectNode }) {
             const subgraphNodes = Array.isArray(subgraph.nodes) ? subgraph.nodes : []
             const ownerLabel = subgraph.owner_node_id ? getTraceNodeDisplayName(subgraph.owner_node_id) : null
             return (
-              <div key={subgraph.subgraph_id} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <div key={subgraph.subgraph_id} className="rounded-xl border border-primary-100/70 bg-white/76 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="text-sm font-semibold text-gray-900">{subgraph.subgraph_id}</div>
                   {subgraph.owner_node_id ? (
@@ -1131,7 +1136,7 @@ function SubgraphsPanel({ subgraphs, selectedNode, onSelectNode }) {
                       {ownerLabel}{ownerLabel !== subgraph.owner_node_id ? ` · ${subgraph.owner_node_id}` : ''}
                     </span>
                   ) : null}
-                  <span className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-600">{subgraph.node_count ?? subgraphNodes.length} 节点</span>
+                  <span className="rounded-full border border-primary-200 bg-primary-50/60 px-2 py-0.5 text-xs text-primary-700">{subgraph.node_count ?? subgraphNodes.length} 节点</span>
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">成功 {subgraph.success_count ?? 0}</span>
                   <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-600">失败 {subgraph.fail_count ?? 0}</span>
                   <span className="ml-auto text-xs text-gray-400">{formatDateTime(subgraph.committed_at_ms)}</span>
@@ -1143,7 +1148,7 @@ function SubgraphsPanel({ subgraphs, selectedNode, onSelectNode }) {
                   {subgraphNodes.map((node, index) => (
                     <button
                       key={`${subgraph.subgraph_id}:${node.node_id}:${index}`}
-                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-left transition-colors hover:bg-gray-50"
+                      className="w-full rounded-lg border border-primary-100/70 bg-white/86 px-3 py-2 text-left transition-colors hover:bg-blue-50/35"
                       onClick={() => onSelectNode?.(node)}
                     >
                       <div className="flex items-center gap-2">
@@ -1186,7 +1191,7 @@ function LiveEntriesPanel({ liveEntries, liveConnected, liveLastTs }) {
       {liveEntries.length > 0 ? (
         <div className="space-y-2">
           {liveEntries.map((entry) => (
-            <div key={entry.entryId} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3">
+            <div key={entry.entryId} className="rounded-xl border border-primary-100/70 bg-white/76 px-3 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="text-sm font-medium text-gray-800">{entry.displayName}</div>
                 <StatusBadge status={normalizeStatus(entry.status)} />
@@ -1243,10 +1248,10 @@ function UnifiedTimelinePanel({ nodes, tribeEvents, selectedNode, onSelectNode }
         <MiniStat label="最新时间" value={items[0]?.ts_ms ? formatDateTime(items[0].ts_ms) : '-'} />
       </div>
 
-      <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <div className="mb-4 rounded-xl border border-primary-100/70 bg-white/74 p-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[8rem_12rem_minmax(0,1fr)_auto]">
           <select
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-primary-100/70 bg-white/88 px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
             value={typeFilter}
             onChange={(event) => setTypeFilter(event.target.value)}
           >
@@ -1255,7 +1260,7 @@ function UnifiedTimelinePanel({ nodes, tribeEvents, selectedNode, onSelectNode }
             <option value="tribe">仅Tribe</option>
           </select>
           <select
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-primary-100/70 bg-white/88 px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
             value={stageFilter}
             onChange={(event) => setStageFilter(event.target.value)}
           >
@@ -1265,7 +1270,7 @@ function UnifiedTimelinePanel({ nodes, tribeEvents, selectedNode, onSelectNode }
             ))}
           </select>
           <input
-            className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            className="w-full rounded-lg border border-primary-100/70 bg-white/88 px-3 py-2 text-sm text-gray-700 focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-100"
             placeholder="搜索标题、节点ID、payload 关键词"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
@@ -1292,7 +1297,7 @@ function UnifiedTimelinePanel({ nodes, tribeEvents, selectedNode, onSelectNode }
             const isNode = item.type === 'node'
             const isSelectedNode = isNode && selectedNode?.node_id === item?.node?.node_id
             const containerClassName = isNode
-              ? (isSelectedNode ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50')
+              ? (isSelectedNode ? 'border-blue-200 bg-blue-50' : 'border-primary-100/70 bg-white/88 hover:bg-blue-50/30')
               : 'border-emerald-200 bg-emerald-50/60'
             return (
               <button
@@ -1304,7 +1309,7 @@ function UnifiedTimelinePanel({ nodes, tribeEvents, selectedNode, onSelectNode }
                   <span className={`rounded-full border px-2 py-0.5 ${isNode ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
                     {isNode ? 'NODE' : 'TRIBE'}
                   </span>
-                  <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-gray-600">{stageLabel}</span>
+                  <span className="rounded-full border border-primary-200 bg-primary-50/60 px-2 py-0.5 text-primary-700">{stageLabel}</span>
                   <StatusBadge status={normalizeStatus(item.status)} />
                   <span className="ml-auto">{formatDateTime(item.ts_ms)}</span>
                 </div>
@@ -1337,15 +1342,15 @@ function NodeTimelinePanel({ nodes, selectedNode, onSelectNode }) {
           {sections.map((section) => {
             const Icon = section.icon
             return (
-              <div key={section.stageId} className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50/70">
-                <div className="flex flex-wrap items-start gap-3 border-b border-gray-200 bg-white px-4 py-3">
-                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-blue-600">
+              <div key={section.stageId} className="overflow-hidden rounded-xl border border-primary-100/70 bg-white/72">
+                <div className="flex flex-wrap items-start gap-3 border-b border-primary-100/70 bg-white/88 px-4 py-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary-100/70 bg-white text-blue-600">
                     <Icon size={18} />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="text-sm font-semibold text-gray-900">{section.label}</div>
-                      <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-600">{section.nodes.length} 个节点</span>
+                      <span className="rounded-full border border-primary-200 bg-primary-50/60 px-2 py-0.5 text-xs text-primary-700">{section.nodes.length} 个节点</span>
                       {section.issueCount > 0 ? (
                         <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-600">
                           异常/降级 {section.issueCount}
@@ -1357,7 +1362,7 @@ function NodeTimelinePanel({ nodes, selectedNode, onSelectNode }) {
                   </div>
                 </div>
 
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-primary-100/70">
                   {section.nodes.map((node, index) => {
                     const isSelected = selectedNode?.node_id === node.node_id
                     const isIssue = ISSUE_STATUSES.has(String(node.status || '').toUpperCase())
@@ -1365,7 +1370,7 @@ function NodeTimelinePanel({ nodes, selectedNode, onSelectNode }) {
                     return (
                       <button
                         key={`${section.stageId}:${node.node_id}:${index}`}
-                        className={`w-full px-4 py-4 text-left transition-colors ${isSelected ? 'bg-blue-50' : isIssue ? 'bg-red-50/60 hover:bg-red-50' : 'bg-white hover:bg-gray-50'}`}
+                        className={`w-full px-4 py-4 text-left transition-colors ${isSelected ? 'bg-blue-50/85' : isIssue ? 'bg-red-50/60 hover:bg-red-50' : 'bg-white/92 hover:bg-primary-50/45'}`}
                         onClick={() => onSelectNode(node)}
                       >
                         <div className="flex items-center gap-2">
@@ -1419,13 +1424,16 @@ export default function TraceRequestDetail() {
     if (!requestId) return
     if (showLoading) setLoading(true)
     try {
-      const [traceResponse, runtimeResponse] = await Promise.all([
-        fetchTraceNodes(requestId),
-        fetchRetrievalRuntime({ request_id: requestId, limit: 5, include_legacy: true }).catch(() => null),
-      ])
+      const traceResponse = await fetchTraceNodes(requestId)
       setTraceData(traceResponse)
-      setRetrievalRuntime(runtimeResponse)
       setError(null)
+      void fetchRetrievalRuntime({ request_id: requestId, limit: 5, include_legacy: true })
+        .then((runtimeResponse) => {
+          setRetrievalRuntime(runtimeResponse)
+        })
+        .catch(() => {
+          setRetrievalRuntime(null)
+        })
     } catch (err) {
       setError(err.message)
       setTraceData(null)
@@ -1489,15 +1497,10 @@ export default function TraceRequestDetail() {
   useEffect(() => {
     if (!requestId) return
     setLoading(true)
-    setEventsLoading(true)
-    setTribeEventsLoading(true)
-    setImmuneReplayLoading(true)
-    Promise.all([
-      loadTrace(),
-      loadEvents({ showLoading: true }),
-      loadTribeEvents({ showLoading: true }),
-      loadImmuneReplay({ showLoading: true }),
-    ]).finally(() => setLoading(false))
+    void loadTrace({ showLoading: true })
+    void loadEvents({ showLoading: true })
+    void loadTribeEvents({ showLoading: true })
+    void loadImmuneReplay({ showLoading: true })
   }, [requestId, loadTrace, loadEvents, loadTribeEvents, loadImmuneReplay])
 
   useEffect(() => {
@@ -1564,6 +1567,9 @@ export default function TraceRequestDetail() {
     [traceData, fallbackEvents]
   )
   const summary = traceData?.summary ?? {}
+  const degradedReason = String(summary?.degraded_reason || '').trim()
+  const degradedMessage = String(summary?.degraded_message || '').trim()
+  const traceDegraded = Boolean(summary?.degraded)
   const subgraphs = Array.isArray(traceData?.subgraphs) ? traceData.subgraphs : []
   const inputPreview = getSummaryInputText(summary)
   const outputPreview = getSummaryOutputText(summary)
@@ -1606,15 +1612,13 @@ export default function TraceRequestDetail() {
     {
       label: '实时模式',
       value: liveModeText,
-      tone: 'gray',
+      tone: 'primary',
       active: liveConnected,
     },
   ]
 
   return (
     <div className="space-y-4">
-      <DigitalLifeNav />
-
       <PageHero
         icon={Layers3}
         eyebrow="单请求链路详情"
@@ -1635,34 +1639,51 @@ export default function TraceRequestDetail() {
         nodes={tracePulseNodes}
       />
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <button className="flex items-center gap-1.5 text-sm text-gray-500 transition-colors hover:text-gray-800" onClick={() => navigate('/trace')}>
-          <ArrowLeft size={14} />
-          返回
-        </button>
-        <div className="min-w-0">
-          <div className="text-xs text-gray-500">请求链路</div>
-          <div className="break-all font-mono text-sm text-gray-900">{requestId}</div>
-        </div>
-        <div className="ml-auto flex items-center gap-2 flex-wrap">
-          {traceData ? <StatusBadge status={normalizeStatus(traceData.status)} label={traceData.status} /> : null}
-          {requestId ? (
-            <a
-              href={`#/automation?immune_replay_request_id=${encodeURIComponent(requestId)}`}
-              className="btn-secondary text-xs"
-            >
-              打开 Immune Ops
-            </a>
-          ) : null}
-          <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => { void loadTrace({ showLoading: true }); void loadEvents({ showLoading: true }); void loadTribeEvents({ showLoading: true }); void loadImmuneReplay({ showLoading: true }) }}>
-            <RefreshCw size={12} />
-            刷新
+      <div className="card space-y-3 p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button className="btn-secondary text-xs" onClick={() => navigate('/trace')}>
+            <ArrowLeft size={14} />
+            返回
           </button>
+          <div className="min-w-0">
+            <div className="text-xs text-gray-500">请求链路</div>
+            <div className="break-all font-mono text-sm text-gray-900">{requestId}</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            {traceData ? <StatusBadge status={normalizeStatus(traceData.status)} label={traceData.status} /> : null}
+            {requestId ? (
+              <a
+                href={`#/automation?immune_replay_request_id=${encodeURIComponent(requestId)}`}
+                className="btn-secondary text-xs"
+              >
+                打开 Immune Ops
+              </a>
+            ) : null}
+            <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => { void loadTrace({ showLoading: true }); void loadEvents({ showLoading: true }); void loadTribeEvents({ showLoading: true }); void loadImmuneReplay({ showLoading: true }) }}>
+              <RefreshCw size={12} />
+              刷新
+            </button>
+          </div>
+        </div>
+        <div className="lifeline-rail h-1.5">
+          <div className="lifeline-wave h-full w-full" />
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 md:grid-cols-4">
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">节点：{traceData?.node_count ?? nodes.length}</div>
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">异常/降级：{issueNodeCount}</div>
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">流式事件：{streamEvents.length}</div>
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">{liveModeText}</div>
         </div>
       </div>
 
       {loading ? <NoticeBanner variant="info" title="加载中">正在加载请求链路详情…</NoticeBanner> : null}
       {error ? <NoticeBanner variant="error" title="链路详情加载失败">{error}</NoticeBanner> : null}
+      {!loading && !error && traceDegraded ? (
+        <NoticeBanner variant="warning" title="当前为降级链路视图">
+          {degradedMessage || '主链路数据已返回，部分扩展数据稍后补齐。'}
+          {degradedReason ? `（${degradedReason}）` : ''}
+        </NoticeBanner>
+      ) : null}
 
       {!loading && !error && traceData ? (
         <>

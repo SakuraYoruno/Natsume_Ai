@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -375,7 +376,8 @@ class MotorCortexAgent:
 
     async def _on_initiative_decision(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
-        self.state_registry.write(
+        await asyncio.to_thread(
+            self.state_registry.write,
             namespace="motor_cortex_agent",
             state={
                 "last_initiative_decision": {
@@ -392,7 +394,8 @@ class MotorCortexAgent:
 
     async def _on_platform_signal(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
-        self.state_registry.write(
+        await asyncio.to_thread(
+            self.state_registry.write,
             namespace="motor_cortex_agent",
             state={
                 "last_platform_signal": {

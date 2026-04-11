@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -194,7 +195,11 @@ class InteroceptionAgent:
         }
 
     async def _on_state_signal(self, event: Any) -> None:
-        self.evaluate_profile(source=str(getattr(event, "event_type", "") or "signal"), ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()))
+        await asyncio.to_thread(
+            self.evaluate_profile,
+            source=str(getattr(event, "event_type", "") or "signal"),
+            ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
+        )
 
     def inject_external_stress(
         self,

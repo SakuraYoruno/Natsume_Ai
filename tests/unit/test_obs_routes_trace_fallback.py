@@ -1,20 +1,20 @@
 """
-T-OBS-ROUTE-TRACE-FALLBACK-01~03 — Trace 降级路径测试
-TASK-0193 / BUG-BE-001
-验证 GET /obs/trace/{request_id} 降级路径不再抛出 AttributeError
+Trace fallback tests for GET /obs/trace/{request_id}.
 """
+
 from __future__ import annotations
 
-import pytest
-from unittest.mock import MagicMock, patch
-from fastapi.testclient import TestClient
-from fastapi import FastAPI
+import time
+from unittest.mock import MagicMock
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from host_brain.app import obs_routes_core
 from host_brain.app.obs_routes import router, set_ledger_provider
 
 
 def _make_app(ledger):
-    """构造带 obs router 的最小 FastAPI 应用。"""
     app = FastAPI()
     app.include_router(router)
     set_ledger_provider(lambda: ledger)
@@ -22,10 +22,11 @@ def _make_app(ledger):
 
 
 def _make_ledger_no_trace(gov_rows=None):
-    """构造 mock ledger：graph_run_trace 无数据，governor_log 返回指定行。"""
     ledger = MagicMock()
 
     def fetch_by_request_id(table, request_id, **kwargs):
+        _ = request_id
+        _ = kwargs
         if table == "governor_log":
             return gov_rows or []
         return []
@@ -34,11 +35,31 @@ def _make_ledger_no_trace(gov_rows=None):
     return ledger
 
 
-# ---------------------------------------------------------------------------
-# T-OBS-ROUTE-TRACE-FALLBACK-01: 降级路径正常返回（governor_log 有数据）
-# ---------------------------------------------------------------------------
+def _minimal_trace_payload(request_id: str, *, degraded: bool) -> dict:
+    return {
+        "request_id": request_id,
+        "session_id": "sess-timeout",
+        "status": "DEGRADED" if degraded else "OK",
+        "total_latency_ms": 123,
+        "node_count": 1,
+        "nodes": [
+            {
+                "node_id": "host_input",
+                "node_type": "intent",
+                "display_name": "Host Input",
+                "status": "OK",
+            }
+        ],
+        "edges": [],
+        "summary": {"degraded": degraded},
+        "subgraphs": [],
+        "stream_events": [],
+        "ts_ms": 1700000000000,
+        "timestamp": 1700000001000,
+    }
+
+
 def test_trace_fallback_returns_ok():
-    """BUG-BE-001: 降级路径不抛 AttributeError，正常返回 200 + JSON。"""
     gov_row = {
         "request_id": "req-fallback-01",
         "decision": "APPROVE",
@@ -54,31 +75,21 @@ def test_trace_fallback_returns_ok():
     data = resp.json()
     assert data["request_id"] == "req-fallback-01"
     assert data["node_count"] >= 1
-    assert data["status"] in ("OK", "FAIL")
+    assert data["status"] in ("OK", "FAIL", "DEGRADED")
 
 
-# ---------------------------------------------------------------------------
-# T-OBS-ROUTE-TRACE-FALLBACK-02: 不存在的 request_id 返回 404
-# ---------------------------------------------------------------------------
 def test_trace_fallback_not_found_returns_404():
-    """BUG-BE-001: 不存在的 request_id 返回 404 + error 字段。"""
     ledger = _make_ledger_no_trace(gov_rows=[])
     client = TestClient(_make_app(ledger))
 
     resp = client.get("/obs/trace/nonexistent-req-xyz")
     assert resp.status_code == 404
-    data = resp.json()
-    # FastAPI 将 detail 包装在 {"detail": ...}
-    detail = data.get("detail", {})
+    detail = resp.json().get("detail", {})
     assert detail.get("error") == "not_found"
     assert detail.get("request_id") == "nonexistent-req-xyz"
 
 
-# ---------------------------------------------------------------------------
-# T-OBS-ROUTE-TRACE-FALLBACK-03: 降级路径调用 fetch_by_time_range 而非属性访问
-# ---------------------------------------------------------------------------
 def test_trace_fallback_uses_method_not_attribute():
-    """BUG-BE-001: 降级路径使用 ledger.fetch_by_request_id('governor_log', ...) 而非 ledger.governor_log。"""
     gov_row = {
         "request_id": "req-fallback-03",
         "decision": "REJECT",
@@ -91,10 +102,55 @@ def test_trace_fallback_uses_method_not_attribute():
 
     resp = client.get("/obs/trace/req-fallback-03")
     assert resp.status_code == 200
-
-    # 验证调用了 fetch_by_request_id 而非属性访问
     calls = [str(c) for c in ledger.fetch_by_request_id.call_args_list]
-    assert any("governor_log" in c for c in calls), (
-        "降级路径应调用 fetch_by_request_id('governor_log', ...) 而非属性访问"
-    )
+    assert any("governor_log" in c for c in calls)
     ledger.fetch_by_request_id.assert_called()
+
+
+def test_trace_timeout_degrades_to_lightweight(monkeypatch):
+    ledger = _make_ledger_no_trace(gov_rows=[])
+    client = TestClient(_make_app(ledger))
+
+    def _slow_build(_ledger, request_id):
+        time.sleep(0.2)
+        return _minimal_trace_payload(request_id, degraded=False)
+
+    def _light_build(_ledger, request_id, *, reason, message):
+        _ = reason
+        _ = message
+        return _minimal_trace_payload(request_id, degraded=True)
+
+    monkeypatch.setattr(obs_routes_core, "_TRACE_BUILD_TIMEOUT_SEC", 0.05)
+    monkeypatch.setattr(obs_routes_core, "_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 0.5)
+    monkeypatch.setattr(obs_routes_core, "_build_trace_response", _slow_build)
+    monkeypatch.setattr(obs_routes_core, "_build_trace_response_lightweight", _light_build)
+
+    resp = client.get("/obs/trace/req-timeout-001")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["request_id"] == "req-timeout-001"
+    assert data["summary"]["degraded"] is True
+
+
+def test_trace_error_degrades_to_lightweight(monkeypatch):
+    ledger = _make_ledger_no_trace(gov_rows=[])
+    client = TestClient(_make_app(ledger))
+
+    def _raise_build(_ledger, _request_id):
+        raise RuntimeError("simulated trace build failure")
+
+    def _light_build(_ledger, request_id, *, reason, message):
+        _ = reason
+        _ = message
+        return _minimal_trace_payload(request_id, degraded=True)
+
+    monkeypatch.setattr(obs_routes_core, "_TRACE_BUILD_TIMEOUT_SEC", 0.2)
+    monkeypatch.setattr(obs_routes_core, "_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 0.5)
+    monkeypatch.setattr(obs_routes_core, "_build_trace_response", _raise_build)
+    monkeypatch.setattr(obs_routes_core, "_build_trace_response_lightweight", _light_build)
+
+    resp = client.get("/obs/trace/req-error-001")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["request_id"] == "req-error-001"
+    assert data["summary"]["degraded"] is True

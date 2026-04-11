@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, patch
 
 
@@ -166,3 +167,57 @@ def test_probe_llm_nodes_skips_local_ollama_when_base_url_is_remote() -> None:
 
     assert result["host_local_14b"]["status"] == "SKIPPED"
     assert "HOST_CHAT_HOST_14B_BASE_URL=http://192.168.1.101:11434" in result["host_local_14b"]["detail"]
+
+
+def test_write_core_service_cache_sets_vts_unknown_without_dedicated_probe_signal() -> None:
+    from host_brain.observability import service_health_heartbeat as heartbeat
+
+    now_ts = int(time.time() * 1000)
+    edge_result = {
+        "status": "DEGRADED",
+        "latency_ms": 27,
+        "sub_services": {
+            "edge_rpc": {"status": "UP", "detail": "edge gateway healthy"},
+            "asr": {"status": "UP", "detail": "asr healthy"},
+            "tts": {"status": "UP", "detail": "tts healthy"},
+            "audio_playback": {"status": "UP", "detail": "audio healthy"},
+        },
+    }
+    host_result = {
+        "overall_status": "UP",
+        "latency_ms": 12,
+        "sub_services": {},
+    }
+
+    with heartbeat._cache_lock:
+        heartbeat._cache.clear()
+    heartbeat._write_core_service_cache(now_ts=now_ts, edge_result=edge_result, host_result=host_result)
+
+    vts = heartbeat.get_cached("vts")
+    assert vts is not None
+    assert vts["status"] == "UNKNOWN"
+
+
+def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:
+    from host_brain.observability import service_health_heartbeat as heartbeat
+
+    probe = {
+        "available": True,
+        "status": "ACCEPTED",
+        "detail": "edge rpc reachable",
+        "latency_ms": 15,
+        "event": {
+            "components": {
+                "vts": {
+                    "enabled": True,
+                    "available": True,
+                    "status": "ok",
+                    "detail": "vts healthy",
+                }
+            }
+        },
+    }
+
+    sub_services = heartbeat._collect_edge_sub_services(probe)
+    assert sub_services["vts"]["status"] == "UP"
+    assert "vts healthy" in str(sub_services["vts"].get("detail") or "")

@@ -247,7 +247,7 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
 
 
 @router.get("/sys-mode", response_model=SysModeStatusResponse)
-async def get_sys_mode():
+def get_sys_mode():
     """获取当前系统运行模式 + 自动切换规则状态 + 空闲信息。"""
     service = _get_mode_transition_service()
     status = service.get_current_status()
@@ -255,7 +255,7 @@ async def get_sys_mode():
 
 
 @router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
-async def get_digital_life_runtime_snapshot(
+def get_digital_life_runtime_snapshot(
     current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
 ):
     """获取统一数字生命 runtime snapshot（只读观测面）。"""
@@ -282,7 +282,7 @@ async def get_digital_life_runtime_snapshot(
 
 
 @router.post("/sys-mode", response_model=SysModeSwitchResponse)
-async def switch_sys_mode(body: SysModeSwitchRequest):
+def switch_sys_mode(body: SysModeSwitchRequest):
     """切换系统运行模式（手动 / API 触发）。"""
     service = _get_mode_transition_service()
 
@@ -318,7 +318,7 @@ async def switch_sys_mode(body: SysModeSwitchRequest):
 
 
 @router.get("/sys-mode/history", response_model=SysModeHistoryResponse)
-async def get_sys_mode_history(
+def get_sys_mode_history(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
 ):
     """获取模式切换历史记录。"""
@@ -333,7 +333,7 @@ async def get_sys_mode_history(
 
 
 @router.put("/sys-mode/auto-rules")
-async def update_auto_rules(body: AutoRulesUpdateRequest):
+def update_auto_rules(body: AutoRulesUpdateRequest):
     """更新自动切换规则开关。"""
     service = _get_mode_transition_service()
     updated = service.update_auto_rules(body.rules)
@@ -344,7 +344,7 @@ async def update_auto_rules(body: AutoRulesUpdateRequest):
 
 
 @router.post("/sys-mode/event")
-async def post_sys_mode_event(
+def post_sys_mode_event(
     event_type: str = Query(..., description="事件类型"),
 ):
     """发送模式切换事件（供 Edge 端调用）。

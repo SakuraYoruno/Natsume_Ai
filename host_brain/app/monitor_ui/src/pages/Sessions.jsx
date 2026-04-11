@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Clock3, Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
 import { exportSessionsCsv, fetchSessions } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
@@ -75,11 +74,35 @@ function getStatusTone(status) {
   }
 }
 
+function FlowSection({ title, hint, children }) {
+  return (
+    <section className="card relative overflow-hidden p-4">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_32%)]" />
+      <div className="relative">
+        <div className="mb-2 flex items-center gap-2">
+          <span className="lifeline-node" />
+          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+        </div>
+        {hint ? <p className="mb-3 text-xs text-gray-500">{hint}</p> : null}
+        <div className="lifeline-rail mb-4 h-4 px-2">
+          <div className="lifeline-wave absolute inset-0 opacity-65" />
+          <div className="relative flex h-full items-center justify-around">
+            {[0, 1, 2, 3].map((index) => (
+              <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
+            ))}
+          </div>
+        </div>
+        {children}
+      </div>
+    </section>
+  )
+}
+
 function SessionCard({ item, onOpen }) {
   const tone = getStatusTone(item.status)
   const preview = compactText(item.input_preview || '暂无输入摘要', 180)
   const latency = item.total_latency_ms != null ? `${item.total_latency_ms} ms` : DASH
-  const reason = item.reason_code ? formatAlertTitle(item.reason_code) : '暂无显性原因'
+  const reason = item.reason_code ? formatAlertTitle(item.reason_code) : '暂无显式原因'
 
   return (
     <button
@@ -91,9 +114,7 @@ function SessionCard({ item, onOpen }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-900">
-                {preview}
-              </div>
+              <div className="truncate text-sm font-semibold text-gray-900">{preview}</div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
                 <span className="font-mono">{item.request_id?.slice(0, 18) || DASH}</span>
                 <span>{item.session_id || DASH}</span>
@@ -103,9 +124,7 @@ function SessionCard({ item, onOpen }) {
             <StatusBadge status={normalizeStatus(item.status)} label={item.status || 'UNKNOWN'} />
           </div>
 
-          <div className="mt-3 text-sm leading-6 text-gray-700">
-            {preview}
-          </div>
+          <div className="mt-3 text-sm leading-6 text-gray-700">{preview}</div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
             <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-medium ${tone.badge}`}>
@@ -129,14 +148,14 @@ function SessionSkeleton() {
   return (
     <div className="grid gap-3 xl:grid-cols-2" aria-hidden="true">
       {Array.from({ length: 6 }).map((_, index) => (
-        <div key={index} className="rounded-2xl border border-gray-200 bg-white p-4">
-          <div className="h-3 w-3/4 rounded-full bg-gray-200 animate-pulse" />
-          <div className="mt-3 h-3 w-1/2 rounded-full bg-gray-200 animate-pulse" />
-          <div className="mt-4 h-12 w-full rounded-xl bg-gray-100 animate-pulse" />
+        <div key={index} className="rounded-2xl border border-gray-200 bg-white/85 p-4">
+          <div className="h-3 w-3/4 animate-pulse rounded-full bg-gray-200" />
+          <div className="mt-3 h-3 w-1/2 animate-pulse rounded-full bg-gray-200" />
+          <div className="mt-4 h-12 w-full animate-pulse rounded-xl bg-gray-100" />
           <div className="mt-3 flex gap-2">
-            <div className="h-6 w-24 rounded-full bg-gray-100 animate-pulse" />
-            <div className="h-6 w-20 rounded-full bg-gray-100 animate-pulse" />
-            <div className="h-6 w-28 rounded-full bg-gray-100 animate-pulse" />
+            <div className="h-6 w-24 animate-pulse rounded-full bg-gray-100" />
+            <div className="h-6 w-20 animate-pulse rounded-full bg-gray-100" />
+            <div className="h-6 w-28 animate-pulse rounded-full bg-gray-100" />
           </div>
         </div>
       ))}
@@ -185,7 +204,7 @@ export default function Sessions() {
       setTotal(response.total || 0)
       setPage(response.page || targetPage)
     } catch (loadError) {
-      setError(loadError.message)
+      setError(loadError.message || '会话流加载失败')
       setSuppressedCount(0)
     } finally {
       setLoading(false)
@@ -208,55 +227,21 @@ export default function Sessions() {
     const latencyValues = sessions
       .map((item) => Number(item.total_latency_ms))
       .filter((value) => Number.isFinite(value) && value > 0)
+
     const avgLatency = latencyValues.length > 0
       ? Math.round(latencyValues.reduce((sum, value) => sum + value, 0) / latencyValues.length)
       : null
 
-    return {
-      healthyCount,
-      degradedCount,
-      errorCount,
-      avgLatency,
-    }
+    return { healthyCount, degradedCount, errorCount, avgLatency }
   }, [sessions])
 
   const pulseNodes = useMemo(() => ([
-    {
-      label: '当前页',
-      value: `${sessions.length}/${PAGE_SIZE}`,
-      tone: 'primary',
-      active: true,
-    },
-    {
-      label: '顺流',
-      value: String(summary.healthyCount),
-      tone: 'teal',
-      active: summary.healthyCount > 0,
-    },
-    {
-      label: '回撤',
-      value: String(summary.degradedCount),
-      tone: 'amber',
-      active: summary.degradedCount > 0,
-    },
-    {
-      label: '异常',
-      value: String(summary.errorCount),
-      tone: 'rose',
-      active: summary.errorCount > 0,
-    },
-    {
-      label: '平均耗时',
-      value: summary.avgLatency != null ? `${summary.avgLatency}ms` : '—',
-      tone: 'violet',
-      active: summary.avgLatency != null,
-    },
-    {
-      label: '时间窗',
-      value: getWindowLabel(windowMinutes),
-      tone: 'gray',
-      active: true,
-    },
+    { label: '当前页', value: `${sessions.length}/${PAGE_SIZE}`, tone: 'primary', active: true },
+    { label: '顺流', value: String(summary.healthyCount), tone: 'teal', active: summary.healthyCount > 0 },
+    { label: '回撤', value: String(summary.degradedCount), tone: 'amber', active: summary.degradedCount > 0 },
+    { label: '异常', value: String(summary.errorCount), tone: 'rose', active: summary.errorCount > 0 },
+    { label: '平均耗时', value: summary.avgLatency != null ? `${summary.avgLatency}ms` : '--', tone: 'violet', active: summary.avgLatency != null },
+    { label: '时间窗', value: getWindowLabel(windowMinutes), tone: 'gray', active: true },
   ]), [sessions.length, summary, windowMinutes])
 
   const handleSearch = useCallback(() => {
@@ -291,7 +276,7 @@ export default function Sessions() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">神经会话沉积</h1>
-          <p className="text-sm text-gray-500">把最近请求看成一段段生命回声，先看它们怎么流动，再点进单条链路。</p>
+          <p className="text-sm text-gray-500">把最近请求看成生命回声流，先看节律，再进入单条链路。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -306,16 +291,14 @@ export default function Sessions() {
         </div>
       </div>
 
-      <DigitalLifeNav />
-
       <PageHero
         icon={Clock3}
         eyebrow="神经会话回声面板"
         title={`最近 ${getWindowLabel(windowMinutes)} 共 ${total} 条请求`}
         description={
           keyword || status
-            ? `当前过滤条件已生效${keyword ? `，关键词“${keyword}”` : ''}${status ? `，状态 ${status}` : ''}。`
-            : '可按关键词、状态和时间窗口筛选请求，再直接跳转到神经链路查看完整传导路径。'
+            ? `当前过滤生效${keyword ? `，关键词“${keyword}”` : ''}${status ? `，状态 ${status}` : ''}。`
+            : '可按关键词、状态和时间窗口筛选请求，再进入神经链路查看完整传导路径。'
         }
         gradientClass="from-sky-50 via-white to-indigo-50"
         metaItems={[
@@ -328,7 +311,7 @@ export default function Sessions() {
 
       <LivingPulseStrip
         title="会话脉冲"
-        subtitle="把这一页的请求聚成一条更像生命流的节律，看它是平稳前行，还是出现回撤与异常。"
+        subtitle="把本页请求聚成一条可读脉冲流，识别是平稳推进还是出现回撤与异常。"
         nodes={pulseNodes}
       />
 
@@ -340,25 +323,27 @@ export default function Sessions() {
 
       {!error && suppressedCount > 0 ? (
         <NoticeBanner variant="info" title="已隐藏噪声记录">
-          当前页已自动隐藏 {suppressedCount} 条测试会话、纯问号占位消息或无可读输入摘要的记录。
+          当前页已自动隐藏 {suppressedCount} 条测试会话、纯问号占位消息或不可读摘要记录。
         </NoticeBanner>
       ) : null}
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="当前页样本" value={sessions.length} hint="用于快速浏览" tone="text-gray-900" />
-        <MetricCard label="顺流" value={summary.healthyCount} hint="当前页" tone="text-green-600" />
-        <MetricCard label="回撤/降级" value={summary.degradedCount} hint="当前页" tone="text-orange-500" />
-        <MetricCard
-          label="平均耗时"
-          value={summary.avgLatency != null ? `${summary.avgLatency} ms` : DASH}
-          hint="当前页样本"
-          tone="text-blue-600"
-        />
-      </div>
+      <FlowSection title="体内会话体征" hint="将会话质量、异常密度和耗时放入同一体征层。">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <MetricCard label="当前页样本" value={sessions.length} hint="用于快速浏览" tone="text-gray-900" />
+          <MetricCard label="顺流" value={summary.healthyCount} hint="当前页" tone="text-green-600" />
+          <MetricCard label="回撤/降级" value={summary.degradedCount} hint="当前页" tone="text-orange-500" />
+          <MetricCard
+            label="平均耗时"
+            value={summary.avgLatency != null ? `${summary.avgLatency} ms` : DASH}
+            hint="当前页样本"
+            tone="text-blue-600"
+          />
+        </div>
+      </FlowSection>
 
-      <div className="card p-4">
+      <FlowSection title="会话筛选与检索" hint="先在体内筛查，再下钻到单条神经链路。">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_180px_160px_auto]">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -395,27 +380,15 @@ export default function Sessions() {
             搜索
           </button>
         </div>
-      </div>
+      </FlowSection>
 
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-gray-900">会话沉积</h2>
-            <p className="text-xs text-gray-500">每条记录都是一个可回放的神经回声。</p>
-          </div>
-          <div className="text-xs text-gray-500">
-            共 {total} 条，单页 {PAGE_SIZE} 条
-          </div>
-        </div>
-
-        {loading ? (
-          <SessionSkeleton />
-        ) : null}
+      <FlowSection title="会话沉积流" hint={`共 ${total} 条，单页 ${PAGE_SIZE} 条。`}>
+        {loading ? <SessionSkeleton /> : null}
 
         {!loading && !error && sessions.length === 0 ? (
           <EmptyStateCard
             title="暂无会话沉积"
-            hint="可以调整筛选条件，或者等待新的对话请求进入系统。"
+            hint="可以调整筛选条件，或等待新的对话请求进入系统。"
             className="p-6"
           />
         ) : null}
@@ -427,7 +400,7 @@ export default function Sessions() {
             ))}
           </div>
         ) : null}
-      </div>
+      </FlowSection>
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
         <span>当前页 {page} / {totalPages}</span>

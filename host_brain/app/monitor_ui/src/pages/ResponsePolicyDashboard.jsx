@@ -8,7 +8,6 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import KeyValueRow from '../components/KeyValueRow.jsx'
 import MetricCard from '../components/MetricCard.jsx'
@@ -99,8 +98,6 @@ export default function ResponsePolicyDashboard() {
           刷新
         </button>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Sparkles}

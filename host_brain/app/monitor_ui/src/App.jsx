@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Layout from './components/Layout.jsx'
+import SelfModelDashboard from './pages/SelfModelDashboard.jsx'
 
 const DigitalLifeOverview = lazy(() => import('./pages/DigitalLifeOverview.jsx'))
 const Overview = lazy(() => import('./pages/Overview.jsx'))
@@ -28,12 +29,38 @@ const PromptConfig = lazy(() => import('./pages/PromptConfig.jsx'))
 const PersonaPromptOps = lazy(() => import('./pages/PersonaPromptOps.jsx'))
 const InnerWorldDashboard = lazy(() => import('./pages/InnerWorldDashboard.jsx'))
 const ResponsePolicyDashboard = lazy(() => import('./pages/ResponsePolicyDashboard.jsx'))
-const SelfModelDashboard = lazy(() => import('./pages/SelfModelDashboard.jsx'))
+
 
 function RouteLoading() {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center text-sm text-gray-500 shadow-sm">
-      正在加载页面…
+    <div className="card relative overflow-hidden p-6">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(41,112,255,0.08),_transparent_40%),radial-gradient(circle_at_bottom_left,_rgba(16,185,129,0.07),_transparent_38%)]" />
+      <div className="relative space-y-4">
+        <div className="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-white/80 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
+          <span className="lifeline-node" />
+          数字生命体唤醒中
+        </div>
+
+        <div className="lifeline-rail h-8 px-3">
+          <div className="lifeline-wave absolute inset-0 opacity-70" />
+          <div className="relative flex h-full items-center justify-between">
+            {[0, 1, 2, 3, 4].map((index) => (
+              <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.28}s` }} />
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm backdrop-blur-sm">
+              <div className="h-2.5 w-24 rounded-full bg-primary-100/80" />
+              <div className="mt-3 h-5 w-2/3 rounded-full bg-gray-200/80" />
+              <div className="mt-2 h-2.5 w-full rounded-full bg-gray-100" />
+              <div className="mt-1.5 h-2.5 w-4/5 rounded-full bg-gray-100" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

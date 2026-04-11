@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -82,6 +83,8 @@ _EDGE_ASR_BRIDGE_FINAL_EVENT_TYPES: frozenset[str] = frozenset(
     {"ASR_FINAL", "ASR_RESULT", "USER_INPUT_FINAL"}
 )
 _EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS: frozenset[str] = frozenset({"[ASR_VAD_NO_SPEECH]"})
+_EDGE_ASR_BRIDGE_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
+_EDGE_ASR_BRIDGE_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
 _EDGE_ASR_BRIDGE_RECENT: dict[str, int] = {}
 _EDGE_ASR_BRIDGE_RECENT_LOCK = threading.Lock()
 # 同 session_id 下最近一次 bridge 的文本和时间戳（用于文本相似度去重）
@@ -143,6 +146,19 @@ def _coerce_float(value: Any) -> float | None:
         return None
 
 
+def _looks_like_asr_placeholder_text(text: str) -> bool:
+    normalized = str(text or "").strip().upper()
+    if not normalized:
+        return True
+    if normalized in _EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS:
+        return True
+    return _EDGE_ASR_BRIDGE_PLACEHOLDER_PATTERN.fullmatch(normalized) is not None
+
+
+def _contains_speech_chars(text: str) -> bool:
+    return _EDGE_ASR_BRIDGE_SPEECH_CHAR_PATTERN.search(str(text or "")) is not None
+
+
 def _log_if_available(logger: Any, level: str, message: str, *args: Any) -> None:
     log_fn = getattr(logger, level, None)
     if callable(log_fn):
@@ -158,6 +174,9 @@ def _extract_edge_asr_bridge_candidate(
         return None
     if normalized_event_type not in _EDGE_ASR_BRIDGE_EVENT_TYPES:
         return None
+    allow_chunk = _parse_bool_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_ALLOW_CHUNK", default=True)
+    if not allow_chunk and normalized_event_type not in _EDGE_ASR_BRIDGE_FINAL_EVENT_TYPES:
+        return None
 
     payload_raw = raw.get("payload")
     payload = dict(payload_raw) if isinstance(payload_raw, Mapping) else {}
@@ -170,17 +189,49 @@ def _extract_edge_asr_bridge_candidate(
     ).strip()
     if not text:
         return None
-    normalized_text = text.strip().upper()
-    if normalized_text in _EDGE_ASR_BRIDGE_PLACEHOLDER_TEXTS:
+    if _looks_like_asr_placeholder_text(text):
+        return None
+
+    min_text_len = max(
+        1,
+        _parse_int_env("HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_TEXT_LEN", default=2),
+    )
+    if len(text) < min_text_len:
+        return None
+    require_speech_chars = _parse_bool_env(
+        "HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_REQUIRE_SPEECH_CHARS",
+        default=True,
+    )
+    if require_speech_chars and not _contains_speech_chars(text):
         return None
 
     reason_code = str(payload.get("reason_code") or raw.get("reason_code") or "").strip().upper()
-    if reason_code == "ASR_VAD_NO_SPEECH":
+    if reason_code in {"ASR_VAD_NO_SPEECH", "ASR_LOW_CONFIDENCE"}:
+        return None
+
+    low_confidence = _coerce_bool(
+        payload.get("low_confidence", raw.get("low_confidence")),
+        default=False,
+    )
+    if low_confidence:
         return None
 
     confidence = _coerce_float(payload.get("confidence"))
     if confidence is None:
         confidence = _coerce_float(raw.get("confidence"))
+    if normalized_event_type.startswith("ASR_"):
+        min_confidence = max(
+            0.0,
+            min(
+                1.0,
+                _parse_float_env(
+                    "HOST_EDGE_EVENT_ASR_AUTO_BRIDGE_MIN_CONFIDENCE",
+                    default=0.60,
+                ),
+            ),
+        )
+        if confidence is None or confidence < min_confidence:
+            return None
 
     is_final = _coerce_bool(
         payload.get("is_final", payload.get("final", raw.get("is_final", raw.get("final")))),
@@ -239,6 +290,7 @@ def _schedule_edge_asr_bridge(
     candidate: Mapping[str, Any],
     logger: Any,
     inline_waiters: list[Any] | None = None,
+    main_loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
     request_id = str(candidate.get("request_id") or "").strip()
     session_id = str(candidate.get("session_id") or "").strip()
@@ -337,6 +389,19 @@ def _schedule_edge_asr_bridge(
     if not run_in_thread and inline_waiters is not None:
         inline_waiters.append(_dispatch())
         return
+
+    if main_loop is not None and main_loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(_dispatch(), main_loop)
+            return
+        except Exception as exc:
+            _log_if_available(
+                logger,
+                "debug",
+                "edge event ASR bridge thread-safe schedule failed request_id=%s: %s",
+                candidate.get("request_id"),
+                exc,
+            )
 
     try:
         loop = asyncio.get_running_loop()
@@ -623,6 +688,7 @@ def receive_edge_events_response(
     get_ledger: Callable[[], Any],
     logger: Any,
     inline_waiters: list[Any] | None = None,
+    main_loop: asyncio.AbstractEventLoop | None = None,
 ) -> EdgeEventsResponse:
     ts_ms = int(time.time() * 1000)
     raw_events = request_body.events
@@ -733,6 +799,22 @@ def receive_edge_events_response(
             import asyncio as _asyncio
             from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
+            def _schedule_async(coro: Any) -> None:
+                if main_loop is not None and main_loop.is_running():
+                    try:
+                        _asyncio.run_coroutine_threadsafe(coro, main_loop)
+                        return
+                    except Exception:
+                        pass
+                try:
+                    loop = _asyncio.get_running_loop()
+                    if loop.is_running():
+                        _asyncio.ensure_future(coro)
+                        return
+                except RuntimeError:
+                    pass
+                _asyncio.run(coro)
+
             for ev in _emotion_events:
                 _ev_request_id = ev["request_id"]
                 _ev_session_id = ev["session_id"]
@@ -770,31 +852,7 @@ def receive_edge_events_response(
                             )
 
                     try:
-                        loop = _asyncio.get_running_loop()
-                        if loop.is_running():
-                            _asyncio.ensure_future(
-                                _fire_bond(
-                                    _ev_request_id,
-                                    _ev_session_id,
-                                    _ev_text,
-                                    _ev_emotion_tag,
-                                    _ev_emotion_intensity,
-                                    _ev_ts_ms,
-                                )
-                            )
-                        else:
-                            _asyncio.run(
-                                _fire_bond(
-                                    _ev_request_id,
-                                    _ev_session_id,
-                                    _ev_text,
-                                    _ev_emotion_tag,
-                                    _ev_emotion_intensity,
-                                    _ev_ts_ms,
-                                )
-                            )
-                    except RuntimeError:
-                        _asyncio.run(
+                        _schedule_async(
                             _fire_bond(
                                 _ev_request_id,
                                 _ev_session_id,
@@ -803,6 +861,12 @@ def receive_edge_events_response(
                                 _ev_emotion_intensity,
                                 _ev_ts_ms,
                             )
+                        )
+                    except Exception as bond_exc:
+                        logger.debug(
+                            "edge event bond update skipped: %s (request_id=%s)",
+                            bond_exc,
+                            _ev_request_id,
                         )
                 except Exception as bond_exc:
                     logger.debug(
@@ -832,6 +896,16 @@ def receive_edge_events_response(
                                     vts_exc, req_id,
                                 )
 
+                        if main_loop is not None and main_loop.is_running():
+                            _schedule_async(
+                                _fire_vts(
+                                    _ev_request_id,
+                                    _ev_emotion_tag,
+                                    _ev_emotion_intensity,
+                                    _ev_ts_ms,
+                                )
+                            )
+                            continue
                         try:
                             loop = _asyncio.get_running_loop()
                             if loop.is_running():
@@ -858,6 +932,7 @@ def receive_edge_events_response(
                 candidate=candidate,
                 logger=logger,
                 inline_waiters=inline_waiters,
+                main_loop=main_loop,
             )
 
     rejected_count = len(rejected_indices)

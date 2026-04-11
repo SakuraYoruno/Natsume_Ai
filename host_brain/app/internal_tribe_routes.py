@@ -57,7 +57,7 @@ class TribeRecentResponse(BaseModel):
 
 
 @router.post("/tribe_event", response_model=TribeEventOut, status_code=202)
-async def ingest_tribe_event(
+def ingest_tribe_event(
     body: TribeEventIn,
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
@@ -82,7 +82,7 @@ async def ingest_tribe_event(
 
 
 @router.get("/tribe_event/recent", response_model=TribeRecentResponse)
-async def list_tribe_events(
+def list_tribe_events(
     limit: int = Query(20, ge=1, le=200),
     event_type: str | None = Query(default=None, max_length=80),
     source_agent: str | None = Query(default=None, max_length=120),
@@ -119,7 +119,7 @@ class TribeStateAllResponse(BaseModel):
 
 
 @router.get("/tribe_state/all", response_model=TribeStateAllResponse)
-async def list_tribe_state_all(
+def list_tribe_state_all(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     """T-39：返回 TribeStateRegistry 中所有命名空间的完整快照。
@@ -152,7 +152,7 @@ class TribeStateFamilyResponse(BaseModel):
 
 
 @router.get("/tribe_state/family/{family}", response_model=TribeStateFamilyResponse)
-async def list_tribe_state_by_family(
+def list_tribe_state_by_family(
     family: str,
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
@@ -198,7 +198,7 @@ class TribeSubscribersResponse(BaseModel):
 
 
 @router.get("/tribe_event/subscribers", response_model=TribeSubscribersResponse)
-async def list_tribe_event_subscribers(
+def list_tribe_event_subscribers(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     """T-67：返回 TribeEventBus 各事件类型的当前订阅数量。
@@ -231,7 +231,7 @@ class ImmuneResetResponse(BaseModel):
 
 
 @router.post("/immune/reset", response_model=ImmuneResetResponse)
-async def post_immune_reset(
+def post_immune_reset(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     """T-73：重置 ImmuneAgent 计数器，供运维手动清零使用。
@@ -261,7 +261,7 @@ class TribeStateNamespacesResponse(BaseModel):
 
 
 @router.get("/tribe_state/namespaces", response_model=TribeStateNamespacesResponse)
-async def list_tribe_state_namespaces(
+def list_tribe_state_namespaces(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     """T-83：返回 TribeStateRegistry 中所有已注册命名空间的名称列表。
@@ -294,7 +294,7 @@ class TribeStateSummaryResponse(BaseModel):
 
 
 @router.get("/tribe_state/summary", response_model=TribeStateSummaryResponse)
-async def get_tribe_state_summary(
+def get_tribe_state_summary(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     """T-101：返回 TribeStateRegistry 所有命名空间的轻量摘要。
@@ -327,7 +327,7 @@ class TribeStateDeleteResponse(BaseModel):
 
 
 @router.delete("/tribe_state/{namespace}", response_model=TribeStateDeleteResponse)
-async def delete_tribe_state_namespace(
+def delete_tribe_state_namespace(
     namespace: str,
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
@@ -377,7 +377,7 @@ class EdgeCommandPushResponse(BaseModel):
 
 
 @router.get("/edge_command/status", response_model=EdgeCommandPusherStatusResponse)
-async def get_edge_command_pusher_status(
+def get_edge_command_pusher_status(
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):
     """T-131：返回 EdgeCommandPusher 当前状态（是否启用、目标地址、超时配置）。
@@ -405,7 +405,7 @@ async def get_edge_command_pusher_status(
 
 
 @router.post("/edge_command/push", response_model=EdgeCommandPushResponse, status_code=202)
-async def post_edge_command_push(
+def post_edge_command_push(
     body: EdgeCommandPushRequest,
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
 ):

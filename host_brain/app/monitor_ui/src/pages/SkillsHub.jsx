@@ -4,7 +4,6 @@ import {
   Shield, Search, FolderOpen, Globe, Zap, Tag,
 } from 'lucide-react'
 import { fetchSkillsHubStats } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -118,8 +117,6 @@ export default function SkillsHub() {
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
         </button>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Package}

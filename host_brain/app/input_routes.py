@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -36,6 +37,8 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
     "当前聊天",
     "当前会话",
 }
+_ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
+_ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
@@ -93,6 +96,103 @@ def _parse_bool_env(name: str, *, default: bool) -> bool:
     if raw in {"0", "false", "no", "off"}:
         return False
     return bool(default)
+
+
+def _parse_float_env(name: str, *, default: float) -> float:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _parse_int_env(name: str, *, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _looks_like_asr_placeholder_text(text: str) -> bool:
+    normalized = str(text or "").strip().upper()
+    if not normalized:
+        return True
+    return _ASR_PLACEHOLDER_PATTERN.fullmatch(normalized) is not None
+
+
+def _contains_speech_chars(text: str) -> bool:
+    return _ASR_SPEECH_CHAR_PATTERN.search(str(text or "")) is not None
+
+
+def _evaluate_asr_noise_gate(
+    *,
+    text: str,
+    payload: dict[str, Any] | None,
+) -> tuple[bool, str | None]:
+    text_value = str(text or "").strip()
+    if not text_value:
+        return False, "ASR_TEXT_EMPTY"
+    if _looks_like_asr_placeholder_text(text_value):
+        return False, "ASR_PLACEHOLDER_TEXT"
+
+    min_text_len = max(1, _parse_int_env("HOST_INPUT_ASR_MIN_TEXT_LEN", default=2))
+    if len(text_value) < min_text_len:
+        return False, "ASR_TEXT_TOO_SHORT"
+
+    require_speech_chars = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_SPEECH_CHARS", default=True)
+    if require_speech_chars and not _contains_speech_chars(text_value):
+        return False, "ASR_NON_SPEECH_TEXT"
+
+    payload_dict = dict(payload or {})
+    reason_code = str(payload_dict.get("reason_code") or "").strip().upper()
+    if reason_code in {"ASR_VAD_NO_SPEECH", "ASR_LOW_CONFIDENCE"}:
+        return False, reason_code
+
+    low_confidence = _coerce_bool(payload_dict.get("low_confidence"), default=False)
+    if low_confidence:
+        return False, "ASR_LOW_CONFIDENCE"
+
+    min_confidence = max(
+        0.0,
+        min(1.0, _parse_float_env("HOST_INPUT_ASR_MIN_CONFIDENCE", default=0.75)),
+    )
+    require_confidence = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_CONFIDENCE", default=False)
+    confidence = _coerce_float(payload_dict.get("confidence"))
+    if confidence is None and require_confidence:
+        return False, "ASR_CONFIDENCE_MISSING"
+    if confidence is not None and confidence < min_confidence:
+        return False, "ASR_LOW_CONFIDENCE"
+
+    return True, None
 
 
 def _is_invalid_gateway_conversation_id(value: str | None) -> bool:
@@ -183,6 +283,23 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         )
 
     payload = body.model_dump(exclude_none=True)
+    if source == "ASR":
+        allow_asr, reject_reason = _evaluate_asr_noise_gate(text=text, payload=payload)
+        if not allow_asr:
+            _logger.info(
+                "input_routes: ASR ignored by noise gate request_id=%s reason=%s",
+                request_id,
+                reject_reason,
+            )
+            return InputResponse(
+                success=True,
+                request_id=request_id,
+                source=source,
+                status="IGNORED",
+                detail=f"ASR ignored by noise gate: {reject_reason}",
+                ts_ms=ts_ms,
+            )
+
     immune_result: dict[str, Any] = {}
     try:
         immune_result = _evaluate_immune_gate_for_input(
@@ -656,6 +773,31 @@ async def _dispatch_to_graph(
     ts_ms: int,
 ) -> None:
     ledger = _get_ledger_safe()
+    source_upper = str(source or "").upper().strip()
+    if source_upper == "ASR":
+        allow_asr, reject_reason = _evaluate_asr_noise_gate(text=text, payload=payload)
+        if not allow_asr:
+            ignored_ts = int(time.time() * 1000)
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=payload,
+                phase="IGNORED",
+                status="IGNORED",
+                reason_code=reject_reason,
+                detail=f"ASR ignored by noise gate: {reject_reason}",
+                ts_ms=ignored_ts,
+            )
+            _logger.info(
+                "input_routes: dispatch ignored request_id=%s source=%s reason=%s",
+                request_id,
+                source_upper,
+                reject_reason,
+            )
+            return
+
     run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
     dispatch_mode = "fire_and_forget.threaded" if run_in_thread else "fire_and_forget.inline"
 

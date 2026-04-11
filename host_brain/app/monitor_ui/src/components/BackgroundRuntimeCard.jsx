@@ -4,7 +4,7 @@ import KeyValueRow from './KeyValueRow.jsx'
 import NoticeBanner from './NoticeBanner.jsx'
 
 function formatDuration(seconds) {
-  if (seconds == null || Number.isNaN(Number(seconds))) return '—'
+  if (seconds == null || Number.isNaN(Number(seconds))) return '--'
   const value = Math.max(0, Math.floor(Number(seconds)))
   if (value < 60) return `${value}s`
   if (value < 3600) return `${Math.floor(value / 60)}m ${value % 60}s`
@@ -18,7 +18,7 @@ function formatTickHealth(value) {
   if (key === 'fresh') return '新鲜'
   if (key === 'delayed') return '延迟'
   if (key === 'stalled') return '停滞'
-  if (key === 'inactive') return '空闲'
+  if (key === 'inactive') return '闲置'
   return '未知'
 }
 
@@ -36,12 +36,12 @@ function formatTaskStatus(task) {
 
 function formatReasonCode(task) {
   const reason = String(task?.last_reason_code || '').trim()
-  return reason || '—'
+  return reason || '--'
 }
 
 function formatGateState(task) {
   const key = String(task?.last_gate_state || '').toLowerCase()
-  if (!key) return '—'
+  if (!key) return '--'
   if (key === 'open') return '开放'
   if (key === 'cautious') return '谨慎'
   if (key === 'protective') return '保护'
@@ -66,34 +66,43 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
   const proactiveTask = background.proactive_task || null
 
   return (
-    <div className="card p-5">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+    <div className="card relative overflow-hidden p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.06),_transparent_42%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_36%)]" />
+
+      <div className="relative flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-            <Activity size={15} className="text-gray-500" />
+            <Activity size={15} className="text-primary" />
             <span>内在推进节律</span>
           </div>
           <div className="mt-2 text-sm text-gray-600">
             {isAdvancing ? '内在世界正在持续推进。' : '推进未达预期，请检查节律与人格对齐。'}
           </div>
         </div>
-        <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${isAdvancing ? 'border-green-200 bg-green-50 text-green-700' : 'border-orange-200 bg-orange-50 text-orange-700'}`}>
+        <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium shadow-sm ${isAdvancing ? 'border-green-200 bg-green-50 text-green-700' : 'border-orange-200 bg-orange-50 text-orange-700'}`}>
           {isAdvancing ? <ShieldCheck size={12} /> : <ShieldX size={12} />}
           {isAdvancing ? '正在推进' : '推进暂停'}
+        </div>
+      </div>
+
+      <div className="lifeline-rail relative mt-4 h-5 px-2">
+        <div className="lifeline-wave absolute inset-0 opacity-70" />
+        <div className="relative flex h-full items-center justify-around">
+          {[0, 1, 2, 3].map((index) => (
+            <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
+          ))}
         </div>
       </div>
 
       {!isAdvancing ? (
         <NoticeBanner className="mt-4" variant="warning" title="推进节律告警">
           节律健康：{tickHealth} · 调度器：{schedulerStatus}
-          {blockedTasks.length > 0 ? (
-            <span className="ml-1">· 闸门阻塞：{blockedTasks.join(', ')}</span>
-          ) : null}
+          {blockedTasks.length > 0 ? <span className="ml-1">· 闸门阻塞：{blockedTasks.join(', ')}</span> : null}
         </NoticeBanner>
       ) : null}
 
-      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+      <div className="relative mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-white/75 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <Clock3 size={13} />
             <span>调度总览</span>
@@ -109,7 +118,7 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-2xl border border-white/75 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
           <div className="text-xs text-gray-500">核心节律</div>
           <div className="mt-3 space-y-2">
             <KeyValueRow label="inner_world_tick" value={formatTaskStatus(innerTick)} />
@@ -117,22 +126,18 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
             <KeyValueRow label="silence_tick" value={formatTaskStatus(silenceTick)} />
             <KeyValueRow label="沉默原因" value={formatReasonCode(silenceTick)} />
             <KeyValueRow label="body_sense_tick" value={formatTaskStatus(bodySenseTick)} />
-            <KeyValueRow label="身体感知原因" value={formatReasonCode(bodySenseTick)} />
+            <KeyValueRow label="体感原因" value={formatReasonCode(bodySenseTick)} />
           </div>
         </div>
 
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-2xl border border-white/75 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
           <div className="text-xs text-gray-500">最近运行间隔</div>
           <div className="mt-3 space-y-2">
             <KeyValueRow label="inner_world_tick" value={formatDuration(innerTick?.seconds_since_last_run)} />
             <KeyValueRow label="silence_tick" value={formatDuration(silenceTick?.seconds_since_last_run)} />
             <KeyValueRow label="body_sense_tick" value={formatDuration(bodySenseTick?.seconds_since_last_run)} />
           </div>
-          {missingTicks.length > 0 ? (
-            <div className="mt-3 text-xs text-orange-600">
-              缺失：{missingTicks.join(', ')}
-            </div>
-          ) : null}
+          {missingTicks.length > 0 ? <div className="mt-3 text-xs text-orange-600">缺失：{missingTicks.join(', ')}</div> : null}
         </div>
       </div>
     </div>

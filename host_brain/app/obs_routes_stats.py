@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -51,7 +52,7 @@ class GovernorStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/governor/stats", response_model=GovernorStatsResponse)
-async def get_governor_stats(
+def get_governor_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
@@ -145,7 +146,7 @@ class ErrorsResponse(BaseModel):
     timestamp: int
 
 @router.get("/errors", response_model=ErrorsResponse)
-async def get_errors(
+def get_errors(
     window_minutes: int = Query(60, ge=1, le=10080),
     interval_minutes: int = Query(5, ge=1, le=60),
     limit: int = Query(20, ge=1, le=100, description="最近错误条数"),
@@ -363,7 +364,7 @@ def _compute_subsystem_health(rows: List[Dict], status_field: str = "status", la
     }
 
 @router.get("/subsystems/stats", response_model=SubsystemsStatsResponse)
-async def get_subsystems_stats(
+def get_subsystems_stats(
     window_minutes: int = Query(60, ge=1, le=10080),
 ):
     """P2/P3: 子系统健康统计 — Memory/Retrieval/Skill/Agent Loop/Airlock/Bond/Vision/Sandbox/Channel。"""
@@ -499,7 +500,7 @@ class AgentLoopStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/agent_loop/stats", response_model=AgentLoopStatsResponse)
-async def get_agent_loop_stats(
+def get_agent_loop_stats(
     window_minutes: int = Query(60, ge=1, le=10080),
     limit: int = Query(10, ge=1, le=50),
 ):
@@ -591,7 +592,7 @@ class MemoryStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/memory/stats", response_model=MemoryStatsResponse)
-async def get_memory_stats(
+def get_memory_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #26: Memory 子系统详细统计。
@@ -809,7 +810,7 @@ class ResidentMemoryContextResponse(BaseModel):
 
 
 @router.get("/memory/resident-context", response_model=ResidentMemoryContextResponse)
-async def get_memory_resident_context():
+def get_memory_resident_context():
     """Ref #126: 常驻设定文件、风格绑定与最新人格证据快照。"""
     now = _now_ms()
     ledger = _get_ledger()
@@ -1021,7 +1022,7 @@ class VtsStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/vts/stats", response_model=VtsStatsResponse)
-async def get_vts_stats(
+def get_vts_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #30: VTS 通道统计 — 表情应用率/降级率/拒绝率、Top 情感标签、Talk Gate 事件统计。"""
@@ -1138,7 +1139,7 @@ class DistillationStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/distillation/stats", response_model=DistillationStatsResponse)
-async def get_distillation_stats(
+def get_distillation_stats(
     window_minutes: int = Query(1440, ge=1, le=43200, description="统计窗口（分钟，默认 24h）"),
     limit: int = Query(10, ge=1, le=50, description="最近循环条数"),
 ):
@@ -1233,7 +1234,7 @@ class WeChatStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/wechat/stats", response_model=WeChatStatsResponse)
-async def get_wechat_stats(
+def get_wechat_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     limit: int = Query(20, ge=1, le=100, description="最近事件条数"),
 ):
@@ -1360,7 +1361,7 @@ async def get_wechat_stats(
 
 
 @router.post("/wechat/reset", response_model=Dict[str, Any])
-async def reset_wechat_channel(
+def reset_wechat_channel(
     reason: Optional[str] = Query(None, description="重置原因"),
 ):
     """Ref #37: 手动重置 WeChat 通道状态（清除频率限制计数器）。"""
@@ -1412,7 +1413,7 @@ class RetentionStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/retention/stats", response_model=RetentionStatsResponse)
-async def get_retention_stats(
+def get_retention_stats(
     limit: int = Query(5, ge=1, le=20, description="最近执行记录条数"),
 ):
     """Ref #34: AuditRetention 保留策略执行统计。"""
@@ -1498,7 +1499,7 @@ class QaStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/qa/stats", response_model=QaStatsResponse)
-async def get_qa_stats(
+def get_qa_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
     limit: int = Query(20, ge=1, le=100, description="最近违规条数"),
@@ -1624,7 +1625,7 @@ class LlmCallStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/llm/call-stats", response_model=LlmCallStatsResponse)
-async def get_llm_call_stats(
+def get_llm_call_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
@@ -1747,7 +1748,7 @@ class CheckpointDetailResponse(BaseModel):
     timestamp: int
 
 @router.get("/checkpoints", response_model=CheckpointsResponse)
-async def get_checkpoints(
+def get_checkpoints(
     limit: int = Query(20, ge=1, le=100, description="返回条数"),
     include_expired: bool = Query(False, description="是否包含已超时的 checkpoint"),
 ):
@@ -1800,7 +1801,7 @@ async def get_checkpoints(
 
 
 @router.get("/checkpoints/{checkpoint_id}", response_model=CheckpointDetailResponse)
-async def get_checkpoint_detail(checkpoint_id: str):
+def get_checkpoint_detail(checkpoint_id: str):
     """Ref #42: 单个 checkpoint 详情（含完整 payload）。"""
     ledger = _get_ledger()
     now = _now_ms()
@@ -1861,7 +1862,7 @@ class RateLimitBackendStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/rate-limit/backend-stats", response_model=RateLimitBackendStatsResponse)
-async def get_rate_limit_backend_stats(
+def get_rate_limit_backend_stats(
     top_k: int = Query(20, ge=1, le=100, description="返回 Top-K 活跃 key"),
 ):
     """Ref #43: RateLimitStore 后端状态 — 当前后端类型/是否降级/各 key 当前计数/TTL。"""
@@ -1947,7 +1948,7 @@ class VaultStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/vault/stats", response_model=VaultStatsResponse)
-async def get_vault_stats(
+def get_vault_stats(
     limit: int = Query(20, ge=1, le=100, description="最近 manifest 条数"),
 ):
     """Ref #44: ArtifactVault Manifest 统计 — ACTIVE/UNDONE/GC 数量、可逆比例、最近 manifest 列表。数据来自 vault_manifest_index。"""
@@ -2025,7 +2026,7 @@ class LlmRouteStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/llm/route-stats", response_model=LlmRouteStatsResponse)
-async def get_llm_route_stats(
+def get_llm_route_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #47: RoutingMatrix 路由决策统计 — 按 model_id 分组的选择次数/降级次数/降级率/task_type 分布。"""
@@ -2112,7 +2113,7 @@ class InputDispatchStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/input/dispatch-stats", response_model=InputDispatchStatsResponse)
-async def get_input_dispatch_stats(
+def get_input_dispatch_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="时序聚合间隔（分钟）"),
 ):
@@ -2240,7 +2241,7 @@ class RecallPackStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/recall-pack/stats", response_model=RecallPackStatsResponse)
-async def get_recall_pack_stats(
+def get_recall_pack_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #49: RecallPack token 预算统计 — 各槽位平均 token 消耗/截断率/冲突抑制率。"""
@@ -2357,7 +2358,7 @@ class UIAssertionStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/ui-assertion/stats", response_model=UIAssertionStatsResponse)
-async def get_ui_assertion_stats(
+def get_ui_assertion_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #50: UIAssertionGuard 统计 — SENSITIVE_UI_BLOCKED/UI_PRECONDITION_FAILED/UI_POSTCONDITION_FAILED 分布。"""
@@ -2467,7 +2468,7 @@ class FailureStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/failure/stats", response_model=FailureStatsResponse)
-async def get_failure_stats(
+def get_failure_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #53: FailureMatrix 失败事件统计 — 7 种失败事件分布、中止率、降级模式分布。"""
@@ -2577,7 +2578,7 @@ class PermissionStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/permission/stats", response_model=PermissionStatsResponse)
-async def get_permission_stats(
+def get_permission_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #54: PermissionGuard 权限拒绝统计 — 工具调用允许/拒绝分布、SCHEDULER 拒绝次数、Top 拒绝工具。"""
@@ -2700,7 +2701,7 @@ class SchedulerHistoryResponse(BaseModel):
     timestamp: int
 
 @router.get("/scheduler/history", response_model=SchedulerHistoryResponse)
-async def get_scheduler_history(
+def get_scheduler_history(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #55: TaskScheduler 执行历史趋势 — 任务状态分布、run_count/error_count 趋势。"""
@@ -2920,7 +2921,7 @@ class ActionPlanStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/action-plan/stats", response_model=ActionPlanStatsResponse)
-async def get_action_plan_stats(
+def get_action_plan_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #56: ActionPlan 执行成功率/指令类型分布 — 成功率、平均置信度、指令类型分布、降级原因。"""
@@ -3044,7 +3045,7 @@ class MemoryGuardStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/memory-guard/stats", response_model=MemoryGuardStatsResponse)
-async def get_memory_guard_stats(
+def get_memory_guard_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #59: MemoryGuard 宪法校验统计 — 过滤率/拒绝原因分布/NARRATIVE_ONLY 比例/蒸馏资格。"""
@@ -3157,7 +3158,7 @@ class StateArbiterStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/state-arbiter/stats", response_model=StateArbiterStatsResponse)
-async def get_state_arbiter_stats(
+def get_state_arbiter_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #60: StateArbiter 事实仲裁统计 — 冲突率/降级率/各源命中分布/SESSION_OVERRIDE 次数。"""
@@ -3253,7 +3254,7 @@ class ContextCompressorStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/context-compressor/stats", response_model=ContextCompressorStatsResponse)
-async def get_context_compressor_stats(
+def get_context_compressor_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #61: ContextCompressor 压缩效率统计 — 压缩率/token 节省/策略分布/摘要生成次数。"""
@@ -3358,7 +3359,7 @@ class PromptBuilderStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
-async def get_prompt_builder_stats(
+def get_prompt_builder_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #65: PromptBuilder 构建统计 — 注入检测率/slot 填充分布/高风险消息比例。"""
@@ -3461,7 +3462,7 @@ class EpisodicStoreStatsResponse(BaseModel):
     timestamp: int
 
 @router.get("/episodic-store/stats", response_model=EpisodicStoreStatsResponse)
-async def get_episodic_store_stats(
+def get_episodic_store_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #66: EpisodicStore 写入统计 — 写入率/MemoryGuard 拦截率/蒸馏资格率/dream 拦截次数。"""
@@ -3573,7 +3574,7 @@ class ChainStatsResponse(BaseModel):
 
 
 @router.get("/chain/stats", response_model=ChainStatsResponse)
-async def get_chain_stats(
+def get_chain_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
     """Ref #82: 请求处理阶段统计（Phase XIV v4 顶级 Agent 架构）。
@@ -3745,7 +3746,7 @@ class AgentLoopHistoryResponse(BaseModel):
 
 
 @router.get("/agent-loop/history", response_model=AgentLoopHistoryResponse)
-async def get_agent_loop_history(
+def get_agent_loop_history(
     window_minutes: int = Query(1440, ge=1, le=10080, description="统计窗口（分钟）"),
     limit: int = Query(10, ge=1, le=50, description="最大返回条数"),
 ):
@@ -3817,7 +3818,7 @@ class ErrorHeatmapResponse(BaseModel):
 
 
 @router.get("/error-heatmap", response_model=ErrorHeatmapResponse)
-async def get_error_heatmap(
+def get_error_heatmap(
     window_hours: int = Query(24, ge=1, le=168, description="统计窗口（小时），最大 7 天"),
 ):
     """Ref #88: 错误热力图端点 — 按小时 × 节点维度统计错误分布。
@@ -3906,7 +3907,7 @@ class SemanticRecallStatsResponse:
 
 
 @router.get("/semantic-recall/stats")
-async def get_semantic_recall_stats():
+def get_semantic_recall_stats():
     """Ref #103: 语义召回器统计端点 — 返回 SemanticRecaller 的配置和状态信息。"""
     now = _now_ms()
     try:
@@ -4165,7 +4166,7 @@ def _dedupe_ordered_values(values: List[str], *, limit: int) -> List[str]:
 
 
 @router.get("/immune-gate/stats", response_model=ImmuneGateStatsResponse)
-async def get_immune_gate_stats(
+def get_immune_gate_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
     limit: int = Query(20, ge=1, le=200, description="最近事件返回条数"),
 ):
@@ -4252,7 +4253,7 @@ async def get_immune_gate_stats(
 
 
 @router.get("/immune-gate/replay/{request_id}", response_model=ImmuneGateReplayResponse)
-async def get_immune_gate_replay(
+def get_immune_gate_replay(
     request_id: str,
     limit: int = Query(120, ge=1, le=500, description="回放最多返回多少条 immune 相关事件"),
 ):
@@ -4469,8 +4470,7 @@ def _build_retrieval_runtime_observed_item(row: dict[str, Any]) -> RetrievalRunt
     )
 
 
-@router.get("/retrieval/runtime", response_model=RetrievalRuntimeResponse)
-async def get_retrieval_runtime(
+def _get_retrieval_runtime_sync(
     request_id: Optional[str] = Query(None, description="可选：指定 request_id，优先返回该请求的运行时模型信息"),
     limit: int = Query(10, ge=1, le=100, description="最近返回多少条 PIPELINE 记录"),
     include_legacy: bool = Query(False, description="是否包含缺少运行时模型字段的历史旧记录"),
@@ -4577,4 +4577,18 @@ async def get_retrieval_runtime(
         recent_embedding_fallbacks=sum(1 for item in recent_items if item.fallback_embedding_used),
         recent_reranker_fallbacks=sum(1 for item in recent_items if item.fallback_reranker_used),
         timestamp=now,
+    )
+
+
+@router.get("/retrieval/runtime", response_model=RetrievalRuntimeResponse)
+async def get_retrieval_runtime(
+    request_id: Optional[str] = Query(None, description="Optional request_id to return runtime model details for a specific request"),
+    limit: int = Query(10, ge=1, le=100, description="Number of recent PIPELINE rows to return"),
+    include_legacy: bool = Query(False, description="Include legacy rows missing runtime model fields"),
+):
+    return await asyncio.to_thread(
+        _get_retrieval_runtime_sync,
+        request_id,
+        limit,
+        include_legacy,
     )

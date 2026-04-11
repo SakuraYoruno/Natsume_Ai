@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -279,37 +280,37 @@ class CircadianAgent:
     async def _on_mode_transition(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        prev = self.refresh_state(source="mode_transition", ts_ms=ts_ms)
+        prev = await asyncio.to_thread(self.refresh_state, source="mode_transition", ts_ms=ts_ms)
         prev["last_mode_transition"] = {
             "from_mode": str(payload.get("from_mode") or "").strip().lower() or None,
             "to_mode": str(payload.get("to_mode") or "").strip().lower() or None,
             "reason": str(payload.get("reason") or "").strip() or None,
             "ts_ms": ts_ms,
         }
-        self.state_registry.set_state("circadian_agent", prev, writer="circadian_agent")
+        await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", prev, writer="circadian_agent")
 
     async def _on_channel_message_received(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        prev = self.state_registry.get_state("circadian_agent") or {}
+        prev = await asyncio.to_thread(self.state_registry.get_state, "circadian_agent") or {}
         state = dict(prev.get("state") or {})
         state["last_external_stimulus_ts_ms"] = ts_ms
-        self.state_registry.set_state("circadian_agent", state, writer="circadian_agent")
+        await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", state, writer="circadian_agent")
 
     async def _on_voice_pipeline_started(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        prev = self.state_registry.get_state("circadian_agent") or {}
+        prev = await asyncio.to_thread(self.state_registry.get_state, "circadian_agent") or {}
         state = dict(prev.get("state") or {})
         state["voice_pipeline_active"] = True
         state["voice_pipeline_started_ts_ms"] = ts_ms
-        self.state_registry.set_state("circadian_agent", state, writer="circadian_agent")
+        await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", state, writer="circadian_agent")
 
     async def _on_voice_pipeline_ended(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
-        prev = self.state_registry.get_state("circadian_agent") or {}
+        prev = await asyncio.to_thread(self.state_registry.get_state, "circadian_agent") or {}
         state = dict(prev.get("state") or {})
         state["voice_pipeline_active"] = False
         state["voice_pipeline_ended_ts_ms"] = ts_ms
-        self.state_registry.set_state("circadian_agent", state, writer="circadian_agent")
+        await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", state, writer="circadian_agent")
 
 
 _CIRCADIAN_AGENT: CircadianAgent | None = None

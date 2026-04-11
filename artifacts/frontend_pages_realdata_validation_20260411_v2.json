@@ -1,0 +1,135 @@
+{
+  "report": [
+    {
+      "page": "digital_life",
+      "chunk_match": "DigitalLifeOverview-",
+      "chunk_rows": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/monitor/assets/DigitalLifeOverview-CRy_YQAk.js",
+          "ms": 15950.649
+        },
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/monitor/assets/DigitalLifeOverview-CRy_YQAk.js",
+          "ms": 1.035
+        }
+      ],
+      "chunk_loaded_ok": true,
+      "obs_calls": 12,
+      "obs_ok": 4,
+      "obs_bad": [
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=360"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/vts/stats?window_minutes=360"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/memory/stats?window_minutes=360"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/services/health?window_minutes=360"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/subsystems/stats?window_minutes=360"
+        }
+      ]
+    },
+    {
+      "page": "sessions",
+      "chunk_match": "Sessions-",
+      "chunk_rows": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/monitor/assets/Sessions-CxSKKm_C.js",
+          "ms": 9445.649
+        }
+      ],
+      "chunk_loaded_ok": true,
+      "obs_calls": 14,
+      "obs_ok": 12,
+      "obs_bad": [
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60"
+        }
+      ]
+    },
+    {
+      "page": "automation",
+      "chunk_match": "Automation-",
+      "chunk_rows": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/monitor/assets/Automation-DvVt-KuK.js",
+          "ms": 7402.237
+        }
+      ],
+      "chunk_loaded_ok": true,
+      "obs_calls": 17,
+      "obs_ok": 15,
+      "obs_bad": [
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot"
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60"
+        }
+      ]
+    },
+    {
+      "page": "metrics",
+      "chunk_match": "Metrics-",
+      "chunk_rows": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/monitor/assets/Metrics-B5vzEcak.js",
+          "ms": 9.368
+        }
+      ],
+      "chunk_loaded_ok": true,
+      "obs_calls": 2,
+      "obs_ok": 2,
+      "obs_bad": []
+    },
+    {
+      "page": "insights",
+      "chunk_match": "Insights-",
+      "chunk_rows": [
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/monitor/assets/Insights-CehnVKbi.js",
+          "ms": -1
+        }
+      ],
+      "chunk_loaded_ok": false,
+      "obs_calls": 2,
+      "obs_ok": 2,
+      "obs_bad": []
+    }
+  ]
+}

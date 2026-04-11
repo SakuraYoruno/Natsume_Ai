@@ -10,7 +10,6 @@ import {
   Zap,
 } from 'lucide-react'
 import { fetchMemoryStats, fetchVtsStats } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -195,8 +194,6 @@ export default function EmotionDashboard() {
           </button>
         </div>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Heart}

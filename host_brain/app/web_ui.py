@@ -75,7 +75,7 @@ def get_ledger() -> SQLiteLedger:
     return get_app_ledger()
 
 @router.get("/timeline", response_model=TimelineAggregationResponse)
-async def get_timeline_aggregation(
+def get_timeline_aggregation(
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),
     interval: str = Query("1h", description="聚合间隔: 1m,5m,15m,1h,1d"),
@@ -115,7 +115,7 @@ async def get_timeline_aggregation(
         raise HTTPException(status_code=500, detail="Failed to get timeline data")
 
 @router.get("/status-distribution", response_model=StatusDistributionResponse)
-async def get_status_distribution(
+def get_status_distribution(
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),
     request_type: Optional[str] = Query(None, description="请求类型过滤"),
@@ -148,7 +148,7 @@ async def get_status_distribution(
         raise HTTPException(status_code=500, detail="Failed to get status distribution data")
 
 @router.get("/request/{request_id}", response_model=RequestDetailResponse)
-async def get_request_detail(request_id: str) -> dict:
+def get_request_detail(request_id: str) -> dict:
     """获取请求详情"""
     try:
         ledger = get_ledger()
@@ -170,7 +170,7 @@ async def get_request_detail(request_id: str) -> dict:
         raise HTTPException(status_code=500, detail="Failed to get request detail")
 
 @router.get("/link-topology", response_model=LinkTopologyResponse)
-async def get_link_topology(
+def get_link_topology(
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),
     min_connections: int = Query(1, description="最小连接数阈值"),
@@ -199,7 +199,7 @@ async def get_link_topology(
         raise HTTPException(status_code=500, detail="Failed to get link topology data")
 
 @router.get("/search-requests")
-async def search_requests(
+def search_requests(
     query: str = Query(..., description="搜索关键词"),
     start_time: datetime = Query(..., description="开始时间"),
     end_time: datetime = Query(..., description="结束时间"),

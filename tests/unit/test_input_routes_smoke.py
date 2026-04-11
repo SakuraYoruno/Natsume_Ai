@@ -83,3 +83,31 @@ def test_receive_input_smoke_asr_non_final_is_ignored():
     assert response.status == "IGNORED"
     assert response.source == "ASR"
     assert dispatch_mock.await_count == 0
+
+
+def test_receive_input_smoke_asr_low_confidence_is_ignored():
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch.dict("os.environ", {"HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95"}), patch(
+        "host_brain.app.input_routes._dispatch_to_graph",
+        dispatch_mock,
+    ):
+        response = asyncio.run(
+            receive_input(
+                body=InputPayload(
+                    source="ASR",
+                    session_id="asr_session_low_conf",
+                    text="hello from mic",
+                    confidence=0.80,
+                    is_final=True,
+                    seq=9,
+                ),
+                request=MagicMock(),
+            )
+        )
+
+    assert response.success is True
+    assert response.status == "IGNORED"
+    assert response.source == "ASR"
+    assert "noise gate" in response.detail
+    assert dispatch_mock.await_count == 0

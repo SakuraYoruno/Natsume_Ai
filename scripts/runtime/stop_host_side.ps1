@@ -152,6 +152,34 @@ if (-not $stopped) {
   }
 }
 
+$monitorProxyResult = $null
+$stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
+if (Test-Path -Path $stopMonitorScript) {
+  try {
+    $monitorRaw = & $stopMonitorScript -EnvFile $EnvFile
+    $monitorJson = ($monitorRaw | Out-String).Trim()
+    if ($monitorJson) {
+      try {
+        $monitorProxyResult = $monitorJson | ConvertFrom-Json
+      } catch {
+        $monitorProxyResult = [ordered]@{
+          side = "monitor_proxy"
+          status = "degraded"
+          reason = "invalid_json_output"
+          raw = $monitorJson
+        }
+      }
+    }
+  } catch {
+    $monitorProxyResult = [ordered]@{
+      side = "monitor_proxy"
+      status = "degraded"
+      reason = "stop_failed"
+      detail = $_.Exception.Message
+    }
+  }
+}
+
 $result = [ordered]@{
   side = "host"
   status = if ($stopped) { "stopped" } else { "not_running" }
@@ -159,5 +187,6 @@ $result = [ordered]@{
   pid_file = $PidFile
   port = $Port
   detail = $detail
+  monitor_proxy = $monitorProxyResult
 }
 $result | ConvertTo-Json -Depth 6

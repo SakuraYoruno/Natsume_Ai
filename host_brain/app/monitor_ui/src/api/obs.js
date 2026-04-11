@@ -5,18 +5,32 @@ import { deepRepairMojibake } from '../utils/text.js'
  */
 
 const BASE = ''
+const REQUEST_TIMEOUT_MS = 15_000
 
 async function request(url, options = {}) {
-  const res = await fetch(BASE + url, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`HTTP ${res.status}: ${text}`)
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = options
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || REQUEST_TIMEOUT_MS))
+  try {
+    const res = await fetch(BASE + url, {
+      headers: { 'Content-Type': 'application/json', ...rest.headers },
+      signal: controller.signal,
+      ...rest,
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(`HTTP ${res.status}: ${text}`)
+    }
+    const data = await res.json()
+    return deepRepairMojibake(data)
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`request timeout after ${Math.max(1000, Number(timeoutMs) || REQUEST_TIMEOUT_MS)}ms: ${url}`)
+    }
+    throw error
+  } finally {
+    globalThis.clearTimeout(timeout)
   }
-  const data = await res.json()
-  return deepRepairMojibake(data)
 }
 
 // ===== 工具函数 =====

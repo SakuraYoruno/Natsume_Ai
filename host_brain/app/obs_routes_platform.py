@@ -34,7 +34,7 @@ from .obs_routes_core import router, _get_ledger, _now_ms, _safe_json
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/failure-events")
-async def get_failure_events(
+def get_failure_events(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计时间窗口（分钟，最大 7 天）"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤（如 PROMPT_INJECTION / GOVERNOR_BLOCK）"),
     limit: int = Query(50, ge=1, le=200, description="返回条数上限"),
@@ -490,7 +490,7 @@ class SkillHubStatsResponse(BaseModel):
     timestamp: int = 0
 
 @router.get("/skills-hub/stats", response_model=SkillHubStatsResponse)
-async def get_skills_hub_stats():
+def get_skills_hub_stats():
     """
     Skills Hub 统计端点。
 

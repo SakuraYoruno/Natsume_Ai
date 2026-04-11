@@ -17,7 +17,6 @@ import {
   fetchRetrievalRuntime,
   fetchServicesHealth,
 } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
@@ -118,7 +117,6 @@ export default function SystemConfig() {
 
       {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
 
-      <DigitalLifeNav />
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
       <PageHero

@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 from urllib.parse import urlparse
 
 from host_brain.observability.service_registry import (
@@ -53,6 +53,16 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "edge.rpc.resource_gate":         "audio_playback",
 }
 
+_EDGE_RPC_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
+    "edge.rpc.gateway": "edge_rpc",
+    "edge.rpc.asr": "asr",
+    "edge.rpc.tts": "tts",
+    "edge.rpc.barge_in": "audio_playback",
+    "edge.rpc.resource_gate": "audio_playback",
+}
+_EDGE_VTS_SERVICE_KEYS = ("edge.rpc.vts",)
+_EDGE_VTS_COMPONENT_KEYS = ("vts", "live2d", "vts_live2d")
+
 # 模块级 httpx.AsyncClient 单例（复用 TCP 连接，避免每次探测都创建/销毁）
 _http_client: Optional[Any] = None
 _http_client_lock = threading.Lock()
@@ -84,6 +94,10 @@ def _parse_int_env(name: str, *, default: int, min_value: int) -> int:
         return max(min_value, int(raw))
     except (TypeError, ValueError):
         return max(min_value, int(default))
+
+
+def _get_host_health_probe_timeout_sec() -> float:
+    return _parse_float_env("HOST_HEALTH_PROBE_TIMEOUT_SEC", default=20.0, min_value=3.0)
 
 
 def _get_http_client():
@@ -390,6 +404,93 @@ async def _probe_llm_nodes() -> Dict[str, Dict[str, Any]]:
 # Edge / Host 探测
 # ---------------------------------------------------------------------------
 
+def _edge_available_to_status(available: bool) -> str:
+    return "UP" if bool(available) else "DEGRADED"
+
+
+def _resolve_edge_vts_sub_service(
+    *,
+    probe: Mapping[str, Any],
+    gateway_detail: str,
+) -> Optional[Dict[str, Any]]:
+    event_payload = probe.get("event")
+    event = event_payload if isinstance(event_payload, Mapping) else {}
+    services_payload = event.get("services")
+    services = services_payload if isinstance(services_payload, Mapping) else {}
+    components_payload = event.get("components")
+    components = components_payload if isinstance(components_payload, Mapping) else {}
+
+    service_probe: Mapping[str, Any] = {}
+    for key in _EDGE_VTS_SERVICE_KEYS:
+        row = services.get(key)
+        if isinstance(row, Mapping):
+            service_probe = row
+            break
+
+    component_probe: Mapping[str, Any] = {}
+    for key in _EDGE_VTS_COMPONENT_KEYS:
+        row = components.get(key)
+        if isinstance(row, Mapping):
+            component_probe = row
+            break
+
+    if not service_probe and not component_probe:
+        return None
+
+    service_detail = str(service_probe.get("detail") or "").strip()
+    component_detail = str(component_probe.get("detail") or "").strip()
+
+    if service_probe and not bool(service_probe.get("available", False)):
+        return {
+            "status": "DEGRADED",
+            "detail": service_detail or component_detail or gateway_detail or "edge vts unavailable",
+        }
+
+    if component_probe:
+        component_enabled = bool(component_probe.get("enabled", True))
+        component_available = bool(component_probe.get("available", False))
+        component_status = str(component_probe.get("status") or "").strip().lower()
+        component_healthy = component_status in {"", "ok", "up", "accepted"}
+        if (not component_enabled) or (not component_available) or (not component_healthy):
+            return {
+                "status": "DEGRADED",
+                "detail": component_detail or service_detail or gateway_detail or "edge vts component unhealthy",
+            }
+        detail_parts = [part for part in (component_detail, service_detail, gateway_detail) if part]
+        return {
+            "status": "UP",
+            "detail": "; ".join(detail_parts),
+        }
+
+    detail_parts = [part for part in (service_detail, gateway_detail) if part]
+    return {
+        "status": _edge_available_to_status(bool(service_probe.get("available", False))),
+        "detail": "; ".join(detail_parts),
+    }
+
+
+def _collect_edge_sub_services(probe: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    from host_brain.app.dependencies import build_edge_dependency_probe_statuses
+
+    dependency_rows = build_edge_dependency_probe_statuses(probe)
+    sub_services: Dict[str, Dict[str, Any]] = {}
+
+    for edge_sid, heartbeat_sid in _EDGE_RPC_SID_TO_HEARTBEAT_SID.items():
+        row = dependency_rows.get(edge_sid)
+        if not isinstance(row, Mapping):
+            continue
+        sub_services[heartbeat_sid] = {
+            "status": _edge_available_to_status(bool(row.get("available", False))),
+            "detail": row.get("detail"),
+        }
+
+    gateway_detail = str(probe.get("detail") or "").strip()
+    vts_status = _resolve_edge_vts_sub_service(probe=probe, gateway_detail=gateway_detail)
+    if vts_status:
+        sub_services["vts"] = vts_status
+
+    return sub_services
+
 async def _probe_edge() -> Dict[str, Any]:
     """探测 Edge RPC：GET /v1/edge/health。返回 { status, latency_ms } 或 DOWN。Edge 正常时返回 status=ACCEPTED，视为 UP。"""
     try:
@@ -397,13 +498,15 @@ async def _probe_edge() -> Dict[str, Any]:
         out = await probe_edge_rpc_health()
         st = (out.get("status") or "").strip().upper()
         ok = out.get("available") and st in ("OK", "UP", "ACCEPTED")
+        sub_services = _collect_edge_sub_services(out)
         return {
             "status": "UP" if ok else "DEGRADED",
             "latency_ms": out.get("latency_ms"),
+            "sub_services": sub_services,
         }
     except Exception as exc:
         logger.debug("Heartbeat Edge probe failed: %s", exc)
-        return {"status": "DOWN", "latency_ms": None}
+        return {"status": "DOWN", "latency_ms": None, "sub_services": {}}
 
 
 async def _probe_host() -> Dict[str, Any]:
@@ -422,10 +525,11 @@ async def _probe_host() -> Dict[str, Any]:
     """
     url = _get_host_health_url()
     client = _get_http_client()
+    timeout_sec = _get_host_health_probe_timeout_sec()
     for attempt in (0, 1):
         t0 = time.monotonic()
         try:
-            resp = await client.get(url)
+            resp = await client.get(url, timeout=timeout_sec)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             if resp.status_code == 200:
                 body = resp.json()
@@ -451,10 +555,19 @@ async def _probe_host() -> Dict[str, Any]:
         except Exception as exc:
             logger.debug("Heartbeat Host probe attempt %s failed: %s", attempt + 1, exc)
             if attempt == 0:
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(1.0)
                 continue
-            return {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
-    return {"overall_status": "DOWN", "latency_ms": None, "sub_services": {}}
+            err_text = str(exc).lower()
+            is_hard_down = any(
+                keyword in err_text
+                for keyword in ("connection refused", "name or service not known", "nodename nor servname")
+            )
+            return {
+                "overall_status": "DOWN" if is_hard_down else "DEGRADED",
+                "latency_ms": None,
+                "sub_services": {},
+            }
+    return {"overall_status": "DEGRADED", "latency_ms": None, "sub_services": {}}
 
 
 def _write_core_service_cache(
@@ -467,18 +580,30 @@ def _write_core_service_cache(
     host_overall = host_result.get("overall_status", "DOWN")
     host_latency = host_result.get("latency_ms")
     sub_services = host_result.get("sub_services") or {}
+    edge_sub_services = edge_result.get("sub_services") or {}
 
     with _cache_lock:
         for sid in EDGE_SERVICE_IDS:
-            sub = sub_services.get(sid)
-            status = sub["status"] if sub else edge_result["status"]
-            _cache[sid] = {
+            sub = sub_services.get(sid) or edge_sub_services.get(sid)
+            if sub:
+                status = str(sub.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
+                detail = sub.get("detail")
+            elif sid == "vts":
+                status = "UNKNOWN"
+                detail = "no dedicated VTS probe signal"
+            else:
+                status = str(edge_result.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
+                detail = None
+            row = {
                 "status": status,
                 "latency_ms": edge_result.get("latency_ms"),
                 "last_check_ts": now_ts,
                 "name": _EDGE_DISPLAY_NAMES.get(sid, sid),
                 "side": "edge",
             }
+            if detail:
+                row["detail"] = detail
+            _cache[sid] = row
 
         for sid in _HOST_SERVICE_IDS:
             sub = sub_services.get(sid)
@@ -517,7 +642,7 @@ async def prime_core_service_cache_once() -> None:
         edge_result = await _probe_edge()
     except Exception as exc:
         logger.debug("Prime core cache edge probe failed: %s", exc)
-        edge_result = {"status": "DOWN", "latency_ms": None}
+        edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
     try:
         host_result = await _probe_host()
     except Exception as exc:
@@ -540,7 +665,7 @@ async def run_once() -> None:
         edge_result = await _probe_edge()
     except Exception as exc:
         logger.debug("Heartbeat Edge probe failed (will cache DOWN): %s", exc)
-        edge_result = {"status": "DOWN", "latency_ms": None}
+        edge_result = {"status": "DOWN", "latency_ms": None, "sub_services": {}}
     try:
         host_result = await _probe_host()
     except Exception as exc:

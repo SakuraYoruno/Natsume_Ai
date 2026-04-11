@@ -17,6 +17,7 @@ from typing import Any, AsyncGenerator, Callable, Dict, Mapping, Optional
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -319,6 +320,9 @@ if _cors_origins_raw:
         allow_headers=["*"],
     )
 
+# 静态资源体积较大（React + ECharts），启用 gzip 减少刷新等待。
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+
 # ---------------------------------------------------------------------------
 # 自定义异常处理器
 @app.exception_handler(Exception)
@@ -332,6 +336,20 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 async def add_request_id_and_audit(request: Request, call_next: Callable) -> Response:
     """Attach request ids to incoming requests — 委托给 http_hooks._add_request_id_fn。"""
     return await _add_request_id_fn(request=request, call_next=call_next, metrics=_metrics, logger=_logger)
+
+
+@app.middleware("http")
+async def tune_monitor_static_cache(request: Request, call_next: Callable) -> Response:
+    response = await call_next(request)
+    if request.method.upper() != "GET":
+        return response
+
+    path = (request.url.path or "").strip()
+    if path.startswith("/monitor/assets/") or path.startswith("/static/monitor/assets/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    elif path in {"/monitor", "/monitor/", "/monitor/index.html", "/static/monitor/index.html"}:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -405,11 +423,14 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
 async def receive_edge_events(request_body: EdgeEventsRequest) -> EdgeEventsResponse:
     """接收 Edge 端批量上报的事件 — 委托给 system_handler.receive_edge_events_response。"""
     bridge_waiters: list[Any] = []
-    response = receive_edge_events_response(
+    loop = asyncio.get_running_loop()
+    response = await asyncio.to_thread(
+        receive_edge_events_response,
         request_body=request_body,
         get_ledger=_get_ledger_compat,
         logger=_logger,
         inline_waiters=bridge_waiters,
+        main_loop=loop,
     )
     if bridge_waiters:
         await asyncio.gather(*bridge_waiters)

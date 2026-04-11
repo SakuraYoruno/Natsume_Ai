@@ -22,6 +22,22 @@ from host_brain.app.http_hooks_runtime_helpers import (
 )
 from host_brain.core.ids import new_request_id
 
+_AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
+    "/monitor/",
+    "/docs",
+    "/openapi",
+    "/favicon",
+    "/health",
+    "/ready",
+    "/metrics",
+)
+_AUDIT_SLOW_REQUEST_MS = 1200
+
+
+def _should_emit_request_info(path: str) -> bool:
+    normalized = str(path or "").strip().lower()
+    return not any(normalized.startswith(prefix) for prefix in _AUDIT_SILENT_PATH_PREFIXES)
+
 
 def _startup_status_is_degraded(value: Any) -> bool:
     normalized = str(value or "").strip().upper()
@@ -452,6 +468,15 @@ def runtime_lifespan(
                 "HOST_STARTUP_EAGER_WARMUP",
                 default=False,
             )
+            _background_tasks_enabled = _parse_bool_env(
+                "HOST_BACKGROUND_TASKS_ENABLED",
+                default=True,
+            )
+            if not _background_tasks_enabled:
+                logger.warning(
+                    "Background periodic schedulers disabled by HOST_BACKGROUND_TASKS_ENABLED=false"
+                )
+                new_module_statuses["proactive_push_client"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
             new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
                 ledger=ledger,
                 logger=logger,
@@ -588,6 +613,8 @@ def runtime_lifespan(
 
             # [Ref #100] DistillationEngine 蒸馏定时任务注册到 HostTaskScheduler（P1，每 30 分钟）
             try:
+                if not _background_tasks_enabled:
+                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
                 from host_brain.app.dependencies import get_distillation_engine  # noqa: PLC0415
                 from host_brain.app.automation.task_scheduler import (  # noqa: PLC0415
                     ScheduledTask, TaskPriority, get_scheduler,
@@ -630,11 +657,16 @@ def runtime_lifespan(
                     _distill_task.task_id,
                 )
             except Exception as _distill_exc:
-                new_module_statuses["distillation_engine_scheduler"] = f"DEGRADED: {_distill_exc}"
+                if not _background_tasks_enabled:
+                    new_module_statuses["distillation_engine_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                else:
+                    new_module_statuses["distillation_engine_scheduler"] = f"DEGRADED: {_distill_exc}"
                 logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
 
             # [Ref #31] LongTermDistiller 蒸馏任务注册到调度器
             try:
+                if not _background_tasks_enabled:
+                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
                 from host_brain.memory.long_term_distiller import make_distillation_task_config  # noqa: PLC0415
                 from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
 
@@ -650,11 +682,16 @@ def runtime_lifespan(
                     _distill_config.trigger_mode,
                 )
             except Exception as _distill_exc:
-                new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
+                if not _background_tasks_enabled:
+                    new_module_statuses["long_term_distiller_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                else:
+                    new_module_statuses["long_term_distiller_scheduler"] = f"DEGRADED: {_distill_exc}"
                 logger.warning("LongTermDistiller 调度任务注册失败（降级）: %s", _distill_exc)
 
             # [Ref #34] AuditRetention 保留策略任务注册到调度器（每日 02:00 CRON）
             try:
+                if not _background_tasks_enabled:
+                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
                 from host_brain.audit.retention import RetentionPolicy  # noqa: PLC0415
                 from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
 
@@ -672,11 +709,16 @@ def runtime_lifespan(
                     _retention_task.trigger_mode,
                 )
             except Exception as _ret_exc:
-                new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
+                if not _background_tasks_enabled:
+                    new_module_statuses["audit_retention_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                else:
+                    new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
                 logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
 
             # [proactive_talk] 主动对话任务注册 + NatsumeScheduler 启动
             try:
+                if not _background_tasks_enabled:
+                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
                 from host_brain.scheduler.task_registry import (  # noqa: PLC0415
                     SchedulerTaskRegistry, SchedulerTaskConfig, TriggerMode, TaskPriority,
                 )
@@ -921,7 +963,10 @@ def runtime_lifespan(
                 )
 
             except Exception as _proactive_exc:
-                new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
+                if not _background_tasks_enabled:
+                    new_module_statuses["proactive_talk_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                else:
+                    new_module_statuses["proactive_talk_scheduler"] = f"DEGRADED: {_proactive_exc}"
                 logger.warning("proactive_talk 调度任务注册失败（降级）: %s", _proactive_exc)
 
             # [builtin_tools_catalog] 将内置 READ 工具注册到 ToolCatalog / ToolBroker
@@ -1405,29 +1450,47 @@ async def add_request_id_and_audit(
     request_id = new_request_id()
     request.state.request_id = request_id
     start_time = time.time()
-    logger.info(
-        "HTTP request started",
-        extra={
-            "request_id": request_id,
-            "path": request.url.path,
-            "method": request.method,
-            "client": request.client.host if request.client else "unknown",
-        },
-    )
+    path = request.url.path
+    method = request.method
+    should_emit_info = _should_emit_request_info(path)
+    if should_emit_info:
+        logger.info(
+            "HTTP request started",
+            extra={
+                "request_id": request_id,
+                "path": path,
+                "method": method,
+                "client": request.client.host if request.client else "unknown",
+            },
+        )
+    else:
+        logger.debug(
+            "HTTP request started",
+            extra={
+                "request_id": request_id,
+                "path": path,
+                "method": method,
+            },
+        )
     try:
         metrics.inc_request()
         response = await call_next(request)
         duration_ms = int((time.time() - start_time) * 1000)
-        logger.info(
-            "HTTP request completed",
-            extra={
-                "request_id": request_id,
-                "path": request.url.path,
-                "method": request.method,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
+        completed_extra = {
+            "request_id": request_id,
+            "path": path,
+            "method": method,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        }
+        if should_emit_info and (
+            duration_ms >= _AUDIT_SLOW_REQUEST_MS
+            or method.upper() != "GET"
+            or int(response.status_code) >= 400
+        ):
+            logger.info("HTTP request completed", extra=completed_extra)
+        else:
+            logger.debug("HTTP request completed", extra=completed_extra)
         return response
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)
@@ -1435,8 +1498,8 @@ async def add_request_id_and_audit(
             "HTTP request failed with exception",
             extra={
                 "request_id": request_id,
-                "path": request.url.path,
-                "method": request.method,
+                "path": path,
+                "method": method,
                 "duration_ms": duration_ms,
                 "exception": str(exc),
             },

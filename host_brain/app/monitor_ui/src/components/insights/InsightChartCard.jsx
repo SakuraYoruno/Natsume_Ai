@@ -10,7 +10,7 @@ export default function InsightChartCard({
   children,
 }) {
   return (
-    <div className="card p-4">
+    <div className="rounded-xl border border-primary-100/70 bg-white/75 p-4 shadow-sm">
       {hasData ? (
         children
       ) : (

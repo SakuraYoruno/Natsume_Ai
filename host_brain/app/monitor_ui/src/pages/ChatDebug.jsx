@@ -11,7 +11,6 @@ import {
   User,
   Zap,
 } from 'lucide-react'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -303,8 +302,6 @@ export default function ChatDebug() {
             </div>
           ) : null}
         </div>
-
-        <DigitalLifeNav />
 
         <div className="mt-3">
           <PageHero

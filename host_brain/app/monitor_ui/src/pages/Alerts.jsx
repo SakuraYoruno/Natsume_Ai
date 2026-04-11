@@ -11,7 +11,6 @@ import {
   XCircle,
 } from 'lucide-react'
 import { fetchErrors, fetchServicesHealth } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
@@ -271,8 +270,6 @@ export default function Alerts() {
           </button>
         </div>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Siren}

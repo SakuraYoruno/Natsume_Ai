@@ -9,7 +9,6 @@ import {
   fetchRecallPackStats,
   fetchResidentMemoryContext,
 } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
@@ -129,8 +128,6 @@ export default function MemoryBrowser() {
           </button>
         </div>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Database}

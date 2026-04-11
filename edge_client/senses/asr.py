@@ -29,6 +29,20 @@ from edge_client.rpc.voice import VoiceRpcContract, VoiceRpcResult
 
 logger = logging.getLogger("Natsume.edge.asr")
 
+
+def _short_log_text(value: Any, *, limit: int = 160) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 3)]}..."
+
+
+def _format_ts_ms(ts_ms: int) -> str:
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts_ms) / 1000.0))
+    except Exception:
+        return "unknown"
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1546,6 +1560,29 @@ class AsrService:
             request_id=request_id,
             payload=payload,
             ts_ms=ts_ms,
+        )
+        event = dict(rpc_result.event or {})
+        event_ts = int(event.get("ts_ms") or ts_ms)
+        event_text = _short_log_text(event.get("text") or payload.get("text"), limit=180)
+        event_conf = event.get("confidence")
+        conf_display = (
+            f"{float(event_conf):.3f}"
+            if isinstance(event_conf, (int, float))
+            else "n/a"
+        )
+        logger.info(
+            "[EDGE_VOICE_MON][ASR] ts=%s req=%s session=%s seq=%s final=%s low_conf=%s conf=%s status=%s reason=%s stage=%s text=\"%s\"",
+            _format_ts_ms(event_ts),
+            request_id,
+            str(event.get("session_id") or session_id or ""),
+            str(event.get("seq") or seq),
+            bool(event.get("final", final)),
+            bool(event.get("low_confidence", False)),
+            conf_display,
+            rpc_result.status,
+            rpc_result.reason_code,
+            rpc_result.stage,
+            event_text,
         )
         if self._rpc_event_callback is not None:
             try:

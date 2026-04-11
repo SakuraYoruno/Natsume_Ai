@@ -16,7 +16,6 @@ import {
   Video, Brain, Shield, Database, Zap, ArrowRightLeft, Filter,
   CheckCircle, ArrowLeft, Clock3,
 } from 'lucide-react'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import CustomNode from '../components/trace/CustomNode.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
@@ -520,7 +519,7 @@ function getLiveTraceStageClasses(stage, group) {
   if (stage.status === 'done') {
     return ''
   }
-  return 'border-gray-200 bg-gray-50 text-gray-400'
+  return 'border-primary-200 bg-primary-50/60 text-primary/60'
 }
 
 function renderImmuneStageTags(stage, keyPrefix) {
@@ -656,7 +655,7 @@ function KeyNodeSequence({ nodes = [] }) {
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {nodes.map((node, index) => (
           <React.Fragment key={`${node.nodeId}-${index}`}>
-            <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-700">
+            <span className="inline-flex items-center gap-1 rounded-full border border-primary-200 bg-primary-50/45 px-2.5 py-1 text-xs text-primary-700">
               <span>{node.label}</span>
               <StatusBadge status={normalizeBadgeStatus(node.status)} />
             </span>
@@ -828,7 +827,7 @@ function getLiveTraceTimelineEntries(item, timelineEntries) {
 function getLiveTraceChangeBadgeClass(changeType) {
   if (changeType === 'added') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (changeType === 'updated') return 'border-blue-200 bg-blue-50 text-blue-700'
-  return 'border-gray-200 bg-gray-50 text-gray-500'
+  return 'border-primary-200 bg-primary-50/60 text-primary-700'
 }
 
 function formatEventPayloadPreview(payload, maxLength = 180) {
@@ -844,9 +843,9 @@ function formatEventPayloadPreview(payload, maxLength = 180) {
 
 function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 'text-gray-900' }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4">
+    <div className="card p-4">
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-blue-600">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary-100/70 bg-white text-blue-600">
           <Icon size={18} />
         </span>
         <div className="min-w-0 flex-1">
@@ -859,6 +858,31 @@ function HomeSummaryCard({ icon: Icon, title, value, caption, toneClassName = 't
   )
 }
 
+function TraceSection({ title, hint, aside = null, children }) {
+  return (
+    <section className="card relative overflow-hidden p-4 md:p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_34%)]" />
+      <div className="relative">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="lifeline-node" />
+          <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+          {aside ? <div className="ml-auto">{aside}</div> : null}
+        </div>
+        {hint ? <p className="mt-1 text-xs text-gray-500">{hint}</p> : null}
+        <div className="lifeline-rail mt-3 h-4 px-2">
+          <div className="lifeline-wave absolute inset-0 opacity-65" />
+          <div className="relative flex h-full items-center justify-around">
+            {[0, 1, 2, 3].map((index) => (
+              <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
+            ))}
+          </div>
+        </div>
+        <div className="mt-4">{children}</div>
+      </div>
+    </section>
+  )
+}
+
 const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSelect, onOpenDetail }) {
   const { session, trace } = item
   const metrics = buildLiveTraceMetrics(session, trace)
@@ -866,7 +890,11 @@ const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSele
 
   return (
     <div
-      className={`rounded-xl border p-4 transition-colors ${selected ? 'border-blue-300 bg-blue-50/60' : 'border-gray-200 bg-white hover:bg-gray-50'}`}
+      className={`relative overflow-hidden rounded-xl border p-4 transition-all ${
+        selected
+          ? 'border-blue-300 bg-blue-50/60 shadow-sm shadow-blue-100/40'
+          : 'border-primary-100/70 bg-white/88 hover:-translate-y-0.5 hover:border-primary-200 hover:bg-white'
+      }`}
     >
       <div className="flex items-start gap-3">
         <button className="min-w-0 flex-1 text-left" onClick={onSelect}>
@@ -920,6 +948,9 @@ const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSele
           {metrics.outputPreview || '暂无输出，链路仍在推进或尚未落盘。'}
         </div>
       </button>
+      <div className="lifeline-rail mt-3 h-1.5">
+        <div className="lifeline-wave h-full w-full" />
+      </div>
     </div>
   )
 })
@@ -927,7 +958,7 @@ const LiveTraceCard = React.memo(function LiveTraceCard({ item, selected, onSele
 function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetail }) {
   if (!item) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
+      <div className="rounded-xl border border-primary-100/70 bg-white/88 p-5">
         <div className="text-sm font-semibold text-gray-900">活跃预览</div>
         <div className="mt-3">
           <EmptyStateCard title="等待最近请求载入" hint="实时链路启动后会自动展示。" className="p-4" />
@@ -941,9 +972,12 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
   const summary = trace?.summary ?? {}
   const displayTitle = getSessionDisplayTitle(session, trace)
   const recentTimelineEntries = getLiveTraceTimelineEntries(item, timelineEntries)
+  const latestNodes = Array.isArray(trace?.nodes)
+    ? [...trace.nodes].sort((a, b) => (b?.ts_ms ?? 0) - (a?.ts_ms ?? 0)).slice(0, 6)
+    : []
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+    <div className="rounded-xl border border-primary-100/70 bg-white/88 p-5 space-y-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-gray-900 break-all">{displayTitle}</div>
@@ -951,13 +985,16 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
         </div>
         <StatusBadge status={normalizeBadgeStatus(metrics.status)} label={getRecentRequestStatusMeta(metrics.status).label} />
       </div>
+      <div className="lifeline-rail h-1.5">
+        <div className="lifeline-wave h-full w-full" />
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-lg border border-primary-100/70 bg-white/70 p-3">
           <div className="text-xs font-medium text-gray-500">当前节点</div>
           <div className="mt-1 text-sm text-gray-800 break-all">{metrics.currentLabel}</div>
         </div>
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-lg border border-primary-100/70 bg-white/70 p-3">
           <div className="text-xs font-medium text-gray-500">链路规模</div>
           <div className="mt-1 text-sm text-gray-800">{metrics.nodeCount} 个节点</div>
           <div className="mt-1 text-xs text-gray-500">{metrics.latencyMs != null ? `${metrics.latencyMs}ms` : '等待耗时落盘'}</div>
@@ -994,13 +1031,13 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
       <div className="grid grid-cols-1 gap-3">
         <div>
           <div className="text-xs font-medium text-gray-500">输入</div>
-          <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 break-all">
+          <div className="mt-1 rounded-lg border border-primary-100/70 bg-white/70 p-3 text-sm text-gray-700 break-all">
             {displayTitle}
           </div>
         </div>
         <div>
           <div className="text-xs font-medium text-gray-500">输出</div>
-          <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 break-all">
+          <div className="mt-1 rounded-lg border border-primary-100/70 bg-white/70 p-3 text-sm text-gray-700 break-all">
             {metrics.outputPreview || '暂无输出，可能仍在执行或本次未产出文本。'}
           </div>
         </div>
@@ -1012,7 +1049,7 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
           {latestNodes.length === 0 ? (
             <EmptyStateCard title="暂无节点详情" hint="当前链路还未上报可展示节点。" className="p-4" />
           ) : latestNodes.map((node) => (
-            <div key={`${session.request_id}-${node.node_id}-${node.ts_ms}`} className="rounded-lg border border-gray-200 px-3 py-2">
+            <div key={`${session.request_id}-${node.node_id}-${node.ts_ms}`} className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">
               <div className="flex items-center gap-2">
                 <div className="text-sm font-medium text-gray-800">{getTraceNodeDisplayName(node)}</div>
                 <StatusBadge status={normalizeBadgeStatus(node.status)} />
@@ -1035,7 +1072,7 @@ function LiveTracePreview({ item, timelineEntries = [], onHighlight, onOpenDetai
 function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpenDetail }) {
   if (!item) {
     return (
-      <div className="rounded-xl border border-gray-200 bg-white p-5">
+      <div className="rounded-xl border border-primary-100/70 bg-white/88 p-5">
         <div className="text-sm font-semibold text-gray-900">活跃预览</div>
         <div className="mt-3">
           <EmptyStateCard title="等待最近请求载入" hint="实时链路启动后会自动展示。" className="p-4" />
@@ -1051,7 +1088,7 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
   const recentTimelineEntries = getLiveTraceTimelineEntries(item, timelineEntries)
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
+    <div className="rounded-xl border border-primary-100/70 bg-white/88 p-5 space-y-4">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-gray-900 break-all">{displayTitle}</div>
@@ -1059,13 +1096,16 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
         </div>
         <StatusBadge status={normalizeBadgeStatus(metrics.status)} label={getRecentRequestStatusMeta(metrics.status).label} />
       </div>
+      <div className="lifeline-rail h-1.5">
+        <div className="lifeline-wave h-full w-full" />
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-lg border border-primary-100/70 bg-white/70 p-3">
           <div className="text-xs font-medium text-gray-500">当前节点</div>
           <div className="mt-1 text-sm text-gray-800 break-all">{metrics.currentLabel}</div>
         </div>
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div className="rounded-lg border border-primary-100/70 bg-white/70 p-3">
           <div className="text-xs font-medium text-gray-500">链路规模</div>
           <div className="mt-1 text-sm text-gray-800">{metrics.nodeCount} 个节点</div>
           <div className="mt-1 text-xs text-gray-500">{metrics.latencyMs != null ? `${metrics.latencyMs}ms` : '等待耗时落盘'}</div>
@@ -1102,13 +1142,13 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
       <div className="grid grid-cols-1 gap-3">
         <div>
           <div className="text-xs font-medium text-gray-500">输入</div>
-          <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 break-all">
+          <div className="mt-1 rounded-lg border border-primary-100/70 bg-white/70 p-3 text-sm text-gray-700 break-all">
             {displayTitle}
           </div>
         </div>
         <div>
           <div className="text-xs font-medium text-gray-500">输出</div>
-          <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 break-all">
+          <div className="mt-1 rounded-lg border border-primary-100/70 bg-white/70 p-3 text-sm text-gray-700 break-all">
             {metrics.outputPreview || '暂无输出，可能仍在执行或这次没有文本结果。'}
           </div>
         </div>
@@ -1120,7 +1160,7 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
           {recentTimelineEntries.length === 0 ? (
             <EmptyStateCard title="暂无节点变化" hint="等待节点事件进入时间线。" className="p-4" />
           ) : recentTimelineEntries.map((entry) => (
-            <div key={entry.entryId} className="rounded-lg border border-gray-200 px-3 py-2">
+            <div key={entry.entryId} className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">
               <div className="flex items-center gap-2">
                 <div className="text-sm font-medium text-gray-800">{entry.displayName || entry.nodeId}</div>
                 <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${getLiveTraceChangeBadgeClass(entry.changeType)}`}>
@@ -1345,61 +1385,66 @@ function GroupDagView({ groupId, traceData, onSelectNode }) {
   return (
     <div className="flex flex-col h-full flex-1">
       {/* 子页面头部 */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
-        <button
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
-          onClick={() => navigate('/trace')}
-        >
-          <ArrowLeft size={14} />
-          返回
-        </button>
-        <div className="flex items-center gap-2">
-          <span className="flex items-center justify-center w-8 h-8 rounded-lg"
-            style={{ background: group.bg, color: group.color }}>
-            <Icon size={16} />
-          </span>
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">{group.label}</h2>
-            <p className="text-xs text-gray-500">{group.desc}</p>
-          </div>
-        </div>
-        {traceData && (
-          <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
-            <span className="px-2 py-1 rounded-full font-medium"
+      <div className="card mb-4 space-y-3 p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            className="btn-secondary text-xs"
+            onClick={() => navigate('/trace')}
+          >
+            <ArrowLeft size={14} />
+            返回
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-8 h-8 rounded-lg"
               style={{ background: group.bg, color: group.color }}>
-              {activeCount} / {totalNodeCount} 节点激活
+              <Icon size={16} />
             </span>
-            {immuneGroupMeta && (immuneGroupMeta.decision || immuneGroupMeta.riskLevel) ? (
-              <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-1 font-medium text-orange-700">
-                {(immuneGroupMeta.decision || 'IMMUNE').toUpperCase()}
-                {immuneGroupMeta.riskLevel ? `/${String(immuneGroupMeta.riskLevel).toLowerCase()}` : ''}
-              </span>
-            ) : null}
-            {(immuneGroupMeta?.reasonTags || []).slice(0, 2).map((reasonCode) => (
-              <span key={`immune-group-meta-${reasonCode}`} className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-700">
-                {reasonCode}
-              </span>
-            ))}
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">{group.label}</h2>
+              <p className="text-xs text-gray-500">{group.desc}</p>
+            </div>
           </div>
-        )}
-        {/* 视图切换 */}
-        {traceData && (
-          <div className="flex rounded border border-gray-300 overflow-hidden text-xs">
-            <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'dag' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-              onClick={() => setViewMode('dag')}>
-              <GitBranch size={11} /> 拓扑图
-            </button>
-            <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'gantt' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-              onClick={() => setViewMode('gantt')}>
-              <BarChart2 size={11} /> 甘特图
-            </button>
-          </div>
-        )}
+          {traceData && (
+            <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
+              <span className="px-2 py-1 rounded-full font-medium"
+                style={{ background: group.bg, color: group.color }}>
+                {activeCount} / {totalNodeCount} 节点激活
+              </span>
+              {immuneGroupMeta && (immuneGroupMeta.decision || immuneGroupMeta.riskLevel) ? (
+                <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-1 font-medium text-orange-700">
+                  {(immuneGroupMeta.decision || 'IMMUNE').toUpperCase()}
+                  {immuneGroupMeta.riskLevel ? `/${String(immuneGroupMeta.riskLevel).toLowerCase()}` : ''}
+                </span>
+              ) : null}
+              {(immuneGroupMeta?.reasonTags || []).slice(0, 2).map((reasonCode) => (
+                <span key={`immune-group-meta-${reasonCode}`} className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-700">
+                  {reasonCode}
+                </span>
+              ))}
+            </div>
+          )}
+          {/* 视图切换 */}
+          {traceData && (
+            <div className="flex rounded-lg border border-primary-100/80 overflow-hidden text-xs">
+              <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'dag' ? 'bg-blue-600 text-white' : 'bg-white/90 text-gray-600 hover:bg-blue-50'}`}
+                onClick={() => setViewMode('dag')}>
+                <GitBranch size={11} /> 拓扑图
+              </button>
+              <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'gantt' ? 'bg-blue-600 text-white' : 'bg-white/90 text-gray-600 hover:bg-blue-50'}`}
+                onClick={() => setViewMode('gantt')}>
+                <BarChart2 size={11} /> 甘特图
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="lifeline-rail h-1.5">
+          <div className="lifeline-wave h-full w-full" />
+        </div>
       </div>
 
       {/* 主体 */}
       <div className="flex gap-4 flex-1 min-h-0" style={{ height: 'calc(100vh - 260px)' }}>
-        <div className="flex-1 rounded-xl border-2 overflow-hidden h-full"
+        <div className="flex-1 card overflow-hidden h-full"
           style={{ borderColor: group.border, background: '#FAFAFA' }}>
           {viewMode === 'dag' && (
             <ReactFlow
@@ -1463,8 +1508,9 @@ function FullChainView({ traceData, onSelectNode }) {
 
   return (
     <div className="flex flex-col h-full flex-1">
-      <div className="flex items-center gap-3 mb-4">
-        <button className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
+      <div className="card mb-4 space-y-3 p-4">
+        <div className="flex items-center gap-3 flex-wrap">
+        <button className="btn-secondary text-xs"
           onClick={() => navigate('/trace')}>
           <ArrowLeft size={14} /> 返回
         </button>
@@ -1489,6 +1535,10 @@ function FullChainView({ traceData, onSelectNode }) {
         }}>
           {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
+        </div>
+        <div className="lifeline-rail h-1.5">
+          <div className="lifeline-wave h-full w-full" />
+        </div>
       </div>
       <div ref={containerRef} className="flex gap-4 flex-1 min-h-0"
         style={{ height: fullscreen ? '100vh' : 'calc(100vh - 240px)' }}>
@@ -1552,7 +1602,7 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
   const rawNodeCount = overviewSchema.rawNodeCount
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 md:p-5 shadow-sm shadow-slate-100/60">
+    <div className="card rounded-2xl p-4 md:p-5">
       <div className="flex items-start gap-3 flex-wrap">
         <div className="flex items-center gap-2 min-w-0">
           <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 text-white shadow-sm">
@@ -1596,6 +1646,9 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
           </button>
         </div>
       </div>
+      <div className="lifeline-rail mt-3 h-1.5">
+        <div className="lifeline-wave h-full w-full" />
+      </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
         {flow.map((stage) => {
@@ -1620,7 +1673,7 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
       </div>
 
       <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-4">
-        <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50" style={{ height: '34rem' }}>
+        <div className="rounded-xl border border-primary-100/70 overflow-hidden bg-white/80" style={{ height: '34rem' }}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -1643,7 +1696,7 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
         </div>
 
         <div className="space-y-4">
-          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <div className="rounded-xl border border-primary-100/70 bg-white/80 p-4">
             <div className="text-xs font-medium text-gray-500">当前请求</div>
             <div className="mt-1 text-sm font-semibold text-gray-900 break-all">
               {traceData.summary?.input_text || requestId || traceData.request_id}
@@ -1861,8 +1914,13 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
             const items = Array.isArray(payload?.items) ? payload.items : []
             setLiveFeedConnected(true)
             setLiveFeedLastTs(payload?.timestamp ?? Date.now())
-            setLiveTraceItems(items)
+            // SSE 可能返回空快照（例如当前无“活跃”窗口），此时保留已有列表，
+            // 后续再由 fallback 拉取 recentRequests 对应链路，避免首页长时间空载。
+            if (items.length > 0) {
+              setLiveTraceItems(items)
+            }
             setLiveTraceTimelineEntries((previous) => {
+              if (items.length === 0) return previous
               const activeRequestIds = new Set(items.map((item) => item?.session?.request_id).filter(Boolean))
               if (activeRequestIds.size === 0) return {}
               const next = {}
@@ -1929,9 +1987,11 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   }, [pollingEnabled, recentKeyword, liveTraceLimit])
 
   useEffect(() => {
-    if (liveFeedConnected) return
+    if (liveTraceLoading) return
+    // SSE 已连接但快照为空时也需要兜底拉取，避免“已连接但无卡片”。
+    if (liveFeedConnected && liveTraceItems.length > 0) return
     loadLiveTraces()
-  }, [liveFeedConnected, loadLiveTraces])
+  }, [liveFeedConnected, liveTraceItems.length, liveTraceLoading, loadLiveTraces])
 
   const revealInlineOverview = useCallback(() => {
     setInlineOverviewVisible(true)
@@ -2017,7 +2077,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const currentTraceStatus = String(traceInfo?.status || '').toUpperCase()
   const currentTraceHealthy = ['OK', 'UP', 'SUCCESS'].includes(currentTraceStatus)
   const liveFeedStatusClass = !pollingEnabled
-    ? 'border-gray-200 bg-white text-gray-500'
+    ? 'border-primary-200 bg-primary-50/45 text-primary-700'
     : liveFeedConnected
       ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
       : 'border-amber-200 bg-amber-50 text-amber-700'
@@ -2142,8 +2202,6 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
   return (
     <div className="space-y-5">
-      <DigitalLifeNav />
-
       <PageHero
         icon={Activity}
         eyebrow="神经传导 Trace"
@@ -2199,13 +2257,17 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         />
       </div>
 
+      <TraceSection
+        title="链路控制台"
+        hint="筛选请求、查看当前会话和 Tribe 联动事件。"
+      >
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-xl font-semibold text-gray-900 shrink-0">链路可视化</h1>
         <div className="flex items-center gap-2 flex-1 min-w-64">
           <div className="relative flex-1">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded font-mono focus:outline-none focus:ring-2 focus:ring-primary-200 focus:border-primary"
+              className="w-full rounded-lg border border-primary-100/70 bg-white/92 py-1.5 pl-8 pr-3 font-mono text-sm focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-primary-200"
               placeholder="输入消息内容、session_id 或 request_id"
               value={inputId}
               onChange={(e) => setInputId(e.target.value)}
@@ -2216,7 +2278,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
             {(loading || recentLoading) ? <RefreshCw size={13} className="animate-spin" /> : (searchLooksLikeRequestId ? '显示总览图' : '筛选请求')}
           </button>
           <select
-            className="text-sm border border-gray-300 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-200 shrink-0"
+            className="shrink-0 rounded-lg border border-primary-100/70 bg-white/92 px-2 py-1.5 text-sm focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-primary-200"
             value={recentStatusFilter}
             onChange={(e) => { setRecentStatusFilter(e.target.value); loadRecentRequests(recentKeyword) }}
           >
@@ -2271,7 +2333,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       )}
 
       {selectedRequestId && (
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-center gap-3 flex-wrap">
+        <div className="card flex items-center gap-3 flex-wrap px-4 py-3">
           <div className="min-w-0">
             <div className="text-xs font-medium text-blue-700">当前会话</div>
             <div className="text-sm font-semibold text-blue-900 break-all">{selectedLiveTraceTitle}</div>
@@ -2285,11 +2347,14 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               打开详情
             </button>
           </div>
+          <div className="lifeline-rail h-1.5 w-full">
+            <div className="lifeline-wave h-full w-full" />
+          </div>
         </div>
       )}
 
       {selectedRequestId && (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 md:p-5">
+        <div className="card rounded-2xl p-4 md:p-5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold text-emerald-900">Tribe 事件联动</h2>
@@ -2313,6 +2378,9 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
                 打开 Insights
               </button>
             </div>
+          </div>
+          <div className="lifeline-rail mt-3 h-1.5">
+            <div className="lifeline-wave h-full w-full" />
           </div>
 
           <div className="mt-3 flex items-center gap-3 text-xs text-emerald-800/90 flex-wrap">
@@ -2340,7 +2408,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               {linkedTribeEventList.map((event) => {
                 const payloadPreview = formatEventPayloadPreview(event?.payload, 220)
                 return (
-                  <div key={event.event_id} className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm">
+                  <div key={event.event_id} className="rounded-2xl border border-primary-100/70 bg-white/80 p-4 shadow-sm">
                     <div className="flex items-start gap-3">
                       <div className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400 ring-4 ring-emerald-50" />
                       <div className="min-w-0 flex-1">
@@ -2360,12 +2428,12 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
                             target {event.target_agent || '—'}
                           </span>
                           {event.request_id ? (
-                            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 font-mono text-gray-600">
+                            <span className="rounded-full border border-primary-200 bg-primary-50/55 px-2 py-1 font-mono text-primary-700">
                               {String(event.request_id).slice(0, 18)}
                             </span>
                           ) : null}
                         </div>
-                        <div className="mt-3 rounded-xl border border-gray-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-gray-600 break-all">
+                        <div className="mt-3 break-all rounded-xl border border-primary-100/70 bg-white/86 px-3 py-2 text-xs leading-5 text-gray-600">
                           {payloadPreview}
                         </div>
                       </div>
@@ -2377,8 +2445,11 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           )}
         </div>
       )}
+      </TraceSection>
 
-      <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-slate-50 via-white to-blue-50/60 p-4 md:p-5">
+      <div className="card relative overflow-hidden p-4 md:p-5">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_34%)]" />
+        <div className="relative">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
             <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 text-white shadow-sm">
@@ -2401,9 +2472,18 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           </div>
         </div>
 
+        <div className="lifeline-rail mt-3 h-4 px-2">
+          <div className="lifeline-wave absolute inset-0 opacity-65" />
+          <div className="relative flex h-full items-center justify-around">
+            {[0, 1, 2, 3].map((index) => (
+              <span key={`active-feed-${index}`} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
+            ))}
+          </div>
+        </div>
+
         <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_24rem] gap-4">
-          <div className="rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm shadow-blue-100/40">
-            <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-1 pb-3">
+          <div className="rounded-2xl border border-primary-100/70 bg-white/88 p-3 shadow-sm shadow-blue-100/40">
+            <div className="flex items-center justify-between gap-3 border-b border-primary-100/70 px-1 pb-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">{activeListTitle}</div>
                 <div className="text-xs text-gray-500">{activeListDescription}</div>
@@ -2444,8 +2524,8 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/70 bg-white/90 p-3 shadow-sm shadow-blue-100/40">
-            <div className="border-b border-gray-100 px-1 pb-3">
+          <div className="rounded-2xl border border-primary-100/70 bg-white/88 p-3 shadow-sm shadow-blue-100/40">
+            <div className="border-b border-primary-100/70 px-1 pb-3">
               <div className="text-sm font-semibold text-gray-900">当前链路预览</div>
               <div className="text-xs text-gray-500">右侧固定看板会跟随选中请求切换，便于快速定位当前跑到哪一层。</div>
             </div>
@@ -2458,6 +2538,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               />
             </div>
           </div>
+        </div>
         </div>
       </div>
 
@@ -2475,11 +2556,11 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
       {!isHistorySearchMode && !showHistoryPanel && (
         <button
-          className="w-full rounded-xl border border-dashed border-gray-300 bg-white px-4 py-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/40"
+          className="card w-full rounded-xl border-dashed border-primary-200 bg-white/85 px-4 py-4 text-left transition-colors hover:border-primary-300 hover:bg-primary-50/35"
           onClick={() => setHistoryExpanded(true)}
         >
           <div className="flex items-center gap-3">
-            <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-gray-100 text-blue-600">
+            <span className="flex items-center justify-center w-9 h-9 rounded-xl border border-primary-100/70 bg-white text-blue-600">
               <Clock3 size={16} />
             </span>
             <div className="min-w-0 flex-1">
@@ -2492,8 +2573,8 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       )}
 
       {!isHistorySearchMode && showHistoryPanel && (
-        <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50 flex-wrap">
+        <div className="card overflow-hidden rounded-xl">
+          <div className="flex items-center gap-2 border-b border-primary-100/70 bg-white/80 px-4 py-3 flex-wrap">
             <Clock3 size={15} className="text-blue-600" />
             <div className="text-sm font-semibold text-gray-900">历史请求</div>
             <div className="text-xs text-gray-400">{historySectionHint}</div>
@@ -2524,7 +2605,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               )}
             </div>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-primary-100/70">
             {recentLoading && recentRequests.length === 0 && (
               <div className="px-4 py-4">
                 <NoticeBanner variant="info" title="加载中">
@@ -2542,7 +2623,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               return (
                 <button
                   key={item.request_id}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors"
+                  className="w-full px-4 py-3 text-left transition-colors hover:bg-primary-50/45"
                   onClick={() => openRequestTrace(item.request_id)}
                 >
                   <div className="flex items-start gap-3">
@@ -2571,13 +2652,13 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         </div>
       )}
 
-      <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+      <div className="card overflow-hidden rounded-2xl">
         <button
-          className="w-full px-4 py-4 text-left transition-colors hover:bg-gray-50"
+          className="w-full px-4 py-4 text-left transition-colors hover:bg-primary-50/45"
           onClick={() => setAdvancedViewsExpanded((value) => !value)}
         >
           <div className="flex items-center gap-3">
-            <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-gray-100 text-blue-600">
+            <span className="flex items-center justify-center w-9 h-9 rounded-xl border border-primary-100/70 bg-white text-blue-600">
               <GitBranch size={16} />
             </span>
             <div className="min-w-0 flex-1">
@@ -2589,7 +2670,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
         </button>
 
         {advancedViewsExpanded && (
-          <div className="border-t border-gray-100 bg-gray-50/60 p-4 space-y-4">
+          <div className="space-y-4 border-t border-primary-100/70 bg-white/75 p-4">
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
               {groupStats.map((g) => {
                 const Icon = g.icon
@@ -2647,7 +2728,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
                       </div>
                     )}
                     {traceData && (
-                      <div className="mt-3 h-1 rounded-full bg-gray-100 overflow-hidden">
+                      <div className="mt-3 h-1 overflow-hidden rounded-full bg-primary-100/70">
                         <div
                           className="h-1 rounded-full transition-all"
                           style={{ width: `${(g.activeCount / Math.max(g.totalNodeCount, 1)) * 100}%`, background: g.color }}
@@ -2661,7 +2742,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_18rem] gap-4">
               <button
-                className="w-full text-left rounded-xl border-2 border-dashed border-gray-300 p-4 hover:border-blue-400 hover:bg-blue-50 transition-all flex items-center gap-4"
+                className="flex w-full items-center gap-4 rounded-xl border-2 border-dashed border-primary-200 p-4 text-left transition-all hover:border-blue-400 hover:bg-blue-50"
                 onClick={() => navigate('/trace/full')}
               >
                 <span className="flex items-center justify-center w-10 h-10 rounded-lg bg-blue-50 text-blue-600 shrink-0">
@@ -2681,7 +2762,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
                   { label: '激活节点', value: traceData ? (traceData.nodes ?? []).length : '—', color: 'text-green-600' },
                   { label: '总耗时', value: traceInfo?.latency != null ? `${traceInfo.latency}ms` : '—', color: 'text-orange-500' },
                 ].map(({ label, value, color }) => (
-                  <div key={label} className="rounded-xl border border-gray-200 bg-white p-4 text-center">
+                  <div key={label} className="rounded-xl border border-primary-100/70 bg-white/90 p-4 text-center">
                     <div className={`text-2xl font-bold ${color}`}>{value}</div>
                     <div className="text-xs text-gray-500 mt-1">{label}</div>
                   </div>

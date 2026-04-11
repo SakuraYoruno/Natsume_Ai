@@ -105,8 +105,10 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null }) {
       to={to}
       onClick={onClick}
       className={({ isActive }) =>
-        `inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-          isActive ? 'bg-primary-50 text-primary' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-800'
+        `inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-medium transition-all ${
+          isActive
+            ? 'border-primary-200 bg-gradient-to-r from-primary-50 to-cyan-50 text-primary shadow-sm'
+            : 'border-transparent text-gray-600 hover:border-primary-200 hover:bg-primary-50/65 hover:text-gray-800'
         }`
       }
     >
@@ -114,6 +116,28 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null }) {
       {label}
       {badge ? <NavBadge value={badge.value} severity={badge.severity} /> : null}
     </NavLink>
+  )
+}
+
+function SectionFlowRail({ sections }) {
+  return (
+    <div className="lifeline-rail hidden h-11 items-center px-3 lg:flex">
+      <div className="lifeline-wave absolute inset-0 opacity-80" />
+      <div className="relative flex w-full items-center justify-between gap-2">
+        {sections.map((section, index) => (
+          <NavLink
+            key={`flow-${section.title}`}
+            to={section.items?.[0]?.to || '/digital-life'}
+            className="group inline-flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-primary-50/60"
+          >
+            <span className="lifeline-node shrink-0" style={{ animationDelay: `${index * 0.35}s` }} />
+            <span className="truncate text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-600 group-hover:text-gray-800">
+              {section.title}
+            </span>
+          </NavLink>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -148,13 +172,13 @@ export default function Layout() {
   }
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden bg-gray-50">
+    <div className="relative flex min-h-screen flex-col overflow-x-hidden">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-32 top-24 h-72 w-72 rounded-full bg-primary-100/40 blur-3xl animate-pulse" />
-        <div className="absolute right-0 top-1/3 h-96 w-96 rounded-full bg-pink-100/35 blur-3xl animate-pulse" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(236,72,153,0.04),_transparent_28%)]" />
+        <div className="absolute -left-36 top-20 h-80 w-80 rounded-full bg-primary-100/35 blur-3xl animate-pulse" />
+        <div className="absolute right-[-6%] top-1/4 h-[28rem] w-[28rem] rounded-full bg-emerald-100/30 blur-3xl animate-pulse" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.08),_transparent_36%),radial-gradient(circle_at_bottom_right,_rgba(245,158,11,0.06),_transparent_30%)]" />
       </div>
-      <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 shadow-sm backdrop-blur">
+      <header className="sticky top-0 z-50 border-b border-primary-100/70 bg-gradient-to-r from-primary-50/80 via-white/88 to-emerald-50/70 shadow-sm backdrop-blur-xl">
         <div className="mx-auto w-full space-y-3 px-4 py-3 sm:px-6">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-2">
@@ -201,7 +225,7 @@ export default function Layout() {
 
           <nav className="hidden flex-wrap gap-3 lg:flex" role="navigation" aria-label="主导航">
             {NAV_SECTIONS.map((section) => (
-              <div key={section.title} className="rounded-xl border border-gray-200 bg-gray-50 px-2.5 py-2">
+              <div key={section.title} className="rounded-2xl border border-primary-100/70 bg-gradient-to-br from-white/86 to-primary-50/55 px-2.5 py-2 shadow-sm backdrop-blur-sm">
                 <div className="flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                   <span>{section.title}</span>
                   {sectionBadges[section.title] ? (
@@ -219,6 +243,8 @@ export default function Layout() {
               </div>
             ))}
           </nav>
+
+          <SectionFlowRail sections={NAV_SECTIONS} />
         </div>
       </header>
 
@@ -226,13 +252,13 @@ export default function Layout() {
         <>
           <div className="fixed inset-0 z-40 bg-black/30 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
           <nav
-            className="fixed bottom-0 left-0 top-[72px] z-50 w-72 overflow-y-auto border-r border-gray-200 bg-white shadow-xl lg:hidden"
+            className="fixed bottom-0 left-0 top-[72px] z-50 w-72 overflow-y-auto border-r border-primary-100/70 bg-slate-50/94 shadow-xl backdrop-blur lg:hidden"
             role="navigation"
             aria-label="移动端导航"
           >
             <div className="space-y-3 p-3">
               {NAV_SECTIONS.map((section) => (
-                <div key={section.title} className="rounded-xl border border-gray-200 bg-gray-50 p-2">
+                <div key={section.title} className="rounded-xl border border-primary-100/70 bg-gradient-to-br from-white/86 to-primary-50/55 p-2">
                   <div className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
                     <span>{section.title}</span>
                     {sectionBadges[section.title] ? (
@@ -259,7 +285,7 @@ export default function Layout() {
         </>
       ) : null}
 
-      <main className="relative z-10 mx-auto flex w-full min-w-0 flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
+      <main className="relative z-10 mx-auto flex w-full max-w-[1760px] min-w-0 flex-1 flex-col px-4 py-6 sm:px-6 lg:px-8">
         <Outlet />
       </main>
     </div>

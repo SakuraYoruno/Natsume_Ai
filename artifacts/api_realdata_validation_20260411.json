@@ -1,0 +1,125 @@
+{
+  "request_id": "req_18ed04d8fad846918d65aa93f976396b",
+  "checked": 18,
+  "ok_count": 18,
+  "fail_count": 0,
+  "results": [
+    {
+      "path": "/health?skip_dependency_probes=1",
+      "status": 200,
+      "ms": 7518.7,
+      "ok": true,
+      "api_status": "OK"
+    },
+    {
+      "path": "/obs/services/health",
+      "status": 200,
+      "ms": 15218.4,
+      "ok": true,
+      "total": 18
+    },
+    {
+      "path": "/obs/sessions?page=1&page_size=5",
+      "status": 200,
+      "ms": 7824.1,
+      "ok": true,
+      "total": 1,
+      "items": 1
+    },
+    {
+      "path": "/obs/metrics/timeseries",
+      "status": 200,
+      "ms": 36.5,
+      "ok": true
+    },
+    {
+      "path": "/obs/governor/stats",
+      "status": 200,
+      "ms": 13759.1,
+      "ok": true,
+      "total": 2
+    },
+    {
+      "path": "/obs/errors",
+      "status": 200,
+      "ms": 8883.9,
+      "ok": true
+    },
+    {
+      "path": "/obs/subsystems/stats",
+      "status": 200,
+      "ms": 42.6,
+      "ok": true
+    },
+    {
+      "path": "/obs/agent_loop/stats",
+      "status": 200,
+      "ms": 16075.4,
+      "ok": true
+    },
+    {
+      "path": "/obs/memory/stats",
+      "status": 200,
+      "ms": 9937.2,
+      "ok": true
+    },
+    {
+      "path": "/obs/prompt-builder/stats",
+      "status": 200,
+      "ms": 40.2,
+      "ok": true
+    },
+    {
+      "path": "/obs/chain/stats",
+      "status": 200,
+      "ms": 11044.8,
+      "ok": true
+    },
+    {
+      "path": "/obs/runtime-snapshot",
+      "status": 200,
+      "ms": 8204.6,
+      "ok": true
+    },
+    {
+      "path": "/obs/sys-mode",
+      "status": 200,
+      "ms": 5.6,
+      "ok": true
+    },
+    {
+      "path": "/obs/retrieval/runtime?window_minutes=60",
+      "status": 200,
+      "ms": 9408.9,
+      "ok": true
+    },
+    {
+      "path": "/obs/trace/req_18ed04d8fad846918d65aa93f976396b",
+      "status": 200,
+      "ms": 16742.8,
+      "ok": true,
+      "api_status": "OK"
+    },
+    {
+      "path": "/obs/trace/req_18ed04d8fad846918d65aa93f976396b/stream_events",
+      "status": 200,
+      "ms": 8010.6,
+      "ok": true
+    },
+    {
+      "path": "/obs/tribe/events?limit=5&request_id=req_18ed04d8fad846918d65aa93f976396b",
+      "status": 200,
+      "ms": 38.1,
+      "ok": true,
+      "total": 5,
+      "items": 5
+    },
+    {
+      "path": "/obs/immune-gate/replay/req_18ed04d8fad846918d65aa93f976396b",
+      "status": 200,
+      "ms": 5.5,
+      "ok": true,
+      "summary_event_count": 1
+    }
+  ]
+}

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from dataclasses import dataclass
 import json
 import logging
@@ -35,6 +36,22 @@ logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
 _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
+
+
+def _env_float(name: str, default: float, *, minimum: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(default, minimum)
+    try:
+        return max(float(raw), minimum)
+    except (TypeError, ValueError):
+        return max(default, minimum)
+
+
+_TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimum=1.0)
+_TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
+_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
+_TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
 
 # ---------------------------------------------------------------------------
 # 依赖注入
@@ -1914,7 +1931,218 @@ def _build_sessions_response(
     )
 
 
+def _mark_trace_summary_degraded(
+    summary: Dict[str, Any],
+    *,
+    reason: str,
+    message: str,
+) -> Dict[str, Any]:
+    payload = dict(summary or {})
+    payload["degraded"] = True
+    payload["degraded_reason"] = reason
+    payload["degraded_message"] = message
+    payload["degraded_at"] = _now_ms()
+    return payload
+
+
+def _load_optional_trace_payload(
+    request_id: str,
+    stage_name: str,
+    builder,
+    *,
+    default_value,
+):
+    timeout_sec = _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC
+    if timeout_sec <= 0:
+        try:
+            return builder(request_id)
+        except Exception as exc:
+            logger.debug("trace optional payload degraded: request_id=%s stage=%s err=%s", request_id, stage_name, exc)
+            return default_value
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"trace-{stage_name}")
+    future = executor.submit(builder, request_id)
+    try:
+        return future.result(timeout=timeout_sec)
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            "trace optional payload timeout: request_id=%s stage=%s timeout_sec=%.2f",
+            request_id,
+            stage_name,
+            timeout_sec,
+        )
+        future.cancel()
+        return default_value
+    except Exception as exc:
+        logger.debug("trace optional payload degraded: request_id=%s stage=%s err=%s", request_id, stage_name, exc)
+        return default_value
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _log_trace_build_cost(
+    request_id: str,
+    *,
+    mode: str,
+    total_ms: int,
+    fetch_ms: int,
+    summary_ms: int,
+    optional_ms: int,
+    compose_ms: int,
+    node_count: int,
+) -> None:
+    msg = (
+        "trace build mode=%s request_id=%s total_ms=%d fetch_ms=%d summary_ms=%d optional_ms=%d compose_ms=%d node_count=%d"
+    )
+    args = (mode, request_id, total_ms, fetch_ms, summary_ms, optional_ms, compose_ms, node_count)
+    if total_ms >= _TRACE_BUILD_SLOW_LOG_MS:
+        logger.info(msg, *args)
+    else:
+        logger.debug(msg, *args)
+
+
+def _build_trace_response_lightweight(
+    ledger: SQLiteLedger,
+    request_id: str,
+    *,
+    reason: str,
+    message: str,
+) -> TraceResponse:
+    trace_rows = _fetch_request_rows(ledger, "graph_run_trace", request_id)
+    intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
+    governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
+    voice_rows = _fetch_request_rows(ledger, "voice_event_log", request_id)
+
+    if not trace_rows and not governor_rows and not intent_rows and not voice_rows:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "not_found", "request_id": request_id},
+        )
+
+    summary = _build_trace_summary(
+        request_id=request_id,
+        intent_rows=intent_rows,
+        governor_rows=governor_rows,
+        retrieval_rows=[],
+        llm_rows=[],
+        airlock_rows=[],
+        bond_rows=[],
+        memory_rows=[],
+        error_rows=[],
+        voice_rows=voice_rows,
+    )
+    summary = _mark_trace_summary_degraded(summary, reason=reason, message=message)
+
+    if trace_rows:
+        row_dict = trace_rows[-1]
+        nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
+        edges_raw = _safe_json(row_dict.get("edges_json")) or []
+
+        nodes: List[TraceNode] = []
+        if isinstance(nodes_raw, list):
+            for node_row in nodes_raw:
+                if not isinstance(node_row, dict):
+                    continue
+                output_data = node_row.get("output_data")
+                input_data = node_row.get("input_data")
+                nodes.append(
+                    TraceNode(
+                        node_id=node_row.get("node_id", ""),
+                        node_type=node_row.get("node_type", "system"),
+                        display_name=node_row.get("display_name", node_row.get("node_id", "")),
+                        side=node_row.get("side"),
+                        provider=node_row.get("provider"),
+                        model_id=node_row.get("model_id"),
+                        status=_normalize_trace_node_status(
+                            node_row.get("status", "OK"),
+                            node_type=node_row.get("node_type", "system"),
+                            reason_code=node_row.get("reason_code"),
+                            output_data=output_data,
+                            input_data=input_data,
+                        ),
+                        reason_code=node_row.get("reason_code"),
+                        latency_ms=node_row.get("latency_ms"),
+                        input_data=input_data,
+                        output_data=output_data,
+                        ts_ms=node_row.get("ts_ms"),
+                        error=node_row.get("error"),
+                        group_id=node_row.get("group_id"),
+                        owner_node_id=node_row.get("owner_node_id"),
+                        subgraph_id=node_row.get("subgraph_id"),
+                        parent_node_id=node_row.get("parent_node_id"),
+                    )
+                )
+
+        supplement_nodes: List[TraceNode] = []
+        intent_node = _build_intent_trace_node(intent_rows[-1] if intent_rows else {})
+        if intent_node is not None:
+            supplement_nodes.append(intent_node)
+        governor_node = _build_governor_trace_node(governor_rows[-1] if governor_rows else {}, summary)
+        if governor_node is not None:
+            supplement_nodes.append(governor_node)
+        supplement_nodes = _append_missing_trace_nodes(nodes, supplement_nodes)
+
+        edges = [
+            TraceEdge(source=edge.get("source", ""), target=edge.get("target", ""))
+            for edge in edges_raw
+            if isinstance(edge, dict)
+        ] if isinstance(edges_raw, list) else []
+        edges = _build_trace_edges(nodes, edges, supplement_nodes)
+        nodes.extend(supplement_nodes)
+
+        voice_nodes = _build_voice_trace_nodes(voice_rows)
+        edges = _build_trace_edges(nodes, edges, voice_nodes)
+        nodes.extend(voice_nodes)
+        nodes = _enrich_trace_nodes(nodes)
+        trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
+
+        return TraceResponse(
+            request_id=request_id,
+            session_id=_first_present(row_dict.get("session_id"), summary.get("session_id")),
+            status=trace_status,
+            total_latency_ms=_first_present(row_dict.get("total_latency_ms"), summary.get("total_latency_ms")),
+            node_count=len(nodes),
+            nodes=nodes,
+            edges=edges,
+            summary=summary,
+            subgraphs=[],
+            stream_events=[],
+            ts_ms=row_dict.get("ts_ms", _now_ms()),
+            timestamp=_now_ms(),
+        )
+
+    synthesized_nodes = _build_voice_trace_nodes(voice_rows)
+    intent_node = _build_intent_trace_node(intent_rows[-1] if intent_rows else {})
+    if intent_node is not None:
+        synthesized_nodes.append(intent_node)
+    governor_node = _build_governor_trace_node(governor_rows[-1] if governor_rows else {}, summary)
+    if governor_node is not None:
+        synthesized_nodes.append(governor_node)
+
+    nodes = _enrich_trace_nodes(_sort_trace_nodes(synthesized_nodes))
+    edges = _build_linear_trace_edges(nodes)
+    decision = str(summary.get("decision") or "").strip().upper()
+    base_status = "FAIL" if decision and decision != "APPROVE" else "OK"
+    trace_status = _coalesce_trace_status(base_status, nodes)
+    trace_ts = next((node.ts_ms for node in nodes if node.ts_ms is not None), _now_ms())
+    return TraceResponse(
+        request_id=request_id,
+        session_id=summary.get("session_id"),
+        status=trace_status,
+        total_latency_ms=summary.get("total_latency_ms"),
+        node_count=len(nodes),
+        nodes=nodes,
+        edges=edges,
+        summary=summary,
+        subgraphs=[],
+        stream_events=[],
+        ts_ms=trace_ts,
+        timestamp=_now_ms(),
+    )
+
+
 def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceResponse:
+    started_at = time.perf_counter()
     trace_rows = _fetch_request_rows(ledger, "graph_run_trace", request_id)
     intent_rows = _fetch_request_rows(ledger, "intent_log", request_id)
     governor_rows = _fetch_request_rows(ledger, "governor_log", request_id)
@@ -1925,6 +2153,7 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     memory_rows = _fetch_request_rows(ledger, "memory_ops_log", request_id)
     error_rows = _fetch_request_rows(ledger, "error_log", request_id)
     voice_rows = _fetch_request_rows(ledger, "voice_event_log", request_id)
+    fetch_ms = int((time.perf_counter() - started_at) * 1000)
 
     if not trace_rows and not governor_rows and not intent_rows and not voice_rows:
         raise HTTPException(
@@ -1944,10 +2173,24 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
         error_rows=error_rows,
         voice_rows=voice_rows,
     )
-    subgraphs = _build_trace_subgraphs(request_id)
-    stream_events = _build_trace_stream_events(request_id)
+    summary_ms = int((time.perf_counter() - started_at) * 1000) - fetch_ms
+    optional_started = time.perf_counter()
+    subgraphs = _load_optional_trace_payload(
+        request_id,
+        "subgraphs",
+        _build_trace_subgraphs,
+        default_value=[],
+    )
+    stream_events = _load_optional_trace_payload(
+        request_id,
+        "stream-events",
+        _build_trace_stream_events,
+        default_value=[],
+    )
+    optional_ms = int((time.perf_counter() - optional_started) * 1000)
 
     if trace_rows:
+        compose_started = time.perf_counter()
         row_dict = trace_rows[-1]
         nodes_raw = _safe_json(row_dict.get("nodes_json")) or []
         edges_raw = _safe_json(row_dict.get("edges_json")) or []
@@ -2022,6 +2265,18 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
         nodes.extend(voice_nodes)
         nodes = _enrich_trace_nodes(nodes)
         trace_status = _coalesce_trace_status(str(row_dict.get("status", "OK")), nodes)
+        compose_ms = int((time.perf_counter() - compose_started) * 1000)
+        total_ms = int((time.perf_counter() - started_at) * 1000)
+        _log_trace_build_cost(
+            request_id,
+            mode="full",
+            total_ms=total_ms,
+            fetch_ms=fetch_ms,
+            summary_ms=summary_ms,
+            optional_ms=optional_ms,
+            compose_ms=compose_ms,
+            node_count=len(nodes),
+        )
 
         return TraceResponse(
             request_id=request_id,
@@ -2062,6 +2317,18 @@ def _build_trace_response(ledger: SQLiteLedger, request_id: str) -> TraceRespons
     base_status = "FAIL" if decision and decision != "APPROVE" else "OK"
     trace_status = _coalesce_trace_status(base_status, nodes)
     trace_ts = next((node.ts_ms for node in nodes if node.ts_ms is not None), _now_ms())
+    compose_ms = int((time.perf_counter() - started_at) * 1000) - fetch_ms - summary_ms - optional_ms
+    total_ms = int((time.perf_counter() - started_at) * 1000)
+    _log_trace_build_cost(
+        request_id,
+        mode="fallback",
+        total_ms=total_ms,
+        fetch_ms=fetch_ms,
+        summary_ms=summary_ms,
+        optional_ms=optional_ms,
+        compose_ms=max(compose_ms, 0),
+        node_count=len(nodes),
+    )
 
     return TraceResponse(
         request_id=request_id,
@@ -2400,7 +2667,7 @@ async def get_services_health(
         pass
 
     # 使用 ledger 数据构建探测函数注册表（被动监控）
-    probe_registry, extra_data = _build_probe_registry(ledger, since_ms)
+    probe_registry, extra_data = await asyncio.to_thread(_build_probe_registry, ledger, since_ms)
     aggregator = ServiceHealthAggregator(probe_registry=probe_registry)
     result = await aggregator.aggregate(side_filter=side)
 
@@ -2606,7 +2873,7 @@ def _build_probe_registry(ledger, since_ms: int):
 # GET /obs/sessions
 # ---------------------------------------------------------------------------
 @router.get("/sessions", response_model=SessionsResponse)
-async def get_sessions(
+def get_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
@@ -2625,7 +2892,7 @@ async def get_sessions(
 
 
 @router.get("/tribe/events", response_model=TribeEventsResponse)
-async def get_tribe_events(
+def get_tribe_events(
     limit: int = Query(20, ge=1, le=200, description="返回最近事件条数"),
     event_type: Optional[str] = Query(None, description="按事件类型过滤"),
     source_agent: Optional[str] = Query(None, description="按 source_agent 过滤"),
@@ -2666,7 +2933,7 @@ async def get_tribe_events(
 # GET /obs/sessions/export  — Ref #75: 会话列表 CSV 导出
 # ---------------------------------------------------------------------------
 @router.get("/sessions/export")
-async def export_sessions_csv(
+def export_sessions_csv(
     status: Optional[str] = Query(None, description="状态过滤: ok/rejected/error"),
     window_minutes: int = Query(1440, ge=1, le=10080, description="导出时间窗口（分钟），默认 24h"),
     keyword: Optional[str] = Query(None),
@@ -2736,7 +3003,43 @@ async def export_sessions_csv(
 @router.get("/trace/{request_id}", response_model=TraceResponse)
 async def get_trace(request_id: str):
     """获取单次会话的完整链路节点详情（含入参/出参/状态/延迟）。"""
-    return _build_trace_response(_get_ledger(), request_id)
+    ledger = _get_ledger()
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_build_trace_response, ledger, request_id),
+            timeout=_TRACE_BUILD_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "trace full build timeout: request_id=%s timeout_sec=%.2f, degrade to lightweight",
+            request_id,
+            _TRACE_BUILD_TIMEOUT_SEC,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("trace full build failed: request_id=%s err=%s, degrade to lightweight", request_id, exc)
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                _build_trace_response_lightweight,
+                ledger,
+                request_id,
+                reason="TRACE_DETAIL_DEGRADED",
+                message="trace detail built in lightweight mode due to timeout or downstream pressure",
+            ),
+            timeout=_TRACE_BUILD_FALLBACK_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": "trace_timeout",
+                "request_id": request_id,
+                "message": "trace detail build timed out in both full and lightweight modes",
+            },
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -2758,13 +3061,15 @@ async def stream_trace_live_feed(
         last_signature: Optional[str] = None
         last_snapshot: Optional[TraceLiveFeedSnapshot] = None
         first_event = True
+        ledger = _get_ledger()
         while True:
             if await request.is_disconnected():
                 break
 
             try:
-                snapshot = _build_trace_live_feed_snapshot(
-                    _get_ledger(),
+                snapshot = await asyncio.to_thread(
+                    _build_trace_live_feed_snapshot,
+                    ledger,
                     limit=limit,
                     window_minutes=window_minutes,
                     keyword=keyword,
@@ -2839,7 +3144,7 @@ class TraceStreamEventsResponse(BaseModel):
 
 
 @router.get("/trace/{request_id}/stream_events", response_model=TraceStreamEventsResponse)
-async def get_trace_stream_events(request_id: str):
+def get_trace_stream_events(request_id: str):
     """获取单次请求的 Chat Stream SSE 事件流（PRESENCE/AGENT_SELECTED/AGENT_HANDOFF 等），供链路详情展示。"""
     try:
         from host_brain.integrations.graph_evidence import get_evidence_plane
@@ -2893,7 +3198,7 @@ class GraphSchemaResponse(BaseModel):
 
 
 @router.get("/graph/schema", response_model=GraphSchemaResponse)
-async def get_graph_schema():
+def get_graph_schema():
     """获取当前 Host 图编排定义（节点、边、graph_meta），供 WebUI 展示图拓扑。"""
     try:
         from host_brain.app.graph_config_builder import (
@@ -2946,7 +3251,7 @@ async def get_graph_schema():
 # GET /obs/metrics/timeseries
 # ---------------------------------------------------------------------------
 @router.get("/metrics/timeseries", response_model=MetricsTimeseriesResponse)
-async def get_metrics_timeseries(
+def get_metrics_timeseries(
     range_minutes: int = Query(60, ge=5, le=10080, description="时间范围（分钟）"),
     interval_minutes: int = Query(5, ge=1, le=60, description="聚合间隔（分钟）"),
 ):
@@ -3003,7 +3308,7 @@ async def get_metrics_timeseries(
 # GET /obs/llm/nodes
 # ---------------------------------------------------------------------------
 @router.get("/llm/nodes", response_model=LlmNodesResponse)
-async def get_llm_nodes(
+def get_llm_nodes(
     window_minutes: int = Query(60, ge=1, le=1440),
 ):
     """9 个 LLM 云节点独立健康状态（成功率/P95延迟/最后调用时间）。"""

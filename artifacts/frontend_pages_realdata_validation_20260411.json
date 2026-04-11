@@ -1,0 +1,90 @@
+{
+  "files": 5,
+  "report": [
+    {
+      "har": "frontend_automation_realdata_20260411.har",
+      "total_entries": 10,
+      "obs_calls": 0,
+      "obs_ok": 0,
+      "obs_bad": [],
+      "sample_obs": []
+    },
+    {
+      "har": "frontend_digital_life_realdata_20260411.har",
+      "total_entries": 14,
+      "obs_calls": 2,
+      "obs_ok": 0,
+      "obs_bad": [
+        [
+          -1,
+          "http://127.0.0.1:18080/obs/runtime-snapshot"
+        ],
+        [
+          -1,
+          "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60"
+        ]
+      ],
+      "sample_obs": [
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot",
+          "ms": -1
+        },
+        {
+          "status": -1,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60",
+          "ms": -1
+        }
+      ]
+    },
+    {
+      "har": "frontend_insights_realdata_20260411.har",
+      "total_entries": 14,
+      "obs_calls": 2,
+      "obs_ok": 2,
+      "obs_bad": [],
+      "sample_obs": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot",
+          "ms": 7978.802
+        },
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60",
+          "ms": 0.555
+        }
+      ]
+    },
+    {
+      "har": "frontend_metrics_realdata_20260411.har",
+      "total_entries": 20,
+      "obs_calls": 2,
+      "obs_ok": 2,
+      "obs_bad": [],
+      "sample_obs": [
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/obs/runtime-snapshot",
+          "ms": 0.98
+        },
+        {
+          "status": 200,
+          "url": "http://127.0.0.1:18080/obs/prompt-builder/stats?window_minutes=60",
+          "ms": 1.699
+        }
+      ]
+    },
+    {
+      "har": "frontend_sessions_realdata_20260411.har",
+      "total_entries": 10,
+      "obs_calls": 0,
+      "obs_ok": 0,
+      "obs_bad": [],
+      "sample_obs": []
+    }
+  ],
+  "all_obs_calls": 6,
+  "all_obs_ok": 4,
+  "all_obs_bad": 2
+}

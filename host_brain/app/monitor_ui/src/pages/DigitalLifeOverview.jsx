@@ -18,7 +18,6 @@ import {
   fetchSubsystemsStats,
   fetchVtsStats,
 } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
@@ -61,13 +60,13 @@ const DOMAIN_STYLES = {
 }
 
 function DomainCard({ icon: Icon, title, desc, status, actionTo, actionLabel }) {
-  const label = status === 'wired' ? '已接入' : status === 'degraded' ? '降级' : '待补齐'
+  const label = status === 'wired' ? '已接入' : status === 'degraded' ? '降级' : '待接入'
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="card card-hover p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-600">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/80 bg-white/80 text-primary shadow-sm">
             <Icon size={18} />
           </span>
           <div>
@@ -90,12 +89,44 @@ function DomainCard({ icon: Icon, title, desc, status, actionTo, actionLabel }) 
 
 function GrowthTextCard({ title, text }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+    <div className="rounded-2xl border border-white/80 bg-white/75 p-4 shadow-sm backdrop-blur-sm">
       <div className="text-xs font-medium text-gray-500">{title}</div>
       <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-gray-700">
         {compactText(text, 200)}
       </div>
     </div>
+  )
+}
+
+function LifeSection({ title, hint, actionTo, actionLabel, children }) {
+  return (
+    <section className="card relative overflow-hidden p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_34%)]" />
+      <div className="relative">
+        <div className="mb-3 flex items-center gap-2">
+          <span className="lifeline-node" />
+          <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
+          {actionTo ? (
+            <Link to={actionTo} className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
+              {actionLabel || '查看'}
+            </Link>
+          ) : null}
+        </div>
+
+        {hint ? <p className="mb-3 text-xs text-gray-500">{hint}</p> : null}
+
+        <div className="lifeline-rail mb-4 h-5 px-2">
+          <div className="lifeline-wave absolute inset-0 opacity-70" />
+          <div className="relative flex h-full items-center justify-around">
+            {[0, 1, 2, 3].map((index) => (
+              <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
+            ))}
+          </div>
+        </div>
+
+        {children}
+      </div>
+    </section>
   )
 }
 
@@ -109,6 +140,7 @@ export default function DigitalLifeOverview() {
   const [memoryData, setMemoryData] = useState(null)
   const [servicesData, setServicesData] = useState(null)
   const [subsystemsData, setSubsystemsData] = useState(null)
+
   const {
     runtimeSnapshot,
     promptStats,
@@ -170,9 +202,11 @@ export default function DigitalLifeOverview() {
   const selfModelSnapshot = runtimeSnapshot?.self_model_snapshot || {}
   const topEmotion = emotionContext?.emotion_tag || vtsData?.top_emotions?.[0]?.emotion_tag
   const memorySubsystems = memoryData?.subsystems || []
+
   const avgMemorySuccessRate = memorySubsystems.length > 0
     ? Math.round(memorySubsystems.reduce((sum, item) => sum + Number(item?.success_rate || 0), 0) / memorySubsystems.length)
     : null
+
   const activeSubsystemCount = (subsystemsData?.subsystems || []).filter((item) => Number(item?.total || 0) > 0).length
   const currentBondStage = formatStage(bondState.current_stage)
   const currentEmotion = formatEmotionTag(topEmotion)
@@ -181,14 +215,30 @@ export default function DigitalLifeOverview() {
   const riskLevel = formatRiskLevel(runtimeSnapshot?.self_reflection_pulse?.narrative_guardrails?.risk_level)
   const absenceBand = formatAbsenceBand(offlineState.absence_band)
   const growthSignals = getGrowthSignals(runtimeSnapshot)
+
   const pulseNodes = [
     { label: '存在态', value: modeMeta.label, tone: 'primary', active: true },
     { label: '关系', value: currentBondStage, tone: 'rose', active: Boolean(bondState.current_stage) },
     { label: '情绪', value: currentEmotion, tone: 'pink', active: Boolean(topEmotion) },
     { label: '回复', value: replyPosture, tone: 'violet', active: Boolean(replyPosture) },
-    { label: '记忆', value: avgMemorySuccessRate != null ? `${avgMemorySuccessRate}% · ${memorySubsystems.length} 轴` : '—', tone: 'teal', active: avgMemorySuccessRate != null },
-    { label: '内在世界', value: offlineState.absence_band ? absenceBand : '在线', tone: 'amber', active: Boolean(offlineState.absence_band) },
-    { label: '自我模型', value: growthSignals.hasAnyGrowth ? '已形成样本' : '待成形', tone: 'gray', active: growthSignals.hasAnyGrowth },
+    {
+      label: '记忆',
+      value: avgMemorySuccessRate != null ? `${avgMemorySuccessRate}% · ${memorySubsystems.length} 个子系统` : '--',
+      tone: 'teal',
+      active: avgMemorySuccessRate != null,
+    },
+    {
+      label: '内在世界',
+      value: offlineState.absence_band ? absenceBand : '在线',
+      tone: 'amber',
+      active: Boolean(offlineState.absence_band),
+    },
+    {
+      label: '自我模型',
+      value: growthSignals.hasAnyGrowth ? '已形成样本' : '待成形',
+      tone: 'gray',
+      active: growthSignals.hasAnyGrowth,
+    },
   ]
 
   const wiredDomains = useMemo(
@@ -206,7 +256,7 @@ export default function DigitalLifeOverview() {
         title: '关系状态',
         desc: bondState.current_stage
           ? `${currentBondStage} · 趋势 ${formatTrend(bondState.trend)}`
-          : '关系系统已在线，但当前快照仍缺少阶段样本。',
+          : '关系系统已在线，但当前窗口仍缺少阶段样本。',
         status: bondState.current_stage ? 'wired' : 'degraded',
         actionTo: '/bond',
         actionLabel: '查看关系',
@@ -226,7 +276,7 @@ export default function DigitalLifeOverview() {
         title: '记忆系统',
         desc: avgMemorySuccessRate != null
           ? `平均成功率 ${avgMemorySuccessRate}% · ${memorySubsystems.length} 个子系统`
-          : '记忆页已接入，但首页摘要还缺少当前窗口样本。',
+          : '记忆页已接入，但首页摘要暂未形成样本。',
         status: avgMemorySuccessRate != null ? 'wired' : 'degraded',
         actionTo: '/memory',
         actionLabel: '查看记忆',
@@ -236,7 +286,7 @@ export default function DigitalLifeOverview() {
         title: '回复策略',
         desc: silenceState.willingness_level
           ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
-          : '回复策略已接入，但当前窗口没有稳定的策略快照。',
+          : '策略系统已接入，但当前窗口缺少稳定快照。',
         status: silenceState.willingness_level ? 'wired' : 'degraded',
         actionTo: '/response-policy',
         actionLabel: '查看策略',
@@ -247,8 +297,8 @@ export default function DigitalLifeOverview() {
         desc: growthSignals.hasAnyGrowth
           ? growthSignals.overviewSummary
           : selfModelSnapshot.recent_mood_trend
-          ? `近期情绪趋势 ${formatTrend(selfModelSnapshot.recent_mood_trend)}`
-          : '自我模型已在线，但本页还没有拿到足够的成长样本。',
+            ? `近期情绪趋势 ${formatTrend(selfModelSnapshot.recent_mood_trend)}`
+            : '自我模型在线，等待更多成长样本聚合。',
         status: growthSignals.hasAnyGrowth || selfModelSnapshot.recent_mood_trend ? 'wired' : 'degraded',
         actionTo: '/self-model',
         actionLabel: '查看自我模型',
@@ -258,7 +308,7 @@ export default function DigitalLifeOverview() {
         title: '内在世界',
         desc: offlineState.absence_band
           ? `${absenceBand} · 等待话题 ${(offlineState.anticipation_topics || []).length} 个`
-          : '内在世界可访问，但当前快照未形成完整的离线状态。',
+          : '内在世界可访问，当前尚未形成完整离线态快照。',
         status: offlineState.absence_band ? 'wired' : 'degraded',
         actionTo: '/inner-world',
         actionLabel: '查看内在世界',
@@ -300,10 +350,10 @@ export default function DigitalLifeOverview() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">数字生命体总览</h1>
-          <p className="text-sm text-gray-500">以数字生命体为主体，整合关系、情绪、记忆、策略与器官级稳态快照。</p>
+          <p className="text-sm text-gray-500">以数字生命体为主体，统一呈现关系、情绪、记忆、策略和器官稳态。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -314,13 +364,11 @@ export default function DigitalLifeOverview() {
         </div>
       </div>
 
-      <DigitalLifeNav />
-
       <PageHero
         icon={Sparkles}
         eyebrow="数字生命体运行态"
         title={`${modeMeta.emoji} ${modeMeta.label}`}
-        description={compactText(runtimeSnapshot?.runtime_summary?.headline || `${modeMeta.semantic} 生命流正在穿过关系、情绪、记忆与回复层。`, 160)}
+        description={compactText(runtimeSnapshot?.runtime_summary?.headline || `${modeMeta.semantic}生命流正在穿过关系、情绪、记忆与回复层。`, 160)}
         gradientClass="from-primary-50 via-white to-pink-50"
         metaItems={[
           `关系：${currentBondStage}`,
@@ -332,12 +380,21 @@ export default function DigitalLifeOverview() {
 
       <LivingPulseStrip
         title="生命流"
-        subtitle="把当前瞬时状态串成一条能读的脉冲流，先看它怎么流动，再往下看各层器官。"
+        subtitle="把当前瞬时状态串成一条可读脉冲流，先看流动，再看器官细节。"
         nodes={pulseNodes}
       />
 
       {error ? <NoticeBanner variant="error" title="总览统计加载失败">{error}</NoticeBanner> : null}
-      {runtimeError ? <NoticeBanner variant="warning" title="运行快照加载异常">{runtimeError}</NoticeBanner> : null}
+      {runtimeError ? (
+        <NoticeBanner
+          variant="info"
+          title={/404|Not Found/i.test(runtimeError) ? '运行快照暂不可用' : '运行快照加载异常'}
+        >
+          {/404|Not Found/i.test(runtimeError)
+            ? '当前环境没有接到运行快照，但页面其余部分仍可正常浏览。'
+            : runtimeError}
+        </NoticeBanner>
+      ) : null}
 
       {runtimeSnapshot ? (
         <>
@@ -352,38 +409,65 @@ export default function DigitalLifeOverview() {
         />
       ) : null}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard label="当前情绪" value={currentEmotion} hint={`VTS 事件 ${vtsData?.total_events ?? 0}`} tone="text-pink-600" />
-        <MetricCard label="关系阶段" value={currentBondStage} hint={`趋势 ${formatTrend(bondState.trend)}`} tone="text-rose-600" />
-        <MetricCard label="主导动机" value={dominantMotive} hint={`回复姿态 ${replyPosture}`} tone="text-violet-600" />
-        <MetricCard label="关键槽位" value={nonLiveSlots.length === 0 ? '全部在线' : `${nonLiveSlots.length} 个异常`} hint={`风险 ${riskLevel}`} tone="text-orange-500" />
-      </div>
-
-      {runtimeAlerts.length > 0 ? (
-        <div className="space-y-2">
-          {runtimeAlerts.slice(0, 3).map((item) => (
-            <NoticeBanner key={item.reason_code} variant={item.severity === 'critical' ? 'error' : item.severity === 'warning' ? 'warning' : 'info'} title={item.title}>
-              {item.detail}
-            </NoticeBanner>
-          ))}
+      <LifeSection
+        title="体征核心指标"
+        hint="把关键体征压成一屏可读指标，避免拆散到多个监控页。"
+      >
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <MetricCard label="当前情绪" value={currentEmotion} hint={`VTS 事件 ${vtsData?.total_events ?? 0}`} tone="text-pink-600" />
+          <MetricCard label="关系阶段" value={currentBondStage} hint={`趋势 ${formatTrend(bondState.trend)}`} tone="text-rose-600" />
+          <MetricCard label="主导动机" value={dominantMotive} hint={`回复姿态 ${replyPosture}`} tone="text-violet-600" />
+          <MetricCard label="关键槽位" value={nonLiveSlots.length === 0 ? '全部在线' : `${nonLiveSlots.length} 个异常`} hint={`风险 ${riskLevel}`} tone="text-orange-500" />
         </div>
-      ) : null}
 
-      <div className="card p-5">
-        <div className="mb-3 flex items-center gap-2">
-          <Sparkles size={16} className="text-gray-500" />
-          <h2 className="text-sm font-semibold text-gray-800">非监督成长</h2>
-          <Link to="/self-model" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
-            查看详情
-          </Link>
-        </div>
+        {runtimeAlerts.length > 0 ? (
+          <div className="mt-4 space-y-2">
+            {runtimeAlerts.slice(0, 3).map((item) => (
+              <NoticeBanner
+                key={item.reason_code}
+                variant={item.severity === 'critical' ? 'error' : item.severity === 'warning' ? 'warning' : 'info'}
+                title={item.title}
+              >
+                {item.detail}
+              </NoticeBanner>
+            ))}
+          </div>
+        ) : null}
+      </LifeSection>
+
+      <LifeSection
+        title="非监督成长"
+        hint="成长面板不再是独立后台模块，而是生命体连续性的一部分。"
+        actionTo="/self-model"
+        actionLabel="查看详情"
+      >
         {growthSignals.hasAnyGrowth ? (
           <>
             <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-              <MetricCard label="成长周期" value={growthSignals.cycleCount || 0} hint={growthSignals.lastCycleLabel !== '—' ? `最近周期 ${growthSignals.lastCycleLabel}` : '尚未形成稳定周期'} tone="text-fuchsia-600" />
-              <MetricCard label="活跃主题" value={growthSignals.activeThemes.length} hint={growthSignals.activeThemes.length > 0 ? compactText(growthSignals.activeThemes.join('、'), 42) : '暂无主题聚合'} tone="text-indigo-600" />
-              <MetricCard label="成长里程碑" value={growthSignals.milestones.length} hint={growthSignals.milestones.length > 0 ? compactText(growthSignals.milestones[0], 36) : '暂无里程碑'} tone="text-purple-600" />
-              <MetricCard label="护栏风险" value={riskLevel} hint="成长展示不会绕过叙事护栏" tone="text-orange-500" />
+              <MetricCard
+                label="成长周期"
+                value={growthSignals.cycleCount || 0}
+                hint={growthSignals.lastCycleLabel !== '--' ? `最近周期 ${growthSignals.lastCycleLabel}` : '尚未形成稳定周期'}
+                tone="text-fuchsia-600"
+              />
+              <MetricCard
+                label="活跃主题"
+                value={growthSignals.activeThemes.length}
+                hint={growthSignals.activeThemes.length > 0 ? compactText(growthSignals.activeThemes.join('、'), 42) : '暂无主题聚合'}
+                tone="text-indigo-600"
+              />
+              <MetricCard
+                label="成长里程碑"
+                value={growthSignals.milestones.length}
+                hint={growthSignals.milestones.length > 0 ? compactText(growthSignals.milestones[0], 36) : '暂无里程碑'}
+                tone="text-purple-600"
+              />
+              <MetricCard
+                label="护栏风险"
+                value={riskLevel}
+                hint="成长展示不会绕过叙事护栏"
+                tone="text-orange-500"
+              />
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -432,55 +516,65 @@ export default function DigitalLifeOverview() {
             className="p-4"
           />
         )}
-      </div>
+      </LifeSection>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {wiredDomains.map((item) => (
-          <DomainCard key={item.title} {...item} />
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <div className="card p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <ShieldAlert size={16} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">当前快照</h2>
-          </div>
-          <div className="space-y-3">
-            <KeyValueRow label="当前模式" value={modeMeta.label} />
-            <KeyValueRow label="离线分层" value={absenceBand} />
-            <KeyValueRow label="回复上限" value={responsePolicy.max_chars != null ? `${responsePolicy.max_chars} 字` : '—'} />
-            <KeyValueRow label="允许追问" value={responsePolicy.allow_followup == null ? '—' : responsePolicy.allow_followup ? '是' : '否'} />
-            <KeyValueRow label="允许换题" value={responsePolicy.allow_topic_shift == null ? '—' : responsePolicy.allow_topic_shift ? '是' : '否'} />
-            <KeyValueRow label="平均记忆成功率" value={avgMemorySuccessRate != null ? `${avgMemorySuccessRate}%` : '—'} />
-          </div>
+      <LifeSection
+        title="器官系统联通态"
+        hint="将已实现的类人器官系统聚合为统一联通视图。"
+      >
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {wiredDomains.map((item) => (
+            <DomainCard key={item.title} {...item} />
+          ))}
         </div>
+      </LifeSection>
 
-        <div className="card p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <Orbit size={16} className="text-gray-500" />
-            <h2 className="text-sm font-semibold text-gray-800">非在线槽位</h2>
-          </div>
-          {nonLiveSlots.length > 0 ? (
-            <div className="space-y-3">
-              {nonLiveSlots.map(([slot, status]) => (
-                <KeyValueRow
-                  key={slot}
-                  label={formatSlotLabel(slot)}
-                  value={formatSlotStatus(status)}
-                  valueClassName={status === 'degraded' ? 'text-orange-600' : 'text-red-600'}
-                />
-              ))}
+      <LifeSection
+        title="体内快照与异常槽位"
+        hint="左侧看当前体内快照，右侧暴露离线/降级槽位。"
+      >
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="card p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <ShieldAlert size={16} className="text-gray-500" />
+              <h3 className="text-sm font-semibold text-gray-800">当前快照</h3>
             </div>
-          ) : (
-            <EmptyStateCard
-              title="全部关键槽位在线"
-              hint="当前快照中没有检测到缺席或降级的核心槽位。"
-              className="p-5"
-            />
-          )}
+            <div className="space-y-3">
+              <KeyValueRow label="当前模式" value={modeMeta.label} />
+              <KeyValueRow label="离线分层" value={absenceBand} />
+              <KeyValueRow label="回复上限" value={responsePolicy.max_chars != null ? `${responsePolicy.max_chars} 字` : '--'} />
+              <KeyValueRow label="允许追问" value={responsePolicy.allow_followup == null ? '--' : responsePolicy.allow_followup ? '是' : '否'} />
+              <KeyValueRow label="允许换题" value={responsePolicy.allow_topic_shift == null ? '--' : responsePolicy.allow_topic_shift ? '是' : '否'} />
+              <KeyValueRow label="平均记忆成功率" value={avgMemorySuccessRate != null ? `${avgMemorySuccessRate}%` : '--'} />
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Orbit size={16} className="text-gray-500" />
+              <h3 className="text-sm font-semibold text-gray-800">非在线槽位</h3>
+            </div>
+            {nonLiveSlots.length > 0 ? (
+              <div className="space-y-3">
+                {nonLiveSlots.map(([slot, status]) => (
+                  <KeyValueRow
+                    key={slot}
+                    label={formatSlotLabel(slot)}
+                    value={formatSlotStatus(status)}
+                    valueClassName={status === 'degraded' ? 'text-orange-600' : 'text-red-600'}
+                  />
+                ))}
+              </div>
+            ) : (
+              <EmptyStateCard
+                title="全部关键槽位在线"
+                hint="当前快照中没有检测到缺席或降级的核心槽位。"
+                className="p-5"
+              />
+            )}
+          </div>
         </div>
-      </div>
+      </LifeSection>
     </div>
   )
 }

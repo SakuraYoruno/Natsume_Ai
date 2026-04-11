@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.input_routes import InputPayload, _log_input_event, receive_input
+from host_brain.app.input_routes import InputPayload, _dispatch_to_graph, _log_input_event, receive_input
 
 
 def _run(coro):
@@ -65,6 +65,30 @@ def test_receive_input_rejects_when_immune_gate_blocks() -> None:
     assert response.status == "REJECTED"
     assert "immune gate blocked" in response.detail
     assert dispatch_mock.await_count == 0
+
+
+def test_dispatch_to_graph_ignores_low_confidence_asr() -> None:
+    worker_mock = AsyncMock(return_value=None)
+
+    with patch.dict(
+        "os.environ",
+        {
+            "HOST_INPUT_DISPATCH_IN_THREAD": "false",
+            "HOST_INPUT_ASR_MIN_CONFIDENCE": "0.95",
+        },
+    ), patch("host_brain.app.input_routes._dispatch_to_graph_worker", new=worker_mock):
+        _run(
+            _dispatch_to_graph(
+                request_id="req-asr-noise-gate",
+                session_id="asr-session-noise-gate",
+                source="ASR",
+                text="字幕志愿者 杨茜茜",
+                payload={"confidence": 0.80, "is_final": True, "text": "字幕志愿者 杨茜茜"},
+                ts_ms=1234567890,
+            )
+        )
+
+    assert worker_mock.await_count == 0
 
 
 def test_log_input_event_persists_gateway_platform_metadata() -> None:

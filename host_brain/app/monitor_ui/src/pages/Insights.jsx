@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { RefreshCw, ShieldCheck, AlertTriangle, Cpu, Bot, Database, Tv, FileWarning, Zap, GitBranch, Layers, ShieldAlert, TriangleAlert, Lock, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Flame, ArrowLeft } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import InsightChartCard from '../components/insights/InsightChartCard.jsx'
@@ -215,21 +214,30 @@ export default function Insights() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">皮层洞察</h1>
-          <p className="mt-0.5 text-sm text-gray-500">把神经链路、记忆链路、执行推理与生命体运行状态收敛到同一套洞察面。</p>
+      <div className="card space-y-3 p-5 md:p-6">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">皮层洞察</h1>
+            <p className="mt-0.5 text-sm text-gray-500">把神经链路、记忆链路、执行推理与生命体运行状态收敛到同一套洞察面。</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
+            <button className="btn-secondary" onClick={load} disabled={loading}>
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              {loading ? '刷新中' : '刷新'}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {loading ? '刷新中' : '刷新'}
-          </button>
+        <div className="lifeline-rail h-1.5">
+          <div className="lifeline-wave h-full w-full" />
+        </div>
+        <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 md:grid-cols-4">
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">窗口：{windowMinutes}m</div>
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">全局异常：{errData?.total_errors ?? 0}</div>
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">子系统：{subsysData?.subsystems?.length ?? 0}</div>
+          <div className="rounded-lg border border-primary-100/70 bg-white/70 px-3 py-2">执行循环：{agentData?.total_loops ?? 0}</div>
         </div>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={currentGroupMeta?.icon || Activity}
@@ -261,34 +269,42 @@ export default function Insights() {
       {error && <NoticeBanner variant="error">加载失败：{error}</NoticeBanner>}
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptBuilderData} compact={!isRoot} />
       {isRoot ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {INSIGHT_GROUPS.map(g => (
-            <div
+            <button
+              type="button"
               key={g.id}
-              className={`rounded-xl p-6 cursor-pointer transition-all duration-300 hover:-translate-y-1 hover:shadow-lg flex flex-col gap-4 ${g.bg}`}
+              className={`card-hover group w-full cursor-pointer p-0 text-left ${g.bg}`}
               onClick={() => navigate(`/insights/${g.id}`)}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2.5 rounded-lg ${g.iconBg} ${g.color} shadow-sm`}>
-                    <g.icon size={24} strokeWidth={2} />
+              <div className="space-y-4 p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`rounded-lg p-2.5 shadow-sm ${g.iconBg} ${g.color}`}>
+                      <g.icon size={24} strokeWidth={2} />
+                    </div>
+                    <h3 className="text-lg font-bold tracking-tight text-gray-800">{g.title}</h3>
                   </div>
-                  <h3 className="text-lg font-bold text-gray-800 tracking-tight">{g.title}</h3>
+                  <div className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium ${g.iconBg} ${g.color} bg-opacity-50`}>
+                    <span>进入</span>
+                    <ArrowLeft size={12} className="rotate-180 transition-transform group-hover:translate-x-0.5 group-hover:rotate-180" />
+                  </div>
                 </div>
-                <div className={`text-xs font-medium px-2 py-1 rounded-full ${g.iconBg} ${g.color} bg-opacity-50 flex items-center gap-1`}>
-                  <span>进入</span>
-                  <ArrowLeft size={12} className="rotate-180" />
+                <p className="text-sm leading-relaxed text-gray-600">{g.desc}</p>
+                <div className="lifeline-rail h-1.5">
+                  <div className="lifeline-wave h-full w-full" />
                 </div>
               </div>
-              <p className="text-sm text-gray-600 leading-relaxed">{g.desc}</p>
-            </div>
+            </button>
           ))}
         </div>
       ) : (
-        <div className="space-y-8 mt-6">
-          <button className="btn-secondary" onClick={() => navigate('/insights')}>
-            <ArrowLeft size={16} /> 返回分组
-          </button>
+        <div className="space-y-8">
+          <div className="card p-4">
+            <button className="btn-secondary" onClick={() => navigate('/insights')}>
+              <ArrowLeft size={16} /> 返回分组
+            </button>
+          </div>
 
           {currentGroup === 'global' && (
             <>

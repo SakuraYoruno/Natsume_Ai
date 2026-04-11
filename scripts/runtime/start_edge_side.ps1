@@ -5,6 +5,8 @@ param(
   [int]$WaitSeconds = 120,
   [int]$StabilityWaitSeconds = 8,
   [switch]$ForceRestart,
+  [switch]$ShowConsoleWindow,
+  [bool]$BreakawayFromSsh = $true,
   [bool]$AutoDegradeOnAsrCrash = $false,
   [bool]$EnforceCnAsrJaTtsMode = $true,
   [ValidateSet("", "wxautox4_hook", "off")]
@@ -77,6 +79,8 @@ $edgeRaw = & $startEdgeScript `
   -WaitSeconds $WaitSeconds `
   -StabilityWaitSeconds $StabilityWaitSeconds `
   -ForceRestart:$ForceRestart.IsPresent `
+  -ShowConsoleWindow:$ShowConsoleWindow.IsPresent `
+  -BreakawayFromSsh:$BreakawayFromSsh `
   -AutoDegradeOnAsrCrash:$AutoDegradeOnAsrCrash `
   -EnforceCnAsrJaTtsMode:$EnforceCnAsrJaTtsMode
 

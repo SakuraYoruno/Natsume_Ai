@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, Database, Pause, Play, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { fetchErrors } from '../api/obs.js'
-import DigitalLifeNav from '../components/DigitalLifeNav.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -130,8 +129,6 @@ export default function LogStream() {
         <h1 className="text-xl font-semibold text-gray-900">生理日志流</h1>
         <p className="text-sm text-gray-500">实时观察生命体审计日志、异常事件和神经链路故障明细。</p>
       </div>
-
-      <DigitalLifeNav />
 
       <PageHero
         icon={Database}

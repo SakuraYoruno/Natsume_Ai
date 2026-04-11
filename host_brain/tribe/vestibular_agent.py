@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -201,12 +202,12 @@ class VestibularAgent:
     async def _on_mode_transition(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._mode_transition_ts.append(ts_ms)
-        self.evaluate_stability(source="mode_transition", ts_ms=ts_ms)
+        await asyncio.to_thread(self.evaluate_stability, source="mode_transition", ts_ms=ts_ms)
 
     async def _on_platform_signal(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._platform_flap_ts.append(ts_ms)
-        self.evaluate_stability(source="platform_signal", ts_ms=ts_ms)
+        await asyncio.to_thread(self.evaluate_stability, source="platform_signal", ts_ms=ts_ms)
 
     async def _on_initiative_decision(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
@@ -214,7 +215,7 @@ class VestibularAgent:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         if decision in {"DEFER", "BLOCK"}:
             self._initiative_defer_ts.append(ts_ms)
-        self.evaluate_stability(source="initiative_decision", ts_ms=ts_ms)
+        await asyncio.to_thread(self.evaluate_stability, source="initiative_decision", ts_ms=ts_ms)
 
 
 _VESTIBULAR_AGENT: VestibularAgent | None = None

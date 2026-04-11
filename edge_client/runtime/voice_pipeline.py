@@ -246,6 +246,19 @@ class EdgeVoicePipeline:
             payload=payload,
             ts_ms=event_ts,
         )
+        barge_event = dict(barge_result.event or {})
+        LOGGER.info(
+            "[EDGE_VOICE_MON][BARGE_IN] ts=%s req=%s session=%s seq=%s status=%s reason=%s stage=%s detail=%s text=\"%s\"",
+            self._format_ts_ms(int(barge_event.get("ts_ms") or event_ts)),
+            str(barge_event.get("request_id") or request_id or ""),
+            str(barge_event.get("session_id") or payload.get("session_id") or ""),
+            str(barge_event.get("seq") or payload.get("seq") or ""),
+            barge_result.status,
+            barge_result.reason_code,
+            barge_result.stage,
+            str(barge_result.detail or ""),
+            self._short_log_text(barge_event.get("text") or payload.get("text"), limit=160),
+        )
         vts_result: VtsDriverResult | None = None
         if (
             barge_result.success
@@ -350,6 +363,20 @@ class EdgeVoicePipeline:
         event = dict(result.event or {})
         event_type = str(event.get("event_type") or "").strip()
         session_id = str(event.get("session_id") or "").strip()
+        if event_type:
+            LOGGER.info(
+                "[EDGE_VOICE_MON][TTS] ts=%s event=%s req=%s session=%s seq=%s status=%s reason=%s stage=%s detail=%s text=\"%s\"",
+                self._format_ts_ms(int(event.get("ts_ms") or now_ms())),
+                event_type,
+                str(event.get("request_id") or request_id or ""),
+                session_id or str(event.get("session_id") or ""),
+                str(event.get("seq") or ""),
+                result.status,
+                result.reason_code,
+                result.stage,
+                str(result.detail or ""),
+                self._short_log_text(event.get("text"), limit=160),
+            )
         if not event_type or not session_id:
             return None
         report_event = {
@@ -698,6 +725,20 @@ class EdgeVoicePipeline:
                 if channel_values:
                     values.append(sum(channel_values) / len(channel_values))
         return values
+
+    @staticmethod
+    def _short_log_text(value: Any, *, limit: int = 160) -> str:
+        text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+        if len(text) <= limit:
+            return text
+        return f"{text[: max(0, limit - 3)]}..."
+
+    @staticmethod
+    def _format_ts_ms(ts_ms: int) -> str:
+        try:
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts_ms) / 1000.0))
+        except Exception:
+            return "unknown"
 
     def health(self) -> dict[str, Any]:
         thread = self._mouth_sync_thread

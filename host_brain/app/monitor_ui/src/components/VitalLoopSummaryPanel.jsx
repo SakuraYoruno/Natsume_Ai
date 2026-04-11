@@ -8,11 +8,11 @@ import { formatDigitalLifeTag, formatNumber, formatSlotLabel, formatSlotStatus }
 
 function asPercent01(value, digits = 0) {
   const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return '—'
+  if (!Number.isFinite(numeric)) return '--'
   return `${formatNumber(numeric * 100, digits)}%`
 }
 
-function toLabel(value, fallback = '—') {
+function toLabel(value, fallback = '--') {
   const raw = String(value || '').trim()
   if (!raw) return fallback
   return formatDigitalLifeTag(raw)
@@ -72,8 +72,8 @@ export default function VitalLoopSummaryPanel({ runtimeSnapshot, compact = false
     return (
       <div className="card p-5">
         <div className="mb-3 flex items-center gap-2">
-          <Activity size={15} className="text-gray-500" />
-          <h2 className="text-sm font-semibold text-gray-800">器官稳态</h2>
+          <Activity size={15} className="text-primary" />
+          <h2 className="text-sm font-semibold text-gray-800">器官稳态摘要</h2>
           {showDetailLink ? (
             <Link to="/overview" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
               查看器官级观测
@@ -81,20 +81,27 @@ export default function VitalLoopSummaryPanel({ runtimeSnapshot, compact = false
           ) : null}
         </div>
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <MetricCard label="稳态风险" value={riskLabel} hint={`稳态 ${toLabel(homeostasis.status || 'stable')}`} tone="text-cyan-600" />
+          <MetricCard label="稳态风险" value={riskLabel} hint={`状态 ${toLabel(homeostasis.status || 'stable')}`} tone="text-cyan-600" />
           <MetricCard label="内感受指数" value={asPercent01(interoception.interoceptive_index, 1)} hint={`恢复紧迫 ${asPercent01(interoception.recovery_urgency, 1)}`} tone="text-rose-600" />
           <MetricCard label="前庭抖动" value={asPercent01(vestibular.jitter_index, 1)} hint={toLabel(vestibular.stability_state)} tone="text-blue-600" />
-          <MetricCard label="动作分发" value={motorCortex.last_dispatch_ok === true ? '成功' : motorCortex.last_dispatch_ok === false ? '失败' : '—'} hint={motorCortex.last_dispatch_reason || '暂无最近记录'} tone="text-purple-600" />
+          <MetricCard
+            label="动作分发"
+            value={motorCortex.last_dispatch_ok === true ? '成功' : motorCortex.last_dispatch_ok === false ? '失败' : '--'}
+            hint={motorCortex.last_dispatch_reason || '暂无最近记录'}
+            tone="text-purple-600"
+          />
         </div>
       </div>
     )
   }
 
   return (
-    <div className="card p-5">
-      <div className="mb-3 flex items-center gap-2">
-        <Activity size={15} className="text-gray-500" />
-        <h2 className="text-sm font-semibold text-gray-800">器官稳态</h2>
+    <div className="card relative overflow-hidden p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(41,112,255,0.05),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.05),_transparent_34%)]" />
+
+      <div className="relative mb-3 flex items-center gap-2">
+        <Activity size={15} className="text-primary" />
+        <h2 className="text-sm font-semibold text-gray-800">器官稳态摘要</h2>
         {showDetailLink ? (
           <Link to="/overview" className="ml-auto text-xs font-medium text-primary hover:text-primary-700">
             查看器官级观测
@@ -102,20 +109,36 @@ export default function VitalLoopSummaryPanel({ runtimeSnapshot, compact = false
         ) : null}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
-        <MetricCard label="稳态风险" value={riskLabel} hint={`稳态 ${toLabel(homeostasis.status || 'stable')}`} tone="text-cyan-600" />
+      <div className="lifeline-rail relative mb-4 h-5 px-2">
+        <div className="lifeline-wave absolute inset-0 opacity-70" />
+        <div className="relative flex h-full items-center justify-around">
+          {[0, 1, 2, 3].map((index) => (
+            <span key={index} className="lifeline-node" style={{ animationDelay: `${index * 0.24}s` }} />
+          ))}
+        </div>
+      </div>
+
+      <div className="relative grid grid-cols-2 gap-3 xl:grid-cols-5">
+        <MetricCard label="稳态风险" value={riskLabel} hint={`状态 ${toLabel(homeostasis.status || 'stable')}`} tone="text-cyan-600" />
         <MetricCard label="内感受指数" value={asPercent01(interoception.interoceptive_index, 1)} hint={`body budget ${asPercent01(interoception.body_budget, 1)}`} tone="text-rose-600" />
         <MetricCard label="前庭抖动" value={asPercent01(vestibular.jitter_index, 1)} hint={toLabel(vestibular.stability_state)} tone="text-blue-600" />
         <MetricCard label="小脑校正" value={toLabel(cerebellum.last_strategy || 'NO_ADJUST')} hint={`urgency ${asPercent01(cerebellum.last_urgency, 1)}`} tone="text-violet-600" />
         <MetricCard label="恢复循环" value={glymphatic.executed ? '已执行' : '等待窗口'} hint={glymphatic.reason_code || 'RECOVERY_WINDOW_CLOSED'} tone="text-emerald-600" />
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="relative mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="space-y-3">
-          <KeyValueRow label="动作计划" value={motorCortex.last_plan_id || '—'} maxValueWidthClassName="max-w-[72%]" />
-          <KeyValueRow label="动作分发" value={motorCortex.last_dispatch_ok === true ? '成功' : motorCortex.last_dispatch_ok === false ? `失败 · ${motorCortex.last_dispatch_reason || 'unknown'}` : '—'} maxValueWidthClassName="max-w-[72%]" />
+          <KeyValueRow label="动作计划" value={motorCortex.last_plan_id || '--'} maxValueWidthClassName="max-w-[72%]" />
+          <KeyValueRow
+            label="动作分发"
+            value={motorCortex.last_dispatch_ok === true ? '成功' : motorCortex.last_dispatch_ok === false ? `失败 · ${motorCortex.last_dispatch_reason || 'unknown'}` : '--'}
+            maxValueWidthClassName="max-w-[72%]"
+          />
           <KeyValueRow label="前庭路由偏置" value={toLabel(vestibular.route_bias || 'normal')} />
-          <KeyValueRow label="稳态告警" value={homeostasis?.alerts?.chronic_overload ? '慢性过载' : homeostasis?.alerts?.chronic_low_energy ? '低能量' : '无'} />
+          <KeyValueRow
+            label="稳态告警"
+            value={homeostasis?.alerts?.chronic_overload ? '慢性过载' : homeostasis?.alerts?.chronic_low_energy ? '低能量' : '无'}
+          />
         </div>
         <div className="space-y-3">
           {nonLiveSlots.length > 0 ? (
@@ -129,14 +152,14 @@ export default function VitalLoopSummaryPanel({ runtimeSnapshot, compact = false
         </div>
       </div>
 
-      <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+      <div className="relative mt-4 rounded-xl border border-white/80 bg-white/75 p-3 text-xs text-gray-500 shadow-sm">
         <div className="flex items-center gap-1.5">
           <Gauge size={13} />
-          说明：这里展示的是器官级稳态摘要，详细时序与分层链路放在器官级观测页。
+          这里展示器官级稳态摘要，详细时序与分层链路请查看器官级观测页。
         </div>
         <div className="mt-1.5 flex items-center gap-1.5">
           <Waves size={13} />
-          如果看到“等待窗口”，通常只是正常节律行为，不代表异常。
+          若显示“等待窗口”，通常是正常节律行为，不代表异常。
         </div>
       </div>
     </div>
