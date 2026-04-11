@@ -817,6 +817,8 @@ $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNEC
 $useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
 
 $wechatEnvOverrideKeys = @(
+  "EDGE_ASR_ENABLED",
+  "EDGE_GATEWAY_VOICE_ASR_ENABLED",
   "EDGE_WECHAT_BRIDGE_ENABLED",
   "EDGE_WECHAT_BRIDGE_BACKEND",
   "EDGE_WECHAT_INBOUND_BACKEND",

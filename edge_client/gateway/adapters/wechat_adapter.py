@@ -70,10 +70,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 self._stats["inbound_skipped"] += 1
                 return None
             content = self._resolve_inbound_content(raw_payload)
+            if not content:
+                content = self._fallback_content_for_msg_type(msg_type)
             if msg_type == MsgType.TEXT and (not content):
                 self._stats["inbound_skipped"] += 1
                 return None
             ts_ms = self._resolve_inbound_ts_ms(raw_payload)
+            media_url = self._resolve_inbound_media_url(raw_payload)
             sender_name = str(raw_payload.get("sender_name") or raw_payload.get("sender") or from_wxid or "").strip() or None
             is_group = (
                 conversation_id.endswith("@chatroom")
@@ -90,7 +93,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 content=content,
                 ts_ms=ts_ms,
                 is_group=is_group,
-                media_url=str(raw_payload.get("media_url") or "").strip() or None,
+                media_url=media_url,
                 sender_name=sender_name,
                 raw_extra=dict(raw_payload),
             )
@@ -111,7 +114,10 @@ class WeChatAdapter(AbstractPlatformAdapter):
         if msg_type == MsgType.SYSTEM:
             self._stats["inbound_skipped"] += 1
             return None
-        if msg_type == MsgType.TEXT and (not str(wx_msg.content or "").strip()):
+        content = str(wx_msg.content or "").strip()
+        if not content:
+            content = self._fallback_content_for_msg_type(msg_type)
+        if msg_type == MsgType.TEXT and (not content):
             self._stats["inbound_skipped"] += 1
             return None
         self._stats["inbound_parsed"] += 1
@@ -122,7 +128,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             to_id=wx_msg.to_wxid,
             conversation_id=conversation_id,
             msg_type=msg_type,
-            content=str(wx_msg.content or ""),
+            content=content,
             ts_ms=int(wx_msg.ts_ms),
             is_group=conversation_id.endswith("@chatroom"),
             media_url=wx_msg.media_url,
@@ -641,6 +647,20 @@ class WeChatAdapter(AbstractPlatformAdapter):
         return ""
 
     @staticmethod
+    def _resolve_inbound_media_url(raw_payload: dict[str, Any]) -> str | None:
+        for item in (
+            raw_payload.get("media_url"),
+            raw_payload.get("media_path"),
+            raw_payload.get("file_path"),
+            raw_payload.get("path"),
+            raw_payload.get("StrFileName"),
+        ):
+            value = str(item or "").strip()
+            if value:
+                return value
+        return None
+
+    @staticmethod
     def _resolve_inbound_msg_type(raw_payload: dict[str, Any]) -> int:
         type_map = {
             "text": 1,
@@ -674,3 +694,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
             except (TypeError, ValueError):
                 continue
         return int(time.time() * 1000)
+
+    @staticmethod
+    def _fallback_content_for_msg_type(msg_type: MsgType) -> str:
+        mapping: dict[MsgType, str] = {
+            MsgType.VOICE: "[语音消息]",
+            MsgType.IMAGE: "[图片消息]",
+            MsgType.VIDEO: "[视频消息]",
+            MsgType.FILE: "[文件消息]",
+        }
+        return mapping.get(msg_type, "")

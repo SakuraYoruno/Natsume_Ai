@@ -6,6 +6,7 @@ param(
   [int]$StabilityWaitSeconds = 8,
   [switch]$ForceRestart,
   [switch]$Background,
+  [switch]$GatewayVoiceAsrMode,
   [switch]$ShowConsoleWindow,
   [bool]$BreakawayFromSsh = $false,
   [bool]$AutoDegradeOnAsrCrash = $false,
@@ -60,6 +61,11 @@ Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_AUTOSTART" -Value "true"
 Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_LAUNCHER_PATH" -Value $napCatCleanLauncher
 Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_LAUNCHER_ARGS" -Value "{QQ_SELF_ID}"
 Set-ProcessEnvValue -Key "EDGE_QQ_ONEBOT_HEALTH_URL" -Value "http://127.0.0.1:3000/get_status"
+if ($GatewayVoiceAsrMode.IsPresent) {
+  # Disable resident microphone ASR and only transcribe gateway voice messages.
+  Set-ProcessEnvValue -Key "EDGE_ASR_ENABLED" -Value "false"
+  Set-ProcessEnvValue -Key "EDGE_GATEWAY_VOICE_ASR_ENABLED" -Value "true"
+}
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_INBOUND_BACKEND" -Value $WeChatInboundBackend
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MODEL" -Value $WeChatVisionModel
 Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_API_URL" -Value $WeChatVisionApiUrl

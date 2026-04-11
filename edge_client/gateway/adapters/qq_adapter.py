@@ -133,6 +133,9 @@ class QQAdapter(AbstractPlatformAdapter):
 
         # 消息类型判断
         msg_type = self._detect_msg_type(raw_payload)
+        media_url = self._extract_media_url(raw_payload, msg_type=msg_type)
+        if not content:
+            content = self._fallback_content_for_msg_type(msg_type)
 
         # 发送者昵称
         sender = raw_payload.get("sender") or {}
@@ -155,6 +158,7 @@ class QQAdapter(AbstractPlatformAdapter):
             ts_ms=ts_ms,
             is_group=is_group,
             sender_name=sender_name or None,
+            media_url=media_url,
             raw_extra=enriched_extra,
         )
 
@@ -510,3 +514,42 @@ class QQAdapter(AbstractPlatformAdapter):
             if "file" in types:
                 return MsgType.FILE
         return MsgType.TEXT
+
+    @staticmethod
+    def _extract_media_url(raw_payload: dict[str, Any], *, msg_type: MsgType) -> str | None:
+        message_arr = raw_payload.get("message")
+        if not isinstance(message_arr, list):
+            return None
+        target_types: dict[MsgType, set[str]] = {
+            MsgType.VOICE: {"record", "voice"},
+            MsgType.IMAGE: {"image"},
+            MsgType.VIDEO: {"video"},
+            MsgType.FILE: {"file"},
+        }
+        expected = target_types.get(msg_type) or set()
+        if not expected:
+            return None
+        for seg in message_arr:
+            if not isinstance(seg, dict):
+                continue
+            seg_type = str(seg.get("type") or "").strip().lower()
+            if seg_type not in expected:
+                continue
+            data = seg.get("data")
+            if not isinstance(data, dict):
+                continue
+            for key in ("file", "url", "path"):
+                value = str(data.get(key) or "").strip()
+                if value:
+                    return value
+        return None
+
+    @staticmethod
+    def _fallback_content_for_msg_type(msg_type: MsgType) -> str:
+        mapping: dict[MsgType, str] = {
+            MsgType.VOICE: "[语音消息]",
+            MsgType.IMAGE: "[图片消息]",
+            MsgType.VIDEO: "[视频消息]",
+            MsgType.FILE: "[文件消息]",
+        }
+        return mapping.get(msg_type, "")

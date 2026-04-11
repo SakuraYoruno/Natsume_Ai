@@ -35,9 +35,10 @@ class _FakeThread:
 
 
 class _FakeRouter:
-    def __init__(self, reporter) -> None:  # noqa: ANN001
+    def __init__(self, reporter, voice_asr=None) -> None:  # noqa: ANN001
         self.reporter = reporter
         self.bridge = None
+        self.voice_asr = voice_asr
 
     def set_tribe_bridge(self, bridge) -> None:  # noqa: ANN001
         self.bridge = bridge
@@ -66,7 +67,7 @@ def test_start_gateway_registers_wechat_in_wxautox4_bridge_mode(monkeypatch) -> 
 
     monkeypatch.setattr("edge_client.channels.input_reporter.EdgeInputReporter", _FakeReporter)
     monkeypatch.setattr("edge_client.gateway.normalizer.MessageNormalizer", lambda: object())
-    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", lambda reporter: object())
+    monkeypatch.setattr("edge_client.gateway.router.GatewayRouter", lambda reporter, voice_asr=None: object())
     monkeypatch.setattr("edge_client.gateway.outbound.OutboundDispatcher", _FakeOutboundDispatcher)
     monkeypatch.setattr(
         "edge_client.gateway.server.create_gateway_app",

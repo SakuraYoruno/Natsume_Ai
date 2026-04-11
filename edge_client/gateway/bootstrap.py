@@ -260,6 +260,7 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     from edge_client.gateway.outbound import OutboundDispatcher
     from edge_client.gateway.router import GatewayRouter
     from edge_client.gateway.server import create_gateway_app
+    from edge_client.gateway.voice_asr import GatewayVoiceAsr
     from edge_client.tribe.peripheral_agent import PeripheralAgent
     from edge_client.tribe.registry import build_edge_tribe_bridge
 
@@ -281,7 +282,15 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     instance.peripheral_agent = PeripheralAgent(bridge=tribe_bridge)
 
     normalizer = MessageNormalizer()
-    router = GatewayRouter(reporter)
+    gateway_voice_asr = GatewayVoiceAsr()
+    router = GatewayRouter(
+        reporter,
+        voice_asr=(gateway_voice_asr if gateway_voice_asr.enabled else None),
+    )
+    if gateway_voice_asr.enabled:
+        logger.info("Gateway: voice-message ASR trigger enabled")
+    else:
+        logger.info("Gateway: voice-message ASR trigger disabled")
     try:
         router.set_tribe_bridge(tribe_bridge)
     except Exception as exc:  # pragma: no cover - non-blocking sidecar
