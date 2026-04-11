@@ -222,8 +222,21 @@ class EdgeVoicePipeline:
             and self.vts_driver is not None
         ):
             self._stop_mouth_sync()
-            self.vts_driver.talk_end()
-            self.vts_driver.reset_to_neutral()
+            playback_event = dict(result.event or {})
+            talk_end_result = self.vts_driver.talk_end()
+            self._log_vts_monitor(
+                action="TALK_END",
+                result=talk_end_result,
+                payload=playback_event,
+                ts_ms=int(playback_event.get("ts_ms") or event_ts),
+            )
+            reset_result = self.vts_driver.reset_to_neutral()
+            self._log_vts_monitor(
+                action="RESET_TO_NEUTRAL",
+                result=reset_result,
+                payload=playback_event,
+                ts_ms=int(playback_event.get("ts_ms") or event_ts),
+            )
         if result is not None and result.success:
             # before_playback_hook 会在 start_next 内部自动驱动 VTS，无需额外调用
             next_start_result = self.speech_queue.start_next(ts_ms=event_ts)
@@ -267,6 +280,12 @@ class EdgeVoicePipeline:
         ):
             self._stop_mouth_sync()
             vts_result = self.vts_driver.reset_to_neutral()
+            self._log_vts_monitor(
+                action="RESET_ON_BARGE_IN",
+                result=vts_result,
+                payload=barge_event if isinstance(barge_event, dict) else payload,
+                ts_ms=int(barge_event.get("ts_ms") or event_ts),
+            )
         return EdgeBargeInResult(
             success=barge_result.success,
             barge_result=barge_result,
@@ -455,6 +474,13 @@ class EdgeVoicePipeline:
             payload,
             synth_event=synth_event,
         )
+        self._log_vts_monitor(
+            action="PRE_PLAYBACK",
+            result=expression_result,
+            payload=payload,
+            detail=f"emotion_tag={_etag} has_audio={_has_audio}",
+            extra={"mouth_sync_state": str((mouth_sync_debug or {}).get("state") or "")},
+        )
         # 缓存结果供 enqueue_speak / complete_playback 读取
         self._pending_vts_result = {
             "expression_result": expression_result,
@@ -474,10 +500,21 @@ class EdgeVoicePipeline:
                 "started": False,
                 "reason": "vts_driver_unavailable",
             }
+            self._log_vts_monitor(
+                action="VTS_UNAVAILABLE",
+                payload=payload,
+                detail="vts_driver_unavailable",
+                extra={"mouth_sync_state": "skipped"},
+            )
             return None, None, dict(self._mouth_sync_debug)
         self._stop_mouth_sync()
         if self.vts_driver.state != VtsState.AUTHENTICATED:
             conn_result = self.vts_driver.connect()
+            self._log_vts_monitor(
+                action="CONNECT",
+                result=conn_result,
+                payload=payload,
+            )
             if not conn_result.success:
                 self._mouth_sync_debug = {
                     "state": "blocked",
@@ -506,14 +543,34 @@ class EdgeVoicePipeline:
                 )
             else:
                 expression_result = self.vts_driver.set_expression(emotion_tag, intensity=intensity)
+        self._log_vts_monitor(
+            action="SET_EXPRESSION",
+            result=expression_result,
+            payload=payload,
+            extra={
+                "emotion_tag": emotion_tag,
+                "intensity": round(float(intensity), 4),
+            },
+        )
         sub_emotion = payload.get("sub_emotion")
         if sub_emotion:
             from host_brain.channels.vts_mapping_store import sub_emotion_to_hotkey
 
             hotkey_id = sub_emotion_to_hotkey(sub_emotion)
             if hotkey_id:
-                self.vts_driver.trigger_hotkey(hotkey_id)
+                hotkey_result = self.vts_driver.trigger_hotkey(hotkey_id)
+                self._log_vts_monitor(
+                    action="TRIGGER_HOTKEY",
+                    result=hotkey_result,
+                    payload=payload,
+                    extra={"hotkey_id": str(hotkey_id)},
+                )
         talk_result = self.vts_driver.talk_start()
+        self._log_vts_monitor(
+            action="TALK_START",
+            result=talk_result,
+            payload=payload,
+        )
         vts_health = self.vts_driver.health()
         mouth_sync_debug = {
             "state": "talk_started" if talk_result.success else "talk_failed",
@@ -525,10 +582,30 @@ class EdgeVoicePipeline:
         has_audio = self._synth_event_has_audio(synth_event)
         if has_audio and talk_result.success:
             mouth_sync_debug = self._start_mouth_sync(synth_event)
+            self._log_vts_monitor(
+                action="MOUTH_SYNC",
+                payload=payload,
+                detail=str(mouth_sync_debug.get("state") or ""),
+                extra={
+                    "state": str(mouth_sync_debug.get("state") or ""),
+                    "started": bool(mouth_sync_debug.get("started", False)),
+                    "envelope_points": int(mouth_sync_debug.get("envelope_points") or 0),
+                },
+            )
         elif not has_audio:
             mouth_sync_debug["reason"] = "missing_synth_event"
             LOGGER.warning(
                 "VTS mouth sync skipped: no synth_event (Edge needs local TTS with audio_data, e.g. SoVITS, for lip sync)"
+            )
+            self._log_vts_monitor(
+                action="MOUTH_SYNC",
+                payload=payload,
+                detail="missing_synth_event",
+                extra={
+                    "state": str(mouth_sync_debug.get("state") or ""),
+                    "started": bool(mouth_sync_debug.get("started", False)),
+                    "reason": "missing_synth_event",
+                },
             )
         self._mouth_sync_debug = dict(mouth_sync_debug)
         return expression_result, talk_result, dict(mouth_sync_debug)
@@ -739,6 +816,49 @@ class EdgeVoicePipeline:
             return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(ts_ms) / 1000.0))
         except Exception:
             return "unknown"
+
+    def _log_vts_monitor(
+        self,
+        *,
+        action: str,
+        result: VtsDriverResult | None = None,
+        payload: dict[str, Any] | None = None,
+        ts_ms: int | None = None,
+        detail: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        row = dict(payload or {})
+        event_ts = int(ts_ms if ts_ms is not None else row.get("ts_ms") or now_ms())
+        request_id = str(row.get("request_id") or "")
+        session_id = str(row.get("session_id") or "")
+        seq = str(row.get("seq") or "")
+        status = "SKIP"
+        reason_code = None
+        result_detail = ""
+        emotion_tag = str(row.get("emotion_tag") or "")
+        expression_id = ""
+        if result is not None:
+            status = "OK" if bool(result.success) else "FAIL"
+            reason_code = result.reason_code
+            result_detail = str(result.detail or "")
+            emotion_tag = str(result.emotion_tag or emotion_tag or "")
+            expression_id = str(result.expression_id or "")
+        merged_detail = str(detail or result_detail or "").strip()
+        extra_text = self._short_log_text(str(extra or {}), limit=220) if extra else "{}"
+        LOGGER.info(
+            "[EDGE_VOICE_MON][VTS] ts=%s action=%s req=%s session=%s seq=%s status=%s reason=%s emotion=%s expression=%s detail=%s extra=%s",
+            self._format_ts_ms(event_ts),
+            str(action or "").strip().upper(),
+            request_id,
+            session_id,
+            seq,
+            status,
+            reason_code,
+            emotion_tag,
+            expression_id,
+            merged_detail,
+            extra_text,
+        )
 
     def health(self) -> dict[str, Any]:
         thread = self._mouth_sync_thread
