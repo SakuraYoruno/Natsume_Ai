@@ -5,8 +5,9 @@ param(
   [int]$WaitSeconds = 120,
   [int]$StabilityWaitSeconds = 8,
   [switch]$ForceRestart,
+  [switch]$Background,
   [switch]$ShowConsoleWindow,
-  [bool]$BreakawayFromSsh = $true,
+  [bool]$BreakawayFromSsh = $false,
   [bool]$AutoDegradeOnAsrCrash = $false,
   [bool]$EnforceCnAsrJaTtsMode = $true,
   [ValidateSet("", "wxautox4_hook", "off")]
@@ -73,14 +74,23 @@ if ($WeChatVisionMinIntervalS -gt 0) {
   Set-OptionalProcessEnv -Key "EDGE_WECHAT_VISION_MIN_INTERVAL_S" -Value $WeChatVisionMinIntervalS
 }
 
+$resolvedShowConsoleWindow = $true
+if ($Background.IsPresent) {
+  $resolvedShowConsoleWindow = $false
+} elseif ($ShowConsoleWindow.IsPresent) {
+  $resolvedShowConsoleWindow = $true
+}
+
+$resolvedBreakawayFromSsh = if ($Background.IsPresent) { $true } else { [bool]$BreakawayFromSsh }
+
 $edgeRaw = & $startEdgeScript `
   -EnvFile $EnvFile `
   -LogDir $LogDir `
   -WaitSeconds $WaitSeconds `
   -StabilityWaitSeconds $StabilityWaitSeconds `
   -ForceRestart:$ForceRestart.IsPresent `
-  -ShowConsoleWindow:$ShowConsoleWindow.IsPresent `
-  -BreakawayFromSsh:$BreakawayFromSsh `
+  -ShowConsoleWindow:$resolvedShowConsoleWindow `
+  -BreakawayFromSsh:$resolvedBreakawayFromSsh `
   -AutoDegradeOnAsrCrash:$AutoDegradeOnAsrCrash `
   -EnforceCnAsrJaTtsMode:$EnforceCnAsrJaTtsMode
 
