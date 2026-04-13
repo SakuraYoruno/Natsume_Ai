@@ -3,6 +3,7 @@ from __future__ import annotations
 from host_brain.app.chat_agent import (
     render_quick_gateway_ack_text,
     render_quick_gateway_progress_text,
+    render_quick_gateway_realign_text,
 )
 
 
@@ -99,3 +100,16 @@ def test_render_quick_gateway_progress_missing_fallback(monkeypatch) -> None:
     text = render_quick_gateway_progress_text(status="NONE")
 
     assert text == "我这边暂时没有可汇报的任务进度。"
+
+
+def test_render_quick_gateway_realign_notice(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.chat_agent._load_template_mapping",
+        lambda _template_id: {
+            "quick_realign_notice": "我看到了，刚才执行方向可能有点偏，我马上重新对齐你的需求再给你结果。",
+        },
+    )
+
+    text = render_quick_gateway_realign_text(sender_name="测试用户")
+
+    assert "执行方向可能有点偏" in text

@@ -729,7 +729,18 @@ def _extract_alignment_keywords(text: str) -> list[str]:
     normalized = str(text or "").strip().lower()
     if not normalized:
         return []
-    tokens = [str(token or "").strip().lower() for token in _ALIGNMENT_TOKEN_RE.findall(normalized)]
+    raw_tokens = [str(token or "").strip().lower() for token in _ALIGNMENT_TOKEN_RE.findall(normalized)]
+    tokens: list[str] = []
+    for token in raw_tokens:
+        if not token:
+            continue
+        is_chinese = bool(re.fullmatch(r"[\u4e00-\u9fff]+", token))
+        if is_chinese and len(token) >= 3:
+            # 中文连续串拆成双字片段，提升关键词覆盖判定灵敏度。
+            for idx in range(0, len(token) - 1):
+                tokens.append(token[idx : idx + 2])
+            continue
+        tokens.append(token)
     dedup: list[str] = []
     for token in tokens:
         if len(token) < 2:

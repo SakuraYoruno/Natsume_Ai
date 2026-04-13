@@ -708,6 +708,83 @@ export function fetchInputDispatchStats(params = {}) {
   return request(`/obs/input/dispatch-stats${qs ? '?' + qs : ''}`)
 }
 
+/**
+ * Gateway humanoid closed-loop stats (ACK/progress/deviation recovery/closed-loop rate).
+ * @param {object} params - { window_minutes }
+ */
+export function fetchInputHumanoidLoopStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-stats${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Gateway humanoid closed-loop trend stats.
+ * @param {object} params - { window_minutes, interval_minutes }
+ */
+export function fetchInputHumanoidLoopTrend(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-trend${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Gateway humanoid closed-loop alerts evaluated from trend buckets.
+ * @param {object} params
+ */
+export function fetchInputHumanoidLoopAlerts(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-alerts${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Gateway humanoid closed-loop remediation playbook.
+ * @param {object} params
+ */
+export function fetchInputHumanoidLoopRemediation(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-remediation${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Gateway humanoid closed-loop diagnostics and root-cause summary.
+ * @param {object} params
+ */
+export function fetchInputHumanoidLoopDiagnostics(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-diagnostics${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Gateway humanoid closed-loop hotspot clustering.
+ * @param {object} params
+ */
+export function fetchInputHumanoidLoopHotspots(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-hotspots${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Gateway humanoid closed-loop hotspot time trend.
+ * @param {object} params
+ */
+export function fetchInputHumanoidLoopHotspotTrend(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-hotspot-trend${qs ? '?' + qs : ''}`)
+}
+
 // ===== Ref #49: RecallPack token budget stats =====
 
 /**

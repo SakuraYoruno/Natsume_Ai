@@ -8,8 +8,10 @@ from unittest.mock import AsyncMock, patch
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.input_routes import (
     _build_gateway_reply_text,
+    _detect_gateway_execution_deviation,
     _dispatch_to_graph,
     _dispatch_to_graph_worker,
+    _maybe_realign_gateway_pipeline,
     _run_gateway_proactive_progress_push,
     _run_cortex_pipeline,
     _should_start_gateway_progress_push,
@@ -391,5 +393,80 @@ def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
         assert kwargs["platform"] == "qq"
         assert kwargs["conversation_id"] == "qq_dm_4003"
         assert "session_summary" in kwargs["content"]
+    finally:
+        ledger.close()
+
+
+def test_detect_gateway_execution_deviation_triggers_on_low_overlap() -> None:
+    result = _detect_gateway_execution_deviation(
+        source="GATEWAY",
+        user_text="请帮我总结今天前端卡顿原因并给出修复方案",
+        decision="APPROVE",
+        narrative="好的，我们来聊聊今天的心情和天气。",
+    )
+
+    assert result["triggered"] is True
+    assert result["reason_code"] == "DEVIATION_OVERLAP_LOW"
+    assert float(result["overlap_ratio"]) < 0.18
+
+
+def test_detect_gateway_execution_deviation_skips_when_overlap_ok() -> None:
+    result = _detect_gateway_execution_deviation(
+        source="GATEWAY",
+        user_text="请帮我总结今天前端卡顿原因并给出修复方案",
+        decision="APPROVE",
+        narrative="前端卡顿原因主要是主线程阻塞和轮询过密，修复方案是异步化和缓存。",
+    )
+
+    assert result["triggered"] is False
+    assert result["reason_code"] in {"DEVIATION_OVERLAP_OK", "DEVIATION_KEYWORDS_INSUFFICIENT"}
+
+
+def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
+        monkeypatch.setenv("HOST_GATEWAY_DEVIATION_RETRY_ENABLED", "true")
+        with patch(
+            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
+        ), patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "前端卡顿原因是主线程阻塞与高频刷新，修复是异步线程化和节流。",
+                    "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
+                }
+            ),
+        ) as rerun_mock:
+            result, meta = _run(
+                _maybe_realign_gateway_pipeline(
+                    request_id="req_realign_001",
+                    session_id="qq_dm_5001",
+                    source="GATEWAY",
+                    user_text="请帮我总结前端卡顿原因并给出修复方案",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_5001",
+                        "sender_name": "测试用户",
+                    },
+                    ts_ms=123456,
+                    pipeline_result={
+                        "decision": "APPROVE",
+                        "reason_code": None,
+                        "narrative": "我们先聊聊别的事情吧。",
+                        "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
+                    },
+                    ledger=ledger,
+                )
+            )
+
+        rerun_mock.assert_awaited_once()
+        assert meta is not None
+        assert meta["triggered"] is True
+        assert meta["retry_applied"] is True
+        assert "卡顿原因" in str(result.get("narrative") or "")
     finally:
         ledger.close()

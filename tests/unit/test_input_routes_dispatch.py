@@ -125,3 +125,42 @@ def test_log_input_event_persists_gateway_platform_metadata() -> None:
         assert payload["is_group"] is False
     finally:
         ledger.close()
+
+
+def test_receive_input_gateway_progress_fastpath_short_circuits_dispatch() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_fp_001",
+        content="现在进度怎么样了？",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
+        new=AsyncMock(return_value=True),
+    ):
+        response = _run(receive_input(body, SimpleNamespace()))
+
+    assert response.status == "COMPLETED"
+    assert "progress fastpath" in response.detail
+    assert dispatch_mock.await_count == 0
+
+
+def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_fp_002",
+        content="现在进度怎么样了？",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
+        new=AsyncMock(return_value=False),
+    ):
+        response = _run(receive_input(body, SimpleNamespace()))
+
+    assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_count == 1
