@@ -221,7 +221,18 @@ def strict_validate_intent(
         if args_reason is not None:
             return None, args_reason, lint
 
-    return IntentEnvelope(**normalized_json), None, lint
+    # NOTE:
+    # normalized_json may carry extension fields (e.g. route/planned_steps) that
+    # are intentionally consumed by downstream runtime routers. Governor strict
+    # validation only binds the canonical envelope fields and ignores unknown
+    # top-level extension keys to preserve forward compatibility.
+    envelope_payload: dict[str, Any] = {
+        key: normalized_json[key]
+        for key in REQUIRED_FIELDS
+    }
+    if "person_id" in normalized_json:
+        envelope_payload["person_id"] = normalized_json.get("person_id")
+    return IntentEnvelope(**envelope_payload), None, lint
 
 
 def _validate_args(action: str, args: dict[str, Any], lint: dict[str, Any]) -> str | None:

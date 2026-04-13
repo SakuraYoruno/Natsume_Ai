@@ -55,6 +55,7 @@ export function getNonLiveSlots(snapshot) {
 
 export function buildDigitalLifeAlerts(snapshot, options = {}) {
   const promptStats = options.promptStats || null
+  const capabilityGapData = options.capabilityGapData || null
   const alerts = []
   const tsMs = snapshot?.timestamp || Date.now()
 
@@ -298,6 +299,39 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       severity: homeostasisStatus === 'critical' ? 'critical' : 'warning',
       source: 'runtime',
       to: '/overview',
+    })
+  }
+
+  const forgeRuntimeSummary = capabilityGapData?.forge_runtime_quality?.summary || {}
+  const criticalProposals = Number(forgeRuntimeSummary.critical_proposals || 0)
+  const unhealthyProposals = Number(forgeRuntimeSummary.unhealthy_proposals || 0)
+  const trackedProposals = Number(forgeRuntimeSummary.tracked_proposals || 0)
+  const avgHealthScore = Number(forgeRuntimeSummary.avg_health_score || 0)
+  if (criticalProposals > 0) {
+    alerts.push({
+      reason_code: 'FORGE_RUNTIME_CRITICAL_PROPOSALS',
+      title: formatAlertTitle('FORGE_RUNTIME_CRITICAL_PROPOSALS'),
+      detail: compactText(
+        `Forge runtime has ${criticalProposals} critical proposals (unhealthy=${unhealthyProposals}, tracked=${trackedProposals}, avg_health=${avgHealthScore.toFixed(1)}).`,
+        180
+      ),
+      ts_ms: tsMs,
+      severity: 'critical',
+      source: 'forge-runtime',
+      to: '/alerts?reason_code=FORGE_RUNTIME_CRITICAL_PROPOSALS',
+    })
+  } else if (unhealthyProposals > 0) {
+    alerts.push({
+      reason_code: 'FORGE_RUNTIME_UNHEALTHY_PROPOSALS',
+      title: formatAlertTitle('FORGE_RUNTIME_UNHEALTHY_PROPOSALS'),
+      detail: compactText(
+        `Forge runtime has ${unhealthyProposals} unhealthy proposals (tracked=${trackedProposals}, avg_health=${avgHealthScore.toFixed(1)}).`,
+        180
+      ),
+      ts_ms: tsMs,
+      severity: 'warning',
+      source: 'forge-runtime',
+      to: '/alerts?reason_code=FORGE_RUNTIME_UNHEALTHY_PROPOSALS',
     })
   }
 

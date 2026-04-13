@@ -41,6 +41,7 @@ def _patch_runtime_dependencies(
     codex_api_key: str | None = "sk-codex",
     deepseek_api_key: str | None = "sk-deepseek",
 ) -> None:
+    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
     monkeypatch.setattr(
         graph_builder,
         "load_host_config",

@@ -82,23 +82,23 @@ const TRACE_STAGE_GROUPS = [
   {
     id: 'orchestration',
     label: '编排决策',
-    description: '响应策略与 Top Agent 的主链路判断、路由结果。',
+    description: '响应策略与 Cortex Orchestrator 的主链路判断、路由结果。',
     icon: Bot,
-    nodeIds: ['response_policy', 'top_agent'],
+    nodeIds: ['response_policy', 'cortex_orchestrator'],
   },
   {
     id: 'agent',
     label: '代理调度',
-    description: 'Dispatch Agent、各类 Sub Agent 与 Chat Agent 的实际执行。',
+    description: 'Executive Router、各类 Sub Agent 与 Chat Agent 的实际执行。',
     icon: Layers3,
-    nodeIds: ['dispatch_agent', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
+    nodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
   },
   {
     id: 'llm',
     label: '提示与模型',
     description: 'Prompt Builder 与 LLM Stream 的最终出文过程。',
     icon: Wand2,
-    nodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'top_agent_llm_stream'],
+    nodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'cortex_orchestrator_llm_stream'],
   },
   {
     id: 'postprocess',
@@ -445,8 +445,8 @@ function resolveTribeEventStageId(event) {
   if (merged.includes('immune')) return 'immune'
   if (merged.includes('query_planner') || merged.includes('agentic_rag') || merged.includes('retrieval') || merged.includes('recall')) return 'retrieval'
   if (merged.includes('emotion') || merged.includes('body_sense') || merged.includes('motive') || merged.includes('persona') || merged.includes('limbic')) return 'persona'
-  if (merged.includes('response_policy') || merged.includes('top_agent') || merged.includes('cortex_agent')) return 'orchestration'
-  if (merged.includes('dispatch') || merged.includes('sub_agent') || merged.includes('chat_agent') || merged.includes('ans_agent')) return 'agent'
+  if (merged.includes('response_policy') || merged.includes('cortex_orchestrator') || merged.includes('cortex_agent')) return 'orchestration'
+  if (merged.includes('executive_router') || merged.includes('sub_agent') || merged.includes('chat_agent') || merged.includes('ans_agent')) return 'agent'
   if (merged.includes('prompt') || merged.includes('llm')) return 'llm'
   if (merged.includes('egress') || merged.includes('pii') || merged.includes('episodic') || merged.includes('bond') || merged.includes('tts') || merged.includes('vts')) return 'postprocess'
   return 'other'

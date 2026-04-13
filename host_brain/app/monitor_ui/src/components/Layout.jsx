@@ -30,6 +30,8 @@ import {
   X,
   Zap,
 } from 'lucide-react'
+import { fetchCapabilityGapStats } from '../api/obs.js'
+import ForgeRiskActionBar from './ForgeRiskActionBar.jsx'
 import useAppStore from '../store/useAppStore.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
@@ -147,17 +149,58 @@ export default function Layout() {
   const setPollingEnabled = useAppStore((state) => state.setPollingEnabled)
   const setPollingInterval = useAppStore((state) => state.setPollingInterval)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [capabilityGapData, setCapabilityGapData] = useState(null)
   const location = useLocation()
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes: 60,
   })
-  const runtimeAlerts = buildDigitalLifeAlerts(runtimeSnapshot, { promptStats })
+  const runtimeAlerts = buildDigitalLifeAlerts(runtimeSnapshot, { promptStats, capabilityGapData })
 
   useEffect(() => {
     setMobileMenuOpen(false)
   }, [location.pathname])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadCapabilityGapData = async () => {
+      try {
+        const data = await fetchCapabilityGapStats({
+          limit_recent: 20,
+          limit_hotspots: 8,
+          limit_candidates: 8,
+          min_candidate_detected: 3,
+          min_candidate_sessions: 2,
+          min_candidate_failure_rate: 0.35,
+          min_candidate_failed: 2,
+        })
+        if (!cancelled) {
+          setCapabilityGapData(data)
+        }
+      } catch {
+        if (!cancelled) {
+          setCapabilityGapData(null)
+        }
+      }
+    }
+
+    loadCapabilityGapData().catch(() => {})
+    if (!pollingEnabled) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const timer = setInterval(() => {
+      loadCapabilityGapData().catch(() => {})
+    }, pollingInterval * 1000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [pollingEnabled, pollingInterval])
 
   const runtimeAlertBadge = runtimeAlerts.length > 0
     ? { value: runtimeAlerts.length, severity: runtimeAlerts[0]?.severity || 'info' }
@@ -222,6 +265,12 @@ export default function Layout() {
               </select>
             </div>
           </div>
+
+          <ForgeRiskActionBar
+            capabilityGapData={capabilityGapData}
+            pollingEnabled={pollingEnabled}
+            pollingInterval={pollingInterval}
+          />
 
           <nav className="hidden flex-wrap gap-3 lg:flex" role="navigation" aria-label="主导航">
             {NAV_SECTIONS.map((section) => (

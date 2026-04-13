@@ -493,6 +493,25 @@ CREATE TABLE IF NOT EXISTS scheduler_tasks (
 CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_enabled ON scheduler_tasks (enabled);
 CREATE INDEX IF NOT EXISTS idx_scheduler_tasks_trigger_mode ON scheduler_tasks (trigger_mode);
 
+-- Capability Forge proposal event log (P4 runtime persistence/audit)
+CREATE TABLE IF NOT EXISTS capability_forge_proposal_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    proposal_id     TEXT    NOT NULL,
+    event_type      TEXT    NOT NULL,
+    status          TEXT    NOT NULL,
+    stage           TEXT    NOT NULL,
+    session_id      TEXT,
+    candidate_key   TEXT,
+    reason_code     TEXT,
+    actor           TEXT,
+    payload         TEXT,
+    ts_ms           INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_capability_forge_proposal_id ON capability_forge_proposal_log (proposal_id);
+CREATE INDEX IF NOT EXISTS idx_capability_forge_status ON capability_forge_proposal_log (status);
+CREATE INDEX IF NOT EXISTS idx_capability_forge_stage ON capability_forge_proposal_log (stage);
+CREATE INDEX IF NOT EXISTS idx_capability_forge_ts ON capability_forge_proposal_log (ts_ms);
+
 -- M18-A: LLM 云节点调用记录表
 CREATE TABLE IF NOT EXISTS llm_node_call_log (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

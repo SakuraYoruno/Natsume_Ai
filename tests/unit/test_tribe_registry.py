@@ -33,8 +33,8 @@ def test_host_tribe_registry_bootstrap_defaults() -> None:
     }.issubset(families)
 
     agents = {item["agent_id"]: item for item in registry.list_agents()}
-    assert agents["top_agent"]["family"] == "cortex"
-    assert agents["dispatch_agent"]["family"] == "cortex"
+    assert agents["cortex_orchestrator"]["family"] == "cortex"
+    assert agents["executive_router"]["family"] == "cortex"
     assert agents["ans_agent"]["family"] == "ans"
     assert agents["endocrine_agent"]["family"] == "endocrine"
     assert agents["immune_agent"]["family"] == "immune"

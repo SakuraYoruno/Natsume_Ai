@@ -926,6 +926,73 @@ export function fetchErrorHeatmap(params = {}) {
   return request(`/obs/error-heatmap${qs ? '?' + qs : ''}`)
 }
 
+// ===== Skill-First: Capability Gap / Forge Runtime =====
+
+/**
+ * Capability Gap 聚合统计（含 forge candidates 与 forge runtime quality）
+ * @param {object} params
+ */
+export function fetchCapabilityGapStats(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/capability-gaps/stats${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Forge Runtime 质量快照（health/failure/latency）
+ * @param {object} params - { limit }
+ */
+export function fetchCapabilityForgeRuntimeQuality(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/capability-gaps/forge-runtime/quality${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Forge proposal 列表
+ * @param {object} params - { status, limit }
+ */
+export function fetchCapabilityForgeProposals(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/capability-gaps/forge-proposals${qs ? '?' + qs : ''}`)
+}
+
+/**
+ * Forge proposal 详情
+ * @param {string} proposalId
+ */
+export function fetchCapabilityForgeProposal(proposalId) {
+  return request(`/obs/capability-gaps/forge-proposals/${encodeURIComponent(proposalId)}`)
+}
+
+/**
+ * 审批并推进 Forge proposal
+ * @param {string} proposalId
+ * @param {object} body - { approval_token_ref, approver, target_stage }
+ */
+export function approveCapabilityForgeProposal(proposalId, body) {
+  return request(`/obs/capability-gaps/forge-proposals/${encodeURIComponent(proposalId)}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * 回滚 Forge proposal
+ * @param {string} proposalId
+ * @param {object} body - { operator, reason }
+ */
+export function rollbackCapabilityForgeProposal(proposalId, body) {
+  return request(`/obs/capability-gaps/forge-proposals/${encodeURIComponent(proposalId)}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 // ===== Ref #105: 语义召回器统计 =====
 
 /**

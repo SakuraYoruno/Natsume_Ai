@@ -1,7 +1,7 @@
 """agent_runtime_shared.py — app 外壳之间的中性共享运行时 helper。
 
-这一层先承接旧 `top_agent.py` 中已经被多个入口直接复用的兼容能力，
-把 `dispatch_agent.py` / `chat_agent.py` 对 `top_agent.py` 的硬耦合先切断，
+这一层先承接旧统一入口中已经被多个入口直接复用的兼容能力，
+把旧调度入口 / `chat_agent.py` 对历史统一入口的硬耦合先切断，
 后续再继续把真实实现逐步下沉到 tribe / observability / airlock 等稳定归属。
 """
 
@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import Any, Callable
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
 from host_brain.bond.user_identity import resolve_person_id
 
@@ -54,7 +55,7 @@ def _load_template_mapping(template_id: str) -> dict[str, Any]:
 
 
 def _load_runtime_texts() -> dict[str, Any]:
-    return _load_template_mapping("top_agent.runtime_texts")
+    return _load_template_mapping("cortex_orchestrator.runtime_texts")
 
 
 
@@ -86,6 +87,16 @@ _ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以
 _TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
 _TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
 _TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
+_CLARIFICATION_DIRECT_QUERY_RE = re.compile(
+    r"^(?:"
+    r"什么意思|啥意思|什么意思啊|什么意思呀|啥意思啊|啥意思呀|"
+    r"这句什么意思|这句话什么意思|这个什么意思|这是什么意思|"
+    r"是什么意思|意思是啥|啥意思呢|什么意思呢|"
+    r"what does this mean|what does that mean|"
+    r"どういう意味|何の意味"
+    r")[\s\?？!！。,.]*$",
+    re.IGNORECASE,
+)
 _TASK_CONTEXT_KEYWORDS = (
     "思路", "方案", "步骤", "实现", "代码", "函数", "模块", "接口", "逻辑", "架构", "设计",
     "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
@@ -635,7 +646,7 @@ async def _persist_post_process_audit(
     ledger.log_llm_node_call(
         {
             "request_id": request_id,
-            "node_id": "top_agent_llm_stream",
+            "node_id": "cortex_orchestrator_llm_stream",
             "provider": provider_name,
             "model_id": model_id,
             "status": "OK" if narrative.strip() else "DEGRADED",
@@ -668,7 +679,7 @@ async def _persist_post_process_audit(
                 "op_kind": "PIPELINE",
                 "status": _rs.get("status", "OK"),
                 "reason_code": _rs.get("reason_code"),
-                "stage": "top_agent._async_post_process",
+                "stage": "cortex_orchestrator._async_post_process",
                 "payload": {
                     "candidate_count": _rs.get("candidate_count", 0),
                     "route_count": _rs.get("route_count", 0),
@@ -748,8 +759,9 @@ async def _persist_post_process_audit(
         output_data=_prompt_builder_output,
     )
 
-    _dispatch_used = bool(_trace_stage_meta.get("dispatch_agent_used"))
+    _dispatch_used = bool(_trace_stage_meta.get("executive_router_used"))
     _chat_used = bool(_trace_stage_meta.get("chat_agent_used"))
+    _orchestrator_used = bool(_trace_stage_meta.get("cortex_orchestrator_used"))
     _path = str(
         _trace_stage_meta.get("dispatch_route")
         or ("delegate" if delegated_agents else "chat_direct")
@@ -771,11 +783,14 @@ async def _persist_post_process_audit(
         "sub_agent_id": _chat_sub_agent_id,
         "delegated_agent_count": len(list(delegated_agents or [])),
     }
-    _top_agent_output = {
+    _cortex_output = {
+        "entrypoint": "cortex_orchestrator",
         "path": _path,
         "retrieval_status": _retrieval_status,
         "retrieval_candidate_count": _retrieval_count,
         "delegated_agent_count": len(list(delegated_agents or [])),
+        "orchestrator_used": _orchestrator_used,
+        "executive_router_used": bool(_trace_stage_meta.get("executive_router_used")),
         "trace_stage_meta": _trace_stage_meta,
     }
 
@@ -857,20 +872,20 @@ async def _persist_post_process_audit(
             output_data=_response_policy_trace,
         ),
         _build_trace_stage_node(
-            node_id="top_agent",
+            node_id="cortex_orchestrator",
             node_type="system",
-            display_name="Top Agent",
+            display_name="Cortex Orchestrator",
             ts_ms=ts_ms,
             status="OK" if narrative.strip() else "DEGRADED",
-            output_data=_top_agent_output,
+            output_data=_cortex_output,
         ),
     ]
     if _dispatch_used:
         _trace_nodes_v2.append(
             _build_trace_stage_node(
-                node_id="dispatch_agent",
+                node_id="executive_router",
                 node_type="agent",
-                display_name="Dispatch Agent",
+                display_name="Executive Router",
                 ts_ms=ts_ms,
                 status="OK",
                 reason_code=_dispatch_reason,
@@ -1132,7 +1147,7 @@ def _load_continuity_turns(
 ) -> list[dict[str, str]]:
     try:
         from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.app.top_agent_prompt import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
+        from host_brain.app.cortex_prompt_builder import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
 
         rows = _fetch_continuity_rows(
             ledger=get_ledger(),
@@ -1923,7 +1938,7 @@ async def _prefetch_retrieval_persona_inputs(
         retrieval_emotion_context = dict(emotion_context or {})
         if mood_state and not str(retrieval_emotion_context.get("mood_state") or "").strip():
             retrieval_emotion_context["mood_state"] = mood_state
-        runtime_flags = {"source": "top_agent_retrieval"}
+        runtime_flags = {"source": "cortex_orchestrator_retrieval"}
         resolved_sys_mode = str(
             (governor_decision or {}).get("sys_mode")
             or (governor_decision or {}).get("mood_state")
@@ -1948,7 +1963,7 @@ async def _prefetch_retrieval_persona_inputs(
     return bond_summary, bond_evidence, motive_state
 
 
-async def _top_agent_sse_generator_impl(
+async def _cortex_orchestrator_sse_generator_impl(
     *,
     request_body: Any,
     request_id: str,
@@ -1970,6 +1985,8 @@ async def _top_agent_sse_generator_impl(
     async_post_process_fn: Callable[..., Any] | None = None,
     resolve_retrieval_timeout_seconds_fn: Callable[[], float] | None = None,
     prefetch_retrieval_persona_inputs_fn: Callable[..., Any] | None = None,
+    chat_lite_governor_fn: Callable[..., dict[str, Any]] | None = None,
+    resolve_person_id_fn: Callable[..., str] | None = None,
 ) -> AsyncGenerator[str, None]:
     _emit_sse = sse_fn or _sse
     _sanitize_input = airlock_sanitize_input_fn or _airlock_sanitize_input
@@ -1981,10 +1998,12 @@ async def _top_agent_sse_generator_impl(
     _post_process = async_post_process_fn or _async_post_process
     _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
     _prefetch_persona_inputs = prefetch_retrieval_persona_inputs_fn or _prefetch_retrieval_persona_inputs
+    _chat_governor = chat_lite_governor_fn or chat_lite_governor
+    _resolve_person = resolve_person_id_fn or resolve_person_id
 
     user_message = str(request_body.message or "").strip()
     thread_id = getattr(request_body, "thread_id", None)
-    person_id = resolve_person_id(
+    person_id = _resolve_person(
         getattr(request_body, "person_id", None),
         session_id=session_id,
         platform=getattr(request_body, "reply_channel", None),
@@ -2021,7 +2040,7 @@ async def _top_agent_sse_generator_impl(
 
     yield _emit_sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
-    gov = chat_lite_governor(session_id=session_id, request_id=request_id)
+    gov = _chat_governor(session_id=session_id, request_id=request_id)
     if gov["decision"] != "APPROVE":
         yield _emit_sse(
             {
@@ -2066,7 +2085,7 @@ async def _top_agent_sse_generator_impl(
                 "request_id": request_id,
                 "audit_refs": {
                     "request_id": request_id,
-                    "path": "top_agent:task_progress_direct",
+                    "path": "cortex_orchestrator:task_progress_direct",
                     "latency_ms": total_latency_ms,
                     "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
                 },
@@ -2095,10 +2114,10 @@ async def _top_agent_sse_generator_impl(
                 pii_ingress_stats=_pii_ingress_stats,
                 pii_egress_stats={},
                 trace_stage_meta={
-                    "top_agent_used": True,
-                    "dispatch_agent_used": False,
+                    "cortex_orchestrator_used": True,
+                    "executive_router_used": False,
                     "chat_agent_used": False,
-                    "top_agent_mode": "task_progress_direct",
+                    "cortex_orchestrator_mode": "task_progress_direct",
                 },
             )
         )
@@ -2123,7 +2142,7 @@ async def _top_agent_sse_generator_impl(
                 "request_id": request_id,
                 "audit_refs": {
                     "request_id": request_id,
-                    "path": "top_agent:recent_turn_direct",
+                    "path": "cortex_orchestrator:recent_turn_direct",
                     "latency_ms": total_latency_ms,
                     "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
                 },
@@ -2152,10 +2171,10 @@ async def _top_agent_sse_generator_impl(
                 pii_ingress_stats=_pii_ingress_stats,
                 pii_egress_stats={},
                 trace_stage_meta={
-                    "top_agent_used": True,
-                    "dispatch_agent_used": False,
+                    "cortex_orchestrator_used": True,
+                    "executive_router_used": False,
                     "chat_agent_used": False,
-                    "top_agent_mode": "recent_turn_direct",
+                    "cortex_orchestrator_mode": "recent_turn_direct",
                 },
             )
         )
@@ -2180,7 +2199,7 @@ async def _top_agent_sse_generator_impl(
                 "request_id": request_id,
                 "audit_refs": {
                     "request_id": request_id,
-                    "path": "top_agent:clarification_direct",
+                    "path": "cortex_orchestrator:clarification_direct",
                     "latency_ms": total_latency_ms,
                     "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
                 },
@@ -2209,10 +2228,10 @@ async def _top_agent_sse_generator_impl(
                 pii_ingress_stats=_pii_ingress_stats,
                 pii_egress_stats={},
                 trace_stage_meta={
-                    "top_agent_used": True,
-                    "dispatch_agent_used": False,
+                    "cortex_orchestrator_used": True,
+                    "executive_router_used": False,
                     "chat_agent_used": False,
-                    "top_agent_mode": "clarification_direct",
+                    "cortex_orchestrator_mode": "clarification_direct",
                 },
             )
         )
@@ -2264,12 +2283,12 @@ async def _top_agent_sse_generator_impl(
             intent_draft={**intent_draft, "fastpath_type": "phatic"},
             llm_runtime=None,
             trace_stage_meta={
-                "top_agent_used": True,
-                "dispatch_agent_used": False,
+                "cortex_orchestrator_used": True,
+                "executive_router_used": False,
                 "chat_agent_used": True,
                 "chat_mode": "sub_agent",
                 "chat_sub_agent_id": "phatic_fastpath",
-                "top_agent_mode": "phatic_fastpath",
+                "cortex_orchestrator_mode": "phatic_fastpath",
             },
         )
         async for event in chat_agent_sse_generator(chat_input):
@@ -2284,7 +2303,7 @@ async def _top_agent_sse_generator_impl(
         if runtime_task_registry.get_by_request_id(request_id) is None:
             runtime_task_registry.create_task(
                 task_kind="chat_request",
-                target_id="top_agent",
+                target_id="cortex_orchestrator",
                 request_id=request_id,
                 session_id=session_id,
                 person_id=person_id,
@@ -2299,10 +2318,10 @@ async def _top_agent_sse_generator_impl(
                     "pre_dispatch_progress",
                     default="我正在整理上下文和检索记忆。",
                 ),
-                meta={"stage": "top_agent_pre_dispatch"},
+                meta={"stage": "cortex_pre_dispatch"},
             )
     except Exception as task_exc:
-        _logger.debug("[%s] top_agent runtime task init failed: %s", request_id, task_exc)
+        _logger.debug("[%s] cortex_orchestrator runtime task init failed: %s", request_id, task_exc)
 
     retrieval_task: asyncio.Task | None = None
     retrieval_evidence_items: list[dict[str, Any]] = []
@@ -2354,7 +2373,7 @@ async def _top_agent_sse_generator_impl(
             )
         )
     except Exception as retrieval_exc:
-        _logger.debug("[%s] top_agent retrieval init failed: %s", request_id, retrieval_exc)
+        _logger.debug("[%s] cortex_orchestrator retrieval init failed: %s", request_id, retrieval_exc)
 
     if retrieval_task is not None:
         try:
@@ -2364,7 +2383,7 @@ async def _top_agent_sse_generator_impl(
             )
         except (asyncio.TimeoutError, Exception) as retrieval_exc:
             retrieval_summary = {"status": "DEGRADED", "error": str(retrieval_exc)[:100]}
-            _logger.debug("[%s] top_agent retrieval failed/timeout: %s", request_id, retrieval_exc)
+            _logger.debug("[%s] cortex_orchestrator retrieval failed/timeout: %s", request_id, retrieval_exc)
 
     if bond_evidence is not None:
         retrieval_evidence_items.append(bond_evidence)
@@ -2381,7 +2400,7 @@ async def _top_agent_sse_generator_impl(
             retrieval_summary = dict(retrieval_summary or {})
             retrieval_summary["prompt_filter"] = dict(prompt_filter_meta)
     except Exception as prompt_filter_exc:
-        _logger.debug("[%s] top_agent prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
+        _logger.debug("[%s] cortex_orchestrator prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
 
     try:
         from host_brain.app.chat_retrieval_helpers import _build_recall_pack_inputs  # noqa: PLC0415
@@ -2402,7 +2421,7 @@ async def _top_agent_sse_generator_impl(
                     if slot and str(getattr(slot, "content", "") or "").strip():
                         recall_slot_text[slot_name] = str(slot.content).strip()
     except Exception as cpb_exc:
-        _logger.debug("[%s] top_agent recall_pack failed: %s", request_id, cpb_exc)
+        _logger.debug("[%s] cortex_orchestrator recall_pack failed: %s", request_id, cpb_exc)
 
     from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
 
@@ -2442,15 +2461,15 @@ async def _top_agent_sse_generator_impl(
                     pii_egress_stats={},
                     retrieval_evidence_items=list(retrieval_evidence_items or []),
                     trace_stage_meta={
-                        "top_agent_used": True,
-                        "dispatch_agent_used": False,
+                        "cortex_orchestrator_used": True,
+                        "executive_router_used": False,
                         "chat_agent_used": False,
-                        "top_agent_mode": "llm_unavailable",
+                        "cortex_orchestrator_mode": "llm_unavailable",
                     },
                 )
             )
         except Exception as post_process_exc:
-            _logger.debug("[%s] top_agent llm unavailable post_process failed: %s", request_id, post_process_exc)
+            _logger.debug("[%s] cortex_orchestrator llm unavailable post_process failed: %s", request_id, post_process_exc)
         yield _emit_sse(
             {
                 "phase": "COMMIT",
@@ -2463,9 +2482,9 @@ async def _top_agent_sse_generator_impl(
         )
         return
 
-    from host_brain.app.dispatch_agent import dispatch_agent_sse_generator  # noqa: PLC0415
+    from host_brain.app.executive_router import executive_router_sse_generator  # noqa: PLC0415
 
-    async for event in dispatch_agent_sse_generator(
+    async for event in executive_router_sse_generator(
         request_body=request_body,
         request_id=request_id,
         session_id=session_id,
@@ -2544,14 +2563,14 @@ async def _async_post_process(
             trace_stage_meta=trace_stage_meta,
         )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process audit persist failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process audit persist failed: %s", request_id, exc)
 
     try:
         from host_brain.airlock.quarantine import classify_ingress  # noqa: PLC0415
 
         await asyncio.to_thread(classify_ingress, narrative)
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process airlock classify failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process airlock classify failed: %s", request_id, exc)
 
     try:
         from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
@@ -2583,7 +2602,7 @@ async def _async_post_process(
                 episodic_store=store,
             )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process episodic failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process episodic failed: %s", request_id, exc)
 
     try:
         await _run_persona_session_end_hooks(
@@ -2594,7 +2613,7 @@ async def _async_post_process(
             emotion_context=emotion_context,
         )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process persona session_end failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process persona session_end failed: %s", request_id, exc)
 
     try:
         from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
@@ -2607,7 +2626,7 @@ async def _async_post_process(
             ts_ms=ts_ms,
         )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process bond failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process bond failed: %s", request_id, exc)
 
     try:
         from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
@@ -2627,7 +2646,7 @@ async def _async_post_process(
             },
         )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process conversation_ended tribe event failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process conversation_ended tribe event failed: %s", request_id, exc)
 
     try:
         from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion  # noqa: PLC0415
@@ -2638,7 +2657,7 @@ async def _async_post_process(
             ts_ms=ts_ms,
         )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process vts failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process vts failed: %s", request_id, exc)
 
     try:
         tts_enabled = str(os.environ.get("HOST_STREAM_TTS_ENABLED") or "true").strip().lower()
@@ -2698,7 +2717,7 @@ async def _async_post_process(
             except Exception:
                 pass
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process tts failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process tts failed: %s", request_id, exc)
 
     try:
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
@@ -2717,7 +2736,7 @@ async def _async_post_process(
                 dict(drift_result or {}).get("drift_dims"),
             )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process drift_detector failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process drift_detector failed: %s", request_id, exc)
 
     try:
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
@@ -2736,7 +2755,7 @@ async def _async_post_process(
                 dict(growth_payload or {}).get("triggered_rules"),
             )
     except Exception as exc:
-        _logger.debug("[%s] top_agent post_process growth_feedback failed: %s", request_id, exc)
+        _logger.debug("[%s] cortex_orchestrator post_process growth_feedback failed: %s", request_id, exc)
 
 
 __all__ = [
@@ -2774,6 +2793,7 @@ __all__ = [
     "_build_trace_stage_node",
     "_persist_post_process_audit",
     "_build_subagent_gateway_from_runtime",
+    "_cortex_orchestrator_sse_generator_impl",
     "_maybe_build_task_progress_fastpath",
     "_maybe_build_recent_turn_answer",
     "_maybe_build_previous_meaning_answer",
@@ -2787,5 +2807,3 @@ __all__ = [
     "_infer_emotion_tag_for_tts",
     "_async_post_process",
 ]
-
-

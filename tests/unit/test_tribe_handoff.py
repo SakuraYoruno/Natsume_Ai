@@ -61,7 +61,7 @@ def test_tribe_handoff_snapshot_contains_families_agents_and_states() -> None:
     family_ids = {item["family_id"] for item in snapshot["families"]}
     agent_ids = {item["agent_id"] for item in snapshot["agents"]}
     assert "prefrontal" in family_ids
-    assert "dispatch_agent" in agent_ids
+    assert "executive_router" in agent_ids
     assert "cortex" in snapshot["states"]
     assert "prefrontal" in snapshot["states"]
     assert isinstance(snapshot["timestamp"], int)

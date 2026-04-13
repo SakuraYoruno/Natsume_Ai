@@ -13,6 +13,7 @@ import {
   Waves,
 } from 'lucide-react'
 import {
+  fetchCapabilityGapStats,
   fetchMemoryStats,
   fetchServicesHealth,
   fetchSubsystemsStats,
@@ -140,6 +141,7 @@ export default function DigitalLifeOverview() {
   const [memoryData, setMemoryData] = useState(null)
   const [servicesData, setServicesData] = useState(null)
   const [subsystemsData, setSubsystemsData] = useState(null)
+  const [capabilityGapData, setCapabilityGapData] = useState(null)
 
   const {
     runtimeSnapshot,
@@ -157,17 +159,27 @@ export default function DigitalLifeOverview() {
     setLoading(true)
     setError(null)
     try {
-      const [vtsRes, memoryRes, servicesRes, subsystemsRes] = await Promise.all([
+      const [vtsRes, memoryRes, servicesRes, subsystemsRes, capabilityGapRes] = await Promise.all([
         fetchVtsStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchServicesHealth({ window_minutes: windowMinutes }).catch(() => null),
         fetchSubsystemsStats({ window_minutes: windowMinutes }).catch(() => null),
+        fetchCapabilityGapStats({
+          limit_recent: 30,
+          limit_hotspots: 8,
+          limit_candidates: 8,
+          min_candidate_detected: 3,
+          min_candidate_sessions: 2,
+          min_candidate_failure_rate: 0.35,
+          min_candidate_failed: 2,
+        }).catch(() => null),
       ])
 
       setVtsData(vtsRes)
       setMemoryData(memoryRes)
       setServicesData(servicesRes)
       setSubsystemsData(subsystemsRes)
+      setCapabilityGapData(capabilityGapRes)
     } catch (loadError) {
       setError(loadError.message || '数字生命体总览加载失败')
     } finally {
@@ -215,6 +227,14 @@ export default function DigitalLifeOverview() {
   const riskLevel = formatRiskLevel(runtimeSnapshot?.self_reflection_pulse?.narrative_guardrails?.risk_level)
   const absenceBand = formatAbsenceBand(offlineState.absence_band)
   const growthSignals = getGrowthSignals(runtimeSnapshot)
+  const forgeQualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
+  const forgeQualityItems = capabilityGapData?.forge_runtime_quality?.items || []
+  const forgeRiskItems = [...forgeQualityItems]
+    .sort((left, right) => Number(left?.health_score ?? 0) - Number(right?.health_score ?? 0))
+    .slice(0, 3)
+  const avgForgeHealth = Number(forgeQualitySummary?.avg_health_score ?? 0)
+  const forgeCriticalCount = Number(forgeQualitySummary?.critical_proposals ?? 0)
+  const forgeUnhealthyCount = Number(forgeQualitySummary?.unhealthy_proposals ?? 0)
 
   const pulseNodes = [
     { label: '存在态', value: modeMeta.label, tone: 'primary', active: true },
@@ -236,6 +256,39 @@ export default function DigitalLifeOverview() {
     {
       label: '自我模型',
       value: growthSignals.hasAnyGrowth ? '已形成样本' : '待成形',
+      tone: 'gray',
+      active: growthSignals.hasAnyGrowth,
+    },
+  ]
+
+  const pulseNodesView = [
+    { label: 'Mode', value: modeMeta.label, tone: 'primary', active: true },
+    { label: 'Bond', value: currentBondStage, tone: 'rose', active: Boolean(bondState.current_stage) },
+    { label: 'Emotion', value: currentEmotion, tone: 'pink', active: Boolean(topEmotion) },
+    { label: 'Reply', value: replyPosture, tone: 'violet', active: Boolean(replyPosture) },
+    {
+      label: 'Memory',
+      value: avgMemorySuccessRate != null ? `${avgMemorySuccessRate}% / ${memorySubsystems.length} subsystems` : '--',
+      tone: 'teal',
+      active: avgMemorySuccessRate != null,
+    },
+    {
+      label: 'Forge',
+      value: (forgeQualitySummary?.tracked_proposals ?? 0) > 0
+        ? `${avgForgeHealth.toFixed(1)} / critical ${forgeCriticalCount}`
+        : 'waiting',
+      tone: 'indigo',
+      active: (forgeQualitySummary?.tracked_proposals ?? 0) > 0,
+    },
+    {
+      label: 'Inner',
+      value: offlineState.absence_band ? absenceBand : 'online',
+      tone: 'amber',
+      active: Boolean(offlineState.absence_band),
+    },
+    {
+      label: 'Self',
+      value: growthSignals.hasAnyGrowth ? 'available' : 'warming',
       tone: 'gray',
       active: growthSignals.hasAnyGrowth,
     },
@@ -381,7 +434,7 @@ export default function DigitalLifeOverview() {
       <LivingPulseStrip
         title="生命流"
         subtitle="把当前瞬时状态串成一条可读脉冲流，先看流动，再看器官细节。"
-        nodes={pulseNodes}
+        nodes={pulseNodesView}
       />
 
       {error ? <NoticeBanner variant="error" title="总览统计加载失败">{error}</NoticeBanner> : null}
@@ -398,7 +451,11 @@ export default function DigitalLifeOverview() {
 
       {runtimeSnapshot ? (
         <>
-          <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} />
+          <DigitalLifeRuntimeCard
+            runtimeSnapshot={runtimeSnapshot}
+            promptStats={promptStats}
+            capabilityGapData={capabilityGapData}
+          />
           <VitalLoopSummaryPanel runtimeSnapshot={runtimeSnapshot} showDetailLink />
           <BackgroundRuntimeCard runtimeSnapshot={runtimeSnapshot} />
         </>
@@ -408,6 +465,88 @@ export default function DigitalLifeOverview() {
           hint="请先产生一次完整对话或等待采样完成。"
         />
       ) : null}
+
+      <LifeSection
+        title="Capability Gap & Forge Loop"
+        hint="Expose gap pressure and forge runtime quality directly in the life-body overview."
+        actionTo="/insights/global"
+        actionLabel="Open Global Insights"
+      >
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <MetricCard label="Gap Detected" value={capabilityGapData?.detected_total ?? '--'} hint={`failed ${capabilityGapData?.failed_total ?? 0}`} tone="text-indigo-600" />
+          <MetricCard label="Forge Candidates" value={(capabilityGapData?.forge_candidates ?? []).length} hint={`runtime caps ${capabilityGapData?.active_runtime_capabilities ?? 0}`} tone="text-blue-600" />
+          <MetricCard label="Avg Health" value={(forgeQualitySummary?.tracked_proposals ?? 0) > 0 ? avgForgeHealth.toFixed(1) : '--'} hint={`tracked ${forgeQualitySummary?.tracked_proposals ?? 0}`} tone={avgForgeHealth >= 70 ? 'text-green-600' : 'text-orange-500'} />
+          <MetricCard label="Risk Proposals" value={forgeCriticalCount} hint={`unhealthy ${forgeUnhealthyCount}`} tone={forgeCriticalCount > 0 ? 'text-red-600' : forgeUnhealthyCount > 0 ? 'text-orange-500' : 'text-green-600'} />
+        </div>
+
+        {forgeCriticalCount > 0 ? (
+          <div className="mt-4">
+            <NoticeBanner variant="error" title="Forge has critical proposals">
+              {`critical=${forgeCriticalCount}, unhealthy=${forgeUnhealthyCount}, avg_health=${avgForgeHealth.toFixed(1)}`}
+            </NoticeBanner>
+          </div>
+        ) : forgeUnhealthyCount > 0 ? (
+          <div className="mt-4">
+            <NoticeBanner variant="warning" title="Forge has unhealthy proposals">
+              {`unhealthy=${forgeUnhealthyCount}, avg_health=${avgForgeHealth.toFixed(1)}`}
+            </NoticeBanner>
+          </div>
+        ) : null}
+
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="card p-4">
+            <div className="mb-2 text-xs font-semibold text-gray-600">Gap Hotspots</div>
+            {(capabilityGapData?.hotspots ?? []).length > 0 ? (
+              <div className="space-y-2">
+                {(capabilityGapData?.hotspots ?? []).slice(0, 5).map((item) => (
+                  <div key={item.candidate_key} className="rounded-lg border border-primary-100/70 bg-white/80 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-orange-600">{item.reason_code}</span>
+                      <span className="text-gray-500">{`fail ${(Number(item.failure_rate || 0) * 100).toFixed(1)}%`}</span>
+                    </div>
+                    <div className="mt-1 text-gray-500">
+                      {`family=${item.suggested_family} | detected=${item.detected_count} | failed=${item.failed_count}`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyStateCard title="No gap hotspots" hint="Hotspots will appear after gap events are collected." className="p-4" />
+            )}
+          </div>
+
+          <div className="card p-4">
+            <div className="mb-2 text-xs font-semibold text-gray-600">Forge Risk Queue</div>
+            {forgeRiskItems.length > 0 ? (
+              <div className="space-y-2">
+                {forgeRiskItems.map((item) => {
+                  const health = Number(item.health_score || 0)
+                  const barClass = health >= 75 ? 'bg-green-400' : health >= 55 ? 'bg-orange-400' : 'bg-red-400'
+                  return (
+                    <div key={item.proposal_id} className="rounded-lg border border-primary-100/70 bg-white/80 px-3 py-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-indigo-600">{(item.proposal_id || '').slice(0, 18)}</span>
+                        <span className="text-gray-500">{String(item.stage || '').toUpperCase()}</span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                          <div className={`h-full rounded-full ${barClass}`} style={{ width: `${Math.max(3, Math.min(100, health))}%` }} />
+                        </div>
+                        <span className="text-gray-600">{health.toFixed(1)}</span>
+                      </div>
+                      <div className="mt-1 text-gray-500">
+                        {`fail ${(Number(item.window_failure_rate || 0) * 100).toFixed(1)}% | p95 ${item.window_p95_latency_ms ?? 0}ms | tune ${item.last_tune_action || 'NONE'}`}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <EmptyStateCard title="No forge runtime samples" hint="Runtime quality will appear after proposal executions." className="p-4" />
+            )}
+          </div>
+        </div>
+      </LifeSection>
 
       <LifeSection
         title="体征核心指标"

@@ -66,13 +66,13 @@ class TribeHandoffCoordinator:
             source,
             direction="outbound",
             payload=payload,
-            writer="dispatch_agent",
+            writer="executive_router",
         )
         self._record_family_state(
             target_family,
             direction="inbound",
             payload=payload,
-            writer="dispatch_agent",
+            writer="executive_router",
         )
         self._publish_handoff_event(payload)
         return dict(payload)
@@ -143,4 +143,3 @@ __all__ = [
     "get_tribe_handoff_coordinator",
     "set_tribe_handoff_coordinator",
 ]
-

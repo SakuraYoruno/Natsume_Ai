@@ -3577,7 +3577,7 @@ class ChainStatsResponse(BaseModel):
 def get_chain_stats(
     window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
 ):
-    """Ref #82: 请求处理阶段统计（Phase XIV v4 顶级 Agent 架构）。
+    """Ref #82: 请求处理阶段统计（Phase XIV v4 cortex_orchestrator 架构）。
 
     从 audit_log（AUDIT_SNAPSHOT / COMMIT 阶段）中提取 audit_tags 和 node_timings，
     聚合各阶段的调用次数、降级率、平均耗时、P95 耗时、超时次数。
@@ -3618,7 +3618,7 @@ def get_chain_stats(
     node_timeout: dict[str, int] = {}
     node_calls: dict[str, int] = {}
 
-    # Phase XIV v4 顶级 Agent 架构阶段名（预定义，保证前端有数据）
+    # Phase XIV v4 cortex_orchestrator 架构阶段名（预定义，保证前端有数据）
     _KNOWN_NODES = [
         "airlock",              # 入口净化（含 PII 过滤）
         "governor",             # 轻量 Governor（速率限制 + sys_mode）
@@ -4591,4 +4591,606 @@ async def get_retrieval_runtime(
         request_id,
         limit,
         include_legacy,
+    )
+
+
+class CapabilityGapStatItem(BaseModel):
+    key: str
+    count: int
+
+
+class CapabilityGapHotspotItem(BaseModel):
+    candidate_key: str
+    reason_code: str
+    suggested_family: str
+    missing_capability_tags: List[str]
+    detected_count: int
+    executed_count: int
+    failed_count: int
+    success_count: int
+    failure_rate: float
+    impact_sessions: int
+    last_detected_ts_ms: Optional[int]
+
+
+class CapabilityGapCandidateThresholds(BaseModel):
+    min_detected_count: int
+    min_unique_sessions: int
+    min_failure_rate: float
+    min_failed_count: int
+
+
+class CapabilityGapCandidateExecutorItem(BaseModel):
+    key: str
+    count: int
+
+
+class CapabilityGapForgeCandidateItem(BaseModel):
+    candidate_key: str
+    stage: str
+    reason_code: str
+    suggested_family: str
+    missing_capability_tags: List[str]
+    detected_count: int
+    executed_count: int
+    success_count: int
+    failed_count: int
+    failure_rate: float
+    success_rate: float
+    impact_sessions: int
+    impact_requests: int
+    priority_score: float
+    recommended_action: str
+    top_executor_targets: List[CapabilityGapCandidateExecutorItem]
+    first_detected_ts_ms: Optional[int]
+    last_detected_ts_ms: Optional[int]
+    last_execution_ts_ms: Optional[int]
+
+
+class CapabilityGapForgeRuntimeQualityItem(BaseModel):
+    proposal_id: str
+    status: str
+    stage: str
+    health_score: float
+    window_failure_rate: float
+    window_p95_latency_ms: int
+    adaptive_tune_count: int
+    last_tune_action: str
+    updated_ts_ms: int
+
+
+class CapabilityGapForgeRuntimeQualitySnapshot(BaseModel):
+    timestamp: int
+    summary: Dict[str, Any]
+    items: List[CapabilityGapForgeRuntimeQualityItem]
+
+
+class CapabilityGapStatsResponse(BaseModel):
+    timestamp: int
+    detected_total: int
+    executed_total: int
+    success_total: int
+    failed_total: int
+    success_rate: float
+    active_runtime_capabilities: int
+    by_reason: List[CapabilityGapStatItem]
+    by_family: List[CapabilityGapStatItem]
+    by_executor: List[CapabilityGapStatItem]
+    hotspots: List[CapabilityGapHotspotItem]
+    forge_candidates: List[CapabilityGapForgeCandidateItem]
+    forge_runtime_quality: CapabilityGapForgeRuntimeQualitySnapshot
+    candidate_thresholds: CapabilityGapCandidateThresholds
+    recent_events: List[Dict[str, Any]]
+
+
+class CapabilityGapForgeCandidatesResponse(BaseModel):
+    timestamp: int
+    candidate_thresholds: CapabilityGapCandidateThresholds
+    total_candidates: int
+    candidates: List[CapabilityGapForgeCandidateItem]
+
+
+def _build_capability_gap_hotspots(snapshot: Mapping[str, Any]) -> List[CapabilityGapHotspotItem]:
+    return [
+        CapabilityGapHotspotItem(
+            candidate_key=str(item.get("candidate_key") or ""),
+            reason_code=str(item.get("reason_code") or "UNKNOWN"),
+            suggested_family=str(item.get("suggested_family") or "unknown"),
+            missing_capability_tags=[
+                str(tag)
+                for tag in list(item.get("missing_capability_tags") or [])
+                if str(tag or "").strip()
+            ],
+            detected_count=int(item.get("detected_count") or 0),
+            executed_count=int(item.get("executed_count") or 0),
+            failed_count=int(item.get("failed_count") or 0),
+            success_count=int(item.get("success_count") or 0),
+            failure_rate=float(item.get("failure_rate") or 0.0),
+            impact_sessions=int(item.get("impact_sessions") or 0),
+            last_detected_ts_ms=(
+                int(item.get("last_detected_ts_ms"))
+                if item.get("last_detected_ts_ms") is not None
+                else None
+            ),
+        )
+        for item in list(snapshot.get("hotspots") or [])
+        if isinstance(item, Mapping)
+    ]
+
+
+def _build_capability_gap_forge_candidates(snapshot: Mapping[str, Any]) -> List[CapabilityGapForgeCandidateItem]:
+    return [
+        CapabilityGapForgeCandidateItem(
+            candidate_key=str(item.get("candidate_key") or ""),
+            stage=str(item.get("stage") or "OBSERVE"),
+            reason_code=str(item.get("reason_code") or "UNKNOWN"),
+            suggested_family=str(item.get("suggested_family") or "unknown"),
+            missing_capability_tags=[
+                str(tag)
+                for tag in list(item.get("missing_capability_tags") or [])
+                if str(tag or "").strip()
+            ],
+            detected_count=int(item.get("detected_count") or 0),
+            executed_count=int(item.get("executed_count") or 0),
+            success_count=int(item.get("success_count") or 0),
+            failed_count=int(item.get("failed_count") or 0),
+            failure_rate=float(item.get("failure_rate") or 0.0),
+            success_rate=float(item.get("success_rate") or 0.0),
+            impact_sessions=int(item.get("impact_sessions") or 0),
+            impact_requests=int(item.get("impact_requests") or 0),
+            priority_score=float(item.get("priority_score") or 0.0),
+            recommended_action=str(item.get("recommended_action") or "observe"),
+            top_executor_targets=[
+                CapabilityGapCandidateExecutorItem(
+                    key=str(executor_item.get("key") or "unknown"),
+                    count=int(executor_item.get("count") or 0),
+                )
+                for executor_item in list(item.get("top_executor_targets") or [])
+                if isinstance(executor_item, Mapping)
+            ],
+            first_detected_ts_ms=(
+                int(item.get("first_detected_ts_ms"))
+                if item.get("first_detected_ts_ms") is not None
+                else None
+            ),
+            last_detected_ts_ms=(
+                int(item.get("last_detected_ts_ms"))
+                if item.get("last_detected_ts_ms") is not None
+                else None
+            ),
+            last_execution_ts_ms=(
+                int(item.get("last_execution_ts_ms"))
+                if item.get("last_execution_ts_ms") is not None
+                else None
+            ),
+        )
+        for item in list(snapshot.get("forge_candidates") or [])
+        if isinstance(item, Mapping)
+    ]
+
+
+def _build_capability_gap_thresholds(snapshot: Mapping[str, Any]) -> CapabilityGapCandidateThresholds:
+    thresholds = snapshot.get("candidate_thresholds")
+    parsed = dict(thresholds) if isinstance(thresholds, Mapping) else {}
+    return CapabilityGapCandidateThresholds(
+        min_detected_count=int(parsed.get("min_detected_count") or 0),
+        min_unique_sessions=int(parsed.get("min_unique_sessions") or 0),
+        min_failure_rate=float(parsed.get("min_failure_rate") or 0.0),
+        min_failed_count=int(parsed.get("min_failed_count") or 0),
+    )
+
+
+def _build_capability_gap_runtime_quality(
+    snapshot: Mapping[str, Any] | None,
+) -> CapabilityGapForgeRuntimeQualitySnapshot:
+    parsed = dict(snapshot) if isinstance(snapshot, Mapping) else {}
+    summary = dict(parsed.get("summary") or {}) if isinstance(parsed.get("summary"), Mapping) else {}
+    return CapabilityGapForgeRuntimeQualitySnapshot(
+        timestamp=int(parsed.get("timestamp") or _now_ms()),
+        summary=summary,
+        items=[
+            CapabilityGapForgeRuntimeQualityItem(
+                proposal_id=str(item.get("proposal_id") or ""),
+                status=str(item.get("status") or "UNKNOWN"),
+                stage=str(item.get("stage") or "PROPOSED"),
+                health_score=float(item.get("health_score") or 0.0),
+                window_failure_rate=float(item.get("window_failure_rate") or 0.0),
+                window_p95_latency_ms=int(item.get("window_p95_latency_ms") or 0),
+                adaptive_tune_count=int(item.get("adaptive_tune_count") or 0),
+                last_tune_action=str(item.get("last_tune_action") or "NONE"),
+                updated_ts_ms=int(item.get("updated_ts_ms") or 0),
+            )
+            for item in list(parsed.get("items") or [])
+            if isinstance(item, Mapping)
+        ],
+    )
+
+
+@router.get("/capability-gaps/stats", response_model=CapabilityGapStatsResponse)
+def get_capability_gaps_stats(
+    limit_recent: int = Query(20, ge=1, le=200, description="Recent capability gap events to return"),
+    limit_hotspots: int = Query(8, ge=1, le=50, description="Hotspot rows to return"),
+    limit_candidates: int = Query(8, ge=1, le=50, description="Forge candidate rows to return"),
+    min_candidate_detected: int = Query(3, ge=1, le=100, description="Min detections for forge candidate"),
+    min_candidate_sessions: int = Query(2, ge=1, le=100, description="Min impacted sessions for forge candidate"),
+    min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0, description="Min failure rate for forge candidate"),
+    min_candidate_failed: int = Query(2, ge=0, le=100, description="Min failed executions for forge candidate"),
+):
+    from host_brain.app.dependencies import get_capability_forge_service, get_capability_gap_telemetry  # noqa: PLC0415
+
+    snapshot = get_capability_gap_telemetry().snapshot(
+        limit_recent=limit_recent,
+        limit_hotspots=limit_hotspots,
+        limit_candidates=limit_candidates,
+        min_candidate_detected=min_candidate_detected,
+        min_candidate_sessions=min_candidate_sessions,
+        min_candidate_failure_rate=min_candidate_failure_rate,
+        min_candidate_failed=min_candidate_failed,
+    )
+    try:
+        forge_quality_snapshot = get_capability_forge_service().runtime_quality_stats(limit=8)
+    except Exception:
+        forge_quality_snapshot = {
+            "timestamp": _now_ms(),
+            "summary": {
+                "tracked_proposals": 0,
+                "unhealthy_proposals": 0,
+                "critical_proposals": 0,
+                "avg_health_score": 0.0,
+                "avg_window_failure_rate": 0.0,
+                "avg_window_p95_latency_ms": 0.0,
+            },
+            "items": [],
+        }
+    return CapabilityGapStatsResponse(
+        timestamp=int(snapshot.get("timestamp") or _now_ms()),
+        detected_total=int(snapshot.get("detected_total") or 0),
+        executed_total=int(snapshot.get("executed_total") or 0),
+        success_total=int(snapshot.get("success_total") or 0),
+        failed_total=int(snapshot.get("failed_total") or 0),
+        success_rate=float(snapshot.get("success_rate") or 0.0),
+        active_runtime_capabilities=int(snapshot.get("active_runtime_capabilities") or 0),
+        by_reason=[
+            CapabilityGapStatItem(
+                key=str(item.get("key") or "UNKNOWN"),
+                count=int(item.get("count") or 0),
+            )
+            for item in list(snapshot.get("by_reason") or [])
+            if isinstance(item, Mapping)
+        ],
+        by_family=[
+            CapabilityGapStatItem(
+                key=str(item.get("key") or "UNKNOWN"),
+                count=int(item.get("count") or 0),
+            )
+            for item in list(snapshot.get("by_family") or [])
+            if isinstance(item, Mapping)
+        ],
+        by_executor=[
+            CapabilityGapStatItem(
+                key=str(item.get("key") or "UNKNOWN"),
+                count=int(item.get("count") or 0),
+            )
+            for item in list(snapshot.get("by_executor") or [])
+            if isinstance(item, Mapping)
+        ],
+        hotspots=_build_capability_gap_hotspots(snapshot),
+        forge_candidates=_build_capability_gap_forge_candidates(snapshot),
+        forge_runtime_quality=_build_capability_gap_runtime_quality(forge_quality_snapshot),
+        candidate_thresholds=_build_capability_gap_thresholds(snapshot),
+        recent_events=[
+            dict(item)
+            for item in list(snapshot.get("recent_events") or [])
+            if isinstance(item, Mapping)
+        ],
+    )
+
+
+@router.get("/capability-gaps/forge-candidates", response_model=CapabilityGapForgeCandidatesResponse)
+def get_capability_gap_forge_candidates(
+    limit: int = Query(20, ge=1, le=200, description="Forge candidates to return"),
+    min_candidate_detected: int = Query(3, ge=1, le=100, description="Min detections for forge candidate"),
+    min_candidate_sessions: int = Query(2, ge=1, le=100, description="Min impacted sessions for forge candidate"),
+    min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0, description="Min failure rate for forge candidate"),
+    min_candidate_failed: int = Query(2, ge=0, le=100, description="Min failed executions for forge candidate"),
+):
+    from host_brain.app.dependencies import get_capability_gap_telemetry  # noqa: PLC0415
+
+    snapshot = get_capability_gap_telemetry().snapshot(
+        limit_recent=10,
+        limit_hotspots=5,
+        limit_candidates=limit,
+        min_candidate_detected=min_candidate_detected,
+        min_candidate_sessions=min_candidate_sessions,
+        min_candidate_failure_rate=min_candidate_failure_rate,
+        min_candidate_failed=min_candidate_failed,
+    )
+    candidates = _build_capability_gap_forge_candidates(snapshot)
+    return CapabilityGapForgeCandidatesResponse(
+        timestamp=int(snapshot.get("timestamp") or _now_ms()),
+        candidate_thresholds=_build_capability_gap_thresholds(snapshot),
+        total_candidates=len(candidates),
+        candidates=candidates,
+    )
+
+
+class CapabilityForgePreviewRequest(BaseModel):
+    candidate_key: Optional[str] = None
+    canary_traffic_percent: int = Field(5, ge=1, le=100)
+
+
+class CapabilityForgeCreateRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=128)
+    proposer: str = Field(..., min_length=1, max_length=128)
+    candidate_key: Optional[str] = None
+    canary_traffic_percent: int = Field(5, ge=1, le=100)
+
+
+class CapabilityForgeApproveRequest(BaseModel):
+    approval_token_ref: str = Field(..., min_length=6, max_length=256)
+    approver: str = Field(..., min_length=1, max_length=128)
+    target_stage: str = Field("shadow", description="shadow/canary/full")
+
+
+class CapabilityForgeRollbackRequest(BaseModel):
+    operator: str = Field(..., min_length=1, max_length=128)
+    reason: Optional[str] = Field(None, max_length=200)
+
+
+class CapabilityForgeRuntimeMatchRequest(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=128)
+    suggested_family: str = Field(..., min_length=1, max_length=64)
+    missing_capability_tags: List[str] = Field(default_factory=list)
+    reason_code: Optional[str] = None
+
+
+class CapabilityForgePreviewResponse(BaseModel):
+    timestamp: int
+    candidate: Dict[str, Any]
+    recommended_release_plan: Dict[str, Any]
+    recommendation: str
+
+
+class CapabilityForgeProposalResponse(BaseModel):
+    timestamp: int
+    proposal: Dict[str, Any]
+
+
+class CapabilityForgeProposalListResponse(BaseModel):
+    timestamp: int
+    total: int
+    items: List[Dict[str, Any]]
+
+
+class CapabilityForgeRuntimeMatchResponse(BaseModel):
+    timestamp: int
+    decision: Dict[str, Any]
+
+
+class CapabilityForgeRuntimeStatsResponse(BaseModel):
+    timestamp: int
+    counters: Dict[str, int]
+    apply_rate: float
+
+
+class CapabilityForgeRuntimeTuningResponse(BaseModel):
+    timestamp: int
+    summary: Dict[str, int]
+    items: List[Dict[str, Any]]
+
+
+class CapabilityForgeRuntimeQualityResponse(BaseModel):
+    timestamp: int
+    summary: Dict[str, Any]
+    items: List[Dict[str, Any]]
+
+
+@router.post("/capability-gaps/forge-proposals/preview", response_model=CapabilityForgePreviewResponse)
+def preview_capability_forge_proposal(body: CapabilityForgePreviewRequest) -> CapabilityForgePreviewResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    candidate = get_capability_forge_service().resolve_candidate(body.candidate_key)
+    if candidate is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "reason_code": "CAPABILITY_FORGE_CANDIDATE_NOT_FOUND",
+                "detail": "No forge candidate or hotspot is currently available",
+            },
+        )
+    failure_rate = float(candidate.get("failure_rate") or 0.0)
+    detected_count = int(candidate.get("detected_count") or 0)
+    impact_sessions = int(candidate.get("impact_sessions") or 0)
+    recommendation = "forge_with_canary"
+    if failure_rate >= 0.5:
+        recommendation = "forge_with_reliability_tests"
+    elif detected_count >= 6 and impact_sessions >= 3:
+        recommendation = "forge_to_full_candidate_after_short_canary"
+    return CapabilityForgePreviewResponse(
+        timestamp=_now_ms(),
+        candidate=dict(candidate),
+        recommended_release_plan={
+            "shadow": {"enabled": True},
+            "canary": {
+                "enabled": True,
+                "traffic_percent": int(body.canary_traffic_percent),
+            },
+            "full": {"enabled": True},
+            "rollback": {"enabled": True, "observe_window_minutes": 30},
+        },
+        recommendation=recommendation,
+    )
+
+
+@router.post("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalResponse)
+def create_capability_forge_proposal(body: CapabilityForgeCreateRequest) -> CapabilityForgeProposalResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    try:
+        proposal = get_capability_forge_service().create_proposal(
+            session_id=body.session_id,
+            proposer=body.proposer,
+            candidate_key=body.candidate_key,
+            canary_traffic_percent=body.canary_traffic_percent,
+        )
+    except ValueError as exc:
+        if str(exc) == "CAPABILITY_FORGE_CANDIDATE_NOT_FOUND":
+            raise HTTPException(
+                status_code=404,
+                detail={"reason_code": str(exc), "detail": "candidate not found"},
+            )
+        raise HTTPException(status_code=422, detail={"reason_code": str(exc), "detail": str(exc)})
+    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
+
+
+@router.get("/capability-gaps/forge-proposals", response_model=CapabilityForgeProposalListResponse)
+def list_capability_forge_proposals(
+    status: Optional[str] = Query(None, description="Optional status filter"),
+    limit: int = Query(20, ge=1, le=200),
+) -> CapabilityForgeProposalListResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    items = get_capability_forge_service().list_proposals(status=status, limit=limit)
+    return CapabilityForgeProposalListResponse(
+        timestamp=_now_ms(),
+        total=len(items),
+        items=items,
+    )
+
+
+@router.get("/capability-gaps/forge-proposals/{proposal_id}", response_model=CapabilityForgeProposalResponse)
+def get_capability_forge_proposal(proposal_id: str) -> CapabilityForgeProposalResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    proposal = get_capability_forge_service().get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"reason_code": "CAPABILITY_FORGE_PROPOSAL_NOT_FOUND", "detail": f"proposal_id={proposal_id}"},
+        )
+    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
+
+
+@router.post("/capability-gaps/forge-proposals/{proposal_id}/approve", response_model=CapabilityForgeProposalResponse)
+def approve_capability_forge_proposal(
+    proposal_id: str,
+    body: CapabilityForgeApproveRequest,
+) -> CapabilityForgeProposalResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    stage = str(body.target_stage or "").strip().lower()
+    if stage not in {"shadow", "canary", "full"}:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason_code": "CAPABILITY_FORGE_INVALID_STAGE", "detail": "target_stage must be shadow/canary/full"},
+        )
+    try:
+        proposal = get_capability_forge_service().approve_and_promote(
+            proposal_id=proposal_id,
+            approval_token_ref=body.approval_token_ref,
+            approver=body.approver,
+            target_stage=stage,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"reason_code": str(exc), "detail": f"proposal_id={proposal_id}"},
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail={"reason_code": str(exc), "detail": "approval token validation failed"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"reason_code": str(exc), "detail": str(exc)})
+    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
+
+
+@router.post("/capability-gaps/forge-proposals/{proposal_id}/rollback", response_model=CapabilityForgeProposalResponse)
+def rollback_capability_forge_proposal(
+    proposal_id: str,
+    body: CapabilityForgeRollbackRequest,
+) -> CapabilityForgeProposalResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    try:
+        proposal = get_capability_forge_service().rollback(
+            proposal_id=proposal_id,
+            operator=body.operator,
+            reason=body.reason,
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail={"reason_code": "CAPABILITY_FORGE_PROPOSAL_NOT_FOUND", "detail": f"proposal_id={proposal_id}"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"reason_code": str(exc), "detail": str(exc)})
+    return CapabilityForgeProposalResponse(timestamp=_now_ms(), proposal=proposal)
+
+
+@router.post("/capability-gaps/forge-proposals/runtime-match", response_model=CapabilityForgeRuntimeMatchResponse)
+def capability_forge_runtime_match(body: CapabilityForgeRuntimeMatchRequest) -> CapabilityForgeRuntimeMatchResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    decision = get_capability_forge_service().get_runtime_route_override(
+        request_id=body.request_id,
+        suggested_family=body.suggested_family,
+        missing_capability_tags=body.missing_capability_tags,
+        reason_code=body.reason_code,
+    )
+    return CapabilityForgeRuntimeMatchResponse(timestamp=_now_ms(), decision=dict(decision))
+
+
+@router.get("/capability-gaps/forge-runtime/stats", response_model=CapabilityForgeRuntimeStatsResponse)
+def capability_forge_runtime_stats() -> CapabilityForgeRuntimeStatsResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    snapshot = get_capability_forge_service().runtime_match_stats()
+    return CapabilityForgeRuntimeStatsResponse(
+        timestamp=int(snapshot.get("timestamp") or _now_ms()),
+        counters={
+            str(k): int(v or 0)
+            for k, v in dict(snapshot.get("counters") or {}).items()
+        },
+        apply_rate=float(snapshot.get("apply_rate") or 0.0),
+    )
+
+
+@router.get("/capability-gaps/forge-runtime/tuning", response_model=CapabilityForgeRuntimeTuningResponse)
+def capability_forge_runtime_tuning_stats(
+    limit: int = Query(20, ge=1, le=200, description="Rows to return"),
+) -> CapabilityForgeRuntimeTuningResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    snapshot = get_capability_forge_service().runtime_tuning_stats(limit=limit)
+    return CapabilityForgeRuntimeTuningResponse(
+        timestamp=int(snapshot.get("timestamp") or _now_ms()),
+        summary={
+            str(k): int(v or 0)
+            for k, v in dict(snapshot.get("summary") or {}).items()
+        },
+        items=[
+            dict(item)
+            for item in list(snapshot.get("items") or [])
+            if isinstance(item, Mapping)
+        ],
+    )
+
+
+@router.get("/capability-gaps/forge-runtime/quality", response_model=CapabilityForgeRuntimeQualityResponse)
+def capability_forge_runtime_quality_stats(
+    limit: int = Query(20, ge=1, le=200, description="Rows to return"),
+) -> CapabilityForgeRuntimeQualityResponse:
+    from host_brain.app.dependencies import get_capability_forge_service  # noqa: PLC0415
+
+    snapshot = get_capability_forge_service().runtime_quality_stats(limit=limit)
+    return CapabilityForgeRuntimeQualityResponse(
+        timestamp=int(snapshot.get("timestamp") or _now_ms()),
+        summary=dict(snapshot.get("summary") or {}),
+        items=[
+            dict(item)
+            for item in list(snapshot.get("items") or [])
+            if isinstance(item, Mapping)
+        ],
     )

@@ -320,6 +320,51 @@ def get_tribe_state_summary(
 
 # ── T-74：TribeStateRegistry 命名空间清除运维端点 ─────────────────────────────
 
+# —— Gemini Key 池安全诊断（仅返回状态，不返回密钥明文） ————————————————
+
+class GeminiKeyPoolResponse(BaseModel):
+    provider_name: str
+    scope: str
+    strategy: str
+    pool_size: int
+    runtime_file_pool_enabled: bool
+    env_fallback_enabled: bool
+    source: str
+    source_breakdown: dict[str, int]
+    next_slot: int | None = None
+    ts_ms: int
+
+
+@router.get("/llm/gemini_key_pool", response_model=GeminiKeyPoolResponse)
+def get_gemini_key_pool_status(
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token", convert_underscores=False),
+):
+    _validate_internal_token(x_internal_token)
+    try:
+        from host_brain.app.model_router import inspect_gemini_key_pool  # noqa: PLC0415
+        from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+        snapshot = dict(inspect_gemini_key_pool() or {})
+        return GeminiKeyPoolResponse(
+            provider_name=str(snapshot.get("provider_name") or "gemini"),
+            scope=str(snapshot.get("scope") or "host.llm"),
+            strategy=str(snapshot.get("strategy") or "round_robin"),
+            pool_size=int(snapshot.get("pool_size") or 0),
+            runtime_file_pool_enabled=bool(snapshot.get("runtime_file_pool_enabled", True)),
+            env_fallback_enabled=bool(snapshot.get("env_fallback_enabled", False)),
+            source=str(snapshot.get("source") or "empty"),
+            source_breakdown=dict(snapshot.get("source_breakdown") or {}),
+            next_slot=(
+                int(snapshot.get("next_slot"))
+                if snapshot.get("next_slot") is not None
+                else None
+            ),
+            ts_ms=now_ms(),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"GEMINI_KEY_POOL_STATUS_FAILED: {exc}") from exc
+
+
 class TribeStateDeleteResponse(BaseModel):
     namespace: str
     deleted: bool

@@ -1,6 +1,6 @@
 """sub_agent_protocol.py — 子 Agent 调度协议（Phase XIV v4）。
 
-定义顶级 Agent 与子 Agent 之间的通信协议：
+定义 Cortex Orchestrator 与子 Agent 之间的通信协议：
   - SubAgentRequest / SubAgentResponse：调度数据结构
   - SubAgentDispatcher：统一调度器，根据 agent_id 路由到对应 handler
   - 子 Agent 内部保留 LangGraph 图引擎（翻译→校对→润色等多节点）
@@ -26,7 +26,7 @@ _logger = logging.getLogger("Natsume.sub_agent")
 
 @dataclass
 class SubAgentRequest:
-    """顶级 Agent → 子 Agent 的调度请求。"""
+    """Cortex Orchestrator → 子 Agent 的调度请求。"""
     agent_id: str                          # "code_agent" / "translate_agent" / "intent_agent" / "vision_agent"
     task: str                              # 自然语言任务描述
     user_message: str = ""                 # 用户原始消息
@@ -38,7 +38,7 @@ class SubAgentRequest:
 
 @dataclass
 class SubAgentResponse:
-    """子 Agent → 顶级 Agent 的执行结果。"""
+    """子 Agent → Cortex Orchestrator 的执行结果。"""
     success: bool
     agent_id: str
     result: str = ""                       # 技术产出（代码/翻译/执行结果）
@@ -61,7 +61,7 @@ ALL_AGENT_IDS: frozenset[str] = frozenset({
     AGENT_CODE, AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR,
 })
 
-# 子 Agent 能力描述（注入顶级 Agent prompt，供 LLM 判断调度）
+# 子 Agent 能力描述（注入 Cortex Orchestrator prompt，供 LLM 判断调度）
 AGENT_CAPABILITIES: dict[str, str] = {
     AGENT_CODE: "代码专家：生成、修改、审查代码，解释技术概念",
     AGENT_TRANSLATE: "翻译专家：中日英多语言翻译，含校对和润色（多步流程）",
@@ -195,7 +195,7 @@ class SubAgentDispatcher:
         context: dict[str, Any] = {
             "request_id": req.request_id,
             "session_id": req.session_id,
-            "source": "top_agent_dispatch",
+            "source": "executive_router_dispatch",
         }
         context.update(dict(req.context or {}))
 

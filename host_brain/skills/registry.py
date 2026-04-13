@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -56,6 +57,10 @@ class SkillMeta:
     handler: SkillHandler
     require_confirm: bool = False
     description: str = ""
+    family: str = "general"
+    capability_tags: tuple[str, ...] = field(default_factory=tuple)
+    parallelizable: bool = False
+    fallback_policy: str = "chat_fallback"
     # 原 ToolMeta 字段（合并自 app/skills/tool_meta.py）
     scheduler_allowed: bool = True
     """是否允许 SCHEDULER 来源调用"""
@@ -79,6 +84,24 @@ class SkillMeta:
             raise ValueError("high-risk skill must set require_confirm=True")
         if self.description and not isinstance(self.description, str):
             raise ValueError("description must be string")
+        normalized_family = str(self.family or "").strip().lower()
+        if not normalized_family:
+            raise ValueError("family must be non-empty string")
+        if not re.match(r"^[a-z][a-z0-9_\\-]{1,63}$", normalized_family):
+            raise ValueError("family must match ^[a-z][a-z0-9_-]{1,63}$")
+        if not isinstance(self.capability_tags, tuple):
+            raise ValueError("capability_tags must be tuple[str, ...]")
+        for tag in self.capability_tags:
+            normalized_tag = str(tag or "").strip().lower()
+            if not normalized_tag:
+                raise ValueError("capability_tags cannot contain empty items")
+            if not re.match(r"^[a-z][a-z0-9_\\-]{1,63}$", normalized_tag):
+                raise ValueError("capability_tags items must match ^[a-z][a-z0-9_-]{1,63}$")
+        if not isinstance(self.parallelizable, bool):
+            raise ValueError("parallelizable must be bool")
+        fallback_policy = str(self.fallback_policy or "").strip().lower()
+        if fallback_policy not in {"chat_fallback", "same_family", "strict_fail", "retry_once"}:
+            raise ValueError("fallback_policy must be one of {'chat_fallback','same_family','strict_fail','retry_once'}")
 
     @property
     def permission_model(self) -> SkillPermissionModel:
@@ -97,6 +120,10 @@ class SkillMeta:
             "scope": self.scope,
             "require_confirm": self.require_confirm,
             "risk_level": self.risk_level,
+            "family": self.family,
+            "capability_tags": list(self.capability_tags),
+            "parallelizable": self.parallelizable,
+            "fallback_policy": self.fallback_policy,
         }
 
 
@@ -109,6 +136,10 @@ def skill(
     reversible: bool = True,
     require_confirm: bool = False,
     description: str = "",
+    family: str = "general",
+    capability_tags: tuple[str, ...] = (),
+    parallelizable: bool = False,
+    fallback_policy: str = "chat_fallback",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator to attach SkillMeta config on handler callables."""
 
@@ -124,6 +155,14 @@ def skill(
                 "reversible": bool(reversible),
                 "require_confirm": bool(require_confirm),
                 "description": str(description or "").strip(),
+                "family": str(family or "general").strip().lower() or "general",
+                "capability_tags": tuple(
+                    str(tag or "").strip().lower()
+                    for tag in capability_tags
+                    if str(tag or "").strip()
+                ),
+                "parallelizable": bool(parallelizable),
+                "fallback_policy": str(fallback_policy or "chat_fallback").strip().lower() or "chat_fallback",
             },
         )
         return handler
@@ -226,6 +265,14 @@ class SkillRegistry:
                 handler=candidate,  # bound method or function
                 require_confirm=bool(cfg.get("require_confirm", False)),
                 description=str(cfg.get("description") or "").strip(),
+                family=str(cfg.get("family") or "general").strip().lower() or "general",
+                capability_tags=tuple(
+                    str(tag or "").strip().lower()
+                    for tag in (cfg.get("capability_tags") or ())
+                    if str(tag or "").strip()
+                ),
+                parallelizable=bool(cfg.get("parallelizable", False)),
+                fallback_policy=str(cfg.get("fallback_policy") or "chat_fallback").strip().lower() or "chat_fallback",
             )
             self.register(meta)
             count += 1

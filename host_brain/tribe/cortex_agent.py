@@ -596,7 +596,7 @@ class CortexAgent:
                 "damping_factor": round(damping_factor, 4),
             }
 
-        # 正常路由：chat（附加 vestibular_bias 供 dispatch_agent 消费）
+        # 正常路由：chat（附加 vestibular_bias 供 executive_router 消费）
         return {
             "route": "chat",
             "reason": f"normal_flow (bond_stage={bond_stage})",

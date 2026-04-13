@@ -2,7 +2,7 @@
 
 夏目蓝本人的"说话"模块。
 职责：拿到上下文→构建 prompt→流式生成→反思链→净化→COMMIT。
-调用者：DispatchAgent（通过 chat_agent_sse_generator 函数）。
+调用者：Executive Runtime（通过 chat_agent_sse_generator 函数）。
 
 架构原则：
   - ChatAgent 只负责「说出来」，不做路由/调度决策。
@@ -11,7 +11,7 @@
   - 不调用 SkillLoader，不做委托判断，不感知 sys_mode 路由。
 
 关系：
-  DispatchAgent  ──────────────▶  ChatAgent
+  Executive Runtime  ─────────▶  ChatAgent
    (路由决策/        ChatAgentInput   (人格渲染/
     Skill执行/        结构体传递       LLM流式生成/
     子Agent调度)                       COMMIT输出)
@@ -43,6 +43,9 @@ _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|�
 _FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
 
 _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
+_ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
+_ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
+_ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
 
 
 
@@ -81,7 +84,7 @@ class ChatAgentInput:
     retrieval_evidence_items: List[Dict[str, Any]] = field(default_factory=list)
     retrieval_summary: Dict[str, Any] = field(default_factory=lambda: {"status": "SKIPPED"})
 
-    # ── 子 Agent 执行结果（执行路径时由 DispatchAgent 填入）──
+    # ── 子 Agent 执行结果（执行路径时由 Executive Runtime 填入）──
     sub_agent_context: Optional[SubAgentContext] = None
 
     # ── 通道参数 ──
@@ -105,7 +108,7 @@ class ChatAgentInput:
 
 
 # ---------------------------------------------------------------------------
-# 工具函数（从 top_agent.py 复用）
+# 工具函数（从 cortex_orchestrator 链路复用）
 # ---------------------------------------------------------------------------
 
 def _sse(data: dict) -> str:
@@ -326,6 +329,150 @@ def _runtime_text(
 ) -> str:
     templates = _load_template_mapping("chat_agent.runtime_texts")
     return _mapping_text(templates, key, **kwargs)
+
+
+def render_quick_gateway_ack_text(
+    *,
+    user_message: str = "",
+    bond_stage: str = "STRANGER",
+    emotion_tag: str = "NEUTRAL",
+    sender_name: str | None = None,
+) -> str:
+    """Render a low-latency persona ACK for gateway immediate feedback."""
+
+    templates = _load_template_mapping("chat_agent.runtime_texts")
+    stage = str(bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    clean_sender = str(sender_name or "").strip()
+
+    if etag in _ACK_LOW_ENERGY_TAGS:
+        text = _mapping_text(templates, "quick_ack_low_energy", sender_name=clean_sender)
+    elif stage in _ACK_CLOSE_STAGES:
+        text = _mapping_text(templates, "quick_ack_close", sender_name=clean_sender)
+    elif stage in _ACK_WARM_STAGES:
+        text = _mapping_text(templates, "quick_ack_warm", sender_name=clean_sender)
+    else:
+        text = _mapping_text(templates, "quick_ack_stranger", sender_name=clean_sender)
+
+    if not str(text or "").strip():
+        text = _mapping_text(templates, "quick_ack_default", sender_name=clean_sender)
+    if not str(text or "").strip():
+        text = "好的，稍等下，我马上处理。"
+
+    normalized = re.sub(r"\s+", " ", str(text)).strip()
+    if len(normalized) > 60:
+        normalized = normalized[:57].rstrip() + "..."
+    _ = user_message
+    return normalized
+
+
+def _format_elapsed_compact(elapsed_ms: int) -> str:
+    total_seconds = max(0, int(elapsed_ms // 1000))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes, seconds = divmod(total_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
+def render_quick_gateway_progress_text(
+    *,
+    status: str = "UNKNOWN",
+    target_id: str = "",
+    progress_message: str = "",
+    result_text: str = "",
+    elapsed_ms: int = 0,
+    bond_stage: str = "STRANGER",
+    emotion_tag: str = "NEUTRAL",
+    sender_name: str | None = None,
+) -> str:
+    """Render a low-latency persona progress reply for gateway status query."""
+
+    templates = _load_template_mapping("chat_agent.runtime_texts")
+    normalized_status = str(status or "UNKNOWN").strip().upper() or "UNKNOWN"
+    _ = str(bond_stage or "STRANGER").strip().upper()
+    _ = str(emotion_tag or "NEUTRAL").strip().upper()
+    elapsed = _format_elapsed_compact(int(elapsed_ms or 0))
+    target = str(target_id or "").strip() or _mapping_text(templates, "default_step_target", default="任务")
+    progress = str(progress_message or "").strip()
+    result = str(result_text or "").strip()
+    clean_sender = str(sender_name or "").strip()
+
+    if normalized_status in {"RUNNING", "RECOVERING"}:
+        text = _mapping_text(
+            templates,
+            "quick_progress_running",
+            sender_name=clean_sender,
+            target_id=target,
+            elapsed=elapsed,
+            progress_message=progress,
+            result_text=result,
+        )
+    elif normalized_status == "COMPLETED":
+        text = _mapping_text(
+            templates,
+            "quick_progress_completed",
+            sender_name=clean_sender,
+            target_id=target,
+            elapsed=elapsed,
+            progress_message=progress,
+            result_text=result,
+        )
+    elif normalized_status == "FAILED":
+        text = _mapping_text(
+            templates,
+            "quick_progress_failed",
+            sender_name=clean_sender,
+            target_id=target,
+            elapsed=elapsed,
+            progress_message=progress,
+            result_text=result,
+        )
+    elif normalized_status in {"NONE", "EMPTY"}:
+        text = _mapping_text(templates, "quick_progress_missing", sender_name=clean_sender)
+    else:
+        text = _mapping_text(
+            templates,
+            "quick_progress_default",
+            sender_name=clean_sender,
+            target_id=target,
+            elapsed=elapsed,
+            progress_message=progress,
+            result_text=result,
+        )
+
+    if not str(text or "").strip():
+        text = "我这边暂时没有可汇报的任务进度。"
+    normalized = re.sub(r"\s+", " ", str(text)).strip()
+    if len(normalized) > 120:
+        normalized = normalized[:117].rstrip() + "..."
+    return normalized
+
+
+def render_quick_gateway_realign_text(
+    *,
+    sender_name: str | None = None,
+    bond_stage: str = "STRANGER",
+    emotion_tag: str = "NEUTRAL",
+) -> str:
+    """Render a low-latency persona notice when execution needs realignment."""
+
+    templates = _load_template_mapping("chat_agent.runtime_texts")
+    _ = str(bond_stage or "STRANGER").strip().upper()
+    _ = str(emotion_tag or "NEUTRAL").strip().upper()
+    clean_sender = str(sender_name or "").strip()
+
+    text = _mapping_text(templates, "quick_realign_notice", sender_name=clean_sender)
+    if not str(text or "").strip():
+        text = _mapping_text(templates, "quick_realign_default", sender_name=clean_sender)
+    if not str(text or "").strip():
+        text = "我发现刚才方向可能有点偏，我马上重新对齐你的需求再继续。"
+    normalized = re.sub(r"\s+", " ", str(text)).strip()
+    if len(normalized) > 80:
+        normalized = normalized[:77].rstrip() + "..."
+    return normalized
 
 
 def _looks_like_followup_sentence(sentence: str) -> bool:
@@ -1197,7 +1344,7 @@ async def chat_agent_sse_generator(
     职责：接收 ChatAgentInput → 构建完整人格 prompt → LLM 流式生成
           → SentenceSplitter → 反思链 → 净化 → COMMIT → 异步后处理。
 
-    调用者：DispatchAgent（top_agent.py 改造后调用此函数）。
+    调用者：Executive Runtime（由 cortex_orchestrator 链路调用此函数）。
     """
     request_id = agent_input.request_id
     session_id = agent_input.session_id
@@ -1231,8 +1378,8 @@ async def chat_agent_sse_generator(
 
     # 确定性子结果渲染不依赖 LLM，也不需要构建完整 prompt。
     if not deterministic_reply:
-        # ── 1. 构建 prompt（复用完整 top_agent_prompt 管线）──────────────
-        from host_brain.app.top_agent_prompt import build_top_agent_prompt  # noqa: PLC0415
+        # ── 1. 构建 prompt（复用完整 cortex_prompt_builder 管线）──────────────
+        from host_brain.app.cortex_prompt_builder import build_cortex_prompt  # noqa: PLC0415
 
         # 如果有子 Agent 结果，注入到 user_message 作为额外上下文
         # Phase XV P1: 子 Agent 结果统一经 ChatAgent 人格渲染，不直接输出
@@ -1255,7 +1402,7 @@ async def chat_agent_sse_generator(
             )
 
         try:
-            prompt_result = build_top_agent_prompt(
+            prompt_result = build_cortex_prompt(
                 user_message=effective_user_message + reply_depth_hint,
                 render_target_lang=render_target_lang,
                 emotion_context=emotion_context,
@@ -1731,7 +1878,7 @@ async def chat_agent_sse_generator(
     })
 
     # ── 9. 异步后处理（fire-and-forget）─────────────────────────────
-    # 先走中性共享模块，逐步把旧 top_agent 兼容能力从调用侧切出去
+    # 先走中性共享模块，保持 cortex_orchestrator 链路上的后处理收口一致
     try:
         from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
         asyncio.create_task(

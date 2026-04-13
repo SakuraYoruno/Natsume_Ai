@@ -48,8 +48,8 @@ class HostTribeRegistry:
 
     def _bootstrap_default_agents(self) -> None:
         default_agents: tuple[TribeAgentDescriptor, ...] = (
-            TribeAgentDescriptor("top_agent", "cortex", capabilities=("route", "governor", "handoff")),
-            TribeAgentDescriptor("dispatch_agent", "cortex", capabilities=("route", "delegate", "skill")),
+            TribeAgentDescriptor("cortex_orchestrator", "cortex", capabilities=("route", "governor", "handoff")),
+            TribeAgentDescriptor("executive_router", "cortex", capabilities=("route", "delegate", "skill")),
             TribeAgentDescriptor("chat_agent", "cortex", capabilities=("reply", "style", "render")),
             TribeAgentDescriptor("ans_agent", "ans", capabilities=("scheduler", "mode_transition", "proactive_tick")),
             TribeAgentDescriptor("hippocampus_agent", "hippocampus", capabilities=("episodic_store", "recall_fusion")),

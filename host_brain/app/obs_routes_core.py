@@ -36,6 +36,8 @@ logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
 _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
+_CORTEX_ORCHESTRATOR_NODE_IDS = {"cortex_orchestrator"}
+_EXECUTIVE_ROUTER_NODE_IDS = {"executive_router"}
 
 
 def _env_float(name: str, default: float, *, minimum: float) -> float:
@@ -229,13 +231,13 @@ def _infer_trace_group_id(
     if normalized_id in {"emotion_context", "persona_resident_memory", "motive_state"}:
         return "persona"
 
-    if normalized_id in {"top_agent", "response_policy"}:
+    if normalized_id in _CORTEX_ORCHESTRATOR_NODE_IDS or normalized_id == "response_policy":
         return "orchestration"
 
-    if normalized_id in {"dispatch_agent", "chat_agent"} or normalized_id.startswith("sub_agent"):
+    if normalized_id in _EXECUTIVE_ROUTER_NODE_IDS or normalized_id in {"chat_agent"} or normalized_id.startswith("sub_agent"):
         return "agent"
 
-    if normalized_id in {"prompt_builder", "llm_stream", "llm_gateway", "top_agent_llm_stream"} or normalized_type == "llm" or normalized_id.startswith("llm_"):
+    if normalized_id in {"prompt_builder", "llm_stream", "llm_gateway", "cortex_orchestrator_llm_stream"} or normalized_type == "llm" or normalized_id.startswith("llm_"):
         return "llm"
 
     if normalized_id in {"airlock_egress", "pii_filter", "audit_snapshot"}:
@@ -1284,13 +1286,15 @@ def _build_orchestration_trace_nodes(
     if summary.get("routing_selected") or summary.get("output_text") or failure_event:
         nodes.append(
             TraceNode(
-                node_id="top_agent",
+                node_id="cortex_orchestrator",
                 node_type="agent",
-                display_name="Top Agent",
+                display_name="Cortex Orchestrator",
                 side="host",
                 status="FAIL" if failure_event else "OK",
                 reason_code=failure_event,
-                latency_ms=node_timings_ms.get("top_agent"),
+                latency_ms=_first_present(
+                    node_timings_ms.get("cortex_orchestrator"),
+                ),
                 output_data={
                     "routing_selected": summary.get("routing_selected"),
                     "final_response_chars": summary.get("final_response_chars"),
@@ -1305,12 +1309,14 @@ def _build_orchestration_trace_nodes(
         has_subgraph_fail = any(int(item.get("fail_count") or 0) > 0 for item in subgraphs if isinstance(item, dict))
         nodes.append(
             TraceNode(
-                node_id="dispatch_agent",
+                node_id="executive_router",
                 node_type="agent",
-                display_name="Dispatch Agent",
+                display_name="Executive Router",
                 side="host",
                 status="DEGRADED" if has_subgraph_fail else "OK",
-                latency_ms=node_timings_ms.get("dispatch_agent"),
+                latency_ms=_first_present(
+                    node_timings_ms.get("executive_router"),
+                ),
                 output_data={
                     "subgraph_count": len(subgraphs),
                     "subgraph_ids": [
@@ -1584,16 +1590,16 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 37
     if node_id == "response_policy":
         return 38
-    if node_id == "top_agent":
+    if node_id == "cortex_orchestrator":
         return 39
-    if node_id == "dispatch_agent":
+    if node_id == "executive_router":
         return 41
     if node_id == "chat_agent":
         return 43
     # Prompt + LLM
     if node_id == "prompt_builder":
         return 45
-    if node_id in ("llm_stream", "llm_gateway", "top_agent_llm_stream"):
+    if node_id in ("llm_stream", "llm_gateway", "cortex_orchestrator_llm_stream"):
         return 50
     if node_id.startswith("llm_"):
         return 51

@@ -150,7 +150,7 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
             "citation": f"style_canon:v5_distilled:{'ja' if resolved_render_lang == 'ja' else 'cn'}",
         }
         return {
-            "top_agent": v5_entry,  # Phase XIV v4：顶级 Agent 使用同一份风格指导
+            "cortex_orchestrator": v5_entry,  # Phase XIV v4：Cortex Orchestrator 使用同一份风格指导
             "core_reasoner_primary": v5_entry,
             "core_reasoner_secondary": v5_entry,
             CHAT_DIRECT_NODE_ID: v5_entry,

@@ -52,7 +52,7 @@ def test_trace_summary_uses_input_completed_reply_preview_when_memory_missing() 
                     "reply_preview": "这是监控应该显示的回复摘要",
                     "reply_text_len": 14,
                 },
-                "detail": "top_agent decision=APPROVE",
+                "detail": "cortex_orchestrator decision=APPROVE",
                 "ts_ms": 1000,
             }
         ],

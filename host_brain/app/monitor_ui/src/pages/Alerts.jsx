@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   Bell,
@@ -10,7 +11,7 @@ import {
   Wrench,
   XCircle,
 } from 'lucide-react'
-import { fetchErrors, fetchServicesHealth } from '../api/obs.js'
+import { fetchCapabilityGapStats, fetchErrors, fetchServicesHealth } from '../api/obs.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
@@ -35,6 +36,11 @@ const SEVERITY_RANK = {
   info: 2,
   resolved: 3,
 }
+
+const FORGE_REASON_CODES = new Set([
+  'FORGE_RUNTIME_CRITICAL_PROPOSALS',
+  'FORGE_RUNTIME_UNHEALTHY_PROPOSALS',
+])
 
 const SEVERITY_META = {
   critical: {
@@ -146,6 +152,8 @@ function AlertCard({ alert }) {
 }
 
 export default function Alerts() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
 
@@ -154,7 +162,28 @@ export default function Alerts() {
   const [error, setError] = useState(null)
   const [alerts, setAlerts] = useState([])
   const [serviceAlerts, setServiceAlerts] = useState([])
+  const [capabilityGapData, setCapabilityGapData] = useState(null)
   const [filterCode, setFilterCode] = useState('')
+
+  const applyFilterCode = useCallback((nextCode) => {
+    const next = String(nextCode || '').trim()
+    setFilterCode(next)
+
+    const params = new URLSearchParams(location.search)
+    if (next) {
+      params.set('reason_code', next)
+    } else {
+      params.delete('reason_code')
+    }
+    const nextSearch = params.toString()
+    navigate(
+      {
+        pathname: '/alerts',
+        search: nextSearch ? `?${nextSearch}` : '',
+      },
+      { replace: true }
+    )
+  }, [location.search, navigate])
 
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
@@ -166,9 +195,18 @@ export default function Alerts() {
     setLoading(true)
     setError(null)
     try {
-      const [errorRes, healthRes] = await Promise.all([
+      const [errorRes, healthRes, capabilityGapRes] = await Promise.all([
         fetchErrors({ window_minutes: windowMinutes, limit: 100 }),
         fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
+        fetchCapabilityGapStats({
+          limit_recent: 20,
+          limit_hotspots: 8,
+          limit_candidates: 8,
+          min_candidate_detected: 3,
+          min_candidate_sessions: 2,
+          min_candidate_failure_rate: 0.35,
+          min_candidate_failed: 2,
+        }).catch(() => null),
       ])
 
       const errorAlerts = (errorRes?.recent_errors || errorRes?.errors || []).map((item) => ({
@@ -194,6 +232,7 @@ export default function Alerts() {
 
       setAlerts(errorAlerts)
       setServiceAlerts(runtimeServiceAlerts)
+      setCapabilityGapData(capabilityGapRes)
     } catch (loadError) {
       setError(loadError.message)
     } finally {
@@ -208,9 +247,15 @@ export default function Alerts() {
     return () => clearInterval(timer)
   }, [load, pollingEnabled, pollingInterval])
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const reasonCode = String(params.get('reason_code') || '').trim()
+    setFilterCode(reasonCode)
+  }, [location.search])
+
   const runtimeAlerts = useMemo(
-    () => buildDigitalLifeAlerts(runtimeSnapshot, { promptStats }),
-    [runtimeSnapshot, promptStats]
+    () => buildDigitalLifeAlerts(runtimeSnapshot, { promptStats, capabilityGapData }),
+    [runtimeSnapshot, promptStats, capabilityGapData]
   )
 
   const allAlerts = useMemo(
@@ -242,6 +287,7 @@ export default function Alerts() {
   const criticalCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'critical').length
   const warningCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'warning').length
   const infoCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'info').length
+  const isForgeRiskFiltered = FORGE_REASON_CODES.has(String(filterCode || '').toUpperCase())
 
   const heroTitle = criticalCount > 0
     ? `${criticalCount} 条严重告警待处理`
@@ -291,7 +337,21 @@ export default function Alerts() {
         </NoticeBanner>
       ) : null}
 
-      <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+      {isForgeRiskFiltered ? (
+        <NoticeBanner variant="info" title="Forge Risk Drill-down">
+          <span className="mr-2">{`filter=${filterCode}`}</span>
+          <a href="#/insights/global?focus=forge-risk" className="font-medium text-primary hover:underline">
+            打开 Forge 全局洞察
+          </a>
+        </NoticeBanner>
+      ) : null}
+
+      <DigitalLifeRuntimeCard
+        runtimeSnapshot={runtimeSnapshot}
+        promptStats={promptStats}
+        capabilityGapData={capabilityGapData}
+        compact
+      />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
         <MetricCard icon={Bell} label="总告警" value={filteredAlerts.length} hint="当前过滤结果" tone="text-gray-900" />
@@ -320,7 +380,7 @@ export default function Alerts() {
                       'w-full rounded-xl border px-3 py-2 text-left transition-colors',
                       active ? 'border-primary bg-primary-50' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
                     )}
-                    onClick={() => setFilterCode(active ? '' : code)}
+                    onClick={() => applyFilterCode(active ? '' : code)}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className={classNames('text-sm font-medium', active ? 'text-primary' : 'text-gray-700')}>
@@ -344,7 +404,7 @@ export default function Alerts() {
           )}
 
           {filterCode ? (
-            <button className="btn-secondary mt-4 w-full justify-center" onClick={() => setFilterCode('')}>
+            <button className="btn-secondary mt-4 w-full justify-center" onClick={() => applyFilterCode('')}>
               清除过滤：{formatAlertTitle(filterCode)}
             </button>
           ) : null}

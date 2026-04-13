@@ -4,8 +4,8 @@
   - handle_chat：POST /v1/chat 统一入口
   - _unified_chat_sse_generator：统一 SSE 生成器（Governor 鉴权 + 场景分类 + 路由分发）
 
-Phase XIV v4 架构：
-  top_agent.py 处理 80% 闲聊直通路径，本模块负责剩余场景的 SSE 生成。
+Phase XV 收口架构：
+  cortex_orchestrator 统一承接主入口，本模块负责 /v1/chat 的鉴权、场景判定与流式转发。
   场景分类由 pre_intent_classifier 完成，按场景类型分发到对应 handler。
 
 子模块职责：
@@ -264,13 +264,13 @@ async def _unified_chat_sse_generator(
             },
         )
 
-        # ── Phase XIV v4：顶级 Agent 统一入口（唯一路径）────────────────
+        # ── Phase XV：Cortex Orchestrator 统一入口（唯一路径）──────────────
         # 夏目蓝本人，统一处理所有场景。
         # 闲聊路径：Airlock → LLM → 反思链 → Airlock → 异步后处理
-        # 执行路径：顶级 Agent 调度子 Agent → 子 Agent 内部走治理
-        from host_brain.app.top_agent import top_agent_sse_generator  # noqa: PLC0415
+        # 执行路径：Cortex Orchestrator 调度 Executive Router / 子 Agent
+        from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415
         _chat_committed = False
-        async for event in top_agent_sse_generator(
+        async for event in cortex_orchestrator_sse_generator(
             request_body=request_body,
             request_id=request_id,
             session_id=session_id,

@@ -818,13 +818,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "dispatch_agent.routing_prompt.templates": PromptTemplateDefinition(
-        template_id="dispatch_agent.routing_prompt.templates",
+    "executive_router.routing_prompt.templates": PromptTemplateDefinition(
+        template_id="executive_router.routing_prompt.templates",
         category="prompt",
-        scope="dispatch_agent",
+        scope="executive_router",
         locale="zh",
         content_type="json",
-        description="DispatchAgent 路由分类 prompt 模板（JSON，含 system prompt、user prompt 与 fallback skill 列表）",
+        description="ExecutiveRouter 路由分类 prompt 模板（JSON，含 system prompt、user prompt 与 fallback skill 列表）",
         default_content=_json_text(
             {
                 "skill_line_with_description": "- {skill_name}: {description}",
@@ -857,13 +857,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "dispatch_agent.failure_recovery.templates": PromptTemplateDefinition(
-        template_id="dispatch_agent.failure_recovery.templates",
+    "executive_router.failure_recovery.templates": PromptTemplateDefinition(
+        template_id="executive_router.failure_recovery.templates",
         category="prompt",
-        scope="dispatch_agent",
+        scope="executive_router",
         locale="zh",
         content_type="json",
-        description="DispatchAgent 失败恢复计划文案模板（JSON，含 summary 与 repair/intent task prompt）",
+        description="ExecutiveRouter 失败恢复计划文案模板（JSON，含 summary 与 repair/intent task prompt）",
         default_content=_json_text(
             {
                 "file_error": {
@@ -889,13 +889,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "dispatch_agent.runtime_texts": PromptTemplateDefinition(
-        template_id="dispatch_agent.runtime_texts",
+    "executive_router.runtime_texts": PromptTemplateDefinition(
+        template_id="executive_router.runtime_texts",
         category="fallback",
-        scope="dispatch_agent",
+        scope="executive_router",
         locale="zh",
         content_type="json",
-        description="DispatchAgent 运行期任务进度/计划状态/委托与技能执行文案模板（JSON）",
+        description="ExecutiveRouter 运行期任务进度/计划状态/委托与技能执行文案模板（JSON）",
         default_content=_json_text(
             {
                 "task_progress": {
@@ -2346,6 +2346,18 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
                 "sub_agent_recovery_hint_line": "  补充信息：{result_text}\n",
                 "unknown_error": "未知错误",
                 "gateway_reply_depth_hint": "（回复简洁，12-60字，适合移动端消息）",
+                "quick_ack_low_energy": "我在，给我一点点时间，我马上处理。",
+                "quick_ack_close": "好，我知道了，马上给你处理好。",
+                "quick_ack_warm": "收到，我这就开始处理。",
+                "quick_ack_stranger": "收到，我这边马上处理。",
+                "quick_ack_default": "好的，稍等下，我马上处理。",
+                "quick_progress_running": "正在处理 {target_id}，已进行 {elapsed}。当前进展：{progress_message}",
+                "quick_progress_completed": "{target_id} 已完成，用时 {elapsed}。结果摘要：{result_text}",
+                "quick_progress_failed": "{target_id} 执行遇到问题。当前状态：FAILED。已记录错误并准备恢复。",
+                "quick_progress_missing": "我这边暂时没有可汇报的任务进度。",
+                "quick_progress_default": "{target_id} 当前状态是 {elapsed} 内持续处理中，最新进展：{progress_message}",
+                "quick_realign_notice": "我看到了，刚才执行方向可能有点偏，我马上重新对齐你的需求再给你结果。",
+                "quick_realign_default": "刚刚那步可能偏题了，我这就纠正并继续处理。",
             }
         ),
     ),
@@ -2561,9 +2573,9 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
                         "AI やアシスタントと自称しない。"
                     ),
                 },
-                "top_agent": {
+                "cortex_orchestrator": {
                     "zh": (
-                        "角色：顶级 Agent（夏目蓝本人，唯一对话入口）。\n"
+                        "角色：cortex_orchestrator（夏目蓝本人，唯一对话入口）。\n"
                         "目标：直接以自己的身份回复用户，或在需要时委托子 Agent。\n"
                         "策略：\n"
                         "1) 遵循【角色人设】中的身份和性格。\n"
@@ -2575,7 +2587,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
                         "7) 输出纯文本，不需要 JSON 封装。代码块用 ``` 包裹。"
                     ),
                     "ja": (
-                        "角色：トップエージェント（夏目蓝本人、唯一の対話入口）。\n"
+                        "角色：cortex_orchestrator（夏目蓝本人、唯一の対話入口）。\n"
                         "目標：自分自身として直接ユーザーに応答する。必要に応じて子エージェントに委託する。\n"
                         "策略：\n"
                         "1)【角色人設】のキャラクターと性格に従う。\n"
@@ -2752,13 +2764,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "top_agent_prompt.style_correction.cn": PromptTemplateDefinition(
-        template_id="top_agent_prompt.style_correction.cn",
+    "cortex_prompt_builder.style_correction.cn": PromptTemplateDefinition(
+        template_id="cortex_prompt_builder.style_correction.cn",
         category="prompt",
-        scope="top_agent_prompt",
+        scope="cortex_prompt_builder",
         locale="zh",
         content_type="text",
-        description="TopAgent 风格纠偏：中文",
+        description="CortexPromptBuilder 风格纠偏：中文",
         default_content=(
             "【语言纠偏（高优先级）】\n"
             "- 普通问候、确认、轻寒暄时，不要每句都以‘嗯……’起手。\n"
@@ -2768,13 +2780,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "- 陌生/初识阶段优先礼貌、自然、清爽，减少黏腻感和过软撒娇语气。"
         ),
     ),
-    "top_agent_prompt.style_correction.ja": PromptTemplateDefinition(
-        template_id="top_agent_prompt.style_correction.ja",
+    "cortex_prompt_builder.style_correction.ja": PromptTemplateDefinition(
+        template_id="cortex_prompt_builder.style_correction.ja",
         category="prompt",
-        scope="top_agent_prompt",
+        scope="cortex_prompt_builder",
         locale="ja",
         content_type="text",
-        description="TopAgent 风格纠偏：日文",
+        description="CortexPromptBuilder 风格纠偏：日文",
         default_content=(
             "【話し方の補正（高優先度）】\n"
             "- 軽い挨拶や相槌では、毎回同じ出だしを繰り返さない。\n"
@@ -2784,13 +2796,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             "- 初期段階では、丁寧で自然、少し距離感のある柔らかさを優先する。"
         ),
     ),
-    "top_agent_prompt.delegate.block_templates": PromptTemplateDefinition(
-        template_id="top_agent_prompt.delegate.block_templates",
+    "cortex_prompt_builder.delegate.block_templates": PromptTemplateDefinition(
+        template_id="cortex_prompt_builder.delegate.block_templates",
         category="prompt",
-        scope="top_agent_prompt",
+        scope="cortex_prompt_builder",
         locale="zh",
         content_type="json",
-        description="TopAgent 委托协议块模板（JSON，支持 agent_id、desc）",
+        description="CortexPromptBuilder 委托协议块模板（JSON，支持 agent_id、desc）",
         default_content=_json_text(
             {
                 "title": "【可用能力（委托协议）】",
@@ -2801,13 +2813,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "top_agent_prompt.sections": PromptTemplateDefinition(
-        template_id="top_agent_prompt.sections",
+    "cortex_prompt_builder.sections": PromptTemplateDefinition(
+        template_id="cortex_prompt_builder.sections",
         category="prompt",
-        scope="top_agent_prompt",
+        scope="cortex_prompt_builder",
         locale="zh",
         content_type="json",
-        description="TopAgent system/prompt 分段标题模板（JSON，含角色人设/说话风格/用户消息）",
+        description="CortexPromptBuilder system/prompt 分段标题模板（JSON，含角色人设/说话风格/用户消息）",
         default_content=_json_text(
             {
                 "profile_title": "【角色人设】\n",
@@ -2816,13 +2828,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "top_agent_prompt.continuity_sections": PromptTemplateDefinition(
-        template_id="top_agent_prompt.continuity_sections",
+    "cortex_prompt_builder.continuity_sections": PromptTemplateDefinition(
+        template_id="cortex_prompt_builder.continuity_sections",
         category="prompt",
-        scope="top_agent_prompt",
+        scope="cortex_prompt_builder",
         locale="*",
         content_type="json",
-        description="TopAgent continuity 上下文块模板（JSON，含 User/Assistant 标签与上下文标题）",
+        description="CortexPromptBuilder continuity 上下文块模板（JSON，含 User/Assistant 标签与上下文标题）",
         default_content=_json_text(
             {
                 "user_label": "User",
@@ -2833,13 +2845,13 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
             }
         ),
     ),
-    "top_agent.runtime_texts": PromptTemplateDefinition(
-        template_id="top_agent.runtime_texts",
+    "cortex_orchestrator.runtime_texts": PromptTemplateDefinition(
+        template_id="cortex_orchestrator.runtime_texts",
         category="fallback",
-        scope="top_agent",
+        scope="cortex_orchestrator",
         locale="zh",
         content_type="json",
-        description="TopAgent 运行期快捷回复/委托整理/任务进度/最近一轮澄清文案模板（JSON）",
+        description="CortexOrchestrator 运行期快捷回复/委托整理/任务进度/最近一轮澄清文案模板（JSON）",
         default_content=_json_text(
             {
                 "variant_selection": {
@@ -4134,6 +4146,18 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
                 "sub_agent_recovery_hint_line": "  补充信息：{result_text}\n",
                 "unknown_error": "未知错误",
                 "gateway_reply_depth_hint": "（回复简洁，12-60 字，适合移动端消息）",
+                "quick_ack_low_energy": "我在，给我一点点时间，我马上处理。",
+                "quick_ack_close": "好，我知道了，马上给你处理好。",
+                "quick_ack_warm": "收到，我这就开始处理。",
+                "quick_ack_stranger": "收到，我这边马上处理。",
+                "quick_ack_default": "好的，稍等下，我马上处理。",
+                "quick_progress_running": "正在处理 {target_id}，已进行 {elapsed}。当前进展：{progress_message}",
+                "quick_progress_completed": "{target_id} 已完成，用时 {elapsed}。结果摘要：{result_text}",
+                "quick_progress_failed": "{target_id} 执行遇到问题。当前状态：FAILED。已记录错误并准备恢复。",
+                "quick_progress_missing": "我这边暂时没有可汇报的任务进度。",
+                "quick_progress_default": "{target_id} 当前状态是 {elapsed} 内持续处理中，最新进展：{progress_message}",
+                "quick_realign_notice": "我看到了，刚才执行方向可能有点偏，我马上重新对齐你的需求再给你结果。",
+                "quick_realign_default": "刚刚那步可能偏题了，我这就纠正并继续处理。",
             }
         ),
     ),

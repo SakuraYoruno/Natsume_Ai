@@ -19,13 +19,18 @@ function Pill({ icon: Icon, label, value }) {
   )
 }
 
-export default function DigitalLifeRuntimeCard({ runtimeSnapshot, promptStats = null, compact = false }) {
+export default function DigitalLifeRuntimeCard({
+  runtimeSnapshot,
+  promptStats = null,
+  capabilityGapData = null,
+  compact = false,
+}) {
   if (!runtimeSnapshot) {
     return null
   }
 
   const summary = getDigitalLifeRuntimeSummary(runtimeSnapshot)
-  const runtimeAlerts = buildDigitalLifeAlerts(runtimeSnapshot, { promptStats })
+  const runtimeAlerts = buildDigitalLifeAlerts(runtimeSnapshot, { promptStats, capabilityGapData })
   const nonLiveSlots = getNonLiveSlots(runtimeSnapshot)
 
   return (

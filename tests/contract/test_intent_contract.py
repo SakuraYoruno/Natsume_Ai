@@ -97,3 +97,37 @@ class TestIntentContract(unittest.TestCase):
         self.assertEqual("REJECT", result["decision"])
         self.assertEqual(EXPIRED_INTENT, result["reason_code"])
         self.assertEqual(self.now_ms, self.ledger.intent_log[-1]["ts_ms"])
+
+    def test_t24_extension_fields_do_not_break_strict_validate(self) -> None:
+        payload = self._fresh_intent(seq=1, intent_id="intent_t24_001", nonce="nonce_t24_001")
+        payload["route"] = "skill"
+        payload["target_id"] = "read_only_status"
+        payload["planned_steps"] = [
+            {
+                "step_index": 1,
+                "route": "skill",
+                "target_id": "read_only_status",
+                "description": "status one",
+                "task_description": "status one",
+                "route_reason": "test:t24:one",
+                "allow_parallel": True,
+                "skill_family": "social",
+                "risk_level": 1,
+            },
+            {
+                "step_index": 2,
+                "route": "skill",
+                "target_id": "read_only_status",
+                "description": "status two",
+                "task_description": "status two",
+                "route_reason": "test:t24:two",
+                "allow_parallel": True,
+                "skill_family": "social",
+                "risk_level": 1,
+            },
+        ]
+
+        result = self.engine.evaluate_intent(payload, current_ms=self.now_ms)
+
+        self.assertEqual("APPROVE", result["decision"])
+        self.assertIsNone(result["reason_code"])

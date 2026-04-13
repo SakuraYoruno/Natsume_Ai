@@ -154,3 +154,17 @@ class TestAccessLevel:
         """验证 SkillMeta 可以设置 RESTRICTED 访问级别。"""
         skill = make_skill_meta(access_level=AccessLevel.RESTRICTED)
         assert skill.access_level == AccessLevel.RESTRICTED
+
+
+class TestSkillFirstMeta:
+    def test_skill_meta_defaults_skill_first_fields(self):
+        skill = make_skill_meta()
+        assert skill.family == "general"
+        assert skill.capability_tags == ()
+        assert skill.parallelizable is False
+        assert skill.fallback_policy == "chat_fallback"
+
+    def test_skill_meta_invalid_family_rejected(self):
+        skill = make_skill_meta(family="INVALID FAMILY")
+        with pytest.raises(ValueError):
+            skill.validate()

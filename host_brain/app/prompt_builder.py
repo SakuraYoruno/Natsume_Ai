@@ -400,9 +400,9 @@ def _build_node_role_instruction(
     if resolved_node_id == PERSONA_RENDERER_NODE_ID:
         return _mapping_text(_mapping_section(templates, "persona_renderer"), lang_key)
 
-    # Phase XIV v4：顶级 Agent（统一入口，夏目蓝本人）
-    if resolved_node_id == "top_agent":
-        return _mapping_text(_mapping_section(templates, "top_agent"), lang_key)
+    # Phase XIV v4：Cortex Orchestrator 使用专属 role instruction block.
+    if resolved_node_id == "cortex_orchestrator":
+        return _mapping_text(_mapping_section(templates, "cortex_orchestrator"), lang_key)
 
     role_instructions = _mapping_section(templates, "generic_roles")
     base_instruction = str(

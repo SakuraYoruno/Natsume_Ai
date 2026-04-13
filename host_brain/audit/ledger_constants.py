@@ -344,6 +344,19 @@ SCHEDULER_EVENT_COLUMNS = (
     "ts_ms",
 )
 
+CAPABILITY_FORGE_PROPOSAL_COLUMNS = (
+    "proposal_id",
+    "event_type",
+    "status",
+    "stage",
+    "session_id",
+    "candidate_key",
+    "reason_code",
+    "actor",
+    "payload",
+    "ts_ms",
+)
+
 # P8-1: subgraph/local loop 失败分布聚合表列定义
 P8_SUBGRAPH_FAILURE_LOG_COLUMNS = (
     "request_id",
@@ -420,6 +433,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "model_control_log": set(),
     "sandbox_exec_log": {"resource_usage"},
     "scheduler_event_log": set(),
+    "capability_forge_proposal_log": {"payload"},
     "llm_route_log": set(),
     "llm_node_call_log": set(),
     "graph_run_trace": {"nodes_json", "edges_json"},
@@ -452,6 +466,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "bond_update_log",
     "sandbox_exec_log",
     "scheduler_event_log",
+    "capability_forge_proposal_log",
     "scheduler_tasks",
     "replay_guard",
     "session_seq_guard",

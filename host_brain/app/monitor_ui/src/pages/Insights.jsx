@@ -23,6 +23,7 @@ import {
   fetchQaStats,
   fetchLlmCallStats,
   fetchLlmRouteStats,
+  fetchCapabilityGapStats,
   fetchRecallPackStats,
   fetchUIAssertionStats,
   fetchFailureStats,
@@ -116,6 +117,7 @@ export default function Insights() {
   const navigate = useNavigate()
   const location = useLocation()
   const currentGroup = location.pathname.split('/').pop()
+  const focusTarget = new URLSearchParams(location.search).get('focus')
   const isRoot = currentGroup === 'insights' || currentGroup === ''
   const currentGroupMeta = INSIGHT_GROUPS.find((group) => group.id === currentGroup) || null
 
@@ -211,6 +213,16 @@ export default function Insights() {
     const timer = setInterval(load, pollingInterval * 1000)
     return () => clearInterval(timer)
   }, [load, pollingEnabled, pollingInterval])
+
+  useEffect(() => {
+    if (currentGroup !== 'global' || focusTarget !== 'forge-risk') {
+      return undefined
+    }
+    const timer = setTimeout(() => {
+      document.getElementById('forge-runtime-risk')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 120)
+    return () => clearTimeout(timer)
+  }, [currentGroup, focusTarget])
 
   return (
     <div className="space-y-8">
@@ -411,6 +423,7 @@ export default function Insights() {
         )}
       </InsightSection>
               <ErrorHeatmapSection windowMinutes={windowMinutes} />
+              <CapabilityGapStatsSection windowMinutes={windowMinutes} highlightForgeRisk={focusTarget === 'forge-risk'} />
               <ChainStatsSection windowMinutes={windowMinutes} />
               <FailureStatsSection windowMinutes={windowMinutes} />
             </>
@@ -1538,6 +1551,212 @@ function ChainStatsSection({ windowMinutes }) {
         </div>
       </div>
     </InsightSection>
+  )
+}
+
+/*
+function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }) {
+  const [data, setData] = React.useState(null)
+
+  React.useEffect(() => {
+    fetchCapabilityGapStats({
+      limit_recent: 30,
+      limit_hotspots: 8,
+      limit_candidates: 8,
+      min_candidate_detected: 3,
+      min_candidate_sessions: 2,
+      min_candidate_failure_rate: 0.35,
+      min_candidate_failed: 2,
+    }).then(setData).catch(() => {})
+  }, [windowMinutes])
+
+  const qualitySummary = data?.forge_runtime_quality?.summary || {}
+  const qualityItems = data?.forge_runtime_quality?.items || []
+  const worstItems = [...qualityItems]
+    .sort((left, right) => Number(left?.health_score ?? 0) - Number(right?.health_score ?? 0))
+    .slice(0, 5)
+
+  return (
+    <InsightSection icon={GitBranch} title="能力缺口与锻造质量" color="text-indigo-600">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="缺口检测" value={data?.detected_total ?? '鈥?} color="text-gray-700" />
+        <StatCard label="缺口失败" value={data?.failed_total ?? '鈥?} color="text-red-600" />
+        <StatCard label="活跃临时能力" value={data?.active_runtime_capabilities ?? '鈥?} color="text-violet-600" />
+        <StatCard label="Forge 候选" value={(data?.forge_candidates ?? []).length} color="text-blue-600" />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="跟踪提案" value={qualitySummary?.tracked_proposals ?? 0} color="text-gray-700" />
+        <StatCard label="不健康提案" value={qualitySummary?.unhealthy_proposals ?? 0} color="text-orange-500" />
+        <StatCard label="临界提案" value={qualitySummary?.critical_proposals ?? 0} color="text-red-600" />
+        <StatCard
+          label="平均健康分"
+          value={qualitySummary?.avg_health_score != null ? `${Number(qualitySummary.avg_health_score).toFixed(1)}` : '鈥?}
+          color={Number(qualitySummary?.avg_health_score ?? 0) >= 70 ? 'text-green-600' : 'text-orange-500'}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">能力缺口热点</div>
+          {(data?.hotspots ?? []).length > 0 ? (
+            <div className="space-y-2">
+              {(data?.hotspots ?? []).slice(0, 6).map((item) => (
+                <div key={item.candidate_key} className="rounded-lg border border-primary-100/70 bg-white/80 px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-orange-600">{item.reason_code}</span>
+                    <span className="text-gray-500">失败率 {(Number(item.failure_rate || 0) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="mt-1 text-gray-500">
+                    family={item.suggested_family} 路 detected={item.detected_count} 路 failed={item.failed_count}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyStateCard title="暂无能力缺口热点" hint="等待缺口事件累计后展示热点。" className="p-5" />
+          )}
+        </div>
+
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">Forge 运行质量（低健康优先）</div>
+          {worstItems.length > 0 ? (
+            <div className="space-y-2">
+              {worstItems.map((item) => {
+                const health = Number(item.health_score || 0)
+                const barClass = health >= 75 ? 'bg-green-400' : health >= 55 ? 'bg-orange-400' : 'bg-red-400'
+                return (
+                  <div key={item.proposal_id} className="rounded-lg border border-primary-100/70 bg-white/80 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-indigo-600">{(item.proposal_id || '').slice(0, 18)}</span>
+                      <span className="text-gray-500">{String(item.stage || '').toUpperCase()}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${Math.max(3, Math.min(100, health))}%` }} />
+                      </div>
+                      <span className="text-gray-600">{health.toFixed(1)}</span>
+                    </div>
+                    <div className="mt-1 text-gray-500">
+                      fail={(Number(item.window_failure_rate || 0) * 100).toFixed(1)}% 路 p95={item.window_p95_latency_ms ?? 0}ms 路 tune={item.last_tune_action || 'NONE'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <EmptyStateCard title="暂无 Forge 运行质量样本" hint="尚未观测到提案运行结果。" className="p-5" />
+          )}
+        </div>
+      </div>
+    </InsightSection>
+  )
+}
+
+*/
+
+function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }) {
+  const [data, setData] = React.useState(null)
+
+  React.useEffect(() => {
+    fetchCapabilityGapStats({
+      limit_recent: 30,
+      limit_hotspots: 8,
+      limit_candidates: 8,
+      min_candidate_detected: 3,
+      min_candidate_sessions: 2,
+      min_candidate_failure_rate: 0.35,
+      min_candidate_failed: 2,
+    }).then(setData).catch(() => {})
+  }, [windowMinutes])
+
+  const qualitySummary = data?.forge_runtime_quality?.summary || {}
+  const qualityItems = data?.forge_runtime_quality?.items || []
+  const worstItems = [...qualityItems]
+    .sort((left, right) => Number(left?.health_score ?? 0) - Number(right?.health_score ?? 0))
+    .slice(0, 5)
+
+  return (
+    <div id="forge-runtime-risk" className={highlightForgeRisk ? 'rounded-2xl ring-2 ring-red-200/80 ring-offset-2 ring-offset-white' : ''}>
+      {highlightForgeRisk ? (
+        <NoticeBanner variant="warning" title="Forge 风险焦点模式">
+          当前视图由全局告警跳转而来，已定位到 Capability Gap / Forge Runtime 细分面板。
+        </NoticeBanner>
+      ) : null}
+      <InsightSection icon={GitBranch} title="Capability Gap & Forge Quality" color="text-indigo-600">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="Gap Detected" value={data?.detected_total ?? '--'} color="text-gray-700" />
+        <StatCard label="Gap Failed" value={data?.failed_total ?? '--'} color="text-red-600" />
+        <StatCard label="Runtime Caps" value={data?.active_runtime_capabilities ?? '--'} color="text-violet-600" />
+        <StatCard label="Forge Candidates" value={(data?.forge_candidates ?? []).length} color="text-blue-600" />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+        <StatCard label="Tracked Props" value={qualitySummary?.tracked_proposals ?? 0} color="text-gray-700" />
+        <StatCard label="Unhealthy" value={qualitySummary?.unhealthy_proposals ?? 0} color="text-orange-500" />
+        <StatCard label="Critical" value={qualitySummary?.critical_proposals ?? 0} color="text-red-600" />
+        <StatCard
+          label="Avg Health"
+          value={qualitySummary?.avg_health_score != null ? `${Number(qualitySummary.avg_health_score).toFixed(1)}` : '--'}
+          color={Number(qualitySummary?.avg_health_score ?? 0) >= 70 ? 'text-green-600' : 'text-orange-500'}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">Capability Gap Hotspots</div>
+          {(data?.hotspots ?? []).length > 0 ? (
+            <div className="space-y-2">
+              {(data?.hotspots ?? []).slice(0, 6).map((item) => (
+                <div key={item.candidate_key} className="rounded-lg border border-primary-100/70 bg-white/80 px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-orange-600">{item.reason_code}</span>
+                    <span className="text-gray-500">fail {(Number(item.failure_rate || 0) * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="mt-1 text-gray-500">
+                    family={item.suggested_family} | detected={item.detected_count} | failed={item.failed_count}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyStateCard title="No capability hotspots" hint="Waiting for gap events to accumulate." className="p-5" />
+          )}
+        </div>
+
+        <div className="card p-4">
+          <div className="text-xs font-semibold text-gray-600 mb-3">Forge Runtime Quality (Worst First)</div>
+          {worstItems.length > 0 ? (
+            <div className="space-y-2">
+              {worstItems.map((item) => {
+                const health = Number(item.health_score || 0)
+                const barClass = health >= 75 ? 'bg-green-400' : health >= 55 ? 'bg-orange-400' : 'bg-red-400'
+                return (
+                  <div key={item.proposal_id} className="rounded-lg border border-primary-100/70 bg-white/80 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-indigo-600">{(item.proposal_id || '').slice(0, 18)}</span>
+                      <span className="text-gray-500">{String(item.stage || '').toUpperCase()}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                        <div className={`h-full rounded-full ${barClass}`} style={{ width: `${Math.max(3, Math.min(100, health))}%` }} />
+                      </div>
+                      <span className="text-gray-600">{health.toFixed(1)}</span>
+                    </div>
+                    <div className="mt-1 text-gray-500">
+                      fail={(Number(item.window_failure_rate || 0) * 100).toFixed(1)}% | p95={item.window_p95_latency_ms ?? 0}ms | tune={item.last_tune_action || 'NONE'}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <EmptyStateCard title="No Forge quality samples" hint="No proposal runtime result observed yet." className="p-5" />
+          )}
+        </div>
+      </div>
+      </InsightSection>
+    </div>
   )
 }
 

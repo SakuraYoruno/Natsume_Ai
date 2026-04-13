@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -188,7 +188,7 @@ def test_build_node_role_instruction_covers_known_and_generic_nodes() -> None:
     zh_renderer = pb._build_node_role_instruction(pb.CHAT_RENDER_NODE_ID, render_target_lang="zh")
     ja_renderer = pb._build_node_role_instruction(pb.CHAT_RENDER_NODE_ID, render_target_lang="ja")
     zh_persona = pb._build_node_role_instruction(pb.PERSONA_RENDERER_NODE_ID, render_target_lang="zh")
-    ja_top = pb._build_node_role_instruction("top_agent", render_target_lang="ja")
+    ja_top = pb._build_node_role_instruction("cortex_orchestrator", render_target_lang="ja")
     tool_planner = pb._build_node_role_instruction(
         "tool_planner",
         render_target_lang="zh",
@@ -199,7 +199,7 @@ def test_build_node_role_instruction_covers_known_and_generic_nodes() -> None:
     assert "renderer" in zh_renderer.lower()
     assert "renderer" in ja_renderer.lower()
     assert "persona_renderer" in zh_persona
-    assert "トップエージェント" in ja_top
+    assert "cortex_orchestrator" in ja_top
     assert "AVAILABLE_SKILLS" in tool_planner
     assert "memory_recall" in tool_planner
     assert generic.startswith("Role: generic node.")
@@ -422,7 +422,7 @@ def test_render_node_generation_prompt_uses_response_policy_template_override(
     monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
 
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "继续",
             "render_target_lang": "zh",
@@ -472,7 +472,7 @@ def test_render_node_generation_prompt_uses_persona_expression_template_override
     monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
 
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "我有点难过",
             "render_target_lang": "zh",
@@ -559,7 +559,7 @@ def test_render_node_generation_prompt_includes_memory_recall_persona_block() ->
 
 def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hint() -> None:
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "我有点难受",
             "render_target_lang": "zh",
@@ -591,7 +591,7 @@ def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hi
 
 def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_directives() -> None:
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "继续说说你最近的变化",
             "render_target_lang": "zh",
@@ -678,7 +678,7 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
     monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
 
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "继续说",
             "render_target_lang": "zh",
@@ -753,7 +753,7 @@ def test_render_node_generation_prompt_uses_self_reflection_template_override(
     monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
 
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "继续说说",
             "render_target_lang": "zh",

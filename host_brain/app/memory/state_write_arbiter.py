@@ -38,7 +38,7 @@ _DEFAULT_SCOPE_WRITERS: dict[StateScope, set[str]] = {
     },
     StateScope.EXECUTION_STATE: {
         "persona_core",
-        "dispatch_agent",
+        "executive_router",
         "tool_exec_agent",
         "skill_pool_agent",
     },
@@ -234,4 +234,3 @@ __all__ = [
     "StateWriteDecision",
     "StateWriteResult",
 ]
-

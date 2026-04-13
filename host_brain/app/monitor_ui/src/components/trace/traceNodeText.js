@@ -17,8 +17,8 @@ const TRACE_NODE_NAME_BY_ID = {
   persona_resident_memory: '人设常驻记忆',
   motive_state: '动机状态',
   response_policy: '响应策略',
-  top_agent: 'Top Agent',
-  dispatch_agent: 'Dispatch Agent',
+  cortex_orchestrator: 'Cortex Orchestrator',
+  executive_router: 'Executive Router',
   chat_agent: 'Chat Agent',
   prompt_builder: '提示构建器',
   llm_stream: '模型流式生成',
@@ -53,8 +53,8 @@ const TRACE_DISPLAY_NAME_ALIASES = {
   'Persona Resident Memory': '人设常驻记忆',
   'Motive State': '动机状态',
   'Response Policy': '响应策略',
-  'Top Agent': 'Top Agent',
-  'Dispatch Agent': 'Dispatch Agent',
+  'Cortex Orchestrator': 'Cortex Orchestrator',
+  'Executive Router': 'Executive Router',
   'Chat Agent': 'Chat Agent',
   'Prompt Builder': '提示构建器',
   'LLM Stream': '模型流式生成',
@@ -113,7 +113,7 @@ export function normalizeTraceNodeKey(nodeId = '') {
   if (raw.startsWith('sub_agent:vision') || raw === 'sub_agent_vision') return 'sub_agent_vision'
   if (raw.startsWith('airlock')) return raw.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
   if (raw === 'host_input') return 'airlock_ingress'
-  if (raw === 'llm_gateway' || raw === 'top_agent_llm_stream') return 'llm_stream'
+  if (raw === 'llm_gateway' || raw === 'cortex_orchestrator_llm_stream') return 'llm_stream'
   if (raw === 'recall_fusion') return 'recall_fusion'
   if (raw.startsWith('retrieval_query_planner')) return 'query_planner'
   if (raw.startsWith('retrieval_agentic_rag')) return 'agentic_rag'

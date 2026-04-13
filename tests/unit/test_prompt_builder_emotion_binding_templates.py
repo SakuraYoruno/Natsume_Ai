@@ -36,7 +36,7 @@ def test_render_node_generation_prompt_uses_emotion_binding_template_override(
     monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
 
     prompt = pb.render_node_generation_prompt(
-        node_id="top_agent",
+        node_id="cortex_orchestrator",
         runtime_payload={
             "user_message": "继续说",
             "render_target_lang": "zh",

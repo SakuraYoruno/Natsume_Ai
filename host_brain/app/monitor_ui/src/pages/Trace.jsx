@@ -104,24 +104,24 @@ const GROUPS = [
   {
     id: 'orchestration',
     label: '编排决策',
-    desc: '响应策略 · Top Agent',
+    desc: '响应策略 · Cortex Orchestrator',
     icon: Shield,
     color: '#7C3AED',
     bg: '#F5F3FF',
     border: '#C4B5FD',
-    nodeIds: ['response_policy', 'top_agent'],
-    traceNodeIds: ['response_policy', 'top_agent'],
+    nodeIds: ['response_policy', 'cortex_orchestrator'],
+    traceNodeIds: ['response_policy', 'cortex_orchestrator'],
   },
   {
     id: 'agent',
     label: '代理调度',
-    desc: 'Dispatch Agent · Sub Agent · Chat Agent',
+    desc: 'Executive Router · Sub Agent · Chat Agent',
     icon: Users,
     color: '#9333EA',
     bg: '#FAF5FF',
     border: '#D8B4FE',
-    nodeIds: ['dispatch_agent', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
-    traceNodeIds: ['dispatch_agent', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
+    nodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
+    traceNodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
   },
   {
     id: 'llm',
@@ -132,7 +132,7 @@ const GROUPS = [
     bg: '#EEF4FF',
     border: '#93C5FD',
     nodeIds: ['prompt_builder', 'llm_stream'],
-    traceNodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'top_agent_llm_stream'],
+    traceNodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'cortex_orchestrator_llm_stream'],
   },
   {
     id: 'postprocess',
@@ -163,8 +163,8 @@ const FULL_CHAIN_SCHEMA = {
     { node_id: 'persona_resident_memory', node_type: 'memory', display_name: '人设常驻记忆', layer: 'host' },
     { node_id: 'motive_state', node_type: 'system', display_name: '动机状态', layer: 'host' },
     { node_id: 'response_policy', node_type: 'system', display_name: '响应策略', layer: 'host' },
-    { node_id: 'top_agent', node_type: 'system', display_name: 'Top Agent', layer: 'host' },
-    { node_id: 'dispatch_agent', node_type: 'agent', display_name: 'Dispatch Agent', layer: 'host' },
+    { node_id: 'cortex_orchestrator', node_type: 'system', display_name: 'Cortex Orchestrator', layer: 'host' },
+    { node_id: 'executive_router', node_type: 'agent', display_name: 'Executive Router', layer: 'host' },
     { node_id: 'sub_agent_code', node_type: 'agent', display_name: '代码代理', layer: 'host' },
     { node_id: 'sub_agent_translate', node_type: 'agent', display_name: '翻译代理', layer: 'host' },
     { node_id: 'sub_agent_intent', node_type: 'agent', display_name: '意图代理', layer: 'host' },
@@ -192,14 +192,14 @@ const FULL_CHAIN_SCHEMA = {
     { source: 'emotion_context', target: 'persona_resident_memory' },
     { source: 'persona_resident_memory', target: 'motive_state' },
     { source: 'motive_state', target: 'response_policy' },
-    { source: 'response_policy', target: 'top_agent' },
-    { source: 'top_agent', target: 'dispatch_agent' },
-    { source: 'top_agent', target: 'prompt_builder' },
-    { source: 'dispatch_agent', target: 'sub_agent_code' },
-    { source: 'dispatch_agent', target: 'sub_agent_translate' },
-    { source: 'dispatch_agent', target: 'sub_agent_intent' },
-    { source: 'dispatch_agent', target: 'sub_agent_vision' },
-    { source: 'dispatch_agent', target: 'chat_agent' },
+    { source: 'response_policy', target: 'cortex_orchestrator' },
+    { source: 'cortex_orchestrator', target: 'executive_router' },
+    { source: 'cortex_orchestrator', target: 'prompt_builder' },
+    { source: 'executive_router', target: 'sub_agent_code' },
+    { source: 'executive_router', target: 'sub_agent_translate' },
+    { source: 'executive_router', target: 'sub_agent_intent' },
+    { source: 'executive_router', target: 'sub_agent_vision' },
+    { source: 'executive_router', target: 'chat_agent' },
     { source: 'sub_agent_code', target: 'chat_agent' },
     { source: 'sub_agent_translate', target: 'chat_agent' },
     { source: 'sub_agent_intent', target: 'chat_agent' },
@@ -240,7 +240,7 @@ function normalizeTraceGroupNodeId(nodeId = '', nodeType = '') {
   if (normalized.startsWith('sub_agent:')) return 'sub_agent_intent'
   if (normalized.startsWith('airlock')) return normalized.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
   if (normalized === 'host_input') return 'airlock_ingress'
-  if (normalized === 'llm_gateway' || normalized === 'top_agent_llm_stream') return 'llm_stream'
+  if (normalized === 'llm_gateway' || normalized === 'cortex_orchestrator_llm_stream') return 'llm_stream'
   if (normalized.startsWith('retrieval_') || normalized === 'recall_fusion') return 'recall_fusion'
   return normalized
 }
@@ -583,8 +583,8 @@ const LIVE_TRACE_KEY_NODE_IDS = [
   'persona_resident_memory',
   'motive_state',
   'response_policy',
-  'top_agent',
-  'dispatch_agent',
+  'cortex_orchestrator',
+  'executive_router',
   'sub_agent_code',
   'sub_agent_translate',
   'sub_agent_intent',

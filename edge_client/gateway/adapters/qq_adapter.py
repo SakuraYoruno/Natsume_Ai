@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from typing import Any
 
@@ -134,7 +135,11 @@ class QQAdapter(AbstractPlatformAdapter):
         # 消息类型判断
         msg_type = self._detect_msg_type(raw_payload)
         media_url = self._extract_media_url(raw_payload, msg_type=msg_type)
-        if not content:
+        if msg_type != MsgType.TEXT:
+            normalized_content = str(content or "").strip()
+            if (not normalized_content) or normalized_content.lower().startswith("[cq:"):
+                content = self._fallback_content_for_msg_type(msg_type)
+        elif not content:
             content = self._fallback_content_for_msg_type(msg_type)
 
         # 发送者昵称
@@ -513,13 +518,22 @@ class QQAdapter(AbstractPlatformAdapter):
                 return MsgType.VIDEO
             if "file" in types:
                 return MsgType.FILE
+        raw_message = str(raw_payload.get("raw_message") or "").lower()
+        if "[cq:record" in raw_message or "[cq:voice" in raw_message:
+            return MsgType.VOICE
+        if "[cq:image" in raw_message:
+            return MsgType.IMAGE
+        if "[cq:video" in raw_message:
+            return MsgType.VIDEO
+        if "[cq:file" in raw_message:
+            return MsgType.FILE
         return MsgType.TEXT
 
     @staticmethod
     def _extract_media_url(raw_payload: dict[str, Any], *, msg_type: MsgType) -> str | None:
         message_arr = raw_payload.get("message")
         if not isinstance(message_arr, list):
-            return None
+            return QQAdapter._extract_media_url_from_cq(raw_payload, msg_type=msg_type)
         target_types: dict[MsgType, set[str]] = {
             MsgType.VOICE: {"record", "voice"},
             MsgType.IMAGE: {"image"},
@@ -540,6 +554,32 @@ class QQAdapter(AbstractPlatformAdapter):
                 continue
             for key in ("file", "url", "path"):
                 value = str(data.get(key) or "").strip()
+                if value:
+                    return value
+        return QQAdapter._extract_media_url_from_cq(raw_payload, msg_type=msg_type)
+
+    @staticmethod
+    def _extract_media_url_from_cq(raw_payload: dict[str, Any], *, msg_type: MsgType) -> str | None:
+        raw_message = str(raw_payload.get("raw_message") or "").strip()
+        if not raw_message:
+            return None
+        cq_type_map: dict[MsgType, str] = {
+            MsgType.VOICE: "record",
+            MsgType.IMAGE: "image",
+            MsgType.VIDEO: "video",
+            MsgType.FILE: "file",
+        }
+        cq_type = cq_type_map.get(msg_type)
+        if not cq_type:
+            return None
+        match = re.search(rf"\[CQ:{re.escape(cq_type)},([^\]]+)\]", raw_message, flags=re.IGNORECASE)
+        if not match:
+            return None
+        payload = str(match.group(1) or "")
+        for key in ("file", "url", "path"):
+            key_match = re.search(rf"(?:^|,){re.escape(key)}=([^,\]]+)", payload, flags=re.IGNORECASE)
+            if key_match:
+                value = str(key_match.group(1) or "").strip()
                 if value:
                     return value
         return None

@@ -45,6 +45,7 @@ from host_brain.app.provider_factory import (
     resolve_gemini_primary_fallback_model_id,
     resolve_host_llm_model_id,
 )
+from host_brain.app.model_router import resolve_gemini_model_route
 
 CHAT_GRAPH_NODE_ORDER: list[str] = [
     CHAT_DIRECT_NODE_ID,
@@ -786,17 +787,29 @@ async def _resolve_host_llm_runtime_core(
         codex_api_key = _resolve_provider_api_key(provider_name=PROVIDER_CODEX)
         deepseek_api_key = _resolve_provider_api_key(provider_name=PROVIDER_DEEPSEEK)
 
+    gemini_cloud_route = resolve_gemini_model_route(
+        role="cloud_primary",
+        preferred_api_key=gemini_api_key,
+        route_key=(str(rollout_key or "").strip() or str(scene_type or "").strip() or None),
+    )
+    gemini_cloud_model_id = str(
+        gemini_cloud_route.get("model_id")
+        or _resolve_cloud_provider_model_id(chain_name="gemini")
+    ).strip() or _resolve_cloud_provider_model_id(chain_name="gemini")
+    gemini_cloud_api_key = str(gemini_cloud_route.get("api_key") or "").strip() or None
+
     remote_cloud_candidates: list[dict[str, Any]] = [
         {
             "chain_name": "gemini",
             "provider_name": PROVIDER_GEMINI,
-            "model_id": _resolve_cloud_provider_model_id(chain_name="gemini"),
-            "api_key": gemini_api_key,
+            "model_id": gemini_cloud_model_id,
+            "api_key": gemini_cloud_api_key,
             "base_url_override": _normalize_openai_compat_base_url(
                 str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()
             ),
             "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_GEMINI",
             "route_detail": "selected Gemini as primary remote provider",
+            "route_meta": dict(gemini_cloud_route),
         },
         {
             "chain_name": "codex",
@@ -835,6 +848,11 @@ async def _resolve_host_llm_runtime_core(
                 "provider_name": candidate_provider,
                 "model_id": candidate.get("model_id"),
                 "available": bool(candidate_available),
+                "model_route": (
+                    dict(candidate.get("route_meta") or {})
+                    if isinstance(candidate.get("route_meta"), dict)
+                    else {}
+                ),
             }
         )
         if candidate_available and selected_remote_candidate is None:
@@ -850,16 +868,22 @@ async def _resolve_host_llm_runtime_core(
         cloud_model_id = str(selected_remote_candidate.get("model_id") or "").strip() or resolve_host_llm_model_id(cloud_provider_name)
         cloud_llm_api_key = str(selected_remote_candidate.get("api_key") or "").strip() or None
         cloud_base_url_override = str(selected_remote_candidate.get("base_url_override") or "").strip() or None
+        cloud_model_route = (
+            dict(selected_remote_candidate.get("route_meta") or {})
+            if isinstance(selected_remote_candidate.get("route_meta"), dict)
+            else {}
+        )
         cloud_available = True
         route_reason_code = str(selected_remote_candidate.get("route_reason_code") or route_reason_code)
         route_detail = str(selected_remote_candidate.get("route_detail") or route_detail)
     else:
         cloud_provider_name = PROVIDER_GEMINI
-        cloud_model_id = _resolve_cloud_provider_model_id(chain_name="gemini")
-        cloud_llm_api_key = gemini_api_key
+        cloud_model_id = gemini_cloud_model_id
+        cloud_llm_api_key = gemini_cloud_api_key
         cloud_base_url_override = _normalize_openai_compat_base_url(
             str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()
         )
+        cloud_model_route = dict(gemini_cloud_route)
         cloud_available = False
 
     cloud_provider_fn = build_host_provider_fn(
@@ -1107,6 +1131,7 @@ f"routing_matrix selected host_14b: task={_decision.task_type.value},"
         "cloud_available": cloud_available,
         "cloud_provider_fn": cloud_provider_fn,
         "cloud_base_url_override": cloud_base_url_override,
+        "cloud_model_route": cloud_model_route,
         "remote_chain_status": remote_chain_status,
         "gray_rollout": dict(gray_rollout),
         "routing_matrix_decision": routing_matrix_decision,
@@ -1679,7 +1704,7 @@ def _build_graph_config_by_profile(
 # Phase XV: 三套 Agent 专用 LLM 运行时解析
 # ---------------------------------------------------------------------------
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
+def _legacy_resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
     """ChatAgent（夏目蓝本人）的 LLM 运行时配置。
 
     追求「好」：高质量模型 + 高温度 + 流式输出 + 双语生成能力。
@@ -1715,8 +1740,8 @@ def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
     }
 
 
-def resolve_dispatch_agent_llm_runtime(*, base_runtime: dict) -> dict:
-    """DispatchAgent（调度器）的 LLM 运行时配置。
+def _legacy_resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
+    """ExecutiveRouter 的旧版 LLM 运行时配置。
 
     追求「快」：轻量模型 + 低温度 + 非流式 + 严格 JSON 输出。
     默认使用 gemini-2.5-flash，可通过 HOST_DISPATCH_AGENT_MODEL_ID 覆盖。
@@ -1725,7 +1750,7 @@ def resolve_dispatch_agent_llm_runtime(*, base_runtime: dict) -> dict:
         base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
 
     Returns:
-        DispatchAgent 专用 LLM 运行时 dict
+        ExecutiveRouter 专用 LLM 运行时 dict
     """
     model_id = str(
         os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID") or "gemini-2.5-flash"
@@ -1742,16 +1767,16 @@ def resolve_dispatch_agent_llm_runtime(*, base_runtime: dict) -> dict:
         "chat_model_id": model_id,
         "timeout_ms": timeout_ms,
         "chat_timeout_ms": timeout_ms,
-        # DispatchAgent 专属 gen_params：低温度确保路由判断稳定可预测
+        # Executive Router 专属 gen_params：低温度确保路由判断稳定可预测
         "agent_gen_params": {
             "temperature": 0.1,
             "top_p": 0.80,
         },
-        "agent_role": "dispatch_agent",
+        "agent_role": "executive_router",
     }
 
 
-def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
+def _legacy_resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
     """SubAgent（code/translate/intent/vision）的 LLM 运行时配置。
 
     追求「准」：中等质量模型 + 低温度 + 非流式 + 多轮工具调用。
@@ -1785,3 +1810,138 @@ def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
         },
         "agent_role": "sub_agent",
     }
+
+
+def _resolve_non_gemini_agent_model_id_v2(
+    *,
+    provider_name: str,
+    base_runtime: dict[str, Any],
+    model_env_names: tuple[str, ...],
+) -> str:
+    for model_env_name in model_env_names:
+        explicit_model = str(os.environ.get(model_env_name) or "").strip()
+        if explicit_model and not explicit_model.lower().startswith("gemini-"):
+            return explicit_model
+    base_model_id = str(
+        base_runtime.get("model_id")
+        or base_runtime.get("chat_model_id")
+        or ""
+    ).strip()
+    if base_model_id:
+        return base_model_id
+    return resolve_host_llm_model_id(provider_name)
+
+
+def _first_non_empty_env(*env_names: str) -> str | None:
+    for env_name in env_names:
+        value = str(os.environ.get(env_name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _resolve_agent_llm_runtime_v2(
+    *,
+    base_runtime: dict[str, Any],
+    role: str,
+    model_env_name: str,
+    timeout_env_name: str,
+    timeout_default_ms: int,
+    timeout_max_ms: int,
+    gen_params: dict[str, float],
+    fallback_model_env_names: tuple[str, ...] = (),
+    fallback_timeout_env_names: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    provider_name = str(base_runtime.get("provider_name") or PROVIDER_GEMINI).strip().lower() or PROVIDER_GEMINI
+    timeout_value = _first_non_empty_env(timeout_env_name, *fallback_timeout_env_names)
+    timeout_ms = max(
+        800,
+        _parse_int(
+            timeout_value,
+            default=timeout_default_ms,
+            min_value=800,
+            max_value=timeout_max_ms,
+        ),
+    )
+    selected_api_key = str(
+        base_runtime.get("llm_api_key")
+        or base_runtime.get("chat_llm_api_key")
+        or ""
+    ).strip() or None
+    model_route: dict[str, Any] = {}
+    if provider_name == PROVIDER_GEMINI:
+        model_route = resolve_gemini_model_route(
+            role=role,
+            preferred_api_key=selected_api_key,
+            route_key=(
+                str(base_runtime.get("route_reason_code") or "").strip()
+                or str(base_runtime.get("route_target") or "").strip()
+                or None
+            ),
+        )
+        model_id = str(
+            model_route.get("model_id")
+            or base_runtime.get("model_id")
+            or base_runtime.get("chat_model_id")
+            or "gemini-2.5-flash"
+        ).strip() or "gemini-2.5-flash"
+        selected_api_key = str(model_route.get("api_key") or selected_api_key or "").strip() or None
+    else:
+        model_id = _resolve_non_gemini_agent_model_id_v2(
+            provider_name=provider_name,
+            base_runtime=base_runtime,
+            model_env_names=(model_env_name, *fallback_model_env_names),
+        )
+
+    return {
+        **base_runtime,
+        "model_id": model_id,
+        "chat_model_id": model_id,
+        "timeout_ms": timeout_ms,
+        "chat_timeout_ms": timeout_ms,
+        "llm_api_key": selected_api_key,
+        "chat_llm_api_key": selected_api_key,
+        "agent_gen_params": dict(gen_params),
+        "agent_role": role,
+        "agent_model_route": (model_route or None),
+    }
+
+
+def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
+    return _resolve_agent_llm_runtime_v2(
+        base_runtime=base_runtime,
+        role="chat_agent",
+        model_env_name="HOST_CHAT_AGENT_MODEL_ID",
+        timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS",
+        timeout_default_ms=30_000,
+        timeout_max_ms=120_000,
+        gen_params={"temperature": 0.8, "top_p": 0.92},
+    )
+
+
+def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
+    return _resolve_agent_llm_runtime_v2(
+        base_runtime=base_runtime,
+        role="executive_router",
+        model_env_name="HOST_EXECUTIVE_ROUTER_MODEL_ID",
+        timeout_env_name="HOST_EXECUTIVE_ROUTER_TIMEOUT_MS",
+        timeout_default_ms=5_000,
+        timeout_max_ms=30_000,
+        gen_params={"temperature": 0.1, "top_p": 0.80},
+        fallback_model_env_names=("HOST_DISPATCH_AGENT_MODEL_ID",),
+        fallback_timeout_env_names=("HOST_DISPATCH_AGENT_TIMEOUT_MS",),
+    )
+
+
+def resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
+    runtime = _resolve_agent_llm_runtime_v2(
+        base_runtime=base_runtime,
+        role="subagent",
+        model_env_name="HOST_SUBAGENT_MODEL_ID",
+        timeout_env_name="HOST_SUBAGENT_TIMEOUT_MS",
+        timeout_default_ms=30_000,
+        timeout_max_ms=120_000,
+        gen_params={"temperature": 0.3, "top_p": 0.85},
+    )
+    runtime["agent_role"] = "sub_agent"
+    return runtime

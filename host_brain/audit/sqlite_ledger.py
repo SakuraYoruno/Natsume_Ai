@@ -42,6 +42,7 @@ from host_brain.audit.ledger_constants import (
     BOND_UPDATE_COLUMNS,
     SANDBOX_EXEC_COLUMNS,
     SCHEDULER_EVENT_COLUMNS,
+    CAPABILITY_FORGE_PROPOSAL_COLUMNS,
     P8_SUBGRAPH_FAILURE_LOG_COLUMNS,
     P8_GRAPH_RUN_LOG_COLUMNS,
     WalConfig,
@@ -211,6 +212,10 @@ class SQLiteLedger(
     def sandbox_exec_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("sandbox_exec_log")
 
+    @property
+    def capability_forge_proposal_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("capability_forge_proposal_log")
+
     # -------------------------------------------------------------------
     # 写入方法（业务 log_* 方法）
     # -------------------------------------------------------------------
@@ -376,6 +381,19 @@ class SQLiteLedger(
         payload = {key: row.get(key) for key in SCHEDULER_EVENT_COLUMNS}
         self._insert("scheduler_event_log", payload)
 
+    def log_capability_forge_proposal(self, row: dict[str, Any]) -> None:
+        payload = {key: row.get(key) for key in CAPABILITY_FORGE_PROPOSAL_COLUMNS}
+        payload["proposal_id"] = str(payload.get("proposal_id") or "").strip()
+        payload["event_type"] = str(payload.get("event_type") or "").strip().upper() or "UNKNOWN"
+        payload["status"] = str(payload.get("status") or "").strip().upper() or "UNKNOWN"
+        payload["stage"] = str(payload.get("stage") or "").strip().upper() or "UNKNOWN"
+        payload["session_id"] = str(payload.get("session_id") or "").strip() or None
+        payload["candidate_key"] = str(payload.get("candidate_key") or "").strip() or None
+        payload["reason_code"] = str(payload.get("reason_code") or "").strip().upper() or None
+        payload["actor"] = str(payload.get("actor") or "").strip() or None
+        payload["ts_ms"] = int(payload.get("ts_ms") or now_ms())
+        self._insert("capability_forge_proposal_log", payload)
+
     def log_p8_subgraph_failure(self, row: dict[str, Any]) -> None:
         """P8-1：写入 subgraph/local loop 失败记录。
 
@@ -393,6 +411,46 @@ class SQLiteLedger(
         """
         payload = {key: row.get(key) for key in P8_GRAPH_RUN_LOG_COLUMNS}
         self._insert("p8_graph_run_log", payload)
+
+    def list_capability_forge_proposals(
+        self,
+        *,
+        proposal_id: str | None = None,
+        status: str | None = None,
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 20000))
+        offset = max(0, int(offset))
+        conditions: list[str] = []
+        params: list[Any] = []
+        if proposal_id is not None and str(proposal_id).strip():
+            conditions.append("proposal_id = ?")
+            params.append(str(proposal_id).strip())
+        if status is not None and str(status).strip():
+            conditions.append("status = ?")
+            params.append(str(status).strip().upper())
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM capability_forge_proposal_log {where_clause} ORDER BY ts_ms ASC, id ASC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+        return [self._decode_row("capability_forge_proposal_log", row) for row in rows]
+
+    def get_latest_capability_forge_proposals(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self.list_capability_forge_proposals(limit=max(1, int(limit)) * 20, offset=0)
+        latest: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            proposal_id = str(row.get("proposal_id") or "").strip()
+            if not proposal_id:
+                continue
+            latest[proposal_id] = dict(row)
+        ordered = sorted(
+            latest.values(),
+            key=lambda item: int(item.get("ts_ms") or 0),
+            reverse=True,
+        )
+        return ordered[: max(1, int(limit))]
 
     # -------------------------------------------------------------------
     # Canon 提案查询与更新

@@ -23,7 +23,7 @@ class RuntimeTaskSnapshot:
     session_id: str
     person_id: str
     user_message: str
-    source: str = "dispatch_agent"
+    source: str = "executive_runtime"
     status: str = STATUS_PENDING
     detail: str = ""
     progress_message: str = ""
@@ -83,7 +83,7 @@ class RuntimeTaskRegistry:
         session_id: str,
         person_id: str,
         user_message: str,
-        source: str = "dispatch_agent",
+        source: str = "executive_runtime",
         detail: str = "",
         progress_message: str = "",
         meta: dict[str, Any] | None = None,
@@ -97,7 +97,7 @@ class RuntimeTaskRegistry:
             session_id=str(session_id or "").strip(),
             person_id=str(person_id or "").strip(),
             user_message=str(user_message or "").strip(),
-            source=str(source or "dispatch_agent").strip() or "dispatch_agent",
+            source=str(source or "executive_runtime").strip() or "executive_runtime",
             detail=str(detail or "").strip(),
             progress_message=str(progress_message or detail or "").strip(),
             meta=dict(meta or {}),

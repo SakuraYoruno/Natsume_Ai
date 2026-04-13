@@ -39,6 +39,100 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
 }
 _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
+_GATEWAY_ACK_PROGRESS_QUERY_RE = re.compile(
+    r"(进度|进展|状态|结果呢|有结果吗|完成了?吗|做完了?吗|好了没|搞定了?吗|到哪了|还要多久|eta|done\??|status|progress|update)",
+    re.IGNORECASE,
+)
+_GATEWAY_ACK_PROGRESS_MARKERS: tuple[str, ...] = (
+    "进度",
+    "进展",
+    "状态",
+    "结果呢",
+    "有结果吗",
+    "完成了吗",
+    "做完了吗",
+    "搞定了吗",
+    "好了没",
+    "到哪了",
+    "到哪一步",
+    "还要多久",
+    "什么时候好",
+    "status",
+    "progress",
+    "update",
+    "done yet",
+    "eta",
+)
+_GATEWAY_ACK_ACTION_MARKERS: tuple[str, ...] = (
+    "请",
+    "麻烦",
+    "帮我",
+    "帮忙",
+    "需要你",
+    "执行",
+    "处理",
+    "安排",
+    "规划",
+    "调用",
+    "查询",
+    "查一下",
+    "查下",
+    "检索",
+    "搜索",
+    "总结",
+    "归纳",
+    "翻译",
+    "改写",
+    "写一个",
+    "生成",
+    "实现",
+    "改造",
+    "优化",
+    "修复",
+    "排查",
+    "测试",
+    "验证",
+    "启动",
+    "停止",
+    "重启",
+    "run",
+    "execute",
+    "build",
+    "fix",
+    "test",
+    "deploy",
+    "search",
+)
+_ALIGNMENT_TOKEN_RE = re.compile(r"[A-Za-z]{3,}|[\u4e00-\u9fff]{2,}")
+_ALIGNMENT_STOPWORDS: set[str] = {
+    "请",
+    "麻烦",
+    "帮我",
+    "帮忙",
+    "一下",
+    "一下子",
+    "这个",
+    "那个",
+    "今天",
+    "现在",
+    "然后",
+    "继续",
+    "处理",
+    "执行",
+    "安排",
+    "操作",
+    "任务",
+    "结果",
+    "进度",
+    "状态",
+    "一下吧",
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+}
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
@@ -362,6 +456,26 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     except Exception:
         pass
 
+    if source == "GATEWAY":
+        handled_by_progress_fastpath = await _try_handle_gateway_progress_fastpath(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ledger=_get_ledger_safe(),
+            ts_ms=ts_ms,
+        )
+        if handled_by_progress_fastpath:
+            return InputResponse(
+                success=True,
+                request_id=request_id,
+                source=source,
+                status="COMPLETED",
+                detail="gateway progress fastpath replied",
+                ts_ms=int(time.time() * 1000),
+            )
+
     try:
         await _dispatch_to_graph(
             request_id=request_id,
@@ -445,6 +559,22 @@ def _log_input_event(
                 "gateway_latency_ms",
                 "reply_text_len",
                 "reply_preview",
+                "immediate_ack_status",
+                "immediate_ack_latency_ms",
+                "immediate_ack_preview",
+                "immediate_ack_reason",
+                "progress_fastpath_status",
+                "progress_fastpath_latency_ms",
+                "progress_fastpath_preview",
+                "progress_fastpath_reason",
+                "progress_push_status",
+                "progress_push_reason",
+                "progress_push_preview",
+                "progress_push_updates",
+                "deviation_reason",
+                "deviation_overlap_ratio",
+                "deviation_retry_applied",
+                "deviation_retry_overlap_ratio",
             )
             for field in gateway_fields:
                 value = (input_payload or {}).get(field)
@@ -480,7 +610,7 @@ def _log_dispatch_task_exception(task: asyncio.Task) -> None:
 
 
 class _NoopMetrics:
-    """Minimal metrics shim for top_agent direct invocation."""
+    """Minimal metrics shim for cortex orchestrator direct invocation."""
 
     def __getattr__(self, _name: str):
         def _noop(*_args: Any, **_kwargs: Any) -> None:
@@ -537,7 +667,661 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     return f"{normalized[: max(0, limit - 3)]}..."
 
 
-async def _run_top_agent_pipeline(
+def _looks_like_progress_query_for_ack_skip(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or "")).strip().lower()
+    if not compact:
+        return False
+    if _GATEWAY_ACK_PROGRESS_QUERY_RE.search(compact):
+        return True
+    return any(marker in compact for marker in _GATEWAY_ACK_PROGRESS_MARKERS)
+
+
+def _looks_like_execution_intent_for_ack(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not normalized:
+        return False
+    if _looks_like_progress_query_for_ack_skip(normalized):
+        return False
+
+    compact = normalized.replace(" ", "").lower()
+    if normalized.startswith(("/", "!", "run ", "exec ")):
+        return True
+    return any(marker in compact for marker in _GATEWAY_ACK_ACTION_MARKERS)
+
+
+def _resolve_bond_stage_for_ack(*, payload: dict[str, Any]) -> str:
+    stage = str((dict(payload.get("bond_summary") or {})).get("stage") or "").strip().upper()
+    if stage:
+        return stage
+
+    person_id = str(payload.get("person_id") or "").strip()
+    if not person_id:
+        return "STRANGER"
+
+    try:
+        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
+
+        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="STRANGER")
+    except Exception:
+        return "STRANGER"
+
+
+def _resolve_emotion_tag_for_ack(*, payload: dict[str, Any]) -> str:
+    for key in ("emotion_tag", "emotion", "mood"):
+        value = str(payload.get(key) or "").strip().upper()
+        if value:
+            return value
+    return "NEUTRAL"
+
+
+def _format_elapsed_compact(elapsed_ms: int) -> str:
+    total_seconds = max(0, int(elapsed_ms // 1000))
+    if total_seconds < 60:
+        return f"{total_seconds}s"
+    minutes, seconds = divmod(total_seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m{seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}m"
+
+
+def _extract_alignment_keywords(text: str) -> list[str]:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return []
+    tokens = [str(token or "").strip().lower() for token in _ALIGNMENT_TOKEN_RE.findall(normalized)]
+    dedup: list[str] = []
+    for token in tokens:
+        if len(token) < 2:
+            continue
+        if token in _ALIGNMENT_STOPWORDS:
+            continue
+        if token not in dedup:
+            dedup.append(token)
+    return dedup[:12]
+
+
+def _compute_keyword_overlap(*, source_text: str, target_text: str) -> tuple[float, int, int]:
+    keywords = _extract_alignment_keywords(source_text)
+    if not keywords:
+        return 1.0, 0, 0
+    haystack = str(target_text or "").strip().lower()
+    if not haystack:
+        return 0.0, len(keywords), 0
+    hit_count = sum(1 for keyword in keywords if keyword and keyword in haystack)
+    ratio = hit_count / max(1, len(keywords))
+    return round(max(0.0, min(1.0, ratio)), 4), len(keywords), hit_count
+
+
+def _detect_gateway_execution_deviation(
+    *,
+    source: str,
+    user_text: str,
+    decision: str,
+    narrative: str,
+) -> dict[str, Any]:
+    if not _parse_bool_env("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", default=True):
+        return {"triggered": False, "reason_code": "DEVIATION_GUARD_DISABLED"}
+    if str(source or "").strip().upper() != "GATEWAY":
+        return {"triggered": False, "reason_code": "DEVIATION_SOURCE_NOT_GATEWAY"}
+    if str(decision or "").strip().upper() != "APPROVE":
+        return {"triggered": False, "reason_code": "DEVIATION_DECISION_NOT_APPROVE"}
+    if not _looks_like_execution_intent_for_ack(user_text):
+        return {"triggered": False, "reason_code": "DEVIATION_NON_ACTION_INTENT"}
+    source_norm = str(user_text or "").strip()
+    target_norm = str(narrative or "").strip()
+    if not source_norm or not target_norm:
+        return {"triggered": False, "reason_code": "DEVIATION_EMPTY_TEXT"}
+
+    overlap_ratio, keyword_count, hit_count = _compute_keyword_overlap(
+        source_text=source_norm,
+        target_text=target_norm,
+    )
+    min_keyword_count = max(2, _parse_int_env("HOST_GATEWAY_DEVIATION_MIN_KEYWORDS", default=3))
+    min_overlap = max(0.0, min(1.0, _parse_float_env("HOST_GATEWAY_DEVIATION_MIN_OVERLAP", default=0.18)))
+    if keyword_count < min_keyword_count:
+        return {
+            "triggered": False,
+            "reason_code": "DEVIATION_KEYWORDS_INSUFFICIENT",
+            "overlap_ratio": overlap_ratio,
+            "keyword_count": keyword_count,
+            "hit_count": hit_count,
+        }
+    if overlap_ratio >= min_overlap:
+        return {
+            "triggered": False,
+            "reason_code": "DEVIATION_OVERLAP_OK",
+            "overlap_ratio": overlap_ratio,
+            "keyword_count": keyword_count,
+            "hit_count": hit_count,
+        }
+    return {
+        "triggered": True,
+        "reason_code": "DEVIATION_OVERLAP_LOW",
+        "overlap_ratio": overlap_ratio,
+        "keyword_count": keyword_count,
+        "hit_count": hit_count,
+        "min_overlap": min_overlap,
+    }
+
+
+def _build_realign_user_message(*, original_user_text: str, first_narrative: str) -> str:
+    original = str(original_user_text or "").strip()
+    first = str(first_narrative or "").strip()
+    guidance = (
+        "[执行纠偏]\n"
+        "刚才结果可能偏离了用户真实意图。请仅围绕原始请求重新执行，并给出可执行/可验证结果。\n"
+        f"原始请求：{original}\n"
+        f"偏航输出：{first}\n"
+        "要求：不要泛泛闲聊，不要复述偏航内容，直接回到用户要你做的事。"
+    )
+    return guidance
+
+
+async def _maybe_send_gateway_realign_notice(
+    *,
+    request_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if not _parse_bool_env("HOST_GATEWAY_DEVIATION_NOTICE_ENABLED", default=True):
+        return {"sent": False, "reason_code": "DEVIATION_NOTICE_DISABLED"}
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not platform or not conversation_id:
+        return {"sent": False, "reason_code": "DEVIATION_NOTICE_TARGET_MISSING"}
+
+    from host_brain.app.chat_agent import render_quick_gateway_realign_text  # noqa: PLC0415
+    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+
+    content = render_quick_gateway_realign_text(
+        sender_name=str(payload.get("sender_name") or "").strip() or None,
+        bond_stage=_resolve_bond_stage_for_ack(payload=payload),
+        emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
+    )
+    wait_result = _parse_bool_env("HOST_GATEWAY_DEVIATION_NOTICE_WAIT_RESULT", default=False)
+    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_DEVIATION_NOTICE_TIMEOUT_MS", default=2500))
+    result = await post_gateway_reply(
+        platform=platform,
+        conversation_id=conversation_id,
+        content=content,
+        msg_type="text",
+        request_id=request_id,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
+    )
+    success = bool(getattr(result, "success", False))
+    return {
+        "sent": success,
+        "status": str(getattr(result, "status", "UNKNOWN")),
+        "reason_code": str(getattr(result, "reason_code", "") or ""),
+        "preview": _build_reply_preview(content, limit=80),
+        "latency_ms": int(getattr(result, "latency_ms", 0)),
+    }
+
+
+def _should_send_gateway_immediate_ack(
+    *,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+) -> tuple[bool, str]:
+    if not _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", default=True):
+        return False, "ACK_DISABLED"
+    if str(source or "").strip().upper() != "GATEWAY":
+        return False, "ACK_SOURCE_NOT_GATEWAY"
+
+    text_value = str(text or payload.get("content") or "").strip()
+    if not text_value:
+        return False, "ACK_EMPTY_TEXT"
+    if _looks_like_progress_query_for_ack_skip(text_value):
+        return False, "ACK_PROGRESS_QUERY"
+    if not _looks_like_execution_intent_for_ack(text_value):
+        return False, "ACK_NON_ACTION_INTENT"
+    return True, "ACK_ACTION_INTENT"
+
+
+async def _deliver_gateway_immediate_ack(
+    *,
+    request_id: str,
+    payload: dict[str, Any],
+    text: str,
+) -> dict[str, Any]:
+    from host_brain.app.chat_agent import render_quick_gateway_ack_text  # noqa: PLC0415
+    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not platform or not conversation_id:
+        return {
+            "success": False,
+            "status": "SKIPPED",
+            "reason_code": "ACK_TARGET_MISSING",
+            "latency_ms": 0,
+            "ack_preview": "",
+        }
+
+    ack_text = render_quick_gateway_ack_text(
+        user_message=text,
+        bond_stage=_resolve_bond_stage_for_ack(payload=payload),
+        emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
+        sender_name=str(payload.get("sender_name") or "").strip() or None,
+    )
+    normalized_ack = str(ack_text or "").strip()
+    if not normalized_ack:
+        return {
+            "success": False,
+            "status": "SKIPPED",
+            "reason_code": "ACK_TEXT_EMPTY",
+            "latency_ms": 0,
+            "ack_preview": "",
+        }
+
+    wait_result = _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_WAIT_RESULT", default=False)
+    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_IMMEDIATE_ACK_TIMEOUT_MS", default=2500))
+    result = await post_gateway_reply(
+        platform=platform,
+        conversation_id=conversation_id,
+        content=normalized_ack,
+        msg_type="text",
+        request_id=request_id,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
+    )
+    return {
+        "success": bool(getattr(result, "success", False)),
+        "status": str(getattr(result, "status", "UNKNOWN")),
+        "reason_code": str(getattr(result, "reason_code", "") or ""),
+        "latency_ms": int(getattr(result, "latency_ms", 0)),
+        "ack_preview": _build_reply_preview(normalized_ack, limit=60),
+    }
+
+
+def _log_gateway_ack_task_exception(task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        _logger.warning("input_routes: immediate gateway ack task failed silently: %s", exc, exc_info=exc)
+
+
+def _build_gateway_progress_reply_text(
+    *,
+    request_id: str,
+    session_id: str,
+    payload: dict[str, Any],
+    exclude_request_id: str | None = None,
+) -> tuple[str, str, dict[str, Any] | None]:
+    from host_brain.app.chat_agent import render_quick_gateway_progress_text  # noqa: PLC0415
+    from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
+
+    person_id = str(payload.get("person_id") or "").strip()
+    summary = None
+    if person_id:
+        summary = get_runtime_task_registry().summarize_for_chat(
+            person_id=person_id,
+            session_id=session_id,
+            exclude_request_id=exclude_request_id,
+        )
+    if not isinstance(summary, dict):
+        return (
+            render_quick_gateway_progress_text(
+                status="NONE",
+                bond_stage=_resolve_bond_stage_for_ack(payload=payload),
+                emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
+                sender_name=str(payload.get("sender_name") or "").strip() or None,
+            ),
+            "PROGRESS_NO_SUMMARY",
+            None,
+        )
+
+    status = str(summary.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
+    target_id = str(summary.get("target_id") or "").strip()
+    progress_message = str(summary.get("progress_message") or summary.get("detail") or "").strip()
+    result_text = str(summary.get("result_text") or "").strip()
+    elapsed_ms = int(summary.get("elapsed_ms") or 0)
+    if not progress_message and status in {"RUNNING", "RECOVERING"}:
+        progress_message = f"已持续 {_format_elapsed_compact(elapsed_ms)}。"
+    reply_text = render_quick_gateway_progress_text(
+        status=status,
+        target_id=target_id,
+        progress_message=progress_message,
+        result_text=result_text,
+        elapsed_ms=elapsed_ms,
+        bond_stage=_resolve_bond_stage_for_ack(payload=payload),
+        emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
+        sender_name=str(payload.get("sender_name") or "").strip() or None,
+    )
+    return reply_text, "PROGRESS_SUMMARY_FOUND", dict(summary)
+
+
+async def _try_handle_gateway_progress_fastpath(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ledger: Any,
+    ts_ms: int,
+) -> bool:
+    if str(source or "").strip().upper() != "GATEWAY":
+        return False
+    if not _parse_bool_env("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", default=True):
+        return False
+    if not _looks_like_progress_query_for_ack_skip(text):
+        return False
+
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not platform or not conversation_id:
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={**dict(payload or {}), "progress_fastpath_reason": "PROGRESS_TARGET_MISSING"},
+            phase="PROGRESS_FASTPATH_SKIPPED",
+            status="IGNORED",
+            reason_code="PROGRESS_TARGET_MISSING",
+            detail="gateway progress fastpath skipped: missing platform/conversation_id",
+            ts_ms=ts_ms,
+        )
+        return False
+
+    try:
+        from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+    except Exception:
+        return False
+
+    try:
+        reply_text, reason, _summary = _build_gateway_progress_reply_text(
+            request_id=request_id,
+            session_id=session_id,
+            payload=payload,
+            exclude_request_id=request_id,
+        )
+    except Exception as exc:
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={**dict(payload or {}), "progress_fastpath_reason": "PROGRESS_BUILD_FAILED"},
+            phase="PROGRESS_FASTPATH_FAILED",
+            status="FAILED",
+            reason_code="PROGRESS_BUILD_FAILED",
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            ts_ms=int(time.time() * 1000),
+        )
+        return False
+
+    wait_result = _parse_bool_env("HOST_GATEWAY_PROGRESS_FASTPATH_WAIT_RESULT", default=True)
+    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_PROGRESS_FASTPATH_TIMEOUT_MS", default=6000))
+    started_ms = int(time.time() * 1000)
+    result = await post_gateway_reply(
+        platform=platform,
+        conversation_id=conversation_id,
+        content=reply_text,
+        msg_type="text",
+        request_id=request_id,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
+    )
+    success = bool(getattr(result, "success", False))
+    finished_ms = int(time.time() * 1000)
+    latency_ms = max(0, finished_ms - started_ms)
+    payload_with_result = dict(payload or {})
+    payload_with_result["progress_fastpath_status"] = str(getattr(result, "status", "UNKNOWN"))
+    payload_with_result["progress_fastpath_latency_ms"] = int(getattr(result, "latency_ms", 0))
+    payload_with_result["progress_fastpath_preview"] = _build_reply_preview(reply_text, limit=100)
+    payload_with_result["progress_fastpath_reason"] = reason
+
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        input_payload=payload_with_result,
+        phase="PROGRESS_FASTPATH",
+        status=("OK" if success else "DEGRADED"),
+        reason_code=(None if success else str(getattr(result, "reason_code", "") or "PROGRESS_REPLY_FAILED")),
+        detail=f"gateway progress fastpath status={getattr(result, 'status', 'UNKNOWN')} success={success}",
+        latency_ms=latency_ms,
+        ts_ms=finished_ms,
+    )
+    return success
+
+
+def _should_start_gateway_progress_push(
+    *,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+) -> tuple[bool, str]:
+    if not _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_ENABLED", default=True):
+        return False, "PROGRESS_PUSH_DISABLED"
+    if str(source or "").strip().upper() != "GATEWAY":
+        return False, "PROGRESS_PUSH_SOURCE_NOT_GATEWAY"
+    if _looks_like_progress_query_for_ack_skip(text):
+        return False, "PROGRESS_PUSH_PROGRESS_QUERY"
+    if not _looks_like_execution_intent_for_ack(text):
+        return False, "PROGRESS_PUSH_NON_ACTION_INTENT"
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not platform or not conversation_id:
+        return False, "PROGRESS_PUSH_TARGET_MISSING"
+    return True, "PROGRESS_PUSH_ENABLED"
+
+
+def _log_progress_push_task_exception(task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        _logger.warning("input_routes: progress push task failed silently: %s", exc, exc_info=exc)
+
+
+async def _run_gateway_proactive_progress_push(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ledger: Any,
+    stop_event: asyncio.Event,
+) -> None:
+    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if not platform or not conversation_id:
+        return
+
+    warmup_ms = max(0, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_WARMUP_MS", default=15000))
+    interval_ms = max(2000, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_INTERVAL_MS", default=15000))
+    max_updates = max(1, min(8, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_MAX_UPDATES", default=2)))
+    wait_result = _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_WAIT_RESULT", default=False)
+    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_PROGRESS_PUSH_TIMEOUT_MS", default=4000))
+
+    if warmup_ms > 0:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=float(warmup_ms) / 1000.0)
+            return
+        except asyncio.TimeoutError:
+            pass
+
+    sent_count = 0
+    last_signature = ""
+    while not stop_event.is_set() and sent_count < max_updates:
+        reply_text, reason, summary = _build_gateway_progress_reply_text(
+            request_id=request_id,
+            session_id=session_id,
+            payload=payload,
+            exclude_request_id=None,
+        )
+        summary_dict = dict(summary or {})
+        status = str(summary_dict.get("status") or "NONE").strip().upper()
+        target_id = str(summary_dict.get("target_id") or "").strip()
+        progress_message = str(summary_dict.get("progress_message") or summary_dict.get("detail") or "").strip()
+        signature = f"{status}|{target_id}|{progress_message}"
+
+        if reason == "PROGRESS_SUMMARY_FOUND" and status in {"RUNNING", "RECOVERING"} and signature != last_signature:
+            started_ms = int(time.time() * 1000)
+            result = await post_gateway_reply(
+                platform=platform,
+                conversation_id=conversation_id,
+                content=reply_text,
+                msg_type="text",
+                request_id=request_id,
+                wait_result=wait_result,
+                timeout_ms=timeout_ms,
+            )
+            success = bool(getattr(result, "success", False))
+            finished_ms = int(time.time() * 1000)
+            latency_ms = max(0, finished_ms - started_ms)
+            push_payload = dict(payload or {})
+            push_payload["progress_push_status"] = str(getattr(result, "status", "UNKNOWN"))
+            push_payload["progress_push_reason"] = reason
+            push_payload["progress_push_preview"] = _build_reply_preview(reply_text, limit=100)
+            push_payload["progress_push_updates"] = sent_count + 1
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=push_payload,
+                phase="PROGRESS_PUSHED",
+                status=("OK" if success else "DEGRADED"),
+                reason_code=(None if success else str(getattr(result, "reason_code", "") or "PROGRESS_PUSH_REPLY_FAILED")),
+                detail=f"gateway progress push status={getattr(result, 'status', 'UNKNOWN')} success={success}",
+                latency_ms=latency_ms,
+                ts_ms=finished_ms,
+            )
+            sent_count += 1
+            last_signature = signature
+        elif reason == "PROGRESS_SUMMARY_FOUND" and status in {"COMPLETED", "FAILED"}:
+            return
+
+        if sent_count >= max_updates:
+            return
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=float(interval_ms) / 1000.0)
+            return
+        except asyncio.TimeoutError:
+            continue
+
+
+async def _stop_progress_push_task(
+    *,
+    stop_event: asyncio.Event | None,
+    task: asyncio.Task | None,
+) -> None:
+    if stop_event is not None:
+        stop_event.set()
+    if task is None:
+        return
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=0.4)
+    except asyncio.TimeoutError:
+        task.cancel()
+    except Exception:
+        return
+
+
+def _maybe_schedule_gateway_immediate_ack(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ledger: Any,
+) -> None:
+    should_send, reason = _should_send_gateway_immediate_ack(source=source, text=text, payload=payload)
+    now_ms = int(time.time() * 1000)
+    if not should_send:
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={**dict(payload or {}), "immediate_ack_reason": reason},
+            phase="ACK_SKIPPED",
+            status="IGNORED",
+            reason_code=reason,
+            detail=f"gateway immediate ack skipped: {reason}",
+            ts_ms=now_ms,
+        )
+        return
+
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        input_payload=payload,
+        phase="ACK_PENDING",
+        status="ACCEPTED",
+        detail="gateway immediate ack scheduled",
+        ts_ms=now_ms,
+    )
+
+    async def _runner() -> None:
+        start_ms = int(time.time() * 1000)
+        try:
+            ack_result = await _deliver_gateway_immediate_ack(
+                request_id=request_id,
+                payload=payload,
+                text=text,
+            )
+        except Exception as exc:
+            finish_ms = int(time.time() * 1000)
+            latency_ms = max(0, finish_ms - start_ms)
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=payload,
+                phase="ACK_FAILED",
+                status="FAILED",
+                reason_code="ACK_DELIVERY_EXCEPTION",
+                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+                latency_ms=latency_ms,
+                ts_ms=finish_ms,
+            )
+            return
+
+        finish_ms = int(time.time() * 1000)
+        latency_ms = max(0, finish_ms - start_ms)
+        ack_payload = dict(payload or {})
+        ack_payload["immediate_ack_status"] = ack_result.get("status")
+        ack_payload["immediate_ack_latency_ms"] = ack_result.get("latency_ms")
+        ack_payload["immediate_ack_preview"] = ack_result.get("ack_preview")
+        ack_payload["immediate_ack_reason"] = ack_result.get("reason_code")
+        ack_success = bool(ack_result.get("success"))
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=ack_payload,
+            phase=("ACKED" if ack_success else "ACK_FAILED"),
+            status=("OK" if ack_success else "FAILED"),
+            reason_code=(str(ack_result.get("reason_code") or "") or None),
+            detail=f"gateway immediate ack status={ack_result.get('status')} success={ack_success}",
+            latency_ms=latency_ms,
+            ts_ms=finish_ms,
+        )
+
+    asyncio.create_task(_runner()).add_done_callback(_log_gateway_ack_task_exception)
+
+
+async def _run_cortex_orchestrator_pipeline(
     *,
     request_id: str,
     session_id: str,
@@ -552,7 +1336,7 @@ async def _run_top_agent_pipeline(
     )
     from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
     from host_brain.app.schemas import ChatRequest  # noqa: PLC0415
-    from host_brain.app.top_agent import top_agent_sse_generator  # noqa: PLC0415
+    from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator  # noqa: PLC0415
 
     reply_channel = str(payload.get("platform") or "").strip() or None
     reply_target = str(payload.get("conversation_id") or "").strip() or None
@@ -591,7 +1375,7 @@ async def _run_top_agent_pipeline(
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
     commit_event: dict[str, Any] | None = None
-    async for event in top_agent_sse_generator(
+    async for event in cortex_orchestrator_sse_generator(
         request_body=request_body,
         request_id=request_id,
         session_id=session_id,
@@ -608,7 +1392,7 @@ async def _run_top_agent_pipeline(
             commit_event = parsed
 
     if commit_event is None:
-        raise RuntimeError("top_agent_commit_missing")
+        raise RuntimeError("cortex_orchestrator_commit_missing")
 
     return {
         "decision": str(commit_event.get("decision") or "").strip().upper() or "REJECT",
@@ -616,6 +1400,129 @@ async def _run_top_agent_pipeline(
         "narrative": str(commit_event.get("narrative") or "").strip(),
         "commit_event": commit_event,
     }
+
+
+async def _run_cortex_pipeline(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+) -> dict[str, Any]:
+    return await _run_cortex_orchestrator_pipeline(
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        text=text,
+        payload=payload,
+        ts_ms=ts_ms,
+    )
+
+
+async def _maybe_realign_gateway_pipeline(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    user_text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    pipeline_result: dict[str, Any],
+    ledger: Any,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    decision = str(pipeline_result.get("decision") or "REJECT").strip().upper()
+    narrative = str(pipeline_result.get("narrative") or "").strip()
+    detection = _detect_gateway_execution_deviation(
+        source=source,
+        user_text=user_text,
+        decision=decision,
+        narrative=narrative,
+    )
+    if not bool(detection.get("triggered")):
+        return pipeline_result, detection
+
+    now_ms = int(time.time() * 1000)
+    detection_payload = dict(payload or {})
+    detection_payload["deviation_reason"] = detection.get("reason_code")
+    detection_payload["deviation_overlap_ratio"] = detection.get("overlap_ratio")
+    detection_payload["deviation_keyword_count"] = detection.get("keyword_count")
+    detection_payload["deviation_hit_count"] = detection.get("hit_count")
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        input_payload=detection_payload,
+        phase="DEVIATION_DETECTED",
+        status="DEGRADED",
+        reason_code=str(detection.get("reason_code") or "DEVIATION_DETECTED"),
+        detail=(
+            f"overlap={detection.get('overlap_ratio')} "
+            f"keywords={detection.get('keyword_count')} hits={detection.get('hit_count')}"
+        ),
+        ts_ms=now_ms,
+    )
+
+    notice_result = await _maybe_send_gateway_realign_notice(
+        request_id=request_id,
+        payload=payload,
+    )
+    detection["notice"] = notice_result
+
+    if not _parse_bool_env("HOST_GATEWAY_DEVIATION_RETRY_ENABLED", default=True):
+        detection["retry_applied"] = False
+        detection["retry_reason"] = "DEVIATION_RETRY_DISABLED"
+        return pipeline_result, detection
+
+    try:
+        retry_message = _build_realign_user_message(
+            original_user_text=user_text,
+            first_narrative=narrative,
+        )
+        retry_result = await _run_cortex_orchestrator_pipeline(
+            request_id=f"{request_id}::realign",
+            session_id=session_id,
+            source=source,
+            text=retry_message,
+            payload=payload,
+            ts_ms=int(time.time() * 1000),
+        )
+    except Exception as exc:
+        detection["retry_applied"] = False
+        detection["retry_reason"] = "DEVIATION_RETRY_FAILED"
+        detection["retry_error"] = f"{type(exc).__name__}:{str(exc)[:160]}"
+        return pipeline_result, detection
+
+    retry_decision = str(retry_result.get("decision") or "REJECT").strip().upper()
+    retry_narrative = str(retry_result.get("narrative") or "").strip()
+    retry_overlap, retry_kw_count, retry_hit_count = _compute_keyword_overlap(
+        source_text=user_text,
+        target_text=retry_narrative,
+    )
+    min_overlap = float(detection.get("min_overlap") or _parse_float_env("HOST_GATEWAY_DEVIATION_MIN_OVERLAP", default=0.18))
+    retry_ok = retry_decision == "APPROVE" and bool(retry_narrative) and retry_overlap >= min_overlap
+    detection["retry_applied"] = retry_ok
+    detection["retry_overlap_ratio"] = retry_overlap
+    detection["retry_keyword_count"] = retry_kw_count
+    detection["retry_hit_count"] = retry_hit_count
+
+    if retry_ok:
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={**dict(payload or {}), "deviation_retry_overlap_ratio": retry_overlap},
+            phase="DEVIATION_RECOVERED",
+            status="OK",
+            reason_code="DEVIATION_RECOVERED",
+            detail=f"retry decision={retry_decision} overlap={retry_overlap}",
+            ts_ms=int(time.time() * 1000),
+        )
+        return retry_result, detection
+    return pipeline_result, detection
 
 
 async def _deliver_gateway_reply(
@@ -812,6 +1719,15 @@ async def _dispatch_to_graph(
         detail=f"source={source} text_len={len(text)}",
         ts_ms=ts_ms,
     )
+    if source_upper == "GATEWAY":
+        _maybe_schedule_gateway_immediate_ack(
+            request_id=request_id,
+            session_id=session_id,
+            source=source_upper,
+            text=text,
+            payload=payload,
+            ledger=ledger,
+        )
 
     if run_in_thread:
         asyncio.create_task(
@@ -854,9 +1770,12 @@ async def _dispatch_to_graph_worker(
     dispatch_mode: str,
     run_in_thread: bool,
 ) -> None:
-    """Run top_agent pipeline and optionally deliver Gateway reply."""
+    """Run cortex orchestrator pipeline and optionally deliver Gateway reply."""
 
     dispatch_ts = int(time.time() * 1000)
+    source_upper = str(source or "").strip().upper()
+    progress_push_stop_event: asyncio.Event | None = None
+    progress_push_task: asyncio.Task | None = None
     _log_input_event(
         ledger=ledger,
         request_id=request_id,
@@ -868,8 +1787,52 @@ async def _dispatch_to_graph_worker(
         detail=f"dispatch_mode={dispatch_mode} source={source}",
         ts_ms=dispatch_ts,
     )
+    if source_upper == "GATEWAY":
+        should_push, push_reason = _should_start_gateway_progress_push(
+            source=source_upper,
+            text=text,
+            payload=payload,
+        )
+        if should_push:
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=payload,
+                phase="PROGRESS_PUSH_PENDING",
+                status="ACCEPTED",
+                detail="gateway proactive progress push scheduled",
+                ts_ms=dispatch_ts,
+            )
+            progress_push_stop_event = asyncio.Event()
+            progress_push_task = asyncio.create_task(
+                _run_gateway_proactive_progress_push(
+                    request_id=request_id,
+                    session_id=session_id,
+                    source=source,
+                    text=text,
+                    payload=payload,
+                    ledger=ledger,
+                    stop_event=progress_push_stop_event,
+                )
+            )
+            progress_push_task.add_done_callback(_log_progress_push_task_exception)
+        else:
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload={**dict(payload or {}), "progress_push_reason": push_reason},
+                phase="PROGRESS_PUSH_SKIPPED",
+                status="IGNORED",
+                reason_code=push_reason,
+                detail=f"gateway proactive progress push skipped: {push_reason}",
+                ts_ms=dispatch_ts,
+            )
     try:
-        pipeline_result = await _run_top_agent_pipeline(
+        pipeline_result = await _run_cortex_orchestrator_pipeline(
             request_id=request_id,
             session_id=session_id,
             source=source,
@@ -877,9 +1840,28 @@ async def _dispatch_to_graph_worker(
             payload=payload,
             ts_ms=ts_ms,
         )
+        deviation_meta: dict[str, Any] | None = None
+        if source_upper == "GATEWAY":
+            pipeline_result, deviation_meta = await _maybe_realign_gateway_pipeline(
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                user_text=text,
+                payload=payload,
+                ts_ms=ts_ms,
+                pipeline_result=pipeline_result,
+                ledger=ledger,
+            )
         decision = str(pipeline_result.get("decision") or "REJECT").strip().upper()
         reason_code = str(pipeline_result.get("reason_code") or "").strip() or None
         narrative = str(pipeline_result.get("narrative") or "").strip()
+
+        await _stop_progress_push_task(
+            stop_event=progress_push_stop_event,
+            task=progress_push_task,
+        )
+        progress_push_stop_event = None
+        progress_push_task = None
 
         gateway_delivery: dict[str, Any] | None = None
         if source == "GATEWAY":
@@ -906,13 +1888,20 @@ async def _dispatch_to_graph_worker(
         latency_ms = complete_ts - dispatch_ts
         completion_status = "OK" if decision == "APPROVE" else "DEGRADED"
         detail_parts = [
-            f"top_agent decision={decision}",
+            f"cortex_orchestrator decision={decision}",
             f"mode={dispatch_mode}",
             f"thread_flag={str(bool(run_in_thread)).lower()}",
             f"latency_ms={latency_ms}",
         ]
         if reason_code:
             detail_parts.append(f"reason_code={reason_code}")
+        if isinstance(deviation_meta, dict):
+            detail_parts.append(f"deviation_reason={deviation_meta.get('reason_code')}")
+            detail_parts.append(f"deviation_retry_applied={bool(deviation_meta.get('retry_applied'))}")
+            if deviation_meta.get("overlap_ratio") is not None:
+                detail_parts.append(f"deviation_overlap={deviation_meta.get('overlap_ratio')}")
+            if deviation_meta.get("retry_overlap_ratio") is not None:
+                detail_parts.append(f"deviation_retry_overlap={deviation_meta.get('retry_overlap_ratio')}")
         if gateway_delivery is not None:
             detail_parts.append(f"gateway_status={gateway_delivery.get('status')}")
             detail_parts.append(f"gateway_latency_ms={gateway_delivery.get('latency_ms')}")
@@ -923,6 +1912,11 @@ async def _dispatch_to_graph_worker(
         completed_payload["decision"] = decision
         if reason_code:
             completed_payload["reason_code"] = reason_code
+        if isinstance(deviation_meta, dict):
+            completed_payload["deviation_reason"] = deviation_meta.get("reason_code")
+            completed_payload["deviation_overlap_ratio"] = deviation_meta.get("overlap_ratio")
+            completed_payload["deviation_retry_applied"] = bool(deviation_meta.get("retry_applied"))
+            completed_payload["deviation_retry_overlap_ratio"] = deviation_meta.get("retry_overlap_ratio")
         if gateway_delivery is not None:
             completed_payload["gateway_status"] = gateway_delivery.get("status")
             completed_payload["gateway_latency_ms"] = gateway_delivery.get("latency_ms")
@@ -950,6 +1944,10 @@ async def _dispatch_to_graph_worker(
             dispatch_mode,
         )
     except Exception as exc:
+        await _stop_progress_push_task(
+            stop_event=progress_push_stop_event,
+            task=progress_push_task,
+        )
         fail_ts = int(time.time() * 1000)
         latency_ms = fail_ts - dispatch_ts
         _log_input_event(

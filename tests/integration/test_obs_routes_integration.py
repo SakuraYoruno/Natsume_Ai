@@ -869,11 +869,13 @@ def test_trace_fallback_contains_summary_and_recall(client):
     assert data["summary"]["recall"]["topk"][0]["snippet"] == "fallback hello rerank snippet"
     assert data["summary"]["recall"]["evidence_topk"][0]["snippet"] == "fallback hello evidence snippet"
     node_ids = {node["node_id"] for node in data["nodes"]}
+    node_display_names = {node["display_name"] for node in data["nodes"]}
     assert "host_input" in node_ids
     assert "query_planner" in node_ids
     assert "agentic_rag" in node_ids
     assert "recall_fusion" in node_ids
-    assert "top_agent" in node_ids
+    assert "cortex_orchestrator" in node_ids
+    assert "Cortex Orchestrator" in node_display_names
     assert "chat_agent" in node_ids
     assert "llm_gateway" in node_ids
 

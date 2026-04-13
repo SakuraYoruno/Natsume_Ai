@@ -57,6 +57,9 @@ from host_brain.core.meta_learning_loop import MetaLearningLoop
 from host_brain.agents.planning_agent import PlanningAgent
 from host_brain.skills.skill_composer import SkillComposer
 from host_brain.app.runtime_task_registry import RuntimeTaskRegistry
+from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
+from host_brain.app.capability_forge import CapabilityForgeService
+from host_brain.app.runtime_capability_synthesizer import RuntimeCapabilityRegistry
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.mcp_skill_bridge import register_mcp_tools_into_skill_registry
 from host_brain.skills.provider_catalog import register_configured_skill_providers
@@ -129,6 +132,10 @@ _meta_learning_loop: Optional[MetaLearningLoop] = None
 _planning_agent: Optional[PlanningAgent] = None
 _skill_composer: Optional[SkillComposer] = None
 _runtime_task_registry: Optional[RuntimeTaskRegistry] = None
+_capability_gap_telemetry: Optional[CapabilityGapTelemetry] = None
+_capability_forge_service: Optional[CapabilityForgeService] = None
+_capability_forge_token_service: Optional[TokenService] = None
+_runtime_capability_registry: Optional[RuntimeCapabilityRegistry] = None
 _shared_memory_index: Optional[SharedMemoryIndex] = None
 _milestone_tracker: Optional[MilestoneTracker] = None
 
@@ -956,6 +963,38 @@ def get_runtime_task_registry() -> RuntimeTaskRegistry:
     if _runtime_task_registry is None:
         _runtime_task_registry = RuntimeTaskRegistry()
     return _runtime_task_registry
+
+
+def get_runtime_capability_registry() -> RuntimeCapabilityRegistry:
+    global _runtime_capability_registry
+    if _runtime_capability_registry is None:
+        _runtime_capability_registry = RuntimeCapabilityRegistry()
+    return _runtime_capability_registry
+
+
+def get_capability_gap_telemetry() -> CapabilityGapTelemetry:
+    global _capability_gap_telemetry
+    if _capability_gap_telemetry is None:
+        _capability_gap_telemetry = CapabilityGapTelemetry()
+    return _capability_gap_telemetry
+
+
+def get_capability_forge_token_service() -> TokenService:
+    global _capability_forge_token_service
+    if _capability_forge_token_service is None:
+        _capability_forge_token_service = TokenService()
+    return _capability_forge_token_service
+
+
+def get_capability_forge_service() -> CapabilityForgeService:
+    global _capability_forge_service
+    if _capability_forge_service is None:
+        _capability_forge_service = CapabilityForgeService(
+            telemetry=get_capability_gap_telemetry(),
+            token_service=get_capability_forge_token_service(),
+            ledger=get_ledger(),
+        )
+    return _capability_forge_service
 
 
 def get_skill_composer() -> SkillComposer:

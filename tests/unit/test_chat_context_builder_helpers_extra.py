@@ -30,7 +30,7 @@ def test_normalize_and_load_v5_style_instruction(tmp_path: Path, monkeypatch: py
 
     normalized = ccb.normalize_node_style_bindings(
         {
-            "top_agent": {
+            "cortex_orchestrator": {
                 "canon_id": "canon-a",
                 "version": 1,
                 "hash": "abc",
@@ -43,7 +43,7 @@ def test_normalize_and_load_v5_style_instruction(tmp_path: Path, monkeypatch: py
         }
     )
 
-    assert normalized["top_agent"]["style_instruction"] == "warm"
+    assert normalized["cortex_orchestrator"]["style_instruction"] == "warm"
     assert ccb._load_v5_style_instruction("ja") == "j" * 120
     assert ccb._load_v5_style_instruction("zh") == ""
 
@@ -53,7 +53,7 @@ def test_build_node_style_bindings_prefers_v5_then_falls_back_to_store(
 ) -> None:
     monkeypatch.setattr(ccb, "_load_v5_style_instruction", lambda render_lang: "v" * 120)
     v5_bindings = ccb.build_node_style_bindings(render_target_lang="ja")
-    assert v5_bindings["top_agent"]["citation"] == "style_canon:v5_distilled:ja"
+    assert v5_bindings["cortex_orchestrator"]["citation"] == "style_canon:v5_distilled:ja"
     assert ccb.CHAT_DIRECT_NODE_ID in v5_bindings
 
     monkeypatch.setattr(ccb, "_load_v5_style_instruction", lambda render_lang: "")
@@ -179,7 +179,7 @@ def test_chat_context_helper_branches_and_observability() -> None:
             "retrieval": [{"kind": "episodic"}],
             "style_pack": {
                 "style_canon": [{"kind": "style_canon"}],
-                "node_bindings": {"top_agent": {"canon_id": "x"}},
+                "node_bindings": {"cortex_orchestrator": {"canon_id": "x"}},
             },
             "tool_meta_pack": [{"id": "memory_recall"}],
             "constraints": {"strict_json_output": True},
@@ -207,9 +207,9 @@ def test_chat_context_helper_branches_and_observability() -> None:
     assert observability["source_stats"]["retrieval_trimmed_items"] == 2
     assert observability["kind_breakdown"]["retrieval"]["episodic"] == 1
 
-    graph_output = {"payload": {"top_agent": {"payload": {"text": "ok"}}}}
-    assert ccb.extract_chat_graph_node_entry(graph_output, node_id="top_agent")["payload"]["text"] == "ok"
-    node_entry, gateway_payload = ccb.extract_chat_graph_gateway_payload(graph_output, node_id="top_agent")
+    graph_output = {"payload": {"cortex_orchestrator": {"payload": {"text": "ok"}}}}
+    assert ccb.extract_chat_graph_node_entry(graph_output, node_id="cortex_orchestrator")["payload"]["text"] == "ok"
+    node_entry, gateway_payload = ccb.extract_chat_graph_gateway_payload(graph_output, node_id="cortex_orchestrator")
     assert node_entry["payload"]["text"] == "ok"
     assert gateway_payload == {"text": "ok"}
 
