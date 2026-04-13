@@ -1,5 +1,0 @@
-2026-03-15 00:36:57,887 - runtime.bootstrap.startup_report: edge.rpc_host=192.168.1.101 rpc_port=17800 fallback_llm_enabled=true
-2026-03-15 00:36:58,011 - HTTP GET http://192.168.1.101:17800/v1/edge/health -> 200 OK
-2026-03-15 00:36:58,014 - Edge RPC reachable: http://192.168.1.101:17800
-2026-03-15 00:36:58,017 - AuditRetention scheduler registration degraded: SchedulerTaskConfig.__init__() got an unexpected keyword argument 'display_name'
-2026-03-15 00:36:58,027 - startup degraded modules: state_arbiter_sources, edge_rpc, distillation_engine_scheduler, long_term_distiller_scheduler, audit_retention_scheduler, proactive_talk_scheduler
