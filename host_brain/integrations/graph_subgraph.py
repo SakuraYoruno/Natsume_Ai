@@ -21,6 +21,7 @@ from host_brain.integrations.graph_contract import (
     STATUS_DEGRADED,
     STATUS_FAILED,
     STATUS_OK,
+    SUBGRAPH_PROTECTED_FIELDS,
     build_subgraph_commit_summary,
 )
 
@@ -187,16 +188,17 @@ def compile_governed_subgraph(
 
 
 def _strip_committed_fields(output: dict[str, Any]) -> None:
-    """权限约束：从子图节点输出中移除 committed_* 字段。
+    """权限约束：从子图节点输出中移除受保护字段（FIX-3.2 显式黑名单）。
 
-    子图节点不允许写入 committed_* 字段（只有 Host Governor 可以写入）。
+    子图节点不允许写入 committed_* 字段及其他 Governor 控制字段。
+    改用 SUBGRAPH_PROTECTED_FIELDS 显式黑名单，不依赖字段名前缀，
+    确保新增 Governor 字段即使未加 committed_ 前缀也能被正确保护。
     此函数在子图节点输出合并到 payload 前调用。
     """
     if not isinstance(output, dict):
         return
-    committed_keys = [k for k in list(output.keys()) if str(k or "").startswith("committed_")]
-    for key in committed_keys:
-        del output[key]
+    for key in SUBGRAPH_PROTECTED_FIELDS:
+        output.pop(key, None)
 
 
 # ---------------------------------------------------------------------------

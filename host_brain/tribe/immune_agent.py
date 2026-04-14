@@ -657,6 +657,8 @@ class ImmuneAgent:
 
         T-35：订阅 INTERACTION_RECORDED，每轮对话结束后将当前会话计数快照
         写入 TribeStateRegistry，供诊断端点查询。
+        FIX-4.1：订阅 IMMUNE_THREAT_DETECTED，将威胁等级同步到 GovernorRulesCache，
+        使 Governor 在下次裁决时使用最新的免疫威胁参数。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -665,10 +667,46 @@ class ImmuneAgent:
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
             # T-81：订阅关系阶段变更事件，关系阶段跃迁时动态调整拦截阈值
             bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
+            # FIX-4.1：订阅免疫威胁检测事件，同步到 GovernorRulesCache（L3 → L2 通道）
+            bus.subscribe("IMMUNE_THREAT_DETECTED", self._on_immune_threat_detected)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").warning(
                 "ImmuneAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_immune_threat_detected(self, event: Any) -> None:
+        """FIX-4.1：处理 IMMUNE_THREAT_DETECTED 事件，将威胁状态同步到 GovernorRulesCache。
+
+        当 ImmuneAgent 检测到新的威胁模式时，通过 GovernorRulesCache 通知 Governor，
+        使其在下次裁决时使用更严格的安全规则。这是 L3（认知层）→ L2（基础设施层）的单向通道。
+
+        事件 payload 格式：
+            threat_level: str  - "NORMAL" | "ELEVATED" | "CRITICAL"
+            blocked_patterns: list[str]  - 需要拦截的模式列表
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.immune_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+            threat_level = str(payload.get("threat_level") or "ELEVATED").strip().upper()
+            blocked_patterns = list(payload.get("blocked_patterns") or [])
+
+            # 同步到 GovernorRulesCache（L3 → L2 单向通道）
+            from host_brain.integrations.governor_rules_cache import get_governor_rules_cache  # noqa: PLC0415
+            cache = get_governor_rules_cache()
+            cache.update_immune_state(
+                threat_level=threat_level,
+                blocked_patterns=blocked_patterns,
+            )
+            _log.info(
+                "ImmuneAgent → GovernorRulesCache: threat_level=%s blocked_patterns_count=%d",
+                threat_level, len(blocked_patterns),
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.immune_agent").warning(
+                "ImmuneAgent._on_immune_threat_detected 异常（降级）: %s", exc
             )
 
     async def _on_interaction_recorded(self, event: Any) -> None:

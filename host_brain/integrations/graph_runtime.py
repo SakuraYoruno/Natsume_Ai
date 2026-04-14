@@ -46,6 +46,7 @@ from host_brain.integrations.graph_fallback import (
     set_finish,
 )
 from host_brain.integrations.llm_gateway import LlmGatewayContract
+from host_brain.integrations.governor_rules_cache import GovernorRulesCache, get_governor_rules_cache
 
 # Evidence Plane 专用线程池：最多 2 线程，不阻塞主图执行路径
 _evidence_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="evidence")
@@ -108,6 +109,8 @@ class GraphRuntimeContract:
         # 导致 load_state() 永远返回 None，resume_graph 始终返回 CHECKPOINT_NOT_FOUND。
         from host_brain.integrations.graph_checkpoint import CheckpointManager as _CM
         self._checkpoint_manager = _CM()
+        # FIX-4.1：获取 GovernorRulesCache 单例（TRIBE 族 → Governor 参数通道）
+        self._governor_rules_cache: GovernorRulesCache = get_governor_rules_cache()
 
     def register_node_handler(self, handler_id: str, handler: NodeHandler) -> None:
         """Register a handler function for a handler_id."""
@@ -244,6 +247,11 @@ class GraphRuntimeContract:
                 or payload_dict.get("committed_route_token_detail")
                 or None
             ),
+            # FIX-4.1：TRIBE 族写入的 Governor 规则参数（L3 → L2 单向通道）
+            # 在图执行前快照当前 TRIBE 族参数，供 Governor 裁决和 Evidence Plane 审计使用
+            "tribe_governor_params": self._governor_rules_cache.get_effective_rules(),
+            "immune_threat_level": None,
+            "endocrine_state": None,
             # M35-A：透明子图节点执行追踪（初始为空列表）
             "subgraph_trace": [],
             # M36-C：双时钟字段初始化
@@ -432,6 +440,8 @@ class GraphRuntimeContract:
             checkpoint_manager=self._checkpoint_manager,  # 修复：共享 CheckpointManager，确保 interrupt/resume 使用同一存储
         )
         compiled = executor.compile_runtime_graph()
+        # FIX-1.3：向前兼容旧 checkpoint，补全新增的 GraphState 字段默认值
+        state = _backfill_graph_state_defaults(state)
         # 更新 state：清除 checkpoint 中断标记，重置 resume_allowed
         resumed_state = {
             **state,
@@ -674,3 +684,68 @@ class GraphRuntimeContract:
             reason_code=reason_code,
             detail=detail,
         )
+
+
+# ---------------------------------------------------------------------------
+# FIX-1.3：GraphState schema 版本兼容（向前兼容旧 checkpoint）
+# ---------------------------------------------------------------------------
+
+def _backfill_graph_state_defaults(state: dict) -> dict:
+    """为旧版 checkpoint 补全新增的 GraphState 字段默认值。
+
+    每次 GraphState 新增必填字段时，旧 checkpoint 恢复时会因缺少字段而 KeyError。
+    此函数在 resume_graph() 加载 checkpoint 后调用，确保向前兼容。
+
+    实现说明（FIX-1.4 双时钟文档对齐）：
+    当前 resume_graph() 从 state.pending_node_id 重新执行图，而非使用 LangGraph 原生
+    checkpoint 恢复机制。这是历史遗留的简化实现：
+    - 优点：不依赖 LangGraph 内部 checkpoint 格式，版本升级无兼容问题
+    - 代价：有副作用的节点重新执行可能导致重复写入
+    - 缓解：所有有副作用的节点必须实现幂等性（idempotent）
+    - 中期目标：迁移到 LangGraph SqliteSaver（见 FIX-PLAN §5.1）
+    """
+    defaults: dict = {
+        # Multi-Agent 字段
+        "active_agent_id": None,
+        "handoff_history": [],
+        "agent_budget": None,
+        "agent_artifacts": None,
+        "judge_result": None,
+        "execution_profile": None,
+        # Phase-Locked Streaming 字段
+        "presence_events": [],
+        "commit_snapshot": None,
+        "render_snapshot_ref": None,
+        "streaming_phase": None,
+        # Checkpoint / Interrupt / Resume 字段
+        "gov_checkpoint_id": None,
+        "interrupt_reason": None,
+        "resume_allowed": None,
+        "resume_deadline_at": None,
+        # barrier_join / RenderGuard 字段
+        "barrier_join_result": None,
+        "render_guard_result": None,
+        # 情感上下文字段
+        "emotion_context": None,
+        "emotion_tag": None,
+        "mood_state": None,
+        "emotion_range_hint": None,
+        # 双时钟字段
+        "policy_start_ms": None,
+        "policy_timeout_ms": None,
+        "clock_events": [],
+        "node_exec_stats": {},
+        # 并行分支字段
+        "branch_specs": [],
+        "branch_manifest": None,
+        # TRIBE 族写入的 Governor 规则参数（L3 认知层，默认空）
+        "tribe_governor_params": {},
+        "immune_threat_level": None,
+        "endocrine_state": None,
+    }
+    result = dict(state)
+    for key, default_val in defaults.items():
+        if key not in result:
+            result[key] = default_val
+    return result
+

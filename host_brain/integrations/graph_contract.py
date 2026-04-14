@@ -691,3 +691,25 @@ def is_budget_breach_failure_code(code: str | None) -> bool:
     if not code:
         return False
     return str(code).strip() in BUDGET_BREACH_FAILURE_CODES
+
+
+# ---------------------------------------------------------------------------
+# FIX-3.2：子图受保护字段显式黑名单（替代字符串前缀匹配）
+# ---------------------------------------------------------------------------
+
+SUBGRAPH_PROTECTED_FIELDS: frozenset[str] = frozenset({
+    # committed_* 系列（路由主权，只有 Host Governor 可写入）
+    "committed_route_token",
+    "committed_route_token_detail",
+    # Governor 控制字段
+    "gov_checkpoint_id",
+    "interrupt_reason",
+    "resume_allowed",
+    "resume_deadline_at",
+    "execution_profile",
+    # TRIBE 族写入的 Governor 参数（L3 → L2 单向通道，子图不可覆写）
+    "tribe_governor_params",
+    "immune_threat_level",
+    "endocrine_state",
+    # 未来新增受保护字段在此处统一维护（不依赖字段名前缀）
+})

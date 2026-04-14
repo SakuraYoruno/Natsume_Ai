@@ -192,6 +192,8 @@ class EndocrineAgent:
         订阅事件：
           - BOND_PROGRESS：关系进展 → 催产素增加 + 皮质醇轻微降低
           - BOND_REGRESS：关系退步 → 皮质醇增加 + 催产素轻微降低
+        FIX-4.1：订阅 ENDOCRINE_STATE_UPDATED，将激素状态同步到 GovernorRulesCache，
+        使 Governor 在下次裁决时感知当前能量/压力水平。
         """
         try:
             from host_brain.app.internal_tribe_routes import get_tribe_event_bus  # noqa: PLC0415
@@ -205,10 +207,56 @@ class EndocrineAgent:
             bus.subscribe("TASK_SUCCESS", self._on_task_success_endocrine)
             # T-86：订阅免疫拦截事件，拦截时 cortisol 轻微上升
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_endocrine)
+            # FIX-4.1：订阅内分泌状态更新事件，同步到 GovernorRulesCache（L3 → L2 通道）
+            bus.subscribe("ENDOCRINE_STATE_UPDATED", self._on_endocrine_state_updated)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.endocrine_agent").warning(
                 "EndocrineAgent 订阅注册失败（降级）: %s", exc
+            )
+
+    async def _on_endocrine_state_updated(self, event: Any) -> None:
+        """FIX-4.1：处理 ENDOCRINE_STATE_UPDATED 事件，将激素状态同步到 GovernorRulesCache。
+
+        当 EndocrineAgent 完成一次内分泌状态计算后，通过 GovernorRulesCache 通知 Governor，
+        使其在下次裁决时感知当前能量/压力水平（如高压力时收紧策略）。
+        这是 L3（认知层）→ L2（基础设施层）的单向通道。
+
+        事件 payload 格式：
+            energy_level: float  - 能量水平 0.0 ~ 1.0（来自 energy_reserve）
+            stress_level: float  - 压力水平 0.0 ~ 1.0（来自 cortisol_level）
+        若 payload 为空，则从 _last_state 中读取当前状态。
+        """
+        try:
+            import logging  # noqa: PLC0415
+            _log = logging.getLogger("Natsume.tribe.endocrine_agent")
+            payload = dict(getattr(event, "payload", None) or {})
+
+            # 优先从事件 payload 读取，降级到 _last_state
+            if "energy_level" in payload or "stress_level" in payload:
+                energy_level = max(0.0, min(1.0, float(payload.get("energy_level") or 1.0)))
+                stress_level = max(0.0, min(1.0, float(payload.get("stress_level") or 0.0)))
+            else:
+                # 从 _last_state 中读取（cortisol_level → stress，energy_reserve → energy）
+                last = dict(self._last_state or {})
+                energy_level = max(0.0, min(1.0, float(last.get("energy_reserve") or 1.0)))
+                stress_level = max(0.0, min(1.0, float(last.get("cortisol_level") or 0.0)))
+
+            # 同步到 GovernorRulesCache（L3 → L2 单向通道）
+            from host_brain.integrations.governor_rules_cache import get_governor_rules_cache  # noqa: PLC0415
+            cache = get_governor_rules_cache()
+            cache.update_endocrine_state(
+                energy_level=energy_level,
+                stress_level=stress_level,
+            )
+            _log.debug(
+                "EndocrineAgent → GovernorRulesCache: energy=%.3f stress=%.3f",
+                energy_level, stress_level,
+            )
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.endocrine_agent").warning(
+                "EndocrineAgent._on_endocrine_state_updated 异常（降级）: %s", exc
             )
 
     async def _on_bond_progress(self, event: Any) -> None:
