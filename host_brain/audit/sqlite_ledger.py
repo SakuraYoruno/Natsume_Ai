@@ -233,6 +233,11 @@ class SQLiteLedger(
 
     def log_governor(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in GOVERNOR_COLUMNS}
+        # FIX-4.2：tribe_params_snapshot 需要 JSON 序列化（dict → str）
+        if payload.get("tribe_params_snapshot") is not None and isinstance(payload["tribe_params_snapshot"], dict):
+            payload["tribe_params_snapshot"] = json.dumps(
+                payload["tribe_params_snapshot"], ensure_ascii=False, default=str
+            )
         self._insert("governor_log", payload)
 
     def log_skill_exec(self, row: dict[str, Any]) -> None:

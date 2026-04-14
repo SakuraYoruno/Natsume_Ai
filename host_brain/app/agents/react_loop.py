@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -104,6 +105,131 @@ class ReactResult:
 # ---------------------------------------------------------------------------
 # ReAct 循环实现
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# FIX-2.2：消息历史修剪（防止超出 context window）
+# ---------------------------------------------------------------------------
+
+_MAX_REACT_HISTORY_CHARS = 8000  # 约 2000 tokens
+
+
+def _trim_messages(
+    messages: list[dict[str, str]],
+    *,
+    max_chars: int = _MAX_REACT_HISTORY_CHARS,
+) -> list[dict[str, str]]:
+    """修剪消息历史，始终保留 system prompt + 原始 user 问题。
+
+    当消息总字符数超过 max_chars 时，从中间截断历史工具调用记录，
+    保留头部（system + 原始 user）和尾部（最近的工具调用结果）。
+
+    Args:
+        messages: 消息列表
+        max_chars: 最大字符数阈值（默认 8000，约 2000 tokens）
+
+    Returns:
+        修剪后的消息列表
+    """
+    total_chars = sum(len(m.get("content") or "") for m in messages)
+    if total_chars <= max_chars:
+        return messages
+
+    # 始终保留 system prompt + 原始 user 问题（前 2 条）
+    preserved_head = messages[:2]
+    tail = messages[2:]
+    kept_tail: list[dict[str, str]] = []
+    remaining = max_chars - sum(len(m.get("content") or "") for m in preserved_head)
+
+    # 从尾部向前保留尽可能多的消息
+    for msg in reversed(tail):
+        content_len = len(msg.get("content") or "")
+        if remaining - content_len < 0:
+            break
+        kept_tail.insert(0, msg)
+        remaining -= content_len
+
+    # 若有截断，插入截断提示
+    if len(kept_tail) < len(tail):
+        omitted = len(tail) - len(kept_tail)
+        kept_tail.insert(0, {
+            "role": "user",
+            "content": f"[历史工具调用记录已截断，共 {omitted} 轮被省略]",
+        })
+
+    return preserved_head + kept_tail
+
+
+# ---------------------------------------------------------------------------
+# FIX-2.1：并行工具调用（READ 工具并发，WRITE 工具串行）
+# ---------------------------------------------------------------------------
+
+# 写工具集合（有副作用，必须串行执行）
+_WRITE_TOOL_PREFIXES = ("write_", "update_", "delete_", "create_", "insert_", "save_", "set_")
+
+
+def _is_write_tool(tool_id: str) -> bool:
+    """判断工具是否为写工具（有副作用，需串行执行）。"""
+    tid = str(tool_id or "").strip().lower()
+    return any(tid.startswith(prefix) for prefix in _WRITE_TOOL_PREFIXES)
+
+
+def _execute_tools_parallel(
+    tool_calls: list[dict[str, Any]],
+    *,
+    agent_id: str,
+    allow_side_effects: bool,
+    context: dict[str, Any] | None = None,
+    max_workers: int = 4,
+) -> list[dict[str, Any]]:
+    """并发执行多个工具调用。
+
+    READ 工具（无副作用）并发执行，WRITE 工具（有副作用）串行执行，
+    保证写操作的顺序安全。
+
+    Args:
+        tool_calls: 工具调用列表，每项格式 {"tool": str, "args": dict}
+        agent_id: 执行此调用的 agent ID
+        allow_side_effects: 是否允许有副作用的工具调用
+        context: 执行上下文（含 request_id 等）
+        max_workers: READ 工具最大并发线程数
+
+    Returns:
+        与 tool_calls 等长的结果列表，顺序与输入一致
+    """
+    ctx = dict(context or {})
+    results: list[dict[str, Any] | None] = [None] * len(tool_calls)
+
+    # 分离 READ 和 WRITE 工具
+    read_calls = [(i, c) for i, c in enumerate(tool_calls)
+                  if not _is_write_tool(str(c.get("tool") or ""))]
+    write_calls = [(i, c) for i, c in enumerate(tool_calls)
+                   if _is_write_tool(str(c.get("tool") or ""))]
+
+    def _run_one(idx: int, call: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        tool_id = str(call.get("tool") or "").strip()
+        if not is_tool_allowed(tool_id, agent_id, allow_side_effects=allow_side_effects):
+            return idx, {"error": f"TOOL_NOT_ALLOWED:{tool_id}", "result": None}
+        runtime_args = dict(call.get("args") or {})
+        if ctx:
+            runtime_args["_react_context"] = dict(ctx)
+        return idx, execute_tool(tool_id, runtime_args)
+
+    # READ 工具并发执行
+    if read_calls:
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(read_calls))) as executor:
+            futures = {executor.submit(_run_one, i, c): i for i, c in read_calls}
+            for future in as_completed(futures):
+                idx, obs = future.result()
+                results[idx] = obs
+
+    # WRITE 工具串行执行（保证顺序和安全）
+    for idx, call in write_calls:
+        _, obs = _run_one(idx, call)
+        results[idx] = obs
+
+    # 兜底：确保没有 None（理论上不会发生）
+    return [r if r is not None else {"error": "TOOL_EXEC_MISSING", "result": None} for r in results]
+
 
 def _build_tools_description(tools: list[ToolSpec]) -> str:
     """构建工具描述文本，用于 system prompt。"""
@@ -251,6 +377,8 @@ def run_react_loop(
                 ))
                 break
 
+        # FIX-2.2：每步 LLM 调用前修剪消息历史，防止超出 context window
+            messages = _trim_messages(messages)
             llm_response = gateway.complete(messages)
             raw_output = str(
                 llm_response.get("content")
@@ -310,16 +438,31 @@ def run_react_loop(
             if ctx:
                 runtime_tool_args["_react_context"] = dict(ctx)
 
-            # 校验工具是否允许调用
-            if not is_tool_allowed(tool_id, agent_id, allow_side_effects=allow_side_effects):
-                observation = {
-                    "error": f"TOOL_NOT_ALLOWED:{tool_id}",
-                    "result": None,
-                }
-                risk_flags.append(f"TOOL_NOT_ALLOWED:{tool_id}")
+            # FIX-2.1：检查是否为多工具调用（LLM 可能在 action 中返回列表）
+            multi_calls = parsed.get("actions")  # 多工具调用格式：{"actions": [{"tool":..., "args":...}, ...]}
+            if isinstance(multi_calls, list) and len(multi_calls) > 1:
+                # 多工具并发执行
+                observations = _execute_tools_parallel(
+                    multi_calls,
+                    agent_id=agent_id,
+                    allow_side_effects=allow_side_effects,
+                    context=ctx,
+                )
+                observation = {"multi_tool_results": observations}
+                for obs in observations:
+                    if isinstance(obs, dict) and str(obs.get("error") or "").startswith("TOOL_NOT_ALLOWED"):
+                        risk_flags.append(str(obs["error"]))
             else:
-                # 执行工具
-                observation = execute_tool(tool_id, runtime_tool_args)
+                # 单工具调用（原有逻辑）
+                if not is_tool_allowed(tool_id, agent_id, allow_side_effects=allow_side_effects):
+                    observation = {
+                        "error": f"TOOL_NOT_ALLOWED:{tool_id}",
+                        "result": None,
+                    }
+                    risk_flags.append(f"TOOL_NOT_ALLOWED:{tool_id}")
+                else:
+                    # 执行工具
+                    observation = execute_tool(tool_id, runtime_tool_args)
 
             step_record = ReactStep(
                 step=step_num,

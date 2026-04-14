@@ -32,6 +32,11 @@ class CompiledSubgraph:
 
     通过 compile_governed_subgraph() 工厂创建，不可直接实例化。
     每个节点执行后写入 subgraph_trace，子图结束时输出 subgraph_commit_summary。
+
+    FIX-3.1+3.3：新增 edge_map / fallback_map 支持条件分支路由。
+    - edge_map 为空时走原有线性序列（向后兼容）
+    - edge_map 非空时走带路由的执行模式
+    - fallback_map 指定节点失败时的降级路由
     """
 
     subgraph_id: str
@@ -40,6 +45,9 @@ class CompiledSubgraph:
     _compiled: bool = field(default=False, repr=False)
     # M37-E：Evidence Plane 实时写入（可选，默认 None）
     _evidence_plane: Any = field(default=None, repr=False)
+    # FIX-3.1+3.3：条件分支路由（可选，默认空字典走线性序列）
+    edge_map: dict[str, str] = field(default_factory=dict)
+    fallback_map: dict[str, str] = field(default_factory=dict)
 
     def invoke(self, state: GraphState) -> GraphState:
         """执行子图，写入 subgraph_trace，返回更新后的 GraphState。
@@ -50,6 +58,13 @@ class CompiledSubgraph:
         Returns:
             更新后的 GraphState（subgraph_trace 已追加，subgraph_commit_summary 已写入 payload）
         """
+        # FIX-3.1+3.3：edge_map 非空时走带路由的执行模式，否则走线性序列（向后兼容）
+        if self.edge_map:
+            return self._invoke_with_routing(state)
+        return self._invoke_linear(state)
+
+    def _invoke_linear(self, state: GraphState) -> GraphState:
+        """原有线性序列执行模式（向后兼容）。"""
         subgraph_trace = list(state.get("subgraph_trace") or [])
         payload = dict(state.get("payload") or {})
         current_status = str(state.get("status") or STATUS_OK)
@@ -127,6 +142,100 @@ class CompiledSubgraph:
             else current_status
         )
 
+        return {
+            **state,
+            "payload": payload,
+            "subgraph_trace": subgraph_trace,
+            "status": final_status,
+        }
+
+    def _invoke_with_routing(self, state: GraphState) -> GraphState:
+        """FIX-3.1+3.3：带条件分支路由的执行模式（edge_map + fallback_map）。
+
+        从 node_ids[0] 开始，按 edge_map 路由到下一节点；
+        节点失败时按 fallback_map 路由到降级节点；
+        无路由时停止执行。防止循环：最多执行 len(node_ids) * 2 跳。
+        """
+        subgraph_trace = list(state.get("subgraph_trace") or [])
+        payload = dict(state.get("payload") or {})
+        current_status = str(state.get("status") or STATUS_OK)
+        current_node = self.node_ids[0] if self.node_ids else None
+        visited: set[str] = set()
+        max_hops = len(self.node_ids) * 2 + 2
+
+        while current_node and len(visited) < max_hops:
+            if current_node in visited:
+                break  # 防止循环
+            visited.add(current_node)
+            ts_ms = int(time.time() * 1000)
+            handler = self.handlers.get(current_node)
+
+            if handler is None:
+                subgraph_trace.append({
+                    "node_id": current_node,
+                    "status": STATUS_FAILED,
+                    "ts_ms": ts_ms,
+                    "reason_code": "SUBGRAPH_HANDLER_MISSING",
+                    "detail": f"子图节点处理器缺失: {current_node}",
+                })
+                current_status = STATUS_DEGRADED
+                current_node = self.fallback_map.get(current_node)
+                continue
+
+            try:
+                output = handler(payload, {
+                    "request_id": str(state.get("request_id") or ""),
+                    "node_id": current_node,
+                    "graph_id": str(state.get("graph_id") or ""),
+                    "subgraph_id": self.subgraph_id,
+                    "timeout_ms": int(state.get("timeout_ms") or 5000),
+                })
+                _strip_committed_fields(output)
+                payload.update(output or {})
+                trace_entry = {
+                    "node_id": current_node,
+                    "status": STATUS_OK,
+                    "ts_ms": ts_ms,
+                    "reason_code": None,
+                    "detail": "subgraph node executed (routed)",
+                }
+                subgraph_trace.append(trace_entry)
+                self._write_node_trace(
+                    request_id=str(state.get("request_id") or ""),
+                    graph_id=str(state.get("graph_id") or ""),
+                    entry=trace_entry,
+                )
+                current_node = self.edge_map.get(current_node)
+            except Exception as exc:
+                trace_entry = {
+                    "node_id": current_node,
+                    "status": STATUS_FAILED,
+                    "ts_ms": ts_ms,
+                    "reason_code": "SUBGRAPH_NODE_ERROR",
+                    "detail": f"子图节点执行失败: {current_node}: {exc}",
+                }
+                subgraph_trace.append(trace_entry)
+                self._write_node_trace(
+                    request_id=str(state.get("request_id") or ""),
+                    graph_id=str(state.get("graph_id") or ""),
+                    entry=trace_entry,
+                )
+                current_status = STATUS_DEGRADED
+                current_node = self.fallback_map.get(current_node)
+
+        summary = build_subgraph_commit_summary(
+            subgraph_id=self.subgraph_id,
+            subgraph_trace=subgraph_trace,
+        )
+        payload["subgraph_commit_summary"] = summary
+
+        _STATUS_SEVERITY = {STATUS_FAILED: 2, STATUS_DEGRADED: 1, STATUS_OK: 0}
+        original_status = str(state.get("status") or STATUS_OK)
+        final_status = (
+            original_status
+            if _STATUS_SEVERITY.get(original_status, 0) >= _STATUS_SEVERITY.get(current_status, 0)
+            else current_status
+        )
         return {
             **state,
             "payload": payload,

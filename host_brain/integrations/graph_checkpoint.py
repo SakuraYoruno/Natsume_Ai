@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -119,10 +120,25 @@ class CheckpointStore:
 
     内存层：快速读写，进程内有效
     SQLite 层：持久化，跨进程/重启有效（可选）
+
+    FIX-1.1+1.2：
+    - 增加 TTL 清理机制（默认 30 分钟），防止长期运行内存泄漏
+    - 增加容量上限（默认 500 条），超出时驱逐最旧条目
+    - 增加写锁（threading.Lock），防止多线程并发写入竞态
     """
 
-    def __init__(self, *, db_path: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        db_path: str | None = None,
+        max_memory_entries: int = 500,
+        ttl_ms: int = 30 * 60 * 1000,
+    ) -> None:
         self._store: dict[str, dict[str, Any]] = {}
+        self._timestamps: dict[str, int] = {}
+        self._max_memory_entries = max(1, int(max_memory_entries))
+        self._ttl_ms = max(1000, int(ttl_ms))
+        self._write_lock = threading.Lock()
         self._db_path = db_path
         if db_path:
             self._init_db(db_path)
@@ -145,6 +161,9 @@ class CheckpointStore:
     def save(self, state: dict[str, Any]) -> str:
         """保存 GraphState 快照，返回唯一 checkpoint_id。
 
+        FIX-1.1+1.2：写锁保护多步操作（生成 UUID → 写内存 → 写 SQLite），
+        同时在写入前执行 TTL 清理和容量驱逐。
+
         Args:
             state: GraphState 字典
 
@@ -152,9 +171,19 @@ class CheckpointStore:
             唯一 checkpoint_id（UUID4）
         """
         checkpoint_id = str(uuid.uuid4())
-        # 内存层
-        self._store[checkpoint_id] = dict(state)
-        # SQLite 层（可选）
+        now = int(time.time() * 1000)
+        with self._write_lock:
+            # TTL 清理：驱逐过期条目
+            self._evict_expired(now)
+            # 容量上限：驱逐最旧条目
+            if len(self._store) >= self._max_memory_entries:
+                oldest_id = min(self._timestamps, key=lambda k: self._timestamps[k])
+                self._store.pop(oldest_id, None)
+                self._timestamps.pop(oldest_id, None)
+            # 写入内存层
+            self._store[checkpoint_id] = dict(state)
+            self._timestamps[checkpoint_id] = now
+        # SQLite 层（可选，写锁外执行，避免长时间持锁）
         if self._db_path:
             try:
                 import sqlite3
@@ -162,11 +191,26 @@ class CheckpointStore:
                 with sqlite3.connect(self._db_path) as conn:
                     conn.execute(
                         "INSERT INTO checkpoints (checkpoint_id, state_json, created_at_ms) VALUES (?, ?, ?)",
-                        (checkpoint_id, state_json, int(time.time() * 1000)),
+                        (checkpoint_id, state_json, now),
+                    )
+                    # FIX-1.1：SQLite 层同步清理过期条目（30 分钟）
+                    conn.execute(
+                        "DELETE FROM checkpoints WHERE created_at_ms < ?",
+                        (now - self._ttl_ms,),
                     )
             except Exception:
                 pass  # 静默降级
         return checkpoint_id
+
+    def _evict_expired(self, now_ms: int) -> None:
+        """驱逐内存层中已过期的条目（TTL 检查，调用方需持有写锁）。"""
+        expired = [
+            cid for cid, ts in self._timestamps.items()
+            if now_ms - ts > self._ttl_ms
+        ]
+        for cid in expired:
+            self._store.pop(cid, None)
+            self._timestamps.pop(cid, None)
 
     def load(self, checkpoint_id: str) -> dict[str, Any] | None:
         """加载 checkpoint，返回 GraphState 字典。

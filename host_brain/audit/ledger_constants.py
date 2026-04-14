@@ -36,6 +36,8 @@ GOVERNOR_COLUMNS = (
     "snapshot_refs",
     "stage",
     "ts_ms",
+    # FIX-4.2：TRIBE 族参数快照（裁决时使用的 L3 动态参数，供审计追溯）
+    "tribe_params_snapshot",
 )
 
 SKILL_EXEC_COLUMNS = (
