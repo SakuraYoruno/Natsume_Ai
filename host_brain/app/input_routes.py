@@ -134,6 +134,58 @@ _ALIGNMENT_STOPWORDS: set[str] = {
     "that",
 }
 
+_GATEWAY_ROUTE_ACTION_PREFIXES: tuple[str, ...] = ("/", "!", "run ", "exec ")
+_GATEWAY_FORCE_TRANSLATE_RE = re.compile(
+    r"(翻译|译成|翻成|translate|translation|中译英|英译中|中译日|日译中)",
+    re.IGNORECASE,
+)
+_GATEWAY_FORCE_MEMORY_RE = re.compile(
+    r"(记住|记一下|记下来|写入记忆|保存.*记忆|记到记忆|remember this|save this memory|偏好是|我的偏好)",
+    re.IGNORECASE,
+)
+_GATEWAY_FORCE_CODE_RE = re.compile(
+    r"(报错|错误|异常|修复|修一下|改代码|写代码|单测|测试|diff|patch|traceback|stack trace|compile|build|修.*bug|bug.*修)",
+    re.IGNORECASE,
+)
+_GATEWAY_RECENT_TURN_RE = re.compile(
+    r"(我刚刚|上一句|上一条|上句话|你刚刚|what did i just say|what did you just say)",
+    re.IGNORECASE,
+)
+_ALLOWED_LLM_ROUTE_TYPES: set[str] = {
+    "chat",
+    "delegate",
+    "skill",
+    "plan",
+    "recent_turn",
+    "task_progress",
+}
+_ALLOWED_DELEGATE_TARGETS: set[str] = {
+    "intent_agent",
+    "code_agent",
+    "translate_agent",
+    "vision_agent",
+    "repair_agent",
+    "retrieval_agent",
+    "judge_agent",
+}
+_EXEC_QUALITY_CHECK_ROUTE_TYPES: set[str] = {"skill", "delegate", "plan"}
+_EXEC_QUALITY_FAIL_STATUSES: set[str] = {"FAILED", "ERROR", "REJECTED", "DEGRADED"}
+_EXEC_QUALITY_FAIL_RESULT_CODES: set[str] = {
+    "SCHED_NO_CONTENT",
+    "SKILL_EXECUTION_FAILED",
+    "SKILL_EXECUTION_ERROR",
+    "MEMORY_WRITER_UNAVAILABLE",
+    "MEMORY_STORE_UNAVAILABLE",
+    "SUB_AGENT_FAILED",
+}
+_EXEC_QUALITY_NO_EFFECT_MARKERS: tuple[str, ...] = (
+    "no memory writer available",
+    "no memory store available",
+    "no memory backend available",
+    "skipping diary",
+    "no conversations on",
+)
+
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged(template_id)
@@ -210,6 +262,10 @@ def _parse_int_env(name: str, *, default: int) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _gateway_auto_reply_enabled() -> bool:
+    return _parse_bool_env("HOST_INPUT_GATEWAY_AUTO_REPLY", default=True)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -313,6 +369,569 @@ def _evaluate_immune_gate_for_input(
             "person_id": str(person_id or "").strip() or None,
         },
     )
+
+
+def _get_skill_registry_safe():
+    try:
+        from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+
+        return get_skill_registry()
+    except Exception:
+        return None
+
+
+def _safe_format_template(text: str, **kwargs: Any) -> str:
+    try:
+        return str(text or "").format(**kwargs)
+    except Exception:
+        return str(text or "")
+
+
+def _build_gateway_skill_manifest_lines(*, skill_registry: Any) -> list[str]:
+    templates = _load_template_mapping("executive_router.routing_prompt.templates")
+    line_with_description = str(templates.get("skill_line_with_description") or "- {skill_name}: {description}")
+    line_without_description = str(templates.get("skill_line_without_description") or "- {skill_name}")
+    fallback_lines = [
+        str(item).strip()
+        for item in list(templates.get("fallback_skill_lines") or [])
+        if str(item).strip()
+    ]
+    if skill_registry is None:
+        return fallback_lines
+
+    try:
+        max_items = max(8, min(120, _parse_int_env("HOST_GATEWAY_INTENT_SKILL_MANIFEST_MAX", default=64)))
+        max_risk_level = max(1, min(5, _parse_int_env("HOST_GATEWAY_INTENT_SKILL_MAX_RISK_LEVEL", default=5)))
+        entries = skill_registry.build_skill_manifest(
+            scopes=["host", "memory", "system"],
+            max_risk_level=max_risk_level,
+        )
+    except Exception:
+        return fallback_lines
+
+    lines: list[str] = []
+    for row in list(entries or [])[:max_items]:
+        skill_name = str(row.get("name") or "").strip()
+        if not skill_name:
+            continue
+        description = str(row.get("description") or "").strip()
+        if description:
+            line = _safe_format_template(
+                line_with_description,
+                skill_name=skill_name,
+                description=description,
+            )
+        else:
+            line = _safe_format_template(
+                line_without_description,
+                skill_name=skill_name,
+            )
+        normalized_line = str(line).strip()
+        if normalized_line:
+            lines.append(normalized_line)
+    return lines or fallback_lines
+
+
+def _extract_first_json_object(raw_text: str) -> dict[str, Any] | None:
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text, re.IGNORECASE)
+    if fenced_match:
+        try:
+            parsed = json.loads(str(fenced_match.group(1) or "").strip())
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+    start = text.find("{")
+    while start >= 0:
+        depth = 0
+        in_string = False
+        escaped = False
+        for idx in range(start, len(text)):
+            char = text[idx]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+                continue
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : idx + 1]
+                    try:
+                        parsed = json.loads(candidate)
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except Exception:
+                        break
+        start = text.find("{", start + 1)
+    return None
+
+
+def _normalize_route_confidence(value: Any) -> float | None:
+    confidence = _coerce_float(value)
+    if confidence is None:
+        return None
+    return max(0.0, min(1.0, float(confidence)))
+
+
+def _normalize_gateway_llm_route_decision(
+    *,
+    raw_decision: dict[str, Any],
+    skill_registry: Any,
+) -> dict[str, Any] | None:
+    route = str(raw_decision.get("route") or raw_decision.get("route_type") or "").strip().lower()
+    if route not in _ALLOWED_LLM_ROUTE_TYPES:
+        return None
+
+    target_id = str(
+        raw_decision.get("target_id")
+        or raw_decision.get("skill_id")
+        or raw_decision.get("agent_id")
+        or raw_decision.get("delegate_agent")
+        or ""
+    ).strip()
+    task = str(raw_decision.get("task") or raw_decision.get("query") or raw_decision.get("text") or "").strip()
+    reason = str(raw_decision.get("reason") or raw_decision.get("reason_code") or "LLM_ROUTE").strip() or "LLM_ROUTE"
+    confidence = _normalize_route_confidence(raw_decision.get("confidence"))
+
+    if route in {"chat", "recent_turn", "task_progress"}:
+        target_id = ""
+    elif route == "plan":
+        target_id = target_id or "skill_dag"
+    elif route == "delegate":
+        if target_id not in _ALLOWED_DELEGATE_TARGETS:
+            target_id = "intent_agent"
+            reason = "LLM_ROUTE_INVALID_DELEGATE_TARGET"
+    elif route == "skill":
+        if not target_id:
+            return None
+        if skill_registry is None:
+            return None
+        try:
+            if skill_registry.get(target_id) is None:
+                return None
+        except Exception:
+            return None
+
+    return {
+        "route": route,
+        "target_id": target_id,
+        "task": task,
+        "reason_code": reason,
+        "confidence": confidence,
+        "route_source": "llm",
+        "llm_route_used": True,
+    }
+
+
+def _build_gateway_rule_route_decision(
+    *,
+    text: str,
+    skill_registry: Any,
+) -> dict[str, Any]:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": "",
+            "reason_code": "RULE_EMPTY_TEXT",
+            "confidence": None,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    if _looks_like_progress_query_for_ack_skip(normalized):
+        return {
+            "route": "task_progress",
+            "target_id": "",
+            "task": "",
+            "reason_code": "RULE_TASK_PROGRESS",
+            "confidence": 0.98,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    if _GATEWAY_RECENT_TURN_RE.search(normalized):
+        return {
+            "route": "recent_turn",
+            "target_id": "",
+            "task": "",
+            "reason_code": "RULE_RECENT_TURN",
+            "confidence": 0.95,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    if _GATEWAY_FORCE_TRANSLATE_RE.search(normalized):
+        return {
+            "route": "delegate",
+            "target_id": "translate_agent",
+            "task": normalized,
+            "reason_code": "RULE_FORCE_TRANSLATE_AGENT",
+            "confidence": 0.95,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    if _GATEWAY_FORCE_MEMORY_RE.search(normalized):
+        memory_skill_exists = False
+        try:
+            memory_skill_exists = bool(skill_registry and skill_registry.get("memory_store") is not None)
+        except Exception:
+            memory_skill_exists = False
+        if memory_skill_exists:
+            return {
+                "route": "skill",
+                "target_id": "memory_store",
+                "task": normalized,
+                "reason_code": "RULE_FORCE_MEMORY_STORE",
+                "confidence": 0.95,
+                "route_source": "rule",
+                "llm_route_used": False,
+            }
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": normalized,
+            "reason_code": "RULE_FORCE_MEMORY_FALLBACK_INTENT",
+            "confidence": 0.90,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    if _GATEWAY_FORCE_CODE_RE.search(normalized):
+        return {
+            "route": "delegate",
+            "target_id": "code_agent",
+            "task": normalized,
+            "reason_code": "RULE_FORCE_CODE_AGENT",
+            "confidence": 0.95,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    compact = normalized.lower()
+    if compact.startswith(_GATEWAY_ROUTE_ACTION_PREFIXES) or _looks_like_execution_intent_for_ack(normalized):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": normalized,
+            "reason_code": "RULE_ACTION_INTENT",
+            "confidence": 0.85,
+            "route_source": "rule",
+            "llm_route_used": False,
+        }
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": "",
+        "reason_code": "RULE_CHAT_DEFAULT",
+        "confidence": 0.75,
+        "route_source": "rule",
+        "llm_route_used": False,
+    }
+
+
+async def _run_gateway_intent_route_llm(
+    *,
+    request_id: str,
+    session_id: str,
+    text: str,
+    skill_registry: Any,
+) -> dict[str, Any] | None:
+    if not _parse_bool_env("HOST_GATEWAY_INTENT_LLM_ENABLED", default=True):
+        return None
+
+    from host_brain.app.graph_config_builder import (  # noqa: PLC0415
+        resolve_executive_router_llm_runtime,
+        resolve_host_llm_runtime_async,
+    )
+    from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
+
+    llm_runtime = await resolve_host_llm_runtime_async(
+        rollout_key=session_id,
+        scene_type="EXEC_INTENT",
+    )
+    router_runtime = resolve_executive_router_llm_runtime(base_runtime=llm_runtime)
+    if not bool(router_runtime.get("available")):
+        return None
+
+    provider_name = str(router_runtime.get("provider_name") or "").strip()
+    model_id = str(router_runtime.get("model_id") or "").strip()
+    api_key = str(router_runtime.get("llm_api_key") or "").strip()
+    if not provider_name or not model_id or not api_key:
+        return None
+
+    timeout_ms = max(
+        800,
+        _parse_int_env(
+            "HOST_GATEWAY_INTENT_LLM_TIMEOUT_MS",
+            default=int(router_runtime.get("timeout_ms") or 5000),
+        ),
+    )
+    base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
+    agent_gen_params = dict(router_runtime.get("agent_gen_params") or {"temperature": 0.1, "top_p": 0.8})
+
+    templates = _load_template_mapping("executive_router.routing_prompt.templates")
+    skill_lines = _build_gateway_skill_manifest_lines(skill_registry=skill_registry)
+    skill_manifest_text = "\n".join(skill_lines) if skill_lines else "- intent_agent: fallback"
+    system_prompt_template = str(
+        templates.get("system_prompt_template")
+        or (
+            "你是路由分类器。输出单个 JSON 对象。"
+            " route 只能是 chat/delegate/skill/task_progress/recent_turn/plan。"
+        )
+    )
+    if "{skill_manifest}" in system_prompt_template:
+        system_prompt = system_prompt_template.replace("{skill_manifest}", skill_manifest_text)
+    else:
+        system_prompt = _safe_format_template(system_prompt_template, skill_manifest=skill_manifest_text)
+    system_prompt += (
+        "\n\n严格要求："
+        "\n1) 仅输出 JSON 对象，不要 markdown。"
+        '\n2) JSON 字段必须包含 {"route","target_id","task","confidence","reason"}。'
+        "\n3) confidence 为 0~1 的数字。"
+    )
+    user_prompt_template = str(templates.get("user_prompt_template") or "用户消息：{message}\n输出 JSON：")
+    if "{message}" in user_prompt_template:
+        user_prompt = user_prompt_template.replace("{message}", str(text or "").strip())
+    else:
+        user_prompt = _safe_format_template(user_prompt_template, message=str(text or "").strip())
+
+    raw_chunks: list[str] = []
+    async for chunk in astream_llm_chunks(
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=api_key,
+        timeout_ms=timeout_ms,
+        prompt_text=user_prompt,
+        system_prompt=system_prompt,
+        gen_params=agent_gen_params,
+        base_url_override=base_url_override,
+    ):
+        raw_chunks.append(str(chunk or ""))
+        if sum(len(item) for item in raw_chunks) >= 8000:
+            break
+    raw_text = "".join(raw_chunks).strip()
+    parsed_obj = _extract_first_json_object(raw_text)
+    if not isinstance(parsed_obj, dict):
+        _logger.warning("[%s] gateway_intent_llm_parse_failed output=%s", request_id, _build_reply_preview(raw_text, limit=180))
+        return None
+    return _normalize_gateway_llm_route_decision(
+        raw_decision=parsed_obj,
+        skill_registry=skill_registry,
+    )
+
+
+def _apply_gateway_force_override(
+    *,
+    text: str,
+    decision: dict[str, Any],
+    skill_registry: Any,
+) -> dict[str, Any]:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return dict(decision or {})
+    route = str(decision.get("route") or "").strip().lower()
+    target_id = str(decision.get("target_id") or "").strip()
+    patched = dict(decision or {})
+    has_translate_intent = _GATEWAY_FORCE_TRANSLATE_RE.search(normalized) is not None
+    has_recent_turn_intent = _GATEWAY_RECENT_TURN_RE.search(normalized) is not None
+
+    if _looks_like_progress_query_for_ack_skip(normalized):
+        if route != "task_progress":
+            patched.update(
+                {
+                    "route": "task_progress",
+                    "target_id": "",
+                    "task": "",
+                    "reason_code": "FORCE_OVERRIDE_TASK_PROGRESS",
+                    "route_source": "override",
+                    "route_override_reason": "FORCE_OVERRIDE_TASK_PROGRESS",
+                }
+            )
+        return patched
+
+    # Recent-turn queries are deterministic: force direct recent_turn and never degrade to chat/delegate.
+    if has_recent_turn_intent:
+        if route != "recent_turn":
+            patched.update(
+                {
+                    "route": "recent_turn",
+                    "target_id": "",
+                    "task": "",
+                    "reason_code": "FORCE_OVERRIDE_RECENT_TURN",
+                    "route_source": "override",
+                    "route_override_reason": "FORCE_OVERRIDE_RECENT_TURN",
+                }
+            )
+        return patched
+
+    # Translation intent has higher priority than code/debug keywords in mixed sentences.
+    if has_translate_intent:
+        if not (route == "delegate" and target_id == "translate_agent"):
+            patched.update(
+                {
+                    "route": "delegate",
+                    "target_id": "translate_agent",
+                    "task": normalized,
+                    "reason_code": "FORCE_OVERRIDE_TRANSLATE_AGENT",
+                    "route_source": "override",
+                    "route_override_reason": "FORCE_OVERRIDE_TRANSLATE_AGENT",
+                }
+            )
+        return patched
+
+    memory_skill_exists = False
+    try:
+        memory_skill_exists = bool(skill_registry and skill_registry.get("memory_store") is not None)
+    except Exception:
+        memory_skill_exists = False
+    if _GATEWAY_FORCE_MEMORY_RE.search(normalized):
+        if memory_skill_exists and not (route == "skill" and target_id == "memory_store"):
+            patched.update(
+                {
+                    "route": "skill",
+                    "target_id": "memory_store",
+                    "task": normalized,
+                    "reason_code": "FORCE_OVERRIDE_MEMORY_STORE",
+                    "route_source": "override",
+                    "route_override_reason": "FORCE_OVERRIDE_MEMORY_STORE",
+                }
+            )
+            return patched
+        if not memory_skill_exists and not (route == "delegate" and target_id == "intent_agent"):
+            patched.update(
+                {
+                    "route": "delegate",
+                    "target_id": "intent_agent",
+                    "task": normalized,
+                    "reason_code": "FORCE_OVERRIDE_MEMORY_FALLBACK_INTENT",
+                    "route_source": "override",
+                    "route_override_reason": "FORCE_OVERRIDE_MEMORY_FALLBACK_INTENT",
+                }
+            )
+            return patched
+
+    if _GATEWAY_FORCE_CODE_RE.search(normalized) and not (route == "delegate" and target_id == "code_agent"):
+        patched.update(
+            {
+                "route": "delegate",
+                "target_id": "code_agent",
+                "task": normalized,
+                "reason_code": "FORCE_OVERRIDE_CODE_AGENT",
+                "route_source": "override",
+                "route_override_reason": "FORCE_OVERRIDE_CODE_AGENT",
+            }
+        )
+        return patched
+
+    if route == "chat" and _looks_like_execution_intent_for_ack(normalized):
+        patched.update(
+            {
+                "route": "delegate",
+                "target_id": "intent_agent",
+                "task": normalized,
+                "reason_code": "FORCE_OVERRIDE_ACTION_INTENT",
+                "route_source": "override",
+                "route_override_reason": "FORCE_OVERRIDE_ACTION_INTENT",
+            }
+        )
+        return patched
+    return patched
+
+
+async def _build_gateway_intent_draft(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+) -> dict[str, Any]:
+    default_draft: dict[str, Any] = {
+        "id": f"intent::{request_id}",
+        "action": "narrative_only",
+        "source": "input_routes",
+        "input_source": source,
+        "route": "chat",
+        "target_id": "",
+        "task": "",
+        "route_reason": "SOURCE_NON_GATEWAY_DEFAULT_CHAT",
+        "route_source": "default",
+        "route_confidence": None,
+        "llm_route_used": False,
+    }
+    if str(source or "").strip().upper() != "GATEWAY":
+        return default_draft
+
+    skill_registry = _get_skill_registry_safe()
+    route_decision = _build_gateway_rule_route_decision(text=text, skill_registry=skill_registry)
+    llm_decision: dict[str, Any] | None = None
+    try:
+        llm_decision = await _run_gateway_intent_route_llm(
+            request_id=request_id,
+            session_id=session_id,
+            text=text,
+            skill_registry=skill_registry,
+        )
+    except Exception as exc:
+        _logger.warning("[%s] gateway_intent_llm_route_failed: %s", request_id, exc)
+
+    if llm_decision is not None:
+        route_decision = dict(llm_decision)
+    route_decision = _apply_gateway_force_override(
+        text=text,
+        decision=route_decision,
+        skill_registry=skill_registry,
+    )
+
+    route = str(route_decision.get("route") or "chat").strip().lower()
+    target_id = str(route_decision.get("target_id") or "").strip()
+    task = str(route_decision.get("task") or "").strip()
+    route_reason = str(route_decision.get("reason_code") or "ROUTE_UNKNOWN").strip() or "ROUTE_UNKNOWN"
+    route_source = str(route_decision.get("route_source") or "rule").strip() or "rule"
+    route_confidence = _normalize_route_confidence(route_decision.get("confidence"))
+    llm_route_used = bool(route_decision.get("llm_route_used"))
+    action = "narrative_only" if route == "chat" else (target_id or route)
+
+    intent_draft: dict[str, Any] = {
+        "id": f"intent::{request_id}",
+        "action": action,
+        "source": "input_routes",
+        "input_source": source,
+        "route": route,
+        "target_id": target_id,
+        "task": task,
+        "route_reason": route_reason,
+        "route_source": route_source,
+        "route_confidence": route_confidence,
+        "llm_route_used": llm_route_used,
+    }
+    override_reason = str(route_decision.get("route_override_reason") or "").strip()
+    if override_reason:
+        intent_draft["route_override_reason"] = override_reason
+    if route == "delegate" and target_id:
+        intent_draft["delegate_agent"] = target_id
+        intent_draft["agent_id"] = target_id
+    elif route == "skill" and target_id:
+        intent_draft["skill_id"] = target_id
+        intent_draft["skill_name"] = target_id
+    return intent_draft
 
 
 @router.post("/input", response_model=InputResponse)
@@ -542,6 +1161,24 @@ def _log_input_event(
         person_id = str((input_payload or {}).get("person_id") or "").strip()
         if person_id:
             payload["person_id"] = person_id
+        route_fields = (
+            "route_type",
+            "route_target",
+            "route_task",
+            "route_source",
+            "route_reason",
+            "route_confidence",
+            "route_override_reason",
+            "llm_route_used",
+            "exec_quality_degraded",
+            "exec_quality_reason_code",
+            "exec_quality_tags",
+            "exec_quality_skill_exec_count",
+        )
+        for field in route_fields:
+            value = (input_payload or {}).get(field)
+            if value is not None:
+                payload[field] = value
         if source == "GATEWAY":
             gateway_fields = (
                 "platform",
@@ -665,6 +1302,125 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: max(0, limit - 3)]}..."
+
+
+def _get_request_skill_exec_rows(ledger: Any, *, request_id: str) -> list[dict[str, Any]]:
+    if ledger is None:
+        return []
+    rid = str(request_id or "").strip()
+    if not rid:
+        return []
+
+    try:
+        if hasattr(ledger, "trace_request"):
+            trace = ledger.trace_request(rid)
+            rows = trace.get("skill_exec_log") if isinstance(trace, dict) else None
+            if isinstance(rows, list):
+                return [dict(row or {}) for row in rows if isinstance(row, dict)]
+    except Exception:
+        pass
+
+    try:
+        fallback_rows = getattr(ledger, "skill_exec_log", None)
+        if isinstance(fallback_rows, list):
+            matched: list[dict[str, Any]] = []
+            for row in fallback_rows:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("request_id") or "").strip() == rid:
+                    matched.append(dict(row))
+            return matched
+    except Exception:
+        pass
+    return []
+
+
+def _analyze_request_execution_quality(
+    *,
+    ledger: Any,
+    request_id: str,
+    decision: str,
+    route_type: str,
+    route_target: str,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "degraded": False,
+        "reason_code": None,
+        "detail_tags": [],
+        "skill_exec_count": 0,
+    }
+    if str(decision or "").strip().upper() != "APPROVE":
+        return result
+
+    normalized_route_type = str(route_type or "").strip().lower()
+    normalized_route_target = str(route_target or "").strip().lower()
+    if normalized_route_type not in _EXEC_QUALITY_CHECK_ROUTE_TYPES:
+        return result
+
+    skill_rows = _get_request_skill_exec_rows(ledger, request_id=request_id)
+    result["skill_exec_count"] = len(skill_rows)
+
+    if normalized_route_type in {"skill", "delegate"} and not skill_rows:
+        result["degraded"] = True
+        result["reason_code"] = "SKILL_EXEC_MISSING"
+        result["detail_tags"] = ["skill_exec_missing=true"]
+        return result
+
+    failure_status_detected = False
+    failure_code_detected = False
+    no_effect_detected = False
+    empty_digest_count = 0
+
+    observed_skill_names: set[str] = set()
+    for row in skill_rows:
+        status_text = str(row.get("result_status") or "").strip().upper()
+        code_text = str(row.get("result_code") or "").strip().upper()
+        digest_text = str(row.get("result_digest") or "").strip()
+        digest_lower = digest_text.lower()
+        skill_name = str(row.get("skill_name") or "").strip().lower()
+        if skill_name:
+            observed_skill_names.add(skill_name)
+
+        if status_text in _EXEC_QUALITY_FAIL_STATUSES:
+            failure_status_detected = True
+        if code_text in _EXEC_QUALITY_FAIL_RESULT_CODES:
+            failure_code_detected = True
+        if any(marker in digest_lower for marker in _EXEC_QUALITY_NO_EFFECT_MARKERS):
+            no_effect_detected = True
+        if not digest_text:
+            empty_digest_count += 1
+
+    if failure_status_detected:
+        result["degraded"] = True
+        result["reason_code"] = "SKILL_EXEC_FAILED"
+        result["detail_tags"].append("skill_exec_failed=true")
+    elif failure_code_detected:
+        result["degraded"] = True
+        result["reason_code"] = "SKILL_EXEC_FAILED"
+        result["detail_tags"].append("skill_exec_result_code_failed=true")
+    elif no_effect_detected:
+        result["degraded"] = True
+        result["reason_code"] = "SKILL_EXEC_NO_EFFECT"
+        result["detail_tags"].append("skill_exec_no_effect=true")
+    elif skill_rows and empty_digest_count >= len(skill_rows):
+        result["degraded"] = True
+        result["reason_code"] = "SKILL_EXEC_RESULT_EMPTY"
+        result["detail_tags"].append("skill_exec_result_empty=true")
+
+    expected_skill_name: str | None = None
+    if normalized_route_type == "skill" and normalized_route_target:
+        expected_skill_name = normalized_route_target
+    elif normalized_route_type == "delegate" and normalized_route_target and normalized_route_target != "intent_agent":
+        expected_skill_name = f"sub_agent:{normalized_route_target}"
+    if expected_skill_name and observed_skill_names and expected_skill_name not in observed_skill_names:
+        result["degraded"] = True
+        result["reason_code"] = result["reason_code"] or "ROUTE_EXEC_MISMATCH"
+        result["detail_tags"].append(
+            f"route_exec_mismatch=expected:{expected_skill_name},observed:{','.join(sorted(observed_skill_names))}"
+        )
+
+    result["detail_tags"].append(f"skill_exec_count={len(skill_rows)}")
+    return result
 
 
 def _looks_like_progress_query_for_ack_skip(text: str) -> bool:
@@ -834,6 +1590,8 @@ async def _maybe_send_gateway_realign_notice(
     request_id: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    if not _gateway_auto_reply_enabled():
+        return {"sent": False, "reason_code": "DEVIATION_NOTICE_AUTO_REPLY_DISABLED"}
     if not _parse_bool_env("HOST_GATEWAY_DEVIATION_NOTICE_ENABLED", default=True):
         return {"sent": False, "reason_code": "DEVIATION_NOTICE_DISABLED"}
     platform = str(payload.get("platform") or "").strip().lower()
@@ -876,6 +1634,8 @@ def _should_send_gateway_immediate_ack(
     text: str,
     payload: dict[str, Any],
 ) -> tuple[bool, str]:
+    if not _gateway_auto_reply_enabled():
+        return False, "ACK_AUTO_REPLY_DISABLED"
     if not _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", default=True):
         return False, "ACK_DISABLED"
     if str(source or "").strip().upper() != "GATEWAY":
@@ -1016,6 +1776,8 @@ async def _try_handle_gateway_progress_fastpath(
     ledger: Any,
     ts_ms: int,
 ) -> bool:
+    if not _gateway_auto_reply_enabled():
+        return False
     if str(source or "").strip().upper() != "GATEWAY":
         return False
     if not _parse_bool_env("HOST_GATEWAY_PROGRESS_FASTPATH_ENABLED", default=True):
@@ -1110,6 +1872,8 @@ def _should_start_gateway_progress_push(
     text: str,
     payload: dict[str, Any],
 ) -> tuple[bool, str]:
+    if not _gateway_auto_reply_enabled():
+        return False, "PROGRESS_PUSH_AUTO_REPLY_DISABLED"
     if not _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_ENABLED", default=True):
         return False, "PROGRESS_PUSH_DISABLED"
     if str(source or "").strip().upper() != "GATEWAY":
@@ -1377,12 +2141,12 @@ async def _run_cortex_orchestrator_pipeline(
         source=f"input_routes.{str(source or '').lower()}",
         ts_ms=ts_ms,
     )
-    intent_draft: dict[str, Any] = {
-        "id": f"intent::{request_id}",
-        "action": "narrative_only",
-        "source": "input_routes",
-        "input_source": source,
-    }
+    intent_draft = await _build_gateway_intent_draft(
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        text=text,
+    )
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
     commit_event: dict[str, Any] | None = None
@@ -1410,6 +2174,17 @@ async def _run_cortex_orchestrator_pipeline(
         "reason_code": str(commit_event.get("reason_code") or "").strip() or None,
         "narrative": str(commit_event.get("narrative") or "").strip(),
         "commit_event": commit_event,
+        "intent_draft": dict(intent_draft or {}),
+        "route_decision": {
+            "route": str(intent_draft.get("route") or "chat").strip().lower() or "chat",
+            "target_id": str(intent_draft.get("target_id") or "").strip(),
+            "task": str(intent_draft.get("task") or "").strip(),
+            "reason_code": str(intent_draft.get("route_reason") or "").strip() or None,
+            "source": str(intent_draft.get("route_source") or "").strip() or None,
+            "confidence": _normalize_route_confidence(intent_draft.get("route_confidence")),
+            "override_reason": str(intent_draft.get("route_override_reason") or "").strip() or None,
+            "llm_route_used": bool(intent_draft.get("llm_route_used")),
+        },
     }
 
 
@@ -1551,15 +2326,8 @@ async def _deliver_gateway_reply(
     # tts_text_ja 为日语 TTS 文本（双语输出时使用，当前为占位）
     tts_text_ja: str | None = None,
 ) -> dict[str, Any]:
-    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
-    from host_brain.app.reply_form_decider import (  # noqa: PLC0415
-        get_reply_form_decider, MsgType,
-    )
-
     platform = str(payload.get("platform") or "").strip().lower()
     conversation_id = str(payload.get("conversation_id") or "").strip()
-    if not platform or not conversation_id:
-        raise RuntimeError("gateway_reply_missing_platform_or_conversation")
 
     reply_text = _build_gateway_reply_text(
         decision=decision,
@@ -1567,6 +2335,37 @@ async def _deliver_gateway_reply(
         reason_code=reason_code,
     )
     preview = _build_reply_preview(reply_text, limit=120)
+    if not _gateway_auto_reply_enabled():
+        return {
+            "success": True,
+            "status": "SKIPPED",
+            "reason_code": "GATEWAY_REPLY_DISABLED",
+            "detail": "gateway reply skipped: HOST_INPUT_GATEWAY_AUTO_REPLY=false",
+            "latency_ms": 0,
+            "reply_text_len": len(reply_text),
+            "reply_preview": preview,
+            "reply_form": "text",
+            "reply_form_reason": "auto_reply_disabled",
+            "voice_sent": False,
+        }
+    if not platform or not conversation_id:
+        return {
+            "success": False,
+            "status": "FAILED",
+            "reason_code": "GATEWAY_REPLY_MISSING_ROUTE",
+            "detail": "gateway reply skipped: missing platform or conversation_id",
+            "latency_ms": 0,
+            "reply_text_len": len(reply_text),
+            "reply_preview": preview,
+            "reply_form": "text",
+            "reply_form_reason": "missing_route",
+            "voice_sent": False,
+        }
+
+    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+    from host_brain.app.reply_form_decider import (  # noqa: PLC0415
+        get_reply_form_decider, MsgType,
+    )
 
     # ── Phase XV P4：ReplyFormDecider ──────────────────────────────────
     # 将用户消息类型字符串转换为 MsgType
@@ -1598,11 +2397,20 @@ async def _deliver_gateway_reply(
     )
     if not bool(getattr(result, "success", False)):
         status = str(getattr(result, "status", "FAILED"))
-        rc = str(getattr(result, "reason_code", "") or "")
+        rc = str(getattr(result, "reason_code", "") or "") or "GATEWAY_REPLY_FAILED"
         detail = str(getattr(result, "detail", "") or "")
-        raise RuntimeError(
-            f"gateway_reply_failed status={status} reason_code={rc or 'UNKNOWN'} detail={detail[:180]}"
-        )
+        return {
+            "success": False,
+            "status": status,
+            "reason_code": rc,
+            "detail": detail,
+            "latency_ms": int(getattr(result, "latency_ms", 0)),
+            "reply_text_len": len(reply_text),
+            "reply_preview": preview,
+            "reply_form": form_decision.primary.value,
+            "reply_form_reason": form_decision.reason,
+            "voice_sent": False,
+        }
 
     # ── 双发模式：先文字字幕，再日语语音（不阻塞主回复）────────────
     voice_sent = False
@@ -1626,7 +2434,10 @@ async def _deliver_gateway_reply(
                 pass  # 语音发送失败不影响主回复
 
     return {
+        "success": True,
         "status": str(getattr(result, "status", "OK")),
+        "reason_code": None,
+        "detail": str(getattr(result, "detail", "") or ""),
         "latency_ms": int(getattr(result, "latency_ms", 0)),
         "reply_text_len": len(reply_text),
         "reply_preview": preview,
@@ -1866,6 +2677,41 @@ async def _dispatch_to_graph_worker(
         decision = str(pipeline_result.get("decision") or "REJECT").strip().upper()
         reason_code = str(pipeline_result.get("reason_code") or "").strip() or None
         narrative = str(pipeline_result.get("narrative") or "").strip()
+        route_decision = dict(pipeline_result.get("route_decision") or {})
+        route_type = str(route_decision.get("route") or "chat").strip().lower() or "chat"
+        route_target = str(route_decision.get("target_id") or "").strip()
+        route_task = str(route_decision.get("task") or "").strip()
+        route_source = str(route_decision.get("source") or "").strip() or None
+        route_reason = str(route_decision.get("reason_code") or "").strip() or None
+        route_override_reason = str(route_decision.get("override_reason") or "").strip() or None
+        route_confidence = _normalize_route_confidence(route_decision.get("confidence"))
+        route_llm_used = bool(route_decision.get("llm_route_used"))
+
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={
+                **dict(payload or {}),
+                "route_type": route_type,
+                "route_target": route_target,
+                "route_task": route_task,
+                "route_source": route_source,
+                "route_reason": route_reason,
+                "route_confidence": route_confidence,
+                "route_override_reason": route_override_reason,
+                "llm_route_used": route_llm_used,
+            },
+            phase="ROUTE_DECIDED",
+            status="OK",
+            reason_code=route_reason,
+            detail=(
+                f"route={route_type} target={route_target or '-'} "
+                f"source={route_source or '-'} llm_used={str(route_llm_used).lower()}"
+            ),
+            ts_ms=int(time.time() * 1000),
+        )
 
         await _stop_progress_push_task(
             stop_event=progress_push_stop_event,
@@ -1884,20 +2730,35 @@ async def _dispatch_to_graph_worker(
             _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper()
             _user_msg_type = str(payload.get("msg_type") or "text").strip().lower()
 
-            gateway_delivery = await _deliver_gateway_reply(
-                request_id=request_id,
-                payload=payload,
-                decision=decision,
-                reason_code=reason_code,
-                narrative=narrative,
-                emotion_tag=_emotion_tag,
-                bond_stage=_bond_stage,
-                user_msg_type=_user_msg_type,
-            )
+            try:
+                gateway_delivery = await _deliver_gateway_reply(
+                    request_id=request_id,
+                    payload=payload,
+                    decision=decision,
+                    reason_code=reason_code,
+                    narrative=narrative,
+                    emotion_tag=_emotion_tag,
+                    bond_stage=_bond_stage,
+                    user_msg_type=_user_msg_type,
+                )
+            except Exception as exc:
+                gateway_delivery = {
+                    "success": False,
+                    "status": "FAILED",
+                    "reason_code": "GATEWAY_REPLY_EXCEPTION",
+                    "detail": f"{type(exc).__name__}: {str(exc)[:180]}",
+                    "latency_ms": 0,
+                    "reply_text_len": 0,
+                    "reply_preview": "",
+                    "reply_form": "text",
+                    "reply_form_reason": "exception",
+                    "voice_sent": False,
+                }
 
         complete_ts = int(time.time() * 1000)
         latency_ms = complete_ts - dispatch_ts
         completion_status = "OK" if decision == "APPROVE" else "DEGRADED"
+        completion_reason_code = reason_code
         detail_parts = [
             f"cortex_orchestrator decision={decision}",
             f"mode={dispatch_mode}",
@@ -1906,6 +2767,18 @@ async def _dispatch_to_graph_worker(
         ]
         if reason_code:
             detail_parts.append(f"reason_code={reason_code}")
+        detail_parts.append(f"route_type={route_type}")
+        if route_target:
+            detail_parts.append(f"route_target={route_target}")
+        if route_source:
+            detail_parts.append(f"route_source={route_source}")
+        if route_reason:
+            detail_parts.append(f"route_reason={route_reason}")
+        if route_override_reason:
+            detail_parts.append(f"route_override_reason={route_override_reason}")
+        if route_confidence is not None:
+            detail_parts.append(f"route_confidence={route_confidence:.3f}")
+        detail_parts.append(f"route_llm_used={str(route_llm_used).lower()}")
         if isinstance(deviation_meta, dict):
             detail_parts.append(f"deviation_reason={deviation_meta.get('reason_code')}")
             detail_parts.append(f"deviation_retry_applied={bool(deviation_meta.get('retry_applied'))}")
@@ -1914,22 +2787,86 @@ async def _dispatch_to_graph_worker(
             if deviation_meta.get("retry_overlap_ratio") is not None:
                 detail_parts.append(f"deviation_retry_overlap={deviation_meta.get('retry_overlap_ratio')}")
         if gateway_delivery is not None:
+            gateway_success = bool(gateway_delivery.get("success", True))
+            gateway_reason_code = str(gateway_delivery.get("reason_code") or "")
+            gateway_detail = str(gateway_delivery.get("detail") or "")
+            if not gateway_success:
+                degrade_on_gateway_failure = _parse_bool_env(
+                    "HOST_GATEWAY_REPLY_FAILURE_DEGRADE_INPUT",
+                    default=True,
+                )
+                if degrade_on_gateway_failure:
+                    completion_status = "DEGRADED"
+                    if not completion_reason_code:
+                        completion_reason_code = gateway_reason_code or "GATEWAY_REPLY_DELIVERY_FAILED"
+                else:
+                    detail_parts.append("gateway_failure_ignored=true")
+            detail_parts.append(f"gateway_success={str(gateway_success).lower()}")
             detail_parts.append(f"gateway_status={gateway_delivery.get('status')}")
             detail_parts.append(f"gateway_latency_ms={gateway_delivery.get('latency_ms')}")
             detail_parts.append(f"reply_text_len={gateway_delivery.get('reply_text_len')}")
             detail_parts.append(f"reply_preview={gateway_delivery.get('reply_preview')}")
+            if gateway_reason_code:
+                detail_parts.append(f"gateway_reason_code={gateway_reason_code}")
+            if gateway_detail:
+                detail_parts.append(f"gateway_detail={_build_reply_preview(gateway_detail, limit=160)}")
+
+        execution_quality = {
+            "degraded": False,
+            "reason_code": None,
+            "detail_tags": [],
+            "skill_exec_count": 0,
+        }
+        if (
+            _parse_bool_env("HOST_INPUT_EXEC_QUALITY_GATE_ENABLED", default=True)
+            and isinstance(pipeline_result.get("commit_event"), dict)
+        ):
+            execution_quality = _analyze_request_execution_quality(
+                ledger=ledger,
+                request_id=request_id,
+                decision=decision,
+                route_type=route_type,
+                route_target=route_target,
+            )
+            if bool(execution_quality.get("degraded")):
+                completion_status = "DEGRADED"
+                if not completion_reason_code:
+                    completion_reason_code = str(
+                        execution_quality.get("reason_code") or "EXECUTION_QUALITY_DEGRADED"
+                    )
+            detail_parts.append(f"exec_quality_degraded={str(bool(execution_quality.get('degraded'))).lower()}")
+            if execution_quality.get("reason_code"):
+                detail_parts.append(f"exec_quality_reason_code={execution_quality.get('reason_code')}")
+            for tag in list(execution_quality.get("detail_tags") or ()):
+                if str(tag or "").strip():
+                    detail_parts.append(f"exec_quality_tag={tag}")
 
         completed_payload = dict(payload or {})
         completed_payload["decision"] = decision
-        if reason_code:
-            completed_payload["reason_code"] = reason_code
+        if completion_reason_code:
+            completed_payload["reason_code"] = completion_reason_code
+        completed_payload["route_type"] = route_type
+        completed_payload["route_target"] = route_target
+        completed_payload["route_task"] = route_task
+        completed_payload["route_source"] = route_source
+        completed_payload["route_reason"] = route_reason
+        completed_payload["route_confidence"] = route_confidence
+        completed_payload["route_override_reason"] = route_override_reason
+        completed_payload["llm_route_used"] = route_llm_used
+        completed_payload["exec_quality_degraded"] = bool(execution_quality.get("degraded"))
+        completed_payload["exec_quality_reason_code"] = execution_quality.get("reason_code")
+        completed_payload["exec_quality_tags"] = list(execution_quality.get("detail_tags") or [])
+        completed_payload["exec_quality_skill_exec_count"] = int(execution_quality.get("skill_exec_count") or 0)
         if isinstance(deviation_meta, dict):
             completed_payload["deviation_reason"] = deviation_meta.get("reason_code")
             completed_payload["deviation_overlap_ratio"] = deviation_meta.get("overlap_ratio")
             completed_payload["deviation_retry_applied"] = bool(deviation_meta.get("retry_applied"))
             completed_payload["deviation_retry_overlap_ratio"] = deviation_meta.get("retry_overlap_ratio")
         if gateway_delivery is not None:
+            completed_payload["gateway_success"] = bool(gateway_delivery.get("success", True))
             completed_payload["gateway_status"] = gateway_delivery.get("status")
+            completed_payload["gateway_reason_code"] = gateway_delivery.get("reason_code")
+            completed_payload["gateway_detail"] = gateway_delivery.get("detail")
             completed_payload["gateway_latency_ms"] = gateway_delivery.get("latency_ms")
             completed_payload["reply_text_len"] = gateway_delivery.get("reply_text_len")
             completed_payload["reply_preview"] = gateway_delivery.get("reply_preview")
@@ -1942,6 +2879,7 @@ async def _dispatch_to_graph_worker(
             input_payload=completed_payload,
             phase="COMPLETED",
             status=completion_status,
+            reason_code=completion_reason_code,
             detail=" ".join(detail_parts),
             latency_ms=latency_ms,
             ts_ms=complete_ts,

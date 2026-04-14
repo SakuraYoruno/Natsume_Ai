@@ -261,3 +261,63 @@ def test_capability_forge_adaptive_tuning_scale_up_and_down() -> None:
     quality_stats = service.runtime_quality_stats(limit=10)
     assert int(dict(quality_stats["summary"]).get("tracked_proposals") or 0) >= 1
     assert float(dict(quality_stats["summary"]).get("avg_health_score") or 0.0) >= 0.0
+
+
+def test_capability_forge_auto_plan_creates_proposal(monkeypatch) -> None:
+    telemetry = _build_seeded_telemetry()
+    service = CapabilityForgeService(telemetry=telemetry)
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED", "true")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_DETECTED", "3")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_SESSIONS", "2")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_FAILURE_RATE", "0.3")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_FAILED", "2")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED", "false")
+
+    decision = service.maybe_auto_plan_for_gap(
+        request_id="req-auto-plan-1",
+        session_id="sess-auto-plan-1",
+        reason_code="ACTION_INTENT_FALLBACK_CHAT",
+        suggested_family="code",
+        missing_capability_tags=["coding"],
+        proposer="runtime-test",
+    )
+    assert decision["triggered"] is True
+    assert decision["reason"] == "PROPOSAL_CREATED"
+    assert str(decision.get("proposal_id") or "").startswith("forge_prop_")
+    assert decision["status"] == "PENDING_APPROVAL"
+
+    # Dedup should skip when an active proposal for the same candidate already exists.
+    decision2 = service.maybe_auto_plan_for_gap(
+        request_id="req-auto-plan-2",
+        session_id="sess-auto-plan-2",
+        reason_code="ACTION_INTENT_FALLBACK_CHAT",
+        suggested_family="code",
+        missing_capability_tags=["coding"],
+        proposer="runtime-test",
+    )
+    assert decision2["triggered"] is False
+    assert decision2["reason"] == "EXISTING_ACTIVE_PROPOSAL"
+    assert decision2["proposal_id"] == decision["proposal_id"]
+
+
+def test_capability_forge_auto_plan_auto_approve(monkeypatch) -> None:
+    telemetry = _build_seeded_telemetry()
+    service = CapabilityForgeService(telemetry=telemetry)
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED", "true")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED", "true")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE", "canary")
+    monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVER", "auto-pilot")
+
+    decision = service.maybe_auto_plan_for_gap(
+        request_id="req-auto-approve-1",
+        session_id="sess-auto-approve-1",
+        reason_code="ACTION_INTENT_FALLBACK_CHAT",
+        suggested_family="code",
+        missing_capability_tags=["coding"],
+        proposer="runtime-test",
+    )
+    assert decision["triggered"] is True
+    assert decision["auto_approved"] is True
+    assert decision["reason"] == "PROPOSAL_CREATED_AND_APPROVED"
+    assert decision["status"] == "APPROVED"
+    assert decision["stage"] == "CANARY"

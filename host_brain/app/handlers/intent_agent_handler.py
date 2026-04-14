@@ -10,6 +10,13 @@ from host_brain.app.agents.tool_registry import get_tools_for_agent
 from host_brain.app.prompt_template_store import resolve_prompt_template_text
 from host_brain.integrations.graph_subgraph import write_agent_artifact_to_state
 
+_INTENT_EXECUTION_ENFORCEMENT = (
+    "Execution discipline: when the user asks for an action, use tools before final_answer. "
+    "Use list_skills to discover callable skills, run_skill for direct skill execution, "
+    "and dispatch_sub_agent for delegated tasks. "
+    "Do not return final_answer without at least one executable attempt unless the request is purely conversational."
+)
+
 
 def _parse_bool_env(key: str, default: bool = False) -> bool:
     raw = str(os.environ.get(key, "")).strip().lower()
@@ -34,7 +41,7 @@ def intent_agent_handler(
 ) -> dict[str, Any]:
     ctx = dict(context or {})
     request_id = str(ctx.get("request_id") or payload.get("request_id") or "").strip()
-    intent_subgraph_enabled = _parse_bool_env("INTENT_SUBGRAPH_ENABLED", default=False)
+    intent_subgraph_enabled = _parse_bool_env("INTENT_SUBGRAPH_ENABLED", default=True)
 
     out = dict(payload)
 
@@ -42,14 +49,15 @@ def intent_agent_handler(
         if intent_subgraph_enabled:
             user_input = str(payload.get("user_input") or payload.get("query") or "").strip()
             tools = get_tools_for_agent(AGENT_ID_INTENT, allow_side_effects=True)
-            gateway = ctx.get("gateway") or payload.get("_gateway")
+            gateway = ctx.get("gateway") or payload.get("gateway") or payload.get("_gateway")
+            system_prompt_extra = f"{_resolve_intent_agent_system_prompt().strip()}\n\n{_INTENT_EXECUTION_ENFORCEMENT}"
 
             react_result = run_react_loop(
                 agent_id=AGENT_ID_INTENT,
                 user_input=user_input,
                 tools=tools,
                 gateway=gateway,
-                system_prompt_extra=_resolve_intent_agent_system_prompt(),
+                system_prompt_extra=system_prompt_extra,
                 max_steps=int(os.environ.get("INTENT_REACT_MAX_STEPS") or "5"),
                 allow_side_effects=True,
                 context=ctx,

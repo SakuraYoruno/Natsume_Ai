@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -559,6 +560,231 @@ def _tool_translate_text(args: dict[str, Any]) -> dict[str, Any]:
 # 方向 G Phase 2：情感 Agent 专用工具
 # ---------------------------------------------------------------------------
 
+def _split_runtime_context(args: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    payload = dict(args or {})
+    runtime_context = payload.pop("_react_context", None)
+    ctx = dict(runtime_context) if isinstance(runtime_context, dict) else {}
+    return payload, ctx
+
+
+def _tool_list_skills(args: dict[str, Any]) -> dict[str, Any]:
+    """List currently registered skills for planner discovery (read-only)."""
+    payload, _ctx = _split_runtime_context(args)
+    family = str(payload.get("family") or "").strip().lower()
+    keyword = str(payload.get("keyword") or payload.get("query") or "").strip().lower()
+    limit = int(payload.get("limit") or 30)
+    limit = max(1, min(limit, 120))
+
+    try:
+        from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
+
+        registry = get_skill_registry()
+        metas = list(registry.all())
+        rows: list[dict[str, Any]] = []
+        for meta in metas:
+            meta_family = str(getattr(meta, "family", "general") or "general").strip().lower()
+            if family and meta_family != family:
+                continue
+            searchable = " ".join(
+                [
+                    str(getattr(meta, "skill_name", "") or ""),
+                    str(getattr(meta, "description", "") or ""),
+                    meta_family,
+                    " ".join(str(tag) for tag in (getattr(meta, "capability_tags", ()) or ())),
+                ]
+            ).lower()
+            if keyword and keyword not in searchable:
+                continue
+            rows.append(
+                {
+                    "skill_name": str(getattr(meta, "skill_name", "") or ""),
+                    "family": meta_family,
+                    "risk_level": int(getattr(meta, "risk_level", 1) or 1),
+                    "parallelizable": bool(getattr(meta, "parallelizable", False)),
+                    "description": str(getattr(meta, "description", "") or ""),
+                }
+            )
+
+        rows.sort(key=lambda item: (int(item["risk_level"]), str(item["skill_name"])))
+        sliced = rows[:limit]
+        if not sliced:
+            return {
+                "result": "No skills matched the filter.",
+                "count": 0,
+                "skills": [],
+            }
+
+        lines = [
+            f"{item['skill_name']} (family={item['family']}, risk={item['risk_level']})"
+            for item in sliced
+        ]
+        return {
+            "result": "\n".join(lines),
+            "count": len(sliced),
+            "skills": sliced,
+        }
+    except Exception as exc:
+        logger.warning("_tool_list_skills failed: %s", exc)
+        return {
+            "error": f"LIST_SKILLS_ERROR:{type(exc).__name__}",
+            "result": None,
+        }
+
+
+def _tool_run_skill(args: dict[str, Any]) -> dict[str, Any]:
+    """Execute a registered skill through the governed runtime path."""
+    payload, ctx = _split_runtime_context(args)
+    skill_name = str(
+        payload.get("skill_name")
+        or payload.get("skill_id")
+        or payload.get("target_id")
+        or payload.get("skill")
+        or payload.get("action")
+        or ""
+    ).strip()
+    if not skill_name:
+        return {"error": "MISSING_SKILL_NAME", "result": None}
+
+    task_text = str(
+        payload.get("task_text")
+        or payload.get("task")
+        or payload.get("query")
+        or payload.get("text")
+        or ""
+    ).strip()
+    user_message = str(payload.get("user_message") or task_text or "").strip()
+    skill_args = payload.get("args")
+    if not isinstance(skill_args, dict):
+        skill_args = {}
+    if not skill_args:
+        skill_args = {
+            "query": task_text or user_message,
+            "text": task_text or user_message,
+            "user_message": user_message,
+        }
+
+    request_id = str(payload.get("request_id") or ctx.get("request_id") or f"react_req_{int(time.time() * 1000)}").strip()
+    session_id = str(payload.get("session_id") or ctx.get("session_id") or "").strip()
+    person_id = str(payload.get("person_id") or ctx.get("person_id") or "default").strip() or "default"
+    intent_id = str(payload.get("intent_id") or "").strip() or None
+    governor_result = ctx.get("governor_result")
+    if not isinstance(governor_result, dict):
+        governor_result = {"decision": "APPROVE", "tokens": {}}
+    else:
+        governor_result = dict(governor_result)
+        governor_result.setdefault("decision", "APPROVE")
+
+    try:
+        from host_brain.app.executive_runtime_core import _execute_skill  # noqa: PLC0415
+
+        outcome = _execute_skill(
+            request_body={"args": skill_args},
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            intent_id=intent_id,
+            skill_id=skill_name,
+            task_text=task_text or user_message,
+            user_message=user_message,
+            governor_result=governor_result,
+            intent_draft=dict(ctx.get("intent_draft") or {}),
+            emotion_context=dict(ctx.get("emotion_context") or {}),
+            recall_slot_text=dict(ctx.get("recall_slot_text") or {}),
+            render_target_lang=str(
+                payload.get("render_target_lang")
+                or ctx.get("render_target_lang")
+                or "zh-CN"
+            ),
+        )
+        return {
+            "result": outcome.result_text or outcome.error_text or "",
+            "status": "SUCCESS" if outcome.success else "FAILED",
+            "success": bool(outcome.success),
+            "skill_name": skill_name,
+            "skill_family": outcome.skill_family,
+            "route_type": outcome.route_type,
+            "latency_ms": int(outcome.latency_ms or 0),
+            "error": outcome.error_text or None,
+        }
+    except Exception as exc:
+        logger.warning("_tool_run_skill failed: %s", exc)
+        return {
+            "error": f"RUN_SKILL_ERROR:{type(exc).__name__}:{exc}",
+            "result": None,
+        }
+
+
+def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
+    """Dispatch task to another sub-agent and return its execution result."""
+    payload, ctx = _split_runtime_context(args)
+    agent_id = str(
+        payload.get("agent_id")
+        or payload.get("target_id")
+        or payload.get("delegate_agent")
+        or ""
+    ).strip()
+    task_text = str(
+        payload.get("task")
+        or payload.get("task_text")
+        or payload.get("query")
+        or payload.get("text")
+        or ""
+    ).strip()
+    if not agent_id:
+        return {"error": "MISSING_AGENT_ID", "result": None}
+    if not task_text:
+        return {"error": "MISSING_TASK", "result": None}
+    if agent_id == "intent_agent":
+        return {"error": "SUB_AGENT_SELF_CALL_BLOCKED", "result": None}
+
+    timeout_ms = int(payload.get("timeout_ms") or 30_000)
+    timeout_ms = max(1_000, min(timeout_ms, 300_000))
+    request_id = str(payload.get("request_id") or ctx.get("request_id") or f"react_req_{int(time.time() * 1000)}").strip()
+    session_id = str(payload.get("session_id") or ctx.get("session_id") or "").strip()
+    user_message = str(payload.get("user_message") or task_text).strip()
+
+    sub_ctx = dict(ctx)
+    if isinstance(payload.get("context"), dict):
+        sub_ctx.update(dict(payload.get("context") or {}))
+    sub_ctx.setdefault("source", "intent_agent_tool_dispatch")
+
+    try:
+        from host_brain.app.sub_agent_protocol import (  # noqa: PLC0415
+            SubAgentRequest,
+            get_sub_agent_dispatcher,
+        )
+
+        dispatcher = get_sub_agent_dispatcher()
+        response = _run_async(
+            dispatcher.dispatch(
+                SubAgentRequest(
+                    agent_id=agent_id,
+                    task=task_text,
+                    user_message=user_message,
+                    request_id=request_id,
+                    session_id=session_id,
+                    context=sub_ctx,
+                    timeout_ms=timeout_ms,
+                )
+            )
+        )
+        return {
+            "result": str(response.result or response.error or "").strip(),
+            "status": "SUCCESS" if response.success else "FAILED",
+            "success": bool(response.success),
+            "agent_id": agent_id,
+            "latency_ms": int(response.latency_ms or 0),
+            "error": str(response.error or "").strip() or None,
+            "audit_refs": dict(response.audit_refs or {}),
+        }
+    except Exception as exc:
+        logger.warning("_tool_dispatch_sub_agent failed: %s", exc)
+        return {
+            "error": f"DISPATCH_SUB_AGENT_ERROR:{type(exc).__name__}:{exc}",
+            "result": None,
+        }
+
+
 def _tool_emotion_history_search(args: dict[str, Any]) -> dict[str, Any]:
     """情感记忆检索工具（只读）。检索 EpisodicStore 中的情感相关记忆。"""
     query = str(args.get("query") or "").strip()
@@ -726,6 +952,58 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
         has_side_effects=False,
         executor=_tool_get_context,
     ),
+    "list_skills": ToolSpec(
+        tool_id="list_skills",
+        display_name="List Skills",
+        description="List available skills with family and risk metadata for planning.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "family": {"type": "string", "description": "Optional skill family filter"},
+                "keyword": {"type": "string", "description": "Optional fuzzy keyword filter"},
+                "limit": {"type": "integer", "description": "Maximum items to return, default 30"},
+            },
+            "required": [],
+        },
+        has_side_effects=False,
+        executor=_tool_list_skills,
+    ),
+    "run_skill": ToolSpec(
+        tool_id="run_skill",
+        display_name="Run Skill",
+        description="Execute a registered skill and return audited execution result.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "skill_name": {"type": "string", "description": "Registered skill name to execute"},
+                "args": {"type": "object", "description": "Skill argument payload"},
+                "task_text": {"type": "string", "description": "Task description used by runtime"},
+                "user_message": {"type": "string", "description": "Original user utterance"},
+                "intent_id": {"type": "string", "description": "Optional stable intent id"},
+            },
+            "required": ["skill_name"],
+        },
+        has_side_effects=True,
+        executor=_tool_run_skill,
+    ),
+    "dispatch_sub_agent": ToolSpec(
+        tool_id="dispatch_sub_agent",
+        display_name="Dispatch Sub Agent",
+        description="Delegate execution to another sub-agent and return sub-agent result.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "agent_id": {"type": "string", "description": "Target sub-agent id"},
+                "task": {"type": "string", "description": "Task to execute"},
+                "user_message": {"type": "string", "description": "Original user message"},
+                "timeout_ms": {"type": "integer", "description": "Dispatch timeout in milliseconds"},
+                "context": {"type": "object", "description": "Extra sub-agent context"},
+            },
+            "required": ["agent_id", "task"],
+        },
+        has_side_effects=True,
+        executor=_tool_dispatch_sub_agent,
+    ),
     "analyze_code": ToolSpec(
         tool_id="analyze_code",
         display_name="代码静态分析",
@@ -823,10 +1101,60 @@ _AGENT_TOOLS: dict[str, list[str]] = {
     "code_agent":      ["analyze_code", "search_knowledge"],
     "translate_agent": ["translate_text", "search_knowledge"],
     "retrieval_agent": ["search_knowledge", "search_by_keyword", "search_by_vector", "get_context"],
-    "intent_agent":    ["search_knowledge", "get_context", "analyze_code"],
+    "intent_agent":    [
+        "search_knowledge",
+        "get_context",
+        "list_skills",
+        "analyze_code",
+        "run_skill",
+        "dispatch_sub_agent",
+    ],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
     "emotion_agent":   ["emotion_history_search", "emotion_timeline_query", "search_knowledge"],  # 方向 G Phase 2
 }
+
+
+_INTENT_AGENT_ID = "intent_agent"
+
+
+def _parse_bool_env(key: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(key, "")).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_csv_env(key: str) -> list[str]:
+    raw = str(os.environ.get(key, "") or "")
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _resolve_intent_dynamic_tool_ids(*, allow_side_effects: bool) -> list[str]:
+    """Resolve intent_agent tools with dynamic discovery to avoid manual whitelist churn."""
+    base_ids = list(dict.fromkeys(_AGENT_TOOLS.get(_INTENT_AGENT_ID, [])))
+    denylist = set(_parse_csv_env("INTENT_TOOL_DENYLIST"))
+    tool_ids = [tool_id for tool_id in base_ids if tool_id not in denylist]
+
+    dynamic_enabled = _parse_bool_env("INTENT_DYNAMIC_TOOLSET_ENABLED", default=True)
+    if not dynamic_enabled:
+        return tool_ids
+
+    include_readonly = _parse_bool_env("INTENT_AUTO_INCLUDE_READONLY_TOOLS", default=False)
+    for tool_id in sorted(_TOOL_REGISTRY):
+        if tool_id in denylist or tool_id in tool_ids:
+            continue
+        spec = _TOOL_REGISTRY.get(tool_id)
+        if spec is None or spec.executor is None:
+            continue
+        if spec.has_side_effects:
+            if allow_side_effects:
+                tool_ids.append(tool_id)
+            continue
+        if include_readonly:
+            tool_ids.append(tool_id)
+    return tool_ids
 
 
 def get_tools_for_agent(agent_id: str, allow_side_effects: bool = False) -> list[ToolSpec]:
@@ -839,7 +1167,11 @@ def get_tools_for_agent(agent_id: str, allow_side_effects: bool = False) -> list
     Returns:
         可用工具列表
     """
-    tool_ids = _AGENT_TOOLS.get(str(agent_id or "").strip(), [])
+    normalized_agent_id = str(agent_id or "").strip()
+    if normalized_agent_id == _INTENT_AGENT_ID:
+        tool_ids = _resolve_intent_dynamic_tool_ids(allow_side_effects=allow_side_effects)
+    else:
+        tool_ids = _AGENT_TOOLS.get(normalized_agent_id, [])
     tools = []
     for tool_id in tool_ids:
         spec = _TOOL_REGISTRY.get(tool_id)

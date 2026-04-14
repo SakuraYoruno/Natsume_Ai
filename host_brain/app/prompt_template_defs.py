@@ -118,7 +118,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         locale="zh",
         content_type="text",
         description="反思链最小兜底：通用",
-        default_content="等我一下，我刚才这句没接稳。",
+        default_content="嗯，我在呢。刚才那句我想再整理一下，马上接上你。",
     ),
     "reflection_chain.revision_empathy_prefix": PromptTemplateDefinition(
         template_id="reflection_chain.revision_empathy_prefix",
@@ -2038,7 +2038,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         locale="zh",
         content_type="text",
         description="ChatAgent 最小兜底：代码子代理结果未顺好",
-        default_content="我先把这件事整理成更清楚一点的说法给你……刚才那一步没有顺好，但我不会把内部草稿直接丢给你。",
+        default_content="收到，我先继续把这步处理完，马上给你可直接用的结果。",
     ),
     "chat_agent.minimal_fallback.recent_turn_direct": PromptTemplateDefinition(
         template_id="chat_agent.minimal_fallback.recent_turn_direct",
@@ -2047,7 +2047,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         locale="zh",
         content_type="text",
         description="ChatAgent 最小兜底：最近一轮直接回答重述",
-        default_content="我刚才那句话，我换个更清楚的说法告诉你。",
+        default_content="我在，你这句我接住了，我现在重说一遍更清楚的版本。",
     ),
     "chat_agent.minimal_fallback.phatic_fastpath": PromptTemplateDefinition(
         template_id="chat_agent.minimal_fallback.phatic_fastpath",
@@ -2083,7 +2083,7 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         locale="zh",
         content_type="text",
         description="ChatAgent 最小兜底：通用",
-        default_content="等我一下，我刚才这句没接稳。",
+        default_content="我在，收到你的消息了。给我几秒，我马上把结果整理好回你。",
     ),
     "chat_agent.response_policy.min_sentence_placeholder": PromptTemplateDefinition(
         template_id="chat_agent.response_policy.min_sentence_placeholder",
@@ -4286,8 +4286,8 @@ PROMPT_TEMPLATE_DEFINITIONS: dict[str, PromptTemplateDefinition] = {
         description="InputRoutes Gateway 回复兜底文案（JSON）",
         default_content=_json_text(
             {
-                "reject_default": "唔…刚刚好像出了点小问题，等一下再试试好吗？",
-                "approve_empty": "收到。",
+                "reject_default": "刚刚这一步有点卡住了，我马上重试一下，别担心。",
+                "approve_empty": "好呀，我收到了，马上去处理。",
             }
         ),
     ),

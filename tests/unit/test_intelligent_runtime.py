@@ -275,7 +275,7 @@ def test_reflection_chain_revise_uses_minimal_fallback_for_empty_reply() -> None
         bond_stage="ACQUAINTANCE",
     )
 
-    assert result.revised_text == "等我一下，我刚才这句没接稳。"
+    assert result.revised_text == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
 
 
 def test_reflection_chain_revise_replaces_too_short_reply_with_minimal_fallback() -> None:
@@ -288,7 +288,7 @@ def test_reflection_chain_revise_replaces_too_short_reply_with_minimal_fallback(
         bond_stage="ACQUAINTANCE",
     )
 
-    assert result.revised_text == "等我一下，我刚才这句没接稳。"
+    assert result.revised_text == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
 
 
 def test_sanitize_narrative_uses_prompt_template_override(monkeypatch) -> None:

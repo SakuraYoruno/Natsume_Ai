@@ -11,7 +11,7 @@ def test_prompt_template_store_uses_default_and_override() -> None:
 
     default_item = store.get_template("reflection_chain.contextual_fallback.default")
     assert default_item["source"] == "default"
-    assert default_item["resolved_content"] == "等我一下，我刚才这句没接稳。"
+    assert default_item["resolved_content"] == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
 
     updated = store.upsert_template(
         "reflection_chain.contextual_fallback.default",
@@ -24,7 +24,7 @@ def test_prompt_template_store_uses_default_and_override() -> None:
 
     reset = store.reset_template("reflection_chain.contextual_fallback.default")
     assert reset["source"] == "default"
-    assert reset["resolved_content"] == "等我一下，我刚才这句没接稳。"
+    assert reset["resolved_content"] == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
     assert reset["has_override"] is False
 
 
@@ -90,6 +90,19 @@ def test_reflection_chain_runtime_uses_empathy_prefix_template_override(monkeypa
     assert result.revised_text.startswith("我在，先缓一缓。")
 
 
+def test_chat_agent_minimal_fallback_defaults_are_not_internal_draft_style() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+
+    default_text = str(store.get_template("chat_agent.minimal_fallback.default")["resolved_content"] or "")
+    code_fallback_text = str(store.get_template("chat_agent.minimal_fallback.code_agent")["resolved_content"] or "")
+
+    assert "内部草稿" not in default_text
+    assert "整理成更清楚一点的说法" not in default_text
+    assert "内部草稿" not in code_fallback_text
+    assert "整理成更清楚一点的说法" not in code_fallback_text
+
+
 def test_runtime_template_defaults_include_input_and_qa_fallbacks() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
@@ -97,7 +110,7 @@ def test_runtime_template_defaults_include_input_and_qa_fallbacks() -> None:
     input_routes_defaults = store.resolve_json("input_routes.fallback_texts")
     qa_defaults = store.resolve_json("core.qa.fallback_texts")
 
-    assert input_routes_defaults["reject_default"] == "唔…刚刚好像出了点小问题，等一下再试试好吗？"
-    assert input_routes_defaults["approve_empty"] == "收到。"
+    assert input_routes_defaults["reject_default"] == "刚刚这一步有点卡住了，我马上重试一下，别担心。"
+    assert input_routes_defaults["approve_empty"] == "好呀，我收到了，马上去处理。"
     assert qa_defaults["default"] == "嗯…脑子有点转不过来，等我缓一下再回你。"
     assert qa_defaults["angry_or_frustrated"] == "我需要冷静一下…等会儿再好好说。"

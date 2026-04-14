@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -58,6 +59,21 @@ _MULTI_STEP_MARKERS = (
 )
 
 _ACTION_SPLIT_RE = re.compile(r"(?:然后|并且|同时|接着|之后|再把|再去|再来)")
+_SKILL_EXEC_FAIL_STATUS = {"failed", "rejected", "degraded", "error"}
+_SKILL_EXEC_FAIL_CODES = {
+    "SCHED_NO_CONTENT",
+    "SKILL_EXECUTION_FAILED",
+    "SKILL_EXECUTION_ERROR",
+    "MEMORY_WRITER_UNAVAILABLE",
+    "MEMORY_STORE_UNAVAILABLE",
+}
+_SKILL_EXEC_NO_EFFECT_MARKERS = (
+    "no memory writer available",
+    "no memory store available",
+    "no memory backend available",
+    "skipping diary",
+    "no conversations on",
+)
 
 
 @dataclass(frozen=True)
@@ -82,6 +98,28 @@ class _ExecutionOutcome:
 def _normalize_text(value: Any, *, lower: bool = False) -> str:
     text = str(value or "").strip()
     return text.lower() if lower else text
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    value = str(os.getenv(name) or "").strip().lower()
+    if not value:
+        return bool(default)
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    return max(int(minimum), min(int(maximum), value))
 
 
 def _coerce_mapping(value: Any) -> dict[str, Any]:
@@ -217,6 +255,163 @@ def _build_default_plan_steps(
     return steps
 
 
+def _build_planning_agent_plan_steps(
+    *,
+    request_id: str,
+    user_message: str,
+    skill_registry: Any,
+) -> list[dict[str, Any]]:
+    from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
+
+    planning_agent = get_planning_agent()
+    if not planning_agent.needs_planning(user_message):
+        return []
+
+    available_skills: list[str] = []
+    try:
+        available_skills = [
+            str(meta.skill_name or "").strip()
+            for meta in list(skill_registry.all() or [])
+            if str(getattr(meta, "skill_name", "") or "").strip()
+        ]
+    except Exception:
+        available_skills = []
+
+    plan = planning_agent.create_plan(
+        task_id=f"runtime_plan::{request_id}",
+        request=user_message,
+        available_skills=available_skills or None,
+    )
+
+    raw_steps = list(getattr(plan, "steps", []) or [])
+    action_steps = [
+        step
+        for step in raw_steps
+        if _normalize_text(getattr(step, "action_type", ""), lower=True) == "act"
+        and _normalize_text(getattr(step, "description"))
+    ]
+    if len(action_steps) <= 1:
+        return []
+
+    source_to_index: dict[int, int] = {}
+    for index, step in enumerate(action_steps, start=1):
+        source_step_id = int(getattr(step, "step_id", index) or index)
+        source_to_index[source_step_id] = index
+
+    parallel_enabled = _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_PARALLEL_ENABLED", default=True)
+    converted_steps: list[dict[str, Any]] = []
+    for index, step in enumerate(action_steps, start=1):
+        description = _normalize_text(getattr(step, "description")) or f"step-{index}"
+        planned_skill = _normalize_text(getattr(step, "skill_name"))
+        route = "delegate"
+        target_id = "intent_agent"
+        route_reason = "planning_agent:act"
+
+        if planned_skill:
+            try:
+                if skill_registry.get(planned_skill) is not None:
+                    route = "skill"
+                    target_id = planned_skill
+                    route_reason = "planning_agent:skill"
+                elif planned_skill.endswith("_agent"):
+                    route = "delegate"
+                    target_id = planned_skill
+                    route_reason = "planning_agent:delegate"
+            except Exception:
+                route = "delegate"
+                target_id = "intent_agent"
+                route_reason = "planning_agent:fallback"
+
+        if target_id == "intent_agent":
+            hard_route = _hard_rule_route(
+                intent_draft={},
+                sanitized_message=description,
+                skill_registry=skill_registry,
+                allow_plan_detection=False,
+            )
+            if hard_route.route_type in {"skill", "delegate"}:
+                route = hard_route.route_type
+                target_id = hard_route.target_id or "intent_agent"
+                route_reason = f"planning_agent:{hard_route.reason_code}"
+
+        decision = build_skill_route_decision(
+            route_type=route,
+            target_id=target_id,
+            reason_code=route_reason,
+            skill_registry=skill_registry,
+        )
+        raw_dependencies = list(getattr(step, "depends_on", []) or [])
+        dependencies = [
+            int(source_to_index[dep])
+            for dep in raw_dependencies
+            if int(dep) in source_to_index and int(source_to_index[dep]) < index
+        ]
+        if not dependencies and index > 1 and not parallel_enabled:
+            dependencies = [index - 1]
+
+        converted_steps.append(
+            {
+                "step_index": index,
+                "route": route,
+                "target_id": target_id,
+                "description": description,
+                "task_description": description,
+                "route_reason": route_reason,
+                "allow_parallel": bool(parallel_enabled and not dependencies),
+                "skill_family": decision.skill_family,
+                "risk_level": decision.risk_level,
+                "dependencies": dependencies,
+                "capability_tags": list(getattr(decision, "capability_tags", ()) or ()),
+            }
+        )
+    return converted_steps
+
+
+def _should_force_complex_plan(
+    *,
+    route: _RouteSelection,
+    user_message: str,
+    intent_draft: dict[str, Any],
+    llm_route_used: bool,
+) -> bool:
+    if route.route_type in {"plan", "recent_turn", "task_progress"}:
+        return False
+    if not _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", default=True):
+        return False
+    if bool(intent_draft.get("disable_auto_plan")):
+        return False
+    if bool(intent_draft.get("force_plan")):
+        return True
+
+    normalized_message = _normalize_text(user_message)
+    min_chars = _parse_int_env(
+        "HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_MIN_CHARS",
+        default=24,
+        minimum=8,
+        maximum=400,
+    )
+    if len(normalized_message) < min_chars:
+        return False
+
+    if route.route_type == "chat":
+        gap = detect_capability_gap(
+            user_message=normalized_message,
+            route_type=route.route_type,
+            target_id=route.target_id,
+            reason_code=route.reason_code,
+            llm_route_used=llm_route_used,
+        )
+        if not gap.detected:
+            return False
+
+    try:
+        from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
+
+        return bool(get_planning_agent().needs_planning(normalized_message))
+    except Exception:
+        return False
+
+
 def _maybe_build_multi_step_plan(
     *,
     request_id: str,
@@ -228,6 +423,12 @@ def _maybe_build_multi_step_plan(
     if not isinstance(explicit_steps, list):
         explicit_steps = intent_draft.get("steps")
     steps = [dict(item or {}) for item in explicit_steps] if isinstance(explicit_steps, list) else []
+    if not steps:
+        steps = _build_planning_agent_plan_steps(
+            request_id=request_id,
+            user_message=sanitized_message,
+            skill_registry=skill_registry,
+        )
     if not steps:
         steps = _build_default_plan_steps(user_message=sanitized_message, skill_registry=skill_registry)
     if len(steps) <= 1:
@@ -318,6 +519,27 @@ def _flatten_result_text(payload: Any) -> str:
                 return text
         return str(payload)
     return str(payload)
+
+
+def _is_effective_skill_success(
+    *,
+    raw_status: str,
+    raw_code: str,
+    raw_result: Any,
+    result_text: str,
+) -> bool:
+    status_value = _normalize_text(raw_status, lower=True)
+    if status_value in _SKILL_EXEC_FAIL_STATUS:
+        return False
+
+    code_value = _normalize_text(raw_code).upper()
+    if code_value in _SKILL_EXEC_FAIL_CODES:
+        return False
+
+    digest = f"{str(raw_result or '')} {str(result_text or '')}".lower()
+    if any(marker in digest for marker in _SKILL_EXEC_NO_EFFECT_MARKERS):
+        return False
+    return True
 
 
 async def _dispatch_to_sub_agent(
@@ -470,7 +692,12 @@ def _execute_skill(
         result_mapping = _coerce_mapping(raw_result)
         raw_status = _normalize_text(result_mapping.get("status"), lower=True)
         raw_code = _normalize_text(result_mapping.get("reason_code") or result_mapping.get("result_code"))
-        success = raw_status not in {"failed", "rejected", "degraded"}
+        success = _is_effective_skill_success(
+            raw_status=raw_status,
+            raw_code=raw_code,
+            raw_result=raw_result,
+            result_text=result_text,
+        )
         latency_ms = int((time.time() - started) * 1000)
         _log_skill_exec_row(
             request_id=request_id,
@@ -488,7 +715,7 @@ def _execute_skill(
             skill_family=str(skill_meta.family or "general"),
             success=success,
             result_text=result_text,
-            error_text="" if success else (raw_code or "SKILL_EXECUTION_FAILED"),
+            error_text="" if success else (raw_code or "SKILL_EXECUTION_NO_EFFECT"),
             latency_ms=latency_ms,
             payload={
                 "result": raw_result,
@@ -562,7 +789,8 @@ def _maybe_synthesize_runtime_capability(
         get_runtime_capability_registry,
     )
 
-    override = get_capability_forge_service().get_runtime_route_override(
+    forge_service = get_capability_forge_service()
+    override = forge_service.get_runtime_route_override(
         request_id=request_id,
         suggested_family=str(gap.suggested_family or "reasoning"),
         missing_capability_tags=list(gap.missing_capability_tags),
@@ -594,10 +822,31 @@ def _maybe_synthesize_runtime_capability(
         executor_target=executor_target,
     )
 
+    auto_plan_result: dict[str, Any] = {}
+    try:
+        auto_plan_result = forge_service.maybe_auto_plan_for_gap(
+            request_id=request_id,
+            session_id=session_id,
+            reason_code=gap.reason_code,
+            suggested_family=str(gap.suggested_family or "reasoning"),
+            missing_capability_tags=list(gap.missing_capability_tags),
+            proposer="executive_runtime",
+        )
+    except Exception as exc:
+        _logger.debug("[%s] capability forge auto-plan skipped: %s", request_id, exc)
+        auto_plan_result = {
+            "triggered": False,
+            "reason": "AUTO_PLAN_EXCEPTION",
+        }
+
+    capability_forge_payload = dict(override or {})
+    if auto_plan_result:
+        capability_forge_payload["auto_plan"] = dict(auto_plan_result)
+
     return {
         "capability_gap": gap.as_dict(),
         "runtime_capability": runtime_spec.as_dict(),
-        "capability_forge": dict(override or {}),
+        "capability_forge": capability_forge_payload,
         "executor_route": executor_route,
         "executor_target": executor_target,
         "task_text": runtime_spec.task,
@@ -930,11 +1179,22 @@ async def _executive_runtime_core_impl(
     del metrics
 
     skill_registry = get_skill_registry()
+    llm_route_used = bool(
+        dict(intent_draft or {}).get("llm_route_used")
+        or dict(intent_draft or {}).get("route_source") == "llm"
+    )
     route = _hard_rule_route(
         intent_draft=dict(intent_draft or {}),
         sanitized_message=sanitized_message,
         skill_registry=skill_registry,
     )
+    if _should_force_complex_plan(
+        route=route,
+        user_message=sanitized_message,
+        intent_draft=dict(intent_draft or {}),
+        llm_route_used=llm_route_used,
+    ):
+        route = _RouteSelection("plan", "skill_dag", "auto_plan:complex_task")
     direct_recent = await try_handle_recent_turn_direct_route(
         route=route.route_type,
         request_id=request_id,
@@ -1004,10 +1264,6 @@ async def _executive_runtime_core_impl(
         },
     )
 
-    llm_route_used = bool(
-        dict(intent_draft or {}).get("llm_route_used")
-        or dict(intent_draft or {}).get("route_source") == "llm"
-    )
     runtime_capability_payload = None
     if route.route_type == "chat":
         runtime_capability_payload = _maybe_synthesize_runtime_capability(
@@ -1321,6 +1577,8 @@ async def _executive_runtime_core_impl(
 __all__ = [
     "_hard_rule_route",
     "_maybe_build_multi_step_plan",
+    "_build_planning_agent_plan_steps",
+    "_should_force_complex_plan",
     "_build_task_progress_sub_context",
     "_dispatch_to_sub_agent",
     "_execute_skill",

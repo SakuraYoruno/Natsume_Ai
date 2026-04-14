@@ -306,6 +306,9 @@ def run_react_loop(
             action = dict(parsed.get("action") or {})
             tool_id = str(action.get("tool") or "").strip()
             tool_args = dict(action.get("args") or {})
+            runtime_tool_args = dict(tool_args)
+            if ctx:
+                runtime_tool_args["_react_context"] = dict(ctx)
 
             # 校验工具是否允许调用
             if not is_tool_allowed(tool_id, agent_id, allow_side_effects=allow_side_effects):
@@ -316,7 +319,7 @@ def run_react_loop(
                 risk_flags.append(f"TOOL_NOT_ALLOWED:{tool_id}")
             else:
                 # 执行工具
-                observation = execute_tool(tool_id, tool_args)
+                observation = execute_tool(tool_id, runtime_tool_args)
 
             step_record = ReactStep(
                 step=step_num,

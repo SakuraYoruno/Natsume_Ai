@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -424,6 +425,127 @@ class TestRetrievalAgentAllowlist:
     def test_is_tool_allowed_search_by_vector(self):
         """is_tool_allowed('search_by_vector', 'retrieval_agent') 返回 True。"""
         assert is_tool_allowed("search_by_vector", "retrieval_agent") is True
+
+
+# ---------------------------------------------------------------------------
+# intent_agent execution tools
+# ---------------------------------------------------------------------------
+
+class TestIntentAgentExecutionTools:
+    def test_intent_agent_side_effect_tools_filtered_by_allow_flag(self):
+        readonly_tools = {tool.tool_id for tool in get_tools_for_agent("intent_agent", allow_side_effects=False)}
+        full_tools = {tool.tool_id for tool in get_tools_for_agent("intent_agent", allow_side_effects=True)}
+
+        assert "list_skills" in readonly_tools
+        assert "run_skill" not in readonly_tools
+        assert "dispatch_sub_agent" not in readonly_tools
+
+        assert "list_skills" in full_tools
+        assert "run_skill" in full_tools
+        assert "dispatch_sub_agent" in full_tools
+
+    def test_list_skills_tool_returns_skill_catalog(self):
+        result = execute_tool("list_skills", {"limit": 5})
+        assert result.get("error") is None
+        assert isinstance(result.get("skills"), list)
+        assert int(result.get("count") or 0) >= 1
+
+    def test_run_skill_tool_executes_runtime_entrypoint(self):
+        fake_outcome = SimpleNamespace(
+            success=True,
+            result_text="stored",
+            error_text="",
+            skill_family="memory",
+            route_type="skill",
+            latency_ms=12,
+        )
+        with patch("host_brain.app.executive_runtime_core._execute_skill", return_value=fake_outcome):
+            result = execute_tool(
+                "run_skill",
+                {
+                    "skill_name": "memory_store",
+                    "task_text": "remember this",
+                    "_react_context": {"request_id": "req_tool_run_skill_001"},
+                },
+            )
+        assert result.get("success") is True
+        assert result.get("status") == "SUCCESS"
+        assert result.get("skill_name") == "memory_store"
+
+    def test_dispatch_sub_agent_tool_executes_dispatcher(self):
+        class _FakeDispatcher:
+            async def dispatch(self, req):  # noqa: ANN001
+                return SimpleNamespace(
+                    success=True,
+                    result=f"handled:{req.agent_id}",
+                    error=None,
+                    latency_ms=23,
+                    audit_refs={"trace": "ok"},
+                )
+
+        with patch("host_brain.app.sub_agent_protocol.get_sub_agent_dispatcher", return_value=_FakeDispatcher()):
+            result = execute_tool(
+                "dispatch_sub_agent",
+                {
+                    "agent_id": "code_agent",
+                    "task": "fix bug",
+                    "_react_context": {
+                        "request_id": "req_tool_sub_agent_001",
+                        "session_id": "sess_tool_sub_agent_001",
+                    },
+                },
+            )
+        assert result.get("success") is True
+        assert result.get("status") == "SUCCESS"
+        assert result.get("agent_id") == "code_agent"
+        assert "handled:code_agent" in str(result.get("result") or "")
+
+    def test_dispatch_sub_agent_blocks_self_recursion(self):
+        result = execute_tool(
+            "dispatch_sub_agent",
+            {
+                "agent_id": "intent_agent",
+                "task": "do something",
+            },
+        )
+        assert result.get("error") == "SUB_AGENT_SELF_CALL_BLOCKED"
+
+    def test_intent_agent_auto_discovers_new_side_effect_tool(self):
+        auto_tool = ToolSpec(
+            tool_id="auto_dynamic_write_tool",
+            display_name="Auto Dynamic Write Tool",
+            description="dynamic side-effect tool",
+            parameters={"type": "object", "properties": {}, "required": []},
+            has_side_effects=True,
+            executor=lambda _args: {"result": "ok"},
+        )
+        with patch.dict(_TOOL_REGISTRY, {"auto_dynamic_write_tool": auto_tool}, clear=False), patch.dict(
+            "os.environ",
+            {"INTENT_DYNAMIC_TOOLSET_ENABLED": "true"},
+            clear=False,
+        ):
+            readonly_tools = {tool.tool_id for tool in get_tools_for_agent("intent_agent", allow_side_effects=False)}
+            full_tools = {tool.tool_id for tool in get_tools_for_agent("intent_agent", allow_side_effects=True)}
+
+        assert "auto_dynamic_write_tool" not in readonly_tools
+        assert "auto_dynamic_write_tool" in full_tools
+
+    def test_intent_agent_dynamic_discovery_can_be_disabled(self):
+        auto_tool = ToolSpec(
+            tool_id="auto_dynamic_write_tool_disabled_case",
+            display_name="Auto Dynamic Disabled Case",
+            description="dynamic side-effect tool",
+            parameters={"type": "object", "properties": {}, "required": []},
+            has_side_effects=True,
+            executor=lambda _args: {"result": "ok"},
+        )
+        with patch.dict(_TOOL_REGISTRY, {"auto_dynamic_write_tool_disabled_case": auto_tool}, clear=False), patch.dict(
+            "os.environ",
+            {"INTENT_DYNAMIC_TOOLSET_ENABLED": "false"},
+            clear=False,
+        ):
+            full_tools = {tool.tool_id for tool in get_tools_for_agent("intent_agent", allow_side_effects=True)}
+        assert "auto_dynamic_write_tool_disabled_case" not in full_tools
 
 
 # ---------------------------------------------------------------------------

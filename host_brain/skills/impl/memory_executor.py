@@ -33,6 +33,16 @@ def execute_memory_skill(args: dict[str, Any], context: dict[str, Any] | None = 
 
     try:
         result = _dispatch_memory_action(action, payload, context)
+        if isinstance(result, dict):
+            status = str(result.get("status") or "").strip().upper()
+            if status in {"FAILED", "DEGRADED", "REJECTED"}:
+                return {
+                    "status": status,
+                    "manifest_ref": manifest_ref,
+                    "action": action,
+                    "reason_code": str(result.get("reason_code") or "MEMORY_EXECUTOR_DEGRADED").strip() or "MEMORY_EXECUTOR_DEGRADED",
+                    "detail": str(result.get("detail") or result),
+                }
         return {
             "status": "OK",
             "manifest_ref": manifest_ref,
@@ -138,7 +148,12 @@ def _execute_store(payload: dict[str, Any], context: dict[str, Any] | None) -> d
             _logger.debug("episodic_writer 调用失败: %s", exc)
 
     _logger.info("记忆写入（无可用后端）: content=%s...", content[:40])
-    return {"content_length": len(content), "note": "no memory writer available"}
+    return {
+        "status": "DEGRADED",
+        "reason_code": "MEMORY_WRITER_UNAVAILABLE",
+        "detail": "no memory writer available",
+        "content_length": len(content),
+    }
 
 
 def _execute_forget(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
@@ -163,4 +178,9 @@ def _execute_forget(payload: dict[str, Any], context: dict[str, Any] | None) -> 
             _logger.debug("episodic_store 删除失败: %s", exc)
 
     _logger.info("记忆删除（无可用后端）: memory_id=%s", memory_id)
-    return {"deleted": False, "note": "no memory store available"}
+    return {
+        "status": "DEGRADED",
+        "reason_code": "MEMORY_STORE_UNAVAILABLE",
+        "detail": "no memory store available",
+        "deleted": False,
+    }

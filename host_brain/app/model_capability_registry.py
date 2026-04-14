@@ -45,6 +45,15 @@ _KNOWN_PROFILES: tuple[ModelCapabilityProfile, ...] = (
         cost_tier="low",
         stability_tier="high",
     ),
+    ModelCapabilityProfile(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        modality="multimodal",
+        reasoning_tier="medium",
+        context_tier="medium",
+        cost_tier="low",
+        stability_tier="high",
+    ),
 )
 
 
@@ -85,4 +94,3 @@ def resolve_model_capability_profile(*, provider_name: str, model_id: str, role:
 
 
 __all__ = ["resolve_model_capability_profile"]
-

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import threading
 import time
 from typing import Any, Mapping
@@ -65,6 +66,58 @@ def _p95_int(values: list[int]) -> int:
     ordered = sorted(int(max(0, v)) for v in values)
     index = max(0, int(len(ordered) * 0.95) - 1)
     return int(ordered[index])
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    value = str(os.getenv(name) or "").strip().lower()
+    if not value:
+        return bool(default)
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    return max(int(minimum), min(int(maximum), value))
+
+
+def _parse_float_env(name: str, *, default: float, minimum: float, maximum: float) -> float:
+    raw = str(os.getenv(name) or "").strip()
+    if not raw:
+        return float(default)
+    try:
+        value = float(raw)
+    except Exception:
+        return float(default)
+    return max(float(minimum), min(float(maximum), value))
+
+
+def _normalize_tags(tags: list[str] | tuple[str, ...] | None) -> list[str]:
+    normalized = [
+        str(tag or "").strip().lower()
+        for tag in list(tags or [])
+        if str(tag or "").strip()
+    ]
+    return list(dict.fromkeys(normalized))
+
+
+def _build_candidate_key(*, reason_code: str, suggested_family: str, missing_capability_tags: list[str]) -> str:
+    return "|".join(
+        [
+            str(reason_code or "UNKNOWN").strip().upper() or "UNKNOWN",
+            str(suggested_family or "unknown").strip().lower() or "unknown",
+            ",".join(sorted(_normalize_tags(missing_capability_tags))),
+        ]
+    )
 
 
 class CapabilityForgeService:
@@ -264,6 +317,214 @@ class CapabilityForgeService:
 
     def resolve_candidate(self, candidate_key: str | None = None) -> dict[str, Any] | None:
         return copy.deepcopy(self._resolve_candidate(candidate_key))
+
+    def _find_latest_candidate_proposal_locked(self, candidate_key: str) -> dict[str, Any] | None:
+        key = str(candidate_key or "").strip()
+        if not key:
+            return None
+        latest: dict[str, Any] | None = None
+        latest_ts = -1
+        for proposal in self._proposals.values():
+            if str(proposal.get("candidate_key") or "").strip() != key:
+                continue
+            ts = int(proposal.get("updated_ts_ms") or proposal.get("created_ts_ms") or 0)
+            if ts >= latest_ts:
+                latest_ts = ts
+                latest = dict(proposal)
+        return latest
+
+    def _get_auto_plan_thresholds(self) -> dict[str, Any]:
+        return {
+            "enabled": _parse_bool_env("HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED", default=True),
+            "min_detected_count": _parse_int_env(
+                "HOST_CAPABILITY_FORGE_AUTO_MIN_DETECTED",
+                default=3,
+                minimum=1,
+                maximum=100,
+            ),
+            "min_unique_sessions": _parse_int_env(
+                "HOST_CAPABILITY_FORGE_AUTO_MIN_SESSIONS",
+                default=2,
+                minimum=1,
+                maximum=100,
+            ),
+            "min_failure_rate": _parse_float_env(
+                "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILURE_RATE",
+                default=0.35,
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            "min_failed_count": _parse_int_env(
+                "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILED",
+                default=2,
+                minimum=0,
+                maximum=100,
+            ),
+            "dedupe_cooldown_ms": _parse_int_env(
+                "HOST_CAPABILITY_FORGE_AUTO_DEDUPE_COOLDOWN_MS",
+                default=1800000,
+                minimum=60000,
+                maximum=86400000,
+            ),
+            "canary_traffic_percent": _parse_int_env(
+                "HOST_CAPABILITY_FORGE_AUTO_CANARY_TRAFFIC_PERCENT",
+                default=5,
+                minimum=1,
+                maximum=100,
+            ),
+            "auto_approve_enabled": _parse_bool_env(
+                "HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED",
+                default=False,
+            ),
+            "auto_approve_stage": _normalize_stage(
+                str(os.getenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE") or "shadow").strip()
+            ),
+            "auto_approver": str(os.getenv("HOST_CAPABILITY_FORGE_AUTO_APPROVER") or "auto_forge").strip()
+            or "auto_forge",
+        }
+
+    def maybe_auto_plan_for_gap(
+        self,
+        *,
+        request_id: str,
+        session_id: str,
+        reason_code: str,
+        suggested_family: str,
+        missing_capability_tags: list[str] | tuple[str, ...] | None = None,
+        proposer: str = "executive_runtime",
+    ) -> dict[str, Any]:
+        self._ensure_loaded_from_ledger()
+        normalized_request_id = str(request_id or "").strip()
+        thresholds = self._get_auto_plan_thresholds()
+        if not bool(thresholds.get("enabled")):
+            return {
+                "triggered": False,
+                "reason": "AUTO_PROPOSAL_DISABLED",
+                "request_id": normalized_request_id,
+            }
+
+        normalized_reason = str(reason_code or "UNKNOWN").strip().upper() or "UNKNOWN"
+        normalized_family = str(suggested_family or "unknown").strip().lower() or "unknown"
+        normalized_tags = _normalize_tags(missing_capability_tags)
+        candidate_key = _build_candidate_key(
+            reason_code=normalized_reason,
+            suggested_family=normalized_family,
+            missing_capability_tags=normalized_tags,
+        )
+        candidate = self._telemetry.get_candidate_detail(candidate_key)
+        if candidate is None:
+            return {
+                "triggered": False,
+                "reason": "CANDIDATE_NOT_FOUND",
+                "request_id": normalized_request_id,
+                "candidate_key": candidate_key,
+            }
+
+        detected_count = int(candidate.get("detected_count") or 0)
+        executed_count = int(candidate.get("executed_count") or 0)
+        failed_count = int(candidate.get("failed_count") or 0)
+        failure_rate = float(candidate.get("failure_rate") or 0.0)
+        unique_sessions = int(candidate.get("impact_sessions") or 0)
+        min_detected_count = int(thresholds.get("min_detected_count") or 3)
+        min_unique_sessions = int(thresholds.get("min_unique_sessions") or 2)
+        min_failure_rate = float(thresholds.get("min_failure_rate") or 0.35)
+        min_failed_count = int(thresholds.get("min_failed_count") or 2)
+
+        meets_threshold = (
+            detected_count >= min_detected_count
+            and unique_sessions >= min_unique_sessions
+            and (
+                failed_count >= min_failed_count
+                or failure_rate >= min_failure_rate
+                or (executed_count == 0 and detected_count >= max(4, min_detected_count * 2))
+            )
+        )
+        if not meets_threshold:
+            return {
+                "triggered": False,
+                "reason": "THRESHOLD_NOT_MET",
+                "request_id": normalized_request_id,
+                "candidate_key": candidate_key,
+                "metrics": {
+                    "detected_count": detected_count,
+                    "executed_count": executed_count,
+                    "failed_count": failed_count,
+                    "failure_rate": round(failure_rate, 4),
+                    "impact_sessions": unique_sessions,
+                },
+                "thresholds": {
+                    "min_detected_count": min_detected_count,
+                    "min_unique_sessions": min_unique_sessions,
+                    "min_failure_rate": round(min_failure_rate, 4),
+                    "min_failed_count": min_failed_count,
+                },
+            }
+
+        now = _now_ms()
+        dedupe_cooldown_ms = int(thresholds.get("dedupe_cooldown_ms") or 1800000)
+        with self._lock:
+            latest = self._find_latest_candidate_proposal_locked(candidate_key)
+        if latest:
+            status = str(latest.get("status") or "").strip().upper()
+            updated_ts = int(latest.get("updated_ts_ms") or latest.get("created_ts_ms") or 0)
+            within_cooldown = updated_ts > 0 and (now - updated_ts) < dedupe_cooldown_ms
+            if status in {"PENDING_APPROVAL", "APPROVED"}:
+                return {
+                    "triggered": False,
+                    "reason": "EXISTING_ACTIVE_PROPOSAL",
+                    "request_id": normalized_request_id,
+                    "candidate_key": candidate_key,
+                    "proposal_id": str(latest.get("proposal_id") or ""),
+                    "status": status,
+                    "within_cooldown": within_cooldown,
+                }
+            if status == "ROLLED_BACK" and within_cooldown:
+                return {
+                    "triggered": False,
+                    "reason": "RECENT_ROLLBACK_COOLDOWN",
+                    "request_id": normalized_request_id,
+                    "candidate_key": candidate_key,
+                    "proposal_id": str(latest.get("proposal_id") or ""),
+                    "status": status,
+                    "within_cooldown": True,
+                }
+
+        created = self.create_proposal(
+            session_id=session_id,
+            proposer=proposer,
+            candidate_key=candidate_key,
+            canary_traffic_percent=int(thresholds.get("canary_traffic_percent") or 5),
+        )
+        proposal_id = str(created.get("proposal_id") or "")
+        result: dict[str, Any] = {
+            "triggered": True,
+            "reason": "PROPOSAL_CREATED",
+            "request_id": normalized_request_id,
+            "candidate_key": candidate_key,
+            "proposal_id": proposal_id,
+            "status": str(created.get("status") or "PENDING_APPROVAL"),
+            "auto_approved": False,
+        }
+
+        if not bool(thresholds.get("auto_approve_enabled")):
+            return result
+
+        gate = dict(created.get("governor_gate") or {})
+        token = str(gate.get("approval_token_ref") or "").strip()
+        if not token or not proposal_id:
+            result["reason"] = "PROPOSAL_CREATED_TOKEN_MISSING"
+            return result
+        approved = self.approve_and_promote(
+            proposal_id=proposal_id,
+            approval_token_ref=token,
+            approver=str(thresholds.get("auto_approver") or "auto_forge"),
+            target_stage=str(thresholds.get("auto_approve_stage") or "SHADOW"),
+        )
+        result["reason"] = "PROPOSAL_CREATED_AND_APPROVED"
+        result["auto_approved"] = True
+        result["status"] = str(approved.get("status") or "APPROVED")
+        result["stage"] = str(dict(approved.get("promotion") or {}).get("stage") or "")
+        return result
 
     def _resolve_executor_target(self, proposal: Mapping[str, Any]) -> str:
         artifact = dict(proposal.get("artifact") or {})

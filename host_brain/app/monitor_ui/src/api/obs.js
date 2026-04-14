@@ -785,6 +785,17 @@ export function fetchInputHumanoidLoopHotspotTrend(params = {}) {
   return request(`/obs/input/humanoid-loop-hotspot-trend${qs ? '?' + qs : ''}`)
 }
 
+/**
+ * Gateway humanoid closed-loop source correlation.
+ * @param {object} params
+ */
+export function fetchInputHumanoidLoopSourceCorrelation(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/input/humanoid-loop-source-correlation${qs ? '?' + qs : ''}`)
+}
+
 // ===== Ref #49: RecallPack token budget stats =====
 
 /**

@@ -4200,6 +4200,765 @@ def get_input_humanoid_loop_hotspot_trend(
     )
 
 
+class InputHumanoidLoopSourceCorrelationItem(BaseModel):
+    source_id: str
+    source_label: str
+    source_kind: str
+    confidence_pct: float
+    impact_level: str
+    source_status: Optional[str] = None
+    correlated_hotspots: List[str]
+    evidence: List[str]
+    narrative: str
+    operator_focus: str
+    recommended_view_path: str
+    recommended_view_label: str
+
+
+class InputHumanoidLoopSourceCorrelationResponse(BaseModel):
+    window_minutes: int
+    interval_minutes: int
+    status: str
+    severity: str
+    summary: str
+    primary_source_system: Optional[str]
+    primary_source_label: Optional[str]
+    source_count: int
+    items: List[InputHumanoidLoopSourceCorrelationItem]
+    timestamp: int
+
+
+def _build_humanoid_loop_gateway_source_snapshot(
+    *,
+    ledger: SQLiteLedger,
+    since_ms: int,
+    now_ms: int,
+) -> Dict[str, Any]:
+    try:
+        voice_rows = ledger.fetch_by_time_range(
+            "voice_event_log",
+            start_ms=since_ms,
+            end_ms=now_ms,
+            limit=30_000,
+        )
+    except Exception:
+        voice_rows = []
+    try:
+        channel_rows = ledger.fetch_by_time_range(
+            "channel_io_log",
+            start_ms=since_ms,
+            end_ms=now_ms,
+            limit=10_000,
+        )
+    except Exception:
+        channel_rows = []
+
+    request_voice_rows, _request_meta = _collect_gateway_request_voice_groups(voice_rows)
+    total_requests = len(request_voice_rows)
+    ack_missing = 0
+    progress_missing = 0
+    touchless_completed = 0
+    failed = 0
+    deviation_unrecovered = 0
+
+    for rows in request_voice_rows.values():
+        flags = _build_gateway_request_flags_from_voice_rows(rows)
+        if not bool(flags.get("ack_touched")):
+            ack_missing += 1
+        if not bool(flags.get("progress_touched")):
+            progress_missing += 1
+        if bool(flags.get("completed")) and not bool(flags.get("ack_touched")) and not bool(flags.get("progress_touched")):
+            touchless_completed += 1
+        if bool(flags.get("failed")):
+            failed += 1
+        if bool(flags.get("deviation_detected")) and not bool(flags.get("deviation_recovered")):
+            deviation_unrecovered += 1
+
+    channel_errors = 0
+    for row in channel_rows:
+        status_upper = str(row.get("status") or "").strip().upper()
+        reason_upper = str(row.get("reason_code") or "").strip().upper()
+        if status_upper in {"ERROR", "FAILED", "REJECTED"} or "FAIL" in reason_upper or "ERROR" in reason_upper:
+            channel_errors += 1
+
+    if total_requests <= 0 and channel_errors <= 0:
+        status = "UNKNOWN"
+    elif channel_errors > 0 or touchless_completed > 0 or deviation_unrecovered > 0:
+        status = "DEGRADED"
+    else:
+        status = "UP"
+
+    return {
+        "status": status,
+        "total_requests": total_requests,
+        "ack_missing": ack_missing,
+        "progress_missing": progress_missing,
+        "touchless_completed": touchless_completed,
+        "failed": failed,
+        "deviation_unrecovered": deviation_unrecovered,
+        "channel_errors": channel_errors,
+    }
+
+
+def _build_humanoid_loop_governor_source_snapshot(
+    *,
+    window_minutes: int,
+    interval_minutes: int,
+) -> Dict[str, Any]:
+    try:
+        resp = get_governor_stats(
+            window_minutes=window_minutes,
+            interval_minutes=interval_minutes,
+        )
+    except Exception:
+        return {
+            "status": "UNKNOWN",
+            "rejected": 0,
+            "rejection_rate": 0.0,
+            "top_reason_codes": [],
+        }
+
+    rejected = int(resp.rejected or 0)
+    rejection_rate = float(resp.rejection_rate or 0.0)
+    if rejected <= 0 and int(resp.total or 0) <= 0:
+        status = "UNKNOWN"
+    elif rejected > 0:
+        status = "DEGRADED"
+    else:
+        status = "UP"
+
+    return {
+        "status": status,
+        "rejected": rejected,
+        "rejection_rate": rejection_rate,
+        "top_reason_codes": [str(item.reason_code or "").strip().upper() for item in list(resp.reason_codes or [])[:3] if str(item.reason_code or "").strip()],
+    }
+
+
+def _build_humanoid_loop_error_source_snapshot(
+    *,
+    window_minutes: int,
+    interval_minutes: int,
+) -> Dict[str, Any]:
+    try:
+        resp = get_errors(
+            window_minutes=window_minutes,
+            interval_minutes=interval_minutes,
+            limit=10,
+        )
+    except Exception:
+        return {
+            "status": "UNKNOWN",
+            "total_errors": 0,
+            "top_stage": None,
+            "top_codes": [],
+        }
+
+    total_errors = int(resp.total_errors or 0)
+    if total_errors <= 0:
+        status = "UP" if int(window_minutes or 0) > 0 else "UNKNOWN"
+    elif total_errors >= 3:
+        status = "DOWN"
+    else:
+        status = "DEGRADED"
+
+    top_stage = None
+    if list(resp.stages or []):
+        top_stage = str(resp.stages[0].stage or "").strip().upper() or None
+
+    return {
+        "status": status,
+        "total_errors": total_errors,
+        "top_stage": top_stage,
+        "top_codes": [str(item.reason_code or "").strip().upper() for item in list(resp.top_codes or [])[:4] if str(item.reason_code or "").strip()],
+    }
+
+
+def _build_humanoid_loop_subsystem_source_snapshot(
+    *,
+    window_minutes: int,
+) -> Dict[str, Any]:
+    try:
+        resp = get_subsystems_stats(window_minutes=window_minutes)
+    except Exception:
+        return {
+            "status": "UNKNOWN",
+            "problem_count": 0,
+            "problem_subsystems": [],
+        }
+
+    problematic: List[Dict[str, Any]] = []
+    for item in list(resp.subsystems or []):
+        failed = int(item.failed or 0)
+        degraded = int(item.degraded or 0)
+        status = str(item.status or "").strip().upper()
+        if failed > 0 or degraded > 0 or status in {"DOWN", "DEGRADED"}:
+            problematic.append(
+                {
+                    "subsystem": str(item.subsystem or "").strip(),
+                    "display_name": str(item.display_name or item.subsystem or "").strip(),
+                    "status": status or "UNKNOWN",
+                    "failed": failed,
+                    "degraded": degraded,
+                }
+            )
+
+    problematic.sort(
+        key=lambda item: (
+            -int(item.get("failed") or 0),
+            -int(item.get("degraded") or 0),
+            str(item.get("subsystem") or ""),
+        )
+    )
+
+    if not problematic and list(resp.subsystems or []):
+        status = "UP"
+    elif problematic:
+        status = "DEGRADED"
+    else:
+        status = "UNKNOWN"
+
+    return {
+        "status": status,
+        "problem_count": len(problematic),
+        "problem_subsystems": problematic[:4],
+    }
+
+
+def _build_humanoid_loop_services_source_snapshot(
+    *,
+    ledger: SQLiteLedger,
+    since_ms: int,
+    now_ms: int,
+) -> Dict[str, Any]:
+    try:
+        llm_rows = ledger.fetch_by_time_range(
+            "llm_node_call_log",
+            start_ms=since_ms,
+            end_ms=now_ms,
+            limit=20_000,
+        )
+    except Exception:
+        llm_rows = []
+
+    problem_services: List[Dict[str, Any]] = []
+    grouped: Dict[str, Dict[str, Any]] = {}
+    success_statuses = {"OK", "SUCCESS", "DONE", "COMPLETED", "PASS", "PASSED"}
+
+    for row in [dict(item) for item in llm_rows if isinstance(item, dict)]:
+        node_id = str(row.get("node_id") or "").strip() or "unknown_model_node"
+        bucket = grouped.setdefault(
+            node_id,
+            {
+                "service_id": node_id,
+                "display_name": node_id,
+                "total": 0,
+                "failed": 0,
+                "max_latency_ms": None,
+            },
+        )
+        bucket["total"] = int(bucket.get("total") or 0) + 1
+        status_upper = str(row.get("status") or "UNKNOWN").strip().upper()
+        if status_upper not in success_statuses:
+            bucket["failed"] = int(bucket.get("failed") or 0) + 1
+        latency_ms = row.get("latency_ms")
+        try:
+            latency_ms = int(latency_ms) if latency_ms is not None else None
+        except (TypeError, ValueError):
+            latency_ms = None
+        if latency_ms is not None:
+            current_max = bucket.get("max_latency_ms")
+            bucket["max_latency_ms"] = latency_ms if current_max is None else max(int(current_max), latency_ms)
+
+    degraded = 0
+    down = 0
+    for item in grouped.values():
+        failed = int(item.get("failed") or 0)
+        total = int(item.get("total") or 0)
+        if failed <= 0:
+            continue
+        status = "DOWN" if failed >= total and total > 0 else "DEGRADED"
+        if status == "DOWN":
+            down += 1
+        else:
+            degraded += 1
+        problem_services.append(
+            {
+                "service_id": str(item.get("service_id") or ""),
+                "display_name": str(item.get("display_name") or ""),
+                "status": status,
+                "p95_ms": item.get("max_latency_ms"),
+            }
+        )
+
+    problem_services.sort(
+        key=lambda item: (
+            0 if str(item.get("status") or "").upper() == "DOWN" else 1,
+            str(item.get("service_id") or ""),
+        )
+    )
+
+    if down > 0:
+        status = "DOWN"
+    elif degraded > 0:
+        status = "DEGRADED"
+    elif grouped:
+        status = "UP"
+    else:
+        status = "UNKNOWN"
+
+    return {
+        "status": status,
+        "degraded": degraded,
+        "down": down,
+        "problem_services": problem_services[:4],
+    }
+
+
+def _clamp_humanoid_loop_source_weight(value: float) -> float:
+    return max(0.05, min(0.95, float(value or 0.0)))
+
+
+def _classify_humanoid_loop_source_impact(
+    *,
+    confidence_pct: float,
+    source_status: Optional[str],
+    hotspot_codes: List[str],
+) -> str:
+    status_upper = str(source_status or "").strip().upper()
+    hotspot_set = {str(code or "").strip().upper() for code in list(hotspot_codes or []) if str(code or "").strip()}
+    if confidence_pct >= 75.0 or status_upper == "DOWN" or hotspot_set.intersection({"EXECUTION_FAILED", "GOVERNOR_BLOCKED", "DEVIATION_NOT_RECOVERED"}):
+        return "critical"
+    if confidence_pct >= 45.0 or status_upper == "DEGRADED":
+        return "warning"
+    return "info"
+
+
+def _build_humanoid_loop_source_meta(source_id: str) -> Dict[str, str]:
+    meta = {
+        "gateway": {
+            "source_label": "Gateway 通道反馈层",
+            "source_kind": "gateway",
+            "operator_focus": "优先复核 ACK、进度触达与平台消息回执是否真正形成回路。",
+            "recommended_view_path": "/gateway",
+            "recommended_view_label": "打开感官网关",
+        },
+        "governor": {
+            "source_label": "Governor / 免疫门控层",
+            "source_kind": "governor",
+            "operator_focus": "优先检查审批令牌、风险规则与门控阈值是否过严或误伤。",
+            "recommended_view_path": "/system",
+            "recommended_view_label": "打开系统底座",
+        },
+        "errors": {
+            "source_label": "错误执行层",
+            "source_kind": "errors",
+            "operator_focus": "优先围绕最近错误 stage / reason_code 回放失败链路，确认是技能、工具还是依赖失败。",
+            "recommended_view_path": "/alerts",
+            "recommended_view_label": "打开免疫告警",
+        },
+        "subsystems": {
+            "source_label": "器官子系统健康层",
+            "source_kind": "subsystems",
+            "operator_focus": "优先检查 Skill、Sandbox、Agent Loop 等器官系统是否出现退化或失败尖峰。",
+            "recommended_view_path": "/system",
+            "recommended_view_label": "打开系统底座",
+        },
+        "services": {
+            "source_label": "依赖服务健康层",
+            "source_kind": "services",
+            "operator_focus": "优先检查模型、边缘服务与基础依赖的降级/不可用情况，确认是否拖垮执行闭环。",
+            "recommended_view_path": "/system",
+            "recommended_view_label": "打开服务健康",
+        },
+    }
+    return dict(meta.get(source_id, meta["errors"]))
+
+
+def _append_humanoid_loop_source_contribution(
+    *,
+    grouped: Dict[str, Dict[str, Any]],
+    diagnosed_count: int,
+    source_id: str,
+    hotspot: InputHumanoidLoopHotspotItem,
+    weight: float,
+    source_status: Optional[str],
+    evidence: List[str],
+    narrative: str,
+    override_view_path: Optional[str] = None,
+    override_view_label: Optional[str] = None,
+) -> None:
+    meta = _build_humanoid_loop_source_meta(source_id)
+    bucket = grouped.setdefault(
+        source_id,
+        {
+            "source_id": source_id,
+            "source_label": meta["source_label"],
+            "source_kind": meta["source_kind"],
+            "source_status": source_status,
+            "score": 0.0,
+            "correlated_hotspots": [],
+            "evidence": [],
+            "narrative": "",
+            "operator_focus": meta["operator_focus"],
+            "recommended_view_path": override_view_path or meta["recommended_view_path"],
+            "recommended_view_label": override_view_label or meta["recommended_view_label"],
+        },
+    )
+
+    weighted_score = _clamp_humanoid_loop_source_weight(weight) * max(1, int(hotspot.request_count or 0))
+    bucket["score"] = float(bucket.get("score") or 0.0) + weighted_score
+    if bucket.get("source_status") in {None, "", "UNKNOWN"} and source_status:
+        bucket["source_status"] = source_status
+
+    root_cause_code = str(hotspot.root_cause_code or "").strip().upper()
+    if root_cause_code and root_cause_code not in bucket["correlated_hotspots"]:
+        bucket["correlated_hotspots"].append(root_cause_code)
+
+    for item in list(evidence or []):
+        normalized = str(item or "").strip()
+        if normalized and normalized not in bucket["evidence"]:
+            bucket["evidence"].append(normalized)
+        if len(bucket["evidence"]) >= 8:
+            break
+
+    current_narrative = str(bucket.get("narrative") or "").strip()
+    if not current_narrative or weighted_score >= float(bucket.get("narrative_score") or 0.0):
+        bucket["narrative"] = narrative
+        bucket["narrative_score"] = weighted_score
+    if override_view_path:
+        bucket["recommended_view_path"] = override_view_path
+    if override_view_label:
+        bucket["recommended_view_label"] = override_view_label
+
+    confidence_pct = round(float(bucket.get("score") or 0.0) / max(1, diagnosed_count) * 100, 1)
+    bucket["confidence_pct"] = min(99.0, confidence_pct)
+    bucket["impact_level"] = _classify_humanoid_loop_source_impact(
+        confidence_pct=float(bucket.get("confidence_pct") or 0.0),
+        source_status=str(bucket.get("source_status") or ""),
+        hotspot_codes=list(bucket.get("correlated_hotspots") or []),
+    )
+
+
+@router.get("/input/humanoid-loop-source-correlation", response_model=InputHumanoidLoopSourceCorrelationResponse)
+async def get_input_humanoid_loop_source_correlation(
+    window_minutes: int = Query(360, ge=1, le=10080, description="统计窗口（分钟）"),
+    interval_minutes: int = Query(30, ge=1, le=360, description="时序聚合间隔（分钟）"),
+    min_bucket_requests: int = Query(3, ge=1, le=100, description="告警评估最小样本量"),
+):
+    """Ref #48I: Gateway 人体闭环病灶源头归因。"""
+    now = _now_ms()
+    since_ms = now - window_minutes * 60 * 1000
+    hotspots_resp = get_input_humanoid_loop_hotspots(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        min_bucket_requests=min_bucket_requests,
+    )
+
+    if not hotspots_resp.hotspots:
+        return InputHumanoidLoopSourceCorrelationResponse(
+            window_minutes=window_minutes,
+            interval_minutes=interval_minutes,
+            status=hotspots_resp.status,
+            severity=hotspots_resp.severity,
+            summary="当前窗口尚未形成可归因的人体闭环病灶源头。",
+            primary_source_system=None,
+            primary_source_label=None,
+            source_count=0,
+            items=[],
+            timestamp=now,
+        )
+
+    ledger = _get_ledger()
+    gateway_snapshot = _build_humanoid_loop_gateway_source_snapshot(
+        ledger=ledger,
+        since_ms=since_ms,
+        now_ms=now,
+    )
+    governor_snapshot = _build_humanoid_loop_governor_source_snapshot(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+    )
+    error_snapshot = _build_humanoid_loop_error_source_snapshot(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+    )
+    subsystem_snapshot = _build_humanoid_loop_subsystem_source_snapshot(window_minutes=window_minutes)
+    services_snapshot = _build_humanoid_loop_services_source_snapshot(
+        ledger=ledger,
+        since_ms=since_ms,
+        now_ms=now,
+    )
+
+    grouped: Dict[str, Dict[str, Any]] = {}
+    diagnosed_count = max(1, int(hotspots_resp.diagnosed_count or 0))
+
+    for hotspot in list(hotspots_resp.hotspots or []):
+        root_cause_code = str(hotspot.root_cause_code or "").strip().upper()
+        hotspot_evidence = [str(code or "").strip().upper() for code in list(hotspot.evidence_codes or [])[:4] if str(code or "").strip()]
+        representative_path = None
+        representative_label = None
+        if list(hotspot.representative_requests or []):
+            representative_path = str(hotspot.representative_requests[0].target_path or "").strip() or None
+            representative_label = "打开代表性链路"
+
+        if root_cause_code == "EXECUTION_FAILED":
+            error_weight = 0.72
+            error_evidence = [f"hotspot={root_cause_code}", f"requests={int(hotspot.request_count or 0)}"]
+            if int(error_snapshot.get("total_errors") or 0) > 0:
+                error_weight += 0.1
+                error_evidence.append(f"errors={int(error_snapshot.get('total_errors') or 0)}")
+            if error_snapshot.get("top_stage"):
+                if str(error_snapshot.get("top_stage")).startswith("S_EXEC"):
+                    error_weight += 0.08
+                error_evidence.append(f"stage={error_snapshot.get('top_stage')}")
+            if list(error_snapshot.get("top_codes") or []):
+                error_weight += 0.05
+                error_evidence.append(f"reason={list(error_snapshot.get('top_codes') or [])[0]}")
+            error_evidence.extend(hotspot_evidence[:2])
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="errors",
+                hotspot=hotspot,
+                weight=error_weight,
+                source_status=str(error_snapshot.get("status") or ""),
+                evidence=error_evidence,
+                narrative=(
+                    f"{hotspot.organ_label} 的失败病灶与错误执行层高度重合，最近异常主要集中在 "
+                    f"{error_snapshot.get('top_stage') or 'UNKNOWN'} / "
+                    f"{(list(error_snapshot.get('top_codes') or []) or ['UNKNOWN'])[0]}。"
+                ),
+                override_view_path=representative_path or "/alerts",
+                override_view_label=representative_label or "打开失败链路",
+            )
+
+            subsystem_weight = 0.56
+            subsystem_evidence = [f"hotspot={root_cause_code}"]
+            if list(subsystem_snapshot.get("problem_subsystems") or []):
+                subsystem_weight += 0.12
+                top_subsystem = list(subsystem_snapshot.get("problem_subsystems") or [])[0]
+                subsystem_evidence.append(f"subsystem={top_subsystem.get('subsystem')}")
+                subsystem_evidence.append(f"status={top_subsystem.get('status')}")
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="subsystems",
+                hotspot=hotspot,
+                weight=subsystem_weight,
+                source_status=str(subsystem_snapshot.get("status") or ""),
+                evidence=subsystem_evidence,
+                narrative="执行器官链路出现失败尖峰时，通常会同时在 Skill / Sandbox / Agent Loop 子系统上留下退化痕迹。",
+            )
+
+            if int(services_snapshot.get("down") or 0) > 0 or int(services_snapshot.get("degraded") or 0) > 0:
+                service_weight = 0.44
+                service_evidence = [f"hotspot={root_cause_code}"]
+                if int(services_snapshot.get("down") or 0) > 0:
+                    service_weight += 0.12
+                    service_evidence.append(f"services_down={int(services_snapshot.get('down') or 0)}")
+                elif int(services_snapshot.get("degraded") or 0) > 0:
+                    service_weight += 0.07
+                    service_evidence.append(f"services_degraded={int(services_snapshot.get('degraded') or 0)}")
+                if list(services_snapshot.get("problem_services") or []):
+                    top_service = list(services_snapshot.get("problem_services") or [])[0]
+                    service_evidence.append(f"service={top_service.get('service_id')}")
+                _append_humanoid_loop_source_contribution(
+                    grouped=grouped,
+                    diagnosed_count=diagnosed_count,
+                    source_id="services",
+                    hotspot=hotspot,
+                    weight=service_weight,
+                    source_status=str(services_snapshot.get("status") or ""),
+                    evidence=service_evidence,
+                    narrative="最近执行失败与下游依赖降级存在伴随关系，需要同步复核模型与基础服务健康。",
+                )
+
+        elif root_cause_code == "GOVERNOR_BLOCKED":
+            governor_weight = 0.84
+            governor_evidence = [f"hotspot={root_cause_code}", f"rejected={int(governor_snapshot.get('rejected') or 0)}"]
+            if float(governor_snapshot.get("rejection_rate") or 0.0) > 0:
+                governor_weight += 0.06
+                governor_evidence.append(f"rejection_rate={round(float(governor_snapshot.get('rejection_rate') or 0.0), 1)}%")
+            if list(governor_snapshot.get("top_reason_codes") or []):
+                governor_weight += 0.05
+                governor_evidence.append(f"reason={list(governor_snapshot.get('top_reason_codes') or [])[0]}")
+            governor_evidence.extend(hotspot_evidence[:2])
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="governor",
+                hotspot=hotspot,
+                weight=governor_weight,
+                source_status=str(governor_snapshot.get("status") or ""),
+                evidence=governor_evidence,
+                narrative="病灶集中在门控前额叶，说明请求尚未进入真正执行阶段就被审批或免疫规则拦下。",
+            )
+
+        elif root_cause_code in {"ACK_PATH_MISSING", "PROGRESS_PATH_MISSING", "COMPLETED_WITHOUT_HUMANOID_TOUCH"}:
+            gateway_weight = 0.78
+            gateway_evidence = [f"hotspot={root_cause_code}"]
+            if int(gateway_snapshot.get("touchless_completed") or 0) > 0:
+                gateway_weight += 0.08
+                gateway_evidence.append(f"touchless={int(gateway_snapshot.get('touchless_completed') or 0)}")
+            if int(gateway_snapshot.get("ack_missing") or 0) > 0:
+                gateway_weight += 0.06
+                gateway_evidence.append(f"ack_missing={int(gateway_snapshot.get('ack_missing') or 0)}")
+            if int(gateway_snapshot.get("progress_missing") or 0) > 0:
+                gateway_weight += 0.04
+                gateway_evidence.append(f"progress_missing={int(gateway_snapshot.get('progress_missing') or 0)}")
+            if int(gateway_snapshot.get("channel_errors") or 0) > 0:
+                gateway_weight += 0.04
+                gateway_evidence.append(f"channel_errors={int(gateway_snapshot.get('channel_errors') or 0)}")
+            gateway_evidence.extend(hotspot_evidence[:2])
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="gateway",
+                hotspot=hotspot,
+                weight=gateway_weight,
+                source_status=str(gateway_snapshot.get("status") or ""),
+                evidence=gateway_evidence,
+                narrative="语言回执或进度触达缺口通常发生在 Gateway 通道反馈层，表现为动作完成但没有像人一样反馈过程。",
+            )
+
+        elif root_cause_code == "DEVIATION_NOT_RECOVERED":
+            gateway_evidence = [
+                f"hotspot={root_cause_code}",
+                f"deviation_unrecovered={int(gateway_snapshot.get('deviation_unrecovered') or 0)}",
+            ]
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="gateway",
+                hotspot=hotspot,
+                weight=0.68 + (0.08 if int(gateway_snapshot.get("deviation_unrecovered") or 0) > 0 else 0.0),
+                source_status=str(gateway_snapshot.get("status") or ""),
+                evidence=gateway_evidence,
+                narrative="偏航已被感知但没有被拉回，优先怀疑反馈-重试-恢复链条在 Gateway 侧没有真正闭合。",
+            )
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="errors",
+                hotspot=hotspot,
+                weight=0.5 + (0.08 if int(error_snapshot.get("total_errors") or 0) > 0 else 0.0),
+                source_status=str(error_snapshot.get("status") or ""),
+                evidence=[f"hotspot={root_cause_code}", f"errors={int(error_snapshot.get('total_errors') or 0)}"] + hotspot_evidence[:2],
+                narrative="若恢复链路伴随错误日志升高，说明自愈动作本身在执行期也遭遇了失败或超时。",
+                override_view_path=representative_path or "/alerts",
+                override_view_label=representative_label or "打开恢复链路",
+            )
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="subsystems",
+                hotspot=hotspot,
+                weight=0.46 + (0.08 if int(subsystem_snapshot.get("problem_count") or 0) > 0 else 0.0),
+                source_status=str(subsystem_snapshot.get("status") or ""),
+                evidence=[f"hotspot={root_cause_code}", f"subsystems={int(subsystem_snapshot.get('problem_count') or 0)}"],
+                narrative="全局纠偏没有收敛时，往往也意味着下层器官系统没有把恢复动作执行到底。",
+            )
+
+        elif root_cause_code == "CLOSED_LOOP_NOT_CONVERGED":
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="gateway",
+                hotspot=hotspot,
+                weight=0.62 + (0.06 if int(gateway_snapshot.get("ack_missing") or 0) > 0 else 0.0),
+                source_status=str(gateway_snapshot.get("status") or ""),
+                evidence=[
+                    f"hotspot={root_cause_code}",
+                    f"ack_missing={int(gateway_snapshot.get('ack_missing') or 0)}",
+                    f"progress_missing={int(gateway_snapshot.get('progress_missing') or 0)}",
+                ],
+                narrative="闭环没有收束，通常不是单点故障，而是反馈链路多处轻微断裂叠加造成的整体不收敛。",
+            )
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="subsystems",
+                hotspot=hotspot,
+                weight=0.42 + (0.06 if int(subsystem_snapshot.get("problem_count") or 0) > 0 else 0.0),
+                source_status=str(subsystem_snapshot.get("status") or ""),
+                evidence=[f"hotspot={root_cause_code}", f"subsystems={int(subsystem_snapshot.get('problem_count') or 0)}"],
+                narrative="如果多个器官系统都轻度退化，也会让人体闭环看起来像是完成了动作，却始终没有完整回路。",
+            )
+
+        else:
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="errors",
+                hotspot=hotspot,
+                weight=0.36 + (0.06 if int(error_snapshot.get("total_errors") or 0) > 0 else 0.0),
+                source_status=str(error_snapshot.get("status") or ""),
+                evidence=[f"hotspot={root_cause_code}"] + hotspot_evidence[:2],
+                narrative="当前病灶还没有稳定模板，优先从错误执行层与代表性链路回放收束真正源头。",
+                override_view_path=representative_path or "/alerts",
+                override_view_label=representative_label or "打开代表性链路",
+            )
+            _append_humanoid_loop_source_contribution(
+                grouped=grouped,
+                diagnosed_count=diagnosed_count,
+                source_id="gateway",
+                hotspot=hotspot,
+                weight=0.32 + (0.04 if int(gateway_snapshot.get("channel_errors") or 0) > 0 else 0.0),
+                source_status=str(gateway_snapshot.get("status") or ""),
+                evidence=[f"hotspot={root_cause_code}", f"channel_errors={int(gateway_snapshot.get('channel_errors') or 0)}"],
+                narrative="在没有稳定模式前，也要同时排除 Gateway 反馈层是否存在吞回执、断进度或通道抖动。",
+            )
+
+    items: List[InputHumanoidLoopSourceCorrelationItem] = []
+    for item in sorted(
+        grouped.values(),
+        key=lambda value: (
+            -float(value.get("confidence_pct") or 0.0),
+            str(value.get("source_id") or ""),
+        ),
+    ):
+        items.append(
+            InputHumanoidLoopSourceCorrelationItem(
+                source_id=str(item.get("source_id") or ""),
+                source_label=str(item.get("source_label") or ""),
+                source_kind=str(item.get("source_kind") or ""),
+                confidence_pct=float(item.get("confidence_pct") or 0.0),
+                impact_level=str(item.get("impact_level") or "info"),
+                source_status=(str(item.get("source_status") or "").strip() or None),
+                correlated_hotspots=list(item.get("correlated_hotspots") or [])[:4],
+                evidence=list(item.get("evidence") or [])[:8],
+                narrative=str(item.get("narrative") or ""),
+                operator_focus=str(item.get("operator_focus") or ""),
+                recommended_view_path=str(item.get("recommended_view_path") or "/alerts"),
+                recommended_view_label=str(item.get("recommended_view_label") or "打开源头归因"),
+            )
+        )
+
+    primary = items[0] if items else None
+    if primary is None:
+        summary = "当前窗口已识别病灶，但还没有形成稳定的源头归因结果。"
+    else:
+        summary = (
+            f"当前主病灶最可能回落到 {primary.source_label}，"
+            f"它与 {', '.join(primary.correlated_hotspots[:2]) or '当前异常'} 的关联度最高，"
+            f"建议先沿 {primary.recommended_view_label} 收束根因。"
+        )
+
+    return InputHumanoidLoopSourceCorrelationResponse(
+        window_minutes=window_minutes,
+        interval_minutes=interval_minutes,
+        status=hotspots_resp.status,
+        severity=hotspots_resp.severity,
+        summary=summary,
+        primary_source_system=(primary.source_id if primary else None),
+        primary_source_label=(primary.source_label if primary else None),
+        source_count=len(items),
+        items=items,
+        timestamp=now,
+    )
+
+
 class RecallPackSlotItem(BaseModel):
     slot: str
     avg_tokens: float

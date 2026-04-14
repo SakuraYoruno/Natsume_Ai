@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
 from typing import Any, Callable, Mapping
 
+from host_brain.app.model_router import resolve_gemini_key_pool
 from host_brain.app.chat_runtime_input import (
     get_chat_runtime_render_target_lang,
     get_chat_runtime_user_message,
@@ -106,7 +108,7 @@ def _build_host_mock_reply_text(node_id: str | None, runtime_payload: dict[str, 
 
 _GEMINI_PRIMARY_RETRY_NODE_ID = "core_reasoner_primary"
 _GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro"})
-_GEMINI_PRIMARY_FALLBACK_MODEL_ID = "gemini-3.1-pro-preview"
+_GEMINI_PRIMARY_FALLBACK_MODEL_ID = "gemini-2.5-flash-lite"
 _GEMINI_PRIMARY_RETRYABLE_MARKERS = (
     "503",
     "deadline exceeded",
@@ -146,6 +148,68 @@ _GEMINI_PRIMARY_FALLBACK_TRIGGER_MARKERS = (
     "resource_exhausted",
     * _GEMINI_PRIMARY_RETRYABLE_MARKERS,
 )
+_GEMINI_KEY_FAILOVER_BLOCKED_MARKERS = (
+    "400",
+    "bad request",
+    "invalid argument",
+    "invalid_request",
+    "malformed",
+    "safety",
+    "content policy",
+)
+_GEMINI_KEY_FAILOVER_TRIGGER_MARKERS = (
+    "429",
+    "quota",
+    "rate limit",
+    "rate_limit",
+    "resource_exhausted",
+    "too many requests",
+    * _GEMINI_PRIMARY_RETRYABLE_MARKERS,
+)
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else int(default)
+    except ValueError:
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
+
+
+def _is_async_callable(fn: Callable[..., Any]) -> bool:
+    return asyncio.iscoroutinefunction(fn) or inspect.iscoroutinefunction(fn)
+
+
+async def _invoke_provider_fn(provider_fn: Callable[[dict[str, Any]], Any], prompt_payload: dict[str, Any]) -> Any:
+    if _is_async_callable(provider_fn):
+        return await provider_fn(prompt_payload)
+    return await asyncio.to_thread(provider_fn, prompt_payload)
+
+
+def _should_try_gemini_key_failover(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    detail = str(exc or "").strip().lower()
+    if not detail:
+        return True
+    if any(marker in detail for marker in _GEMINI_KEY_FAILOVER_BLOCKED_MARKERS):
+        return False
+    if any(marker in detail for marker in _GEMINI_KEY_FAILOVER_TRIGGER_MARKERS):
+        return True
+    # Unknown transport/provider errors are treated as failover-eligible by default.
+    return True
 
 
 def resolve_host_llm_model_id(provider_name: str) -> str:
@@ -250,7 +314,7 @@ def wrap_node_provider_fn_with_retry(
         last_exc: BaseException | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                return await asyncio.to_thread(provider_fn, prompt_payload)
+                return await _invoke_provider_fn(provider_fn, prompt_payload)
             except Exception as exc:
                 last_exc = exc
                 should_retry = _should_retry_node_provider_failure(
@@ -274,7 +338,7 @@ def wrap_node_provider_fn_with_retry(
                             exc,
                         )
                         try:
-                            return await asyncio.to_thread(fallback_provider_fn, prompt_payload)
+                            return await _invoke_provider_fn(fallback_provider_fn, prompt_payload)
                         except Exception as fallback_exc:
                             raise RuntimeError(
                                 f"gemini primary model failed: {exc}; fallback model {resolved_fallback_model} failed: {fallback_exc}"
@@ -292,7 +356,7 @@ def wrap_node_provider_fn_with_retry(
                     await asyncio.sleep(retry_delay_s)
         if last_exc is not None:
             raise last_exc
-        return await asyncio.to_thread(provider_fn, prompt_payload)
+        return await _invoke_provider_fn(provider_fn, prompt_payload)
 
     return _async_provider  # type: ignore[return-value]
 
@@ -430,13 +494,11 @@ def build_host_provider_fn_for_node(
     node_id: str,
     base_url_override: str | None = None,
 ) -> Callable[[dict[str, Any]], Any]:
-    provider = str(provider_name or "").strip().lower()
-    key_value = str(api_key or "").strip()
-    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+    def _build_single_key_provider(resolved_key: str) -> Callable[[dict[str, Any]], Any]:
         provider_fn = build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,
-            api_key=key_value,
+            api_key=resolved_key,
             timeout_ms=timeout_ms,
             node_id=node_id,
             base_url_override=base_url_override,
@@ -453,7 +515,7 @@ def build_host_provider_fn_for_node(
                 fallback_provider_fn = build_langchain_chat_provider_fn(
                     provider_name=provider,
                     model_id=fallback_model_id,
-                    api_key=key_value,
+                    api_key=resolved_key,
                     timeout_ms=timeout_ms,
                     node_id=node_id,
                     base_url_override=base_url_override,
@@ -466,4 +528,68 @@ def build_host_provider_fn_for_node(
             fallback_provider_fn=fallback_provider_fn,
             fallback_model_id=fallback_model_id,
         )
+
+    provider = str(provider_name or "").strip().lower()
+    key_value = str(api_key or "").strip()
+    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+        if provider != PROVIDER_GEMINI:
+            return _build_single_key_provider(key_value)
+
+        if not _parse_bool_env("HOST_GEMINI_KEY_FAILOVER_ENABLED", default=True):
+            return _build_single_key_provider(key_value)
+
+        key_pool = resolve_gemini_key_pool(preferred_api_key=key_value)
+        if not key_pool:
+            return _build_single_key_provider(key_value)
+        max_attempts = _parse_int_env(
+            "HOST_GEMINI_KEY_FAILOVER_MAX_ATTEMPTS",
+            default=9,
+            minimum=1,
+            maximum=max(1, len(key_pool)),
+        )
+        candidate_keys = list(key_pool)[:max_attempts]
+        if len(candidate_keys) <= 1:
+            return _build_single_key_provider(candidate_keys[0])
+
+        provider_cache: dict[str, Callable[[dict[str, Any]], Any]] = {}
+
+        def _provider_for_key(secret: str) -> Callable[[dict[str, Any]], Any]:
+            cached = provider_cache.get(secret)
+            if cached is not None:
+                return cached
+            built = _build_single_key_provider(secret)
+            provider_cache[secret] = built
+            return built
+
+        async def _key_failover_provider(prompt_payload: dict[str, Any]) -> Any:
+            last_exc: BaseException | None = None
+            for idx, key_secret in enumerate(candidate_keys, start=1):
+                provider_fn = _provider_for_key(key_secret)
+                try:
+                    return await _invoke_provider_fn(provider_fn, prompt_payload)
+                except Exception as exc:
+                    last_exc = exc
+                    has_next = idx < len(candidate_keys)
+                    should_failover = has_next and _should_try_gemini_key_failover(exc)
+                    if should_failover:
+                        _logger.warning(
+                            "Gemini key failover for node=%s model=%s slot=%d/%d after failure: %s",
+                            str(node_id or "").strip() or "-",
+                            str(model_id or "").strip() or "-",
+                            idx,
+                            len(candidate_keys),
+                            exc,
+                        )
+                        continue
+                    if idx > 1:
+                        raise RuntimeError(
+                            f"gemini key failover exhausted node={str(node_id or '').strip() or '-'} "
+                            f"model={str(model_id or '').strip() or '-'} tried={idx} last_error={exc}"
+                        ) from exc
+                    raise
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError("gemini key failover provider exhausted without execution")
+
+        return _key_failover_provider
     return build_host_mock_provider_for_node(node_id)

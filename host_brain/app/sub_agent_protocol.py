@@ -312,19 +312,23 @@ class SubAgentDispatcher:
         try:
             from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
             ledger = get_ledger()
+            result_code = "SUB_AGENT_OK" if resp.success else "SUB_AGENT_FAILED"
+            result_digest = str(resp.result or resp.error or "").strip()
+            if not result_digest:
+                result_digest = f"agent={resp.agent_id} success={str(bool(resp.success)).lower()}"
             ledger.log_skill_exec({
                 "request_id": req.request_id,
-                "session_id": req.session_id,
+                "intent_id": f"intent::{req.request_id}::{resp.agent_id}",
+                "event_id": f"evt::{req.request_id}::{resp.agent_id}",
                 "skill_name": f"sub_agent:{resp.agent_id}",
+                "approval_token_ref": None,
+                "confirm_token_ref": None,
+                "undo_token_ref": None,
                 "result_status": "OK" if resp.success else "FAILED",
-                "reason_code": resp.error[:120] if resp.error else None,
-                "latency_ms": resp.latency_ms,
-                "payload": {
-                    "task": req.task[:200],
-                    "agent_id": resp.agent_id,
-                    "success": resp.success,
-                    "audit_refs": resp.audit_refs,
-                },
+                "result_code": result_code,
+                "result_digest": result_digest[:4000],
+                "evidence_ref": f"sub_agent::{req.request_id}::{resp.agent_id}",
+                "manifest_ref": None,
                 "ts_ms": int(time.time() * 1000),
             })
         except Exception:

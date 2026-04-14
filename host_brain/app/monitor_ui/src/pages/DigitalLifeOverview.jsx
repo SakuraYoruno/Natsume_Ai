@@ -19,6 +19,7 @@ import {
   fetchInputHumanoidLoopHotspotTrend,
   fetchInputHumanoidLoopHotspots,
   fetchInputHumanoidLoopRemediation,
+  fetchInputHumanoidLoopSourceCorrelation,
   fetchInputHumanoidLoopTrend,
   fetchInputHumanoidLoopStats,
   fetchMemoryStats,
@@ -105,6 +106,12 @@ function getHumanoidDiagnosticStatusClass(status) {
 function getHumanoidHotspotSeverityClass(severity) {
   if (severity === 'critical') return 'border-red-200 bg-red-50 text-red-700'
   if (severity === 'warning') return 'border-orange-200 bg-orange-50 text-orange-700'
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+}
+
+function getHumanoidSourceImpactClass(impactLevel) {
+  if (impactLevel === 'critical') return 'border-red-200 bg-red-50 text-red-700'
+  if (impactLevel === 'warning') return 'border-orange-200 bg-orange-50 text-orange-700'
   return 'border-emerald-200 bg-emerald-50 text-emerald-700'
 }
 
@@ -210,6 +217,7 @@ export default function DigitalLifeOverview() {
   const [humanoidLoopDiagnosticsData, setHumanoidLoopDiagnosticsData] = useState(null)
   const [humanoidLoopHotspotsData, setHumanoidLoopHotspotsData] = useState(null)
   const [humanoidLoopHotspotTrendData, setHumanoidLoopHotspotTrendData] = useState(null)
+  const [humanoidLoopSourceCorrelationData, setHumanoidLoopSourceCorrelationData] = useState(null)
 
   const {
     runtimeSnapshot,
@@ -240,6 +248,7 @@ export default function DigitalLifeOverview() {
         humanoidLoopDiagnosticsRes,
         humanoidLoopHotspotsRes,
         humanoidLoopHotspotTrendRes,
+        humanoidLoopSourceCorrelationRes,
       ] = await Promise.all([
         fetchVtsStats({ window_minutes: windowMinutes }).catch(() => null),
         fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
@@ -283,6 +292,11 @@ export default function DigitalLifeOverview() {
           window_minutes: windowMinutes,
           interval_minutes: toTrendIntervalMinutes(windowMinutes),
         }).catch(() => null),
+        fetchInputHumanoidLoopSourceCorrelation({
+          window_minutes: windowMinutes,
+          interval_minutes: toTrendIntervalMinutes(windowMinutes),
+          min_bucket_requests: 3,
+        }).catch(() => null),
       ])
 
       setVtsData(vtsRes)
@@ -297,6 +311,7 @@ export default function DigitalLifeOverview() {
       setHumanoidLoopDiagnosticsData(humanoidLoopDiagnosticsRes)
       setHumanoidLoopHotspotsData(humanoidLoopHotspotsRes)
       setHumanoidLoopHotspotTrendData(humanoidLoopHotspotTrendRes)
+      setHumanoidLoopSourceCorrelationData(humanoidLoopSourceCorrelationRes)
     } catch (loadError) {
       setError(loadError.message || '数字生命体总览加载失败')
     } finally {
@@ -376,6 +391,7 @@ export default function DigitalLifeOverview() {
   const humanoidHotspotTrendLabels = humanoidLoopHotspotTrendData?.timeseries_labels || []
   const humanoidHotspotTrendSeries = humanoidLoopHotspotTrendData?.series || []
   const humanoidHotspotTrendBuckets = humanoidLoopHotspotTrendData?.dominant_buckets || []
+  const humanoidSourceItems = humanoidLoopSourceCorrelationData?.items || []
 
   const pulseNodes = [
     { label: '存在态', value: modeMeta.label, tone: 'primary', active: true },
@@ -930,6 +946,95 @@ export default function DigitalLifeOverview() {
                         <EmptyStateCard
                           title="暂无病灶演化趋势"
                           hint="当前时间窗口内还没有足够的异常样本形成可读趋势。"
+                          className="p-4"
+                        />
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {humanoidLoopSourceCorrelationData ? (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.08),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.08),_transparent_40%)] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-gray-600">源头归因 / 系统关联</div>
+                        <div className="mt-1 text-sm text-gray-700">
+                          {humanoidLoopSourceCorrelationData?.summary || '当前病灶已出现，但还没有形成稳定的源头归因。'}
+                        </div>
+                      </div>
+                      {humanoidLoopSourceCorrelationData?.primary_source_label ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                          {`${humanoidLoopSourceCorrelationData.primary_source_label} · ${humanoidLoopSourceCorrelationData.primary_source_system || 'source'}`}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {humanoidSourceItems.length > 0 ? (
+                      <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+                        {humanoidSourceItems.map((item) => (
+                          <div key={item.source_id} className="rounded-2xl border border-white/80 bg-white/92 p-4 shadow-sm backdrop-blur-sm">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getHumanoidSourceImpactClass(item.impact_level)}`}>
+                                {item.impact_level}
+                              </span>
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                                {item.source_label}
+                              </span>
+                              {item.source_status ? (
+                                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                  {item.source_status}
+                                </span>
+                              ) : null}
+                              <span className="ml-auto text-xs text-gray-500">
+                                {`confidence ${formatPercent(item.confidence_pct)}`}
+                              </span>
+                            </div>
+
+                            <div className="mt-3 text-sm font-semibold leading-6 text-gray-900">
+                              {item.narrative}
+                            </div>
+
+                            <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-xs leading-6 text-amber-800">
+                              {item.operator_focus}
+                            </div>
+
+                            {(item.correlated_hotspots || []).length > 0 ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {(item.correlated_hotspots || []).slice(0, 4).map((code) => (
+                                  <span
+                                    key={`${item.source_id}-${code}`}
+                                    className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700"
+                                  >
+                                    {code}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              {(item.evidence || []).slice(0, 4).map((evidence) => (
+                                <span
+                                  key={`${item.source_id}-${evidence}`}
+                                  className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700"
+                                >
+                                  {evidence}
+                                </span>
+                              ))}
+                              <Link
+                                to={item.recommended_view_path}
+                                className="ml-auto inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:border-amber-300 hover:bg-amber-100"
+                              >
+                                {item.recommended_view_label || '打开源头归因'}
+                              </Link>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-4">
+                        <EmptyStateCard
+                          title="暂无稳定源头归因"
+                          hint="当前窗口内虽然已经形成病灶，但底层系统关联还不够稳定。"
                           className="p-4"
                         />
                       </div>
