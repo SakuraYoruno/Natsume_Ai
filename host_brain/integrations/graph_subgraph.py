@@ -1,19 +1,20 @@
-"""Transparent Subgraph factory for Governed Runtime Contract (M35-E).
+"""Transparent Subgraph factory for Governed Runtime Contract（FIX-5.3 彻底迁移）。
 
-实现 compile_governed_subgraph() 工厂函数，确保子图内部节点对 Evidence Plane 透明。
+自研 compile_governed_subgraph() 已删除，改为直接使用 LangGraph 原生子图。
+此模块保留公共接口（compile_governed_subgraph / compile_intent_agent_subgraph 等），
+内部委托给 graph_langgraph_subgraph.build_governed_subgraph()。
 
-设计原则（ModelPlane.md §10 Rule 3）：
+保留不变的约束：
 - 子图每个节点执行后写入 subgraph_trace
 - 子图结束时输出 subgraph_commit_summary
-- 子图不允许直接写入 committed_* 字段（权限约束）
+- 子图不允许直接写入 committed_* 字段（SUBGRAPH_PROTECTED_FIELDS 黑名单）
 - 子图失败时 status = STATUS_DEGRADED，不影响主图继续执行
 """
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from host_brain.integrations.graph_contract import (
     GraphState,
@@ -24,237 +25,7 @@ from host_brain.integrations.graph_contract import (
     SUBGRAPH_PROTECTED_FIELDS,
     build_subgraph_commit_summary,
 )
-
-
-@dataclass
-class CompiledSubgraph:
-    """已编译的透明子图（Transparent Subgraph）。
-
-    通过 compile_governed_subgraph() 工厂创建，不可直接实例化。
-    每个节点执行后写入 subgraph_trace，子图结束时输出 subgraph_commit_summary。
-
-    FIX-3.1+3.3：新增 edge_map / fallback_map 支持条件分支路由。
-    - edge_map 为空时走原有线性序列（向后兼容）
-    - edge_map 非空时走带路由的执行模式
-    - fallback_map 指定节点失败时的降级路由
-    """
-
-    subgraph_id: str
-    node_ids: list[str]
-    handlers: dict[str, NodeHandler]
-    _compiled: bool = field(default=False, repr=False)
-    # M37-E：Evidence Plane 实时写入（可选，默认 None）
-    _evidence_plane: Any = field(default=None, repr=False)
-    # FIX-3.1+3.3：条件分支路由（可选，默认空字典走线性序列）
-    edge_map: dict[str, str] = field(default_factory=dict)
-    fallback_map: dict[str, str] = field(default_factory=dict)
-
-    def invoke(self, state: GraphState) -> GraphState:
-        """执行子图，写入 subgraph_trace，返回更新后的 GraphState。
-
-        Args:
-            state: 当前主图状态
-
-        Returns:
-            更新后的 GraphState（subgraph_trace 已追加，subgraph_commit_summary 已写入 payload）
-        """
-        # FIX-3.1+3.3：edge_map 非空时走带路由的执行模式，否则走线性序列（向后兼容）
-        if self.edge_map:
-            return self._invoke_with_routing(state)
-        return self._invoke_linear(state)
-
-    def _invoke_linear(self, state: GraphState) -> GraphState:
-        """原有线性序列执行模式（向后兼容）。"""
-        subgraph_trace = list(state.get("subgraph_trace") or [])
-        payload = dict(state.get("payload") or {})
-        current_status = str(state.get("status") or STATUS_OK)
-
-        for node_id in self.node_ids:
-            ts_ms = int(time.time() * 1000)
-            handler = self.handlers.get(node_id)
-            if handler is None:
-                # 节点处理器缺失：记录失败，继续执行（不影响主图）
-                subgraph_trace.append({
-                    "node_id": node_id,
-                    "status": STATUS_FAILED,
-                    "ts_ms": ts_ms,
-                    "reason_code": "SUBGRAPH_HANDLER_MISSING",
-                    "detail": f"子图节点处理器缺失: {node_id}",
-                })
-                current_status = STATUS_DEGRADED
-                continue
-
-            try:
-                output = handler(payload, {
-                    "request_id": str(state.get("request_id") or ""),
-                    "node_id": node_id,
-                    "graph_id": str(state.get("graph_id") or ""),
-                    "subgraph_id": self.subgraph_id,
-                    "timeout_ms": int(state.get("timeout_ms") or 5000),
-                })
-                # 权限约束：子图不允许写入 committed_* 字段
-                _strip_committed_fields(output)
-                payload.update(output or {})
-                trace_entry = {
-                    "node_id": node_id,
-                    "status": STATUS_OK,
-                    "ts_ms": ts_ms,
-                    "reason_code": None,
-                    "detail": "subgraph node executed",
-                }
-                subgraph_trace.append(trace_entry)
-                # M37-E：Evidence Plane 实时写入（成功）
-                self._write_node_trace(request_id=str(state.get("request_id") or ""),
-                                       graph_id=str(state.get("graph_id") or ""),
-                                       entry=trace_entry)
-            except Exception as exc:
-                trace_entry = {
-                    "node_id": node_id,
-                    "status": STATUS_FAILED,
-                    "ts_ms": ts_ms,
-                    "reason_code": "SUBGRAPH_NODE_ERROR",
-                    "detail": f"子图节点执行失败: {node_id}: {exc}",
-                }
-                subgraph_trace.append(trace_entry)
-                # M37-E：Evidence Plane 实时写入（失败）
-                self._write_node_trace(request_id=str(state.get("request_id") or ""),
-                                       graph_id=str(state.get("graph_id") or ""),
-                                       entry=trace_entry)
-                current_status = STATUS_DEGRADED
-                # 子图失败不影响主图继续执行（继续下一个节点）
-
-        # 子图结束：生成 subgraph_commit_summary 写入 payload
-        summary = build_subgraph_commit_summary(
-            subgraph_id=self.subgraph_id,
-            subgraph_trace=subgraph_trace,
-        )
-        payload["subgraph_commit_summary"] = summary
-
-        # 子图状态降级时，主图状态同步降级（但不覆盖 FAILED）
-        # 优先级：FAILED > DEGRADED > OK
-        # 修复：取 current_status 和 state["status"] 中"更严重"的那个，
-        # 避免子图 DEGRADED 覆盖主图已有的 FAILED 状态
-        _STATUS_SEVERITY = {STATUS_FAILED: 2, STATUS_DEGRADED: 1, STATUS_OK: 0}
-        original_status = str(state.get("status") or STATUS_OK)
-        final_status = (
-            original_status
-            if _STATUS_SEVERITY.get(original_status, 0) >= _STATUS_SEVERITY.get(current_status, 0)
-            else current_status
-        )
-
-        return {
-            **state,
-            "payload": payload,
-            "subgraph_trace": subgraph_trace,
-            "status": final_status,
-        }
-
-    def _invoke_with_routing(self, state: GraphState) -> GraphState:
-        """FIX-3.1+3.3：带条件分支路由的执行模式（edge_map + fallback_map）。
-
-        从 node_ids[0] 开始，按 edge_map 路由到下一节点；
-        节点失败时按 fallback_map 路由到降级节点；
-        无路由时停止执行。防止循环：最多执行 len(node_ids) * 2 跳。
-        """
-        subgraph_trace = list(state.get("subgraph_trace") or [])
-        payload = dict(state.get("payload") or {})
-        current_status = str(state.get("status") or STATUS_OK)
-        current_node = self.node_ids[0] if self.node_ids else None
-        visited: set[str] = set()
-        max_hops = len(self.node_ids) * 2 + 2
-
-        while current_node and len(visited) < max_hops:
-            if current_node in visited:
-                break  # 防止循环
-            visited.add(current_node)
-            ts_ms = int(time.time() * 1000)
-            handler = self.handlers.get(current_node)
-
-            if handler is None:
-                subgraph_trace.append({
-                    "node_id": current_node,
-                    "status": STATUS_FAILED,
-                    "ts_ms": ts_ms,
-                    "reason_code": "SUBGRAPH_HANDLER_MISSING",
-                    "detail": f"子图节点处理器缺失: {current_node}",
-                })
-                current_status = STATUS_DEGRADED
-                current_node = self.fallback_map.get(current_node)
-                continue
-
-            try:
-                output = handler(payload, {
-                    "request_id": str(state.get("request_id") or ""),
-                    "node_id": current_node,
-                    "graph_id": str(state.get("graph_id") or ""),
-                    "subgraph_id": self.subgraph_id,
-                    "timeout_ms": int(state.get("timeout_ms") or 5000),
-                })
-                _strip_committed_fields(output)
-                payload.update(output or {})
-                trace_entry = {
-                    "node_id": current_node,
-                    "status": STATUS_OK,
-                    "ts_ms": ts_ms,
-                    "reason_code": None,
-                    "detail": "subgraph node executed (routed)",
-                }
-                subgraph_trace.append(trace_entry)
-                self._write_node_trace(
-                    request_id=str(state.get("request_id") or ""),
-                    graph_id=str(state.get("graph_id") or ""),
-                    entry=trace_entry,
-                )
-                current_node = self.edge_map.get(current_node)
-            except Exception as exc:
-                trace_entry = {
-                    "node_id": current_node,
-                    "status": STATUS_FAILED,
-                    "ts_ms": ts_ms,
-                    "reason_code": "SUBGRAPH_NODE_ERROR",
-                    "detail": f"子图节点执行失败: {current_node}: {exc}",
-                }
-                subgraph_trace.append(trace_entry)
-                self._write_node_trace(
-                    request_id=str(state.get("request_id") or ""),
-                    graph_id=str(state.get("graph_id") or ""),
-                    entry=trace_entry,
-                )
-                current_status = STATUS_DEGRADED
-                current_node = self.fallback_map.get(current_node)
-
-        summary = build_subgraph_commit_summary(
-            subgraph_id=self.subgraph_id,
-            subgraph_trace=subgraph_trace,
-        )
-        payload["subgraph_commit_summary"] = summary
-
-        _STATUS_SEVERITY = {STATUS_FAILED: 2, STATUS_DEGRADED: 1, STATUS_OK: 0}
-        original_status = str(state.get("status") or STATUS_OK)
-        final_status = (
-            original_status
-            if _STATUS_SEVERITY.get(original_status, 0) >= _STATUS_SEVERITY.get(current_status, 0)
-            else current_status
-        )
-        return {
-            **state,
-            "payload": payload,
-            "subgraph_trace": subgraph_trace,
-            "status": final_status,
-        }
-
-    def _write_node_trace(self, *, request_id: str, graph_id: str, entry: dict[str, Any]) -> None:
-        """M37-E：子图节点执行后实时写入 Evidence Plane（静默降级）。"""
-        if self._evidence_plane is None:
-            return
-        try:
-            self._evidence_plane.write_trace(
-                request_id=request_id,
-                graph_id=graph_id,
-                trace=[entry],
-            )
-        except Exception:
-            pass  # 静默降级，不影响子图执行
+from host_brain.integrations.graph_langgraph_subgraph import build_governed_subgraph
 
 
 def compile_governed_subgraph(
@@ -262,82 +33,49 @@ def compile_governed_subgraph(
     node_ids: list[str],
     handlers: dict[str, NodeHandler],
     evidence_plane: Any = None,
-) -> CompiledSubgraph:
-    """编译透明子图工厂函数（Transparent Subgraph Rule，ModelPlane.md §10 Rule 3）。
+    *,
+    edge_map: dict[str, str] | None = None,
+    fallback_map: dict[str, str] | None = None,
+) -> Any:
+    """编译透明子图（FIX-5.3：委托给 LangGraph 原生子图）。
 
-    子图内部节点必须对 Evidence Plane 透明：
-    - 每个节点执行后写入 subgraph_trace
-    - 子图结束时输出 subgraph_commit_summary
-    - 子图不允许直接写入 committed_* 字段
+    接口与原自研版本兼容，内部改为调用 build_governed_subgraph()。
 
     Args:
-        subgraph_id: 子图唯一 ID（用于 Evidence Plane 追踪）
+        subgraph_id: 子图唯一 ID
         node_ids: 子图节点 ID 列表（按执行顺序）
-        handlers: 节点处理器字典 {node_id: handler_fn}
-        evidence_plane: Evidence Plane 实例（可选，M37-E 新增，默认 None）
+        handlers: 节点处理器字典 {node_id: handler_fn(payload, context) -> dict}
+        evidence_plane: Evidence Plane 实例（可选）
+        edge_map: 条件分支路由（可选，None 时线性执行）
+        fallback_map: 降级路由（可选）
 
     Returns:
-        CompiledSubgraph（可调用 .invoke(state) 执行）
-
-    Raises:
-        ValueError: subgraph_id 为空或 node_ids 为空
+        subgraph_adapter 函数（可调用 adapter(state) 执行）
     """
-    if not str(subgraph_id or "").strip():
-        raise ValueError("subgraph_id 不能为空")
-    if not node_ids:
-        raise ValueError("node_ids 不能为空")
+    # 将 handlers 适配为 node_fns 格式（handlers 接受 (payload, context)，与 node_fns 一致）
+    node_fns: dict[str, Callable] = {nid: handlers[nid] for nid in node_ids if nid in handlers}
 
-    return CompiledSubgraph(
-        subgraph_id=str(subgraph_id).strip(),
-        node_ids=[str(nid).strip() for nid in node_ids if str(nid or "").strip()],
-        handlers=dict(handlers or {}),
-        _compiled=True,
-        _evidence_plane=evidence_plane,
+    # 构建 edges 列表（从 edge_map 转换）
+    edges: list[tuple[str, str]] | None = None
+    if edge_map:
+        edges = list(edge_map.items())
+
+    return build_governed_subgraph(
+        subgraph_id=subgraph_id,
+        node_fns=node_fns,
+        edges=edges,
+        evidence_plane=evidence_plane,
     )
 
-
-def _strip_committed_fields(output: dict[str, Any]) -> None:
-    """权限约束：从子图节点输出中移除受保护字段（FIX-3.2 显式黑名单）。
-
-    子图节点不允许写入 committed_* 字段及其他 Governor 控制字段。
-    改用 SUBGRAPH_PROTECTED_FIELDS 显式黑名单，不依赖字段名前缀，
-    确保新增 Governor 字段即使未加 committed_ 前缀也能被正确保护。
-    此函数在子图节点输出合并到 payload 前调用。
-    """
-    if not isinstance(output, dict):
-        return
-    for key in SUBGRAPH_PROTECTED_FIELDS:
-        output.pop(key, None)
-
-
-# ---------------------------------------------------------------------------
-# M-MA2：Multi-Agent 透明子图工厂（第二阶段）
-# ---------------------------------------------------------------------------
 
 def compile_intent_agent_subgraph(
     handlers: dict[str, NodeHandler],
     evidence_plane: Any = None,
-) -> CompiledSubgraph:
+) -> Any:
     """编译执行意图 agent 透明子图（IntentAgentSubgraph）。
 
     封装 SCENE_EXEC_INTENT 的核心推理链为透明子图：
         core_reasoner_primary → planner_constraints → tool_planner
-
-    子图约束（继承自 compile_governed_subgraph）：
-    - 每个节点执行后写入 subgraph_trace
-    - 子图结束时输出 subgraph_commit_summary
-    - 子图不允许写入 committed_* 字段
-    - 子图失败时 status = STATUS_DEGRADED，不影响主图继续执行
-
-    Args:
-        handlers: 节点处理器字典，必须包含以下节点的处理器：
-            - core_reasoner_primary
-            - planner_constraints
-            - tool_planner
-        evidence_plane: Evidence Plane 实例（可选，M37-E 新增）
-
-    Returns:
-        CompiledSubgraph（可调用 .invoke(state) 执行）
     """
     _INTENT_SUBGRAPH_NODES = [
         "core_reasoner_primary",
@@ -355,23 +93,11 @@ def compile_intent_agent_subgraph(
 def compile_code_refine_subgraph(
     handlers: dict[str, NodeHandler],
     evidence_plane: Any = None,
-) -> CompiledSubgraph:
+) -> Any:
     """编译代码精炼 agent 透明子图（CodeRefineSubgraph）。
 
     封装代码场景的多步精炼链为透明子图：
         workbench_code_assist → consistency_verifier
-
-    适用于需要多轮精炼的复杂代码任务。
-    简单代码任务仍走单节点 workbench_code_assist。
-
-    Args:
-        handlers: 节点处理器字典，必须包含以下节点的处理器：
-            - workbench_code_assist
-            - consistency_verifier
-        evidence_plane: Evidence Plane 实例（可选）
-
-    Returns:
-        CompiledSubgraph（可调用 .invoke(state) 执行）
     """
     _CODE_REFINE_SUBGRAPH_NODES = [
         "workbench_code_assist",
@@ -385,6 +111,14 @@ def compile_code_refine_subgraph(
     )
 
 
+def _strip_committed_fields(output: dict[str, Any]) -> None:
+    """权限约束：从子图节点输出中移除受保护字段（FIX-3.2 显式黑名单）。"""
+    if not isinstance(output, dict):
+        return
+    for key in SUBGRAPH_PROTECTED_FIELDS:
+        output.pop(key, None)
+
+
 def write_agent_artifact_to_state(
     state: dict[str, Any],
     *,
@@ -394,19 +128,7 @@ def write_agent_artifact_to_state(
     confidence: float = 0.0,
     risk_flags: list[str] | None = None,
 ) -> None:
-    """将子 agent 输出工件写入 GraphState 顶层 agent_artifacts 字段（M-MA3）。
-
-    子 agent 执行完毕后调用此函数，将工件摘要写入 GraphState.agent_artifacts，
-    供 JudgeAgent 和 Supervisor 读取。
-
-    Args:
-        state: 当前图状态字典（GraphState，原地修改）
-        agent_id: 子 agent ID
-        artifact_ref: 工件引用（artifact://...）
-        summary: 工件摘要
-        confidence: 置信度（0.0 ~ 1.0）
-        risk_flags: 风险标记列表
-    """
+    """将子 agent 输出工件写入 GraphState 顶层 agent_artifacts 字段（M-MA3）。"""
     if not isinstance(state, dict):
         return
     artifacts = state.setdefault("agent_artifacts", {})
@@ -422,5 +144,5 @@ def write_agent_artifact_to_state(
     }
 
 
-# 向后兼容别名（第三阶段迁移期间保留，后续版本删除）
+# 向后兼容别名
 write_agent_artifact_to_payload = write_agent_artifact_to_state

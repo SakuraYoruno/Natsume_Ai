@@ -303,6 +303,7 @@ def _parse_llm_react_output(raw_output: str) -> dict[str, Any]:
         }
 
 
+
 def run_react_loop(
     *,
     agent_id: str,
@@ -313,8 +314,13 @@ def run_react_loop(
     max_steps: int = 3,
     allow_side_effects: bool = False,
     context: dict[str, Any] | None = None,
+    governor: Any = None,
+    evidence_plane: Any = None,
 ) -> ReactResult:
-    """执行 ReAct 循环。
+    """执行 ReAct 循环（FIX-5.2：基于 LangGraph GovernedToolNode）。
+
+    使用 LangGraph 原生 ToolNode 执行工具调用，Governor 门控和 Evidence Plane 审计
+    通过 GovernedToolNode 保留（不可绕过）。
 
     Args:
         agent_id: 执行此循环的 agent ID
@@ -325,14 +331,27 @@ def run_react_loop(
         max_steps: 最大循环步数（硬限制，默认 3）
         allow_side_effects: 是否允许有副作用的工具调用
         context: 执行上下文（含 request_id 等）
+        governor: Governor 实例（可选，None 时跳过门控）
+        evidence_plane: Evidence Plane 实例（可选，None 时跳过审计）
 
     Returns:
         ReactResult（含 final_answer、steps、stopped_reason）
     """
+    from host_brain.integrations.graph_governed_tool_node import GovernedToolNode  # noqa: PLC0415
+
     ctx = dict(context or {})
     steps: list[ReactStep] = []
     risk_flags: list[str] = []
     templates = _load_template_mapping("react_loop.prompt_templates")
+
+    # 构建 GovernedToolNode（LangGraph ToolNode + Governor 门控）
+    # 将 ToolSpec 列表转换为 LangChain Tool 格式
+    lc_tools = _tool_specs_to_lc_tools(tools, agent_id=agent_id, allow_side_effects=allow_side_effects, ctx=ctx)
+    governed_tool_node = GovernedToolNode(
+        tools=lc_tools,
+        governor=governor,
+        evidence_plane=evidence_plane,
+    )
 
     # 构建 system prompt
     tools_desc = _build_tools_description(tools)
@@ -344,7 +363,6 @@ def run_react_loop(
     if system_prompt_extra:
         system_prompt = system_prompt + "\n\n" + system_prompt_extra.strip()
 
-    # 构建初始消息列表
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_input},
@@ -357,19 +375,11 @@ def run_react_loop(
         # --- Think：调用 LLM ---
         try:
             if gateway is None:
-                # 无 gateway：直接返回 final_answer（降级）
-                final_answer = _mapping_text(
-                    templates,
-                    "no_llm_final_answer",
-                    agent_id=agent_id,
-                )
+                final_answer = _mapping_text(templates, "no_llm_final_answer", agent_id=agent_id)
                 stopped_reason = "NO_LLM"
                 steps.append(ReactStep(
                     step=step_num,
-                    thought=_mapping_text(
-                        templates,
-                        "no_llm_thought",
-                    ),
+                    thought=_mapping_text(templates, "no_llm_thought"),
                     action_type="final_answer",
                     action=None,
                     observation=None,
@@ -377,7 +387,7 @@ def run_react_loop(
                 ))
                 break
 
-        # FIX-2.2：每步 LLM 调用前修剪消息历史，防止超出 context window
+            # FIX-2.2：每步 LLM 调用前修剪消息历史，防止超出 context window
             messages = _trim_messages(messages)
             llm_response = gateway.complete(messages)
             raw_output = str(
@@ -388,21 +398,13 @@ def run_react_loop(
             ).strip()
 
         except Exception as exc:
-            # LLM 调用失败：降级
-            final_answer = _mapping_text(
-                templates,
-                "llm_error_final_answer",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
+            final_answer = _mapping_text(templates, "llm_error_final_answer",
+                                         error_type=type(exc).__name__, error=str(exc))
             stopped_reason = "ERROR"
             risk_flags.append(f"LLM_ERROR:{type(exc).__name__}")
             steps.append(ReactStep(
                 step=step_num,
-                thought=_mapping_text(
-                    templates,
-                    "llm_error_thought",
-                ),
+                thought=_mapping_text(templates, "llm_error_thought"),
                 action_type="error",
                 action=None,
                 observation={"error": str(exc)},
@@ -416,7 +418,6 @@ def run_react_loop(
         action_type = str(parsed.get("action_type") or "final_answer").strip()
 
         if action_type == "final_answer":
-            # 停止循环，返回最终答案
             final_answer = str(parsed.get("final_answer") or raw_output).strip()
             stopped_reason = "FINAL_ANSWER"
             steps.append(ReactStep(
@@ -430,66 +431,57 @@ def run_react_loop(
             break
 
         elif action_type == "tool_call":
-            # --- Act：执行工具调用 ---
+            # --- Act：通过 GovernedToolNode 执行工具调用 ---
             action = dict(parsed.get("action") or {})
             tool_id = str(action.get("tool") or "").strip()
             tool_args = dict(action.get("args") or {})
-            runtime_tool_args = dict(tool_args)
-            if ctx:
-                runtime_tool_args["_react_context"] = dict(ctx)
 
-            # FIX-2.1：检查是否为多工具调用（LLM 可能在 action 中返回列表）
-            multi_calls = parsed.get("actions")  # 多工具调用格式：{"actions": [{"tool":..., "args":...}, ...]}
+            # 构建 tool_calls 格式（GovernedToolNode 接受的格式）
+            multi_calls = parsed.get("actions")
             if isinstance(multi_calls, list) and len(multi_calls) > 1:
-                # 多工具并发执行
-                observations = _execute_tools_parallel(
-                    multi_calls,
-                    agent_id=agent_id,
-                    allow_side_effects=allow_side_effects,
-                    context=ctx,
-                )
-                observation = {"multi_tool_results": observations}
-                for obs in observations:
-                    if isinstance(obs, dict) and str(obs.get("error") or "").startswith("TOOL_NOT_ALLOWED"):
-                        risk_flags.append(str(obs["error"]))
+                tool_calls_input = [{"tool": c.get("tool", ""), "args": c.get("args", {})} for c in multi_calls]
             else:
-                # 单工具调用（原有逻辑）
-                if not is_tool_allowed(tool_id, agent_id, allow_side_effects=allow_side_effects):
-                    observation = {
-                        "error": f"TOOL_NOT_ALLOWED:{tool_id}",
-                        "result": None,
-                    }
-                    risk_flags.append(f"TOOL_NOT_ALLOWED:{tool_id}")
-                else:
-                    # 执行工具
-                    observation = execute_tool(tool_id, runtime_tool_args)
+                tool_calls_input = [{"tool": tool_id, "args": tool_args}]
 
-            step_record = ReactStep(
+            # 通过 GovernedToolNode 执行（Governor 门控 + LangGraph ToolNode + Evidence Plane）
+            node_state = {
+                "tool_calls": tool_calls_input,
+                "request_id": str(ctx.get("request_id") or ""),
+                "agent_id": agent_id,
+            }
+            node_result = governed_tool_node(node_state)
+
+            # 检查 Governor 是否拒绝
+            route_token = str(node_result.get("committed_route_token") or "").strip()
+            if route_token and route_token != "GOV_APPROVE":
+                observation = {"error": f"GOV_REJECTED:{route_token}", "result": None}
+                risk_flags.append(f"GOV_REJECTED:{route_token}")
+            else:
+                tool_results = list(node_result.get("tool_results") or [])
+                if len(tool_results) == 1:
+                    observation = tool_results[0].get("result") or tool_results[0]
+                elif tool_results:
+                    observation = {"multi_tool_results": tool_results}
+                else:
+                    observation = {"result": None}
+
+            steps.append(ReactStep(
                 step=step_num,
                 thought=thought,
                 action_type="tool_call",
                 action={"tool": tool_id, "args": tool_args},
                 observation=observation,
                 final_answer=None,
-            )
-            steps.append(step_record)
+            ))
 
-            # 把工具结果追加到消息历史，供下一轮 LLM 参考
             messages.append({"role": "assistant", "content": raw_output})
             obs_text = json.dumps(observation, ensure_ascii=False)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": _mapping_text(
-                        templates,
-                        "tool_result_message",
-                        obs_text=obs_text,
-                    ),
-                }
-            )
+            messages.append({
+                "role": "user",
+                "content": _mapping_text(templates, "tool_result_message", obs_text=obs_text),
+            })
 
         else:
-            # 未知 action_type：视为 final_answer
             final_answer = raw_output
             stopped_reason = "FINAL_ANSWER"
             steps.append(ReactStep(
@@ -502,31 +494,22 @@ def run_react_loop(
             ))
             break
 
-    # 计算置信度（根据 stopped_reason 和 risk_flags）
     if stopped_reason == "FINAL_ANSWER":
         confidence = 0.85 if not risk_flags else 0.6
     elif stopped_reason == "MAX_STEPS":
         confidence = 0.5
         risk_flags.append("REACT_MAX_STEPS_REACHED")
-        # MAX_STEPS 时用最后一步的 thought 作为 final_answer
         if steps and not final_answer:
             last_step = steps[-1]
             final_answer = str(
                 last_step.final_answer
                 or last_step.thought
-                or _mapping_text(
-                    templates,
-                    "max_steps_final_answer",
-                )
+                or _mapping_text(templates, "max_steps_final_answer")
             )
     else:
         confidence = 0.3
         if not final_answer:
-            final_answer = _mapping_text(
-                templates,
-                "abnormal_stop_final_answer",
-                stopped_reason=stopped_reason,
-            )
+            final_answer = _mapping_text(templates, "abnormal_stop_final_answer", stopped_reason=stopped_reason)
 
     return ReactResult(
         agent_id=agent_id,
@@ -539,9 +522,60 @@ def run_react_loop(
     )
 
 
+def _tool_specs_to_lc_tools(
+    tools: list[ToolSpec],
+    *,
+    agent_id: str,
+    allow_side_effects: bool,
+    ctx: dict[str, Any],
+) -> list[Any]:
+    """将 ToolSpec 列表转换为 LangChain Tool 格式（供 GovernedToolNode 使用）。
+
+    FIX-5.2：GovernedToolNode 内部使用 LangGraph ToolNode，
+    需要 LangChain Tool 格式（有 name、description、func 属性）。
+    """
+    try:
+        from langchain_core.tools import StructuredTool  # noqa: PLC0415
+    except ImportError:
+        return []
+
+    lc_tools = []
+    for spec in tools:
+        if spec.has_side_effects and not allow_side_effects:
+            continue
+        if spec.executor is None:
+            continue
+
+        _spec = spec
+        _ctx = dict(ctx)
+        _agent_id = agent_id
+        _allow_se = allow_side_effects
+
+        def _make_func(s: ToolSpec, c: dict, aid: str, ase: bool) -> Any:
+            def _fn(**kwargs: Any) -> Any:
+                if not is_tool_allowed(s.tool_id, aid, allow_side_effects=ase):
+                    return {"error": f"TOOL_NOT_ALLOWED:{s.tool_id}", "result": None}
+                runtime_args = dict(kwargs)
+                if c:
+                    runtime_args["_react_context"] = dict(c)
+                return execute_tool(s.tool_id, runtime_args)
+            return _fn
+
+        lc_tool = StructuredTool.from_function(
+            func=_make_func(_spec, _ctx, _agent_id, _allow_se),
+            name=spec.tool_id,
+            description=spec.description,
+            args_schema=None,
+        )
+        lc_tools.append(lc_tool)
+    return lc_tools
+
+
 # ---------------------------------------------------------------------------
 # FIX-2.4：ReAct 循环异步流式版本
 # ---------------------------------------------------------------------------
+
+
 
 async def astream_react_loop(
     *,
