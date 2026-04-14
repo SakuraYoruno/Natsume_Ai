@@ -103,10 +103,9 @@ class GraphRuntimeContract:
         self._handlers: dict[str, NodeHandler] = {}
         self._gateway_factory = gateway_factory or self._default_gateway_factory
         self._model_plane_dir = Path(model_plane_dir) if model_plane_dir is not None else DEFAULT_MODEL_PLANE_DIR
-        # 修复：CheckpointManager 必须在实例级别共享，而非在 resume_graph 中每次 new。
-        # 原逻辑在 resume_graph 中 `manager = CheckpointManager()` 创建全新实例，
-        # 其内部 CheckpointStore 是纯内存存储，与 interrupt() 时保存 checkpoint 的实例不同，
-        # 导致 load_state() 永远返回 None，resume_graph 始终返回 CHECKPOINT_NOT_FOUND。
+        # FIX-5.1（彻底迁移）：CheckpointManager 现在是 LangGraph SqliteSaver 的薄包装，
+        # 仅用于 interrupt() 生成 InterruptSignal 和 resume() 的 Policy Clock 检查。
+        # 真正的 checkpoint 存储由 LangGraph SqliteSaver 负责（在 compile_runtime_graph 时注入）。
         from host_brain.integrations.graph_checkpoint import CheckpointManager as _CM
         self._checkpoint_manager = _CM()
         # FIX-4.1：获取 GovernorRulesCache 单例（TRIBE 族 → Governor 参数通道）
@@ -179,13 +178,13 @@ class GraphRuntimeContract:
                 ts_ms=now_value,
             )
 
-        # 3. 执行层：编译并运行图
+        # 3. 执行层：编译并运行图（FIX-5.1：compile_runtime_graph 内部直接注入 LangGraph SqliteSaver）
         executor = GraphExecutor(
             handlers=self._handlers,
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
-            checkpoint_manager=self._checkpoint_manager,  # 修复：共享 CheckpointManager，确保 interrupt/resume 使用同一存储
+            checkpoint_manager=self._checkpoint_manager,
         )
         compiled = executor.compile_runtime_graph()
         # M36-C：初始化双时钟字段
@@ -293,9 +292,12 @@ class GraphRuntimeContract:
             ),
         }
         initial_state["payload"] = payload_dict
-        # 修复 P1：在图执行前记录真实开始时间戳，用于计算 latency_ms
+        # FIX-5.1：使用 LangGraph thread_id（request_id）执行图，SqliteSaver 自动保存 checkpoint
         _graph_run_start_ms = now_ms()
-        state = compiled.invoke(initial_state)
+        state = compiled.invoke(
+            initial_state,
+            config={"configurable": {"thread_id": request_id}},
+        )
         _graph_run_end_ms = now_ms()
 
         # P5-4：Supervisor 决策写入 ledger，供 metrics 聚合
@@ -348,14 +350,19 @@ class GraphRuntimeContract:
         request_id: str,
         now_ms: int | None = None,
     ) -> GraphRunResult:
-        """从 checkpoint 恢复图执行（M39-F）。
+        """从 checkpoint 恢复图执行（FIX-5.1：LangGraph 原生 thread_id 恢复）。
 
-        恢复前调用 HostPolicyGuard 验证：
+        恢复前调用 HostPolicyGuard 验证 Policy Clock（不变）：
         - 验证失败时写入 SyntheticTimeoutEvent 并返回 STATUS_FAILED
-        - 验证通过时从 checkpoint 加载 state 并继续执行
+        - 验证通过时使用 LangGraph 原生 thread_id 恢复（真正的断点恢复，不重新执行整张图）
+
+        FIX-5.1 变更：
+        - 不再调用 manager.load_state()（已废弃）
+        - 使用 compiled.invoke(None, config={"configurable": {"thread_id": checkpoint_id}}) 恢复
+        - checkpoint_id 即 LangGraph thread_id（run_graph 时使用 request_id 作为 thread_id）
 
         Args:
-            checkpoint_id: checkpoint ID
+            checkpoint_id: checkpoint ID（即 LangGraph thread_id，通常等于 request_id）
             request_id: 请求 ID
             now_ms: 当前时间戳（毫秒），默认为 now_ms()
 
@@ -363,7 +370,6 @@ class GraphRuntimeContract:
             GraphRunResult（恢复执行结果或 synthetic timeout 结果）
         """
         from host_brain.integrations.graph_checkpoint import (
-            CheckpointManager,
             InterruptSignal,
             SyntheticTimeoutEvent,
         )
@@ -371,51 +377,66 @@ class GraphRuntimeContract:
             INTERRUPT_REASON_HUMAN_REVIEW,
             RESUME_DENIED_DEADLINE_EXCEEDED,
         )
-
         from host_brain.core.ids import now_ms as _now_ms
+
         current_ms = int(now_ms if now_ms is not None else _now_ms())
-        # 修复：使用实例级别共享的 _checkpoint_manager，而非每次 new CheckpointManager()
         manager = self._checkpoint_manager
 
-        # 1. 加载 checkpoint
-        state = manager.load_state(checkpoint_id)
-        if state is None:
-            return GraphRunResult(
-                status=STATUS_FAILED,
-                reason_code="CHECKPOINT_NOT_FOUND",
-                stage=S_ORCH_RUN,
-                detail=f"checkpoint 不存在: {checkpoint_id}",
-                output={
-                    "request_id": request_id,
-                    "checkpoint_id": checkpoint_id,
-                    "status": STATUS_FAILED,
-                    "reason_code": "CHECKPOINT_NOT_FOUND",
-                },
-            )
+        # 1. Policy Clock 检查（保留不变）
+        # 从 LangGraph SqliteSaver 中读取最新 checkpoint 的 state 元数据
+        # 用于构建 InterruptSignal（resume_deadline_at / policy_timeout_ms）
+        try:
+            checkpointer = manager._policy_guard  # HostPolicyGuard
+            # 尝试从 LangGraph SqliteSaver 读取 checkpoint 元数据
+            from host_brain.integrations.graph_checkpoint import get_langgraph_checkpointer  # noqa: PLC0415
+            lg_checkpointer = get_langgraph_checkpointer()
+            config = {"configurable": {"thread_id": checkpoint_id}}
+            checkpoint_tuple = lg_checkpointer.get_tuple(config)
+            if checkpoint_tuple is None:
+                return GraphRunResult(
+                    status=STATUS_FAILED,
+                    reason_code="CHECKPOINT_NOT_FOUND",
+                    stage=S_ORCH_RUN,
+                    detail=f"LangGraph checkpoint 不存在: thread_id={checkpoint_id}",
+                    output={
+                        "request_id": request_id,
+                        "checkpoint_id": checkpoint_id,
+                        "status": STATUS_FAILED,
+                        "reason_code": "CHECKPOINT_NOT_FOUND",
+                    },
+                )
+            # 从 checkpoint 元数据中提取 Policy Clock 字段
+            channel_values = checkpoint_tuple.checkpoint.get("channel_values") or {}
+            resume_deadline_at = int(channel_values.get("resume_deadline_at") or (current_ms + 300_000))
+            policy_timeout_ms = int(channel_values.get("policy_timeout_ms") or DEFAULT_POLICY_TIMEOUT_MS)
+            policy_start_ms = int(channel_values.get("policy_start_ms") or current_ms)
+            interrupt_reason = str(channel_values.get("interrupt_reason") or INTERRUPT_REASON_HUMAN_REVIEW)
+        except Exception as exc:
+            _logger.warning("resume_graph: 读取 LangGraph checkpoint 元数据失败（%s），使用默认值", exc)
+            resume_deadline_at = current_ms + 300_000
+            policy_timeout_ms = DEFAULT_POLICY_TIMEOUT_MS
+            policy_start_ms = current_ms
+            interrupt_reason = INTERRUPT_REASON_HUMAN_REVIEW
 
-        # 2. 构建 InterruptSignal（从 state 中恢复）
-        resume_deadline_at = int(state.get("resume_deadline_at") or (current_ms + 300_000))
         interrupt_signal = InterruptSignal(
             checkpoint_id=checkpoint_id,
-            interrupt_reason=str(state.get("interrupt_reason") or INTERRUPT_REASON_HUMAN_REVIEW),
-            interrupted_at_ms=int(state.get("policy_start_ms") or current_ms),
+            interrupt_reason=interrupt_reason,
+            interrupted_at_ms=policy_start_ms,
             resume_deadline_at=resume_deadline_at,
         )
         decision = manager.resume(
             interrupt_signal,
             now_ms=current_ms,
-            policy_timeout_ms=int(state.get("policy_timeout_ms") or DEFAULT_POLICY_TIMEOUT_MS),
-            policy_start_ms=int(state.get("policy_start_ms") or current_ms),
+            policy_timeout_ms=policy_timeout_ms,
+            policy_start_ms=policy_start_ms,
         )
 
         if not decision.allowed:
-            # 验证失败：写入 SyntheticTimeoutEvent
             synthetic = decision.synthetic_event or SyntheticTimeoutEvent(
                 checkpoint_id=checkpoint_id,
                 error_code=RESUME_DENIED_DEADLINE_EXCEEDED,
                 ts_ms=current_ms,
             ).to_dict()
-            _evidence_executor.submit(self._write_evidence, request_id=request_id, state=state)
             return GraphRunResult(
                 status=STATUS_FAILED,
                 reason_code=str(synthetic.get("error_code") or "RESUME_DENIED"),
@@ -431,25 +452,22 @@ class GraphRuntimeContract:
                 },
             )
 
-        # 4. 验证通过：从 checkpoint 恢复并继续执行
+        # 2. Policy Clock 通过：使用 LangGraph 原生 thread_id 恢复（真正的断点恢复）
         executor = GraphExecutor(
             handlers=self._handlers,
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
-            checkpoint_manager=self._checkpoint_manager,  # 修复：共享 CheckpointManager，确保 interrupt/resume 使用同一存储
+            checkpoint_manager=self._checkpoint_manager,
         )
         compiled = executor.compile_runtime_graph()
-        # FIX-1.3：向前兼容旧 checkpoint，补全新增的 GraphState 字段默认值
-        state = _backfill_graph_state_defaults(state)
-        # 更新 state：清除 checkpoint 中断标记，重置 resume_allowed
-        resumed_state = {
-            **state,
-            "gov_checkpoint_id": checkpoint_id,
-            "resume_allowed": True,
-            "interrupt_reason": None,
-        }
-        final_state = compiled.invoke(resumed_state)
+        # FIX-5.1：传 None 作为 input，LangGraph 从 thread_id 对应的 checkpoint 恢复
+        # 不重新执行整张图，从上次中断的节点继续执行
+        final_state = compiled.invoke(
+            None,
+            config={"configurable": {"thread_id": checkpoint_id}},
+        )
+        final_state = dict(final_state) if final_state else {}
         _evidence_executor.submit(self._write_evidence, request_id=request_id, state=final_state)
 
         return GraphRunResult(
@@ -685,67 +703,4 @@ class GraphRuntimeContract:
             detail=detail,
         )
 
-
-# ---------------------------------------------------------------------------
-# FIX-1.3：GraphState schema 版本兼容（向前兼容旧 checkpoint）
-# ---------------------------------------------------------------------------
-
-def _backfill_graph_state_defaults(state: dict) -> dict:
-    """为旧版 checkpoint 补全新增的 GraphState 字段默认值。
-
-    每次 GraphState 新增必填字段时，旧 checkpoint 恢复时会因缺少字段而 KeyError。
-    此函数在 resume_graph() 加载 checkpoint 后调用，确保向前兼容。
-
-    实现说明（FIX-1.4 双时钟文档对齐）：
-    当前 resume_graph() 从 state.pending_node_id 重新执行图，而非使用 LangGraph 原生
-    checkpoint 恢复机制。这是历史遗留的简化实现：
-    - 优点：不依赖 LangGraph 内部 checkpoint 格式，版本升级无兼容问题
-    - 代价：有副作用的节点重新执行可能导致重复写入
-    - 缓解：所有有副作用的节点必须实现幂等性（idempotent）
-    - 中期目标：迁移到 LangGraph SqliteSaver（见 FIX-PLAN §5.1）
-    """
-    defaults: dict = {
-        # Multi-Agent 字段
-        "active_agent_id": None,
-        "handoff_history": [],
-        "agent_budget": None,
-        "agent_artifacts": None,
-        "judge_result": None,
-        "execution_profile": None,
-        # Phase-Locked Streaming 字段
-        "presence_events": [],
-        "commit_snapshot": None,
-        "render_snapshot_ref": None,
-        "streaming_phase": None,
-        # Checkpoint / Interrupt / Resume 字段
-        "gov_checkpoint_id": None,
-        "interrupt_reason": None,
-        "resume_allowed": None,
-        "resume_deadline_at": None,
-        # barrier_join / RenderGuard 字段
-        "barrier_join_result": None,
-        "render_guard_result": None,
-        # 情感上下文字段
-        "emotion_context": None,
-        "emotion_tag": None,
-        "mood_state": None,
-        "emotion_range_hint": None,
-        # 双时钟字段
-        "policy_start_ms": None,
-        "policy_timeout_ms": None,
-        "clock_events": [],
-        "node_exec_stats": {},
-        # 并行分支字段
-        "branch_specs": [],
-        "branch_manifest": None,
-        # TRIBE 族写入的 Governor 规则参数（L3 认知层，默认空）
-        "tribe_governor_params": {},
-        "immune_threat_level": None,
-        "endocrine_state": None,
-    }
-    result = dict(state)
-    for key, default_val in defaults.items():
-        if key not in result:
-            result[key] = default_val
-    return result
 
