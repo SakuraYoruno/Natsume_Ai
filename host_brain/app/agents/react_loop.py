@@ -537,3 +537,89 @@ def run_react_loop(
         confidence=confidence,
         risk_flags=risk_flags,
     )
+
+
+# ---------------------------------------------------------------------------
+# FIX-2.4：ReAct 循环异步流式版本
+# ---------------------------------------------------------------------------
+
+async def astream_react_loop(
+    *,
+    agent_id: str,
+    user_input: str,
+    tools: list[ToolSpec],
+    gateway: Any,
+    system_prompt_extra: str = "",
+    max_steps: int = 3,
+    allow_side_effects: bool = False,
+    context: dict[str, Any] | None = None,
+):
+    """ReAct 循环的异步流式版本，逐步 yield 每个 ReactStep，最后 yield ReactResult。
+
+    实现说明（FIX-2.4）：
+    当前为简化实现——在独立线程中运行同步 run_react_loop()，
+    完成后批量 yield 所有 steps，最后 yield ReactResult。
+    这保证了与现有同步代码的完全兼容，同时提供异步接口供 FastAPI 等框架使用。
+
+    真正的逐步流式（每个 LLM token 实时推送）需要修改 gateway.complete() 为流式接口，
+    见 FIX-PLAN §5.2 中期迁移方案。
+
+    Args:
+        agent_id: 执行此循环的 agent ID
+        user_input: 用户输入
+        tools: 可用工具列表
+        gateway: LLM gateway 实例
+        system_prompt_extra: 额外的 system prompt 内容
+        max_steps: 最大循环步数（硬限制，默认 3）
+        allow_side_effects: 是否允许有副作用的工具调用
+        context: 执行上下文
+
+    Yields:
+        ReactStep（每个执行步骤）
+        ReactResult（最终结果，最后一个 yield）
+    """
+    import asyncio
+    import threading
+
+    loop = asyncio.get_event_loop()
+    result_future: asyncio.Future = loop.create_future()
+
+    def _sync_runner() -> None:
+        try:
+            result = run_react_loop(
+                agent_id=agent_id,
+                user_input=user_input,
+                tools=tools,
+                gateway=gateway,
+                system_prompt_extra=system_prompt_extra,
+                max_steps=max_steps,
+                allow_side_effects=allow_side_effects,
+                context=context,
+            )
+            loop.call_soon_threadsafe(result_future.set_result, result)
+        except Exception as exc:
+            loop.call_soon_threadsafe(result_future.set_exception, exc)
+
+    thread = threading.Thread(target=_sync_runner, daemon=True)
+    thread.start()
+
+    try:
+        final_result: ReactResult = await asyncio.wait_for(result_future, timeout=120.0)
+    except asyncio.TimeoutError:
+        # 超时：构造降级结果
+        final_result = ReactResult(
+            agent_id=agent_id,
+            final_answer="[ReAct 循环超时]",
+            steps=[],
+            stopped_reason="ERROR",
+            total_steps=0,
+            confidence=0.0,
+            risk_flags=["ASTREAM_TIMEOUT"],
+        )
+
+    # 逐步 yield 每个 ReactStep
+    for step in final_result.steps:
+        yield step
+
+    # 最后 yield ReactResult
+    yield final_result

@@ -1157,17 +1157,81 @@ def _resolve_intent_dynamic_tool_ids(*, allow_side_effects: bool) -> list[str]:
     return tool_ids
 
 
-def get_tools_for_agent(agent_id: str, allow_side_effects: bool = False) -> list[ToolSpec]:
+def _tool_meta_to_spec(meta: "Any") -> ToolSpec:
+    """FIX-2.3：将 ToolCatalog 的 ToolMeta 转换为 ToolSpec（适配器）。
+
+    ToolMeta 是 catalog.py 中的元数据契约（只含描述信息），
+    ToolSpec 是 tool_registry.py 中的执行契约（含 executor）。
+    转换时优先从 _TOOL_REGISTRY 查找已有 executor，否则 executor=None（仅描述）。
+
+    Args:
+        meta: ToolMeta 实例
+
+    Returns:
+        ToolSpec 实例
+    """
+    tool_id = str(getattr(meta, "id", "") or "").strip()
+    # 优先复用 _TOOL_REGISTRY 中已有的 executor
+    existing = _TOOL_REGISTRY.get(tool_id)
+    executor = existing.executor if existing is not None else None
+    side_effect_level = str(getattr(meta, "side_effect_level", "READ") or "READ").strip().upper()
+    has_side_effects = side_effect_level == "WRITE"
+    return ToolSpec(
+        tool_id=tool_id,
+        display_name=str(getattr(meta, "name", tool_id) or tool_id),
+        description=str(getattr(meta, "desc", "") or ""),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        has_side_effects=has_side_effects,
+        executor=executor,
+    )
+
+
+def get_tools_for_agent(
+    agent_id: str,
+    allow_side_effects: bool = False,
+    *,
+    catalog: "Any | None" = None,
+) -> list[ToolSpec]:
     """获取指定 agent 可用的工具列表。
+
+    FIX-2.3：增加 catalog 参数，支持从 ToolCatalog 动态获取工具。
+    优先级：catalog（动态）> 静态 _TOOL_REGISTRY（向后兼容）。
+    MCP 动态注册的工具通过 catalog 注入后，即可进入 ReAct 循环。
 
     Args:
         agent_id: agent ID
         allow_side_effects: 是否允许有副作用的工具（仅 EXEC_INTENT 场景为 True）
+        catalog: ToolCatalog 实例（可选）。非 None 时优先从 catalog 获取工具元数据，
+                 再从 _TOOL_REGISTRY 查找 executor；None 时走原有静态注册表路径。
 
     Returns:
         可用工具列表
     """
     normalized_agent_id = str(agent_id or "").strip()
+
+    # FIX-2.3：catalog 路径（动态工具发现）
+    if catalog is not None:
+        allowlist = _AGENT_TOOLS.get(normalized_agent_id, [])
+        tools: list[ToolSpec] = []
+        for tool_id in allowlist:
+            try:
+                meta = catalog.get(tool_id)
+                spec = _tool_meta_to_spec(meta)
+            except (KeyError, Exception):
+                # catalog 中不存在时降级到静态注册表
+                spec = _TOOL_REGISTRY.get(tool_id)
+            if spec is None:
+                continue
+            if spec.has_side_effects and not allow_side_effects:
+                continue
+            tools.append(spec)
+        return tools
+
+    # 原有静态注册表路径（向后兼容）
     if normalized_agent_id == _INTENT_AGENT_ID:
         tool_ids = _resolve_intent_dynamic_tool_ids(allow_side_effects=allow_side_effects)
     else:

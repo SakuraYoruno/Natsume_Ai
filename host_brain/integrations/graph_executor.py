@@ -118,6 +118,17 @@ class GraphExecutor:
         graph.add_edge(START, "step")
         graph.add_conditional_edges("step", self._route_after_step, {"step": "step", "finish": "finish"})
         graph.add_edge("finish", END)
+        # FIX-5.1：若 LANGGRAPH_CHECKPOINT_ENABLED=true，注入 LangGraph SqliteSaver
+        # 否则保持原有行为（自研 CheckpointManager 在 graph_runtime.py 层处理）
+        try:
+            from host_brain.integrations.graph_langgraph_checkpoint import (  # noqa: PLC0415
+                compile_with_langgraph_checkpoint,
+                is_langgraph_checkpoint_enabled,
+            )
+            if is_langgraph_checkpoint_enabled():
+                return compile_with_langgraph_checkpoint(graph)
+        except ImportError:
+            pass  # 静默降级
         return graph.compile()
 
     def _run_single_step(self, state: GraphState) -> GraphState:
