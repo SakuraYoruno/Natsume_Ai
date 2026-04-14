@@ -556,6 +556,12 @@ async def _dispatch_to_sub_agent(
 
     started = time.time()
     dispatcher = get_sub_agent_dispatcher()
+    timeout_ms = _parse_int_env(
+        "HOST_SUBAGENT_DISPATCH_TIMEOUT_MS",
+        default=90_000,
+        minimum=5_000,
+        maximum=300_000,
+    )
     response = await dispatcher.dispatch(
         SubAgentRequest(
             agent_id=target_id,
@@ -564,6 +570,7 @@ async def _dispatch_to_sub_agent(
             request_id=request_id,
             session_id=session_id,
             context=dict(context or {}),
+            timeout_ms=timeout_ms,
         )
     )
     latency_ms = int((time.time() - started) * 1000)

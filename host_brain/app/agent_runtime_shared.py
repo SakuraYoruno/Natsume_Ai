@@ -1053,21 +1053,54 @@ class _SubAgentGatewayAdapter:
         from langchain_openai import ChatOpenAI  # noqa: PLC0415
         from host_brain.app.prompt_builder import extract_langchain_content_text  # noqa: PLC0415
 
+        self._chat_openai_cls = ChatOpenAI
         self._human_message = HumanMessage
         self._system_message = SystemMessage
         self._ai_message = AIMessage
         self._extract_text = extract_langchain_content_text
-        self._llm = ChatOpenAI(
-            model=str(model_id or "").strip() or "default",
-            api_key=api_key,
-            base_url=(str(base_url_override or "").strip() or None),
-            timeout=max(1.0, float(timeout_ms) / 1000.0),
-            max_retries=1,
-            temperature=0.3,
-        )
         self.provider_name = str(provider_name or "").strip().lower()
+        self._model_id = str(model_id or "").strip() or "default"
+        self._api_key = str(api_key or "").strip()
+        self._base_url_override = str(base_url_override or "").strip() or None
+        self._timeout_sec = max(1.0, float(timeout_ms) / 1000.0)
+        self._temperature = 0.3
+        self._fallback_model_ids = self._resolve_fallback_model_ids(
+            provider_name=self.provider_name,
+            primary_model_id=self._model_id,
+        )
+        self._llm = self._build_llm(model_id=self._model_id, api_key=self._api_key)
 
-    def complete(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    @staticmethod
+    def _resolve_fallback_model_ids(*, provider_name: str, primary_model_id: str) -> list[str]:
+        if str(provider_name or "").strip().lower() != "gemini":
+            return []
+        raw = str(os.environ.get("HOST_SUBAGENT_FALLBACK_MODEL_IDS") or "").strip()
+        if not raw:
+            raw = "gemini-2.5-flash-lite,gemini-2.5-flash"
+        primary = str(primary_model_id or "").strip()
+        rows: list[str] = []
+        for chunk in raw.split(","):
+            model_id = str(chunk or "").strip()
+            if not model_id:
+                continue
+            if primary and model_id == primary:
+                continue
+            if model_id in rows:
+                continue
+            rows.append(model_id)
+        return rows
+
+    def _build_llm(self, *, model_id: str, api_key: str) -> Any:
+        return self._chat_openai_cls(
+            model=str(model_id or "").strip() or "default",
+            api_key=str(api_key or "").strip() or None,
+            base_url=self._base_url_override,
+            timeout=self._timeout_sec,
+            max_retries=1,
+            temperature=self._temperature,
+        )
+
+    def _to_lc_messages(self, messages: list[dict[str, Any]]) -> list[Any]:
         lc_messages: list[Any] = []
         for row in list(messages or []):
             if not isinstance(row, Mapping):
@@ -1082,8 +1115,48 @@ class _SubAgentGatewayAdapter:
                 lc_messages.append(self._ai_message(content=content))
             else:
                 lc_messages.append(self._human_message(content=content))
-        response = self._llm.invoke(lc_messages)
-        return {"content": self._extract_text(getattr(response, "content", ""))}
+        return lc_messages
+
+    def complete(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        lc_messages = self._to_lc_messages(messages)
+        try:
+            response = self._llm.invoke(lc_messages)
+            return {"content": self._extract_text(getattr(response, "content", ""))}
+        except Exception as primary_exc:
+            last_exc: Exception = primary_exc
+            _logger.warning(
+                "sub-agent gateway invoke failed provider=%s model=%s err=%s",
+                self.provider_name,
+                self._model_id,
+                primary_exc,
+            )
+            for fallback_model_id in list(self._fallback_model_ids or []):
+                retry_api_key = self._api_key
+                if self.provider_name == "gemini":
+                    try:
+                        from host_brain.app.graph_config_builder import resolve_gemini_model_route  # noqa: PLC0415
+
+                        retry_route = resolve_gemini_model_route(
+                            role="subagent_fallback",
+                            preferred_api_key=None,
+                            route_key=f"{fallback_model_id}:{int(time.time() * 1000)}",
+                        )
+                        retry_api_key = str(retry_route.get("api_key") or retry_api_key or "").strip() or retry_api_key
+                    except Exception:
+                        pass
+                try:
+                    retry_llm = self._build_llm(model_id=fallback_model_id, api_key=retry_api_key)
+                    response = retry_llm.invoke(lc_messages)
+                    return {"content": self._extract_text(getattr(response, "content", ""))}
+                except Exception as fallback_exc:
+                    last_exc = fallback_exc
+                    _logger.warning(
+                        "sub-agent gateway fallback failed provider=%s model=%s err=%s",
+                        self.provider_name,
+                        fallback_model_id,
+                        fallback_exc,
+                    )
+            raise last_exc
 
 
 

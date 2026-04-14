@@ -161,6 +161,63 @@ class SubAgentDispatcher:
         except ImportError:
             pass
 
+    @staticmethod
+    def _extract_gateway(
+        *,
+        payload: Mapping[str, Any],
+        context: Mapping[str, Any],
+    ) -> Any | None:
+        candidate = (
+            context.get("gateway")
+            or context.get("_gateway")
+            or payload.get("gateway")
+            or payload.get("_gateway")
+        )
+        return candidate
+
+    async def _ensure_runtime_gateway(
+        self,
+        *,
+        req: SubAgentRequest,
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        # Reuse existing gateway first (propagated from parent route / tool context).
+        existing_gateway = self._extract_gateway(payload=payload, context=context)
+        if existing_gateway is not None:
+            context.setdefault("gateway", existing_gateway)
+            payload.setdefault("_gateway", existing_gateway)
+            return
+
+        # Build sub-agent gateway lazily from current runtime routing.
+        try:
+            from host_brain.app.graph_config_builder import (  # noqa: PLC0415
+                resolve_host_llm_runtime_async,
+                resolve_subagent_llm_runtime,
+            )
+            from host_brain.app.agent_runtime_shared import (  # noqa: PLC0415
+                _build_subagent_gateway_from_runtime,
+            )
+
+            base_runtime = await resolve_host_llm_runtime_async(
+                rollout_key=str(req.session_id or req.request_id or req.agent_id),
+                scene_type="EXEC_INTENT",
+            )
+            subagent_runtime = resolve_subagent_llm_runtime(base_runtime=dict(base_runtime or {}))
+            gateway = _build_subagent_gateway_from_runtime(subagent_runtime)
+            if gateway is None:
+                return
+            context["gateway"] = gateway
+            payload["_gateway"] = gateway
+        except Exception as exc:
+            _logger.debug(
+                "[%s] sub_agent runtime gateway build skipped agent=%s: %s",
+                req.request_id,
+                req.agent_id,
+                exc,
+            )
+            return
+
     async def dispatch(self, req: SubAgentRequest) -> SubAgentResponse:
         """调度子 Agent 执行任务。
 
@@ -198,6 +255,7 @@ class SubAgentDispatcher:
             "source": "executive_router_dispatch",
         }
         context.update(dict(req.context or {}))
+        await self._ensure_runtime_gateway(req=req, payload=payload, context=context)
 
         try:
             timeout_sec = max(1.0, req.timeout_ms / 1000.0)

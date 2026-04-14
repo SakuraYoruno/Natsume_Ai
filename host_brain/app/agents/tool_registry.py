@@ -737,7 +737,7 @@ def _tool_dispatch_sub_agent(args: dict[str, Any]) -> dict[str, Any]:
     if agent_id == "intent_agent":
         return {"error": "SUB_AGENT_SELF_CALL_BLOCKED", "result": None}
 
-    timeout_ms = int(payload.get("timeout_ms") or 30_000)
+    timeout_ms = int(payload.get("timeout_ms") or os.environ.get("HOST_SUBAGENT_DISPATCH_TIMEOUT_MS") or 90_000)
     timeout_ms = max(1_000, min(timeout_ms, 300_000))
     request_id = str(payload.get("request_id") or ctx.get("request_id") or f"react_req_{int(time.time() * 1000)}").strip()
     session_id = str(payload.get("session_id") or ctx.get("session_id") or "").strip()
