@@ -405,12 +405,44 @@ class GraphRuntimeContract:
                         "reason_code": "CHECKPOINT_NOT_FOUND",
                     },
                 )
-            # 从 checkpoint 元数据中提取 Policy Clock 字段
-            channel_values = checkpoint_tuple.checkpoint.get("channel_values") or {}
-            resume_deadline_at = int(channel_values.get("resume_deadline_at") or (current_ms + 300_000))
-            policy_timeout_ms = int(channel_values.get("policy_timeout_ms") or DEFAULT_POLICY_TIMEOUT_MS)
-            policy_start_ms = int(channel_values.get("policy_start_ms") or current_ms)
-            interrupt_reason = str(channel_values.get("interrupt_reason") or INTERRUPT_REASON_HUMAN_REVIEW)
+            # FIX-P2：多路径读取 Policy Clock 字段，避免依赖 LangGraph 内部格式
+            # LangGraph 不同版本的 checkpoint 格式可能不同，使用多路径兜底策略：
+            # 路径1：channel_values（LangGraph 0.x 标准格式）
+            # 路径2：pending_writes（部分版本的中间状态）
+            # 路径3：metadata（自定义元数据字段）
+            # 路径4：直接访问 checkpoint 顶层字段（最宽松的兜底）
+            ckpt = checkpoint_tuple.checkpoint or {}
+            channel_values = ckpt.get("channel_values") or {}
+
+            def _read_policy_field(field_name: str, default: Any) -> Any:
+                """多路径读取 Policy Clock 字段，任一路径命中即返回。"""
+                # 路径1：channel_values（标准格式）
+                v = channel_values.get(field_name)
+                if v is not None:
+                    return v
+                # 路径2：pending_writes（中间状态格式）
+                for write_entry in (ckpt.get("pending_writes") or []):
+                    if isinstance(write_entry, (list, tuple)) and len(write_entry) >= 2:
+                        if write_entry[0] == field_name:
+                            return write_entry[1]
+                    elif isinstance(write_entry, dict) and write_entry.get("key") == field_name:
+                        return write_entry.get("value")
+                # 路径3：checkpoint_tuple.metadata（自定义元数据）
+                meta = getattr(checkpoint_tuple, "metadata", None) or {}
+                if isinstance(meta, dict):
+                    v = meta.get(field_name)
+                    if v is not None:
+                        return v
+                # 路径4：checkpoint 顶层字段（最宽松兜底）
+                v = ckpt.get(field_name)
+                if v is not None:
+                    return v
+                return default
+
+            resume_deadline_at = int(_read_policy_field("resume_deadline_at", current_ms + 300_000))
+            policy_timeout_ms = int(_read_policy_field("policy_timeout_ms", DEFAULT_POLICY_TIMEOUT_MS))
+            policy_start_ms = int(_read_policy_field("policy_start_ms", current_ms))
+            interrupt_reason = str(_read_policy_field("interrupt_reason", INTERRUPT_REASON_HUMAN_REVIEW))
         except Exception as exc:
             _logger.warning("resume_graph: 读取 LangGraph checkpoint 元数据失败（%s），使用默认值", exc)
             resume_deadline_at = current_ms + 300_000

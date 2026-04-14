@@ -800,6 +800,22 @@ class PrefrontalAgent:
                 # T-219：漂移检测结果联动 LimbicAgent 情绪调整
                 drift_alert = str(drift_result.get("drift_alert_level") or "").strip().upper()
                 if drift_alert in {"MODERATE", "SEVERE"}:
+                    # FIX-P1：将漂移状态同步到 GovernorRulesCache（L3 → L2 单向通道）
+                    # PrefrontalAgent 检测到漂移时，收紧 Governor 的 scope_policy_gate
+                    try:
+                        from host_brain.integrations.governor_rules_cache import get_governor_rules_cache  # noqa: PLC0415
+                        _scope_override = f"drift_restricted:{drift_alert.lower()}" if drift_alert == "SEVERE" else None
+                        get_governor_rules_cache().update_prefrontal_state(
+                            drift_detected=True,
+                            scope_override=_scope_override,
+                        )
+                        _logger.info(
+                            "PrefrontalAgent 漂移状态已同步到 GovernorRulesCache: alert_level=%s scope_override=%s",
+                            drift_alert, _scope_override,
+                        )
+                    except Exception as _gov_exc:
+                        _logger.debug("PrefrontalAgent GovernorRulesCache 更新跳过: %s", _gov_exc)
+
                     try:
                         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                         limbic = get_limbic_agent()
@@ -859,6 +875,18 @@ class PrefrontalAgent:
                                     source=f"prefrontal_severe_drift:{session_id[:16]}",
                                     intensity=_drift_intero,
                                 )
+                        except Exception:
+                            pass
+                else:
+                    # FIX-P1：漂移恢复正常时，重置 GovernorRulesCache 的漂移状态
+                    # 避免历史漂移状态永久收紧 Governor 策略
+                    if drift_alert in {"NONE", "LOW", ""}:
+                        try:
+                            from host_brain.integrations.governor_rules_cache import get_governor_rules_cache  # noqa: PLC0415
+                            get_governor_rules_cache().update_prefrontal_state(
+                                drift_detected=False,
+                                scope_override=None,
+                            )
                         except Exception:
                             pass
 

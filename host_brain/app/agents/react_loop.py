@@ -543,8 +543,10 @@ def _tool_specs_to_lc_tools(
     for spec in tools:
         if spec.has_side_effects and not allow_side_effects:
             continue
-        if spec.executor is None:
-            continue
+        # FIX-P1：executor=None 时不再静默跳过，改为使用 execute_tool() 作为 fallback
+        # 静态注册表中大量工具的 executor 可能为 None（通过 tool_id 字符串查找执行器），
+        # 直接跳过会导致这些工具在 GovernedToolNode 路径下静默消失。
+        # fallback：通过 execute_tool(tool_id, args) 执行（与旧的自研 ReAct 路径一致）
 
         _spec = spec
         _ctx = dict(ctx)
@@ -558,7 +560,15 @@ def _tool_specs_to_lc_tools(
                 runtime_args = dict(kwargs)
                 if c:
                     runtime_args["_react_context"] = dict(c)
-                return execute_tool(s.tool_id, runtime_args)
+                if s.executor is not None:
+                    # 优先使用 spec.executor（直接调用，无需查找注册表）
+                    try:
+                        return s.executor(runtime_args)
+                    except Exception as _exec_exc:
+                        return {"error": f"EXECUTOR_ERROR:{type(_exec_exc).__name__}", "result": None}
+                else:
+                    # fallback：通过 execute_tool() 查找注册表执行（兼容静态注册表工具）
+                    return execute_tool(s.tool_id, runtime_args)
             return _fn
 
         lc_tool = StructuredTool.from_function(
