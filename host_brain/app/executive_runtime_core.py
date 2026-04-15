@@ -1444,15 +1444,26 @@ async def _executive_runtime_core_impl(
 
     runtime_capability_payload = None
     if route.route_type == "chat":
-        runtime_capability_payload = _maybe_synthesize_runtime_capability(
-            request_id=request_id,
-            session_id=session_id,
-            user_message=sanitized_message,
-            route_type=route.route_type,
-            target_id=route.target_id,
-            reason_code=route.reason_code,
-            llm_route_used=llm_route_used,
+        # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
+        _skip_capability_synthesis = (
+            _prefrontal_plan_enabled
+            and bool(_prefrontal_plan.get("action"))
         )
+        if not _skip_capability_synthesis:
+            runtime_capability_payload = _maybe_synthesize_runtime_capability(
+                request_id=request_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                route_type=route.route_type,
+                target_id=route.target_id,
+                reason_code=route.reason_code,
+                llm_route_used=llm_route_used,
+            )
+        else:
+            _logger.debug(
+                "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
+                request_id, _prefrontal_plan.get("action"),
+            )
         if runtime_capability_payload is not None:
             route = _RouteSelection(
                 route_type=_normalize_text(runtime_capability_payload.get("executor_route"), lower=True) or "delegate",

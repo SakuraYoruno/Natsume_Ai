@@ -240,7 +240,29 @@ async def classify_task_intent(
        "target_id": str, "task": str,
        "reason_code": str, "confidence": float|None, "route_source": "rule"|"llm"|"default"}
     """
+    import os as _os  # noqa: PLC0415
     normalized = str(text or "").strip()
+
+    # Phase D 短路：PREFRONTAL_PLAN_ENABLED=true 时，
+    # PrefrontalAgent 已在 executive_runtime_core 完成意图规划，
+    # 此处跳过 LLM 兜底，直接返回 chat 路由（路由决策由 plan_response 覆盖）
+    _prefrontal_enabled = _os.environ.get("PREFRONTAL_PLAN_ENABLED", "false").lower() == "true"
+    if _prefrontal_enabled:
+        ctx = dict(tribe_context or {})
+        _pf_plan = dict(ctx.get("prefrontal_plan") or {})
+        if _pf_plan.get("action"):
+            # 前额叶已规划，规则层仍运行（进度查询/最近对话等高优先级规则不跳过）
+            rule_result = _classify_task_intent_by_rules(normalized)
+            if rule_result is not None:
+                return rule_result
+            # 跳过 LLM 兜底，直接返回 chat（executive_runtime_core 会用 plan_response 覆盖路由）
+            _logger.debug(
+                "[%s] classify_task_intent: prefrontal_plan 已存在，跳过 LLM 兜底 action=%s",
+                request_id, _pf_plan.get("action"),
+            )
+            return {"route": "chat", "target_id": "", "task": normalized,
+                    "reason_code": "PREFRONTAL_PLAN_BYPASS", "confidence": 0.95,
+                    "route_source": "prefrontal", "prefrontal_action": _pf_plan.get("action")}
 
     # 第一层：规则快速预判
     rule_result = _classify_task_intent_by_rules(normalized)

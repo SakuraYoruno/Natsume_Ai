@@ -541,34 +541,110 @@ motor_cortex.dispatch_speak(
 
 | 缺口 | 描述 | 优先级 |
 |------|------|--------|
-| Broca→MotorCortex 桥 | LanguageSystemAgent.broca_generate_plan() 产出后，应调用 dispatch_speak() 而非直接 TTS | 中 |
-| chat_agent→dispatch_speak 迁移 | G1 补的直接调用改为走 MotorCortexAgent.dispatch_speak() | 低（功能已通） |
-| PrefrontalAgent 真实推理 | 当前读静态快照，需要接入小模型做实时意图规划（Phase D 长期目标） | 高（架构重构） |
-| 器官族并行激活 | 当前串行调用，真实神经系统是并行激活 | 高（性能优化） |
-| LimbicAgent 连续动态系统 | 当前离散事件驱动，需要持续运转的情绪物理模型 | 中（体验提升） |
+| Broca→MotorCortex 桥 | LanguageSystemAgent.broca_generate_plan() 产出后，应调用 dispatch_speak() 而非直接 TTS | ✅ 已修复（P0） |
+| chat_agent→dispatch_speak 迁移 | G1 补的直接调用改为走 MotorCortexAgent.dispatch_speak() | ✅ 已完成 |
+| PrefrontalAgent 真实推理 | 当前读静态快照，需要接入小模型做实时意图规划 | ✅ Phase D 已完成 |
+| 器官族并行激活 | 当前串行调用，真实神经系统是并行激活 | ✅ P1 已完成（asyncio.gather） |
+| LimbicAgent 连续动态系统 | 当前离散事件驱动，需要持续运转的情绪物理模型 | 中（体验提升，待规划） |
 
-### 10.6 下一步：Phase D（长期架构重构）
+### 10.6 Phase D：PrefrontalAgent 真实推理接管（已完成，2026-04-15）
+
+**目标**：LLM 从"总控制器"降级为"语言生成器"，PrefrontalAgent 基于器官族完整状态产出意图计划。
+
+#### 实现内容
+
+**P2-1：`PrefrontalAgent.plan_response()` 方法**（`host_brain/tribe/prefrontal_agent.py`）
+
+```python
+# 规则快速路径（<1ms）：免疫高风险/严重漂移/极度退缩直接返回
+# LLM 推理路径（gemini-2.0-flash，<500ms）：基于器官族完整状态产出意图计划
+plan = prefrontal_agent.plan_response(
+    user_message=...,
+    motive_state=limbic.compute_motive_state(),
+    recall_summary=hippocampus.recall_result,
+    bond_stage=bond_summary["stage"],
+    immune_risk_level=immune.risk_level,
+    drift_alert_level=prefrontal.alert_level,
+    emotion_tag=emotion_context["emotion_tag"],
+    ...
+)
+# 输出：{"action": "speak|skill|delegate|wait", "target": "...", "task": "...", "tone_hint": "...", "urgency": 0.7}
+```
+
+**P2-2：`executive_runtime_core` 接入 `plan_response`**（`host_brain/app/executive_runtime_core.py`）
 
 ```
-目标：把 executive_runtime_core 拆掉，由 PrefrontalAgent（专用小模型）替代
+PREFRONTAL_PLAN_ENABLED=true 时启用（默认关，灰度）：
+  1. plan_response 的 action=skill/delegate 时覆盖 _hard_rule_route 结果
+  2. prefrontal_task/tone_hint 注入 intent_draft 传递给 chat_agent
+  3. 跳过 _maybe_synthesize_runtime_capability（前额叶已规划，无需 LLM 再次合成）
+  4. 结果写入 organ_route_meta 可观测性
+```
 
-输入：
-  LimbicAgent.motive_state（情绪驱动）
-  HippocampusAgent.recall（记忆检索结果）
-  LanguageSystemAgent.broca_generate_plan（语言规划）
-  ImmuneAgent.risk_level（安全状态）
+**P2-3：`executive.yaml` 新增 `prefrontal_agent.plan_response.prompt` 模板**
 
-PrefrontalAgent（小模型，低延迟 <500ms）：
-  system prompt = "你是七海的前额叶皮质，当前情绪是X，记忆里有Y，Bond阶段是Z，决定你接下来要做什么"
-  输出：{ "action": "speak|skill|delegate|wait", "target": "...", "task": "..." }
+- `system_prompt`：前额叶皮质角色设定 + 决策规则（action/tone_hint/urgency 约束）
+- `user_prompt_template`：器官族完整状态格式化注入（14 个字段）
 
-MotorCortexAgent：
-  接收 PrefrontalAgent 输出 → dispatch_speak() / dispatch_action()
+**P2-4：`chat_agent` 注入 `prefrontal_task` 字段**（`host_brain/app/chat_agent.py`）
 
-chat_agent：
-  退化为纯粹的语言生成器，只负责把 PrefrontalAgent 规划好的意图转成流畅自然语言
+```python
+# 从 intent_draft 读取 prefrontal_task/prefrontal_tone_hint
+# 构建【前额叶规划】context block 追加到 extra_context_prompt
+# LLM 感知"我要说什么"的目标，退化为纯语言生成器
+_prefrontal_context_block = f"【前额叶规划】当前回应目标：{prefrontal_task}（语气：{tone_hint}）"
+```
+
+**P3-1：`classify_task_intent` Phase D 短路**（`host_brain/tribe/cortex_route_decider.py`）
+
+```python
+# PREFRONTAL_PLAN_ENABLED=true 且 prefrontal_plan 已存在时：
+# - 高优先级规则（进度查询/最近对话）仍运行
+# - 跳过 LLM 兜底，直接返回 chat（executive_runtime_core 用 plan_response 覆盖路由）
+# reason_code: "PREFRONTAL_PLAN_BYPASS"
+```
+
+**P3-2：`executive_runtime_core` 跳过 `_maybe_synthesize_runtime_capability`**
+
+```python
+# PREFRONTAL_PLAN_ENABLED=true 且 prefrontal_plan.action 存在时：
+# 跳过 runtime_capability 合成（前额叶已规划，无需 LLM 再次合成路由）
+```
+
+#### 完整链路（Phase D 启用后）
+
+```
+外界刺激（用户消息）
+    ↓
+ImmuneAgent 门控
+    ↓
+HippocampusAgent 记忆检索
+    ↓
+LimbicAgent 情绪激活 + MirrorNeuronAgent 共情
+    ↓
+PrefrontalAgent.plan_response()（小模型，<500ms）
+  输入：motive_state + recall_summary + bond_stage + immune_risk + drift_alert + emotion
+  输出：{ action, target, task, tone_hint, urgency }
+    ↓
+executive_runtime_core 路由覆盖（plan_response.action 优先）
+    ↓
+chat_agent（纯语言生成器）
+  接收 prefrontal_task 作为"我要说什么"的目标
+  LLM 只负责把 task 转成流畅自然语言
+    ↓
+MotorCortexAgent.dispatch_speak() → TTS → 语音输出
+```
+
+#### 灰度开关
+
+```bash
+# 启用 Phase D（默认关）
+PREFRONTAL_PLAN_ENABLED=true
+
+# 禁用 cortex_route_decider LLM 兜底（Phase D 启用时自动跳过）
+HOST_CORTEX_INTENT_LLM_ENABLED=false
 ```
 
 ---
 
-*文档版本：v1.2 | 最后更新：2026-04-15 | 新增 §10 器官族接管路线图（Phase A+B+C 实现记录）*
+*文档版本：v1.3 | 最后更新：2026-04-15 | 新增 §10.6 Phase D 实现记录（PrefrontalAgent 真实推理接管）*
