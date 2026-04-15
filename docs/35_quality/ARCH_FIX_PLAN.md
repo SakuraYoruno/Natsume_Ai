@@ -2,9 +2,8 @@
 
 **文档编号**：ARCH-FIX-PLAN-001
 **日期**：2026-04-15
-**版本**：v1.0
+**版本**：v1.3
 **状态**：P0/P1/P3 全部完成，P2 待执行
-**版本**：v1.2
 **受众**：核心开发团队
 
 ---
@@ -28,7 +27,7 @@
 |--------|------|--------|
 | **P0** | 可能导致生产挂起/数据错误的严重 Bug | 1 |
 | **P1** | 影响正确性的功能性问题 | 5 |
-| **P2** | 影响质量和可靠性的工程问题 | 6 |
+| **P2** | 影响质量和可靠性的工程问题 | 12 |
 | **P3** | 影响可维护性的技术债务 | 8 |
 
 ---
@@ -290,6 +289,126 @@ FastAPI 路由文件应该只做参数解析和响应格式化，
 
 ---
 
+### P2-7：`obs_routes_core.py` 3345 行，可观测性核心路由过于庞大
+
+**文件**：`host_brain/app/obs_routes_core.py`（3345 行）
+
+**根因**：
+可观测性核心路由将所有核心监控端点（健康检查、指标查询、事件流、告警等）
+全部堆在一个文件中，是扫描发现的最大单文件，严重影响可维护性。
+
+**修复方案**：
+按功能拆分为：
+- `obs_routes_health.py`：健康检查与存活探针
+- `obs_routes_metrics.py`：指标查询端点
+- `obs_routes_events.py`：事件流与告警端点
+- `obs_routes_core.py`：保留为路由注册入口（仅 include_router）
+
+**涉及文件**：`host_brain/app/obs_routes_core.py`
+**工作量**：2d
+
+---
+
+### P2-8：`obs_routes_stats_input.py` 3019 行，输入统计路由过大
+
+**文件**：`host_brain/app/obs_routes_stats_input.py`（3019 行）
+
+**根因**：
+obs_routes_stats 拆分后，`obs_routes_stats_input.py` 子文件本身仍然超过 3000 行，
+说明拆分粒度不够，内部仍存在多个独立的统计维度混合。
+
+**修复方案**：
+按统计维度二次拆分：
+- `obs_routes_stats_input_text.py`：文本输入统计
+- `obs_routes_stats_input_voice.py`：语音输入统计
+- `obs_routes_stats_input_multimodal.py`：多模态输入统计
+- `obs_routes_stats_input.py`：保留为聚合入口
+
+**涉及文件**：`host_brain/app/obs_routes_stats_input.py`
+**工作量**：2d
+
+---
+
+### P2-9：`obs_routes_stats_capability.py` 2892 行，能力统计路由过大
+
+**文件**：`host_brain/app/obs_routes_stats_capability.py`（2892 行）
+
+**根因**：
+与 P2-8 同理，能力统计子文件仍然接近 3000 行，
+内部混合了 skill 执行统计、工具调用统计、Agent 能力统计等多个维度。
+
+**修复方案**：
+按能力类型二次拆分：
+- `obs_routes_stats_capability_skill.py`：Skill 执行统计
+- `obs_routes_stats_capability_tool.py`：工具调用统计
+- `obs_routes_stats_capability_agent.py`：Agent 能力统计
+- `obs_routes_stats_capability.py`：保留为聚合入口
+
+**涉及文件**：`host_brain/app/obs_routes_stats_capability.py`
+**工作量**：2d
+
+---
+
+### P2-10：`prompt_builder.py` 2090 行，Prompt 构建逻辑过于集中
+
+**文件**：`host_brain/app/prompt_builder.py`（2090 行）
+
+**根因**：
+Prompt 构建器将所有 Agent 类型的 prompt 组装逻辑（chat、executive、planning、
+tribe 等）全部放在一个文件中，每次新增 Agent 类型都需要修改同一个文件。
+
+**修复方案**：
+按 Agent 类型拆分：
+- `prompt_builder_chat.py`：Chat Agent prompt 构建
+- `prompt_builder_executive.py`：Executive Agent prompt 构建
+- `prompt_builder_planning.py`：Planning Agent prompt 构建
+- `prompt_builder_tribe.py`：TRIBE 族 Agent prompt 构建
+- `prompt_builder.py`：保留为统一入口（工厂函数）
+
+**涉及文件**：`host_brain/app/prompt_builder.py`
+**工作量**：2d
+
+---
+
+### P2-11：`graph_config_builder.py` 1947 行，图配置构建逻辑过于集中
+
+**文件**：`host_brain/app/graph_config_builder.py`（1947 行）
+
+**根因**：
+图配置构建器将所有图类型（plan_graph、skill_dag、tribe_graph 等）的
+节点定义、边定义、条件路由全部混在一个文件中，图结构变更时难以定位。
+
+**修复方案**：
+按图类型拆分：
+- `graph_config_plan.py`：plan_graph 配置
+- `graph_config_skill.py`：skill_dag 配置
+- `graph_config_tribe.py`：tribe_graph 配置
+- `graph_config_builder.py`：保留为配置加载入口
+
+**涉及文件**：`host_brain/app/graph_config_builder.py`
+**工作量**：2d
+
+---
+
+### P2-12：`chat_agent.py` 1928 行，Chat Agent 职责过多
+
+**文件**：`host_brain/app/chat_agent.py`（1928 行）
+
+**根因**：
+Chat Agent 承担了消息预处理、上下文注入、LLM 调用、流式输出、
+后处理（情感标注、记忆写入）等多个职责，导致文件体积接近 2000 行。
+
+**修复方案**：
+按处理阶段拆分：
+- `chat_agent_preprocessor.py`：消息预处理与上下文注入
+- `chat_agent_postprocessor.py`：后处理（情感标注、记忆写入）
+- `chat_agent.py`：保留为主流程协调器（调用上述模块 + LLM 调用）
+
+**涉及文件**：`host_brain/app/chat_agent.py`
+**工作量**：2d
+
+---
+
 ## 5. P3 — 低优先级（技术债务）
 
 ### ✅ P3-1：`cortex_agent.py` 1144 行，职责过多（已完成）
@@ -467,7 +586,13 @@ def get_plan_graph() -> Any:
   ├── P2-3：agent_runtime_shared.py 清理（104KB）
   ├── P2-4：prompt_template_defs.py 迁移到 YAML（272KB）
   ├── P2-5：dependencies.py 初始化逻辑分离
-  └── P2-6：input_routes.py 业务逻辑提取
+  ├── P2-6：input_routes.py 业务逻辑提取
+  ├── P2-7：obs_routes_core.py 拆分（3345行）
+  ├── P2-8：obs_routes_stats_input.py 二次拆分（3019行）
+  ├── P2-9：obs_routes_stats_capability.py 二次拆分（2892行）
+  ├── P2-10：prompt_builder.py 按 Agent 类型拆分（2090行）
+  ├── P2-11：graph_config_builder.py 按图类型拆分（1947行）
+  └── P2-12：chat_agent.py 按处理阶段拆分（1928行）
 
 ✅ 第四阶段（P3，全部已完成）：
   ├── P3-1：cortex_agent.py 拆分（1144行）✅
@@ -488,9 +613,9 @@ def get_plan_graph() -> Any:
 |------|--------|----------|
 | P0（立即） | 1 | 0.5d |
 | P1（本周） | 5 | 4d |
-| P2（下一迭代） | 6 | 15d |
+| P2（下一迭代） | 12 | 27d |
 | P3（规划中） | 8 | 11d |
-| **合计** | **20** | **30.5d** |
+| **合计** | **26** | **42.5d** |
 
 ---
 
@@ -506,4 +631,4 @@ def get_plan_graph() -> Any:
 
 ---
 
-*文档版本：v1.2 | 最后更新：2026-04-15 | P0/P1/P3 全部完成，P2 待执行*
+*文档版本：v1.3 | 最后更新：2026-04-15 | P0/P1/P3 全部完成，P2 待执行（12项，含扫描新增 P2-7~P2-12）*
