@@ -1,6 +1,6 @@
 """Graph orchestration runtime facade.
+
 Delegates to graph_contract, graph_executor, and graph_fallback.
-Public symbols remain re-exported for backward compatibility.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from host_brain.integrations.graph_contract import (
 )
 from host_brain.integrations.graph_model_resolve import resolve_model_nodes
 from host_brain.integrations.graph_executor import GraphExecutor
+from host_brain.integrations.graph_checkpoint import HostPolicyGuard
 from host_brain.integrations.graph_fallback import (
     fail_hard,
     handle_dependency_unavailable,
@@ -54,11 +55,6 @@ _evidence_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="evide
 # 注册 atexit 钩子，确保进程退出时线程池优雅关闭，防止线程泄漏
 import atexit as _atexit
 _atexit.register(_evidence_executor.shutdown, wait=False, cancel_futures=True)
-
-# 向后兼容：保留旧的私有函数名作为模块级别别名
-_build_edge_map = build_edge_map
-_pick_model_profile_id = pick_model_profile_id
-_build_model_param_hash = build_model_param_hash
 
 _logger = logging.getLogger(__name__)
 
@@ -103,11 +99,7 @@ class GraphRuntimeContract:
         self._handlers: dict[str, NodeHandler] = {}
         self._gateway_factory = gateway_factory or self._default_gateway_factory
         self._model_plane_dir = Path(model_plane_dir) if model_plane_dir is not None else DEFAULT_MODEL_PLANE_DIR
-        # FIX-5.1（彻底迁移）：CheckpointManager 现在是 LangGraph SqliteSaver 的薄包装，
-        # 仅用于 interrupt() 生成 InterruptSignal 和 resume() 的 Policy Clock 检查。
-        # 真正的 checkpoint 存储由 LangGraph SqliteSaver 负责（在 compile_runtime_graph 时注入）。
-        from host_brain.integrations.graph_checkpoint import CheckpointManager as _CM
-        self._checkpoint_manager = _CM()
+        self._policy_guard = HostPolicyGuard()
         # FIX-4.1：获取 GovernorRulesCache 单例（TRIBE 族 → Governor 参数通道）
         self._governor_rules_cache: GovernorRulesCache = get_governor_rules_cache()
 
@@ -184,7 +176,6 @@ class GraphRuntimeContract:
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
-            checkpoint_manager=self._checkpoint_manager,
         )
         compiled = executor.compile_runtime_graph()
         # M36-C：初始化双时钟字段
@@ -357,7 +348,7 @@ class GraphRuntimeContract:
         - 验证通过时使用 LangGraph 原生 thread_id 恢复（真正的断点恢复，不重新执行整张图）
 
         FIX-5.1 变更：
-        - 不再调用 manager.load_state()（已废弃）
+        - 不再依赖旧的手工 load_state 恢复路径
         - 使用 compiled.invoke(None, config={"configurable": {"thread_id": checkpoint_id}}) 恢复
         - checkpoint_id 即 LangGraph thread_id（run_graph 时使用 request_id 作为 thread_id）
 
@@ -372,6 +363,7 @@ class GraphRuntimeContract:
         from host_brain.integrations.graph_checkpoint import (
             InterruptSignal,
             SyntheticTimeoutEvent,
+            check_resume_allowed,
         )
         from host_brain.integrations.graph_contract import (
             INTERRUPT_REASON_HUMAN_REVIEW,
@@ -380,13 +372,11 @@ class GraphRuntimeContract:
         from host_brain.core.ids import now_ms as _now_ms
 
         current_ms = int(now_ms if now_ms is not None else _now_ms())
-        manager = self._checkpoint_manager
 
         # 1. Policy Clock 检查（保留不变）
         # 从 LangGraph SqliteSaver 中读取最新 checkpoint 的 state 元数据
         # 用于构建 InterruptSignal（resume_deadline_at / policy_timeout_ms）
         try:
-            checkpointer = manager._policy_guard  # HostPolicyGuard
             # 尝试从 LangGraph SqliteSaver 读取 checkpoint 元数据
             from host_brain.integrations.graph_checkpoint import get_langgraph_checkpointer  # noqa: PLC0415
             lg_checkpointer = get_langgraph_checkpointer()
@@ -456,11 +446,12 @@ class GraphRuntimeContract:
             interrupted_at_ms=policy_start_ms,
             resume_deadline_at=resume_deadline_at,
         )
-        decision = manager.resume(
-            interrupt_signal,
+        decision = check_resume_allowed(
+            interrupt_signal=interrupt_signal,
             now_ms=current_ms,
             policy_timeout_ms=policy_timeout_ms,
             policy_start_ms=policy_start_ms,
+            policy_guard=self._policy_guard,
         )
 
         if not decision.allowed:
@@ -490,7 +481,6 @@ class GraphRuntimeContract:
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
-            checkpoint_manager=self._checkpoint_manager,
         )
         compiled = executor.compile_runtime_graph()
         # FIX-5.1：传 None 作为 input，LangGraph 从 thread_id 对应的 checkpoint 恢复
@@ -734,5 +724,3 @@ class GraphRuntimeContract:
             reason_code=reason_code,
             detail=detail,
         )
-
-

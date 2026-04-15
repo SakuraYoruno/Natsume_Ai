@@ -232,7 +232,8 @@ class SQLiteLedger(
         self._insert("intent_log", payload)
 
     def log_governor(self, row: dict[str, Any]) -> None:
-        payload = {key: row.get(key) for key in GOVERNOR_COLUMNS}
+        available_columns = {key for key in GOVERNOR_COLUMNS if self._table_has_column("governor_log", key)}
+        payload = {key: row.get(key) for key in available_columns}
         # FIX-4.2：tribe_params_snapshot 需要 JSON 序列化（dict → str）
         if payload.get("tribe_params_snapshot") is not None and isinstance(payload["tribe_params_snapshot"], dict):
             payload["tribe_params_snapshot"] = json.dumps(

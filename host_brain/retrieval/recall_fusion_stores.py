@@ -579,4 +579,3 @@ def search_artifact_vault(self: Any, *, query: str, top_k: int) -> list[dict[str
     return sorted(candidates, key=lambda c: -float(c["score"]))[: max(1, int(top_k))]
 
 
-... EOF no more lines ...

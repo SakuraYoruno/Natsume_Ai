@@ -291,8 +291,6 @@ async def _maybe_send_gateway_realign_notice(
     )
 
 
-@router.post("/input", response_model=InputResponse)
-async def receive_input(body: InputPayload, request: Request) -> InputResponse:
 
 
 def _parse_int_env(name: str, *, default: int) -> int:

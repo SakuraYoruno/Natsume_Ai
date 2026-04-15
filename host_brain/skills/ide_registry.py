@@ -8,6 +8,19 @@ from host_brain.skills.declarative import DeclarativeSkillProvider, DeclarativeS
 from host_brain.skills.registry import SkillRegistry
 
 
+def _coalesce_codex_task(args: dict[str, Any], ctx: dict[str, Any] | None) -> str:
+    merged = dict(args or {})
+    if isinstance(ctx, dict):
+        merged.setdefault("task_text", ctx.get("task_text"))
+        merged.setdefault("user_message", ctx.get("user_message"))
+        merged.setdefault("query", ctx.get("query"))
+    for key in ("task", "task_text", "text", "user_message", "query"):
+        candidate = str(merged.get(key) or "").strip()
+        if candidate:
+            return candidate
+    return ""
+
+
 def _normalize_open_cursor(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "path": str((args or {}).get("path") or "").strip(),
@@ -25,7 +38,7 @@ def _normalize_run_pycharm_action(args: dict[str, Any], ctx: dict[str, Any] | No
 
 
 def _normalize_codex_task(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
-    task = str((args or {}).get("task") or "").strip()
+    task = _coalesce_codex_task(args or {}, ctx)
     context = str((args or {}).get("context") or "").strip()
     return {
         "task": task,

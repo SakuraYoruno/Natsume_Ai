@@ -35,11 +35,10 @@ def compile_governed_subgraph(
     evidence_plane: Any = None,
     *,
     edge_map: dict[str, str] | None = None,
-    fallback_map: dict[str, str] | None = None,
 ) -> Any:
     """编译透明子图（FIX-5.3：委托给 LangGraph 原生子图）。
 
-    接口与原自研版本兼容，内部改为调用 build_governed_subgraph()。
+    内部直接调用 build_governed_subgraph()。
 
     Args:
         subgraph_id: 子图唯一 ID
@@ -47,7 +46,6 @@ def compile_governed_subgraph(
         handlers: 节点处理器字典 {node_id: handler_fn(payload, context) -> dict}
         evidence_plane: Evidence Plane 实例（可选）
         edge_map: 条件分支路由（可选，None 时线性执行）
-        fallback_map: 降级路由（可选）
 
     Returns:
         subgraph_adapter 函数（可调用 adapter(state) 执行）
@@ -142,7 +140,3 @@ def write_agent_artifact_to_state(
         "risk_flags": list(risk_flags or []),
         "ts_ms": int(time.time() * 1000),
     }
-
-
-# 向后兼容别名
-write_agent_artifact_to_payload = write_agent_artifact_to_state

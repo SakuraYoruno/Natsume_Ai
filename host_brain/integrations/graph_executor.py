@@ -39,7 +39,7 @@ from host_brain.integrations.graph_streaming import (
     RenderStreamEmitter,
 )
 from host_brain.integrations.graph_checkpoint import (
-    CheckpointManager,
+    build_interrupt_signal,
 )
 from host_brain.integrations.graph_fallback import (
     fail_hard, handle_airlock_pending, handle_dependency_unavailable, handle_execution_error,
@@ -94,8 +94,7 @@ class GraphExecutor:
 
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
                  default_timeout_ms: int = 5_000, ledger: Any = None,
-                 evidence_plane: Any = None,
-                 checkpoint_manager: CheckpointManager | None = None) -> None:
+                 evidence_plane: Any = None) -> None:
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
@@ -108,8 +107,6 @@ class GraphExecutor:
         self._render_emitter = RenderStreamEmitter()
         self._phase_lock_guard = PhaseLockGuard()
         self._render_guard = RenderGuard()
-        # M39-E：Checkpoint 管理器（优先使用外部传入的共享实例，确保 interrupt/resume 使用同一存储）
-        self._checkpoint_manager = checkpoint_manager if checkpoint_manager is not None else CheckpointManager()
 
     def compile_runtime_graph(self) -> Any:
         graph = StateGraph(GraphState)
@@ -232,11 +229,11 @@ class GraphExecutor:
         # AIRLOCK 令牌：安全终止，不执行任何节点
         token = str(state.get("committed_route_token") or "").strip()
         if token == "GOV_AIRLOCK_REVIEW":
-            # M39-E：保存 checkpoint 并写入 InterruptSignal
+            # M39-E：写入 InterruptSignal（直接用 build_interrupt_signal，LangGraph 已接管 checkpoint 持久化）
             try:
                 from host_brain.integrations.graph_contract import INTERRUPT_REASON_AIRLOCK
-                interrupt_signal = self._checkpoint_manager.interrupt(
-                    dict(state),
+                interrupt_signal = build_interrupt_signal(
+                    state=dict(state),
                     interrupt_reason=INTERRUPT_REASON_AIRLOCK,
                 )
                 state = {

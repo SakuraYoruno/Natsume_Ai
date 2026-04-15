@@ -148,7 +148,7 @@ class GraphState(TypedDict):
     # streaming_phase：当前流阶段（PRESENCE / COMMIT / RENDER / None）
     streaming_phase: str | None
     # M39-B：Checkpoint / Interrupt / Resume 字段（ModelPlane.md §10 Rule 6）
-    # gov_checkpoint_id：当前 checkpoint ID（由 CheckpointManager 写入，避免与 LangGraph 保留字段冲突）
+    # gov_checkpoint_id：当前 checkpoint ID（由 graph_checkpoint helper 写入，避免与 LangGraph 保留字段冲突）
     gov_checkpoint_id: str | None
     # interrupt_reason：中断原因（HUMAN_REVIEW / POLICY_TIMEOUT / AIRLOCK）
     interrupt_reason: str | None

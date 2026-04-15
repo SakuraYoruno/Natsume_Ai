@@ -1,17 +1,4 @@
-"""Checkpoint / Interrupt / Resume 核心实现（迁移到 LangGraph SqliteSaver）。
-
-FIX-5.1（彻底迁移）：
-- 删除自研 CheckpointStore（内存 + SQLite 双层存储）
-- 删除自研 CheckpointManager（组合 CheckpointStore + HostPolicyGuard）
-- 改为直接使用 LangGraph SqliteSaver 作为唯一 checkpoint 后端
-- CheckpointManager 保留接口兼容层，内部委托给 LangGraph SqliteSaver
-- HostPolicyGuard / InterruptSignal / ResumeDecision 保留（Policy Clock 逻辑不变）
-
-设计原则：
-- LangGraph 负责"能不能恢复"（Execution Clock，SqliteSaver 真正断点恢复）
-- Host 负责"允不允许恢复"（Policy Clock，HostPolicyGuard 不变）
-- resume_graph() 改为使用 LangGraph 原生 thread_id 恢复（不重新执行整张图）
-"""
+"""Checkpoint / interrupt / resume primitives backed by LangGraph SqliteSaver."""
 
 from __future__ import annotations
 
@@ -23,9 +10,7 @@ from typing import Any
 
 from host_brain.integrations.graph_contract import (
     DEFAULT_RESUME_DEADLINE_MS,
-    INTERRUPT_REASON_AIRLOCK,
     INTERRUPT_REASON_HUMAN_REVIEW,
-    INTERRUPT_REASON_POLICY_TIMEOUT,
     RESUME_DENIED_DEADLINE_EXCEEDED,
     RESUME_DENIED_POLICY_EXPIRED,
     SYNTHETIC_EVENT_TIMEOUT,
@@ -33,26 +18,18 @@ from host_brain.integrations.graph_contract import (
 
 _logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# 环境变量
-# ---------------------------------------------------------------------------
-
 _ENV_DB_PATH = "HOST_CHECKPOINT_DB"
 _DEFAULT_DB_PATH = "host_brain/data/checkpoints.db"
 
 
 def get_checkpoint_db_path() -> str:
-    """获取 checkpoint 数据库路径（从环境变量读取）。"""
+    """Resolve checkpoint DB path from env."""
+
     return str(os.environ.get(_ENV_DB_PATH, _DEFAULT_DB_PATH)).strip() or _DEFAULT_DB_PATH
 
 
-# ---------------------------------------------------------------------------
-# 数据类（保留，供 graph_runtime.py 使用）
-# ---------------------------------------------------------------------------
-
 @dataclass
 class InterruptSignal:
-    """中断信号：保存 checkpoint 后产生，携带恢复所需的元信息。"""
     checkpoint_id: str
     interrupt_reason: str = INTERRUPT_REASON_HUMAN_REVIEW
     interrupted_at_ms: int = field(default_factory=lambda: int(time.time() * 1000))
@@ -71,7 +48,6 @@ class InterruptSignal:
 
 @dataclass
 class SyntheticTimeoutEvent:
-    """超时合成事件：Policy Clock 超时时写入，替代直接恢复。"""
     node_result: str = SYNTHETIC_EVENT_TIMEOUT
     error_code: str = RESUME_DENIED_DEADLINE_EXCEEDED
     route_token: str = "GOV_FALLBACK_SECONDARY"
@@ -90,7 +66,6 @@ class SyntheticTimeoutEvent:
 
 @dataclass
 class ResumeDecision:
-    """恢复决策：HostPolicyGuard 检查后产生。"""
     allowed: bool
     reason: str = ""
     synthetic_event: dict[str, Any] | None = None
@@ -103,12 +78,8 @@ class ResumeDecision:
         }
 
 
-# ---------------------------------------------------------------------------
-# HostPolicyGuard：Policy Clock 恢复前置检查（保留不变）
-# ---------------------------------------------------------------------------
-
 class HostPolicyGuard:
-    """Host 策略守卫：恢复前由 Host 检查 Policy Clock 是否允许恢复。"""
+    """Host-side resume gate (Policy Clock)."""
 
     def check_resume_allowed(
         self,
@@ -128,7 +99,10 @@ class HostPolicyGuard:
             )
             return ResumeDecision(
                 allowed=False,
-                reason=f"恢复截止时间已过（resume_deadline_at={interrupt_signal.resume_deadline_at}，now={current_ms}）",
+                reason=(
+                    f"resume deadline exceeded "
+                    f"(resume_deadline_at={interrupt_signal.resume_deadline_at}, now={current_ms})"
+                ),
                 synthetic_event=synthetic.to_dict(),
             )
 
@@ -142,133 +116,85 @@ class HostPolicyGuard:
                 )
                 return ResumeDecision(
                     allowed=False,
-                    reason=f"Policy Clock 已超时（elapsed={elapsed}ms，policy_timeout={policy_timeout_ms}ms）",
+                    reason=f"policy clock timeout (elapsed={elapsed}ms, timeout={policy_timeout_ms}ms)",
                     synthetic_event=synthetic.to_dict(),
                 )
 
         return ResumeDecision(
             allowed=True,
-            reason="Policy Clock 检查通过，允许恢复",
+            reason="policy clock check passed",
             synthetic_event=None,
         )
 
-
-# ---------------------------------------------------------------------------
-# LangGraph SqliteSaver 单例
-# ---------------------------------------------------------------------------
 
 _langgraph_checkpointer: Any = None
 
 
 def get_langgraph_checkpointer() -> Any:
-    """获取 LangGraph SqliteSaver 单例（懒初始化）。
+    """Get lazy singleton SqliteSaver."""
 
-    Returns:
-        SqliteSaver 实例；若 LangGraph 不可用则抛出 ImportError
-    """
     global _langgraph_checkpointer
     if _langgraph_checkpointer is not None:
         return _langgraph_checkpointer
 
     import pathlib
+
     db_path = get_checkpoint_db_path()
     pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     from langgraph.checkpoint.sqlite import SqliteSaver
+
     _langgraph_checkpointer = SqliteSaver.from_conn_string(db_path)
-    _logger.info("LangGraph SqliteSaver 初始化成功，db_path=%s", db_path)
+    _logger.info("LangGraph SqliteSaver initialized db_path=%s", db_path)
     return _langgraph_checkpointer
 
 
 def compile_graph_with_checkpoint(graph: Any) -> Any:
-    """编译 LangGraph StateGraph，注入 SqliteSaver checkpointer。
+    """Compile StateGraph with LangGraph SqliteSaver."""
 
-    Args:
-        graph: 未编译的 StateGraph 实例
-
-    Returns:
-        编译后的图（已注入 SqliteSaver）
-    """
     checkpointer = get_langgraph_checkpointer()
     return graph.compile(checkpointer=checkpointer)
 
 
-# ---------------------------------------------------------------------------
-# CheckpointManager：接口兼容层（内部委托给 LangGraph SqliteSaver）
-# ---------------------------------------------------------------------------
+def build_interrupt_signal(
+    *,
+    state: dict[str, Any],
+    interrupt_reason: str = INTERRUPT_REASON_HUMAN_REVIEW,
+    resume_deadline_ms: int | None = None,
+    now_ms: int | None = None,
+) -> InterruptSignal:
+    """Create interrupt metadata (checkpoint_id aligns with LangGraph thread_id)."""
 
-class CheckpointManager:
-    """Checkpoint 管理器接口兼容层。
+    thread_id = str(state.get("request_id") or "").strip()
+    if not thread_id:
+        import uuid
 
-    FIX-5.1（彻底迁移）：
-    - interrupt() 保存 thread_id（即 checkpoint_id）到 InterruptSignal
-    - resume() 委托给 HostPolicyGuard（Policy Clock 检查不变）
-    - load_state() 已废弃（LangGraph 原生恢复不需要手动 load_state）
-    - 真正的 checkpoint 存储由 LangGraph SqliteSaver 负责
+        thread_id = str(uuid.uuid4())
+    current_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    deadline_ms = int(resume_deadline_ms if resume_deadline_ms is not None else DEFAULT_RESUME_DEADLINE_MS)
+    return InterruptSignal(
+        checkpoint_id=thread_id,
+        interrupt_reason=str(interrupt_reason),
+        interrupted_at_ms=current_ms,
+        resume_deadline_at=current_ms + deadline_ms,
+    )
 
-    注意：interrupt() 不再主动写入 checkpoint（LangGraph 在图执行时自动保存）；
-    interrupt_signal.checkpoint_id 对应 LangGraph 的 thread_id。
-    """
 
-    def __init__(
-        self,
-        *,
-        policy_guard: HostPolicyGuard | None = None,
-        default_resume_deadline_ms: int = DEFAULT_RESUME_DEADLINE_MS,
-    ) -> None:
-        self._policy_guard = policy_guard or HostPolicyGuard()
-        self._default_resume_deadline_ms = int(default_resume_deadline_ms)
+def check_resume_allowed(
+    *,
+    interrupt_signal: InterruptSignal,
+    now_ms: int | None = None,
+    policy_timeout_ms: int | None = None,
+    policy_start_ms: int | None = None,
+    policy_guard: HostPolicyGuard | None = None,
+) -> ResumeDecision:
+    """Evaluate resume permission via policy guard."""
 
-    def interrupt(
-        self,
-        state: dict[str, Any],
-        *,
-        interrupt_reason: str = INTERRUPT_REASON_HUMAN_REVIEW,
-        resume_deadline_ms: int | None = None,
-    ) -> InterruptSignal:
-        """生成中断信号。
+    guard = policy_guard or HostPolicyGuard()
+    return guard.check_resume_allowed(
+        interrupt_signal=interrupt_signal,
+        now_ms=now_ms,
+        policy_timeout_ms=policy_timeout_ms,
+        policy_start_ms=policy_start_ms,
+    )
 
-        FIX-5.1：checkpoint 由 LangGraph SqliteSaver 在图执行时自动保存；
-        此处使用 state["request_id"] 作为 thread_id（checkpoint_id）。
-        """
-        thread_id = str(state.get("request_id") or "").strip()
-        if not thread_id:
-            import uuid
-            thread_id = str(uuid.uuid4())
-        now = int(time.time() * 1000)
-        deadline_ms = int(resume_deadline_ms if resume_deadline_ms is not None else self._default_resume_deadline_ms)
-        return InterruptSignal(
-            checkpoint_id=thread_id,
-            interrupt_reason=str(interrupt_reason),
-            interrupted_at_ms=now,
-            resume_deadline_at=now + deadline_ms,
-        )
-
-    def resume(
-        self,
-        interrupt_signal: InterruptSignal,
-        *,
-        now_ms: int | None = None,
-        policy_timeout_ms: int | None = None,
-        policy_start_ms: int | None = None,
-    ) -> ResumeDecision:
-        """检查是否允许恢复（Policy Clock 检查，不变）。"""
-        return self._policy_guard.check_resume_allowed(
-            interrupt_signal=interrupt_signal,
-            now_ms=now_ms,
-            policy_timeout_ms=policy_timeout_ms,
-            policy_start_ms=policy_start_ms,
-        )
-
-    def load_state(self, checkpoint_id: str) -> dict[str, Any] | None:
-        """已废弃：LangGraph 原生恢复不需要手动 load_state。
-
-        FIX-5.1：resume_graph() 改为使用 LangGraph thread_id 恢复，
-        不再调用此方法。保留接口避免编译错误，始终返回 None。
-        """
-        _logger.warning(
-            "CheckpointManager.load_state() 已废弃（FIX-5.1），"
-            "请使用 LangGraph 原生 thread_id 恢复（resume_graph 已更新）。"
-            "checkpoint_id=%s", checkpoint_id,
-        )
-        return None
