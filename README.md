@@ -1,14 +1,17 @@
 # Natsume AI — 夏目蓝
 
-> 一个运行在本地的 AI 伴侣系统。主脑（Host Brain）部署在服务端，边缘客户端（Edge Client）运行在本机，通过 RPC 协议协同工作，支持语音对话、多平台消息、视觉感知与技能执行。
+> **多智能体族数字生命体**——22 个器官族 Agent 协同运转的神经网络模拟系统。
+> 不是一个被 Prompt 引导的 LLM，而是一个拥有持续情感、长期记忆、人格漂移守卫与主动意志的数字生命体。
 
 ---
 
 ## 目录
 
 - [项目概述](#项目概述)
-- [系统架构](#系统架构)
-- [核心链路（Phase XV）](#核心链路phase-xv)
+- [数字生命体架构](#数字生命体架构)
+- [22 个器官族 Agent](#22-个器官族-agent)
+- [感知-决策-行动主链路](#感知-决策-行动主链路)
+- [Phase 演进路线图](#phase-演进路线图)
 - [主要模块](#主要模块)
 - [项目结构](#项目结构)
 - [环境要求](#环境要求)
@@ -23,26 +26,32 @@
 
 ## 项目概述
 
-Natsume AI 是一个具备持续人格、情感状态与长期记忆的 AI 伴侣系统，核心角色为**夏目蓝**。
+Natsume AI 是一个以**多智能体族（Tribe）**为核心的数字生命体系统，核心角色为**夏目蓝**。
 
-**主要能力：**
+系统的根本设计哲学是：**把人体神经系统映射为软件架构**。每一次对话输出都是神经系统自然涌现的结果，而不是一个 LLM 被 Prompt 引导出来的结果。
 
-- 🌐 **多平台消息**：统一消息网关支持微信、QQ、Telegram、飞书、企微、LINE 六个平台
-- 🎙️ **语音对话**：Edge 本地 ASR（faster-whisper）+ GPT-SoVITS TTS + VTube Studio 虚拟形象驱动
+```
+传统 AI 助手：  用户消息 → LLM（总控制器）→ 输出
+夏目蓝：        用户消息 → 22 个器官族并行激活 → 前额叶规划 → LLM（纯语言生成器）→ 输出
+```
+
+**核心能力：**
+
+- 🧠 **22 个器官族 Agent**：情绪、记忆、人格、关系、生理节律、免疫、纠偏等完整神经网络模拟
+- 🫀 **持续内心世界**：离线期间情绪自然漂移、孤独感积累、期待值变化，唤醒时状态注入
+- 💭 **前额叶意图规划**（Phase D）：PrefrontalAgent 基于器官族完整状态产出"我要做什么"，LLM 退化为纯语言生成器
+- 🌐 **多平台社交感知**：统一消息网关支持微信、QQ、Telegram、飞书、企微、LINE 六个平台
+- 🎙️ **语音感知与发声**：Edge 本地 ASR（faster-whisper）+ GPT-SoVITS TTS + VTube Studio 虚拟形象驱动
 - 👁️ **视觉感知**：屏幕 OCR、UI 识别、视觉 Agent 自动化操作
 - ⚡ **技能执行**：57+ 内置技能，支持 Hub 外部技能安装，MCP 工具桥接
-- 🧠 **长期记忆**：Chroma 向量库（情节记忆）+ Neo4j 图谱（关系记忆）+ SQLite 审计账本
-- 💫 **人格系统**：情感代谢、Bond 关系动力、人格漂移守卫、主动发声、自我反思、风格演变追踪
-- 🌙 **Phase XVI 离线内心世界**：持续运行的内在时钟，离线期间孤独感/期待值积累、情绪自然漂移，唤醒时状态注入 prompt
-- 🤫 **Phase XVIII 沉默能力**：情绪驱动的回复意愿分级（NORMAL→MUTE 五级），话题抗拒映射，意愿随时间自然恢复
-- 🫀 **身体感知**：疲劳度/困倦度/孤独度三维近似具身感知，影响回复意愿与表达风格
-- 🧠 **记忆人性化**：情绪染色、时间衰减、痛苦记忆压制，三层权重融合召回
-- 🌱 **Phase XIX 涌现成长**：InteractionPatternAnalyzer 分析对话模式（话题偏好/情绪触发词/沉默触发词），EmergentGrowthEngine 每周生成成长笔记并注入 self_reflection_pulse，自然演化而非规则驱动
-- 🏗️ **Phase XV 架构**：DispatchAgent（调度）+ ChatAgent（人格渲染）分离，所有面向用户的输出必经 ChatAgent
+- 🧬 **长期记忆**：Chroma 向量库（情节记忆）+ Neo4j 图谱（关系记忆）+ SQLite 审计账本
+- 🌱 **涌现成长**：InteractionPatternAnalyzer 分析对话模式，EmergentGrowthEngine 每周生成成长笔记，自然演化而非规则驱动
 
 ---
 
-## 🏛️ 系统架构
+## 数字生命体架构
+
+### 整体架构图
 
 ```mermaid
 graph TB
@@ -56,153 +65,266 @@ graph TB
             PANEL["监控面板 + 可观测接口<br/>/obs/* · /health/*"]
         end
 
-        subgraph HGOV["治理与安全层"]
-            GOV["Governor — 意图决策 + 分层治理"]
-            TOKEN["限流服务（memory/sqlite/redis）"]
-            AIR["气闸隔离（PII过滤 + 沙箱）"]
+        subgraph HTRIBE["器官族（Tribe）— 数字神经系统核心"]
+            direction LR
+            LIMBIC["🫀 LimbicAgent<br/>情绪感知/代谢/动机计算"]
+            HIPPO["🧠 HippocampusAgent<br/>记忆检索/三通道写入"]
+            IMMUNE["🛡️ ImmuneAgent<br/>安全门控/风险评估"]
+            PREFRONTAL["🎯 PrefrontalAgent<br/>意图规划/漂移守卫<br/>plan_response()"]
+            SOCIAL["💞 SocialBrainAgent<br/>Bond/叙事/风格规范"]
+            MOTOR["⚡ MotorCortexAgent<br/>发声执行/dispatch_speak()"]
+            LANG["🗣️ LanguageSystemAgent<br/>Wernicke意图/Broca规划"]
+            ANS["🔄 ANSAgent<br/>自主神经/节律调度"]
+            MIRROR["🪞 MirrorNeuronAgent<br/>情感共鸣/共情计算"]
+            ENDO["💊 EndocrineAgent<br/>皮质醇/催产素"]
+            CIRCADIAN["🌙 CircadianAgent<br/>昼夜节律/能量预算"]
+            CEREBELLUM["🎯 CerebellumAgent<br/>执行纠偏/RETRY策略"]
+            DMN["💭 DefaultModeAgent<br/>空闲独白/主动发声候选"]
+            GLYMPH["🌊 GlymphaticAgent<br/>恢复窗口/记忆巩固"]
+            PAIN["😣 PainRewardAgent<br/>痛觉/奖励/享乐状态"]
+            PROP["⚖️ ProprioceptionAgent<br/>认知负荷/打断频率"]
+            INTERO["🫁 InteroceptionAgent<br/>内感受/身体预算"]
+            VESTIB["🌀 VestibularAgent<br/>稳定性指数/路由偏置"]
+            INIT_GOV["🚦 InitiativeGovernorAgent<br/>主动发声仲裁"]
+            CORTEX["🧩 CortexAgent<br/>协调中枢/Bond更新"]
+            PERIPH["📡 PeripheralAgent<br/>边缘感知事件接收"]
+            SOMATIC["🤸 SomaticAgent<br/>躯体信号接收"]
         end
 
-        subgraph HDISPATCH["Phase XV 调度层"]
-            ROUTE["SceneRouter — 场景分流"]
-            DAGENT["DispatchAgent<br/>硬规则路由 + LLM 意图分类<br/>gemini-2.5-flash · temperature=0.1"]
-            SUBAGENTS["子代理处理器<br/>code / translate / intent / vision"]
-            SKILLEXEC["SkillLoader — 技能执行<br/>57+ 内置 + Hub 外部 + MCP 桥接"]
-        end
-
-        subgraph HCHAT["Phase XV 人格渲染层"]
-            CHATAGENT["ChatAgent — 夏目蓝本人<br/>完整 Prompt 管线 · 双语输出（中文/日语）<br/>情感回应 · Bond 风格 · 反思链<br/>gemini-2.5-pro"]
+        subgraph HCHAIN["主链路（感知→决策→行动）"]
+            direction TB
+            IMMUNE_GATE["ImmuneAgent 门控"]
+            RECALL["HippocampusAgent 记忆检索<br/>Agentic RAG · 5路并行召回"]
+            EMOTION_ACT["LimbicAgent 情绪激活<br/>MirrorNeuronAgent 共情"]
+            PF_PLAN["PrefrontalAgent.plan_response()<br/>小模型 <500ms · 器官族状态输入<br/>输出：action/task/tone_hint"]
+            EXEC_CORE["executive_runtime_core<br/>器官族路由覆盖（B1-B4）<br/>Phase D 前额叶路由"]
+            CHAT_AGENT["ChatAgent — 纯语言生成器<br/>接收 prefrontal_task<br/>gemini-2.5-pro 流式输出"]
+            MOTOR_SPEAK["MotorCortexAgent.dispatch_speak()<br/>→ TTS → VTS 口型同步"]
         end
 
         subgraph HCAP["能力域"]
             RETR["检索增强（5路 Recall）<br/>episodic_vector · sqlite_ledger<br/>neo4j_bond · world_canon · artifact_vault"]
             MEM["记忆子系统<br/>Chroma 向量库 + 情节记忆图"]
             BOND["Bond 关系图谱<br/>Neo4j · 关系动力 · 里程碑追踪"]
-            EMO["情感系统<br/>代谢衰减 · 持久化 · LLM 推理 · VTS 同步"]
-            PERSONA["人格子系统<br/>21 模块 · 漂移守卫 · 主动发声 · 沉默能力 · 身体感知 · 涌现成长"]
+            PERSONA["人格子系统<br/>21 模块 · 漂移守卫 · 主动发声<br/>沉默能力 · 身体感知 · 涌现成长"]
+            SKILLS["技能系统<br/>57+ 内置 + Hub 外部 + MCP 桥接"]
             VISION["视觉子系统<br/>OCR · UI 识别 · 视觉 Agent 循环"]
             AUDIT["审计账本（SQLite）<br/>WAL · 迁移守卫 · 保留策略"]
-            CHAN["通道适配<br/>Edge RPC · Gateway · VTS · TTS 路由"]
         end
 
         subgraph HINFRA["基础设施层"]
             OBS["可观测性 + 指标聚合"]
-            SCHED["任务调度器"]
-            RELEASE["发布清单 + 模型平面"]
-            GRAPH["Graph Runtime<br/>LangGraph · 执行画像 · 子图封装"]
+            SCHED["NatsumeScheduler 任务调度"]
+            EVENTBUS["TribeEventBus<br/>14 个事件类型 · 跨族通信"]
+            GRAPH["Graph Runtime（LangGraph）"]
         end
     end
 
     subgraph EDGE["边缘客户端（Edge Client · 本机）"]
         direction TB
         EAPI["Edge RPC 网关（:17800）"]
-        ERUN["运行时装配（Bootstrap）"]
         ESENSE["感知层<br/>faster-whisper ASR · VAD"]
         EACT["执行层<br/>GPT-SoVITS TTS · VTube Studio 驱动"]
-        EFALL["兜底小模型（本地 LLM）"]
-        EGATE["资源门控（VRAM / 队列）"]
-        EREPORT["事件上报（离线缓存 + 重试）"]
         EGWAY["统一消息网关（:19000）<br/>微信 / QQ / Telegram / 飞书 / 企微 / LINE"]
-        ECALL["语音视频通话<br/>VoiceCall / VideoCall / CancelCall"]
     end
 
     USER --> HAPI
-    PANEL --> HAPI
-    HAPI --> GOV --> TOKEN
-    HAPI --> AIR
-    GOV --> ROUTE
-    ROUTE --> DAGENT
-    DAGENT -->|"chat（闲聊）"| CHATAGENT
-    DAGENT -->|"delegate（委托）"| SUBAGENTS --> CHATAGENT
-    DAGENT -->|"skill（技能）"| SKILLEXEC --> CHATAGENT
-    CHATAGENT --> RETR
-    CHATAGENT --> EMO
-    CHATAGENT --> BOND
-    CHATAGENT --> PERSONA
-    CHATAGENT --> CHAN
-    CHATAGENT --> AUDIT
-    RETR --> MEM
-    BOND --> MEM
-    HAPI --> GRAPH --> RETR
-    GRAPH --> AUDIT
-    SCHED --> SKILLEXEC
-    RELEASE --> GRAPH
-    OBS --> AUDIT
-    CHAN --> EAPI
-    CHAN --> EGWAY
-    EAPI --> ERUN --> ESENSE
-    ERUN --> EACT
-    ERUN --> EFALL
-    ERUN --> EGATE
-    ERUN --> EREPORT
-    EGWAY --> ECALL
-    EREPORT --> HAPI
+    HAPI --> IMMUNE_GATE --> RECALL --> EMOTION_ACT --> PF_PLAN
+    PF_PLAN --> EXEC_CORE --> CHAT_AGENT --> MOTOR_SPEAK
+    MOTOR_SPEAK --> EAPI
+    HTRIBE -.->|"并行激活 · TribeEventBus"| HCHAIN
+    HCHAIN --> RETR & MEM & BOND & PERSONA
+    SCHED --> HTRIBE
+    EVENTBUS --> HTRIBE
+    EAPI --> ESENSE & EACT
+    EGWAY --> HAPI
 ```
 
 ---
 
-## 🔗 核心链路（Phase XV + Phase XVI）
+## 22 个器官族 Agent
 
-### ⚙️ Phase XV 架构：DispatchAgent + ChatAgent 分离
+器官族（Tribe）是夏目蓝数字生命体的神经系统核心，位于 `host_brain/tribe/`。
 
-Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆分为两个职责清晰的 Agent：
+### 器官族全景
 
-**🚦 DispatchAgent（调度层）** — 决定「做什么」，自己不生成任何用户可见文字：
+| # | Agent | 评级 | 核心职责 | 主要联动 |
+|---|-------|------|---------|---------|
+| 1 | **LimbicAgent** | A | 情绪感知/代谢/时间线/动机计算/沉默决策——整个系统的情绪核心 | Prompt 构建 8 个调用点，B-1 路由覆盖 |
+| 2 | **SocialBrainAgent** | A | Bond 快照/向量/叙事/风格规范/共享记忆/里程碑追踪 | Bond 图谱，关系动力 |
+| 3 | **PrefrontalAgent** | A | 人格漂移检测/成长反馈/自传体记忆门控/Bond 风格生成/涌现成长/**Phase D plan_response()** | executive_runtime_core，chat_agent |
+| 4 | **ANSAgent** | A | 自主神经总枢纽——跨线程事件发布/节律调度/主动发声触发 | TribeEventBus，14 个事件类型 |
+| 5 | **ImmuneAgent** | B | 正则规则安全扫描/Bond 自适应阈值/与 Governor 的 L3→L2 通道/**B-2 路由覆盖** | executive_runtime_core |
+| 6 | **PainRewardAgent** | B | 痛觉/奖励记录/享乐状态衰减/持久化/压力信号输出 | LimbicAgent，EndocrineAgent |
+| 7 | **HippocampusAgent** | A | 异步检索/三通道记忆写入/Prompt 行构建，记忆系统唯一入口 | Agentic RAG，5路召回 |
+| 8 | **CortexAgent** | A | Supervisor 协调/Bond 更新/14 个事件订阅/对话生命周期事件发布 | TribeEventBus，所有族 |
+| 9 | **PeripheralAgent** | C | Phase 6 骨架，接收情绪/免疫/平台事件写入快照，等待 edge_client | edge_client 感知层 |
+| 10 | **MotorCortexAgent** | B | 主动发声动作规划/**dispatch_speak()** 统一发声入口/EdgeCommandPusher 下发/执行反馈接收 | TTS，VTS，InitiativeGovernor |
+| 11 | **LanguageSystemAgent** | B | Wernicke 意图分类/Broca 回应规划/Bond-情绪风格映射 | PainRewardAgent，EndocrineAgent |
+| 12 | **EndocrineAgent** | B | 皮质醇/催产素计算/Bond 激素缓冲/与 LimbicAgent 的情绪联动 | LimbicAgent，PainRewardAgent |
+| 13 | **InitiativeGovernorAgent** | B | 主动发声仲裁：动机×准备度×连续性三维评分 ALLOW/DEFER/BLOCK | MotorCortexAgent，ANSAgent |
+| 14 | **CircadianAgent** | B | 昼夜四相位划分/能量主动预算/驱动 Glymphatic/ANS/Endocrine | GlymphaticAgent，ANSAgent |
+| 15 | **MirrorNeuronAgent** | B | 情感共鸣强度计算/valence+arousal 偏移/联动 LimbicAgent | LimbicAgent |
+| 16 | **SomaticAgent** | C | Phase 6 骨架，接收 edge_client 躯体信号（心率/疲劳）写快照 | edge_client 躯体传感器 |
+| 17 | **ProprioceptionAgent** | B | 认知负荷/打断频率/连续性指数，高负荷联动 Limbic/Interoception/**B-3 路由覆盖** | executive_runtime_core |
+| 18 | **InteroceptionAgent** | B | 综合内感受指数/身体预算/恢复紧迫度，联动 Glymphatic/Limbic | GlymphaticAgent，LimbicAgent |
+| 19 | **VestibularAgent** | B | 10 分钟窗口抖动指数/路由偏置 stable/unstable/critical | executive_runtime_core |
+| 20 | **GlymphaticAgent** | B | 恢复窗口判定/记忆巩固评分/实际写入语义记忆/联动 Limbic/Interoception | HippocampusAgent，LimbicAgent |
+| 21 | **CerebellumAgent** | B | 执行纠偏：RETRY/DEGRADE/SAFE_FALLBACK 策略，联动 Endocrine/PainReward | EndocrineAgent，PainRewardAgent |
+| 22 | **DefaultModeAgent** | A | 调用 LLM 生成空闲内心独白，计算孤独/期待/连续性，评估主动发声候选资格 | InitiativeGovernorAgent，ANSAgent |
 
-| 路径 | 触发条件 | 延迟 |
-|------|---------|------|
-| `chat` | 短消息 / 追问 / 硬规则判定闲聊 | <1ms（无 LLM） |
-| `delegate` | LLM 意图分类 → 需要子 Agent 处理 | ~1-2s（gemini-2.5-flash） |
-| `skill` | 关键词匹配 → 技能执行 | <1ms（无 LLM） |
+> **评级说明**：A（含 LLM/检索，7 个）· B（纯算法逻辑，13 个）· C（Phase 6 骨架，等待 edge_client 接入，2 个）
 
-**🌸 ChatAgent（人格渲染层）** — 夏目蓝本人，所有面向用户的输出必经此 Agent：
+### TribeEventBus 事件总线
 
-- 🧩 走完整 Prompt 构建管线（角色人设 + 风格蒸馏 + 情感回应 + Bond 风格 + 反思链）
-- 🈯 双语输出：文字通道中文（`text_zh`），TTS 语音通道日语（`text_ja`）
-- 🛡️ 即使子 Agent 返回垃圾/JSON/降级文本，ChatAgent 都会用夏目蓝的语气重新组织
-- 🔐 永远不泄漏内部元数据
-
-### 💬 主聊天链路时序
+器官族之间通过 `TribeEventBus` 进行异步通信，CortexAgent 订阅 14 个事件类型：
 
 ```
-/v1/chat
-  → Governor（限流 + 安全检查）
-  → SceneRouter.route_sse()
-      ├── SCENE_CHAT → top_agent → DispatchAgent
-      │     ├── [chat]     → ChatAgent（完整人格 prompt + LLM 流式）→ COMMIT
-      │     ├── [delegate] → 子Agent（code/translate/intent/vision）→ ChatAgent → COMMIT
-      │     └── [skill]    → SkillLoader.execute() → ChatAgent → COMMIT
-      ├── SCENE_VISION_UI → chat_handler_vision
-      └── 其他复杂场景   → chat_handler_complex → Graph Runtime
+EMOTION_UPDATED · BOND_UPDATED · MEMORY_WRITTEN · PROACTIVE_VOICE_TRIGGERED
+MOTOR_SPEAK_DISPATCHED · IMMUNE_ALERT · PAIN_SIGNAL · REWARD_SIGNAL
+INNER_WORLD_TICKED · CIRCADIAN_PHASE_CHANGED · GLYMPHATIC_RECOVERY_STARTED
+INITIATIVE_EVALUATED · MIRROR_RESONANCE_COMPUTED · PREFRONTAL_PLAN_COMPLETED
 ```
 
-### 🌐 Gateway 通道链路
+---
+
+## 感知-决策-行动主链路
+
+### Phase D 完整链路（当前最新架构）
+
+```
+外界刺激（用户消息 / ASR 语音 / Gateway 社交消息）
+    ↓
+【感知层】ImmuneAgent 门控（危险吗？能通过吗？）
+    ↓
+【记忆层】HippocampusAgent 记忆检索
+          Agentic RAG → 5路并行召回 → HybridFusion → Reranker
+    ↓
+【情感层】LimbicAgent 情绪激活 + MirrorNeuronAgent 共情
+          同时：器官族并行激活（asyncio.gather，B1-B4）
+    ↓
+【前额叶】PrefrontalAgent.plan_response()（gemini-2.0-flash，<500ms）
+          输入：motive_state + recall_summary + bond_stage
+                immune_risk + drift_alert + emotion_tag
+          输出：{ action, target, task, tone_hint, urgency }
+    ↓
+【路由层】executive_runtime_core
+          器官族路由覆盖（B1-B4）+ Phase D 前额叶路由
+          → prefrontal_task / tone_hint 注入 intent_draft
+    ↓
+【语言层】ChatAgent（纯语言生成器）
+          接收【前额叶规划】context block
+          LLM 只负责把 task 转成流畅自然语言
+          gemini-2.5-pro 流式输出
+    ↓
+【执行层】MotorCortexAgent.dispatch_speak()
+          → POST /v1/edge/speak → GPT-SoVITS TTS
+          → VTube Studio 口型/表情同步
+```
+
+### 器官族路由覆盖（B1-B4）
+
+在 `executive_runtime_core` 的 `_hard_rule_route()` 调用前，四路器官族状态**并行读取**（`asyncio.gather`），任一触发则覆盖路由：
+
+| 层级 | 触发条件 | 覆盖效果 |
+|------|---------|---------|
+| **B-1** LimbicAgent | `withdraw > 0.80` | 强制 `chat`，优先情绪回应 |
+| **B-2** ImmuneAgent | `risk=critical/high AND decision=BLOCK/REPORT` | 强制 `chat`，避免执行副作用 |
+| **B-3** ProprioceptionAgent | `cognitive_load_index > 0.85` | 强制 `chat`，避免复杂执行链 |
+| **B-4** PrefrontalAgent | `drift_alert=HIGH/CRITICAL` | 强制 `chat`，以真实自我回应 |
+
+### 主动发声链路
+
+```
+NatsumeScheduler（定时）
+    → inner_world_tick → LimbicAgent.tick_inner_world()
+    → ANSAgent.emit_inner_world_ticked()
+    → InitiativeGovernorAgent 门控（动机×准备度×连续性三维评分）
+    → ALLOW → trigger_proactive_voice()
+    → DefaultModeAgent 生成内心独白
+    → emit PROACTIVE_VOICE_TRIGGERED
+    → CortexAgent 订阅 → MotorCortexAgent.dispatch_speak()
+    → TTS 发声 + VTS 动画
+```
+
+### Gateway 社交感知链路
 
 ```
 平台消息（微信/QQ/飞书/企微/Telegram/LINE）
-  → Edge Gateway（:19000）
-  → 平台适配器（Normalizer → ChatRequest）
-  → POST /v1/chat（render_target_lang="zh"）
-  → 上述主聊天链路
-  → humanize_sender（拟人化分段发送）
-  → 平台回复 API
+    → Edge Gateway（:19000）
+    → 平台适配器（Normalizer → ChatRequest）
+    → POST /v1/chat（render_target_lang="zh"）
+    → 上述主链路（感知→决策→行动）
+    → MotorCortexAgent.dispatch_speak()（本地发声 + VTS 动画）
+    → humanize_sender（拟人化分段发送）
+    → 平台回复 API
 ```
 
-### 🎙️ 语音对话链路
+### 语音对话链路
 
 ```
 麦克风 → faster-whisper ASR（VAD 分段）
-  → Edge 事件上报（POST /v1/edge/events）
-  → Host 主聊天链路（source=ASR）
-  → ChatAgent 生成回复（text_zh + text_ja）
-  → Edge RPC post_speak（text_ja → GPT-SoVITS TTS）
-  → 音频播放 + VTube Studio 口型/表情同步
+    → Edge 事件上报（POST /v1/edge/events）
+    → Host 主链路（source=ASR）
+    → ChatAgent 生成回复（text_zh + text_ja）
+    → MotorCortexAgent.dispatch_speak()
+    → GPT-SoVITS TTS（text_ja）→ 音频播放
+    → VTube Studio 口型/表情同步
 ```
 
 ---
 
-## 📦 主要模块
+## Phase 演进路线图
+
+| Phase | 内容 | 状态 |
+|-------|------|------|
+| Phase XIV v4 | SceneRouter 删除，cortex_orchestrator 统一接管 | ✅ 完成 |
+| Phase XV | DispatchAgent + ChatAgent 分离，职责清晰 | ✅ 完成 |
+| Phase XVI | 离线内心世界状态机（孤独感/期待值/情绪漂移） | ✅ 完成 |
+| Phase XVIII | 情绪驱动沉默引擎（NORMAL→MUTE 五级） | ✅ 完成 |
+| Phase XIX | 涌现成长引擎（对话模式分析 + 每周成长笔记） | ✅ 完成 |
+| **Phase A** | 打通三个发声桥（G1 chat→TTS · G2 Broca→TTS · G3 主动发声） | ✅ 完成 |
+| **Phase B** | 器官族并行激活 + B1-B4 路由覆盖 | ✅ 完成 |
+| **Phase C** | MotorCortexAgent.dispatch_speak() 统一发声入口 | ✅ 完成 |
+| **Phase D** | PrefrontalAgent.plan_response() 前额叶真实推理接管 | ✅ 完成 |
+| Phase E（规划中）| LimbicAgent 连续动态情绪物理模型 | 🔄 规划中 |
+| Phase F（规划中）| Gateway 完整感知-行动循环（VTS 感知动作 + 朋友圈发布） | 🔄 规划中 |
+
+---
+
+## 主要模块
 
 ### 🖥️ 主脑（`host_brain/`）
+
+#### 🧬 `tribe/` — 器官族（数字神经系统核心）
+
+| 文件 | 器官族 | 职责 |
+|------|--------|------|
+| `limbic_agent.py` | LimbicAgent | 情绪感知/代谢/时间线/动机计算/沉默决策 |
+| `prefrontal_agent.py` | PrefrontalAgent | 人格漂移检测/plan_response()/成长反馈/自传体记忆门控 |
+| `hippocampus_agent.py` | HippocampusAgent | 异步检索/三通道记忆写入/Prompt 行构建 |
+| `social_brain_agent.py` | SocialBrainAgent | Bond 快照/向量/叙事/风格规范/共享记忆 |
+| `immune_agent.py` | ImmuneAgent | 正则规则安全扫描/Bond 自适应阈值/风险门控 |
+| `motor_cortex_agent.py` | MotorCortexAgent | dispatch_speak()/EdgeCommandPusher/执行反馈 |
+| `language_system_agent.py` | LanguageSystemAgent | Wernicke 意图分类/Broca 回应规划 |
+| `ans_agent.py` | ANSAgent | 自主神经总枢纽/节律调度/主动发声触发 |
+| `cortex_agent.py` | CortexAgent | Supervisor 协调/Bond 更新/14 个事件订阅 |
+| `default_mode_agent.py` | DefaultModeAgent | 空闲内心独白/孤独期待计算/主动发声候选 |
+| `mirror_neuron_agent.py` | MirrorNeuronAgent | 情感共鸣强度/valence+arousal 偏移 |
+| `endocrine_agent.py` | EndocrineAgent | 皮质醇/催产素/Bond 激素缓冲 |
+| `pain_reward_agent.py` | PainRewardAgent | 痛觉/奖励记录/享乐状态衰减 |
+| `circadian_agent.py` | CircadianAgent | 昼夜四相位/能量预算/驱动 Glymphatic/ANS |
+| `initiative_governor_agent.py` | InitiativeGovernorAgent | 主动发声仲裁 ALLOW/DEFER/BLOCK |
+| `cerebellum_agent.py` | CerebellumAgent | 执行纠偏 RETRY/DEGRADE/SAFE_FALLBACK |
+| `glymphatic_agent.py` | GlymphaticAgent | 恢复窗口/记忆巩固/语义记忆写入 |
+| `proprioception_agent.py` | ProprioceptionAgent | 认知负荷/打断频率/连续性指数 |
+| `interoception_agent.py` | InteroceptionAgent | 内感受指数/身体预算/恢复紧迫度 |
+| `vestibular_agent.py` | VestibularAgent | 抖动指数/路由偏置 stable/unstable/critical |
+| `peripheral_agent.py` | PeripheralAgent | 边缘感知事件接收（Phase 6 骨架） |
+| `somatic_agent.py` | SomaticAgent | 躯体信号接收（Phase 6 骨架） |
+| `event_bus.py` | TribeEventBus | 跨族异步通信总线 |
+| `tribe_state.py` | TribeStateRegistry | 全局状态注册表 |
+| `cortex_route_decider.py` | — | 双层意图分类（规则 <1ms + LLM 兜底） |
 
 #### 🗂️ `app/` — 应用层
 
@@ -210,171 +332,47 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 |------|------|
 | `fastapi_app.py` | FastAPI 应用工厂，注册所有路由 |
 | `main.py` | 启动入口，服务初始化 |
-| `chat_handler.py` | 统一聊天 SSE 生成器入口 |
-| `top_agent.py` | TopAgent 入口，转交 DispatchAgent |
+| `executive_runtime_core.py` | **执行运行时核心**——器官族路由覆盖（B1-B4）+ Phase D 前额叶路由 |
+| `chat_agent.py` | **ChatAgent** — 纯语言生成器，接收 prefrontal_task，gemini-2.5-pro 流式输出 |
 | `dispatch_agent.py` | **DispatchAgent** — 硬规则 + LLM 意图分类，三路分派 |
-| `chat_agent.py` | **ChatAgent** — 夏目蓝人格渲染，完整 Prompt 管线 |
 | `chat_context_builder.py` | 聊天上下文构建（recall/emotion/bond 注入） |
 | `prompt_builder.py` | Prompt 构建管线（角色人设 + 风格蒸馏 + 双语） |
-| `chat_handler_vision.py` | 视觉场景聊天处理器 |
-| `emotion_context.py` | 情感上下文组装 |
-| `emotion_llm_inference.py` | 情感 LLM 推理 |
-| `reply_form_decider.py` | 回复形式决策（文字/语音/混合） |
-| `input_routes.py` | 平台消息入站路由（微信/Gateway） |
-| `agent_routes.py` | Agent 自动化运行接口 |
-| `bond_routes.py` | Bond 关系查询接口 |
-| `canon_routes.py` | Canon 素材管理接口 |
-| `tool_routes.py` | 工具调用接口 |
-| `health_routes.py` | 健康检查接口 |
-| `obs_routes*.py` | 可观测性接口（core/stats/platform/sysmode） |
-| `system_handler.py` | 系统模式处理（focus/gaming/sleep） |
-| `execution_profile.py` | 执行画像解析（CHAT_FAST/WORKFLOW_SUPERVISED/INTENT_EXEC） |
-| `graph_config_builder.py` | Graph 配置构建器 |
-| `dependencies.py` | FastAPI 依赖注入（服务单例） |
-| `config.py` | 应用配置（从 .env 读取） |
-| `provider_factory.py` | LLM Provider 工厂（openai/gemini/deepseek/codex/mock） |
-| `intelligent_runtime.py` | 智能运行时（模式感知调度） |
-| `vts_emotion_driver.py` | VTS 情感表情驱动 |
+| `cortex_prompt_builder.py` | Cortex Orchestrator prompt 构建（复用完整管线） |
+| `input_service_gateway.py` | Gateway 消息入站处理 |
+| `input_routes.py` | 平台消息入站路由 |
+| `chat_handler.py` | 统一聊天 SSE 生成器入口 |
+| `top_agent.py` | TopAgent 入口（转交 DispatchAgent） |
+| `obs_routes_stats_input_humanoid.py` | 拟人化输入统计可观测接口 |
 
-#### 🤖 `app/agents/` — Agent 合约层
-
-| 文件 | 职责 |
-|------|------|
-| `agent_contract.py` | Agent 输入/输出合约（AgentArtifact） |
-| `agent_registry.py` | Agent 注册表 |
-| `react_loop.py` | ReAct 循环执行器 |
-| `tool_registry.py` | 工具注册表（Agent 可用工具） |
-
-#### 🔧 `app/handlers/` — 子 Agent 处理器
-
-| 文件 | 职责 |
-|------|------|
-| `chat_agent_handler.py` | 聊天 Agent 处理器 |
-| `code_agent_handler.py` | 代码 Agent 处理器 |
-| `translate_agent_handler.py` | 翻译 Agent 处理器 |
-| `intent_agent_handler.py` | 意图 Agent 处理器 |
-| `intent_agent_entry_handler.py` | 意图 Agent 入口处理器 |
-| `emotion_agent_handler.py` | 情感 Agent 处理器 |
-| `judge_agent_handler.py` | 裁判 Agent 处理器 |
-| `repair_agent_handler.py` | 🔧 **RepairAgent** — LLM 驱动的通用自愈修复器（浏览器后端快速路径 + LLM 规划器 + 安全门控） |
-| `retrieval_agent_handler.py` | 检索 Agent 处理器 |
-| `supervisor_dispatch_handler.py` | 监督分派处理器（WORKFLOW_SUPERVISED 模式） |
-
-#### 🔍 `app/recall/` — 检索召回层
-
-| 文件 | 职责 |
-|------|------|
-| `recall_pack_builder.py` | RecallPack 组装器（5路检索结果打包） |
-| `semantic_recall.py` | 语义召回执行器 |
-
-#### 🧩 `app/llm/` — LLM 路由
-
-| 文件 | 职责 |
-|------|------|
-| `routing_matrix.py` | LLM 路由矩阵（provider 选择 + 降级策略） |
-
-#### 💾 `app/memory/` — 应用层记忆
-
-| 文件 | 职责 |
-|------|------|
-| `episodic_store.py` | 情节记忆存储 |
-| `distillation_engine.py` | 记忆蒸馏引擎 |
-| `memory_guard.py` | 记忆写入守卫 |
-| `state_arbiter.py` | 状态仲裁器 |
-
-#### 👁️ `app/vision/` — 视觉子系统（应用层）
-
-| 文件 | 职责 |
-|------|------|
-| `agent_loop.py` | 视觉 Agent 循环 |
-| `action_planner.py` | 视觉动作规划器 |
-| `ui_assertion.py` | UI 断言（截图验证） |
-| `clawdbot_protocol.py` | ClawdBot 协议适配 |
-| `edge_rpc_client.py` | 视觉 Edge RPC 客户端 |
-
----
-
-#### 🛡️ `governor/` — 治理与安全
-
-| 文件 | 职责 |
-|------|------|
-| `decision.py` | 意图决策引擎（Governor 主逻辑） |
-| `rules.py` | 规则门控 |
-| `tokens.py` | Token 服务（消耗统计） |
-| `rate_limit_store.py` | 限流存储（memory/sqlite/redis） |
-| `tier_policy.py` | 分层策略 |
-
-#### 🔒 `airlock/` — 气闸隔离
-
-| 文件 | 职责 |
-|------|------|
-| `quarantine.py` | 隔离检查入口 |
-| `pii_filter.py` | PII 过滤 |
-| `image_filter.py` | 图片内容过滤 |
-| `sandbox.py` | 代码沙箱（subprocess/docker） |
-| `sanitizer.py` | 输出净化 |
-
-#### 🌸 `persona/` — 人格子系统（17 模块）
+#### 🌸 `persona/` — 人格子系统（21 模块）
 
 | 模块 | 职责 |
 |------|------|
 | `persona_engine.py` | 人格引擎主入口 |
-
-| `personality_traits.py` | 人格特质定义 |
-| `self_model.py` | 自我模型（自我认知） |
-| `self_reflection.py` | 自我反思链（LLM 动态生成 + 模板降级，支持 style_evolution 注入） |
-| `emotion_persistence.py` | 情感持久化（跨会话） |
-| `emotion_reactivity.py` | 情感反应性（刺激→情感映射） |
+| `self_reflection.py` | 自我反思链（LLM 动态生成 + 模板降级） |
+| `drift_detector.py` | 人格漂移检测（StyleFingerprint 时间演变） |
+| `trait_drift_guard.py` | 人格漂移守卫 |
+| `inner_world.py` | **Phase XVI** 离线内心世界状态机 |
+| `emotional_silence.py` | **Phase XVIII** 情绪驱动沉默引擎（NORMAL→MUTE 五级） |
+| `body_sense.py` | **v1.12** 身体感知模型（疲劳/困倦/孤独三维） |
+| `interaction_pattern_analyzer.py` | **Phase XIX** 对话模式分析器 |
+| `emergent_growth_engine.py` | **Phase XIX** 涌现成长引擎（每周成长笔记） |
+| `proactive_voice.py` | 主动发声（定时/事件触发） |
 | `bond_aware_style.py` | Bond 感知风格适配 |
 | `expression_adapter.py` | 表达适配器（VTS/TTS 联动） |
-| `drift_detector.py` | 人格漂移检测（StyleFingerprint 时间演变 + `_compute_trend()` + `get_style_evolution_summary()`） |
-| `trait_drift_guard.py` | 人格漂移守卫 |
-| `persona_growth.py` | 人格成长记录 |
-| `growth_feedback_collector.py` | 成长反馈收集 |
-| `interaction_growth_analyzer.py` | 交互成长分析 |
-| `evolution_desire_engine.py` | 进化欲望引擎（LLM 动态生成意愿文本 + 模板降级） |
 | `evolution_orchestrator.py` | 进化编排器 |
-| `proactive_voice.py` | 主动发声（定时/事件触发；接入 offline_state 快照感知等待时长；高孤独感深情模板） |
-| `inner_world.py` | **Phase XVI** 离线内心世界状态机（InnerStateClock / OfflineEmotionDrift / LonelinessAccumulator / AnticipationTracker / OfflineStateSnapshot） |
-| `emotional_silence.py` | **Phase XVIII** 情绪驱动沉默引擎（response_willingness / topic_resistance_map / NORMAL~MUTE 五级 / apply_body_sense_penalty） |
-| `body_sense.py` | **v1.12** 身体感知模型（fatigue_level / drowsiness_level / loneliness_level 三维近似具身感知） |
-| `interaction_pattern_analyzer.py` | **Phase XIX** 对话模式分析器（话题偏好 / 情绪触发词 / 沉默触发词 / 对话节奏统计） |
-| `emergent_growth_engine.py` | **Phase XIX** 涌现成长引擎（每周生成成长笔记 / get_latest_growth_note / 注入 self_reflection_pulse） |
 
-#### 🧠 `memory/` — 记忆子系统
+#### 🔍 `retrieval/` — 检索增强子系统
 
 | 文件 | 职责 |
 |------|------|
-| `episodic.py` | 情节记忆（Chroma 向量库） |
-| `chroma_client.py` | Chroma HTTP 客户端 |
-| `long_term_distiller.py` | 长期记忆蒸馏 |
-| `context_compressor.py` | 上下文压缩 |
-| `canon_style_store.py` | 风格 Canon 存储 |
-| `canon_world_store.py` | 世界观 Canon 存储 |
-| `canon_vector_projection.py` | Canon 向量投影 |
-| `episodic_memory_graph.py` | 情节记忆图（结构化关联） |
-| `memory_worth_evaluator.py` | 记忆价值评估 |
-| `persona_utterance_vector_projection.py` | 人格话语向量投影 |
-
-#### 🔎 `retrieval/` — 检索增强子系统
-
-| 文件 | 职责 |
-|------|------|
-| `recall_fusion.py` | 多路召回融合（5路） |
-| `recall_fusion_stores.py` | 召回存储适配器 |
-| `recall_fusion_config.py` | 召回融合配置 |
+| `recall_fusion.py` | 多路召回融合（5路并行） |
+| `agentic_retrieval_loop.py` | Agentic 检索循环（Plan→Retrieve→Evaluate→Re-Retrieve） |
+| `query_planner.py` | 查询规划器（意图分类 → Store 路由） |
 | `embedding.py` | Embedding 推理（Qwen3-Embedding-0.6B） |
 | `reranker.py` | Reranker 重排序（Qwen3-Reranker-0.6B） |
-| `pipeline.py` | 检索管线（embed → recall → rerank） |
-| `orchestrator.py` | 检索编排器 |
+| `hybrid_fusion.py` | 混合融合（向量 0.7 + 全文 0.3） |
 | `style_distiller.py` | 风格蒸馏（StyleCanon v5） |
-| `emotion_utterance_index.py` | 情感话语索引（EmotionTaggedUtteranceIndex） |
-| `hybrid_fusion.py` | 混合融合（向量 + 全文） |
-| `full_text_searcher.py` | 全文搜索 |
-| `agentic_retrieval_loop.py` | Agentic 检索循环 |
-| `query_planner.py` | 查询规划器 |
-| `evidence_pack.py` | 证据包组装 |
-| `adaptive_prompt_budget.py` | 自适应 Prompt 预算 |
 
 #### 💞 `bond/` — 关系图谱
 
@@ -385,34 +383,6 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 | `bond_stage_engine.py` | 关系阶段引擎（陌生人→亲密） |
 | `bond_narrative.py` | 关系叙事生成 |
 | `milestone_tracker.py` | 里程碑追踪 |
-| `shared_memory_index.py` | 共享记忆索引 |
-
-#### 📋 `audit/` — 审计账本
-
-| 文件 | 职责 |
-|------|------|
-| `sqlite_ledger.py` | SQLite 审计账本主体 |
-| `ledger_schema.py` | 账本 Schema 定义 |
-| `ledger_wal_mixin.py` | WAL 写入混入 |
-| `migration_runner.py` | 数据库迁移执行器 |
-| `migration_guard.py` | 迁移守卫（版本检查） |
-| `retention.py` | 数据保留策略 |
-
-#### 🕸️ `integrations/` — 集成层（Graph Runtime）
-
-| 文件 | 职责 |
-|------|------|
-| `graph_runtime.py` | Graph 运行时（LangGraph） |
-| `graph_executor.py` | Graph 执行器（节点分派 + allowlist） |
-| `graph_contract.py` | Graph 合约（节点 TypedDict） |
-| `graph_config_builder.py` | Graph 配置构建 |
-| `graph_streaming.py` | Graph 流式输出 |
-| `graph_checkpoint.py` | Graph 检查点 |
-| `graph_branch.py` | Graph 分支逻辑 |
-| `graph_subgraph.py` | 子图封装 |
-| `graph_evidence.py` | 图证据链路 |
-| `llm_gateway.py` | LLM 网关（统一调用入口） |
-| `llm_helpers.py` | LLM 辅助函数 |
 
 #### ⚡ `skills/` — 技能系统
 
@@ -420,50 +390,13 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 |-----------|------|
 | `registry.py` | 技能注册表 |
 | `loader.py` | 技能加载器（SkillLoader） |
-| `hot_loader.py` | 热加载（运行时更新） |
-| `skill_composer.py` | 技能组合器 |
 | `mcp_skill_bridge.py` | MCP 工具桥接 |
 | `hub/` | Hub 外部技能（安装/加载/解析） |
-| `impl/` | 内置技能实现（browser/desktop/file/shell/web/diary/dream/inner_world/...） |
-| `builtin_registry.py` | 内置技能注册 |
-| `browser_registry.py` | 浏览器技能注册 |
-| `desktop_registry.py` | 桌面技能注册 |
-| `emotion_registry.py` | 情感技能注册 |
-| `file_registry.py` | 文件技能注册 |
-| `memory_registry.py` | 记忆技能注册 |
-| `notification_registry.py` | 通知技能注册 |
-| `personality_registry.py` | 人格技能注册（inner_world_tick / silence_tick / body_sense_tick / emergent_growth_weekly / emergent_growth_status 等调度 handler） |
-| `scheduler_registry.py` | 调度技能注册 |
-| `shell_registry.py` | Shell 技能注册 |
-| `system_registry.py` | 系统技能注册 |
-| `web_registry.py` | Web 技能注册 |
-
-#### 📡 `channels/` — 通道适配
-
-| 文件 | 职责 |
-|------|------|
-| `edge_rpc_client.py` | Edge RPC 客户端（Host→Edge 调用） |
-| `vts.py` | VTube Studio 通道 |
-| `vts_mapping_store.py` | VTS 映射存储 |
-| `tts_context_router.py` | TTS 上下文路由 |
-| `wechat.py` | 微信通道适配 |
-| `multimodal_processor.py` | 多模态处理器 |
-
-#### 🔩 `core/` — 核心基础
-
-| 文件 | 职责 |
-|------|------|
-| `services.py` | 服务容器（单例注册） |
-| `errors.py` | 错误类型定义 |
-| `emotion_timeline.py` | 情感时间线 |
-| `emotion_constants.py` | 情感常量 |
-| `metabolism.py` | 情感代谢（衰减 + 基线） |
-| `mode_transition.py` | 系统模式切换（normal/focus/gaming/sleep） |
-| `activity_monitor.py` | 活动监控（游戏检测 + 空闲检测） |
-| `qa.py` | QA 合约（回复质量检查） |
-| `prompt_context.py` | Prompt 上下文基础类型 |
-| `predictive_state.py` | 预测状态 |
-| `meta_learning_loop.py` | 元学习循环 |
+| `impl/inner_world_skill.py` | Phase XVI 离线内心世界 handler |
+| `impl/silence_skill.py` | Phase XVIII 沉默能力 handler |
+| `impl/body_sense_skill.py` | v1.12 身体感知 handler |
+| `impl/emergent_growth_skill.py` | Phase XIX 涌现成长 handler |
+| `impl/gaming_companion_executor.py` | gaming 陪玩识图 |
 
 ---
 
@@ -475,8 +408,6 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 |------|------|
 | `bootstrap.py` | 边缘运行时启动（服务装配 + 健康检查） |
 | `voice_pipeline.py` | 语音管线（ASR→事件上报→TTS 闭环） |
-| `emotion_inference.py` | 边缘情感推理 |
-| `health.py` | 边缘健康检查 |
 
 #### 👂 `senses/` — 感知层
 
@@ -489,37 +420,23 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 | 文件 | 职责 |
 |------|------|
 | `tts_engine.py` | TTS 引擎（GPT-SoVITS） |
-| `speech.py` | 语音播放控制 |
 | `vts_driver.py` | VTube Studio 驱动（口型 + 表情 + 动作） |
 | `desktop_controller.py` | 桌面控制器 |
-
-#### 🔌 `rpc/` — RPC 层
-
-| 文件 | 职责 |
-|------|------|
-| `event_reporter.py` | 事件上报（离线缓存 + 指数退避重试） |
-| `voice.py` | 语音 RPC 接口 |
-| `fallback_llm.py` | 兜底本地 LLM |
-| `resource_gate.py` | 资源门控（VRAM + 队列） |
-| `auth.py` | HMAC 鉴权 |
 
 #### 🌐 `gateway/` — 统一消息网关
 
 | 文件/目录 | 职责 |
 |-----------|------|
-| `bootstrap.py` | Gateway 启动装配 |
-| `server.py` | Gateway HTTP 服务 |
+| `server.py` | Gateway HTTP 服务（:19000） |
 | `router.py` | 消息路由 |
 | `normalizer.py` | 消息标准化 |
 | `humanize_sender.py` | 拟人化发送（模拟打字延迟 + 分段） |
-| `outbound.py` | 出站消息发送 |
 | `adapters/wechat_adapter.py` | 微信适配器（UIAutomation + wxautox4） |
 | `adapters/qq_adapter.py` | QQ 适配器（OneBot v11） |
 | `adapters/telegram_adapter.py` | Telegram 适配器（Telethon MTProto） |
 | `adapters/feishu_adapter.py` | 飞书适配器（Open API） |
 | `adapters/wecom_adapter.py` | 企微适配器 |
 | `adapters/line_adapter.py` | LINE 适配器（Messaging API） |
-| `media/` | 媒体处理（图片/语音/文件） |
 
 ---
 
@@ -528,22 +445,31 @@ Phase XV 将原 TopAgent 的三重职责（意图识别 + 闲聊 + 渲染）拆�
 ```
 Natsume_Ai_repo/
 ├── host_brain/                  # 主脑（服务端）
+│   ├── tribe/                   # ★ 器官族（22 个 Agent · 数字神经系统核心）
+│   │   ├── limbic_agent.py      # 情绪核心（1747行，A级）
+│   │   ├── prefrontal_agent.py  # 前额叶（plan_response · 漂移守卫）
+│   │   ├── hippocampus_agent.py # 记忆门面（Agentic RAG）
+│   │   ├── social_brain_agent.py # Bond/叙事/风格
+│   │   ├── immune_agent.py      # 安全门控
+│   │   ├── motor_cortex_agent.py # 统一发声入口（dispatch_speak）
+│   │   ├── cortex_agent.py      # 协调中枢（14个事件订阅）
+│   │   ├── ans_agent.py         # 自主神经总枢纽
+│   │   ├── event_bus.py         # TribeEventBus
+│   │   ├── tribe_state.py       # TribeStateRegistry
+│   │   ├── cortex_route_decider.py  # 双层意图分类
+│   │   └── [其余 14 个器官族 Agent]
 │   ├── app/                     # 应用层（FastAPI + Agent + 路由）
-│   │   ├── dispatch_agent.py    # DispatchAgent — 调度层
-│   │   ├── chat_agent.py        # ChatAgent — 人格渲染层
-│   │   ├── top_agent.py         # TopAgent 入口（转交 DispatchAgent）
-│   │   ├── chat_handler.py      # 统一聊天 SSE 入口
-│   │   ├── prompt_builder.py    # Prompt 构建管线
+│   │   ├── executive_runtime_core.py  # 执行运行时核心（B1-B4 + Phase D）
+│   │   ├── chat_agent.py        # ChatAgent（纯语言生成器）
+│   │   ├── dispatch_agent.py    # DispatchAgent（调度层）
 │   │   ├── chat_context_builder.py  # 聊天上下文构建
+│   │   ├── prompt_builder.py    # Prompt 构建管线
+│   │   ├── cortex_prompt_builder.py # Cortex prompt 构建
 │   │   ├── agents/              # Agent 合约 + ReAct 循环
 │   │   ├── handlers/            # 子 Agent 处理器
 │   │   ├── recall/              # RecallPack 组装
-│   │   ├── llm/                 # LLM 路由矩阵
 │   │   ├── memory/              # 应用层记忆
 │   │   ├── vision/              # 视觉子系统
-│   │   ├── graph/               # Graph 链类型定义
-│   │   ├── schemas/             # 数据类型定义
-│   │   ├── http_hooks.py        # 调度任务注册（inner_world_tick / silence_tick / body_sense_tick / gaming_companion_tick）
 │   │   └── monitor_ui/          # 监控面板前端（React + Vite）
 │   ├── persona/                 # 人格子系统（21 模块）
 │   ├── memory/                  # 记忆子系统（Chroma + Canon）
@@ -554,20 +480,10 @@ Natsume_Ai_repo/
 │   ├── airlock/                 # 气闸隔离（PII + 沙箱）
 │   ├── integrations/            # Graph Runtime（LangGraph）
 │   ├── skills/                  # 技能系统（57+ 内置 + Hub）
-│   │   ├── impl/inner_world_skill.py      # Phase XVI handler
-│   │   ├── impl/silence_skill.py          # Phase XVIII handler
-│   │   ├── impl/body_sense_skill.py       # v1.12 handler
-│   │   ├── impl/gaming_companion_executor.py  # gaming 陪玩识图
-│   │   └── impl/emergent_growth_skill.py       # Phase XIX 涌现成长 handler
 │   ├── channels/                # 通道适配（Edge RPC + VTS + TTS）
 │   ├── core/                    # 核心基础（服务容器 + 情感 + 模式）
 │   ├── observability/           # 可观测性
-│   ├── scheduler/               # 任务调度器
-│   ├── release/                 # 发布清单
-│   ├── vision/                  # 视觉子系统（底层）
-│   ├── reasoning/               # 推理模块
-│   ├── lsp/                     # LSP 集成
-│   ├── mcp/                     # MCP 工具注册
+│   ├── scheduler/               # NatsumeScheduler 任务调度器
 │   └── canon/                   # Canon 素材（character/style/world）
 │
 ├── edge_client/                 # 边缘客户端（本机）
@@ -578,48 +494,18 @@ Natsume_Ai_repo/
 │   ├── gateway/                 # 统一消息网关（6 平台适配器）
 │   └── app/                     # Edge FastAPI 应用
 │
-├── configs/                     # 配置文件
-│   ├── model_plane/             # 模型平面配置
-│   ├── release/                 # 发布配置
-│   ├── deploy/                  # 部署配置
-│   └── secrets/                 # 密钥配置（本地，不提交）
-│
-├── skills/                      # 外部技能目录（Hub 安装位置）
-│   └── example-echo/            # 示例技能
-│
 ├── prompts/                     # Prompt 模板
-│   ├── CODEX_PROMPT.md
-│   ├── PROJECT_PROMPT.md
-│   └── llm_contract/            # LLM 合约 Prompt
+│   └── templates/
+│       ├── executive.yaml       # 执行层模板（含 prefrontal_agent.plan_response.prompt）
+│       ├── persona.yaml         # 人格模板
+│       └── governance.yaml      # 治理模板
 │
-├── runtime/                     # 运行时数据
-│   └── style_canon/             # 风格 Canon 运行时文件
-│
-├── data/                        # 数据目录
-│   └── evidence/                # 证据数据
-│
+├── configs/                     # 配置文件
 ├── docs/                        # 文档
-│   ├── 00_index/                # 文档索引
-│   ├── 10_whitepaper/           # 白皮书
-│   ├── 20_prd/                  # 产品需求
-│   ├── 30_devspec/              # 开发规范
-│   ├── 40_agents/               # Agent 设计文档
-│   ├── 50_project/              # 项目架构文档
-│   └── 50_release/              # 发布记录
-│
-├── tests/                       # 测试
-│   ├── unit/                    # 单元测试
-│   ├── integration/             # 集成测试
-│   ├── e2e/                     # 端到端测试
-│   └── contract/                # 合约测试
-│
+│   ├── 35_quality/GATEWAY_ARCH_REDESIGN.md  # 架构重设计方案（含 Phase D 记录）
+│   └── 50_project/arch/         # 架构文档
+├── tests/                       # 测试（unit / integration / e2e / contract）
 ├── tools/                       # 开发工具脚本
-│   ├── diag.py                  # 综合诊断
-│   ├── diag_chat_ab.py          # 聊天 A/B 测试
-│   ├── diag_emotion_closed_loop.py  # 情感闭环诊断
-│   ├── bench/                   # 性能基准测试
-│   └── replay/                  # 回放工具
-│
 ├── .env.example                 # 环境变量模板（含详细注释）
 ├── requirements.txt             # Python 依赖
 └── README.md                    # 本文件
@@ -636,17 +522,15 @@ Natsume_Ai_repo/
 | Python | 3.11+ | 运行时 |
 | FastAPI | ≥0.104 | HTTP 服务 |
 | LangGraph | ≥1.0 | Graph Runtime |
-| LangChain | ≥1.2 | LLM 集成 |
 | Pydantic | ≥2.0 | 数据验证 |
-| ChromaDB | ≥1.4 | 向量库 |
-| Neo4j | ≥6.1 | 关系图谱 |
+| ChromaDB | ≥1.4 | 向量库（情节记忆） |
+| Neo4j | ≥6.1 | 关系图谱（Bond） |
 | uvicorn | ≥0.24 | ASGI 服务器 |
-| psutil | ≥5.9 | 系统监控 |
 
 **外部服务：**
 - 🗄️ **ChromaDB** HTTP 服务（默认 `:18000`）
 - 🕸️ **Neo4j** 图数据库（默认 `bolt://127.0.0.1:7687`）
-- 🔑 **LLM API Key**：OpenAI / Gemini / DeepSeek（至少一个）
+- 🔑 **LLM API Key**：Gemini / OpenAI / DeepSeek（至少一个）
 
 ### 💻 边缘客户端（Edge Client）
 
@@ -658,7 +542,7 @@ Natsume_Ai_repo/
 | CUDA GPU | ASR/TTS 推理加速（可降级到 CPU） |
 
 **可选：**
-- 💬 wxautox4（微信自动化，需购买激活码）
+- 💬 wxautox4（微信自动化）
 - 🐧 NapCat/Lagrange.Core（QQ OneBot v11）
 - ✈️ Telethon（Telegram MTProto）
 
@@ -684,17 +568,18 @@ cp .env.example .env
 ```env
 # LLM（至少一个）
 GEMINI_API_KEY=your_key_here
-# 或
-OPENAI_API_KEY=your_key_here
 
-# Phase XV Agent 模型配置
-HOST_CHAT_AGENT_MODEL_ID=gemini-2.5-pro
-HOST_DISPATCH_AGENT_MODEL_ID=gemini-2.5-flash
-HOST_SUBAGENT_MODEL_ID=gemini-2.5-flash
+# Agent 模型配置
+HOST_CHAT_AGENT_MODEL_ID=gemini-2.5-pro        # ChatAgent（语言生成器）
+HOST_DISPATCH_AGENT_MODEL_ID=gemini-2.5-flash  # DispatchAgent（意图分类）
+HOST_SUBAGENT_MODEL_ID=gemini-2.5-flash        # 子 Agent
 
 # 外部服务
 CHROMA_ENDPOINT=http://127.0.0.1:18000
 BOND_NEO4J_URI=bolt://127.0.0.1:7687
+
+# Phase D 前额叶规划（可选，默认关）
+PREFRONTAL_PLAN_ENABLED=false
 ```
 
 ### 3️⃣ 启动外部服务
@@ -743,15 +628,13 @@ curl http://127.0.0.1:18080/health
 |------|------|------|
 | 主脑服务 | `HOST_APP_*` | 监听地址、端口、日志级别 |
 | LLM 配置 | `HOST_LLM_*` / `HOST_*_AGENT_*` | Provider、模型 ID、超时 |
-| Phase XV Agent | `HOST_CHAT_AGENT_*` / `HOST_DISPATCH_AGENT_*` / `HOST_SUBAGENT_*` | 三套 Agent 专用 LLM |
+| 三套 Agent LLM | `HOST_CHAT_AGENT_*` / `HOST_DISPATCH_AGENT_*` / `HOST_SUBAGENT_*` | 专用 LLM 配置 |
+| **Phase D 前额叶** | `PREFRONTAL_PLAN_ENABLED` | 启用前额叶意图规划（默认 false，灰度） |
 | 限流 | `HOST_RATE_LIMIT_*` | 后端、窗口、最大请求数 |
 | 检索 | `RETR_*` | Embedding、Reranker、5路 Recall 路由 |
 | 情感系统 | `HOST_EMOTION_*` | 衰减速率、基线、持久化 |
 | Bond 图谱 | `HOST_BOND_*` / `BOND_NEO4J_*` | 后端、Neo4j 连接 |
 | 记忆 | `CHROMA_*` / `SEMANTIC_RECALL_*` | ChromaDB 连接、召回参数 |
-| 系统模式 | `HOST_SYS_MODE` / `HOST_GAMING_*` | 运行模式、游戏检测 |
-| 技能系统 | `HOST_SKILL_*` | Hub 开关、外部目录、MCP 桥 |
-| **自愈修复** | `REPAIR_AGENT_LLM_*` | LLM 规划器开关、Provider、模型 ID |
 | 消息网关 | `EDGE_GATEWAY_*` | 端口、平台列表 |
 | 微信 | `EDGE_WECHAT_*` / `WECHAT_*` | Bridge 后端、UIA 配置 |
 | QQ | `QQ_*` / `EDGE_QQ_*` | OneBot API、自动启动 |
@@ -762,57 +645,34 @@ curl http://127.0.0.1:18080/health
 | Edge ASR | `EDGE_ASR_*` | 模型、设备、VAD 参数 |
 | Edge TTS | `EDGE_TTS_*` | 模型路径、设备、语言 |
 | Edge VTS | `EDGE_VTS_*` | VTube Studio 连接 |
-| 沙箱 | `SANDBOX_*` | 隔离后端、超时、权限 |
 | 审计 | `Natsume_AUDIT_DB` | SQLite 路径 |
 | 可观测性 | `OBS_MODE` / `P8_*` | 观测模式、扩展指标 |
 
-### 🤖 Phase XV 三套 Agent LLM 配置
+### 🎯 Phase D 前额叶规划配置
 
 ```env
-# ChatAgent — 追求「好」：高质量人格渲染
-HOST_CHAT_AGENT_MODEL_ID=gemini-2.5-pro
-HOST_CHAT_AGENT_TIMEOUT_MS=30000
+# 启用 Phase D（LLM 退化为纯语言生成器，前额叶接管意图规划）
+PREFRONTAL_PLAN_ENABLED=true
 
-# DispatchAgent — 追求「快」：低延迟意图分类
-HOST_DISPATCH_AGENT_MODEL_ID=gemini-2.5-flash
-HOST_DISPATCH_AGENT_TIMEOUT_MS=5000
-
-# SubAgent — 追求「准」：技术准确
-HOST_SUBAGENT_MODEL_ID=gemini-2.5-flash
-HOST_SUBAGENT_TIMEOUT_MS=30000
+# 前额叶小模型（默认 gemini-2.0-flash，低延迟 <500ms）
+# 在 executive.yaml 的 prefrontal_agent.plan_response.prompt 模板中配置
 ```
 
-### 🔧 RepairAgent 自愈配置
-
-```env
-# 是否启用 LLM 规划器（默认 true，false 时仅保留浏览器快速路径）
-REPAIR_AGENT_LLM_ENABLED=true
-
-# LLM 提供商（openai / gemini / deepseek，默认 gemini）
-REPAIR_AGENT_LLM_PROVIDER=gemini
-
-# 修复规划模型（默认 gemini-2.0-flash，轻量快速）
-REPAIR_AGENT_LLM_MODEL_ID=gemini-2.0-flash
-```
-
-> **自愈流程**：技能/子 Agent 失败 → `_build_failure_recovery_plan()` 识别错误码 → 触发 `SELF_HEALING` SSE 事件 → **缓存命中检查**（5 分钟 TTL，相同错误跳过 LLM）→ RepairAgent 调用 LLM 生成修复计划 → 安全门控过滤危险命令 → **部分成功即允许重试** → `repair_agent_trace.can_retry` → **`SubAgentDispatcher` 正确读取 `can_retry` 作为 `success`**（而非 `final_answer` 是否非空）→ `recovery_ctx.success` 触发 `_retry_after_repair` → 返回结果
-
-| 优化点 | 说明 |
-|--------|------|
-| 🗂️ **修复历史缓存** | 相同错误指纹在 5 分钟 TTL 内复用上次 LLM 结果，避免重复调用 |
-| ✅ **部分成功策略** | 多步修复中只要有命令成功执行即视为修复有效，允许重试原任务 |
-| 🔁 **`can_retry` 透传** | `repair_agent_trace` 新增 `can_retry` / `all_success` 字段 |
-| 🔗 **闭环信号修复** | `SubAgentDispatcher` 对 `repair_agent` 专门从 `can_retry` 读取 `success`，而非 `bool(final_answer)`，确保重试判断准确 |
+**Phase D 启用后的行为变化：**
+- `PrefrontalAgent.plan_response()` 基于器官族完整状态产出 `{ action, task, tone_hint, urgency }`
+- `executive_runtime_core` 用 plan_response 结果覆盖 `_hard_rule_route` 路由
+- `chat_agent` 接收 `【前额叶规划】` context block，LLM 只负责语言化
+- `cortex_route_decider` 跳过 LLM 兜底（`PREFRONTAL_PLAN_BYPASS`）
 
 ### 🔍 检索配置（5路 Recall）
 
 ```env
 RETR_RECALL_ROUTES_JSON={
-  "route_episodic":     {"store_id":"episodic_vector", "collection":"episodic", "top_k":8, "score_weight":0.9},
-  "route_sqlite_ledger":{"store_id":"sqlite_ledger",   "top_k":6,  "score_weight":1.0},
-  "route_neo4j_bond":   {"store_id":"neo4j_bond",      "top_k":4,  "score_weight":0.95},
-  "route_world_canon":  {"store_id":"world_canon",     "collection":"canon", "top_k":4, "score_weight":0.8},
-  "route_artifact_vault":{"store_id":"artifact_vault", "top_k":4,  "score_weight":0.75}
+  "route_episodic":      {"store_id":"episodic_vector",  "top_k":8,  "score_weight":0.9},
+  "route_sqlite_ledger": {"store_id":"sqlite_ledger",    "top_k":6,  "score_weight":1.0},
+  "route_neo4j_bond":    {"store_id":"neo4j_bond",       "top_k":4,  "score_weight":0.95},
+  "route_world_canon":   {"store_id":"world_canon",      "top_k":4,  "score_weight":0.8},
+  "route_artifact_vault":{"store_id":"artifact_vault",   "top_k":4,  "score_weight":0.75}
 }
 ```
 
@@ -878,14 +738,6 @@ GET  /v1/bond/{user_id}
 POST /v1/bond/{user_id}/update
 ```
 
-### 📚 Canon 管理
-
-```
-GET  /v1/canon/style
-GET  /v1/canon/world
-POST /v1/canon/sync
-```
-
 ---
 
 ## ⚡ 技能系统
@@ -903,17 +755,11 @@ POST /v1/canon/sync
 | 记忆 | 记忆写入/查询 |
 | 通知 | 桌面通知、提醒 |
 | 调度 | 定时任务创建/管理 |
-| 系统 | 系统信息、进程管理 |
-| IDE | 代码编辑器集成 |
-| 日记 | 日记写入 |
-| 梦境 | 梦境生成 |
-| 主动发声 | 触发主动说话 |
-| 专注模式 | 进入/退出专注模式 |
 | 离线内心世界 | inner_world_tick / inner_world_awaken / inner_world_session_end |
 | 沉默能力 | silence_tick / silence_conversation_start / silence_conversation_end |
 | 身体感知 | body_sense_tick / body_sense_conversation_start / body_sense_conversation_end |
-| 游戏陪玩 | gaming_companion_tick（gaming 模式下每 300s 截图 + 多模态 LLM 识图） |
-| 涌现成长 | emergent_growth_weekly（每周六 03:00 分析对话模式 + 生成成长笔记）/ emergent_growth_status（成长状态查询） |
+| 游戏陪玩 | gaming_companion_tick（gaming 模式下截图 + 多模态 LLM 识图） |
+| 涌现成长 | emergent_growth_weekly（每周六 03:00 分析对话模式 + 生成成长笔记） |
 
 ### 📦 外部技能安装
 
@@ -921,16 +767,9 @@ POST /v1/canon/sync
 # 从 ClawHub 安装
 python -m host_brain skill install clawhub:author/skill-name
 
-# 从 Skillshub 安装
-python -m host_brain skill install skillshub:anthropics/skills/frontend-design
-
 # 本地安装（包含 SKILL.md 的目录）
 python -m host_brain skill install /path/to/skill
 ```
-
-### 🛠️ 自定义技能
-
-参考 `host_brain/skills/custom_providers/template_provider.py.example`
 
 ---
 
@@ -942,55 +781,41 @@ python -m host_brain skill install /path/to/skill
 
 ```bash
 cd host_brain/app/monitor_ui
-npm install
-npm run build
-```
-
-### 📈 指标接口
-
-```bash
-# 综合指标
-curl http://127.0.0.1:18080/obs/metrics
-
-# 扩展指标（需开启 P8_EXTENDED_METRICS_ENABLED=true）
-# 包含：subgraph_failure_metrics / local_loop_failure_metrics /
-#       intent_budget_breach_metrics / graph_latency_metrics
+npm install && npm run build
 ```
 
 ### 🔬 诊断工具
 
 ```bash
-# 综合诊断
-python tools/diag.py
-
-# 聊天链路诊断
-python tools/_diag_chat.py
-
-# 检索链路诊断
-python tools/_diag_retrieval.py
-
-# LLM 连通性诊断
-python tools/_diag_llm.py
-
-# 情感闭环诊断
-python tools/diag_emotion_closed_loop.py
-
-# 聊天 A/B 测试
-python tools/diag_chat_ab.py
-
-# 审计账本检查
-python tools/check_audit.py
-
-# ChromaDB 状态检查
-python tools/check_chroma.py
+python tools/diag.py                        # 综合诊断
+python tools/_diag_chat.py                  # 聊天链路诊断
+python tools/_diag_retrieval.py             # 检索链路诊断
+python tools/_diag_llm.py                   # LLM 连通性诊断
+python tools/diag_emotion_closed_loop.py    # 情感闭环诊断
+python tools/diag_chat_ab.py                # 聊天 A/B 测试
+python tools/check_audit.py                 # 审计账本检查
+python tools/check_chroma.py               # ChromaDB 状态检查
 ```
 
-### 🔭 LangSmith 链路追踪（可选）
+### 器官族状态可观测性
 
-```env
-LANGSMITH_TRACING=true
-LANGSMITH_API_KEY=your_key
-LANGSMITH_PROJECT=natsume-ai
+每次对话后，`organ_route_meta` 写入 `intent_draft._organ_route_meta`，包含：
+
+```json
+{
+  "immune_risk_level": "none",
+  "immune_last_decision": "ALLOW",
+  "cognitive_load_index": 0.42,
+  "motive_withdraw": 0.12,
+  "motive_care": 0.78,
+  "prefrontal_drift_alert": "NONE",
+  "prefrontal_drift_score": 0.031,
+  "prefrontal_plan_action": "speak",
+  "prefrontal_plan_source": "prefrontal_llm",
+  "prefrontal_plan_latency_ms": 312,
+  "organ_route_override": null,
+  "organ_route_reason": null
+}
 ```
 
 ---
@@ -1000,25 +825,25 @@ LANGSMITH_PROJECT=natsume-ai
 ### 🧪 运行测试
 
 ```bash
-# 单元测试
-pytest tests/unit/
-
-# 集成测试
-pytest tests/integration/
-
-# 合约测试
-pytest tests/contract/
-
-# 全部测试
-pytest tests/
+pytest tests/unit/          # 单元测试
+pytest tests/integration/   # 集成测试
+pytest tests/contract/      # 合约测试
+pytest tests/               # 全部测试
 ```
 
-### 📐 代码规范
+### 🌸 人格 Canon 更新
 
-```bash
-# pre-commit 检查
-pre-commit run --all-files
-```
+- 角色人设：`host_brain/canon/character/character_profile.json`
+- 风格 Canon：`host_brain/canon/style/`（中文 `natsume_ai_cn`，日文 `natsume_ai_ja`）
+- 世界观 Canon：`host_brain/canon/world/`
+
+### ➕ 添加新器官族 Agent
+
+1. 在 `host_brain/tribe/` 创建 `xxx_agent.py`，继承 `TribeAgentDescriptor`
+2. 在 `host_brain/tribe/__init__.py` 注册导出
+3. 在 `host_brain/tribe/registry.py` 注册到 `HostTribeRegistry`
+4. 在 `host_brain/tribe/event_bus.py` 添加需要订阅的事件类型
+5. 在 `NatsumeScheduler` 中注册定时任务（如需要）
 
 ### ➕ 添加新技能
 
@@ -1032,11 +857,11 @@ pre-commit run --all-files
 2. 在 `edge_client/gateway/bootstrap.py` 注册适配器
 3. 在 `.env.example` 添加平台配置项
 
-### 🌸 人格 Canon 更新
+### 📐 代码规范
 
-- 角色人设：`host_brain/canon/character/character_profile.json`
-- 风格 Canon：`host_brain/canon/style/`（中文 `natsume_ai_cn`，日文 `natsume_ai_ja`）
-- 世界观 Canon：`host_brain/canon/world/`
+```bash
+pre-commit run --all-files
+```
 
 ---
 
