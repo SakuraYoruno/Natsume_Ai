@@ -290,15 +290,22 @@ class LanguageSystemAgent:
                 _motor = get_motor_cortex_agent()
                 try:
                     _loop = _asyncio.get_running_loop()
-                    _loop.create_task(
-                        _asyncio.coroutine(lambda: _motor.dispatch_speak(
-                            text=_broca_text,
-                            emotion_tag=_tts_params["emotion_tag"],
-                            emotion_intensity=_tts_params["emotion_intensity"],
+
+                    async def _do_speak(
+                        _m=_motor,
+                        _text=_broca_text,
+                        _etag=_tts_params["emotion_tag"],
+                        _eint=_tts_params["emotion_intensity"],
+                    ) -> None:
+                        _m.dispatch_speak(
+                            text=_text,
+                            emotion_tag=_etag,
+                            emotion_intensity=_eint,
                             source="broca",
                             require_gate=False,
-                        ))()
-                    )
+                        )
+
+                    _loop.create_task(_do_speak())
                 except RuntimeError:
                     pass  # 非异步上下文时跳过，不阻塞
         except Exception:
