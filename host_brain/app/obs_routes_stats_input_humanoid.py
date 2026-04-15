@@ -210,9 +210,9 @@ def _classify_humanoid_loop_root_cause_snapshot(
 def _resolve_humanoid_loop_hotspot_profile(*, root_cause_code: str, suspected_breakpoint: str) -> Dict[str, str]:
     profiles: Dict[str, Dict[str, str]] = {
         "ACK_PATH_MISSING": {"organ_system": "language_feedback", "organ_label": "语言回执系统", "operator_focus": "优先检查即时 ACK 开关、超时配置和人格化确认回路是否被短路。", "organ_story": "生命体已经收到请求，但没有先开口回应，用户体感会像神经已接入、语言器官却失声。", "recommended_view_path": "/system", "recommended_view_label": "检查 ACK 配置"},
-        "PROGRESS_PATH_MISSING": {"organ_system": "somatic_progress", "organ_label": "体感进度系统", "operator_focus": "优先检查 progress fastpath、主动进度推送和长任务回报节律。", "organ_story": "身体还在执行，但没有把过程反馈给外界，表现为"人还活着，却像完全没动静"。", "recommended_view_path": "/gateway", "recommended_view_label": "检查进度回路"},
-        "COMPLETED_WITHOUT_HUMANOID_TOUCH": {"organ_system": "language_feedback", "organ_label": "语言回执系统", "operator_focus": "检查 ACK 与 Progress 触达链路是否同时缺席，避免"做完了但一句话不说"。", "organ_story": "动作已经完成，但生命体没有留下任何触达痕迹，容易给用户造成冰冷的后台感。", "recommended_view_path": "/gateway", "recommended_view_label": "复核触达闭环"},
-        "EXECUTION_FAILED": {"organ_system": "motor_execution", "organ_label": "运动执行系统", "operator_focus": "优先检查失败 skill、工具调用、超时和依赖服务状态。", "organ_story": "意图已经下达到身体，但真正动手的执行器失步了，表现为"知道该做，却做不成"。", "recommended_view_path": "", "recommended_view_label": "打开失败链路"},
+        "PROGRESS_PATH_MISSING": {"organ_system": "somatic_progress", "organ_label": "体感进度系统", "operator_focus": "优先检查 progress fastpath、主动进度推送和长任务回报节律。", "organ_story": "身体还在执行，但没有把过程反馈给外界，表现为'人还活着，却像完全没动静'。", "recommended_view_path": "/gateway", "recommended_view_label": "检查进度回路"},
+        "COMPLETED_WITHOUT_HUMANOID_TOUCH": {"organ_system": "language_feedback", "organ_label": "语言回执系统", "operator_focus": "检查 ACK 与 Progress 触达链路是否同时缺席，避免'做完了但一句话不说'。", "organ_story": "动作已经完成，但生命体没有留下任何触达痕迹，容易给用户造成冰冷的后台感。", "recommended_view_path": "/gateway", "recommended_view_label": "复核触达闭环"},
+        "EXECUTION_FAILED": {"organ_system": "motor_execution", "organ_label": "运动执行系统", "operator_focus": "优先检查失败 skill、工具调用、超时和依赖服务状态。", "organ_story": "意图已经下达到身体，但真正动手的执行器失步了，表现为'知道该做，却做不成'。", "recommended_view_path": "", "recommended_view_label": "打开失败链路"},
         "DEVIATION_NOT_RECOVERED": {"organ_system": "immune_realign", "organ_label": "免疫纠偏系统", "operator_focus": "检查 deviation detect / notice / retry 是否真的形成了 recover 闭环。", "organ_story": "系统已经感知自己偏航，但免疫纠偏没有把轨道拉回来，属于自愈机制失手。", "recommended_view_path": "", "recommended_view_label": "查看偏航修复"},
         "GOVERNOR_BLOCKED": {"organ_system": "prefrontal_governor", "organ_label": "前额叶门控系统", "operator_focus": "检查 Governor/Immune Gate 决策、审批令牌与风控策略是否过严。", "organ_story": "动作还没开始，前额叶就先把身体刹住了，通常是门控、审批或免疫规则造成的阻断。", "recommended_view_path": "/gateway", "recommended_view_label": "检查门控链路"},
         "CLOSED_LOOP_NOT_CONVERGED": {"organ_system": "closed_loop_integration", "organ_label": "闭环整合系统", "operator_focus": "复核 ACK、Progress、Deviation Recovery 是否全部在同一次请求上完成闭合。", "organ_story": "链路各器官都动了一部分，但没能真正收束成一次完整的人体闭环。", "recommended_view_path": "/gateway", "recommended_view_label": "查看闭环总览"},
@@ -1019,7 +1019,7 @@ def _build_input_humanoid_loop_diagnostic_item(*, ledger, request_id: str, categ
         recommended_view_label = "查看偏航修复"
     elif flags.get("completed") and not flags.get("ack_touched") and not flags.get("progress_touched"):
         suspected_breakpoint, root_cause_code = "humanoid_touch", "COMPLETED_WITHOUT_HUMANOID_TOUCH"
-        root_cause_summary = "请求虽然完成了，但整条链路缺少 ACK / Progress 生命体触达信号，用户体感上会像"系统做了事，却没有任何回应"。"
+        root_cause_summary = "请求虽然完成了，但整条链路缺少 ACK / Progress 生命体触达信号，用户体感上会像'系统做了事，却没有任何回应'。"
         recommended_view_label = "检查触达链路"
     elif not flags.get("ack_touched"):
         suspected_breakpoint, root_cause_code = "ack_touch_path", "ACK_PATH_MISSING"
