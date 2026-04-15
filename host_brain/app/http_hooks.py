@@ -583,7 +583,7 @@ def runtime_lifespan(
 
             # [P1] Edge RPC 健康探测：启动时检查 Edge 是否可达
             try:
-                from host_brain.app.dependencies import (  # noqa: PLC0415
+                from host_brain.app.startup import (  # noqa: PLC0415
                     build_edge_dependency_probe_statuses,
                     probe_edge_rpc_health,
                 )
