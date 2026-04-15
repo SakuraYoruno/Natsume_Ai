@@ -19,6 +19,7 @@ from host_brain.app.agents.agent_registry import (
     AGENT_ID_RETRIEVAL,
     AGENT_ID_TRANSLATE,
     get_agent_meta,
+    is_agent_allowed,
 )
 from host_brain.app.graph_config_builder import AGENT_DISPATCH_NODE_ID
 from host_brain.app.prompt_builder import (
@@ -28,17 +29,10 @@ from host_brain.app.prompt_builder import (
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
-from host_brain.integrations.graph_contract import (
-    SUPERVISOR_DECISION_SOURCE_LLM,
-    SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE,
-    SUPERVISOR_DECISION_SOURCE_RULE,
-    SUPERVISOR_FAILURE_LLM_BAD_JSON,
-    SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR,
-    SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID,
-    SUPERVISOR_FAILURE_LLM_TIMEOUT,
-)
 
+# ---------------------------------------------------------------------------
+# 场景 → Agent 映射（Phase XIV 遗留，仅作兜底，优先级低于 intent_draft.route）
+# ---------------------------------------------------------------------------
 _SCENE_DEFAULT_AGENT: dict[str, str] = {
     SCENE_CHAT: AGENT_ID_CHAT,
     SCENE_WORK_CODE: AGENT_ID_CODE,
@@ -63,44 +57,45 @@ _SCENE_NEED_JUDGE: dict[str, bool] = {
     SCENE_VISION_UI: True,
 }
 
+# ---------------------------------------------------------------------------
+# intent_draft.route → Agent 映射（Phase XV 新增，优先级高于 _SCENE_DEFAULT_AGENT）
+# ---------------------------------------------------------------------------
+_ROUTE_TO_AGENT: dict[str, str] = {
+    "chat":         AGENT_ID_CHAT,
+    "delegate":     "",            # 由 target_id 决定，见下方逻辑
+    "skill":        AGENT_ID_INTENT,   # skill 由 intent_agent 执行
+    "plan":         AGENT_ID_INTENT,   # 多步规划由 intent_agent 执行
+    "task_progress": AGENT_ID_CHAT,    # 进度查询走 chat 快速回复
+    "recent_turn":  AGENT_ID_CHAT,     # 最近对话回溯走 chat
+}
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
+_ROUTE_TO_RISK_MODE: dict[str, str] = {
+    "chat":         RISK_MODE_SAFE,
+    "delegate":     RISK_MODE_GUARDED,
+    "skill":        RISK_MODE_STRICT,
+    "plan":         RISK_MODE_STRICT,
+    "task_progress": RISK_MODE_SAFE,
+    "recent_turn":  RISK_MODE_SAFE,
+}
 
+_ROUTE_NEED_JUDGE: dict[str, bool] = {
+    "chat":         False,
+    "delegate":     True,
+    "skill":        True,
+    "plan":         True,
+    "task_progress": False,
+    "recent_turn":  False,
+}
 
-def _mapping_text(
-    mapping: Mapping[str, Any],
-    key: str,
-    *,
-    default: str = "",
-    **kwargs: Any,
-) -> str:
-    text = str(mapping.get(key, default) or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
-    except Exception:
-        return text
-
-
-def _resolve_supervisor_system_prompt() -> str:
-    templates = _load_template_mapping("supervisor_dispatch_handler.prompt_templates")
-    return _mapping_text(
-        templates,
-        "system_prompt",
-    )
-
-
-def _build_supervisor_user_prompt(scene_type: str, user_input: str) -> str:
-    templates = _load_template_mapping("supervisor_dispatch_handler.prompt_templates")
-    return _mapping_text(
-        templates,
-        "user_prompt_template",
-        scene_type=scene_type,
-        user_input=user_input,
-    )
+# delegate 时合法的 target_id → agent_id 映射
+_DELEGATE_TARGET_TO_AGENT: dict[str, str] = {
+    "code_agent":       AGENT_ID_CODE,
+    "translate_agent":  AGENT_ID_TRANSLATE,
+    "intent_agent":     AGENT_ID_INTENT,
+    "vision_agent":     AGENT_ID_INTENT,   # vision_agent 暂复用 intent_agent
+    "retrieval_agent":  AGENT_ID_RETRIEVAL,
+    "emotion_agent":    AGENT_ID_EMOTION,
+}
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -114,66 +109,97 @@ def _parse_bool(value: Any, default: bool = False) -> bool:
     return bool(default)
 
 
+def _resolve_agent_from_intent_draft(
+    intent_draft: dict[str, Any],
+    *,
+    scene_type: str,
+) -> tuple[str, str, bool, str] | None:
+    """从 intent_draft.route/target_id 解析 (agent_id, risk_mode, need_judge, decision_source)。
+
+    返回 None 表示 intent_draft 无有效路由信息，调用方应降级到 scene_type 映射。
+    """
+    route = str(intent_draft.get("route") or "").strip().lower()
+    if not route or route not in _ROUTE_TO_AGENT:
+        return None
+
+    target_id = str(intent_draft.get("target_id") or intent_draft.get("delegate_agent") or "").strip()
+    risk_mode = _ROUTE_TO_RISK_MODE.get(route, RISK_MODE_SAFE)
+    need_judge = _ROUTE_NEED_JUDGE.get(route, False)
+
+    if route == "delegate":
+        # delegate 时由 target_id 决定具体 agent
+        agent_id = _DELEGATE_TARGET_TO_AGENT.get(target_id, AGENT_ID_INTENT)
+    else:
+        agent_id = _ROUTE_TO_AGENT[route]
+
+    # 验证 agent_id 在 allowlist 内
+    if not is_agent_allowed(agent_id):
+        agent_id = AGENT_ID_CHAT
+        risk_mode = RISK_MODE_SAFE
+        need_judge = False
+
+    route_source = str(intent_draft.get("route_source") or "rule").strip()
+    decision_source = f"intent_draft:{route}:{route_source}"
+    return agent_id, risk_mode, need_judge, decision_source
+
+
 def supervisor_dispatch_handler(
     payload: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Supervisor 分派处理器。
+
+    Phase XV 改造：
+    - 优先消费 intent_draft.route/target_id（由 cortex_route_decider.classify_task_intent 填充）
+    - _SCENE_DEFAULT_AGENT 降为兜底（scene_type 有效时使用）
+    - SUPERVISOR_MODE=llm 不再独立调用 LLM，改为复用 intent_draft 中已有的 LLM 路由结果
+    """
     ctx = dict(context or {})
     node_id = str(ctx.get("node_id") or "supervisor_dispatch").strip()
     scene_type = str(payload.get("scene_type") or SCENE_CHAT).strip().upper() or SCENE_CHAT
 
-    raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
-    supervisor_mode = "llm" if raw_mode == "llm" else "rule"
-    use_llm_proposal = supervisor_mode == "llm"
+    # ── 从 intent_draft 解析路由（Phase XV 主路径）──────────────────────────
+    intent_draft = dict(payload.get("intent_draft") or {})
+    intent_result = _resolve_agent_from_intent_draft(intent_draft, scene_type=scene_type)
 
     allowlist_raw = ctx.get("agent_dispatch_allowlist")
     allowlist: list[str] | None = None
     if isinstance(allowlist_raw, (list, tuple)):
         allowlist = [str(item).strip() for item in allowlist_raw if str(item).strip()]
 
+    # ── 兜底：scene_type 映射（Phase XIV 遗留，仅在 intent_draft 无有效路由时使用）──
     rule_agent = _SCENE_DEFAULT_AGENT.get(scene_type, AGENT_ID_CHAT)
     rule_risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
     rule_need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
 
+    # 情感深度分析覆盖（保留原有逻辑）
     inferred_emotion = payload.get("inferred_emotion") or {}
     needs_deep = bool(payload.get("needs_deep_emotion_analysis")) if isinstance(inferred_emotion, dict) else False
     if needs_deep and rule_agent == AGENT_ID_CHAT:
         rule_agent = AGENT_ID_EMOTION
         rule_need_judge = False
 
-    selected_agent = rule_agent
-    risk_mode = rule_risk_mode
-    need_judge = rule_need_judge
-    decision_source = SUPERVISOR_DECISION_SOURCE_RULE
-    supervisor_failure_code: str | None = None
+    # ── 决策优先级：intent_draft > scene_type 映射 ──────────────────────────
+    if intent_result is not None:
+        selected_agent, risk_mode, need_judge, decision_source = intent_result
+        # 情感深度分析覆盖（对 intent_draft 路径同样生效）
+        if needs_deep and selected_agent == AGENT_ID_CHAT:
+            selected_agent = AGENT_ID_EMOTION
+            need_judge = False
+            decision_source = f"{decision_source}:emotion_override"
+    else:
+        # 降级到 scene_type 映射
+        selected_agent = rule_agent
+        risk_mode = rule_risk_mode
+        need_judge = rule_need_judge
+        decision_source = f"scene_type:{scene_type}:rule_fallback"
 
-    if use_llm_proposal:
-        llm_proposal, failure_code = _try_llm_proposal(payload=payload, scene_type=scene_type, context=ctx)
-        if llm_proposal is None:
-            selected_agent = rule_agent
-            risk_mode = rule_risk_mode
-            need_judge = rule_need_judge
-            decision_source = SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE
-            supervisor_failure_code = failure_code or SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
-        else:
-            raw_rm = str(llm_proposal.get("risk_mode") or "").strip().lower()
-            proposal_to_validate = {
-                "selected_agent": str(llm_proposal.get("selected_agent") or "").strip(),
-                "risk_mode": raw_rm if raw_rm else rule_risk_mode,
-                "need_judge": _parse_bool(llm_proposal.get("need_judge"), rule_need_judge),
-            }
-            is_valid, validation_failure = validate_supervisor_proposal(proposal_to_validate, allowlist=allowlist)
-            if not is_valid:
-                selected_agent = rule_agent
-                risk_mode = rule_risk_mode
-                need_judge = rule_need_judge
-                decision_source = SUPERVISOR_DECISION_SOURCE_LLM_FALLBACK_RULE
-                supervisor_failure_code = validation_failure or SUPERVISOR_FAILURE_LLM_INTERNAL_ERROR
-            else:
-                selected_agent = proposal_to_validate["selected_agent"]
-                risk_mode = proposal_to_validate["risk_mode"]
-                need_judge = proposal_to_validate["need_judge"]
-                decision_source = SUPERVISOR_DECISION_SOURCE_LLM
+    # ── SUPERVISOR_MODE 观测（不再影响决策，仅记录）──────────────────────────
+    # Phase XV：SUPERVISOR_MODE=llm 不再独立调用 LLM，intent_draft 中已包含 LLM 路由结果
+    # （route_source="llm" 时说明 classify_task_intent 已走过 LLM 兜底）
+    raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
+    supervisor_mode = "llm" if raw_mode == "llm" else "rule"
+    supervisor_failure_code: str | None = None
 
     next_node = AGENT_DISPATCH_NODE_ID
     agent_meta = get_agent_meta(selected_agent) or {}
@@ -208,6 +234,10 @@ def supervisor_dispatch_handler(
         "risk_mode": risk_mode,
         "need_judge": need_judge,
         "dispatched_at_ms": int(time.time() * 1000),
+        # Phase XV 新增：记录 intent_draft 路由信息，便于 trace
+        "intent_route": str(intent_draft.get("route") or ""),
+        "intent_target_id": str(intent_draft.get("target_id") or ""),
+        "intent_route_source": str(intent_draft.get("route_source") or ""),
     }
     out["__next_node__"] = next_node
 

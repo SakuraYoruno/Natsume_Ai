@@ -33,8 +33,8 @@ SCENE_ROUTER_ENTRY_HANDLER_ID = "scene_router_entry"
 SCENE_ROUTER_POST_CORE_HANDLER_ID = "scene_router_post_core"
 SCENE_TYPE_AUTO = "AUTO"
 
-SUPERVISOR_DISPATCH_NODE_ID = "supervisor_dispatch"
-SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
+# SUPERVISOR_DISPATCH_NODE_ID / SUPERVISOR_DISPATCH_HANDLER_ID 已移至 graph_config_builder.py
+# 此处不再重复定义，避免双轨维护
 
 HOST_CHAT_ROUTE_HOST_14B = "host_14b"
 HOST_CHAT_ROUTE_CLOUD = "cloud"
