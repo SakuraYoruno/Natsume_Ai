@@ -6,7 +6,7 @@
 
 Phase XV 收口架构：
   cortex_orchestrator 统一承接主入口，本模块负责 /v1/chat 的鉴权、场景判定与流式转发。
-  场景分类由 pre_intent_classifier 完成，按场景类型分发到对应 handler。
+场景分类由 cortex_route_decider.classify_task_intent 完成（Phase XV），按意图路由分发到对应 handler。
 
 子模块职责：
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
@@ -66,9 +66,9 @@ def _resolve_sys_mode_narrative(mode: str) -> str:
 async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:
     """POST /v1/chat 统一入口。
 
-    Governor 鉴权后由 pre_intent_classifier 分类场景：
-    - SCENE_CHAT（日常対話）→ 云优先单节点（Gemini → Codex → DeepSeek → host_14b），token 级流式 SSE
-    - 複雑場景（WORK_CODE / WORK_TRANSLATE / EXEC_INTENT）→ 多节点编排，节点级进度 SSE
+Governor 鉴权后由 cortex_route_decider.classify_task_intent 分类意图（Phase XV）：
+    - route=chat → 云优先单节点（Gemini → Codex → DeepSeek → host_14b），token 级流式 SSE
+    - route=delegate/skill/plan → cortex_orchestrator 调度对应 Agent
 
     模式门控：
     - locked 模式下拒绝所有 chat 请求（返回 403 提示）

@@ -1877,6 +1877,41 @@ async def chat_agent_sse_generator(
         },
     })
 
+    # ── 9a. G1: COMMIT 后兜底触发 TTS（补发未被分句流式覆盖的 narrative）──
+    # 条件：suppress_edge_tts=True（Gateway 模式）时分句 TTS 被跳过，
+    # 或分句流式 TTS 未触发（tts_sentence_index == 0）时，补发完整 narrative。
+    if narrative.strip() and (_suppress_tts or tts_sentence_index == 0):
+        _commit_emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        _commit_emotion_intensity: float | None = None
+        try:
+            from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+            from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+            _lang_agent = get_language_system_agent()
+            _last_broca = dict((_lang_agent.state_registry.get_state("language_system_agent") or {}).get("state", {}).get("last_broca") or {})
+            if _last_broca:
+                _tts_params = broca_to_tts_params(
+                    tone=str(_last_broca.get("tone") or "balanced"),
+                    warmth_weight=float(_last_broca.get("warmth_weight") or 0.5),
+                    emotion_tag=_commit_emotion_tag,
+                )
+                _commit_emotion_tag = _tts_params["emotion_tag"]
+                _commit_emotion_intensity = _tts_params["emotion_intensity"]
+        except Exception:
+            pass
+        try:
+            from host_brain.app.chat_agent_postprocessor import trigger_tts_after_commit  # noqa: PLC0415
+            asyncio.create_task(trigger_tts_after_commit(
+                narrative=narrative,
+                request_id=request_id,
+                session_id=session_id,
+                emotion_tag=_commit_emotion_tag,
+                emotion_intensity=_commit_emotion_intensity,
+                suppress_tts=False,   # 此处已判断条件，强制发送
+                source="chat_commit_fallback",
+            ))
+        except Exception as _tts_exc:
+            _logger.debug("[%s] G1 trigger_tts_after_commit schedule failed: %s", request_id, _tts_exc)
+
     # ── 9. 异步后处理（fire-and-forget）─────────────────────────────
     # 先走中性共享模块，保持 cortex_orchestrator 链路上的后处理收口一致
     try:
