@@ -1,50 +1,74 @@
-"""obs_routes_stats_input.py — 可观测性统计端点（从 obs_routes_stats.py 拆分）。
+"""obs_routes_stats_input.py — 可观测性统计端点聚合入口（P2-8 拆分后）。
 
-子模块：Input Dispatch统计、Humanoid Loop系列统计
+子模块已拆分为：
+  - obs_routes_stats_input_dispatch.py：InputDispatch 生命周期统计、RecallPack 统计
+  - obs_routes_stats_input_humanoid.py：Gateway 人体闭环系列统计
+
+本文件作为向后兼容的聚合入口，导入并重新导出子模块中的所有路由和模型。
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
-import os
-import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional
+# 导入子模块以触发路由注册（副作用导入）
+import host_brain.app.obs_routes_stats_input_dispatch  # noqa: F401
+import host_brain.app.obs_routes_stats_input_humanoid  # noqa: F401
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from host_brain.retrieval.model_suite import resolve_retrieval_model_suite
-
-from host_brain.audit.sqlite_ledger import SQLiteLedger
-
-logger = logging.getLogger("Natsume.obs")
-
-
-from .obs_routes_core import (
-    _build_trace_summary,
-    router,
-    _extract_input_dispatch_latency_ms,
-    _fetch_request_rows,
-    _get_ledger,
-    _is_input_dispatch_event,
-    _normalize_input_dispatch_source,
-    _now_ms,
-    _safe_json,
+# 向后兼容：重新导出子模块中的公共符号
+from host_brain.app.obs_routes_stats_input_dispatch import (
+    InputSourceItem,
+    InputDispatchStatsResponse,
+    RecallPackSlotItem,
+    RecallPackStatsResponse,
+    get_input_dispatch_stats,
+    get_recall_pack_stats,
+)
+from host_brain.app.obs_routes_stats_input_humanoid import (
+    InputHumanoidLoopStageItem,
+    InputHumanoidLoopStatsResponse,
+    InputHumanoidLoopTrendResponse,
+    InputHumanoidLoopAlertItem,
+    InputHumanoidLoopAlertsResponse,
+    InputHumanoidLoopRemediationStepItem,
+    InputHumanoidLoopRemediationRequestItem,
+    InputHumanoidLoopRemediationResponse,
+    InputHumanoidLoopDiagnosticItem,
+    InputHumanoidLoopDiagnosticsResponse,
+    InputHumanoidLoopHotspotRequestItem,
+    InputHumanoidLoopHotspotItem,
+    InputHumanoidLoopHotspotsResponse,
+    InputHumanoidLoopHotspotTrendSeriesItem,
+    InputHumanoidLoopHotspotTrendBucketItem,
+    InputHumanoidLoopHotspotTrendResponse,
+    InputHumanoidLoopSourceCorrelationItem,
+    InputHumanoidLoopSourceCorrelationResponse,
+    get_input_humanoid_loop_stats,
+    get_input_humanoid_loop_trend,
+    get_input_humanoid_loop_alerts,
+    get_input_humanoid_loop_remediation,
+    get_input_humanoid_loop_diagnostics,
+    get_input_humanoid_loop_hotspots,
+    get_input_humanoid_loop_hotspot_trend,
+    get_input_humanoid_loop_source_correlation,
 )
 
+__all__ = [
+    "InputSourceItem", "InputDispatchStatsResponse",
+    "RecallPackSlotItem", "RecallPackStatsResponse",
+    "get_input_dispatch_stats", "get_recall_pack_stats",
+    "InputHumanoidLoopStageItem", "InputHumanoidLoopStatsResponse",
+    "InputHumanoidLoopTrendResponse", "InputHumanoidLoopAlertItem",
+    "InputHumanoidLoopAlertsResponse", "InputHumanoidLoopRemediationStepItem",
+    "InputHumanoidLoopRemediationRequestItem", "InputHumanoidLoopRemediationResponse",
+    "InputHumanoidLoopDiagnosticItem", "InputHumanoidLoopDiagnosticsResponse",
+    "InputHumanoidLoopHotspotRequestItem", "InputHumanoidLoopHotspotItem",
+    "InputHumanoidLoopHotspotsResponse", "InputHumanoidLoopHotspotTrendSeriesItem",
+    "InputHumanoidLoopHotspotTrendBucketItem", "InputHumanoidLoopHotspotTrendResponse",
+    "InputHumanoidLoopSourceCorrelationItem", "InputHumanoidLoopSourceCorrelationResponse",
+    "get_input_humanoid_loop_stats", "get_input_humanoid_loop_trend",
+    "get_input_humanoid_loop_alerts", "get_input_humanoid_loop_remediation",
+    "get_input_humanoid_loop_diagnostics", "get_input_humanoid_loop_hotspots",
+    "get_input_humanoid_loop_hotspot_trend", "get_input_humanoid_loop_source_correlation",
+]
 
-# ---------------------------------------------------------------------------
-# Ref #48: GET /obs/input/dispatch-stats  — InputDispatch 生命周期统计
-# ---------------------------------------------------------------------------
-class InputSourceItem(BaseModel):
-    source: str
-    accepted: int
-    completed: int
-    failed: int
-    not_wired: int
-    success_rate: Optional[float]
-    avg_latency_ms: Optional[float]
 
 class InputDispatchStatsResponse(BaseModel):
     window_minutes: int
