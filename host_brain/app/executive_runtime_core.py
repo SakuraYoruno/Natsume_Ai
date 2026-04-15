@@ -1179,64 +1179,111 @@ async def _executive_runtime_core_impl(
         or dict(intent_draft or {}).get("route_source") == "llm"
     )
 
-    # ── Phase B：器官族状态注入路由决策 ──────────────────────────────────
+    # ── Phase B：器官族状态并行激活注入路由决策 ──────────────────────────
     # B-1: LimbicAgent motive_state → 情绪驱动路由调整
     # B-2: ImmuneAgent 风险等级 → 高风险时强制 chat 快速回复
     # B-3: ProprioceptionAgent 认知负荷 → 高负荷时强制 chat 快速回复
-    # B-4: 器官族路由影响记录到 trace_stage_meta
+    # B-4: PrefrontalAgent 漂移状态 → 漂移中强制 chat 路由
+    # 四路并行读取，减少串行等待（真实神经系统是并行激活的）
     _organ_route_override: str | None = None
     _organ_route_reason: str | None = None
     _organ_route_meta: dict[str, Any] = {}
 
-    try:
-        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
-        _immune_state = get_immune_agent().export_runtime_state()
-        _immune_risk = str(_immune_state.get("last_risk_level") or "none").strip().lower()
-        _immune_decision = str(_immune_state.get("last_decision") or "ALLOW").strip().upper()
-        _organ_route_meta["immune_risk_level"] = _immune_risk
-        _organ_route_meta["immune_last_decision"] = _immune_decision
-        # 高风险（critical/high）且 ImmuneAgent 最近决策为 REPORT/BLOCK 时，
-        # 强制走 chat 快速回复，避免触发 skill/delegate 执行副作用
-        if _immune_risk in {"critical", "high"} and _immune_decision in {"REPORT", "BLOCK"}:
-            _organ_route_override = "chat"
-            _organ_route_reason = f"immune_gate:risk={_immune_risk}:decision={_immune_decision}"
-    except Exception:
-        pass
+    def _fetch_immune_state() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+            return get_immune_agent().export_runtime_state()
+        except Exception:
+            return {}
 
-    if _organ_route_override is None:
+    def _fetch_proprioception_state() -> dict[str, Any]:
         try:
             from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
-            _prop_state = get_proprioception_agent().export_runtime_state()
-            _cognitive_load = float(_prop_state.get("cognitive_load_index") or 0.0)
-            _interrupt_freq = float(_prop_state.get("interrupt_frequency") or 0.0)
-            _organ_route_meta["cognitive_load_index"] = round(_cognitive_load, 3)
-            _organ_route_meta["interrupt_frequency"] = round(_interrupt_freq, 3)
-            # 认知负荷极高（>0.85）时强制 chat 快速回复，避免复杂执行链加重负担
-            if _cognitive_load > 0.85:
-                _organ_route_override = "chat"
-                _organ_route_reason = f"proprioception:cognitive_load={_cognitive_load:.2f}"
+            return get_proprioception_agent().export_runtime_state()
+        except Exception:
+            return {}
+
+    def _fetch_limbic_motive() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+            _limbic = get_limbic_agent()
+            if hasattr(_limbic, "compute_motive_state"):
+                return dict(_limbic.compute_motive_state() or {})
         except Exception:
             pass
+        return {}
 
-    # B-1: LimbicAgent motive_state → 情绪驱动路由调整
-    _motive_state: dict[str, Any] = {}
-    try:
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
-        _limbic = get_limbic_agent()
-        if hasattr(_limbic, "compute_motive_state"):
-            _motive_state = dict(_limbic.compute_motive_state() or {})
-        _organ_route_meta["motive_withdraw"] = round(float(_motive_state.get("withdraw", 0.0)), 3)
-        _organ_route_meta["motive_care"] = round(float(_motive_state.get("care", 0.0)), 3)
-        _organ_route_meta["motive_continuity"] = round(float(_motive_state.get("continuity", 0.0)), 3)
-        # withdraw 极高（>0.80）时，即使 intent_draft 建议 skill/delegate，
-        # 也降级为 chat，让七海以情绪状态优先回应而非执行任务
-        if _organ_route_override is None:
-            _withdraw = float(_motive_state.get("withdraw", 0.0))
-            if _withdraw > 0.80:
-                _organ_route_override = "chat"
-                _organ_route_reason = f"limbic:withdraw={_withdraw:.2f}"
-    except Exception:
-        pass
+    def _fetch_prefrontal_state() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            return get_prefrontal_agent().export_runtime_state()
+        except Exception:
+            return {}
+
+    import asyncio as _asyncio  # noqa: PLC0415
+    import concurrent.futures as _futures  # noqa: PLC0415
+
+    _loop = _asyncio.get_event_loop()
+    with _futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="organ_fetch") as _pool:
+        _immune_fut = _loop.run_in_executor(_pool, _fetch_immune_state)
+        _prop_fut = _loop.run_in_executor(_pool, _fetch_proprioception_state)
+        _limbic_fut = _loop.run_in_executor(_pool, _fetch_limbic_motive)
+        _pf_fut = _loop.run_in_executor(_pool, _fetch_prefrontal_state)
+        _immune_state, _prop_state, _motive_state, _pf_state = await _asyncio.gather(
+            _immune_fut, _prop_fut, _limbic_fut, _pf_fut,
+            return_exceptions=True,
+        )
+
+    # 异常降级：gather 返回 Exception 时用空 dict 代替
+    if isinstance(_immune_state, Exception):
+        _immune_state = {}
+    if isinstance(_prop_state, Exception):
+        _prop_state = {}
+    if isinstance(_motive_state, Exception):
+        _motive_state = {}
+    if isinstance(_pf_state, Exception):
+        _pf_state = {}
+
+    # B-2: ImmuneAgent 风险门控（最高优先级，先判断）
+    _immune_risk = str(_immune_state.get("last_risk_level") or "none").strip().lower()
+    _immune_decision = str(_immune_state.get("last_decision") or "ALLOW").strip().upper()
+    _organ_route_meta["immune_risk_level"] = _immune_risk
+    _organ_route_meta["immune_last_decision"] = _immune_decision
+    if _immune_risk in {"critical", "high"} and _immune_decision in {"REPORT", "BLOCK"}:
+        _organ_route_override = "chat"
+        _organ_route_reason = f"immune_gate:risk={_immune_risk}:decision={_immune_decision}"
+
+    # B-3: ProprioceptionAgent 认知负荷
+    _cognitive_load = float(_prop_state.get("cognitive_load_index") or 0.0)
+    _interrupt_freq = float(_prop_state.get("interrupt_frequency") or 0.0)
+    _organ_route_meta["cognitive_load_index"] = round(_cognitive_load, 3)
+    _organ_route_meta["interrupt_frequency"] = round(_interrupt_freq, 3)
+    if _organ_route_override is None and _cognitive_load > 0.85:
+        _organ_route_override = "chat"
+        _organ_route_reason = f"proprioception:cognitive_load={_cognitive_load:.2f}"
+
+    # B-1: LimbicAgent motive_state
+    _organ_route_meta["motive_withdraw"] = round(float(_motive_state.get("withdraw", 0.0)), 3)
+    _organ_route_meta["motive_care"] = round(float(_motive_state.get("care", 0.0)), 3)
+    _organ_route_meta["motive_continuity"] = round(float(_motive_state.get("continuity", 0.0)), 3)
+    if _organ_route_override is None:
+        _withdraw = float(_motive_state.get("withdraw", 0.0))
+        if _withdraw > 0.80:
+            _organ_route_override = "chat"
+            _organ_route_reason = f"limbic:withdraw={_withdraw:.2f}"
+
+    # B-4: PrefrontalAgent 人格漂移状态
+    _drift_alert = str(_pf_state.get("alert_level") or "NONE").strip().upper()
+    _drift_score = float(_pf_state.get("drift_score") or 0.0)
+    _organ_route_meta["prefrontal_drift_alert"] = _drift_alert
+    _organ_route_meta["prefrontal_drift_score"] = round(_drift_score, 4)
+    if _organ_route_override is None and _drift_alert in {"HIGH", "CRITICAL"}:
+        _organ_route_override = "chat"
+        _organ_route_reason = f"prefrontal:drift_alert={_drift_alert}:score={_drift_score:.3f}"
+        _logger.info(
+            "[%s] prefrontal drift override: alert=%s score=%.3f → force chat",
+            request_id, _drift_alert, _drift_score,
+        )
 
     route = _hard_rule_route(
         intent_draft=dict(intent_draft or {}),
