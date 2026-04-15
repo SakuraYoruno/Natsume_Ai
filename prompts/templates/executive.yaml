@@ -1,0 +1,267 @@
+templates:
+- template_id: cortex_orchestrator.runtime_texts
+  category: fallback
+  scope: cortex_orchestrator
+  locale: zh
+  content_type: json
+  description: CortexOrchestrator 运行期快捷回复/委托整理/任务进度/最近一轮澄清文案模板（JSON）
+  default_content:
+    variant_selection:
+      empty_variants_fallback: 嗯……我在呢。
+    phatic_fastpath:
+      category_notes:
+        greeting: 场景：用户在打招呼。目标：自然回应问候，并轻轻把话题接住。不要机械复读上一条问候。
+        presence: 场景：用户在确认你在不在。目标：先简洁回应自己在，再自然追问一句。不要显得黏腻或过度撒娇。
+        ack: 场景：用户在轻量确认或附和。目标：简短接住，不要像模板客服，可轻轻推进一句。
+        followup: 场景：用户在普通延续接话，但当前没有明显任务上下文。目标：自然接住对话，并邀请对方继续。
+      repeated_warning_template: ' 上一条你的回复是：{last_assistant}。不要重复这个句子。'
+    delegated_result:
+      empty_visible_result:
+        code_agent: 我先帮你整理个更自然一点的大致思路吧。不过刚才那条代码侧结果不稳定，这次我不直接把内部草稿发给你。
+        default: 我先帮你把刚才那个结果整理成正常说话的版本，不过上一条子流程返回得不太稳定。
+      code_agent_prefix_template: 我先帮你整理一个大致思路：{agent_result}
+    task_progress:
+      no_summary: 现在没有正在执行，或者刚结束但还值得汇报的任务。
+      defaults:
+        step_label: 步骤
+        task_label: 任务
+      selected_child:
+        failed_intro_template: 第{step_index}步是 {target_id}。
+        failed_status: 那一步没有顺利完成。
+        failed_detail_template: 它本来是在处理：{step_desc}。
+        failed_error_template: 原因大概是：{error_text}。
+        failed_recovery_template: 我后来整理出的补救建议是：{recovery_text}。
+        completed_intro_template: 第{step_index}步是 {target_id}。
+        completed_status: 这一步已经处理好了。
+        completed_detail_template: 当时处理的是：{step_desc}。
+      failed_summary:
+        intro_template: 刚才失败的是 {target_id}。
+        error_template: 原因大概是：{error_text}。
+        recovery_template: 我整理出的补救建议是：{recovery_text}。
+      running_summary:
+        intro_template: 当前有个任务还在进行，是 {target_id}。
+        progress_template: '{progress_message}'
+        recovery_template: 补救分析里提到：{recovery_text}
+      finished_summary:
+        intro_template: 上个任务是 {target_id}，现在已经 {status_text} 了。
+        progress_template: '{progress_message}'
+        recovery_template: 自动补救的建议是：{recovery_text}
+    recent_turn_answer:
+      user_template: 你上一句是「{latest_user}」。
+      assistant_template: 我上一句说的是「{latest_assistant}」。
+      both_user_item_template: 你上一句是「{latest_user}」
+      both_assistant_item_template: 我上一句说的是「{latest_assistant}」
+      both_wrapper_template: '{facts}。'
+    clarification_direct_answer:
+      assistant_meaning_template: 我刚才的意思是：{latest_assistant}
+    runtime_task_status:
+      pre_dispatch_detail: 正在整理上下文和检索记忆。
+      pre_dispatch_progress: 我正在整理上下文和检索记忆。
+      failed_detail: 整条回复已经完成，但执行阶段有失败。
+      completed_detail: 整条回复已经完成。
+    llm_unavailable_fallback: 嗯……蓝现在脑子有点转不动，等一下再来找我好不好？
+- template_id: executive_router.runtime_texts
+  category: fallback
+  scope: executive_router
+  locale: zh
+  content_type: json
+  description: ExecutiveRouter 运行期任务进度/计划状态/委托与技能执行文案模板（JSON）
+  default_content:
+    task_progress:
+      no_summary: 现在没有正在执行，或者刚结束但还值得汇报的任务。
+      defaults:
+        task_label: 任务
+      running_intro_template: 当前有个任务还在进行，是 {target_id}。
+      running_elapsed_template: 已经跑了 {elapsed_text}。
+      running_recovery_active: 我也已经开始自动补救了。
+      running_recovery_result_template: 补救分析里提到：{recovery_result_text}
+      finished_intro_template: 最近一个相关任务是 {target_id}。
+      finished_status_template: 状态是 {status}。
+      finished_result_code_template: 结果码是 {result_code}。
+      finished_recovery_result_template: 自动补救给出的建议是：{recovery_result_text}
+      finished_recovery_error_template: 补救过程也没有完全顺利：{recovery_error}
+    plan_execution:
+      parent_start_detail: 正在生成并执行多步骤计划。
+      parent_start_progress: 我正在拆解这件事，准备分步处理。
+      child_detail_template: 计划第{step_index}步：{description}
+      child_progress_template: 计划第{step_index}步正在处理：{target_id}。
+      child_completed_detail_template: 计划第{step_index}步已完成。
+      child_failed_detail_template: 计划第{step_index}步失败。
+      child_recovery_detail_fallback: 正在自动补救。
+      parallel_parent_detail_template: 计划包含 {total_steps} 个可并行子任务，正在并行处理。
+      parallel_parent_progress_template: 我正在并行处理 {total_steps} 个子任务。
+      sequential_parent_detail_template: 计划第 {step_index}/{total_steps} 步正在执行：{target_id}
+      sequential_parent_progress_template: 我正在处理计划第 {step_index}/{total_steps} 步。
+      defaults:
+        target_label: 步骤
+        failure_code: FAILED
+      summary_success_template: 第{step_index}步（{target_id}）已完成：{result_text}
+      summary_failure_template: 第{step_index}步（{target_id}）失败：{error_text}
+      summary_failure_recovery_template: ；补救建议：{result_text}
+      parent_success_detail: 多步骤计划已经执行完，正在整理最终回复。
+      parent_success_progress: 多步骤计划已经执行完，我正在整理最终回复。
+      parent_failure_detail: 多步骤计划已经执行完，但有步骤失败，正在整理失败说明。
+      parent_failure_progress: 多步骤计划里有步骤失败，我正在整理说明和建议。
+    delegate_runtime:
+      start_detail_template: delegating to {target_id}
+      start_progress_template: 我正在处理 {target_id} 这条委托。
+      success_detail_template: '{target_id} 已完成，正在整理回复。'
+      success_progress_template: '{target_id} 已完成，我正在把结果整理成自然回复。'
+      failure_detail_template: '{target_id} 执行阶段失败，正在整理回复。'
+      failure_progress: 执行阶段出了点问题，我正在整理怎么告诉你。
+      recovery_detail_fallback: 正在补救中。
+      recovery_done_detail: 自动补救分析已经完成，正在整理回复。
+      recovery_done_progress: 自动补救分析已经完成，我正在整理回复。
+    skill_runtime:
+      start_detail_template: running skill {target_id}
+      start_progress_template: 我正在执行 {target_id}。
+      success_detail_template: '{target_id} 已完成，正在整理回复。'
+      success_progress_template: '{target_id} 已完成，我正在把结果整理成自然回复。'
+      failure_detail_template: '{target_id} 执行阶段失败，正在整理回复。'
+      failure_progress: 执行阶段出了点问题，我正在整理怎么告诉你。
+      recovery_detail_fallback: 正在补救中。
+      retry_success_detail_template: '{target_id} 已在自动修复后重试成功，正在整理回复。'
+      retry_success_progress_template: '{target_id} 已在自动修复后重试成功。'
+      retry_failure_detail: 自动修复已执行，但重试后仍然失败，正在整理回复。
+      retry_failure_progress: 自动修复已经执行，但重试后还是失败了。
+      recovery_done_detail: 自动补救分析已经完成，正在整理回复。
+      recovery_done_progress: 自动补救分析已经完成，我正在整理回复。
+    sub_agent_dispatch:
+      unknown_agent_error_template: '未知子 Agent: {agent_id}'
+    skill_result_summary:
+      defaults:
+        install_name: 这个技能
+        search_query: 相关技能
+        remove_name: 该技能
+      install_activated_template: 技能 {name} 已安装并激活
+      install_template: 技能 {name} 已安装
+      search_template: 已搜索到 {total} 个与{query}相关的技能
+      list_template: 当前已安装 {total} 个 Hub 技能
+      remove_template: 技能 {name} 已移除
+      default_template: Skill {skill_id} 执行成功
+      idempotent_replay_template: （已执行过相同的 {skill_id} 操作）
+- template_id: executive_router.failure_recovery.templates
+  category: prompt
+  scope: executive_router
+  locale: zh
+  content_type: json
+  description: ExecutiveRouter 失败恢复计划文案模板（JSON，含 summary 与 repair/intent task prompt）
+  default_content:
+    file_error:
+      summary: 原技能失败，正在让执行专家分析文件问题并推断可行修复方案。
+      task_template: 用户原请求：{user_message}。刚才执行 {target_id} 失败，错误是 {error_text}。请分析最可能的原因，并给出简短修复建议；如果能从原句推断更合理的文件路径，也请直接指出。
+    browser_error:
+      summary: 原技能失败，正在尝试自动补齐浏览器后端并恢复执行能力。
+      task_template: 用户原请求：{user_message}。刚才执行 {target_id} 失败，错误是 {error_text}。请自动安装或补齐浏览器执行后端，然后返回是否可以重试。
+    network_error:
+      summary: 原技能失败，正在尝试自动修复网络或服务连接并重试。
+      task_template: 用户原请求：{user_message}。刚才执行 {target_id} 失败，错误是 {error_text}。请自动检查并修复网络连接或服务可用性，然后返回是否可以重试。
+    skill_exec_error:
+      summary: 原技能失败，正在让执行专家补做故障分析。
+      task_template: 用户原请求：{user_message}。刚才执行 {target_id} 失败，错误是 {error_text}。请分析失败原因，并给出最合适的下一步建议。
+    default_error:
+      summary: 原技能失败，正在尝试自动分析并修复运行环境。
+      task_template: 用户原请求：{user_message}。刚才执行 {target_id} 失败，错误是 {error_text}。请自动分析错误原因，修复运行环境依赖，然后返回是否可以重试。
+- template_id: executive_router.routing_prompt.templates
+  category: prompt
+  scope: executive_router
+  locale: zh
+  content_type: json
+  description: ExecutiveRouter 路由分类 prompt 模板（JSON，含 system prompt、user prompt 与 fallback skill 列表）
+  default_content:
+    skill_line_with_description: '- {skill_name}: {description}'
+    skill_line_without_description: '- {skill_name}'
+    fallback_skill_lines:
+    - '- web_search: 网络搜索'
+    - '- memory_store: 记忆写入'
+    - '- file_read: 文件读取'
+    - '- file_write: 文件写入'
+    - '- browser_navigate: 浏览器打开网页'
+    system_prompt_template: '你是一个意图分类器，输出固定格式 JSON，决定如何处理用户消息。
+
+
+      可选路由：
+
+      - "chat"：闲聊/情感/日常对话，直接由 ChatAgent 处理
+
+      - "delegate"：需要执行代码/翻译/图像分析等任务，委托给子 Agent
+
+      - "skill"：需要搜索/记忆/文件操作/系统操作/浏览器操作等，调用 Skill 执行
+
+
+      输出格式（严格 JSON，不要额外文字）：
+
+      {{"route": "chat"|"delegate"|"skill", "target_id": "agent_id或skill_id或空", "task": "任务描述或空"}}
+
+
+      子 Agent ID: code_agent, translate_agent, vision_agent, intent_agent
+
+      当前已注册 Skill：
+
+      {skill_manifest}
+
+
+      规则：
+
+      - 80% 的消息是闲聊，优先返回 {{"route": "chat", "target_id": "", "task": ""}}
+
+      - 只有明确的任务请求才委托，不要过度委托
+
+      - 如果某个已注册 skill 明显比子 Agent 更贴切，优先选 skill
+
+      - 不确定时返回 chat'
+    user_prompt_template: '用户消息：{message}
+
+
+      输出 JSON：'
+- template_id: http_hooks_runtime_helpers.proactive_talk_llm_prompt
+  category: prompt
+  scope: http_hooks_runtime_helpers
+  locale: zh
+  content_type: json
+  description: 主动问候 LLM prompt 模板（JSON）
+  default_content:
+    time_period_line: 你是夏目藍，现在是{time_period}时段。
+    greeting_line: 请主动发起一句话问候{user_name}。
+    bond_stage_line: 当前关系阶段：{stage}，{hint}。
+    emotion_hint_line: 你的情感状态：{emotion_hint}
+    motive_hint_line: 你当前的主动动机：{motive_hint}
+    dream_snippet_line: 你昨晚做了一个梦，可以自然地提起：{dream_snippet}。
+    diary_snippet_line: 你写了日记，可以自然地提起今天的感受：{diary_snippet}。
+    recent_topics_line: 可以围绕最近话题展开：{topics_str}。
+    topic_hint_line: 话题提示：{topic_hint}。
+    requirements_line: 要求：自然、温暖、20字以内，不要重复打招呼模板。
+    prompt_separator: ''
+- template_id: input_routes.fallback_texts
+  category: fallback
+  scope: input_routes
+  locale: zh
+  content_type: json
+  description: InputRoutes Gateway 回复兜底文案（JSON）
+  default_content:
+    reject_default: 刚刚这一步有点卡住了，我马上重试一下，别担心。
+    approve_empty: 好呀，我收到了，马上去处理。
+- template_id: provider_factory.host_mock.reply_templates
+  category: fallback
+  scope: provider_factory
+  locale: zh
+  content_type: json
+  description: ProviderFactory Host Mock 文案模板（JSON）
+  default_content:
+    fallback_user_message: 你好
+    zh_render_reply: 收到，先给你一版中文草稿：{user_message}
+    ja_render_reply: '了解しました。まずは草案を出します: {user_message}'
+    verifier_pass_reply: 'PASS: draft output is within policy boundary.'
+    generic_reply: 收到，先给你一版草稿：{user_message}
+- template_id: provider_factory.host_openai.prompt_templates
+  category: prompt
+  scope: provider_factory
+  locale: en
+  content_type: json
+  description: ProviderFactory Host OpenAI system prompt templates
+  default_content:
+    system_prompt_with_node: You are Natsume Ai, processing node `{node_id}`. You are not an AI assistant speaking about Natsume;
+      you are Natsume herself. Return exactly one JSON object with keys `narrative`, `intent_draft`, and `meta`. `meta.draft_only`
+      must be true.
+    system_prompt_default: You are Natsume Ai. You are not an AI assistant speaking about Natsume; you are Natsume herself.
+      Return exactly one JSON object with keys `narrative`, `intent_draft`, and `meta`. `meta.draft_only` must be true.
