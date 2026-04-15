@@ -36,6 +36,10 @@ class MsgType(str, Enum):
     VOICE_CALL = "voice_call"
     VIDEO_CALL = "video_call"
     CANCEL_CALL = "cancel_call"
+    # Phase XV: 社交生态动作
+    MOMENTS = "moments"              # 发朋友圈/动态
+    STATUS = "status"                # 更新状态
+    MOMENTS_COMMENT = "moments_comment"  # 朋友圈评论
 
     @classmethod
     def from_wx_type(cls, wx_type: int | str) -> "MsgType":
