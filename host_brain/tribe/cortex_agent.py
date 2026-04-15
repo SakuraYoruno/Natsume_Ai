@@ -110,6 +110,7 @@ class CortexAgent:
         CortexAgent 保留为协调器入口，保持向后兼容。
         """
         return _collect_tribe_context(
+            state_registry=self.state_registry,
             request_body=request_body,
             session_id=session_id,
             user_id=user_id,
