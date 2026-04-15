@@ -334,15 +334,6 @@ class SubAgentDispatcher:
         except Exception:
             pass  # 审计不影响主流程
 
-    async def dispatch_parallel(
-        self, requests: list[SubAgentRequest],
-    ) -> list[SubAgentResponse]:
-        """并行调度多个子 Agent。"""
-        return list(await asyncio.gather(
-            *(self.dispatch(req) for req in requests),
-            return_exceptions=False,
-        ))
-
 
 # 模块级单例
 _dispatcher: SubAgentDispatcher | None = None
