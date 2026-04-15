@@ -20,6 +20,14 @@ from host_brain.app.http_hooks_runtime_helpers import (
     run_long_term_distillation_handler,
     run_proactive_intent_dispatch,
 )
+# P3-2：导入拆分后的子模块
+from host_brain.app.http_hooks_inbound import add_request_id_and_audit, should_emit_request_info
+from host_brain.app.http_hooks_outbound import global_exception_handler, startup_status_is_degraded
+from host_brain.app.http_hooks_middleware import (
+    parse_bool_env as _middleware_parse_bool_env,
+    build_scheduler_emotion_state as _middleware_build_scheduler_emotion_state,
+    build_personality_tick_status as _middleware_build_personality_tick_status,
+)
 from host_brain.core.ids import new_request_id
 
 _AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
@@ -35,75 +43,23 @@ _AUDIT_SLOW_REQUEST_MS = 1200
 
 
 def _should_emit_request_info(path: str) -> bool:
-    normalized = str(path or "").strip().lower()
-    return not any(normalized.startswith(prefix) for prefix in _AUDIT_SILENT_PATH_PREFIXES)
+    # P3-2：委托给 http_hooks_inbound.should_emit_request_info
+    return should_emit_request_info(path)
 
 
 def _startup_status_is_degraded(value: Any) -> bool:
-    normalized = str(value or "").strip().upper()
-    if not normalized:
-        return False
-    return normalized.startswith("DEGRADED") or normalized.startswith("FAIL")
+    # P3-2：委托给 http_hooks_outbound.startup_status_is_degraded
+    return startup_status_is_degraded(value)
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = str(os.environ.get(name) or "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "on"}
+    # P3-2：委托给 http_hooks_middleware.parse_bool_env
+    return _middleware_parse_bool_env(name, default=default)
 
 
 def _build_scheduler_emotion_state() -> dict[str, Any]:
-    """构建调度器门控使用的情绪/内分泌快照。
-
-    Phase T-06：优先通过 EndocrineAgent.resolve_vital_signs() 获取门控状态，
-    确保调度门控与 Tribe 架构保持一致。
-    """
-    mood_state = "steady"
-    emotion_tag = "NEUTRAL"
-    emotion_intensity = 0.0
-    endocrine_state: dict[str, Any] = {}
-    try:
-        from host_brain.app.dependencies import get_hard_state  # noqa: PLC0415
-        from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
-
-        hard_state = get_hard_state()
-        mood_state = str(getattr(hard_state, "mood_state", "steady") or "steady").strip().lower() or "steady"
-        emotion_tag = str(getattr(hard_state, "emotion_tag", "NEUTRAL") or "NEUTRAL").strip().upper() or "NEUTRAL"
-        emotion_intensity = float(getattr(hard_state, "emotion_intensity", 0.0) or 0.0)
-
-        # T-06：通过 EndocrineAgent 统一解析内分泌状态（含 gate_state / stress_index / energy_reserve）
-        endocrine_agent = get_endocrine_agent()
-        raw_endocrine = endocrine_agent.resolve_endocrine_state(
-            hard_state=hard_state,
-            emotion_tag=emotion_tag,
-            emotion_intensity=emotion_intensity,
-        )
-        vital_signs = endocrine_agent.resolve_vital_signs(endocrine_state=raw_endocrine)
-        # 将 vital_signs 合并到 endocrine_state，供 NatsumeScheduler 门控读取
-        endocrine_state = dict(raw_endocrine)
-        endocrine_state["gate_state"] = vital_signs.get("gate_state", "open")
-        endocrine_state["stress_index"] = vital_signs.get("stress_index", 0.0)
-        endocrine_state["energy_reserve"] = vital_signs.get("energy_reserve", 0.6)
-        endocrine_state["homeostasis_ok"] = vital_signs.get("homeostasis_ok", True)
-        endocrine_state["source"] = "endocrine_agent"
-    except Exception:
-        endocrine_state = {
-            "dopamine_level": 0.5,
-            "serotonin_level": 0.5,
-            "cortisol_level": 0.25,
-            "energy_reserve": 0.6,
-            "gate_state": "open",
-            "stress_index": 0.0,
-            "homeostasis_ok": True,
-            "source": "scheduler_fallback",
-        }
-    return {
-        "mood_state": mood_state,
-        "emotion_tag": emotion_tag,
-        "emotion_intensity": emotion_intensity,
-        "endocrine_state": endocrine_state,
-    }
+    """构建调度器门控使用的情绪/内分泌快照。P3-2：委托给 http_hooks_middleware。"""
+    return _middleware_build_scheduler_emotion_state()
 
 
 def _build_audit_retention_task_config() -> Any:
@@ -130,22 +86,9 @@ def _build_audit_retention_task_config() -> Any:
 
 
 def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str:
-    registered: list[str] = []
-    missing: list[str] = []
+    # P3-2：委托给 http_hooks_middleware.build_personality_tick_status
+    return _middleware_build_personality_tick_status(registry=registry, task_ids=task_ids)
 
-    for task_id in task_ids:
-        task = registry.get(task_id) if registry is not None else None
-        if task is None:
-            missing.append(task_id)
-            continue
-        enabled = bool(getattr(task, "enabled", False))
-        registered.append(f"{task_id}[{'enabled' if enabled else 'disabled'}]")
-
-    if missing:
-        registered_text = ",".join(registered) if registered else "none"
-        return f"DEGRADED: missing={','.join(missing)}; registered={registered_text}"
-
-    return f"OK (registered={len(registered)}/{len(task_ids)}; tasks={','.join(registered)})"
 
 
 def _bootstrap_personality_scheduler(
@@ -1402,106 +1345,7 @@ def runtime_lifespan(
 
     return _lifespan()
 
-async def global_exception_handler(
-    *,
-    request: Request,
-    exc: Exception,
-    logger: Any,
-) -> JSONResponse:
-    request_id = getattr(request.state, "request_id", None) or new_request_id()
-    if isinstance(exc, HTTPException):
-        status_code = exc.status_code
-        reason_code = f"HTTP_{status_code}"
-        detail = exc.detail
-    else:
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        reason_code = "INTERNAL_SERVER_ERROR"
-        detail = str(exc) or "Internal server error"
-    logger.error(
-        "HTTP request failed",
-        extra={
-            "request_id": request_id,
-            "path": request.url.path,
-            "method": request.method,
-            "status_code": status_code,
-            "reason_code": reason_code,
-            "detail": detail,
-        },
-    )
-    return JSONResponse(
-        status_code=status_code,
-        content=ErrorResponse(
-            error=exc.__class__.__name__,
-            reason_code=reason_code,
-            detail=detail,
-            request_id=request_id,
-            timestamp=int(time.time() * 1000),
-        ).dict(),
-    )
-
-
-async def add_request_id_and_audit(
-    *,
-    request: Request,
-    call_next: Callable,
-    metrics: Any,
-    logger: Any,
-) -> Response:
-    request_id = new_request_id()
-    request.state.request_id = request_id
-    start_time = time.time()
-    path = request.url.path
-    method = request.method
-    should_emit_info = _should_emit_request_info(path)
-    if should_emit_info:
-        logger.info(
-            "HTTP request started",
-            extra={
-                "request_id": request_id,
-                "path": path,
-                "method": method,
-                "client": request.client.host if request.client else "unknown",
-            },
-        )
-    else:
-        logger.debug(
-            "HTTP request started",
-            extra={
-                "request_id": request_id,
-                "path": path,
-                "method": method,
-            },
-        )
-    try:
-        metrics.inc_request()
-        response = await call_next(request)
-        duration_ms = int((time.time() - start_time) * 1000)
-        completed_extra = {
-            "request_id": request_id,
-            "path": path,
-            "method": method,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
-        }
-        if should_emit_info and (
-            duration_ms >= _AUDIT_SLOW_REQUEST_MS
-            or method.upper() != "GET"
-            or int(response.status_code) >= 400
-        ):
-            logger.info("HTTP request completed", extra=completed_extra)
-        else:
-            logger.debug("HTTP request completed", extra=completed_extra)
-        return response
-    except Exception as exc:
-        duration_ms = int((time.time() - start_time) * 1000)
-        logger.error(
-            "HTTP request failed with exception",
-            extra={
-                "request_id": request_id,
-                "path": path,
-                "method": method,
-                "duration_ms": duration_ms,
-                "exception": str(exc),
-            },
-        )
-        raise
+# P3-2：global_exception_handler 和 add_request_id_and_audit 已拆分到子模块：
+# - global_exception_handler → http_hooks_outbound.global_exception_handler（已导入）
+# - add_request_id_and_audit → http_hooks_inbound.add_request_id_and_audit（已导入）
+# 此处保留导入的版本，不再重复定义。

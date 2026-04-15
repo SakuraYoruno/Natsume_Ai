@@ -122,105 +122,111 @@ class GraphExecutor:
         from host_brain.integrations.graph_checkpoint import compile_graph_with_checkpoint  # noqa: PLC0415
         return compile_graph_with_checkpoint(graph)
 
+    def _execute_agent_dispatch_node(self, state: GraphState, node_id: str) -> GraphState:
+        """M-MA6：执行 agent_dispatch_node，根据 active_agent_id 动态路由分发。
+
+        提取自 _run_single_step，独立处理 agent_dispatch_node 的完整执行逻辑。
+        """
+        # P16：active_agent_id 优先从 payload 同步到 state 顶层
+        payload_active = str((state.get("payload") or {}).get("active_agent_id") or "").strip()
+        state_active = str(state.get("active_agent_id") or "").strip()
+        resolved_active_agent = payload_active or state_active
+        if resolved_active_agent != state_active:
+            state = {**state, "active_agent_id": resolved_active_agent}
+
+        # P16：allowlist 校验（从 node_bindings 读取，防止 LLM 提案选到无 handler 的 agent）
+        binding = (state.get("node_bindings") or {}).get(node_id) or {}
+        allowlist_raw = binding.get("agent_dispatch_allowlist")
+        if isinstance(allowlist_raw, (list, tuple)) and allowlist_raw:
+            allowlist = frozenset(str(x).strip() for x in allowlist_raw if str(x).strip())
+            if resolved_active_agent and resolved_active_agent not in allowlist:
+                next_node = (state.get("edge_map") or {}).get(node_id)
+                return {
+                    **state,
+                    "pending_node_id": next_node,
+                    "trace": list(state.get("trace") or []) + [{
+                        "node_id": node_id,
+                        "handler_id": "",
+                        "status": "DEGRADED",
+                        "reason_code": "AGENT_NOT_IN_ALLOWLIST",
+                        "detail": f"active_agent_id={resolved_active_agent!r} 不在 allowlist={sorted(allowlist)}，安全降级",
+                    }],
+                }
+
+        handler_id = self._dispatch_to_agent(state)
+        if handler_id:
+            try:
+                output = self._invoke_handler(handler_id=handler_id, node_id=node_id, state=state)
+            except Exception as exc:
+                return handle_execution_error(state=state, node_id=node_id, handler_id=handler_id, error=exc)
+            # agent handler 不写 __next_node__，由 need_judge 快路径或 edge_map 决定下一跳
+            payload = dict(output or state.get("payload") or {})
+            payload.pop("__next_node__", None)
+
+            # P16：need_judge 快路径（chat_agent 等不需要 judge 时直接跳 chat_render_node）
+            supervisor_info = dict(payload.get("supervisor_dispatch") or {})
+            need_judge = bool(supervisor_info.get("need_judge", True))
+            if need_judge:
+                next_node = (state.get("edge_map") or {}).get(node_id)
+            else:
+                from host_brain.app.graph_config_builder import CHAT_RENDER_NODE_ID  # noqa: PLC0415
+                next_node = CHAT_RENDER_NODE_ID
+
+            agent_artifacts = dict(state.get("agent_artifacts") or {})
+            if isinstance(payload.get("agent_artifacts"), dict):
+                agent_artifacts = {**agent_artifacts, **payload["agent_artifacts"]}
+            trace = list(state.get("trace") or [])
+            trace.append({
+                "node_id": node_id,
+                "handler_id": handler_id,
+                "status": "OK",
+                "reason_code": None,
+                "detail": f"agent_dispatch_node → {handler_id} (need_judge={need_judge})",
+            })
+            return {
+                **state,
+                "payload": payload,
+                "trace": trace,
+                "pending_node_id": next_node,
+                "agent_artifacts": agent_artifacts,
+                "active_agent_id": resolved_active_agent,
+            }
+
+        # handler_id 为空时降级：直接跳到下一跳（edge_map 决定）
+        next_node = (state.get("edge_map") or {}).get(node_id)
+        return {
+            **state,
+            "pending_node_id": next_node,
+            "trace": list(state.get("trace") or []) + [{
+                "node_id": node_id,
+                "handler_id": "",
+                "status": "DEGRADED",
+                "reason_code": "AGENT_DISPATCH_NO_HANDLER",
+                "detail": f"active_agent_id={resolved_active_agent!r} 无对应 handler，跳过",
+            }],
+        }
+
+    def _execute_barrier_join_node(self, state: GraphState, manifest_dict: dict) -> GraphState:
+        """M40-F：执行 barrier_join fan-in 校验。
+
+        提取自 _run_single_step，独立处理并行分支合并逻辑。
+        """
+        try:
+            bj_result = barrier_join(branch_manifest=manifest_dict, audit_tickets=None)
+            return {**state, "barrier_join_result": bj_result.to_dict()}
+        except Exception:
+            return state  # 静默降级，不影响主图执行
+
     def _run_single_step(self, state: GraphState) -> GraphState:
         node_id = str(state.get("pending_node_id") or "").strip()
         if not node_id:
             return set_finish(state)
 
-        # M-MA6：agent_dispatch_node 动态路由分发
+        # M-MA6：agent_dispatch_node 动态路由分发（提取为独立方法 _execute_agent_dispatch_node）
         # 当 node_id == "agent_dispatch_node" 时，根据 active_agent_id 动态选择对应 handler 执行，
         # 而不是走固定节点序列。这是 M-MA6 的核心：图执行器根据 GraphState.active_agent_id 动态路由。
         if node_id == "agent_dispatch_node":
-            # P16：active_agent_id 优先从 payload 同步到 state 顶层（supervisor_dispatch_handler 写 payload["active_agent_id"]）
-            payload_active = str((state.get("payload") or {}).get("active_agent_id") or "").strip()
-            state_active = str(state.get("active_agent_id") or "").strip()
-            resolved_active_agent = payload_active or state_active
-            if resolved_active_agent != state_active:
-                state = {**state, "active_agent_id": resolved_active_agent}
-
-            # P16：allowlist 校验（从 node_bindings 读取，防止 LLM 提案选到无 handler 的 agent）
-            binding = (state.get("node_bindings") or {}).get(node_id) or {}
-            allowlist_raw = binding.get("agent_dispatch_allowlist")
-            if isinstance(allowlist_raw, (list, tuple)) and allowlist_raw:
-                allowlist = frozenset(str(x).strip() for x in allowlist_raw if str(x).strip())
-                if resolved_active_agent and resolved_active_agent not in allowlist:
-                    # 不在 allowlist：安全降级，跳到下一跳
-                    next_node = (state.get("edge_map") or {}).get(node_id)
-                    return {
-                        **state,
-                        "pending_node_id": next_node,
-                        "trace": list(state.get("trace") or []) + [{
-                            "node_id": node_id,
-                            "handler_id": "",
-                            "status": "DEGRADED",
-                            "reason_code": "AGENT_NOT_IN_ALLOWLIST",
-                            "detail": f"active_agent_id={resolved_active_agent!r} 不在 allowlist={sorted(allowlist)}，安全降级",
-                        }],
-                    }
-
-            handler_id = self._dispatch_to_agent(state)
-            if handler_id:
-                try:
-                    output = self._invoke_handler(
-                        handler_id=handler_id,
-                        node_id=node_id,
-                        state=state,
-                    )
-                except Exception as exc:
-                    return handle_execution_error(
-                        state=state,
-                        node_id=node_id,
-                        handler_id=handler_id,
-                        error=exc,
-                    )
-                # agent handler 不写 __next_node__，由 need_judge 快路径或 edge_map 决定下一跳
-                # 安全约束：先 pop __next_node__，防止 agent handler 控图
-                payload = dict(output or state.get("payload") or {})
-                payload.pop("__next_node__", None)
-
-                # P16：need_judge 快路径（chat_agent 等不需要 judge 时直接跳 chat_render_node）
-                supervisor_info = dict(payload.get("supervisor_dispatch") or {})
-                need_judge = bool(supervisor_info.get("need_judge", True))
-                if need_judge:
-                    next_node = (state.get("edge_map") or {}).get(node_id)
-                else:
-                    # 快路径：跳过 judge，直接到 chat_render_node
-                    from host_brain.app.graph_config_builder import CHAT_RENDER_NODE_ID  # noqa: PLC0415
-                    next_node = CHAT_RENDER_NODE_ID
-
-                # 同步 agent_artifacts 到 state 顶层
-                agent_artifacts = dict(state.get("agent_artifacts") or {})
-                if isinstance(payload.get("agent_artifacts"), dict):
-                    agent_artifacts = {**agent_artifacts, **payload["agent_artifacts"]}
-                trace = list(state.get("trace") or [])
-                trace.append({
-                    "node_id": node_id,
-                    "handler_id": handler_id,
-                    "status": "OK",
-                    "reason_code": None,
-                    "detail": f"agent_dispatch_node → {handler_id} (need_judge={need_judge})",
-                })
-                return {
-                    **state,
-                    "payload": payload,
-                    "trace": trace,
-                    "pending_node_id": next_node,
-                    "agent_artifacts": agent_artifacts,
-                    "active_agent_id": resolved_active_agent,
-                }
-            # handler_id 为空时降级：直接跳到下一跳（edge_map 决定）
-            next_node = (state.get("edge_map") or {}).get(node_id)
-            return {
-                **state,
-                "pending_node_id": next_node,
-                "trace": list(state.get("trace") or []) + [{
-                    "node_id": node_id,
-                    "handler_id": "",
-                    "status": "DEGRADED",
-                    "reason_code": "AGENT_DISPATCH_NO_HANDLER",
-                    "detail": f"active_agent_id={resolved_active_agent!r} 无对应 handler，跳过",
-                }],
-            }
+            return self._execute_agent_dispatch_node(state, node_id)
 
         # M35-D：Route Commitment Rule — 在节点执行前检查 committed_route_token
         # AIRLOCK 令牌：安全终止，不执行任何节点
@@ -495,15 +501,8 @@ class GraphExecutor:
                     )
                     manifest_dict = build_branch_manifest_dict(manifest)
                     new_state = {**new_state, "branch_manifest": manifest_dict}
-                    # M40-F：barrier_join() fan-in 校验
-                    try:
-                        bj_result = barrier_join(
-                            branch_manifest=manifest_dict,
-                            audit_tickets=None,
-                        )
-                        new_state = {**new_state, "barrier_join_result": bj_result.to_dict()}
-                    except Exception:
-                        pass  # 静默降级
+                    # M40-F：barrier_join() fan-in 校验（提取为独立方法 _execute_barrier_join_node）
+                    new_state = self._execute_barrier_join_node(new_state, manifest_dict)
             except Exception:
                 pass  # 静默降级，不影响主图执行
 

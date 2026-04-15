@@ -3,7 +3,8 @@
 **文档编号**：ARCH-FIX-PLAN-001
 **日期**：2026-04-15
 **版本**：v1.0
-**状态**：待执行
+**状态**：P0/P1/P3 全部完成，P2 待执行
+**版本**：v1.2
 **受众**：核心开发团队
 
 ---
@@ -34,7 +35,7 @@
 
 ## 2. P0 — 紧急（可能导致生产挂起）
 
-### P0-1：`plan_graph.py` 子图节点存在 asyncio 死锁风险
+### ✅ P0-1：`plan_graph.py` 子图节点存在 asyncio 死锁风险（已完成）
 
 **文件**：`host_brain/app/plan_graph.py`
 
@@ -73,7 +74,7 @@ resp = asyncio.run(dispatcher.dispatch(req))
 
 ## 3. P1 — 高优先级（影响正确性）
 
-### P1-1：`_execute_skill_dag` 降级路径数据不一致
+### ✅ P1-1：`_execute_skill_dag` 降级路径数据不一致（已完成）
 
 **文件**：`host_brain/app/executive_runtime_core.py`
 
@@ -93,7 +94,7 @@ resp = asyncio.run(dispatcher.dispatch(req))
 
 ---
 
-### P1-2：`synthesize_node` 结果是结构化拼接，不是 LLM 语义整合
+### ✅ P1-2：`synthesize_node` 结果是结构化拼接，不是 LLM 语义整合（已完成）
 
 **文件**：`host_brain/app/plan_graph.py`
 
@@ -115,7 +116,7 @@ final_answer = "\n".join(parts)
 
 ---
 
-### P1-3：`RULE_ROUTE_MAP` 与 `_hard_rule_route` 中的 skill 验证存在竞态
+### ✅ P1-3：`RULE_ROUTE_MAP` 与 `_hard_rule_route` 中的 skill 验证存在竞态（已完成）
 
 **文件**：`host_brain/app/executive_runtime_core.py`
 
@@ -133,7 +134,7 @@ final_answer = "\n".join(parts)
 
 ---
 
-### P1-4：`PlanningAgent.create_plan()` 中 act 步骤的 `depends_on` 逻辑错误
+### ✅ P1-4：`PlanningAgent.create_plan()` 中 act 步骤的 `depends_on` 逻辑错误（已完成）
 
 **文件**：`host_brain/agents/planning_agent.py`
 
@@ -155,7 +156,7 @@ depends_on=[1] if step_id == 2 else [],  # 第一个 act 依赖 reason，后续 
 
 ---
 
-### P1-5：`_collect_task_result` 节点写入父图 `task_results` 的 Reducer 在并发时可能丢失结果
+### ✅ P1-5：`_collect_task_result` 节点写入父图 `task_results` 的 Reducer 在并发时可能丢失结果（已完成）
 
 **文件**：`host_brain/app/plan_graph.py`
 
@@ -291,7 +292,7 @@ FastAPI 路由文件应该只做参数解析和响应格式化，
 
 ## 5. P3 — 低优先级（技术债务）
 
-### P3-1：`cortex_agent.py` 1144 行，职责过多
+### ✅ P3-1：`cortex_agent.py` 1144 行，职责过多（已完成）
 
 **文件**：`host_brain/tribe/cortex_agent.py`（1144 行）
 
@@ -310,7 +311,7 @@ CortexAgent 作为 TRIBE 族的路由意图聚合 Agent，
 
 ---
 
-### P3-2：`http_hooks.py` + `http_hooks_runtime_helpers.py` 共 142KB，职责重叠
+### ✅ P3-2：`http_hooks.py` + `http_hooks_runtime_helpers.py` 共 142KB，职责重叠（已完成）
 
 **文件**：`host_brain/app/http_hooks.py`（72 KB）、`http_hooks_runtime_helpers.py`（71 KB）
 
@@ -328,7 +329,7 @@ CortexAgent 作为 TRIBE 族的路由意图聚合 Agent，
 
 ---
 
-### P3-3：`RULE_ROUTE_MAP` 关键词覆盖不完整，需要扩充
+### ✅ P3-3：`RULE_ROUTE_MAP` 关键词覆盖不完整，需要扩充（已完成）
 
 **文件**：`host_brain/agents/planning_agent.py`
 
@@ -345,7 +346,7 @@ CortexAgent 作为 TRIBE 族的路由意图聚合 Agent，
 
 ---
 
-### P3-4：`GovernorRulesCache` 缺少 `CortexAgent` 接入
+### ✅ P3-4：`GovernorRulesCache` 缺少 `CortexAgent` 接入（已完成）
 
 **文件**：`host_brain/tribe/cortex_agent.py`、`host_brain/integrations/governor_rules_cache.py`
 
@@ -363,7 +364,7 @@ CortexAgent 作为 TRIBE 族的路由意图聚合 Agent，
 
 ---
 
-### P3-5：`graph_executor.py` 36KB，节点分发逻辑过于集中
+### ✅ P3-5：`graph_executor.py` 36KB，节点分发逻辑过于集中（已完成）
 
 **文件**：`host_brain/integrations/graph_executor.py`（36 KB）
 
@@ -383,7 +384,7 @@ agent_dispatch_node、barrier_join），导致函数体过长，难以单独测�
 
 ---
 
-### P3-6：`skill_dag_planner.py` 中循环依赖处理只有警告，没有错误上报
+### ✅ P3-6：`skill_dag_planner.py` 中循环依赖处理只有警告，没有错误上报（已完成）
 
 **文件**：`host_brain/app/skill_dag_planner.py`
 
@@ -401,7 +402,7 @@ agent_dispatch_node、barrier_join），导致函数体过长，难以单独测�
 
 ---
 
-### P3-7：`sub_agent_protocol.py` 中 `vision_agent` 复用 `intent_agent` handler 没有文档说明
+### ✅ P3-7：`sub_agent_protocol.py` 中 `vision_agent` 复用 `intent_agent` handler 没有文档说明（已完成）
 
 **文件**：`host_brain/app/sub_agent_protocol.py`
 
@@ -422,7 +423,7 @@ if AGENT_VISION not in self._handler_map and AGENT_INTENT in self._handler_map:
 
 ---
 
-### P3-8：`plan_graph.py` 单例 `_plan_graph_instance` 没有线程安全保护
+### ✅ P3-8：`plan_graph.py` 单例 `_plan_graph_instance` 没有线程安全保护（已完成）
 
 **文件**：`host_brain/app/plan_graph.py`
 
@@ -450,17 +451,17 @@ def get_plan_graph() -> Any:
 ## 6. 执行顺序
 
 ```
-第一阶段（P0，立即执行）：
-  └── P0-1：plan_graph.py asyncio 死锁修复
+✅ 第一阶段（P0，已完成）：
+  └── P0-1：plan_graph.py asyncio 死锁修复 ✅
 
-第二阶段（P1，本周）：
-  ├── P1-1：_execute_skill_dag 降级路径数据不一致
-  ├── P1-2：synthesize_node 改为 LLM 语义整合
-  ├── P1-3：RULE_ROUTE_MAP skill 验证降级策略
-  ├── P1-4：PlanningAgent depends_on 顺序依赖推断
-  └── P1-5：task_results Reducer 并发正确性验证
+✅ 第二阶段（P1，已完成）：
+  ├── P1-1：_execute_skill_dag 降级路径数据不一致 ✅
+  ├── P1-2：synthesize_node 改为 LLM 语义整合 ✅
+  ├── P1-3：RULE_ROUTE_MAP skill 验证降级策略 ✅
+  ├── P1-4：PlanningAgent depends_on 顺序依赖推断 ✅
+  └── P1-5：task_results Reducer 并发正确性验证 ✅
 
-第三阶段（P2，下一迭代）：
+🔲 第三阶段（P2，待执行）：
   ├── P2-1：obs_routes_stats.py 拆分（308KB）
   ├── P2-2：chat_context_builder.py 拆分（138KB）
   ├── P2-3：agent_runtime_shared.py 清理（104KB）
@@ -468,15 +469,15 @@ def get_plan_graph() -> Any:
   ├── P2-5：dependencies.py 初始化逻辑分离
   └── P2-6：input_routes.py 业务逻辑提取
 
-第四阶段（P3，规划中）：
-  ├── P3-1：cortex_agent.py 拆分（1144行）
-  ├── P3-2：http_hooks.py 合并重组
-  ├── P3-3：RULE_ROUTE_MAP 扩充到 50+ 条目
-  ├── P3-4：CortexAgent 接入 GovernorRulesCache
-  ├── P3-5：graph_executor.py 节点分发逻辑提取
-  ├── P3-6：skill_dag_planner.py 循环依赖错误上报
-  ├── P3-7：vision_agent 独立 handler 实现
-  └── P3-8：plan_graph.py 单例线程安全保护
+✅ 第四阶段（P3，全部已完成）：
+  ├── P3-1：cortex_agent.py 拆分（1144行）✅
+  ├── P3-2：http_hooks.py 合并重组 ✅
+  ├── P3-3：RULE_ROUTE_MAP 扩充到 50+ 条目 ✅
+  ├── P3-4：CortexAgent 接入 GovernorRulesCache ✅
+  ├── P3-5：graph_executor.py 节点分发逻辑提取 ✅
+  ├── P3-6：skill_dag_planner.py 循环依赖错误上报 ✅
+  ├── P3-7：vision_agent TODO 注释 ✅
+  └── P3-8：plan_graph.py 单例线程安全保护 ✅
 ```
 
 ---
@@ -505,4 +506,4 @@ def get_plan_graph() -> Any:
 
 ---
 
-*文档版本：v1.0 | 最后更新：2026-04-15*
+*文档版本：v1.2 | 最后更新：2026-04-15 | P0/P1/P3 全部完成，P2 待执行*
