@@ -457,3 +457,118 @@ _DELEGATE_TARGET_TO_AGENT = {
 ---
 
 *文档版本：v1.1 | 最后更新：2026-04-15 | 新增 §9 supervisor_dispatch_handler 配套修复*
+
+---
+
+## 10. 器官族接管主流程路线图（Phase B+C 实现记录）
+
+### 10.1 22 个器官族当前接入状态
+
+| 层级 | 器官族 | 接入状态 | 接入方式 |
+|------|--------|---------|---------|
+| 感知层 | ASR/Vision | ✅ 已接入 | Edge 侧完成，文字直接进入决策链 |
+| 记忆层 | HippocampusAgent | ✅ 主链路 | 唯一记忆门面，三通道写入，Agentic RAG |
+| 情感层 | LimbicAgent | ✅ 深度集成 | Prompt 构建 8 个调用点 + **Phase B-1 路由覆盖** |
+| 免疫层 | ImmuneAgent | ✅ 门控+路由 | 输入门控 + **Phase B-2 路由覆盖** |
+| 认知层 | ProprioceptionAgent | ✅ 路由覆盖 | **Phase B-3 认知负荷路由覆盖** |
+| 语言层 | LanguageSystemAgent | ⚠️ Broca 断裂 | Broca 产出写 state_registry，**G2 已补映射** |
+| 执行层 | MotorCortexAgent | ✅ 统一发声 | **Phase C 新增 dispatch_speak()** |
+| 节律层 | ANSAgent/CircadianAgent | ✅ 后台运行 | 定时触发，主动发声节律 |
+| 主动发声 | DefaultModeAgent | ⚠️ 事件断裂 | **G3 已补 PROACTIVE_VOICE_TRIGGERED 消费** |
+| 纠偏层 | CerebellumAgent | ✅ 已接入 | 执行失败纠偏，联动 Endocrine/PainReward |
+| 其余 B 级 | 13 个算法族 | ✅ 旁路运行 | 通过 Prompt 上下文软性影响 LLM 输出 |
+| C 级骨架 | PeripheralAgent/SomaticAgent | ⏳ 等待 edge_client | 事件处理和状态写入已实现 |
+
+### 10.2 Phase A：打通三个发声桥（已完成）
+
+```
+G1: chat_agent 对话完成 → 取 narrative → 组装 speak payload → POST /v1/edge/speak
+G2: Broca.warmth_weight/tone → emotion_tag/emotion_intensity 映射表 → 注入 speak payload
+G3: CortexAgent 订阅 PROACTIVE_VOICE_TRIGGERED → expression.content → TTS 链路
+```
+
+**效果**：七海现在真正能"开口说话"——对话回复、主动发声、情绪表达三条路全部打通。
+
+### 10.3 Phase B：器官族状态影响路由决策（已完成）
+
+在 `executive_runtime_core._executive_runtime_core_impl()` 中，`_hard_rule_route()` 调用前注入三层器官族状态检查：
+
+```
+B-1: LimbicAgent.compute_motive_state()
+     → withdraw > 0.80 时强制 chat 路由
+     → 七海情绪极度退缩时不执行 skill/delegate，优先情绪回应
+
+B-2: ImmuneAgent.export_runtime_state()
+     → risk_level=critical/high AND last_decision=BLOCK/REPORT 时强制 chat
+     → 高风险时避免触发执行副作用
+
+B-3: ProprioceptionAgent.export_runtime_state()
+     → cognitive_load_index > 0.85 时强制 chat
+     → 认知负荷极高时避免复杂执行链加重负担
+
+B-4: 器官族路由影响写入 trace_stage_meta
+     → organ_route_override / organ_route_reason / organ_route_meta
+     → plan 路由和 skill/delegate 路由均覆盖，完整可观测
+```
+
+**覆盖规则**：器官族覆盖只作用于 `skill/delegate/plan/chat` 路由，不覆盖 `recent_turn/task_progress`（这两个是功能性快速路径，不受情绪状态影响）。
+
+### 10.4 Phase C：MotorCortexAgent 统一发声入口（已完成）
+
+新增 `MotorCortexAgent.dispatch_speak()` 方法，将所有发声统一走 MotorCortex 分发：
+
+```python
+motor_cortex.dispatch_speak(
+    text="...",
+    emotion_tag="LOVING",
+    emotion_intensity=0.7,
+    utterance_id="utt_xxx",
+    request_id="req_xxx",
+    session_id="sess_xxx",
+    source="broca",          # 来源：broca/proactive/chat_agent
+    require_gate=True,       # 主动发声时需要 InitiativeGovernor 门控
+    motive=0.65,
+)
+```
+
+**替代原有分散调用**：原来 `chat_agent_postprocessor`、`CortexAgent` 等各自直接 `POST /v1/edge/speak`，现在统一经过 MotorCortex，确保：
+1. 发声前可选 InitiativeGovernor 门控
+2. 发声结果写入 `state_registry`（`last_speak_outcome`）
+3. 发布 `MOTOR_SPEAK_DISPATCHED` 事件到 TribeEventBus
+4. 发声失败时联动 LimbicAgent 轻度挫败感
+
+### 10.5 当前剩余缺口
+
+| 缺口 | 描述 | 优先级 |
+|------|------|--------|
+| Broca→MotorCortex 桥 | LanguageSystemAgent.broca_generate_plan() 产出后，应调用 dispatch_speak() 而非直接 TTS | 中 |
+| chat_agent→dispatch_speak 迁移 | G1 补的直接调用改为走 MotorCortexAgent.dispatch_speak() | 低（功能已通） |
+| PrefrontalAgent 真实推理 | 当前读静态快照，需要接入小模型做实时意图规划（Phase D 长期目标） | 高（架构重构） |
+| 器官族并行激活 | 当前串行调用，真实神经系统是并行激活 | 高（性能优化） |
+| LimbicAgent 连续动态系统 | 当前离散事件驱动，需要持续运转的情绪物理模型 | 中（体验提升） |
+
+### 10.6 下一步：Phase D（长期架构重构）
+
+```
+目标：把 executive_runtime_core 拆掉，由 PrefrontalAgent（专用小模型）替代
+
+输入：
+  LimbicAgent.motive_state（情绪驱动）
+  HippocampusAgent.recall（记忆检索结果）
+  LanguageSystemAgent.broca_generate_plan（语言规划）
+  ImmuneAgent.risk_level（安全状态）
+
+PrefrontalAgent（小模型，低延迟 <500ms）：
+  system prompt = "你是七海的前额叶皮质，当前情绪是X，记忆里有Y，Bond阶段是Z，决定你接下来要做什么"
+  输出：{ "action": "speak|skill|delegate|wait", "target": "...", "task": "..." }
+
+MotorCortexAgent：
+  接收 PrefrontalAgent 输出 → dispatch_speak() / dispatch_action()
+
+chat_agent：
+  退化为纯粹的语言生成器，只负责把 PrefrontalAgent 规划好的意图转成流畅自然语言
+```
+
+---
+
+*文档版本：v1.2 | 最后更新：2026-04-15 | 新增 §10 器官族接管路线图（Phase A+B+C 实现记录）*
