@@ -1178,11 +1178,88 @@ async def _executive_runtime_core_impl(
         dict(intent_draft or {}).get("llm_route_used")
         or dict(intent_draft or {}).get("route_source") == "llm"
     )
+
+    # ── Phase B：器官族状态注入路由决策 ──────────────────────────────────
+    # B-1: LimbicAgent motive_state → 情绪驱动路由调整
+    # B-2: ImmuneAgent 风险等级 → 高风险时强制 chat 快速回复
+    # B-3: ProprioceptionAgent 认知负荷 → 高负荷时强制 chat 快速回复
+    # B-4: 器官族路由影响记录到 trace_stage_meta
+    _organ_route_override: str | None = None
+    _organ_route_reason: str | None = None
+    _organ_route_meta: dict[str, Any] = {}
+
+    try:
+        from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+        _immune_state = get_immune_agent().export_runtime_state()
+        _immune_risk = str(_immune_state.get("last_risk_level") or "none").strip().lower()
+        _immune_decision = str(_immune_state.get("last_decision") or "ALLOW").strip().upper()
+        _organ_route_meta["immune_risk_level"] = _immune_risk
+        _organ_route_meta["immune_last_decision"] = _immune_decision
+        # 高风险（critical/high）且 ImmuneAgent 最近决策为 REPORT/BLOCK 时，
+        # 强制走 chat 快速回复，避免触发 skill/delegate 执行副作用
+        if _immune_risk in {"critical", "high"} and _immune_decision in {"REPORT", "BLOCK"}:
+            _organ_route_override = "chat"
+            _organ_route_reason = f"immune_gate:risk={_immune_risk}:decision={_immune_decision}"
+    except Exception:
+        pass
+
+    if _organ_route_override is None:
+        try:
+            from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
+            _prop_state = get_proprioception_agent().export_runtime_state()
+            _cognitive_load = float(_prop_state.get("cognitive_load_index") or 0.0)
+            _interrupt_freq = float(_prop_state.get("interrupt_frequency") or 0.0)
+            _organ_route_meta["cognitive_load_index"] = round(_cognitive_load, 3)
+            _organ_route_meta["interrupt_frequency"] = round(_interrupt_freq, 3)
+            # 认知负荷极高（>0.85）时强制 chat 快速回复，避免复杂执行链加重负担
+            if _cognitive_load > 0.85:
+                _organ_route_override = "chat"
+                _organ_route_reason = f"proprioception:cognitive_load={_cognitive_load:.2f}"
+        except Exception:
+            pass
+
+    # B-1: LimbicAgent motive_state → 情绪驱动路由调整
+    _motive_state: dict[str, Any] = {}
+    try:
+        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+        _limbic = get_limbic_agent()
+        if hasattr(_limbic, "compute_motive_state"):
+            _motive_state = dict(_limbic.compute_motive_state() or {})
+        _organ_route_meta["motive_withdraw"] = round(float(_motive_state.get("withdraw", 0.0)), 3)
+        _organ_route_meta["motive_care"] = round(float(_motive_state.get("care", 0.0)), 3)
+        _organ_route_meta["motive_continuity"] = round(float(_motive_state.get("continuity", 0.0)), 3)
+        # withdraw 极高（>0.80）时，即使 intent_draft 建议 skill/delegate，
+        # 也降级为 chat，让七海以情绪状态优先回应而非执行任务
+        if _organ_route_override is None:
+            _withdraw = float(_motive_state.get("withdraw", 0.0))
+            if _withdraw > 0.80:
+                _organ_route_override = "chat"
+                _organ_route_reason = f"limbic:withdraw={_withdraw:.2f}"
+    except Exception:
+        pass
+
     route = _hard_rule_route(
         intent_draft=dict(intent_draft or {}),
         sanitized_message=sanitized_message,
         skill_registry=skill_registry,
     )
+
+    # 应用器官族路由覆盖（仅覆盖 skill/delegate/plan，不覆盖 recent_turn/task_progress）
+    if _organ_route_override is not None and route.route_type not in {"recent_turn", "task_progress"}:
+        _logger.info(
+            "[%s] organ_route_override: %s → %s (reason=%s)",
+            request_id, route.route_type, _organ_route_override, _organ_route_reason,
+        )
+        route = _RouteSelection(_organ_route_override, "", _organ_route_reason or "organ_override")
+
+    # B-4: 器官族路由影响写入 trace_stage_meta（可观测性）
+    if _organ_route_meta:
+        _organ_route_meta["organ_route_override"] = _organ_route_override
+        _organ_route_meta["organ_route_reason"] = _organ_route_reason
+        if isinstance(intent_draft, dict):
+            intent_draft = dict(intent_draft)
+            intent_draft.setdefault("_organ_route_meta", _organ_route_meta)
+
     if _should_force_complex_plan(
         route=route,
         user_message=sanitized_message,
@@ -1378,6 +1455,10 @@ async def _executive_runtime_core_impl(
             "skill_route_reason": route.reason_code,
             "plan_id": plan.plan_id,
             "parallel_enabled": bool(plan_meta.get("parallel_enabled")),
+            # Phase B-4: 器官族路由影响可观测性字段
+            "organ_route_override": _organ_route_override,
+            "organ_route_reason": _organ_route_reason,
+            "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
         }
         if plan_outcome.success:
             runtime_task_registry.mark_completed(
@@ -1541,6 +1622,10 @@ async def _executive_runtime_core_impl(
         "skill_family": route_decision.skill_family or "general",
         "skill_id": route_decision.skill_id,
         "skill_route_reason": route.reason_code,
+        # Phase B-4: 器官族路由影响可观测性字段
+        "organ_route_override": _organ_route_override,
+        "organ_route_reason": _organ_route_reason,
+        "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
     }
     async for event in _stream_chat_with_context(
         route_reason=route.reason_code,
