@@ -956,6 +956,9 @@ class CortexAgent:
 
         T-88：任务成功时记录最近一次成功的时间戳和强度，
         供路由决策参考（任务成功后适当提升 chat 路由置信度）。
+
+        P3-4：同步将本次成功的意图类型写入 GovernorRulesCache.intent_allowlist_extra，
+        使 Governor 裁决时能感知 CortexAgent 已确认可通过的意图，完成 TRIBE 族接入闭环。
         """
         try:
             import logging  # noqa: PLC0415
@@ -971,9 +974,32 @@ class CortexAgent:
                 "last_task_success_session_id": session_id,
             })
             self.state_registry.set_state("cortex_agent", prev_state, writer="cortex_agent")
-            logging.getLogger("Natsume.tribe.cortex_agent").debug(
+            _log = logging.getLogger("Natsume.tribe.cortex_agent")
+            _log.debug(
                 "CortexAgent TASK_SUCCESS: session_id=%s intensity=%.2f", session_id, intensity,
             )
+
+            # ── P3-4：同步意图白名单到 GovernorRulesCache ──
+            # 将本次成功任务的 intent_type 写入动态白名单，
+            # Governor 裁决时通过 get_effective_rules()["intent_allowlist_extra"] 读取
+            intent_type = str(payload.get("intent_type") or payload.get("route_type") or "").strip()
+            if intent_type:
+                try:
+                    from host_brain.integrations.governor_rules_cache import get_governor_rules_cache  # noqa: PLC0415
+                    cache = get_governor_rules_cache()
+                    # 追加到现有白名单（去重合并）
+                    existing = list(cache.get_effective_rules().get("intent_allowlist_extra") or [])
+                    if intent_type not in existing:
+                        existing.append(intent_type)
+                    # 只保留最近 20 个，避免无限增长
+                    cache.update_cortex_intent_allowlist(existing[-20:])
+                    _log.debug(
+                        "CortexAgent 更新 GovernorRulesCache intent_allowlist_extra: +%s (total=%d)",
+                        intent_type, len(existing),
+                    )
+                except Exception as cache_exc:
+                    _log.debug("CortexAgent 更新 GovernorRulesCache 失败（降级）: %s", cache_exc)
+
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(

@@ -58,6 +58,7 @@ class SkillDagPlan:
     nodes: list[SkillDagNode] = field(default_factory=list)
     execution_batches: list[list[str]] = field(default_factory=list)
     parallel_window: int = 1
+    has_cycle_warning: bool = False  # 检测到循环依赖时为 True，调用方可据此决定是否降级
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +67,7 @@ class SkillDagPlan:
             "execution_batches": [list(batch) for batch in self.execution_batches],
             "nodes": [node.as_dict() for node in self.nodes],
             "parallel_enabled": any(len(batch) > 1 for batch in self.execution_batches),
+            "has_cycle_warning": self.has_cycle_warning,
         }
 
 
@@ -186,9 +188,15 @@ def _make_idempotency_key(
     return f"idem::{digest}"
 
 
-def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int) -> list[list[str]]:
+def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int) -> tuple[list[list[str]], bool]:
+    """构建执行批次。
+
+    Returns:
+        (batches, has_cycle_warning) — has_cycle_warning 为 True 表示检测到循环/无效依赖，
+        依赖关系已被忽略并强制按 step_index 顺序执行，调用方可据此决定是否降级处理。
+    """
     if not nodes:
-        return []
+        return [], False
 
     node_by_id = {node.node_id: node for node in nodes}
     indegree: dict[str, int] = {node.node_id: 0 for node in nodes}
@@ -206,6 +214,7 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
     ]
     pending_ids = {node.node_id for node in nodes}
     batches: list[list[str]] = []
+    has_cycle_warning = False
 
     while pending_ids:
         ready = sorted(
@@ -221,6 +230,7 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
                 "强制按 step_index 顺序单步推进。pending_ids=%s",
                 sorted(pending_ids),
             )
+            has_cycle_warning = True  # 标记循环依赖，调用方可据此决定是否降级
             forced = next(node for node in sorted(nodes, key=lambda item: (item.step_index, item.node_id)) if node.node_id in pending_ids)
             current_batch = [forced]
         else:
@@ -243,7 +253,7 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
                     if successor is not None:
                         ready.append(successor)
 
-    return batches
+    return batches, has_cycle_warning
 
 
 def build_skill_dag_plan(
@@ -359,12 +369,13 @@ def build_skill_dag_plan(
             last_barrier_id = node.node_id
         last_node_id = node.node_id
 
-    execution_batches = _build_execution_batches(nodes=nodes, parallel_window=window)
+    execution_batches, has_cycle_warning = _build_execution_batches(nodes=nodes, parallel_window=window)
     return SkillDagPlan(
         plan_id=normalized_plan_id,
         nodes=nodes,
         execution_batches=execution_batches,
         parallel_window=window,
+        has_cycle_warning=has_cycle_warning,
     )
 
 

@@ -140,30 +140,65 @@ _MULTI_PART_PATTERN_WORDS = frozenset({
 # 命中则直接路由，无需进入 LLM 判断
 # ---------------------------------------------------------------------------
 RULE_ROUTE_MAP: dict[str, tuple[str, str]] = {
-    # 情绪/心情 → emotion_agent
+    # ── 情绪/心情 → emotion_agent ──────────────────────────────────────────
     "情绪": ("delegate", "emotion_agent"),
     "心情": ("delegate", "emotion_agent"),
     "感受": ("delegate", "emotion_agent"),
-    # 关系/亲密 → bond_query skill
+    "开心": ("delegate", "emotion_agent"),
+    "难过": ("delegate", "emotion_agent"),
+    "伤心": ("delegate", "emotion_agent"),
+    "焦虑": ("delegate", "emotion_agent"),
+    "压力": ("delegate", "emotion_agent"),
+    "烦躁": ("delegate", "emotion_agent"),
+    "孤独": ("delegate", "emotion_agent"),
+    "委屈": ("delegate", "emotion_agent"),
+    # ── 关系/亲密 → bond_query skill ──────────────────────────────────────
     "关系阶段": ("skill", "bond_query"),
     "亲密度": ("skill", "bond_query"),
-    # 记忆/回忆 → memory_recall skill
+    "好感度": ("skill", "bond_query"),
+    "关系进展": ("skill", "bond_query"),
+    "我们的关系": ("skill", "bond_query"),
+    # ── 记忆/回忆 → memory_recall skill ───────────────────────────────────
     "回忆一下": ("skill", "memory_recall"),
     "记得吗": ("skill", "memory_recall"),
-    # 状态/运行 → read_only_status skill
+    "你还记得": ("skill", "memory_recall"),
+    "之前说过": ("skill", "memory_recall"),
+    "上次提到": ("skill", "memory_recall"),
+    "我说过": ("skill", "memory_recall"),
+    # ── 状态/运行 → read_only_status skill ────────────────────────────────
     "运行状态": ("skill", "read_only_status"),
     "系统状态": ("skill", "read_only_status"),
-    # 总结/摘要 → session_summary skill
+    "当前状态": ("skill", "read_only_status"),
+    "健康状态": ("skill", "read_only_status"),
+    # ── 总结/摘要 → session_summary skill ─────────────────────────────────
     "总结一下": ("skill", "session_summary"),
     "回顾一下": ("skill", "session_summary"),
-    # 翻译 → translate_agent
+    "今天聊了": ("skill", "session_summary"),
+    "这次对话": ("skill", "session_summary"),
+    "帮我整理": ("skill", "session_summary"),
+    # ── 翻译 → translate_agent ────────────────────────────────────────────
     "翻译成": ("delegate", "translate_agent"),
+    "翻译一下": ("delegate", "translate_agent"),
+    "用英文说": ("delegate", "translate_agent"),
+    "用中文说": ("delegate", "translate_agent"),
     "translate to": ("delegate", "translate_agent"),
-    # 代码 → code_agent
+    "how do you say": ("delegate", "translate_agent"),
+    # ── 代码 → code_agent ─────────────────────────────────────────────────
     "帮我写代码": ("delegate", "code_agent"),
     "帮我写一段": ("delegate", "code_agent"),
+    "帮我实现": ("delegate", "code_agent"),
+    "写个函数": ("delegate", "code_agent"),
+    "写个脚本": ("delegate", "code_agent"),
     "debug": ("delegate", "code_agent"),
     "报错": ("delegate", "code_agent"),
+    "代码报错": ("delegate", "code_agent"),
+    "怎么修复这个": ("delegate", "code_agent"),
+    "语法错误": ("delegate", "code_agent"),
+    # ── 任务进度查询 → task_progress（内置路由，无需 target_id）─────────────
+    "任务进度": ("task_progress", ""),
+    "执行进度": ("task_progress", ""),
+    "做到哪了": ("task_progress", ""),
+    "完成了吗": ("task_progress", ""),
 }
 
 
@@ -269,7 +304,14 @@ class PlanningAgent:
         # 2. 分析子任务
         sub_tasks = self._decompose_request(text)
 
+        # 顺序依赖指示词：含这些词的子任务说明它依赖前一步的结果，不能并行
+        _SEQUENTIAL_INDICATORS = frozenset({
+            "然后", "再", "接着", "之后", "完成后", "基于此", "在此基础上",
+            "根据以上", "根据上面", "根据结果", "接下来", "随后", "继续",
+        })
+
         # 3. 为每个子任务生成步骤
+        prev_act_step_id: int | None = None  # 记录上一个 act 步骤的 step_id
         for i, sub_task in enumerate(sub_tasks[:self._max_steps - 2]):
             step_id = i + 2
             selected_skill = self._select_skill_name(
@@ -285,14 +327,28 @@ class PlanningAgent:
                     depends_on=[1],
                 ))
             else:
+                desc_lower = sub_task["description"].lower()
+                # 顺序依赖推断：
+                # - 第一个 act 步骤始终依赖 reason（step_id=1）
+                # - 后续 act 步骤：若描述含顺序词，则依赖前一个 act 步骤（串行）
+                #                  否则只依赖 reason（允许并行）
+                if step_id == 2:
+                    depends_on = [1]
+                elif prev_act_step_id is not None and any(
+                    word in desc_lower for word in _SEQUENTIAL_INDICATORS
+                ):
+                    depends_on = [prev_act_step_id]
+                else:
+                    depends_on = [1]
+
                 steps.append(PlanStep(
                     step_id=step_id,
                     description=sub_task["description"],
                     action_type="act",
                     skill_name=selected_skill or sub_task.get("skill"),
-                    # 第一个 act 步骤依赖 reason，后续 act 步骤不强制串行（允许并行）
-                    depends_on=[1] if step_id == 2 else [],
+                    depends_on=depends_on,
                 ))
+                prev_act_step_id = step_id
 
         # 4. 综合阶段（Synthesize）—— 保留，不再被过滤掉
         synthesize_step = PlanStep(

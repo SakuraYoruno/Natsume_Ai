@@ -228,8 +228,17 @@ def _hard_rule_route(
                     try:
                         if skill_registry.get(rule_target_id) is not None:
                             return _RouteSelection(rule_route_type, rule_target_id, f"rule_map:{keyword}")
+                        else:
+                            # skill 不在 registry 中（可能尚未初始化或已下线）
+                            # 降级到 delegate 路由而非 chat，保留意图语义
+                            _logger.debug(
+                                "_hard_rule_route: skill '%s' 不在 registry，降级到 delegate 路由 (keyword=%s)",
+                                rule_target_id, keyword,
+                            )
+                            return _RouteSelection("delegate", "intent_agent", f"rule_map:{keyword}:skill_fallback")
                     except Exception:
-                        pass
+                        # registry 访问异常时同样降级到 delegate，不丢失意图
+                        return _RouteSelection("delegate", "intent_agent", f"rule_map:{keyword}:registry_error")
                 else:
                     return _RouteSelection(rule_route_type, rule_target_id, f"rule_map:{keyword}")
     except ImportError:
@@ -944,11 +953,37 @@ async def _execute_skill_dag(
         )
     except Exception as pg_exc:
         _logger.warning(
-            "[%s] plan_graph 执行失败，降级到 SkillDag 手动执行: %s",
+            "[%s] plan_graph 执行失败，返回失败结果（不降级到 SkillDag，避免执行不同数据的计划）: %s",
             request_id, pg_exc,
         )
+        # P1-1 修复：plan_graph 失败时直接返回失败结果。
+        # 原降级路径使用 _maybe_build_multi_step_plan() 构建的 SkillDag（来自 intent_draft.planned_steps），
+        # 而 plan_graph 使用 PlanningAgent.create_plan() 实时拆解的子任务，两者是不同的计划数据。
+        # 降级实际上是在执行一个不同的计划，而非真正的"降级重试"，会产生不可预期的结果。
+        return (
+            _ExecutionOutcome(
+                route_type="plan",
+                target_id=plan.plan_id,
+                skill_family="executive",
+                success=False,
+                result_text="",
+                error_text=f"PLAN_GRAPH_EXCEPTION: {pg_exc!s}"[:200],
+                latency_ms=0,
+                payload={
+                    "plan": plan.as_dict(),
+                    "plan_trace": [{"node": "_execute_skill_dag", "status": "FAILED", "error": str(pg_exc)[:200]}],
+                },
+            ),
+            {
+                "plan_id": plan.plan_id,
+                "plan_trace": [],
+                "parallel_enabled": False,
+                "engine": "plan_graph_failed",
+            },
+        )
 
-    # ── 降级：手动 SkillDag 执行（保留原逻辑，添加关键节点失败中断）──
+    # ── 以下代码保留为历史参考，正常路径不会执行到此处 ──
+    # （plan_graph 成功时已在 try 块中 return，失败时已在 except 块中 return）
     node_results: dict[str, _ExecutionOutcome] = {}
     plan_trace: list[dict[str, Any]] = []
     critical_failure = False  # 关键节点失败标志

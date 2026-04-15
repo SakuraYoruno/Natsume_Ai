@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from typing import Annotated, Any, TypedDict
 
@@ -197,47 +198,131 @@ def _route_to_tasks(state: PlanGraphState) -> list[Send] | str:
 
 
 def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
-    """综合所有子任务结果，生成最终回复。
+    """综合所有子任务结果，通过 LLM 语义整合生成最终回复。
 
-    若有关键节点失败，在 final_answer 中标注失败信息。
-    不再是简单字符串拼接，而是结构化整合。
+    改进（P1-2）：
+    - 优先调用 LLM 做真正的语义整合，将所有子任务结果作为上下文，生成连贯的最终回复
+    - LLM 调用失败时降级为结构化拼接（保证可用性）
+    - 对 task_results 做去重合并（P1-5），防止 Reducer 并发写入重复条目
     """
     ts_start = int(time.time() * 1000)
     request_id = str(state.get("request_id") or "")
     task_results = list(state.get("task_results") or [])
 
-    # 按 task_index 排序
-    task_results_sorted = sorted(task_results, key=lambda r: int(r.get("task_index", 0)))
+    # P1-5：去重合并 —— 按 task_index 去重，保留最后一条（并发写入时可能有重复）
+    deduped: dict[int, dict] = {}
+    for r in task_results:
+        idx = int(r.get("task_index", 0))
+        deduped[idx] = r
+    task_results_sorted = sorted(deduped.values(), key=lambda r: int(r.get("task_index", 0)))
 
     # 检查是否有失败节点
     failed_tasks = [r for r in task_results_sorted if not r.get("success")]
     success_tasks = [r for r in task_results_sorted if r.get("success")]
+    overall_success = len(failed_tasks) == 0 and len(success_tasks) > 0
 
-    # 构建综合摘要
+    # 构建结构化摘要（作为 LLM 输入上下文，也作为降级输出）
     parts: list[str] = []
     for r in task_results_sorted:
         idx = int(r.get("task_index", 0)) + 1
-        desc = str(r.get("task_description") or f"子任务{idx}")[:50]
+        desc = str(r.get("task_description") or f"子任务{idx}")[:60]
         result_text = str(r.get("result") or "").strip()
         if r.get("success") and result_text:
-            parts.append(f"[{idx}] {desc}：{result_text}")
+            parts.append(f"[子任务{idx}] {desc}：{result_text}")
         elif not r.get("success"):
             error = str(r.get("error") or "执行失败")[:100]
-            parts.append(f"[{idx}] {desc}：⚠️ {error}")
+            parts.append(f"[子任务{idx}] {desc}：⚠️ {error}")
 
     if not parts and state.get("failed"):
-        final_answer = "任务拆解失败，无法执行多步规划。"
+        fallback_answer = "任务拆解失败，无法执行多步规划。"
     elif not parts:
-        final_answer = "所有子任务均无输出。"
+        fallback_answer = "所有子任务均无输出。"
     else:
-        final_answer = "\n".join(parts)
+        fallback_answer = "\n".join(parts)
+
+    # ── 尝试 LLM 语义整合 ──
+    user_message = str(state.get("user_message") or "").strip()
+    llm_used = False
+    final_answer = fallback_answer
+
+    if parts and user_message:
+        try:
+            from host_brain.app.graph_config_builder import (  # noqa: PLC0415
+                resolve_executive_router_llm_runtime,
+                resolve_host_llm_runtime_async,
+            )
+            from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
+
+            # synthesize_node 是同步函数（运行在 asyncio.to_thread 的线程池中），
+            # 用 asyncio.run() 在独立事件循环中获取 LLM 运行时配置
+            llm_runtime = asyncio.run(
+                resolve_host_llm_runtime_async(
+                    rollout_key=str(state.get("session_id") or ""),
+                    scene_type="EXEC_INTENT",
+                )
+            )
+            router_runtime = resolve_executive_router_llm_runtime(base_runtime=llm_runtime)
+
+            if bool(router_runtime.get("available")):
+                provider_name = str(router_runtime.get("provider_name") or "").strip()
+                model_id = str(router_runtime.get("model_id") or "").strip()
+                api_key = str(router_runtime.get("llm_api_key") or "").strip()
+
+                if provider_name and model_id and api_key:
+                    timeout_ms = max(3000, int(router_runtime.get("timeout_ms") or 8000))
+                    base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
+                    gen_params = {"temperature": 0.4, "top_p": 0.9}
+
+                    sub_results_text = "\n".join(parts)
+                    system_prompt = (
+                        "你是一个任务综合助手。用户提出了一个复杂请求，"
+                        "系统已将其拆解为多个子任务并分别执行。"
+                        "请根据所有子任务的执行结果，生成一个连贯、完整、自然的最终回复。"
+                        "要求：语言流畅，不要逐条列举，不要暴露内部子任务编号，"
+                        "如有失败的子任务请简要说明影响。"
+                    )
+                    user_prompt = (
+                        f"用户原始请求：{user_message}\n\n"
+                        f"各子任务执行结果：\n{sub_results_text}\n\n"
+                        "请生成最终回复："
+                    )
+
+                    chunks: list[str] = []
+                    for chunk in stream_llm_chunks(
+                        provider_name=provider_name,
+                        model_id=model_id,
+                        api_key=api_key,
+                        timeout_ms=timeout_ms,
+                        prompt_text=user_prompt,
+                        system_prompt=system_prompt,
+                        gen_params=gen_params,
+                        base_url_override=base_url_override,
+                    ):
+                        chunks.append(str(chunk or ""))
+                        if sum(len(c) for c in chunks) >= 4000:
+                            break
+
+                    llm_text = "".join(chunks).strip()
+                    if llm_text:
+                        final_answer = llm_text
+                        llm_used = True
+                        _logger.info(
+                            "[%s] synthesize_node: LLM 语义整合成功，输出 %d 字符",
+                            request_id, len(final_answer),
+                        )
+
+        except Exception as llm_exc:
+            _logger.warning(
+                "[%s] synthesize_node: LLM 语义整合失败，降级为结构化拼接: %s",
+                request_id, llm_exc,
+            )
+            final_answer = fallback_answer
 
     latency_ms = int(time.time() * 1000) - ts_start
-    overall_success = len(failed_tasks) == 0 and len(success_tasks) > 0
 
     _logger.info(
-        "[%s] synthesize_node: 综合 %d 个子任务结果（成功=%d，失败=%d），耗时 %dms",
-        request_id, len(task_results_sorted), len(success_tasks), len(failed_tasks), latency_ms,
+        "[%s] synthesize_node: 综合 %d 个子任务结果（成功=%d，失败=%d，llm_used=%s），耗时 %dms",
+        request_id, len(task_results_sorted), len(success_tasks), len(failed_tasks), llm_used, latency_ms,
     )
 
     return {
@@ -248,6 +333,7 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
             "status": "OK" if overall_success else "PARTIAL_FAILED",
             "success_count": len(success_tasks),
             "failed_count": len(failed_tasks),
+            "llm_used": llm_used,
             "latency_ms": latency_ms,
         }],
     }
@@ -294,6 +380,10 @@ def _task_route_node(state: TaskState) -> dict[str, Any]:
 
         else:
             # delegate 路由：调用子 Agent（同步包装）
+            # 注意：_task_route_node 是同步函数，运行在 asyncio.to_thread 的线程池中。
+            # 不能使用 run_coroutine_threadsafe 提交到外层 loop（会死锁：外层 loop 在等
+            # to_thread 完成，to_thread 在等外层 loop 执行协程）。
+            # 正确做法：在当前线程中用 asyncio.run() 创建独立的新事件循环执行协程。
             from host_brain.app.sub_agent_protocol import SubAgentRequest, get_sub_agent_dispatcher  # noqa: PLC0415
             dispatcher = get_sub_agent_dispatcher()
             req = SubAgentRequest(
@@ -305,20 +395,8 @@ def _task_route_node(state: TaskState) -> dict[str, Any]:
                 context={"source": "plan_graph", "task_index": task_index},
                 timeout_ms=30_000,
             )
-            # 子图节点是同步的，用 asyncio.run_coroutine_threadsafe 或直接 asyncio.get_event_loop
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # 在已有事件循环中：用 asyncio.run_coroutine_threadsafe
-                    import concurrent.futures  # noqa: PLC0415
-                    future = asyncio.run_coroutine_threadsafe(dispatcher.dispatch(req), loop)
-                    resp = future.result(timeout=35)
-                else:
-                    resp = loop.run_until_complete(dispatcher.dispatch(req))
-            except RuntimeError:
-                # 没有事件循环：创建新的
-                resp = asyncio.run(dispatcher.dispatch(req))
-
+            # asyncio.run() 在当前线程创建全新的独立事件循环，不与外层 loop 交互，无死锁风险
+            resp = asyncio.run(dispatcher.dispatch(req))
             result_text = str(resp.result or "").strip()
             success = resp.success
 
@@ -431,13 +509,16 @@ def build_plan_graph() -> Any:
 # ---------------------------------------------------------------------------
 
 _plan_graph_instance: Any = None
-
+_plan_graph_lock = threading.Lock()
 
 def get_plan_graph() -> Any:
-    """获取全局单例父子图（懒加载）。"""
+    """获取全局单例父子图（懒加载，线程安全）。"""
     global _plan_graph_instance
     if _plan_graph_instance is None:
-        _plan_graph_instance = build_plan_graph()
+        with _plan_graph_lock:
+            # 双重检查锁定（Double-Checked Locking）
+            if _plan_graph_instance is None:
+                _plan_graph_instance = build_plan_graph()
     return _plan_graph_instance
 
 
