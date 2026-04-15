@@ -241,156 +241,6 @@ def _hard_rule_route(
     return _RouteSelection("chat", "", "default:chat")
 
 
-def _build_default_plan_steps(
-    *,
-    user_message: str,
-    skill_registry: Any,
-) -> list[dict[str, Any]]:
-    segments = [segment.strip(" ，。；;") for segment in _ACTION_SPLIT_RE.split(_normalize_text(user_message)) if segment.strip(" ，。；;")]
-    if len(segments) <= 1:
-        return []
-    steps: list[dict[str, Any]] = []
-    for index, segment in enumerate(segments, start=1):
-        route = _hard_rule_route(
-            intent_draft={},
-            sanitized_message=segment,
-            skill_registry=skill_registry,
-            allow_plan_detection=False,
-        )
-        decision = build_skill_route_decision(
-            route_type=route.route_type if route.route_type in {"skill", "delegate"} else "delegate",
-            target_id=route.target_id if route.target_id else "intent_agent",
-            reason_code=route.reason_code or "plan:segment",
-            skill_registry=skill_registry,
-        )
-        steps.append(
-            {
-                "step_index": index,
-                "route": route.route_type if route.route_type in {"skill", "delegate"} else "delegate",
-                "target_id": route.target_id if route.target_id else "intent_agent",
-                "description": segment,
-                "task_description": segment,
-                "route_reason": route.reason_code or "plan:segment",
-                "allow_parallel": ("同时" in _normalize_text(user_message)) and index > 1,
-                "skill_family": decision.skill_family,
-                "risk_level": decision.risk_level,
-            }
-        )
-    return steps
-
-
-def _build_planning_agent_plan_steps(
-    *,
-    request_id: str,
-    user_message: str,
-    skill_registry: Any,
-) -> list[dict[str, Any]]:
-    from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
-
-    planning_agent = get_planning_agent()
-    if not planning_agent.needs_planning(user_message):
-        return []
-
-    available_skills: list[str] = []
-    try:
-        available_skills = [
-            str(meta.skill_name or "").strip()
-            for meta in list(skill_registry.all() or [])
-            if str(getattr(meta, "skill_name", "") or "").strip()
-        ]
-    except Exception:
-        available_skills = []
-
-    plan = planning_agent.create_plan(
-        task_id=f"runtime_plan::{request_id}",
-        request=user_message,
-        available_skills=available_skills or None,
-    )
-
-    raw_steps = list(getattr(plan, "steps", []) or [])
-    action_steps = [
-        step
-        for step in raw_steps
-        if _normalize_text(getattr(step, "action_type", ""), lower=True) == "act"
-        and _normalize_text(getattr(step, "description"))
-    ]
-    if len(action_steps) <= 1:
-        return []
-
-    source_to_index: dict[int, int] = {}
-    for index, step in enumerate(action_steps, start=1):
-        source_step_id = int(getattr(step, "step_id", index) or index)
-        source_to_index[source_step_id] = index
-
-    parallel_enabled = _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_PARALLEL_ENABLED", default=True)
-    converted_steps: list[dict[str, Any]] = []
-    for index, step in enumerate(action_steps, start=1):
-        description = _normalize_text(getattr(step, "description")) or f"step-{index}"
-        planned_skill = _normalize_text(getattr(step, "skill_name"))
-        route = "delegate"
-        target_id = "intent_agent"
-        route_reason = "planning_agent:act"
-
-        if planned_skill:
-            try:
-                if skill_registry.get(planned_skill) is not None:
-                    route = "skill"
-                    target_id = planned_skill
-                    route_reason = "planning_agent:skill"
-                elif planned_skill.endswith("_agent"):
-                    route = "delegate"
-                    target_id = planned_skill
-                    route_reason = "planning_agent:delegate"
-            except Exception:
-                route = "delegate"
-                target_id = "intent_agent"
-                route_reason = "planning_agent:fallback"
-
-        if target_id == "intent_agent":
-            hard_route = _hard_rule_route(
-                intent_draft={},
-                sanitized_message=description,
-                skill_registry=skill_registry,
-                allow_plan_detection=False,
-            )
-            if hard_route.route_type in {"skill", "delegate"}:
-                route = hard_route.route_type
-                target_id = hard_route.target_id or "intent_agent"
-                route_reason = f"planning_agent:{hard_route.reason_code}"
-
-        decision = build_skill_route_decision(
-            route_type=route,
-            target_id=target_id,
-            reason_code=route_reason,
-            skill_registry=skill_registry,
-        )
-        raw_dependencies = list(getattr(step, "depends_on", []) or [])
-        dependencies = [
-            int(source_to_index[dep])
-            for dep in raw_dependencies
-            if int(dep) in source_to_index and int(source_to_index[dep]) < index
-        ]
-        if not dependencies and index > 1 and not parallel_enabled:
-            dependencies = [index - 1]
-
-        converted_steps.append(
-            {
-                "step_index": index,
-                "route": route,
-                "target_id": target_id,
-                "description": description,
-                "task_description": description,
-                "route_reason": route_reason,
-                "allow_parallel": bool(parallel_enabled and not dependencies),
-                "skill_family": decision.skill_family,
-                "risk_level": decision.risk_level,
-                "dependencies": dependencies,
-                "capability_tags": list(getattr(decision, "capability_tags", ()) or ()),
-            }
-        )
-    return converted_steps
-
-
 def _should_force_complex_plan(
     *,
     route: _RouteSelection,
@@ -406,8 +256,6 @@ def _should_force_complex_plan(
     - RULE_ROUTE_MAP 命中的请求不会到达此函数（已在 _hard_rule_route 中直接路由）
     """
     if route.route_type in {"plan", "recent_turn", "task_progress"}:
-        return False
-    if not _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", default=True):
         return False
     if bool(intent_draft.get("disable_auto_plan")):
         return False
@@ -451,18 +299,15 @@ def _maybe_build_multi_step_plan(
     intent_draft: dict[str, Any],
     skill_registry: Any,
 ) -> SkillDagPlan | None:
+    """构建多步骤 DAG 计划。
+
+    仅使用 intent_draft 中的显式步骤（由 LangGraph 父子图规划产生），
+    不再依赖旧的 _build_planning_agent_plan_steps / _build_default_plan_steps 兜底。
+    """
     explicit_steps = intent_draft.get("planned_steps")
     if not isinstance(explicit_steps, list):
         explicit_steps = intent_draft.get("steps")
     steps = [dict(item or {}) for item in explicit_steps] if isinstance(explicit_steps, list) else []
-    if not steps:
-        steps = _build_planning_agent_plan_steps(
-            request_id=request_id,
-            user_message=sanitized_message,
-            skill_registry=skill_registry,
-        )
-    if not steps:
-        steps = _build_default_plan_steps(user_message=sanitized_message, skill_registry=skill_registry)
     if len(steps) <= 1:
         return None
     return build_skill_dag_plan(plan_id=f"plan::{request_id}", steps=steps)
@@ -1692,7 +1537,6 @@ async def _executive_runtime_core_impl(
 __all__ = [
     "_hard_rule_route",
     "_maybe_build_multi_step_plan",
-    "_build_planning_agent_plan_steps",
     "_should_force_complex_plan",
     "_build_task_progress_sub_context",
     "_dispatch_to_sub_agent",
