@@ -1394,6 +1394,25 @@ async def chat_agent_sse_generator(
                 "sub_agent_id": sub_agent_ctx.agent_id,
             }
 
+        # Phase D: PrefrontalAgent 意图规划结果注入
+        # prefrontal_task 由 executive_runtime_core 在 plan_response 后写入 intent_draft
+        # 这里将其转换为 extra_context_prompt 的一部分，让 LLM 感知"我要说什么"的目标
+        _prefrontal_task = str(intent_draft.get("prefrontal_task") or "").strip()
+        _prefrontal_tone_hint = str(intent_draft.get("prefrontal_tone_hint") or "").strip()
+        _prefrontal_context_block = ""
+        if _prefrontal_task:
+            _prefrontal_context_block = f"【前额叶规划】当前回应目标：{_prefrontal_task}"
+            if _prefrontal_tone_hint:
+                _prefrontal_context_block += f"（语气：{_prefrontal_tone_hint}）"
+            _logger.debug(
+                "[%s] ChatAgent 接收 prefrontal_task: task=%s tone=%s",
+                request_id, _prefrontal_task[:60], _prefrontal_tone_hint,
+            )
+
+        # 合并 extra_context_prompt（子 Agent 结果 + prefrontal 规划）
+        _extra_parts = [p for p in [sub_agent_context_prompt, _prefrontal_context_block] if p]
+        _combined_extra_context = "\n\n".join(_extra_parts)
+
         # 回复深度策略：Gateway 通道使用更短的回复
         reply_depth_hint = ""
         if agent_input.reply_depth_policy == "gateway":
@@ -1415,7 +1434,7 @@ async def chat_agent_sse_generator(
                 thread_id=thread_id,
                 bond_summary=bond_summary,
                 recall_slot_text=recall_slot_text if recall_slot_text else None,
-                extra_context_prompt=sub_agent_context_prompt,
+                extra_context_prompt=_combined_extra_context,
                 include_runtime_payload=True,
             )
             if isinstance(prompt_result, tuple) and len(prompt_result) >= 4:

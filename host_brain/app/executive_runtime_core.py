@@ -1285,6 +1285,65 @@ async def _executive_runtime_core_impl(
             request_id, _drift_alert, _drift_score,
         )
 
+    # ── Phase D：PrefrontalAgent 意图规划（小模型，<500ms）────────────────
+    # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 chat_agent 使用
+    # 仅在 PREFRONTAL_PLAN_ENABLED=true 时启用（默认关，逐步灰度）
+    _prefrontal_plan: dict[str, Any] = {}
+    _prefrontal_plan_enabled = os.environ.get("PREFRONTAL_PLAN_ENABLED", "false").lower() == "true"
+    if _prefrontal_plan_enabled:
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            _pf_agent = get_prefrontal_agent()
+            # 提取 emotion 信息
+            _emotion_tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL")
+            _valence = float((emotion_context or {}).get("valence") or 0.0)
+            _arousal = float((emotion_context or {}).get("arousal") or 0.0)
+            # 提取 bond 信息
+            _bond_stage = str((bond_summary or {}).get("stage") or "STRANGER")
+            _bond_intimacy = float((bond_summary or {}).get("intimacy_score") or 0.0)
+            # 提取 recall 摘要
+            _recall_summary = str((retrieval_summary or {}).get("summary") or "")
+            _prefrontal_plan = _pf_agent.plan_response(
+                user_message=sanitized_message,
+                motive_state=_motive_state,
+                recall_summary=_recall_summary,
+                bond_stage=_bond_stage,
+                bond_intimacy=_bond_intimacy,
+                immune_risk_level=_immune_risk,
+                drift_alert_level=_drift_alert,
+                emotion_tag=_emotion_tag,
+                valence=_valence,
+                arousal=_arousal,
+                session_id=session_id,
+                request_id=request_id,
+                timeout_ms=500,
+            )
+            _organ_route_meta["prefrontal_plan_action"] = _prefrontal_plan.get("action")
+            _organ_route_meta["prefrontal_plan_source"] = _prefrontal_plan.get("source")
+            _organ_route_meta["prefrontal_plan_latency_ms"] = _prefrontal_plan.get("latency_ms")
+            # plan_response 的 action 覆盖路由（仅当 organ_route_override 未设置时）
+            _plan_action = str(_prefrontal_plan.get("action") or "").strip().lower()
+            if _organ_route_override is None and _plan_action in {"skill", "delegate"}:
+                _plan_target = str(_prefrontal_plan.get("target") or "").strip()
+                if _plan_target:
+                    _organ_route_override = _plan_action
+                    _organ_route_reason = f"prefrontal_plan:{_plan_action}:{_plan_target}"
+                    _logger.info(
+                        "[%s] prefrontal_plan override: action=%s target=%s",
+                        request_id, _plan_action, _plan_target,
+                    )
+            # 将 prefrontal_task 注入 intent_draft，供 chat_agent 作为语言化目标
+            if isinstance(intent_draft, dict):
+                intent_draft = dict(intent_draft)
+            else:
+                intent_draft = {}
+            if _prefrontal_plan.get("task"):
+                intent_draft["prefrontal_task"] = _prefrontal_plan.get("task")
+            if _prefrontal_plan.get("tone_hint"):
+                intent_draft["prefrontal_tone_hint"] = _prefrontal_plan.get("tone_hint")
+        except Exception as _pf_plan_exc:
+            _logger.debug("[%s] prefrontal plan_response 跳过: %s", request_id, _pf_plan_exc)
+
     route = _hard_rule_route(
         intent_draft=dict(intent_draft or {}),
         sanitized_message=sanitized_message,
