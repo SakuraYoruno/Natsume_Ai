@@ -7,10 +7,9 @@
   - Route 4: world_canon（世界观典籍向量投影 + 文件降级）
   - Route 5: artifact_vault（制品库 SSOT 接口）
 
-已废弃（Phase XIII 走独立通道，不再作为检索路由）：
-  - style_canon → StyleCanon v5 常驻注入
-  - persona_utterance → EmotionTaggedUtteranceIndex 独立通道
-  搜索方法保留供向后兼容，但不再有路由配置指向它们。
+Phase XIII 已废弃的路由（已彻底删除，不再保留向后兼容代码）：
+  - style_canon → StyleCanon v5 常驻注入，不走路由
+  - persona_utterance → EmotionTaggedUtteranceIndex 独立通道，不走路由
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ logger = logging.getLogger("Natsume.retrieval.recall_fusion")
 # ── 常量（与 recall_fusion.py 保持一致）────────────────────────────────────
 DEFAULT_RECALL_COLLECTION = "episodic"
 DEFAULT_CANON_VECTOR_COLLECTION = "canon"
-DEFAULT_PERSONA_UTTERANCE_COLLECTION = "persona_utterance"
 CANON_VECTOR_FETCH_FACTOR = 5
 SQLITE_SESSION_BOOST = 0.25
 SQLITE_RECENCY_BOOST_5M = 0.20
@@ -37,10 +35,8 @@ _SESSION_REF_PREFIX = "chat://session/"
 STORE_SQLITE_LEDGER = "sqlite_ledger"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
-STORE_STYLE_CANON = "style_canon"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
-STORE_PERSONA_UTTERANCE = "persona_utterance"
 
 
 def search_route(
@@ -74,15 +70,6 @@ def search_route(
         )
     if store_id == STORE_NEO4J_BOND:
         return search_neo4j_bond(self, query=query, top_k=int(route.top_k))
-    if store_id == STORE_STYLE_CANON:
-        return search_style_canon(
-            self,
-            query=query,
-            query_embedding=query_embedding,
-            top_k=int(route.top_k),
-            collection=route.collection,
-            render_target_lang=render_target_lang,
-        )
     if store_id == STORE_WORLD_CANON:
         return search_world_canon(
             self,
@@ -93,14 +80,6 @@ def search_route(
         )
     if store_id == STORE_ARTIFACT_VAULT:
         return search_artifact_vault(self, query=query, top_k=int(route.top_k))
-    if store_id == STORE_PERSONA_UTTERANCE:
-        return search_persona_utterance(
-            self,
-            query_embedding=query_embedding,
-            top_k=int(route.top_k),
-            collection=route.collection,
-            render_target_lang=render_target_lang,
-        )
     raise RuntimeError(f"unsupported recall store_id: {store_id}")
 
 
@@ -397,92 +376,6 @@ def search_neo4j_bond(self: Any, *, query: str, top_k: int) -> list[dict[str, An
     return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
 
 
-def search_style_canon(
-    self: Any,
-    *,
-    query: str,
-    query_embedding: list[float],
-    top_k: int,
-    collection: str | None,
-    render_target_lang: str | None = None,
-) -> list[dict[str, Any]]:
-    """Route 4：风格典籍检索（向量投影优先，文件降级）。"""
-    try:
-        vector_rows = search_canon_projection_vector(
-            self,
-            query_embedding=query_embedding,
-            top_k=top_k,
-            collection=collection,
-            canon_kind="style",
-            store_id=STORE_STYLE_CANON,
-            render_target_lang=render_target_lang,
-        )
-        if vector_rows:
-            return vector_rows
-    except Exception:
-        pass
-    return search_style_canon_file(
-        self,
-        query=query,
-        top_k=top_k,
-        render_target_lang=render_target_lang,
-    )
-
-
-def search_style_canon_file(
-    self: Any,
-    *,
-    query: str,
-    top_k: int,
-    render_target_lang: str | None = None,
-) -> list[dict[str, Any]]:
-    """风格典籍文件降级检索。"""
-    from host_brain.retrieval.recall_fusion_utils import (
-        _text_similarity_score,
-        _truncate_text_for_recall,
-    )
-
-    if self.style_store is None:
-        return []
-    entries = getattr(self.style_store, "list_entries", lambda: [])()
-    scored: list[tuple[float, dict[str, Any]]] = []
-    for entry in entries or []:
-        canon_id = str(getattr(entry, "canon_id", "") or "").strip()
-        content = str(getattr(entry, "content", "") or "").strip()
-        tags = list(getattr(entry, "tags", []) or [])
-        if not _matches_render_target_lang(
-            render_target_lang=render_target_lang,
-            canon_id=canon_id,
-            tags=tags,
-        ):
-            continue
-        text = " ".join([content] + [str(tag) for tag in tags if str(tag).strip()])
-        score = _text_similarity_score(query, text)
-        if score <= 0.0:
-            continue
-        version = int(getattr(entry, "version", 0) or 0)
-        content_hash = str(getattr(entry, "hash", "") or "").strip() or "unknown"
-        source_ref = f"style_canon://{canon_id}@v{version}"
-        scored.append((
-            score,
-            {
-                "memory_id": canon_id,
-                "text": _truncate_text_for_recall(content, limit=512),
-                "score": score,
-                "metadata": {
-                    "store_id": STORE_STYLE_CANON,
-                    "canon_id": canon_id,
-                    "version": version,
-                    "hash": content_hash,
-                    "evidence_refs": [source_ref],
-                    "source_ref": source_ref,
-                    "evidence_refs_primary": source_ref,
-                },
-            },
-        ))
-    return [item for _score, item in sorted(scored, key=lambda pair: -pair[0])[: max(1, int(top_k))]]
-
-
 def search_world_canon(
     self: Any,
     *,
@@ -598,65 +491,31 @@ def search_canon_projection_vector(
         content_hash = str(normalized_metadata.get("hash") or "").strip() or "unknown"
         snippet = _truncate_text_for_recall(str(row.get("text") or ""), limit=512)
 
-        if canon_kind == "style":
-            canon_id = str(normalized_metadata.get("canon_id") or "").strip()
-            if not canon_id:
-                canon_id = _extract_canon_entity_id(memory_id, "canon_style") or memory_id
-            if not _matches_render_target_lang(
-                render_target_lang=render_target_lang,
-                lang_value=str(normalized_metadata.get("lang") or "").strip(),
-                canon_id=canon_id,
-                tags=list(normalized_metadata.get("tags") or []),
-            ):
-                continue
-            source_ref = str(normalized_metadata.get("source_ref") or f"style_canon://{canon_id}@v{version}")
-            evidence_primary = str(
-                normalized_metadata.get("evidence_ref")
-                or normalized_metadata.get("evidence_refs_primary")
-                or source_ref
-            )
-            payload: dict[str, Any] = {
-                "memory_id": canon_id,
-                "text": snippet,
-                "score": score,
-                "metadata": {
-                    "store_id": store_id,
-                    "canon_kind": canon_kind,
-                    "canon_id": canon_id,
-                    "version": version,
-                    "hash": content_hash,
-                    "vector_collection": target_collection,
-                    "evidence_refs": [source_ref],
-                    "source_ref": source_ref,
-                    "evidence_refs_primary": evidence_primary,
-                },
-            }
-        else:
-            doc_id = str(normalized_metadata.get("doc_id") or "").strip()
-            if not doc_id:
-                doc_id = _extract_canon_entity_id(memory_id, "canon_world") or memory_id
-            source_ref = str(normalized_metadata.get("source_ref") or f"world_canon://{doc_id}@v{version}")
-            evidence_primary = str(
-                normalized_metadata.get("evidence_ref")
-                or normalized_metadata.get("evidence_refs_primary")
-                or source_ref
-            )
-            payload = {
-                "memory_id": doc_id,
-                "text": snippet,
-                "score": score,
-                "metadata": {
-                    "store_id": store_id,
-                    "canon_kind": canon_kind,
-                    "doc_id": doc_id,
-                    "version": version,
-                    "hash": content_hash,
-                    "vector_collection": target_collection,
-                    "evidence_refs": [source_ref],
-                    "source_ref": source_ref,
-                    "evidence_refs_primary": evidence_primary,
-                },
-            }
+        doc_id = str(normalized_metadata.get("doc_id") or "").strip()
+        if not doc_id:
+            doc_id = _extract_canon_entity_id(memory_id, "canon_world") or memory_id
+        source_ref = str(normalized_metadata.get("source_ref") or f"world_canon://{doc_id}@v{version}")
+        evidence_primary = str(
+            normalized_metadata.get("evidence_ref")
+            or normalized_metadata.get("evidence_refs_primary")
+            or source_ref
+        )
+        payload: dict[str, Any] = {
+            "memory_id": doc_id,
+            "text": snippet,
+            "score": score,
+            "metadata": {
+                "store_id": store_id,
+                "canon_kind": canon_kind,
+                "doc_id": doc_id,
+                "version": version,
+                "hash": content_hash,
+                "vector_collection": target_collection,
+                "evidence_refs": [source_ref],
+                "source_ref": source_ref,
+                "evidence_refs_primary": evidence_primary,
+            },
+        }
         candidates.append(payload)
     return sorted(candidates, key=lambda row: -float(row["score"]))[: max(1, int(top_k))]
 
@@ -720,82 +579,4 @@ def search_artifact_vault(self: Any, *, query: str, top_k: int) -> list[dict[str
     return sorted(candidates, key=lambda c: -float(c["score"]))[: max(1, int(top_k))]
 
 
-def search_persona_utterance(
-    self: Any,
-    *,
-    query_embedding: list[float],
-    top_k: int,
-    collection: str | None,
-    render_target_lang: str | None = None,
-) -> list[dict[str, Any]]:
-    """Route 7：人格话语向量投影检索。"""
-    from host_brain.retrieval.recall_fusion_utils import (
-        _coerce_non_negative_int,
-        _coerce_score,
-        _truncate_text_for_recall,
-    )
-
-    target_collection = str(collection or DEFAULT_PERSONA_UTTERANCE_COLLECTION).strip()
-    if not target_collection:
-        target_collection = DEFAULT_PERSONA_UTTERANCE_COLLECTION
-    fetch_k = max(1, int(top_k)) * CANON_VECTOR_FETCH_FACTOR
-    rows = self.chroma.search(
-        query_embedding=query_embedding,
-        top_k=fetch_k,
-        collection=target_collection,
-    )
-
-    candidates: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, Mapping):
-            continue
-        metadata_raw = row.get("metadata")
-        metadata = dict(metadata_raw) if isinstance(metadata_raw, Mapping) else {}
-        memory_id = str(row.get("memory_id") or "").strip()
-        if not memory_id:
-            continue
-        score = _coerce_score(row.get("score"))
-        if score <= 0.0:
-            continue
-        canon_id = str(metadata.get("canon_id") or "").strip() or "unknown"
-        lang = str(metadata.get("lang") or "").strip().lower() or "unknown"
-        if not _matches_render_target_lang(
-            render_target_lang=render_target_lang,
-            lang_value=lang,
-            canon_id=canon_id,
-        ):
-            continue
-        source_ref = str(
-            metadata.get("source_ref") or f"persona_utterance://{canon_id}/{memory_id}"
-        ).strip()
-        evidence_primary = str(
-            metadata.get("evidence_ref")
-            or metadata.get("evidence_refs_primary")
-            or source_ref
-        ).strip() or source_ref
-        speaker = str(metadata.get("speaker") or "").strip() or None
-        file_rel_path = str(metadata.get("file_rel_path") or "").strip() or None
-        block_id = str(metadata.get("block_id") or "").strip() or None
-        line_index = _coerce_non_negative_int(metadata.get("line_index"), default=0)
-        snippet = _truncate_text_for_recall(str(row.get("text") or ""), limit=512)
-        if not snippet:
-            continue
-        candidates.append({
-            "memory_id": memory_id,
-            "text": snippet,
-            "score": score,
-            "metadata": {
-                "store_id": STORE_PERSONA_UTTERANCE,
-                "canon_id": canon_id,
-                "lang": lang,
-                "speaker": speaker,
-                "file_rel_path": file_rel_path,
-                "block_id": block_id,
-                "line_index": line_index,
-                "vector_collection": target_collection,
-                "source_ref": source_ref,
-                "evidence_refs": [evidence_primary],
-                "evidence_refs_primary": evidence_primary,
-            },
-        })
-    return sorted(candidates, key=lambda row: -float(row["score"]))[: max(1, int(top_k))]
+... EOF no more lines ...
