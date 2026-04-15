@@ -356,3 +356,113 @@ def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
+
+
+# ---------------------------------------------------------------------------
+# D10: GET /obs/organ-tribe/status — 器官族实时状态快照
+# ---------------------------------------------------------------------------
+class OrganTribeAgentItem(BaseModel):
+    agent_id: str
+    family: str
+    status: str
+    key_metrics: dict
+    last_updated_ts_ms: Optional[int] = None
+
+
+class OrganTribeStatusResponse(BaseModel):
+    total_agents: int
+    active_agents: int
+    agents: List[OrganTribeAgentItem]
+    continuous_system_active: bool
+    emotion_decay_tick_enabled: bool
+    timestamp: int
+
+
+@router.get("/organ-tribe/status", response_model=OrganTribeStatusResponse)
+def get_organ_tribe_status():
+    """D10: 器官族实时状态快照——返回 22 个器官族的当前运行状态和关键指标。
+
+    供 WebUI 数字生命体总览页面展示器官族健康状态。
+    """
+    agents: List[OrganTribeAgentItem] = []
+
+    # 定义要采集的器官族及其 export_runtime_state 调用
+    _AGENT_REGISTRY = [
+        ("limbic_agent",          "limbic",          "host_brain.tribe.limbic_agent",          "get_limbic_agent"),
+        ("social_brain_agent",    "social_brain",    "host_brain.tribe.social_brain_agent",    "get_social_brain_agent"),
+        ("prefrontal_agent",      "prefrontal",      "host_brain.tribe.prefrontal_agent",      "get_prefrontal_agent"),
+        ("ans_agent",             "ans",             "host_brain.tribe.ans_agent",             "get_ans_agent"),
+        ("immune_agent",          "immune",          "host_brain.tribe.immune_agent",          "get_immune_agent"),
+        ("pain_reward_agent",     "pain_reward",     "host_brain.tribe.pain_reward_agent",     "get_pain_reward_agent"),
+        ("hippocampus_agent",     "hippocampus",     "host_brain.tribe.hippocampus_agent",     "get_hippocampus_agent"),
+        ("cortex_agent",          "cortex",          "host_brain.tribe.cortex_agent",          "get_cortex_agent"),
+        ("peripheral_agent",      "peripheral",      "host_brain.tribe.peripheral_agent",      "get_peripheral_agent"),
+        ("motor_cortex_agent",    "motor_cortex",    "host_brain.tribe.motor_cortex_agent",    "get_motor_cortex_agent"),
+        ("language_system_agent", "language",        "host_brain.tribe.language_system_agent", "get_language_system_agent"),
+        ("endocrine_agent",       "endocrine",       "host_brain.tribe.endocrine_agent",       "get_endocrine_agent"),
+        ("initiative_governor_agent", "initiative_governor", "host_brain.tribe.initiative_governor_agent", "get_initiative_governor_agent"),
+        ("circadian_agent",       "circadian",       "host_brain.tribe.circadian_agent",       "get_circadian_agent"),
+        ("mirror_neuron_agent",   "mirror_neuron",   "host_brain.tribe.mirror_neuron_agent",   "get_mirror_neuron_agent"),
+        ("somatic_agent",         "somatic",         "host_brain.tribe.somatic_agent",         "get_somatic_agent"),
+        ("proprioception_agent",  "proprioception",  "host_brain.tribe.proprioception_agent",  "get_proprioception_agent"),
+        ("interoception_agent",   "interoception",   "host_brain.tribe.interoception_agent",   "get_interoception_agent"),
+        ("vestibular_agent",      "vestibular",      "host_brain.tribe.vestibular_agent",      "get_vestibular_agent"),
+        ("glymphatic_agent",      "glymphatic",      "host_brain.tribe.glymphatic_agent",      "get_glymphatic_agent"),
+        ("cerebellum_agent",      "cerebellum",      "host_brain.tribe.cerebellum_agent",      "get_cerebellum_agent"),
+        ("default_mode_agent",    "default_mode",    "host_brain.tribe.default_mode_agent",    "get_default_mode_agent"),
+    ]
+
+    active_count = 0
+    for agent_id, family, module_path, getter_name in _AGENT_REGISTRY:
+        try:
+            import importlib
+            mod = importlib.import_module(module_path)
+            getter = getattr(mod, getter_name)
+            agent = getter()
+            state = {}
+            if hasattr(agent, "export_runtime_state"):
+                state = dict(agent.export_runtime_state() or {})
+            # 提取关键指标（取前 6 个数值/字符串字段）
+            key_metrics: dict = {}
+            for k, v in state.items():
+                if isinstance(v, (int, float, str, bool)) and not k.endswith("_ts_ms"):
+                    key_metrics[k] = v
+                    if len(key_metrics) >= 6:
+                        break
+            last_ts = int(state.get("last_updated_ts_ms") or state.get("last_dispatch_ts_ms") or 0)
+            status = "active"
+            active_count += 1
+        except Exception as exc:
+            key_metrics = {"error": str(exc)[:60]}
+            last_ts = None
+            status = "unavailable"
+
+        agents.append(OrganTribeAgentItem(
+            agent_id=agent_id,
+            family=family,
+            status=status,
+            key_metrics=key_metrics,
+            last_updated_ts_ms=last_ts if last_ts else None,
+        ))
+
+    # 检查连续动态系统是否激活（emotion_decay_tick 是否注册）
+    continuous_active = False
+    decay_tick_enabled = False
+    try:
+        from host_brain.scheduler.task_registry import SchedulerTaskRegistry
+        registry = SchedulerTaskRegistry.get_instance()
+        decay_task = registry.get("emotion_decay_tick")
+        if decay_task is not None:
+            decay_tick_enabled = True
+            continuous_active = bool(getattr(decay_task, "enabled", False))
+    except Exception:
+        pass
+
+    return OrganTribeStatusResponse(
+        total_agents=len(agents),
+        active_agents=active_count,
+        agents=agents,
+        continuous_system_active=continuous_active,
+        emotion_decay_tick_enabled=decay_tick_enabled,
+        timestamp=_now_ms(),
+    )

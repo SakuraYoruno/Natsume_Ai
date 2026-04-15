@@ -6,6 +6,8 @@
   - INPUT_COMPLETED 同步写入
   - 异步后处理（fire-and-forget）
   - TTS 分句推送
+  - G1: trigger_tts_after_commit — 对话完成后兜底触发 TTS
+  - G2: broca_to_tts_params — Broca 参数映射到 TTS emotion_tag/intensity
 """
 from __future__ import annotations
 
@@ -191,3 +193,123 @@ def schedule_async_post_process(
         )
     except Exception as _pp_exc:
         _logger.debug("[%s] ChatAgent post_process task failed: %s", request_id, _pp_exc)
+
+
+# ---------------------------------------------------------------------------
+# G2: Broca → TTS 参数映射表
+# ---------------------------------------------------------------------------
+
+# tone → emotion_tag 映射（LanguageSystemAgent.broca_generate_plan 产出的 tone）
+_BROCA_TONE_TO_EMOTION_TAG: dict[str, str] = {
+    "warm":        "LOVING",
+    "caring":      "LOVING",
+    "gentle":      "CALM",
+    "supportive":  "CALM",
+    "playful":     "HAPPY",
+    "cheerful":    "HAPPY",
+    "excited":     "HAPPY",
+    "serious":     "NEUTRAL",
+    "direct":      "NEUTRAL",
+    "balanced":    "NEUTRAL",
+    "cautious":    "NEUTRAL",
+    "empathetic":  "SAD",
+    "sad":         "SAD",
+    "concerned":   "SAD",
+    "angry":       "ANGRY",
+    "firm":        "ANGRY",
+    "surprised":   "SURPRISED",
+    "fearful":     "FEAR",
+}
+
+
+def broca_to_tts_params(
+    *,
+    tone: str = "balanced",
+    warmth_weight: float = 0.5,
+    emotion_tag: str = "NEUTRAL",
+) -> dict[str, Any]:
+    """G2: 将 Broca 规划参数映射为 TTS emotion_tag / emotion_intensity。
+
+    优先使用 emotion_tag（来自 LimbicAgent），
+    tone 作为辅助修正，warmth_weight 映射为 emotion_intensity。
+    """
+    # 优先使用已有 emotion_tag，若为 NEUTRAL 则尝试从 tone 推断
+    resolved_tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    if resolved_tag == "NEUTRAL":
+        tone_key = str(tone or "balanced").strip().lower()
+        resolved_tag = _BROCA_TONE_TO_EMOTION_TAG.get(tone_key, "NEUTRAL")
+
+    # warmth_weight [0,1] → emotion_intensity [0.2, 0.9]
+    # 低暖度（0.0）→ 0.2（平静），高暖度（1.0）→ 0.9（强烈）
+    clamped = max(0.0, min(1.0, float(warmth_weight or 0.5)))
+    intensity = round(0.2 + clamped * 0.7, 3)
+
+    return {
+        "emotion_tag": resolved_tag,
+        "emotion_intensity": intensity,
+    }
+
+
+# ---------------------------------------------------------------------------
+# G1: 对话完成后兜底触发 TTS
+# ---------------------------------------------------------------------------
+
+async def trigger_tts_after_commit(
+    *,
+    narrative: str,
+    request_id: str,
+    session_id: str,
+    emotion_tag: str = "NEUTRAL",
+    emotion_intensity: float | None = None,
+    suppress_tts: bool = False,
+    source: str = "chat_commit",
+) -> None:
+    """G1/D2: 对话 COMMIT 后触发 TTS 发声（统一走 MotorCortexAgent.dispatch_speak()）。
+
+    Phase C 改造：原来直接调用 post_speak，现在统一走 MotorCortexAgent.dispatch_speak()，
+    确保发声结果写入 state_registry 并发布 MOTOR_SPEAK_DISPATCHED 事件。
+    """
+    import os as _os
+    if suppress_tts:
+        return
+    text = str(narrative or "").strip()
+    if not text:
+        return
+    tts_enabled = str(_os.environ.get("HOST_TTS_ENABLED") or "true").strip().lower()
+    if tts_enabled not in {"1", "true", "yes", "on"}:
+        return
+
+    try:
+        from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
+        from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
+
+        splitter = SentenceSplitter()
+        sentences = list(splitter.feed(text))
+        remainder = splitter.flush()
+        if remainder:
+            sentences.append(remainder)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        if not sentences:
+            sentences = [text]
+
+        motor = get_motor_cortex_agent()
+        for idx, sentence in enumerate(sentences):
+            utterance_id = f"utt_commit_{request_id}_{idx:03d}"
+            try:
+                motor.dispatch_speak(
+                    text=sentence,
+                    emotion_tag=emotion_tag,
+                    emotion_intensity=float(emotion_intensity) if emotion_intensity is not None else 0.5,
+                    utterance_id=utterance_id,
+                    request_id=request_id,
+                    session_id=session_id,
+                    source=source,
+                    require_gate=False,
+                )
+            except Exception as exc:
+                _logger.debug(
+                    "[%s] trigger_tts_after_commit dispatch_speak[%d] failed: %s",
+                    request_id, idx, exc,
+                )
+    except Exception as exc:
+        _logger.debug("[%s] trigger_tts_after_commit failed: %s", request_id, exc)

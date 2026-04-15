@@ -886,6 +886,28 @@ def runtime_lifespan(
                 except Exception as _emergent_exc:
                     logger.warning("涌现式成长任务注册失败（降级）: %s", _emergent_exc)
 
+                # [D9] 注册 emotion_decay_tick 任务（每 30s 驱动情绪衰减连续动态系统）
+                try:
+                    _emotion_decay_task = SchedulerTaskConfig(
+                        task_id="emotion_decay_tick",
+                        trigger_mode=TriggerMode.INTERVAL,
+                        trigger_config={"seconds": 30},  # 每 30s tick 一次
+                        intent_template={
+                            "skill_name": "emotion_decay_tick",
+                            "args": {},
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["normal", "focus", "gaming", "sleep"],
+                        enabled=True,
+                        description="D4/D6/D7/D8: 情绪衰减连续动态系统 tick——每 30s 驱动 LimbicAgent 情绪衰减、CircadianAgent 基线调制、InteroceptionAgent 身体预算、GlymphaticAgent 恢复窗口",
+                    )
+                    if _proactive_registry.get("emotion_decay_tick") is None:
+                        _proactive_registry.register(_emotion_decay_task)
+                        logger.info("情绪衰减 tick 任务已注册: task_id=emotion_decay_tick, interval=30s")
+                except Exception as _decay_exc:
+                    logger.warning("情绪衰减 tick 任务注册失败（降级）: %s", _decay_exc)
+
                 # 关键约束：必须在全部 seed tasks 注册完成后再 start，
                 # 否则后续仅写入 registry 的任务不会被运行中的 scheduler 真正调度。
                 _natsume_scheduler.start()

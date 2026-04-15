@@ -265,8 +265,78 @@ class InteroceptionAgent:
         })
         self.state_registry.set_state("interoception_agent", prev_state, writer="interoception_agent")
 
+    def tick_body_budget(
+        self,
+        *,
+        source: str = "scheduler",
+        circadian_phase: str = "day",
+    ) -> dict[str, Any]:
+        """D7: 内感受指数持续衰减和恢复 tick——每 30s 由 NatsumeScheduler 驱动一次。
 
-_INTEROCEPTION_AGENT: InteroceptionAgent | None = None
+        模拟身体预算的连续动态特性：
+        - 日间：身体预算缓慢消耗（活动消耗能量）
+        - 夜间：身体预算缓慢恢复（睡眠补充能量）
+        - 高内感受压力时自然衰减（压力不会无限累积）
+
+        Returns:
+            {"body_budget": float, "interoceptive_index": float, "recovery_urgency": float}
+        """
+        import logging as _logging
+        _log = _logging.getLogger("Natsume.tribe.interoception_agent")
+        try:
+            prev = self.state_registry.get_state("interoception_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+
+            cur_budget = _clamp(float(prev_state.get("body_budget") or 0.7))
+            cur_intero = _clamp(float(prev_state.get("interoceptive_index") or 0.3))
+            cur_urgency = _clamp(float(prev_state.get("recovery_urgency") or 0.2))
+
+            phase = str(circadian_phase or "day").strip().lower()
+
+            # 身体预算：日间缓慢消耗，夜间缓慢恢复
+            budget_delta = {
+                "day":   -0.002,   # 日间：轻微消耗
+                "dusk":  -0.001,   # 黄昏：极轻微消耗
+                "night":  0.004,   # 夜间：恢复
+                "dawn":   0.002,   # 黎明：开始恢复
+            }.get(phase, -0.001)
+            new_budget = _clamp(cur_budget + budget_delta)
+
+            # 内感受压力：高压力时自然衰减（不会无限累积）
+            intero_decay = 0.003 if cur_intero > 0.5 else 0.001
+            new_intero = _clamp(cur_intero - intero_decay)
+
+            # 恢复紧迫度：随身体预算恢复而降低
+            urgency_delta = -0.002 if new_budget > cur_budget else 0.001
+            new_urgency = _clamp(cur_urgency + urgency_delta)
+
+            prev_state.update({
+                "body_budget": round(new_budget, 4),
+                "interoceptive_index": round(new_intero, 4),
+                "recovery_urgency": round(new_urgency, 4),
+                "last_tick_source": source,
+                "last_tick_phase": phase,
+            })
+            self.state_registry.set_state("interoception_agent", prev_state, writer="interoception_agent")
+
+            _log.debug(
+                "InteroceptionAgent.tick_body_budget: phase=%s budget=%.3f→%.3f "
+                "intero=%.3f→%.3f urgency=%.3f→%.3f",
+                phase, cur_budget, new_budget, cur_intero, new_intero, cur_urgency, new_urgency,
+            )
+            return {
+                "body_budget": round(new_budget, 4),
+                "interoceptive_index": round(new_intero, 4),
+                "recovery_urgency": round(new_urgency, 4),
+                "phase": phase,
+                "ticked": True,
+            }
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.interoception_agent").warning(
+                "InteroceptionAgent.tick_body_budget 失败（降级）: %s", exc
+            )
+            return {"ticked": False, "error": str(exc)}
 
 
 def get_interoception_agent() -> InteroceptionAgent:

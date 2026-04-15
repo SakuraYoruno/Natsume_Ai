@@ -312,8 +312,64 @@ class CircadianAgent:
         state["voice_pipeline_ended_ts_ms"] = ts_ms
         await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", state, writer="circadian_agent")
 
+    def tick_emotion_baseline(
+        self,
+        *,
+        source: str = "circadian_scheduler",
+    ) -> dict[str, Any]:
+        """D6: 按昼夜四相位驱动 LimbicAgent 情绪基线调制。
 
-_CIRCADIAN_AGENT: CircadianAgent | None = None
+        每次 emotion_decay_tick 时由 NatsumeScheduler 调用，
+        将当前相位的情绪基线偏置注入 LimbicAgent.tick_emotion_decay()，
+        实现昼夜节律对情绪的持续调制：
+        - 日间（day）：活力基线，轻度正向偏置
+        - 黄昏（dusk）：平静基线，轻度负向偏置
+        - 夜间（night）：低唤醒基线，情绪趋向平静
+        - 黎明（dawn）：恢复基线，轻度正向偏置
+
+        Returns:
+            {"phase": str, "decay_result": dict, "baseline_applied": bool}
+        """
+        import logging as _logging
+        _log = _logging.getLogger("Natsume.tribe.circadian_agent")
+        try:
+            profile = self.export_runtime_state()
+            phase = str(profile.get("phase") or "day").strip().lower()
+            sleep_pressure = float(profile.get("sleep_pressure") or 0.2)
+
+            # 调用 LimbicAgent.tick_emotion_decay()，传入昼夜相位信息
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "tick_emotion_decay"):
+                    decay_result = _limbic.tick_emotion_decay(
+                        source=f"circadian:{phase}",
+                        circadian_phase=phase,
+                        sleep_pressure=sleep_pressure,
+                    )
+                    _log.debug(
+                        "CircadianAgent.tick_emotion_baseline: phase=%s sleep_pressure=%.2f "
+                        "decay_rate=%.4f tag=%s",
+                        phase, sleep_pressure,
+                        float(decay_result.get("effective_decay_rate") or 0.0),
+                        decay_result.get("emotion_tag"),
+                    )
+                    return {
+                        "phase": phase,
+                        "sleep_pressure": round(sleep_pressure, 3),
+                        "decay_result": decay_result,
+                        "baseline_applied": bool(decay_result.get("decayed")),
+                    }
+            except Exception as _limbic_exc:
+                _log.debug("CircadianAgent.tick_emotion_baseline: LimbicAgent 调用失败: %s", _limbic_exc)
+
+            return {"phase": phase, "baseline_applied": False, "reason": "limbic_unavailable"}
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.circadian_agent").warning(
+                "CircadianAgent.tick_emotion_baseline 失败（降级）: %s", exc
+            )
+            return {"baseline_applied": False, "error": str(exc)}
 
 
 def get_circadian_agent() -> CircadianAgent:

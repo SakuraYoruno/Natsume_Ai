@@ -1383,6 +1383,9 @@ def run_proactive_intent_dispatch(
     if skill_name == "evolution_cycle":
         return _run_evolution_cycle(system_intent=system_intent, logger=logger)
 
+    if skill_name == "emotion_decay_tick":
+        return _run_emotion_decay_tick(system_intent=system_intent, logger=logger)
+
     if skill_name != "proactive_talk":
         personality_result = _run_personality_scheduler_skill(
             system_intent=system_intent,
@@ -1642,7 +1645,57 @@ def _run_evolution_cycle(*, system_intent: dict[str, Any], logger: Any) -> dict[
         }
 
 
-def _load_recent_topics(*, get_ledger: Callable[[], Any]) -> list[str]:
+def _run_emotion_decay_tick(
+    *,
+    system_intent: dict[str, Any],
+    logger: Any,
+) -> dict[str, Any]:
+    """D9: emotion_decay_tick skill 执行函数。
+
+    每 30s 由 NatsumeScheduler 调用，驱动情绪衰减连续动态系统：
+    1. CircadianAgent.tick_emotion_baseline() → 昼夜相位调制 + LimbicAgent 情绪衰减
+    2. InteroceptionAgent.tick_body_budget() → 身体预算持续更新
+    3. GlymphaticAgent.tick_recovery_window() → 恢复窗口持续评估
+    """
+    results: dict[str, Any] = {"status": "OK", "skill_name": "emotion_decay_tick"}
+    try:
+        from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
+        circadian = get_circadian_agent()
+        if hasattr(circadian, "tick_emotion_baseline"):
+            baseline_result = circadian.tick_emotion_baseline(source="emotion_decay_tick")
+            results["circadian_baseline"] = baseline_result
+    except Exception as exc:
+        logger.debug("emotion_decay_tick: circadian baseline failed: %s", exc)
+        results["circadian_baseline"] = {"error": str(exc)[:60]}
+
+    try:
+        from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
+        intero = get_interoception_agent()
+        if hasattr(intero, "tick_body_budget"):
+            # 从 circadian 结果获取相位
+            phase = str(
+                (results.get("circadian_baseline") or {}).get("phase") or "day"
+            ).strip().lower()
+            body_result = intero.tick_body_budget(
+                source="emotion_decay_tick",
+                circadian_phase=phase,
+            )
+            results["body_budget"] = body_result
+    except Exception as exc:
+        logger.debug("emotion_decay_tick: body budget failed: %s", exc)
+        results["body_budget"] = {"error": str(exc)[:60]}
+
+    try:
+        from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
+        glymphatic = get_glymphatic_agent()
+        if hasattr(glymphatic, "tick_recovery_window"):
+            recovery_result = glymphatic.tick_recovery_window(source="emotion_decay_tick")
+            results["recovery_window"] = recovery_result
+    except Exception as exc:
+        logger.debug("emotion_decay_tick: recovery window failed: %s", exc)
+        results["recovery_window"] = {"error": str(exc)[:60]}
+
+    return results
     topics: list[str] = []
     try:
         ledger = get_ledger()

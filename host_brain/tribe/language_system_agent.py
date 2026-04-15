@@ -271,6 +271,39 @@ class LanguageSystemAgent:
             except Exception:
                 pass
 
+        # D1: Broca → MotorCortexAgent 发声桥
+        # broca_generate_plan 产出后，将 tone/warmth_weight 映射为 TTS 参数，
+        # 通过 MotorCortexAgent.dispatch_speak() 统一发声（不阻塞主流程）
+        try:
+            from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+            from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
+            import asyncio as _asyncio  # noqa: PLC0415
+
+            _tts_params = broca_to_tts_params(
+                tone=str(broca.get("tone") or "balanced"),
+                warmth_weight=float(broca.get("warmth_weight") or 0.5),
+                emotion_tag=str(wernicke.get("emotion_tag") or "NEUTRAL"),
+            )
+            # 仅在有 last_broca_text 时触发（由外部调用方注入 broca_text 字段）
+            _broca_text = str(broca.get("broca_text") or "").strip()
+            if _broca_text:
+                _motor = get_motor_cortex_agent()
+                try:
+                    _loop = _asyncio.get_running_loop()
+                    _loop.create_task(
+                        _asyncio.coroutine(lambda: _motor.dispatch_speak(
+                            text=_broca_text,
+                            emotion_tag=_tts_params["emotion_tag"],
+                            emotion_intensity=_tts_params["emotion_intensity"],
+                            source="broca",
+                            require_gate=False,
+                        ))()
+                    )
+                except RuntimeError:
+                    pass  # 非异步上下文时跳过，不阻塞
+        except Exception:
+            pass
+
         return payload
 
     def get_language_style(
