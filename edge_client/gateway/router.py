@@ -9,6 +9,7 @@ from typing import Any
 from edge_client.channels.input_reporter import EdgeInputReporter, InputReportResult
 from edge_client.gateway.models import MsgType, UnifiedMessage
 from edge_client.tribe.channel_agent import ChannelAgent
+from edge_client.tribe.peripheral_agent import PeripheralAgent
 
 logger = logging.getLogger("Natsume.edge.gateway.router")
 
@@ -26,6 +27,7 @@ class GatewayRouter:
         self._tribe_bridge = tribe_bridge
         self._voice_asr = voice_asr
         self._channel_agent = ChannelAgent(bridge=tribe_bridge)
+        self._peripheral_agent = PeripheralAgent(bridge=tribe_bridge)
         self._stats: dict[str, int] = {
             "routed": 0,
             "failed": 0,
@@ -35,6 +37,7 @@ class GatewayRouter:
     def set_tribe_bridge(self, bridge: Any | None) -> None:
         self._tribe_bridge = bridge
         self._channel_agent.set_bridge(bridge)
+        self._peripheral_agent.set_bridge(bridge)
 
     def route(self, msg: UnifiedMessage) -> InputReportResult:
         routed_msg = self._maybe_apply_voice_asr(msg)
@@ -56,6 +59,28 @@ class GatewayRouter:
             routed_msg.msg_id,
             "ok" if result.success else ("cached" if result.cached else "failed"),
         )
+
+        # Phase XV：收到消息时向 PeripheralAgent 发布 VTS 感知事件
+        # 让 Natsume 在收到社交消息时做对应的感知动作（看到消息/听到语音）
+        try:
+            asr_info = dict(routed_msg.raw_extra.get("gateway_voice_asr") or {})
+            if routed_msg.msg_type == MsgType.VOICE and asr_info.get("text"):
+                # 语音消息：ASR 识别后发布“听到声音”感知事件
+                self._peripheral_agent.publish_voice_received(
+                    platform=routed_msg.platform.value,
+                    transcript=str(asr_info["text"]),
+                    sender=str(routed_msg.sender_name or routed_msg.from_id or ""),
+                )
+            else:
+                # 文字/图片/其他消息：发布“看到消息”感知事件
+                self._peripheral_agent.publish_message_received(
+                    platform=routed_msg.platform.value,
+                    msg_type=routed_msg.msg_type.value,
+                    sender=str(routed_msg.sender_name or routed_msg.from_id or ""),
+                )
+        except Exception as exc:
+            logger.debug("GatewayRouter: peripheral VTS event failed msg_id=%s err=%s", routed_msg.msg_id, exc)
+
         self._channel_agent.on_message_received(
             platform=routed_msg.platform.value,
             conversation_id=routed_msg.conversation_id,

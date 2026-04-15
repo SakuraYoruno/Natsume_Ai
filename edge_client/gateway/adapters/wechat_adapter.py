@@ -181,6 +181,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
                     return success
                 detail = "bridge_queue_not_enabled"
                 return False
+            # Phase XV: 社交生态动作
+            if reply.msg_type in (MsgType.MOMENTS, MsgType.STATUS, MsgType.MOMENTS_COMMENT):
+                if self._bridge_queue_enabled():
+                    success = self._send_moments_via_bridge_queue(reply)
+                    detail = f"bridge_queue_{reply.msg_type.value}"
+                    return success
+                detail = "bridge_queue_not_enabled"
+                return False
             detail = f"unsupported msg_type={reply.msg_type.value}"
             return False
         except Exception as exc:
@@ -595,7 +603,61 @@ class WeChatAdapter(AbstractPlatformAdapter):
             logger.warning("WeChatAdapter: %s to '%s' failed: %s", action, target, (result or {}).get("detail", ""))
         return ok
 
-    # NOTE: Legacy _send_via_pywinauto has been removed.
+    def _send_moments_via_bridge_queue(self, reply: UnifiedReply) -> bool:
+        """Phase XV: 通过 bridge 命令队列发布朋友圈/动态/评论。
+
+        action 从 reply.msg_type.value 映射：
+          MsgType.MOMENTS         → action="publish_moment"（发朋友圈）
+          MsgType.STATUS          → action="publish_moment"（发状态，复用 publish_moment）
+          MsgType.MOMENTS_COMMENT → action="comment_moment"（评论朋友圈）
+
+        reply.content: 文字内容
+        reply.media_path: 可选图片/视频路径（朋友圈配图）
+        reply.raw_extra.get("moment_id"): 评论时需要的朋友圈 ID
+        """
+        from edge_client.channels.wechat_command_queue import (  # noqa: PLC0415
+            enqueue_wechat_command,
+            resolve_command_file_paths,
+            wait_wechat_command_result,
+        )
+
+        if reply.msg_type == MsgType.MOMENTS_COMMENT:
+            action = "comment_moment"
+        else:
+            action = "publish_moment"
+
+        queue_file, result_file = resolve_command_file_paths()
+        now_ms = int(time.time() * 1000)
+        request_id = str(reply.raw_extra.get("request_id") or f"gateway-{action}-{now_ms}-{uuid.uuid4().hex[:8]}")
+        content = str(reply.content or "").strip()
+        moment_id = str(reply.raw_extra.get("moment_id") or "").strip()
+
+        extra_fields: dict[str, Any] = {}
+        if reply.media_path:
+            extra_fields["images"] = [str(reply.media_path)]
+        if moment_id and action == "comment_moment":
+            extra_fields["moment_id"] = moment_id
+
+        row = enqueue_wechat_command(
+            action=action,
+            target="",  # 朋友圈操作不需要 target（发给所有人）
+            content=content,
+            request_id=request_id,
+            queue_file=queue_file,
+            ts_ms=now_ms,
+            extra_fields=extra_fields if extra_fields else None,
+        )
+        result = wait_wechat_command_result(
+            command_id=str(row.get("command_id") or ""),
+            timeout_ms=self._resolve_command_timeout_ms(),
+            result_file=result_file,
+        )
+        ok = bool((result or {}).get("success"))
+        if ok:
+            logger.info("WeChatAdapter: %s OK content_len=%d", action, len(content))
+        else:
+            logger.warning("WeChatAdapter: %s failed: %s", action, (result or {}).get("detail", ""))
+        return ok
     # All outbound messages go through the WeChat bridge command queue.
 
     @staticmethod

@@ -15,8 +15,6 @@ from host_brain.core.errors import (
     CHROMA_VECTOR_DIM_MISMATCH,
     RETR_BOND_UNAVAILABLE,
     RETR_LEDGER_UNAVAILABLE,
-    RETR_PERSONA_UTTERANCE_UNAVAILABLE,
-    RETR_STYLE_UNAVAILABLE,
     RETR_VAULT_UNAVAILABLE,
     RETR_WORLD_UNAVAILABLE,
 )
@@ -24,10 +22,8 @@ from host_brain.core.errors import (
 STORE_SQLITE_LEDGER = "sqlite_ledger"
 STORE_NEO4J_BOND = "neo4j_bond"
 STORE_EPISODIC_VECTOR = "episodic_vector"
-STORE_STYLE_CANON = "style_canon"
 STORE_WORLD_CANON = "world_canon"
 STORE_ARTIFACT_VAULT = "artifact_vault"
-STORE_PERSONA_UTTERANCE = "persona_utterance"
 
 SQLITE_SESSION_BOOST = 0.25
 SQLITE_PERSON_BOOST = 0.35
@@ -233,14 +229,10 @@ def _map_route_exception(exc: Exception, *, store_id: str | None = None) -> str:
         return RETR_LEDGER_UNAVAILABLE
     if normalized_store == STORE_NEO4J_BOND:
         return RETR_BOND_UNAVAILABLE
-    if normalized_store == STORE_STYLE_CANON:
-        return RETR_STYLE_UNAVAILABLE
     if normalized_store == STORE_WORLD_CANON:
         return RETR_WORLD_UNAVAILABLE
     if normalized_store == STORE_ARTIFACT_VAULT:
         return RETR_VAULT_UNAVAILABLE
-    if normalized_store == STORE_PERSONA_UTTERANCE:
-        return RETR_PERSONA_UTTERANCE_UNAVAILABLE
     # episodic_vector：保持原有 Chroma 错误码分发（向后兼容）
     text = str(exc)
     if CHROMA_COLLECTION_MISSING in text:

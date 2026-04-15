@@ -3343,3 +3343,25 @@ def get_llm_nodes(
         ))
 
     return LlmNodesResponse(nodes=nodes, timestamp=_now_ms())
+
+
+# ---------------------------------------------------------------------------
+# 子模块路由注册（P2-7 拆分后的子路由）
+# ---------------------------------------------------------------------------
+def _register_sub_routers() -> None:
+    """将拆分出的子模块路由注册到主 router。
+    使用延迟注册避免循环导入，在应用启动时调用一次即可。
+    """
+    try:
+        from host_brain.app.obs_routes_health import router as _health_router
+        from host_brain.app.obs_routes_sessions import router as _sessions_router
+        from host_brain.app.obs_routes_trace import router as _trace_router
+        from host_brain.app.obs_routes_metrics import router as _metrics_router
+        # 注意：子路由已含 /obs 前缀，include 时不再重复添加
+        router.include_router(_health_router, prefix="")
+        router.include_router(_sessions_router, prefix="")
+        router.include_router(_trace_router, prefix="")
+        router.include_router(_metrics_router, prefix="")
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger("Natsume.obs").warning("obs sub-router registration failed: %s", exc)

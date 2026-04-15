@@ -1,9 +1,16 @@
-"""Unified Host input route for ASR / Gateway events."""
+"""Unified Host input route for ASR / Gateway events.
+
+路由层（薄层）：只负责参数解析和响应格式化。
+业务逻辑已拆分到以下 service 模块：
+  - input_service_log.py      日志/审计
+  - input_service_gateway.py  gateway 意图路由
+  - input_service_ack.py      即时 ACK / 进度推送
+  - input_service_quality.py  执行质量分析 / 偏航检测
+"""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
@@ -13,183 +20,53 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.core.ids import new_request_id
+
+# ── service 层 import ──────────────────────────────────────────────────────
+from host_brain.app.input_service_log import (
+    get_ledger_safe as _get_ledger_safe,
+    build_reply_preview as _build_reply_preview,
+    build_input_preview as _build_input_preview,
+    log_input_event as _log_input_event,
+    log_dispatch_task_exception as _log_dispatch_task_exception,
+    get_request_skill_exec_rows as _get_request_skill_exec_rows,
+)
+from host_brain.app.input_service_gateway import (
+    looks_like_progress_query as _looks_like_progress_query_for_ack_skip,
+    looks_like_execution_intent as _looks_like_execution_intent_for_ack,
+    normalize_route_confidence as _normalize_route_confidence,
+)
+from host_brain.tribe.cortex_route_decider import classify_task_intent as _classify_task_intent
+from host_brain.app.input_service_ack import (
+    resolve_bond_stage_for_ack as _resolve_bond_stage_for_ack,
+    resolve_emotion_tag_for_ack as _resolve_emotion_tag_for_ack,
+    format_elapsed_compact as _format_elapsed_compact,
+    should_send_gateway_immediate_ack as _should_send_gateway_immediate_ack_impl,
+    deliver_gateway_immediate_ack as _deliver_gateway_immediate_ack,
+    log_gateway_ack_task_exception as _log_gateway_ack_task_exception,
+    build_gateway_progress_reply_text as _build_gateway_progress_reply_text,
+    log_progress_push_task_exception as _log_progress_push_task_exception,
+)
+from host_brain.app.input_service_quality import (
+    analyze_request_execution_quality as _analyze_request_execution_quality,
+    detect_gateway_execution_deviation as _detect_gateway_execution_deviation_impl,
+    build_realign_user_message as _build_realign_user_message,
+    maybe_send_gateway_realign_notice as _maybe_send_gateway_realign_notice_impl,
+    compute_keyword_overlap as _compute_keyword_overlap,
+)
 
 _logger = logging.getLogger("Natsume.input_routes")
 
 router = APIRouter(prefix="/v1/host", tags=["input"])
 
+# ASR 相关常量（未迁移，仅在本文件使用）
 _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
-    "active_chat",
-    "active chat",
-    "current_chat",
-    "current chat",
-    "current_session",
-    "default",
-    "unknown",
-    "none",
-    "null",
-    "-",
-    "_",
-    "na",
-    "n/a",
-    "当前聊天",
-    "当前会话",
+    "active_chat", "active chat", "current_chat", "current chat",
+    "current_session", "default", "unknown", "none", "null",
+    "-", "_", "na", "n/a", "当前聊天", "当前会话",
 }
 _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
-_GATEWAY_ACK_PROGRESS_QUERY_RE = re.compile(
-    r"(进度|进展|状态|结果呢|有结果吗|完成了?吗|做完了?吗|好了没|搞定了?吗|到哪了|还要多久|eta|done\??|status|progress|update)",
-    re.IGNORECASE,
-)
-_GATEWAY_ACK_PROGRESS_MARKERS: tuple[str, ...] = (
-    "进度",
-    "进展",
-    "状态",
-    "结果呢",
-    "有结果吗",
-    "完成了吗",
-    "做完了吗",
-    "搞定了吗",
-    "好了没",
-    "到哪了",
-    "到哪一步",
-    "还要多久",
-    "什么时候好",
-    "status",
-    "progress",
-    "update",
-    "done yet",
-    "eta",
-)
-_GATEWAY_ACK_ACTION_MARKERS: tuple[str, ...] = (
-    "请",
-    "麻烦",
-    "帮我",
-    "帮忙",
-    "需要你",
-    "执行",
-    "处理",
-    "安排",
-    "规划",
-    "调用",
-    "查询",
-    "查一下",
-    "查下",
-    "检索",
-    "搜索",
-    "总结",
-    "归纳",
-    "翻译",
-    "改写",
-    "写一个",
-    "生成",
-    "实现",
-    "改造",
-    "优化",
-    "修复",
-    "排查",
-    "测试",
-    "验证",
-    "启动",
-    "停止",
-    "重启",
-    "run",
-    "execute",
-    "build",
-    "fix",
-    "test",
-    "deploy",
-    "search",
-)
-_ALIGNMENT_TOKEN_RE = re.compile(r"[A-Za-z]{3,}|[\u4e00-\u9fff]{2,}")
-_ALIGNMENT_STOPWORDS: set[str] = {
-    "请",
-    "麻烦",
-    "帮我",
-    "帮忙",
-    "一下",
-    "一下子",
-    "这个",
-    "那个",
-    "今天",
-    "现在",
-    "然后",
-    "继续",
-    "处理",
-    "执行",
-    "安排",
-    "操作",
-    "任务",
-    "结果",
-    "进度",
-    "状态",
-    "一下吧",
-    "the",
-    "and",
-    "for",
-    "with",
-    "this",
-    "that",
-}
-
-_GATEWAY_ROUTE_ACTION_PREFIXES: tuple[str, ...] = ("/", "!", "run ", "exec ")
-_GATEWAY_FORCE_TRANSLATE_RE = re.compile(
-    r"(翻译|译成|翻成|translate|translation|中译英|英译中|中译日|日译中)",
-    re.IGNORECASE,
-)
-_GATEWAY_FORCE_MEMORY_RE = re.compile(
-    r"(记住|记一下|记下来|写入记忆|保存.*记忆|记到记忆|remember this|save this memory|偏好是|我的偏好)",
-    re.IGNORECASE,
-)
-_GATEWAY_FORCE_CODE_RE = re.compile(
-    r"(报错|错误|异常|修复|修一下|改代码|写代码|单测|测试|diff|patch|traceback|stack trace|compile|build|修.*bug|bug.*修)",
-    re.IGNORECASE,
-)
-_GATEWAY_RECENT_TURN_RE = re.compile(
-    r"(我刚刚|上一句|上一条|上句话|你刚刚|what did i just say|what did you just say)",
-    re.IGNORECASE,
-)
-_ALLOWED_LLM_ROUTE_TYPES: set[str] = {
-    "chat",
-    "delegate",
-    "skill",
-    "plan",
-    "recent_turn",
-    "task_progress",
-}
-_ALLOWED_DELEGATE_TARGETS: set[str] = {
-    "intent_agent",
-    "code_agent",
-    "translate_agent",
-    "vision_agent",
-    "repair_agent",
-    "retrieval_agent",
-    "judge_agent",
-}
-_EXEC_QUALITY_CHECK_ROUTE_TYPES: set[str] = {"skill", "delegate", "plan"}
-_EXEC_QUALITY_FAIL_STATUSES: set[str] = {"FAILED", "ERROR", "REJECTED", "DEGRADED"}
-_EXEC_QUALITY_FAIL_RESULT_CODES: set[str] = {
-    "SCHED_NO_CONTENT",
-    "SKILL_EXECUTION_FAILED",
-    "SKILL_EXECUTION_ERROR",
-    "MEMORY_WRITER_UNAVAILABLE",
-    "MEMORY_STORE_UNAVAILABLE",
-    "SUB_AGENT_FAILED",
-}
-_EXEC_QUALITY_NO_EFFECT_MARKERS: tuple[str, ...] = (
-    "no memory writer available",
-    "no memory store available",
-    "no memory backend available",
-    "skipping diary",
-    "no conversations on",
-)
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    return dict(raw) if isinstance(raw, dict) else {}
 
 
 class InputPayload(BaseModel):
@@ -233,6 +110,8 @@ class InputResponse(BaseModel):
     ts_ms: int
 
 
+# ── 本文件保留的 ASR 相关工具函数（未迁移，仅在本文件使用）──────────────────
+
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     raw = str(os.environ.get(name) or "").strip().lower()
     if not raw:
@@ -252,6 +131,168 @@ def _parse_float_env(name: str, *, default: float) -> float:
         return float(raw)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _parse_int_env(name: str, *, default: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    if not raw:
+        return int(default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _looks_like_asr_placeholder_text(text: str) -> bool:
+    normalized = str(text or "").strip().upper()
+    if not normalized:
+        return True
+    return _ASR_PLACEHOLDER_PATTERN.fullmatch(normalized) is not None
+
+
+def _contains_speech_chars(text: str) -> bool:
+    return _ASR_SPEECH_CHAR_PATTERN.search(str(text or "")) is not None
+
+
+def _evaluate_asr_noise_gate(
+    *,
+    text: str,
+    payload: dict[str, Any] | None,
+) -> tuple[bool, str | None]:
+    text_value = str(text or "").strip()
+    if not text_value:
+        return False, "ASR_TEXT_EMPTY"
+    if _looks_like_asr_placeholder_text(text_value):
+        return False, "ASR_PLACEHOLDER_TEXT"
+    min_text_len = max(1, _parse_int_env("HOST_INPUT_ASR_MIN_TEXT_LEN", default=2))
+    if len(text_value) < min_text_len:
+        return False, "ASR_TEXT_TOO_SHORT"
+    require_speech_chars = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_SPEECH_CHARS", default=True)
+    if require_speech_chars and not _contains_speech_chars(text_value):
+        return False, "ASR_NON_SPEECH_TEXT"
+    payload_dict = dict(payload or {})
+    reason_code = str(payload_dict.get("reason_code") or "").strip().upper()
+    if reason_code in {"ASR_VAD_NO_SPEECH", "ASR_LOW_CONFIDENCE"}:
+        return False, reason_code
+    low_confidence = _coerce_bool(payload_dict.get("low_confidence"), default=False)
+    if low_confidence:
+        return False, "ASR_LOW_CONFIDENCE"
+    min_confidence = max(0.0, min(1.0, _parse_float_env("HOST_INPUT_ASR_MIN_CONFIDENCE", default=0.75)))
+    require_confidence = _parse_bool_env("HOST_INPUT_ASR_REQUIRE_CONFIDENCE", default=False)
+    confidence = _coerce_float(payload_dict.get("confidence"))
+    if confidence is None and require_confidence:
+        return False, "ASR_CONFIDENCE_MISSING"
+    if confidence is not None and confidence < min_confidence:
+        return False, "ASR_LOW_CONFIDENCE"
+    return True, None
+
+
+def _is_invalid_gateway_conversation_id(value: str | None) -> bool:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return True
+    return normalized in _PLACEHOLDER_GATEWAY_CONVERSATIONS
+
+
+def _evaluate_immune_gate_for_input(
+    *,
+    text: str,
+    source: str,
+    session_id: str,
+    person_id: str | None = None,
+) -> dict[str, Any]:
+    from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+    return get_immune_agent().inspect_text(
+        text=text,
+        source=f"http.v1.host.input.{str(source or '').lower()}",
+        metadata={
+            "session_id": str(session_id or "").strip() or None,
+            "person_id": str(person_id or "").strip() or None,
+        },
+    )
+
+
+class _NoopMetrics:
+    """Minimal metrics shim for cortex orchestrator direct invocation."""
+    def __getattr__(self, _name: str):
+        def _noop(*_args: Any, **_kwargs: Any) -> None:
+            return None
+        return _noop
+
+
+def _should_send_gateway_immediate_ack(
+    *,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+) -> tuple[bool, str]:
+    """包装 service 层函数，传入本文件的判断函数。"""
+    return _should_send_gateway_immediate_ack_impl(
+        source=source,
+        text=text,
+        payload=payload,
+        looks_like_progress_query_fn=_looks_like_progress_query_for_ack_skip,
+        looks_like_execution_intent_fn=_looks_like_execution_intent_for_ack,
+    )
+
+
+def _detect_gateway_execution_deviation(
+    *,
+    source: str,
+    user_text: str,
+    decision: str,
+    narrative: str,
+) -> dict[str, Any]:
+    """包装 service 层函数，传入本文件的判断函数。"""
+    return _detect_gateway_execution_deviation_impl(
+        source=source,
+        user_text=user_text,
+        decision=decision,
+        narrative=narrative,
+        looks_like_execution_intent_fn=_looks_like_execution_intent_for_ack,
+    )
+
+
+async def _maybe_send_gateway_realign_notice(
+    *,
+    request_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """包装 service 层函数，传入本文件的上下文解析函数。"""
+    return await _maybe_send_gateway_realign_notice_impl(
+        request_id=request_id,
+        payload=payload,
+        resolve_bond_stage_fn=_resolve_bond_stage_for_ack,
+        resolve_emotion_tag_fn=_resolve_emotion_tag_for_ack,
+    )
+
+
+@router.post("/input", response_model=InputResponse)
+async def receive_input(body: InputPayload, request: Request) -> InputResponse:
 
 
 def _parse_int_env(name: str, *, default: int) -> int:
@@ -371,567 +412,43 @@ def _evaluate_immune_gate_for_input(
     )
 
 
-def _get_skill_registry_safe():
+def _parse_sse_data_event(raw_event: str) -> dict[str, Any] | None:
+    """解析 SSE data 事件行，返回 JSON 对象或 None。"""
+    line = str(raw_event or "").strip()
+    if not line.startswith("data:"):
+        return None
+    payload_str = line.removeprefix("data:").strip()
+    if not payload_str:
+        return None
+    import json  # noqa: PLC0415
     try:
-        from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
-
-        return get_skill_registry()
+        obj = json.loads(payload_str)
     except Exception:
         return None
+    return obj if isinstance(obj, dict) else None
 
 
-def _safe_format_template(text: str, **kwargs: Any) -> str:
-    try:
-        return str(text or "").format(**kwargs)
-    except Exception:
-        return str(text or "")
-
-
-def _build_gateway_skill_manifest_lines(*, skill_registry: Any) -> list[str]:
-    templates = _load_template_mapping("executive_router.routing_prompt.templates")
-    line_with_description = str(templates.get("skill_line_with_description") or "- {skill_name}: {description}")
-    line_without_description = str(templates.get("skill_line_without_description") or "- {skill_name}")
-    fallback_lines = [
-        str(item).strip()
-        for item in list(templates.get("fallback_skill_lines") or [])
-        if str(item).strip()
-    ]
-    if skill_registry is None:
-        return fallback_lines
-
-    try:
-        max_items = max(8, min(120, _parse_int_env("HOST_GATEWAY_INTENT_SKILL_MANIFEST_MAX", default=64)))
-        max_risk_level = max(1, min(5, _parse_int_env("HOST_GATEWAY_INTENT_SKILL_MAX_RISK_LEVEL", default=5)))
-        entries = skill_registry.build_skill_manifest(
-            scopes=["host", "memory", "system"],
-            max_risk_level=max_risk_level,
-        )
-    except Exception:
-        return fallback_lines
-
-    lines: list[str] = []
-    for row in list(entries or [])[:max_items]:
-        skill_name = str(row.get("name") or "").strip()
-        if not skill_name:
-            continue
-        description = str(row.get("description") or "").strip()
-        if description:
-            line = _safe_format_template(
-                line_with_description,
-                skill_name=skill_name,
-                description=description,
-            )
-        else:
-            line = _safe_format_template(
-                line_without_description,
-                skill_name=skill_name,
-            )
-        normalized_line = str(line).strip()
-        if normalized_line:
-            lines.append(normalized_line)
-    return lines or fallback_lines
-
-
-def _extract_first_json_object(raw_text: str) -> dict[str, Any] | None:
-    text = str(raw_text or "").strip()
-    if not text:
-        return None
-
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
-
-    fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text, re.IGNORECASE)
-    if fenced_match:
-        try:
-            parsed = json.loads(str(fenced_match.group(1) or "").strip())
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-
-    start = text.find("{")
-    while start >= 0:
-        depth = 0
-        in_string = False
-        escaped = False
-        for idx in range(start, len(text)):
-            char = text[idx]
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-                continue
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    candidate = text[start : idx + 1]
-                    try:
-                        parsed = json.loads(candidate)
-                        if isinstance(parsed, dict):
-                            return parsed
-                    except Exception:
-                        break
-        start = text.find("{", start + 1)
-    return None
-
-
-def _normalize_route_confidence(value: Any) -> float | None:
-    confidence = _coerce_float(value)
-    if confidence is None:
-        return None
-    return max(0.0, min(1.0, float(confidence)))
-
-
-def _normalize_gateway_llm_route_decision(
+def _build_gateway_reply_text(
     *,
-    raw_decision: dict[str, Any],
-    skill_registry: Any,
-) -> dict[str, Any] | None:
-    route = str(raw_decision.get("route") or raw_decision.get("route_type") or "").strip().lower()
-    if route not in _ALLOWED_LLM_ROUTE_TYPES:
-        return None
-
-    target_id = str(
-        raw_decision.get("target_id")
-        or raw_decision.get("skill_id")
-        or raw_decision.get("agent_id")
-        or raw_decision.get("delegate_agent")
-        or ""
-    ).strip()
-    task = str(raw_decision.get("task") or raw_decision.get("query") or raw_decision.get("text") or "").strip()
-    reason = str(raw_decision.get("reason") or raw_decision.get("reason_code") or "LLM_ROUTE").strip() or "LLM_ROUTE"
-    confidence = _normalize_route_confidence(raw_decision.get("confidence"))
-
-    if route in {"chat", "recent_turn", "task_progress"}:
-        target_id = ""
-    elif route == "plan":
-        target_id = target_id or "skill_dag"
-    elif route == "delegate":
-        if target_id not in _ALLOWED_DELEGATE_TARGETS:
-            target_id = "intent_agent"
-            reason = "LLM_ROUTE_INVALID_DELEGATE_TARGET"
-    elif route == "skill":
-        if not target_id:
-            return None
-        if skill_registry is None:
-            return None
-        try:
-            if skill_registry.get(target_id) is None:
-                return None
-        except Exception:
-            return None
-
-    return {
-        "route": route,
-        "target_id": target_id,
-        "task": task,
-        "reason_code": reason,
-        "confidence": confidence,
-        "route_source": "llm",
-        "llm_route_used": True,
-    }
+    decision: str,
+    narrative: str,
+    reason_code: str | None,
+) -> str:
+    """构建 gateway 最终回复文本。"""
+    from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+    templates_raw = resolve_prompt_template_json_merged("input_routes.fallback_texts")
+    templates = dict(templates_raw) if isinstance(templates_raw, dict) else {}
+    reply_text = str(narrative or "").strip()
+    if reply_text:
+        return reply_text
+    if str(decision or "").upper() != "APPROVE":
+        return str(templates.get("reject_default") or "")
+    _ = reason_code
+    return str(templates.get("approve_empty") or "")
 
 
-def _build_gateway_rule_route_decision(
-    *,
-    text: str,
-    skill_registry: Any,
-) -> dict[str, Any]:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return {
-            "route": "chat",
-            "target_id": "",
-            "task": "",
-            "reason_code": "RULE_EMPTY_TEXT",
-            "confidence": None,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    if _looks_like_progress_query_for_ack_skip(normalized):
-        return {
-            "route": "task_progress",
-            "target_id": "",
-            "task": "",
-            "reason_code": "RULE_TASK_PROGRESS",
-            "confidence": 0.98,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    if _GATEWAY_RECENT_TURN_RE.search(normalized):
-        return {
-            "route": "recent_turn",
-            "target_id": "",
-            "task": "",
-            "reason_code": "RULE_RECENT_TURN",
-            "confidence": 0.95,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    if _GATEWAY_FORCE_TRANSLATE_RE.search(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "translate_agent",
-            "task": normalized,
-            "reason_code": "RULE_FORCE_TRANSLATE_AGENT",
-            "confidence": 0.95,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    if _GATEWAY_FORCE_MEMORY_RE.search(normalized):
-        memory_skill_exists = False
-        try:
-            memory_skill_exists = bool(skill_registry and skill_registry.get("memory_store") is not None)
-        except Exception:
-            memory_skill_exists = False
-        if memory_skill_exists:
-            return {
-                "route": "skill",
-                "target_id": "memory_store",
-                "task": normalized,
-                "reason_code": "RULE_FORCE_MEMORY_STORE",
-                "confidence": 0.95,
-                "route_source": "rule",
-                "llm_route_used": False,
-            }
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": normalized,
-            "reason_code": "RULE_FORCE_MEMORY_FALLBACK_INTENT",
-            "confidence": 0.90,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    if _GATEWAY_FORCE_CODE_RE.search(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "code_agent",
-            "task": normalized,
-            "reason_code": "RULE_FORCE_CODE_AGENT",
-            "confidence": 0.95,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    compact = normalized.lower()
-    if compact.startswith(_GATEWAY_ROUTE_ACTION_PREFIXES) or _looks_like_execution_intent_for_ack(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": normalized,
-            "reason_code": "RULE_ACTION_INTENT",
-            "confidence": 0.85,
-            "route_source": "rule",
-            "llm_route_used": False,
-        }
-    return {
-        "route": "chat",
-        "target_id": "",
-        "task": "",
-        "reason_code": "RULE_CHAT_DEFAULT",
-        "confidence": 0.75,
-        "route_source": "rule",
-        "llm_route_used": False,
-    }
-
-
-async def _run_gateway_intent_route_llm(
-    *,
-    request_id: str,
-    session_id: str,
-    text: str,
-    skill_registry: Any,
-) -> dict[str, Any] | None:
-    if not _parse_bool_env("HOST_GATEWAY_INTENT_LLM_ENABLED", default=True):
-        return None
-
-    from host_brain.app.graph_config_builder import (  # noqa: PLC0415
-        resolve_executive_router_llm_runtime,
-        resolve_host_llm_runtime_async,
-    )
-    from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
-
-    llm_runtime = await resolve_host_llm_runtime_async(
-        rollout_key=session_id,
-        scene_type="EXEC_INTENT",
-    )
-    router_runtime = resolve_executive_router_llm_runtime(base_runtime=llm_runtime)
-    if not bool(router_runtime.get("available")):
-        return None
-
-    provider_name = str(router_runtime.get("provider_name") or "").strip()
-    model_id = str(router_runtime.get("model_id") or "").strip()
-    api_key = str(router_runtime.get("llm_api_key") or "").strip()
-    if not provider_name or not model_id or not api_key:
-        return None
-
-    timeout_ms = max(
-        800,
-        _parse_int_env(
-            "HOST_GATEWAY_INTENT_LLM_TIMEOUT_MS",
-            default=int(router_runtime.get("timeout_ms") or 5000),
-        ),
-    )
-    base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
-    agent_gen_params = dict(router_runtime.get("agent_gen_params") or {"temperature": 0.1, "top_p": 0.8})
-
-    templates = _load_template_mapping("executive_router.routing_prompt.templates")
-    skill_lines = _build_gateway_skill_manifest_lines(skill_registry=skill_registry)
-    skill_manifest_text = "\n".join(skill_lines) if skill_lines else "- intent_agent: fallback"
-    system_prompt_template = str(
-        templates.get("system_prompt_template")
-        or (
-            "你是路由分类器。输出单个 JSON 对象。"
-            " route 只能是 chat/delegate/skill/task_progress/recent_turn/plan。"
-        )
-    )
-    if "{skill_manifest}" in system_prompt_template:
-        system_prompt = system_prompt_template.replace("{skill_manifest}", skill_manifest_text)
-    else:
-        system_prompt = _safe_format_template(system_prompt_template, skill_manifest=skill_manifest_text)
-    system_prompt += (
-        "\n\n严格要求："
-        "\n1) 仅输出 JSON 对象，不要 markdown。"
-        '\n2) JSON 字段必须包含 {"route","target_id","task","confidence","reason"}。'
-        "\n3) confidence 为 0~1 的数字。"
-    )
-    user_prompt_template = str(templates.get("user_prompt_template") or "用户消息：{message}\n输出 JSON：")
-    if "{message}" in user_prompt_template:
-        user_prompt = user_prompt_template.replace("{message}", str(text or "").strip())
-    else:
-        user_prompt = _safe_format_template(user_prompt_template, message=str(text or "").strip())
-
-    raw_chunks: list[str] = []
-    async for chunk in astream_llm_chunks(
-        provider_name=provider_name,
-        model_id=model_id,
-        api_key=api_key,
-        timeout_ms=timeout_ms,
-        prompt_text=user_prompt,
-        system_prompt=system_prompt,
-        gen_params=agent_gen_params,
-        base_url_override=base_url_override,
-    ):
-        raw_chunks.append(str(chunk or ""))
-        if sum(len(item) for item in raw_chunks) >= 8000:
-            break
-    raw_text = "".join(raw_chunks).strip()
-    parsed_obj = _extract_first_json_object(raw_text)
-    if not isinstance(parsed_obj, dict):
-        _logger.warning("[%s] gateway_intent_llm_parse_failed output=%s", request_id, _build_reply_preview(raw_text, limit=180))
-        return None
-    return _normalize_gateway_llm_route_decision(
-        raw_decision=parsed_obj,
-        skill_registry=skill_registry,
-    )
-
-
-def _apply_gateway_force_override(
-    *,
-    text: str,
-    decision: dict[str, Any],
-    skill_registry: Any,
-) -> dict[str, Any]:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return dict(decision or {})
-    route = str(decision.get("route") or "").strip().lower()
-    target_id = str(decision.get("target_id") or "").strip()
-    patched = dict(decision or {})
-    has_translate_intent = _GATEWAY_FORCE_TRANSLATE_RE.search(normalized) is not None
-    has_recent_turn_intent = _GATEWAY_RECENT_TURN_RE.search(normalized) is not None
-
-    if _looks_like_progress_query_for_ack_skip(normalized):
-        if route != "task_progress":
-            patched.update(
-                {
-                    "route": "task_progress",
-                    "target_id": "",
-                    "task": "",
-                    "reason_code": "FORCE_OVERRIDE_TASK_PROGRESS",
-                    "route_source": "override",
-                    "route_override_reason": "FORCE_OVERRIDE_TASK_PROGRESS",
-                }
-            )
-        return patched
-
-    # Recent-turn queries are deterministic: force direct recent_turn and never degrade to chat/delegate.
-    if has_recent_turn_intent:
-        if route != "recent_turn":
-            patched.update(
-                {
-                    "route": "recent_turn",
-                    "target_id": "",
-                    "task": "",
-                    "reason_code": "FORCE_OVERRIDE_RECENT_TURN",
-                    "route_source": "override",
-                    "route_override_reason": "FORCE_OVERRIDE_RECENT_TURN",
-                }
-            )
-        return patched
-
-    # Translation intent has higher priority than code/debug keywords in mixed sentences.
-    if has_translate_intent:
-        if not (route == "delegate" and target_id == "translate_agent"):
-            patched.update(
-                {
-                    "route": "delegate",
-                    "target_id": "translate_agent",
-                    "task": normalized,
-                    "reason_code": "FORCE_OVERRIDE_TRANSLATE_AGENT",
-                    "route_source": "override",
-                    "route_override_reason": "FORCE_OVERRIDE_TRANSLATE_AGENT",
-                }
-            )
-        return patched
-
-    memory_skill_exists = False
-    try:
-        memory_skill_exists = bool(skill_registry and skill_registry.get("memory_store") is not None)
-    except Exception:
-        memory_skill_exists = False
-    if _GATEWAY_FORCE_MEMORY_RE.search(normalized):
-        if memory_skill_exists and not (route == "skill" and target_id == "memory_store"):
-            patched.update(
-                {
-                    "route": "skill",
-                    "target_id": "memory_store",
-                    "task": normalized,
-                    "reason_code": "FORCE_OVERRIDE_MEMORY_STORE",
-                    "route_source": "override",
-                    "route_override_reason": "FORCE_OVERRIDE_MEMORY_STORE",
-                }
-            )
-            return patched
-        if not memory_skill_exists and not (route == "delegate" and target_id == "intent_agent"):
-            patched.update(
-                {
-                    "route": "delegate",
-                    "target_id": "intent_agent",
-                    "task": normalized,
-                    "reason_code": "FORCE_OVERRIDE_MEMORY_FALLBACK_INTENT",
-                    "route_source": "override",
-                    "route_override_reason": "FORCE_OVERRIDE_MEMORY_FALLBACK_INTENT",
-                }
-            )
-            return patched
-
-    if _GATEWAY_FORCE_CODE_RE.search(normalized) and not (route == "delegate" and target_id == "code_agent"):
-        patched.update(
-            {
-                "route": "delegate",
-                "target_id": "code_agent",
-                "task": normalized,
-                "reason_code": "FORCE_OVERRIDE_CODE_AGENT",
-                "route_source": "override",
-                "route_override_reason": "FORCE_OVERRIDE_CODE_AGENT",
-            }
-        )
-        return patched
-
-    if route == "chat" and _looks_like_execution_intent_for_ack(normalized):
-        patched.update(
-            {
-                "route": "delegate",
-                "target_id": "intent_agent",
-                "task": normalized,
-                "reason_code": "FORCE_OVERRIDE_ACTION_INTENT",
-                "route_source": "override",
-                "route_override_reason": "FORCE_OVERRIDE_ACTION_INTENT",
-            }
-        )
-        return patched
-    return patched
-
-
-async def _build_gateway_intent_draft(
-    *,
-    request_id: str,
-    session_id: str,
-    source: str,
-    text: str,
-) -> dict[str, Any]:
-    default_draft: dict[str, Any] = {
-        "id": f"intent::{request_id}",
-        "action": "narrative_only",
-        "source": "input_routes",
-        "input_source": source,
-        "route": "chat",
-        "target_id": "",
-        "task": "",
-        "route_reason": "SOURCE_NON_GATEWAY_DEFAULT_CHAT",
-        "route_source": "default",
-        "route_confidence": None,
-        "llm_route_used": False,
-    }
-    if str(source or "").strip().upper() != "GATEWAY":
-        return default_draft
-
-    skill_registry = _get_skill_registry_safe()
-    route_decision = _build_gateway_rule_route_decision(text=text, skill_registry=skill_registry)
-    llm_decision: dict[str, Any] | None = None
-    try:
-        llm_decision = await _run_gateway_intent_route_llm(
-            request_id=request_id,
-            session_id=session_id,
-            text=text,
-            skill_registry=skill_registry,
-        )
-    except Exception as exc:
-        _logger.warning("[%s] gateway_intent_llm_route_failed: %s", request_id, exc)
-
-    if llm_decision is not None:
-        route_decision = dict(llm_decision)
-    route_decision = _apply_gateway_force_override(
-        text=text,
-        decision=route_decision,
-        skill_registry=skill_registry,
-    )
-
-    route = str(route_decision.get("route") or "chat").strip().lower()
-    target_id = str(route_decision.get("target_id") or "").strip()
-    task = str(route_decision.get("task") or "").strip()
-    route_reason = str(route_decision.get("reason_code") or "ROUTE_UNKNOWN").strip() or "ROUTE_UNKNOWN"
-    route_source = str(route_decision.get("route_source") or "rule").strip() or "rule"
-    route_confidence = _normalize_route_confidence(route_decision.get("confidence"))
-    llm_route_used = bool(route_decision.get("llm_route_used"))
-    action = "narrative_only" if route == "chat" else (target_id or route)
-
-    intent_draft: dict[str, Any] = {
-        "id": f"intent::{request_id}",
-        "action": action,
-        "source": "input_routes",
-        "input_source": source,
-        "route": route,
-        "target_id": target_id,
-        "task": task,
-        "route_reason": route_reason,
-        "route_source": route_source,
-        "route_confidence": route_confidence,
-        "llm_route_used": llm_route_used,
-    }
-    override_reason = str(route_decision.get("route_override_reason") or "").strip()
-    if override_reason:
-        intent_draft["route_override_reason"] = override_reason
-    if route == "delegate" and target_id:
-        intent_draft["delegate_agent"] = target_id
-        intent_draft["agent_id"] = target_id
-    elif route == "skill" and target_id:
-        intent_draft["skill_id"] = target_id
-        intent_draft["skill_name"] = target_id
-    return intent_draft
+# ── gateway 路由函数已迁移到 input_service_gateway.py ──────────────────────
+# 本文件通过顶部 import 使用 service 层函数
 
 
 @router.post("/input", response_model=InputResponse)
@@ -1124,648 +641,6 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         )
 
 
-def _get_ledger_safe():
-    try:
-        from host_brain.app.dependencies import get_ledger
-
-        return get_ledger()
-    except Exception:
-        return None
-
-
-def _log_input_event(
-    *,
-    ledger,
-    request_id: str,
-    session_id: str,
-    source: str,
-    input_payload: dict[str, Any] | None = None,
-    phase: str,
-    status: str,
-    detail: str = "",
-    reason_code: str | None = None,
-    latency_ms: int | None = None,
-    ts_ms: int,
-) -> None:
-    if ledger is None:
-        return
-    try:
-        payload: dict[str, Any] = {
-            "source": source,
-            "phase": phase,
-            "latency_ms": latency_ms,
-        }
-        input_preview = _build_input_preview(input_payload, source=source)
-        if input_preview:
-            payload["input_preview"] = input_preview
-        person_id = str((input_payload or {}).get("person_id") or "").strip()
-        if person_id:
-            payload["person_id"] = person_id
-        route_fields = (
-            "route_type",
-            "route_target",
-            "route_task",
-            "route_source",
-            "route_reason",
-            "route_confidence",
-            "route_override_reason",
-            "llm_route_used",
-            "exec_quality_degraded",
-            "exec_quality_reason_code",
-            "exec_quality_tags",
-            "exec_quality_skill_exec_count",
-        )
-        for field in route_fields:
-            value = (input_payload or {}).get(field)
-            if value is not None:
-                payload[field] = value
-        if source == "GATEWAY":
-            gateway_fields = (
-                "platform",
-                "conversation_id",
-                "msg_id",
-                "msg_type",
-                "from_id",
-                "to_id",
-                "sender_name",
-                "media_url",
-                "reply_to_msg_id",
-                "is_group",
-                "decision",
-                "gateway_status",
-                "gateway_latency_ms",
-                "reply_text_len",
-                "reply_preview",
-                "immediate_ack_status",
-                "immediate_ack_latency_ms",
-                "immediate_ack_preview",
-                "immediate_ack_reason",
-                "progress_fastpath_status",
-                "progress_fastpath_latency_ms",
-                "progress_fastpath_preview",
-                "progress_fastpath_reason",
-                "progress_push_status",
-                "progress_push_reason",
-                "progress_push_preview",
-                "progress_push_updates",
-                "deviation_reason",
-                "deviation_overlap_ratio",
-                "deviation_retry_applied",
-                "deviation_retry_overlap_ratio",
-            )
-            for field in gateway_fields:
-                value = (input_payload or {}).get(field)
-                if value is not None:
-                    payload[field] = value
-        ledger.log_voice_event(
-            {
-                "request_id": request_id,
-                "session_id": session_id,
-                "event_type": f"INPUT_{phase}",
-                "direction": "EDGE_TO_HOST",
-                "status": status,
-                "reason_code": reason_code,
-                "stage": f"input_dispatch.{phase.lower()}",
-                "detail": detail[:400] if detail else None,
-                "payload": payload,
-                "ts_ms": ts_ms,
-            }
-        )
-    except Exception as log_exc:
-        _logger.debug("input_routes: ledger log failed (non-blocking): %s", log_exc)
-
-
-def _log_dispatch_task_exception(task: asyncio.Task) -> None:
-    """Log fire-and-forget task exceptions."""
-
-    try:
-        exc = task.exception()
-    except asyncio.CancelledError:
-        return
-    if exc is not None:
-        _logger.error("input_routes: dispatch task failed silently: %s", exc, exc_info=exc)
-
-
-class _NoopMetrics:
-    """Minimal metrics shim for cortex orchestrator direct invocation."""
-
-    def __getattr__(self, _name: str):
-        def _noop(*_args: Any, **_kwargs: Any) -> None:
-            return None
-
-        return _noop
-
-
-def _build_input_preview(payload: dict[str, Any] | None, *, source: str, limit: int = 120) -> str | None:
-    payload_dict = dict(payload or {})
-    preview_source = None
-    if str(source or "").upper() == "GATEWAY":
-        preview_source = payload_dict.get("content")
-    elif str(source or "").upper() == "ASR":
-        preview_source = payload_dict.get("text")
-    preview = _build_reply_preview(str(preview_source or ""), limit=limit).strip()
-    return preview or None
-
-
-def _parse_sse_data_event(raw_event: str) -> dict[str, Any] | None:
-    line = str(raw_event or "").strip()
-    if not line.startswith("data:"):
-        return None
-    payload = line.removeprefix("data:").strip()
-    if not payload:
-        return None
-    try:
-        obj = json.loads(payload)
-    except Exception:
-        return None
-    return obj if isinstance(obj, dict) else None
-
-
-def _build_gateway_reply_text(
-    *,
-    decision: str,
-    narrative: str,
-    reason_code: str | None,
-) -> str:
-    templates = _load_template_mapping("input_routes.fallback_texts")
-    reply_text = str(narrative or "").strip()
-    if reply_text:
-        return reply_text
-    if str(decision or "").upper() != "APPROVE":
-        return str(templates.get("reject_default") or "")
-    _ = reason_code
-    return str(templates.get("approve_empty") or "")
-
-
-def _build_reply_preview(text: str, *, limit: int = 120) -> str:
-    normalized = str(text or "").strip().replace("\r", " ").replace("\n", " ")
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[: max(0, limit - 3)]}..."
-
-
-def _get_request_skill_exec_rows(ledger: Any, *, request_id: str) -> list[dict[str, Any]]:
-    if ledger is None:
-        return []
-    rid = str(request_id or "").strip()
-    if not rid:
-        return []
-
-    try:
-        if hasattr(ledger, "trace_request"):
-            trace = ledger.trace_request(rid)
-            rows = trace.get("skill_exec_log") if isinstance(trace, dict) else None
-            if isinstance(rows, list):
-                return [dict(row or {}) for row in rows if isinstance(row, dict)]
-    except Exception:
-        pass
-
-    try:
-        fallback_rows = getattr(ledger, "skill_exec_log", None)
-        if isinstance(fallback_rows, list):
-            matched: list[dict[str, Any]] = []
-            for row in fallback_rows:
-                if not isinstance(row, dict):
-                    continue
-                if str(row.get("request_id") or "").strip() == rid:
-                    matched.append(dict(row))
-            return matched
-    except Exception:
-        pass
-    return []
-
-
-def _analyze_request_execution_quality(
-    *,
-    ledger: Any,
-    request_id: str,
-    decision: str,
-    route_type: str,
-    route_target: str,
-) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "degraded": False,
-        "reason_code": None,
-        "detail_tags": [],
-        "skill_exec_count": 0,
-    }
-    if str(decision or "").strip().upper() != "APPROVE":
-        return result
-
-    normalized_route_type = str(route_type or "").strip().lower()
-    normalized_route_target = str(route_target or "").strip().lower()
-    if normalized_route_type not in _EXEC_QUALITY_CHECK_ROUTE_TYPES:
-        return result
-
-    skill_rows = _get_request_skill_exec_rows(ledger, request_id=request_id)
-    result["skill_exec_count"] = len(skill_rows)
-
-    if normalized_route_type in {"skill", "delegate"} and not skill_rows:
-        result["degraded"] = True
-        result["reason_code"] = "SKILL_EXEC_MISSING"
-        result["detail_tags"] = ["skill_exec_missing=true"]
-        return result
-
-    failure_status_detected = False
-    failure_code_detected = False
-    no_effect_detected = False
-    empty_digest_count = 0
-
-    observed_skill_names: set[str] = set()
-    for row in skill_rows:
-        status_text = str(row.get("result_status") or "").strip().upper()
-        code_text = str(row.get("result_code") or "").strip().upper()
-        digest_text = str(row.get("result_digest") or "").strip()
-        digest_lower = digest_text.lower()
-        skill_name = str(row.get("skill_name") or "").strip().lower()
-        if skill_name:
-            observed_skill_names.add(skill_name)
-
-        if status_text in _EXEC_QUALITY_FAIL_STATUSES:
-            failure_status_detected = True
-        if code_text in _EXEC_QUALITY_FAIL_RESULT_CODES:
-            failure_code_detected = True
-        if any(marker in digest_lower for marker in _EXEC_QUALITY_NO_EFFECT_MARKERS):
-            no_effect_detected = True
-        if not digest_text:
-            empty_digest_count += 1
-
-    if failure_status_detected:
-        result["degraded"] = True
-        result["reason_code"] = "SKILL_EXEC_FAILED"
-        result["detail_tags"].append("skill_exec_failed=true")
-    elif failure_code_detected:
-        result["degraded"] = True
-        result["reason_code"] = "SKILL_EXEC_FAILED"
-        result["detail_tags"].append("skill_exec_result_code_failed=true")
-    elif no_effect_detected:
-        result["degraded"] = True
-        result["reason_code"] = "SKILL_EXEC_NO_EFFECT"
-        result["detail_tags"].append("skill_exec_no_effect=true")
-    elif skill_rows and empty_digest_count >= len(skill_rows):
-        result["degraded"] = True
-        result["reason_code"] = "SKILL_EXEC_RESULT_EMPTY"
-        result["detail_tags"].append("skill_exec_result_empty=true")
-
-    expected_skill_name: str | None = None
-    if normalized_route_type == "skill" and normalized_route_target:
-        expected_skill_name = normalized_route_target
-    elif normalized_route_type == "delegate" and normalized_route_target and normalized_route_target != "intent_agent":
-        expected_skill_name = f"sub_agent:{normalized_route_target}"
-    if expected_skill_name and observed_skill_names and expected_skill_name not in observed_skill_names:
-        result["degraded"] = True
-        result["reason_code"] = result["reason_code"] or "ROUTE_EXEC_MISMATCH"
-        result["detail_tags"].append(
-            f"route_exec_mismatch=expected:{expected_skill_name},observed:{','.join(sorted(observed_skill_names))}"
-        )
-
-    result["detail_tags"].append(f"skill_exec_count={len(skill_rows)}")
-    return result
-
-
-def _looks_like_progress_query_for_ack_skip(text: str) -> bool:
-    compact = re.sub(r"\s+", "", str(text or "")).strip().lower()
-    if not compact:
-        return False
-    if _GATEWAY_ACK_PROGRESS_QUERY_RE.search(compact):
-        return True
-    return any(marker in compact for marker in _GATEWAY_ACK_PROGRESS_MARKERS)
-
-
-def _looks_like_execution_intent_for_ack(text: str) -> bool:
-    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
-    if not normalized:
-        return False
-    if _looks_like_progress_query_for_ack_skip(normalized):
-        return False
-
-    compact = normalized.replace(" ", "").lower()
-    if normalized.startswith(("/", "!", "run ", "exec ")):
-        return True
-    return any(marker in compact for marker in _GATEWAY_ACK_ACTION_MARKERS)
-
-
-def _resolve_bond_stage_for_ack(*, payload: dict[str, Any]) -> str:
-    stage = str((dict(payload.get("bond_summary") or {})).get("stage") or "").strip().upper()
-    if stage:
-        return stage
-
-    person_id = str(payload.get("person_id") or "").strip()
-    if not person_id:
-        return "STRANGER"
-
-    try:
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-
-        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="STRANGER")
-    except Exception:
-        return "STRANGER"
-
-
-def _resolve_emotion_tag_for_ack(*, payload: dict[str, Any]) -> str:
-    for key in ("emotion_tag", "emotion", "mood"):
-        value = str(payload.get(key) or "").strip().upper()
-        if value:
-            return value
-    return "NEUTRAL"
-
-
-def _format_elapsed_compact(elapsed_ms: int) -> str:
-    total_seconds = max(0, int(elapsed_ms // 1000))
-    if total_seconds < 60:
-        return f"{total_seconds}s"
-    minutes, seconds = divmod(total_seconds, 60)
-    if minutes < 60:
-        return f"{minutes}m{seconds:02d}s"
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h{minutes:02d}m"
-
-
-def _extract_alignment_keywords(text: str) -> list[str]:
-    normalized = str(text or "").strip().lower()
-    if not normalized:
-        return []
-    raw_tokens = [str(token or "").strip().lower() for token in _ALIGNMENT_TOKEN_RE.findall(normalized)]
-    tokens: list[str] = []
-    for token in raw_tokens:
-        if not token:
-            continue
-        is_chinese = bool(re.fullmatch(r"[\u4e00-\u9fff]+", token))
-        if is_chinese and len(token) >= 3:
-            # 中文连续串拆成双字片段，提升关键词覆盖判定灵敏度。
-            for idx in range(0, len(token) - 1):
-                tokens.append(token[idx : idx + 2])
-            continue
-        tokens.append(token)
-    dedup: list[str] = []
-    for token in tokens:
-        if len(token) < 2:
-            continue
-        if token in _ALIGNMENT_STOPWORDS:
-            continue
-        if token not in dedup:
-            dedup.append(token)
-    return dedup[:12]
-
-
-def _compute_keyword_overlap(*, source_text: str, target_text: str) -> tuple[float, int, int]:
-    keywords = _extract_alignment_keywords(source_text)
-    if not keywords:
-        return 1.0, 0, 0
-    haystack = str(target_text or "").strip().lower()
-    if not haystack:
-        return 0.0, len(keywords), 0
-    hit_count = sum(1 for keyword in keywords if keyword and keyword in haystack)
-    ratio = hit_count / max(1, len(keywords))
-    return round(max(0.0, min(1.0, ratio)), 4), len(keywords), hit_count
-
-
-def _detect_gateway_execution_deviation(
-    *,
-    source: str,
-    user_text: str,
-    decision: str,
-    narrative: str,
-) -> dict[str, Any]:
-    if not _parse_bool_env("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", default=True):
-        return {"triggered": False, "reason_code": "DEVIATION_GUARD_DISABLED"}
-    if str(source or "").strip().upper() != "GATEWAY":
-        return {"triggered": False, "reason_code": "DEVIATION_SOURCE_NOT_GATEWAY"}
-    if str(decision or "").strip().upper() != "APPROVE":
-        return {"triggered": False, "reason_code": "DEVIATION_DECISION_NOT_APPROVE"}
-    if not _looks_like_execution_intent_for_ack(user_text):
-        return {"triggered": False, "reason_code": "DEVIATION_NON_ACTION_INTENT"}
-    source_norm = str(user_text or "").strip()
-    target_norm = str(narrative or "").strip()
-    if not source_norm or not target_norm:
-        return {"triggered": False, "reason_code": "DEVIATION_EMPTY_TEXT"}
-
-    overlap_ratio, keyword_count, hit_count = _compute_keyword_overlap(
-        source_text=source_norm,
-        target_text=target_norm,
-    )
-    min_keyword_count = max(2, _parse_int_env("HOST_GATEWAY_DEVIATION_MIN_KEYWORDS", default=3))
-    min_overlap = max(0.0, min(1.0, _parse_float_env("HOST_GATEWAY_DEVIATION_MIN_OVERLAP", default=0.18)))
-    if keyword_count < min_keyword_count:
-        return {
-            "triggered": False,
-            "reason_code": "DEVIATION_KEYWORDS_INSUFFICIENT",
-            "overlap_ratio": overlap_ratio,
-            "keyword_count": keyword_count,
-            "hit_count": hit_count,
-        }
-    if overlap_ratio >= min_overlap:
-        return {
-            "triggered": False,
-            "reason_code": "DEVIATION_OVERLAP_OK",
-            "overlap_ratio": overlap_ratio,
-            "keyword_count": keyword_count,
-            "hit_count": hit_count,
-        }
-    return {
-        "triggered": True,
-        "reason_code": "DEVIATION_OVERLAP_LOW",
-        "overlap_ratio": overlap_ratio,
-        "keyword_count": keyword_count,
-        "hit_count": hit_count,
-        "min_overlap": min_overlap,
-    }
-
-
-def _build_realign_user_message(*, original_user_text: str, first_narrative: str) -> str:
-    original = str(original_user_text or "").strip()
-    first = str(first_narrative or "").strip()
-    guidance = (
-        "[执行纠偏]\n"
-        "刚才结果可能偏离了用户真实意图。请仅围绕原始请求重新执行，并给出可执行/可验证结果。\n"
-        f"原始请求：{original}\n"
-        f"偏航输出：{first}\n"
-        "要求：不要泛泛闲聊，不要复述偏航内容，直接回到用户要你做的事。"
-    )
-    return guidance
-
-
-async def _maybe_send_gateway_realign_notice(
-    *,
-    request_id: str,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    if not _gateway_auto_reply_enabled():
-        return {"sent": False, "reason_code": "DEVIATION_NOTICE_AUTO_REPLY_DISABLED"}
-    if not _parse_bool_env("HOST_GATEWAY_DEVIATION_NOTICE_ENABLED", default=True):
-        return {"sent": False, "reason_code": "DEVIATION_NOTICE_DISABLED"}
-    platform = str(payload.get("platform") or "").strip().lower()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    if not platform or not conversation_id:
-        return {"sent": False, "reason_code": "DEVIATION_NOTICE_TARGET_MISSING"}
-
-    from host_brain.app.chat_agent import render_quick_gateway_realign_text  # noqa: PLC0415
-    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
-
-    content = render_quick_gateway_realign_text(
-        sender_name=str(payload.get("sender_name") or "").strip() or None,
-        bond_stage=_resolve_bond_stage_for_ack(payload=payload),
-        emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
-    )
-    wait_result = _parse_bool_env("HOST_GATEWAY_DEVIATION_NOTICE_WAIT_RESULT", default=False)
-    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_DEVIATION_NOTICE_TIMEOUT_MS", default=2500))
-    result = await post_gateway_reply(
-        platform=platform,
-        conversation_id=conversation_id,
-        content=content,
-        msg_type="text",
-        request_id=request_id,
-        wait_result=wait_result,
-        timeout_ms=timeout_ms,
-    )
-    success = bool(getattr(result, "success", False))
-    return {
-        "sent": success,
-        "status": str(getattr(result, "status", "UNKNOWN")),
-        "reason_code": str(getattr(result, "reason_code", "") or ""),
-        "preview": _build_reply_preview(content, limit=80),
-        "latency_ms": int(getattr(result, "latency_ms", 0)),
-    }
-
-
-def _should_send_gateway_immediate_ack(
-    *,
-    source: str,
-    text: str,
-    payload: dict[str, Any],
-) -> tuple[bool, str]:
-    if not _gateway_auto_reply_enabled():
-        return False, "ACK_AUTO_REPLY_DISABLED"
-    if not _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", default=True):
-        return False, "ACK_DISABLED"
-    if str(source or "").strip().upper() != "GATEWAY":
-        return False, "ACK_SOURCE_NOT_GATEWAY"
-
-    text_value = str(text or payload.get("content") or "").strip()
-    if not text_value:
-        return False, "ACK_EMPTY_TEXT"
-    if _looks_like_progress_query_for_ack_skip(text_value):
-        return False, "ACK_PROGRESS_QUERY"
-    if not _looks_like_execution_intent_for_ack(text_value):
-        return False, "ACK_NON_ACTION_INTENT"
-    return True, "ACK_ACTION_INTENT"
-
-
-async def _deliver_gateway_immediate_ack(
-    *,
-    request_id: str,
-    payload: dict[str, Any],
-    text: str,
-) -> dict[str, Any]:
-    from host_brain.app.chat_agent import render_quick_gateway_ack_text  # noqa: PLC0415
-    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
-
-    platform = str(payload.get("platform") or "").strip().lower()
-    conversation_id = str(payload.get("conversation_id") or "").strip()
-    if not platform or not conversation_id:
-        return {
-            "success": False,
-            "status": "SKIPPED",
-            "reason_code": "ACK_TARGET_MISSING",
-            "latency_ms": 0,
-            "ack_preview": "",
-        }
-
-    ack_text = render_quick_gateway_ack_text(
-        user_message=text,
-        bond_stage=_resolve_bond_stage_for_ack(payload=payload),
-        emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
-        sender_name=str(payload.get("sender_name") or "").strip() or None,
-    )
-    normalized_ack = str(ack_text or "").strip()
-    if not normalized_ack:
-        return {
-            "success": False,
-            "status": "SKIPPED",
-            "reason_code": "ACK_TEXT_EMPTY",
-            "latency_ms": 0,
-            "ack_preview": "",
-        }
-
-    wait_result = _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_WAIT_RESULT", default=False)
-    timeout_ms = max(1000, _parse_int_env("HOST_GATEWAY_IMMEDIATE_ACK_TIMEOUT_MS", default=2500))
-    result = await post_gateway_reply(
-        platform=platform,
-        conversation_id=conversation_id,
-        content=normalized_ack,
-        msg_type="text",
-        request_id=request_id,
-        wait_result=wait_result,
-        timeout_ms=timeout_ms,
-    )
-    return {
-        "success": bool(getattr(result, "success", False)),
-        "status": str(getattr(result, "status", "UNKNOWN")),
-        "reason_code": str(getattr(result, "reason_code", "") or ""),
-        "latency_ms": int(getattr(result, "latency_ms", 0)),
-        "ack_preview": _build_reply_preview(normalized_ack, limit=60),
-    }
-
-
-def _log_gateway_ack_task_exception(task: asyncio.Task) -> None:
-    try:
-        exc = task.exception()
-    except asyncio.CancelledError:
-        return
-    if exc is not None:
-        _logger.warning("input_routes: immediate gateway ack task failed silently: %s", exc, exc_info=exc)
-
-
-def _build_gateway_progress_reply_text(
-    *,
-    request_id: str,
-    session_id: str,
-    payload: dict[str, Any],
-    exclude_request_id: str | None = None,
-) -> tuple[str, str, dict[str, Any] | None]:
-    from host_brain.app.chat_agent import render_quick_gateway_progress_text  # noqa: PLC0415
-    from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
-
-    person_id = str(payload.get("person_id") or "").strip()
-    summary = None
-    if person_id:
-        summary = get_runtime_task_registry().summarize_for_chat(
-            person_id=person_id,
-            session_id=session_id,
-            exclude_request_id=exclude_request_id,
-        )
-    if not isinstance(summary, dict):
-        return (
-            render_quick_gateway_progress_text(
-                status="NONE",
-                bond_stage=_resolve_bond_stage_for_ack(payload=payload),
-                emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
-                sender_name=str(payload.get("sender_name") or "").strip() or None,
-            ),
-            "PROGRESS_NO_SUMMARY",
-            None,
-        )
-
-    status = str(summary.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
-    target_id = str(summary.get("target_id") or "").strip()
-    progress_message = str(summary.get("progress_message") or summary.get("detail") or "").strip()
-    result_text = str(summary.get("result_text") or "").strip()
-    elapsed_ms = int(summary.get("elapsed_ms") or 0)
-    if not progress_message and status in {"RUNNING", "RECOVERING"}:
-        progress_message = f"已持续 {_format_elapsed_compact(elapsed_ms)}。"
-    reply_text = render_quick_gateway_progress_text(
-        status=status,
-        target_id=target_id,
-        progress_message=progress_message,
-        result_text=result_text,
-        elapsed_ms=elapsed_ms,
-        bond_stage=_resolve_bond_stage_for_ack(payload=payload),
-        emotion_tag=_resolve_emotion_tag_for_ack(payload=payload),
-        sender_name=str(payload.get("sender_name") or "").strip() or None,
-    )
-    return reply_text, "PROGRESS_SUMMARY_FOUND", dict(summary)
-
-
 async def _try_handle_gateway_progress_fastpath(
     *,
     request_id: str,
@@ -1889,21 +764,11 @@ def _should_start_gateway_progress_push(
     return True, "PROGRESS_PUSH_ENABLED"
 
 
-def _log_progress_push_task_exception(task: asyncio.Task) -> None:
-    try:
-        exc = task.exception()
-    except asyncio.CancelledError:
-        return
-    if exc is not None:
-        _logger.warning("input_routes: progress push task failed silently: %s", exc, exc_info=exc)
-
-
 async def _run_gateway_proactive_progress_push(
     *,
     request_id: str,
     session_id: str,
     source: str,
-    text: str,
     payload: dict[str, Any],
     ledger: Any,
     stop_event: asyncio.Event,
@@ -2129,8 +994,9 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        suppress_edge_tts=(True if source == "GATEWAY" else None),
-        suppress_edge_vts=(True if source == "GATEWAY" else None),
+        # Phase XV：Gateway 回复时 TTS/VTS 与 ASR 链路一致，Natsume 在微信里回复时本地同步发声 + VTS 动画
+        suppress_edge_tts=None,
+        suppress_edge_vts=None,
         # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
         # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
         render_target_lang=("zh" if source == "GATEWAY" else None),
@@ -2141,12 +1007,34 @@ async def _run_cortex_orchestrator_pipeline(
         source=f"input_routes.{str(source or '').lower()}",
         ts_ms=ts_ms,
     )
-    intent_draft = await _build_gateway_intent_draft(
+    intent_draft = await _classify_task_intent(
         request_id=request_id,
         session_id=session_id,
-        source=source,
         text=text,
     )
+    # 将 classify_task_intent 结果包装为 intent_draft 格式
+    _route = str(intent_draft.get("route") or "chat").strip().lower()
+    _target_id = str(intent_draft.get("target_id") or "").strip()
+    _action = "narrative_only" if _route == "chat" else (_target_id or _route)
+    intent_draft = {
+        "id": f"intent::{request_id}",
+        "action": _action,
+        "source": "input_routes",
+        "input_source": source,
+        "route": _route,
+        "target_id": _target_id,
+        "task": str(intent_draft.get("task") or text).strip(),
+        "route_reason": str(intent_draft.get("reason_code") or "TRIBE_INTENT").strip(),
+        "route_source": str(intent_draft.get("route_source") or "rule").strip(),
+        "route_confidence": _normalize_route_confidence(intent_draft.get("confidence")),
+        "llm_route_used": str(intent_draft.get("route_source") or "") == "llm",
+    }
+    if _route == "delegate" and _target_id:
+        intent_draft["delegate_agent"] = _target_id
+        intent_draft["agent_id"] = _target_id
+    elif _route == "skill" and _target_id:
+        intent_draft["skill_id"] = _target_id
+        intent_draft["skill_name"] = _target_id
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
     commit_event: dict[str, Any] | None = None

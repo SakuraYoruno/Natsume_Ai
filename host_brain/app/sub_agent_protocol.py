@@ -152,7 +152,10 @@ class SubAgentDispatcher:
             self._handler_map[AGENT_INTENT] = intent_agent_handler
         except ImportError:
             pass
-        # vision_agent 暂未实现独立 handler，复用 intent_agent
+        # TODO(P3-7): vision_agent 暂未实现独立 handler，当前临时复用 intent_agent。
+        # 独立 handler 需实现图片/截图内容分析、UI 元素提取等视觉能力。
+        # 跟踪：创建 host_brain/app/handlers/vision_agent_handler.py，
+        # 接入多模态 LLM（如 GPT-4V / Qwen-VL），替换此处的复用逻辑。
         if AGENT_VISION not in self._handler_map and AGENT_INTENT in self._handler_map:
             self._handler_map[AGENT_VISION] = self._handler_map[AGENT_INTENT]
         try:
@@ -391,15 +394,6 @@ class SubAgentDispatcher:
             })
         except Exception:
             pass  # 审计不影响主流程
-
-    async def dispatch_parallel(
-        self, requests: list[SubAgentRequest],
-    ) -> list[SubAgentResponse]:
-        """并行调度多个子 Agent。"""
-        return list(await asyncio.gather(
-            *(self.dispatch(req) for req in requests),
-            return_exceptions=False,
-        ))
 
 
 # 模块级单例

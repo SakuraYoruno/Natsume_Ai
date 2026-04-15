@@ -1394,6 +1394,25 @@ async def chat_agent_sse_generator(
                 "sub_agent_id": sub_agent_ctx.agent_id,
             }
 
+        # Phase D: PrefrontalAgent 意图规划结果注入
+        # prefrontal_task 由 executive_runtime_core 在 plan_response 后写入 intent_draft
+        # 这里将其转换为 extra_context_prompt 的一部分，让 LLM 感知"我要说什么"的目标
+        _prefrontal_task = str(intent_draft.get("prefrontal_task") or "").strip()
+        _prefrontal_tone_hint = str(intent_draft.get("prefrontal_tone_hint") or "").strip()
+        _prefrontal_context_block = ""
+        if _prefrontal_task:
+            _prefrontal_context_block = f"【前额叶规划】当前回应目标：{_prefrontal_task}"
+            if _prefrontal_tone_hint:
+                _prefrontal_context_block += f"（语气：{_prefrontal_tone_hint}）"
+            _logger.debug(
+                "[%s] ChatAgent 接收 prefrontal_task: task=%s tone=%s",
+                request_id, _prefrontal_task[:60], _prefrontal_tone_hint,
+            )
+
+        # 合并 extra_context_prompt（子 Agent 结果 + prefrontal 规划）
+        _extra_parts = [p for p in [sub_agent_context_prompt, _prefrontal_context_block] if p]
+        _combined_extra_context = "\n\n".join(_extra_parts)
+
         # 回复深度策略：Gateway 通道使用更短的回复
         reply_depth_hint = ""
         if agent_input.reply_depth_policy == "gateway":
@@ -1415,7 +1434,7 @@ async def chat_agent_sse_generator(
                 thread_id=thread_id,
                 bond_summary=bond_summary,
                 recall_slot_text=recall_slot_text if recall_slot_text else None,
-                extra_context_prompt=sub_agent_context_prompt,
+                extra_context_prompt=_combined_extra_context,
                 include_runtime_payload=True,
             )
             if isinstance(prompt_result, tuple) and len(prompt_result) >= 4:
@@ -1877,6 +1896,41 @@ async def chat_agent_sse_generator(
         },
     })
 
+    # ── 9a. G1: COMMIT 后兜底触发 TTS（补发未被分句流式覆盖的 narrative）──
+    # 条件：suppress_edge_tts=True（Gateway 模式）时分句 TTS 被跳过，
+    # 或分句流式 TTS 未触发（tts_sentence_index == 0）时，补发完整 narrative。
+    if narrative.strip() and (_suppress_tts or tts_sentence_index == 0):
+        _commit_emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+        _commit_emotion_intensity: float | None = None
+        try:
+            from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
+            from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
+            _lang_agent = get_language_system_agent()
+            _last_broca = dict((_lang_agent.state_registry.get_state("language_system_agent") or {}).get("state", {}).get("last_broca") or {})
+            if _last_broca:
+                _tts_params = broca_to_tts_params(
+                    tone=str(_last_broca.get("tone") or "balanced"),
+                    warmth_weight=float(_last_broca.get("warmth_weight") or 0.5),
+                    emotion_tag=_commit_emotion_tag,
+                )
+                _commit_emotion_tag = _tts_params["emotion_tag"]
+                _commit_emotion_intensity = _tts_params["emotion_intensity"]
+        except Exception:
+            pass
+        try:
+            from host_brain.app.chat_agent_postprocessor import trigger_tts_after_commit  # noqa: PLC0415
+            asyncio.create_task(trigger_tts_after_commit(
+                narrative=narrative,
+                request_id=request_id,
+                session_id=session_id,
+                emotion_tag=_commit_emotion_tag,
+                emotion_intensity=_commit_emotion_intensity,
+                suppress_tts=False,   # 此处已判断条件，强制发送
+                source="chat_commit_fallback",
+            ))
+        except Exception as _tts_exc:
+            _logger.debug("[%s] G1 trigger_tts_after_commit schedule failed: %s", request_id, _tts_exc)
+
     # ── 9. 异步后处理（fire-and-forget）─────────────────────────────
     # 先走中性共享模块，保持 cortex_orchestrator 链路上的后处理收口一致
     try:
@@ -1926,3 +1980,48 @@ async def chat_agent_sse_generator(
         )
     except Exception as _pp_exc:
         _logger.debug("[%s] ChatAgent post_process task failed: %s", request_id, _pp_exc)
+
+
+# ---------------------------------------------------------------------------
+# 聚合导入（P2-12 拆分后向后兼容）
+# ---------------------------------------------------------------------------
+# 预处理函数/结构体已移至 chat_agent_preprocessor.py
+from host_brain.app.chat_agent_preprocessor import (  # noqa: F401, E402
+    SubAgentContext,
+    ChatAgentInput,
+    _sse,
+    _airlock_sanitize_output,
+    _strip_internal_delegate_markers,
+    _build_reply_preview,
+    _coerce_response_policy,
+    _split_text_into_sentences,
+    _truncate_text_to_sentence_limit,
+    _truncate_text_to_char_limit,
+    _extract_response_policy_limits,
+    _coerce_response_policy_score,
+    _apply_response_policy_stream_guard,
+    _response_policy_requires_buffering,
+    _apply_response_policy_hard_guard,
+    _build_minimal_chat_fallback_reply,
+    _build_chat_agent_quality_fallback_reply,
+    _build_chat_agent_fallback_reply,
+    _build_installed_capabilities_reply,
+    _should_buffer_stream_output,
+    _build_deterministic_sub_agent_reply,
+    _build_sub_agent_context_prompt,
+    _extract_visible_text,
+    _extract_tts_text,
+    _infer_emotion_tag_for_tts,
+    render_quick_gateway_ack_text,
+    render_quick_gateway_progress_text,
+    render_quick_gateway_realign_text,
+)
+
+# 后处理函数已移至 chat_agent_postprocessor.py
+from host_brain.app.chat_agent_postprocessor import (  # noqa: F401, E402
+    _post_speak_sentence,
+    apply_response_intelligence_safe,
+    scrub_pii_egress,
+    log_input_completed,
+    schedule_async_post_process,
+)

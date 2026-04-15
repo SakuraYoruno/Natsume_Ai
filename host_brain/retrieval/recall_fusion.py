@@ -63,10 +63,8 @@ from host_brain.retrieval.recall_fusion_stores import (
     STORE_SQLITE_LEDGER,
     STORE_NEO4J_BOND,
     STORE_EPISODIC_VECTOR,
-    STORE_STYLE_CANON,
     STORE_WORLD_CANON,
     STORE_ARTIFACT_VAULT,
-    STORE_PERSONA_UTTERANCE,
     search_route as _search_route_impl,
 )
 from host_brain.retrieval.hybrid_fusion import HybridFusionStrategy  # noqa: F401

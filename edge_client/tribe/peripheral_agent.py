@@ -45,6 +45,58 @@ class PeripheralAgent:
             },
         )
 
+    def publish_message_received(
+        self,
+        *,
+        platform: str,
+        msg_type: str,
+        sender: str = "",
+    ) -> None:
+        """Phase XV：收到社交消息时发布感知事件，触发 VTS「看到消息」动作。
+
+        Args:
+            platform: 来源平台（如 "wechat"/"qq"）。
+            msg_type: 消息类型（如 "text"/"image"/"file"）。
+            sender: 发送者昵称或 ID（显示用）。
+        """
+        self._publish_event(
+            event_type="social_message_received",
+            target_agent="peripheral_agent",
+            payload={
+                "platform": str(platform or ""),
+                "msg_type": str(msg_type or "text"),
+                "sender": str(sender or ""),
+                "vts_hint": "look_at_screen",  # VTS 动作提示：眼神移向屏幕方向
+                "source": "edge.peripheral",
+            },
+        )
+
+    def publish_voice_received(
+        self,
+        *,
+        platform: str,
+        transcript: str,
+        sender: str = "",
+    ) -> None:
+        """Phase XV：收到语音消息（ASR 识别后）时发布感知事件，触发 VTS「听到声音」动作。
+
+        Args:
+            platform: 来源平台（如 "wechat"）。
+            transcript: ASR 识别出的文字内容。
+            sender: 发送者昵称或 ID（显示用）。
+        """
+        self._publish_event(
+            event_type="social_voice_received",
+            target_agent="peripheral_agent",
+            payload={
+                "platform": str(platform or ""),
+                "transcript": str(transcript or ""),
+                "sender": str(sender or ""),
+                "vts_hint": "listen_attentively",  # VTS 动作提示：侧耳倾听
+                "source": "edge.peripheral",
+            },
+        )
+
     # ── T-166：下行指令统一入口 ───────────────────────────────────────────────
 
     # ── T-198：Motor 执行结果回流 ─────────────────────────────────────────────

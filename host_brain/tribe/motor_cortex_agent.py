@@ -323,6 +323,159 @@ class MotorCortexAgent:
         )
         return outcome
 
+    def dispatch_speak(
+        self,
+        *,
+        text: str,
+        emotion_tag: str = "NEUTRAL",
+        emotion_intensity: float = 0.5,
+        utterance_id: str | None = None,
+        request_id: str | None = None,
+        session_id: str | None = None,
+        source: str = "motor_cortex",
+        require_gate: bool = False,
+        motive: float | None = None,
+    ) -> dict[str, Any]:
+        """Phase C：统一发声入口——将 speak action 通过 MotorCortex 分发到 TTS 链路。
+
+        替代原有分散的 POST /v1/edge/speak 直接调用，所有发声（对话回复、主动发声、
+        情绪表达）统一经过此方法，确保：
+        1. 发声前经过 InitiativeGovernor 门控（require_gate=True 时）
+        2. 发声结果写入 state_registry，供 CerebellumAgent 纠偏
+        3. 发声事件发布到 TribeEventBus，供其他器官族感知
+
+        Args:
+            text: 要发声的文本内容
+            emotion_tag: 情绪标签（NEUTRAL/HAPPY/SAD/ANGRY/LOVING/SURPRISED 等）
+            emotion_intensity: 情绪强度（0.0~1.0）
+            utterance_id: 话语 ID（None 时自动生成）
+            request_id: 关联的请求 ID
+            session_id: 会话 ID
+            source: 发声来源标识（motor_cortex/proactive/broca 等）
+            require_gate: 是否需要 InitiativeGovernor 门控
+            motive: 主动发声动机分数（require_gate=True 时使用）
+
+        Returns:
+            {"ok": bool, "utterance_id": str, "reason_code": str | None}
+        """
+        resolved_text = str(text or "").strip()
+        if not resolved_text:
+            return {"ok": False, "reason_code": "SPEAK_EMPTY_TEXT"}
+
+        resolved_ts = now_ms()
+        resolved_utterance_id = str(utterance_id or f"utt_{resolved_ts}").strip()
+        resolved_emotion_tag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+        resolved_intensity = max(0.0, min(1.0, float(emotion_intensity or 0.5)))
+
+        # ── 门控检查（主动发声场景）──────────────────────────────────────
+        if require_gate:
+            gate_result = None
+            try:
+                from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
+                gate_result = get_initiative_governor_agent().evaluate_initiative(
+                    action="speak",
+                    motive=motive,
+                    session_id=str(session_id or ""),
+                    user_id="",
+                    context={"source": source, "utterance_id": resolved_utterance_id},
+                )
+                if str(gate_result.get("decision") or "").upper() in {"BLOCK", "DEFER"}:
+                    return {
+                        "ok": False,
+                        "utterance_id": resolved_utterance_id,
+                        "reason_code": gate_result.get("reason_code") or "SPEAK_GATE_BLOCKED",
+                        "gate": gate_result,
+                    }
+            except Exception:
+                pass
+
+        # ── 调用 TTS 链路 ────────────────────────────────────────────────
+        speak_ok = False
+        speak_reason: str | None = None
+        try:
+            from host_brain.channels.edge_rpc_client import post_speak  # noqa: PLC0415
+            import asyncio as _asyncio  # noqa: PLC0415
+
+            async def _do_speak() -> None:
+                await post_speak(
+                    text=resolved_text,
+                    utterance_id=resolved_utterance_id,
+                    request_id=str(request_id or ""),
+                    session_id=str(session_id or ""),
+                    emotion_tag=resolved_emotion_tag,
+                    emotion_intensity=resolved_intensity,
+                    lang_hint="ja",
+                )
+
+            try:
+                loop = _asyncio.get_running_loop()
+                loop.create_task(_do_speak())
+                speak_ok = True
+            except RuntimeError:
+                _asyncio.run(_do_speak())
+                speak_ok = True
+        except Exception as exc:
+            speak_reason = f"SPEAK_DISPATCH_FAILED:{str(exc)[:60]}"
+
+        # ── 写入 state_registry ──────────────────────────────────────────
+        speak_outcome = {
+            "utterance_id": resolved_utterance_id,
+            "text_preview": resolved_text[:80],
+            "emotion_tag": resolved_emotion_tag,
+            "emotion_intensity": resolved_intensity,
+            "ok": speak_ok,
+            "reason_code": speak_reason,
+            "source": source,
+            "request_id": str(request_id or ""),
+            "session_id": str(session_id or ""),
+            "ts_ms": resolved_ts,
+        }
+        self.state_registry.write(
+            namespace="motor_cortex_agent",
+            state={"last_speak_outcome": speak_outcome, "last_speak_ts_ms": resolved_ts},
+            writer="motor_cortex_agent",
+            merge=True,
+            reason="motor_speak_dispatch",
+            decision_trace_id=resolved_utterance_id,
+        )
+
+        # ── 发布 TribeEventBus 事件 ──────────────────────────────────────
+        emit_tribe_event(
+            event_type="MOTOR_SPEAK_DISPATCHED",
+            source_agent="motor_cortex_agent",
+            payload={
+                "utterance_id": resolved_utterance_id,
+                "text_preview": resolved_text[:80],
+                "emotion_tag": resolved_emotion_tag,
+                "emotion_intensity": resolved_intensity,
+                "ok": speak_ok,
+                "reason_code": speak_reason,
+                "source": source,
+                "ts_ms": resolved_ts,
+            },
+        )
+
+        if not speak_ok:
+            # 发声失败时联动 LimbicAgent 轻度挫败感
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                get_limbic_agent().drive_emotion_metabolism(
+                    valence=-0.06,
+                    arousal=0.04,
+                    dominance=-0.03,
+                    blend_weight=0.10,
+                    event_kind="motor_speak_failed",
+                    source="motor_cortex_agent",
+                )
+            except Exception:
+                pass
+
+        return {
+            "ok": speak_ok,
+            "utterance_id": resolved_utterance_id,
+            "reason_code": speak_reason,
+        }
+
     def export_runtime_state(self) -> dict[str, Any]:
         snap = self.state_registry.get_state("motor_cortex_agent") or {}
         state = dict(snap.get("state") or {})

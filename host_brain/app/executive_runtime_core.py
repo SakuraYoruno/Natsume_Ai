@@ -189,6 +189,11 @@ def _hard_rule_route(
     skill_registry: Any,
     allow_plan_detection: bool = True,
 ) -> _RouteSelection:
+    """两层路由判断。
+
+    第一层：RULE_ROUTE_MAP 规则映射（精确匹配，无歧义词）→ 命中则直接路由
+    第二层：intent_draft 提示 + 硬规则检测 → 未命中则兜底 chat
+    """
     route_hint = _normalize_text(intent_draft.get("route"), lower=True)
     target_hint = _normalize_text(intent_draft.get("target_id") or intent_draft.get("skill_id") or intent_draft.get("agent_id"))
     if route_hint in {"recent_turn", "task_progress", "chat"}:
@@ -211,160 +216,38 @@ def _hard_rule_route(
     if delegate_target:
         return _RouteSelection("delegate", delegate_target, "intent_draft:delegate_target")
 
+    # ── 第一层：RULE_ROUTE_MAP 规则映射（精确匹配，无歧义词）──
+    # 命中则直接路由，不进入 LLM 判断，也不进入 plan 路径
+    try:
+        from host_brain.agents.planning_agent import RULE_ROUTE_MAP  # noqa: PLC0415
+        msg_lower = _normalize_text(sanitized_message, lower=True)
+        for keyword, (rule_route_type, rule_target_id) in RULE_ROUTE_MAP.items():
+            if keyword.lower() in msg_lower:
+                # 验证 target_id 是否在 registry 中（skill 路由需要验证）
+                if rule_route_type == "skill":
+                    try:
+                        if skill_registry.get(rule_target_id) is not None:
+                            return _RouteSelection(rule_route_type, rule_target_id, f"rule_map:{keyword}")
+                        else:
+                            # skill 不在 registry 中（可能尚未初始化或已下线）
+                            # 降级到 delegate 路由而非 chat，保留意图语义
+                            _logger.debug(
+                                "_hard_rule_route: skill '%s' 不在 registry，降级到 delegate 路由 (keyword=%s)",
+                                rule_target_id, keyword,
+                            )
+                            return _RouteSelection("delegate", "intent_agent", f"rule_map:{keyword}:skill_fallback")
+                    except Exception:
+                        # registry 访问异常时同样降级到 delegate，不丢失意图
+                        return _RouteSelection("delegate", "intent_agent", f"rule_map:{keyword}:registry_error")
+                else:
+                    return _RouteSelection(rule_route_type, rule_target_id, f"rule_map:{keyword}")
+    except ImportError:
+        pass
+
     if allow_plan_detection and _looks_multi_step_request(sanitized_message, intent_draft):
         return _RouteSelection("plan", "skill_dag", "hard_rule:multi_step")
 
     return _RouteSelection("chat", "", "default:chat")
-
-
-def _build_default_plan_steps(
-    *,
-    user_message: str,
-    skill_registry: Any,
-) -> list[dict[str, Any]]:
-    segments = [segment.strip(" ，。；;") for segment in _ACTION_SPLIT_RE.split(_normalize_text(user_message)) if segment.strip(" ，。；;")]
-    if len(segments) <= 1:
-        return []
-    steps: list[dict[str, Any]] = []
-    for index, segment in enumerate(segments, start=1):
-        route = _hard_rule_route(
-            intent_draft={},
-            sanitized_message=segment,
-            skill_registry=skill_registry,
-            allow_plan_detection=False,
-        )
-        decision = build_skill_route_decision(
-            route_type=route.route_type if route.route_type in {"skill", "delegate"} else "delegate",
-            target_id=route.target_id if route.target_id else "intent_agent",
-            reason_code=route.reason_code or "plan:segment",
-            skill_registry=skill_registry,
-        )
-        steps.append(
-            {
-                "step_index": index,
-                "route": route.route_type if route.route_type in {"skill", "delegate"} else "delegate",
-                "target_id": route.target_id if route.target_id else "intent_agent",
-                "description": segment,
-                "task_description": segment,
-                "route_reason": route.reason_code or "plan:segment",
-                "allow_parallel": ("同时" in _normalize_text(user_message)) and index > 1,
-                "skill_family": decision.skill_family,
-                "risk_level": decision.risk_level,
-            }
-        )
-    return steps
-
-
-def _build_planning_agent_plan_steps(
-    *,
-    request_id: str,
-    user_message: str,
-    skill_registry: Any,
-) -> list[dict[str, Any]]:
-    from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
-
-    planning_agent = get_planning_agent()
-    if not planning_agent.needs_planning(user_message):
-        return []
-
-    available_skills: list[str] = []
-    try:
-        available_skills = [
-            str(meta.skill_name or "").strip()
-            for meta in list(skill_registry.all() or [])
-            if str(getattr(meta, "skill_name", "") or "").strip()
-        ]
-    except Exception:
-        available_skills = []
-
-    plan = planning_agent.create_plan(
-        task_id=f"runtime_plan::{request_id}",
-        request=user_message,
-        available_skills=available_skills or None,
-    )
-
-    raw_steps = list(getattr(plan, "steps", []) or [])
-    action_steps = [
-        step
-        for step in raw_steps
-        if _normalize_text(getattr(step, "action_type", ""), lower=True) == "act"
-        and _normalize_text(getattr(step, "description"))
-    ]
-    if len(action_steps) <= 1:
-        return []
-
-    source_to_index: dict[int, int] = {}
-    for index, step in enumerate(action_steps, start=1):
-        source_step_id = int(getattr(step, "step_id", index) or index)
-        source_to_index[source_step_id] = index
-
-    parallel_enabled = _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_PARALLEL_ENABLED", default=True)
-    converted_steps: list[dict[str, Any]] = []
-    for index, step in enumerate(action_steps, start=1):
-        description = _normalize_text(getattr(step, "description")) or f"step-{index}"
-        planned_skill = _normalize_text(getattr(step, "skill_name"))
-        route = "delegate"
-        target_id = "intent_agent"
-        route_reason = "planning_agent:act"
-
-        if planned_skill:
-            try:
-                if skill_registry.get(planned_skill) is not None:
-                    route = "skill"
-                    target_id = planned_skill
-                    route_reason = "planning_agent:skill"
-                elif planned_skill.endswith("_agent"):
-                    route = "delegate"
-                    target_id = planned_skill
-                    route_reason = "planning_agent:delegate"
-            except Exception:
-                route = "delegate"
-                target_id = "intent_agent"
-                route_reason = "planning_agent:fallback"
-
-        if target_id == "intent_agent":
-            hard_route = _hard_rule_route(
-                intent_draft={},
-                sanitized_message=description,
-                skill_registry=skill_registry,
-                allow_plan_detection=False,
-            )
-            if hard_route.route_type in {"skill", "delegate"}:
-                route = hard_route.route_type
-                target_id = hard_route.target_id or "intent_agent"
-                route_reason = f"planning_agent:{hard_route.reason_code}"
-
-        decision = build_skill_route_decision(
-            route_type=route,
-            target_id=target_id,
-            reason_code=route_reason,
-            skill_registry=skill_registry,
-        )
-        raw_dependencies = list(getattr(step, "depends_on", []) or [])
-        dependencies = [
-            int(source_to_index[dep])
-            for dep in raw_dependencies
-            if int(dep) in source_to_index and int(source_to_index[dep]) < index
-        ]
-        if not dependencies and index > 1 and not parallel_enabled:
-            dependencies = [index - 1]
-
-        converted_steps.append(
-            {
-                "step_index": index,
-                "route": route,
-                "target_id": target_id,
-                "description": description,
-                "task_description": description,
-                "route_reason": route_reason,
-                "allow_parallel": bool(parallel_enabled and not dependencies),
-                "skill_family": decision.skill_family,
-                "risk_level": decision.risk_level,
-                "dependencies": dependencies,
-                "capability_tags": list(getattr(decision, "capability_tags", ()) or ()),
-            }
-        )
-    return converted_steps
 
 
 def _should_force_complex_plan(
@@ -374,9 +257,14 @@ def _should_force_complex_plan(
     intent_draft: dict[str, Any],
     llm_route_used: bool,
 ) -> bool:
+    """第二层判断：是否强制进入 plan 路径（LangGraph 父子图）。
+
+    改进：
+    - skill/delegate 路由也需要通过 gap 检测保护，避免已能处理的请求被过度拆解
+    - needs_planning() 评分指标已收紧（见 planning_agent.py），误触发率降低
+    - RULE_ROUTE_MAP 命中的请求不会到达此函数（已在 _hard_rule_route 中直接路由）
+    """
     if route.route_type in {"plan", "recent_turn", "task_progress"}:
-        return False
-    if not _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", default=True):
         return False
     if bool(intent_draft.get("disable_auto_plan")):
         return False
@@ -393,16 +281,17 @@ def _should_force_complex_plan(
     if len(normalized_message) < min_chars:
         return False
 
-    if route.route_type == "chat":
-        gap = detect_capability_gap(
-            user_message=normalized_message,
-            route_type=route.route_type,
-            target_id=route.target_id,
-            reason_code=route.reason_code,
-            llm_route_used=llm_route_used,
-        )
-        if not gap.detected:
-            return False
+    # 所有路由类型（包括 skill/delegate）都需要通过 gap 检测
+    # 避免已有 skill/agent 能处理的请求被强制拆解为多步 DAG
+    gap = detect_capability_gap(
+        user_message=normalized_message,
+        route_type=route.route_type,
+        target_id=route.target_id,
+        reason_code=route.reason_code,
+        llm_route_used=llm_route_used,
+    )
+    if not gap.detected:
+        return False
 
     try:
         from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
@@ -419,18 +308,15 @@ def _maybe_build_multi_step_plan(
     intent_draft: dict[str, Any],
     skill_registry: Any,
 ) -> SkillDagPlan | None:
+    """构建多步骤 DAG 计划。
+
+    仅使用 intent_draft 中的显式步骤（由 LangGraph 父子图规划产生），
+    不再依赖旧的 _build_planning_agent_plan_steps / _build_default_plan_steps 兜底。
+    """
     explicit_steps = intent_draft.get("planned_steps")
     if not isinstance(explicit_steps, list):
         explicit_steps = intent_draft.get("steps")
     steps = [dict(item or {}) for item in explicit_steps] if isinstance(explicit_steps, list) else []
-    if not steps:
-        steps = _build_planning_agent_plan_steps(
-            request_id=request_id,
-            user_message=sanitized_message,
-            skill_registry=skill_registry,
-        )
-    if not steps:
-        steps = _build_default_plan_steps(user_message=sanitized_message, skill_registry=skill_registry)
     if len(steps) <= 1:
         return None
     return build_skill_dag_plan(plan_id=f"plan::{request_id}", steps=steps)
@@ -1020,10 +906,104 @@ async def _execute_skill_dag(
     recall_slot_text: dict[str, Any],
     render_target_lang: str,
 ) -> tuple[_ExecutionOutcome, dict[str, Any]]:
+    """执行 Skill DAG。
+
+    改进：
+    - 优先使用 LangGraph 父子图（run_plan_graph）执行，充分利用 Send API 并行
+    - 关键节点失败时中断后续批次，不继续执行依赖它的节点
+    - synthesize 结果由 plan_graph.synthesize_node 语义整合，不再是简单字符串拼接
+    """
+    # ── 优先走 LangGraph 父子图 ──
+    try:
+        from host_brain.app.plan_graph import run_plan_graph  # noqa: PLC0415
+        pg_result = await run_plan_graph(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=str((intent_draft or {}).get("user_message") or "").strip()
+                         or str(request_body).strip()[:500] if request_body else "",
+            intent_draft=dict(intent_draft or {}),
+            emotion_context=dict(emotion_context or {}),
+        )
+        plan_trace = list(pg_result.get("plan_trace") or [])
+        success = bool(pg_result.get("success"))
+        final_answer = str(pg_result.get("final_answer") or "").strip()
+        latency_ms = int(pg_result.get("latency_ms") or 0)
+
+        _logger.info(
+            "[%s] _execute_skill_dag: plan_graph 执行完成 success=%s latency=%dms",
+            request_id, success, latency_ms,
+        )
+
+        return (
+            _ExecutionOutcome(
+                route_type="plan",
+                target_id=plan.plan_id,
+                skill_family="executive",
+                success=success,
+                result_text=final_answer,
+                error_text="" if success else "PLAN_GRAPH_FAILED",
+                latency_ms=latency_ms,
+                payload={
+                    "plan": plan.as_dict(),
+                    "plan_trace": plan_trace,
+                    "sub_tasks": list(pg_result.get("sub_tasks") or []),
+                    "task_results": list(pg_result.get("task_results") or []),
+                },
+            ),
+            {
+                "plan_id": plan.plan_id,
+                "plan_trace": plan_trace,
+                "parallel_enabled": True,  # plan_graph 始终并行
+                "engine": "langgraph_plan_graph",
+            },
+        )
+    except Exception as pg_exc:
+        _logger.warning(
+            "[%s] plan_graph 执行失败，返回失败结果（不降级到 SkillDag，避免执行不同数据的计划）: %s",
+            request_id, pg_exc,
+        )
+        # P1-1 修复：plan_graph 失败时直接返回失败结果。
+        # 原降级路径使用 _maybe_build_multi_step_plan() 构建的 SkillDag（来自 intent_draft.planned_steps），
+        # 而 plan_graph 使用 PlanningAgent.create_plan() 实时拆解的子任务，两者是不同的计划数据。
+        # 降级实际上是在执行一个不同的计划，而非真正的"降级重试"，会产生不可预期的结果。
+        return (
+            _ExecutionOutcome(
+                route_type="plan",
+                target_id=plan.plan_id,
+                skill_family="executive",
+                success=False,
+                result_text="",
+                error_text=f"PLAN_GRAPH_EXCEPTION: {pg_exc!s}"[:200],
+                latency_ms=0,
+                payload={
+                    "plan": plan.as_dict(),
+                    "plan_trace": [{"node": "_execute_skill_dag", "status": "FAILED", "error": str(pg_exc)[:200]}],
+                },
+            ),
+            {
+                "plan_id": plan.plan_id,
+                "plan_trace": [],
+                "parallel_enabled": False,
+                "engine": "plan_graph_failed",
+            },
+        )
+
+    # ── 以下代码保留为历史参考，正常路径不会执行到此处 ──
+    # （plan_graph 成功时已在 try 块中 return，失败时已在 except 块中 return）
     node_results: dict[str, _ExecutionOutcome] = {}
     plan_trace: list[dict[str, Any]] = []
+    critical_failure = False  # 关键节点失败标志
 
     for batch in list(plan.execution_batches or []):
+        # 关键节点失败后中断，不继续执行后续批次
+        if critical_failure:
+            _logger.warning(
+                "[%s] _execute_skill_dag: 关键节点失败，中断后续批次执行",
+                request_id,
+            )
+            break
+
         batch_nodes = [node for node in plan.nodes if node.node_id in batch]
         coros = [
             _execute_plan_node(
@@ -1056,9 +1036,23 @@ async def _execute_skill_dag(
                     "error_text": outcome.error_text,
                 }
             )
+            # 检查是否为关键节点失败（有后续节点依赖它）
+            if not outcome.success:
+                has_dependents = any(
+                    node.node_id in (n.dependencies or ())
+                    for n in plan.nodes
+                    if n.node_id != node.node_id
+                )
+                if has_dependents:
+                    critical_failure = True
+                    _logger.warning(
+                        "[%s] 关键节点 %s 失败（有 %d 个后续节点依赖），标记中断",
+                        request_id, node.node_id,
+                        sum(1 for n in plan.nodes if node.node_id in (n.dependencies or ())),
+                    )
 
     ordered_results = [node_results[node.node_id] for node in plan.nodes if node.node_id in node_results]
-    success = bool(ordered_results) and all(item.success for item in ordered_results)
+    success = bool(ordered_results) and all(item.success for item in ordered_results) and not critical_failure
     summary_lines: list[str] = []
     for node in plan.nodes:
         outcome = node_results.get(node.node_id)
@@ -1085,6 +1079,7 @@ async def _execute_skill_dag(
             "plan_id": plan.plan_id,
             "plan_trace": plan_trace,
             "parallel_enabled": any(len(batch) > 1 for batch in list(plan.execution_batches or [])),
+            "engine": "skill_dag_fallback",
         },
     )
 
@@ -1190,11 +1185,194 @@ async def _executive_runtime_core_impl(
         dict(intent_draft or {}).get("llm_route_used")
         or dict(intent_draft or {}).get("route_source") == "llm"
     )
+
+    # ── Phase B：器官族状态并行激活注入路由决策 ──────────────────────────
+    # B-1: LimbicAgent motive_state → 情绪驱动路由调整
+    # B-2: ImmuneAgent 风险等级 → 高风险时强制 chat 快速回复
+    # B-3: ProprioceptionAgent 认知负荷 → 高负荷时强制 chat 快速回复
+    # B-4: PrefrontalAgent 漂移状态 → 漂移中强制 chat 路由
+    # 四路并行读取，减少串行等待（真实神经系统是并行激活的）
+    _organ_route_override: str | None = None
+    _organ_route_reason: str | None = None
+    _organ_route_meta: dict[str, Any] = {}
+
+    def _fetch_immune_state() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
+            return get_immune_agent().export_runtime_state()
+        except Exception:
+            return {}
+
+    def _fetch_proprioception_state() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
+            return get_proprioception_agent().export_runtime_state()
+        except Exception:
+            return {}
+
+    def _fetch_limbic_motive() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+            _limbic = get_limbic_agent()
+            if hasattr(_limbic, "compute_motive_state"):
+                return dict(_limbic.compute_motive_state() or {})
+        except Exception:
+            pass
+        return {}
+
+    def _fetch_prefrontal_state() -> dict[str, Any]:
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            return get_prefrontal_agent().export_runtime_state()
+        except Exception:
+            return {}
+
+    import asyncio as _asyncio  # noqa: PLC0415
+    import concurrent.futures as _futures  # noqa: PLC0415
+
+    _loop = _asyncio.get_event_loop()
+    with _futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="organ_fetch") as _pool:
+        _immune_fut = _loop.run_in_executor(_pool, _fetch_immune_state)
+        _prop_fut = _loop.run_in_executor(_pool, _fetch_proprioception_state)
+        _limbic_fut = _loop.run_in_executor(_pool, _fetch_limbic_motive)
+        _pf_fut = _loop.run_in_executor(_pool, _fetch_prefrontal_state)
+        _immune_state, _prop_state, _motive_state, _pf_state = await _asyncio.gather(
+            _immune_fut, _prop_fut, _limbic_fut, _pf_fut,
+            return_exceptions=True,
+        )
+
+    # 异常降级：gather 返回 Exception 时用空 dict 代替
+    if isinstance(_immune_state, Exception):
+        _immune_state = {}
+    if isinstance(_prop_state, Exception):
+        _prop_state = {}
+    if isinstance(_motive_state, Exception):
+        _motive_state = {}
+    if isinstance(_pf_state, Exception):
+        _pf_state = {}
+
+    # B-2: ImmuneAgent 风险门控（最高优先级，先判断）
+    _immune_risk = str(_immune_state.get("last_risk_level") or "none").strip().lower()
+    _immune_decision = str(_immune_state.get("last_decision") or "ALLOW").strip().upper()
+    _organ_route_meta["immune_risk_level"] = _immune_risk
+    _organ_route_meta["immune_last_decision"] = _immune_decision
+    if _immune_risk in {"critical", "high"} and _immune_decision in {"REPORT", "BLOCK"}:
+        _organ_route_override = "chat"
+        _organ_route_reason = f"immune_gate:risk={_immune_risk}:decision={_immune_decision}"
+
+    # B-3: ProprioceptionAgent 认知负荷
+    _cognitive_load = float(_prop_state.get("cognitive_load_index") or 0.0)
+    _interrupt_freq = float(_prop_state.get("interrupt_frequency") or 0.0)
+    _organ_route_meta["cognitive_load_index"] = round(_cognitive_load, 3)
+    _organ_route_meta["interrupt_frequency"] = round(_interrupt_freq, 3)
+    if _organ_route_override is None and _cognitive_load > 0.85:
+        _organ_route_override = "chat"
+        _organ_route_reason = f"proprioception:cognitive_load={_cognitive_load:.2f}"
+
+    # B-1: LimbicAgent motive_state
+    _organ_route_meta["motive_withdraw"] = round(float(_motive_state.get("withdraw", 0.0)), 3)
+    _organ_route_meta["motive_care"] = round(float(_motive_state.get("care", 0.0)), 3)
+    _organ_route_meta["motive_continuity"] = round(float(_motive_state.get("continuity", 0.0)), 3)
+    if _organ_route_override is None:
+        _withdraw = float(_motive_state.get("withdraw", 0.0))
+        if _withdraw > 0.80:
+            _organ_route_override = "chat"
+            _organ_route_reason = f"limbic:withdraw={_withdraw:.2f}"
+
+    # B-4: PrefrontalAgent 人格漂移状态
+    _drift_alert = str(_pf_state.get("alert_level") or "NONE").strip().upper()
+    _drift_score = float(_pf_state.get("drift_score") or 0.0)
+    _organ_route_meta["prefrontal_drift_alert"] = _drift_alert
+    _organ_route_meta["prefrontal_drift_score"] = round(_drift_score, 4)
+    if _organ_route_override is None and _drift_alert in {"HIGH", "CRITICAL"}:
+        _organ_route_override = "chat"
+        _organ_route_reason = f"prefrontal:drift_alert={_drift_alert}:score={_drift_score:.3f}"
+        _logger.info(
+            "[%s] prefrontal drift override: alert=%s score=%.3f → force chat",
+            request_id, _drift_alert, _drift_score,
+        )
+
+    # ── Phase D：PrefrontalAgent 意图规划（小模型，<500ms）────────────────
+    # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 chat_agent 使用
+    # 仅在 PREFRONTAL_PLAN_ENABLED=true 时启用（默认关，逐步灰度）
+    _prefrontal_plan: dict[str, Any] = {}
+    _prefrontal_plan_enabled = os.environ.get("PREFRONTAL_PLAN_ENABLED", "false").lower() == "true"
+    if _prefrontal_plan_enabled:
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+            _pf_agent = get_prefrontal_agent()
+            # 提取 emotion 信息
+            _emotion_tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL")
+            _valence = float((emotion_context or {}).get("valence") or 0.0)
+            _arousal = float((emotion_context or {}).get("arousal") or 0.0)
+            # 提取 bond 信息
+            _bond_stage = str((bond_summary or {}).get("stage") or "STRANGER")
+            _bond_intimacy = float((bond_summary or {}).get("intimacy_score") or 0.0)
+            # 提取 recall 摘要
+            _recall_summary = str((retrieval_summary or {}).get("summary") or "")
+            _prefrontal_plan = _pf_agent.plan_response(
+                user_message=sanitized_message,
+                motive_state=_motive_state,
+                recall_summary=_recall_summary,
+                bond_stage=_bond_stage,
+                bond_intimacy=_bond_intimacy,
+                immune_risk_level=_immune_risk,
+                drift_alert_level=_drift_alert,
+                emotion_tag=_emotion_tag,
+                valence=_valence,
+                arousal=_arousal,
+                session_id=session_id,
+                request_id=request_id,
+                timeout_ms=500,
+            )
+            _organ_route_meta["prefrontal_plan_action"] = _prefrontal_plan.get("action")
+            _organ_route_meta["prefrontal_plan_source"] = _prefrontal_plan.get("source")
+            _organ_route_meta["prefrontal_plan_latency_ms"] = _prefrontal_plan.get("latency_ms")
+            # plan_response 的 action 覆盖路由（仅当 organ_route_override 未设置时）
+            _plan_action = str(_prefrontal_plan.get("action") or "").strip().lower()
+            if _organ_route_override is None and _plan_action in {"skill", "delegate"}:
+                _plan_target = str(_prefrontal_plan.get("target") or "").strip()
+                if _plan_target:
+                    _organ_route_override = _plan_action
+                    _organ_route_reason = f"prefrontal_plan:{_plan_action}:{_plan_target}"
+                    _logger.info(
+                        "[%s] prefrontal_plan override: action=%s target=%s",
+                        request_id, _plan_action, _plan_target,
+                    )
+            # 将 prefrontal_task 注入 intent_draft，供 chat_agent 作为语言化目标
+            if isinstance(intent_draft, dict):
+                intent_draft = dict(intent_draft)
+            else:
+                intent_draft = {}
+            if _prefrontal_plan.get("task"):
+                intent_draft["prefrontal_task"] = _prefrontal_plan.get("task")
+            if _prefrontal_plan.get("tone_hint"):
+                intent_draft["prefrontal_tone_hint"] = _prefrontal_plan.get("tone_hint")
+        except Exception as _pf_plan_exc:
+            _logger.debug("[%s] prefrontal plan_response 跳过: %s", request_id, _pf_plan_exc)
+
     route = _hard_rule_route(
         intent_draft=dict(intent_draft or {}),
         sanitized_message=sanitized_message,
         skill_registry=skill_registry,
     )
+
+    # 应用器官族路由覆盖（仅覆盖 skill/delegate/plan，不覆盖 recent_turn/task_progress）
+    if _organ_route_override is not None and route.route_type not in {"recent_turn", "task_progress"}:
+        _logger.info(
+            "[%s] organ_route_override: %s → %s (reason=%s)",
+            request_id, route.route_type, _organ_route_override, _organ_route_reason,
+        )
+        route = _RouteSelection(_organ_route_override, "", _organ_route_reason or "organ_override")
+
+    # B-4: 器官族路由影响写入 trace_stage_meta（可观测性）
+    if _organ_route_meta:
+        _organ_route_meta["organ_route_override"] = _organ_route_override
+        _organ_route_meta["organ_route_reason"] = _organ_route_reason
+        if isinstance(intent_draft, dict):
+            intent_draft = dict(intent_draft)
+            intent_draft.setdefault("_organ_route_meta", _organ_route_meta)
+
     if _should_force_complex_plan(
         route=route,
         user_message=sanitized_message,
@@ -1273,15 +1451,26 @@ async def _executive_runtime_core_impl(
 
     runtime_capability_payload = None
     if route.route_type == "chat":
-        runtime_capability_payload = _maybe_synthesize_runtime_capability(
-            request_id=request_id,
-            session_id=session_id,
-            user_message=sanitized_message,
-            route_type=route.route_type,
-            target_id=route.target_id,
-            reason_code=route.reason_code,
-            llm_route_used=llm_route_used,
+        # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
+        _skip_capability_synthesis = (
+            _prefrontal_plan_enabled
+            and bool(_prefrontal_plan.get("action"))
         )
+        if not _skip_capability_synthesis:
+            runtime_capability_payload = _maybe_synthesize_runtime_capability(
+                request_id=request_id,
+                session_id=session_id,
+                user_message=sanitized_message,
+                route_type=route.route_type,
+                target_id=route.target_id,
+                reason_code=route.reason_code,
+                llm_route_used=llm_route_used,
+            )
+        else:
+            _logger.debug(
+                "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
+                request_id, _prefrontal_plan.get("action"),
+            )
         if runtime_capability_payload is not None:
             route = _RouteSelection(
                 route_type=_normalize_text(runtime_capability_payload.get("executor_route"), lower=True) or "delegate",
@@ -1390,6 +1579,10 @@ async def _executive_runtime_core_impl(
             "skill_route_reason": route.reason_code,
             "plan_id": plan.plan_id,
             "parallel_enabled": bool(plan_meta.get("parallel_enabled")),
+            # Phase B-4: 器官族路由影响可观测性字段
+            "organ_route_override": _organ_route_override,
+            "organ_route_reason": _organ_route_reason,
+            "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
         }
         if plan_outcome.success:
             runtime_task_registry.mark_completed(
@@ -1553,6 +1746,10 @@ async def _executive_runtime_core_impl(
         "skill_family": route_decision.skill_family or "general",
         "skill_id": route_decision.skill_id,
         "skill_route_reason": route.reason_code,
+        # Phase B-4: 器官族路由影响可观测性字段
+        "organ_route_override": _organ_route_override,
+        "organ_route_reason": _organ_route_reason,
+        "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
     }
     async for event in _stream_chat_with_context(
         route_reason=route.reason_code,
@@ -1584,7 +1781,6 @@ async def _executive_runtime_core_impl(
 __all__ = [
     "_hard_rule_route",
     "_maybe_build_multi_step_plan",
-    "_build_planning_agent_plan_steps",
     "_should_force_complex_plan",
     "_build_task_progress_sub_context",
     "_dispatch_to_sub_agent",

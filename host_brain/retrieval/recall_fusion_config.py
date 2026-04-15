@@ -39,10 +39,8 @@ SUPPORTED_RECALL_STORE_IDS: frozenset[str] = frozenset({
     "sqlite_ledger",
     "neo4j_bond",
     "episodic_vector",
-    "style_canon",
     "world_canon",
     "artifact_vault",
-    "persona_utterance",
 })
 
 

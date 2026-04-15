@@ -234,8 +234,67 @@ class GlymphaticAgent:
             now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
         )
 
+    def tick_recovery_window(
+        self,
+        *,
+        source: str = "scheduler",
+    ) -> dict[str, Any]:
+        """D8: 恢复窗口持续评估 tick——每 30s 由 NatsumeScheduler 驱动一次。
 
-_GLYMPHATIC_AGENT: GlymphaticAgent | None = None
+        轻量版的 run_recovery_cycle()，不触发完整的记忆巩固，
+        只评估当前是否处于恢复窗口，并更新 state_registry 中的恢复状态。
+        在夜间/黄昏相位持续运行，确保恢复窗口状态实时更新。
+
+        Returns:
+            {"in_recovery_window": bool, "phase": str, "sleep_pressure": float}
+        """
+        import logging as _logging
+        _log = _logging.getLogger("Natsume.tribe.glymphatic_agent")
+        try:
+            vital_signs = self.state_registry.aggregate_vital_signs()
+            phase = str(vital_signs.get("circadian_phase") or "day").strip().lower()
+            sleep_pressure = _clamp(float(vital_signs.get("sleep_pressure") or 0.2))
+
+            in_recovery = phase in {"night", "dusk"} or sleep_pressure >= 0.62
+
+            # 更新 state_registry 中的恢复窗口状态
+            prev = self.state_registry.get_state("glymphatic_agent") or {}
+            prev_state = dict(prev.get("state") or {})
+            prev_state.update({
+                "recovery_window_active": in_recovery,
+                "last_tick_phase": phase,
+                "last_tick_sleep_pressure": round(sleep_pressure, 3),
+                "last_tick_source": source,
+                "last_tick_ts_ms": now_ms(),
+            })
+            self.state_registry.set_state("glymphatic_agent", prev_state, writer="glymphatic_agent")
+
+            # 如果进入恢复窗口，通知 ANSAgent 进入恢复模式
+            if in_recovery:
+                try:
+                    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
+                    _ans = get_ans_agent()
+                    if hasattr(_ans, "set_recovery_mode") and not _ans._recovery_mode:
+                        _ans.set_recovery_mode(enabled=True, source=f"glymphatic_tick:{phase}")
+                except Exception:
+                    pass
+
+            _log.debug(
+                "GlymphaticAgent.tick_recovery_window: phase=%s sleep_pressure=%.2f in_recovery=%s",
+                phase, sleep_pressure, in_recovery,
+            )
+            return {
+                "in_recovery_window": in_recovery,
+                "phase": phase,
+                "sleep_pressure": round(sleep_pressure, 3),
+                "ticked": True,
+            }
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.glymphatic_agent").warning(
+                "GlymphaticAgent.tick_recovery_window 失败（降级）: %s", exc
+            )
+            return {"ticked": False, "error": str(exc)}
 
 
 def get_glymphatic_agent() -> GlymphaticAgent:

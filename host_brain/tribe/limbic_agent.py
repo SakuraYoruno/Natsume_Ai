@@ -1727,8 +1727,135 @@ class LimbicAgent:
             )
             return {"metabolism": {}, "timeline": {}, "error": str(exc)}
 
+    # ── D4：情绪衰减连续动态系统 ─────────────────────────────────────────────
 
-_LIMBIC_AGENT: LimbicAgent | None = None
+    def tick_emotion_decay(
+        self,
+        *,
+        source: str = "scheduler",
+        circadian_phase: str = "day",
+        sleep_pressure: float = 0.2,
+    ) -> dict[str, Any]:
+        """D4: 情绪衰减连续 tick——每 30s 由 NatsumeScheduler 驱动一次。
+
+        模拟真实情绪的连续动态特性：
+        - 惯性（Inertia）：情绪不会瞬间归零，有时间常数
+        - 峰值衰减（Peak Decay）：强烈情绪（|valence|>0.5）衰减更快
+        - 昼夜调制（Circadian Modulation）：夜间衰减更慢（睡眠巩固情绪记忆）
+        - 睡眠压力调制：高睡眠压力时情绪趋向中性（疲惫抹平情绪）
+
+        Args:
+            source: 调用来源标识
+            circadian_phase: 当前昼夜相位（day/dusk/night/dawn）
+            sleep_pressure: 当前睡眠压力 [0.0, 1.0]
+
+        Returns:
+            {"valence": float, "arousal": float, "emotion_tag": str, "decayed": bool}
+        """
+        import logging as _logging
+        _log = _logging.getLogger("Natsume.tribe.limbic_agent")
+        try:
+            from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+
+            # 读取当前持久化情绪状态
+            if self._emotion_persistence is None:
+                return {"decayed": False, "reason": "no_persistence"}
+            restored = self._emotion_persistence.restore(user_id="user_1")
+            cur_valence = float(getattr(restored, "valence", 0.0))
+            cur_arousal = float(getattr(restored, "arousal", 0.3))
+            cur_dominance = float(getattr(restored, "dominance", 0.0))
+
+            # 如果情绪已经接近中性，跳过衰减（避免无意义的计算）
+            if abs(cur_valence) < 0.05 and abs(cur_arousal - 0.3) < 0.05:
+                return {"decayed": False, "reason": "already_neutral",
+                        "valence": cur_valence, "arousal": cur_arousal}
+
+            # ── 昼夜调制衰减速率 ──────────────────────────────────────────
+            # 夜间衰减更慢（睡眠期间情绪记忆巩固），日间衰减正常
+            phase = str(circadian_phase or "day").strip().lower()
+            base_decay = {
+                "day":   0.04,   # 日间：正常衰减
+                "dusk":  0.03,   # 黄昏：略慢
+                "night": 0.015,  # 夜间：最慢（睡眠巩固）
+                "dawn":  0.025,  # 黎明：恢复中
+            }.get(phase, 0.04)
+
+            # ── 峰值衰减加速 ──────────────────────────────────────────────
+            # 强烈情绪（|valence|>0.5）衰减更快，模拟情绪峰值后的自然回落
+            peak_factor = 1.0
+            if abs(cur_valence) > 0.5:
+                peak_factor = 1.0 + (abs(cur_valence) - 0.5) * 0.8  # 最高 1.4x
+
+            # ── 睡眠压力调制 ──────────────────────────────────────────────
+            # 高睡眠压力时情绪趋向中性（疲惫抹平情绪波动）
+            sp = max(0.0, min(1.0, float(sleep_pressure or 0.2)))
+            sleep_factor = 1.0 + sp * 0.5  # 睡眠压力 1.0 时衰减速率 1.5x
+
+            effective_decay = min(0.15, base_decay * peak_factor * sleep_factor)
+
+            # ── 执行衰减 ──────────────────────────────────────────────────
+            vec = EmotionVector(
+                valence=cur_valence,
+                arousal=cur_arousal,
+                dominance=cur_dominance,
+                ts_ms=now_ms(),
+            )
+            decayed_vec = vec.decay(rate=effective_decay)
+
+            # 将衰减后的情绪写回持久化存储
+            try:
+                self._emotion_persistence.persist(
+                    user_id="user_1",
+                    valence=decayed_vec.valence,
+                    arousal=decayed_vec.arousal,
+                    dominance=decayed_vec.dominance,
+                )
+            except Exception:
+                pass
+
+            emotion_tag = decayed_vec.to_emotion_tag()
+            mood_state = decayed_vec.to_mood_state()
+
+            # 更新 state_registry
+            self._touch_state(
+                key="last_emotion_decay_tick",
+                value={
+                    "valence": round(decayed_vec.valence, 4),
+                    "arousal": round(decayed_vec.arousal, 4),
+                    "dominance": round(decayed_vec.dominance, 4),
+                    "emotion_tag": emotion_tag,
+                    "mood_state": mood_state,
+                    "effective_decay_rate": round(effective_decay, 4),
+                    "circadian_phase": phase,
+                    "sleep_pressure": round(sp, 3),
+                    "source": source,
+                },
+            )
+
+            _log.debug(
+                "LimbicAgent.tick_emotion_decay: v=%.3f→%.3f a=%.3f→%.3f "
+                "decay=%.4f phase=%s tag=%s",
+                cur_valence, decayed_vec.valence,
+                cur_arousal, decayed_vec.arousal,
+                effective_decay, phase, emotion_tag,
+            )
+            return {
+                "decayed": True,
+                "valence": round(decayed_vec.valence, 4),
+                "arousal": round(decayed_vec.arousal, 4),
+                "dominance": round(decayed_vec.dominance, 4),
+                "emotion_tag": emotion_tag,
+                "mood_state": mood_state,
+                "effective_decay_rate": round(effective_decay, 4),
+                "circadian_phase": phase,
+            }
+        except Exception as exc:
+            import logging  # noqa: PLC0415
+            logging.getLogger("Natsume.tribe.limbic_agent").warning(
+                "LimbicAgent.tick_emotion_decay 失败（降级）: %s", exc
+            )
+            return {"decayed": False, "error": str(exc)}
 
 
 def get_limbic_agent() -> LimbicAgent:

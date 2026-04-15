@@ -296,6 +296,200 @@ class PrefrontalAgent:
         )
         return dict(aligned or {})
 
+    def plan_response(
+        self,
+        *,
+        user_message: str,
+        motive_state: Mapping[str, Any] | None = None,
+        recall_summary: str = "",
+        bond_stage: str = "STRANGER",
+        bond_intimacy: float = 0.0,
+        immune_risk_level: str = "none",
+        drift_alert_level: str = "NONE",
+        emotion_tag: str = "NEUTRAL",
+        valence: float = 0.0,
+        arousal: float = 0.0,
+        session_id: str = "",
+        request_id: str = "",
+        timeout_ms: int = 500,
+    ) -> dict[str, Any]:
+        """Phase D: 前额叶意图规划——用专用小模型实时决策"我要做什么"。
+
+        这是 LLM 从"总控制器"降级为"语言生成器"的关键一步。
+        PrefrontalAgent 基于器官族完整状态产出意图计划，
+        chat_agent 退化为纯粹的语言生成器，只负责把 task 转成流畅自然语言。
+
+        Args:
+            user_message: 用户消息原文
+            motive_state: LimbicAgent.compute_motive_state() 输出
+            recall_summary: HippocampusAgent 记忆检索摘要
+            bond_stage: 当前关系阶段
+            bond_intimacy: 亲密度分数 0~1
+            immune_risk_level: ImmuneAgent 风险等级
+            drift_alert_level: 人格漂移告警等级
+            emotion_tag: 当前情绪标签
+            valence: 情感效价 -1~1
+            arousal: 情感唤醒度 0~1
+            session_id: 会话 ID
+            request_id: 请求 ID
+            timeout_ms: LLM 调用超时（毫秒），默认 500ms
+
+        Returns:
+            dict: {
+                "action": "speak" | "skill" | "delegate" | "wait",
+                "target": str,          # skill/agent 名称，speak 时为空
+                "task": str,            # 任务描述，注入 chat_agent 作为语言化目标
+                "tone_hint": str,       # 语气提示（warm/direct/gentle/playful）
+                "urgency": float,       # 紧迫度 0~1
+                "source": str,          # "prefrontal_llm" | "prefrontal_rule"
+                "latency_ms": int,
+            }
+        """
+        import time as _time  # noqa: PLC0415
+        _t0 = _time.monotonic()
+
+        # ── 规则快速路径（<1ms，无 LLM 调用）────────────────────────────
+        # 1. 免疫高风险：强制 speak，不执行任何 skill
+        if immune_risk_level in {"high", "critical"}:
+            return {
+                "action": "speak",
+                "target": "",
+                "task": "以温和方式回应，不执行任何外部操作",
+                "tone_hint": "gentle",
+                "urgency": 0.3,
+                "source": "prefrontal_rule",
+                "latency_ms": int((_time.monotonic() - _t0) * 1000),
+            }
+        # 2. 严重漂移：强制 speak，避免执行复杂任务加重漂移
+        if drift_alert_level in {"HIGH", "CRITICAL"}:
+            return {
+                "action": "speak",
+                "target": "",
+                "task": "以真实自我回应，不执行复杂任务，优先情感连接",
+                "tone_hint": "warm",
+                "urgency": 0.4,
+                "source": "prefrontal_rule",
+                "latency_ms": int((_time.monotonic() - _t0) * 1000),
+            }
+        # 3. 极度退缩（withdraw > 0.85）：等待或极简回应
+        _withdraw = float((motive_state or {}).get("withdraw", 0.0))
+        if _withdraw > 0.85:
+            return {
+                "action": "speak",
+                "target": "",
+                "task": "简短回应，表达当前状态，不强迫自己展开话题",
+                "tone_hint": "gentle",
+                "urgency": 0.2,
+                "source": "prefrontal_rule",
+                "latency_ms": int((_time.monotonic() - _t0) * 1000),
+            }
+
+        # ── LLM 推理路径（小模型，<500ms）────────────────────────────────
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.llm.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            # 从 executive.yaml 加载 prefrontal_plan prompt 模板
+            _tpl = resolve_prompt_template_json("prefrontal_agent.plan_response.prompt") or {}
+            _system_tpl = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+
+            if not _system_tpl or not _user_tpl:
+                raise ValueError("prefrontal_plan prompt 模板未配置")
+
+            # 构建 user prompt
+            _motive = dict(motive_state or {})
+            _care = round(float(_motive.get("care", 0.0)), 3)
+            _continuity = round(float(_motive.get("continuity", 0.0)), 3)
+            _user_prompt = _user_tpl.format(
+                user_message=str(user_message or "")[:200],
+                emotion_tag=str(emotion_tag or "NEUTRAL"),
+                valence=round(float(valence), 3),
+                arousal=round(float(arousal), 3),
+                bond_stage=str(bond_stage or "STRANGER"),
+                bond_intimacy=round(float(bond_intimacy), 3),
+                motive_care=_care,
+                motive_continuity=_continuity,
+                motive_withdraw=round(_withdraw, 3),
+                recall_summary=str(recall_summary or "")[:300],
+                immune_risk=str(immune_risk_level or "none"),
+                drift_alert=str(drift_alert_level or "NONE"),
+            )
+
+            # 调用专用小模型（Flash，低延迟）
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=int(timeout_ms),
+                agent_role="prefrontal_planner",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_tpl,
+                user_prompt=_user_prompt,
+                max_tokens=128,
+                temperature=0.1,
+            )
+            _raw_text = str(_raw or "").strip()
+
+            # 解析 JSON 输出
+            import json as _json  # noqa: PLC0415
+            import re as _re  # noqa: PLC0415
+            _json_match = _re.search(r"\{.*\}", _raw_text, _re.DOTALL)
+            if _json_match:
+                _plan = _json.loads(_json_match.group())
+            else:
+                _plan = {}
+
+            _action = str(_plan.get("action") or "speak").strip().lower()
+            if _action not in {"speak", "skill", "delegate", "wait"}:
+                _action = "speak"
+
+            _result = {
+                "action": _action,
+                "target": str(_plan.get("target") or "").strip(),
+                "task": str(_plan.get("task") or "").strip(),
+                "tone_hint": str(_plan.get("tone_hint") or "balanced").strip(),
+                "urgency": max(0.0, min(1.0, float(_plan.get("urgency") or 0.5))),
+                "source": "prefrontal_llm",
+                "latency_ms": int((_time.monotonic() - _t0) * 1000),
+            }
+
+            # 写入 state_registry 供可观测性
+            self.state_registry.write(
+                namespace="prefrontal_agent",
+                state={"last_plan_response": {
+                    **_result,
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "ts_ms": now_ms(),
+                }},
+                writer="prefrontal_agent",
+                merge=True,
+                reason="plan_response",
+            )
+            _logger.info(
+                "PrefrontalAgent.plan_response: action=%s tone=%s urgency=%.2f latency=%dms",
+                _result["action"], _result["tone_hint"], _result["urgency"], _result["latency_ms"],
+            )
+            return _result
+
+        except Exception as exc:
+            _logger.warning(
+                "PrefrontalAgent.plan_response LLM 调用失败（降级到规则）: %s", exc,
+            )
+            # 降级：基于 motive_state 做简单规则决策
+            _care = float((motive_state or {}).get("care", 0.5))
+            _tone = "warm" if _care > 0.6 else "balanced"
+            return {
+                "action": "speak",
+                "target": "",
+                "task": "",
+                "tone_hint": _tone,
+                "urgency": 0.5,
+                "source": "prefrontal_rule_fallback",
+                "latency_ms": int((_time.monotonic() - _t0) * 1000),
+            }
+
     def run_evolution_cycle(self, *, system_intent: dict[str, Any], logger: Any | None = None) -> dict[str, Any]:
         runtime_logger = logger or _logger
         try:
