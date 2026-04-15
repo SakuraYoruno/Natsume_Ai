@@ -2,6 +2,10 @@
 
 职责：对复杂请求做 ReAct 式任务分解——Reasoning + Acting 交替。
 设计：先规划步骤，再逐步执行，中间可追问用户。
+
+第一层判断：RULE_ROUTE_MAP 规则映射表（精确匹配，无歧义词）
+第二层判断：LLM 节点（由 executive_runtime_core 调用）
+规划执行：LangGraph 父子图（plan_graph.py）
 """
 
 from __future__ import annotations
@@ -14,7 +18,6 @@ from typing import Any, Callable
 
 _logger = logging.getLogger("Natsume.agents.planning")
 
-
 # ---------------------------------------------------------------------------
 # 步骤状态
 # ---------------------------------------------------------------------------
@@ -25,7 +28,6 @@ class StepStatus(str, Enum):
     FAILED = "failed"
     NEEDS_INPUT = "needs_input"    # 需要用户补充信息
     SKIPPED = "skipped"
-
 
 # ---------------------------------------------------------------------------
 # 数据类
@@ -52,7 +54,6 @@ class PlanStep:
             "has_result": bool(self.result),
         }
 
-
 @dataclass
 class TaskPlan:
     """完整的任务计划。"""
@@ -75,7 +76,6 @@ class TaskPlan:
             ),
             "steps": [s.as_dict() for s in self.steps],
         }
-
 
 @dataclass
 class PlanExecutionResult:
@@ -104,20 +104,67 @@ class PlanExecutionResult:
             "executed_skills": list(self.executed_skills[:8]),
         }
 
+# ---------------------------------------------------------------------------
+# 第一层：规则映射表（精确匹配，无歧义词）
+# 只收录语义明确的多步/复杂任务指示词，不收录"帮我"/"需要"等泛化词
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# 任务复杂度判定
-# ---------------------------------------------------------------------------
+# 明确的多步连接词（用于 _decompose_request 切分）
+# 注意：不包含"和"——"和"在"A和B的差异"中是连接词而非分隔符，会导致误切
+_MULTI_STEP_SEPARATORS: tuple[str, ...] = (
+    "，然后", "，再", "，并且", "，同时", "，还要", "，另外",
+    "；然后", "；再", "；并且", "；同时",
+    "接着", "之后再", "完成后",
+)
+
+# 明确的复杂任务指示词（语义无歧义）
 _COMPLEX_INDICATORS = frozenset({
+    # 规划类
     "计划", "安排", "规划", "步骤", "流程",
-    "先…再…", "首先", "然后", "接着", "最后",
-    "帮我", "需要", "想要", "要求",
-    "对比", "比较", "分析", "评估", "调研",
+    # 顺序类（明确多步）
+    "首先", "然后", "接着", "最后", "第一步", "第二步",
+    # 分析对比类
+    "对比", "比较", "分析", "评估", "调研", "总结并",
+    # 明确多任务
+    "同时做", "并行", "一边.*一边",
 })
 
+# 明确的多部分连接词（不含"和"）
 _MULTI_PART_PATTERN_WORDS = frozenset({
-    "和", "并且", "同时", "另外", "还有", "以及",
+    "并且", "同时", "另外", "还有", "以及", "还需要", "还要",
 })
+
+# ---------------------------------------------------------------------------
+# 第一层规则路由映射表（供 executive_runtime_core 直接使用）
+# 格式：{关键词: (route_type, target_id_hint)}
+# 命中则直接路由，无需进入 LLM 判断
+# ---------------------------------------------------------------------------
+RULE_ROUTE_MAP: dict[str, tuple[str, str]] = {
+    # 情绪/心情 → emotion_agent
+    "情绪": ("delegate", "emotion_agent"),
+    "心情": ("delegate", "emotion_agent"),
+    "感受": ("delegate", "emotion_agent"),
+    # 关系/亲密 → bond_query skill
+    "关系阶段": ("skill", "bond_query"),
+    "亲密度": ("skill", "bond_query"),
+    # 记忆/回忆 → memory_recall skill
+    "回忆一下": ("skill", "memory_recall"),
+    "记得吗": ("skill", "memory_recall"),
+    # 状态/运行 → read_only_status skill
+    "运行状态": ("skill", "read_only_status"),
+    "系统状态": ("skill", "read_only_status"),
+    # 总结/摘要 → session_summary skill
+    "总结一下": ("skill", "session_summary"),
+    "回顾一下": ("skill", "session_summary"),
+    # 翻译 → translate_agent
+    "翻译成": ("delegate", "translate_agent"),
+    "translate to": ("delegate", "translate_agent"),
+    # 代码 → code_agent
+    "帮我写代码": ("delegate", "code_agent"),
+    "帮我写一段": ("delegate", "code_agent"),
+    "debug": ("delegate", "code_agent"),
+    "报错": ("delegate", "code_agent"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -126,20 +173,14 @@ _MULTI_PART_PATTERN_WORDS = frozenset({
 class PlanningAgent:
     """ReAct 式任务规划代理。
 
-    用法::
+    判断流程（两层）：
+    1. 第一层：RULE_ROUTE_MAP 精确规则匹配 → 命中则直接路由（由 executive_runtime_core 调用）
+    2. 第二层：needs_planning() 评分 + LLM 节点判断 → 判定为多步则进入 LangGraph 父子图
 
-        agent = PlanningAgent()
-
-        # 1. 判断是否需要规划
-        if agent.needs_planning("帮我计划周末行程，看电影再吃饭"):
-            # 2. 生成计划
-            plan = agent.create_plan(
-                task_id="task_001",
-                request="帮我计划周末行程，看电影再吃饭",
-            )
-            # 3. 逐步执行（或交给 Supervisor）
-            for step in plan.steps:
-                print(f"Step {step.step_id}: {step.description}")
+    规划执行：
+    - 使用 LangGraph 父子图（app/plan_graph.py）
+    - 父图：plan_decompose_node（LLM 拆解）→ Send API 并行子图 → synthesize_node
+    - 子图：每个子任务独立的 task_exec_subgraph
     """
 
     def __init__(
@@ -151,8 +192,25 @@ class PlanningAgent:
         self._max_steps = int(max_steps)
         self._complexity_threshold = int(complexity_threshold)
 
+    @staticmethod
+    def rule_route(request: str) -> tuple[str, str] | None:
+        """第一层：规则映射表快速判断。
+
+        Returns:
+            (route_type, target_id) 若命中规则；None 若未命中（进入第二层 LLM 判断）
+        """
+        text = str(request or "").strip().lower()
+        for keyword, route_info in RULE_ROUTE_MAP.items():
+            if keyword.lower() in text:
+                return route_info
+        return None
+
     def needs_planning(self, request: str) -> bool:
-        """判断请求是否需要多步规划（vs 单轮直接回复）。"""
+        """第二层：判断请求是否需要多步规划（vs 单轮直接回复）。
+
+        注意：此方法只在第一层规则未命中时调用。
+        评分指标已收紧，移除了"帮我"/"需要"等泛化词，避免误触发。
+        """
         text = str(request or "").strip()
         if len(text) < 15:
             return False
@@ -160,24 +218,26 @@ class PlanningAgent:
         score = 0
         text_lower = text.lower()
 
-        # 复杂度指标
+        # 明确的复杂度指标（无歧义词）
         for indicator in _COMPLEX_INDICATORS:
             if indicator in text_lower:
                 score += 1
 
-        # 多部分请求
+        # 明确的多部分连接词（不含"和"）
         for word in _MULTI_PART_PATTERN_WORDS:
             if word in text_lower:
                 score += 1
 
-        # 长度
-        if len(text) > 80:
+        # 长度（适当提高阈值，减少误触发）
+        if len(text) > 120:
             score += 1
 
-        # 多个问号/句号
+        # 多个问号（真正的多问题请求）
         if text.count("？") + text.count("?") > 1:
             score += 1
-        if text.count("。") + text.count(".") > 2:
+
+        # 多个句号（多个独立句子）
+        if text.count("。") + text.count(".") > 3:
             score += 1
 
         return score >= self._complexity_threshold
@@ -189,7 +249,13 @@ class PlanningAgent:
         request: str,
         available_skills: list[str] | None = None,
     ) -> TaskPlan:
-        """将复杂请求分解为执行步骤。"""
+        """将复杂请求分解为执行步骤。
+
+        步骤结构：
+        1. reason（固定）：理解意图
+        2~N. act：每个子任务
+        N+1. synthesize（固定）：综合所有结果
+        """
         text = str(request or "").strip()
         steps: list[PlanStep] = []
 
@@ -224,16 +290,18 @@ class PlanningAgent:
                     description=sub_task["description"],
                     action_type="act",
                     skill_name=selected_skill or sub_task.get("skill"),
-                    depends_on=[step_id - 1] if step_id > 2 else [1],
+                    # 第一个 act 步骤依赖 reason，后续 act 步骤不强制串行（允许并行）
+                    depends_on=[1] if step_id == 2 else [],
                 ))
 
-        # 4. 综合阶段（Synthesize）
-        steps.append(PlanStep(
+        # 4. 综合阶段（Synthesize）—— 保留，不再被过滤掉
+        synthesize_step = PlanStep(
             step_id=len(steps) + 1,
-            description="综合所有结果，生成最终回复",
+            description="综合所有执行结果，生成完整的最终回复",
             action_type="synthesize",
-            depends_on=[s.step_id for s in steps[1:]],
-        ))
+            depends_on=[s.step_id for s in steps if s.action_type == "act"],
+        )
+        steps.append(synthesize_step)
 
         plan = TaskPlan(
             task_id=task_id,
@@ -244,8 +312,10 @@ class PlanningAgent:
         )
 
         _logger.info(
-            "PlanningAgent: created plan %s with %d steps for: %s",
-            task_id, len(steps), text[:60],
+            "PlanningAgent: created plan %s with %d steps (act=%d) for: %s",
+            task_id, len(steps),
+            sum(1 for s in steps if s.action_type == "act"),
+            text[:60],
         )
         return plan
 
@@ -281,128 +351,39 @@ class PlanningAgent:
         plan.status = "completed"
         return None
 
-    def execute_plan(
-        self,
-        plan: TaskPlan,
-        *,
-        skill_runners: dict[str, Callable[..., Any]] | None = None,
-        base_context: dict[str, Any] | None = None,
-    ) -> PlanExecutionResult:
-        """Execute a plan with safe skill runners."""
-        t0 = time.monotonic()
-        runners = dict(skill_runners or {})
-        ctx = dict(base_context or {})
-        step_results: list[dict[str, Any]] = []
-        executed_skills: list[str] = []
-        completed = 0
-
-        for step in plan.steps:
-            unmet = [
-                dep for dep in step.depends_on
-                if 0 < dep <= len(plan.steps) and plan.steps[dep - 1].status not in {StepStatus.COMPLETED, StepStatus.SKIPPED}
-            ]
-            if unmet:
-                step.status = StepStatus.SKIPPED
-                step.result = f"blocked_by_dependencies:{','.join(str(dep) for dep in unmet)}"
-                step_results.append(step.as_dict())
-                continue
-
-            if step.action_type == "reason":
-                step.status = StepStatus.COMPLETED
-                step.result = "parsed_request"
-                completed += 1
-            elif step.action_type == "ask":
-                step.status = StepStatus.NEEDS_INPUT
-                step.result = step.description
-                step_results.append(step.as_dict())
-                return PlanExecutionResult(
-                    task_id=plan.task_id,
-                    success=False,
-                    steps_completed=completed,
-                    steps_total=len(plan.steps),
-                    final_response="",
-                    needs_user_input=True,
-                    pending_question=step.description,
-                    elapsed_ms=(time.monotonic() - t0) * 1000,
-                    step_results=step_results,
-                    executed_skills=executed_skills,
-                )
-            elif step.action_type == "act":
-                runner = runners.get(str(step.skill_name or "").strip())
-                payload = {
-                    "request": plan.original_request,
-                    "task_id": plan.task_id,
-                    "step_id": step.step_id,
-                    "description": step.description,
-                    "context": ctx,
-                }
-                if runner is None:
-                    step.status = StepStatus.SKIPPED
-                    step.result = "no_safe_skill_runner"
-                else:
-                    try:
-                        step.status = StepStatus.IN_PROGRESS
-                        result = runner(payload)
-                        step.status = StepStatus.COMPLETED
-                        step.result = str(result)
-                        if step.skill_name:
-                            executed_skills.append(str(step.skill_name))
-                        completed += 1
-                    except Exception as exc:  # pragma: no cover - defensive
-                        step.status = StepStatus.FAILED
-                        step.result = f"runner_failed:{exc}"
-                step_results.append(step.as_dict())
-            else:
-                act_steps = [
-                    item for item in plan.steps
-                    if item.action_type == "act" and item.status == StepStatus.COMPLETED and str(item.result or "").strip()
-                ]
-                step.status = StepStatus.COMPLETED
-                if act_steps:
-                    step.result = " | ".join(
-                        f"{item.skill_name or 'step'}={str(item.result)[:120]}"
-                        for item in act_steps[:4]
-                    )
-                else:
-                    step.result = "synthesized_without_skill_results"
-                completed += 1
-            step_results.append(step.as_dict())
-
-        plan.status = "completed"
-        final_response = ""
-        for step in reversed(plan.steps):
-            if step.action_type == "synthesize" and str(step.result or "").strip():
-                final_response = step.result
-                break
-        if not final_response:
-            final_response = "plan_completed"
-        return PlanExecutionResult(
-            task_id=plan.task_id,
-            success=all(step.status not in {StepStatus.FAILED, StepStatus.NEEDS_INPUT} for step in plan.steps),
-            steps_completed=sum(
-                1 for step in plan.steps
-                if step.status in {StepStatus.COMPLETED, StepStatus.SKIPPED}
-            ),
-            steps_total=len(plan.steps),
-            final_response=final_response,
-            elapsed_ms=(time.monotonic() - t0) * 1000,
-            step_results=step_results,
-            executed_skills=executed_skills,
-        )
-
     def _decompose_request(self, text: str) -> list[dict[str, Any]]:
-        """将请求分解为子任务。"""
+        """将请求分解为子任务。
+
+        只使用语义明确的多步连接词切分，不使用"和"（会误切"A和B的差异"）。
+        """
         sub_tasks: list[dict[str, Any]] = []
 
-        # 按"和""并且""然后"等连接词拆分
+        # 只按明确的多步连接词拆分，不含"和"
         parts: list[str] = [text]
-        for sep in ("，然后", "，再", "，并且", "，同时", "，还要", "，另外", "和"):
+        for sep in _MULTI_STEP_SEPARATORS:
             new_parts: list[str] = []
             for part in parts:
                 new_parts.extend(part.split(sep))
             parts = new_parts
 
+        # 语义保护：如果切分后某段太短（< 5字），可能是误切，合并回去
+        merged_parts: list[str] = []
+        buffer = ""
         for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            if len(part) < 5 and buffer:
+                # 太短，合并到前一段
+                buffer = buffer + part
+            else:
+                if buffer:
+                    merged_parts.append(buffer)
+                buffer = part
+        if buffer:
+            merged_parts.append(buffer)
+
+        for part in merged_parts:
             part = part.strip()
             if not part or len(part) < 3:
                 continue
@@ -426,6 +407,11 @@ class PlanningAgent:
         *,
         available_skills: list[str] | None = None,
     ) -> str | None:
+        """从 available_skills 中匹配最合适的 skill。
+
+        优先从 skill_registry 动态传入的 available_skills 中匹配，
+        不再依赖硬编码关键词映射表。
+        """
         available = {
             str(name or "").strip().lower(): str(name or "").strip()
             for name in list(available_skills or [])
@@ -435,16 +421,49 @@ class PlanningAgent:
             return None
 
         text = str(description or "").strip().lower()
-        keyword_map = (
-            (("情绪", "心情", "感受", "emotion", "mood"), "emotion_query"),
-            (("关系", "亲密", "bond", "阶段"), "bond_query"),
-            (("总结", "摘要", "概括", "回顾", "session"), "session_summary"),
-            (("状态", "运行", "health", "status"), "read_only_status"),
-            (("记忆", "回忆", "回想", "memory"), "memory_recall"),
-        )
-        for keywords, skill_name in keyword_map:
-            if any(keyword in text for keyword in keywords):
-                resolved = available.get(skill_name)
+
+        # 直接名称匹配（优先）
+        for skill_lower, skill_orig in available.items():
+            if skill_lower in text or text in skill_lower:
+                return skill_orig
+
+        # 语义关键词匹配（从 RULE_ROUTE_MAP 派生，保持一致性）
+        for keyword, (route_type, target_id) in RULE_ROUTE_MAP.items():
+            if route_type == "skill" and keyword.lower() in text:
+                resolved = available.get(target_id.lower())
                 if resolved:
                     return resolved
+
         return None
+
+    # ------------------------------------------------------------------
+    # execute_plan() 已废弃（Deprecated）
+    # 实际执行由 LangGraph 父子图（app/plan_graph.py）负责
+    # 保留此方法仅为向后兼容，不应在新代码中调用
+    # ------------------------------------------------------------------
+    def execute_plan(
+        self,
+        plan: TaskPlan,
+        *,
+        skill_runners: dict[str, Callable[..., Any]] | None = None,
+        base_context: dict[str, Any] | None = None,
+    ) -> PlanExecutionResult:
+        """[已废弃] 同步执行计划。
+
+        此方法已被 LangGraph 父子图（app/plan_graph.py）替代，
+        不应在新代码中调用。保留仅为向后兼容。
+        """
+        _logger.warning(
+            "PlanningAgent.execute_plan() 已废弃，请使用 app/plan_graph.py 中的 "
+            "LangGraph 父子图执行规划。task_id=%s",
+            plan.task_id,
+        )
+        # 返回空结果，不执行任何逻辑
+        return PlanExecutionResult(
+            task_id=plan.task_id,
+            success=False,
+            steps_completed=0,
+            steps_total=len(plan.steps),
+            final_response="execute_plan_deprecated",
+            elapsed_ms=0.0,
+        )

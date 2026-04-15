@@ -214,6 +214,13 @@ def _build_execution_batches(*, nodes: list[SkillDagNode], parallel_window: int)
         )
         if not ready:
             # Fallback for cyclic/invalid dependencies: force one-by-one in step order.
+            # 警告：检测到循环依赖或无效依赖，强制按 step_index 顺序单步推进
+            import logging as _logging  # noqa: PLC0415
+            _logging.getLogger("Natsume.skill_dag_planner").warning(
+                "build_execution_batches: 检测到循环依赖或无效依赖，"
+                "强制按 step_index 顺序单步推进。pending_ids=%s",
+                sorted(pending_ids),
+            )
             forced = next(node for node in sorted(nodes, key=lambda item: (item.step_index, item.node_id)) if node.node_id in pending_ids)
             current_batch = [forced]
         else:

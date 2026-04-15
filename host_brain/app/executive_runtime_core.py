@@ -189,6 +189,11 @@ def _hard_rule_route(
     skill_registry: Any,
     allow_plan_detection: bool = True,
 ) -> _RouteSelection:
+    """两层路由判断。
+
+    第一层：RULE_ROUTE_MAP 规则映射（精确匹配，无歧义词）→ 命中则直接路由
+    第二层：intent_draft 提示 + 硬规则检测 → 未命中则兜底 chat
+    """
     route_hint = _normalize_text(intent_draft.get("route"), lower=True)
     target_hint = _normalize_text(intent_draft.get("target_id") or intent_draft.get("skill_id") or intent_draft.get("agent_id"))
     if route_hint in {"recent_turn", "task_progress", "chat"}:
@@ -210,6 +215,25 @@ def _hard_rule_route(
     delegate_target = _extract_delegate_target(intent_draft)
     if delegate_target:
         return _RouteSelection("delegate", delegate_target, "intent_draft:delegate_target")
+
+    # ── 第一层：RULE_ROUTE_MAP 规则映射（精确匹配，无歧义词）──
+    # 命中则直接路由，不进入 LLM 判断，也不进入 plan 路径
+    try:
+        from host_brain.agents.planning_agent import RULE_ROUTE_MAP  # noqa: PLC0415
+        msg_lower = _normalize_text(sanitized_message, lower=True)
+        for keyword, (rule_route_type, rule_target_id) in RULE_ROUTE_MAP.items():
+            if keyword.lower() in msg_lower:
+                # 验证 target_id 是否在 registry 中（skill 路由需要验证）
+                if rule_route_type == "skill":
+                    try:
+                        if skill_registry.get(rule_target_id) is not None:
+                            return _RouteSelection(rule_route_type, rule_target_id, f"rule_map:{keyword}")
+                    except Exception:
+                        pass
+                else:
+                    return _RouteSelection(rule_route_type, rule_target_id, f"rule_map:{keyword}")
+    except ImportError:
+        pass
 
     if allow_plan_detection and _looks_multi_step_request(sanitized_message, intent_draft):
         return _RouteSelection("plan", "skill_dag", "hard_rule:multi_step")
@@ -374,6 +398,13 @@ def _should_force_complex_plan(
     intent_draft: dict[str, Any],
     llm_route_used: bool,
 ) -> bool:
+    """第二层判断：是否强制进入 plan 路径（LangGraph 父子图）。
+
+    改进：
+    - skill/delegate 路由也需要通过 gap 检测保护，避免已能处理的请求被过度拆解
+    - needs_planning() 评分指标已收紧（见 planning_agent.py），误触发率降低
+    - RULE_ROUTE_MAP 命中的请求不会到达此函数（已在 _hard_rule_route 中直接路由）
+    """
     if route.route_type in {"plan", "recent_turn", "task_progress"}:
         return False
     if not _parse_bool_env("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", default=True):
@@ -393,16 +424,17 @@ def _should_force_complex_plan(
     if len(normalized_message) < min_chars:
         return False
 
-    if route.route_type == "chat":
-        gap = detect_capability_gap(
-            user_message=normalized_message,
-            route_type=route.route_type,
-            target_id=route.target_id,
-            reason_code=route.reason_code,
-            llm_route_used=llm_route_used,
-        )
-        if not gap.detected:
-            return False
+    # 所有路由类型（包括 skill/delegate）都需要通过 gap 检测
+    # 避免已有 skill/agent 能处理的请求被强制拆解为多步 DAG
+    gap = detect_capability_gap(
+        user_message=normalized_message,
+        route_type=route.route_type,
+        target_id=route.target_id,
+        reason_code=route.reason_code,
+        llm_route_used=llm_route_used,
+    )
+    if not gap.detected:
+        return False
 
     try:
         from host_brain.app.dependencies import get_planning_agent  # noqa: PLC0415
@@ -1013,10 +1045,78 @@ async def _execute_skill_dag(
     recall_slot_text: dict[str, Any],
     render_target_lang: str,
 ) -> tuple[_ExecutionOutcome, dict[str, Any]]:
+    """执行 Skill DAG。
+
+    改进：
+    - 优先使用 LangGraph 父子图（run_plan_graph）执行，充分利用 Send API 并行
+    - 关键节点失败时中断后续批次，不继续执行依赖它的节点
+    - synthesize 结果由 plan_graph.synthesize_node 语义整合，不再是简单字符串拼接
+    """
+    # ── 优先走 LangGraph 父子图 ──
+    try:
+        from host_brain.app.plan_graph import run_plan_graph  # noqa: PLC0415
+        pg_result = await run_plan_graph(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=str((intent_draft or {}).get("user_message") or "").strip()
+                         or str(request_body).strip()[:500] if request_body else "",
+            intent_draft=dict(intent_draft or {}),
+            emotion_context=dict(emotion_context or {}),
+        )
+        plan_trace = list(pg_result.get("plan_trace") or [])
+        success = bool(pg_result.get("success"))
+        final_answer = str(pg_result.get("final_answer") or "").strip()
+        latency_ms = int(pg_result.get("latency_ms") or 0)
+
+        _logger.info(
+            "[%s] _execute_skill_dag: plan_graph 执行完成 success=%s latency=%dms",
+            request_id, success, latency_ms,
+        )
+
+        return (
+            _ExecutionOutcome(
+                route_type="plan",
+                target_id=plan.plan_id,
+                skill_family="executive",
+                success=success,
+                result_text=final_answer,
+                error_text="" if success else "PLAN_GRAPH_FAILED",
+                latency_ms=latency_ms,
+                payload={
+                    "plan": plan.as_dict(),
+                    "plan_trace": plan_trace,
+                    "sub_tasks": list(pg_result.get("sub_tasks") or []),
+                    "task_results": list(pg_result.get("task_results") or []),
+                },
+            ),
+            {
+                "plan_id": plan.plan_id,
+                "plan_trace": plan_trace,
+                "parallel_enabled": True,  # plan_graph 始终并行
+                "engine": "langgraph_plan_graph",
+            },
+        )
+    except Exception as pg_exc:
+        _logger.warning(
+            "[%s] plan_graph 执行失败，降级到 SkillDag 手动执行: %s",
+            request_id, pg_exc,
+        )
+
+    # ── 降级：手动 SkillDag 执行（保留原逻辑，添加关键节点失败中断）──
     node_results: dict[str, _ExecutionOutcome] = {}
     plan_trace: list[dict[str, Any]] = []
+    critical_failure = False  # 关键节点失败标志
 
     for batch in list(plan.execution_batches or []):
+        # 关键节点失败后中断，不继续执行后续批次
+        if critical_failure:
+            _logger.warning(
+                "[%s] _execute_skill_dag: 关键节点失败，中断后续批次执行",
+                request_id,
+            )
+            break
+
         batch_nodes = [node for node in plan.nodes if node.node_id in batch]
         coros = [
             _execute_plan_node(
@@ -1049,9 +1149,23 @@ async def _execute_skill_dag(
                     "error_text": outcome.error_text,
                 }
             )
+            # 检查是否为关键节点失败（有后续节点依赖它）
+            if not outcome.success:
+                has_dependents = any(
+                    node.node_id in (n.dependencies or ())
+                    for n in plan.nodes
+                    if n.node_id != node.node_id
+                )
+                if has_dependents:
+                    critical_failure = True
+                    _logger.warning(
+                        "[%s] 关键节点 %s 失败（有 %d 个后续节点依赖），标记中断",
+                        request_id, node.node_id,
+                        sum(1 for n in plan.nodes if node.node_id in (n.dependencies or ())),
+                    )
 
     ordered_results = [node_results[node.node_id] for node in plan.nodes if node.node_id in node_results]
-    success = bool(ordered_results) and all(item.success for item in ordered_results)
+    success = bool(ordered_results) and all(item.success for item in ordered_results) and not critical_failure
     summary_lines: list[str] = []
     for node in plan.nodes:
         outcome = node_results.get(node.node_id)
@@ -1078,6 +1192,7 @@ async def _execute_skill_dag(
             "plan_id": plan.plan_id,
             "plan_trace": plan_trace,
             "parallel_enabled": any(len(batch) > 1 for batch in list(plan.execution_batches or [])),
+            "engine": "skill_dag_fallback",
         },
     )
 
