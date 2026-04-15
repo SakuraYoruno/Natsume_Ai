@@ -1926,3 +1926,48 @@ async def chat_agent_sse_generator(
         )
     except Exception as _pp_exc:
         _logger.debug("[%s] ChatAgent post_process task failed: %s", request_id, _pp_exc)
+
+
+# ---------------------------------------------------------------------------
+# 聚合导入（P2-12 拆分后向后兼容）
+# ---------------------------------------------------------------------------
+# 预处理函数/结构体已移至 chat_agent_preprocessor.py
+from host_brain.app.chat_agent_preprocessor import (  # noqa: F401, E402
+    SubAgentContext,
+    ChatAgentInput,
+    _sse,
+    _airlock_sanitize_output,
+    _strip_internal_delegate_markers,
+    _build_reply_preview,
+    _coerce_response_policy,
+    _split_text_into_sentences,
+    _truncate_text_to_sentence_limit,
+    _truncate_text_to_char_limit,
+    _extract_response_policy_limits,
+    _coerce_response_policy_score,
+    _apply_response_policy_stream_guard,
+    _response_policy_requires_buffering,
+    _apply_response_policy_hard_guard,
+    _build_minimal_chat_fallback_reply,
+    _build_chat_agent_quality_fallback_reply,
+    _build_chat_agent_fallback_reply,
+    _build_installed_capabilities_reply,
+    _should_buffer_stream_output,
+    _build_deterministic_sub_agent_reply,
+    _build_sub_agent_context_prompt,
+    _extract_visible_text,
+    _extract_tts_text,
+    _infer_emotion_tag_for_tts,
+    render_quick_gateway_ack_text,
+    render_quick_gateway_progress_text,
+    render_quick_gateway_realign_text,
+)
+
+# 后处理函数已移至 chat_agent_postprocessor.py
+from host_brain.app.chat_agent_postprocessor import (  # noqa: F401, E402
+    _post_speak_sentence,
+    apply_response_intelligence_safe,
+    scrub_pii_egress,
+    log_input_completed,
+    schedule_async_post_process,
+)
