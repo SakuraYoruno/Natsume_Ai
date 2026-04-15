@@ -1,25 +1,25 @@
-"""Chat 上下文构建辅助函数。
+"""Chat 上下文构建辅助函数（组合入口）。
 
 从 chat_handler.py 拆分，负责构建 context pack、style bindings 和 generation prompt payload。
+
+P2-2 重构：已按功能拆分为子模块，本文件作为组合入口保持向后兼容：
+  - chat_context_style.py     风格绑定（normalize_node_style_bindings / build_node_style_bindings）
+  - chat_context_memory.py    记忆信号 + 人格表达提示（_build_memory_* / _apply_*_to_persona_expression_hint）
+  - chat_context_retrieval.py 检索路径 + 可观测性（_build_retrieval_rows / build_prompt_context_observability）
 """
 
 from __future__ import annotations
 
 import copy
-import json
 import logging
 import os
 import threading
 import time
-from pathlib import Path
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
 
-from host_brain.app.dependencies import get_ledger
-from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
 from host_brain.app.prompt_builder import _truncate_for_prompt, infer_render_target_lang
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.chat_runtime_input import build_emotion_recall_text
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.core.prompt_context import (
@@ -28,18 +28,43 @@ from host_brain.core.prompt_context import (
     validate_prompt_context as validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
-# T-143: StyleCanonStore 直接调用已迁移到 SocialBrainAgent.resolve_style_canon()，此处不再直接 import
-try:
-    from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
-except Exception:  # pragma: no cover - optional compatibility seam
-    StyleCanonStore = None  # type: ignore[assignment]
 
-
-CONTEXT_DEGRADE_ORDER: tuple[str, ...] = (
-    "six_route",
-    "core_three",
-    "minimal_context",
-    "bare_llm",
+# ── 从子模块导入（向后兼容：外部代码仍可从本模块 import）──────────────────
+from host_brain.app.chat_context_style import (  # noqa: F401
+    normalize_node_style_bindings,
+    build_node_style_bindings,
+    _load_v5_style_instruction,
+)
+from host_brain.app.chat_context_memory import (  # noqa: F401
+    _coerce_non_negative_int,
+    _coerce_optional_float,
+    _clamp_float,
+    _coerce_optional_bool,
+    _load_runtime_guidance_templates,
+    _template_text,
+    _resolve_offline_reconnect_profile,
+    _build_memory_persona_signal,
+    _build_memory_persona_evidence,
+    _build_memory_recall_summary,
+    _apply_motive_state_to_persona_expression_hint,
+    _apply_offline_state_to_persona_expression_hint,
+    _apply_activity_monitor_to_persona_expression_hint,
+    _apply_scene_awareness_to_persona_expression_hint,
+    _apply_runtime_mode_to_persona_expression_hint,
+    _apply_memory_persona_signal_to_persona_expression_hint,
+)
+from host_brain.app.chat_context_retrieval import (  # noqa: F401
+    CONTEXT_DEGRADE_ORDER,
+    _extract_query_plan_intent,
+    _extract_query_plan_text_len,
+    _should_drop_persona_row,
+    _build_retrieval_rows_fallback,
+    _build_retrieval_rows,
+    _count_kind,
+    _extract_route_ids,
+    _classify_retrieval_path_for_obs,
+    _select_context_degrade_tier,
+    build_prompt_context_observability,
 )
 
 _LOW_SIGNAL_PERSONA_INTENTS: frozenset[str] = frozenset({"phatic", "affection"})
