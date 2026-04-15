@@ -165,7 +165,11 @@ def _resolve_route_target_family(*, route_target: str, scene_type: str, next_nod
 # 公共 API
 # ---------------------------------------------------------------------------
 def pre_intent_classifier(user_input: str) -> str:
-    """轻量规则预分类器，优先级：VISION_UI > WORK_CODE > WORK_TRANSLATE > EXEC_INTENT > CHAT。"""
+    """[已废弃] 轻量规则预分类器。
+
+    Phase XV 架构重设计后，意图识别统一由 cortex_route_decider.classify_task_intent() 完成。
+    此函数仅保留以兼容 graph_config_builder 的导入，不应在新代码中调用。
+    """
     text = str(user_input or "").strip().lower()
     if not text:
         return SCENE_CHAT
@@ -249,10 +253,9 @@ def resolve_graph_entry_scene_type(*, payload: dict[str, Any]) -> tuple[str, str
         explicit_nested = str(payload["input"].get("scene_type") or "").strip().upper()
         if explicit_nested:
             return _normalize_scene_type(explicit_nested), "explicit"
-    if _parse_bool(os.environ.get("HOST_CHAT_ENABLE_PRECLASSIFIER"), default=True):
-        scene = pre_intent_classifier(_extract_scene_router_message(payload))
-        return _normalize_scene_type(scene), "graph_pre_classifier"
-    return SCENE_CHAT, "graph_default_chat"
+    # Phase XV：意图识别已下沉到 cortex_route_decider，此处不再调用 pre_intent_classifier。
+    # graph 入口场景类型默认为 AUTO，由 cortex_orchestrator 在 tribe 层统一决策。
+    return SCENE_TYPE_AUTO, "cortex_tribe_decider"
 
 
 def graph_scene_router_entry_handler(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -294,9 +297,9 @@ def resolve_chat_scene_type(*, request_body: Any) -> tuple[str, str]:
     explicit_scene_type = str(getattr(request_body, "scene_type", None) or "").strip().upper()
     if explicit_scene_type:
         return explicit_scene_type, "explicit"
-    if _parse_bool(os.environ.get("HOST_CHAT_ENABLE_PRECLASSIFIER"), default=True):
-        return pre_intent_classifier(request_body.message), "pre_classifier"
-    return SCENE_CHAT, "default_chat"
+    # Phase XV：意图识别已下沉到 cortex_route_decider，此处不再调用 pre_intent_classifier。
+    # 返回 AUTO，由 cortex_orchestrator 在 tribe 层统一决策。
+    return SCENE_TYPE_AUTO, "cortex_tribe_decider"
 
 
 def resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:

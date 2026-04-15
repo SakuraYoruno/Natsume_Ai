@@ -34,10 +34,9 @@ from host_brain.app.input_service_log import (
 from host_brain.app.input_service_gateway import (
     looks_like_progress_query as _looks_like_progress_query_for_ack_skip,
     looks_like_execution_intent as _looks_like_execution_intent_for_ack,
-    build_gateway_intent_draft as _build_gateway_intent_draft,
     normalize_route_confidence as _normalize_route_confidence,
-    get_skill_registry_safe as _get_skill_registry_safe,
 )
+from host_brain.tribe.cortex_route_decider import classify_task_intent as _classify_task_intent
 from host_brain.app.input_service_ack import (
     resolve_bond_stage_for_ack as _resolve_bond_stage_for_ack,
     resolve_emotion_tag_for_ack as _resolve_emotion_tag_for_ack,
@@ -995,8 +994,9 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        suppress_edge_tts=(True if source == "GATEWAY" else None),
-        suppress_edge_vts=(True if source == "GATEWAY" else None),
+        # Phase XV：Gateway 回复时 TTS/VTS 与 ASR 链路一致，Natsume 在微信里回复时本地同步发声 + VTS 动画
+        suppress_edge_tts=None,
+        suppress_edge_vts=None,
         # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
         # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
         render_target_lang=("zh" if source == "GATEWAY" else None),
@@ -1007,12 +1007,34 @@ async def _run_cortex_orchestrator_pipeline(
         source=f"input_routes.{str(source or '').lower()}",
         ts_ms=ts_ms,
     )
-    intent_draft = await _build_gateway_intent_draft(
+    intent_draft = await _classify_task_intent(
         request_id=request_id,
         session_id=session_id,
-        source=source,
         text=text,
     )
+    # 将 classify_task_intent 结果包装为 intent_draft 格式
+    _route = str(intent_draft.get("route") or "chat").strip().lower()
+    _target_id = str(intent_draft.get("target_id") or "").strip()
+    _action = "narrative_only" if _route == "chat" else (_target_id or _route)
+    intent_draft = {
+        "id": f"intent::{request_id}",
+        "action": _action,
+        "source": "input_routes",
+        "input_source": source,
+        "route": _route,
+        "target_id": _target_id,
+        "task": str(intent_draft.get("task") or text).strip(),
+        "route_reason": str(intent_draft.get("reason_code") or "TRIBE_INTENT").strip(),
+        "route_source": str(intent_draft.get("route_source") or "rule").strip(),
+        "route_confidence": _normalize_route_confidence(intent_draft.get("confidence")),
+        "llm_route_used": str(intent_draft.get("route_source") or "") == "llm",
+    }
+    if _route == "delegate" and _target_id:
+        intent_draft["delegate_agent"] = _target_id
+        intent_draft["agent_id"] = _target_id
+    elif _route == "skill" and _target_id:
+        intent_draft["skill_id"] = _target_id
+        intent_draft["skill_name"] = _target_id
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
     commit_event: dict[str, Any] | None = None
