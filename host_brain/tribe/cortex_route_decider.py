@@ -156,7 +156,8 @@ async def _classify_task_intent_by_llm(
         emotion_label = str(vital_signs.get("emotion_label") or ctx.get("emotion_label") or "neutral").strip()
         tribe_summary = f"bond_stage={bond_stage}, emotion={emotion_label}"
 
-        system_prompt = (
+        # 从 YAML 模板加载 prompt（降级时使用内联兜底）
+        _FALLBACK_SYSTEM_PROMPT = (
             "你是意图路由分类器。根据用户消息判断意图类型，输出单个 JSON 对象。\n"
             "route 只能是以下之一：chat / delegate / skill / task_progress / recent_turn\n"
             "delegate 时 target_id 只能是：intent_agent / code_agent / translate_agent / vision_agent\n"
@@ -165,11 +166,19 @@ async def _classify_task_intent_by_llm(
             '字段：{"route","target_id","task","confidence","reason"}\n'
             "confidence 为 0~1 的数字。"
         )
-        user_prompt = (
-            f"族状态：{tribe_summary}\n"
-            f"用户消息：{str(text or '').strip()}\n"
-            "输出 JSON："
-        )
+        _FALLBACK_USER_PROMPT_TEMPLATE = "族状态：{tribe_summary}\n用户消息：{text}\n输出 JSON："
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+            from collections.abc import Mapping as _Mapping  # noqa: PLC0415
+            _raw = resolve_prompt_template_json_merged("cortex_route_decider.intent_classification_prompts")
+            tpl: dict = dict(_raw) if isinstance(_raw, _Mapping) else {}
+            system_prompt = str(tpl.get("system_prompt") or _FALLBACK_SYSTEM_PROMPT).strip()
+            user_prompt_template = str(tpl.get("user_prompt_template") or _FALLBACK_USER_PROMPT_TEMPLATE).strip()
+        except Exception:
+            system_prompt = _FALLBACK_SYSTEM_PROMPT
+            user_prompt_template = _FALLBACK_USER_PROMPT_TEMPLATE
+
+        user_prompt = user_prompt_template.format(tribe_summary=tribe_summary, text=str(text or "").strip())
 
         timeout_ms = int(os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS", "4000"))
         base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None

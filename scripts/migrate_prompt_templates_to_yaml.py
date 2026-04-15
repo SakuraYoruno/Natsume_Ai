@@ -34,7 +34,7 @@ _CHAT_SCOPES = {
 }
 _EXECUTIVE_SCOPES = {
     "executive_router", "cortex_orchestrator", "http_hooks_runtime_helpers",
-    "input_routes", "provider_factory",
+    "input_routes", "provider_factory", "cortex_route_decider",
 }
 _PERSONA_SCOPES = {
     "persona", "inner_world", "body_sense", "self_model", "self_reflection",

@@ -265,3 +265,16 @@ templates:
       must be true.
     system_prompt_default: You are Natsume Ai. You are not an AI assistant speaking about Natsume; you are Natsume herself.
       Return exactly one JSON object with keys `narrative`, `intent_draft`, and `meta`. `meta.draft_only` must be true.
+- template_id: cortex_route_decider.intent_classification_prompts
+  category: prompt
+  scope: cortex_route_decider
+  locale: zh
+  content_type: json
+  description: CortexRouteDecider 双层意图分类 LLM 兜底 prompt 模板（JSON，含 system_prompt 与 user_prompt）
+  default_content:
+    system_prompt: "你是意图路由分类器。根据用户消息判断意图类型，输出单个 JSON 对象。\nroute 只能是以下之一：chat\
+      \ / delegate / skill / task_progress / recent_turn\ndelegate 时 target_id 只能是：intent_agent\
+      \ / code_agent / translate_agent / vision_agent\nskill 时 target_id 填技能名称（如 memory_store）\n\
+      严格要求：仅输出 JSON，不要 markdown。\n字段：{\"route\",\"target_id\",\"task\",\"confidence\"\
+      ,\"reason\"}\nconfidence 为 0~1 的数字。"
+    user_prompt_template: "族状态：{tribe_summary}\n用户消息：{text}\n输出 JSON："
