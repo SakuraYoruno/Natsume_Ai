@@ -373,6 +373,80 @@ class PeripheralAgent:
         except Exception:
             pass
 
+    # ── 跨平台情境感知（A 级升级）───────────────────────────────────────────
+
+    def analyze_peripheral_context(self) -> str | None:
+        """跨平台情境感知：调用 LLM 分析当前平台连接状态的语义含义。
+
+        触发条件：有活跃平台连接。
+        调用：Flash 小模型。
+        开关：PERIPHERAL_CONTEXT_ANALYSIS_ENABLED（默认 false）。
+        输出注入：PrefrontalAgent.plan_response() 的 context 字段。
+
+        Returns:
+            情境感知描述字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("PERIPHERAL_CONTEXT_ANALYSIS_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.peripheral_agent")
+        try:
+            state = self.get_peripheral_state()
+            _active_platforms = list(state.get("connected_platforms") or [])
+            if not _active_platforms:
+                return None
+
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("peripheral_agent.context_analysis") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("peripheral_agent.context_analysis 模板未配置")
+
+            _gate_state = dict(state.get("gate_state") or {})
+            _mute_state = dict(state.get("mute_state") or {})
+            _user_prompt = _user_tpl.format(
+                active_platforms=str(_active_platforms),
+                connection_status="connected" if _active_platforms else "disconnected",
+                gate_status=str(_gate_state.get("state") or "open"),
+                mute_status=str(_mute_state.get("muted") or False),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=2000,
+                agent_role="peripheral_analyzer",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=48,
+                temperature=0.1,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _hint = str(_parsed.get("context_hint") or "").strip()[:60]
+            if _hint:
+                _log.debug("PeripheralAgent.analyze_peripheral_context: %s", _hint)
+                try:
+                    self.state_registry.set_state(
+                        "peripheral_agent",
+                        {"last_context_hint": _hint},
+                        writer="peripheral_agent",
+                    )
+                except Exception:
+                    pass
+            return _hint or None
+        except Exception as exc:
+            _log.debug("PeripheralAgent.analyze_peripheral_context 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         """导出 Peripheral 运行时状态，供 CortexAgent 收口与监控使用。"""
         try:

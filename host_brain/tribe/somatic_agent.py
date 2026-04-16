@@ -269,6 +269,81 @@ class SomaticAgent:
         except Exception:
             pass
 
+    # ── 躯体感受叙事（A 级升级）──────────────────────────────────────────────
+
+    def generate_somatic_narrative(
+        self,
+        *,
+        somatic_pressure: float = 0.0,
+        user_expression: str = "NEUTRAL",
+        face_confidence: float = 0.0,
+    ) -> str | None:
+        """将躯体信号转化为自然语言身体感受叙事，注入 Prompt Phase XIII 情绪层。
+
+        触发条件：somatic_pressure > 0.4 或 face_confidence > 0.5（面捕有效）。
+        调用：Flash 小模型。
+        开关：SOMATIC_NARRATIVE_ENABLED（默认 false）。
+
+        Returns:
+            躯体感受描述字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("SOMATIC_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
+        _significant = (
+            float(somatic_pressure or 0.0) > 0.4
+            or (float(face_confidence or 0.0) > 0.5 and str(user_expression or "NEUTRAL").upper() != "NEUTRAL")
+        )
+        if not _enabled or not _significant:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.somatic_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("somatic_agent.somatic_narrative") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("somatic_agent.somatic_narrative 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                somatic_pressure=round(float(somatic_pressure), 3),
+                user_expression=str(user_expression or "NEUTRAL").upper(),
+                face_confidence=round(float(face_confidence), 3),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1500,
+                agent_role="somatic_narrator",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=32,
+                temperature=0.2,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _hint = str(_parsed.get("somatic_hint") or "").strip()[:40]
+            if _hint:
+                _log.debug("SomaticAgent.generate_somatic_narrative: %s", _hint)
+                try:
+                    self.state_registry.set_state(
+                        "somatic_agent",
+                        {"last_somatic_hint": _hint},
+                        writer="somatic_agent",
+                    )
+                except Exception:
+                    pass
+            return _hint or None
+        except Exception as exc:
+            _log.debug("SomaticAgent.generate_somatic_narrative 失败（降级）: %s", exc)
+            return None
+
     # ── T-170：运行时状态导出 ─────────────────────────────────────────────────
 
     def export_runtime_state(self) -> dict[str, Any]:

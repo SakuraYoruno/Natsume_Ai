@@ -562,6 +562,82 @@ class MotorCortexAgent:
             reason="platform_signal",
         )
 
+    # ── 发声风格微调（A 级升级）──────────────────────────────────────────────
+
+    def plan_speak_style(
+        self,
+        *,
+        emotion_tag: str = "NEUTRAL",
+        valence: float = 0.0,
+        arousal: float = 0.3,
+        tone_hint: str = "balanced",
+    ) -> dict[str, Any]:
+        """dispatch_speak 前调用 LLM 生成发声风格微调建议，注入 TTS prosody_hint。
+
+        触发条件：arousal > 0.6 或 valence < -0.3（情绪显著）。
+        调用：Flash 小模型（<100ms，延迟敏感）。
+        开关：MOTOR_SPEAK_STYLE_ENABLED（默认 false）。
+
+        Returns:
+            {
+                "speed": float,         # 语速 0.8~1.2
+                "pause_hint": str,      # 停顿建议（短/中/长）
+                "filler_hint": str,     # 语气词建议
+                "source": str,          # "motor_llm"|"disabled"|"error"
+            }
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("MOTOR_SPEAK_STYLE_ENABLED", "false")).lower() in ("1", "true", "yes")
+        _significant = float(arousal or 0.3) > 0.6 or float(valence or 0.0) < -0.3
+        if not _enabled or not _significant:
+            return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "disabled"}
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.motor_cortex_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("motor_cortex_agent.speak_style") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("motor_cortex_agent.speak_style 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
+                valence=round(float(valence), 3),
+                arousal=round(float(arousal), 3),
+                tone_hint=str(tone_hint or "balanced"),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1000,
+                agent_role="motor_speak_planner",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=48,
+                temperature=0.1,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _speed = max(0.8, min(1.2, float(_parsed.get("speed") or 1.0)))
+            _result = {
+                "speed": round(_speed, 2),
+                "pause_hint": str(_parsed.get("pause_hint") or "中").strip()[:4],
+                "filler_hint": str(_parsed.get("filler_hint") or "嗯").strip()[:8],
+                "source": "motor_llm",
+            }
+            _log.debug("MotorCortexAgent.plan_speak_style: %s", _result)
+            return _result
+        except Exception as exc:
+            _log.debug("MotorCortexAgent.plan_speak_style 失败（降级）: %s", exc)
+            return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "error"}
+
 
 _MOTOR_CORTEX_AGENT: MotorCortexAgent | None = None
 
