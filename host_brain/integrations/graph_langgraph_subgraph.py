@@ -104,6 +104,17 @@ def build_governed_subgraph(
             subgraph_trace=subgraph_trace,
         )
 
+        # 写入 Evidence Plane（如果提供）
+        if evidence_plane is not None:
+            try:
+                evidence_plane.write_trace(
+                    request_id=sub_state["request_id"],
+                    graph_id=sub_state["graph_id"],
+                    trace=subgraph_trace,
+                )
+            except Exception:
+                pass  # 静默降级，不影响子图执行
+
         # 只将非受保护字段合并回主图 state（核心安全约束）
         safe_payload = {
             k: v for k, v in (sub_result.get("payload") or {}).items()

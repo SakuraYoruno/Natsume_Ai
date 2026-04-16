@@ -76,8 +76,8 @@ def test_sge_01_compile_governed_subgraph_accepts_evidence_plane():
         handlers={"n1": _ok_handler, "n2": _ok_handler},
         evidence_plane=ep,
     )
-    assert sg._evidence_plane is ep
-    assert sg.subgraph_id == "sg-001"
+    # FIX-5.3 后，返回的是函数适配器，验证可调用即可
+    assert callable(sg)
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ def test_sge_02_successful_node_writes_to_evidence_plane():
         evidence_plane=ep,
     )
     state = _make_state()
-    sg.invoke(state)
+    sg(state)
 
     rows = ep.query_trace(request_id="req-sge-m37")
     assert len(rows) == 1
@@ -114,7 +114,7 @@ def test_sge_03_failed_node_also_writes_to_evidence_plane():
         evidence_plane=ep,
     )
     state = _make_state()
-    sg.invoke(state)
+    sg(state)
 
     rows = ep.query_trace(request_id="req-sge-m37")
     assert len(rows) == 1
@@ -134,7 +134,7 @@ def test_sge_04_none_evidence_plane_backward_compatible():
         evidence_plane=None,
     )
     state = _make_state()
-    result = sg.invoke(state)
+    result = sg(state)
     # 子图正常执行，subgraph_trace 有记录
     assert len(result["subgraph_trace"]) == 1
     assert result["subgraph_trace"][0]["status"] == "OK"
@@ -160,7 +160,7 @@ def test_sge_05_evidence_plane_write_failure_silent_degradation(monkeypatch: pyt
     )
     state = _make_state()
     # 不应抛出异常，子图正常执行
-    result = sg.invoke(state)
+    result = sg(state)
     assert len(result["subgraph_trace"]) == 1
     assert result["subgraph_trace"][0]["status"] == "OK"
 
@@ -179,7 +179,7 @@ def test_sge_06_written_trace_has_correct_fields():
     )
     state = _make_state()
     before = int(time.time() * 1000)
-    sg.invoke(state)
+    sg(state)
     after = int(time.time() * 1000)
 
     rows = ep.query_trace(request_id="req-sge-m37")
