@@ -262,6 +262,80 @@ class CircadianAgent:
         self._last_phase = next_phase
         return prev_state
 
+    # ── 昼夜节律情绪提示（A 级升级）─────────────────────────────────────────
+
+    def generate_circadian_mood_hint(
+        self,
+        *,
+        circadian_phase: str = "day",
+        energy_level: float = 0.8,
+        sleep_pressure: float = 0.2,
+        current_hour: int = 12,
+    ) -> str | None:
+        """根据昼夜相位和能量水平生成时段感知叙事，注入 Prompt Phase XIII 情绪层。
+
+        触发条件：energy_level < 0.3 或 sleep_pressure > 0.6（状态显著）。
+        调用：Flash 小模型。
+        开关：CIRCADIAN_MOOD_HINT_ENABLED（默认 false）。
+
+        Returns:
+            时段感知描述字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("CIRCADIAN_MOOD_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
+        _significant = float(energy_level or 0.8) < 0.3 or float(sleep_pressure or 0.2) > 0.6
+        if not _enabled or not _significant:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.circadian_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("circadian_agent.circadian_mood_hint") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("circadian_agent.circadian_mood_hint 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                circadian_phase=str(circadian_phase or "day"),
+                energy_level=round(float(energy_level), 3),
+                sleep_pressure=round(float(sleep_pressure), 3),
+                current_hour=int(current_hour),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1500,
+                agent_role="circadian_narrator",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=32,
+                temperature=0.2,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _hint = str(_parsed.get("circadian_hint") or "").strip()[:40]
+            if _hint:
+                _log.debug("CircadianAgent.generate_circadian_mood_hint: %s", _hint)
+                try:
+                    self.state_registry.set_state(
+                        "circadian_agent",
+                        {"last_circadian_hint": _hint},
+                        writer="circadian_agent",
+                    )
+                except Exception:
+                    pass
+            return _hint or None
+        except Exception as exc:
+            _log.debug("CircadianAgent.generate_circadian_mood_hint 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         self.refresh_state(source="export_runtime_state")
         snap = self.state_registry.get_state("circadian_agent") or {}

@@ -178,6 +178,82 @@ class InteroceptionAgent:
 
         return dict(prev_state)
 
+    # ── 内感受叙事（A 级升级）────────────────────────────────────────────────
+
+    def generate_interoceptive_narrative(
+        self,
+        *,
+        interoception_index: float = 0.5,
+        body_budget: float = 0.5,
+        recovery_urgency: float = 0.0,
+    ) -> str | None:
+        """将内感受指数转化为身体感受叙事，注入 Prompt Phase XIII 情绪层。
+
+        触发条件：interoception_index < 0.3 或 recovery_urgency > 0.7 或 body_budget < 0.3。
+        调用：Flash 小模型。
+        开关：INTEROCEPTION_NARRATIVE_ENABLED（默认 false）。
+
+        Returns:
+            内感受描述字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("INTEROCEPTION_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
+        _significant = (
+            float(interoception_index or 0.5) < 0.3
+            or float(recovery_urgency or 0.0) > 0.7
+            or float(body_budget or 0.5) < 0.3
+        )
+        if not _enabled or not _significant:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.interoception_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("interoception_agent.interoceptive_narrative") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("interoception_agent.interoceptive_narrative 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                interoception_index=round(float(interoception_index), 3),
+                body_budget=round(float(body_budget), 3),
+                recovery_urgency=round(float(recovery_urgency), 3),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1500,
+                agent_role="interoception_narrator",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=32,
+                temperature=0.2,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _hint = str(_parsed.get("interoceptive_hint") or "").strip()[:40]
+            if _hint:
+                _log.debug("InteroceptionAgent.generate_interoceptive_narrative: %s", _hint)
+                try:
+                    self.state_registry.set_state(
+                        "interoception_agent",
+                        {"last_interoceptive_hint": _hint},
+                        writer="interoception_agent",
+                    )
+                except Exception:
+                    pass
+            return _hint or None
+        except Exception as exc:
+            _log.debug("InteroceptionAgent.generate_interoceptive_narrative 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         state = self.evaluate_profile(source="export_runtime_state")
         return {

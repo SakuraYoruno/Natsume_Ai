@@ -181,6 +181,80 @@ class VestibularAgent:
 
         return dict(prev_state)
 
+    # ── 稳定性评估（A 级升级）────────────────────────────────────────────────
+
+    def generate_stability_assessment(
+        self,
+        *,
+        stability_status: str = "stable",
+        jitter_index: float = 0.0,
+        topic_shift_rate: float = 0.0,
+        emotion_volatility: float = 0.0,
+    ) -> str | None:
+        """稳定性异常时调用 LLM 分析不稳定原因，注入 PrefrontalAgent。
+
+        触发条件：stability_status 为 unstable 或 critical。
+        调用：Flash 小模型。
+        开关：VESTIBULAR_STABILITY_ASSESSMENT_ENABLED（默认 false）。
+
+        Returns:
+            不稳定原因分析字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("VESTIBULAR_STABILITY_ASSESSMENT_ENABLED", "false")).lower() in ("1", "true", "yes")
+        _significant = str(stability_status or "stable").lower() in ("unstable", "critical")
+        if not _enabled or not _significant:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.vestibular_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("vestibular_agent.stability_assessment") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("vestibular_agent.stability_assessment 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                stability_status=str(stability_status or "stable"),
+                jitter_index=round(float(jitter_index), 3),
+                topic_shift_rate=round(float(topic_shift_rate), 3),
+                emotion_volatility=round(float(emotion_volatility), 3),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1500,
+                agent_role="vestibular_assessor",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=48,
+                temperature=0.1,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _insight = str(_parsed.get("instability_insight") or "").strip()[:60]
+            if _insight:
+                _log.debug("VestibularAgent.generate_stability_assessment: %s", _insight)
+                try:
+                    self.state_registry.set_state(
+                        "vestibular_agent",
+                        {"last_stability_insight": _insight},
+                        writer="vestibular_agent",
+                    )
+                except Exception:
+                    pass
+            return _insight or None
+        except Exception as exc:
+            _log.debug("VestibularAgent.generate_stability_assessment 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         """T-250：读取 state_registry 快照，不触发 evaluate_stability()（避免副作用）。"""
         snap = self.state_registry.get_state("vestibular_agent") or {}

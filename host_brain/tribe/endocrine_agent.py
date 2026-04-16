@@ -174,6 +174,78 @@ class EndocrineAgent:
             "homeostasis_ok": bool(cortisol < 0.62 and energy > 0.22 and gate_state == "open"),
         }
 
+    # ── 激素状态身体感受提示（A 级升级）─────────────────────────────────────
+
+    def generate_hormonal_state_hint(
+        self,
+        *,
+        cortisol: float = 0.0,
+        oxytocin: float = 0.0,
+        emotion_tag: str = "NEUTRAL",
+    ) -> str | None:
+        """将激素状态转化为自然语言身体感受提示，注入 Prompt Phase XIII 情绪层。
+
+        触发条件：cortisol > 0.6 或 oxytocin > 0.6（激素状态显著）。
+        调用：Flash 小模型。
+        开关：ENDOCRINE_HORMONAL_HINT_ENABLED（默认 false）。
+
+        Returns:
+            身体感受描述字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("ENDOCRINE_HORMONAL_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
+        _significant = float(cortisol or 0.0) > 0.6 or float(oxytocin or 0.0) > 0.6
+        if not _enabled or not _significant:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.endocrine_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("endocrine_agent.hormonal_state_hint") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("endocrine_agent.hormonal_state_hint 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                cortisol=round(float(cortisol), 3),
+                oxytocin=round(float(oxytocin), 3),
+                emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1500,
+                agent_role="endocrine_narrator",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=32,
+                temperature=0.2,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _hint = str(_parsed.get("hormonal_hint") or "").strip()[:40]
+            if _hint:
+                _log.debug("EndocrineAgent.generate_hormonal_state_hint: %s", _hint)
+                try:
+                    self.state_registry.set_state(
+                        "endocrine_agent",
+                        {"last_hormonal_hint": _hint},
+                        writer="endocrine_agent",
+                    )
+                except Exception:
+                    pass
+            return _hint or None
+        except Exception as exc:
+            _log.debug("EndocrineAgent.generate_hormonal_state_hint 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         last_state = dict(self._last_state or {})
         return {
