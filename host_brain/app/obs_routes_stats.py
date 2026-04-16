@@ -17,3 +17,6 @@ from .obs_routes_stats_agent import *       # noqa: F401, F403
 from .obs_routes_stats_system import *      # noqa: F401, F403
 from .obs_routes_stats_input import *       # noqa: F401, F403
 from .obs_routes_stats_capability import *  # noqa: F401, F403
+
+# 顶层引用，供测试 monkeypatch 使用
+from .obs_routes_core import _get_ledger  # noqa: F401

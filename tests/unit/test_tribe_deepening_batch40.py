@@ -343,22 +343,23 @@ class TestSomaticInteroceptionLink:
 # ── T-294 ────────────────────────────────────────────────────────────────────
 
 class TestPeripheralInteroceptionLink:
-    """T-294：PeripheralAgent 外设连接时调用 InteroceptionAgent.inject_external_stress(intensity<0)。"""
+    """T-294：PeripheralAgent 外设连接时调用 InteroceptionAgent.reduce_recovery_urgency()。"""
 
     def test_platform_connected_calls_interoception_negative(self, registry):
         agent = PeripheralAgent(state_registry=registry)
         mock_intero = MagicMock()
-        mock_intero.inject_external_stress = MagicMock()
+        mock_intero.reduce_recovery_urgency = MagicMock()
 
         event = MagicMock()
         event.payload = {"platform": "vts", "detail": "connected"}
         event.ts_ms = 1000
 
-        with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
+        with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero), \
+             patch("host_brain.tribe.peripheral_agent.get_pain_reward_agent", return_value=MagicMock()):
             asyncio.run(agent._on_platform_connected(event))
 
-        assert mock_intero.inject_external_stress.called, \
-            "外设连接时应调用 InteroceptionAgent.inject_external_stress()"
-        call_kwargs = mock_intero.inject_external_stress.call_args.kwargs
-        assert float(call_kwargs.get("intensity") or 0.0) < 0, \
-            "外设连接时 intensity 应为负值（恢复信号）"
+        assert mock_intero.reduce_recovery_urgency.called, \
+            "外设连接时应调用 InteroceptionAgent.reduce_recovery_urgency()"
+        call_kwargs = mock_intero.reduce_recovery_urgency.call_args.kwargs
+        assert float(call_kwargs.get("relief") or 0.0) > 0, \
+            "外设连接时 relief 应为正值（恢复信号）"

@@ -73,7 +73,7 @@ async def _fake_runtime_route_loader(*_args, **_kwargs):  # pragma: no cover
 
 
 def test_get_retrieval_runtime_returns_latest_and_counts(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.app.obs_routes_stats._get_ledger", lambda: _FakeLedger())
+    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_agent._get_ledger", lambda: _FakeLedger())
     monkeypatch.setattr(
         "host_brain.retrieval.embedding.load_embedding_runtime_config",
         lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={"host_default": SimpleNamespace(provider="sentence_transformers", model_id="embed-config", dim=1024, timeout_ms=20000, node_selector="default")}), success=True),
@@ -97,7 +97,7 @@ def test_get_retrieval_runtime_returns_latest_and_counts(monkeypatch) -> None:
 
 
 def test_get_retrieval_runtime_can_select_specific_request(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.app.obs_routes_stats._get_ledger", lambda: _FakeLedger())
+    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_agent._get_ledger", lambda: _FakeLedger())
     monkeypatch.setattr(
         "host_brain.retrieval.embedding.load_embedding_runtime_config",
         lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True),
@@ -117,7 +117,7 @@ def test_get_retrieval_runtime_can_select_specific_request(monkeypatch) -> None:
 
 
 def test_get_retrieval_runtime_reports_suite_profile(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.app.obs_routes_stats._get_ledger", lambda: _FakeLedger())
+    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_agent._get_ledger", lambda: _FakeLedger())
     monkeypatch.setattr("host_brain.retrieval.embedding.load_embedding_runtime_config", lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True))
     monkeypatch.setattr("host_brain.retrieval.reranker_config.load_reranker_runtime_config", lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True))
     monkeypatch.setenv("RETR_MODEL_SUITE_PROFILE", "qwen3_0_6b_local")
@@ -131,7 +131,7 @@ def test_get_retrieval_runtime_reports_suite_profile(monkeypatch) -> None:
 
 
 def test_get_retrieval_runtime_reports_write_side_embedding_hints(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.app.obs_routes_stats._get_ledger", lambda: _FakeLedger())
+    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_agent._get_ledger", lambda: _FakeLedger())
     monkeypatch.setattr("host_brain.retrieval.embedding.load_embedding_runtime_config", lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True))
     monkeypatch.setattr("host_brain.retrieval.reranker_config.load_reranker_runtime_config", lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True))
 
@@ -150,7 +150,7 @@ def test_get_retrieval_runtime_reports_write_side_embedding_hints(monkeypatch) -
 
 
 def test_get_retrieval_runtime_include_legacy_keeps_incomplete_rows(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.app.obs_routes_stats._get_ledger", lambda: _FakeLedger())
+    monkeypatch.setattr("host_brain.app.obs_routes_stats_capability_agent._get_ledger", lambda: _FakeLedger())
     monkeypatch.setattr("host_brain.retrieval.embedding.load_embedding_runtime_config", lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True))
     monkeypatch.setattr("host_brain.retrieval.reranker_config.load_reranker_runtime_config", lambda env=None: SimpleNamespace(config=SimpleNamespace(enabled=True, default_route="host_default", routes={}), success=True))
 

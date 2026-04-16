@@ -273,7 +273,7 @@ def test_t319_autobiographical_write_triggers_default_mode():
     mock_arbiter.write = MagicMock(return_value={"decision": "ALLOW", "trace_id": "t1"})
 
     with patch("host_brain.tribe.hippocampus_agent.get_default_mode_agent", return_value=mock_dma), \
-         patch.object(agent, "_write_memory_scope", return_value={"decision": "ALLOW"}):
+         patch("host_brain.tribe.hippocampus_agent.HippocampusAgent._write_memory_scope", return_value={"decision": "ALLOW"}):
         result = agent.write_autobiographical_memory(
             person_id="user_1",
             narrative="第一次深夜聊天，感觉很特别",

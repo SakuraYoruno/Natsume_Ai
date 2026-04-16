@@ -139,7 +139,7 @@ class TestPrefrontalDriftEndocrineLink:
         with patch("host_brain.tribe.prefrontal_agent.get_endocrine_agent", return_value=mock_endocrine):
             with patch("host_brain.tribe.prefrontal_agent.get_limbic_agent", return_value=mock_limbic):
                 # 模拟 run_growth_feedback_cycle 返回 MODERATE 漂移
-                with patch.object(agent, "run_growth_feedback_cycle", return_value={
+                with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value={
                     "drift_alert_level": "MODERATE",
                     "feedback_count": 1,
                     "applied": False,
@@ -215,19 +215,20 @@ class TestDefaultModeANSLink:
         agent = DefaultModeAgent(state_registry=registry)
         mock_ans = MagicMock()
         mock_ans._recovery_mode = True
+        def _fake_set_recovery_mode(enabled, **kw):
+            mock_ans._recovery_mode = enabled
+        mock_ans.set_recovery_mode.side_effect = _fake_set_recovery_mode
 
-        with patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=mock_ans):
-            with patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent"):
-                with patch.object(agent, "_resolve_inner_state", return_value={
-                    "inner_stream": [],
-                    "continuity_score": 0.75,
-                    "loneliness_level": 0.20,
-                    "anticipation_level": 0.30,
-                    "absence_band": "short",
-                    "offline_hours": 1.0,
-                }):
-                    with patch("host_brain.tribe.default_mode_agent.emit_tribe_event"):
-                        agent.tick_idle_cycle(source="test", user_id="user_1")
+        with patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=mock_ans), \
+             patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent"), \
+             patch("host_brain.tribe.default_mode_agent.get_pain_reward_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.default_mode_agent.emit_tribe_event"), \
+             patch("host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+                   return_value={"continuity_score": 0.75, "absence_band": "short",
+                                 "offline_hours": 1.0, "loneliness_level": 0.20, "anticipation_level": 0.30}):
+            agent.tick_idle_cycle(source="test", person_id="user_1")
 
         assert mock_ans._recovery_mode is False, \
             "continuity_score=0.75 >= 0.60 时应将 ANSAgent._recovery_mode 设为 False"
