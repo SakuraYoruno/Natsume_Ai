@@ -354,6 +354,9 @@ class CerebellumAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        snap = self.state_registry.get_state("cerebellum_agent") or {}
+        state = dict(snap.get("state") or {})
+        decision = dict(state.get("last_correction") or {})
         return {
             "last_strategy": str(decision.get("strategy") or "NO_ADJUST"),
             "last_urgency": float(decision.get("urgency") or 0.0),

@@ -769,6 +769,11 @@ class PainRewardAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        return {
+            "state": self.get_hedonic_state(),
+            "stress_signal": self.get_stress_signal(),
+            "emotion_modulation": self.get_emotion_modulation(),
+        }
 
 
 def _classify_hedonic_tone(net_valence: float) -> str:

@@ -401,14 +401,12 @@ class LanguageSystemAgent:
                 "source": "wernicke_llm"|"disabled"|"error",
             }
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("LANGUAGE_WERNICKE_DEEP_PARSE_ENABLED", "false")).lower() in ("1", "true", "yes")
         _should_trigger = (
             str(intent_type or "").lower() == "complex"
             or float(semantic_pressure or 0.0) > 0.6
         )
-        if not _enabled or not _should_trigger:
-            return {"topic_entity": "", "emotional_subtext": "", "implicit_need": "", "source": "disabled"}
+        if not _should_trigger:
+            return {"topic_entity": "", "emotional_subtext": "", "implicit_need": "", "source": "skipped"}
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.language_system_agent")
@@ -482,9 +480,7 @@ class LanguageSystemAgent:
         Returns:
             开场句字符串（15字以内），或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("LANGUAGE_BROCA_OPENING_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled or float(emotional_pressure or 0.0) <= 0.7:
+        if float(emotional_pressure or 0.0) <= 0.7:
             return None
 
         import logging as _logging  # noqa: PLC0415

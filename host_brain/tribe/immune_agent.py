@@ -294,6 +294,8 @@ class ImmuneAgent:
                 ]
             except Exception:
                 pass
+
+        if record:
             self._record_result(result)
             # T-35：如果决策为 BLOCK，发布 IMMUNE_BLOCK 事件通知其他 Agent
             if decision == "BLOCK":
@@ -713,11 +715,6 @@ class ImmuneAgent:
                 "source": "semantic_llm"|"disabled"|"error",
             }
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("IMMUNE_SEMANTIC_SCAN_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled:
-            return {"intent_class": "SAFE", "confidence": 0.0, "reason": "semantic_scan_disabled", "source": "disabled"}
-
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.immune_agent")
 
