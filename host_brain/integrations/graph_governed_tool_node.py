@@ -1,6 +1,6 @@
-"""GovernedToolNode：LangGraph ToolNode + Governor 门控（FIX-5.2 彻底迁移，无兼容开关）。
+"""GovernedToolNode：工具调用执行节点（Governor 门控 + 直接工具执行 + Evidence Plane 审计）。
 
-直接使用 LangGraph 原生 ToolNode，不再有任何环境变量开关或降级路径。
+直接执行工具调用，不依赖 LangGraph ToolNode（ToolNode 需要 messages 格式，与 react_loop 不兼容）。
 Governor 门控和 Evidence Plane 审计作为不可绕过的前置/后置钩子保留。
 """
 
@@ -10,13 +10,11 @@ import logging
 import time
 from typing import Any
 
-from langgraph.prebuilt import ToolNode
-
 _logger = logging.getLogger(__name__)
 
 
 class GovernedToolNode:
-    """在 LangGraph ToolNode 基础上增加 Governor 门控和 Evidence Plane 审计。
+    """工具调用执行节点（Governor 门控 + 直接工具执行 + Evidence Plane 审计）。
 
     核心约束（FIX-PLAN §5.2）：
     1. Governor 门控（保留，不可绕过）：
@@ -25,8 +23,8 @@ class GovernedToolNode:
        - 非 GOV_APPROVE 时直接返回，不执行工具
     2. Evidence Plane 审计（保留，不可绕过）：
        - 工具调用后写入 Evidence Plane
-    3. LangGraph 原生 ToolNode 执行：
-       - 利用 LangGraph 原生工具调用解析、错误处理、重试机制
+    3. 直接工具执行：
+       - 通过工具名称查找并调用工具
     """
 
     def __init__(
@@ -41,8 +39,12 @@ class GovernedToolNode:
         self._governor = governor
         self._evidence_plane = evidence_plane
         self._governor_rules_cache = governor_rules_cache
-        # 直接初始化 LangGraph ToolNode（无降级路径）
-        self._tool_node = ToolNode(self._tools) if self._tools else None
+        # 构建工具名称到工具的映射
+        self._tool_map: dict[str, Any] = {}
+        for tool in self._tools:
+            name = getattr(tool, "name", None) or str(tool)
+            if name:
+                self._tool_map[name] = tool
 
     def _get_tribe_params(self) -> dict[str, Any]:
         """获取 TRIBE 族动态参数（用于 Governor 裁决）。"""
@@ -55,14 +57,31 @@ class GovernedToolNode:
         except Exception:
             return {}
 
+    def _execute_tool(self, tool_name: str, tool_args: dict[str, Any]) -> Any:
+        """直接执行工具调用。"""
+        tool = self._tool_map.get(tool_name)
+        if tool is None:
+            return {"error": f"工具 '{tool_name}' 未找到", "result": None}
+        try:
+            # LangChain Tool 支持 .invoke() 或直接调用
+            if hasattr(tool, "invoke"):
+                result = tool.invoke(tool_args)
+            elif callable(tool):
+                result = tool(**tool_args)
+            else:
+                result = {"error": f"工具 '{tool_name}' 不可调用", "result": None}
+            return result
+        except Exception as exc:
+            return {"error": str(exc), "result": None}
+
     def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
-        """执行工具调用（Governor 门控 → LangGraph ToolNode → Evidence Plane 审计）。
+        """执行工具调用（Governor 门控 → 直接工具执行 → Evidence Plane 审计）。
 
         Args:
-            state: 当前 GraphState 字典
+            state: 包含 tool_calls 列表的字典
 
         Returns:
-            更新后的 GraphState 字典
+            更新后的字典，包含 tool_results
         """
         tool_calls = list(state.get("tool_calls") or [])
         request_id = str(state.get("request_id") or "")
@@ -90,12 +109,20 @@ class GovernedToolNode:
             except Exception as exc:
                 _logger.warning("GovernedToolNode: Governor 门控异常（降级允许执行）: %s", exc)
 
-        # 2. LangGraph 原生 ToolNode 执行
-        if self._tool_node is None:
-            return state
-        result_state = self._tool_node(state)
-        tool_results = list(result_state.get("tool_results") or [])
-        merged = {**state, **result_state}
+        # 2. 直接执行工具
+        tool_results = []
+        for tc in tool_calls:
+            tool_name = str(tc.get("tool") or "").strip()
+            tool_args = dict(tc.get("args") or {})
+            result = self._execute_tool(tool_name, tool_args)
+            tool_results.append({
+                "tool": tool_name,
+                "args": tool_args,
+                "result": result,
+                "ts_ms": int(time.time() * 1000),
+            })
+
+        merged = {**state, "tool_results": tool_results}
 
         # 3. Evidence Plane 审计（保留，不可绕过）
         if self._evidence_plane is not None:
