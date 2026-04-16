@@ -192,10 +192,8 @@ class EndocrineAgent:
         Returns:
             身体感受描述字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("ENDOCRINE_HORMONAL_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
         _significant = float(cortisol or 0.0) > 0.6 or float(oxytocin or 0.0) > 0.6
-        if not _enabled or not _significant:
+        if not _significant:
             return None
 
         import logging as _logging  # noqa: PLC0415

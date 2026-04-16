@@ -281,10 +281,8 @@ class CircadianAgent:
         Returns:
             时段感知描述字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("CIRCADIAN_MOOD_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
         _significant = float(energy_level or 0.8) < 0.3 or float(sleep_pressure or 0.2) > 0.6
-        if not _enabled or not _significant:
+        if not _significant:
             return None
 
         import logging as _logging  # noqa: PLC0415

@@ -160,9 +160,7 @@ class ProprioceptionAgent:
         Returns:
             认知状态描述字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("PROPRIOCEPTION_LOAD_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled or float(cognitive_load_index or 0.0) <= 0.6:
+        if float(cognitive_load_index or 0.0) <= 0.6:
             return None
 
         import logging as _logging  # noqa: PLC0415
