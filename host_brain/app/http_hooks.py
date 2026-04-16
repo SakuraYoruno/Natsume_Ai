@@ -90,6 +90,24 @@ def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str
     return _middleware_build_personality_tick_status(registry=registry, task_ids=task_ids)
 
 
+def _init_edge_command_pusher_status(*, logger: Any) -> str:
+    try:
+        from host_brain.tribe.edge_command_pusher import init_edge_command_pusher  # noqa: PLC0415
+
+        edge_cmd_pusher = init_edge_command_pusher()
+        logger.info(
+            "EdgeCommandPusher initialized: enabled=%s url=%s",
+            edge_cmd_pusher.enabled,
+            edge_cmd_pusher.edge_base_url,
+        )
+        return (
+            f"OK (enabled={edge_cmd_pusher.enabled}, "
+            f"edge_url={edge_cmd_pusher.edge_base_url})"
+        )
+    except Exception as exc:
+        logger.warning("EdgeCommandPusher initialization degraded: %s", exc)
+        return f"DEGRADED: {exc}"
+
 
 def _bootstrap_personality_scheduler(
     *,
@@ -1282,28 +1300,14 @@ def runtime_lifespan(
                         logger.warning("Tribe 订阅注册失败（降级）: agent=%s exc=%s", _agent_name, _sub_exc)
 
 
-                # T-130：初始化 EdgeCommandPusher 单例，注入到 LimbicAgent 和 CortexAgent
-                # Phase 6 下行链路：host_brain → edge_client 情绪/门控指令推送
+                # T-130: initialize the shared EdgeCommandPusher singleton for host->edge commands.
                 try:
-                    from host_brain.tribe.edge_command_pusher import init_edge_command_pusher  # noqa: PLC0415
-                    from host_brain.tribe.limbic_agent import get_limbic_agent as _get_limbic  # noqa: PLC0415
-                    from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
-
-                    _edge_cmd_pusher = init_edge_command_pusher()
-                    _get_limbic().set_edge_command_pusher(_edge_cmd_pusher)
-                    _get_cortex().set_edge_command_pusher(_edge_cmd_pusher)
-                    new_module_statuses["edge_command_pusher"] = (
-                        f"OK (enabled={_edge_cmd_pusher.enabled}, "
-                        f"edge_url={_edge_cmd_pusher.edge_base_url})"
-                    )
-                    logger.info(
-                        "EdgeCommandPusher 已初始化并注入 LimbicAgent/CortexAgent: enabled=%s url=%s",
-                        _edge_cmd_pusher.enabled,
-                        _edge_cmd_pusher.edge_base_url,
+                    new_module_statuses["edge_command_pusher"] = _init_edge_command_pusher_status(
+                        logger=logger,
                     )
                 except Exception as _ecp_exc:
                     new_module_statuses["edge_command_pusher"] = f"DEGRADED: {_ecp_exc}"
-                    logger.warning("EdgeCommandPusher 初始化失败（降级）: %s", _ecp_exc)
+                    logger.warning("EdgeCommandPusher initialization failed (degraded): %s", _ecp_exc)
 
                 # T-113~T-122: ANSAgent +VOICE_PIPELINE_STARTED/ENDED/CHANNEL_MESSAGE_RECEIVED(+3)
                 #              CortexAgent +PLATFORM_CONNECTED/DISCONNECTED(+2) = +5（第二十一批）

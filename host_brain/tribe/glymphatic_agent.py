@@ -370,6 +370,9 @@ class GlymphaticAgent:
             return {"ticked": False, "error": str(exc)}
 
 
+_GLYMPHATIC_AGENT: GlymphaticAgent | None = None
+
+
 def get_glymphatic_agent() -> GlymphaticAgent:
     global _GLYMPHATIC_AGENT
     if _GLYMPHATIC_AGENT is None:

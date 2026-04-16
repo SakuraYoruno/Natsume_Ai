@@ -101,7 +101,9 @@ def _strip_internal_delegate_markers(text: str) -> str:
     normalized = str(text or "")
     normalized = _DELEGATE_MARKER_RE.sub("", normalized)
     normalized = normalized.replace("{agent_result}", "")
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
     return normalized
 
 
@@ -555,6 +557,12 @@ def _build_minimal_chat_fallback_reply(*, user_message: str, sub_agent_ctx: SubA
 
 
 def _build_chat_agent_quality_fallback_reply(*, user_message: str, sub_agent_ctx: SubAgentContext | None, bond_summary: Dict[str, Any] | None, emotion_context: Dict[str, Any] | None, render_target_lang: str, response_policy: Any = None, prompt_runtime_payload: Mapping[str, Any] | None = None) -> str:
+    delegated_fallback = _build_sub_agent_result_preserving_fallback_reply(
+        sub_agent_ctx,
+        render_target_lang=render_target_lang,
+    )
+    if delegated_fallback:
+        return delegated_fallback
     return _build_minimal_chat_fallback_reply(user_message=user_message, sub_agent_ctx=sub_agent_ctx, render_target_lang=render_target_lang)
 
 
@@ -838,6 +846,37 @@ def _build_hub_skill_reply_cn(ctx: SubAgentContext) -> str | None:
     return None
 
 
+def _looks_like_internal_sub_agent_result(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if normalized.startswith("[ReAct"):
+        return True
+    if normalized.startswith("ReAct 已达到最大步数限制"):
+        return True
+    if normalized.startswith("[RepairAgent"):
+        return True
+    return any(marker in normalized for marker in ("stopped_reason=", "agent_id=", "repair_agent_trace"))
+
+
+def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | None, *, render_target_lang: str) -> str | None:
+    if ctx is None or render_target_lang != "zh":
+        return None
+    if not bool(ctx.success) or str(ctx.error or "").strip():
+        return None
+    agent_id = str(ctx.agent_id or "").strip()
+    if agent_id == "plan_execution":
+        return _build_plan_execution_reply_cn(ctx)
+    if agent_id.startswith("skill:hub_skill_"):
+        return _build_hub_skill_reply_cn(ctx)
+    result_text = _strip_internal_delegate_markers(str(ctx.result_text or ""))
+    result_text = _extract_visible_text(result_text)
+    result_text = re.sub(r"\n{3,}", "\n\n", result_text).strip()
+    if not result_text or _looks_like_internal_sub_agent_result(result_text):
+        return None
+    return result_text
+
+
 def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_target_lang: str) -> str | None:
     if ctx is None:
         return None
@@ -895,6 +934,10 @@ def _extract_visible_text(raw: str) -> str:
                 narrative = parsed.get("narrative")
                 if isinstance(narrative, dict):
                     return str(narrative.get("text_zh") or narrative.get("text") or "").strip()
+                for key in ("final_answer", "result", "output", "text", "message"):
+                    value = parsed.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
         except (json.JSONDecodeError, ValueError):
             pass
     return text

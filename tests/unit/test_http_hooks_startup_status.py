@@ -4,6 +4,7 @@ import json
 import logging
 
 from host_brain.app.http_hooks import _build_audit_retention_task_config
+from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _build_personality_tick_status
 from host_brain.app.http_hooks import _sync_world_canon_index_on_startup
 from host_brain.app.http_hooks import _startup_status_is_degraded
@@ -83,6 +84,39 @@ def test_build_personality_tick_status_marks_missing_tasks_degraded() -> None:
 
     assert status.startswith("DEGRADED")
     assert "missing=inner_world_tick" in status
+
+
+def test_init_edge_command_pusher_status_returns_ok(monkeypatch) -> None:
+    class _FakePusher:
+        enabled = True
+        edge_base_url = "http://edge.local"
+
+    monkeypatch.setattr(
+        "host_brain.tribe.edge_command_pusher.init_edge_command_pusher",
+        lambda: _FakePusher(),
+    )
+
+    status = _init_edge_command_pusher_status(
+        logger=logging.getLogger("tests.edge_command_pusher.ok"),
+    )
+
+    assert status == "OK (enabled=True, edge_url=http://edge.local)"
+
+
+def test_init_edge_command_pusher_status_returns_degraded(monkeypatch) -> None:
+    def _raise() -> None:
+        raise RuntimeError("pusher unavailable")
+
+    monkeypatch.setattr(
+        "host_brain.tribe.edge_command_pusher.init_edge_command_pusher",
+        _raise,
+    )
+
+    status = _init_edge_command_pusher_status(
+        logger=logging.getLogger("tests.edge_command_pusher.degraded"),
+    )
+
+    assert status == "DEGRADED: pusher unavailable"
 
 
 def test_world_canon_sync_on_startup_backfills_world_canon_index(tmp_path) -> None:

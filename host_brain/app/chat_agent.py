@@ -1768,6 +1768,7 @@ async def chat_agent_sse_generator(
             render_lang=render_target_lang,
             allow_rewrite=buffer_stream,
         )
+        narrative = _extract_visible_text(narrative) or narrative
         narrative = _apply_response_policy_hard_guard(
             narrative,
             response_policy,

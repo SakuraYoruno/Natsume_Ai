@@ -408,6 +408,9 @@ class InteroceptionAgent:
             return {"ticked": False, "error": str(exc)}
 
 
+_INTEROCEPTION_AGENT: InteroceptionAgent | None = None
+
+
 def get_interoception_agent() -> InteroceptionAgent:
     global _INTEROCEPTION_AGENT
     if _INTEROCEPTION_AGENT is None:

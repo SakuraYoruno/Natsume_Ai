@@ -1858,6 +1858,9 @@ class LimbicAgent:
             return {"decayed": False, "error": str(exc)}
 
 
+_LIMBIC_AGENT: LimbicAgent | None = None
+
+
 def get_limbic_agent() -> LimbicAgent:
     global _LIMBIC_AGENT
     if _LIMBIC_AGENT is None:

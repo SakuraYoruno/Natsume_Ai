@@ -11,12 +11,46 @@ import logging
 import os
 import threading
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
 from host_brain.core.ids import now_ms
 
 logger = logging.getLogger("Natsume.tribe.edge_command_pusher")
+
+
+def _normalize_base_url(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    parsed = urlparse(raw)
+    scheme = parsed.scheme or "http"
+    netloc = parsed.netloc or parsed.path
+    if not netloc:
+        return ""
+    return f"{scheme}://{netloc}".rstrip("/")
+
+
+def _resolve_edge_command_base_url() -> str:
+    for env_name in ("EDGE_COMMAND_BASE_URL", "HOST_EDGE_RPC_BASE_URL", "EDGE_RPC_BASE_URL"):
+        candidate = _normalize_base_url(os.environ.get(env_name) or "")
+        if candidate:
+            return candidate
+
+    rpc_host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    port_raw = str(
+        os.environ.get("EDGE_COMMAND_PORT")
+        or os.environ.get("EDGE_RPC_PORT")
+        or "17800"
+    ).strip()
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = 17800
+    return f"http://{rpc_host}:{port}"
 
 
 class EdgeCommandPusher:
@@ -55,13 +89,7 @@ class EdgeCommandPusher:
           EDGE_COMMAND_PUSHER_ENABLED 是否启用（默认 true）
           EDGE_COMMAND_TIMEOUT_MS     超时毫秒（默认 2000）
         """
-        edge_base_url = str(os.environ.get("EDGE_COMMAND_BASE_URL") or "").strip()
-        if not edge_base_url:
-            rpc_host = str(os.environ.get("EDGE_RPC_HOST") or "127.0.0.1").strip() or "127.0.0.1"
-            port = str(os.environ.get("EDGE_COMMAND_PORT") or "18081").strip() or "18081"
-            edge_base_url = f"http://{rpc_host}:{port}"
-        if "://" not in edge_base_url:
-            edge_base_url = f"http://{edge_base_url}"
+        edge_base_url = _resolve_edge_command_base_url()
         token = str(os.environ.get("HOST_INTERNAL_TRIBE_TOKEN") or "").strip()
         enabled_raw = str(os.environ.get("EDGE_COMMAND_PUSHER_ENABLED") or "true").strip().lower()
         enabled = enabled_raw not in {"0", "false", "no", "off"}
