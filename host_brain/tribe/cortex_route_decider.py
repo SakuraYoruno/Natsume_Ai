@@ -307,7 +307,6 @@ def route_intent(
 
     if bool(ctx.get("initiative_request", False)):
         try:
-            from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
             decision = get_initiative_governor_agent().evaluate_initiative(
                 action=str(ctx.get("initiative_action") or "proactive_talk"),
                 motive=ctx.get("motive"),
@@ -347,3 +346,6 @@ def route_intent(
 
 
 __all__ = ["route_intent", "classify_task_intent", "_classify_task_intent_by_rules"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: E402, F401

@@ -58,7 +58,6 @@ class CortexAgent:
         from host_brain.app.dependencies import get_bond_update_queue, get_ledger  # noqa: PLC0415
         from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
         from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
         payload_emotion = dict(emotion_context or {})
         emotion_tag = str(payload_emotion.get("emotion_tag") or "NEUTRAL").strip().upper()
@@ -147,7 +146,6 @@ class CortexAgent:
         可从同步上下文调用（内部使用 emit_tribe_event 同步写入 bus）。
         """
         try:
-            from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
 
             emit_tribe_event(
                 event_type="CONVERSATION_STARTED",
@@ -178,7 +176,6 @@ class CortexAgent:
         - INTERACTION_RECORDED → PrefrontalAgent / SocialBrainAgent（触发人格/关系更新）
         """
         try:
-            from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
 
             base_payload = {
                 "user_id": str(user_id or ""),
@@ -206,7 +203,6 @@ class CortexAgent:
         # T-369：对话结束时联动 PainRewardAgent 记录对话完成奖励
         # 成功完成一次对话是最直接的正向强化（"我帮助了对方"是核心奖励）
         try:
-            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
             _pr = get_pain_reward_agent()
             if hasattr(_pr, "record_reward"):
                 _emotion_tag = str(emotion_tag or "NEUTRAL").strip().upper()
@@ -302,7 +298,6 @@ class CortexAgent:
         """
         try:
             import logging  # noqa: PLC0415
-            from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
 
             payload = dict(event.payload or {})
             _log = logging.getLogger("Natsume.tribe.cortex_agent")
@@ -611,7 +606,6 @@ class CortexAgent:
             )
             # T-129：平台连接后向 ChannelAgent 推送开门指令（允许消息路由）
             try:
-                from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
                 _pusher = get_edge_command_pusher()
                 if _pusher is not None and _pusher.enabled:
                     _pusher.push_gate_control(
@@ -658,7 +652,6 @@ class CortexAgent:
             )
             # T-129：平台断线后向 ChannelAgent 推送关门指令（暂停该平台消息路由）
             try:
-                from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
                 _pusher = get_edge_command_pusher()
                 if _pusher is not None and _pusher.enabled:
                     _pusher.push_gate_control(
@@ -713,7 +706,6 @@ class CortexAgent:
             emotion_intensity: float = 0.5
             try:
                 from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
-                from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
                 _lang_agent = get_language_system_agent()
                 _last_broca = dict(
                     (_lang_agent.state_registry.get_state("language_system_agent") or {})
@@ -732,7 +724,6 @@ class CortexAgent:
                 pass
 
             # D3: 直接调用 MotorCortexAgent.dispatch_speak()（Phase C 统一发声入口）
-            from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
             from host_brain.core.ids import new_request_id  # noqa: PLC0415
             req_id = new_request_id()
             motor = get_motor_cortex_agent()
@@ -778,3 +769,7 @@ __all__ = ["CortexAgent", "get_cortex_agent", "set_cortex_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
+from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: E402, F401
+from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: E402, F401
+from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401

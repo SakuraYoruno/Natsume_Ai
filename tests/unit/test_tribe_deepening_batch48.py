@@ -34,10 +34,10 @@ def test_t371_ans_high_interrupt_injects_stress():
         agent = ANSAgent.__new__(ANSAgent)
         agent._recovery_mode = False
         agent._bond_stage = "friend"
-        agent.emit_from_thread = MagicMock()
 
         import math
-        agent.adjust_rhythm_for_high_interrupt(interrupt_count=8, source="test")
+        with patch.object(ANSAgent, "emit_from_thread"):
+            agent.adjust_rhythm_for_high_interrupt(interrupt_count=8, source="test")
 
     mock_intero.inject_external_stress.assert_called_once()
     call_kwargs = mock_intero.inject_external_stress.call_args[1]
@@ -75,9 +75,9 @@ def test_t372_ans_recovery_exit_reduces_urgency():
         from host_brain.tribe.ans_agent import ANSAgent
         agent = ANSAgent.__new__(ANSAgent)
         agent._recovery_mode = True  # 当前在恢复模式
-        agent.emit_from_thread = MagicMock()
 
-        agent.set_recovery_mode(False, source="circadian_day_phase")
+        with patch.object(ANSAgent, "emit_from_thread"):
+            agent.set_recovery_mode(False, source="circadian_day_phase")
 
     mock_intero.reduce_recovery_urgency.assert_called_once()
     call_kwargs = mock_intero.reduce_recovery_urgency.call_args[1]
@@ -97,9 +97,9 @@ def test_t372_ans_enter_recovery_no_reduce():
         from host_brain.tribe.ans_agent import ANSAgent
         agent = ANSAgent.__new__(ANSAgent)
         agent._recovery_mode = False
-        agent.emit_from_thread = MagicMock()
 
-        agent.set_recovery_mode(True, source="test")
+        with patch.object(ANSAgent, "emit_from_thread"):
+            agent.set_recovery_mode(True, source="test")
 
     mock_intero.reduce_recovery_urgency.assert_not_called()
 
@@ -135,7 +135,10 @@ def test_t373_high_emotional_pressure_injects_stress():
              patch("host_brain.tribe.language_system_agent.get_endocrine_agent", create=True), \
              patch("host_brain.tribe.language_system_agent.get_limbic_agent", create=True):
             mock_pr_factory.return_value = MM()
-            agent.resolve_dual_system(wernicke=wernicke, broca=broca)
+        agent.resolve_dual_system(
+            user_text="我很伤心",
+            emotion_tag="SAD",
+        )
 
     mock_intero.inject_external_stress.assert_called_once()
     call_kwargs = mock_intero.inject_external_stress.call_args[1]
@@ -198,10 +201,13 @@ def test_t375_no_adjust_reduces_urgency():
             mock_pr.return_value = MM()
             mock_dma.return_value = MM()
             agent.evaluate_correction(
-                latency_ms=120,
-                error_rate=0.01,
-                urgency=0.20,
-                reason="smooth_execution",
+                execution_feedback={
+                    "accepted": True,
+                    "dispatched": True,
+                    "latency_ms": 120,
+                    "error_rate": 0.01,
+                },
+                source="test",
             )
 
     mock_intero.reduce_recovery_urgency.assert_called_once()
@@ -255,7 +261,8 @@ def test_t377_day_phase_ticks_idle_cycle():
             mock_ans.return_value = MM()
             mock_pr.return_value = MM()
             mock_limbic.return_value = MM()
-            agent.refresh_state(profile=profile, source="test")
+            agent._last_phase = "night"
+            agent.refresh_state(source="test", ts_ms=1000)
 
     mock_dma.tick_idle_cycle.assert_called()
     call_kwargs = mock_dma.tick_idle_cycle.call_args[1]
@@ -280,17 +287,27 @@ def test_t378_high_resonance_ticks_idle_cycle():
         agent.state_registry = MM()
         agent.state_registry.get_state = MM(return_value={})
         agent.state_registry.set_state = MM()
+        agent.state_registry.aggregate_vital_signs = MM(return_value={})
+
+        mock_social = MM()
+        # 提供高 bond 值，确保 resonance_strength >= 0.60
+        mock_social.get_bond_context.return_value = {
+            "bond_vector": {"trust": 0.9, "affinity": 0.9, "safety": 0.9, "repair_confidence": 0.9}
+        }
 
         with patch("host_brain.tribe.mirror_neuron_agent.get_endocrine_agent", create=True), \
              patch("host_brain.tribe.mirror_neuron_agent.get_interoception_agent", create=True) as mock_intero_f, \
-             patch("host_brain.tribe.mirror_neuron_agent.get_pain_reward_agent", create=True) as mock_pr_f:
+             patch("host_brain.tribe.mirror_neuron_agent.get_pain_reward_agent", create=True) as mock_pr_f, \
+             patch("host_brain.tribe.mirror_neuron_agent.get_social_brain_agent", return_value=mock_social, create=True), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_limbic_agent", create=True), \
+             patch("host_brain.tribe.mirror_neuron_agent.emit_tribe_event", create=True):
             mock_intero_f.return_value = MM()
             mock_pr_f.return_value = MM()
             agent.apply_resonance(
+                user_id="user_1",
                 emotion_tag="JOY",
-                resonance_strength=0.75,
-                valence_shift=0.20,
-                arousal_shift=0.10,
+                emotion_intensity=0.75,
+                source="test",
             )
 
     mock_dma.tick_idle_cycle.assert_called_once()
@@ -322,10 +339,13 @@ def test_t379_no_adjust_ticks_idle_cycle():
             mock_pr.return_value = MM()
             mock_intero.return_value = MM()
             agent.evaluate_correction(
-                latency_ms=100,
-                error_rate=0.005,
-                urgency=0.15,
-                reason="smooth",
+                execution_feedback={
+                    "accepted": True,
+                    "dispatched": True,
+                    "latency_ms": 100,
+                    "error_rate": 0.005,
+                },
+                source="test",
             )
 
     mock_dma.tick_idle_cycle.assert_called_once()

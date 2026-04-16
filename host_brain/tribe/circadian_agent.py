@@ -106,7 +106,6 @@ class CircadianAgent:
             # T-227：相位切换到 night 时，主动触发 GlymphaticAgent 恢复周期
             if next_phase == "night":
                 try:
-                    from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
                     get_glymphatic_agent().run_recovery_cycle(
                         source="circadian_night_phase",
                         force=False,
@@ -116,7 +115,6 @@ class CircadianAgent:
                     pass
                 # T-258：夜间相位时联动 EndocrineAgent 降低 cortisol（夜间应降低压力激素）
                 try:
-                    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                     _endo = get_endocrine_agent()
                     if hasattr(_endo, "_bond_cortisol_delta"):
                         # 注入负 delta（降低 cortisol），通过 _bond_cortisol_delta 缓冲消费
@@ -131,7 +129,6 @@ class CircadianAgent:
             # T-292：日间/黎明相位切换时联动 ANSAgent 恢复 proactive_multiplier
             if next_phase in {"day", "dawn"}:
                 try:
-                    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
 
                     _ans = get_ans_agent()
                     if hasattr(_ans, "set_recovery_mode"):
@@ -147,7 +144,6 @@ class CircadianAgent:
                 # T-356：日间/黎明相位切换时联动 PainRewardAgent 记录清醒奖励
                 # 日间清醒是轻度正向奖励（类似早晨醒来的清爽感）
                 try:
-                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                     _pr = get_pain_reward_agent()
                     if hasattr(_pr, "record_reward"):
                         _wake_reward = 0.18 if next_phase == "day" else 0.12
@@ -164,7 +160,6 @@ class CircadianAgent:
                     pass
                 # T-366：日间/黎明相位切换时联动 LimbicAgent 触发轻度活力情绪（日间清醒带来活力感）
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _wake_valence = 0.12 if next_phase == "day" else 0.08
@@ -182,7 +177,6 @@ class CircadianAgent:
                 # T-377：日间/黎明相位切换时联动 DefaultModeAgent.tick_idle_cycle()
                 # 日间清醒是自我叙事的重要节点（"新的一天开始了"），应更新连续性
                 try:
-                    from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                     _dma = get_default_mode_agent()
                     if hasattr(_dma, "tick_idle_cycle"):
                         _dma.tick_idle_cycle(
@@ -195,7 +189,6 @@ class CircadianAgent:
             # T-313：夜间相位切换时联动 InteroceptionAgent 降低 recovery_urgency（夜间是恢复窗口）
             if next_phase == "night":
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "reduce_recovery_urgency"):
                         _intero.reduce_recovery_urgency(
@@ -210,7 +203,6 @@ class CircadianAgent:
                 _sleep_pressure = float(profile.get("sleep_pressure") or 0.0)
                 if _sleep_pressure >= 0.70:
                     try:
-                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                         _pr = get_pain_reward_agent()
                         if hasattr(_pr, "record_pain"):
                             _sleep_pain = round(min(0.30, (_sleep_pressure - 0.70) * 1.00), 4)
@@ -229,7 +221,6 @@ class CircadianAgent:
                 # 深度睡眠是最强的身体预算恢复信号，应大幅释放内在压力
                 if _sleep_pressure < 0.30:
                     try:
-                        from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                         _intero_deep = get_interoception_agent()
                         if hasattr(_intero_deep, "reduce_recovery_urgency"):
                             _deep_relief = round(min(0.55, (0.30 - _sleep_pressure) * 1.83), 4)
@@ -244,7 +235,6 @@ class CircadianAgent:
             # T-314：夜间/黄昏相位切换时联动 LimbicAgent 降低唤醒（夜间应降低情绪激活）
             if next_phase in {"night", "dusk"}:
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _arousal_drop = -0.18 if next_phase == "night" else -0.10
@@ -411,7 +401,6 @@ class CircadianAgent:
 
             # 调用 LimbicAgent.tick_emotion_decay()，传入昼夜相位信息
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "tick_emotion_decay"):
                     decay_result = _limbic.tick_emotion_decay(
@@ -465,3 +454,4 @@ from host_brain.tribe.ans_agent import get_ans_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
 from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: E402, F401
+from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401

@@ -10,6 +10,14 @@ from host_brain.tribe.base_agent import TribeAgentDescriptor
 logger = logging.getLogger("Natsume.tribe.ans_agent")
 
 
+def _default_state_registry() -> Any:
+    try:
+        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
+        return get_global_registry()
+    except Exception:
+        return None
+
+
 @dataclass(slots=True)
 class ANSAgent:
     """自主神经系统族 Agent。
@@ -27,10 +35,15 @@ class ANSAgent:
             capabilities=("scheduler", "mode_transition", "proactive_tick"),
         )
     )
+    state_registry: Any = field(default=None)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
     _bond_stage: str = field(default="stranger", init=False, repr=False)  # T-37：记录当前关系阶段
     _recovery_mode: bool = field(default=False, init=False, repr=False)  # T-203：Glymphatic 恢复窗口标志
     _recovery_mode_ts_ms: int = field(default=0, init=False, repr=False)  # T-203：恢复窗口开始时间戳
+
+    def __post_init__(self) -> None:
+        if self.state_registry is None:
+            self.state_registry = _default_state_registry()
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -64,7 +77,6 @@ class ANSAgent:
     async def _async_emit(self, event_type: str, payload: dict[str, Any]) -> None:
         """异步发布事件到 TribeEventBus（在主 asyncio 线程中执行）。"""
         try:
-            from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
 
             emit_tribe_event(
                 event_type=event_type,
@@ -113,7 +125,6 @@ class ANSAgent:
                 )
             )
             if _should_trigger:
-                from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
 
                 decision = get_initiative_governor_agent().evaluate_initiative(
                     action="proactive_voice",
@@ -366,7 +377,6 @@ class ANSAgent:
             {"triggered": bool, "expression": dict | None, "scene_type": str | None}
         """
         try:
-            from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: PLC0415
             from host_brain.persona.proactive_voice import PersonaProactiveVoice  # noqa: PLC0415
 
             decision = get_initiative_governor_agent().evaluate_initiative(
@@ -660,7 +670,6 @@ class ANSAgent:
         # T-371：高打断频率（交感过度激活）时联动 InteroceptionAgent 注入内在压力
         # 频繁打断 = 交感神经持续激活 = 身体预算持续消耗（内在压力源）
         try:
-            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
             _intero = get_interoception_agent()
             if hasattr(_intero, "inject_external_stress"):
                 _ans_stress = round(min(0.35, math.log1p(interrupt_count - 5) * 0.18), 4)
@@ -702,7 +711,6 @@ class ANSAgent:
                 )
                 # T-364：退出恢复模式时联动 LimbicAgent 触发轻度舒适情绪（恢复后的清爽感）
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _limbic.drive_emotion_metabolism(
@@ -718,7 +726,6 @@ class ANSAgent:
                 # T-372：退出恢复模式时联动 InteroceptionAgent 降低 recovery_urgency
                 # 副交感恢复激活 = 身体预算重新充盈，应主动释放内在压力
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "reduce_recovery_urgency"):
                         _intero.reduce_recovery_urgency(
@@ -760,7 +767,14 @@ class ANSAgent:
         }
         # T-289：写入 state_registry，供 vital_signs 聚合读取
         try:
-            self.state_registry.set_state("ans_agent", snapshot, writer="ans_agent")
+            if hasattr(self.state_registry, "write"):
+                self.state_registry.write(
+                    namespace="ans_agent",
+                    state=snapshot,
+                    writer="ans_agent",
+                )
+            elif hasattr(self.state_registry, "set_state"):
+                self.state_registry.set_state("ans_agent", snapshot, writer="ans_agent")
         except Exception:
             pass
         return snapshot
@@ -895,7 +909,6 @@ class ANSAgent:
             )
             # 写入 TribeStateRegistry，供后续调度门控读取
             try:
-                from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
                 registry = get_global_registry()
                 registry.write(
                     namespace="ans_agent",
@@ -927,7 +940,6 @@ class ANSAgent:
                 request_id, session_id, status,
             )
             try:
-                from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
                 registry = get_global_registry()
                 registry.write(
                     namespace="ans_agent",
@@ -961,7 +973,6 @@ class ANSAgent:
                 "ANSAgent 感知消息到达: platform=%s ts_ms=%d", platform, ts_ms,
             )
             try:
-                from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
                 from host_brain.core.ids import now_ms  # noqa: PLC0415
                 registry = get_global_registry()
                 registry.write(
@@ -996,3 +1007,10 @@ def set_ans_agent(agent: ANSAgent | None) -> None:
 
 
 __all__ = ["ANSAgent", "get_ans_agent", "set_ans_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
+from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.tribe_state import get_global_registry  # noqa: E402, F401

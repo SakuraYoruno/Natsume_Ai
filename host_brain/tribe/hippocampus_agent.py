@@ -64,7 +64,6 @@ class HippocampusAgent:
         # T-49：将 ImmuneAgent 运行时状态注入 session_state，
         # 供 RetrievalOrchestrator 在检索时参考安全状态（如 risk_level/block_rate）。
         try:
-            from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
             _immune = get_immune_agent().export_runtime_state()
             session_state["immune_state"] = {
                 "risk_level": _immune.get("risk_level", "none"),
@@ -424,7 +423,6 @@ class HippocampusAgent:
 
         # T-311：情节记忆写入后联动 DefaultModeAgent 提升连续性评分（情节记忆是连续性的重要来源）
         try:
-            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
             _dma = get_default_mode_agent()
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
@@ -472,7 +470,6 @@ class HippocampusAgent:
 
         # T-291：写入语义记忆后联动 DefaultModeAgent 更新连续性（记忆写入增强自我连续感）
         try:
-            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
             _dma = get_default_mode_agent()
             _prev_dma = _dma.state_registry.get_state("default_mode_agent") or {}
             _dma_state = dict(_prev_dma.get("state") or {})
@@ -488,7 +485,6 @@ class HippocampusAgent:
 
         # T-340：语义记忆写入成功时联动 PainRewardAgent 记录学习奖励（记忆巩固是学习成就感）
         try:
-            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
             _pr = get_pain_reward_agent()
             if hasattr(_pr, "record_reward"):
                 _pr.record_reward(
@@ -504,7 +500,6 @@ class HippocampusAgent:
 
         # T-344：语义记忆写入后联动 InteroceptionAgent 降低 recovery_urgency（记忆巩固后身体预算恢复）
         try:
-            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
             _intero = get_interoception_agent()
             if hasattr(_intero, "reduce_recovery_urgency"):
                 _intero.reduce_recovery_urgency(
@@ -516,7 +511,6 @@ class HippocampusAgent:
 
         # T-351：语义记忆巩固成功后联动 LimbicAgent 触发轻度满足感（学习成就感）
         try:
-            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
             _limbic = get_limbic_agent()
             if hasattr(_limbic, "drive_emotion_metabolism"):
                 _limbic.drive_emotion_metabolism(
@@ -577,7 +571,6 @@ class HippocampusAgent:
 
         # T-319：自传体记忆写入后联动 DefaultModeAgent 提升连续性（自传体记忆是最强的连续性来源）
         try:
-            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
             _dma = get_default_mode_agent()
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(
@@ -589,7 +582,6 @@ class HippocampusAgent:
 
         # T-340：自传体记忆写入成功时联动 PainRewardAgent 记录强学习奖励（自传体记忆是最深层的成就感）
         try:
-            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
             _pr = get_pain_reward_agent()
             if hasattr(_pr, "record_reward"):
                 _pr.record_reward(
@@ -606,7 +598,6 @@ class HippocampusAgent:
 
         # T-344：自传体记忆写入后联动 InteroceptionAgent 降低 recovery_urgency（深度记忆巩固后身体预算显著恢复）
         try:
-            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
             _intero = get_interoception_agent()
             if hasattr(_intero, "reduce_recovery_urgency"):
                 _intero.reduce_recovery_urgency(
@@ -618,7 +609,6 @@ class HippocampusAgent:
 
         # T-351：自传体记忆巩固成功后联动 LimbicAgent 触发中度满足感（自我叙事完整感）
         try:
-            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
             _limbic = get_limbic_agent()
             if hasattr(_limbic, "drive_emotion_metabolism"):
                 _limbic.drive_emotion_metabolism(
@@ -692,3 +682,6 @@ __all__ = ["HippocampusAgent", "get_hippocampus_agent", "set_hippocampus_agent"]
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
+from host_brain.tribe.immune_agent import get_immune_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401

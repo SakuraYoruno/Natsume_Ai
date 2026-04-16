@@ -3082,3 +3082,54 @@ def extract_chat_graph_gateway_payload(
     gateway_payload_raw = node_entry.get("payload")
     gateway_payload = dict(gateway_payload_raw or {}) if isinstance(gateway_payload_raw, dict) else {}
     return node_entry, gateway_payload
+
+
+def _inject_tribe_supervisor_context(
+    runtime_payload: dict[str, Any],
+    tribe_context: dict[str, Any],
+) -> None:
+    """将 tribe_context 中的器官族状态注入到 runtime_payload。
+
+    T-285/T-286：注入 motor_cortex_state/cerebellum_state/glymphatic_state/proprioception_state。
+    供测试和外部调用方直接使用。
+    """
+    _motor_state = dict((tribe_context or {}).get("motor_cortex_state") or {})
+    if _motor_state:
+        runtime_payload["motor_cortex_state"] = {
+            "execution_health": round(float(_motor_state.get("execution_health") or 1.0), 4),
+            "last_action_type": str(_motor_state.get("last_action_type") or _motor_state.get("last_action") or ""),
+            "last_result": str(_motor_state.get("last_result") or ""),
+            "retry_count": int(_motor_state.get("retry_count") or 0),
+            "failure_rate": round(float(_motor_state.get("failure_rate") or 0.0), 4),
+            **{k: v for k, v in _motor_state.items() if k not in {
+                "execution_health", "last_action_type", "last_action", "last_result", "retry_count", "failure_rate"
+            }},
+        }
+
+    _cerebellum_state = dict((tribe_context or {}).get("cerebellum_state") or {})
+    if _cerebellum_state:
+        runtime_payload["cerebellum_state"] = {
+            "correction_rate": round(float(_cerebellum_state.get("correction_rate") or 0.0), 4),
+            "last_correction_type": str(_cerebellum_state.get("last_correction_type") or ""),
+            "correction_count": int(_cerebellum_state.get("correction_count") or 0),
+            "total_interactions": int(_cerebellum_state.get("total_interactions") or 0),
+        }
+
+    _glymphatic_state = dict((tribe_context or {}).get("glymphatic_state") or {})
+    if _glymphatic_state:
+        runtime_payload["glymphatic_state"] = {
+            "phase": str(_glymphatic_state.get("phase") or "day"),
+            "sleep_pressure": round(float(_glymphatic_state.get("sleep_pressure") or 0.0), 4),
+            "consolidation_score": round(float(_glymphatic_state.get("consolidation_score") or 0.0), 4),
+            "homeostasis_status": str(_glymphatic_state.get("homeostasis_status") or "stable"),
+            "cycle_count": int(_glymphatic_state.get("cycle_count") or 0),
+        }
+
+    _proprio_state = dict((tribe_context or {}).get("proprioception_state") or {})
+    if _proprio_state:
+        _interrupt_count = int(_proprio_state.get("interrupt_count_5m") or 0)
+        runtime_payload["proprioception_state"] = {
+            "interrupt_count_5m": _interrupt_count,
+            "last_interrupt_source": str(_proprio_state.get("last_interrupt_source") or ""),
+            "high_interrupt_flag": _interrupt_count >= 6,
+        }

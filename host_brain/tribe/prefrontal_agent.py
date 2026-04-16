@@ -495,7 +495,6 @@ class PrefrontalAgent:
         try:
             from host_brain.app.emotion_context import _global_emotion_timeline  # noqa: PLC0415
             from host_brain.persona.evolution_orchestrator import EvolutionOrchestrator  # noqa: PLC0415
-            from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
             orchestrator = EvolutionOrchestrator()
             args = dict((system_intent or {}).get("args") or {})
@@ -665,8 +664,6 @@ class PrefrontalAgent:
         source_agent: str = "default_mode_agent",
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-        from host_brain.tribe.tribe_state import get_global_registry  # noqa: PLC0415
 
         user_id = str(persona_user_id or "user_1").strip() or "user_1"
         narrative_text = str(narrative or "").strip()
@@ -743,7 +740,6 @@ class PrefrontalAgent:
         context: Mapping[str, Any] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
-        from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
 
         gate = self.evaluate_autobiographical_memory_gate(
             persona_user_id=persona_user_id,
@@ -1011,7 +1007,6 @@ class PrefrontalAgent:
                         _logger.debug("PrefrontalAgent GovernorRulesCache 更新跳过: %s", _gov_exc)
 
                     try:
-                        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                         limbic = get_limbic_agent()
                         if hasattr(limbic, "drive_emotion_metabolism"):
                             # 漂移时情绪向不安/焦虑偏移
@@ -1028,7 +1023,6 @@ class PrefrontalAgent:
                         pass
                     # T-279：高漂移时联动 EndocrineAgent 记录压力事件（人格漂移是内在压力源）
                     try:
-                        from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                         _endo = get_endocrine_agent()
                         if hasattr(_endo, "record_stress_event"):
                             _drift_intensity = 0.20 if drift_alert == "MODERATE" else 0.35
@@ -1040,7 +1034,6 @@ class PrefrontalAgent:
                         pass
                     # T-336：高漂移时联动 PainRewardAgent 记录深层痛苦（价值漂移是自我认同的痛苦）
                     try:
-                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                         _pr = get_pain_reward_agent()
                         if hasattr(_pr, "record_pain"):
                             _pain_intensity = 0.22 if drift_alert == "MODERATE" else 0.38
@@ -1059,7 +1052,6 @@ class PrefrontalAgent:
                     # 人格/价值观漂移是最深层的内在压力源（自我认同危机消耗大量认知资源）
                     if drift_alert == "SEVERE":
                         try:
-                            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                             _intero = get_interoception_agent()
                             if hasattr(_intero, "inject_external_stress"):
                                 _drift_intero = round(min(0.40, len(
@@ -1087,7 +1079,6 @@ class PrefrontalAgent:
             # T-26：检测 humor/task 成功信号并发布对应事件
             if assistant_reply:
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
 
                     _reply_lower = assistant_reply.lower()
                     # 幽默成功信号：回复中包含笑声/幽默标记词
@@ -1192,7 +1183,6 @@ class PrefrontalAgent:
                 )
                 # 孤独感 > 0.6：触发演化周期（孤独感是人格成长的催化剂）
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
                     emit_tribe_event(
                         event_type="EVOLUTION_CYCLE_TRIGGERED",
                         source_agent="prefrontal_agent",
@@ -1274,3 +1264,10 @@ __all__ = ["PrefrontalAgent", "get_prefrontal_agent", "set_prefrontal_agent"]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
+from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401
+from host_brain.tribe.tribe_state import get_global_registry  # noqa: E402, F401

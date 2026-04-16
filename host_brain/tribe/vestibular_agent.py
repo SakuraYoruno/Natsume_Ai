@@ -104,7 +104,6 @@ class VestibularAgent:
         # T-251：高抖动时联动 LimbicAgent 触发警觉性情绪偏移
         if jitter >= 0.35:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _alert_intensity = min(0.35, (jitter - 0.35) * 1.43)
@@ -122,7 +121,6 @@ class VestibularAgent:
         # T-252：高抖动时联动 ANSAgent 降低主动发声节律
         if jitter >= 0.35:
             try:
-                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
                 _ans = get_ans_agent()
                 if hasattr(_ans, "adjust_rhythm_for_high_interrupt"):
                     _virtual_interrupt = int(6 + (jitter - 0.35) * 20)
@@ -134,7 +132,6 @@ class VestibularAgent:
                 pass
             # T-307：高抖动时联动 EndocrineAgent 记录系统不稳定压力事件
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 _endo = get_endocrine_agent()
                 if hasattr(_endo, "record_stress_event"):
                     _jitter_stress = round(min(0.35, (jitter - 0.35) * 0.80), 4)
@@ -149,7 +146,6 @@ class VestibularAgent:
         # 系统严重抖动是行动受阻的深层痛苦（无法稳定执行是一种持续性痛苦）
         if jitter >= 0.72:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_pain"):
                     _vestibular_pain = round(min(0.40, (jitter - 0.72) * 1.43), 4)
@@ -168,7 +164,6 @@ class VestibularAgent:
             # T-380：严重失衡时联动 InteroceptionAgent 注入躯体内在压力
             # 系统抖动 = 执行层不稳定 = 身体预算持续消耗（类似晕眩感的内在压力）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _vestibular_stress = round(min(0.30, (jitter - 0.72) * 1.07), 4)
@@ -311,3 +306,5 @@ __all__ = ["VestibularAgent", "get_vestibular_agent", "set_vestibular_agent"]
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.ans_agent import get_ans_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401

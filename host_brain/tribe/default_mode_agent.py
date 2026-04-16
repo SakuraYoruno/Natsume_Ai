@@ -147,7 +147,6 @@ class DefaultModeAgent:
         # T-218：默认模式激活且连续性分数达标时，触发 GlymphaticAgent 恢复周期
         if continuity_score >= 0.55:
             try:
-                from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
                 get_glymphatic_agent().run_recovery_cycle(
                     source="default_mode_activated",
                     force=False,
@@ -159,7 +158,6 @@ class DefaultModeAgent:
         # T-281：高连续性(>=0.60)时联动 ANSAgent 退出 recovery_mode，提高主动发声倾向
         if continuity_score >= 0.60:
             try:
-                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
                 _ans = get_ans_agent()
                 if hasattr(_ans, "set_recovery_mode"):
                     _ans.set_recovery_mode(False, source="default_mode_high_continuity")
@@ -174,7 +172,6 @@ class DefaultModeAgent:
         # T-310：高连续性(>=0.55)时联动 InteroceptionAgent 降低 recovery_urgency（默认模式恢复是正向信号）
         if continuity_score >= 0.55:
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "reduce_recovery_urgency"):
                     _relief = round(min(0.35, (continuity_score - 0.55) * 0.70), 4)
@@ -190,7 +187,6 @@ class DefaultModeAgent:
         # 高连续性意味着自我叙事完整，是深层的正向强化（"我是完整的我"）
         if continuity_score >= 0.70:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
                     _continuity_reward = round(min(0.40, (continuity_score - 0.70) * 1.33), 4)
@@ -207,7 +203,6 @@ class DefaultModeAgent:
                 pass
             # T-365：高连续性时联动 LimbicAgent 触发温和正向情绪（自我完整感带来平静满足）
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _cont_valence = round(min(0.14, (continuity_score - 0.70) * 0.47), 4)

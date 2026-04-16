@@ -108,7 +108,6 @@ class SomaticAgent:
             # T-293：高疲劳(>=0.60)时联动 InteroceptionAgent 注入外部压力
             if fatigue_level >= 0.60:
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "inject_external_stress"):
                         _fatigue_stress = round(min(0.50, (fatigue_level - 0.60) * 1.25), 4)
@@ -121,7 +120,6 @@ class SomaticAgent:
                     pass
                 # T-304：高疲劳时联动 EndocrineAgent 记录躯体压力事件（疲劳是内在压力源）
                 try:
-                    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                     _endo = get_endocrine_agent()
                     if hasattr(_endo, "record_stress_event"):
                         _somatic_stress = round(min(0.40, (fatigue_level - 0.60) * 1.00), 4)
@@ -135,7 +133,6 @@ class SomaticAgent:
                 # 极度疲劳是持续性躯体痛苦（身体预算严重透支）
                 if fatigue_level >= 0.75:
                     try:
-                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                         _pr = get_pain_reward_agent()
                         if hasattr(_pr, "record_pain"):
                             _fatigue_pain = round(min(0.45, (fatigue_level - 0.75) * 1.80), 4)
@@ -154,7 +151,6 @@ class SomaticAgent:
             # 躯体恢复良好是最直接的恢复信号，应主动释放身体预算压力
             if fatigue_level < 0.30:
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "reduce_recovery_urgency"):
                         _relief = round(min(0.35, (0.30 - fatigue_level) * 1.17), 4)
@@ -167,7 +163,6 @@ class SomaticAgent:
                     pass
                 # T-350：低疲劳时联动 LimbicAgent 触发轻度舒适情绪（躯体恢复带来身体愉悦感）
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _comfort = round(min(0.15, (0.30 - fatigue_level) * 0.50), 4)
@@ -185,7 +180,6 @@ class SomaticAgent:
                 # 身体充盈、疲劳极低是一种轻度正向奖励（类似运动后的清爽感）
                 if fatigue_level < 0.25:
                     try:
-                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                         _pr = get_pain_reward_agent()
                         if hasattr(_pr, "record_reward"):
                             _somatic_reward = round(min(0.18, (0.25 - fatigue_level) * 0.72), 4)
@@ -226,7 +220,6 @@ class SomaticAgent:
             # T-226：高孤独感时通知 InteroceptionAgent 提高 recovery_urgency
             if comfort_needed:
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     intero = get_interoception_agent()
                     if hasattr(intero, "inject_external_stress"):
                         intero.inject_external_stress(

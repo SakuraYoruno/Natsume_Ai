@@ -110,7 +110,6 @@ class MirrorNeuronAgent:
         source: str,
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
         resolved_ts = int(ts_ms or now_ms())
         social = get_social_brain_agent()
@@ -175,7 +174,6 @@ class MirrorNeuronAgent:
         resonance_strength = float(result.get("resonance_strength") or 0.0)
         if resonance_strength >= 0.45:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 limbic = get_limbic_agent()
                 if hasattr(limbic, "drive_emotion_metabolism"):
                     limbic.drive_emotion_metabolism(
@@ -192,7 +190,6 @@ class MirrorNeuronAgent:
         # T-259：高共情(>=0.60)时联动 EndocrineAgent 分泌欲素（降低 cortisol，提升 energy_reserve）
         if resonance_strength >= 0.60:
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 _endo = get_endocrine_agent()
                 if hasattr(_endo, "_bond_cortisol_delta") and hasattr(_endo, "_bond_lock"):
                     # 高共情时降低 cortisol（欲素效应：社交联结降低压力激素）
@@ -206,7 +203,6 @@ class MirrorNeuronAgent:
                 pass
             # T-305：高共情时联动 InteroceptionAgent 降低 recovery_urgency（共情是正向信号，缓解身体压力）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "reduce_recovery_urgency"):
                     _relief = round(min(0.40, (resonance_strength - 0.60) * 0.50), 4)
@@ -223,7 +219,6 @@ class MirrorNeuronAgent:
             _resonance_tag_pos = str(result.get("emotion_tag") or "NEUTRAL").upper()
             if _resonance_tag_pos in _pos_tags:
                 try:
-                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                     _pr = get_pain_reward_agent()
                     if hasattr(_pr, "record_reward"):
                         _empathy_reward = round(min(0.35, (resonance_strength - 0.60) * 0.875), 4)
@@ -240,7 +235,6 @@ class MirrorNeuronAgent:
             # T-378：高共情时联动 DefaultModeAgent.tick_idle_cycle()
             # 共情他人的情绪是自我叙事的重要素材（"我感受到了对方的感受"）
             try:
-                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
@@ -256,7 +250,6 @@ class MirrorNeuronAgent:
         _resonance_tag = str(result.get("emotion_tag") or "NEUTRAL").upper()
         if resonance_strength >= 0.65 and _resonance_tag in _neg_tags:
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 _endo = get_endocrine_agent()
                 if hasattr(_endo, "record_stress_event"):
                     _empathy_stress = round(min(0.35, (resonance_strength - 0.65) * 1.00), 4)
@@ -337,7 +330,6 @@ class MirrorNeuronAgent:
                     pass
                 # 发布 MIRROR_EMPATHY_GENERATED 事件
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
                     emit_tribe_event(
                         event_type="MIRROR_EMPATHY_GENERATED",
                         source_agent="mirror_neuron_agent",
@@ -447,3 +439,6 @@ from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401
+from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401

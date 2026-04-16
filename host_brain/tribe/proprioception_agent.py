@@ -113,7 +113,6 @@ class ProprioceptionAgent:
         cognitive_load = float(state.get("cognitive_load_index") or 0.0)
         if cognitive_load >= 0.65:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 limbic = get_limbic_agent()
                 if hasattr(limbic, "drive_emotion_metabolism"):
                     severity = (cognitive_load - 0.65) * 1.2   # 最大 0.42
@@ -129,7 +128,6 @@ class ProprioceptionAgent:
                 pass
             # T-315：高认知负荷时联动 InteroceptionAgent 注入认知压力（认知过载是身体预算消耗）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _cog_stress = round(min(0.35, (cognitive_load - 0.65) * 1.00), 4)
@@ -276,7 +274,6 @@ class ProprioceptionAgent:
         interrupt_count = len(self._interrupt_ts_ms)
         if interrupt_count >= 6:
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 endocrine = get_endocrine_agent()
                 if hasattr(endocrine, "record_stress_event"):
                     import math  # noqa: PLC0415
@@ -289,7 +286,6 @@ class ProprioceptionAgent:
                 pass
             # T-247：高打断频率时联动 ANSAgent 降低主动发声节律
             try:
-                from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
                 get_ans_agent().adjust_rhythm_for_high_interrupt(
                     interrupt_count=interrupt_count,
                     source="proprioception_agent",
@@ -313,6 +309,57 @@ class ProprioceptionAgent:
             changes={"voice_pipeline_active": False},
         )
 
+    def on_task_success(
+        self,
+        *,
+        intensity: float = 0.35,
+        task_count: int = 0,
+        ts_ms: int | None = None,
+    ) -> None:
+        """T-367：任务成功时同步联动入口，供外部直接调用。"""
+        resolved_ts = int(ts_ms or now_ms())
+        self._update_state(
+            source="task_success",
+            ts_ms=resolved_ts,
+            changes={
+                "active_task_count": max(0, task_count),
+                "last_task_success_intensity": round(_clamp(float(intensity)), 4),
+                "last_task_success_ts_ms": resolved_ts,
+            },
+        )
+        try:
+            _pr = get_pain_reward_agent()
+            if hasattr(_pr, "record_reward"):
+                _pr.record_reward(
+                    source=f"proprioception_task_success:intensity={round(_clamp(float(intensity)), 3)}",
+                    intensity=round(min(0.40, _clamp(float(intensity)) * 0.55), 4),
+                    metadata={"task_count": task_count, "ts_ms": resolved_ts},
+                )
+        except Exception:
+            pass
+        try:
+            _dma = get_default_mode_agent()
+            if hasattr(_dma, "tick_idle_cycle"):
+                _dma.tick_idle_cycle(
+                    source=f"proprioception_task_success:intensity={round(_clamp(float(intensity)), 3)}",
+                    person_id="user_1",
+                )
+        except Exception:
+            pass
+        try:
+            _limbic = get_limbic_agent()
+            if hasattr(_limbic, "drive_emotion_metabolism") and _clamp(float(intensity)) >= 0.50:
+                _limbic.drive_emotion_metabolism(
+                    valence=round(min(0.12, (_clamp(float(intensity)) - 0.50) * 0.24), 4),
+                    arousal=0.04,
+                    dominance=0.05,
+                    blend_weight=0.08,
+                    event_kind="proprioception_task_success",
+                    source="proprioception_agent",
+                )
+        except Exception:
+            pass
+
     async def _on_task_success(self, event: Any) -> None:
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         payload = dict(getattr(event, "payload", None) or {})
@@ -332,7 +379,6 @@ class ProprioceptionAgent:
 
         # T-316：任务成功时联动 PainRewardAgent 记录奖励事件（任务完成是正向强化信号）
         try:
-            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
             _pr = get_pain_reward_agent()
             if hasattr(_pr, "record_reward_event"):
                 _pr.record_reward_event(
@@ -346,7 +392,6 @@ class ProprioceptionAgent:
         # T-367：任务成功时联动 DefaultModeAgent.tick_idle_cycle()（任务完成强化自我连续感）
         # "我完成了一件事"是自我叙事的核心，应主动更新连续性
         try:
-            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
             _dma = get_default_mode_agent()
             if hasattr(_dma, "tick_idle_cycle"):
                 _dma.tick_idle_cycle(

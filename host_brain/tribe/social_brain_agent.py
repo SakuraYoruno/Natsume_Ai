@@ -334,7 +334,6 @@ class SocialBrainAgent:
 
             # T-25：读取当前 bond 快照，根据 bond_trend 发布 BOND_PROGRESS / BOND_REGRESS
             try:
-                from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
 
                 snapshot = self.resolve_bond_snapshot(person_id=user_id or None)
                 bond_trend = str(snapshot.get("bond_trend") or "").strip().upper()
@@ -426,7 +425,6 @@ class SocialBrainAgent:
             )
             # T-220：Bond 进展联动 PainRewardAgent 记录 bond_progress 奖励
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 get_pain_reward_agent().record_reward(
                     source="bond_progress",
                     intensity=round(intensity * 0.85, 4),
@@ -437,7 +435,6 @@ class SocialBrainAgent:
             # T-348：Bond 进展时联动 DefaultModeAgent.tick_idle_cycle()
             # 关系进展是自我连续性的重要来源（"我与他人的关系"是自我叙事的核心）
             try:
-                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
@@ -506,7 +503,6 @@ class SocialBrainAgent:
             )
             # T-220：Bond 退步联动 PainRewardAgent 记录 bond_regress 痛觉
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 get_pain_reward_agent().record_pain(
                     source="bond_regress",
                     intensity=round(intensity * 0.8, 4),
@@ -517,7 +513,6 @@ class SocialBrainAgent:
             # T-343：Bond 退步/社交冲突时联动 InteroceptionAgent 注入躯体压力
             # 社交关系退步是强烈的躯体压力源（社交痛苦与躯体痛苦共享神经回路）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _social_stress = round(min(0.45, intensity * 0.50), 4)
@@ -749,7 +744,6 @@ class SocialBrainAgent:
             # T-280：关系修复时联动 LimbicAgent 触发温暖情绪偏移（修复带来正向情绪）
             if effort >= 0.30:
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _warmth = min(0.30, effort * 0.35)
@@ -1143,7 +1137,6 @@ class SocialBrainAgent:
                 )
                 # T-318：里程碑达成时联动 PainRewardAgent 记录高强度奖励事件（里程碑是重要正向强化）
                 try:
-                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                     _pr = get_pain_reward_agent()
                     if hasattr(_pr, "record_reward_event"):
                         _milestone_reward = round(min(0.90, 0.60 + len(new_milestones) * 0.10), 4)
@@ -1219,3 +1212,5 @@ __all__ = ["SocialBrainAgent", "get_social_brain_agent", "set_social_brain_agent
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
+from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401

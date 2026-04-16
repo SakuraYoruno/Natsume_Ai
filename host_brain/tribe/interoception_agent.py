@@ -54,7 +54,6 @@ class InteroceptionAgent:
         homeostasis_ok = bool(vital_signs.get("homeostasis_ok", True))
         somatic_fatigue = 0.0
         try:
-            from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: PLC0415
 
             somatic_state = get_somatic_agent().export_runtime_state()
             somatic_fatigue = _clamp(float(somatic_state.get("fatigue_level") or 0.0))
@@ -107,7 +106,6 @@ class InteroceptionAgent:
         # T-210：高恢复紧迫度时主动触发 GlymphaticAgent 恢复周期
         if recovery_urgency >= 0.75:
             try:
-                from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: PLC0415
                 get_glymphatic_agent().run_recovery_cycle(
                     source="interoception_urgency",
                     force=True,
@@ -120,7 +118,6 @@ class InteroceptionAgent:
         # 身体预算严重透支时，内感受信号会直接影响情绪基调（疲惫/焦虑/不适感）
         if interoceptive_index >= 0.70:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _intero_valence = round(-(interoceptive_index - 0.70) * 0.50, 4)
@@ -140,7 +137,6 @@ class InteroceptionAgent:
         # 极度疲惫/睡眠压力是一种持续性躯体痛苦（身体预算严重透支）
         if recovery_urgency >= 0.75:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_pain"):
                     _urgency_pain = round(min(0.35, (recovery_urgency - 0.75) * 1.40), 4)
@@ -160,7 +156,6 @@ class InteroceptionAgent:
         # 身体预算充盈、压力极低时是一种轻度正向奖励（舒适感/活力感）
         if recovery_urgency < 0.20:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
                     _comfort_reward = round(min(0.20, (0.20 - recovery_urgency) * 1.00), 4)
@@ -426,3 +421,9 @@ def set_interoception_agent(agent: InteroceptionAgent | None) -> None:
 
 
 __all__ = ["InteroceptionAgent", "get_interoception_agent", "set_interoception_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: E402, F401
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.somatic_agent import get_somatic_agent  # noqa: E402, F401

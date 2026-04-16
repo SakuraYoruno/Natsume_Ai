@@ -164,7 +164,6 @@ class PainRewardAgent:
         # 奖励强化自我连续感（"我做到了"是自我叙事的核心）
         if intensity >= 0.25:
             try:
-                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
@@ -557,7 +556,6 @@ class PainRewardAgent:
         reward_level = float(state.get("reward_level") or 0.0)
         if event_type == "pain" and pain_level >= 0.55:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 limbic = get_limbic_agent()
                 if hasattr(limbic, "drive_emotion_metabolism"):
                     valence_shift = -((pain_level - 0.55) * 1.2)   # 最大 -0.54
@@ -574,7 +572,6 @@ class PainRewardAgent:
                 pass
         elif event_type == "reward" and reward_level >= 0.60:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 limbic = get_limbic_agent()
                 if hasattr(limbic, "drive_emotion_metabolism"):
                     valence_shift = (reward_level - 0.60) * 0.9    # 最大 +0.36
@@ -593,7 +590,6 @@ class PainRewardAgent:
         cumulative_pain = float(state.get("cumulative_pain") or 0.0)
         if event_type == "pain" and cumulative_pain >= 1.0:
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 endocrine = get_endocrine_agent()
                 if hasattr(endocrine, "record_stress_event"):
                     # 将累积痛觉转换为压力事件强度（对数压缩，避免无限增长）
@@ -610,7 +606,6 @@ class PainRewardAgent:
         reward_level = float(state.get("reward_level") or 0.0)
         if event_type == "reward" and reward_level >= 0.55:
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "reduce_recovery_urgency"):
                     _relief = round(min(0.45, (reward_level - 0.55) * 0.60), 4)

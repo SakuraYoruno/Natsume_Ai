@@ -45,7 +45,6 @@ class EndocrineAgent:
         # 使痛觉事件（被拒绝/被攻击/话题受挫等）能够影响内分泌状态。
         # 叠加量上限 ±0.15，避免单次事件过度影响皮质醇。
         try:
-            from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
 
             _pain_agent = get_pain_reward_agent()
             _stress_signal = _pain_agent.get_stress_signal()
@@ -91,7 +90,6 @@ class EndocrineAgent:
         _cortisol = float(payload.get("cortisol_level") or 0.0)
         if _cortisol >= 0.65:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _stress_intensity = (_cortisol - 0.65) * 1.43  # 0.65→0, 0.95→0.43
@@ -107,7 +105,6 @@ class EndocrineAgent:
                 pass
             # T-320：高皮质醇时联动 InteroceptionAgent 注入内分泌压力（cortisol 升高消耗身体预算）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _endo_stress = round(min(0.40, (_cortisol - 0.65) * 1.33), 4)
@@ -121,7 +118,6 @@ class EndocrineAgent:
             # 持续高 cortisol 是深层躯体痛苦（慢性压力的内在体验）
             if _cortisol >= 0.80:
                 try:
-                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                     _pr = get_pain_reward_agent()
                     if hasattr(_pr, "record_pain"):
                         _cortisol_pain = round(min(0.40, (_cortisol - 0.80) * 2.00), 4)
@@ -482,3 +478,4 @@ __all__ = [
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401

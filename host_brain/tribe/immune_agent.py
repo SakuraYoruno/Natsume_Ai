@@ -300,7 +300,6 @@ class ImmuneAgent:
             # T-35：如果决策为 BLOCK，发布 IMMUNE_BLOCK 事件通知其他 Agent
             if decision == "BLOCK":
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
                     emit_tribe_event(
                         event_type="IMMUNE_BLOCK",
                         source_agent="immune_agent",
@@ -316,7 +315,6 @@ class ImmuneAgent:
                     pass
                 # T-239：BLOCK 时联动 LimbicAgent 触发防御性情绪偏移（警觉/不安）
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _defense_intensity = min(0.40, score * 0.45)
@@ -332,7 +330,6 @@ class ImmuneAgent:
                     pass
                 # T-240：BLOCK 时联动 InteroceptionAgent 提高 recovery_urgency
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "inject_external_stress"):
                         _intero.inject_external_stress(
@@ -343,7 +340,6 @@ class ImmuneAgent:
                     pass
                 # T-308：BLOCK 时联动 EndocrineAgent 记录免疫拦截压力事件（高风险内容触发应激）
                 try:
-                    from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                     _endo = get_endocrine_agent()
                     if hasattr(_endo, "record_stress_event"):
                         _immune_stress = round(min(0.45, score * 0.50), 4)
@@ -355,7 +351,6 @@ class ImmuneAgent:
                     pass
                 # T-337：BLOCK 时联动 PainRewardAgent 记录防御性痛苦（拦截有害内容是边界被侵犯的痛苦）
                 try:
-                    from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                     _pr = get_pain_reward_agent()
                     if hasattr(_pr, "record_pain"):
                         _pain_intensity = round(min(0.50, score * 0.55), 4)
@@ -375,7 +370,6 @@ class ImmuneAgent:
         # 成功通过免疫检测是一种安全感的正向强化（"环境是安全的"）
         if decision == "ALLOW" and score < 0.15:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
                     _safety_reward = round(min(0.15, (0.15 - score) * 1.00), 4)
@@ -570,7 +564,6 @@ class ImmuneAgent:
         if record and decision in ("BLOCK", "REPORT"):
             # 输出越界时联动 LimbicAgent 触发防御性情绪
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _limbic.drive_emotion_metabolism(
@@ -586,7 +579,6 @@ class ImmuneAgent:
             # 发布 IMMUNE_BLOCK 事件（输出越界）
             if decision == "BLOCK":
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
                     emit_tribe_event(
                         event_type="IMMUNE_BLOCK",
                         source_agent="immune_agent",
@@ -887,7 +879,6 @@ class ImmuneAgent:
                     }
                 # 发布 IMMUNE_BLOCK 事件
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
                     emit_tribe_event(
                         event_type="IMMUNE_BLOCK",
                         source_agent="immune_agent",
@@ -966,7 +957,6 @@ class ImmuneAgent:
                         "hit_count": len(hits),
                     }
                 try:
-                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
                     emit_tribe_event(
                         event_type="IMMUNE_BLOCK",
                         source_agent="immune_agent",
@@ -1434,3 +1424,6 @@ __all__ = [
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401

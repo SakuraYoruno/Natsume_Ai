@@ -55,13 +55,11 @@ class GlymphaticAgent:
         homeostasis = self.state_registry.get_homeostasis_report(now_ts_ms=resolved_ts)
         status = str(homeostasis.get("status") or "stable").strip().lower()
         try:
-            from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
 
             memory_layers = get_hippocampus_agent().resolve_memory_layer_snapshot()
         except Exception:
             memory_layers = {}
         try:
-            from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
 
             default_mode_state = get_default_mode_agent().export_runtime_state()
         except Exception:
@@ -134,7 +132,6 @@ class GlymphaticAgent:
 
             # T-302：恢复周期完成时联动 InteroceptionAgent 降低 recovery_urgency（身体压力缓解）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "reduce_recovery_urgency"):
                     _relief = min(0.60, consolidation_score * 0.65)
@@ -149,7 +146,6 @@ class GlymphaticAgent:
             # T-339：恢复周期完成且巩固分数达标时，联动 PainRewardAgent 记录深度清理奖励
             # 深度清理是最强的正向强化之一（类似睡眠后的清醒感）
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
                     _reward_intensity = round(min(0.55, consolidation_score * 0.60), 4)
@@ -181,7 +177,6 @@ class GlymphaticAgent:
             # 高质量清理是最强的身体预算恢复信号，T-302 已有通用恢复，此处补充额外强化
             if consolidation_score >= 0.70:
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero_deep = get_interoception_agent()
                     if hasattr(_intero_deep, "reduce_recovery_urgency"):
                         _deep_relief = round(min(0.35, (consolidation_score - 0.70) * 1.17), 4)
@@ -351,7 +346,6 @@ class GlymphaticAgent:
             # 如果进入恢复窗口，通知 ANSAgent 进入恢复模式
             if in_recovery:
                 try:
-                    from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
                     _ans = get_ans_agent()
                     if hasattr(_ans, "set_recovery_mode") and not _ans._recovery_mode:
                         _ans.set_recovery_mode(enabled=True, source=f"glymphatic_tick:{phase}")
@@ -396,3 +390,4 @@ from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: E4
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.ans_agent import get_ans_agent  # noqa: E402, F401

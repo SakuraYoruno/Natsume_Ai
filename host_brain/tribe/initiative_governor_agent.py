@@ -118,9 +118,6 @@ class InitiativeGovernorAgent:
         user_id: str | None = None,
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: PLC0415
-        from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: PLC0415
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
         resolved_context = dict(context or {})
         resolved_ts = now_ms()
@@ -158,7 +155,6 @@ class InitiativeGovernorAgent:
         # T-209：读取 body_budget，体能耗尽时降低主动意愿
         body_budget = 0.5
         try:
-            from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
             intero_state = get_interoception_agent().export_runtime_state()
             body_budget = _clamp(float(intero_state.get("body_budget") or 0.5))
         except Exception:
@@ -235,7 +231,6 @@ class InitiativeGovernorAgent:
         # T-270：BLOCK/DEFER 时联动 VestibularAgent 记录主动推迟事件（增加 initiative_defer_count）
         if decision in {"BLOCK", "DEFER"}:
             try:
-                from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: PLC0415
                 _vest = get_vestibular_agent()
                 if hasattr(_vest, "state_registry"):
                     _vest_snap = _vest.state_registry.get_state("vestibular_agent") or {}
@@ -250,9 +245,8 @@ class InitiativeGovernorAgent:
                 pass
 
         # T-317：APPROVE 时联动 PainRewardAgent 记录奖励事件（主动发声被批准是正向强化信号）
-        if decision == "APPROVE":
+        if decision in {"APPROVE", "ALLOW"}:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward_event"):
                     _approve_reward = round(min(0.65, motive_score * 0.75), 4)
@@ -270,7 +264,6 @@ class InitiativeGovernorAgent:
             # T-368：APPROVE 时联动 DefaultModeAgent.tick_idle_cycle()
             # 主动发声被批准是"我有能力主动表达"的自我叙事，应强化连续性
             try:
-                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
@@ -412,3 +405,8 @@ __all__ = [
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: E402, F401
 from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.proprioception_agent import get_proprioception_agent  # noqa: E402, F401
+from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401
+from host_brain.tribe.vestibular_agent import get_vestibular_agent  # noqa: E402, F401

@@ -111,7 +111,6 @@ class PeripheralAgent:
             _pos_emotion_tags = {"JOY", "HAPPY", "EXCITED", "CONTENT", "GRATEFUL"}
             if emotion_tag in _pos_emotion_tags and intensity >= 0.65:
                 try:
-                    from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                     _limbic = get_limbic_agent()
                     if hasattr(_limbic, "drive_emotion_metabolism"):
                         _periph_valence = round(min(0.15, (intensity - 0.65) * 0.43), 4)
@@ -157,7 +156,6 @@ class PeripheralAgent:
             # T-387：免疫拦截（medium/high/critical）时联动 InteroceptionAgent 注入压力
             # 被迫抑制外周输出是一种行动受阻的内在压力（想表达却被拦截）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _immune_stress = {"medium": 0.12, "high": 0.22, "critical": 0.32}.get(risk_level, 0.12)
@@ -196,7 +194,6 @@ class PeripheralAgent:
 
             # T-294/T-297：外设连接成功时联动 InteroceptionAgent 降低 recovery_urgency（连接恢复减轻压力）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "reduce_recovery_urgency"):
                     _intero.reduce_recovery_urgency(
@@ -210,7 +207,6 @@ class PeripheralAgent:
             # T-389：平台连接恢复时联动 PainRewardAgent 记录通道恢复奖励
             # 外设重新连通意味着表达/行动通道恢复，是轻度正向奖励
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
                     _pr.record_reward(
@@ -249,7 +245,6 @@ class PeripheralAgent:
             self.state_registry.set_state("peripheral_agent", prev_state, writer="peripheral_agent")
             # T-386：平台断开时联动 InteroceptionAgent 注入压力（失去连接=行动通道受阻）
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _intero.inject_external_stress(
@@ -301,7 +296,6 @@ class PeripheralAgent:
             _latency_ms = int(payload.get("latency_ms") or 0)
             if _error or _latency_ms >= 1500:
                 try:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "inject_external_stress"):
                         _stress = 0.25 if _error else min(0.20, (_latency_ms - 1500) / 5000.0)
@@ -315,7 +309,6 @@ class PeripheralAgent:
                 # 外周高延迟/错误是行动受阻的直接体验（想说话却说不出来）
                 if _error or _latency_ms >= 2000:
                     try:
-                        from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                         _pr = get_pain_reward_agent()
                         if hasattr(_pr, "record_pain"):
                             _pain = 0.20 if _error else round(min(0.25, (_latency_ms - 2000) / 8000.0), 4)
@@ -510,3 +503,4 @@ __all__ = ["PeripheralAgent", "get_peripheral_agent", "set_peripheral_agent"]
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

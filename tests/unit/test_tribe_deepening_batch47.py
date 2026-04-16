@@ -35,7 +35,10 @@ class TestT359SomaticExtremeFatiguePain:
         with patch("host_brain.tribe.somatic_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero), \
              patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=mock_endo):
-            agent._on_body_sense_updated({"fatigue_level": 0.85, "ts_ms": 1000})
+            import asyncio
+            asyncio.run(agent._on_body_sense_updated(
+                MagicMock(payload={"fatigue_level": 0.85, "ts_ms": 1000}, ts_ms=1000)
+            ))
 
         mock_pr.record_pain.assert_called_once()
         call_kwargs = mock_pr.record_pain.call_args.kwargs
@@ -54,7 +57,10 @@ class TestT359SomaticExtremeFatiguePain:
         with patch("host_brain.tribe.somatic_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero), \
              patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=mock_endo):
-            agent._on_body_sense_updated({"fatigue_level": 0.65, "ts_ms": 1000})
+            import asyncio
+            asyncio.run(agent._on_body_sense_updated(
+                MagicMock(payload={"fatigue_level": 0.65, "ts_ms": 1000}, ts_ms=1000)
+            ))
 
         mock_pr.record_pain.assert_not_called()
 
@@ -74,12 +80,17 @@ class TestT360EndocrineHighCortisolPain:
         agent._last_state = {}
 
         mock_pr = MagicMock()
+        # net_stress_delta=0 避免 cortisol 被拉低
+        mock_pr.get_stress_signal.return_value = {"net_stress_delta": 0.0}
         mock_limbic = MagicMock()
         mock_intero = MagicMock()
         with patch("host_brain.tribe.endocrine_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.endocrine_agent.get_limbic_agent", return_value=mock_limbic), \
              patch("host_brain.tribe.endocrine_agent.get_interoception_agent", return_value=mock_intero):
-            agent.resolve_endocrine_state({"cortisol_level": 0.88})
+            # energy_level=0 + mood_state=critical + sys_mode=locked 产生极高 cortisol
+            agent.resolve_endocrine_state(
+                hard_state={"energy_level": 0, "mood_state": "critical", "sys_mode": "locked"}
+            )
 
         mock_pr.record_pain.assert_called_once()
         call_kwargs = mock_pr.record_pain.call_args.kwargs
@@ -95,12 +106,16 @@ class TestT360EndocrineHighCortisolPain:
         agent._last_state = {}
 
         mock_pr = MagicMock()
+        mock_pr.get_stress_signal.return_value = {"net_stress_delta": 0.0}
         mock_limbic = MagicMock()
         mock_intero = MagicMock()
         with patch("host_brain.tribe.endocrine_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.endocrine_agent.get_limbic_agent", return_value=mock_limbic), \
              patch("host_brain.tribe.endocrine_agent.get_interoception_agent", return_value=mock_intero):
-            agent.resolve_endocrine_state({"cortisol_level": 0.70})
+            # energy_level=60 + mood_state=steady 产生中等 cortisol，不达到 0.80
+            agent.resolve_endocrine_state(
+                hard_state={"energy_level": 60, "mood_state": "steady", "sys_mode": "normal"}
+            )
 
         mock_pr.record_pain.assert_not_called()
 
@@ -115,22 +130,26 @@ class TestT361CircadianNightSleepPressurePain:
         agent = CircadianAgent.__new__(CircadianAgent)
         agent.state_registry = MagicMock()
         agent.state_registry.get_state.return_value = {}
+        agent._last_phase = "dusk"  # 上一个相位是 dusk，切换到 night 才触发
 
         mock_pr = MagicMock()
         mock_limbic = MagicMock()
         mock_intero = MagicMock()
         mock_ans = MagicMock()
+        # mock evaluate_profile 返回夜间高睡眠压力
         with patch("host_brain.tribe.circadian_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.circadian_agent.get_limbic_agent", return_value=mock_limbic), \
              patch("host_brain.tribe.circadian_agent.get_interoception_agent", return_value=mock_intero), \
-             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans):
-            agent.refresh_state({
-                "phase": "night",
-                "previous_phase": "dusk",
-                "sleep_pressure": 0.80,
-                "local_hour": 2,
-                "ts_ms": 1000,
-            })
+             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans), \
+             patch("host_brain.tribe.circadian_agent.get_glymphatic_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.emit_tribe_event"), \
+             patch("host_brain.tribe.circadian_agent.CircadianAgent.evaluate_profile", return_value={
+                 "phase": "night", "sleep_pressure": 0.80, "local_hour": 2,
+                 "phase_energy_baseline": 0.20, "proactive_multiplier": 0.40,
+                 "recovery_bias": 0.80, "response_latency_ms": 600, "ts_ms": 1000,
+             }):
+            agent.refresh_state(source="test", ts_ms=1000)
 
         # record_pain 应被调用（夜间高睡眠压力）
         pain_calls = [c for c in mock_pr.record_pain.call_args_list
@@ -142,6 +161,7 @@ class TestT361CircadianNightSleepPressurePain:
         agent = CircadianAgent.__new__(CircadianAgent)
         agent.state_registry = MagicMock()
         agent.state_registry.get_state.return_value = {}
+        agent._last_phase = "dusk"
 
         mock_pr = MagicMock()
         mock_limbic = MagicMock()
@@ -150,14 +170,16 @@ class TestT361CircadianNightSleepPressurePain:
         with patch("host_brain.tribe.circadian_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.circadian_agent.get_limbic_agent", return_value=mock_limbic), \
              patch("host_brain.tribe.circadian_agent.get_interoception_agent", return_value=mock_intero), \
-             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans):
-            agent.refresh_state({
-                "phase": "night",
-                "previous_phase": "dusk",
-                "sleep_pressure": 0.40,
-                "local_hour": 2,
-                "ts_ms": 1000,
-            })
+             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans), \
+             patch("host_brain.tribe.circadian_agent.get_glymphatic_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.emit_tribe_event"), \
+             patch("host_brain.tribe.circadian_agent.CircadianAgent.evaluate_profile", return_value={
+                 "phase": "night", "sleep_pressure": 0.40, "local_hour": 2,
+                 "phase_energy_baseline": 0.20, "proactive_multiplier": 0.40,
+                 "recovery_bias": 0.80, "response_latency_ms": 600, "ts_ms": 1000,
+             }):
+            agent.refresh_state(source="test", ts_ms=1000)
 
         pain_calls = [c for c in mock_pr.record_pain.call_args_list
                       if "sleep_pressure" in str(c)]
@@ -174,20 +196,31 @@ class TestT362MirrorPositiveEmpathyReward:
         agent = MirrorNeuronAgent.__new__(MirrorNeuronAgent)
         agent.state_registry = MagicMock()
         agent.state_registry.get_state.return_value = {}
+        agent.state_registry.aggregate_vital_signs = MagicMock(return_value={})
 
         mock_pr = MagicMock()
         mock_endo = MagicMock()
-        mock_endo._bond_cortisol_delta = 0.0
-        mock_endo._bond_lock = MagicMock().__enter__ = MagicMock()
         mock_intero = MagicMock()
+        mock_social = MagicMock()
+        # 提供高 bond 值，确保 resonance_strength >= 0.60
+        mock_social.get_bond_context.return_value = {
+            "bond_vector": {"trust": 0.9, "affinity": 0.9, "safety": 0.9, "repair_confidence": 0.9}
+        }
+        mock_limbic = MagicMock()
+        mock_dma = MagicMock()
         with patch("host_brain.tribe.mirror_neuron_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.mirror_neuron_agent.get_endocrine_agent", return_value=mock_endo), \
-             patch("host_brain.tribe.mirror_neuron_agent.get_interoception_agent", return_value=mock_intero):
-            agent.apply_resonance({
-                "resonance_strength": 0.75,
-                "emotion_tag": "JOY",
-                "ts_ms": 1000,
-            })
+             patch("host_brain.tribe.mirror_neuron_agent.get_interoception_agent", return_value=mock_intero), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_social_brain_agent", return_value=mock_social), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_limbic_agent", return_value=mock_limbic), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_default_mode_agent", return_value=mock_dma), \
+             patch("host_brain.tribe.mirror_neuron_agent.emit_tribe_event"):
+            agent.apply_resonance(
+                user_id="user_1",
+                emotion_tag="JOY",
+                emotion_intensity=0.75,
+                source="test",
+            )
 
         mock_pr.record_reward.assert_called_once()
         call_kwargs = mock_pr.record_reward.call_args.kwargs
@@ -198,20 +231,30 @@ class TestT362MirrorPositiveEmpathyReward:
         agent = MirrorNeuronAgent.__new__(MirrorNeuronAgent)
         agent.state_registry = MagicMock()
         agent.state_registry.get_state.return_value = {}
+        agent.state_registry.aggregate_vital_signs = MagicMock(return_value={})
 
         mock_pr = MagicMock()
         mock_endo = MagicMock()
-        mock_endo._bond_cortisol_delta = 0.0
-        mock_endo._bond_lock = MagicMock().__enter__ = MagicMock()
         mock_intero = MagicMock()
+        mock_social = MagicMock()
+        mock_social.get_bond_context.return_value = {
+            "bond_vector": {"trust": 0.9, "affinity": 0.9, "safety": 0.9, "repair_confidence": 0.9}
+        }
+        mock_limbic = MagicMock()
+        mock_dma = MagicMock()
         with patch("host_brain.tribe.mirror_neuron_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.mirror_neuron_agent.get_endocrine_agent", return_value=mock_endo), \
-             patch("host_brain.tribe.mirror_neuron_agent.get_interoception_agent", return_value=mock_intero):
-            agent.apply_resonance({
-                "resonance_strength": 0.75,
-                "emotion_tag": "SAD",
-                "ts_ms": 1000,
-            })
+             patch("host_brain.tribe.mirror_neuron_agent.get_interoception_agent", return_value=mock_intero), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_social_brain_agent", return_value=mock_social), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_limbic_agent", return_value=mock_limbic), \
+             patch("host_brain.tribe.mirror_neuron_agent.get_default_mode_agent", return_value=mock_dma), \
+             patch("host_brain.tribe.mirror_neuron_agent.emit_tribe_event"):
+            agent.apply_resonance(
+                user_id="user_1",
+                emotion_tag="SAD",
+                emotion_intensity=0.75,
+                source="test",
+            )
 
         mock_pr.record_reward.assert_not_called()
 
@@ -223,26 +266,17 @@ class TestT363ImmunesSafePassReward:
 
     def test_safe_pass_records_reward(self):
         from host_brain.tribe.immune_agent import ImmuneAgent
-        agent = ImmuneAgent.__new__(ImmuneAgent)
-        agent._lock = __import__("threading").Lock()
-        agent._counters = {"total": 0, "block": 0, "warn": 0, "allow": 0}
-        agent._last_inspection = {}
-        agent._config_cache = None
-        agent._config_cache_ts = 0
+        # 使用完整构造，避免 slots 属性问题
+        agent = ImmuneAgent()
 
         mock_pr = MagicMock()
         mock_limbic = MagicMock()
         mock_endo = MagicMock()
         with patch("host_brain.tribe.immune_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.immune_agent.get_limbic_agent", return_value=mock_limbic), \
-             patch("host_brain.tribe.immune_agent.get_endocrine_agent", return_value=mock_endo), \
-             patch.object(agent, "_load_config", return_value=MagicMock(
-                 enabled=True, blocking_enabled=True,
-                 warn_threshold=0.40, block_threshold=0.70,
-                 ruleset_version="v1",
-             )), \
-             patch.object(agent, "_resolve_rules", return_value=[]):
-            agent.inspect_text("hello world", source="chat")
+             patch("host_brain.tribe.immune_agent.get_endocrine_agent", return_value=mock_endo):
+            # inspect_text 是关键字参数方法
+            agent.inspect_text(text="hello world", source="chat")
 
         mock_pr.record_reward.assert_called_once()
         call_kwargs = mock_pr.record_reward.call_args.kwargs
@@ -256,17 +290,13 @@ class TestT364ANSRecoveryExitEmotionMetabolism:
 
     def test_recovery_exit_triggers_emotion(self):
         from host_brain.tribe.ans_agent import ANSAgent
-        import threading
         agent = ANSAgent.__new__(ANSAgent)
         agent._recovery_mode = True  # 初始为恢复模式
         agent._bond_stage = "friend"
-        agent._bond_lock = threading.Lock()
-        agent._bond_cortisol_delta = 0.0
-        agent._bond_oxytocin_delta = 0.0
-        agent.emit_from_thread = MagicMock()
-
+        # slots=True 不能直接赋值 emit_from_thread，用 patch 替代
         mock_limbic = MagicMock()
-        with patch("host_brain.tribe.ans_agent.get_limbic_agent", return_value=mock_limbic):
+        with patch("host_brain.tribe.ans_agent.get_limbic_agent", return_value=mock_limbic), \
+             patch.object(ANSAgent, "emit_from_thread"):
             agent.set_recovery_mode(False, source="circadian_day_phase")
 
         mock_limbic.drive_emotion_metabolism.assert_called_once()
@@ -276,15 +306,13 @@ class TestT364ANSRecoveryExitEmotionMetabolism:
 
     def test_no_change_no_emotion(self):
         from host_brain.tribe.ans_agent import ANSAgent
-        import threading
         agent = ANSAgent.__new__(ANSAgent)
         agent._recovery_mode = False  # 已经是非恢复模式
         agent._bond_stage = "friend"
-        agent._bond_lock = threading.Lock()
-        agent.emit_from_thread = MagicMock()
 
         mock_limbic = MagicMock()
-        with patch("host_brain.tribe.ans_agent.get_limbic_agent", return_value=mock_limbic):
+        with patch("host_brain.tribe.ans_agent.get_limbic_agent", return_value=mock_limbic), \
+             patch.object(ANSAgent, "emit_from_thread"):
             agent.set_recovery_mode(False, source="test")  # 无变化
 
         mock_limbic.drive_emotion_metabolism.assert_not_called()
@@ -299,16 +327,21 @@ class TestT365DefaultModeHighContinuityEmotion:
         from host_brain.tribe.default_mode_agent import DefaultModeAgent
         agent = DefaultModeAgent.__new__(DefaultModeAgent)
         agent.state_registry = MagicMock()
-        agent.state_registry.get_state.return_value = {
-            "state": {"last_offline_state": {"continuity_score": 0.82}}
-        }
+        agent.state_registry.get_state.return_value = {}
 
         mock_limbic = MagicMock()
         mock_pr = MagicMock()
         mock_intero = MagicMock()
+        # build_offline_state_from_inner_state 决定 continuity_score，需要 mock 它
         with patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=mock_limbic), \
              patch("host_brain.tribe.default_mode_agent.get_pain_reward_agent", return_value=mock_pr), \
-             patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=mock_intero):
+             patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=mock_intero), \
+             patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.default_mode_agent.emit_tribe_event"), \
+             patch("host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+                   return_value={"continuity_score": 0.82, "absence_band": "recent",
+                                 "offline_hours": 0.0, "loneliness_level": 0.0, "anticipation_level": 0.0}):
             agent.tick_idle_cycle(source="test", person_id="user_1")
 
         mock_limbic.drive_emotion_metabolism.assert_called_once()
@@ -327,6 +360,7 @@ class TestT366CircadianDayPhaseEmotion:
         agent = CircadianAgent.__new__(CircadianAgent)
         agent.state_registry = MagicMock()
         agent.state_registry.get_state.return_value = {}
+        agent._last_phase = "dawn"  # 上一个相位是 dawn，切换到 day 才触发
 
         mock_limbic = MagicMock()
         mock_pr = MagicMock()
@@ -335,13 +369,15 @@ class TestT366CircadianDayPhaseEmotion:
         with patch("host_brain.tribe.circadian_agent.get_limbic_agent", return_value=mock_limbic), \
              patch("host_brain.tribe.circadian_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.circadian_agent.get_interoception_agent", return_value=mock_intero), \
-             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans):
-            agent.refresh_state({
-                "phase": "day",
-                "previous_phase": "dawn",
-                "local_hour": 9,
-                "ts_ms": 1000,
-            })
+             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans), \
+             patch("host_brain.tribe.circadian_agent.get_default_mode_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.emit_tribe_event"), \
+             patch("host_brain.tribe.circadian_agent.CircadianAgent.evaluate_profile", return_value={
+                 "phase": "day", "sleep_pressure": 0.20, "local_hour": 9,
+                 "phase_energy_baseline": 0.84, "proactive_multiplier": 1.0,
+                 "recovery_bias": 0.30, "response_latency_ms": 360, "ts_ms": 1000,
+             }):
+            agent.refresh_state(source="test", ts_ms=1000)
 
         # drive_emotion_metabolism 应被调用（日间活力情绪）
         wake_calls = [c for c in mock_limbic.drive_emotion_metabolism.call_args_list
@@ -359,6 +395,7 @@ class TestT367ProprioceptionTaskSuccessContinuity:
         agent = ProprioceptionAgent.__new__(ProprioceptionAgent)
         agent.state_registry = MagicMock()
         agent.state_registry.get_state.return_value = {}
+        agent._interrupt_ts_ms = []  # slots=True 需要手动初始化
 
         mock_dma = MagicMock()
         mock_pr = MagicMock()
@@ -390,14 +427,36 @@ class TestT368InitiativeApprovedContinuity:
         mock_vest = MagicMock()
         mock_vest.state_registry = MagicMock()
         mock_vest.state_registry.get_state.return_value = {}
+        mock_circadian = MagicMock()
+        mock_circadian.export_runtime_state.return_value = {
+            "proactive_multiplier": 1.0, "sleep_pressure": 0.20
+        }
+        mock_social = MagicMock()
+        mock_social.get_bond_context.return_value = {
+            "bond_vector": {"trust": 0.8, "affinity": 0.8, "safety": 0.8}
+        }
+        mock_intero = MagicMock()
+        mock_intero.export_runtime_state.return_value = {"body_budget": 0.80}
+        mock_proprio = MagicMock()
+        mock_proprio.export_runtime_state.return_value = {
+            "cognitive_load_index": 0.10, "continuity_hint": 0.60
+        }
+        # aggregate_vital_signs 返回高能量、低压力、开放闸门
+        agent.state_registry.aggregate_vital_signs = MagicMock(return_value={
+            "energy_reserve": 0.80, "stress_index": 0.10,
+            "gate_state": "open", "immune_risk_level": "none"
+        })
         with patch("host_brain.tribe.initiative_governor_agent.get_default_mode_agent", return_value=mock_dma), \
              patch("host_brain.tribe.initiative_governor_agent.get_pain_reward_agent", return_value=mock_pr), \
-             patch("host_brain.tribe.initiative_governor_agent.get_vestibular_agent", return_value=mock_vest):
+             patch("host_brain.tribe.initiative_governor_agent.get_vestibular_agent", return_value=mock_vest), \
+             patch("host_brain.tribe.initiative_governor_agent.get_circadian_agent", return_value=mock_circadian), \
+             patch("host_brain.tribe.initiative_governor_agent.get_social_brain_agent", return_value=mock_social), \
+             patch("host_brain.tribe.initiative_governor_agent.get_interoception_agent", return_value=mock_intero), \
+             patch("host_brain.tribe.initiative_governor_agent.get_proprioception_agent", return_value=mock_proprio):
             agent.evaluate_initiative(
                 action="proactive_greeting",
-                motive_score=0.75,
-                readiness_score=0.80,
-                continuity_score=0.65,
+                motive=0.75,
+                context={"readiness_score": 0.80, "continuity_score": 0.65},
             )
 
         mock_dma.tick_idle_cycle.assert_called_once()

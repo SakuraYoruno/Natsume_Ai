@@ -210,7 +210,6 @@ class LanguageSystemAgent:
         emotional_pressure = float(wernicke.get("emotional_pressure") or 0.0)
         if emotional_pressure >= 0.55:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 get_pain_reward_agent().record_pain(
                     source="language_emotional_pressure",
                     intensity=round(emotional_pressure * 0.7, 4),
@@ -223,7 +222,6 @@ class LanguageSystemAgent:
         urgency_score = float(wernicke.get("urgency_score") or 0.0)
         if urgency_score >= 0.65:
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 _endo = get_endocrine_agent()
                 if hasattr(_endo, "record_stress_event"):
                     _lang_stress = round(min(0.40, (urgency_score - 0.65) * 1.14), 4)
@@ -238,7 +236,6 @@ class LanguageSystemAgent:
         # 语言层面的情绪压力（悲伤/孤独/焦虑）应反馈到情绪代谢系统，形成完整的情绪回路
         if emotional_pressure >= 0.55:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _intent = str(wernicke.get("intent_type") or "chat")
@@ -260,7 +257,6 @@ class LanguageSystemAgent:
             # T-373：高情绪压力时联动 InteroceptionAgent 注入认知压力
             # 语言层面的情绪压力（悲伤/孤独/焦虑）消耗认知资源，是内在压力源
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "inject_external_stress"):
                     _lang_intero_stress = round(min(0.30, (emotional_pressure - 0.55) * 0.67), 4)
@@ -276,7 +272,6 @@ class LanguageSystemAgent:
         # 通过 MotorCortexAgent.dispatch_speak() 统一发声（不阻塞主流程）
         try:
             from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
-            from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: PLC0415
             import asyncio as _asyncio  # noqa: PLC0415
 
             _tts_params = broca_to_tts_params(
@@ -599,3 +594,5 @@ __all__ = ["LanguageSystemAgent", "get_language_system_agent", "set_language_sys
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: E402, F401

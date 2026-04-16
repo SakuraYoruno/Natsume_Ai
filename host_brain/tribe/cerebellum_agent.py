@@ -113,7 +113,6 @@ class CerebellumAgent:
         # T-335：高纠偏策略时联动 PainRewardAgent 记录认知痛苦（持续纠偏是认知负担）
         if strategy in {"RETRY_ONCE", "SAFE_FALLBACK"}:
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_pain"):
                     _pain_intensity = 0.20 if strategy == "RETRY_ONCE" else 0.32
@@ -133,7 +132,6 @@ class CerebellumAgent:
         # T-341：低纠偏（NO_ADJUST）时联动 PainRewardAgent 记录技能奖励（执行顺畅是正向强化）
         if strategy == "NO_ADJUST":
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
                     _pr.record_reward(
@@ -150,7 +148,6 @@ class CerebellumAgent:
             # T-375：纠偏成功（NO_ADJUST）时联动 InteroceptionAgent 降低 recovery_urgency
             # 执行顺畅 = 认知资源充足，应主动释放身体预算压力
             try:
-                from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                 _intero = get_interoception_agent()
                 if hasattr(_intero, "reduce_recovery_urgency"):
                     _intero.reduce_recovery_urgency(
@@ -162,7 +159,6 @@ class CerebellumAgent:
             # T-379：纠偏成功（NO_ADJUST）时联动 DefaultModeAgent.tick_idle_cycle()
             # 执行顺畅是"我能做到"的自我能力叙事，应强化连续性
             try:
-                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
@@ -180,7 +176,6 @@ class CerebellumAgent:
                 _correction_count = int(_prev_st.get("correction_count") or 0)
                 # 连续纠偏次数 >= 3 时才注入躯体压力（避免单次纠偏过度触发）
                 if _correction_count >= 3:
-                    from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: PLC0415
                     _intero = get_interoception_agent()
                     if hasattr(_intero, "inject_external_stress"):
                         _somatic_stress = round(min(0.35, urgency * 0.38), 4)
@@ -444,3 +439,6 @@ __all__ = ["CerebellumAgent", "get_cerebellum_agent", "set_cerebellum_agent"]
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
