@@ -485,13 +485,19 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             _sr_ng = dict(_sr_ng_raw) if isinstance(_sr_ng_raw, Mapping) else {}
             if _sr_ng:
                 _ng_instruction = _truncate_for_prompt(_sr_ng.get("instruction"), limit=240) or ""
+                _ng_max_sentences = _sr_ng.get("max_self_narrative_sentences")
                 _ng_prompt_directives = [_truncate_for_prompt(item, limit=120) or "" for item in (_sr_ng.get("prompt_directives") or []) if _truncate_for_prompt(item, limit=120)]
                 if _ng_instruction:
                     _self_reflection_templates = _load_template_mapping("prompt_builder.self_reflection.templates")
                     _rp_directives.append(_mapping_text(_self_reflection_templates, "narrative_instruction_prefix", instruction=_ng_instruction))
-                for _ng_directive in _ng_prompt_directives:
-                    if _ng_directive not in _rp_directives:
-                        _rp_directives.append(_ng_directive)
+                if _ng_max_sentences is not None:
+                    _sr_parts.append(f"- max_self_narrative_sentences: {_ng_max_sentences}")
+                if _ng_prompt_directives:
+                    _sr_parts.append("- prompt_directives:")
+                    for _ng_directive in _ng_prompt_directives:
+                        _sr_parts.append(f"  - {_ng_directive}")
+                        if _ng_directive not in _rp_directives:
+                            _rp_directives.append(_ng_directive)
             if len(_sr_parts) > 1:
                 _self_reflection_block = "\n".join(_sr_parts) + "\n\n"
     except Exception:

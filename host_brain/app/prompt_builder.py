@@ -162,8 +162,13 @@ def get_last_injection_meta() -> dict[str, Any]:
 
 
 def _set_injection_meta(meta: dict[str, Any]) -> None:
-    """内部：将注入检测结果写入线程局部变量。"""
+    """内部：将注入检测结果写入线程局部变量（同时写入 utils 模块，保持一致性）。"""
     _injection_meta_local.meta = meta
+    try:
+        from host_brain.app.prompt_builder_utils import _injection_meta_local as _utils_local  # noqa: PLC0415
+        _utils_local.meta = meta
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
