@@ -63,8 +63,11 @@ class GovernedToolNode:
         if tool is None:
             return {"error": f"工具 '{tool_name}' 未找到", "result": None}
         try:
-            # LangChain Tool 支持 .invoke() 或直接调用
-            if hasattr(tool, "invoke"):
+            # 优先使用 .func(**kwargs)（LangChain StructuredTool 的底层函数）
+            # 避免 .invoke() 的 Pydantic 参数解析问题
+            if hasattr(tool, "func") and callable(tool.func):
+                result = tool.func(**tool_args)
+            elif hasattr(tool, "invoke"):
                 result = tool.invoke(tool_args)
             elif callable(tool):
                 result = tool(**tool_args)
