@@ -100,7 +100,6 @@ class CerebellumAgent:
         # T-288：高纠偏策略时联动 EndocrineAgent 记录压力事件（执行失败是内在压力源）
         if strategy in {"RETRY_ONCE", "SAFE_FALLBACK"}:
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 _endo = get_endocrine_agent()
                 if hasattr(_endo, "record_stress_event"):
                     _stress_intensity = 0.18 if strategy == "RETRY_ONCE" else 0.28
@@ -326,7 +325,6 @@ class CerebellumAgent:
                 _log.info("CerebellumAgent.analyze_failure_pattern: %s", _insight[:60])
                 # 写入 HippocampusAgent 语义记忆
                 try:
-                    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
                     _hippo = get_hippocampus_agent()
                     if hasattr(_hippo, "write_semantic_memory"):
                         _hippo.write_semantic_memory(
@@ -397,7 +395,6 @@ class CerebellumAgent:
             )
             # T-268：RETRY_ONCE 时联动 LimbicAgent 触发轻度焦虑情绪偏移
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _anxiety_intensity = min(0.25, urgency * 0.28)
@@ -443,3 +440,7 @@ def set_cerebellum_agent(agent: CerebellumAgent | None) -> None:
 
 
 __all__ = ["CerebellumAgent", "get_cerebellum_agent", "set_cerebellum_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401

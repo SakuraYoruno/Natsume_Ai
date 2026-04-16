@@ -92,7 +92,6 @@ class GlymphaticAgent:
         memory_written = False
         if recovery_window and consolidation_score >= 0.45:
             try:
-                from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
                 hippocampus = get_hippocampus_agent()
                 if hasattr(hippocampus, "write_semantic_memory_fact"):
                     # T-214：修复：补充 person_id 参数，confidence 通过 source_refs 携带
@@ -119,7 +118,6 @@ class GlymphaticAgent:
         # T-290：恢复周期完成且巩固分数达标时，联动 LimbicAgent 触发轻度正向情绪偏移（恢复感）
         if recovery_window and consolidation_score >= 0.45:
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _recovery_warmth = min(0.18, consolidation_score * 0.20)
@@ -171,7 +169,6 @@ class GlymphaticAgent:
             # T-347：深度清理完成后联动 DefaultModeAgent.tick_idle_cycle()
             # 深度清理是连续性的重要来源（类似睡眠后的自我整合感）
             try:
-                from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: PLC0415
                 _dma = get_default_mode_agent()
                 if hasattr(_dma, "tick_idle_cycle"):
                     _dma.tick_idle_cycle(
@@ -257,7 +254,6 @@ class GlymphaticAgent:
                 _log.info("GlymphaticAgent.generate_consolidation_summary: %s", _summary[:50])
                 # 写入 HippocampusAgent 语义记忆
                 try:
-                    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
                     _hippo = get_hippocampus_agent()
                     if hasattr(_hippo, "write_semantic_memory"):
                         _hippo.write_semantic_memory(
@@ -393,3 +389,10 @@ def set_glymphatic_agent(agent: GlymphaticAgent | None) -> None:
 
 
 __all__ = ["GlymphaticAgent", "get_glymphatic_agent", "set_glymphatic_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401

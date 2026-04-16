@@ -775,3 +775,6 @@ def set_cortex_agent(agent: CortexAgent | None) -> None:
 
 
 __all__ = ["CortexAgent", "get_cortex_agent", "set_cortex_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401

@@ -457,3 +457,11 @@ def set_circadian_agent(agent: CircadianAgent | None) -> None:
 
 
 __all__ = ["CircadianAgent", "get_circadian_agent", "set_circadian_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.ans_agent import get_ans_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
+from host_brain.tribe.glymphatic_agent import get_glymphatic_agent  # noqa: E402, F401

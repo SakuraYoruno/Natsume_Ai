@@ -441,3 +441,9 @@ def set_mirror_neuron_agent(agent: MirrorNeuronAgent | None) -> None:
 
 
 __all__ = ["MirrorNeuronAgent", "get_mirror_neuron_agent", "set_mirror_neuron_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
+from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401

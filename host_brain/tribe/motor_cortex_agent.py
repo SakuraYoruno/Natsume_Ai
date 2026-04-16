@@ -130,7 +130,6 @@ class MotorCortexAgent:
             )
             # T-287：执行失败时联动 LimbicAgent 触发轻度挫败感情绪偏移
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
                     _limbic.drive_emotion_metabolism(
@@ -145,7 +144,6 @@ class MotorCortexAgent:
                 pass
             # T-303：执行失败时联动 EndocrineAgent 记录执行压力事件
             try:
-                from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: PLC0415
                 _endo = get_endocrine_agent()
                 if hasattr(_endo, "record_stress_event"):
                     _endo.record_stress_event(
@@ -156,7 +154,6 @@ class MotorCortexAgent:
                 pass
             # T-338：执行失败时联动 PainRewardAgent 记录行动痛苦（执行失败是行动受阻的痛苦）
             try:
-                from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: PLC0415
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_pain"):
                     _pr.record_pain(
@@ -458,7 +455,6 @@ class MotorCortexAgent:
         if not speak_ok:
             # 发声失败时联动 LimbicAgent 轻度挫败感
             try:
-                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
                 get_limbic_agent().drive_emotion_metabolism(
                     valence=-0.06,
                     arousal=0.04,
@@ -653,3 +649,7 @@ def set_motor_cortex_agent(agent: MotorCortexAgent | None) -> None:
 
 
 __all__ = ["MotorCortexAgent", "get_motor_cortex_agent", "set_motor_cortex_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401

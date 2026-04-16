@@ -1430,3 +1430,7 @@ __all__ = [
     "get_immune_agent",
     "set_immune_agent",
 ]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401

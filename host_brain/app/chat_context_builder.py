@@ -11,10 +11,12 @@ P2-2 重构：已按功能拆分为子模块，本文件作为组合入口保持
 from __future__ import annotations
 
 import copy
+import json
 import logging
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Any, Mapping
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,14 @@ from host_brain.core.prompt_context import (
     validate_prompt_context as validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
+
+from host_brain.app.dependencies import get_ledger
+from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+try:
+    from host_brain.memory.canon_style_store import StyleCanonStore  # noqa: PLC0415
+except Exception:
+    StyleCanonStore = None  # type: ignore[assignment,misc]
 
 # ── 从子模块导入（向后兼容：外部代码仍可从本模块 import）──────────────────
 from host_brain.app.chat_context_style import (  # noqa: F401

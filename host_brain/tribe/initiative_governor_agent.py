@@ -408,3 +408,7 @@ __all__ = [
     "get_initiative_governor_agent",
     "set_initiative_governor_agent",
 ]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.circadian_agent import get_circadian_agent  # noqa: E402, F401
+from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401

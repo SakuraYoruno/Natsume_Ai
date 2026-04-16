@@ -1271,3 +1271,6 @@ def set_prefrontal_agent(agent: PrefrontalAgent | None) -> None:
 
 
 __all__ = ["PrefrontalAgent", "get_prefrontal_agent", "set_prefrontal_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401

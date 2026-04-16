@@ -287,8 +287,8 @@ NatsumeScheduler（定时）
 | **Phase B** | 器官族并行激活 + B1-B4 路由覆盖 | ✅ 完成 |
 | **Phase C** | MotorCortexAgent.dispatch_speak() 统一发声入口 | ✅ 完成 |
 | **Phase D** | PrefrontalAgent.plan_response() 前额叶真实推理接管 | ✅ 完成 |
-| Phase E（规划中）| LimbicAgent 连续动态情绪物理模型 | 🔄 规划中 |
-| Phase F（规划中）| Gateway 完整感知-行动循环（VTS 感知动作 + 朋友圈发布） | 🔄 规划中 |
+| Phase E（规划中）| LimbicAgent 连续动态情绪物理模型 | ✅ 完成  |
+| Phase F（规划中）| Gateway 完整感知-行动循环（VTS 感知动作 + 朋友圈发布） | ✅ 完成  |
 
 ---
 

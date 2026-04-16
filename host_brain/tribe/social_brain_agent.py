@@ -1214,3 +1214,8 @@ def set_social_brain_agent(agent: SocialBrainAgent | None) -> None:
 
 
 __all__ = ["SocialBrainAgent", "get_social_brain_agent", "set_social_brain_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: E402, F401

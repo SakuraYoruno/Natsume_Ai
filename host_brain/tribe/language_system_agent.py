@@ -594,3 +594,8 @@ def set_language_system_agent(agent: LanguageSystemAgent | None) -> None:
 
 
 __all__ = ["LanguageSystemAgent", "get_language_system_agent", "set_language_system_agent"]
+
+# ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
+from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
