@@ -2,8 +2,8 @@
 
 **文档编号**：ORGAN-TRIBE-UPGRADE-001
 **日期**：2026-04-16
-**版本**：v1.0
-**状态**：待执行
+**版本**：v2.0
+**状态**：✅ 已完成（2026-04-16）
 **受众**：核心开发团队
 
 ---
@@ -505,4 +505,92 @@ MOTOR_SPEAK_STYLE_ENABLED=false
 
 ---
 
-*文档版本：v1.0 | 创建日期：2026-04-16 | 作者：Natsume AI 开发团队*
+## 8. 实现完成记录（2026-04-16）
+
+### 8.1 实际完成情况
+
+所有 15 个非 A 级器官已全部完成升级，22 个器官族全部达到 A 级。
+
+| 批次 | 提交 | 内容 | 状态 |
+|------|------|------|------|
+| fix | `prefrontal_agent` | 修复 `provider_factory` 错误导入路径（`llm/` → `app/`） | ✅ |
+| P0 | `feat(tribe-P0)` | ImmuneAgent + LanguageSystemAgent + MirrorNeuronAgent | ✅ |
+| P1 | `feat(tribe-P1)` | GlymphaticAgent + InitiativeGovernorAgent + PainRewardAgent + CerebellumAgent | ✅ |
+| P2 | `feat(tribe-P2)` | EndocrineAgent + CircadianAgent + ProprioceptionAgent + InteroceptionAgent + VestibularAgent | ✅ |
+| P3+P4 | `feat(tribe-P3P4)` | SomaticAgent + PeripheralAgent + MotorCortexAgent | ✅ |
+
+### 8.2 新增方法清单（22 个）
+
+| Agent | 新增方法 | 触发条件 | 开关 |
+|-------|---------|---------|------|
+| ImmuneAgent | `semantic_intent_analysis()` | 规则层 score ∈ [0.3, 0.55) | `IMMUNE_SEMANTIC_SCAN_ENABLED` |
+| LanguageSystemAgent | `wernicke_deep_parse()` | intent_type=complex 或 semantic_pressure > 0.6 | `LANGUAGE_WERNICKE_DEEP_PARSE_ENABLED` |
+| LanguageSystemAgent | `broca_generate_opening_hint()` | emotional_pressure > 0.7 | `LANGUAGE_BROCA_OPENING_HINT_ENABLED` |
+| MirrorNeuronAgent | `generate_empathy_response_hint()` | resonance_intensity > 0.6 | `MIRROR_EMPATHY_HINT_ENABLED` |
+| GlymphaticAgent | `generate_consolidation_summary()` | 恢复窗口期 | `GLYMPHATIC_CONSOLIDATION_LLM_ENABLED` |
+| InitiativeGovernorAgent | `generate_proactive_topic()` | evaluate_initiative() = ALLOW | `GOVERNOR_PROACTIVE_TOPIC_ENABLED` |
+| PainRewardAgent | `generate_hedonic_reflection()` | \|delta_valence\| > 0.3 | `PAIN_HEDONIC_REFLECTION_ENABLED` |
+| CerebellumAgent | `generate_correction_narrative()` | strategy ≠ NO_ADJUST | `CEREBELLUM_CORRECTION_NARRATIVE_ENABLED` |
+| CerebellumAgent | `analyze_failure_pattern()` | consecutive_failures > 2 | `CEREBELLUM_CORRECTION_NARRATIVE_ENABLED` |
+| EndocrineAgent | `generate_hormonal_state_hint()` | cortisol/oxytocin > 0.6 | `ENDOCRINE_HORMONAL_HINT_ENABLED` |
+| CircadianAgent | `generate_circadian_mood_hint()` | energy_level < 0.3 或 sleep_pressure > 0.6 | `CIRCADIAN_MOOD_HINT_ENABLED` |
+| ProprioceptionAgent | `generate_cognitive_load_hint()` | cognitive_load_index > 0.6 | `PROPRIOCEPTION_LOAD_HINT_ENABLED` |
+| InteroceptionAgent | `generate_interoceptive_narrative()` | interoception_index < 0.3 或 recovery_urgency > 0.7 | `INTEROCEPTION_NARRATIVE_ENABLED` |
+| VestibularAgent | `generate_stability_assessment()` | stability_status = unstable/critical | `VESTIBULAR_STABILITY_ASSESSMENT_ENABLED` |
+| SomaticAgent | `generate_somatic_narrative()` | somatic_pressure > 0.4 或面捕有效 | `SOMATIC_NARRATIVE_ENABLED` |
+| PeripheralAgent | `analyze_peripheral_context()` | 有活跃平台连接 | `PERIPHERAL_CONTEXT_ANALYSIS_ENABLED` |
+| MotorCortexAgent | `plan_speak_style()` | arousal > 0.6 或 valence < -0.3 | `MOTOR_SPEAK_STYLE_ENABLED` |
+
+### 8.3 新增 Prompt 模板清单（17 个）
+
+| 模板 Key | 所在文件 | 状态 |
+|---------|---------|------|
+| `immune_agent.semantic_intent_analysis` | `governance.yaml` | ✅ 已存在 |
+| `language_system_agent.wernicke_deep_parse` | `executive.yaml` | ✅ 已存在 |
+| `language_system_agent.broca_opening_hint` | `executive.yaml` | ✅ 已存在 |
+| `mirror_neuron_agent.empathy_response_hint` | `persona.yaml` | ✅ 新增 |
+| `glymphatic_agent.consolidation_summary` | `persona.yaml` | ✅ 新增 |
+| `initiative_governor_agent.proactive_topic` | `persona.yaml` | ✅ 新增 |
+| `pain_reward_agent.hedonic_reflection` | `persona.yaml` | ✅ 新增 |
+| `endocrine_agent.hormonal_state_hint` | `persona.yaml` | ✅ 新增 |
+| `circadian_agent.circadian_mood_hint` | `persona.yaml` | ✅ 新增 |
+| `proprioception_agent.cognitive_load_hint` | `persona.yaml` | ✅ 新增 |
+| `interoception_agent.interoceptive_narrative` | `persona.yaml` | ✅ 新增 |
+| `vestibular_agent.stability_assessment` | `persona.yaml` | ✅ 新增 |
+| `somatic_agent.somatic_narrative` | `persona.yaml` | ✅ 新增 |
+| `cerebellum_agent.correction_narrative` | `executive.yaml` | ✅ 新增 |
+| `cerebellum_agent.failure_pattern` | `executive.yaml` | ✅ 新增 |
+| `peripheral_agent.context_analysis` | `executive.yaml` | ✅ 新增 |
+| `motor_cortex_agent.speak_style` | `executive.yaml` | ✅ 新增 |
+
+### 8.4 所有开关默认值（全部 false，灰度启用）
+
+```env
+# P0
+IMMUNE_SEMANTIC_SCAN_ENABLED=false
+LANGUAGE_WERNICKE_DEEP_PARSE_ENABLED=false
+LANGUAGE_BROCA_OPENING_HINT_ENABLED=false
+MIRROR_EMPATHY_HINT_ENABLED=false
+
+# P1
+GLYMPHATIC_CONSOLIDATION_LLM_ENABLED=false
+GOVERNOR_PROACTIVE_TOPIC_ENABLED=false
+PAIN_HEDONIC_REFLECTION_ENABLED=false
+CEREBELLUM_CORRECTION_NARRATIVE_ENABLED=false
+
+# P2
+ENDOCRINE_HORMONAL_HINT_ENABLED=false
+CIRCADIAN_MOOD_HINT_ENABLED=false
+PROPRIOCEPTION_LOAD_HINT_ENABLED=false
+INTEROCEPTION_NARRATIVE_ENABLED=false
+VESTIBULAR_STABILITY_ASSESSMENT_ENABLED=false
+
+# P3/P4
+SOMATIC_NARRATIVE_ENABLED=false
+PERIPHERAL_CONTEXT_ANALYSIS_ENABLED=false
+MOTOR_SPEAK_STYLE_ENABLED=false
+```
+
+---
+
+*文档版本：v2.0 | 创建日期：2026-04-16 | 完成日期：2026-04-16 | 作者：Natsume AI 开发团队*
