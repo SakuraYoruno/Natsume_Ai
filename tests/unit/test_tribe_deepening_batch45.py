@@ -65,9 +65,9 @@ class TestT335CerebellumHighCorrectionRecordsPain:
         agent = CerebellumAgent(state_registry=reg)
 
         with patch("host_brain.tribe.cerebellum_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=_make_intero_mock()):
+             patch("host_brain.tribe.cerebellum_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.cerebellum_agent.get_interoception_agent", return_value=_make_intero_mock()):
             agent.evaluate_correction(
                 execution_feedback={"accepted": False, "dispatched": False, "latency_ms": 0},
                 source="test",
@@ -86,9 +86,9 @@ class TestT335CerebellumHighCorrectionRecordsPain:
         agent = CerebellumAgent(state_registry=reg)
 
         with patch("host_brain.tribe.cerebellum_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=_make_intero_mock()):
+             patch("host_brain.tribe.cerebellum_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.cerebellum_agent.get_interoception_agent", return_value=_make_intero_mock()):
             agent.evaluate_correction(
                 execution_feedback={
                     "accepted": False, "dispatched": False,
@@ -118,10 +118,10 @@ class TestT336PrefrontalDriftRecordsPain:
             "correction_hint": "tone drift",
         }
 
-        with patch.object(agent, "run_growth_feedback_cycle", return_value=drift_result), \
+        with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value=drift_result), \
              patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.prefrontal_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.prefrontal_agent.get_pain_reward_agent", return_value=pr_mock), \
              patch("host_brain.tribe.events.emit_tribe_event"):
             event = MagicMock()
             event.payload = {
@@ -130,7 +130,8 @@ class TestT336PrefrontalDriftRecordsPain:
                 "session_id": "test_session",
             }
             event.ts_ms = 0
-            asyncio.get_event_loop().run_until_complete(
+            import asyncio
+            asyncio.run(
                 agent._on_interaction_recorded(event)
             )
 
@@ -141,7 +142,6 @@ class TestT336PrefrontalDriftRecordsPain:
 
     def test_severe_drift_calls_record_pain_higher(self) -> None:
         from host_brain.tribe.prefrontal_agent import PrefrontalAgent
-        import asyncio
 
         pr_mock = _make_pain_reward_mock()
         agent = PrefrontalAgent()
@@ -152,10 +152,10 @@ class TestT336PrefrontalDriftRecordsPain:
             "correction_hint": "severe drift",
         }
 
-        with patch.object(agent, "run_growth_feedback_cycle", return_value=drift_result), \
+        with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value=drift_result), \
              patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.prefrontal_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.prefrontal_agent.get_pain_reward_agent", return_value=pr_mock), \
              patch("host_brain.tribe.events.emit_tribe_event"):
             event = MagicMock()
             event.payload = {
@@ -164,7 +164,8 @@ class TestT336PrefrontalDriftRecordsPain:
                 "session_id": "test_session",
             }
             event.ts_ms = 0
-            asyncio.get_event_loop().run_until_complete(
+            import asyncio
+            asyncio.run(
                 agent._on_interaction_recorded(event)
             )
 
@@ -174,15 +175,14 @@ class TestT336PrefrontalDriftRecordsPain:
 
     def test_no_drift_no_record_pain(self) -> None:
         from host_brain.tribe.prefrontal_agent import PrefrontalAgent
-        import asyncio
 
         pr_mock = _make_pain_reward_mock()
         agent = PrefrontalAgent()
 
         drift_result = {"drift_alert_level": "NONE", "drift_dims": []}
 
-        with patch.object(agent, "run_growth_feedback_cycle", return_value=drift_result), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
+        with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value=drift_result), \
+             patch("host_brain.tribe.prefrontal_agent.get_pain_reward_agent", return_value=pr_mock), \
              patch("host_brain.tribe.events.emit_tribe_event"):
             event = MagicMock()
             event.payload = {
@@ -191,7 +191,8 @@ class TestT336PrefrontalDriftRecordsPain:
                 "session_id": "test_session",
             }
             event.ts_ms = 0
-            asyncio.get_event_loop().run_until_complete(
+            import asyncio
+            asyncio.run(
                 agent._on_interaction_recorded(event)
             )
 
@@ -210,9 +211,9 @@ class TestT337ImmuneBlockRecordsPain:
         with patch("host_brain.tribe.immune_agent.ImmuneAgent._load_config") as mock_cfg, \
              patch("host_brain.tribe.events.emit_tribe_event"), \
              patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=_make_intero_mock()), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+             patch("host_brain.tribe.immune_agent.get_interoception_agent", return_value=_make_intero_mock()), \
+             patch("host_brain.tribe.immune_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.immune_agent.get_pain_reward_agent", return_value=pr_mock):
             from host_brain.tribe.immune_agent import _ImmuneConfig
             mock_cfg.return_value = _ImmuneConfig(
                 enabled=True,
@@ -235,7 +236,7 @@ class TestT337ImmuneBlockRecordsPain:
         pr_mock = _make_pain_reward_mock()
         agent = ImmuneAgent()
 
-        with patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+        with patch("host_brain.tribe.immune_agent.get_pain_reward_agent", return_value=pr_mock):
             agent.inspect_text(text="今天天气真好", source="test", record=True)
 
         pr_mock.record_pain.assert_not_called()
@@ -255,8 +256,8 @@ class TestT338MotorExecutionFailedRecordsPain:
 
         with patch("host_brain.tribe.motor_cortex_agent.emit_tribe_event"), \
              patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+             patch("host_brain.tribe.motor_cortex_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.motor_cortex_agent.get_pain_reward_agent", return_value=pr_mock):
             agent.receive_execution_feedback(
                 plan_id="plan_001",
                 ok=False,
@@ -280,7 +281,7 @@ class TestT338MotorExecutionFailedRecordsPain:
         agent = MotorCortexAgent(state_registry=reg)
 
         with patch("host_brain.tribe.motor_cortex_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+             patch("host_brain.tribe.motor_cortex_agent.get_pain_reward_agent", return_value=pr_mock):
             agent.receive_execution_feedback(
                 plan_id="plan_002",
                 ok=True,
@@ -310,8 +311,8 @@ class TestT339GlymphaticCleanRecordsReward:
                  export_runtime_state=MagicMock(return_value={"continuity_score": 0.70}),
              )), \
              patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=_make_intero_mock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+             patch("host_brain.tribe.glymphatic_agent.get_interoception_agent", return_value=_make_intero_mock()), \
+             patch("host_brain.tribe.glymphatic_agent.get_pain_reward_agent", return_value=pr_mock):
             result = agent.run_recovery_cycle(source="test", force=True)
 
         assert result["executed"] is True
@@ -344,7 +345,7 @@ class TestT339GlymphaticCleanRecordsReward:
              patch("host_brain.tribe.default_mode_agent.get_default_mode_agent", return_value=MagicMock(
                  export_runtime_state=MagicMock(return_value={"continuity_score": 0.30}),
              )), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+             patch("host_brain.tribe.glymphatic_agent.get_pain_reward_agent", return_value=pr_mock):
             result = agent.run_recovery_cycle(source="test", force=False)
 
         assert result["executed"] is False
@@ -374,8 +375,8 @@ class TestT340HippocampusMemoryConsolidationRecordsReward:
                      set_state=MagicMock(),
                  ),
              )), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.hippocampus_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.hippocampus_agent.get_interoception_agent", return_value=intero_mock):
             agent.write_semantic_memory_fact(
                 person_id="user_1",
                 fact="test_fact",
@@ -404,8 +405,8 @@ class TestT340HippocampusMemoryConsolidationRecordsReward:
              patch("host_brain.tribe.default_mode_agent.get_default_mode_agent", return_value=MagicMock(
                  tick_idle_cycle=MagicMock(),
              )), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.hippocampus_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.hippocampus_agent.get_interoception_agent", return_value=intero_mock):
             agent.write_autobiographical_memory(
                 person_id="user_1",
                 narrative="今天发生了很多事情",
@@ -429,7 +430,7 @@ class TestT341CerebellumNoAdjustRecordsReward:
         agent = CerebellumAgent(state_registry=reg)
 
         with patch("host_brain.tribe.cerebellum_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock):
+             patch("host_brain.tribe.cerebellum_agent.get_pain_reward_agent", return_value=pr_mock):
             agent.evaluate_correction(
                 execution_feedback={"accepted": True, "dispatched": True, "latency_ms": 100},
                 source="test",
@@ -448,9 +449,9 @@ class TestT341CerebellumNoAdjustRecordsReward:
         agent = CerebellumAgent(state_registry=reg)
 
         with patch("host_brain.tribe.cerebellum_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=pr_mock), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=_make_intero_mock()):
+             patch("host_brain.tribe.cerebellum_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_pain_reward_agent", return_value=pr_mock), \
+             patch("host_brain.tribe.cerebellum_agent.get_interoception_agent", return_value=_make_intero_mock()):
             agent.evaluate_correction(
                 execution_feedback={"accepted": False, "dispatched": False, "latency_ms": 0},
                 source="test",
@@ -472,9 +473,9 @@ class TestT342CerebellumPersistentCorrectionInjectsStress:
         agent = CerebellumAgent(state_registry=reg)
 
         with patch("host_brain.tribe.cerebellum_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.cerebellum_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_interoception_agent", return_value=intero_mock):
             agent.evaluate_correction(
                 execution_feedback={"accepted": False, "dispatched": False, "latency_ms": 0},
                 source="test",
@@ -493,9 +494,9 @@ class TestT342CerebellumPersistentCorrectionInjectsStress:
         agent = CerebellumAgent(state_registry=reg)
 
         with patch("host_brain.tribe.cerebellum_agent.emit_tribe_event"), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.cerebellum_agent.get_endocrine_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
+             patch("host_brain.tribe.cerebellum_agent.get_interoception_agent", return_value=intero_mock):
             agent.evaluate_correction(
                 execution_feedback={"accepted": False, "dispatched": False, "latency_ms": 0},
                 source="test",
@@ -518,8 +519,8 @@ class TestT343SocialBondRegressInjectsStress:
         agent = SocialBrainAgent(state_registry=reg)
 
         with patch("host_brain.tribe.social_brain_agent.SocialBrainAgent._refresh_bond_vector"), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.social_brain_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
+             patch("host_brain.tribe.social_brain_agent.get_interoception_agent", return_value=intero_mock):
             event = MagicMock()
             event.payload = {
                 "user_id": "user_1",
@@ -528,7 +529,7 @@ class TestT343SocialBondRegressInjectsStress:
                 "intensity": 0.60,
             }
             event.ts_ms = 0
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_bond_regress_snapshot(event)
             )
 
@@ -560,8 +561,8 @@ class TestT344HippocampusConsolidationReducesUrgency:
                      set_state=MagicMock(),
                  ),
              )), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.hippocampus_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
+             patch("host_brain.tribe.hippocampus_agent.get_interoception_agent", return_value=intero_mock):
             agent.write_semantic_memory_fact(
                 person_id="user_1",
                 fact="test_fact",
@@ -588,8 +589,8 @@ class TestT344HippocampusConsolidationReducesUrgency:
              patch("host_brain.tribe.default_mode_agent.get_default_mode_agent", return_value=MagicMock(
                  tick_idle_cycle=MagicMock(),
              )), \
-             patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
-             patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock):
+             patch("host_brain.tribe.hippocampus_agent.get_pain_reward_agent", return_value=_make_pain_reward_mock()), \
+             patch("host_brain.tribe.hippocampus_agent.get_interoception_agent", return_value=intero_mock):
             agent.write_autobiographical_memory(
                 person_id="user_1",
                 narrative="今天发生了很多事情",
@@ -615,15 +616,15 @@ class TestT345SomaticLowFatigueReducesUrgency:
         reg.set_state = MagicMock()
         agent = SomaticAgent(state_registry=reg)
 
-        with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()):
+        with patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=intero_mock), \
+             patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=MagicMock()):
             event = MagicMock()
             event.payload = {
                 "fatigue_level": 0.10,  # 低疲劳，< 0.30
                 "motion_level": 0.20,
             }
             event.ts_ms = 1000
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_body_sense_updated(event)
             )
 
@@ -642,15 +643,15 @@ class TestT345SomaticLowFatigueReducesUrgency:
         reg.set_state = MagicMock()
         agent = SomaticAgent(state_registry=reg)
 
-        with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()):
+        with patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=intero_mock), \
+             patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=MagicMock()):
             event = MagicMock()
             event.payload = {
                 "fatigue_level": 0.80,  # 高疲劳，>= 0.60
                 "motion_level": 0.10,
             }
             event.ts_ms = 1000
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_body_sense_updated(event)
             )
 
@@ -668,15 +669,15 @@ class TestT345SomaticLowFatigueReducesUrgency:
         reg.set_state = MagicMock()
         agent = SomaticAgent(state_registry=reg)
 
-        with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=intero_mock), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=MagicMock()):
+        with patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=intero_mock), \
+             patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=MagicMock()):
             event = MagicMock()
             event.payload = {
                 "fatigue_level": 0.45,  # 中等疲劳，0.30~0.60 区间
                 "motion_level": 0.20,
             }
             event.ts_ms = 1000
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_body_sense_updated(event)
             )
 

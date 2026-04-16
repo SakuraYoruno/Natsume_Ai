@@ -38,19 +38,15 @@ class TestT324RecordRewardEventAlias:
         agent = self._make_agent()
         called_with = {}
 
-        original = agent.record_reward
-        def mock_record_reward(*, source, intensity, metadata=None):
-            called_with["source"] = source
-            called_with["intensity"] = intensity
-            called_with["metadata"] = metadata
-            return original(source=source, intensity=intensity, metadata=metadata)
-
-        agent.record_reward = mock_record_reward
-        agent.record_reward_event(
-            source="test_source",
-            reward_level=0.75,
-            metadata={"key": "val"},
-        )
+        with patch.object(type(agent), "record_reward",
+                          lambda self, *, source, intensity, metadata=None: called_with.update(
+                              {"source": source, "intensity": intensity, "metadata": metadata}
+                          ) or {}):
+            agent.record_reward_event(
+                source="test_source",
+                reward_level=0.75,
+                metadata={"key": "val"},
+            )
         assert called_with["source"] == "test_source"
         assert abs(called_with["intensity"] - 0.75) < 1e-6
         assert called_with["metadata"] == {"key": "val"}
@@ -60,13 +56,11 @@ class TestT324RecordRewardEventAlias:
         agent = self._make_agent()
         called_with = {}
 
-        original = agent.record_reward
-        def mock_record_reward(*, source, intensity, metadata=None):
-            called_with["intensity"] = intensity
-            return original(source=source, intensity=intensity, metadata=metadata)
-
-        agent.record_reward = mock_record_reward
-        agent.record_reward_event(source="default_test")
+        with patch.object(type(agent), "record_reward",
+                          lambda self, *, source, intensity, metadata=None: called_with.update(
+                              {"intensity": intensity}
+                          ) or {}):
+            agent.record_reward_event(source="default_test")
         assert abs(called_with["intensity"] - 0.4) < 1e-6
 
     def test_record_reward_event_clamps_reward_level(self):
@@ -193,8 +187,10 @@ class TestT330ANSAgentSetRecoveryMode:
         agent = self._make_agent()
         agent._recovery_mode = False
         emit_calls = []
-        agent.emit_from_thread = lambda *a, **kw: emit_calls.append((a, kw))
-        agent.set_recovery_mode(False, source="test")  # 未变化
+        # slots=True 不能直接赋值，用 patch.object 替代
+        with patch.object(type(agent), "emit_from_thread",
+                          lambda self, *a, **kw: emit_calls.append((a, kw))):
+            agent.set_recovery_mode(False, source="test")  # 未变化
         assert len(emit_calls) == 0
 
     def test_set_recovery_mode_false_emits_recovery_exit(self):
@@ -202,8 +198,9 @@ class TestT330ANSAgentSetRecoveryMode:
         agent = self._make_agent()
         agent._recovery_mode = True
         emit_calls = []
-        agent.emit_from_thread = lambda event_type, payload: emit_calls.append((event_type, payload))
-        agent.set_recovery_mode(False, source="circadian_day_phase")
+        with patch.object(type(agent), "emit_from_thread",
+                          lambda self, event_type, payload: emit_calls.append((event_type, payload))):
+            agent.set_recovery_mode(False, source="circadian_day_phase")
         assert len(emit_calls) == 1
         event_type, payload = emit_calls[0]
         assert event_type == "INNER_WORLD_TICKED"
@@ -220,38 +217,14 @@ class TestT330CircadianAgentUsesSetRecoveryMode:
 
     def test_circadian_day_phase_calls_set_recovery_mode(self):
         """CircadianAgent 日间相位切换时应调用 set_recovery_mode(False)。"""
-        set_recovery_calls = []
-
-        mock_ans = MagicMock()
-        mock_ans.set_recovery_mode = lambda enabled, **kw: set_recovery_calls.append(enabled)
-        # 不应有 _recovery_mode 直接赋值
-        mock_ans._recovery_mode = True
-
-        mock_reg = MagicMock()
-        mock_reg.get_state.return_value = None
-        mock_reg.set_state.return_value = None
-        mock_reg.aggregate_vital_signs.return_value = {}
-
-        mock_endo = MagicMock()
-        mock_endo.adjust_cortisol = MagicMock(return_value={})
-
-        with patch("host_brain.tribe.ans_agent.get_ans_agent", return_value=mock_ans), \
-             patch("host_brain.tribe.endocrine_agent.get_endocrine_agent", return_value=mock_endo, create=True):
-            from host_brain.tribe.circadian_agent import CircadianAgent
-            agent = CircadianAgent(state_registry=mock_reg)
-            try:
-                agent.tick_phase(now_ts_ms=1000000)
-            except Exception:
-                pass
-
-        # 如果触发了日间相位，应调用 set_recovery_mode(False)
-        # 由于相位依赖时间，只验证方法存在且不直接访问私有属性
         import inspect
-        source = inspect.getsource(agent.tick_phase)
+        from host_brain.tribe.circadian_agent import CircadianAgent
+        # 验证 refresh_state 中使用 set_recovery_mode 而非直接赋值 _recovery_mode
+        source = inspect.getsource(CircadianAgent.refresh_state)
         assert "_recovery_mode = False" not in source, \
-            "tick_phase 不应直接赋值 _recovery_mode，应使用 set_recovery_mode()"
+            "refresh_state 不应直接赋值 _recovery_mode，应使用 set_recovery_mode()"
         assert "set_recovery_mode" in source, \
-            "tick_phase 应调用 set_recovery_mode()"
+            "refresh_state 应调用 set_recovery_mode()"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

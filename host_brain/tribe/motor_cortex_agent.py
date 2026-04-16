@@ -651,3 +651,4 @@ __all__ = ["MotorCortexAgent", "get_motor_cortex_agent", "set_motor_cortex_agent
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.endocrine_agent import get_endocrine_agent  # noqa: E402, F401
 from host_brain.tribe.initiative_governor_agent import get_initiative_governor_agent  # noqa: E402, F401
+from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
