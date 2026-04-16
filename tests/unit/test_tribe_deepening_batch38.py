@@ -127,8 +127,10 @@ class TestCerebellumRetryLimbicLink:
         }
         event.ts_ms = 1000
 
-        with patch("host_brain.tribe.cerebellum_agent.get_limbic_agent", return_value=mock_limbic):
-            asyncio.get_event_loop().run_until_complete(
+        # mock evaluate_correction 返回 RETRY_ONCE 策略
+        with patch("host_brain.tribe.cerebellum_agent.get_limbic_agent", return_value=mock_limbic), \
+             patch("host_brain.tribe.cerebellum_agent.CerebellumAgent.evaluate_correction", return_value={"strategy": "RETRY_ONCE", "backoff_ms": 0, "urgency": 0.5, "plan_id": "plan_test_001"}):
+            asyncio.run(
                 agent._on_motor_action_dispatched(event)
             )
 
@@ -155,7 +157,7 @@ class TestCerebellumRetryLimbicLink:
         event.ts_ms = 1000
 
         with patch("host_brain.tribe.cerebellum_agent.get_limbic_agent", return_value=mock_limbic):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_motor_action_dispatched(event)
             )
 
@@ -182,7 +184,7 @@ class TestPeripheralErrorInteroceptionLink:
         event.ts_ms = 1000
 
         with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_peripheral_state_updated(event)
             )
 
@@ -203,7 +205,7 @@ class TestPeripheralErrorInteroceptionLink:
         event.ts_ms = 1000
 
         with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_peripheral_state_updated(event)
             )
 
@@ -217,14 +219,17 @@ class TestInitiativeGovernorVestibularLink:
     """T-270：InitiativeGovernorAgent BLOCK 时联动 VestibularAgent 记录主动推迟。"""
 
     def test_block_increments_vestibular_defer_count(self, registry):
+        from host_brain.tribe.vestibular_agent import VestibularAgent
         agent = InitiativeGovernorAgent(state_registry=registry)
+        vest_agent = VestibularAgent(state_registry=registry)
         # 预设 vestibular_agent 状态
         registry.set_state("vestibular_agent", {
             "initiative_defer_count_10m": 2,
         }, writer="test")
 
         # 构造会触发 BLOCK 的条件（gate_state=pause）
-        with patch("host_brain.tribe.initiative_governor_agent.emit_tribe_event"):
+        with patch("host_brain.tribe.initiative_governor_agent.emit_tribe_event"), \
+             patch("host_brain.tribe.initiative_governor_agent.get_vestibular_agent", return_value=vest_agent):
             agent.evaluate_initiative(
                 action="proactive_talk",
                 motive={"type": "proactive_talk", "intensity": 0.5},

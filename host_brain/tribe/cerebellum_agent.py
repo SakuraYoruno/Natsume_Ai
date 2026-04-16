@@ -356,6 +356,8 @@ class CerebellumAgent:
         }
 
     async def _on_motor_action_dispatched(self, event: Any) -> None:
+        import asyncio  # noqa: PLC0415
+        import logging  # noqa: PLC0415
         payload = dict(getattr(event, "payload", None) or {})
         decision = await asyncio.to_thread(
             self.evaluate_correction,
@@ -365,8 +367,6 @@ class CerebellumAgent:
         )
         # T-205：若策略为 RETRY_ONCE，延迟 backoff_ms 后发布 MOTOR_RETRY_REQUESTED
         if decision.get("strategy") == "RETRY_ONCE" and int(decision.get("backoff_ms") or 0) >= 0:
-            import asyncio  # noqa: PLC0415
-            import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.cerebellum_agent")
             plan_id = str(decision.get("plan_id") or "").strip()
             backoff_ms = int(decision.get("backoff_ms") or 0)
