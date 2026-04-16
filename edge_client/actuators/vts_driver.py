@@ -1179,6 +1179,77 @@ class VTubeStudioDriver:
             },
         }
 
+    # ── 面部捕捉感知：读取用户表情参数 ──────────────────────────────────────
+
+    def read_face_capture_params(
+        self,
+        *,
+        param_ids: list[str] | None = None,
+        timeout_s: float | None = None,
+    ) -> dict[str, float]:
+        """读取 VTS 面部捕捉参数值，用于感知用户当前表情状态。
+
+        通过 VTS ParameterValueRequest API 批量读取面部捕捉参数，
+        将摄像头捕捉到的用户脸部动作数字化后返回。
+
+        Args:
+            param_ids: 要读取的参数 ID 列表，None 时使用默认面捕参数集。
+            timeout_s: API 超时秒数，None 时使用配置默认值。
+
+        Returns:
+            {param_id: value} 字典，value 范围通常为 [0.0, 1.0] 或 [-1.0, 1.0]。
+            VTS 未连接或读取失败时返回空字典。
+        """
+        if self._vts is None or self._state != VtsState.AUTHENTICATED:
+            return {}
+
+        _timeout = float(timeout_s or self._config.api_timeout_s)
+        _param_ids = list(param_ids or _DEFAULT_FACE_CAPTURE_PARAMS)
+
+        try:
+            return _read_vts_face_params(
+                vts=self._vts,
+                param_ids=_param_ids,
+                timeout_s=_timeout,
+            )
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger("Natsume.edge.vts_driver").debug(
+                "read_face_capture_params 失败: %s", exc
+            )
+            return {}
+
+    def infer_user_expression(
+        self,
+        *,
+        face_params: dict[str, float] | None = None,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
+        """从面部捕捉参数推断用户当前表情标签。
+
+        先调用 read_face_capture_params() 获取原始参数（若未传入），
+        再通过规则映射推断用户表情标签和置信度。
+
+        Args:
+            face_params: 已读取的面部参数字典，None 时自动读取。
+            timeout_s: API 超时秒数。
+
+        Returns:
+            {
+                "expression_tag": str,       # "SMILE"/"FROWN"/"SURPRISED"/"NEUTRAL"/"BLINK" 等
+                "confidence": float,         # 推断置信度 [0.0, 1.0]
+                "raw_params": dict,          # 原始参数值
+                "mouth_open": float,         # 嘴巴张开程度
+                "smile": float,              # 笑容程度
+                "brow_raise": float,         # 眉毛上扬程度
+                "eye_open_avg": float,       # 平均眼睛睁开程度
+            }
+        """
+        params = face_params if face_params is not None else self.read_face_capture_params(
+            timeout_s=timeout_s
+        )
+        return _infer_expression_from_face_params(params)
+
 
 # ---------------------------------------------------------------------------
 # Internal: pyvts SDK bridge (isolates actual SDK dependency)
@@ -1452,3 +1523,166 @@ def _extract_vts_api_error(response: Any, *, default: str) -> str:
     if str(response.get("messageType") or "").strip().lower() == "apierror":
         return f"VTS API error: {message or default}"
     return str(default)
+
+
+# ---------------------------------------------------------------------------
+# 面部捕捉感知：参数常量与推断逻辑
+# ---------------------------------------------------------------------------
+
+# 默认读取的面部捕捉参数集（VTS 标准参数 + Live2D 常用参数）
+_DEFAULT_FACE_CAPTURE_PARAMS: tuple[str, ...] = (
+    # 嘴部
+    "MouthOpen",          # 嘴巴张开 [0, 1]
+    "MouthSmile",         # 嘴角上扬/笑容 [-1, 1]
+    # 眼部
+    "EyeOpenLeft",        # 左眼睁开 [0, 1]
+    "EyeOpenRight",       # 右眼睁开 [0, 1]
+    "EyeLeftX",           # 左眼球水平 [-1, 1]
+    "EyeLeftY",           # 左眼球垂直 [-1, 1]
+    # 眉毛
+    "BrowLeftY",          # 左眉高度 [-1, 1]
+    "BrowRightY",         # 右眉高度 [-1, 1]
+    # 头部姿态
+    "FaceAngleX",         # 头部左右偏转 [-30, 30]
+    "FaceAngleY",         # 头部上下偏转 [-30, 30]
+    "FaceAngleZ",         # 头部旋转 [-30, 30]
+    # Live2D 别名（部分模型使用）
+    "ParamMouthOpenY",
+    "ParamMouthForm",
+    "ParamEyeLOpen",
+    "ParamEyeROpen",
+    "ParamBrowLY",
+    "ParamBrowRY",
+)
+
+
+def _read_vts_face_params(
+    *,
+    vts: Any,
+    param_ids: list[str],
+    timeout_s: float,
+) -> dict[str, float]:
+    """通过 VTS ParameterValueRequest 批量读取面部捕捉参数值。
+
+    VTS API 每次只能查询单个参数，因此对每个参数 ID 发起独立请求，
+    忽略不存在的参数（VTS 返回 errorID > 0 时跳过）。
+    """
+    if vts is None or not param_ids:
+        return {}
+
+    async def _read_all() -> dict[str, float]:
+        results: dict[str, float] = {}
+        for pid in param_ids:
+            try:
+                request = vts.vts_request.BaseRequest(
+                    "ParameterValueRequest",
+                    {"name": pid},
+                )
+                response = await asyncio.wait_for(
+                    vts.request(request),
+                    timeout=timeout_s,
+                )
+                error = _extract_vts_api_error(response, default="")
+                if error:
+                    continue  # 参数不存在或不可用，跳过
+                data = dict(response.get("data") or {})
+                value = data.get("value")
+                if value is not None:
+                    try:
+                        results[pid] = float(value)
+                    except (TypeError, ValueError):
+                        pass
+            except Exception:
+                continue  # 单个参数失败不影响其他参数
+        return results
+
+    try:
+        return dict(_run_in_vts_loop(_read_all(), timeout_s=timeout_s + 2.0) or {})
+    except Exception:
+        return {}
+
+
+def _infer_expression_from_face_params(params: dict[str, float]) -> dict[str, Any]:
+    """从面部捕捉参数推断用户表情标签。
+
+    规则映射（优先级从高到低）：
+    1. SURPRISED：嘴巴大开（>0.6）且眉毛上扬（>0.3）
+    2. SMILE：嘴角上扬（>0.3）且嘴巴微开或闭合
+    3. FROWN：嘴角下压（<-0.2）或眉毛皱起（<-0.3）
+    4. BLINK：双眼接近闭合（<0.2）
+    5. NEUTRAL：其他情况
+
+    Returns:
+        {
+            "expression_tag": str,
+            "confidence": float,
+            "raw_params": dict,
+            "mouth_open": float,
+            "smile": float,
+            "brow_raise": float,
+            "eye_open_avg": float,
+        }
+    """
+    if not params:
+        return {
+            "expression_tag": "NEUTRAL",
+            "confidence": 0.0,
+            "raw_params": {},
+            "mouth_open": 0.0,
+            "smile": 0.0,
+            "brow_raise": 0.0,
+            "eye_open_avg": 1.0,
+        }
+
+    def _get(*keys: str, default: float = 0.0) -> float:
+        for k in keys:
+            v = params.get(k)
+            if v is not None:
+                return float(v)
+        return float(default)
+
+    # 提取关键维度（兼容标准参数名和 Live2D 别名）
+    mouth_open = _get("MouthOpen", "ParamMouthOpenY", default=0.0)
+    smile = _get("MouthSmile", "ParamMouthForm", default=0.0)
+    eye_open_left = _get("EyeOpenLeft", "ParamEyeLOpen", default=1.0)
+    eye_open_right = _get("EyeOpenRight", "ParamEyeROpen", default=1.0)
+    brow_left = _get("BrowLeftY", "ParamBrowLY", default=0.0)
+    brow_right = _get("BrowRightY", "ParamBrowRY", default=0.0)
+
+    eye_open_avg = (eye_open_left + eye_open_right) / 2.0
+    brow_raise = (brow_left + brow_right) / 2.0
+
+    # ── 规则推断 ──────────────────────────────────────────────────────────
+    expression_tag = "NEUTRAL"
+    confidence = 0.5
+
+    if mouth_open > 0.6 and brow_raise > 0.3:
+        # 嘴大开 + 眉毛上扬 → 惊讶
+        expression_tag = "SURPRISED"
+        confidence = min(1.0, (mouth_open - 0.6) * 2.5 + (brow_raise - 0.3) * 2.0)
+    elif smile > 0.3:
+        # 嘴角上扬 → 微笑
+        expression_tag = "SMILE"
+        confidence = min(1.0, (smile - 0.3) * 1.4 + 0.4)
+    elif smile < -0.2 or brow_raise < -0.3:
+        # 嘴角下压或眉毛皱起 → 皱眉/不悦
+        expression_tag = "FROWN"
+        confidence = min(1.0, max(abs(smile + 0.2) * 1.5, abs(brow_raise + 0.3) * 1.5) + 0.3)
+    elif eye_open_avg < 0.2:
+        # 双眼接近闭合 → 眨眼/闭眼
+        expression_tag = "BLINK"
+        confidence = min(1.0, (0.2 - eye_open_avg) * 5.0 + 0.4)
+    else:
+        # 中性
+        expression_tag = "NEUTRAL"
+        confidence = 0.6
+
+    return {
+        "expression_tag": expression_tag,
+        "confidence": round(min(1.0, max(0.0, confidence)), 3),
+        "raw_params": dict(params),
+        "mouth_open": round(mouth_open, 3),
+        "smile": round(smile, 3),
+        "brow_raise": round(brow_raise, 3),
+        "eye_open_avg": round(eye_open_avg, 3),
+    }

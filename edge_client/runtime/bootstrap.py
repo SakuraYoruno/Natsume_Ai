@@ -507,6 +507,56 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
     except Exception as exc:
         LOGGER.warning("EdgeTribeRegistry 初始化失败（非致命）: %s", exc)
 
+    # 面部捕捉感知轮询：每 5s 读取 VTS 面捕参数，推断用户表情并上报给 host_brain
+    # SomaticAgent.poll_user_face_capture() → publish_emotion_inference_updated
+    # → host_brain LimbicAgent/MirrorNeuronAgent 感知用户情绪状态
+    try:
+        import threading as _threading  # noqa: PLC0415
+
+        _face_capture_interval_s = float(
+            _env_get(dict(os.environ), "EDGE_FACE_CAPTURE_POLL_INTERVAL_S") or 5.0
+        )
+        _face_capture_enabled = _parse_bool(
+            _env_get(dict(os.environ), "EDGE_FACE_CAPTURE_ENABLED"),
+            default=True,
+        )
+
+        if _face_capture_enabled and runtime.vts_driver is not None:
+            def _face_capture_poll_loop() -> None:
+                """面部捕捉感知轮询循环，在后台线程中持续运行。"""
+                import time as _time  # noqa: PLC0415
+                _somatic = None
+                try:
+                    _somatic = get_edge_tribe_registry().somatic
+                except Exception:
+                    pass
+
+                while True:
+                    try:
+                        if _somatic is not None and hasattr(_somatic, "poll_user_face_capture"):
+                            _somatic.poll_user_face_capture()
+                    except Exception as _exc:
+                        LOGGER.debug("面部捕捉轮询异常（非致命）: %s", _exc)
+                    _time.sleep(_face_capture_interval_s)
+
+            _face_poll_thread = _threading.Thread(
+                target=_face_capture_poll_loop,
+                name="edge-face-capture-poll",
+                daemon=True,
+            )
+            _face_poll_thread.start()
+            LOGGER.info(
+                "面部捕捉感知轮询已启动: interval=%.1fs thread=%s",
+                _face_capture_interval_s, _face_poll_thread.name,
+            )
+        else:
+            LOGGER.info(
+                "面部捕捉感知轮询已跳过: enabled=%s vts_driver=%s",
+                _face_capture_enabled, runtime.vts_driver is not None,
+            )
+    except Exception as exc:
+        LOGGER.warning("面部捕捉感知轮询启动失败（非致命）: %s", exc)
+
     # 启动 Unified Message Gateway（若已启用）
     if config.gateway_enabled:
         try:

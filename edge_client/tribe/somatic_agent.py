@@ -310,6 +310,91 @@ class SomaticAgent:
             vts_connected, current_expression, last_emotion_tag,
         )
 
+    # ── 面部捕捉感知：读取用户表情并上报 ────────────────────────────────────
+
+    def poll_user_face_capture(self) -> dict[str, Any]:
+        """读取 VTS 面部捕捉参数，推断用户当前表情，并通过 TribeEventBus 上报。
+
+        由 bootstrap 定时调用（建议 5s interval），将用户表情感知结果
+        发布为 emotion_inference_updated 事件，供 host_brain LimbicAgent
+        和 MirrorNeuronAgent 感知用户情绪状态。
+
+        Returns:
+            {
+                "ok": bool,
+                "expression_tag": str,   # 推断的用户表情标签
+                "confidence": float,
+                "skipped": bool,         # True 表示 VTS 未连接，跳过
+            }
+        """
+        driver = self.vts_driver
+        if driver is None:
+            return {"ok": False, "expression_tag": "NEUTRAL", "confidence": 0.0, "skipped": True,
+                    "reason": "VTS_DRIVER_UNAVAILABLE"}
+
+        try:
+            # 调用 vts_driver 推断用户表情
+            infer_result = driver.infer_user_expression()
+            expression_tag = str(infer_result.get("expression_tag") or "NEUTRAL").strip().upper()
+            confidence = float(infer_result.get("confidence") or 0.0)
+
+            # 置信度过低时不上报（避免噪声）
+            if confidence < 0.35:
+                _log.debug(
+                    "SomaticAgent.poll_user_face_capture: 置信度过低，跳过上报 "
+                    "tag=%s confidence=%.3f", expression_tag, confidence,
+                )
+                return {
+                    "ok": True,
+                    "expression_tag": expression_tag,
+                    "confidence": confidence,
+                    "skipped": True,
+                    "reason": "LOW_CONFIDENCE",
+                }
+
+            # 将用户表情标签映射为情绪维度（供 MirrorNeuronAgent 使用）
+            _tag_to_emotion: dict[str, tuple[str, float]] = {
+                "SMILE":     ("JOY",      0.6),
+                "FROWN":     ("SAD",      0.5),
+                "SURPRISED": ("SURPRISE", 0.7),
+                "BLINK":     ("NEUTRAL",  0.3),
+                "NEUTRAL":   ("NEUTRAL",  0.4),
+            }
+            emotion_tag, emotion_intensity = _tag_to_emotion.get(
+                expression_tag, ("NEUTRAL", 0.4)
+            )
+
+            # 上报为 emotion_inference_updated 事件（source 标记为 face_capture）
+            from host_brain.core.ids import now_ms  # noqa: PLC0415
+            self.publish_emotion_inference_updated(
+                request_id=f"face_capture_{now_ms()}",
+                session_id="face_capture",
+                seq=None,
+                emotion_tag=emotion_tag,
+                emotion_intensity=emotion_intensity,
+                mood_state=None,
+                emotion_source="face_capture",
+                emotion_terms=[expression_tag.lower()],
+            )
+
+            _log.debug(
+                "SomaticAgent.poll_user_face_capture: 用户表情已上报 "
+                "expression=%s emotion=%s confidence=%.3f",
+                expression_tag, emotion_tag, confidence,
+            )
+            return {
+                "ok": True,
+                "expression_tag": expression_tag,
+                "emotion_tag": emotion_tag,
+                "confidence": confidence,
+                "skipped": False,
+            }
+
+        except Exception as exc:
+            _log.debug("SomaticAgent.poll_user_face_capture 异常: %s", exc)
+            return {"ok": False, "expression_tag": "NEUTRAL", "confidence": 0.0,
+                    "skipped": True, "reason": str(exc)}
+
     def _publish_event(
         self,
         *,
