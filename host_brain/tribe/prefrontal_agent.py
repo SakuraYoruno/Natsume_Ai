@@ -387,7 +387,7 @@ class PrefrontalAgent:
         # ── LLM 推理路径（小模型，<500ms）────────────────────────────────
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.llm.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
 
             # 从 executive.yaml 加载 prefrontal_plan prompt 模板
             _tpl = resolve_prompt_template_json("prefrontal_agent.plan_response.prompt") or {}

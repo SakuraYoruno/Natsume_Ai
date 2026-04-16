@@ -269,6 +269,94 @@ class MirrorNeuronAgent:
 
         return result
 
+    # ── 共情回应建议（A 级升级）──────────────────────────────────────────────
+
+    def generate_empathy_response_hint(
+        self,
+        *,
+        resonance_intensity: float = 0.0,
+        user_emotion_tag: str = "NEUTRAL",
+        bond_stage: str = "stranger",
+    ) -> str | None:
+        """共情回应建议：共鸣强度高时调用 LLM 生成共情回应策略。
+
+        触发条件：resonance_intensity > 0.6。
+        调用：Flash 小模型。
+        开关：MIRROR_EMPATHY_HINT_ENABLED（默认 false）。
+        输出注入：PrefrontalAgent.plan_response() 的 tone_hint 字段。
+
+        Returns:
+            共情回应建议字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("MIRROR_EMPATHY_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled or float(resonance_intensity or 0.0) <= 0.6:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.mirror_neuron_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("mirror_neuron_agent.empathy_response_hint") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("mirror_neuron_agent.empathy_response_hint 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                resonance_intensity=round(float(resonance_intensity), 3),
+                user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
+                bond_stage=str(bond_stage or "stranger"),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=1500,
+                agent_role="mirror_empathy",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=64,
+                temperature=0.2,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _hint = str(_parsed.get("empathy_hint") or "").strip()[:100]
+            if _hint:
+                _log.debug("MirrorNeuronAgent.generate_empathy_response_hint: %s", _hint)
+                # 写入 state_registry 供 PrefrontalAgent 读取
+                try:
+                    self.state_registry.set_state(
+                        "mirror_neuron_agent",
+                        {"last_empathy_hint": _hint},
+                        writer="mirror_neuron_agent",
+                    )
+                except Exception:
+                    pass
+                # 发布 MIRROR_EMPATHY_GENERATED 事件
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+                    emit_tribe_event(
+                        event_type="MIRROR_EMPATHY_GENERATED",
+                        source_agent="mirror_neuron_agent",
+                        payload={
+                            "empathy_hint": _hint,
+                            "resonance_intensity": round(float(resonance_intensity), 3),
+                            "user_emotion_tag": str(user_emotion_tag or "NEUTRAL").upper(),
+                            "bond_stage": str(bond_stage or "stranger"),
+                        },
+                    )
+                except Exception:
+                    pass
+            return _hint or None
+        except Exception as exc:
+            _log.debug("MirrorNeuronAgent.generate_empathy_response_hint 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         snap = self.state_registry.get_state("mirror_neuron_agent") or {}
         state = dict(snap.get("state") or {})

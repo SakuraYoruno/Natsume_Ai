@@ -260,7 +260,40 @@ class ImmuneAgent:
                 "adaptive_boost_applied": bool(reason_codes and reason_codes != ["IMMUNE_DISABLED"]),
             },
         }
-        if record:
+
+        # ── 语义二次扫描：规则层灰色地带 [0.3, 0.55) 时触发 LLM 语义分析 ──────
+        if (
+            cfg.enabled
+            and decision == "ALLOW"
+            and 0.30 <= score < 0.55
+        ):
+            try:
+                _semantic = self.semantic_intent_analysis(
+                    text=normalized_text,
+                    rule_score=score,
+                    reason_codes=reason_codes,
+                )
+                _intent_class = str(_semantic.get("intent_class") or "SAFE").upper()
+                if _intent_class == "HARMFUL":
+                    # 语义层判定有害，升级为 REPORT（不直接 BLOCK，保守策略）
+                    decision = "BLOCK" if cfg.blocking_enabled else "REPORT"
+                    score = min(1.0, score + 0.30)
+                    risk_level = _risk_level(score)
+                    reason_codes = list(reason_codes or []) + ["SEMANTIC_HARMFUL"]
+                elif _intent_class == "SUSPICIOUS":
+                    decision = "REPORT"
+                    reason_codes = list(reason_codes or []) + ["SEMANTIC_SUSPICIOUS"]
+                result["decision"] = decision
+                result["risk_level"] = risk_level
+                result["score"] = round(score, 4)
+                result["reason_codes"] = reason_codes
+                result["semantic_scan"] = _semantic
+                result["scope_note"]["covered"].append("semantic_intent")
+                result["scope_note"]["not_covered"] = [
+                    x for x in result["scope_note"]["not_covered"] if x != "semantic_intent"
+                ]
+            except Exception:
+                pass
             self._record_result(result)
             # T-35：如果决策为 BLOCK，发布 IMMUNE_BLOCK 事件通知其他 Agent
             if decision == "BLOCK":
@@ -649,6 +682,103 @@ class ImmuneAgent:
                 "scan_type": "internal_watchdog",
             },
         }
+
+    # ── 语义意图分析：LLM 二次扫描（适应性免疫升级为 A 级）────────────────────
+
+    def semantic_intent_analysis(
+        self,
+        *,
+        text: str,
+        rule_score: float = 0.0,
+        reason_codes: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """LLM 语义意图分析：对规则层灰色地带输入做二次语义扫描。
+
+        触发条件：规则层 score 在 [0.3, 0.55) 灰色地带，正则未命中但语义可疑。
+        调用：Flash 小模型（低延迟，<200ms）。
+        开关：IMMUNE_SEMANTIC_SCAN_ENABLED（默认 false，灰度）。
+
+        Args:
+            text: 待分析的用户输入文本。
+            rule_score: 规则层初步扫描分数。
+            reason_codes: 规则层命中的 reason_codes。
+            context: 额外上下文（可选）。
+
+        Returns:
+            {
+                "intent_class": "SAFE"|"SUSPICIOUS"|"HARMFUL",
+                "confidence": float,
+                "reason": str,
+                "source": "semantic_llm"|"disabled"|"error",
+            }
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("IMMUNE_SEMANTIC_SCAN_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled:
+            return {"intent_class": "SAFE", "confidence": 0.0, "reason": "semantic_scan_disabled", "source": "disabled"}
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.immune_agent")
+
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("immune_agent.semantic_intent_analysis") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("immune_agent.semantic_intent_analysis 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                rule_score=round(float(rule_score), 4),
+                reason_codes=str(reason_codes or []),
+                text=str(text or "")[:300],
+            )
+
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=2000,
+                agent_role="immune_semantic_scanner",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=64,
+                temperature=0.0,
+            )
+            _raw_text = str(_raw or "").strip()
+
+            import json as _json  # noqa: PLC0415
+            import re as _re  # noqa: PLC0415
+            _match = _re.search(r"\{.*\}", _raw_text, _re.DOTALL)
+            if _match:
+                _parsed = _json.loads(_match.group())
+            else:
+                _parsed = {}
+
+            _intent_class = str(_parsed.get("intent_class") or "SAFE").strip().upper()
+            if _intent_class not in {"SAFE", "SUSPICIOUS", "HARMFUL"}:
+                _intent_class = "SAFE"
+
+            _result = {
+                "intent_class": _intent_class,
+                "confidence": max(0.0, min(1.0, float(_parsed.get("confidence") or 0.5))),
+                "reason": str(_parsed.get("reason") or "").strip()[:100],
+                "source": "semantic_llm",
+            }
+            _log.debug(
+                "ImmuneAgent.semantic_intent_analysis: intent=%s confidence=%.3f reason=%s",
+                _result["intent_class"], _result["confidence"], _result["reason"],
+            )
+            return _result
+
+        except Exception as exc:
+            _log.debug("ImmuneAgent.semantic_intent_analysis 失败（降级）: %s", exc)
+            return {"intent_class": "SAFE", "confidence": 0.0, "reason": str(exc)[:80], "source": "error"}
 
     def reset_counters(self) -> dict[str, Any]:
         """T-68：重置免疫计数器，支持运维手动清零。
