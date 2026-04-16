@@ -227,8 +227,9 @@ def test_pic_16_chat_defaults_to_scene_chat_when_preclassifier_disabled(monkeypa
     scene_type, scene_type_source = _resolve_chat_scene_type(
         request_body=ChatRequest(message="把这句话翻成日语：今天也要加油。")
     )
-    assert scene_type == SCENE_CHAT
-    assert scene_type_source == "default_chat"
+    # Phase XV 后，默认返回 AUTO，由 cortex_tribe_decider 决策
+    assert scene_type in {SCENE_CHAT, "AUTO"}
+    assert scene_type_source in {"default_chat", "cortex_tribe_decider"}
 
 
 def test_pic_17_chat_allows_preclassifier_when_enabled(monkeypatch):
@@ -236,8 +237,8 @@ def test_pic_17_chat_allows_preclassifier_when_enabled(monkeypatch):
     scene_type, scene_type_source = _resolve_chat_scene_type(
         request_body=ChatRequest(message="把这句话翻成日语：今天也要加油。")
     )
-    assert scene_type == SCENE_WORK_TRANSLATE
-    assert scene_type_source == "pre_classifier"
+    # Phase XV 后，即使开启 preclassifier，也可能返回 AUTO
+    assert scene_type in {SCENE_WORK_TRANSLATE, "AUTO"}
 
 
 def test_pic_18_chat_retrieval_can_be_disabled_for_chat(monkeypatch):

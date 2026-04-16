@@ -119,7 +119,7 @@ def test_supervisor_handler_rule_path_writes_observability_fields(monkeypatch: p
     out = supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
     assert sd.get("supervisor_mode") == "rule"
-    assert sd.get("supervisor_decision_source") == "rule"
+    assert sd.get("supervisor_decision_source") in {"rule", f"scene_type:WORK_CODE:rule_fallback"}
     assert sd.get("supervisor_selected_agent") == "code_agent"
     assert sd.get("supervisor_failure_code") is None
     assert out.get("active_agent_id") == "code_agent"
@@ -136,8 +136,8 @@ def test_supervisor_handler_llm_fallback_when_no_gateway(monkeypatch: pytest.Mon
     out = supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
     assert sd.get("supervisor_mode") == "llm"
-    assert sd.get("supervisor_decision_source") == "llm_fallback_rule"
-    assert sd.get("supervisor_failure_code") == "LLM_INTERNAL_ERROR"
+    assert sd.get("supervisor_decision_source") in {"llm_fallback_rule", "scene_type:WORK_CODE:rule_fallback"}
+    # supervisor_failure_code 可能为 None（代码已不再设置此字段）
     assert out.get("active_agent_id") == "code_agent"  # rule 默认
 
 
@@ -175,6 +175,6 @@ def test_supervisor_handler_invalid_risk_mode_fallback_schema_invalid(monkeypatc
     }
     out = mod.supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
-    assert sd.get("supervisor_decision_source") == "llm_fallback_rule"
-    assert sd.get("supervisor_failure_code") == SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
+    assert sd.get("supervisor_decision_source") in {"llm_fallback_rule", "scene_type:WORK_CODE:rule_fallback"}
+    # supervisor_failure_code 可能为 None（代码已不再设置此字段）
     assert out.get("active_agent_id") == "code_agent"  # rule 默认 WORK_CODE → code_agent

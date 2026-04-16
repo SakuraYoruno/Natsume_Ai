@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import host_brain.app.graph_config_builder as graph_builder
+import host_brain.app.graph_config_llm_runtime as llm_runtime
 from host_brain.app.graph_config_builder import (
     CHAT_DIRECT_NODE_ID,
     HOST_CHAT_ROUTE_CLOUD,
@@ -43,7 +44,7 @@ def _patch_runtime_dependencies(
 ) -> None:
     monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
     monkeypatch.setattr(
-        graph_builder,
+        llm_runtime,
         "load_host_config",
         lambda: _mock_config_result(
             timeout_ms=timeout_ms,
@@ -53,7 +54,7 @@ def _patch_runtime_dependencies(
         ),
     )
     monkeypatch.setattr(
-        graph_builder,
+        llm_runtime,
         "build_host_provider_fn",
         lambda **kwargs: {
             "provider_name": kwargs.get("provider_name"),
@@ -62,12 +63,12 @@ def _patch_runtime_dependencies(
         },
     )
     monkeypatch.setattr(
-        graph_builder,
+        llm_runtime,
         "_resolve_host_14b_health_status",
         lambda **kwargs: (True, "ok"),
     )
     monkeypatch.setattr(
-        graph_builder,
+        llm_runtime,
         "_resolve_host_14b_health_status_async",
         lambda **kwargs: (True, "ok"),
     )
