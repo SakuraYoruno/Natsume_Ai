@@ -586,11 +586,9 @@ class MotorCortexAgent:
                 "source": str,          # "motor_llm"|"disabled"|"error"
             }
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("MOTOR_SPEAK_STYLE_ENABLED", "false")).lower() in ("1", "true", "yes")
         _significant = float(arousal or 0.3) > 0.6 or float(valence or 0.0) < -0.3
-        if not _enabled or not _significant:
-            return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "disabled"}
+        if not _significant:
+            return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "skipped"}
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.motor_cortex_agent")
