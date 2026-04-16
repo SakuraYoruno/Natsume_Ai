@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import os
 import re
 import time
@@ -12,6 +13,37 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 _IMMUNE_TEMPLATE_ID = "immune_agent.runtime_rules"
 _IMMUNE_TEMPLATE_MAX_RULES = 64
+
+# ── 适应性免疫：攻击记忆窗口配置 ─────────────────────────────────────────────
+_ADAPTIVE_MEMORY_MAX_PATTERNS = 128   # 最多记住 128 个攻击模式
+_ADAPTIVE_MEMORY_DECAY_RATE = 0.05    # 每轮对话后命中计数衰减 5%
+_ADAPTIVE_MEMORY_BOOST_FACTOR = 1.40  # 二次命中时分数加权倍率
+_ADAPTIVE_MEMORY_PRUNE_THRESHOLD = 0.05  # 命中权重低于此值时剪枝
+
+# ── 输出监控：LLM 输出越界检测规则 ──────────────────────────────────────────
+_OUTPUT_MONITOR_RULES: tuple[tuple[str, str, float], ...] = (
+    # (rule_id, pattern, score)
+    ("output_system_prompt_leak",
+     r"(system prompt|system instruction|你的提示词|你的指令).{0,40}(是|为|如下|：|:)",
+     0.72),
+    ("output_pii_phone",
+     r"1[3-9]\d{9}",
+     0.55),
+    ("output_pii_id_card",
+     r"\d{17}[\dXx]",
+     0.60),
+    ("output_jailbreak_confirm",
+     r"(当然|好的|没问题).{0,20}(越狱|jailbreak|dan mode|无限制模式)",
+     0.80),
+    ("output_secret_token",
+     r"(api[_\-]?key|token|secret|password)\s*[:=]\s*[\w\-]{8,}",
+     0.75),
+)
+
+# ── 内部看门狗：Agent 调用频率异常阈值 ───────────────────────────────────────
+_WATCHDOG_CALL_WINDOW_SEC = 60        # 统计窗口（秒）
+_WATCHDOG_CALL_BURST_THRESHOLD = 30   # 窗口内超过此次数视为异常
+_WATCHDOG_ERROR_RATE_THRESHOLD = 0.40 # 错误率超过此值视为异常
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +117,8 @@ class ImmuneAgent:
         default_factory=lambda: TribeAgentDescriptor(
             agent_id="immune_agent",
             family="immune",
-            capabilities=("risk_scan", "prompt_guard", "input_gate"),
+            capabilities=("risk_scan", "prompt_guard", "input_gate",
+                          "adaptive_memory", "output_monitor", "internal_watchdog"),
         )
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry, repr=False)  # T-35：使用全局单例
@@ -103,9 +136,43 @@ class ImmuneAgent:
     _last_inspection: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     _template_rules_cache: tuple[_ImmuneRule, ...] = field(default_factory=tuple, init=False, repr=False)
     _template_cache_expires_at_ms: int = field(default=0, init=False, repr=False)
+    # ── 适应性免疫记忆：{reason_code -> {"count": float, "last_ts": int, "boost": float}} ──
+    _adaptive_memory: dict[str, dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
+    # ── 内部看门狗：{agent_id -> deque[(ts_ms, is_error)]} ──────────────────────
+    _watchdog_calls: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
+
+    # ── 能力边界声明 ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def capability_scope() -> dict[str, Any]:
+        """返回 ImmuneAgent 的能力边界声明，供其他 Agent 运行时查询。
+
+        Returns:
+            dict: 包含 covered/not_covered/scan_type/adaptive/version 字段。
+        """
+        return {
+            "covered": [
+                "input_text_scan",          # 输入文本正则扫描
+                "prompt_injection_guard",   # 提示词注入防护
+                "pii_filter_ingress",       # 入口 PII 过滤
+                "pii_filter_egress",        # 出口 PII 过滤
+                "governor_gate",            # Governor 规则门控
+                "output_content_monitor",   # LLM 输出越界监控
+                "adaptive_attack_memory",   # 适应性攻击模式记忆
+                "internal_agent_watchdog",  # 内部 Agent 调用异常监控
+            ],
+            "not_covered": [
+                "semantic_intent_analysis",  # 语义意图分析（需要 LLM）
+                "cross_session_learning",    # 跨会话持久化学习（内存级，重启失效）
+                "behavioral_biometrics",     # 行为生物特征识别
+            ],
+            "scan_type": "hybrid",           # 先天（规则）+ 适应性（记忆加权）
+            "adaptive": True,               # 已具备适应性免疫能力
+            "version": "immune_v3",
+        }
 
     def inspect_text(
         self,
@@ -144,6 +211,11 @@ class ImmuneAgent:
                     }
                 )
 
+        # ── 适应性免疫加权：二次命中时提升分数 ──────────────────────────────
+        if reason_codes:
+            boost = self._adaptive_boost(reason_codes)
+            score = min(1.0, score * boost)
+
         score = max(0.0, min(1.0, score))
         risk_level = _risk_level(score)
         decision = "ALLOW"
@@ -153,6 +225,10 @@ class ImmuneAgent:
             decision = "BLOCK" if cfg.blocking_enabled else "REPORT"
         elif score >= cfg.warn_threshold:
             decision = "REPORT"
+
+        # ── 适应性免疫记忆更新：记录本次命中的 reason_codes ─────────────────
+        if reason_codes and reason_codes != ["IMMUNE_DISABLED"]:
+            self._adaptive_record_hit(reason_codes)
 
         now_ms = int(time.time() * 1000)
         template_rule_count = max(0, len(rules) - len(_IMMUNE_RULES))
@@ -176,6 +252,13 @@ class ImmuneAgent:
             },
             "metadata": dict(metadata or {}),
             "ts_ms": now_ms,
+            # 能力边界声明（调用方可据此判断本次扫描覆盖了什么）
+            "scope_note": {
+                "covered": ["input_text", "prompt_injection", "adaptive_memory_boost"],
+                "not_covered": ["output_content", "internal_agent_behavior", "semantic_intent"],
+                "scan_type": "hybrid",
+                "adaptive_boost_applied": bool(reason_codes and reason_codes != ["IMMUNE_DISABLED"]),
+            },
         }
         if record:
             self._record_result(result)
@@ -302,6 +385,269 @@ class ImmuneAgent:
             "last_score": round(last_score, 4),     # T-44：最近一次检测分数
             "last_decision": str(last.get("decision") or "ALLOW"),  # T-44：最近一次决策
             "last_inspection": last,
+        }
+
+    # ── 适应性免疫：攻击模式记忆 ─────────────────────────────────────────────
+
+    def _adaptive_record_hit(self, reason_codes: list[str]) -> None:
+        """记录本次命中的 reason_codes 到适应性记忆，更新命中计数。"""
+        now_ms = int(time.time() * 1000)
+        with self._lock:
+            for code in reason_codes:
+                if code not in self._adaptive_memory:
+                    if len(self._adaptive_memory) >= _ADAPTIVE_MEMORY_MAX_PATTERNS:
+                        # 剪枝：移除权重最低的条目
+                        min_key = min(self._adaptive_memory, key=lambda k: self._adaptive_memory[k]["count"])
+                        del self._adaptive_memory[min_key]
+                    self._adaptive_memory[code] = {"count": 0.0, "last_ts": now_ms, "boost": 1.0}
+                entry = self._adaptive_memory[code]
+                entry["count"] = float(entry["count"]) + 1.0
+                entry["last_ts"] = now_ms
+                # 命中次数越多，boost 越高（上限 2.0）
+                entry["boost"] = min(2.0, 1.0 + (float(entry["count"]) - 1) * 0.15)
+
+    def _adaptive_boost(self, reason_codes: list[str]) -> float:
+        """根据适应性记忆计算当前命中的 boost 倍率（取最高值）。"""
+        with self._lock:
+            boosts = [self._adaptive_memory[code]["boost"]
+                      for code in reason_codes
+                      if code in self._adaptive_memory]
+        return max(boosts) if boosts else 1.0
+
+    def adaptive_memory_decay(self) -> dict[str, Any]:
+        """对适应性记忆执行一次衰减（每轮对话后调用）。
+
+        命中计数乘以 (1 - decay_rate)，低于剪枝阈值的条目被移除。
+
+        Returns:
+            dict: {"decayed": int, "pruned": int, "remaining": int}
+        """
+        with self._lock:
+            decayed = 0
+            pruned_keys = []
+            for code, entry in self._adaptive_memory.items():
+                old_count = float(entry["count"])
+                new_count = old_count * (1.0 - _ADAPTIVE_MEMORY_DECAY_RATE)
+                entry["count"] = new_count
+                entry["boost"] = min(2.0, 1.0 + max(0.0, new_count - 1) * 0.15)
+                decayed += 1
+                if new_count < _ADAPTIVE_MEMORY_PRUNE_THRESHOLD:
+                    pruned_keys.append(code)
+            for key in pruned_keys:
+                del self._adaptive_memory[key]
+            remaining = len(self._adaptive_memory)
+        return {"decayed": decayed, "pruned": len(pruned_keys), "remaining": remaining}
+
+    def export_adaptive_memory(self) -> list[dict[str, Any]]:
+        """导出当前适应性记忆快照，供诊断使用。
+
+        Returns:
+            list: 按命中次数降序排列的攻击模式记忆列表。
+        """
+        with self._lock:
+            snapshot = [
+                {
+                    "reason_code": code,
+                    "count": round(float(entry["count"]), 3),
+                    "boost": round(float(entry["boost"]), 3),
+                    "last_ts": int(entry["last_ts"]),
+                }
+                for code, entry in self._adaptive_memory.items()
+            ]
+        return sorted(snapshot, key=lambda x: x["count"], reverse=True)
+
+    # ── 输出监控：LLM 输出越界检测 ───────────────────────────────────────────
+
+    def monitor_output(
+        self,
+        *,
+        text: str,
+        source: str = "llm_output",
+        record: bool = True,
+    ) -> dict[str, Any]:
+        """扫描 LLM 输出是否包含异常泄露或越界内容。
+
+        这是 ImmuneAgent 从"先天免疫"升级到"适应性免疫"的关键扩展——
+        不仅扫描输入，也监控输出，形成双向防护闭环。
+
+        检测内容：
+        - 系统提示词泄露（system prompt leak）
+        - PII 信息（手机号、身份证号）
+        - Jailbreak 确认语句
+        - 敏感 token/key 泄露
+
+        Args:
+            text: LLM 输出文本。
+            source: 调用来源，默认 "llm_output"。
+            record: 是否记录到计数器，默认 True。
+
+        Returns:
+            dict: {decision, risk_level, score, reason_codes, matched_rules, scope_note}
+        """
+        normalized = str(text or "").strip()
+        matches: list[dict[str, Any]] = []
+        score = 0.0
+        reason_codes: list[str] = []
+
+        for rule_id, pattern_str, rule_score in _OUTPUT_MONITOR_RULES:
+            try:
+                hit = re.search(pattern_str, normalized, re.IGNORECASE | re.DOTALL)
+            except re.error:
+                continue
+            if hit is None:
+                continue
+            score += rule_score
+            if rule_id not in reason_codes:
+                reason_codes.append(rule_id)
+            snippet = str(hit.group(0) or "").strip().replace("\r", " ").replace("\n", " ")
+            matches.append({
+                "rule_id": rule_id,
+                "score": rule_score,
+                "snippet": snippet[:120],
+                "source": "output_monitor",
+            })
+
+        score = max(0.0, min(1.0, score))
+        risk_level = _risk_level(score)
+        decision = "ALLOW"
+        if score >= 0.65:
+            decision = "BLOCK"
+        elif score >= 0.40:
+            decision = "REPORT"
+
+        now_ms = int(time.time() * 1000)
+        result = {
+            "decision": decision,
+            "risk_level": risk_level,
+            "score": round(score, 4),
+            "reason_codes": reason_codes,
+            "matched_rules": matches,
+            "source": str(source or "llm_output"),
+            "text_length": len(normalized),
+            "ts_ms": now_ms,
+            "scope_note": {
+                "covered": ["output_pii", "system_prompt_leak", "jailbreak_confirm", "secret_token"],
+                "not_covered": ["semantic_policy_violation", "factual_hallucination"],
+                "scan_type": "output_monitor",
+            },
+        }
+
+        if record and decision in ("BLOCK", "REPORT"):
+            # 输出越界时联动 LimbicAgent 触发防御性情绪
+            try:
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+                _limbic = get_limbic_agent()
+                if hasattr(_limbic, "drive_emotion_metabolism"):
+                    _limbic.drive_emotion_metabolism(
+                        valence=round(-min(0.30, score * 0.35), 4),
+                        arousal=round(min(0.25, score * 0.30), 4),
+                        dominance=-0.08,
+                        blend_weight=0.20,
+                        event_kind=f"output_monitor:{risk_level}",
+                        source="immune_agent",
+                    )
+            except Exception:
+                pass
+            # 发布 IMMUNE_BLOCK 事件（输出越界）
+            if decision == "BLOCK":
+                try:
+                    from host_brain.tribe.events import emit_tribe_event  # noqa: PLC0415
+                    emit_tribe_event(
+                        event_type="IMMUNE_BLOCK",
+                        source_agent="immune_agent",
+                        payload={
+                            "source": str(source or "llm_output"),
+                            "risk_level": risk_level,
+                            "score": round(score, 4),
+                            "reason_codes": reason_codes,
+                            "channel": "output",
+                        },
+                    )
+                except Exception:
+                    pass
+
+        return result
+
+    # ── 内部看门狗：Agent 调用链路异常监控 ───────────────────────────────────
+
+    def watchdog_record_call(
+        self,
+        *,
+        agent_id: str,
+        is_error: bool = False,
+    ) -> None:
+        """记录一次 Agent 调用事件到看门狗窗口。
+
+        Args:
+            agent_id: 被调用的 Agent ID。
+            is_error: 本次调用是否发生错误。
+        """
+        now_ms = int(time.time() * 1000)
+        with self._lock:
+            if agent_id not in self._watchdog_calls:
+                self._watchdog_calls[agent_id] = collections.deque(maxlen=200)
+            self._watchdog_calls[agent_id].append((now_ms, bool(is_error)))
+
+    def watchdog_check(self, *, agent_id: str | None = None) -> dict[str, Any]:
+        """检查 Agent 调用链路是否存在异常（调用突刺/高错误率）。
+
+        Args:
+            agent_id: 指定检查某个 Agent，None 则检查所有。
+
+        Returns:
+            dict: {
+                "status": "normal" | "warning" | "critical",
+                "anomalies": [{"agent_id", "call_count", "error_rate", "reason"}],
+                "checked_agents": int,
+                "ts_ms": int,
+            }
+        """
+        now_ms = int(time.time() * 1000)
+        window_start = now_ms - _WATCHDOG_CALL_WINDOW_SEC * 1000
+        anomalies: list[dict[str, Any]] = []
+
+        with self._lock:
+            targets = ([agent_id] if agent_id else list(self._watchdog_calls.keys()))
+            for aid in targets:
+                if aid not in self._watchdog_calls:
+                    continue
+                calls = [(ts, err) for ts, err in self._watchdog_calls[aid] if ts >= window_start]
+                if not calls:
+                    continue
+                call_count = len(calls)
+                error_count = sum(1 for _, err in calls if err)
+                error_rate = error_count / max(1, call_count)
+
+                reasons = []
+                if call_count >= _WATCHDOG_CALL_BURST_THRESHOLD:
+                    reasons.append(f"调用突刺: {call_count}次/{_WATCHDOG_CALL_WINDOW_SEC}s")
+                if error_rate >= _WATCHDOG_ERROR_RATE_THRESHOLD:
+                    reasons.append(f"高错误率: {error_rate:.1%}")
+
+                if reasons:
+                    anomalies.append({
+                        "agent_id": aid,
+                        "call_count": call_count,
+                        "error_count": error_count,
+                        "error_rate": round(error_rate, 4),
+                        "reasons": reasons,
+                    })
+
+        status = "normal"
+        if anomalies:
+            max_error_rate = max(a["error_rate"] for a in anomalies)
+            status = "critical" if max_error_rate >= 0.70 else "warning"
+
+        return {
+            "status": status,
+            "anomalies": anomalies,
+            "checked_agents": len(targets),
+            "ts_ms": now_ms,
+            "scope_note": {
+                "covered": ["call_burst", "error_rate_spike"],
+                "not_covered": ["deadlock", "memory_leak", "cross_process_anomaly"],
+                "scan_type": "internal_watchdog",
+            },
         }
 
     def reset_counters(self) -> dict[str, Any]:
@@ -714,6 +1060,7 @@ class ImmuneAgent:
 
         T-35：每轮对话结束后同步免疫计数快照，供诊断端点查询。
         T-253：同步写入 risk_level/last_score/last_decision，供 vital_signs 聚合使用。
+        适应性免疫：每轮对话后触发攻击记忆衰减，防止历史攻击模式永久加权。
         """
         try:
             with self._lock:
@@ -722,6 +1069,14 @@ class ImmuneAgent:
             total = max(1, int(counters.get("total") or 1))
             block_rate = round(int(counters.get("block") or 0) / total, 4)
             last_score = float(last.get("score") or 0.0)
+
+            # 适应性免疫衰减
+            decay_result = self.adaptive_memory_decay()
+            adaptive_snapshot = self.export_adaptive_memory()[:10]  # 只写前10条
+
+            # 写入 immune_capability 供其他 Agent 查询
+            capability = self.capability_scope()
+
             self.state_registry.set_state(
                 "immune_agent",
                 {
@@ -730,6 +1085,11 @@ class ImmuneAgent:
                     "risk_level": _risk_level(last_score),
                     "last_score": round(last_score, 4),
                     "last_decision": str(last.get("decision") or "ALLOW"),
+                    # 适应性免疫状态
+                    "adaptive_memory_size": decay_result.get("remaining", 0),
+                    "adaptive_memory_top": adaptive_snapshot,
+                    # 能力边界声明
+                    "capability": capability,
                 },
                 writer="immune_agent",
             )
