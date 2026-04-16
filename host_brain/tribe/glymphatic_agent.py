@@ -217,10 +217,7 @@ class GlymphaticAgent:
         Returns:
             记忆巩固摘要字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("GLYMPHATIC_CONSOLIDATION_LLM_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled:
-            return None
+        pass  # 无触发条件限制，直接执行
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.glymphatic_agent")

@@ -288,9 +288,7 @@ class MirrorNeuronAgent:
         Returns:
             共情回应建议字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("MIRROR_EMPATHY_HINT_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled or float(resonance_intensity or 0.0) <= 0.6:
+        if float(resonance_intensity or 0.0) <= 0.6:
             return None
 
         import logging as _logging  # noqa: PLC0415

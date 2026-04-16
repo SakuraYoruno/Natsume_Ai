@@ -303,10 +303,7 @@ class InitiativeGovernorAgent:
         Returns:
             话题建议字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("GOVERNOR_PROACTIVE_TOPIC_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled:
-            return None
+        pass  # 无灰度开关，直接执行
 
         import logging as _logging  # noqa: PLC0415
         _log = _logging.getLogger("Natsume.tribe.initiative_governor_agent")
