@@ -198,3 +198,15 @@ def check_resume_allowed(
         policy_start_ms=policy_start_ms,
     )
 
+
+
+class CheckpointManager:
+    """检查点管理器（占位实现，供测试 monkeypatch 使用）。"""
+
+    def interrupt(self, state: Any, **kwargs: Any) -> str | None:
+        """保存检查点并返回 checkpoint_id（None 表示未保存）。"""
+        return None
+
+    def resume(self, checkpoint_id: str, **kwargs: Any) -> dict[str, Any] | None:
+        """恢复检查点状态（None 表示未找到）。"""
+        return None

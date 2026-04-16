@@ -72,7 +72,7 @@ def test_cortex_post_process_bond_update_fallback_writer(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: "ledger_sentinel")
     monkeypatch.setattr("host_brain.bond.bond_dynamics.BondDynamicsWriter", _Writer)
     monkeypatch.setattr("host_brain.bond.user_identity.resolve_bond_user_id", lambda session_id: "user_2")
-    monkeypatch.setattr("host_brain.tribe.social_brain_agent.get_social_brain_agent", lambda: _SocialBrain())
+    monkeypatch.setattr("host_brain.tribe.cortex_agent.get_social_brain_agent", lambda: _SocialBrain())
 
     result = _run(
         CortexAgent().post_process_bond_update(

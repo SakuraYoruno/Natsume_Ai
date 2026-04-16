@@ -28,7 +28,7 @@ def test_motor_cortex_agent_plan_and_dispatch() -> None:
 
 
 def test_motor_cortex_agent_respects_gate(monkeypatch) -> None:
-    monkeypatch.setattr("host_brain.tribe.initiative_governor_agent.get_initiative_governor_agent", lambda: _FakeGovernor())
+    monkeypatch.setattr("host_brain.tribe.motor_cortex_agent.get_initiative_governor_agent", lambda: _FakeGovernor())
     agent = MotorCortexAgent(state_registry=TribeStateRegistry())
     planned = agent.plan_action(
         action="proactive_voice",

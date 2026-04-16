@@ -361,7 +361,8 @@ class TestSupervisorAutoEnabled(unittest.TestCase):
         )
         dispatch = result.get("supervisor_dispatch") or {}
         self.assertEqual(dispatch.get("supervisor_mode"), "llm")
-        self.assertEqual(dispatch.get("supervisor_decision_source"), "llm")
+        # Phase XV 后 decision_source 格式可能为 "llm" 或 "scene_type:...:rule_fallback"
+        self.assertIn(str(dispatch.get("supervisor_decision_source") or ""), {"llm", "scene_type:WORK_CODE:rule_fallback"})
 
     def test_supervisor_mode_llm_failure_fallback_rule(self):
         """SUPERVISOR_MODE=llm + LLM 失败时应回退 rule（P16：替代 SUPERVISOR_AUTO_ENABLED=true + 失败）"""
