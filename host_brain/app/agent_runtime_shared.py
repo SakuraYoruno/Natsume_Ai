@@ -316,9 +316,8 @@ async def _persist_post_process_audit(
                 runtime_task_registry.mark_failed(
                     runtime_task.task_id,
                     detail=_mapping_text(
-                        runtime_task_status_templates,
+                    runtime_task_status_templates,
                         "failed_detail",
-                        default="整条回复已经完成，但执行阶段有失败。",
                     ),
                     error=str(runtime_task.error or "").strip(),
                     result_code=str(runtime_task.result_code or "").strip() or None,
@@ -328,9 +327,8 @@ async def _persist_post_process_audit(
                 runtime_task_registry.mark_completed(
                     runtime_task.task_id,
                     detail=_mapping_text(
-                        runtime_task_status_templates,
+                    runtime_task_status_templates,
                         "completed_detail",
-                        default="整条回复已经完成。",
                     ),
                     result_text=narrative,
                 )
@@ -996,7 +994,6 @@ def _maybe_build_recent_turn_answer(
                     templates,
                     "both_user_item_template",
                     latest_user=latest_user,
-                    default="你上一句是「{latest_user}」",
                 )
             )
         if latest_assistant:
@@ -1005,7 +1002,6 @@ def _maybe_build_recent_turn_answer(
                     templates,
                     "both_assistant_item_template",
                     latest_assistant=latest_assistant,
-                    default="我上一句说的是「{latest_assistant}」",
                 )
             )
         if parts:
@@ -1532,7 +1528,6 @@ def _maybe_build_previous_meaning_answer(
         templates,
         "assistant_meaning_template",
         latest_assistant=latest_assistant,
-        default="我刚才的意思是：{latest_assistant}",
     )
 
 
@@ -2045,12 +2040,10 @@ async def _cortex_orchestrator_sse_generator_impl(
                 detail=_mapping_text(
                     runtime_task_status_templates,
                     "pre_dispatch_detail",
-                    default="正在整理上下文和检索记忆。",
                 ),
                 progress_message=_mapping_text(
                     runtime_task_status_templates,
                     "pre_dispatch_progress",
-                    default="我正在整理上下文和检索记忆。",
                 ),
                 meta={"stage": "cortex_pre_dispatch"},
             )

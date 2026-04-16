@@ -420,18 +420,18 @@ templates:
       '
     unknown_error: 未知错误
     gateway_reply_depth_hint: （回复简洁，12-60 字，适合移动端消息）
-    quick_ack_low_energy: 我在，给我一点点时间，我马上处理。
-    quick_ack_close: 好，我知道了，马上给你处理好。
-    quick_ack_warm: 收到，我这就开始处理。
-    quick_ack_stranger: 收到，我这边马上处理。
-    quick_ack_default: 好的，稍等下，我马上处理。
-    quick_progress_running: 正在处理 {target_id}，已进行 {elapsed}。当前进展：{progress_message}
-    quick_progress_completed: '{target_id} 已完成，用时 {elapsed}。结果摘要：{result_text}'
-    quick_progress_failed: '{target_id} 执行遇到问题。当前状态：FAILED。已记录错误并准备恢复。'
-    quick_progress_missing: 我这边暂时没有可汇报的任务进度。
-    quick_progress_default: '{target_id} 当前状态是 {elapsed} 内持续处理中，最新进展：{progress_message}'
-    quick_realign_notice: 我看到了，刚才执行方向可能有点偏，我马上重新对齐你的需求再给你结果。
-    quick_realign_default: 刚刚那步可能偏题了，我这就纠正并继续处理。
+    quick_ack_low_energy: 嗯，我在的，稍等一下下。
+    quick_ack_close: 好，我知道了，马上来。
+    quick_ack_warm: 嗯嗯，我这就去处理。
+    quick_ack_stranger: 好的，稍等一下，我马上处理。
+    quick_ack_default: 嗯，稍等一下，我来看看。
+    quick_progress_running: 还在处理 {target_id}，已经过了 {elapsed}，进展：{progress_message}
+    quick_progress_completed: '{target_id} 做完了，用了 {elapsed}。结果：{result_text}'
+    quick_progress_failed: '{target_id} 这边遇到了点问题，我已经记下来了，准备重新处理。'
+    quick_progress_missing: 这边暂时没有进度可以汇报，等有了我会告诉你的。
+    quick_progress_default: '{target_id} 还在处理中，已经 {elapsed} 了，最新进展：{progress_message}'
+    quick_realign_notice: 嗯，我看到了，刚才好像偏了一点，我重新对齐一下再给你。
+    quick_realign_default: 刚才那步偏了，我这就纠正一下继续。
 - template_id: chat_context_builder.runtime_guidance_texts
   category: fallback
   scope: chat_context_builder

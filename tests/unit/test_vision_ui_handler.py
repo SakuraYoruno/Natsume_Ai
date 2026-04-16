@@ -313,8 +313,8 @@ def test_builtin_vision_templates_are_clean() -> None:
 
     assert analysis_templates["context_title"] == "视觉上下文："
     assert analysis_templates["screen_description_label"] == "界面描述：{value}"
-    assert fallback_templates["hmac_rejected"] == "啊啦，请求签名验证失败呢，请检查一下鉴权配置。"
-    assert fallback_templates["origin_not_allowed"] == "啊啦，这个请求来源不在允许范围内呢。"
+    assert fallback_templates["hmac_rejected"] == "请求签名验证失败，请检查一下鉴权配置。"
+    assert fallback_templates["origin_not_allowed"] == "这个请求来源不在允许范围内。"
 
 
 class TestVisionUiSseGenerator:

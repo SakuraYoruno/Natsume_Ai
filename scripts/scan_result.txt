@@ -1,0 +1,1088 @@
+共找到 1702 处硬编码中文字符串
+
+
+=== host_brain/app\agent_routes.py (19 处) ===
+  L49: 'POST /v1/agent/run 请求体。'
+       """POST /v1/agent/run 请求体。"""
+  L52: '自动化目标，自然语言描述，如'
+       goal: str = Field(..., description="自动化目标，自然语言描述，如'填写并提交登录表单'")
+  L57: '会话 ID，用于 ClawdBot 识别目标窗口/进程。不传则自动生成。'
+       description="会话 ID，用于 ClawdBot 识别目标窗口/进程。不传则自动生成。",
+  L65: '最大循环轮数（默认 {DEFAULT_MAX_ROUNDS}，最大 20）'
+       description=f"最大循环轮数（默认 {DEFAULT_MAX_ROUNDS}，最大 20）",
+  L71: '单轮超时秒数（默认 {DEFAULT_ROUND_TIMEOUT_SEC}s）'
+       description=f"单轮超时秒数（默认 {DEFAULT_ROUND_TIMEOUT_SEC}s）",
+  L77: '总超时秒数（默认 {DEFAULT_TOTAL_TIMEOUT_SEC}s）'
+       description=f"总超时秒数（默认 {DEFAULT_TOTAL_TIMEOUT_SEC}s）",
+  L83: '是否授权将截图上传给云端 LLM 分析（默认 False，截图仅在本地处理）'
+       description="是否授权将截图上传给云端 LLM 分析（默认 False，截图仅在本地处理）",
+  L89: '是否使用 Mock ClawdBot（开发/测试模式，不发送真实 HTTP 请求）'
+       description="是否使用 Mock ClawdBot（开发/测试模式，不发送真实 HTTP 请求）",
+  L95: '是否使用 Edge RPC 客户端（通过 Edge 端 /v1/edge/screenshot 和 /v1/edge/automate）'
+       description="是否使用 Edge RPC 客户端（通过 Edge 端 /v1/edge/screenshot 和 /v1/edge/automate）",
+  L101: 'Edge RPC 网关地址（可选，默认读取 EDGE_RPC_BASE_URL 环境变量）'
+       description="Edge RPC 网关地址（可选，默认读取 EDGE_RPC_BASE_URL 环境变量）",
+  L107: 'ClawdBot 服务地址（可选，默认读取 CLAWDBOT_BASE_URL 环境变量）'
+       description="ClawdBot 服务地址（可选，默认读取 CLAWDBOT_BASE_URL 环境变量）",
+  L112: 'GET /v1/agent/info 响应体。'
+       """GET /v1/agent/info 响应体。"""
+  L127: '获取 ClawdBot 服务地址（优先级：请求参数 > 环境变量 > 默认值）。'
+       """获取 ClawdBot 服务地址（优先级：请求参数 > 环境变量 > 默认值）。"""
+  L135: '获取 Edge RPC 网关地址（优先级：请求参数 > 环境变量 > 默认值）。'
+       """获取 Edge RPC 网关地址（优先级：请求参数 > 环境变量 > 默认值）。"""
+  L182: 'agent_routes: 使用 MockClawdbotClient（开发模式）'
+       "agent_routes: 使用 MockClawdbotClient（开发模式）",
+  L194: 'agent_routes: 使用 EdgeRpcClient，地址=%s'
+       "agent_routes: 使用 EdgeRpcClient，地址=%s",
+  L204: 'agent_routes: 使用 ClawdbotClient，地址=%s'
+       "agent_routes: 使用 ClawdbotClient，地址=%s",
+  L244: 'agent_routes: Agent Loop 异常: %s'
+       "agent_routes: Agent Loop 异常: %s",
+  L323: '返回 Agent Loop 当前配置信息（版本、默认参数、ClawdBot 地址等）。'
+       """返回 Agent Loop 当前配置信息（版本、默认参数、ClawdBot 地址等）。"""
+
+=== host_brain/app\agent_runtime_shared.py (39 处) ===
+  L56: '(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)'
+       _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
+  L57: '(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)'
+       _RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
+  L58: '(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?'
+       _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
+  L61: '^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢)[!！。…~]*$'
+       _CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢)[!！。…~]*$")
+  L62: '^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$'
+       _GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+  L63: '^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$'
+       _PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+  L64: '^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$'
+       _ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+  L65: '(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)'
+       _TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
+  L66: '(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)'
+       _TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
+  L67: '第\\s*(\\d+)\\s*步'
+       _TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
+  L70: '什么意思|啥意思|什么意思啊|什么意思呀|啥意思啊|啥意思呀|'
+       r"什么意思|啥意思|什么意思啊|什么意思呀|啥意思啊|啥意思呀|"
+  L71: '这句什么意思|这句话什么意思|这个什么意思|这是什么意思|'
+       r"这句什么意思|这句话什么意思|这个什么意思|这是什么意思|"
+  L72: '是什么意思|意思是啥|啥意思呢|什么意思呢|'
+       r"是什么意思|意思是啥|啥意思呢|什么意思呢|"
+  L74: 'どういう意味|何の意味'
+       r"どういう意味|何の意味"
+  L80: '从哪里开始'
+       "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
+  L81: '实现思路'
+       "贪吃蛇", "codeagent", "code_agent", "agent", "work", "tool", "翻译", "实现思路",
+  L86: '哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった'
+       ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった"),
+  L87: '难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん'
+       ("SAD", "难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん"),
+  L88: '生气|气死|烦|腹立|むかつく'
+       ("ANGRY", "生气|气死|烦|腹立|むかつく"),
+  L89: '谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった'
+       ("LOVING", "谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった"),
+  L90: '哇|真的吗|竟然|びっくり|えっ|本当'
+       ("SURPRISED", "哇|真的吗|竟然|びっくり|えっ|本当"),
+  L321: '整条回复已经完成，但执行阶段有失败。'
+       default="整条回复已经完成，但执行阶段有失败。",
+  L333: '整条回复已经完成。'
+       default="整条回复已经完成。",
+  L659: 'PII 过滤'
+       "display_name": "PII 过滤",
+  L944: '已确认事实'
+       for token in ("已确认事实", "请直接告诉用户", "请直接回答", "不要再说看不到", "不要再说没看到")
+  L970: '你上一句是「{latest_user}」。'
+       fallback = f"你上一句是「{latest_user}」。"
+  L981: '我上一句说的是「{latest_assistant}」。'
+       fallback = f"我上一句说的是「{latest_assistant}」。"
+  L999: '你上一句是「{latest_user}」'
+       default="你上一句是「{latest_user}」",
+  L1008: '我上一句说的是「{latest_assistant}」'
+       default="我上一句说的是「{latest_assistant}」",
+  L1027: '为人格 session_end 提取可用的 valence / arousal。'
+       """为人格 session_end 提取可用的 valence / arousal。"""
+  L1075: '统一触发人格 session_end/conversation_end 收口。'
+       """统一触发人格 session_end/conversation_end 收口。"""
+  L1115: '当 current_tag 为 NEUTRAL 时，根据回复文案推断 emotion_tag。'
+       """当 current_tag 为 NEUTRAL 时，根据回复文案推断 emotion_tag。"""
+  L1146: '从哪里开始'
+       for phrase in ("从哪里开始", "具体", "下一步", "准备好", "继续", "展开", "思路", "方案")
+  L1535: '我刚才的意思是：{latest_assistant}'
+       default="我刚才的意思是：{latest_assistant}",
+  L1990: '根据当前寒暄语境生成简短自然回复'
+       task="根据当前寒暄语境生成简短自然回复",
+  L2048: '正在整理上下文和检索记忆。'
+       default="正在整理上下文和检索记忆。",
+  L2053: '我正在整理上下文和检索记忆。'
+       default="我正在整理上下文和检索记忆。",
+  L2467: '[%s] 人格漂移检测: level=%s dims=%s'
+       "[%s] 人格漂移检测: level=%s dims=%s",
+  L2486: '[%s] 人格成长: user=%s rules=%s'
+       "[%s] 人格成长: user=%s rules=%s",
+
+=== host_brain/app\agents\agent_contract.py (4 处) ===
+  L111: '记录 handoff 历史。'
+       """记录 handoff 历史。"""
+  L121: '记录子 agent 输出的工件。'
+       """记录子 agent 输出的工件。"""
+  L172: '构建默认 agent_runtime 结构。'
+       """构建默认 agent_runtime 结构。"""
+  L197: '构建子 agent 输出工件。'
+       """构建子 agent 输出工件。"""
+
+=== host_brain/app\agents\agent_registry.py (12 处) ===
+  L57: '普通聊天快路径，轻治理 + 强边界'
+       "description": "普通聊天快路径，轻治理 + 强边界",
+  L67: '代码草案生成，只产出工件，不直接控图'
+       "description": "代码草案生成，只产出工件，不直接控图",
+  L77: '翻译草案生成，只产出工件'
+       "description": "翻译草案生成，只产出工件",
+  L87: '执行意图，涉及工具调用，第一阶段保留重链'
+       "description": "执行意图，涉及工具调用，第一阶段保留重链",
+  L97: '安全校验，仅中高风险 / 执行场景条件触发'
+       "description": "安全校验，仅中高风险 / 执行场景条件触发",
+  L107: '统一收口，裁判汇总子 agent 输出'
+       "description": "统一收口，裁判汇总子 agent 输出",
+  L117: '最终成文输出'
+       "description": "最终成文输出",
+  L127: '知识库检索，只读，产出检索工件'
+       "description": "知识库检索，只读，产出检索工件",
+  L137: '环境修复与依赖安装，负责补齐运行所需的浏览器/工具后端'
+       "description": "环境修复与依赖安装，负责补齐运行所需的浏览器/工具后端",
+  L147: '深度情感分析，检索情感记忆，评估 Bond 状态，产出情感工件'
+       "description": "深度情感分析，检索情感记忆，评估 Bond 状态，产出情感工件",
+  L153: '检查 agent_id 是否在 allowlist 内。'
+       """检查 agent_id 是否在 allowlist 内。"""
+  L158: '获取 agent 元数据，不存在时返回 None。'
+       """获取 agent 元数据，不存在时返回 None。"""
+
+=== host_brain/app\agents\react_loop.py (7 处) ===
+  L59: 'ReAct 单步记录。'
+       """ReAct 单步记录。"""
+  L82: 'ReAct 循环执行结果。'
+       """ReAct 循环执行结果。"""
+  L92: '转换为 react_scratchpad 格式，写入 payload。'
+       """转换为 react_scratchpad 格式，写入 payload。"""
+  L156: '[历史工具调用记录已截断，共 {omitted} 轮被省略]'
+       "content": f"[历史工具调用记录已截断，共 {omitted} 轮被省略]",
+  L171: '判断工具是否为写工具（有副作用，需串行执行）。'
+       """判断工具是否为写工具（有副作用，需串行执行）。"""
+  L235: '构建工具描述文本，用于 system prompt。'
+       """构建工具描述文本，用于 system prompt。"""
+  L656: '[ReAct 循环超时]'
+       final_answer="[ReAct 循环超时]",
+
+=== host_brain/app\agents\tool_registry.py (94 处) ===
+  L29: '工具规格定义。'
+       """工具规格定义。"""
+  L38: '转换为 LLM function calling 格式的 schema。'
+       """转换为 LLM function calling 格式的 schema。"""
+  L51: '延迟获取 SemanticRecaller 单例，避免循环导入。'
+       """延迟获取 SemanticRecaller 单例，避免循环导入。"""
+  L106: '知识库语义检索工具（只读）。接入 SemanticRecaller。'
+       """知识库语义检索工具（只读）。接入 SemanticRecaller。"""
+  L123: '未找到与 '
+       "result": f"未找到与 '{query}' 相关的知识库内容",
+  L139: '[{i}] (相关度={score:.2f}) {content}'
+       lines.append(f"[{i}] (相关度={score:.2f}) {content}")
+  L155: '知识库检索失败: {exc}'
+       "result": f"知识库检索失败: {exc}",
+  L164: '关键词检索工具（只读）。基于关键词重叠率召回，接入 SemanticRecaller mock 路径。'
+       """关键词检索工具（只读）。基于关键词重叠率召回，接入 SemanticRecaller mock 路径。"""
+  L184: '关键词 '
+       "result": f"关键词 '{keyword}' 未命中任何文档",
+  L210: '关键词检索失败: {exc}'
+       "result": f"关键词检索失败: {exc}",
+  L219: '向量语义检索工具（只读）。接入 SemanticRecaller，使用较高相似度阈值。'
+       """向量语义检索工具（只读）。接入 SemanticRecaller，使用较高相似度阈值。"""
+  L241: '向量检索未找到与 '
+       "result": f"向量检索未找到与 '{query}' 相似度≥{threshold:.2f} 的内容",
+  L256: '[{i}] (相似度={score:.2f}) {content}'
+       lines.append(f"[{i}] (相似度={score:.2f}) {content}")
+  L269: '向量检索失败: {exc}'
+       "result": f"向量检索失败: {exc}",
+  L278: '获取当前对话上下文（只读）。返回真实的运行时上下文信息。'
+       """获取当前对话上下文（只读）。返回真实的运行时上下文信息。"""
+  L306: '上下文已获取（ts={ts_ms}, type={context_type}）'
+       "result": f"上下文已获取（ts={ts_ms}, type={context_type}）",
+  L313: '代码静态分析工具（只读）。返回真实的代码结构分析结果。'
+       """代码静态分析工具（只读）。返回真实的代码结构分析结果。"""
+  L351: '文件较长（{total_lines} 行），建议拆分'
+       issues.append(f"文件较长（{total_lines} 行），建议拆分")
+  L353: '函数数量较多（{func_count} 个），建议模块化'
+       issues.append(f"函数数量较多（{func_count} 个），建议模块化")
+  L355: '缺少注释，建议补充文档'
+       issues.append("缺少注释，建议补充文档")
+  L360: '语言={language}, 总行数={total_lines}, 代码行={code_lines}, '
+       f"语言={language}, 总行数={total_lines}, 代码行={code_lines}, "
+  L361: '注释行={comment_lines}（{comment_ratio:.1%}）, 空行={blank_lines}, '
+       f"注释行={comment_lines}（{comment_ratio:.1%}）, 空行={blank_lines}, "
+  L362: '函数={func_count}, 类={class_count}'
+       f"函数={func_count}, 类={class_count}"
+  L365: '; 建议: {'
+       result_summary += f"; 建议: {'; '.join(issues)}"
+  L385: '工件质量评估工具（只读）。对单个 AgentArtifact 进行结构化质量评估。'
+       """工件质量评估工具（只读）。对单个 AgentArtifact 进行结构化质量评估。"""
+  L402: '工件含错误: {error}'
+       issues.append(f"工件含错误: {error}")
+  L405: '摘要为空'
+       issues.append("摘要为空")
+  L408: 'artifact_ref 缺失'
+       issues.append("artifact_ref 缺失")
+  L411: '置信度偏低（{confidence:.2f}）'
+       issues.append(f"置信度偏低（{confidence:.2f}）")
+  L417: '含高风险标记'
+       issues.append("含高风险标记")
+  L423: '工件评估完成（agent={agent_id}, 置信度={confidence:.2f}, '
+       f"工件评估完成（agent={agent_id}, 置信度={confidence:.2f}, "
+  L424: '质量={quality}, 风险标记={risk_flags}）'
+       f"质量={quality}, 风险标记={risk_flags}）"
+  L427: '；问题: {'
+       result_text += f"；问题: {'; '.join(issues)}"
+  L442: '多工件比较工具（只读）。比较多个 AgentArtifact，推荐最优工件。'
+       """多工件比较工具（只读）。比较多个 AgentArtifact，推荐最优工件。"""
+  L454: '所有工件均含错误，无法比较'
+       "result": "所有工件均含错误，无法比较",
+  L484: '比较 {len(valid)} 个有效工件，推荐 {best_agent}（score={best_score:.2f}）。'
+       f"比较 {len(valid)} 个有效工件，推荐 {best_agent}（score={best_score:.2f}）。"
+  L485: ' 详情: {'
+       f" 详情: {', '.join(comparison_lines)}"
+  L499: '文本翻译工具（只读）。检测源语言并返回翻译元数据；实际翻译由 LLM 完成。'
+       """文本翻译工具（只读）。检测源语言并返回翻译元数据；实际翻译由 LLM 完成。"""
+  L527: '西班牙文'
+       "es": "西班牙文", "ru": "俄文",
+  L539: '源语言与目标语言相同（{src_name}），无需翻译'
+       "note": f"源语言与目标语言相同（{src_name}），无需翻译",
+  L544: '[待翻译] {src_name}→{tgt_name}，原文长度={len(text)} 字符，请 LLM 完成翻译'
+       "result": f"[待翻译] {src_name}→{tgt_name}，原文长度={len(text)} 字符，请 LLM 完成翻译",
+  L555: 'translate_text 工具提供语言检测和元数据，实际翻译由 LLM 在 ReAct 循环中完成'
+       "note": "translate_text 工具提供语言检测和元数据，实际翻译由 LLM 在 ReAct 循环中完成",
+  L789: '情感记忆检索工具（只读）。检索 EpisodicStore 中的情感相关记忆。'
+       """情感记忆检索工具（只读）。检索 EpisodicStore 中的情感相关记忆。"""
+  L798: '情感 {query}'
+       enriched_query = f"情感 {query}"
+  L800: '情感 {emotion_tag} {query}'
+       enriched_query = f"情感 {emotion_tag} {query}"
+  L810: '未找到与 '
+       "result": f"未找到与 '{query}' 相关的情感记忆",
+  L822: '[{i}] (相关度={score:.2f}) {content}'
+       lines.append(f"[{i}] (相关度={score:.2f}) {content}")
+  L833: '情感记忆检索失败: {exc}'
+       "result": f"情感记忆检索失败: {exc}",
+  L841: '情感时间线查询工具（只读）。查询最近的情感变化轨迹。'
+       """情感时间线查询工具（只读）。查询最近的情感变化轨迹。"""
+  L859: '最近 {window_minutes} 分钟内没有情感记录'
+       "result": f"最近 {window_minutes} 分钟内没有情感记录",
+  L865: '最近 {window_minutes} 分钟的情感轨迹（{total_entries} 条记录）：\\n'
+       f"最近 {window_minutes} 分钟的情感轨迹（{total_entries} 条记录）：\n"
+  L866: '主导情感: {dominant}\\n'
+       f"主导情感: {dominant}\n"
+  L867: '平均效价: {avg_valence:.3f}\\n'
+       f"平均效价: {avg_valence:.3f}\n"
+  L870: '日记摘要: {diary_text}'
+       result_text += f"日记摘要: {diary_text}"
+  L883: '情感时间线查询失败: {exc}'
+       "result": f"情感时间线查询失败: {exc}",
+  L897: '知识库语义检索'
+       display_name="知识库语义检索",
+  L898: '在知识库中进行语义检索，返回最相关的内容片段（接入 SemanticRecaller）'
+       description="在知识库中进行语义检索，返回最相关的内容片段（接入 SemanticRecaller）",
+  L902: '检索查询词'
+       "query": {"type": "string", "description": "检索查询词"},
+  L911: '关键词检索'
+       display_name="关键词检索",
+  L912: '基于关键词重叠率在知识库中检索，适合精确词汇匹配场景'
+       description="基于关键词重叠率在知识库中检索，适合精确词汇匹配场景",
+  L916: '检索关键词'
+       "keyword": {"type": "string", "description": "检索关键词"},
+  L917: '最大返回条数，默认 5，范围 1-20'
+       "top_k": {"type": "integer", "description": "最大返回条数，默认 5，范围 1-20"},
+  L926: '向量语义检索'
+       display_name="向量语义检索",
+  L927: '基于向量相似度在知识库中检索，适合语义相似场景，支持自定义相似度阈值'
+       description="基于向量相似度在知识库中检索，适合语义相似场景，支持自定义相似度阈值",
+  L931: '检索查询文本'
+       "query": {"type": "string", "description": "检索查询文本"},
+  L932: '最大返回条数，默认 5，范围 1-20'
+       "top_k": {"type": "integer", "description": "最大返回条数，默认 5，范围 1-20"},
+  L933: '相似度阈值，默认 0.70，范围 0.0-1.0'
+       "threshold": {"type": "number", "description": "相似度阈值，默认 0.70，范围 0.0-1.0"},
+  L942: '获取对话上下文'
+       display_name="获取对话上下文",
+  L943: '获取当前对话的运行时上下文信息，包括时间戳、知识库状态等'
+       description="获取当前对话的运行时上下文信息，包括时间戳、知识库状态等",
+  L947: '会话 ID（可选）'
+       "session_id": {"type": "string", "description": "会话 ID（可选）"},
+  L948: '上下文类型，默认 conversation'
+       "context_type": {"type": "string", "description": "上下文类型，默认 conversation"},
+  L1009: '代码静态分析'
+       display_name="代码静态分析",
+  L1010: '对给定代码进行静态分析，返回行数、函数数、注释率、潜在问题等指标'
+       description="对给定代码进行静态分析，返回行数、函数数、注释率、潜在问题等指标",
+  L1014: '要分析的代码'
+       "code": {"type": "string", "description": "要分析的代码"},
+  L1015: '编程语言，默认 python'
+       "language": {"type": "string", "description": "编程语言，默认 python"},
+  L1024: '文本翻译'
+       display_name="文本翻译",
+  L1025: '检测文本语言并返回翻译元数据，实际翻译由 LLM 在 ReAct 循环中完成'
+       description="检测文本语言并返回翻译元数据，实际翻译由 LLM 在 ReAct 循环中完成",
+  L1029: '要翻译的文本'
+       "text": {"type": "string", "description": "要翻译的文本"},
+  L1030: '目标语言代码，如 en/ja/zh'
+       "target_lang": {"type": "string", "description": "目标语言代码，如 en/ja/zh"},
+  L1039: '工件质量评估'
+       display_name="工件质量评估",
+  L1040: '对单个 AgentArtifact 进行结构化质量评估，返回质量等级、评分和问题列表'
+       description="对单个 AgentArtifact 进行结构化质量评估，返回质量等级、评分和问题列表",
+  L1044: '要评估的工件对象（含 confidence、summary、risk_flags 等字段）'
+       "artifact": {"type": "object", "description": "要评估的工件对象（含 confidence、summary、risk_flags 等字段）"},
+  L1045: '工件所属 agent ID（可选，用于标识）'
+       "agent_id": {"type": "string", "description": "工件所属 agent ID（可选，用于标识）"},
+  L1054: '多工件比较'
+       display_name="多工件比较",
+  L1055: '比较多个 AgentArtifact，基于置信度和风险标记推荐最优工件'
+       description="比较多个 AgentArtifact，基于置信度和风险标记推荐最优工件",
+  L1059: '工件字典，key 为 agent_id，value 为工件对象'
+       "artifacts": {"type": "object", "description": "工件字典，key 为 agent_id，value 为工件对象"},
+  L1069: '情感记忆检索'
+       display_name="情感记忆检索",
+  L1070: '检索用户的历史情感记忆，了解用户过去的情感状态变化'
+       description="检索用户的历史情感记忆，了解用户过去的情感状态变化",
+  L1074: '情感相关的检索查询词'
+       "query": {"type": "string", "description": "情感相关的检索查询词"},
+  L1075: '过滤指定情感标签（可选）'
+       "emotion_tag": {"type": "string", "description": "过滤指定情感标签（可选）"},
+  L1084: '情感时间线查询'
+       display_name="情感时间线查询",
+  L1085: '查询最近的情感变化轨迹，了解情感走势'
+       description="查询最近的情感变化轨迹，了解情感走势",
+  L1089: '时间窗口（分钟），默认 60'
+       "window_minutes": {"type": "integer", "description": "时间窗口（分钟），默认 60"},
+  L1271: '检查工具是否允许被指定 agent 调用。'
+       """检查工具是否允许被指定 agent 调用。"""
+
+=== host_brain/app\automation\scheduler_routes.py (10 处) ===
+  L31: '列出所有调度任务（含运行时状态），按优先级排序。'
+       """列出所有调度任务（含运行时状态），按优先级排序。"""
+  L47: '返回调度器健康快照（running/task_count/tasks）。'
+       """返回调度器健康快照（running/task_count/tasks）。"""
+  L58: '启用指定调度任务。'
+       """启用指定调度任务。"""
+  L64: '任务 {task_id!r} 不存在'
+       detail=f"任务 {task_id!r} 不存在",
+  L76: '禁用指定调度任务（不取消正在运行的，下次不再触发）。'
+       """禁用指定调度任务（不取消正在运行的，下次不再触发）。"""
+  L82: '任务 {task_id!r} 不存在'
+       detail=f"任务 {task_id!r} 不存在",
+  L94: '立即触发指定调度任务（重置 last_run_ts，下次调度循环即触发）。'
+       """立即触发指定调度任务（重置 last_run_ts，下次调度循环即触发）。"""
+  L100: '任务 {task_id!r} 不存在或已禁用'
+       detail=f"任务 {task_id!r} 不存在或已禁用",
+  L123: '任务 {task_id!r} 不存在'
+       detail=f"任务 {task_id!r} 不存在",
+  L132: '任务 {task_id!r} 已禁用，无法触发'
+       detail=f"任务 {task_id!r} 已禁用，无法触发",
+
+=== host_brain/app\automation\task_scheduler.py (22 处) ===
+  L43: '任务优先级（数值越小优先级越高）。'
+       """任务优先级（数值越小优先级越高）。"""
+  L59: '常驻调度任务定义。'
+       """常驻调度任务定义。"""
+  L69: '任务优先级（P0 最高，P3 最低）'
+       """任务优先级（P0 最高，P3 最低）"""
+  L71: '依赖的任务 ID 列表（所有依赖任务最近一次执行成功后才触发本任务）'
+       """依赖的任务 ID 列表（所有依赖任务最近一次执行成功后才触发本任务）"""
+  L108: '游戏辅助'
+       name="游戏辅助",
+  L123: '注册任务（可在启动前或运行中注册）。'
+       """注册任务（可在启动前或运行中注册）。"""
+  L128: '注销任务。'
+       """注销任务。"""
+  L138: '启用任务。'
+       """启用任务。"""
+  L145: '禁用任务（不取消正在运行的，下次不再触发）。'
+       """禁用任务（不取消正在运行的，下次不再触发）。"""
+  L154: '启动调度器。'
+       """启动调度器。"""
+  L165: '停止调度器，等待所有任务完成。'
+       """停止调度器，等待所有任务完成。"""
+  L181: '立即触发指定任务（不等待下次调度）。'
+       """立即触发指定任务（不等待下次调度）。"""
+  L238: '返回调度器健康快照。'
+       """返回调度器健康快照。"""
+  L250: '主调度循环：每秒检查一次，按优先级触发到期任务（Ref #97）。'
+       """主调度循环：每秒检查一次，按优先级触发到期任务（Ref #97）。"""
+  L281: 'Ref #97: 检查任务依赖链是否满足（所有依赖任务最近一次执行成功）。'
+       """Ref #97: 检查任务依赖链是否满足（所有依赖任务最近一次执行成功）。"""
+  L288: 'TaskScheduler: 任务 %s 依赖的任务 %s 不存在，视为未满足'
+       "TaskScheduler: 任务 %s 依赖的任务 %s 不存在，视为未满足",
+  L294: 'TaskScheduler: 任务 %s 依赖 %s 未满足（status=%s）'
+       "TaskScheduler: 任务 %s 依赖 %s 未满足（status=%s）",
+  L301: '执行单个任务，含重试逻辑。'
+       """执行单个任务，含重试逻辑。"""
+  L312: 'TaskScheduler: 任务 %s 执行成功（第 %d 次）'
+       "TaskScheduler: 任务 %s 执行成功（第 %d 次）",
+  L324: 'TaskScheduler: 任务 %s 失败（attempt=%d/%d），%ss 后重试: %s'
+       "TaskScheduler: 任务 %s 失败（attempt=%d/%d），%ss 后重试: %s",
+  L331: 'TaskScheduler: 任务 %s 重试耗尽（%d 次），放弃: %s'
+       "TaskScheduler: 任务 %s 重试耗尽（%d 次），放弃: %s",
+  L345: '获取全局调度器单例。'
+       """获取全局调度器单例。"""
+
+=== host_brain/app\bond_routes.py (24 处) ===
+  L33: 'evidence_refs 不能为空（FR-BOND-002）'
+       _EVIDENCE_REFS_REQUIRED_DETAIL = "evidence_refs 不能为空（FR-BOND-002）"
+  L47: '由 fastapi_app.py 注入 BondStageEngine 获取回调。'
+       """由 fastapi_app.py 注入 BondStageEngine 获取回调。"""
+  L63: 'GET /bond/stage/{user_id} 响应体。'
+       """GET /bond/stage/{user_id} 响应体。"""
+  L65: '当前 Bond 阶段'
+       current_stage: str = Field(..., description="当前 Bond 阶段")
+  L66: '阶段序号（0=STRANGER）'
+       stage_index: int = Field(..., description="阶段序号（0=STRANGER）")
+  L67: '累计积分'
+       total_score: int = Field(..., description="累计积分")
+  L68: '事件总数'
+       event_count: int = Field(..., description="事件总数")
+  L69: '趋势: RISING/STABLE/DECLINING'
+       trend: str = Field(..., description="趋势: RISING/STABLE/DECLINING")
+  L70: '能力提示（不含数值）'
+       capability_hint: str = Field(..., description="能力提示（不含数值）")
+  L71: '最近事件时间戳（毫秒）'
+       last_event_ts_ms: int = Field(..., description="最近事件时间戳（毫秒）")
+  L77: 'GET /bond/summary/{user_id} 响应体（context-pack-safe，不含数值）。'
+       """GET /bond/summary/{user_id} 响应体（context-pack-safe，不含数值）。"""
+  L87: 'POST /bond/event 请求体。'
+       """POST /bond/event 请求体。"""
+  L88: '用户 ID'
+       user_id: str = Field(..., description="用户 ID")
+  L89: '事件类型: INTERACTION/DEEP_TALK/EMOTIONAL_SUPPORT/...'
+       update_kind: str = Field(..., description="事件类型: INTERACTION/DEEP_TALK/EMOTIONAL_SUPPORT/...")
+  L90: '证据引用列表'
+       evidence_refs: List[str] = Field(default_factory=list, description="证据引用列表")
+  L91: '关联请求 ID（可选）'
+       request_id: Optional[str] = Field(default=None, description="关联请求 ID（可选）")
+  L93: '情感标签（可选，如 JOY/SADNESS/NEUTRAL）'
+       emotion_tag: Optional[str] = Field(default=None, description="情感标签（可选，如 JOY/SADNESS/NEUTRAL）")
+  L94: '情感强度（可选，0.0-1.0，默认 0.5）'
+       emotion_intensity: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="情感强度（可选，0.0-1.0，默认 0.5）")
+  L98: 'POST /bond/event 响应体。'
+       """POST /bond/event 响应体。"""
+  L112: 'GET /bond/health 响应体。'
+       """GET /bond/health 响应体。"""
+  L126: 'BondStageEngine 健康状态检查。'
+       """BondStageEngine 健康状态检查。"""
+  L158: '列出所有有 Bond 状态的用户 ID。'
+       """列出所有有 Bond 状态的用户 ID。"""
+  L182: '获取 context-pack-safe Bond Summary（不含数值，供语义内核消费）。'
+       """获取 context-pack-safe Bond Summary（不含数值，供语义内核消费）。"""
+  L210: '查询用户当前 Bond 阶段与积分状态（含数值，仅供管理/调试使用）。'
+       """查询用户当前 Bond 阶段与积分状态（含数值，仅供管理/调试使用）。"""
+
+=== host_brain/app\canon_route_schemas.py (15 处) ===
+  L13: '提案唯一 ID（调用方生成）'
+       proposal_id: str = Field(..., description="提案唯一 ID（调用方生成）")
+  L14: '目标 World Canon 文档 ID'
+       target_doc_id: str = Field(..., description="目标 World Canon 文档 ID")
+  L15: '提案标题'
+       proposed_title: str = Field(..., description="提案标题")
+  L16: '提案标签列表'
+       proposed_tags: List[str] = Field(default_factory=list, description="提案标签列表")
+  L17: '提案正文（不得含完成性表述）'
+       proposed_body: str = Field(..., description="提案正文（不得含完成性表述）")
+  L18: '提案来源节点 ID（可选）'
+       proposer_node_id: Optional[str] = Field(None, description="提案来源节点 ID（可选）")
+  L19: '提案摘要（不超过 200 字）'
+       summary: Optional[str] = Field(None, description="提案摘要（不超过 200 字）")
+  L23: '提案标题（与提交时一致）'
+       proposed_title: str = Field(..., description="提案标题（与提交时一致）")
+  L24: '提案标签'
+       proposed_tags: List[str] = Field(default_factory=list, description="提案标签")
+  L25: '提案正文（与提交时一致）'
+       proposed_body: str = Field(..., description="提案正文（与提交时一致）")
+  L26: '审核节点 ID（可选）'
+       approver_node_id: Optional[str] = Field(None, description="审核节点 ID（可选）")
+  L30: '拒绝原因（不超过 200 字）'
+       reason: Optional[str] = Field(None, description="拒绝原因（不超过 200 字）")
+  L31: '拒绝节点 ID（可选）'
+       rejector_node_id: Optional[str] = Field(None, description="拒绝节点 ID（可选）")
+  L35: '回滚原因（不超过 200 字）'
+       rollback_reason: Optional[str] = Field(None, description="回滚原因（不超过 200 字）")
+  L36: '操作节点 ID（可选）'
+       operator_node_id: Optional[str] = Field(None, description="操作节点 ID（可选）")
+
+=== host_brain/app\canon_routes.py (29 处) ===
+  L64: '获取 WorldCanonStore 单例（F-28 修复：加锁防止多线程竞态）。'
+       """获取 WorldCanonStore 单例（F-28 修复：加锁防止多线程竞态）。"""
+  L79: '提案唯一 ID（调用方生成）'
+       proposal_id: str = Field(..., description="提案唯一 ID（调用方生成）")
+  L80: '目标 World Canon 文档 ID'
+       target_doc_id: str = Field(..., description="目标 World Canon 文档 ID")
+  L81: '提案标题'
+       proposed_title: str = Field(..., description="提案标题")
+  L82: '提案标签列表'
+       proposed_tags: List[str] = Field(default_factory=list, description="提案标签列表")
+  L83: '提案正文（不得含完成性表述）'
+       proposed_body: str = Field(..., description="提案正文（不得含完成性表述）")
+  L84: '提案来源节点 ID（可选）'
+       proposer_node_id: Optional[str] = Field(None, description="提案来源节点 ID（可选）")
+  L85: '提案摘要（不超过 200 字）'
+       summary: Optional[str] = Field(None, description="提案摘要（不超过 200 字）")
+  L89: '提案标题（与提交时一致）'
+       proposed_title: str = Field(..., description="提案标题（与提交时一致）")
+  L90: '提案标签'
+       proposed_tags: List[str] = Field(default_factory=list, description="提案标签")
+  L91: '提案正文（与提交时一致）'
+       proposed_body: str = Field(..., description="提案正文（与提交时一致）")
+  L92: '审核节点 ID（可选）'
+       approver_node_id: Optional[str] = Field(None, description="审核节点 ID（可选）")
+  L96: '拒绝原因（不超过 200 字）'
+       reason: Optional[str] = Field(None, description="拒绝原因（不超过 200 字）")
+  L97: '拒绝节点 ID（可选）'
+       rejector_node_id: Optional[str] = Field(None, description="拒绝节点 ID（可选）")
+  L101: '回滚原因（不超过 200 字）'
+       rollback_reason: Optional[str] = Field(None, description="回滚原因（不超过 200 字）")
+  L102: '操作节点 ID（可选）'
+       operator_node_id: Optional[str] = Field(None, description="操作节点 ID（可选）")
+  L184: '获取共享 ledger 实例（通过外部注入的 provider，避免循环导入）。'
+       """获取共享 ledger 实例（通过外部注入的 provider，避免循环导入）。"""
+  L247: '提交新的 World Canon Evolution 提案（status=pending）。'
+       """提交新的 World Canon Evolution 提案（status=pending）。"""
+  L260: 'proposal_id 已存在: {body.proposal_id}'
+       detail=f"proposal_id 已存在: {body.proposal_id}",
+  L296: '查询单个 World Canon 提案详情。'
+       """查询单个 World Canon 提案详情。"""
+  L315: '提案不存在: {proposal_id}'
+       detail=f"提案不存在: {proposal_id}",
+  L332: '审核通过 World Canon 提案，触发 SSOT 文件写入并记录 canon_change_log。'
+       """审核通过 World Canon 提案，触发 SSOT 文件写入并记录 canon_change_log。"""
+  L345: '提案不存在: {proposal_id}'
+       detail=f"提案不存在: {proposal_id}",
+  L403: '拒绝 World Canon 提案（status=rejected，不修改 SSOT 文件）。'
+       """拒绝 World Canon 提案（status=rejected，不修改 SSOT 文件）。"""
+  L463: '回滚已 APPLIED 的 World Canon 提案，将 SSOT 文件恢复到 base_version。'
+       """回滚已 APPLIED 的 World Canon 提案，将 SSOT 文件恢复到 base_version。"""
+  L533: '列出当前 World Canon 文档（SSOT 快照）。'
+       """列出当前 World Canon 文档（SSOT 快照）。"""
+  L575: '查询单个 World Canon 文档。'
+       """查询单个 World Canon 文档。"""
+  L586: 'World Canon 文档不存在: {doc_id}'
+       detail=f"World Canon 文档不存在: {doc_id}",
+  L676: '最近提案列表'
+       window_minutes 控制"最近提案列表"的时间窗口，状态分布统计全量数据。
+
+=== host_brain/app\capability_gap_detector.py (3 处) ===
+  L34: '(是什么|为什么|是啥|啥意思|解释一下|讲讲|介绍下)'
+       _QUESTION_ONLY_PATTERN = re.compile(r"(是什么|为什么|是啥|啥意思|解释一下|讲讲|介绍下)")
+  L40: '环境变量'
+       ("system", ("进程", "端口", "日志", "系统", "服务", "环境变量")),
+  L41: '总结会话'
+       ("memory", ("记住", "回忆", "摘要", "总结会话")),
+
+=== host_brain/app\chat_agent.py (45 处) ===
+  L40: '^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$'
+       _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+  L41: '^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$'
+       _FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+  L42: '(想你|好想你|我想你了|想你啦|惦记你)'
+       _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|惦记你)")
+  L43: '(特长|擅长|你会什么|你能做什么|你会做什么)'
+       _FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
+  L58: '子 Agent 执行结果，注入 ChatAgent prompt。'
+       """子 Agent 执行结果，注入 ChatAgent prompt。"""
+  L70: 'ChatAgent 的完整输入上下文。'
+       """ChatAgent 的完整输入上下文。"""
+  L119: '出口净化：null byte + 长度截断。'
+       """出口净化：null byte + 长度截断。"""
+  L360: '好的，稍等下，我马上处理。'
+       text = "好的，稍等下，我马上处理。"
+  L447: '我这边暂时没有可汇报的任务进度。'
+       text = "我这边暂时没有可汇报的任务进度。"
+  L471: '我发现刚才方向可能有点偏，我马上重新对齐你的需求再继续。'
+       text = "我发现刚才方向可能有点偏，我马上重新对齐你的需求再继续。"
+  L483: '还要不要'
+       "你呢", "要不要", "想不想", "还要不要", "要继续吗", "如果你愿意",
+  L484: '方便的话'
+       "方便的话", "可以告诉我", "能不能", "要不要我", "要我继续", "还想",
+  L485: '要聊聊吗'
+       "要聊聊吗", "愿意的话", "想继续", "要不要继续",
+  L497: '[，,、]?(?:你呢|你觉得呢|你怎么看呢|你怎么看|你觉得怎么样呢|你觉得怎么样)[。！？!?？]*$'
+       r"[，,、]?(?:你呢|你觉得呢|你怎么看呢|你怎么看|你觉得怎么样呢|你觉得怎么样)[。！？!?？]*$",
+  L498: '[，,、]?(?:要不要|想不想|还要不要|要不要继续|要继续吗).*[。！？!?？]*$'
+       r"[，,、]?(?:要不要|想不想|还要不要|要不要继续|要继续吗).*[。！？!?？]*$",
+  L499: '[，,、]?(?:如果你愿意|方便的话|愿意的话|可以的话).*[。！？!?？]*$'
+       r"[，,、]?(?:如果你愿意|方便的话|愿意的话|可以的话).*[。！？!?？]*$",
+  L500: '[，,、]?(?:可以告诉我|能不能告诉我|要不要和我说说).*[。！？!?？]*$'
+       r"[，,、]?(?:可以告诉我|能不能告诉我|要不要和我说说).*[。！？!?？]*$",
+  L517: '^(?:对了|另外|顺便|说起来|还有|题外话|再补一句|补充一句)'
+       return bool(re.match(r"^(?:对了|另外|顺便|说起来|还有|题外话|再补一句|补充一句)", normalized))
+  L523: '好喜欢你'
+       "我爱你", "爱你", "好喜欢你", "最喜欢你", "喜欢你", "好想你", "想你了",
+  L524: '离不开你'
+       "想你", "离不开你", "不能没有你", "只想和你", "属于你", "亲亲", "抱抱你",
+  L525: '一直陪着你'
+       "一直陪着你", "永远陪着你", "会一直等你",
+  L536: '好喜欢你'
+       "喜欢你", "好喜欢你", "最喜欢你", "想你", "好想你", "想你了",
+  L579: '哈{2,}'
+       normalized = re.sub(r"哈{2,}", "", normalized)
+  L580: '呵{2,}'
+       normalized = re.sub(r"呵{2,}", "", normalized)
+  L581: '嘿{2,}'
+       normalized = re.sub(r"嘿{2,}", "", normalized)
+  L582: '嘻{2,}'
+       normalized = re.sub(r"嘻{2,}", "", normalized)
+  L734: '哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった'
+       ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった"),
+  L735: '难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん'
+       ("SAD", "难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん"),
+  L736: '生气|气死|烦|腹立|むかつく'
+       ("ANGRY", "生气|气死|烦|腹立|むかつく"),
+  L737: '谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった'
+       ("LOVING", "谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった"),
+  L738: '哇|真的吗|竟然|びっくり|えっ|本当'
+       ("SURPRISED", "哇|真的吗|竟然|びっくり|えっ|本当"),
+  L776: '从 LLM 原始输出中提取可见文本（支持 JSON / fenced JSON 包装格式）。'
+       """从 LLM 原始输出中提取可见文本（支持 JSON / fenced JSON 包装格式）。"""
+  L796: '提取 TTS 语音通道文本（日语，text_ja 字段）。'
+       """提取 TTS 语音通道文本（日语，text_ja 字段）。"""
+  L817: '^\\s*(?:蓝蓝|夏目蓝|夏目藍|小蓝|阿蓝)[，,、:：\\s]*'
+       text = re.sub(r"^\s*(?:蓝蓝|夏目蓝|夏目藍|小蓝|阿蓝)[，,、:：\s]*", "", text)
+  L843: '^(?:搜索(?:一下)?|查(?:一下)?|帮我搜索(?:一下)?|帮我查(?:一下)?|给我搜索(?:一下)?|给我查(?:一下)?)\\s*'
+       topic = re.sub(r"^(?:搜索(?:一下)?|查(?:一下)?|帮我搜索(?:一下)?|帮我查(?:一下)?|给我搜索(?:一下)?|给我查(?:一下)?)\s*", "", topic)
+  L871: '^(?:搜索技能|查找技能|搜技能)\\s*'
+       topic = re.sub(r"^(?:搜索技能|查找技能|搜技能)\s*", "", topic).strip() or _runtime_text("default_topic")
+  L963: '^(?:蓝蓝|夏目蓝|夏目蓝蓝|natsume ai|natsume)[，,\\s:：]*'
+       normalized = re.sub(r"^(?:蓝蓝|夏目蓝|夏目蓝蓝|natsume ai|natsume)[，,\s:：]*", "", normalized, flags=re.IGNORECASE).strip()
+  L964: '\\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$'
+       normalized = re.sub(r"\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$", "", normalized, flags=re.IGNORECASE).strip()
+  L1004: '安装 hub 技能'
+       markers=("安装 hub 技能", "安装技能", "安装skill"),
+  L1054: '搜索技能'
+       markers=("搜索技能", "查找技能", "搜技能"),
+  L1115: '卸载技能'
+       markers=("卸载技能", "删除技能"),
+  L1244: '高风险对话缓冲判断。'
+       """高风险对话缓冲判断。"""
+  L1404: '【前额叶规划】当前回应目标：{_prefrontal_task}'
+       _prefrontal_context_block = f"【前额叶规划】当前回应目标：{_prefrontal_task}"
+  L1406: '（语气：{_prefrontal_tone_hint}）'
+       _prefrontal_context_block += f"（语气：{_prefrontal_tone_hint}）"
+  L1408: '[%s] ChatAgent 接收 prefrontal_task: task=%s tone=%s'
+       "[%s] ChatAgent 接收 prefrontal_task: task=%s tone=%s",
+
+=== host_brain/app\chat_agent_postprocessor.py (5 处) ===
+  L30: 'Phase XV P7：向 Edge 发送单句 TTS 请求（fire-and-forget）。'
+       """Phase XV P7：向 Edge 发送单句 TTS 请求（fire-and-forget）。"""
+  L55: '安全调用 apply_response_intelligence，降级时返回原始 narrative。'
+       """安全调用 apply_response_intelligence，降级时返回原始 narrative。"""
+  L72: 'PII 出口检查，返回（净化后文本, pii_egress_stats）。'
+       """PII 出口检查，返回（净化后文本, pii_egress_stats）。"""
+  L100: '同步写入 INPUT_COMPLETED 事件到 voice_event_log。'
+       """同步写入 INPUT_COMPLETED 事件到 voice_event_log。"""
+  L162: '调度异步后处理任务（fire-and-forget）。'
+       """调度异步后处理任务（fire-and-forget）。"""
+
+=== host_brain/app\chat_agent_preprocessor.py (31 处) ===
+  L27: '^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$'
+       _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+  L28: '^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$'
+       _FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+  L29: '(想你|好想你|我想你了|想你啦|惦记你)'
+       _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|惦记你)")
+  L30: '(特长|擅长|你会什么|你能做什么|你会做什么)'
+       _FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
+  L42: '子 Agent 执行结果，注入 ChatAgent prompt。'
+       """子 Agent 执行结果，注入 ChatAgent prompt。"""
+  L54: 'ChatAgent 的完整输入上下文。'
+       """ChatAgent 的完整输入上下文。"""
+  L282: '好的，稍等下，我马上处理。'
+       text = "好的，稍等下，我马上处理。"
+  L309: '我这边暂时没有可汇报的任务进度。'
+       text = "我这边暂时没有可汇报的任务进度。"
+  L323: '我发现刚才方向可能有点偏，我马上重新对齐你的需求再继续。'
+       text = "我发现刚才方向可能有点偏，我马上重新对齐你的需求再继续。"
+  L337: '还要不要'
+       followup_markers = ("你呢", "要不要", "想不想", "还要不要", "要继续吗", "如果你愿意", "方便的话", "可以告诉我", "能不能", "要不要我", "要我继续", "还想", "要聊聊吗", "
+  L347: '[，,、]?(?:你呢|你觉得呢|你怎么看呢|你怎么看|你觉得怎么样呢|你觉得怎么样)[。！？!?？]*$'
+       patterns = [r"[，,、]?(?:你呢|你觉得呢|你怎么看呢|你怎么看|你觉得怎么样呢|你觉得怎么样)[。！？!?？]*$", r"[，,、]?(?:要不要|想不想|还要不要|要不要继续|要继续吗).*[。！？!?？]*$", 
+  L363: '^(?:对了|另外|顺便|说起来|还有|题外话|再补一句|补充一句)'
+       return bool(re.match(r"^(?:对了|另外|顺便|说起来|还有|题外话|再补一句|补充一句)", normalized))
+  L368: '好喜欢你'
+       markers = ("我爱你", "爱你", "好喜欢你", "最喜欢你", "喜欢你", "好想你", "想你了", "想你", "离不开你", "不能没有你", "只想和你", "属于你", "亲亲", "抱抱你", "一直陪着你",
+  L376: '好喜欢你'
+       markers = ("亲爱的", "宝贝", "宝宝", "乖乖", "抱抱", "亲亲", "喜欢你", "好喜欢你", "最喜欢你", "想你", "好想你", "想你了")
+  L418: '哈{2,}'
+       normalized = re.sub(r"哈{2,}", "", normalized)
+  L419: '呵{2,}'
+       normalized = re.sub(r"呵{2,}", "", normalized)
+  L420: '嘿{2,}'
+       normalized = re.sub(r"嘿{2,}", "", normalized)
+  L421: '嘻{2,}'
+       normalized = re.sub(r"嘻{2,}", "", normalized)
+  L621: '^\\s*(?:蓝蓝|夏目蓝|夏目藍|小蓝|阿蓝)[，,、:：\\s]*'
+       text = re.sub(r"^\s*(?:蓝蓝|夏目蓝|夏目藍|小蓝|阿蓝)[，,、:：\s]*", "", text)
+  L646: '^(?:搜索(?:一下)?|查(?:一下)?|帮我搜索(?:一下)?|帮我查(?:一下)?|给我搜索(?:一下)?|给我查(?:一下)?)\\s*'
+       topic = re.sub(r"^(?:搜索(?:一下)?|查(?:一下)?|帮我搜索(?:一下)?|帮我查(?:一下)?|给我搜索(?:一下)?|给我查(?:一下)?)\s*", "", topic)
+  L706: '^(?:蓝蓝|夏目蓝|夏目蓝蓝|natsume ai|natsume)[，,\\s:：]*'
+       normalized = re.sub(r"^(?:蓝蓝|夏目蓝|夏目蓝蓝|natsume ai|natsume)[，,\s:：]*", "", normalized, flags=re.IGNORECASE).strip()
+  L707: '\\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$'
+       normalized = re.sub(r"\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$", "", normalized, flags=re.IGNORECASE).strip()
+  L727: '安装 hub 技能'
+       name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("安装 hub 技能", "安装技能", "安装skill"), def
+  L766: '搜索技能'
+       query = str(detail.get("query") or payload.get("query") or _infer_hub_skill_name_from_task(ctx.task, markers=("搜索技能", "查
+  L815: '卸载技能'
+       name = str(detail.get("name") or _infer_hub_skill_name_from_task(ctx.task, markers=("卸载技能", "删除技能"), default_name=_defau
+  L855: '将子 Agent 结果转换为注入 ChatAgent prompt 的上下文块。'
+       """将子 Agent 结果转换为注入 ChatAgent prompt 的上下文块。"""
+  L922: '哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった'
+       ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶|うれしい|楽しい|よかった"),
+  L923: '难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん'
+       ("SAD", "难过|伤心|哭|呜|抱歉|对不起|悲しい|つらい|ごめん"),
+  L924: '生气|气死|烦|腹立|むかつく'
+       ("ANGRY", "生气|气死|烦|腹立|むかつく"),
+  L925: '谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった'
+       ("LOVING", "谢谢|感谢|感动|喜欢|爱你|好き|大好き|愛してる|会いたかった"),
+  L926: '哇|真的吗|竟然|びっくり|えっ|本当'
+       ("SURPRISED", "哇|真的吗|竟然|びっくり|えっ|本当"),
+
+=== host_brain/app\chat_context_builder.py (31 处) ===
+  L284: '你是夏目藍...(中文风格指导)'
+       "instruction_cn": "你是夏目藍...(中文风格指导)",
+  L285: 'あなたは夏目藍...(日语风格指导)'
+       "instruction_ja": "あなたは夏目藍...(日语风格指导)",
+  L411: 'world canon slot 构建失败: {exc}'
+       detail=f"world canon slot 构建失败: {exc}",
+  L891: '偏温暖承接'
+       "warm": "偏温暖承接",
+  L892: '偏克制试探'
+       "guarded": "偏克制试探",
+  L893: '偏留白保守'
+       "uncertain": "偏留白保守",
+  L894: '偏脆弱照看'
+       "fragile": "偏脆弱照看",
+  L895: '偏中性回忆'
+       "neutral": "偏中性回忆",
+  L900: '本次召回命中了 {humanized_count} 条带人格化标记的记忆'
+       parts.append(f"本次召回命中了 {humanized_count} 条带人格化标记的记忆")
+  L902: '主导回忆情绪偏向 {dominant_emotion}'
+       parts.append(f"主导回忆情绪偏向 {dominant_emotion}")
+  L904: '{shared_history_resonance_count} 条带共享记忆共振'
+       parts.append(f"{shared_history_resonance_count} 条带共享记忆共振")
+  L906: '{protective_recoil_count} 条带防御性回缩'
+       parts.append(f"{protective_recoil_count} 条带防御性回缩")
+  L908: '其中 {suppressed_count} 条处于压制状态'
+       parts.append(f"其中 {suppressed_count} 条处于压制状态")
+  L910: '{distorted_count} 条带有细节失真，平均失真 {avg_distortion:.2f}'
+       parts.append(f"{distorted_count} 条带有细节失真，平均失真 {avg_distortion:.2f}")
+  L912: '当前回忆倾向 {bias_labels.get(recall_bias, recall_bias)}'
+       parts.append(f"当前回忆倾向 {bias_labels.get(recall_bias, recall_bias)}")
+  L914: '处理建议：{guidance}'
+       parts.append(f"处理建议：{guidance}")
+  L2226: 'OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s'
+       "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
+  L2244: 'EmotionalSilenceEngine 状态注入: user=%s willingness=%.2f level=%s'
+       "EmotionalSilenceEngine 状态注入: user=%s willingness=%.2f level=%s",
+  L2269: 'BodySenseModel 状态注入: user=%s fatigue=%s drowsiness=%s loneliness=%s'
+       "BodySenseModel 状态注入: user=%s fatigue=%s drowsiness=%s loneliness=%s",
+  L2305: 'EmergentGrowthEngine 成长叙事注入（via PrefrontalAgent）: user=%s note='
+       "EmergentGrowthEngine 成长叙事注入（via PrefrontalAgent）: user=%s note='%s'",
+  L2713: '主动关怀，增加陪伴感表达，避免冷漠或过于简短的回复'
+       "suggest": "主动关怀，增加陪伴感表达，避免冷漠或过于简短的回复",
+  L2739: '当前会话存在内容风险，回复需更加谨慎，避免触碰敏感话题'
+       "suggest": "当前会话存在内容风险，回复需更加谨慎，避免触碰敏感话题",
+  L2785: '当前痛觉较高，回复需更温柔体贴，避免加重负面情绪'
+       "suggest": "当前痛觉较高，回复需更温柔体贴，避免加重负面情绪",
+  L2816: '当前疲劳度较高，回复应简洁温柔，避免信息过载'
+       "suggest": "当前疲劳度较高，回复应简洁温柔，避免信息过载",
+  L2856: '当前输入存在风险信号，回复应保持谨慎，避免配合敏感操作'
+       "suggest": "当前输入存在风险信号，回复应保持谨慎，避免配合敏感操作",
+  L2886: '当前为夜间时段，回复应更温柔、简短，避免高能量话题'
+       "suggest": "当前为夜间时段，回复应更温柔、简短，避免高能量话题",
+  L2917: '当前共情共鸣强烈，回复应充分体现情感同频，优先情感支持'
+       "suggest": "当前共情共鸣强烈，回复应充分体现情感同频，优先情感支持",
+  L2936: '当前人格漂移较严重，回复应主动向核心人格特征靠拢，避免偏离角色设定'
+       "suggest": "当前人格漂移较严重，回复应主动向核心人格特征靠拢，避免偏离角色设定",
+  L2991: '当前关系需要修复，回复应更温柔、更有耐心，主动表达关心'
+       "suggest": "当前关系需要修复，回复应更温柔、更有耐心，主动表达关心",
+  L3011: '当前身体预算不足，回复应更简短、更温和，避免高能量输出'
+       "suggest": "当前身体预算不足，回复应更简短、更温和，避免高能量输出",
+  L3057: 'CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s '
+       "CortexAgent Supervisor 收口完成: gate_state=%s route=%s voice_emotion=%s hedonic_tone=%s "
+
+=== host_brain/app\chat_context_memory.py (10 处) ===
+  L256: '偏温暖承接'
+       "warm": "偏温暖承接", "guarded": "偏克制试探",
+  L257: '偏留白保守'
+       "uncertain": "偏留白保守", "fragile": "偏脆弱照看", "neutral": "偏中性回忆",
+  L261: '本次召回命中了 {humanized_count} 条带人格化标记的记忆'
+       parts.append(f"本次召回命中了 {humanized_count} 条带人格化标记的记忆")
+  L263: '主导回忆情绪偏向 {dominant_emotion}'
+       parts.append(f"主导回忆情绪偏向 {dominant_emotion}")
+  L265: '{shared_history_resonance_count} 条带共享记忆共振'
+       parts.append(f"{shared_history_resonance_count} 条带共享记忆共振")
+  L267: '{protective_recoil_count} 条带防御性回缩'
+       parts.append(f"{protective_recoil_count} 条带防御性回缩")
+  L269: '其中 {suppressed_count} 条处于压制状态'
+       parts.append(f"其中 {suppressed_count} 条处于压制状态")
+  L271: '{distorted_count} 条带有细节失真，平均失真 {avg_distortion:.2f}'
+       parts.append(f"{distorted_count} 条带有细节失真，平均失真 {avg_distortion:.2f}")
+  L273: '当前回忆倾向 {bias_labels.get(recall_bias, recall_bias)}'
+       parts.append(f"当前回忆倾向 {bias_labels.get(recall_bias, recall_bias)}")
+  L275: '处理建议：{guidance}'
+       parts.append(f"处理建议：{guidance}")
+
+=== host_brain/app\chat_handler.py (2 处) ===
+  L213: 'unified_chat_sse_generator 使用预鉴权结果（来自 GovernorNode），跳过重复鉴权'
+       "unified_chat_sse_generator 使用预鉴权结果（来自 GovernorNode），跳过重复鉴权",
+  L252: '客户端传入非法 scene_type，已降级为 SCENE_CHAT'
+       "客户端传入非法 scene_type，已降级为 SCENE_CHAT",
+
+=== host_brain/app\chat_handler_vision.py (10 处) ===
+  L132: '记录一次调用结果，返回 SLA 监控摘要。'
+       """记录一次调用结果，返回 SLA 监控摘要。"""
+  L162: 'VISION SLA 告警: %s model=%s provider=%s consecutive=%d degrade_rate=%.2f'
+       "VISION SLA 告警: %s model=%s provider=%s consecutive=%d degrade_rate=%.2f",
+  L203: '构建视觉上下文描述段落。'
+       """构建视觉上下文描述段落。"""
+  L284: '判断是否有真实图片输入（base64 或 URL）。'
+       """判断是否有真实图片输入（base64 或 URL）。"""
+  L349: '图片上传被策略拒绝，降级为纯文字模式'
+       "图片上传被策略拒绝，降级为纯文字模式",
+  L369: 'Airlock 图片过滤 BLOCK，降级为纯文字模式: %s'
+       "Airlock 图片过滤 BLOCK，降级为纯文字模式: %s",
+  L378: 'Airlock 图片过滤 WARN，检测到潜在敏感内容: %s'
+       "Airlock 图片过滤 WARN，检测到潜在敏感内容: %s",
+  L543: 'VISION HMAC 签名校验失败: request_id=%s session_id=%s'
+       "VISION HMAC 签名校验失败: request_id=%s session_id=%s",
+  L582: 'VISION 请求来源校验失败: origin_ip=%s'
+       "VISION 请求来源校验失败: origin_ip=%s",
+  L694: 'VISION SLA 延迟告警: latency_ms=%d > threshold=%d'
+       "VISION SLA 延迟告警: latency_ms=%d > threshold=%d",
+
+=== host_brain/app\chat_retrieval_helpers.py (4 处) ===
+  L47: '什么意思|啥意思|什么情况|怎么理解|怎么说|这话什么意思|这句什么意思|刚才那句什么意思|你这是什么意思|你这话是什么意思|'
+       r"什么意思|啥意思|什么情况|怎么理解|怎么说|这话什么意思|这句什么意思|刚才那句什么意思|你这是什么意思|你这话是什么意思|"
+  L48: '(?:你|我)(?:刚才|刚刚|上一句|上句|前一句|前面).{0,16}(?:什么意思|说了什么|发了什么|回了什么|回复了什么|是什么)|'
+       r"(?:你|我)(?:刚才|刚刚|上一句|上句|前一句|前面).{0,16}(?:什么意思|说了什么|发了什么|回了什么|回复了什么|是什么)|"
+  L49: '(?:上一句|上句|前一句|刚才说的|刚刚说的).{0,12}(?:什么意思|是什么|说了什么)?'
+       r"(?:上一句|上句|前一句|刚才说的|刚刚说的).{0,12}(?:什么意思|是什么|说了什么)?"
+  L187: '并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。'
+       """并行执行检索，返回 (retrieval_summary, retrieval_evidence_items)。"""
+
+=== host_brain/app\cortex_prompt_builder.py (4 处) ===
+  L562: '【角色人设】\\n'
+       _section_templates.get("profile_title", "【角色人设】\n")
+  L569: '【说话风格（必须遵守）】\\n'
+       _section_templates.get("style_title", "【说话风格（必须遵守）】\n")
+  L581: '【用户消息】\\n'
+       _section_templates.get("user_message_title", "【用户消息】\n")
+  L596: '构建子 Agent 能力描述块。'
+       """构建子 Agent 能力描述块。"""
+
+=== host_brain/app\dependencies.py (14 处) ===
+  L152: '注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。'
+       """注册进程级 ActivityMonitor 实例（由 http_hooks 启动时调用）。"""
+  L158: '获取进程级 ActivityMonitor，可选在缺失时懒启动。'
+       """获取进程级 ActivityMonitor，可选在缺失时懒启动。"""
+  L231: '获取 SQLite 账本实例（延迟初始化，支持跨线程访问）。'
+       """获取 SQLite 账本实例（延迟初始化，支持跨线程访问）。"""
+  L674: '获取模型路由矩阵单例（延迟初始化）。'
+       """获取模型路由矩阵单例（延迟初始化）。"""
+  L702: '获取 RecallPack 组装器单例（延迟初始化）。'
+       """获取 RecallPack 组装器单例（延迟初始化）。"""
+  L724: '获取记忆守卫单例（延迟初始化）。'
+       """获取记忆守卫单例（延迟初始化）。"""
+  L741: '获取状态仲裁器单例（延迟初始化）。'
+       """获取状态仲裁器单例（延迟初始化）。"""
+  L763: '获取状态写权限仲裁器单例（延迟初始化）。'
+       """获取状态写权限仲裁器单例（延迟初始化）。"""
+  L790: '获取蒸馏引擎单例（延迟初始化）。'
+       """获取蒸馏引擎单例（延迟初始化）。"""
+  L819: '获取语义召回器单例（延迟初始化）。'
+       """获取语义召回器单例（延迟初始化）。"""
+  L841: 'SemanticRecaller 已初始化（use_mock=%s, chroma=%s:%d, top_k=%d, threshold=%.2f）'
+       "SemanticRecaller 已初始化（use_mock=%s, chroma=%s:%d, top_k=%d, threshold=%.2f）",
+  L1082: 'sys_mode 已切换: %s → %s'
+       "sys_mode 已切换: %s → %s",
+  L1099: '基于当前 HardState 派生内分泌基调状态（EndocrineAgent 最小版）。'
+       """基于当前 HardState 派生内分泌基调状态（EndocrineAgent 最小版）。"""
+  L1198: 'EmotionTimeline 已从日志预热 %d 条情绪记录'
+       "EmotionTimeline 已从日志预热 %d 条情绪记录",
+
+=== host_brain/app\emotion_context.py (31 处) ===
+  L99: '获取全局情感时间线实例（供外部模块访问）。'
+       """获取全局情感时间线实例（供外部模块访问）。"""
+  L106: '刚醒来，状态还不错'
+       首次调用时初始化为中性偏微正的默认值（模拟"刚醒来，状态还不错"）。
+  L146: '情绪时间衰减 elapsed=%.1f分钟 rate=%.3f valence=%.3f→%.3f arousal=%.3f→%.3f'
+       "情绪时间衰减 elapsed=%.1f分钟 rate=%.3f valence=%.3f→%.3f arousal=%.3f→%.3f",
+  L181: '持久化情绪更新 new_input=(%.3f,%.3f) decayed=(%.3f,%.3f) blended=(%.3f,%.3f)'
+       "持久化情绪更新 new_input=(%.3f,%.3f) decayed=(%.3f,%.3f) blended=(%.3f,%.3f)",
+  L408: '现在心里特别开心，有种想要分享一切的冲动'
+       return str(case_templates.get("high_positive_high_arousal") or "现在心里特别开心，有种想要分享一切的冲动")
+  L411: '心里暖暖的，感觉很安心，这种平静的幸福感真好'
+       return str(case_templates.get("high_positive_low_arousal") or "心里暖暖的，感觉很安心，这种平静的幸福感真好")
+  L414: '心情不错，有些小雀跃，想和对方多聊聊'
+       return str(case_templates.get("mid_positive_mid_arousal") or "心情不错，有些小雀跃，想和对方多聊聊")
+  L417: '很舒服的状态，不需要太多言语，安静待着也很好'
+       return str(case_templates.get("mid_positive_low_arousal") or "很舒服的状态，不需要太多言语，安静待着也很好")
+  L420: '心里有些难受，但还在努力消化这种感觉，不想让对方担心'
+       return str(case_templates.get("high_negative_high_arousal") or "心里有些难受，但还在努力消化这种感觉，不想让对方担心")
+  L423: '有点低落，不太想说话，只想安静待一会儿'
+       return str(case_templates.get("high_negative_low_arousal") or "有点低落，不太想说话，只想安静待一会儿")
+  L426: '心情有点沉，不过还好，也许聊聊会好一些'
+       return str(case_templates.get("mid_negative") or "心情有点沉，不过还好，也许聊聊会好一些")
+  L429: '有些紧张，心跳比平时快一些，不知道在期待什么'
+       return str(case_templates.get("high_arousal_neutral_valence") or "有些紧张，心跳比平时快一些，不知道在期待什么")
+  L432: '很平静，像水面一样，思绪慢慢地流淌'
+       return str(case_templates.get("low_arousal_neutral_valence") or "很平静，像水面一样，思绪慢慢地流淌")
+  L435: '状态不错，心里很有底，知道自己在做什么'
+       return str(case_templates.get("high_dominance") or "状态不错，心里很有底，知道自己在做什么")
+  L438: '心态比较柔软，愿意倾听和配合对方'
+       return str(case_templates.get("low_dominance") or "心态比较柔软，愿意倾听和配合对方")
+  L440: '状态还不错，心里很平稳，可以自然地聊下去'
+       return str(templates.get("default") or "状态还不错，心里很平稳，可以自然地聊下去")
+  L474: '方向 D：将当天的情感时间线摘要写入 EpisodicStore 作为'
+       """方向 D：将当天的情感时间线摘要写入 EpisodicStore 作为"情感日记"。
+  L516: '[情感日记] {diary_text}'
+       text=f"[情感日记] {diary_text}",
+  L530: '方向D: 情感日记写入 status=%s entries=%d dominant=%s avg_valence=%.3f'
+       "方向D: 情感日记写入 status=%s entries=%d dominant=%s avg_valence=%.3f",
+  L575: '更新用户情感画像（每次对话时调用）。'
+       """更新用户情感画像（每次对话时调用）。"""
+  L592: '生成用户情感画像摘要（供 prompt 注入）。'
+       """生成用户情感画像摘要（供 prompt 注入）。"""
+  L629: '将用户情感画像转为自然语言提示。'
+       """将用户情感画像转为自然语言提示。"""
+  L645: '这位用户总体上是一个比较积极乐观的人'
+       "这位用户总体上是一个比较积极乐观的人",
+  L654: '这位用户似乎最近心情不太好，需要更多温暖和关心'
+       "这位用户似乎最近心情不太好，需要更多温暖和关心",
+  L663: '这位用户的情绪比较平稳'
+       "这位用户的情绪比较平稳",
+  L678: '大部分时候处于{emotion}的状态'
+       "大部分时候处于{emotion}的状态",
+  L688: '经常处于{emotion}的状态'
+       "经常处于{emotion}的状态",
+  L700: '情绪变化比较大，对情感话题可能比较敏感'
+       "情绪变化比较大，对情感话题可能比较敏感",
+  L709: '情绪很稳定'
+       "情绪很稳定",
+  L726: '获取全局用户情感画像单例（方向 F）。线程安全。'
+       """获取全局用户情感画像单例（方向 F）。线程安全。"""
+  L740: '更新用户情感画像（方向 F，在每次对话时调用）。'
+       """更新用户情感画像（方向 F，在每次对话时调用）。"""
+
+=== host_brain/app\emotion_llm_inference.py (4 处) ===
+  L103: '构建 LLM 情感推理的用户侧 prompt。'
+       """构建 LLM 情感推理的用户侧 prompt。"""
+  L163: 'Level 2 LLM 推理结果。'
+       """Level 2 LLM 推理结果。"""
+  L288: '同步 LLM 调用（在独立线程中执行）。'
+       """同步 LLM 调用（在独立线程中执行）。"""
+  L505: '检查 LLM 情感推理是否启用。'
+       """检查 LLM 情感推理是否启用。"""
+
+=== host_brain/app\entry_routing.py (1 处) ===
+  L1: '入口路由层工具：fast-pass、narrative 判定等，与建图逻辑解耦（P3 职责分离）。'
+       """入口路由层工具：fast-pass、narrative 判定等，与建图逻辑解耦（P3 职责分离）。"""
+
+=== host_brain/app\executive_runtime_core.py (19 处) ===
+  L36: '我刚才说'
+       "我刚才说",
+  L37: '你刚才说'
+       "你刚才说",
+  L38: '我们刚才'
+       "我们刚才",
+  L44: '做完了吗'
+       "做完了吗",
+  L46: '执行到哪'
+       "执行到哪",
+  L47: '任务状态'
+       "任务状态",
+  L48: '现在怎么样'
+       "现在怎么样",
+  L61: '(?:然后|并且|同时|接着|之后|再把|再去|再来)'
+       _ACTION_SPLIT_RE = re.compile(r"(?:然后|并且|同时|接着|之后|再把|再去|再来)")
+  L235: ' 不在 registry，降级到 delegate 路由 (keyword=%s)'
+       "_hard_rule_route: skill '%s' 不在 registry，降级到 delegate 路由 (keyword=%s)",
+  L353: '当前没有可汇报的执行进度。'
+       result_text="当前没有可汇报的执行进度。",
+  L361: '当前任务 {target_id} 状态为 {status}，已运行 {elapsed}。'
+       result_text = f"当前任务 {target_id} 状态为 {status}，已运行 {elapsed}。"
+  L363: ' 当前进展：{progress}'
+       result_text += f" 当前进展：{progress}"
+  L366: ' 结果摘要：{result_value}'
+       result_text += f" 结果摘要：{result_value}"
+  L934: '[%s] _execute_skill_dag: plan_graph 执行完成 success=%s latency=%dms'
+       "[%s] _execute_skill_dag: plan_graph 执行完成 success=%s latency=%dms",
+  L963: '[%s] plan_graph 执行失败，返回失败结果（不降级到 SkillDag，避免执行不同数据的计划）: %s'
+       "[%s] plan_graph 执行失败，返回失败结果（不降级到 SkillDag，避免执行不同数据的计划）: %s",
+  L1002: '[%s] _execute_skill_dag: 关键节点失败，中断后续批次执行'
+       "[%s] _execute_skill_dag: 关键节点失败，中断后续批次执行",
+  L1049: '[%s] 关键节点 %s 失败（有 %d 个后续节点依赖），标记中断'
+       "[%s] 关键节点 %s 失败（有 %d 个后续节点依赖），标记中断",
+  L1421: '当前没有可汇报的执行进度。'
+       fallback_no_summary_text="当前没有可汇报的执行进度。",
+  L1471: '[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s'
+       "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
+
+=== host_brain/app\failure_matrix.py (28 处) ===
+  L29: '系统失败事件枚举，覆盖所有需要统一处理的异常场景。'
+       """系统失败事件枚举，覆盖所有需要统一处理的异常场景。"""
+  L31: 'Governor R1-R7 任意规则触发拦截'
+       """Governor R1-R7 任意规则触发拦截"""
+  L33: '七路召回结果为空'
+       """七路召回结果为空"""
+  L35: '主模型失败，已降级到备用模型'
+       """主模型失败，已降级到备用模型"""
+  L37: 'QA Contract 检测到违规并重写输出'
+       """QA Contract 检测到违规并重写输出"""
+  L39: 'Edge 端不可达'
+       """Edge 端不可达"""
+  L41: 'Vision 识别置信度低于阈值（0.80）'
+       """Vision 识别置信度低于阈值（0.80）"""
+  L43: '任意模块超时'
+       """任意模块超时"""
+  L47: '检测到提示词注入攻击（CRITICAL/HIGH/MEDIUM 三级）'
+       """检测到提示词注入攻击（CRITICAL/HIGH/MEDIUM 三级）"""
+  L56: 'FailureHandler.handle() 的返回值。'
+       """FailureHandler.handle() 的返回值。"""
+  L58: '触发的失败事件'
+       """触发的失败事件"""
+  L60: '向用户展示的标准化响应文本'
+       """向用户展示的标准化响应文本"""
+  L62: '写入 triptych 的审计标签'
+       """写入 triptych 的审计标签"""
+  L64: '是否中止当前链路（False 表示可以继续，如 MODEL_FALLBACK）'
+       """是否中止当前链路（False 表示可以继续，如 MODEL_FALLBACK）"""
+  L66: '降级模式标识（如 '
+       """降级模式标识（如 'text_only'、'conservative_answer'）"""
+  L68: '附加元数据（写入响应 meta 字段）'
+       """附加元数据（写入响应 meta 字段）"""
+  L78: '……这个，蓝没办法回答呢。'
+       "……这个，蓝没办法回答呢。"
+  L81: '嗯……蓝对这个不太了解，能再多告诉蓝一些吗？'
+       "嗯……蓝对这个不太了解，能再多告诉蓝一些吗？"
+  L92: '声音好像传不过去了……先用文字聊吧。'
+       "声音好像传不过去了……先用文字聊吧。"
+  L95: '蓝看不太清楚……能再描述一下，或者重新发一次吗？'
+       "蓝看不太清楚……能再描述一下，或者重新发一次吗？"
+  L98: '等了好久都没反应……再试一次好吗？'
+       "等了好久都没反应……再试一次好吗？"
+  L101: '……这个，蓝没办法回答呢。'
+       "……这个，蓝没办法回答呢。"
+  L225: 'FailureHandler 处理完成: event=%s, abort=%s, mode=%s'
+       "FailureHandler 处理完成: event=%s, abort=%s, mode=%s",
+  L237: '各事件的特定处理逻辑。'
+       """各事件的特定处理逻辑。"""
+  L246: '主模型不可用'
+       meta["fallback_reason"] = detail.get("fallback_reason", "主模型不可用")
+Traceback (most recent call last):
+  File "D:\Natsume_Ai_repo\scripts\scan_hardcoded_strings.py", line 47, in <module>
+    print(f"  L{i}: {text!r}")
+UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0' in position 26: illegal multibyte sequence

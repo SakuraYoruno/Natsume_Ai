@@ -56,9 +56,9 @@ templates:
       assistant_meaning_template: 我刚才的意思是：{latest_assistant}
     runtime_task_status:
       pre_dispatch_detail: 正在整理上下文和检索记忆。
-      pre_dispatch_progress: 我正在整理上下文和检索记忆。
-      failed_detail: 整条回复已经完成，但执行阶段有失败。
-      completed_detail: 整条回复已经完成。
+      pre_dispatch_progress: 嗯，我在整理一下上下文，马上来。
+      failed_detail: 这次回复完成了，不过执行阶段有一步没顺利，我已经记下来了。
+      completed_detail: 这次回复完成了。
     llm_unavailable_fallback: 嗯……蓝现在脑子有点转不动，等一下再来找我好不好？
 - template_id: executive_router.runtime_texts
   category: fallback

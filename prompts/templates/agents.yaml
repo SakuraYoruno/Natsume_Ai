@@ -7,7 +7,7 @@ templates:
   description: ChatAgent 运行期摘要与异常摘要模板（JSON）
   default_content:
     draft_summary_default: 聊天回复已生成
-    handler_error_summary: ChatAgent 执行异常
+    handler_error_summary: 这边出了点问题，暂时没法给你回复，稍后再试试吧。
 - template_id: chat_handler_vision.fallback_texts
   category: fallback
   scope: chat_handler_vision
@@ -15,12 +15,12 @@ templates:
   content_type: json
   description: 视觉链兜底文案（JSON，含不可用/报错/签名失败/来源拒绝等）
   default_content:
-    llm_unavailable: 啊啦，视觉分析功能现在暂时不可用呢。不过你可以用文字描述一下你看到的界面，我来帮你分析！
-    empty_narrative: 啊啦，这边好像稍微有点忙不过来了呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？
-    llm_error: 啊啦，视觉分析的时候遇到了一点小问题呢。你可以再试一次，或者用文字描述一下你看到的内容，我来帮你！
-    hmac_rejected: 啊啦，请求签名验证失败呢，请检查一下鉴权配置。
-    origin_not_allowed: 啊啦，这个请求来源不在允许范围内呢。
-    sse_error: 啊啦，视觉分析的时候遇到了一点小问题呢。不要太着急哦，先稍微休息一下，喝口茶，等会儿再来试吧？
+    llm_unavailable: 视觉分析功能现在暂时不可用，你可以用文字描述一下你看到的界面，我来帮你分析。
+    empty_narrative: 这边好像稍微有点忙不过来了，稍等一下，等会儿再来试试吧。
+    llm_error: 视觉分析的时候遇到了一点小问题，你可以再试一次，或者用文字描述一下你看到的内容，我来帮你。
+    hmac_rejected: 请求签名验证失败，请检查一下鉴权配置。
+    origin_not_allowed: 这个请求来源不在允许范围内。
+    sse_error: 视觉分析的时候遇到了一点小问题，稍等一下，等会儿再来试试吧。
 - template_id: chat_handler_vision.analysis_prompt.templates
   category: prompt
   scope: chat_handler_vision
@@ -75,21 +75,21 @@ templates:
   locale: zh
   content_type: text
   description: CodeAgent 异常摘要
-  default_content: CodeAgent 执行异常
+  default_content: 代码这边出了点问题，暂时没法给你结果。
 - template_id: code_agent_handler.system_prompt_extra
   category: prompt
   scope: code_agent_handler
   locale: zh
   content_type: text
   description: CodeAgent ReAct 额外 system prompt
-  default_content: 你是代码专家，负责生成高质量的代码草案和修复方案。
+  default_content: 你是夏目蓝的代码能力模块，负责生成高质量的代码草稿和修复方案。输出要简洁、准确、可直接使用。
 - template_id: emotion_agent_handler.error_summary
   category: fallback
   scope: emotion_agent_handler
   locale: zh
   content_type: text
   description: EmotionAgent 异常摘要
-  default_content: EmotionAgent 执行异常
+  default_content: 情感分析这边出了点问题，暂时没法给你结果。
 - template_id: emotion_agent_handler.prompt_templates
   category: prompt
   scope: emotion_agent_handler
@@ -127,14 +127,14 @@ templates:
   locale: zh
   content_type: text
   description: IntentAgent 异常摘要
-  default_content: IntentAgent 执行异常
+  default_content: 执行意图这边出了点问题，暂时没法给你结果。
 - template_id: intent_agent_handler.system_prompt_extra
   category: prompt
   scope: intent_agent_handler
   locale: zh
   content_type: text
   description: IntentAgent ReAct 额外 system prompt
-  default_content: 你是执行意图专家，负责理解用户的执行意图并制定执行计划。
+  default_content: 你是夏目蓝的执行意图模块，负责理解用户的真实意图并制定执行计划。优先理解用户真正想要什么，再决定怎么做。
 - template_id: judge_agent_handler.prompt_templates
   category: prompt
   scope: judge_agent_handler
@@ -220,8 +220,8 @@ templates:
   content_type: json
   description: RetrievalAgent system prompt 与异常摘要模板（JSON）
   default_content:
-    system_prompt_extra: 你是检索专家，负责从知识库中提取相关信息。
-    handler_error_summary: RetrievalAgent 执行异常
+    system_prompt_extra: 你是夏目蓝的检索模块，负责从知识库中提取相关信息。只返回真正相关的内容，不要添加多余信息。
+    handler_error_summary: 检索这边出了点问题，暂时没法给你结果。
 - template_id: sub_agent_protocol.runtime_texts
   category: fallback
   scope: sub_agent_protocol
@@ -267,8 +267,8 @@ templates:
   content_type: json
   description: TranslateAgent system prompt 与异常摘要模板（JSON）
   default_content:
-    system_prompt_extra: 你是翻译专家，负责生成高质量的翻译草案。
-    handler_error_summary: TranslateAgent 执行异常
+    system_prompt_extra: 你是夏目蓝的翻译模块，负责生成高质量的翻译草稿。翻译要自然、准确，保留原文的语气和风格。
+    handler_error_summary: 翻译这边出了点问题，暂时没法给你结果。
 - template_id: vision.action_planner.prompt_templates
   category: prompt
   scope: vision.action_planner
