@@ -433,6 +433,9 @@ class CircadianAgent:
             return {"baseline_applied": False, "error": str(exc)}
 
 
+_CIRCADIAN_AGENT: "CircadianAgent | None" = None
+
+
 def get_circadian_agent() -> CircadianAgent:
     global _CIRCADIAN_AGENT
     if _CIRCADIAN_AGENT is None:

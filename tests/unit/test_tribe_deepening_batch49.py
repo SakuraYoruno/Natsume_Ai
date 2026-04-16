@@ -88,11 +88,11 @@ def test_t383_interoception_high_load_drives_negative_limbic(monkeypatch) -> Non
     mock_glymphatic = MagicMock()
 
     monkeypatch.setattr("host_brain.tribe.interoception_agent.emit_tribe_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr("host_brain.tribe.somatic_agent.get_somatic_agent", lambda: _FakeSomatic(0.88))
+    monkeypatch.setattr("host_brain.tribe.interoception_agent.get_somatic_agent", lambda: _FakeSomatic(0.88))
 
-    with patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=mock_limbic), \
-         patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=mock_pr), \
-         patch("host_brain.tribe.glymphatic_agent.get_glymphatic_agent", return_value=mock_glymphatic):
+    with patch("host_brain.tribe.interoception_agent.get_limbic_agent", return_value=mock_limbic), \
+         patch("host_brain.tribe.interoception_agent.get_pain_reward_agent", return_value=mock_pr), \
+         patch("host_brain.tribe.interoception_agent.get_glymphatic_agent", return_value=mock_glymphatic):
         profile = agent.evaluate_profile(source="unit_t383", ts_ms=101)
 
     assert profile["interoceptive_index"] >= 0.70
@@ -111,11 +111,11 @@ def test_t384_interoception_high_urgency_records_pain(monkeypatch) -> None:
     mock_glymphatic = MagicMock()
 
     monkeypatch.setattr("host_brain.tribe.interoception_agent.emit_tribe_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr("host_brain.tribe.somatic_agent.get_somatic_agent", lambda: _FakeSomatic(0.72))
+    monkeypatch.setattr("host_brain.tribe.interoception_agent.get_somatic_agent", lambda: _FakeSomatic(0.72))
 
-    with patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=mock_limbic), \
-         patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=mock_pr), \
-         patch("host_brain.tribe.glymphatic_agent.get_glymphatic_agent", return_value=mock_glymphatic):
+    with patch("host_brain.tribe.interoception_agent.get_limbic_agent", return_value=mock_limbic), \
+         patch("host_brain.tribe.interoception_agent.get_pain_reward_agent", return_value=mock_pr), \
+         patch("host_brain.tribe.interoception_agent.get_glymphatic_agent", return_value=mock_glymphatic):
         profile = agent.evaluate_profile(source="unit_t384", ts_ms=102)
 
     assert profile["recovery_urgency"] >= 0.75
@@ -133,11 +133,11 @@ def test_t385_interoception_low_urgency_records_reward(monkeypatch) -> None:
     mock_glymphatic = MagicMock()
 
     monkeypatch.setattr("host_brain.tribe.interoception_agent.emit_tribe_event", lambda *args, **kwargs: None)
-    monkeypatch.setattr("host_brain.tribe.somatic_agent.get_somatic_agent", lambda: _FakeSomatic(0.10))
+    monkeypatch.setattr("host_brain.tribe.interoception_agent.get_somatic_agent", lambda: _FakeSomatic(0.10))
 
-    with patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=mock_limbic), \
-         patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=mock_pr), \
-         patch("host_brain.tribe.glymphatic_agent.get_glymphatic_agent", return_value=mock_glymphatic):
+    with patch("host_brain.tribe.interoception_agent.get_limbic_agent", return_value=mock_limbic), \
+         patch("host_brain.tribe.interoception_agent.get_pain_reward_agent", return_value=mock_pr), \
+         patch("host_brain.tribe.interoception_agent.get_glymphatic_agent", return_value=mock_glymphatic):
         profile = agent.evaluate_profile(source="unit_t385", ts_ms=103)
 
     assert profile["recovery_urgency"] < 0.20
@@ -151,7 +151,7 @@ def test_t386_peripheral_disconnect_injects_stress() -> None:
     agent = PeripheralAgent(state_registry=TribeStateRegistry())
     mock_intero = MagicMock()
 
-    with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=mock_intero):
+    with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
         _run(agent._on_platform_disconnected(_Event(payload={"platform": "wechat"}, ts_ms=201)))
 
     mock_intero.inject_external_stress.assert_called_once()
@@ -164,7 +164,7 @@ def test_t387_peripheral_immune_block_injects_stress() -> None:
     agent = PeripheralAgent(state_registry=TribeStateRegistry())
     mock_intero = MagicMock()
 
-    with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=mock_intero):
+    with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
         _run(agent._on_immune_block(_Event(payload={"risk_level": "high"}, ts_ms=202)))
 
     mock_intero.inject_external_stress.assert_called_once()
@@ -177,7 +177,7 @@ def test_t388_peripheral_positive_emotion_drives_limbic() -> None:
     agent = PeripheralAgent(state_registry=TribeStateRegistry())
     mock_limbic = MagicMock()
 
-    with patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=mock_limbic):
+    with patch("host_brain.tribe.peripheral_agent.get_limbic_agent", return_value=mock_limbic):
         _run(
             agent._on_emotion_state_changed(
                 _Event(payload={"emotion_tag": "JOY", "intensity": 0.82}, ts_ms=203)
@@ -196,8 +196,8 @@ def test_t389_peripheral_connected_records_reward() -> None:
     mock_intero = MagicMock()
     mock_pr = MagicMock()
 
-    with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=mock_intero), \
-         patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=mock_pr):
+    with patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero), \
+         patch("host_brain.tribe.peripheral_agent.get_pain_reward_agent", return_value=mock_pr):
         _run(agent._on_platform_connected(_Event(payload={"platform": "wechat", "detail": "restored"}, ts_ms=204)))
 
     mock_intero.reduce_recovery_urgency.assert_called_once()
@@ -214,9 +214,9 @@ def test_t390_somatic_low_fatigue_records_reward() -> None:
     mock_limbic = MagicMock()
     mock_pr = MagicMock()
 
-    with patch("host_brain.tribe.interoception_agent.get_interoception_agent", return_value=mock_intero), \
-         patch("host_brain.tribe.limbic_agent.get_limbic_agent", return_value=mock_limbic), \
-         patch("host_brain.tribe.pain_reward_agent.get_pain_reward_agent", return_value=mock_pr):
+    with patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero), \
+         patch("host_brain.tribe.somatic_agent.get_limbic_agent", return_value=mock_limbic), \
+         patch("host_brain.tribe.somatic_agent.get_pain_reward_agent", return_value=mock_pr):
         _run(agent._on_body_sense_updated(_Event(payload={"fatigue_level": 0.10}, ts_ms=205)))
 
     mock_pr.record_reward.assert_called_once()
