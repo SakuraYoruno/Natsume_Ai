@@ -196,14 +196,12 @@ class InteroceptionAgent:
         Returns:
             内感受描述字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("INTEROCEPTION_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
         _significant = (
             float(interoception_index or 0.5) < 0.3
             or float(recovery_urgency or 0.0) > 0.7
             or float(body_budget or 0.5) < 0.3
         )
-        if not _enabled or not _significant:
+        if not _significant:
             return None
 
         import logging as _logging  # noqa: PLC0415

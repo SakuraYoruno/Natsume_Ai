@@ -287,13 +287,11 @@ class SomaticAgent:
         Returns:
             躯体感受描述字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("SOMATIC_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
         _significant = (
             float(somatic_pressure or 0.0) > 0.4
             or (float(face_confidence or 0.0) > 0.5 and str(user_expression or "NEUTRAL").upper() != "NEUTRAL")
         )
-        if not _enabled or not _significant:
+        if not _significant:
             return None
 
         import logging as _logging  # noqa: PLC0415

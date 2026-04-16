@@ -200,10 +200,8 @@ class VestibularAgent:
         Returns:
             不稳定原因分析字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("VESTIBULAR_STABILITY_ASSESSMENT_ENABLED", "false")).lower() in ("1", "true", "yes")
         _significant = str(stability_status or "stable").lower() in ("unstable", "critical")
-        if not _enabled or not _significant:
+        if not _significant:
             return None
 
         import logging as _logging  # noqa: PLC0415
