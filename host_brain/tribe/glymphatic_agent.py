@@ -198,6 +198,92 @@ class GlymphaticAgent:
 
         return result
 
+    # ── 记忆巩固摘要（A 级升级）──────────────────────────────────────────────
+
+    def generate_consolidation_summary(
+        self,
+        *,
+        episode_summary: str = "",
+        emotion_trajectory: str = "",
+        bond_stage: str = "stranger",
+        recovery_quality: float = 0.5,
+    ) -> str | None:
+        """恢复窗口期调用 LLM 对当天情节记忆做语义压缩，模拟睡眠期记忆巩固。
+
+        触发条件：run_recovery_cycle() 判定为恢复窗口期且 consolidation_score > 0.5。
+        调用：Pro 模型（质量优先，非延迟敏感）。
+        开关：GLYMPHATIC_CONSOLIDATION_LLM_ENABLED（默认 false）。
+
+        Returns:
+            记忆巩固摘要字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("GLYMPHATIC_CONSOLIDATION_LLM_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.glymphatic_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("glymphatic_agent.consolidation_summary") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("glymphatic_agent.consolidation_summary 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                episode_summary=str(episode_summary or "")[:400],
+                emotion_trajectory=str(emotion_trajectory or "")[:100],
+                bond_stage=str(bond_stage or "stranger"),
+                recovery_quality=round(float(recovery_quality), 3),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.5-flash",
+                timeout_ms=8000,
+                agent_role="glymphatic_consolidator",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=128,
+                temperature=0.3,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _summary = str(_parsed.get("consolidation_summary") or "").strip()[:100]
+            if _summary:
+                _log.info("GlymphaticAgent.generate_consolidation_summary: %s", _summary[:50])
+                # 写入 HippocampusAgent 语义记忆
+                try:
+                    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+                    _hippo = get_hippocampus_agent()
+                    if hasattr(_hippo, "write_semantic_memory"):
+                        _hippo.write_semantic_memory(
+                            content=_summary,
+                            source="glymphatic_consolidation",
+                            tags=["consolidation", "daily_summary"],
+                        )
+                except Exception:
+                    pass
+                # 写入 state_registry
+                try:
+                    self.state_registry.set_state(
+                        "glymphatic_agent",
+                        {"last_consolidation_summary": _summary},
+                        writer="glymphatic_agent",
+                    )
+                except Exception:
+                    pass
+            return _summary or None
+        except Exception as exc:
+            _log.debug("GlymphaticAgent.generate_consolidation_summary 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
         """T-241：读取 state_registry 快照，不触发 run_recovery_cycle（避免副作用）。"""
         prev = self.state_registry.get_state("glymphatic_agent") or {}

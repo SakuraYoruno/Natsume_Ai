@@ -194,10 +194,166 @@ class CerebellumAgent:
 
         return decision
 
+    # ── 纠偏叙事与失败模式分析（A 级升级）───────────────────────────────────
+
+    def generate_correction_narrative(
+        self,
+        *,
+        strategy: str = "RETRY_ONCE",
+        target_id: str = "",
+        error_text: str = "",
+        urgency: float = 0.5,
+    ) -> str | None:
+        """执行纠偏时调用 LLM 生成面向用户的自然语言解释。
+
+        触发条件：evaluate_correction() 返回 RETRY/DEGRADE/SAFE_FALLBACK。
+        调用：Flash 小模型。
+        开关：CEREBELLUM_CORRECTION_NARRATIVE_ENABLED（默认 false）。
+        输出注入：ChatAgent 的 extra_context_prompt。
+
+        Returns:
+            纠偏叙事字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("CEREBELLUM_CORRECTION_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled or str(strategy or "").upper() == "NO_ADJUST":
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.cerebellum_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("cerebellum_agent.correction_narrative") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("cerebellum_agent.correction_narrative 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                strategy=str(strategy or "RETRY_ONCE"),
+                target_id=str(target_id or "")[:50],
+                error_text=str(error_text or "")[:100],
+                urgency=round(float(urgency), 3),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=2000,
+                agent_role="cerebellum_narrator",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=64,
+                temperature=0.2,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _narrative = str(_parsed.get("correction_narrative") or "").strip()[:80]
+            if _narrative:
+                _log.debug("CerebellumAgent.generate_correction_narrative: %s", _narrative)
+                try:
+                    self.state_registry.set_state(
+                        "cerebellum_agent",
+                        {"last_correction_narrative": _narrative},
+                        writer="cerebellum_agent",
+                    )
+                except Exception:
+                    pass
+            return _narrative or None
+        except Exception as exc:
+            _log.debug("CerebellumAgent.generate_correction_narrative 失败（降级）: %s", exc)
+            return None
+
+    def analyze_failure_pattern(
+        self,
+        *,
+        consecutive_failures: int = 0,
+        failure_history: list[dict] | None = None,
+        target_id: str = "",
+    ) -> str | None:
+        """连续失败时调用 LLM 分析失败模式，产出 failure_insight 写入语义记忆。
+
+        触发条件：consecutive_failures > 2。
+        调用：Flash 小模型。
+        开关：CEREBELLUM_CORRECTION_NARRATIVE_ENABLED（复用同一开关）。
+
+        Returns:
+            失败模式洞察字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("CEREBELLUM_CORRECTION_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled or int(consecutive_failures or 0) <= 2:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.cerebellum_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("cerebellum_agent.failure_pattern") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("cerebellum_agent.failure_pattern 模板未配置")
+
+            _history_text = ""
+            for _item in (failure_history or [])[-5:]:
+                _history_text += f"- {_item.get('strategy','?')} / {_item.get('error','?')[:40]}\n"
+
+            _user_prompt = _user_tpl.format(
+                consecutive_failures=int(consecutive_failures),
+                target_id=str(target_id or "")[:50],
+                failure_history=_history_text.strip()[:200],
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=3000,
+                agent_role="cerebellum_analyst",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=96,
+                temperature=0.1,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _insight = str(_parsed.get("failure_insight") or "").strip()[:120]
+            if _insight:
+                _log.info("CerebellumAgent.analyze_failure_pattern: %s", _insight[:60])
+                # 写入 HippocampusAgent 语义记忆
+                try:
+                    from host_brain.tribe.hippocampus_agent import get_hippocampus_agent  # noqa: PLC0415
+                    _hippo = get_hippocampus_agent()
+                    if hasattr(_hippo, "write_semantic_memory"):
+                        _hippo.write_semantic_memory(
+                            content=_insight,
+                            source="cerebellum_failure_analysis",
+                            tags=["failure_pattern", str(target_id or "")[:20]],
+                        )
+                except Exception:
+                    pass
+                try:
+                    self.state_registry.set_state(
+                        "cerebellum_agent",
+                        {"last_failure_insight": _insight},
+                        writer="cerebellum_agent",
+                    )
+                except Exception:
+                    pass
+            return _insight or None
+        except Exception as exc:
+            _log.debug("CerebellumAgent.analyze_failure_pattern 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
-        snap = self.state_registry.get_state("cerebellum_agent") or {}
-        state = dict(snap.get("state") or {})
-        decision = dict(state.get("last_correction") or {})
         return {
             "last_strategy": str(decision.get("strategy") or "NO_ADJUST"),
             "last_urgency": float(decision.get("urgency") or 0.0),

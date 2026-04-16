@@ -282,6 +282,82 @@ class InitiativeGovernorAgent:
 
         return result
 
+    # ── 主动发声话题建议（A 级升级）──────────────────────────────────────────
+
+    def generate_proactive_topic(
+        self,
+        *,
+        loneliness_level: float = 0.0,
+        anticipation_level: float = 0.0,
+        emotion_tag: str = "NEUTRAL",
+        bond_stage: str = "stranger",
+        recent_topics: str = "",
+    ) -> str | None:
+        """Governor 决策 ALLOW 时调用 LLM 生成主动发声的话题建议。
+
+        触发条件：evaluate_initiative() 返回 ALLOW。
+        调用：Flash 小模型。
+        开关：GOVERNOR_PROACTIVE_TOPIC_ENABLED（默认 false）。
+        输出传递：DefaultModeAgent 独白生成的 topic_seed 参数。
+
+        Returns:
+            话题建议字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("GOVERNOR_PROACTIVE_TOPIC_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.initiative_governor_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("initiative_governor_agent.proactive_topic") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("initiative_governor_agent.proactive_topic 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                loneliness_level=round(float(loneliness_level), 3),
+                anticipation_level=round(float(anticipation_level), 3),
+                emotion_tag=str(emotion_tag or "NEUTRAL").upper(),
+                bond_stage=str(bond_stage or "stranger"),
+                recent_topics=str(recent_topics or "")[:100],
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=2000,
+                agent_role="proactive_topic_planner",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=64,
+                temperature=0.4,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _topic = str(_parsed.get("topic_seed") or "").strip()[:50]
+            if _topic:
+                _log.debug("InitiativeGovernorAgent.generate_proactive_topic: %s", _topic)
+                try:
+                    self.state_registry.set_state(
+                        "initiative_governor_agent",
+                        {"last_proactive_topic": _topic},
+                        writer="initiative_governor_agent",
+                    )
+                except Exception:
+                    pass
+            return _topic or None
+        except Exception as exc:
+            _log.debug("InitiativeGovernorAgent.generate_proactive_topic 失败（降级）: %s", exc)
+            return None
+
     def get_last_decision(self) -> dict[str, Any]:
         snap = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(snap.get("state") or {})

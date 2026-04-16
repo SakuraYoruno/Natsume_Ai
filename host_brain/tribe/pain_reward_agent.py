@@ -693,12 +693,82 @@ class PainRewardAgent:
             )
             return False
 
+    # ── 享乐状态反思（A 级升级）──────────────────────────────────────────────
+
+    def generate_hedonic_reflection(
+        self,
+        *,
+        delta_valence: float = 0.0,
+        trigger_event: str = "",
+        net_valence: float = 0.0,
+        bond_stage: str = "stranger",
+    ) -> str | None:
+        """享乐状态显著变化时调用 LLM 生成内心感受叙事。
+
+        触发条件：|delta_valence| > 0.3。
+        调用：Flash 小模型。
+        开关：PAIN_HEDONIC_REFLECTION_ENABLED（默认 false）。
+        输出写入：DefaultModeAgent 独白素材池。
+
+        Returns:
+            内心感受叙事字符串，或 None（未触发/失败）。
+        """
+        import os as _os  # noqa: PLC0415
+        _enabled = str(_os.environ.get("PAIN_HEDONIC_REFLECTION_ENABLED", "false")).lower() in ("1", "true", "yes")
+        if not _enabled or abs(float(delta_valence or 0.0)) <= 0.3:
+            return None
+
+        import logging as _logging  # noqa: PLC0415
+        _log = _logging.getLogger("Natsume.tribe.pain_reward_agent")
+        try:
+            from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
+            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+
+            _tpl = resolve_prompt_template_json("pain_reward_agent.hedonic_reflection") or {}
+            _system_prompt = str(_tpl.get("system_prompt") or "")
+            _user_tpl = str(_tpl.get("user_prompt_template") or "")
+            if not _system_prompt or not _user_tpl:
+                raise ValueError("pain_reward_agent.hedonic_reflection 模板未配置")
+
+            _user_prompt = _user_tpl.format(
+                delta_valence=float(delta_valence),
+                trigger_event=str(trigger_event or "")[:80],
+                net_valence=float(net_valence),
+                bond_stage=str(bond_stage or "stranger"),
+            )
+            _provider = build_llm_provider(
+                provider_name="gemini",
+                model_id="gemini-2.0-flash",
+                timeout_ms=2000,
+                agent_role="hedonic_reflector",
+            )
+            _raw = _provider.complete_sync(
+                system_prompt=_system_prompt,
+                user_prompt=_user_prompt,
+                max_tokens=64,
+                temperature=0.3,
+            )
+            import json as _json, re as _re  # noqa: PLC0415, E401
+            _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
+            _parsed = _json.loads(_match.group()) if _match else {}
+            _reflection = str(_parsed.get("hedonic_reflection") or "").strip()[:60]
+            if _reflection:
+                _log.debug("PainRewardAgent.generate_hedonic_reflection: %s", _reflection)
+                # 写入 state_registry 供 DefaultModeAgent 读取
+                try:
+                    self.state_registry.set_state(
+                        "pain_reward_agent",
+                        {"last_hedonic_reflection": _reflection},
+                        writer="pain_reward_agent",
+                    )
+                except Exception:
+                    pass
+            return _reflection or None
+        except Exception as exc:
+            _log.debug("PainRewardAgent.generate_hedonic_reflection 失败（降级）: %s", exc)
+            return None
+
     def export_runtime_state(self) -> dict[str, Any]:
-        return {
-            "state": self.get_hedonic_state(),
-            "stress_signal": self.get_stress_signal(),
-            "emotion_modulation": self.get_emotion_modulation(),
-        }
 
 
 def _classify_hedonic_tone(net_valence: float) -> str:
