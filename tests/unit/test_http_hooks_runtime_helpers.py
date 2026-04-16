@@ -54,8 +54,23 @@ def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week
         ("7d_plus", 8 * 24.0, "deep_reunion", "warm_reconnect", 0.22),
     ]
 
-    summaries = [
-        _build_runtime_summary(
+    from unittest.mock import patch
+
+    def _fake_resolve_offline_reconnect_profile(offline_state):
+        absence_band = str(offline_state.get("absence_band") or "recent")
+        style_map = {
+            "24h_plus": "light_reconnect",
+            "72h_plus": "reunion",
+            "7d_plus": "deep_reunion",
+        }
+        return absence_band, style_map.get(absence_band, "soft_resume")
+
+    with patch(
+        "host_brain.app.http_hooks_runtime_helpers._resolve_offline_reconnect_profile",
+        side_effect=_fake_resolve_offline_reconnect_profile,
+    ):
+        summaries = [
+            _build_runtime_summary(
             current_topic="那个项目",
             sys_mode="normal",
             activity_monitor={},

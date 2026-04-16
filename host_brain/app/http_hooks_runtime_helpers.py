@@ -1719,6 +1719,31 @@ def _run_emotion_decay_tick(
     return topics
 
 
+def _load_recent_topics(
+    *,
+    get_ledger: Callable[[], Any],
+    limit: int = 5,
+) -> list[str]:
+    """从 intent_log 中加载最近的话题列表。"""
+    try:
+        ledger = get_ledger()
+        db_path = getattr(ledger, "_db_path", None) or getattr(ledger, "db_path", None)
+        if not db_path:
+            return []
+        conn = _sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT topic FROM intent_log WHERE topic IS NOT NULL AND topic != '' "
+                "ORDER BY ts_ms DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [str(row[0]) for row in rows if row[0]]
+    except Exception:
+        return []
+
+
 def _load_last_interaction_ts(
     *,
     get_ledger: Callable[[], Any],

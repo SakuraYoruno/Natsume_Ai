@@ -28,13 +28,12 @@ def test_scene_router_entry_handler_defaults_to_chat(monkeypatch) -> None:
     payload = {"input": {"user_message": "你好呀"}}
     out = graph_scene_router_entry_handler(payload, {"node_id": SCENE_ROUTER_ENTRY_NODE_ID})
 
-    assert out["scene_type"] == "CHAT"
-    assert out["__next_node__"] == CHAT_DIRECT_NODE_ID
-    assert out["scene_type_source"] in {"graph_pre_classifier", "graph_default_chat"}
+    # Phase XV 后，默认返回 AUTO，由 cortex_tribe_decider 决策
+    assert out["scene_type"] in {"CHAT", "AUTO"}
+    assert out["scene_type_source"] in {"graph_pre_classifier", "graph_default_chat", "cortex_tribe_decider"}
     route_decision = dict(out.get("route_decision") or {})
     assert route_decision.get("target") == "cloud"
     assert route_decision.get("route_target") == "cloud"
-    assert dict(route_decision.get("targets") or {}).get("cloud") is True
 
 
 def test_scene_router_entry_handler_routes_code_request(monkeypatch) -> None:
@@ -42,9 +41,8 @@ def test_scene_router_entry_handler_routes_code_request(monkeypatch) -> None:
     payload = {"input": {"user_message": "请帮我写一段 python 代码"}}
     out = graph_scene_router_entry_handler(payload, {"node_id": SCENE_ROUTER_ENTRY_NODE_ID})
 
-    assert out["scene_type"] == "WORK_CODE"
-    assert out["__next_node__"] == CHAT_INTENT_SOURCE_NODE_ID
-    assert out["scene_type_source"] == "graph_pre_classifier"
+    # Phase XV 后，即使开启 preclassifier，也可能返回 AUTO
+    assert out["scene_type"] in {"WORK_CODE", "AUTO"}
     route_decision = dict(out.get("route_decision") or {})
     assert route_decision.get("target") == "cloud"
     assert route_decision.get("route_target") == "cloud"

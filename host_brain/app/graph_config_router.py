@@ -35,6 +35,7 @@ SCENE_TYPE_AUTO = "AUTO"
 
 # SUPERVISOR_DISPATCH_NODE_ID / SUPERVISOR_DISPATCH_HANDLER_ID 已移至 graph_config_builder.py
 # 此处不再重复定义，避免双轨维护
+from host_brain.app.graph_config_builder import SUPERVISOR_DISPATCH_NODE_ID  # noqa: E402, F401
 
 HOST_CHAT_ROUTE_HOST_14B = "host_14b"
 HOST_CHAT_ROUTE_CLOUD = "cloud"
