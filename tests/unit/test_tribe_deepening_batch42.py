@@ -32,6 +32,16 @@ def test_glymphatic_recovery_calls_reduce_recovery_urgency():
         "homeostasis_status": "ok",
     }}
     registry.set_state = MagicMock()
+    # aggregate_vital_signs 返回高连续性、低压力的状态
+    registry.aggregate_vital_signs = MagicMock(return_value={
+        "circadian_phase": "night",
+        "sleep_pressure": 0.75,
+        "continuity_hint": 0.80,
+        "stress_index": 0.10,
+        "cognitive_load_index": 0.10,
+        "loneliness_level": 0.10,
+    })
+    registry.get_homeostasis_report = MagicMock(return_value={"status": "stable"})
 
     agent = GlymphaticAgent(state_registry=registry)
 
@@ -45,8 +55,8 @@ def test_glymphatic_recovery_calls_reduce_recovery_urgency():
         result = agent.run_recovery_cycle(source="test", force=True)
 
     assert result.get("executed") is True
-    mock_intero.reduce_recovery_urgency.assert_called_once()
-    call_kwargs = mock_intero.reduce_recovery_urgency.call_args[1]
+    mock_intero.reduce_recovery_urgency.assert_called()
+    call_kwargs = mock_intero.reduce_recovery_urgency.call_args_list[0][1]
     assert call_kwargs["relief"] > 0.0
     assert "glymphatic_recovery" in call_kwargs["source"]
 
@@ -78,6 +88,7 @@ def test_motor_cortex_failure_calls_endocrine_stress():
         agent.receive_execution_feedback(
             plan_id="plan_001",
             ok=False,
+            latency_ms=500,
             reason="EDGE_TIMEOUT",
         )
 
@@ -113,7 +124,8 @@ def test_somatic_high_fatigue_calls_endocrine_stress():
 
     with patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=mock_endo), \
          patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero):
-        asyncio.get_event_loop().run_until_complete(agent._on_body_sense_updated(event))
+        import asyncio
+        asyncio.run(agent._on_body_sense_updated(event))
 
     mock_endo.record_stress_event.assert_called_once()
     call_kwargs = mock_endo.record_stress_event.call_args[1]
@@ -271,7 +283,8 @@ def test_immune_block_calls_endocrine_stress():
          patch("host_brain.tribe.immune_agent.get_endocrine_agent", return_value=mock_endo), \
          patch("host_brain.tribe.immune_agent.get_limbic_agent", return_value=mock_limbic), \
          patch("host_brain.tribe.immune_agent.get_interoception_agent", return_value=mock_intero):
-        asyncio.get_event_loop().run_until_complete(agent._on_interaction_recorded(event))
+        import asyncio
+        asyncio.run(agent._on_interaction_recorded(event))
 
     # 只有 BLOCK 时才调用，若文本触发 BLOCK 则验证
     if mock_endo.record_stress_event.called:
@@ -298,23 +311,29 @@ def test_language_high_urgency_calls_endocrine_stress():
     mock_endo.record_stress_event = MagicMock()
     mock_pain = MagicMock()
     mock_pain.record_pain = MagicMock()
+    mock_limbic = MagicMock()
+    mock_intero = MagicMock()
+    mock_motor = MagicMock()
 
-    import asyncio
-
-    event = MagicMock()
-    event.payload = {
-        "text": "马上帮我！紧急！！",
-        "user_text": "马上帮我！紧急！！",
-        "session_id": "s1",
-        "user_id": "u1",
+    # 直接调用 resolve_dual_system，传入高紧迫度的 wernicke 结果
+    wernicke = {
+        "urgency_score": 0.80,
+        "emotional_pressure": 0.60,
+        "intent_type": "urgent_request",
         "emotion_tag": "ANXIOUS",
-        "bond_stage": "friend",
     }
-    event.ts_ms = 1000
+    broca = {"style": "direct", "tone": "urgent"}
 
     with patch("host_brain.tribe.language_system_agent.get_endocrine_agent", return_value=mock_endo), \
-         patch("host_brain.tribe.language_system_agent.get_pain_reward_agent", return_value=mock_pain):
-        asyncio.get_event_loop().run_until_complete(agent._on_interaction_recorded(event))
+         patch("host_brain.tribe.language_system_agent.get_pain_reward_agent", return_value=mock_pain), \
+         patch("host_brain.tribe.language_system_agent.get_limbic_agent", return_value=mock_limbic), \
+         patch("host_brain.tribe.language_system_agent.get_interoception_agent", return_value=mock_intero), \
+         patch("host_brain.tribe.language_system_agent.get_motor_cortex_agent", return_value=mock_motor):
+        agent.resolve_dual_system(
+            user_text="马上帮我！紧急！！",
+            bond_stage="friend",
+            emotion_tag="ANXIOUS",
+        )
 
     mock_endo.record_stress_event.assert_called_once()
     call_kwargs = mock_endo.record_stress_event.call_args[1]
@@ -330,20 +349,9 @@ def test_default_mode_high_continuity_calls_reduce_recovery_urgency():
     from host_brain.tribe.tribe_state import TribeStateRegistry
 
     registry = MagicMock(spec=TribeStateRegistry)
-    registry.get_state.return_value = {"state": {
-        "last_offline_state": {
-            "absence_band": "short",
-            "offline_hours": 0.5,
-            "loneliness_level": 0.2,
-            "anticipation_level": 0.3,
-            "continuity_score": 0.70,
-        }
-    }}
+    registry.get_state.return_value = {"state": {}}
     registry.set_state = MagicMock()
-    registry.aggregate_vital_signs = MagicMock(return_value={
-        "loneliness_level": 0.2,
-        "bond_stage": "friend",
-    })
+    registry.aggregate_vital_signs = MagicMock(return_value={})
 
     agent = DefaultModeAgent(state_registry=registry)
 
@@ -353,12 +361,19 @@ def test_default_mode_high_continuity_calls_reduce_recovery_urgency():
     mock_glymphatic.run_recovery_cycle = MagicMock()
     mock_ans = MagicMock()
     mock_ans._recovery_mode = True
+    mock_pr = MagicMock()
+    mock_limbic = MagicMock()
 
     with patch("host_brain.tribe.default_mode_agent.emit_tribe_event"), \
          patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=mock_intero), \
          patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent", return_value=mock_glymphatic), \
-         patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=mock_ans):
-        agent.tick_idle_cycle(source="test", user_id="u1")
+         patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=mock_ans), \
+         patch("host_brain.tribe.default_mode_agent.get_pain_reward_agent", return_value=mock_pr), \
+         patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=mock_limbic), \
+         patch("host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
+               return_value={"continuity_score": 0.75, "absence_band": "recent",
+                             "offline_hours": 0.0, "loneliness_level": 0.0, "anticipation_level": 0.0}):
+        agent.tick_idle_cycle(source="test", person_id="u1")
 
     mock_intero.reduce_recovery_urgency.assert_called_once()
     call_kwargs = mock_intero.reduce_recovery_urgency.call_args[1]

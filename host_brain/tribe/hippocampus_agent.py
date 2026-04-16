@@ -685,3 +685,4 @@ from host_brain.tribe.default_mode_agent import get_default_mode_agent  # noqa: 
 from host_brain.tribe.immune_agent import get_immune_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
+from host_brain.app.dependencies import get_state_write_arbiter  # noqa: E402, F401
