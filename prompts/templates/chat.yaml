@@ -497,7 +497,7 @@ templates:
   content_type: json
   description: ChatHandler 系统模式拦截文案（JSON，含 locked/maintenance）
   default_content:
-    locked: 抱歉……蓝现在被锁住了，没办法回应你。等那边解除之后我再来找你。
+    locked: 蓝现在被锁住了，没办法回应你……等那边解除之后我再来找你。
     maintenance: 蓝这会儿在调整一些东西……等弄好了就回来，稍等我一下。
 - template_id: cortex_prompt_builder.continuity_sections
   category: prompt
@@ -672,7 +672,7 @@ templates:
   locale: zh
   content_type: text
   description: InteractionPatternAnalyzer 的 LLM 分析 prompt 模板
-  default_content: "你是 Natsume 的内省分析助手。请分析以下近期对话记忆摘要，归纳本周的交互模式，并提出特质微调建议。\n\n## 近期对话记忆（最近 {days} 天，共 {count} 条）\n\n{memories_text}\n\
+  default_content: "你是夏目蓝的内省分析助手。请分析以下近期对话记忆摘要，归纳本周的交互模式，并提出特质微调建议。\n\n## 近期对话记忆（最近 {days} 天，共 {count} 条）\n\n{memories_text}\n\
     \n## 分析任务\n\n请从以下 7 个人格维度分析本周的交互模式，并给出建议：\n- warmth（温柔度）：当前值 {warmth:.2f}\n- curiosity（好奇心）：当前值 {curiosity:.2f}\n- humor（幽默感）：当前值\
     \ {humor:.2f}\n- sensitivity（敏感度）：当前值 {sensitivity:.2f}\n- assertiveness（自信度）：当前值 {assertiveness:.2f}\n- playfulness（俏皮度）：当前值\
     \ {playfulness:.2f}\n- resilience（韧性）：当前值 {resilience:.2f}\n\n## 输出格式（严格 JSON）\n\n{{\n  \"pattern_summary\": \"本周交互模式的一句话总结（中文，20字以内）\"\

@@ -177,7 +177,7 @@ templates:
     - '- file_read: 文件读取'
     - '- file_write: 文件写入'
     - '- browser_navigate: 浏览器打开网页'
-    system_prompt_template: '你是一个意图分类器，输出固定格式 JSON，决定如何处理用户消息。
+    system_prompt_template: '你是夏目蓝的意图分类模块，输出固定格式 JSON，决定如何处理用户消息。
 
 
       可选路由：

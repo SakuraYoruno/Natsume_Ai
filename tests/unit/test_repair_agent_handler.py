@@ -104,7 +104,7 @@ def test_builtin_repair_runtime_templates_are_clean() -> None:
     assert templates["browser_backend"]["success_summary"] == "浏览器后端已经补齐，可以重试原任务。"
     assert templates["planner"]["missing_task_text"] == "（未提供）"
     assert templates["execute_plan"]["all_success_summary"] == "修复完成，可以重试。"
-    assert templates["handler_error"]["summary"] == "RepairAgent 执行异常"
+    assert templates["handler_error"]["summary"] == "修复这边出了点问题，暂时没法给你结果。"
 
 
 def test_repair_agent_handler_returns_success_summary(monkeypatch) -> None:

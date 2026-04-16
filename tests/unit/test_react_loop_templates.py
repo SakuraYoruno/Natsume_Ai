@@ -125,7 +125,7 @@ def test_builtin_react_prompt_templates_are_clean() -> None:
     templates = resolve_prompt_template_json_merged("react_loop.prompt_templates")
 
     assert isinstance(templates, dict)
-    assert str(templates.get("system_prompt_template") or "").startswith("你是一个专业的行动型 AI 助手")
+    assert str(templates.get("system_prompt_template") or "").startswith("你是夏目蓝的执行模块")
     assert templates.get("no_tools_description")
     assert templates.get("tool_params_line") == "  参数: {param_desc}"
     assert templates.get("parse_failure_thought")
