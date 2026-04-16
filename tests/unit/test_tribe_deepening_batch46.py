@@ -87,7 +87,7 @@ def test_t348_bond_progress_triggers_default_mode():
     import asyncio
     with patch("host_brain.tribe.social_brain_agent.get_default_mode_agent", return_value=mock_dma), \
          patch("host_brain.tribe.social_brain_agent.get_pain_reward_agent", return_value=mock_pr):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             agent._on_bond_progress_snapshot(event)
         )
 
@@ -150,7 +150,7 @@ def test_t350_low_fatigue_triggers_limbic_comfort():
     import asyncio
     with patch("host_brain.tribe.somatic_agent.get_limbic_agent", return_value=mock_limbic), \
          patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             agent._on_body_sense_updated(event)
         )
 
@@ -178,7 +178,7 @@ def test_t350_high_fatigue_no_comfort():
     with patch("host_brain.tribe.somatic_agent.get_limbic_agent", return_value=mock_limbic), \
          patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero), \
          patch("host_brain.tribe.somatic_agent.get_endocrine_agent", return_value=mock_endo):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             agent._on_body_sense_updated(event)
         )
 
@@ -345,7 +345,7 @@ def test_t355_peripheral_error_triggers_pain():
     import asyncio
     with patch("host_brain.tribe.peripheral_agent.get_pain_reward_agent", return_value=mock_pr), \
          patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             agent._on_peripheral_state_updated(event)
         )
 
@@ -371,7 +371,7 @@ def test_t355_peripheral_high_latency_triggers_pain():
     import asyncio
     with patch("host_brain.tribe.peripheral_agent.get_pain_reward_agent", return_value=mock_pr), \
          patch("host_brain.tribe.peripheral_agent.get_interoception_agent", return_value=mock_intero):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             agent._on_peripheral_state_updated(event)
         )
 

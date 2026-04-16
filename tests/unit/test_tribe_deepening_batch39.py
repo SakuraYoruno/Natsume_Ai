@@ -146,7 +146,7 @@ class TestPrefrontalDriftEndocrineLink:
                     "triggered_rules": [],
                 }):
                     import asyncio
-                    asyncio.get_event_loop().run_until_complete(
+                    asyncio.run(
                         agent._on_interaction_recorded(MagicMock(payload={
                             "user_message": "你好",
                             "assistant_reply": "你好呀",
@@ -173,7 +173,7 @@ class TestSocialBrainRepairLimbicLink:
 
         with patch("host_brain.tribe.social_brain_agent.get_limbic_agent", return_value=mock_limbic):
             import asyncio
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_bond_repair_action(MagicMock(payload={
                     "effort": 0.50,
                     "action": "apology",
@@ -194,7 +194,7 @@ class TestSocialBrainRepairLimbicLink:
 
         with patch("host_brain.tribe.social_brain_agent.get_limbic_agent", return_value=mock_limbic):
             import asyncio
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent._on_bond_repair_action(MagicMock(payload={
                     "effort": 0.10,
                     "action": "small_gesture",

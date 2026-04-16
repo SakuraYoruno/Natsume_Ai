@@ -44,7 +44,7 @@ class TestSomaticInteroceptionLink:
         event.ts_ms = 1000
 
         with patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero):
-            asyncio.get_event_loop().run_until_complete(agent._on_loneliness_signal(event))
+            asyncio.run(agent._on_loneliness_signal(event))
 
         assert mock_intero.inject_external_stress.called, \
             "loneliness=0.80 > 0.65 时应调用 inject_external_stress()"
@@ -62,7 +62,7 @@ class TestSomaticInteroceptionLink:
         event.ts_ms = 1000
 
         with patch("host_brain.tribe.somatic_agent.get_interoception_agent", return_value=mock_intero):
-            asyncio.get_event_loop().run_until_complete(agent._on_loneliness_signal(event))
+            asyncio.run(agent._on_loneliness_signal(event))
 
         assert not mock_intero.inject_external_stress.called, \
             "loneliness=0.40 <= 0.65 时不应调用 inject_external_stress()"
@@ -172,7 +172,7 @@ class TestProprioceptionEndocrineLink:
                 for i in range(7):
                     event.payload = {"conversation_id": "s1", "ts_ms": 1000 + i * 10000}
                     event.ts_ms = 1000 + i * 10000
-                    asyncio.get_event_loop().run_until_complete(
+                    asyncio.run(
                         agent._on_channel_message_received(event)
                     )
 

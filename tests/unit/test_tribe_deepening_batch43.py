@@ -171,7 +171,7 @@ def test_t316_task_success_records_reward():
     with patch("host_brain.tribe.proprioception_agent.get_pain_reward_agent", return_value=mock_pr), \
          patch("host_brain.tribe.proprioception_agent.get_limbic_agent", return_value=MagicMock()), \
          patch("host_brain.tribe.proprioception_agent.emit_tribe_event"):
-        asyncio.get_event_loop().run_until_complete(agent._on_task_success(event))
+        asyncio.run(agent._on_task_success(event))
 
     mock_pr.record_reward_event.assert_called_once()
     call_kwargs = mock_pr.record_reward_event.call_args.kwargs

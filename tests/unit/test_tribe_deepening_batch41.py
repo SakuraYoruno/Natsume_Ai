@@ -125,6 +125,8 @@ def test_ans_export_runtime_state_writes_registry():
 
     registry = MagicMock(spec=TribeStateRegistry)
     registry.set_state = MagicMock()
+    # 确保走 set_state 分支而非 write 分支（spec 中有 write 属性，需要删除）
+    del registry.write
 
     agent = ANSAgent()
     agent.state_registry = registry
@@ -276,16 +278,25 @@ def test_circadian_day_phase_resets_ans_recovery_mode():
 
     mock_ans = MagicMock()
     mock_ans._recovery_mode = True
+    # set_recovery_mode 被调用时同步修改 _recovery_mode
+    def _fake_set_recovery_mode(enabled, **kw):
+        mock_ans._recovery_mode = enabled
+    mock_ans.set_recovery_mode.side_effect = _fake_set_recovery_mode
 
     with (
         patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=mock_ans),
         patch("host_brain.tribe.circadian_agent.emit_tribe_event"),
+        patch("host_brain.tribe.circadian_agent.get_glymphatic_agent", return_value=MagicMock()),
+        patch("host_brain.tribe.circadian_agent.get_endocrine_agent", return_value=MagicMock()),
+        patch("host_brain.tribe.circadian_agent.get_limbic_agent", return_value=MagicMock()),
+        patch("host_brain.tribe.circadian_agent.get_pain_reward_agent", return_value=MagicMock()),
+        patch("host_brain.tribe.circadian_agent.CircadianAgent.evaluate_profile", return_value={
+            "phase": "day", "sleep_pressure": 0.20, "local_hour": 10,
+            "phase_energy_baseline": 0.84, "proactive_multiplier": 1.0,
+            "recovery_bias": 0.30, "response_latency_ms": 360, "ts_ms": 1000,
+        }),
     ):
-        # 模拟日间时间戳（上午10点）
-        import datetime
-        dt = datetime.datetime(2024, 1, 1, 10, 0, 0, tzinfo=datetime.timezone.utc)
-        ts_ms = int(dt.timestamp() * 1000)
-        agent.refresh_state(source="test", ts_ms=ts_ms)
+        agent.refresh_state(source="test", ts_ms=1000)
 
     assert mock_ans._recovery_mode is False
 

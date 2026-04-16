@@ -130,15 +130,14 @@ class TestGlymphaticExportRuntimeState:
             "cycle_count": 3,
         }, writer="test")
 
-        # mock run_recovery_cycle，确认它不被调用
-        agent.run_recovery_cycle = MagicMock(return_value={})
-        state = agent.export_runtime_state()
-
-        assert not agent.run_recovery_cycle.called, \
-            "export_runtime_state() 不应触发 run_recovery_cycle()"
-        assert state.get("executed") is True
-        assert state.get("phase") == "night"
-        assert state.get("cycle_count") == 3
+        # slots=True 不能直接赋值，改用 patch 类方法验证不被调用
+        with patch("host_brain.tribe.glymphatic_agent.GlymphaticAgent.run_recovery_cycle") as mock_rrc:
+            result = agent.export_runtime_state()
+            assert not mock_rrc.called, \
+                "export_runtime_state() 不应触发 run_recovery_cycle()"
+        assert result.get("executed") is True
+        assert result.get("phase") == "night"
+        assert result.get("cycle_count") == 3
 
     def test_export_runtime_state_returns_snapshot_fields(self, registry):
         agent = GlymphaticAgent(state_registry=registry)
@@ -261,7 +260,7 @@ class TestProprioceptionANSLink:
                     for i in range(7):
                         event.payload = {"conversation_id": "s1", "ts_ms": 1000 + i * 10000}
                         event.ts_ms = 1000 + i * 10000
-                        asyncio.get_event_loop().run_until_complete(
+                        asyncio.run(
                             agent._on_channel_message_received(event)
                         )
 

@@ -50,15 +50,14 @@ class TestVestibularExportRuntimeState:
             "ts_ms": 1000,
         }, writer="test")
 
-        agent.evaluate_stability = MagicMock(return_value={})
-        state = agent.export_runtime_state()
-
-        assert not agent.evaluate_stability.called, \
-            "export_runtime_state() 不应触发 evaluate_stability()"
-        assert state.get("stability_state") == "unstable"
-        assert state.get("route_bias") == "conservative"
-        assert abs(float(state.get("jitter_index") or 0) - 0.42) < 0.01
-        assert state.get("conservative_mode") is True
+        with patch("host_brain.tribe.vestibular_agent.VestibularAgent.evaluate_stability") as mock_es:
+            result = agent.export_runtime_state()
+            assert not mock_es.called, \
+                "export_runtime_state() 不应触发 evaluate_stability()"
+        assert result.get("stability_state") == "unstable"
+        assert result.get("route_bias") == "conservative"
+        assert abs(float(result.get("jitter_index") or 0) - 0.42) < 0.01
+        assert result.get("conservative_mode") is True
 
     def test_export_returns_default_when_no_state(self, registry):
         agent = VestibularAgent(state_registry=registry)
@@ -126,7 +125,7 @@ class TestImmuneInteractionRecorded:
         agent._counters = {"total": 5, "block": 2, "report": 1, "allow": 2}
 
         event = MagicMock()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             agent._on_interaction_recorded(event)
         )
 
@@ -227,13 +226,18 @@ class TestCircadianNightEndocrineLink:
         mock_endo._bond_lock.__enter__ = MagicMock(return_value=None)
         mock_endo._bond_lock.__exit__ = MagicMock(return_value=False)
 
-        with patch("host_brain.tribe.circadian_agent.get_endocrine_agent", return_value=mock_endo):
-            with patch("host_brain.tribe.circadian_agent.get_glymphatic_agent"):
-                # 使用夜间时间戳（23:00）
-                import datetime
-                night_ts = int(datetime.datetime(2024, 1, 1, 23, 0, 0,
-                    tzinfo=datetime.timezone.utc).timestamp() * 1000)
-                agent.refresh_state(source="test", ts_ms=night_ts)
+        with patch("host_brain.tribe.circadian_agent.get_endocrine_agent", return_value=mock_endo), \
+             patch("host_brain.tribe.circadian_agent.get_glymphatic_agent"), \
+             patch("host_brain.tribe.circadian_agent.get_ans_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.get_limbic_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.get_pain_reward_agent", return_value=MagicMock()), \
+             patch("host_brain.tribe.circadian_agent.emit_tribe_event"), \
+             patch("host_brain.tribe.circadian_agent.CircadianAgent.evaluate_profile", return_value={
+                 "phase": "night", "sleep_pressure": 0.75, "local_hour": 23,
+                 "phase_energy_baseline": 0.34, "proactive_multiplier": 0.36,
+                 "recovery_bias": 0.86, "response_latency_ms": 940, "ts_ms": 1000,
+             }):
+            agent.refresh_state(source="test", ts_ms=1000)
 
         # 验证 _bond_cortisol_delta 被修改（降低）
         assert mock_endo._bond_lock.__enter__.called, \
