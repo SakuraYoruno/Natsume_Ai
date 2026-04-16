@@ -713,9 +713,7 @@ class PainRewardAgent:
         Returns:
             内心感受叙事字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("PAIN_HEDONIC_REFLECTION_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled or abs(float(delta_valence or 0.0)) <= 0.3:
+        if abs(float(delta_valence or 0.0)) <= 0.3:
             return None
 
         import logging as _logging  # noqa: PLC0415

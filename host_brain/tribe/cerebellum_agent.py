@@ -214,9 +214,7 @@ class CerebellumAgent:
         Returns:
             纠偏叙事字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("CEREBELLUM_CORRECTION_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled or str(strategy or "").upper() == "NO_ADJUST":
+        if str(strategy or "").upper() == "NO_ADJUST":
             return None
 
         import logging as _logging  # noqa: PLC0415
@@ -284,9 +282,7 @@ class CerebellumAgent:
         Returns:
             失败模式洞察字符串，或 None（未触发/失败）。
         """
-        import os as _os  # noqa: PLC0415
-        _enabled = str(_os.environ.get("CEREBELLUM_CORRECTION_NARRATIVE_ENABLED", "false")).lower() in ("1", "true", "yes")
-        if not _enabled or int(consecutive_failures or 0) <= 2:
+        if int(consecutive_failures or 0) <= 2:
             return None
 
         import logging as _logging  # noqa: PLC0415
