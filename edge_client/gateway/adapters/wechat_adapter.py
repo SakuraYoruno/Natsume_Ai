@@ -143,9 +143,20 @@ class WeChatAdapter(AbstractPlatformAdapter):
         try:
             if reply.msg_type == MsgType.TEXT:
                 if self._bridge_queue_enabled():
-                    # 拟人化分段发送（公共模块）
-                    success = self._send_text_humanized(reply)
-                    detail = "bridge_queue_humanized"
+                    success, humanized_detail = self._send_text_humanized(reply)
+                    if success:
+                        detail = "bridge_queue_humanized"
+                        return success
+                    logger.warning(
+                        "WeChatAdapter: humanized send failed, falling back to plain bridge send: %s",
+                        humanized_detail or "unknown error",
+                    )
+                    success = self._send_via_bridge_queue(reply)
+                    detail = (
+                        f"bridge_queue_plain_fallback:{humanized_detail}"
+                        if success
+                        else f"bridge_queue_plain_failed:{humanized_detail}"
+                    )
                     return success
                 detail = "bridge_queue_not_enabled"
                 logger.warning(
@@ -464,7 +475,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
         )
         return bool((result or {}).get("success"))
 
-    def _send_text_humanized(self, reply: UnifiedReply) -> bool:
+    def _send_text_humanized(self, reply: UnifiedReply) -> tuple[bool, str]:
         """使用公共拟人化模块分段发送文字消息。
 
         将完整回复拆分为多段，逐段通过 bridge 队列发送，
@@ -524,7 +535,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 send_result.total_segments,
                 send_result.error[:100],
             )
-        return send_result.success
+        detail = (
+            f"segment={send_result.failed_segment_index + 1}/{send_result.total_segments};"
+            f" sent={send_result.sent_segments}; error={send_result.error[:120]}"
+            if not send_result.success
+            else f"segments={send_result.sent_segments}; delay_ms={send_result.total_delay_ms}"
+        )
+        return send_result.success, detail
 
     def _send_file_via_bridge_queue(self, reply: UnifiedReply) -> bool:  # Phase 1
         """Send a generic file via the bridge command queue.

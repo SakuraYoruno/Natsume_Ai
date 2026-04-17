@@ -32,17 +32,32 @@ def test_build_skill_route_decision_for_skill_uses_registry_meta() -> None:
     assert "episodic" in decision.capability_tags
 
 
-def test_build_skill_route_decision_for_delegate_maps_family() -> None:
+def test_build_skill_route_decision_for_codex_skill_maps_code_family() -> None:
     decision = build_skill_route_decision(
-        route_type="delegate",
-        target_id="code_agent",
+        route_type="skill",
+        target_id="codex_codegen",
         reason_code="keyword:debug",
         skill_registry=None,
     )
 
-    assert decision.route_type == "delegate"
+    assert decision.route_type == "skill"
     assert decision.skill_family == "code"
-    assert decision.executor_target == "code_agent"
+    assert decision.executor_target == "codex_codegen"
+    assert decision.skill_id == "codex_codegen"
+    assert decision.requires_model_profile is True
+
+
+def test_build_skill_route_decision_for_delegate_maps_intent_family() -> None:
+    decision = build_skill_route_decision(
+        route_type="delegate",
+        target_id="intent_agent",
+        reason_code="keyword:plan",
+        skill_registry=None,
+    )
+
+    assert decision.route_type == "delegate"
+    assert decision.skill_family == "reasoning"
+    assert decision.executor_target == "intent_agent"
     assert decision.requires_model_profile is True
 
 

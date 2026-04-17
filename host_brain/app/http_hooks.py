@@ -109,6 +109,25 @@ def _init_edge_command_pusher_status(*, logger: Any) -> str:
         return f"DEGRADED: {exc}"
 
 
+def _build_codex_self_heal_scheduler_task(*, interval_s: float) -> Any:
+    from host_brain.app.automation.task_scheduler import ScheduledTask, TaskPriority  # noqa: PLC0415
+    from host_brain.app.internal_codex_routes import run_scheduled_self_heal_auto_dispatch_cycle  # noqa: PLC0415
+
+    async def _run_codex_self_heal_scheduler_task() -> None:
+        await run_scheduled_self_heal_auto_dispatch_cycle()
+
+    return ScheduledTask(
+        task_id="codex_self_heal_auto_dispatch_tick",
+        name="Codex self-heal auto-dispatch tick",
+        fn=_run_codex_self_heal_scheduler_task,
+        interval_s=float(interval_s),
+        max_retries=1,
+        retry_delay_s=15.0,
+        enabled=True,
+        priority=TaskPriority.P1,
+    )
+
+
 def _bootstrap_personality_scheduler(
     *,
     logger: Any,
@@ -438,6 +457,24 @@ def runtime_lifespan(
                     "Background periodic schedulers disabled by HOST_BACKGROUND_TASKS_ENABLED=false"
                 )
                 new_module_statuses["proactive_push_client"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+            try:
+                from host_brain.app.internal_codex_routes import (  # noqa: PLC0415
+                    start_self_heal_auto_dispatch_monitor,
+                )
+
+                if not _background_tasks_enabled:
+                    new_module_statuses["codex_self_heal_monitor"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                else:
+                    _codex_monitor_state = start_self_heal_auto_dispatch_monitor(logger=logger)
+                    if bool(_codex_monitor_state.get("scheduler_managed")):
+                        new_module_statuses["codex_self_heal_monitor"] = "OK (scheduler-managed auto-dispatch)"
+                    elif bool(_codex_monitor_state.get("enabled")):
+                        new_module_statuses["codex_self_heal_monitor"] = "OK (auto-dispatch monitor enabled)"
+                    else:
+                        new_module_statuses["codex_self_heal_monitor"] = "SKIPPED: HOST_CODEX_SELF_HEAL_AUTODISPATCH_ENABLED=false"
+            except Exception as _codex_monitor_exc:
+                new_module_statuses["codex_self_heal_monitor"] = f"DEGRADED: {_codex_monitor_exc}"
+                logger.warning("Codex self-heal auto-dispatch monitor startup degraded: %s", _codex_monitor_exc)
             new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
                 ledger=ledger,
                 logger=logger,
@@ -625,6 +662,69 @@ def runtime_lifespan(
                 logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
 
             # [Ref #31] LongTermDistiller 蒸馏任务注册到调度器
+            # Codex self-heal auto-dispatch task registration for HostTaskScheduler.
+            try:
+                if not _background_tasks_enabled:
+                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
+                _codex_scheduler_enabled = _parse_bool_env(
+                    "HOST_CODEX_SELF_HEAL_SCHEDULER_ENABLED",
+                    default=False,
+                )
+                if not _codex_scheduler_enabled:
+                    new_module_statuses["codex_self_heal_scheduler"] = (
+                        "SKIPPED: HOST_CODEX_SELF_HEAL_SCHEDULER_ENABLED=false"
+                    )
+                else:
+                    from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
+
+                    _codex_scheduler = get_scheduler()
+                    _codex_interval_s = float(
+                        max(
+                            15,
+                            min(
+                                86400,
+                                int(
+                                    str(
+                                        os.environ.get(
+                                            "HOST_CODEX_SELF_HEAL_SCHEDULER_INTERVAL_SECONDS"
+                                        )
+                                        or "300"
+                                    ).strip()
+                                    or "300"
+                                ),
+                            ),
+                        )
+                    )
+                    _codex_task = _build_codex_self_heal_scheduler_task(
+                        interval_s=_codex_interval_s
+                    )
+                    if not any(
+                        str(task.get("task_id") or "") == _codex_task.task_id
+                        for task in _codex_scheduler.get_all_tasks_status()
+                    ):
+                        _codex_scheduler.register(_codex_task)
+                    new_module_statuses["codex_self_heal_scheduler"] = (
+                        f"OK (task_id={_codex_task.task_id}, interval={int(_codex_interval_s)}s)"
+                    )
+                    logger.info(
+                        "Codex self-heal scheduler task registered: task_id=%s interval=%ss",
+                        _codex_task.task_id,
+                        int(_codex_interval_s),
+                    )
+            except Exception as _codex_scheduler_exc:
+                if not _background_tasks_enabled:
+                    new_module_statuses["codex_self_heal_scheduler"] = (
+                        "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                    )
+                else:
+                    new_module_statuses["codex_self_heal_scheduler"] = (
+                        f"DEGRADED: {_codex_scheduler_exc}"
+                    )
+                logger.warning(
+                    "Codex self-heal scheduler task registration degraded: %s",
+                    _codex_scheduler_exc,
+                )
+
             try:
                 if not _background_tasks_enabled:
                     raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
@@ -1107,6 +1207,28 @@ def runtime_lifespan(
             dependency_probes = _edge_health
             if dependency_probes is None:
                 dependency_probes = await probe_edge_rpc_health()
+            try:
+                if not _background_tasks_enabled:
+                    new_module_statuses["host_task_scheduler"] = (
+                        "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                    )
+                else:
+                    from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
+
+                    _host_task_scheduler = get_scheduler()
+                    await _host_task_scheduler.start()
+                    new_module_statuses["host_task_scheduler"] = (
+                        f"OK (running={_host_task_scheduler.health().get('running', False)}, "
+                        f"task_count={len(_host_task_scheduler.get_all_tasks_status())})"
+                    )
+            except Exception as _host_task_scheduler_exc:
+                new_module_statuses["host_task_scheduler"] = (
+                    f"DEGRADED: {_host_task_scheduler_exc}"
+                )
+                logger.warning(
+                    "HostTaskScheduler startup degraded: %s",
+                    _host_task_scheduler_exc,
+                )
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -1367,6 +1489,18 @@ def runtime_lifespan(
             logger.info("TribeStateRegistry 定时保存已停止，最终快照已落盘")
         except Exception as _periodic_stop_exc:
             logger.debug("TribeStateRegistry.stop_periodic_save 失败（降级）: %s", _periodic_stop_exc)
+        try:
+            from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
+
+            await get_scheduler().stop()
+        except Exception as _host_task_scheduler_stop_exc:
+            logger.debug("HostTaskScheduler stop degraded: %s", _host_task_scheduler_stop_exc)
+        try:
+            from host_brain.app.internal_codex_routes import stop_self_heal_auto_dispatch_monitor  # noqa: PLC0415
+
+            stop_self_heal_auto_dispatch_monitor(logger=logger)
+        except Exception as _codex_monitor_stop_exc:
+            logger.debug("Codex self-heal auto-dispatch monitor stop degraded: %s", _codex_monitor_stop_exc)
         logger.info("Natsume AI Host Brain shutting down ...")
 
     return _lifespan()

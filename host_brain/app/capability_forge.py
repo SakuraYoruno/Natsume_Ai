@@ -22,7 +22,7 @@ _FORGE_EVENT_RUNTIME = "CAPABILITY_FORGE_EVENT_RUNTIME_RESULT"
 _FORGE_REASON_AUTO_ROLLBACK = "CAPABILITY_FORGE_AUTO_ROLLBACK"
 
 _DEFAULT_EXECUTOR_BY_FAMILY = {
-    "code": "code_agent",
+    "code": "codex_codegen",
     "translation": "translate_agent",
     "perception": "vision_agent",
     "vision": "vision_agent",

@@ -16,6 +16,7 @@ class TribeFamilySpec:
 
 _DEFAULT_FAMILY_SPECS: tuple[TribeFamilySpec, ...] = (
     TribeFamilySpec("cortex", "CortexAgent"),
+    TribeFamilySpec("thalamus", "ThalamusAgent"),
     TribeFamilySpec("ans", "ANSAgent"),
     TribeFamilySpec("hippocampus", "HippocampusAgent"),
     TribeFamilySpec("limbic", "LimbicAgent"),
@@ -51,6 +52,7 @@ class HostTribeRegistry:
             TribeAgentDescriptor("cortex_orchestrator", "cortex", capabilities=("route", "governor", "handoff")),
             TribeAgentDescriptor("executive_router", "cortex", capabilities=("route", "delegate", "skill")),
             TribeAgentDescriptor("chat_agent", "cortex", capabilities=("reply", "style", "render")),
+            TribeAgentDescriptor("thalamus_agent", "thalamus", capabilities=("intent_compile", "schema_normalize", "handoff_pack")),
             TribeAgentDescriptor("ans_agent", "ans", capabilities=("scheduler", "mode_transition", "proactive_tick")),
             TribeAgentDescriptor("hippocampus_agent", "hippocampus", capabilities=("episodic_store", "recall_fusion")),
             TribeAgentDescriptor("limbic_agent", "limbic", capabilities=("emotion", "motive", "body_sense")),
@@ -121,6 +123,8 @@ class HostTribeRegistry:
                 return "hippocampus"
             if "language" in normalized_target or "wernicke" in normalized_target or "broca" in normalized_target:
                 return "language"
+            if "thalamus" in normalized_target or "intent_compile" in normalized_target or "schema_normalize" in normalized_target:
+                return "thalamus"
             if "pain" in normalized_target or "reward" in normalized_target or "hedonic" in normalized_target:
                 return "pain_reward"
             if "emotion" in normalized_target or "motive" in normalized_target or "inner_world" in normalized_target:
@@ -163,7 +167,7 @@ class HostTribeRegistry:
                 return "endocrine"
             if "immune" in normalized_target or "guard" in normalized_target or "injection" in normalized_target:
                 return "immune"
-            if normalized_target in {"code_agent", "translate_agent", "intent_agent", "vision_agent", "repair_agent"}:
+            if normalized_target in {"translate_agent", "intent_agent", "vision_agent", "repair_agent"}:
                 return "cortex"
 
         if normalized_route == "skill":

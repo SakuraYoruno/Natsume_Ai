@@ -42,6 +42,7 @@ from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.input_routes import router as input_router
 from host_brain.app.prompt_config_routes import router as prompt_config_router
 from host_brain.app.internal_tribe_routes import router as internal_tribe_router
+from host_brain.app.internal_codex_routes import router as internal_codex_router
 from host_brain.app.dependencies import (
     get_ledger as _get_ledger_dep,
     get_tool_catalog,
@@ -288,6 +289,7 @@ app.include_router(input_router)
 # 注册 Tribe 内部事件入口（Host/Edge 事件桥）
 # ---------------------------------------------------------------------------
 app.include_router(internal_tribe_router)
+app.include_router(internal_codex_router)
 
 # ---------------------------------------------------------------------------
 # 挂载静态文件目录（TASK-0066: 前端面板页面）

@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from edge_client.actuators.tts_engine import _synthesize_audio
+from edge_client.actuators import tts_engine
+from edge_client.actuators.tts_engine import (
+    _ModernSoVITSAdapter,
+    SoVITSModelManager,
+    TtsConfig,
+    TtsState,
+    TtsSynthResult,
+    _is_retryable_invalid_argument_error,
+    _synthesize_audio,
+)
 
 
 class _RetryModel:
@@ -52,3 +63,127 @@ def test_synthesize_audio_raises_non_retryable_exception() -> None:
             emotion_intensity=0.5,
             timeout_s=5.0,
         )
+
+
+def test_retryable_invalid_argument_error_detection() -> None:
+    assert _is_retryable_invalid_argument_error(OSError("[Errno 22] Invalid argument"))
+    assert _is_retryable_invalid_argument_error(RuntimeError("invalid argument from backend"))
+    assert not _is_retryable_invalid_argument_error(RuntimeError("backend exploded"))
+
+
+def test_model_manager_reloads_and_retries_after_invalid_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    bad_model = object()
+    good_model = object()
+    calls: list[object] = []
+
+    mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+    mgr._state = TtsState.READY
+    mgr._model = bad_model
+
+    def fake_synthesize_audio(*, model, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(model)
+        _ = kwargs
+        if model is bad_model:
+            raise OSError("[Errno 22] Invalid argument")
+        return [0.1, -0.2, 0.3], 32000
+
+    def fake_load() -> TtsSynthResult:
+        mgr._model = good_model
+        mgr._state = TtsState.READY
+        return TtsSynthResult(success=True, reason_code=None, detail="reloaded")
+
+    monkeypatch.setattr(tts_engine, "_synthesize_audio", fake_synthesize_audio)
+    monkeypatch.setattr(mgr, "load", fake_load)
+
+    result = mgr.synthesize("こんにちは")
+
+    assert result.success
+    assert calls == [bad_model, good_model]
+    assert mgr.health()["recovery_count"] == 1
+    assert "recovered from invalid argument" in str(mgr.health()["last_recovery_detail"])
+
+
+def test_model_manager_falls_back_to_fresh_process_when_reload_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    bad_model = object()
+
+    mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+    mgr._state = TtsState.READY
+    mgr._model = bad_model
+
+    def fake_synthesize_audio(*, model, **kwargs):  # type: ignore[no-untyped-def]
+        _ = kwargs
+        if model is bad_model:
+            raise OSError("[Errno 22] Invalid argument")
+        raise AssertionError("unexpected in-process retry")
+
+    def fake_load() -> TtsSynthResult:
+        return TtsSynthResult(success=False, reason_code="TTS_MODEL_UNAVAILABLE", detail="reload boom")
+
+    monkeypatch.setattr(tts_engine, "_synthesize_audio", fake_synthesize_audio)
+    monkeypatch.setattr(tts_engine, "_allow_tts_subprocess_fallback", lambda: True)
+    monkeypatch.setattr(mgr, "load", fake_load)
+    monkeypatch.setattr(
+        mgr,
+        "_synthesize_via_fresh_process",
+        lambda **kwargs: ([0.05, -0.05], 32000),
+    )
+
+    result = mgr.synthesize("こんにちは")
+
+    assert result.success
+    assert result.sample_rate == 32000
+    assert mgr.state == TtsState.READY
+    assert mgr.health()["backend_mode"] == "subprocess"
+    assert mgr.health()["load_error"] is None
+    assert mgr.health()["recovery_count"] == 1
+    assert "fresh subprocess" in str(mgr.health()["last_recovery_detail"])
+
+
+def test_model_manager_load_activates_persistent_subprocess_backend_on_invalid_argument(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mgr = SoVITSModelManager(TtsConfig(device="cpu"))
+
+    def fake_load_sovits_model(**kwargs):  # type: ignore[no-untyped-def]
+        _ = kwargs
+        raise OSError("[Errno 22] Invalid argument")
+
+    monkeypatch.setattr(tts_engine, "_load_sovits_model", fake_load_sovits_model)
+    monkeypatch.setattr(tts_engine, "_allow_tts_subprocess_fallback", lambda: True)
+
+    result = mgr.load()
+
+    assert result.success
+    assert mgr.state == TtsState.READY
+    assert mgr.health()["backend_mode"] == "subprocess"
+    assert mgr.health()["load_error"] is None
+    assert "fresh subprocess backend after load failure" in str(mgr.health()["last_recovery_detail"])
+
+
+def test_modern_sovits_adapter_anchors_working_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    chdirs: list[str] = []
+
+    class _FakeTTS:
+        configs = SimpleNamespace(languages=["ja"])
+
+        @staticmethod
+        def run(run_inputs):  # type: ignore[no-untyped-def]
+            _ = run_inputs
+            yield 32000, [0.1, -0.2, 0.3]
+
+    monkeypatch.setattr(tts_engine.os, "getcwd", lambda: r"C:\Users\ROG")
+    monkeypatch.setattr(tts_engine.os.path, "isdir", lambda path: True)
+    monkeypatch.setattr(tts_engine.os, "chdir", lambda path: chdirs.append(str(path)))
+
+    adapter = _ModernSoVITSAdapter(
+        tts=_FakeTTS(),
+        ref_audio_path=r"D:\ref.wav",
+        ref_text="こんにちは",
+        default_language="ja",
+        working_directory=r"D:\AI_Models\GPT-SoVITS",
+    )
+
+    result = adapter.synthesize(text="こんにちは", language="ja")
+
+    assert result["sample_rate"] == 32000
+    assert chdirs == [r"D:\AI_Models\GPT-SoVITS", r"C:\Users\ROG"]

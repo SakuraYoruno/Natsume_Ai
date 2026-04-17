@@ -96,7 +96,12 @@ def _default_mock_provider(_payload: dict[str, Any]) -> str:
     return json.dumps(
         {
             "narrative": {"text": "这是一个草案回复。"},
-            "intent_draft": {"skill_name": "narrative_only", "args": {}, "draft_only": True},
+            "intent_draft": {
+                "route": "chat",
+                "target_id": "",
+                "action": "narrative_only",
+                "args": {},
+            },
             "meta": {"draft_only": True, "source": "mock_gateway"},
         },
         ensure_ascii=False,

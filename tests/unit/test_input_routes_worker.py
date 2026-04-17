@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.input_routes import (
-    _build_gateway_intent_draft,
     _build_gateway_reply_text,
     _deliver_gateway_reply,
     _detect_gateway_execution_deviation,
@@ -21,6 +20,8 @@ from host_brain.app.input_routes import (
     _try_handle_gateway_progress_fastpath,
 )
 from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.tribe.thalamus_agent import classify_task_intent
+from tests.text_quality_assertions import assert_natsume_style
 
 
 def _run(coro):
@@ -111,10 +112,11 @@ def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded() -> None
         assert "INPUT_NOT_WIRED" not in event_types
 
         completed = next(row for row in rows if row["event_type"] == "INPUT_COMPLETED")
+        completed_payload = dict(completed.get("payload") or {})
         assert completed["status"] == "DEGRADED"
         assert completed["reason_code"] == "GATEWAY_REPLY_EXCEPTION"
         assert "gateway_success=false" in str(completed.get("detail") or "")
-        assert "gateway_reason_code=GATEWAY_REPLY_EXCEPTION" in str(completed.get("detail") or "")
+        assert completed_payload["gateway_reason_code"] == "GATEWAY_REPLY_EXCEPTION"
     finally:
         ledger.close()
 
@@ -162,6 +164,73 @@ def test_dispatch_worker_gateway_reply_failure_can_be_ignored_for_completion_sta
         ledger.close()
 
 
+def test_dispatch_worker_persists_gateway_voice_result_in_completed_payload() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        with patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "这次我把语音和动作都接上了。",
+                }
+            ),
+        ), patch(
+            "host_brain.app.input_routes._deliver_gateway_reply",
+            new=AsyncMock(
+                return_value={
+                    "success": True,
+                    "status": "OK",
+                    "reason_code": None,
+                    "detail": "gateway ok",
+                    "latency_ms": 30,
+                    "reply_text_len": 14,
+                    "reply_preview": "preview",
+                    "reply_form": "text",
+                    "reply_form_reason": "force_dual_voice_reply",
+                    "voice_sent": True,
+                    "voice_waited": True,
+                    "voice_success": True,
+                    "voice_status": "ACCEPTED",
+                    "voice_reason_code": None,
+                    "voice_detail": "tts queued; tts playback started",
+                    "voice_latency_ms": 320,
+                    "voice_started": True,
+                    "voice_vts_started": True,
+                    "voice_vts_expression_success": True,
+                    "voice_event": {"event_type": "TTS_PLAYBACK_STARTED"},
+                }
+            ),
+        ):
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_worker_voice_payload_001",
+                    session_id="qq_dm_voice_payload_001",
+                    source="GATEWAY",
+                    text="请继续处理",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_voice_payload_001",
+                        "msg_id": "msg_voice_payload_001",
+                    },
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                )
+            )
+
+        completed = next(row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED")
+        payload = dict(completed.get("payload") or {})
+        assert payload["gateway_voice_success"] is True
+        assert payload["gateway_voice_started"] is True
+        assert payload["gateway_voice_vts_started"] is True
+        assert payload["gateway_voice_event"]["event_type"] == "TTS_PLAYBACK_STARTED"
+    finally:
+        ledger.close()
+
+
 def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
@@ -173,10 +242,10 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
                     "reason_code": None,
                     "narrative": "已完成",
                     "route_decision": {
-                        "route": "delegate",
-                        "target_id": "code_agent",
+                        "route": "skill",
+                        "target_id": "codex_codegen",
                         "task": "修复测试",
-                        "reason_code": "LLM_ROUTE_CODE_AGENT",
+                        "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
                         "source": "llm",
                         "confidence": 0.91,
                         "override_reason": None,
@@ -210,8 +279,8 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
         route_row = next(row for row in rows if row["event_type"] == "INPUT_ROUTE_DECIDED")
         route_payload = dict(route_row.get("payload") or {})
         assert route_row["status"] == "OK"
-        assert route_payload["route_type"] == "delegate"
-        assert route_payload["route_target"] == "code_agent"
+        assert route_payload["route_type"] == "skill"
+        assert route_payload["route_target"] == "codex_codegen"
         assert route_payload["route_source"] == "llm"
         assert float(route_payload["route_confidence"]) == 0.91
         assert route_payload["llm_route_used"] is True
@@ -235,10 +304,10 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
                     "narrative": "delegate done",
                     "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
                     "route_decision": {
-                        "route": "delegate",
-                        "target_id": "code_agent",
+                        "route": "skill",
+                        "target_id": "codex_codegen",
                         "task": "fix code",
-                        "reason_code": "LLM_ROUTE_CODE_AGENT",
+                        "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
                         "source": "llm",
                         "confidence": 0.95,
                         "llm_route_used": True,
@@ -370,196 +439,124 @@ def test_run_cortex_pipeline_forwards_to_cortex_orchestrator() -> None:
     assert result == expected
 
 
-def test_build_gateway_intent_draft_prefers_llm_route_when_available() -> None:
+def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
     with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
+        "host_brain.tribe.thalamus_agent.classify_task_intent_by_rules",
+        return_value=None,
+    ), patch(
+        "host_brain.tribe.thalamus_agent.classify_task_intent_by_llm",
         new=AsyncMock(
             return_value={
-                "route": "delegate",
-                "target_id": "code_agent",
+                "route": "skill",
+                "target_id": "codex_codegen",
                 "task": "请修复这个报错",
-                "reason_code": "LLM_ROUTE_CODE_AGENT",
+                "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
                 "confidence": 0.93,
                 "route_source": "llm",
-                "llm_route_used": True,
             }
         ),
     ):
-        draft = _run(
-            _build_gateway_intent_draft(
+        decision = _run(
+            classify_task_intent(
                 request_id="req_llm_route_001",
                 session_id="qq_dm_llm_001",
-                source="GATEWAY",
                 text="请修复这个报错",
             )
         )
 
-    assert draft["route"] == "delegate"
-    assert draft["target_id"] == "code_agent"
-    assert draft["delegate_agent"] == "code_agent"
-    assert draft["route_source"] == "llm"
-    assert draft["llm_route_used"] is True
-    assert float(draft["route_confidence"]) == 0.93
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_codegen"
+    assert decision["route_source"] == "llm"
+    assert float(decision["confidence"]) == 0.93
 
 
-def test_build_gateway_intent_draft_falls_back_to_rule_when_llm_unavailable() -> None:
-    with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
-        new=AsyncMock(return_value=None),
-    ):
-        draft = _run(
-            _build_gateway_intent_draft(
-                request_id="req_llm_route_002",
-                session_id="qq_dm_llm_002",
-                source="GATEWAY",
-                text="run diagnostics now",
-            )
+def test_classify_task_intent_uses_rule_for_action_prefix() -> None:
+    decision = _run(
+        classify_task_intent(
+            request_id="req_llm_route_002",
+            session_id="qq_dm_llm_002",
+            text="run diagnostics now",
         )
+    )
 
-    assert draft["route"] == "delegate"
-    assert draft["target_id"] == "intent_agent"
-    assert draft["route_source"] == "rule"
-    assert draft["llm_route_used"] is False
-    assert draft["route_reason"] == "RULE_ACTION_INTENT"
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "intent_agent"
+    assert decision["route_source"] == "rule"
+    assert decision["reason_code"] == "RULE_ACTION_PREFIX"
 
 
-def test_build_gateway_intent_draft_force_overrides_translate() -> None:
-    with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "chat",
-                "target_id": "",
-                "task": "",
-                "reason_code": "LLM_ROUTE_CHAT",
-                "confidence": 0.88,
-                "route_source": "llm",
-                "llm_route_used": True,
-            }
-        ),
-    ):
-        draft = _run(
-            _build_gateway_intent_draft(
-                request_id="req_llm_route_003",
-                session_id="qq_dm_llm_003",
-                source="GATEWAY",
-                text="请翻译成英文：你好",
-            )
+def test_classify_task_intent_routes_translate_requests() -> None:
+    decision = _run(
+        classify_task_intent(
+            request_id="req_llm_route_003",
+            session_id="qq_dm_llm_003",
+            text="请翻译成英文：你好",
         )
+    )
 
-    assert draft["route"] == "delegate"
-    assert draft["target_id"] == "translate_agent"
-    assert draft["route_source"] == "override"
-    assert draft["route_override_reason"] == "FORCE_OVERRIDE_TRANSLATE_AGENT"
-    assert draft["llm_route_used"] is True
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "translate_agent"
+    assert decision["route_source"] == "rule"
+    assert decision["reason_code"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
-def test_build_gateway_intent_draft_keeps_translate_priority_when_text_contains_bug() -> None:
-    with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "delegate",
-                "target_id": "translate_agent",
-                "task": "请翻译成英文：今天修了三个bug",
-                "reason_code": "LLM_ROUTE_TRANSLATE_AGENT",
-                "confidence": 0.92,
-                "route_source": "llm",
-                "llm_route_used": True,
-            }
-        ),
-    ):
-        draft = _run(
-            _build_gateway_intent_draft(
-                request_id="req_llm_route_004",
-                session_id="qq_dm_llm_004",
-                source="GATEWAY",
-                text="请翻译成英文：今天修了三个bug",
-            )
+def test_classify_task_intent_keeps_translate_priority_when_text_contains_bug() -> None:
+    decision = _run(
+        classify_task_intent(
+            request_id="req_llm_route_004",
+            session_id="qq_dm_llm_004",
+            text="请翻译成英文：今天修了三个bug",
         )
+    )
 
-    assert draft["route"] == "delegate"
-    assert draft["target_id"] == "translate_agent"
-    assert draft.get("route_override_reason") != "FORCE_OVERRIDE_CODE_AGENT"
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "translate_agent"
+    assert decision["reason_code"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
-def test_build_gateway_intent_draft_force_overrides_recent_turn_query() -> None:
-    with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "chat",
-                "target_id": "",
-                "task": "",
-                "reason_code": "LLM_ROUTE_CHAT",
-                "confidence": 0.88,
-                "route_source": "llm",
-                "llm_route_used": True,
-            }
-        ),
-    ):
-        draft = _run(
-            _build_gateway_intent_draft(
-                request_id="req_llm_route_005",
-                session_id="qq_dm_llm_005",
-                source="GATEWAY",
-                text="你刚刚说了什么",
-            )
+def test_classify_task_intent_routes_recent_turn_query() -> None:
+    decision = _run(
+        classify_task_intent(
+            request_id="req_llm_route_005",
+            session_id="qq_dm_llm_005",
+            text="你刚刚说了什么",
         )
+    )
 
-    assert draft["route"] == "recent_turn"
-    assert draft["target_id"] == ""
-    assert draft["route_source"] == "override"
-    assert draft["route_override_reason"] == "FORCE_OVERRIDE_RECENT_TURN"
+    assert decision["route"] == "recent_turn"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "rule"
+    assert decision["reason_code"] == "RULE_RECENT_TURN"
 
 
-def test_build_gateway_intent_draft_force_overrides_task_progress_query() -> None:
-    with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
-        new=AsyncMock(
-            return_value={
-                "route": "chat",
-                "target_id": "",
-                "task": "",
-                "reason_code": "LLM_ROUTE_CHAT",
-                "confidence": 0.82,
-                "route_source": "llm",
-                "llm_route_used": True,
-            }
-        ),
-    ):
-        draft = _run(
-            _build_gateway_intent_draft(
-                request_id="req_llm_route_005a",
-                session_id="qq_dm_llm_005a",
-                source="GATEWAY",
-                text="现在进度怎么样了",
-            )
+def test_classify_task_intent_routes_task_progress_query() -> None:
+    decision = _run(
+        classify_task_intent(
+            request_id="req_llm_route_005a",
+            session_id="qq_dm_llm_005a",
+            text="现在进度怎么样了",
         )
+    )
 
-    assert draft["route"] == "task_progress"
-    assert draft["target_id"] == ""
-    assert draft["route_source"] == "override"
-    assert draft["route_override_reason"] == "FORCE_OVERRIDE_TASK_PROGRESS"
+    assert decision["route"] == "task_progress"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "rule"
+    assert decision["reason_code"] == "RULE_TASK_PROGRESS"
 
 
-def test_build_gateway_intent_draft_rule_fallback_captures_save_memory_phrase() -> None:
-    with patch(
-        "host_brain.app.input_routes._run_gateway_intent_route_llm",
-        new=AsyncMock(return_value=None),
-    ):
-        draft = _run(
-            _build_gateway_intent_draft(
-                request_id="req_llm_route_006",
-                session_id="qq_dm_llm_006",
-                source="GATEWAY",
-                text="保存这条记忆：我周五晚上有空",
-            )
+def test_classify_task_intent_routes_memory_store_request() -> None:
+    decision = _run(
+        classify_task_intent(
+            request_id="req_llm_route_006",
+            session_id="qq_dm_llm_006",
+            text="保存这条记忆：我周五晚上有空",
         )
+    )
 
-    assert draft["route"] in {"skill", "delegate"}
-    if draft["route"] == "skill":
-        assert draft["target_id"] == "memory_store"
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "memory_store"
+    assert decision["route_source"] == "rule"
+    assert decision["reason_code"] == "RULE_FORCE_MEMORY_STORE"
 
 
 def test_build_gateway_reply_text_fallback_for_empty_reject() -> None:
@@ -569,6 +566,12 @@ def test_build_gateway_reply_text_fallback_for_empty_reject() -> None:
         reason_code="RATE_LIMIT",
     )
     assert "重试" in text
+    assert_natsume_style(
+        user_message="先继续处理这件事",
+        reply=text,
+        emotion_tag="neutral",
+        bond_stage="STRANGER",
+    )
 
 
 def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> None:
@@ -601,6 +604,18 @@ def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> 
         narrative="",
         reason_code=None,
     ) == "已经收到啦。"
+    assert_natsume_style(
+        user_message="先帮我继续处理",
+        reply="先等等我，我马上回来。",
+        emotion_tag="neutral",
+        bond_stage="STRANGER",
+    )
+    assert_natsume_style(
+        user_message="先帮我继续处理",
+        reply="已经收到啦。",
+        emotion_tag="neutral",
+        bond_stage="STRANGER",
+    )
 
 
 def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> None:
@@ -620,6 +635,178 @@ def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> No
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
     assert result["reply_form"] == "text"
     assert result["reply_form_reason"] == "auto_reply_disabled"
+
+
+def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_speak",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                status="ACCEPTED",
+                reason_code=None,
+                detail="tts queued; tts playback started",
+                latency_ms=287,
+                event={
+                    "event_type": "TTS_PLAYBACK_STARTED",
+                    "vts_talk_result": {"success": True},
+                    "vts_expression_result": {"success": True},
+                    "vts_mouth_sync": {"started": True, "state": "running"},
+                },
+            )
+        ),
+    ) as speak_mock:
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_voice_only_001",
+                payload={
+                    "platform": "wechat",
+                    "conversation_id": "wxid_voice_only_001",
+                    "raw_extra": {
+                        "force_dual_voice_reply": True,
+                        "wait_voice_reply_result": True,
+                    },
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="我先直接在你这边把结果念出来。",
+                emotion_tag="GENTLE",
+                user_msg_type="text",
+            )
+        )
+
+    speak_mock.assert_awaited_once()
+    assert result["success"] is True
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
+    assert result["voice_sent"] is True
+    assert result["voice_waited"] is True
+    assert result["voice_success"] is True
+    assert result["voice_started"] is True
+    assert result["voice_vts_started"] is True
+    assert result["voice_vts_expression_success"] is True
+
+
+def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                status="SENT",
+                reason_code=None,
+                detail="text sent",
+                latency_ms=24,
+            )
+        ),
+    ), patch(
+        "host_brain.channels.edge_rpc_client.post_speak",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                status="ACCEPTED",
+                reason_code=None,
+                detail="tts queued; tts playback started",
+                latency_ms=320,
+                event={
+                    "event_type": "TTS_PLAYBACK_STARTED",
+                    "vts_talk_result": {"success": True},
+                    "vts_expression_result": {"success": True},
+                    "vts_mouth_sync": {"started": True, "state": "running"},
+                },
+            )
+        ),
+    ) as speak_mock:
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_voice_wait_001",
+                payload={
+                    "platform": "wechat",
+                    "conversation_id": "wxid_demo_001",
+                    "raw_extra": {
+                        "force_dual_voice_reply": True,
+                        "wait_voice_reply_result": True,
+                    },
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="今天我会直接把结果说给你听。",
+                emotion_tag="HAPPY",
+                user_msg_type="text",
+            )
+        )
+
+    speak_mock.assert_awaited_once()
+    assert result["success"] is True
+    assert result["reply_form_reason"] == "force_dual_voice_reply"
+    assert result["voice_sent"] is True
+    assert result["voice_waited"] is True
+    assert result["voice_success"] is True
+    assert result["voice_started"] is True
+    assert result["voice_vts_started"] is True
+    assert result["voice_vts_expression_success"] is True
+
+
+def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delivery_fails(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                success=False,
+                status="FAILED",
+                reason_code="WECHAT_SEND_FAILED",
+                detail="target not found",
+                latency_ms=18,
+            )
+        ),
+    ), patch(
+        "host_brain.channels.edge_rpc_client.post_speak",
+        new=AsyncMock(
+            return_value=SimpleNamespace(
+                success=True,
+                status="ACCEPTED",
+                reason_code=None,
+                detail="tts queued; tts playback started",
+                latency_ms=301,
+                event={
+                    "event_type": "TTS_PLAYBACK_STARTED",
+                    "vts_talk_result": {"success": True},
+                    "vts_expression_result": {"success": True},
+                    "vts_mouth_sync": {"started": True, "state": "running"},
+                },
+            )
+        ),
+    ) as speak_mock:
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_voice_on_failure_001",
+                payload={
+                    "platform": "wechat",
+                    "conversation_id": "wxid_missing_target",
+                    "raw_extra": {
+                        "force_dual_voice_reply": True,
+                        "wait_voice_reply_result": True,
+                        "allow_voice_reply_on_primary_failure": True,
+                    },
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="就算文字发不出去，我也先把声音链路跑起来。",
+                emotion_tag="HAPPY",
+                user_msg_type="text",
+            )
+        )
+
+    speak_mock.assert_awaited_once()
+    assert result["success"] is False
+    assert result["reason_code"] == "WECHAT_SEND_FAILED"
+    assert result["voice_sent"] is True
+    assert result["voice_success"] is True
+    assert result["voice_started"] is True
+    assert result["voice_vts_started"] is True
 
 
 def test_dispatch_worker_gateway_auto_reply_disabled_still_completes_ok(monkeypatch) -> None:
@@ -655,10 +842,11 @@ def test_dispatch_worker_gateway_auto_reply_disabled_still_completes_ok(monkeypa
             )
 
         completed = next(row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED")
+        completed_payload = dict(completed.get("payload") or {})
         assert completed["status"] == "OK"
         assert "gateway_success=true" in str(completed.get("detail") or "")
         assert "gateway_status=SKIPPED" in str(completed.get("detail") or "")
-        assert "gateway_reason_code=GATEWAY_REPLY_DISABLED" in str(completed.get("detail") or "")
+        assert completed_payload["gateway_reason_code"] == "GATEWAY_REPLY_DISABLED"
     finally:
         ledger.close()
 
@@ -764,6 +952,12 @@ def test_gateway_progress_fastpath_replies_from_runtime_registry(monkeypatch) ->
         assert kwargs["platform"] == "qq"
         assert kwargs["conversation_id"] == "qq_dm_3001"
         assert "session_summary" in kwargs["content"]
+        assert_natsume_style(
+            user_message="现在进度怎么样了？",
+            reply=str(kwargs["content"]),
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
     finally:
         ledger.close()
 
@@ -875,6 +1069,12 @@ def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
         assert kwargs["platform"] == "qq"
         assert kwargs["conversation_id"] == "qq_dm_4003"
         assert "session_summary" in kwargs["content"]
+        assert_natsume_style(
+            user_message="请执行任务",
+            reply=str(kwargs["content"]),
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
     finally:
         ledger.close()
 
@@ -950,5 +1150,11 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
         assert meta["triggered"] is True
         assert meta["retry_applied"] is True
         assert "卡顿原因" in str(result.get("narrative") or "")
+        assert_natsume_style(
+            user_message="请帮我总结前端卡顿原因并给出修复方案",
+            reply=str(result.get("narrative") or ""),
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
     finally:
         ledger.close()

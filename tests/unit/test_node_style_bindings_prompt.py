@@ -80,7 +80,7 @@ def _make_runtime_payload(
             "core_reasoner_primary": {
                 "payload": {
                     "narrative": {"text": "core narrative"},
-                    "intent_draft": {"skill_name": "narrative_only", "args": {}},
+                    "intent_draft": {"route": "chat", "target_id": "", "action": "narrative_only", "args": {}},
                 }
             },
             "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
@@ -453,7 +453,7 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
         "core_reasoner_primary": {
             "payload": {
                 "narrative": {"text": "core narrative"},
-                "intent_draft": {"skill_name": "narrative_only", "args": {}},
+                "intent_draft": {"route": "chat", "target_id": "", "action": "narrative_only", "args": {}},
             }
         },
         "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},

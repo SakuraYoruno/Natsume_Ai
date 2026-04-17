@@ -82,6 +82,13 @@ class EdgeVoicePipeline:
             "started": False,
             "reason": "not_started",
         }
+        self._last_vts_result: dict[str, Any] = {
+            "request_id": None,
+            "emotion_tag": None,
+            "expression_result": None,
+            "talk_result": None,
+            "mouth_sync": dict(self._mouth_sync_debug),
+        }
         # 将 VTS 驱动注册为播放前钩子，确保表情/口型在音频播放前就绪
         self.speech_queue._before_playback_hook = self._vts_before_playback_hook
 
@@ -487,6 +494,13 @@ class EdgeVoicePipeline:
             "talk_result": talk_result,
             "mouth_sync_debug": mouth_sync_debug,
         }
+        self._last_vts_result = {
+            "request_id": str(payload.get("request_id") or "") or None,
+            "emotion_tag": _etag,
+            "expression_result": expression_result.as_dict() if expression_result is not None else None,
+            "talk_result": talk_result.as_dict() if talk_result is not None else None,
+            "mouth_sync": dict(mouth_sync_debug or {}),
+        }
 
     def _start_vts_for_payload(
         self,
@@ -865,6 +879,7 @@ class EdgeVoicePipeline:
         return {
             "mouth_sync": dict(self._mouth_sync_debug),
             "mouth_sync_thread_alive": bool(thread is not None and thread.is_alive()),
+            "last_vts_result": dict(self._last_vts_result),
         }
 
     def _resolve_asr_emotion_report(self, event: dict[str, Any]) -> dict[str, Any]:

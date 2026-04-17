@@ -22,7 +22,7 @@ def test_get_agent_capabilities_uses_template_override(monkeypatch) -> None:
         "sub_agent_protocol.agent_capabilities",
         content=json.dumps(
             {
-                "code_agent": "代码能力::override",
+                "translate_agent": "翻译能力::override",
             },
             ensure_ascii=False,
         ),
@@ -36,7 +36,7 @@ def test_get_agent_capabilities_uses_template_override(monkeypatch) -> None:
 
     capabilities = get_agent_capabilities()
 
-    assert capabilities["code_agent"] == "代码能力::override"
+    assert capabilities["translate_agent"] == "翻译能力::override"
     assert "translate_agent" in capabilities
 
 
@@ -96,12 +96,12 @@ def test_dispatcher_uses_timeout_template(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.app.sub_agent_protocol.asyncio.wait_for", _raise_timeout)
 
     dispatcher = SubAgentDispatcher()
-    dispatcher._handler_map = {"code_agent": lambda _payload, _context: {"ok": True}}
+    dispatcher._handler_map = {"translate_agent": lambda _payload, _context: {"ok": True}}
 
     result = asyncio.run(
         dispatcher.dispatch(
             SubAgentRequest(
-                agent_id="code_agent",
+                agent_id="translate_agent",
                 task="noop",
                 timeout_ms=321,
             )
@@ -113,11 +113,12 @@ def test_dispatcher_uses_timeout_template(monkeypatch) -> None:
 
 
 def test_builtin_sub_agent_templates_are_clean() -> None:
-    capabilities = resolve_prompt_template_json_merged("sub_agent_protocol.agent_capabilities")
+    capabilities = get_agent_capabilities()
     runtime_texts = resolve_prompt_template_json_merged("sub_agent_protocol.runtime_texts")
 
     assert isinstance(capabilities, dict)
-    assert capabilities.get("code_agent") == "代码专家：生成、修改、审查代码，并解释技术概念"
+    assert "codex_codegen" not in capabilities
+    assert capabilities.get("translate_agent") == "翻译专家：处理中日英多语翻译，包含校对和润色"
     assert capabilities.get("repair_agent") == "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力"
 
     assert isinstance(runtime_texts, dict)

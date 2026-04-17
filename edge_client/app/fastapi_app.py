@@ -115,7 +115,7 @@ def create_edge_fastapi_app(
     async def edge_health() -> dict[str, Any]:
         snapshot_ts = int(clock())
         collected = _run_health_collector(health_runner, runtime_value, ts_ms=snapshot_ts)
-        health = build_edge_health_snapshot(runtime_value, ts_ms=snapshot_ts)
+        health = build_edge_health_snapshot(runtime_value, ts_ms=snapshot_ts, collected=collected)
         for key in ("status", "timestamp", "components", "resource_gate"):
             if key in collected:
                 health[key] = collected[key]

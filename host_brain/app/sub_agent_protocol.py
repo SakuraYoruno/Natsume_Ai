@@ -27,7 +27,7 @@ _logger = logging.getLogger("Natsume.sub_agent")
 @dataclass
 class SubAgentRequest:
     """Cortex Orchestrator → 子 Agent 的调度请求。"""
-    agent_id: str                          # "code_agent" / "translate_agent" / "intent_agent" / "vision_agent"
+    agent_id: str                          # "translate_agent" / "intent_agent" / "vision_agent" / "repair_agent"
     task: str                              # 自然语言任务描述
     user_message: str = ""                 # 用户原始消息
     request_id: str = ""
@@ -51,19 +51,17 @@ class SubAgentResponse:
 # Agent ID 常量
 # ---------------------------------------------------------------------------
 
-AGENT_CODE = "code_agent"
 AGENT_TRANSLATE = "translate_agent"
 AGENT_INTENT = "intent_agent"
 AGENT_VISION = "vision_agent"
 AGENT_REPAIR = "repair_agent"
 
 ALL_AGENT_IDS: frozenset[str] = frozenset({
-    AGENT_CODE, AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR,
+    AGENT_TRANSLATE, AGENT_INTENT, AGENT_VISION, AGENT_REPAIR,
 })
 
 # 子 Agent 能力描述（注入 Cortex Orchestrator prompt，供 LLM 判断调度）
 AGENT_CAPABILITIES: dict[str, str] = {
-    AGENT_CODE: "代码专家：生成、修改、审查代码，解释技术概念",
     AGENT_TRANSLATE: "翻译专家：中日英多语言翻译，含校对和润色（多步流程）",
     AGENT_INTENT: "执行专家：理解用户的执行意图，调用工具完成实际操作（文件/网络/系统）",
     AGENT_VISION: "视觉分析：分析图片/截图内容，提取 UI 元素信息",
@@ -97,7 +95,6 @@ def _mapping_text(
 
 
 _DEFAULT_AGENT_CAPABILITIES: dict[str, str] = {
-    AGENT_CODE: "代码专家：生成、修改、审查代码，并解释技术概念",
     AGENT_TRANSLATE: "翻译专家：处理中日英多语翻译，包含校对和润色",
     AGENT_INTENT: "执行专家：理解用户的执行意图，并调用工具完成实际操作（文件 / 网络 / 系统）",
     AGENT_VISION: "视觉分析：分析图片或截图内容，提取 UI 元素与关键信息",
@@ -137,11 +134,6 @@ class SubAgentDispatcher:
         """延迟导入 handler，避免循环依赖。"""
         if self._handler_map:
             return
-        try:
-            from host_brain.app.handlers.code_agent_handler import code_agent_handler
-            self._handler_map[AGENT_CODE] = code_agent_handler
-        except ImportError:
-            pass
         try:
             from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
             self._handler_map[AGENT_TRANSLATE] = translate_agent_handler

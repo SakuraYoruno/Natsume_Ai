@@ -94,6 +94,7 @@ if (-not $EnvFile) {
 if (-not $PidFile) {
   $PidFile = Join-Path $repoRoot "runtime\host\host.pid"
 }
+$runtimeEnvFile = Join-Path $repoRoot "runtime\host\host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
 if ($Port -le 0) {
@@ -151,6 +152,8 @@ if (-not $stopped) {
     $detail = "host not running"
   }
 }
+
+Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
 
 $monitorProxyResult = $null
 $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"

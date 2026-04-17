@@ -89,7 +89,7 @@ def _choose_executor(missing_capability_tags: tuple[str, ...], suggested_family:
     family = str(suggested_family or "").strip().lower()
 
     if "coding" in tags or family == "code":
-        return "delegate", "code_agent"
+        return "skill", "codex_codegen"
     if "translation" in tags or family == "translation":
         return "delegate", "translate_agent"
     if "vision" in tags or family in {"vision", "perception"}:
@@ -161,4 +161,3 @@ def synthesize_runtime_capability(
 
 
 __all__ = ["RuntimeCapabilitySpec", "RuntimeCapabilityRegistry", "synthesize_runtime_capability"]
-

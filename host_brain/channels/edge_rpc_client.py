@@ -659,10 +659,12 @@ async def post_speak(
         payload["style_note"] = str(style_note).strip()
     if lang_hint:
         payload["lang_hint"] = str(lang_hint).strip().lower()
+    rpc_timeout_ms = max(_resolve_timeout_ms(), 60_000)
     result = await _post_to_edge(
         path="/v1/edge/speak",
         payload=payload,
         request_id=req_id,
+        request_timeout_ms=rpc_timeout_ms,
     )
     _logger.debug(
         "post_speak text_len=%d → %s latency=%dms",

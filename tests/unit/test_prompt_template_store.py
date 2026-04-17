@@ -95,7 +95,7 @@ def test_chat_agent_minimal_fallback_defaults_are_not_internal_draft_style() -> 
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
 
     default_text = str(store.get_template("chat_agent.minimal_fallback.default")["resolved_content"] or "")
-    code_fallback_text = str(store.get_template("chat_agent.minimal_fallback.code_agent")["resolved_content"] or "")
+    code_fallback_text = str(store.get_template("chat_agent.minimal_fallback.codex_codegen")["resolved_content"] or "")
 
     assert "内部草稿" not in default_text
     assert "整理成更清楚一点的说法" not in default_text

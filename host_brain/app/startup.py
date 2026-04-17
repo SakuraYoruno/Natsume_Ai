@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from typing import Any, Mapping
 
 _logger = logging.getLogger("Natsume.startup")
@@ -37,6 +38,10 @@ _EDGE_RPC_COMPONENT_BY_SERVICE_ID = {
     "edge.rpc.barge_in": "voice_pipeline",
     "edge.rpc.resource_gate": "resource_gate",
 }
+_EDGE_COMPONENT_DISABLED_MARKERS = (
+    "disabled by config",
+    "requires edge_",
+)
 
 
 def _is_edge_rpc_enabled() -> bool:
@@ -192,6 +197,19 @@ def _build_edge_component_probe_status(
     component_status = str(component_probe.get("status") or "").strip().lower()
     component_enabled = bool(component_probe.get("enabled", True)) if component_probe else True
     component_available = bool(component_probe.get("available", False)) if component_probe else False
+    component_health = component_probe.get("health") if isinstance(component_probe.get("health"), Mapping) else {}
+
+    if _is_edge_component_disabled_by_config(
+        service_probe=service_probe,
+        service_detail=service_detail,
+        component_probe=component_probe,
+        component_detail=component_detail,
+        component_enabled=component_enabled,
+    ):
+        detail_parts = [p for p in (component_detail, service_detail, gateway_detail) if p]
+        if not detail_parts:
+            detail_parts = ["edge component disabled by config"]
+        return {"available": True, "detail": "; ".join(dict.fromkeys(detail_parts))}
 
     if service_probe and not bool(service_probe.get("available", False)):
         return {"available": False, "unavailable_kind": "dependency", "detail": service_detail or gateway_detail}
@@ -200,7 +218,14 @@ def _build_edge_component_probe_status(
         if not component_enabled:
             return {"available": False, "unavailable_kind": "dependency", "detail": component_detail or service_detail or "edge component disabled by config"}
         if (not component_available) or (component_status and component_status != "ok"):
-            return {"available": False, "unavailable_kind": "dependency", "detail": component_detail or service_detail or gateway_detail}
+            failure_detail = _build_edge_component_failure_detail(
+                gateway_detail=gateway_detail,
+                service_detail=service_detail,
+                component_detail=component_detail,
+                component_status=component_status,
+                component_health=component_health,
+            )
+            return {"available": False, "unavailable_kind": "dependency", "detail": failure_detail}
         detail_parts = [p for p in (component_detail, service_detail, gateway_detail) if p]
         return {"available": True, "detail": "; ".join(detail_parts)}
 
@@ -209,6 +234,59 @@ def _build_edge_component_probe_status(
         return {"available": True, "detail": "; ".join(detail_parts)}
 
     return {"available": True, "detail": gateway_detail}
+
+
+def _is_edge_component_disabled_by_config(
+    *,
+    service_probe: Mapping[str, Any],
+    service_detail: str,
+    component_probe: Mapping[str, Any],
+    component_detail: str,
+    component_enabled: bool,
+) -> bool:
+    if component_probe and not component_enabled:
+        return True
+    if _looks_like_config_disabled_detail(component_detail):
+        return True
+    if _looks_like_config_disabled_detail(service_detail):
+        return True
+    if service_probe and not bool(service_probe.get("available", False)) and _looks_like_config_disabled_detail(service_detail):
+        return True
+    return False
+
+
+def _looks_like_config_disabled_detail(detail: str) -> bool:
+    lowered = str(detail or "").strip().lower()
+    if not lowered:
+        return False
+    return any(marker in lowered for marker in _EDGE_COMPONENT_DISABLED_MARKERS)
+
+
+def _build_edge_component_failure_detail(
+    *,
+    gateway_detail: str,
+    service_detail: str,
+    component_detail: str,
+    component_status: str,
+    component_health: Mapping[str, Any],
+) -> str:
+    detail_parts = [p for p in (component_detail, service_detail) if p]
+    health_state = str(component_health.get("state") or "").strip()
+    if health_state:
+        detail_parts.append(f"health state={health_state}")
+    load_error = str(component_health.get("load_error") or component_health.get("error") or "").strip()
+    if load_error:
+        detail_parts.append(f"load_error={load_error}")
+    last_recovery_detail = str(component_health.get("last_recovery_detail") or "").strip()
+    if last_recovery_detail:
+        detail_parts.append(f"last_recovery={last_recovery_detail}")
+    if component_status and component_status != "ok":
+        detail_parts.append(f"component status={component_status}")
+    if gateway_detail:
+        detail_parts.append(gateway_detail)
+    if not detail_parts:
+        return "edge component unavailable"
+    return "; ".join(dict.fromkeys(detail_parts))
 
 
 async def collect_dependency_probes() -> dict[str, dict[str, Any]]:
@@ -222,7 +300,26 @@ def collect_dependency_probes_sync() -> dict[str, dict[str, Any]]:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(collect_dependency_probes())
-    return {}
+    result: dict[str, dict[str, Any]] = {}
+    error: Exception | None = None
+
+    def _runner() -> None:
+        nonlocal result, error
+        try:
+            result = asyncio.run(collect_dependency_probes())
+        except Exception as exc:  # pragma: no cover - forwarded to caller
+            error = exc
+
+    thread = threading.Thread(
+        target=_runner,
+        name="collect-dependency-probes-sync",
+        daemon=True,
+    )
+    thread.start()
+    thread.join()
+    if error is not None:
+        raise error
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -6,7 +6,6 @@ from host_brain.app.handlers.chat_agent_handler import (
     _resolve_chat_agent_draft_summary_default,
     _resolve_chat_agent_error_summary,
 )
-from host_brain.app.handlers.code_agent_handler import _resolve_code_agent_error_summary
 from host_brain.app.handlers.emotion_agent_handler import _resolve_emotion_agent_error_summary
 from host_brain.app.handlers.intent_agent_handler import _resolve_intent_agent_error_summary
 from host_brain.app.handlers.judge_agent_handler import (
@@ -93,9 +92,6 @@ def test_chat_runtime_templates_override(monkeypatch) -> None:
 
 
 def test_error_summary_templates_override(monkeypatch) -> None:
-    _install_store(monkeypatch, "code_agent_handler.error_summary", "custom code error")
-    assert _resolve_code_agent_error_summary() == "custom code error"
-
     _install_store(monkeypatch, "intent_agent_handler.error_summary", "custom intent error")
     assert _resolve_intent_agent_error_summary() == "custom intent error"
 
@@ -118,7 +114,7 @@ def test_judge_prompt_templates_override(monkeypatch) -> None:
 
     user_input = _build_judge_user_input(
         {
-            "code_agent": {
+            "codex_codegen": {
                 "confidence": 0.9,
                 "summary": "code summary",
                 "risk_flags": [],
@@ -127,7 +123,7 @@ def test_judge_prompt_templates_override(monkeypatch) -> None:
     )
 
     assert _resolve_judge_system_prompt() == "custom judge prompt"
-    assert user_input.startswith("ARTS=1|DESC=- code_agent:")
+    assert user_input.startswith("ARTS=1|DESC=- codex_codegen:")
     assert "|JSON={" in user_input
 
 
@@ -156,7 +152,7 @@ def test_builtin_handler_runtime_templates_are_clean() -> None:
     supervisor_templates = resolve_prompt_template_json_merged("supervisor_dispatch_handler.prompt_templates")
 
     assert chat_templates["draft_summary_default"] == "聊天回复已生成"
-    assert retrieval_templates["system_prompt_extra"] == "你是检索专家，负责从知识库中提取相关信息。"
-    assert translate_templates["handler_error_summary"] == "TranslateAgent 执行异常"
+    assert retrieval_templates["system_prompt_extra"].startswith("你是夏目蓝的检索模块")
+    assert translate_templates["handler_error_summary"].startswith("翻译这边出了点问题")
     assert judge_templates["system_prompt_extra"].startswith("你是裁判专家")
     assert supervisor_templates["user_prompt_template"] == "场景类型：{scene_type}\n用户输入：{user_input}"

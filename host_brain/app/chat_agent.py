@@ -251,8 +251,8 @@ def _build_minimal_chat_fallback_reply(
 
     if sub_agent_ctx is not None:
         agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if agent_id == "code_agent":
-            return resolve_prompt_template_text("chat_agent.minimal_fallback.code_agent")
+        if agent_id == "codex_codegen":
+            return resolve_prompt_template_text("chat_agent.minimal_fallback.codex_codegen")
         if agent_id == "recent_turn_direct":
             return resolve_prompt_template_text("chat_agent.minimal_fallback.recent_turn_direct")
         if agent_id == "phatic_fastpath":
@@ -882,8 +882,8 @@ def _render_plan_step_success_cn(step: Dict[str, Any]) -> str:
         return _mapping_text(success_templates, "file_write", step_index=step_index)
     if target_id == "file_list":
         return _mapping_text(success_templates, "file_list", step_index=step_index)
-    if target_id == "code_agent":
-        return _mapping_text(success_templates, "code_agent", step_index=step_index)
+    if target_id == "codex_codegen":
+        return _mapping_text(success_templates, "codex_codegen", step_index=step_index)
     if target_id == "intent_agent":
         return _mapping_text(success_templates, "intent_agent", step_index=step_index)
     if result_text:
@@ -1302,10 +1302,10 @@ def _build_sub_agent_context_prompt(ctx: SubAgentContext) -> str:
     if not result_text:
         return ""
 
-    if agent_id == "code_agent":
+    if agent_id == "codex_codegen":
         return _mapping_text(
             templates,
-            "code_agent",
+            "codex_codegen",
             agent_id=agent_id,
             task=task,
             result_text=result_text,

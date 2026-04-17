@@ -3,7 +3,9 @@
     "text": "收到请求，当前处于草案阶段。"
   },
   "intent_draft": {
-    "skill_name": "narrative_only",
+    "route": "chat",
+    "target_id": "",
+    "action": "narrative_only",
     "args": {
       "text": "draft"
     }

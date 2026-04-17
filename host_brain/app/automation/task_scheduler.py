@@ -119,8 +119,15 @@ class HostTaskScheduler:
         self._running = False
         self._scheduler_task: asyncio.Task | None = None
 
+    @staticmethod
+    def _prime_task_clock(task: ScheduledTask, *, now: float | None = None) -> None:
+        if task.interval_s > 0 and task.last_run_ts <= 0:
+            task.last_run_ts = float(now if now is not None else time.monotonic())
+
     def register(self, task: ScheduledTask) -> None:
         """注册任务（可在启动前或运行中注册）。"""
+        if self._running:
+            self._prime_task_clock(task)
         self._tasks[task.task_id] = task
         _logger.info("TaskScheduler: 注册任务 %s (%s)", task.task_id, task.name)
 
@@ -154,6 +161,9 @@ class HostTaskScheduler:
         """启动调度器。"""
         if self._running:
             return
+        bootstrap_ts = time.monotonic()
+        for task in self._tasks.values():
+            self._prime_task_clock(task, now=bootstrap_ts)
         self._running = True
         self._scheduler_task = asyncio.create_task(
             self._scheduler_loop(),

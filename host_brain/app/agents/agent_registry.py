@@ -13,7 +13,6 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 AGENT_ID_CHAT = "chat_agent"
-AGENT_ID_CODE = "code_agent"
 AGENT_ID_TRANSLATE = "translate_agent"
 AGENT_ID_INTENT = "intent_agent"
 AGENT_ID_SAFETY = "safety_agent"
@@ -29,7 +28,6 @@ AGENT_ID_REPAIR = "repair_agent"
 
 AGENT_ALLOWLIST: frozenset[str] = frozenset({
     AGENT_ID_CHAT,
-    AGENT_ID_CODE,
     AGENT_ID_TRANSLATE,
     AGENT_ID_INTENT,
     # AGENT_ID_SAFETY 和 AGENT_ID_RENDERER 暂不加入 allowlist：
@@ -55,16 +53,6 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "has_side_effects": False,
         "risk_level": "low",
         "description": "普通聊天快路径，轻治理 + 强边界",
-    },
-    AGENT_ID_CODE: {
-        "agent_id": AGENT_ID_CODE,
-        "display_name": "CodeAgent",
-        "node_id": "workbench_code_assist",    # 复用现有节点
-        "fast_path": False,
-        "allow_parallel": False,
-        "has_side_effects": False,
-        "risk_level": "medium",
-        "description": "代码草案生成，只产出工件，不直接控图",
     },
     AGENT_ID_TRANSLATE: {
         "agent_id": AGENT_ID_TRANSLATE,

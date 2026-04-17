@@ -7,7 +7,6 @@
 from host_brain.app.agents.agent_registry import (
     AGENT_ALLOWLIST,
     AGENT_ID_CHAT,
-    AGENT_ID_CODE,
     AGENT_ID_TRANSLATE,
     AGENT_ID_INTENT,
     AGENT_ID_SAFETY,
@@ -40,7 +39,6 @@ __all__ = [
     # registry
     "AGENT_ALLOWLIST",
     "AGENT_ID_CHAT",
-    "AGENT_ID_CODE",
     "AGENT_ID_TRANSLATE",
     "AGENT_ID_INTENT",
     "AGENT_ID_SAFETY",

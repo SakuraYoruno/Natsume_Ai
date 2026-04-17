@@ -13,6 +13,7 @@ from host_brain.app.intelligent_runtime import (
 from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
+from tests.text_quality_assertions import assert_natsume_style
 
 
 class _DummyMetaLearning:
@@ -168,6 +169,13 @@ def test_apply_response_intelligence_revises_high_risk_reply(monkeypatch) -> Non
     assert reflection.get("revised") is True
     assert reflection.get("revision_mode") == "reflection_revise"
     assert float(after.get("overall_score") or 0.0) >= float(before.get("overall_score") or 0.0)
+    assert_natsume_style(
+        user_message="我今天很难过",
+        reply=revised_text,
+        emotion_tag="sadness",
+        bond_stage="STRANGER",
+        required_markers=("我在",),
+    )
 
 
 def test_apply_response_intelligence_extracts_narrative_text_from_structured_json(monkeypatch) -> None:
@@ -220,6 +228,13 @@ def test_apply_response_intelligence_repairs_evasive_affection_question_reply(mo
     assert reflection.get("revised") is True
     assert "我在这里" not in revised_text
     assert "喜欢" in revised_text or "在意" in revised_text
+    assert_natsume_style(
+        user_message="你喜欢我吗",
+        reply=revised_text,
+        emotion_tag="neutral",
+        bond_stage="STRANGER",
+        forbidden_markers=("宝贝", "亲爱的", "永远陪着你", "AI", "系统", "Agent"),
+    )
 
 
 def test_apply_response_intelligence_repairs_generic_thanks_on_affection_disclosure(monkeypatch) -> None:
@@ -236,10 +251,19 @@ def test_apply_response_intelligence_repairs_generic_thanks_on_affection_disclos
     )
 
     reflection = dict(meta.get("reflection") or {})
+    after = dict(reflection.get("after") or {})
 
     assert reflection.get("revised") is True
     assert "认真记着" in revised_text or "认真对待" in revised_text or "慢一点比较好" in revised_text
     assert revised_text != "嗯……谢谢你。能这样和你说话，我也很高兴。"
+    assert after.get("should_revise") is False
+    assert_natsume_style(
+        user_message="我喜欢你",
+        reply=revised_text,
+        emotion_tag="neutral",
+        bond_stage="STRANGER",
+        forbidden_markers=("宝贝", "亲爱的", "永远陪着你", "AI", "系统", "Agent"),
+    )
 
 
 def test_resolve_tts_route_maps_canonical_sad_to_semantic_style(monkeypatch) -> None:

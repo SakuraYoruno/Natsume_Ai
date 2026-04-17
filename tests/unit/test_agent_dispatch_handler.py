@@ -7,13 +7,12 @@ from __future__ import annotations
 
 import pytest
 
-from host_brain.app.agents.agent_registry import AGENT_ID_CODE, AGENT_ID_INTENT, AGENT_ID_TRANSLATE, AGENT_ID_RETRIEVAL
+from host_brain.app.agents.agent_registry import AGENT_ID_INTENT, AGENT_ID_TRANSLATE, AGENT_ID_RETRIEVAL
 from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
 
 
 def test_agent_handler_map_contains_core_agents() -> None:
     """_AGENT_HANDLER_MAP 包含所有核心 agent。"""
-    assert AGENT_ID_CODE in _AGENT_HANDLER_MAP
     assert AGENT_ID_TRANSLATE in _AGENT_HANDLER_MAP
     assert AGENT_ID_RETRIEVAL in _AGENT_HANDLER_MAP
     assert "chat_agent" in _AGENT_HANDLER_MAP
@@ -31,8 +30,16 @@ def test_dispatch_to_agent_returns_handler_id() -> None:
     """_dispatch_to_agent 对已注册 agent 返回正确 handler_id。"""
     from host_brain.integrations.graph_executor import GraphExecutor
     executor = GraphExecutor.__new__(GraphExecutor)
-    state = {"active_agent_id": AGENT_ID_CODE}
-    assert executor._dispatch_to_agent(state) == "code_agent"
+    state = {"active_agent_id": AGENT_ID_INTENT}
+    assert executor._dispatch_to_agent(state) == "intent_agent"
+
+
+def test_dispatch_to_agent_returns_empty_for_removed_legacy_agent() -> None:
+    """已移除的历史 agent id 应触发降级。"""
+    from host_brain.integrations.graph_executor import GraphExecutor
+    executor = GraphExecutor.__new__(GraphExecutor)
+    state = {"active_agent_id": "legacy_removed_agent"}
+    assert executor._dispatch_to_agent(state) == ""
 
 
 def test_dispatch_to_agent_returns_empty_for_unknown() -> None:

@@ -541,8 +541,8 @@ def _build_minimal_chat_fallback_reply(*, user_message: str, sub_agent_ctx: SubA
         return resolve_prompt_template_text("chat_agent.minimal_fallback.ja_default")
     if sub_agent_ctx is not None:
         agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if agent_id == "code_agent":
-            return resolve_prompt_template_text("chat_agent.minimal_fallback.code_agent")
+        if agent_id == "codex_codegen":
+            return resolve_prompt_template_text("chat_agent.minimal_fallback.codex_codegen")
         if agent_id == "recent_turn_direct":
             return resolve_prompt_template_text("chat_agent.minimal_fallback.recent_turn_direct")
         if agent_id == "phatic_fastpath":
@@ -647,7 +647,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any]) -> str:
     result_text = str(step.get("result_text") or "").strip()
     description_or_target = description or target_id
     # 特殊 target_id 处理
-    special_targets = {"web_search", "memory_store", "system_info", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", "code_agent", "intent_agent"}
+    special_targets = {"web_search", "memory_store", "system_info", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", "codex_codegen", "intent_agent"}
     if target_id in special_targets:
         if target_id == "web_search":
             topic = description or _runtime_text("default_topic")
@@ -887,6 +887,8 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
         return _build_plan_execution_reply_cn(ctx)
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx)
+    if agent_id in {"codex_codegen", "translate_agent", "intent_agent"}:
+        return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang)
     return None
 
 
@@ -903,8 +905,8 @@ def _build_sub_agent_context_prompt(ctx: SubAgentContext) -> str:
         return _mapping_text(templates, "failure", agent_id=agent_id, task=task, error_text=(ctx.error or _runtime_text("unknown_error")), recovery_hint=recovery_hint)
     if not result_text:
         return ""
-    if agent_id == "code_agent":
-        return _mapping_text(templates, "code_agent", agent_id=agent_id, task=task, result_text=result_text)
+    if agent_id == "codex_codegen":
+        return _mapping_text(templates, "codex_codegen", agent_id=agent_id, task=task, result_text=result_text)
     if agent_id == "recent_turn_direct":
         return _mapping_text(templates, "recent_turn_direct", result_text=result_text)
     if agent_id == "phatic_fastpath":

@@ -54,7 +54,7 @@ class TestCortexPromptBuilder:
         assert gen_params == {"temperature": 0.42}
         assert prompt_text.startswith("PROMPT_BODY")
         assert "【可用能力" in prompt_text
-        assert "code_agent" in prompt_text
+        assert "codex_codegen" in prompt_text
         assert "【用户消息】\nhello world" in prompt_text
         assert build_runtime_input.call_count == 1
         assert build_prompt_payload.call_count == 1
@@ -90,7 +90,7 @@ class TestCortexPromptBuilder:
         block = _build_agent_capabilities_block()
 
         assert "【代理能力】" in block
-        assert "- code_agent =>" in block
+        assert "- intent_agent =>" in block
         assert "委托格式示例" in block
 
     def test_build_cortex_prompt_uses_section_template_override(self, monkeypatch) -> None:

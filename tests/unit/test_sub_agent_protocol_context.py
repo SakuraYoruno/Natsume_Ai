@@ -14,7 +14,7 @@ def test_dispatcher_merges_request_context_into_handler_context() -> None:
         captured["context"] = dict(context)
         return {
             "agent_artifacts": {
-                "code_agent": {
+                "translate_agent": {
                     "summary": "ok",
                     "confidence": 0.8,
                     "risk_flags": [],
@@ -23,11 +23,11 @@ def test_dispatcher_merges_request_context_into_handler_context() -> None:
             "react_scratchpad": {"final_answer": "ok"},
         }
 
-    dispatcher._handler_map = {"code_agent": _handler}
+    dispatcher._handler_map = {"translate_agent": _handler}
 
     req = SubAgentRequest(
-        agent_id="code_agent",
-        task="write code",
+        agent_id="translate_agent",
+        task="translate this",
         request_id="req-ctx-001",
         session_id="session-ctx-001",
         context={"gateway": "GW", "custom": "VALUE"},

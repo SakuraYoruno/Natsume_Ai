@@ -33,7 +33,7 @@ BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
     SkillProviderSpec("HOST_SKILL_FILE_ENABLED", "host_brain.skills.file_registry:FileSkillProvider", "File Skills", "file_read / file_write / file_append / file_delete / file_list"),
     SkillProviderSpec("HOST_SKILL_SHELL_ENABLED", "host_brain.skills.shell_registry:ShellSkillProvider", "Shell Skills", "shell_run / shell_read_log / shell_run_test"),
     SkillProviderSpec("HOST_SKILL_NOTIFICATION_ENABLED", "host_brain.skills.notification_registry:NotificationSkillProvider", "Notification Skills", "notify_desktop / notify_tts_speak / notify_schedule_reminder"),
-    SkillProviderSpec("HOST_SKILL_IDE_ENABLED", "host_brain.skills.ide_registry:IDESkillProvider", "IDE Skills", "open_cursor / run_pycharm_action / codex_task / open_file_in_editor"),
+    SkillProviderSpec("HOST_SKILL_IDE_ENABLED", "host_brain.skills.ide_registry:IDESkillProvider", "IDE Skills", "open_cursor / run_pycharm_action / codex_task / codex_codegen / open_file_in_editor"),
     SkillProviderSpec("HOST_SKILL_BROWSER_ENABLED", "host_brain.skills.browser_registry:BrowserSkillProvider", "Browser Skills", "browser_navigate / browser_click / browser_type / browser_screenshot / browser_execute_script / browser_wait_for / browser_scrape / browser_close"),
     SkillProviderSpec("HOST_SKILL_PERSONALITY_ENABLED", "host_brain.skills.personality_registry:PersonalitySkillProvider", "Personality Skills", "diary_writer / dream_generator / desktop_note / focus_mode / proactive_talk"),
     SkillProviderSpec("HOST_SKILL_DESKTOP_ENABLED", "host_brain.skills.desktop_registry:DesktopSkillProvider", "Desktop Skills", "desktop_screenshot / desktop_click / desktop_type / desktop_hotkey / clipboard_read / clipboard_write"),

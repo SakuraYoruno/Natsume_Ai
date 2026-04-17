@@ -72,7 +72,6 @@ _TRUSTED_HANDLER_ALLOWLIST: frozenset[str] = frozenset({
 
 _AGENT_HANDLER_MAP: dict[str, str] = {
     "chat_agent":      "chat_agent",
-    "code_agent":      "code_agent",
     "translate_agent": "translate_agent",
     "intent_agent":    "intent_agent",
     "judge_agent":     "judge_agent",
@@ -94,11 +93,13 @@ class GraphExecutor:
 
     def __init__(self, *, handlers: dict[str, NodeHandler], gateway_factory: GatewayFactory,
                  default_timeout_ms: int = 5_000, ledger: Any = None,
-                 evidence_plane: Any = None) -> None:
+                 evidence_plane: Any = None,
+                 model_nodes: dict[str, dict[str, Any]] | None = None) -> None:
         self._handlers = handlers
         self._gateway_factory = gateway_factory
         self._default_timeout_ms = default_timeout_ms
         self._ledger = ledger
+        self._model_nodes = dict(model_nodes or {})
         # M36-K：Evidence Plane 实时写入（可选，默认 None）
         self._evidence_plane = evidence_plane
         # M38-E/F/G：Phase-Locked Streaming 发射器
@@ -550,7 +551,7 @@ class GraphExecutor:
             return out
 
         context["invoke_model_node"] = _invoke_model_node
-        # P3.5：agent_dispatch 仅做分派，需 invoke_handler 调用 code_agent / translate_agent
+        # P3.5：agent_dispatch 仅做分派，需 invoke_handler 调用当前存活的 agent handler
         handlers = self._handlers
 
         def invoke_handler(h_id: str, pl: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -562,7 +563,11 @@ class GraphExecutor:
 
     def _invoke_model_node(self, *, node_id: str, binding: Mapping[str, Any], state: GraphState) -> dict[str, Any]:
         model_node_id = str(binding.get("model_node_id") or node_id).strip()
-        model_node = dict((state.get("model_nodes") or {}).get(model_node_id) or {})
+        model_node = dict(
+            self._model_nodes.get(model_node_id)
+            or (state.get("model_nodes") or {}).get(model_node_id)
+            or {}
+        )
         if not model_node:
             raise KeyError(f"model node missing for node={node_id}, model_node_id={model_node_id}")
         provider_name = str(model_node.get("provider") or "").strip().lower()

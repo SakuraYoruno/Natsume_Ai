@@ -48,14 +48,14 @@ def test_decision_sources() -> None:
 
 
 def test_validate_proposal_empty_fails() -> None:
-    valid, code = validate_supervisor_proposal_for_graph({}, ["code_agent", "translate_agent"])
+    valid, code = validate_supervisor_proposal_for_graph({}, ["intent_agent", "translate_agent"])
     assert not valid
     assert code == SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
 
 
 def test_validate_proposal_missing_selected_agent_fails() -> None:
     valid, code = validate_supervisor_proposal_for_graph(
-        {"reason": "test", "risk_mode": "safe"}, ["code_agent"]
+        {"reason": "test", "risk_mode": "safe"}, ["intent_agent"]
     )
     assert not valid
     assert code == SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
@@ -63,7 +63,7 @@ def test_validate_proposal_missing_selected_agent_fails() -> None:
 
 def test_validate_proposal_forbidden_key_fails() -> None:
     valid, code = validate_supervisor_proposal_for_graph(
-        {"selected_agent": "code_agent", "__next_node__": "x"}, ["code_agent"]
+        {"selected_agent": "intent_agent", "__next_node__": "x"}, ["intent_agent"]
     )
     assert not valid
     assert code == SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
@@ -71,8 +71,8 @@ def test_validate_proposal_forbidden_key_fails() -> None:
 
 def test_validate_proposal_agent_not_in_allowlist_fails() -> None:
     valid, code = validate_supervisor_proposal_for_graph(
-        {"selected_agent": "intent_agent", "risk_mode": "strict"},
-        ["code_agent", "translate_agent"],
+        {"selected_agent": "emotion_agent", "risk_mode": "safe"},
+        ["intent_agent", "translate_agent"],
     )
     assert not valid
     assert code == SUPERVISOR_FAILURE_LLM_AGENT_NOT_ALLOWED
@@ -80,8 +80,8 @@ def test_validate_proposal_agent_not_in_allowlist_fails() -> None:
 
 def test_validate_proposal_invalid_risk_mode_fails() -> None:
     valid, code = validate_supervisor_proposal_for_graph(
-        {"selected_agent": "code_agent", "risk_mode": "invalid_mode"},
-        ["code_agent"],
+        {"selected_agent": "intent_agent", "risk_mode": "invalid_mode"},
+        ["intent_agent"],
     )
     assert not valid
     assert code == SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
@@ -89,8 +89,8 @@ def test_validate_proposal_invalid_risk_mode_fails() -> None:
 
 def test_validate_proposal_valid_passes() -> None:
     valid, code = validate_supervisor_proposal_for_graph(
-        {"selected_agent": "code_agent", "reason": "用户请求代码", "need_judge": True, "risk_mode": "guarded"},
-        ["code_agent", "translate_agent"],
+        {"selected_agent": "intent_agent", "reason": "用户请求代码", "need_judge": True, "risk_mode": "strict"},
+        ["intent_agent", "translate_agent"],
     )
     assert valid
     assert code is None
@@ -99,7 +99,7 @@ def test_validate_proposal_valid_passes() -> None:
 def test_validate_proposal_empty_allowlist_allows_any_agent() -> None:
     """allowlist 为空时视为不限制（向后兼容或测试）。"""
     valid, code = validate_supervisor_proposal_for_graph(
-        {"selected_agent": "code_agent", "risk_mode": "safe"}, []
+        {"selected_agent": "intent_agent", "risk_mode": "strict"}, []
     )
     assert valid
     assert code is None
@@ -119,15 +119,15 @@ def test_supervisor_handler_rule_path_writes_observability_fields(monkeypatch: p
     out = supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
     assert sd.get("supervisor_mode") == "rule"
-    assert sd.get("supervisor_decision_source") in {"rule", f"scene_type:WORK_CODE:rule_fallback"}
-    assert sd.get("supervisor_selected_agent") == "code_agent"
+    assert sd.get("supervisor_decision_source") == "scene_type:WORK_CODE:rule_fallback"
+    assert sd.get("supervisor_selected_agent") == "intent_agent"
     assert sd.get("supervisor_failure_code") is None
-    assert out.get("active_agent_id") == "code_agent"
+    assert out.get("active_agent_id") == "intent_agent"
     assert sd.get("need_judge") is True
 
 
 def test_supervisor_handler_llm_fallback_when_no_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
-    """SUPERVISOR_MODE=llm 且无 gateway 时统一回退 rule，写出 llm_fallback_rule 与 failure_code。"""
+    """SUPERVISOR_MODE=llm 现在只作观测，缺少 intent_draft 时仍走 scene_type fallback。"""
     monkeypatch.setenv("SUPERVISOR_MODE", "llm")
     from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
 
@@ -136,9 +136,8 @@ def test_supervisor_handler_llm_fallback_when_no_gateway(monkeypatch: pytest.Mon
     out = supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
     assert sd.get("supervisor_mode") == "llm"
-    assert sd.get("supervisor_decision_source") in {"llm_fallback_rule", "scene_type:WORK_CODE:rule_fallback"}
-    # supervisor_failure_code 可能为 None（代码已不再设置此字段）
-    assert out.get("active_agent_id") == "code_agent"  # rule 默认
+    assert sd.get("supervisor_decision_source") == "scene_type:WORK_CODE:rule_fallback"
+    assert out.get("active_agent_id") == "intent_agent"
 
 
 def test_supervisor_handler_uses_graph_allowlist_when_provided(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,31 +149,33 @@ def test_supervisor_handler_uses_graph_allowlist_when_provided(monkeypatch: pyte
     ctx = {
         "request_id": "p5-test",
         "node_id": "supervisor_dispatch",
-        "agent_dispatch_allowlist": ["code_agent", "translate_agent"],
+        "agent_dispatch_allowlist": ["intent_agent", "translate_agent"],
     }
     out = supervisor_dispatch_handler(payload, ctx)
-    assert out.get("active_agent_id") == "code_agent"
+    assert out.get("active_agent_id") == "intent_agent"
 
 
-def test_supervisor_handler_invalid_risk_mode_fallback_schema_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """显式非法 risk_mode 判 LLM_SCHEMA_INVALID，回退到 rule（缺失才补默认，非法不补）。"""
-    from host_brain.integrations.graph_contract import SUPERVISOR_FAILURE_LLM_SCHEMA_INVALID
-
+def test_supervisor_handler_consumes_llm_route_from_intent_draft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SUPERVISOR_MODE=llm 时直接复用 thalamus 已编好的 llm route。"""
     monkeypatch.setenv("SUPERVISOR_MODE", "llm")
-    from host_brain.app.handlers import supervisor_dispatch_handler as mod
+    from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
 
-    def _fake_llm_proposal(*args: object, **kwargs: object) -> tuple[dict[str, object], None]:
-        return ({"selected_agent": "code_agent", "risk_mode": "invalid_mode"}, None)
-
-    monkeypatch.setattr(mod, "_try_llm_proposal", _fake_llm_proposal)
-    payload = {"scene_type": "WORK_CODE", "request_id": "p5-test"}
+    payload = {
+        "scene_type": "WORK_CODE",
+        "request_id": "p5-test",
+        "intent_draft": {
+            "route": "skill",
+            "target_id": "codex_codegen",
+            "route_source": "llm",
+        },
+    }
     ctx = {
         "request_id": "p5-test",
         "node_id": "supervisor_dispatch",
-        "agent_dispatch_allowlist": ["code_agent", "translate_agent"],
+        "agent_dispatch_allowlist": ["intent_agent", "translate_agent"],
     }
-    out = mod.supervisor_dispatch_handler(payload, ctx)
+    out = supervisor_dispatch_handler(payload, ctx)
     sd = out.get("supervisor_dispatch") or {}
-    assert sd.get("supervisor_decision_source") in {"llm_fallback_rule", "scene_type:WORK_CODE:rule_fallback"}
-    # supervisor_failure_code 可能为 None（代码已不再设置此字段）
-    assert out.get("active_agent_id") == "code_agent"  # rule 默认 WORK_CODE → code_agent
+    assert sd.get("supervisor_decision_source") == "intent_draft:skill:llm"
+    assert sd.get("intent_target_id") == "codex_codegen"
+    assert out.get("active_agent_id") == "intent_agent"

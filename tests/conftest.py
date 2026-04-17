@@ -105,6 +105,10 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         if pain_reward_agent is not None:
             pain_reward_agent._PAIN_REWARD_AGENT = None
 
+        thalamus_agent = sys.modules.get("host_brain.tribe.thalamus_agent")
+        if thalamus_agent is not None:
+            thalamus_agent._THALAMUS_AGENT = None
+
         body_sense = sys.modules.get("host_brain.persona.body_sense")
         if body_sense is not None:
             body_sense._GLOBAL_BODY_SENSE = None

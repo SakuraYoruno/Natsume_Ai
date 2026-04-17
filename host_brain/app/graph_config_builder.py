@@ -73,8 +73,6 @@ SUPERVISOR_DISPATCH_HANDLER_ID = "supervisor_dispatch"
 # M-MA5：各 Agent Handler 节点常量
 CHAT_AGENT_NODE_ID = "chat_agent_node"
 CHAT_AGENT_HANDLER_ID = "chat_agent"
-CODE_AGENT_NODE_ID = "code_agent_node"
-CODE_AGENT_HANDLER_ID = "code_agent"
 TRANSLATE_AGENT_NODE_ID = "translate_agent_node"
 TRANSLATE_AGENT_HANDLER_ID = "translate_agent"
 INTENT_AGENT_NODE_ID = "intent_agent_node"
@@ -846,7 +844,6 @@ def _build_graph_config_by_profile(
         # P16：allowlist 对齐 _AGENT_HANDLER_MAP（graph_executor 内的全量 agent）
         _dispatch_allowlist = [
             CHAT_AGENT_HANDLER_ID,
-            CODE_AGENT_HANDLER_ID,
             TRANSLATE_AGENT_HANDLER_ID,
             INTENT_AGENT_HANDLER_ID,
             JUDGE_AGENT_HANDLER_ID,
@@ -1273,6 +1270,8 @@ from host_brain.app.graph_config_router import (  # noqa: F401, E402
     SCENE_ROUTER_ENTRY_HANDLER_ID,
     SCENE_ROUTER_POST_CORE_HANDLER_ID,
     SCENE_TYPE_AUTO,
+    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
+    SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT,
     ALLOWED_EXPLICIT_SCENE_TYPES,
     HOST_CHAT_ROUTE_HOST_14B,
     HOST_CHAT_ROUTE_CLOUD,

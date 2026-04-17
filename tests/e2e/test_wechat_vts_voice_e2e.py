@@ -49,6 +49,7 @@ from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.loader import SkillLoader
 from host_brain.skills.registry import SkillMeta, SkillRegistry
+from tests.text_quality_assertions import assert_natsume_style
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -244,6 +245,12 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
         )
         self.assertTrue(egress.success)
         self.assertEqual(STATUS_SENT, egress.status)
+        assert_natsume_style(
+            user_message=fix["wechat_ingress"]["content"],
+            reply="今天天气晴朗，适合外出！",
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
 
         # Step 8: 审计链完整性验证
         trace = self.ledger.trace_request(request_id)
@@ -523,6 +530,12 @@ class TestWeChat_VTS_Voice_E2E(unittest.TestCase):
             ts_ms=self.now_ms,
         )
         self.assertTrue(egress.success)
+        assert_natsume_style(
+            user_message=fix["wechat_ingress"]["content"],
+            reply="（语音不可用，文本回复）这是一个笑话……",
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
 
         # 验证审计链
         trace = self.ledger.trace_request(request_id)

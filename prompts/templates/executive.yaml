@@ -17,9 +17,9 @@ templates:
       repeated_warning_template: ' 上一条你的回复是：{last_assistant}。不要重复这个句子。'
     delegated_result:
       empty_visible_result:
-        code_agent: 我先帮你整理个更自然一点的大致思路吧。不过刚才那条代码侧结果不稳定，这次我不直接把内部草稿发给你。
+        codex_codegen: 我先帮你整理个更自然一点的大致思路吧。不过刚才那条代码侧结果不稳定，这次我不直接把内部草稿发给你。
         default: 我先帮你把刚才那个结果整理成正常说话的版本，不过上一条子流程返回得不太稳定。
-      code_agent_prefix_template: 我先帮你整理一个大致思路：{agent_result}
+      codex_codegen_prefix_template: 我先帮你整理一个大致思路：{agent_result}
     task_progress:
       no_summary: 现在没有正在执行，或者刚结束但还值得汇报的任务。
       defaults:
@@ -194,7 +194,7 @@ templates:
       {{"route": "chat"|"delegate"|"skill", "target_id": "agent_id或skill_id或空", "task": "任务描述或空"}}
 
 
-      子 Agent ID: code_agent, translate_agent, vision_agent, intent_agent
+      子 Agent ID: translate_agent, vision_agent, intent_agent
 
       当前已注册 Skill：
 
@@ -265,16 +265,16 @@ templates:
       must be true.
     system_prompt_default: You are Natsume Ai. You are not an AI assistant speaking about Natsume; you are Natsume herself.
       Return exactly one JSON object with keys `narrative`, `intent_draft`, and `meta`. `meta.draft_only` must be true.
-- template_id: cortex_route_decider.intent_classification_prompts
+- template_id: thalamus_agent.intent_classification_prompts
   category: prompt
-  scope: cortex_route_decider
+  scope: thalamus_agent
   locale: zh
   content_type: json
-  description: CortexRouteDecider 双层意图分类 LLM 兜底 prompt 模板（JSON，含 system_prompt 与 user_prompt）
+  description: ThalamusAgent canonical intent classification prompt 模板
   default_content:
     system_prompt: "你是意图路由分类器。根据用户消息判断意图类型，输出单个 JSON 对象。\nroute 只能是以下之一：chat\
       \ / delegate / skill / task_progress / recent_turn\ndelegate 时 target_id 只能是：intent_agent\
-      \ / code_agent / translate_agent / vision_agent\nskill 时 target_id 填技能名称（如 memory_store）\n\
+      \ / translate_agent / vision_agent\nskill 时 target_id 填技能名称（如 memory_store / codex_codegen）\n\
       严格要求：仅输出 JSON，不要 markdown。\n字段：{\"route\",\"target_id\",\"task\",\"confidence\"\
       ,\"reason\"}\nconfidence 为 0~1 的数字。"
     user_prompt_template: "族状态：{tribe_summary}\n用户消息：{text}\n输出 JSON："

@@ -24,6 +24,7 @@ from host_brain.app.chat_handler_vision import (
 )
 from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from tests.text_quality_assertions import assert_natsume_style
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +385,12 @@ class TestVisionUiSseGenerator:
         commit_event = next(e for e in parsed if e.get("phase") == "COMMIT")
         assert commit_event.get("decision") == "APPROVE"
         assert "登录界面" in str(commit_event.get("narrative") or "")
+        assert_natsume_style(
+            user_message=request_body.message,
+            reply=str(commit_event.get("narrative") or ""),
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
 
     @pytest.mark.asyncio
     async def test_graph_start_contains_vision_node_sequence(self):
@@ -557,6 +564,12 @@ class TestVisionUiSseGenerator:
         # 降级时仍然 APPROVE（不拒绝用户），但 narrative 包含降级提示
         assert commit_event.get("decision") == "APPROVE"
         assert commit_event.get("narrative") is not None
+        assert_natsume_style(
+            user_message=request_body.message,
+            reply=str(commit_event.get("narrative") or ""),
+            emotion_tag="neutral",
+            bond_stage="STRANGER",
+        )
 
 
 # ---------------------------------------------------------------------------

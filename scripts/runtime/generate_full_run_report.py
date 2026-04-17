@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import glob
+import importlib.util
 import json
 import os
 import subprocess
@@ -82,6 +83,20 @@ def collect_host_status():
     }
 
 
+def collect_codex_self_heal_scheduler_probe():
+    try:
+        script_path = ROOT / "scripts" / "runtime" / "test_codex_self_heal_scheduler.py"
+        spec = importlib.util.spec_from_file_location("test_codex_self_heal_scheduler", script_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load runtime probe module: {script_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        report = module.build_probe_report(base_url=HOST_URL)
+        return {"ok": bool(report.get("overall", {}).get("passed")), "data": report}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def collect_unit_test_results():
     try:
         result = subprocess.run(
@@ -144,6 +159,7 @@ def main():
 
     print("  [3/5] Host Brain 服务状态...", flush=True)
     report["sections"]["host_brain_status"] = collect_host_status()
+    report["sections"]["codex_self_heal_scheduler"] = collect_codex_self_heal_scheduler_probe()
 
     print("  [4/5] 单元测试套件...", flush=True)
     report["sections"]["unit_tests"] = collect_unit_test_results()
@@ -156,6 +172,7 @@ def main():
     docker_ok = s["docker_services"].get("ok", False)
     env_ok = s["env_readiness"].get("ready", False)
     host_ok = s["host_brain_status"]["health"]["status_code"] == 200
+    codex_scheduler_ok = s["codex_self_heal_scheduler"].get("ok", False)
     unit_ok = s["unit_tests"].get("ok", False)
     integ_ok = s["integration_tests"].get("ok", False)
 
@@ -163,9 +180,10 @@ def main():
         "docker_services": "PASS" if docker_ok else "FAIL",
         "env_readiness": "PASS" if env_ok else "FAIL",
         "host_brain_up": "PASS" if host_ok else "FAIL",
+        "codex_self_heal_scheduler": "PASS" if codex_scheduler_ok else "FAIL",
         "unit_tests": "PASS" if unit_ok else "FAIL",
         "integration_tests": "PASS" if integ_ok else "FAIL",
-        "all_pass": all([docker_ok, env_ok, host_ok, unit_ok, integ_ok]),
+        "all_pass": all([docker_ok, env_ok, host_ok, codex_scheduler_ok, unit_ok, integ_ok]),
     }
 
     report_path = ROOT / f"FULL_RUN_REPORT_{ts}.json"

@@ -20,7 +20,7 @@ from host_brain.app.prompt_template_defs import list_prompt_template_definitions
 _SCOPE_GROUP: dict[str, str] = {}
 
 _AGENT_SCOPES = {
-    "code_agent_handler", "intent_agent_handler", "intent_agent_entry_handler",
+    "intent_agent_handler", "intent_agent_entry_handler",
     "translate_agent_handler", "repair_agent_handler", "emotion_agent_handler",
     "chat_agent_handler", "retrieval_agent_handler", "judge_agent_handler",
     "supervisor_dispatch_handler", "sub_agent_protocol", "react_loop",

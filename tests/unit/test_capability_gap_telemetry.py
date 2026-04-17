@@ -14,14 +14,14 @@ def test_capability_gap_telemetry_counts_detected_and_execution() -> None:
         missing_capability_tags=["coding"],
         confidence=0.91,
         executor_route="delegate",
-        executor_target="code_agent",
+        executor_target="codex_codegen",
     )
     telemetry.record_execution(
         runtime_capability_id="runtime_cap_1",
         request_id="req-1",
         success=True,
         executor_route="delegate",
-        executor_target="code_agent",
+        executor_target="codex_codegen",
         latency_ms=123,
         error_code=None,
     )
@@ -35,7 +35,7 @@ def test_capability_gap_telemetry_counts_detected_and_execution() -> None:
     assert snapshot["active_runtime_capabilities"] == 1
     assert snapshot["by_reason"][0]["key"] == "ACTION_INTENT_FALLBACK_CHAT"
     assert snapshot["by_family"][0]["key"] == "code"
-    assert snapshot["by_executor"][0]["key"] == "code_agent"
+    assert snapshot["by_executor"][0]["key"] == "codex_codegen"
 
 
 def test_capability_gap_telemetry_recent_limit_and_reset() -> None:
@@ -77,14 +77,14 @@ def test_capability_gap_telemetry_builds_forge_candidates() -> None:
             missing_capability_tags=["coding"],
             confidence=0.92,
             executor_route="delegate",
-            executor_target="code_agent",
+            executor_target="codex_codegen",
         )
         telemetry.record_execution(
             runtime_capability_id=cap_id,
             request_id=f"req-{index}",
             success=index == 3,
             executor_route="delegate",
-            executor_target="code_agent",
+            executor_target="codex_codegen",
             latency_ms=100 + index,
             error_code=None if index == 3 else "FAILED",
         )

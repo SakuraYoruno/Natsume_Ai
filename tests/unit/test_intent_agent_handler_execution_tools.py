@@ -88,7 +88,7 @@ def test_intent_agent_handler_can_dispatch_sub_agent_tool() -> None:
 
     gateway = _GatewayToolThenAnswer(
         tool_name="dispatch_sub_agent",
-        action_args={"agent_id": "code_agent", "task": "fix crash"},
+        action_args={"agent_id": "translate_agent", "task": "translate this"},
         final_answer="delegated",
     )
 
@@ -106,5 +106,5 @@ def test_intent_agent_handler_can_dispatch_sub_agent_tool() -> None:
     assert len(steps) >= 2
     assert steps[0]["action"]["tool"] == "dispatch_sub_agent"
     assert steps[0]["observation"]["status"] == "SUCCESS"
-    assert steps[0]["observation"]["agent_id"] == "code_agent"
-    assert "delegate_ok:code_agent" in str(steps[0]["observation"]["result"])
+    assert steps[0]["observation"]["agent_id"] == "translate_agent"
+    assert "delegate_ok:translate_agent" in str(steps[0]["observation"]["result"])

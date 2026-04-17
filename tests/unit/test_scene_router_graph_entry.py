@@ -16,6 +16,7 @@ from host_brain.app.graph_config_builder import (
     SCENE_ROUTER_POST_CORE_HANDLER_ID,
     SCENE_ROUTER_POST_CORE_NODE_ID,
     SCENE_TYPE_AUTO,
+    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
     SUPERVISOR_DISPATCH_NODE_ID,
     build_chat_graph_config,
     graph_scene_router_entry_handler,
@@ -28,9 +29,9 @@ def test_scene_router_entry_handler_defaults_to_chat(monkeypatch) -> None:
     payload = {"input": {"user_message": "你好呀"}}
     out = graph_scene_router_entry_handler(payload, {"node_id": SCENE_ROUTER_ENTRY_NODE_ID})
 
-    # Phase XV 后，默认返回 AUTO，由 cortex_tribe_decider 决策
+    # Phase XV 后，默认返回 AUTO，由 tribe 场景决策层继续判断；intent 编译已由 thalamus 接管
     assert out["scene_type"] in {"CHAT", "AUTO"}
-    assert out["scene_type_source"] in {"graph_pre_classifier", "graph_default_chat", "cortex_tribe_decider"}
+    assert out["scene_type_source"] == SCENE_TYPE_SOURCE_TRIBE_DECIDER
     route_decision = dict(out.get("route_decision") or {})
     assert route_decision.get("target") == "cloud"
     assert route_decision.get("route_target") == "cloud"
@@ -67,6 +68,15 @@ def test_scene_router_post_core_exec_intent_targets_skills() -> None:
     route_decision = dict(out.get("route_decision") or {})
     assert route_decision.get("target") == "skills"
     assert route_decision.get("route_target") == "skills"
+
+
+def test_scene_router_post_core_normalizes_legacy_scene_type_source() -> None:
+    payload = {"scene_type": SCENE_EXEC_INTENT, "scene_type_source": "cortex_tribe_decider"}
+    out = graph_scene_router_post_core_handler(payload, {"node_id": SCENE_ROUTER_POST_CORE_NODE_ID})
+
+    assert out["scene_type_source"] == SCENE_TYPE_SOURCE_TRIBE_DECIDER
+    route_decision = dict(out.get("route_decision") or {})
+    assert route_decision.get("scene_type_source") == SCENE_TYPE_SOURCE_TRIBE_DECIDER
 
 
 def test_build_chat_graph_config_by_execution_profile() -> None:

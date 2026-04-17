@@ -20,7 +20,7 @@ _ALLOWED_LLM_ROUTE_TYPES: set[str] = {
     "chat", "delegate", "skill", "plan", "recent_turn", "task_progress",
 }
 _ALLOWED_DELEGATE_TARGETS: set[str] = {
-    "intent_agent", "code_agent", "translate_agent",
+    "intent_agent", "translate_agent",
     "vision_agent", "repair_agent", "retrieval_agent", "judge_agent",
 }
 
@@ -246,13 +246,10 @@ def normalize_gateway_llm_route_decision(
     skill_registry: Any,
 ) -> dict[str, Any] | None:
     """归一化 LLM 路由决策，验证合法性。"""
-    route = str(raw_decision.get("route") or raw_decision.get("route_type") or "").strip().lower()
+    route = str(raw_decision.get("route") or "").strip().lower()
     if route not in _ALLOWED_LLM_ROUTE_TYPES:
         return None
-    target_id = str(
-        raw_decision.get("target_id") or raw_decision.get("skill_id")
-        or raw_decision.get("agent_id") or raw_decision.get("delegate_agent") or ""
-    ).strip()
+    target_id = str(raw_decision.get("target_id") or "").strip()
     task = str(raw_decision.get("task") or raw_decision.get("query") or raw_decision.get("text") or "").strip()
     reason = str(raw_decision.get("reason") or raw_decision.get("reason_code") or "LLM_ROUTE").strip() or "LLM_ROUTE"
     confidence = normalize_route_confidence(raw_decision.get("confidence"))
@@ -288,12 +285,12 @@ def normalize_gateway_llm_route_decision(
 
 
 # ---------------------------------------------------------------------------
-# 规则路由决策（已废弃，规则逻辑已迁移到 cortex_route_decider._classify_task_intent_by_rules）
+# 规则路由决策（已废弃，规则逻辑已迁移到 thalamus_agent.classify_task_intent_by_rules）
 # ---------------------------------------------------------------------------
 
 # Phase XV 架构重设计：build_gateway_rule_route_decision、run_gateway_intent_route_llm、
 # apply_gateway_force_override、build_gateway_intent_draft 四个函数已删除。
-# 意图识别统一由 cortex_route_decider.classify_task_intent() 完成，
+# 意图识别统一由 thalamus_agent 收口（规则 + LLM fallback）完成，
 # 所有来源（ASR/Web/GATEWAY）走同一套双层意图识别（规则 + LLM 兜底）。
 
 

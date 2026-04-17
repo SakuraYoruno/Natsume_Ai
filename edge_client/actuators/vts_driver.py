@@ -491,7 +491,8 @@ class VTubeStudioDriver:
                     action="set_mouth_open_level",
                 )
 
-        mouth_params = self._preferred_mouth_parameters()
+        preferred_mouth_params = self._preferred_mouth_parameters()
+        mouth_params = list(preferred_mouth_params)
         plan = dict(self._mouth_parameter_plan or {})
         available_params = {
             str(item or "").strip()
@@ -522,12 +523,32 @@ class VTubeStudioDriver:
             detail = "all mouth parameters failed"
             if errors:
                 detail = f"{detail}: {'; '.join(errors)}"
-            return VtsDriverResult(
-                success=False,
-                reason_code=VTS_API_ERROR,
-                detail=detail,
-                action="set_mouth_open_level",
-            )
+            if available_params and mouth_params != preferred_mouth_params:
+                for param in preferred_mouth_params:
+                    if param in mouth_params:
+                        continue
+                    try:
+                        _set_vts_parameter(
+                            vts=self._vts,
+                            param_name=param,
+                            value=level,
+                            timeout_s=self._config.api_timeout_s,
+                        )
+                        selected_primary = param
+                        break
+                    except Exception as exc:  # pragma: no cover - depends on VTS runtime state
+                        errors.append(f"{param}: {exc}")
+                if selected_primary is None:
+                    detail = "all mouth parameters failed after fallback"
+                    if errors:
+                        detail = f"{detail}: {'; '.join(errors)}"
+            if selected_primary is None:
+                return VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_API_ERROR,
+                    detail=detail,
+                    action="set_mouth_open_level",
+                )
 
         # Optional companion parameters: failures here should not fail playback.
         volume_params = [
@@ -653,10 +674,22 @@ class VTubeStudioDriver:
                 emotion_tag=normalized,
             )
         except Exception as e:
+            if override_hotkey and hotkey_id == override_hotkey:
+                self._expression_hotkey_overrides.pop(normalized, None)
             fallback_hotkey = self._resolve_hotkey_for_emotion(
                 emotion_tag=normalized,
                 preferred_hotkey=expression_id,
+                include_preferred=False,
+                exclude_hotkeys=(hotkey_id,),
             )
+            if not fallback_hotkey:
+                fallback_hotkey = self._resolve_hotkey_for_emotion(
+                    emotion_tag=normalized,
+                    preferred_hotkey=expression_id,
+                    include_preferred=False,
+                    force_refresh=True,
+                    exclude_hotkeys=(hotkey_id,),
+                )
             if fallback_hotkey and fallback_hotkey != hotkey_id:
                 try:
                     _trigger_vts_hotkey(
@@ -976,19 +1009,29 @@ class VTubeStudioDriver:
         *,
         emotion_tag: str,
         preferred_hotkey: str,
+        include_preferred: bool = True,
+        force_refresh: bool = False,
+        exclude_hotkeys: tuple[str, ...] = (),
     ) -> str | None:
         catalog = list(self._hotkey_catalog or [])
-        if not catalog:
+        excluded = {
+            str(item or "").strip().lower()
+            for item in exclude_hotkeys
+            if str(item or "").strip()
+        }
+        if force_refresh or not catalog:
             catalog = _list_vts_hotkeys(vts=self._vts, timeout_s=self._config.api_timeout_s)
             self._hotkey_catalog = list(catalog)
         if not catalog:
             return None
 
         preferred_norm = str(preferred_hotkey or "").strip().lower()
-        if preferred_norm:
+        if include_preferred and preferred_norm:
             for row in catalog:
                 hotkey_id = str(row.get("id") or "").strip()
                 name = str(row.get("name") or "").strip()
+                if hotkey_id.lower() in excluded:
+                    continue
                 if hotkey_id.lower() == preferred_norm and not self._is_disallowed_expression_hotkey(
                     hotkey_id,
                     name=name,
@@ -1004,6 +1047,8 @@ class VTubeStudioDriver:
             for row in catalog:
                 hotkey_id = str(row.get("id") or "").strip()
                 name = str(row.get("name") or "").strip()
+                if hotkey_id.lower() in excluded:
+                    continue
                 if self._is_disallowed_expression_hotkey(hotkey_id, name=name):
                     continue
                 if hint_norm in hotkey_id.lower() or hint_norm in name.lower():

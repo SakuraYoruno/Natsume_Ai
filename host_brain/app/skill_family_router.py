@@ -7,6 +7,7 @@ from typing import Any
 
 
 _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
+    "codex_codegen": "code",
     "web_search": "browser",
     "browser_navigate": "browser",
     "browser_screenshot": "browser",
@@ -28,7 +29,6 @@ _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
 }
 
 _DEFAULT_FAMILY_BY_AGENT_ID: dict[str, str] = {
-    "code_agent": "code",
     "translate_agent": "translation",
     "vision_agent": "perception",
     "intent_agent": "reasoning",

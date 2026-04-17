@@ -12,6 +12,7 @@ import host_brain.app.dependencies as deps
 import host_brain.app.fastapi_app as fastapi_app
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
+from host_brain.skills.ide_registry import IDESkillProvider
 
 
 class _FakeIntentEngine:
@@ -168,6 +169,129 @@ def test_http_chat_route_executes_direct_skill(monkeypatch) -> None:
         _close_client(client, ledger)
 
 
+def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatch) -> None:
+    client, ledger = _build_client(monkeypatch)
+    try:
+        response = client.post(
+            "/v1/chat",
+            json={
+                "message": "please summarize the current session",
+                "session_id": "sess_http_skill_smoke_nl_001",
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response)
+        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+
+        assert route_event["route_type"] == "skill"
+        assert route_event["target_id"] == "session_summary"
+        assert route_event["reason_code"] == "intent_draft:skill"
+        assert commit_event["decision"] == "APPROVE"
+        assert "session_summary" in str(commit_event.get("narrative") or "")
+
+        request_id = str(commit_event["request_id"])
+        trace = ledger.trace_request(request_id)
+        assert len(trace["skill_exec_log"]) == 1
+        assert trace["skill_exec_log"][0]["skill_name"] == "session_summary"
+        assert trace["skill_exec_log"][0]["result_status"] == "SUCCESS"
+    finally:
+        _close_client(client, ledger)
+
+
+def test_http_chat_route_infers_codex_codegen_from_code_request(monkeypatch) -> None:
+    client, ledger = _build_client(monkeypatch)
+    deps._skill_registry.register_decorated(IDESkillProvider())
+    monkeypatch.setattr(
+        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        lambda payload: {
+            "status": "EXECUTED",
+            "result_text": "```python\nprint('fixed')\n```",
+            "tool": payload.get("tool"),
+        },
+    )
+    try:
+        response = client.post(
+            "/v1/chat",
+            json={
+                "message": "please fix the failing test and show me the code",
+                "session_id": "sess_http_skill_smoke_codex_001",
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response)
+        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+
+        assert route_event["route_type"] == "skill"
+        assert route_event["target_id"] == "codex_codegen"
+        assert commit_event["decision"] == "APPROVE"
+        assert "print('fixed')" in str(commit_event.get("narrative") or "")
+
+        request_id = str(commit_event["request_id"])
+        trace = ledger.trace_request(request_id)
+        assert len(trace["skill_exec_log"]) == 1
+        assert trace["skill_exec_log"][0]["skill_name"] == "codex_codegen"
+        assert trace["skill_exec_log"][0]["result_status"] == "SUCCESS"
+    finally:
+        _close_client(client, ledger)
+
+
+def test_http_chat_route_infers_codex_self_heal_task(monkeypatch) -> None:
+    client, ledger = _build_client(monkeypatch)
+    deps._skill_registry.register_decorated(IDESkillProvider())
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        "host_brain.skills.codex_task_builder._safe_build_runtime_health_snapshot",
+        lambda request_id, include_dependency_probes: {
+            "runtime_repo_root": "D:/Natsume_Ai",
+            "health_status": "DEGRADED",
+            "health_reason_code": "EDGE_RPC_DOWN",
+            "health_report": {"status": "DEGRADED", "reason_code": "EDGE_RPC_DOWN"},
+            "dependency_probe_error": None,
+        },
+    )
+
+    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+        captured["payload"] = dict(payload)
+        return {
+            "status": "EXECUTED",
+            "result_text": "self-heal-ready",
+            "tool": payload.get("tool"),
+        }
+
+    monkeypatch.setattr(
+        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        _fake_dispatch,
+    )
+    try:
+        response = client.post(
+            "/v1/chat",
+            json={
+                "message": "please self heal the host health check failure",
+                "session_id": "sess_http_skill_smoke_self_heal_001",
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response)
+        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+
+        assert route_event["route_type"] == "skill"
+        assert route_event["target_id"] == "codex_codegen"
+        assert captured["payload"]["run_mode"] == "self_heal"
+        assert captured["payload"]["workspace_strategy"] == "runtime_repo"
+        assert "runtime:service_health" in captured["payload"]["evidence_refs"]
+    finally:
+        _close_client(client, ledger)
+
+
 def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch) -> None:
     client, ledger = _build_client(monkeypatch, use_real_governor=True)
     try:
@@ -203,7 +327,7 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch) -> 
 
         assert route_event["route_type"] == "skill"
         assert route_event["target_id"] == "session_summary"
-        assert route_event["reason_code"] == "intent_draft:skill_target"
+        assert route_event["reason_code"] == "intent_draft:skill"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
 
@@ -215,6 +339,41 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch) -> 
         assert len(trace["skill_exec_log"]) == 1
         assert trace["skill_exec_log"][0]["skill_name"] == "session_summary"
         assert trace["skill_exec_log"][0]["result_status"] == "SUCCESS"
+    finally:
+        _close_client(client, ledger)
+
+
+def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch) -> None:
+    client, ledger = _build_client(monkeypatch)
+    try:
+        response = client.post(
+            "/v1/chat",
+            json={
+                "message": "first summarize the current session then read emotion snapshot",
+                "session_id": "sess_http_plan_smoke_nl_001",
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response)
+        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+
+        assert route_event["route_type"] == "plan"
+        assert route_event["target_id"] == "skill_dag"
+        assert route_event["reason_code"] == "hard_rule:multi_step"
+        assert commit_event["decision"] == "APPROVE"
+        assert "session_summary" in str(commit_event.get("narrative") or "")
+        assert "emotion_query" in str(commit_event.get("narrative") or "")
+
+        request_id = str(commit_event["request_id"])
+        trace = ledger.trace_request(request_id)
+        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
+            "emotion_query",
+            "session_summary",
+        ]
+        assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
     finally:
         _close_client(client, ledger)
 
@@ -271,9 +430,9 @@ def test_http_chat_route_executes_skill_plan(monkeypatch) -> None:
 
         request_id = str(commit_event["request_id"])
         trace = ledger.trace_request(request_id)
-        assert [row["skill_name"] for row in trace["skill_exec_log"]] == [
-            "session_summary",
+        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
             "emotion_query",
+            "session_summary",
         ]
         assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
     finally:
@@ -289,15 +448,17 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch) -> N
             json={
                 "message": "first summarize session then read emotion snapshot",
                 "session_id": "sess_http_plan_e2e_001",
-                "intent_draft": {
-                    "schema_version": "Natsume.intent.v1",
-                    "id": f"intent::http-plan-e2e::{now_ms}",
-                    "ts_ms": now_ms,
-                    "session_id": "sess_http_plan_e2e_001",
-                    "seq": 1,
-                    "type": "query",
-                    "action": "exec_intent",
-                    "target": "host",
+                    "intent_draft": {
+                        "schema_version": "Natsume.intent.v1",
+                        "id": f"intent::http-plan-e2e::{now_ms}",
+                        "ts_ms": now_ms,
+                        "session_id": "sess_http_plan_e2e_001",
+                        "seq": 1,
+                        "type": "query",
+                        "route": "plan",
+                        "target_id": "skill_dag",
+                        "action": "exec_intent",
+                        "target": "host",
                     "args": {
                         "text": "first summarize session then read emotion snapshot",
                     },
@@ -348,9 +509,9 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch) -> N
         assert trace["status"] == "COMPLETE"
         assert len(trace["intent_log"]) == 1
         assert len(trace["governor_log"]) == 1
-        assert [row["skill_name"] for row in trace["skill_exec_log"]] == [
-            "session_summary",
+        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
             "emotion_query",
+            "session_summary",
         ]
         assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
     finally:

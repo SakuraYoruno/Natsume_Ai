@@ -6,7 +6,7 @@
 
 Phase XV 收口架构：
   cortex_orchestrator 统一承接主入口，本模块负责 /v1/chat 的鉴权、场景判定与流式转发。
-场景分类由 cortex_route_decider.classify_task_intent 完成（Phase XV），按意图路由分发到对应 handler。
+意图收口由 thalamus_agent.classify_and_compile_intent_draft 完成（Phase XV+），再按 canonical intent 路由分发到对应 handler。
 
 子模块职责：
   - chat_handler_complex.py — 复杂场景 LangGraph 编排（_complex_scene_sse_generator）
@@ -31,15 +31,16 @@ from host_brain.app.emotion_context import (
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
 )
-from host_brain.app.intent_seq import allocate_intent_seq
 from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
+    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
+    SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
-from host_brain.tribe.cortex_route_decider import classify_task_intent as _classify_task_intent
+from host_brain.tribe.thalamus_agent import get_thalamus_agent
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.schemas import ChatRequest
 from host_brain.core.ids import new_request_id
@@ -66,7 +67,7 @@ def _resolve_sys_mode_narrative(mode: str) -> str:
 async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:
     """POST /v1/chat 统一入口。
 
-Governor 鉴权后由 cortex_route_decider.classify_task_intent 分类意图（Phase XV）：
+Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+）：
     - route=chat → 云优先单节点（Gemini → Codex → DeepSeek → host_14b），token 级流式 SSE
     - route=delegate/skill/plan → cortex_orchestrator 调度对应 Agent
 
@@ -104,50 +105,16 @@ Governor 鉴权后由 cortex_route_decider.classify_task_intent 分类意图（P
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    intent_draft = request_body.intent_draft
-    _pre_task_intent: dict | None = None
-    if intent_draft is None:
-        # Phase XV：使用 cortex_route_decider.classify_task_intent 做双层意图分类，
-        # 替代已废弃的 pre_intent_classifier，使 Governor 能感知真实意图类型。
-        _pre_task_intent = await _classify_task_intent(
-            request_id=request_id,
-            session_id=session_id,
-            text=request_body.message,
-        )
-        _route = str(_pre_task_intent.get("route") or "chat").strip().lower()
-        _target_id = str(_pre_task_intent.get("target_id") or "").strip()
-        # 映射 route → action（Governor 感知用）
-        if _route == "delegate" and _target_id == "code_agent":
-            _draft_action = "work_code"
-        elif _route == "delegate" and _target_id == "translate_agent":
-            _draft_action = "work_translate"
-        elif _route in {"delegate", "skill", "plan"}:
-            _draft_action = "exec_intent"
-        elif _route == "task_progress":
-            _draft_action = "task_progress"
-        elif _route == "recent_turn":
-            _draft_action = "recent_turn"
-        else:
-            _draft_action = "narrative_only"
-        _intent_seq = allocate_intent_seq(session_id=session_id)
-        intent_draft = {
-            "schema_version": "Natsume.intent.v1",
-            "id": f"intent::{request_id}",
-            "ts_ms": ts_ms,
-            "session_id": session_id,
-            "seq": _intent_seq,
-            "person_id": request_body.person_id,
-            "type": "query",
-            "action": _draft_action,
-            "route": _route,
-            "target_id": _target_id,
-            "task": str(_pre_task_intent.get("task") or request_body.message).strip(),
-            "route_reason": str(_pre_task_intent.get("reason_code") or "TRIBE_INTENT").strip(),
-            "route_source": str(_pre_task_intent.get("route_source") or "rule").strip(),
-            "target": "host",
-            "args": {"text": request_body.message},
-            "nonce": f"nonce::{request_id}",
-        }
+    intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+        request_id=request_id,
+        session_id=session_id,
+        user_message=request_body.message,
+        person_id=request_body.person_id,
+        existing_intent_draft=request_body.intent_draft,
+        source="chat_handler",
+        input_source=getattr(request_body, "input_source", None),
+        ts_ms=ts_ms,
+    )
 
     return StreamingResponse(
         _unified_chat_sse_generator(
@@ -264,11 +231,11 @@ async def _unified_chat_sse_generator(
         elif _pre_classified_scene is not None:
             # 复用 handle_chat 中已完成的预分类结果
             scene_type = _pre_classified_scene
-            scene_type_source = "cortex_tribe_decider"
+            scene_type_source = SCENE_TYPE_SOURCE_TRIBE_DECIDER
         else:
             # Phase XV：不再调用 pre_intent_classifier，scene_type 由 cortex_orchestrator 决定
             scene_type = SCENE_CHAT
-            scene_type_source = "cortex_tribe_decider_default"
+            scene_type_source = SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT
 
         _logger.info(
             "chat scene classified",

@@ -7,12 +7,16 @@ SpeechPlaybackQueue as a drop-in Synthesizer callback.
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -309,7 +313,11 @@ class SoVITSModelManager:
         self._state = TtsState.UNLOADED
         self._lock = threading.Lock()
         self._actual_device: str = self._config.device
+        self._backend_mode: str = "inprocess"
         self._load_error: str | None = None
+        self._last_synth_error: str | None = None
+        self._last_recovery_detail: str | None = None
+        self._recovery_count = 0
 
     @property
     def state(self) -> TtsState:
@@ -350,7 +358,9 @@ class SoVITSModelManager:
                 )
                 self._model = model
                 self._actual_device = self._config.device
+                self._backend_mode = "inprocess"
                 self._state = TtsState.READY
+                self._load_error = None
                 logger.info(
                     "GPT-SoVITS model loaded: %s on %s",
                     self._config.model_path,
@@ -374,6 +384,16 @@ class SoVITSModelManager:
                 error_str = str(e).lower()
                 self._state = TtsState.ERROR
                 self._load_error = str(e)
+                if _is_retryable_invalid_argument_error(e):
+                    fallback = self._activate_fresh_process_backend(
+                        detail_prefix="recovered via fresh subprocess backend after load failure"
+                    )
+                    if fallback.success:
+                        logger.warning(
+                            "TTS load hit invalid argument; activating fresh subprocess backend: %s",
+                            e,
+                        )
+                        return fallback
                 if "cuda" in error_str or "oom" in error_str or "gpu" in error_str:
                     logger.error("GPU load failed: %s", e)
                     return TtsSynthResult(
@@ -390,6 +410,16 @@ class SoVITSModelManager:
             except Exception as e:
                 self._state = TtsState.ERROR
                 self._load_error = str(e)
+                if _is_retryable_invalid_argument_error(e):
+                    fallback = self._activate_fresh_process_backend(
+                        detail_prefix="recovered via fresh subprocess backend after load failure"
+                    )
+                    if fallback.success:
+                        logger.warning(
+                            "TTS load hit invalid argument; activating fresh subprocess backend: %s",
+                            e,
+                        )
+                        return fallback
                 logger.error("Unexpected error loading model: %s", e)
                 return TtsSynthResult(
                     success=False,
@@ -454,16 +484,15 @@ class SoVITSModelManager:
         t0 = time.monotonic()
         self._state = TtsState.SYNTHESIZING
         try:
-            audio_data, sr = _synthesize_audio(
-                model=self._model,
+            audio_data, sr = self._synthesize_with_recovery(
                 text=normalized_text,
                 language=normalized_language,
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
-                timeout_s=self._config.synth_timeout_s,
             )
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
+            self._last_synth_error = None
 
             # 计算音频时长
             duration_s = 0.0
@@ -485,6 +514,7 @@ class SoVITSModelManager:
         except TimeoutError as e:
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
+            self._last_synth_error = str(e)
             logger.error("TTS synthesis timeout: %s", e)
             return TtsSynthResult(
                 success=False,
@@ -496,6 +526,7 @@ class SoVITSModelManager:
         except Exception as e:
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
+            self._last_synth_error = str(e)
             error_str = str(e).lower()
             if "oom" in error_str or "cuda" in error_str:
                 reason = TTS_GPU_OOM
@@ -512,9 +543,155 @@ class SoVITSModelManager:
     def unload(self) -> None:
         """Unload model and free GPU memory."""
         with self._lock:
+            model = self._model
             self._model = None
             self._state = TtsState.UNLOADED
-            logger.info("GPT-SoVITS model unloaded")
+            self._backend_mode = "inprocess"
+        self._cleanup_model_resources(model)
+        self._release_gpu_cache()
+        logger.info("GPT-SoVITS model unloaded")
+
+    def _synthesize_with_recovery(
+        self,
+        *,
+        text: str,
+        language: str,
+        emotion_tag: str | None,
+        emotion_intensity: float | None,
+    ) -> tuple[Any, int]:
+        try:
+            return _synthesize_audio(
+                model=self._model,
+                text=text,
+                language=language,
+                emotion_tag=emotion_tag,
+                emotion_intensity=emotion_intensity,
+                timeout_s=self._config.synth_timeout_s,
+            )
+        except Exception as exc:
+            if not _is_retryable_invalid_argument_error(exc):
+                raise
+            logger.warning(
+                "TTS synth hit invalid argument; reloading model and retrying once: %s",
+                exc,
+            )
+            recovery = self._recover_after_invalid_argument()
+            if not recovery.success or self._model is None:
+                self._last_recovery_detail = (
+                    f"reload failed after invalid argument: {recovery.detail}"
+                )
+                if _allow_tts_subprocess_fallback():
+                    result = self._synthesize_via_fresh_process(
+                        text=text,
+                        language=language,
+                        emotion_tag=emotion_tag,
+                        emotion_intensity=emotion_intensity,
+                    )
+                    activation = self._activate_fresh_process_backend(
+                        detail_prefix="recovered via fresh subprocess after reload failure"
+                    )
+                    if activation.success:
+                        logger.warning("%s", activation.detail)
+                    return result
+                raise RuntimeError(self._last_recovery_detail) from exc
+            try:
+                result = _synthesize_audio(
+                    model=self._model,
+                    text=text,
+                    language=language,
+                    emotion_tag=emotion_tag,
+                    emotion_intensity=emotion_intensity,
+                    timeout_s=self._config.synth_timeout_s,
+                )
+            except Exception as retry_exc:
+                self._last_recovery_detail = (
+                    f"reload retry failed after invalid argument: {retry_exc}"
+                )
+                if _allow_tts_subprocess_fallback():
+                    result = self._synthesize_via_fresh_process(
+                        text=text,
+                        language=language,
+                        emotion_tag=emotion_tag,
+                        emotion_intensity=emotion_intensity,
+                    )
+                    activation = self._activate_fresh_process_backend(
+                        detail_prefix="recovered via fresh subprocess after retry failure"
+                    )
+                    if activation.success:
+                        logger.warning("%s", activation.detail)
+                    return result
+                raise RuntimeError(self._last_recovery_detail) from retry_exc
+            self._recovery_count += 1
+            self._last_recovery_detail = (
+                f"recovered from invalid argument via model reload #{self._recovery_count}"
+            )
+            return result
+
+    def _recover_after_invalid_argument(self) -> TtsSynthResult:
+        self.unload()
+        return self.load()
+
+    def _activate_fresh_process_backend(self, *, detail_prefix: str) -> TtsSynthResult:
+        if not _allow_tts_subprocess_fallback():
+            return TtsSynthResult(
+                success=False,
+                reason_code=TTS_MODEL_UNAVAILABLE,
+                detail="fresh subprocess fallback disabled",
+            )
+        self._model = _FreshProcessSoVITSAdapter(config=self._config)
+        self._actual_device = self._config.device
+        self._backend_mode = "subprocess"
+        self._state = TtsState.READY
+        self._load_error = None
+        self._recovery_count += 1
+        self._last_recovery_detail = f"{detail_prefix} #{self._recovery_count}"
+        return TtsSynthResult(
+            success=True,
+            reason_code=None,
+            detail=self._last_recovery_detail,
+        )
+
+    def _synthesize_via_fresh_process(
+        self,
+        *,
+        text: str,
+        language: str,
+        emotion_tag: str | None,
+        emotion_intensity: float | None,
+    ) -> tuple[Any, int]:
+        return _run_tts_fresh_process(
+            config=self._config,
+            text=text,
+            text_language=language,
+            emotion_tag=emotion_tag,
+            emotion_intensity=emotion_intensity,
+        )
+
+    @staticmethod
+    def _cleanup_model_resources(model: Any) -> None:
+        if model is None:
+            return
+        for attr in ("shutdown", "close"):
+            method = getattr(model, attr, None)
+            if not callable(method):
+                continue
+            try:
+                method()
+            except Exception:
+                logger.debug("TTS model %s cleanup failed", attr, exc_info=True)
+
+    @staticmethod
+    def _release_gpu_cache() -> None:
+        gc.collect()
+        try:
+            import torch
+        except ImportError:
+            return
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            logger.debug("torch cuda cache release failed", exc_info=True)
 
     def health(self) -> dict[str, Any]:
         """Return engine health snapshot."""
@@ -522,9 +699,13 @@ class SoVITSModelManager:
             "state": self._state.value,
             "model_path": self._config.model_path,
             "device": self._actual_device,
+            "backend_mode": self._backend_mode,
             "config_device": self._config.device,
             "sample_rate": self._config.sample_rate,
             "load_error": self._load_error,
+            "last_synth_error": self._last_synth_error,
+            "last_recovery_detail": self._last_recovery_detail,
+            "recovery_count": self._recovery_count,
         }
 
 
@@ -551,6 +732,9 @@ class AudioPlaybackDevice:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._on_playback_finished: Callable[[], None] | None = None
+        self._last_playback_started_ts_ms: int | None = None
+        self._last_playback_finished_ts_ms: int | None = None
+        self._last_playback_error: str | None = None
 
     @property
     def playing(self) -> bool:
@@ -570,6 +754,7 @@ class AudioPlaybackDevice:
         """Play audio data through output device."""
         with self._lock:
             if self._playing:
+                self._last_playback_error = "audio device already playing"
                 return TtsSynthResult(
                     success=False,
                     reason_code=VOICE_SYNTH_FAILED,
@@ -578,6 +763,8 @@ class AudioPlaybackDevice:
 
             self._stop_event.clear()
             self._playing = True
+            self._last_playback_error = None
+            self._last_playback_started_ts_ms = now_ms()
 
         sr = sample_rate or self._sample_rate
 
@@ -592,6 +779,7 @@ class AudioPlaybackDevice:
             if blocking:
                 with self._lock:
                     self._playing = False
+                    self._last_playback_finished_ts_ms = now_ms()
                 self._notify_playback_finished()
             else:
                 threading.Thread(
@@ -609,6 +797,7 @@ class AudioPlaybackDevice:
         except ImportError as e:
             with self._lock:
                 self._playing = False
+                self._last_playback_error = f"sounddevice not available: {e}"
             return TtsSynthResult(
                 success=False,
                 reason_code=TTS_MODEL_UNAVAILABLE,
@@ -617,6 +806,7 @@ class AudioPlaybackDevice:
         except Exception as e:
             with self._lock:
                 self._playing = False
+                self._last_playback_error = f"playback error: {e}"
             return TtsSynthResult(
                 success=False,
                 reason_code=VOICE_SYNTH_FAILED,
@@ -629,6 +819,8 @@ class AudioPlaybackDevice:
             was_playing = self._playing
             self._playing = False
             self._stop_event.set()
+            if was_playing:
+                self._last_playback_finished_ts_ms = now_ms()
 
         if was_playing:
             try:
@@ -644,11 +836,34 @@ class AudioPlaybackDevice:
         )
 
     def health(self) -> dict[str, Any]:
-        return {
-            "playing": self._playing,
-            "sample_rate": self._sample_rate,
-            "device_index": self._device_index,
+        with self._lock:
+            snapshot = {
+                "playing": self._playing,
+                "sample_rate": self._sample_rate,
+                "device_index": self._device_index,
+                "configured_device_index": self._device_index,
+                "last_playback_started_ts_ms": self._last_playback_started_ts_ms,
+                "last_playback_finished_ts_ms": self._last_playback_finished_ts_ms,
+                "last_playback_error": self._last_playback_error,
+            }
+        probe_enabled = str(os.environ.get("EDGE_TTS_HEALTH_PROBE_DEVICES", "false")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
         }
+        if probe_enabled:
+            snapshot.update(self._probe_device_health())
+        else:
+            snapshot.update(
+                {
+                    "sounddevice_available": None,
+                    "device_probe_skipped": True,
+                    "resolved_output_device": None,
+                    "default_output_device": None,
+                }
+            )
+        return snapshot
 
     def _await_nonblocking_completion(self, sd_module: Any) -> None:
         try:
@@ -658,7 +873,85 @@ class AudioPlaybackDevice:
         finally:
             with self._lock:
                 self._playing = False
+                self._last_playback_finished_ts_ms = now_ms()
             self._notify_playback_finished()
+
+    def _probe_device_health(self) -> dict[str, Any]:
+        try:
+            import sounddevice as sd
+        except ImportError as exc:
+            return {
+                "sounddevice_available": False,
+                "device_probe_error": f"sounddevice not available: {exc}",
+                "resolved_output_device": None,
+                "default_output_device": None,
+            }
+        except Exception as exc:  # pragma: no cover - defensive guard
+            return {
+                "sounddevice_available": False,
+                "device_probe_error": f"sounddevice import failed: {exc}",
+                "resolved_output_device": None,
+                "default_output_device": None,
+            }
+
+        try:
+            default_device = getattr(getattr(sd, "default", None), "device", None)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            default_device = None
+            default_error = f"default device probe failed: {exc}"
+        else:
+            default_error = None
+
+        default_output_index = self._extract_output_device_index(default_device)
+        resolved_output_index = self._device_index if self._device_index is not None else default_output_index
+
+        probe = {
+            "sounddevice_available": True,
+            "resolved_output_device": self._query_device(sd, resolved_output_index),
+            "default_output_device": self._query_device(sd, default_output_index),
+        }
+        if default_error:
+            probe["device_probe_error"] = default_error
+        return probe
+
+    @staticmethod
+    def _extract_output_device_index(default_device: Any) -> int | None:
+        if isinstance(default_device, (list, tuple)):
+            if len(default_device) >= 2:
+                candidate = default_device[1]
+            elif len(default_device) == 1:
+                candidate = default_device[0]
+            else:
+                return None
+        else:
+            candidate = default_device
+        try:
+            if candidate is None:
+                return None
+            index = int(candidate)
+        except (TypeError, ValueError):
+            return None
+        return index if index >= 0 else None
+
+    @staticmethod
+    def _query_device(sd_module: Any, device_index: int | None) -> dict[str, Any] | None:
+        if device_index is None:
+            return None
+        try:
+            raw = sd_module.query_devices(device_index)
+        except Exception as exc:
+            return {
+                "index": int(device_index),
+                "query_error": str(exc),
+            }
+        info = dict(raw or {})
+        return {
+            "index": int(device_index),
+            "name": str(info.get("name") or ""),
+            "hostapi": info.get("hostapi"),
+            "max_output_channels": info.get("max_output_channels"),
+            "default_samplerate": info.get("default_samplerate"),
+        }
 
     def _notify_playback_finished(self) -> None:
         callback: Callable[[], None] | None
@@ -760,28 +1053,28 @@ def _load_sovits_model(
 ) -> Any:
     """Load GPT-SoVITS model using legacy or modern SDK backends."""
     model_root = os.path.abspath(model_path)
+    with _temporary_working_directory(model_root):
+        # Legacy SDK path: GPT_SoVITS.inference.TTS_Model
+        try:
+            from GPT_SoVITS.inference import TTS_Model  # type: ignore[import-not-found]
 
-    # Legacy SDK path: GPT_SoVITS.inference.TTS_Model
-    try:
-        from GPT_SoVITS.inference import TTS_Model  # type: ignore[import-not-found]
+            return TTS_Model(
+                model_path=model_path,
+                device=device,
+                ref_audio_path=ref_audio_path,
+                ref_text=ref_text,
+            )
+        except ImportError:
+            pass
 
-        return TTS_Model(
-            model_path=model_path,
+        # Modern SDK path: GPT_SoVITS.TTS_infer_pack.TTS
+        return _load_modern_sovits_model(
+            model_root=model_root,
             device=device,
             ref_audio_path=ref_audio_path,
             ref_text=ref_text,
+            language=language,
         )
-    except ImportError:
-        pass
-
-    # Modern SDK path: GPT_SoVITS.TTS_infer_pack.TTS
-    return _load_modern_sovits_model(
-        model_root=model_root,
-        device=device,
-        ref_audio_path=ref_audio_path,
-        ref_text=ref_text,
-        language=language,
-    )
 
 
 def _load_modern_sovits_model(
@@ -848,6 +1141,7 @@ def _load_modern_sovits_model(
         ref_audio_path=effective_ref_audio,
         ref_text=(effective_ref_text or None),
         default_language=language,
+        working_directory=model_root,
     )
 
 
@@ -861,11 +1155,13 @@ class _ModernSoVITSAdapter:
         ref_audio_path: str,
         ref_text: str | None,
         default_language: str,
+        working_directory: str,
     ) -> None:
         self._tts = tts
         self._ref_audio_path = ref_audio_path
         self._ref_text = (ref_text or "").strip()
         self._default_language = default_language
+        self._working_directory = working_directory
 
     def synthesize(
         self,
@@ -909,21 +1205,22 @@ class _ModernSoVITSAdapter:
                     chunks.append(np.asarray(audio_i))
             return chunks, sample_rate
 
-        try:
-            chunks, sample_rate = _collect_audio(inputs)
-        except TypeError as exc:
-            message = str(exc)
-            if "speed_factor" in message or "energy_factor" in message or "unexpected keyword" in message:
-                fallback_inputs = dict(inputs)
-                fallback_inputs.pop("speed_factor", None)
-                fallback_inputs.pop("energy_factor", None)
-                logger.debug(
-                    "Modern SoVITS backend does not accept speed/energy args; retry without them: %s",
-                    message,
-                )
-                chunks, sample_rate = _collect_audio(fallback_inputs)
-            else:
-                raise
+        with _temporary_working_directory(self._working_directory):
+            try:
+                chunks, sample_rate = _collect_audio(inputs)
+            except TypeError as exc:
+                message = str(exc)
+                if "speed_factor" in message or "energy_factor" in message or "unexpected keyword" in message:
+                    fallback_inputs = dict(inputs)
+                    fallback_inputs.pop("speed_factor", None)
+                    fallback_inputs.pop("energy_factor", None)
+                    logger.debug(
+                        "Modern SoVITS backend does not accept speed/energy args; retry without them: %s",
+                        message,
+                    )
+                    chunks, sample_rate = _collect_audio(fallback_inputs)
+                else:
+                    raise
 
         if not chunks:
             raise RuntimeError("GPT-SoVITS produced empty audio.")
@@ -944,6 +1241,40 @@ class _ModernSoVITSAdapter:
         if languages:
             return sorted(languages)[0]
         return "ja"
+
+
+class _FreshProcessSoVITSAdapter:
+    """Persistent subprocess-backed adapter used after in-process backend failure."""
+
+    def __init__(self, *, config: TtsConfig) -> None:
+        self._config = config
+
+    def synthesize(
+        self,
+        *,
+        text: str,
+        language: str,
+        emotion: str | None = None,
+        speed_factor: float | None = None,
+        energy_factor: float | None = None,
+    ) -> dict[str, Any]:
+        audio, sample_rate = _run_tts_fresh_process(
+            config=self._config,
+            text=text,
+            text_language=language,
+            emotion_tag=emotion,
+            emotion_intensity=_infer_emotion_intensity_from_prosody(
+                speed_factor=speed_factor,
+                energy_factor=energy_factor,
+            ),
+        )
+        return {
+            "audio": audio,
+            "sample_rate": sample_rate,
+        }
+
+    def close(self) -> None:
+        return None
 
 
 def _ensure_modern_sdk_paths(model_root: str) -> None:
@@ -1026,6 +1357,125 @@ def _patch_torchaudio_load_fallback() -> None:
 
     setattr(torchaudio, "load", _load_with_soundfile_fallback)
     _TORCHAUDIO_LOAD_PATCHED = True
+
+
+def _resolve_tts_repo_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def _allow_tts_subprocess_fallback() -> bool:
+    raw = str(os.environ.get("EDGE_TTS_SUBPROCESS_HELPER") or "").strip().lower()
+    return raw not in {"1", "true", "yes", "on"}
+
+
+def _infer_emotion_intensity_from_prosody(
+    *,
+    speed_factor: float | None,
+    energy_factor: float | None,
+) -> float | None:
+    values: list[float] = []
+    if speed_factor is not None:
+        values.append((float(speed_factor) - 0.7) / 0.5)
+    if energy_factor is not None:
+        values.append((float(energy_factor) - 0.6) / 0.8)
+    if not values:
+        return None
+    intensity = sum(values) / len(values)
+    return max(0.0, min(1.0, intensity))
+
+
+def _run_tts_fresh_process(
+    *,
+    config: TtsConfig,
+    text: str,
+    text_language: str,
+    emotion_tag: str | None,
+    emotion_intensity: float | None,
+) -> tuple[Any, int]:
+    import numpy as np
+
+    fd, output_path = tempfile.mkstemp(prefix="edge_tts_fallback_", suffix=".npz")
+    os.close(fd)
+    cmd = [
+        sys.executable,
+        "-m",
+        "edge_client.actuators.tts_subprocess_helper",
+        "--output",
+        output_path,
+        "--model-path",
+        str(config.model_path),
+        "--device",
+        str(config.device),
+        "--sample-rate",
+        str(config.sample_rate),
+        "--language",
+        str(config.language),
+        "--text",
+        str(text),
+        "--text-language",
+        str(text_language),
+    ]
+    if config.ref_audio_path:
+        cmd.extend(["--ref-audio-path", str(config.ref_audio_path)])
+    if config.ref_text:
+        cmd.extend(["--ref-text", str(config.ref_text)])
+    if emotion_tag:
+        cmd.extend(["--emotion-tag", str(emotion_tag)])
+    if emotion_intensity is not None:
+        cmd.extend(["--emotion-intensity", str(float(emotion_intensity))])
+
+    env = dict(os.environ)
+    env["EDGE_TTS_SUBPROCESS_HELPER"] = "1"
+    try:
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=max(15.0, float(config.synth_timeout_s) + 15.0),
+            cwd=_resolve_tts_repo_root(),
+            env=env,
+            check=False,
+        )
+        if completed.returncode != 0:
+            stderr = str(completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(
+                f"fresh subprocess synth failed (exit={completed.returncode}): {stderr}"
+            )
+        payload = np.load(output_path)
+        audio = np.asarray(payload["audio"], dtype=np.float32)
+        sample_rate = int(payload["sample_rate"])
+        return audio, sample_rate
+    finally:
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+
+
+@contextmanager
+def _temporary_working_directory(path: str | None):
+    target = str(path or "").strip()
+    if not target or not os.path.isdir(target):
+        yield
+        return
+    try:
+        previous = os.getcwd()
+    except OSError:
+        previous = None
+    try:
+        os.chdir(target)
+    except OSError:
+        logger.debug("failed to switch cwd to %s", target, exc_info=True)
+        yield
+        return
+    try:
+        yield
+    finally:
+        if previous:
+            try:
+                os.chdir(previous)
+            except OSError:
+                logger.debug("failed to restore cwd to %s", previous, exc_info=True)
 
 
 def _configure_modern_sv_path(model_root: str) -> None:
@@ -1350,3 +1800,8 @@ def _synthesize_audio(
         sr = DEFAULT_SAMPLE_RATE
 
     return audio, sr
+
+
+def _is_retryable_invalid_argument_error(exc: BaseException) -> bool:
+    lowered = str(exc or "").strip().lower()
+    return "invalid argument" in lowered or "errno 22" in lowered

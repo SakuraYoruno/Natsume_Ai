@@ -487,7 +487,7 @@ class TestIntentAgentExecutionTools:
             result = execute_tool(
                 "dispatch_sub_agent",
                 {
-                    "agent_id": "code_agent",
+                    "agent_id": "translate_agent",
                     "task": "fix bug",
                     "_react_context": {
                         "request_id": "req_tool_sub_agent_001",
@@ -497,8 +497,8 @@ class TestIntentAgentExecutionTools:
             )
         assert result.get("success") is True
         assert result.get("status") == "SUCCESS"
-        assert result.get("agent_id") == "code_agent"
-        assert "handled:code_agent" in str(result.get("result") or "")
+        assert result.get("agent_id") == "translate_agent"
+        assert "handled:translate_agent" in str(result.get("result") or "")
 
     def test_dispatch_sub_agent_blocks_self_recursion(self):
         result = execute_tool(
@@ -587,7 +587,7 @@ class TestToolRegistryContractUnchanged:
 
     def test_get_tools_for_agent_returns_list(self):
         """get_tools_for_agent 返回 list[ToolSpec]。"""
-        tools = get_tools_for_agent("code_agent")
+        tools = get_tools_for_agent("intent_agent")
         assert isinstance(tools, list)
         for t in tools:
             assert isinstance(t, ToolSpec)

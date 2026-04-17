@@ -172,3 +172,33 @@ def test_wechat_adapter_legacy_uia_backend_falls_back_to_wxautox4(monkeypatch, c
 
     assert WeChatAdapter._bridge_backend() == "wxautox4"
     assert "no longer supported" in caplog.text
+
+
+def test_wechat_adapter_falls_back_to_plain_send_when_humanized_send_fails(monkeypatch) -> None:
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_ENABLED", "true")
+    monkeypatch.setenv("EDGE_WECHAT_BRIDGE_BACKEND", "wxautox4")
+
+    adapter = WeChatAdapter(None, self_wxid=None)
+    called: list[str] = []
+
+    monkeypatch.setattr(
+        adapter,
+        "_send_text_humanized",
+        lambda reply: (called.append(f"humanized:{reply.content}") or False, "segment=1/2; error=timeout"),
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_send_via_bridge_queue",
+        lambda reply: (called.append(f"plain:{reply.content}") or True),
+    )
+
+    reply = UnifiedReply(
+        conversation_id="wxid_alice",
+        platform=Platform.WECHAT,
+        msg_type=MsgType.TEXT,
+        content="消息发出去了吗",
+    )
+
+    assert adapter.send_reply(reply) is True
+    assert called == ["humanized:消息发出去了吗", "plain:消息发出去了吗"]
+    assert adapter.health()["last_outbound"]["detail"].startswith("bridge_queue_plain_fallback:")

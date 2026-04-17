@@ -38,6 +38,10 @@ class DeclarativeSkillSpec:
     normalize_args: NormalizeArgs = _identity_normalizer
     context_aliases: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     static_payload: dict[str, Any] = field(default_factory=dict)
+    family: str = "general"
+    capability_tags: tuple[str, ...] = field(default_factory=tuple)
+    parallelizable: bool = False
+    fallback_policy: str = "chat_fallback"
 
     def _normalize_args(self, args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
         try:
@@ -76,6 +80,10 @@ class DeclarativeSkillSpec:
             require_confirm=self.require_confirm,
             description=self.description,
             handler=self.build_handler(),
+            family=self.family,
+            capability_tags=self.capability_tags,
+            parallelizable=self.parallelizable,
+            fallback_policy=self.fallback_policy,
         )
 
 

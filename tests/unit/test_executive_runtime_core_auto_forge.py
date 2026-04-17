@@ -62,8 +62,8 @@ def test_runtime_synthesis_attaches_auto_plan_result(monkeypatch) -> None:
     )
 
     assert payload is not None
-    assert payload["executor_route"] == "delegate"
-    assert payload["executor_target"] == "code_agent"
+    assert payload["executor_route"] == "skill"
+    assert payload["executor_target"] == "codex_codegen"
     assert payload["capability_forge"]["auto_plan"]["triggered"] is True
     assert payload["capability_forge"]["auto_plan"]["proposal_id"] == "forge_prop_unit"
     assert len(telemetry.calls) == 1

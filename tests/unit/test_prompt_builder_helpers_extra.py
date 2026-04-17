@@ -240,7 +240,7 @@ def test_json_coercion_and_langchain_extractors_cover_fallback_paths() -> None:
     assert pb.extract_json_object_from_text(inline)["text"] == "fallback"
 
     payload = pb.coerce_gateway_payload_json_text(
-        '{"narrative":{"text":"hello"},"intent_draft":{"skill_name":"x"},"meta":{"trace":"1"}}'
+        '{"narrative":{"text":"hello"},"intent_draft":{"route":"skill","target_id":"x","action":"x"},"meta":{"trace":"1"}}'
     )
     payload_from_text = pb.coerce_gateway_payload_json_text('{"text":"hello"}')
     decoded = json.loads(payload)
@@ -268,7 +268,7 @@ def test_extract_node_helpers_and_injection_meta_roundtrip() -> None:
         "core_reasoner_primary": {
             "payload": {
                 "narrative": {"text": "核心结论"},
-                "intent_draft": {"skill_name": "narrative_only", "args": {}},
+                "intent_draft": {"route": "chat", "target_id": "", "action": "narrative_only", "args": {}},
             }
         }
     }
@@ -276,7 +276,7 @@ def test_extract_node_helpers_and_injection_meta_roundtrip() -> None:
     pb._set_injection_meta({"mode": "ACTIVE", "risk_level": "HIGH"})
 
     assert pb.get_last_injection_meta()["risk_level"] == "HIGH"
-    assert pb.extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_primary")["intent_draft"]["skill_name"] == "narrative_only"
+    assert pb.extract_node_runtime_payload(runtime_payload, node_id="core_reasoner_primary")["intent_draft"]["action"] == "narrative_only"
     assert pb.extract_node_runtime_payload(runtime_payload, node_id="missing") == {}
     assert pb.extract_node_narrative_text(runtime_payload, node_id="core_reasoner_primary") == "核心结论"
 

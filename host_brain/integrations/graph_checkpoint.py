@@ -1,4 +1,4 @@
-"""Checkpoint / interrupt / resume primitives backed by LangGraph SqliteSaver."""
+"""Checkpoint / interrupt / resume primitives backed by LangGraph checkpointers."""
 
 from __future__ import annotations
 
@@ -131,7 +131,12 @@ _langgraph_checkpointer: Any = None
 
 
 def get_langgraph_checkpointer() -> Any:
-    """Get lazy singleton SqliteSaver."""
+    """Get a lazy singleton LangGraph checkpointer.
+
+    Prefer SqliteSaver when the optional sqlite backend is installed.
+    Fall back to MemorySaver in lightweight runtime and test environments
+    where the sqlite package is unavailable.
+    """
 
     global _langgraph_checkpointer
     if _langgraph_checkpointer is not None:
@@ -142,7 +147,17 @@ def get_langgraph_checkpointer() -> Any:
     db_path = get_checkpoint_db_path()
     pathlib.Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    from langgraph.checkpoint.sqlite import SqliteSaver
+    try:
+        from langgraph.checkpoint.sqlite import SqliteSaver
+    except ModuleNotFoundError as exc:
+        from langgraph.checkpoint.memory import MemorySaver
+
+        _langgraph_checkpointer = MemorySaver()
+        _logger.warning(
+            "LangGraph SqliteSaver unavailable, falling back to MemorySaver: %s",
+            exc,
+        )
+        return _langgraph_checkpointer
 
     _langgraph_checkpointer = SqliteSaver.from_conn_string(db_path)
     _logger.info("LangGraph SqliteSaver initialized db_path=%s", db_path)

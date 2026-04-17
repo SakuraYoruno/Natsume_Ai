@@ -3,7 +3,9 @@
     "text": "我已执行并保存全部更改。"
   },
   "intent_draft": {
-    "skill_name": "read_only_status",
+    "route": "skill",
+    "target_id": "read_only_status",
+    "action": "read_only_status",
     "args": {}
   },
   "meta": {

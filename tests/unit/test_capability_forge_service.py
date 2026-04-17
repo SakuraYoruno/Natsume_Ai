@@ -19,15 +19,15 @@ def _build_seeded_telemetry() -> CapabilityGapTelemetry:
             suggested_family="code",
             missing_capability_tags=["coding"],
             confidence=0.9,
-            executor_route="delegate",
-            executor_target="code_agent",
+            executor_route="skill",
+            executor_target="codex_codegen",
         )
         telemetry.record_execution(
             runtime_capability_id=cap_id,
             request_id=f"req-forge-{index}",
             success=index == 3,
-            executor_route="delegate",
-            executor_target="code_agent",
+            executor_route="skill",
+            executor_target="codex_codegen",
             latency_ms=120 + index,
             error_code=None if index == 3 else "FAILED",
         )
@@ -119,7 +119,7 @@ def test_capability_forge_replay_and_runtime_override() -> None:
     )
     assert decision["apply"] is True
     assert decision["stage"] in {"CANARY", "FULL"}
-    assert decision["executor_target"] == "code_agent"
+    assert decision["executor_target"] == "codex_codegen"
 
     stats = restored_service.runtime_match_stats()
     assert stats["counters"]["total"] >= 1

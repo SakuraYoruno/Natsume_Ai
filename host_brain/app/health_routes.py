@@ -14,6 +14,10 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
+from host_brain.app.codex_self_heal import (
+    build_codex_self_heal_proposal_from_health_report,
+    build_codex_self_heal_proposal_from_readiness_report,
+)
 from host_brain.app.dependencies import collect_dependency_probes, get_ledger, get_obs_metrics_collector
 from host_brain.app.main import (
     build_env_readiness_report,
@@ -89,11 +93,79 @@ def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None,
     return [], None, None
 
 
+async def build_live_health_report(
+    *,
+    skip_dependency_probes: bool = False,
+    request_id: str | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    req_id = str(request_id or new_request_id()).strip()
+    ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
+
+    _host_result = load_host_config()
+    _runtime_statuses: dict[str, Any] = {}
+    if _host_result.success and _host_result.config is not None:
+        _runtime_statuses = build_host_runtime_statuses(_host_result.config)
+
+    if not skip_dependency_probes:
+        try:
+            _dep_probes = await collect_dependency_probes()
+            _runtime_statuses.update(_dep_probes)
+            _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
+            _runtime_statuses.update(
+                build_edge_transport_probe_statuses(
+                    available=bool(_edge_gateway.get("available", False)),
+                    detail=str(_edge_gateway.get("detail") or "").strip() or None,
+                )
+            )
+        except Exception as _edge_exc:
+            _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
+            _runtime_statuses.update(
+                build_edge_transport_probe_statuses(
+                    available=False,
+                    detail=str(_edge_exc),
+                )
+            )
+    return build_service_health_report(
+        runtime_statuses=_runtime_statuses,
+        request_id=req_id,
+        ledger=get_ledger(),
+        ts_ms=ts_value,
+    )
+
+
+async def build_live_readiness_report(
+    *,
+    request_id: str | None = None,
+    ts_ms: int | None = None,
+) -> dict[str, Any]:
+    req_id = str(request_id or new_request_id()).strip()
+    ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
+    node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
+    dependency_probes = await collect_dependency_probes()
+    readiness_report = build_env_readiness_report(
+        env=str(os.environ.get("Natsume_ENV") or "dev"),
+        node_inventory=node_inventory,
+        expected_node_count=expected_node_count,
+        dependency_probes=dependency_probes,
+        request_id=req_id,
+        ledger=get_ledger(),
+        ts_ms=ts_value,
+    )
+    if inventory_path:
+        readiness_report["node_inventory_path"] = inventory_path
+    return readiness_report
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check(
     skip_dependency_probes: bool = Query(
         False,
         description="Skip external dependency probes and return a lightweight host-only health snapshot.",
+    ),
+    include_self_heal_proposal: bool = Query(
+        False,
+        description="Attach a Codex self-heal proposal when the health report is not healthy.",
     ),
 ) -> HealthResponse:
     """Health endpoint."""
@@ -101,36 +173,18 @@ async def health_check(
     ts_ms = int(time.time() * 1000)
 
     try:
-        _host_result = load_host_config()
-        _runtime_statuses: dict[str, Any] = {}
-        if _host_result.success and _host_result.config is not None:
-            _runtime_statuses = build_host_runtime_statuses(_host_result.config)
-
-        if not skip_dependency_probes:
-            try:
-                _dep_probes = await collect_dependency_probes()
-                _runtime_statuses.update(_dep_probes)
-                _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
-                _runtime_statuses.update(
-                    build_edge_transport_probe_statuses(
-                        available=bool(_edge_gateway.get("available", False)),
-                        detail=str(_edge_gateway.get("detail") or "").strip() or None,
-                    )
-                )
-            except Exception as _edge_exc:
-                _logger.warning("Edge transport probe failed (degraded): %s", _edge_exc)
-                _runtime_statuses.update(
-                    build_edge_transport_probe_statuses(
-                        available=False,
-                        detail=str(_edge_exc),
-                    )
-                )
-        health_report = build_service_health_report(
-            runtime_statuses=_runtime_statuses,
+        health_report = await build_live_health_report(
+            skip_dependency_probes=skip_dependency_probes,
             request_id=request_id,
-            ledger=get_ledger(),
             ts_ms=ts_ms,
         )
+        if include_self_heal_proposal:
+            proposal = build_codex_self_heal_proposal_from_health_report(
+                health_report,
+                include_dependency_probes=not skip_dependency_probes,
+            )
+            if proposal.get("triggered"):
+                health_report["self_heal_proposal"] = proposal
 
         return HealthResponse(
             status=health_report.get("status", "OK"),
@@ -147,25 +201,28 @@ async def health_check(
 
 
 @router.get("/ready", response_model=ReadinessResponse)
-async def environment_readiness() -> ReadinessResponse:
+async def environment_readiness(
+    include_self_heal_proposal: bool = Query(
+        False,
+        description="Attach a Codex self-heal proposal when the readiness report is degraded or failed.",
+    ),
+) -> ReadinessResponse:
     """Readiness endpoint."""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
 
     try:
-        node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
-        dependency_probes = await collect_dependency_probes()
-        readiness_report = build_env_readiness_report(
-            env=str(os.environ.get("Natsume_ENV") or "dev"),
-            node_inventory=node_inventory,
-            expected_node_count=expected_node_count,
-            dependency_probes=dependency_probes,
+        readiness_report = await build_live_readiness_report(
             request_id=request_id,
-            ledger=get_ledger(),
             ts_ms=ts_ms,
         )
-        if inventory_path:
-            readiness_report["node_inventory_path"] = inventory_path
+        if include_self_heal_proposal:
+            proposal = build_codex_self_heal_proposal_from_readiness_report(
+                readiness_report,
+                include_dependency_probes=True,
+            )
+            if proposal.get("triggered"):
+                readiness_report["self_heal_proposal"] = proposal
 
         readiness_status = readiness_report.get("readiness_status", "FAILED")
 

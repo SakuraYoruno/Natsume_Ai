@@ -13,6 +13,7 @@ import asyncio
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -122,6 +123,136 @@ def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> in
     return max(int(minimum), min(int(maximum), value))
 
 
+def _run_awaitable_sync(awaitable: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(awaitable)
+
+    result_box: dict[str, Any] = {}
+    error_box: dict[str, BaseException] = {}
+    done = threading.Event()
+
+    def _worker() -> None:
+        try:
+            result_box["value"] = asyncio.run(awaitable)
+        except BaseException as exc:  # pragma: no cover - defensive bridge
+            error_box["error"] = exc
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_worker, name="memory-skill-awaitable", daemon=True)
+    thread.start()
+    done.wait()
+    if "error" in error_box:
+        raise error_box["error"]
+    return result_box.get("value")
+
+
+def _build_memory_exec_context(
+    *,
+    request_id: str,
+    session_id: str,
+    intent_id: str,
+    emotion_context: dict[str, Any],
+) -> dict[str, Any]:
+    from host_brain.app.dependencies import get_episodic_store, get_semantic_recaller  # noqa: PLC0415
+
+    try:
+        episodic_store = get_episodic_store()
+    except Exception as exc:  # pragma: no cover - depends on runtime services
+        episodic_store = None
+        _logger.debug("memory skill episodic_store unavailable: %s", exc)
+
+    try:
+        semantic_recaller = get_semantic_recaller()
+    except Exception as exc:  # pragma: no cover - depends on runtime services
+        semantic_recaller = None
+        _logger.debug("memory skill semantic_recaller unavailable: %s", exc)
+
+    if episodic_store is None and semantic_recaller is None:
+        return {}
+
+    default_emotion_tag = _normalize_text(dict(emotion_context or {}).get("emotion_tag")).upper() or "NEUTRAL"
+
+    def _episodic_writer(
+        *,
+        content: str,
+        tags: list[str] | None = None,
+        importance: float | None = None,
+        source: str | None = None,
+        emotion_tag: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        _ = importance
+        if episodic_store is None:
+            raise RuntimeError("episodic store unavailable")
+        evidence_refs = [f"request:{request_id}"]
+        session_ref = str(session_id or "").strip()
+        if session_ref:
+            evidence_refs.append(f"session:{session_ref}")
+        source_ref = str(source or "").strip()
+        if source_ref:
+            evidence_refs.append(f"source:{source_ref}")
+        for tag in list(tags or []):
+            tag_text = str(tag or "").strip()
+            if tag_text:
+                evidence_refs.append(f"tag:{tag_text}")
+        result = episodic_store.write_memory(
+            text=str(content or "").strip(),
+            evidence_refs=evidence_refs,
+            request_id=request_id,
+            intent_id=intent_id,
+            emotion_tag=str(emotion_tag or default_emotion_tag).strip().upper() or default_emotion_tag,
+        )
+        if not bool(result.success):
+            raise RuntimeError(str(result.reason_code or result.detail or "memory write failed"))
+        return str(result.memory_id or "")
+
+    def _semantic_recaller_wrapper(
+        *,
+        query: str,
+        top_k: int = 5,
+        threshold: float = 0.6,
+        tags: list[str] | None = None,
+        session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        _ = tags
+        if semantic_recaller is None:
+            return []
+        filter_metadata: dict[str, Any] = {}
+        session_ref = str(session_id or "").strip()
+        if session_ref:
+            filter_metadata["session_id"] = session_ref
+        recall_result = _run_awaitable_sync(
+            semantic_recaller.recall(
+                str(query or ""),
+                top_k=int(top_k or 5),
+                threshold=float(threshold) if threshold is not None else None,
+                filter_metadata=filter_metadata or None,
+            )
+        )
+        hits = list(getattr(recall_result, "hits", []) or [])
+        normalized_hits: list[dict[str, Any]] = []
+        for hit in hits:
+            normalized_hits.append(
+                {
+                    "doc_id": str(getattr(hit, "doc_id", "") or ""),
+                    "content": str(getattr(hit, "content", "") or ""),
+                    "score": float(getattr(hit, "score", 0.0) or 0.0),
+                    "metadata": dict(getattr(hit, "metadata", {}) or {}),
+                    "source": str(getattr(hit, "source", "") or ""),
+                }
+            )
+        return normalized_hits
+
+    return {
+        "episodic_store": episodic_store,
+        "episodic_writer": _episodic_writer,
+        "semantic_recaller": _semantic_recaller_wrapper,
+    }
+
+
 def _coerce_mapping(value: Any) -> dict[str, Any]:
     return dict(value or {}) if isinstance(value, dict) else {}
 
@@ -129,16 +260,8 @@ def _coerce_mapping(value: Any) -> dict[str, Any]:
 def _iter_candidate_keys() -> tuple[str, ...]:
     return (
         "route",
-        "route_type",
         "target_id",
-        "skill_id",
-        "skill_name",
-        "skill",
         "action",
-        "executor_target",
-        "delegate_agent",
-        "agent_id",
-        "target_agent",
     )
 
 
@@ -162,23 +285,30 @@ def _looks_multi_step_request(user_message: str, intent_draft: dict[str, Any]) -
 
 
 def _extract_skill_target(intent_draft: dict[str, Any], skill_registry: Any) -> str:
-    for key in ("skill_id", "skill_name", "skill", "action", "target_id"):
-        candidate = _normalize_text(intent_draft.get(key))
-        if not candidate:
-            continue
+    candidate = _normalize_text(intent_draft.get("target_id"))
+    if candidate:
         try:
             if skill_registry.get(candidate) is not None:
                 return candidate
         except Exception:
-            continue
+            pass
+    candidate = _normalize_text(intent_draft.get("action"))
+    if candidate and candidate not in {"exec_intent", "narrative_only", "noop", "work_code", "work_translate", "task_progress", "recent_turn"}:
+        try:
+            if skill_registry.get(candidate) is not None:
+                return candidate
+        except Exception:
+            pass
     return ""
 
 
 def _extract_delegate_target(intent_draft: dict[str, Any]) -> str:
-    for key in ("delegate_agent", "agent_id", "target_agent", "executor_target"):
-        candidate = _normalize_text(intent_draft.get(key))
-        if candidate.endswith("_agent"):
-            return candidate
+    candidate = _normalize_text(intent_draft.get("target_id"))
+    if candidate.endswith("_agent"):
+        return candidate
+    candidate = _normalize_text(intent_draft.get("action"))
+    if candidate.endswith("_agent"):
+        return candidate
     return ""
 
 
@@ -195,7 +325,7 @@ def _hard_rule_route(
     第二层：intent_draft 提示 + 硬规则检测 → 未命中则兜底 chat
     """
     route_hint = _normalize_text(intent_draft.get("route"), lower=True)
-    target_hint = _normalize_text(intent_draft.get("target_id") or intent_draft.get("skill_id") or intent_draft.get("agent_id"))
+    target_hint = _normalize_text(intent_draft.get("target_id"))
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
     if route_hint == "skill" and target_hint:
@@ -568,10 +698,21 @@ def _execute_skill(
         "user_message": user_message,
         "task_text": task_text,
         "render_target_lang": render_target_lang,
+        "mood_state": _normalize_text(dict(emotion_context or {}).get("mood_state")) or "NEUTRAL",
+        "emotion_tag": _normalize_text(dict(emotion_context or {}).get("emotion_tag")).upper() or "NEUTRAL",
         "emotion_context": dict(emotion_context or {}),
         "recall_slot_text": dict(recall_slot_text or {}),
         "skill_family": str(skill_meta.family or "general"),
     }
+    if skill_id.startswith("memory_"):
+        exec_context.update(
+            _build_memory_exec_context(
+                request_id=request_id,
+                session_id=session_id,
+                intent_id=execution_intent_id,
+                emotion_context=emotion_context,
+            )
+        )
 
     try:
         handler_payload = skill_meta.handler(args, exec_context)
@@ -646,7 +787,7 @@ def _execute_skill(
 def _family_default_delegate(skill_family: str) -> str:
     normalized = _normalize_text(skill_family, lower=True)
     if normalized == "code":
-        return "code_agent"
+        return "intent_agent"
     if normalized == "translation":
         return "translate_agent"
     if normalized in {"perception", "vision"}:
@@ -906,6 +1047,24 @@ async def _execute_skill_dag(
     recall_slot_text: dict[str, Any],
     render_target_lang: str,
 ) -> tuple[_ExecutionOutcome, dict[str, Any]]:
+    explicit_steps = dict(intent_draft or {}).get("planned_steps")
+    if not isinstance(explicit_steps, list):
+        explicit_steps = dict(intent_draft or {}).get("steps")
+    if isinstance(explicit_steps, list) and len(explicit_steps) > 1:
+        return await _execute_explicit_skill_dag(
+            plan=plan,
+            request_body=request_body,
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            intent_id=intent_id,
+            governor_result=governor_result,
+            intent_draft=intent_draft,
+            emotion_context=emotion_context,
+            recall_slot_text=recall_slot_text,
+            render_target_lang=render_target_lang,
+        )
+
     """执行 Skill DAG。
 
     改进：
@@ -1080,6 +1239,111 @@ async def _execute_skill_dag(
             "plan_trace": plan_trace,
             "parallel_enabled": any(len(batch) > 1 for batch in list(plan.execution_batches or [])),
             "engine": "skill_dag_fallback",
+        },
+    )
+
+
+async def _execute_explicit_skill_dag(
+    *,
+    plan: SkillDagPlan,
+    request_body: Any,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    intent_id: str | None,
+    governor_result: dict[str, Any],
+    intent_draft: dict[str, Any],
+    emotion_context: dict[str, Any],
+    recall_slot_text: dict[str, Any],
+    render_target_lang: str,
+) -> tuple[_ExecutionOutcome, dict[str, Any]]:
+    node_results: dict[str, _ExecutionOutcome] = {}
+    plan_trace: list[dict[str, Any]] = []
+    critical_failure = False
+
+    for batch in list(plan.execution_batches or []):
+        if critical_failure:
+            _logger.warning(
+                "[%s] _execute_explicit_skill_dag: critical node failed, stop remaining batches",
+                request_id,
+            )
+            break
+
+        batch_nodes = [node for node in plan.nodes if node.node_id in batch]
+        coros = [
+            _execute_plan_node(
+                node=node,
+                request_body=request_body,
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                intent_id=intent_id,
+                governor_result=governor_result,
+                intent_draft=intent_draft,
+                emotion_context=emotion_context,
+                recall_slot_text=recall_slot_text,
+                render_target_lang=render_target_lang,
+                node_results=node_results,
+            )
+            for node in batch_nodes
+        ]
+        batch_results = await asyncio.gather(*coros)
+        for node, outcome in zip(batch_nodes, batch_results):
+            node_results[node.node_id] = outcome
+            plan_trace.append(
+                {
+                    "node_id": node.node_id,
+                    "route": node.route,
+                    "target_id": node.target_id,
+                    "success": outcome.success,
+                    "latency_ms": outcome.latency_ms,
+                    "result_text": outcome.result_text,
+                    "error_text": outcome.error_text,
+                }
+            )
+            if not outcome.success:
+                has_dependents = any(
+                    node.node_id in (n.dependencies or ())
+                    for n in plan.nodes
+                    if n.node_id != node.node_id
+                )
+                if has_dependents:
+                    critical_failure = True
+                    _logger.warning(
+                        "[%s] critical explicit-plan node failed: %s",
+                        request_id,
+                        node.node_id,
+                    )
+
+    ordered_results = [node_results[node.node_id] for node in plan.nodes if node.node_id in node_results]
+    success = bool(ordered_results) and all(item.success for item in ordered_results) and not critical_failure
+    summary_lines: list[str] = []
+    for node in plan.nodes:
+        outcome = node_results.get(node.node_id)
+        if outcome is None:
+            continue
+        body = outcome.result_text or outcome.error_text or "no output"
+        summary_lines.append(f"[{node.step_index}] {node.target_id or node.description}: {body}")
+
+    return (
+        _ExecutionOutcome(
+            route_type="plan",
+            target_id=plan.plan_id,
+            skill_family="executive",
+            success=success,
+            result_text="\n".join(summary_lines).strip(),
+            error_text="" if success else "PLAN_NODE_FAILED",
+            latency_ms=sum(int(item.latency_ms or 0) for item in ordered_results),
+            payload={
+                "plan": plan.as_dict(),
+                "plan_trace": plan_trace,
+            },
+        ),
+        {
+            "plan_id": plan.plan_id,
+            "plan_trace": plan_trace,
+            "parallel_enabled": any(len(batch) > 1 for batch in list(plan.execution_batches or [])),
+            "engine": "skill_dag_explicit_plan",
         },
     )
 

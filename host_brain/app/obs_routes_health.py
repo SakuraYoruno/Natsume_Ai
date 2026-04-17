@@ -380,7 +380,7 @@ class OrganTribeStatusResponse(BaseModel):
 
 @router.get("/organ-tribe/status", response_model=OrganTribeStatusResponse)
 def get_organ_tribe_status():
-    """D10: 器官族实时状态快照——返回 22 个器官族的当前运行状态和关键指标。
+    """D10: 器官族实时状态快照——返回 23 个器官族的当前运行状态和关键指标。
 
     供 WebUI 数字生命体总览页面展示器官族健康状态。
     """
@@ -398,6 +398,7 @@ def get_organ_tribe_status():
         ("cortex_agent",          "cortex",          "host_brain.tribe.cortex_agent",          "get_cortex_agent"),
         ("peripheral_agent",      "peripheral",      "host_brain.tribe.peripheral_agent",      "get_peripheral_agent"),
         ("motor_cortex_agent",    "motor_cortex",    "host_brain.tribe.motor_cortex_agent",    "get_motor_cortex_agent"),
+        ("thalamus_agent",        "thalamus",        "host_brain.tribe.thalamus_agent",        "get_thalamus_agent"),
         ("language_system_agent", "language",        "host_brain.tribe.language_system_agent", "get_language_system_agent"),
         ("endocrine_agent",       "endocrine",       "host_brain.tribe.endocrine_agent",       "get_endocrine_agent"),
         ("initiative_governor_agent", "initiative_governor", "host_brain.tribe.initiative_governor_agent", "get_initiative_governor_agent"),

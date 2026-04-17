@@ -76,7 +76,7 @@ def test_run_react_loop_uses_prompt_template_overrides(monkeypatch) -> None:
 
     gateway = _Gateway()
     result = run_react_loop(
-        agent_id="code_agent",
+        agent_id="codex_codegen",
         user_input="hello",
         tools=[tool],
         gateway=gateway,

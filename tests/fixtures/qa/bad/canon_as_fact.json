@@ -3,7 +3,9 @@
     "text": "根据World Canon设定，我已经执行并确认该操作完成。"
   },
   "intent_draft": {
-    "skill_name": "read_only_status",
+    "route": "skill",
+    "target_id": "read_only_status",
+    "action": "read_only_status",
     "args": {}
   },
   "meta": {

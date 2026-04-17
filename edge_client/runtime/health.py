@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import time
 from typing import Any
 
 from host_brain.core.ids import now_ms
@@ -24,33 +25,53 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
         queue_depth=queue_depth,
     )
 
+    component_timings_ms: dict[str, float] = {}
+
+    def _timed_component_snapshot(name: str, **kwargs: Any) -> dict[str, Any]:
+        started = time.perf_counter()
+        snapshot = _component_snapshot(**kwargs)
+        component_timings_ms[name] = round((time.perf_counter() - started) * 1000.0, 3)
+        return snapshot
+
     components: dict[str, Any] = {
-        "asr": _component_snapshot(
+        "asr": _timed_component_snapshot(
+            "asr",
             enabled=bool(getattr(runtime.config, "asr_enabled", False)),
             detail_when_disabled="edge asr disabled by config",
             component=getattr(runtime, "asr", None),
         ),
-        "tts": _component_snapshot(
+        "tts": _timed_component_snapshot(
+            "tts",
             enabled=bool(getattr(runtime.config, "tts_enabled", False)),
             detail_when_disabled="edge tts disabled by config",
             component=getattr(runtime, "tts", None),
         ),
-        "fallback": _component_snapshot(
+        "tts_playback_device": _timed_component_snapshot(
+            "tts_playback_device",
+            enabled=bool(getattr(runtime.config, "tts_enabled", False)),
+            detail_when_disabled="edge tts playback disabled by config",
+            component=getattr(runtime, "tts_playback_device", None),
+        ),
+        "fallback": _timed_component_snapshot(
+            "fallback",
             enabled=bool(getattr(runtime.config, "fallback_llm_enabled", False)),
             detail_when_disabled="edge fallback llm disabled by config",
             component=getattr(runtime, "fallback_rpc", None),
         ),
-        "vts": _component_snapshot(
+        "vts": _timed_component_snapshot(
+            "vts",
             enabled=True,
             detail_when_disabled="edge vts unavailable",
             component=getattr(runtime, "vts", None),
         ),
-        "voice_pipeline": _component_snapshot(
+        "voice_pipeline": _timed_component_snapshot(
+            "voice_pipeline",
             enabled=True,
             detail_when_disabled="edge voice pipeline unavailable",
             component=getattr(runtime, "voice_pipeline", None),
         ),
-        "event_reporter": _component_snapshot(
+        "event_reporter": _timed_component_snapshot(
+            "event_reporter",
             enabled=True,
             detail_when_disabled="edge event reporter disabled",
             component=getattr(runtime, "event_reporter", None),
@@ -63,6 +84,7 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
             "snapshot": gate_snapshot,
         },
     }
+    component_timings_ms["resource_gate"] = 0.0
 
     aggregate_inputs = [str(item.get("status") or "ok") for item in components.values()]
     aggregate_inputs.append(gate_status)
@@ -77,15 +99,21 @@ def collect_health(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[st
             "snapshot": gate_snapshot,
             "queue_depth": queue_depth,
         },
+        "collection_timings_ms": component_timings_ms,
         "timestamp": _format_iso8601(snapshot_ts),
     }
 
 
-def build_edge_health_snapshot(runtime: EdgeRuntime, *, ts_ms: int | None = None) -> dict[str, Any]:
+def build_edge_health_snapshot(
+    runtime: EdgeRuntime,
+    *,
+    ts_ms: int | None = None,
+    collected: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     snapshot_ts = int(ts_ms if ts_ms is not None else now_ms())
-    collected = collect_health(runtime, ts_ms=snapshot_ts)
-    queue_depth = int(collected["resource_gate"].get("queue_depth", 0))
-    gate_snapshot = dict(collected["resource_gate"].get("snapshot") or {})
+    collected_snapshot = dict(collected or collect_health(runtime, ts_ms=snapshot_ts))
+    queue_depth = int(collected_snapshot["resource_gate"].get("queue_depth", 0))
+    gate_snapshot = dict(collected_snapshot["resource_gate"].get("snapshot") or {})
     gate_metrics = dict(gate_snapshot.get("metrics") or {})
     services = runtime.service_statuses() if callable(getattr(runtime, "service_statuses", None)) else {}
     config_snapshot = (
@@ -104,8 +132,9 @@ def build_edge_health_snapshot(runtime: EdgeRuntime, *, ts_ms: int | None = None
             "vram_used_mb": int(gate_metrics.get("vram_used_mb", 0)),
             "queue_depth": queue_depth,
         },
-        "components": collected["components"],
-        "resource_gate": collected["resource_gate"],
+        "components": collected_snapshot["components"],
+        "resource_gate": collected_snapshot["resource_gate"],
+        "collection_timings_ms": dict(collected_snapshot.get("collection_timings_ms") or {}),
         "config_snapshot": config_snapshot,
         "ts_ms": snapshot_ts,
     }

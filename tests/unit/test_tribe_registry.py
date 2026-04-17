@@ -9,6 +9,7 @@ def test_host_tribe_registry_bootstrap_defaults() -> None:
     families = {item["family_id"] for item in registry.list_families()}
     assert {
         "cortex",
+        "thalamus",
         "ans",
         "hippocampus",
         "limbic",
@@ -35,6 +36,7 @@ def test_host_tribe_registry_bootstrap_defaults() -> None:
     agents = {item["agent_id"]: item for item in registry.list_agents()}
     assert agents["cortex_orchestrator"]["family"] == "cortex"
     assert agents["executive_router"]["family"] == "cortex"
+    assert agents["thalamus_agent"]["family"] == "thalamus"
     assert agents["ans_agent"]["family"] == "ans"
     assert agents["endocrine_agent"]["family"] == "endocrine"
     assert agents["immune_agent"]["family"] == "immune"
@@ -59,6 +61,7 @@ def test_host_tribe_registry_resolve_target_family() -> None:
 
     assert registry.resolve_target_family(route="plan", target_id=None) == "prefrontal"
     assert registry.resolve_target_family(route="skill", target_id="memory_recall") == "hippocampus"
+    assert registry.resolve_target_family(route="delegate", target_id="thalamus_intent_compiler") == "thalamus"
     assert registry.resolve_target_family(route="delegate", target_id="emotion_reflection_agent") == "limbic"
     assert registry.resolve_target_family(route="delegate", target_id="bond_style_adapter") == "social_brain"
     assert registry.resolve_target_family(route="delegate", target_id="cortisol_gate_resolver") == "endocrine"

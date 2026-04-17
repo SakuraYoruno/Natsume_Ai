@@ -51,7 +51,10 @@ function Read-EnvFile {
 function Set-ProcessEnv {
   param([hashtable]$Values)
   foreach ($key in $Values.Keys) {
-    [Environment]::SetEnvironmentVariable($key, [string]$Values[$key], "Process")
+    $existing = [Environment]::GetEnvironmentVariable([string]$key, "Process")
+    if ([string]::IsNullOrWhiteSpace([string]$existing)) {
+      [Environment]::SetEnvironmentVariable($key, [string]$Values[$key], "Process")
+    }
   }
 }
 
@@ -60,6 +63,58 @@ function Ensure-Directory {
   if (-not (Test-Path -Path $Path)) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
   }
+}
+
+function ConvertTo-CmdArgument {
+  param([AllowNull()][string]$Value)
+  if ($null -eq $Value) {
+    return '""'
+  }
+  $text = [string]$Value
+  if (-not $text) {
+    return '""'
+  }
+  if ($text -notmatch '[\s"]') {
+    return $text
+  }
+  return '"' + ($text -replace '"', '\"') + '"'
+}
+
+function Join-CmdArguments {
+  param([string[]]$Arguments)
+  $parts = @()
+  foreach ($arg in @($Arguments)) {
+    $parts += (ConvertTo-CmdArgument -Value ([string]$arg))
+  }
+  return ($parts -join ' ')
+}
+
+function Write-RuntimeEnvFile {
+  param(
+    [string]$Path,
+    [hashtable]$SeedValues
+  )
+
+  $snapshot = @{}
+  foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
+    $name = [string]$entry.Key
+    if ($name -match '^(HOST_|EDGE_|Natsume_|OPENAI_|GEMINI_|DEEPSEEK_|GOOGLE_)') {
+      $snapshot[$name] = [string]$entry.Value
+    }
+  }
+  foreach ($key in $SeedValues.Keys) {
+    $value = [Environment]::GetEnvironmentVariable([string]$key, 'Process')
+    if ($null -ne $value) {
+      $snapshot[[string]$key] = [string]$value
+    }
+  }
+
+  $lines = @()
+  foreach ($key in ($snapshot.Keys | Sort-Object)) {
+    $lines += ("{0}={1}" -f $key, ([string]$snapshot[$key]))
+  }
+  Set-Content -Path $Path -Value $lines -Encoding UTF8
+  return $snapshot
 }
 
 function Get-ListeningPid {
@@ -281,6 +336,7 @@ Ensure-Directory -Path $LogDir
 $pidFile = Join-Path $runtimeRoot "host.pid"
 $stdoutLog = Join-Path $LogDir "host.stdout.log"
 $stderrLog = Join-Path $LogDir "host.stderr.log"
+$runtimeEnvFile = Join-Path $runtimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
@@ -480,13 +536,23 @@ if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
 }
 
+$null = Write-RuntimeEnvFile -Path $runtimeEnvFile -SeedValues $envValues
+$cmdLine = @(
+  "set ""HOST_RUNTIME_ENV_FILE=$runtimeEnvFile""",
+  "&&",
+  (ConvertTo-CmdArgument -Value $pythonExe),
+  (Join-CmdArguments -Arguments $hostArgs),
+  "1>>",
+  (ConvertTo-CmdArgument -Value $stdoutLog),
+  "2>>",
+  (ConvertTo-CmdArgument -Value $stderrLog)
+) -join " "
+
 $startProcessArgs = @{
-  FilePath = $pythonExe
-  ArgumentList = $hostArgs
+  FilePath = $env:ComSpec
+  ArgumentList = @('/d', '/c', $cmdLine)
   WorkingDirectory = $repoRoot
   PassThru = $true
-  RedirectStandardOutput = $stdoutLog
-  RedirectStandardError = $stderrLog
 }
 if (-not $ShowConsoleWindow.IsPresent) {
   $startProcessArgs["WindowStyle"] = "Hidden"
@@ -688,6 +754,7 @@ $result = [ordered]@{
   external_services_backend = $ExternalServicesBackend
   health_url = $healthUrl
   env_file = $EnvFile
+  runtime_env_file = $runtimeEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices

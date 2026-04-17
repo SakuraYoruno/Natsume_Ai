@@ -442,6 +442,7 @@ class TestEdgeRpcWrappers(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("/v1/edge/speak", post_to_edge.await_args_list[0].kwargs["path"])
         self.assertEqual("req-auto-speak", post_to_edge.await_args_list[0].kwargs["request_id"])
+        self.assertEqual(60000, post_to_edge.await_args_list[0].kwargs["request_timeout_ms"])
         self.assertEqual(
             {
                 "session_id": "sess::req-auto-speak",

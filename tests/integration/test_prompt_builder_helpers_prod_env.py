@@ -77,7 +77,7 @@ def test_prompt_builder_helpers_prod_extract_node_payload_and_narrative() -> Non
         'core_reasoner_primary': {
             'payload': {
                 'narrative': {'text': '核心结论'},
-                'intent_draft': {'skill_name': 'narrative_only', 'args': {}},
+                'intent_draft': {'route': 'chat', 'target_id': '', 'action': 'narrative_only', 'args': {}},
             }
         }
     }
@@ -85,5 +85,5 @@ def test_prompt_builder_helpers_prod_extract_node_payload_and_narrative() -> Non
     payload = extract_node_runtime_payload(runtime_payload, node_id='core_reasoner_primary')
     narrative = extract_node_narrative_text(runtime_payload, node_id='core_reasoner_primary')
 
-    assert payload['intent_draft']['skill_name'] == 'narrative_only'
+    assert payload['intent_draft']['action'] == 'narrative_only'
     assert narrative == '核心结论'

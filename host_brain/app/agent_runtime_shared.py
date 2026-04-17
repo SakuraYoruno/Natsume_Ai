@@ -78,7 +78,7 @@ _CLARIFICATION_DIRECT_QUERY_RE = re.compile(
 _TASK_CONTEXT_KEYWORDS = (
     "思路", "方案", "步骤", "实现", "代码", "函数", "模块", "接口", "逻辑", "架构", "设计",
     "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
-    "贪吃蛇", "codeagent", "code_agent", "agent", "work", "tool", "翻译", "实现思路",
+    "贪吃蛇", "codex", "codex_codegen", "agent", "work", "tool", "翻译", "实现思路",
 )
 
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
@@ -1254,18 +1254,18 @@ def _render_delegated_result_naturally(
     templates = _mapping_section(_load_runtime_texts(), "delegated_result")
     empty_visible_templates = _mapping_section(templates, "empty_visible_result")
     if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
-        if agent_id == "code_agent":
-            return _mapping_text(empty_visible_templates, "code_agent")
+        if agent_id == "codex_codegen":
+            return _mapping_text(empty_visible_templates, "codex_codegen")
         return _mapping_text(empty_visible_templates, "default")
 
     if reply_template and "{agent_result}" in reply_template:
         rendered = reply_template.replace("{agent_result}", visible).strip()
         if rendered:
             return rendered
-    if agent_id == "code_agent":
+    if agent_id == "codex_codegen":
         return _mapping_text(
             templates,
-            "code_agent_prefix_template",
+            "codex_codegen_prefix_template",
             agent_result=visible,
         ).strip()
     return visible

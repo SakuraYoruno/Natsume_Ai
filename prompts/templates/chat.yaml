@@ -170,12 +170,12 @@ templates:
       '1': 你想起了和对方之间的一段记忆，可以在合适的时候自然提起。
       '2': 你想起了和对方之间的几段记忆，它们让你说话时更有温度。
       '3': 你和对方之间有不少共同记忆，这些记忆让你的表达更加细腻和贴心。
-- template_id: chat_agent.minimal_fallback.code_agent
+- template_id: chat_agent.minimal_fallback.codex_codegen
   category: fallback
   scope: chat_agent
   locale: zh
   content_type: text
-  description: ChatAgent 最小兜底：代码子代理结果未顺好
+  description: ChatAgent 最小兜底：Codex 代码技能结果未顺好
   default_content: 收到，我先继续把这步处理完，马上给你可直接用的结果。
 - template_id: chat_agent.minimal_fallback.default
   category: fallback
@@ -318,7 +318,7 @@ templates:
   description: 子 Agent 上下文提示模板（JSON）
   default_content:
     failure: "[子 Agent 执行结果]\n  执行状态：失败\n  Agent：{agent_id}\n  任务：{task}\n  错误：{error_text}\n{recovery_hint}  说明：请用夏目蓝自然、贴近人的语气告诉用户这次处理没有顺利完成。如果有补充信息，就把它整理成真正有帮助的下一步建议。不要提内部模块、Agent、JSON、草稿、降级这些系统词。\n"
-    code_agent: "[子 Agent 执行结果]\n  Agent：{agent_id}\n  任务：{task}\n  结果：{result_text}\n  说明：这是技术处理中间结果。请整理成夏目蓝会直接对用户说的话，先给用户一个简洁结论，再自然展开。不要提\
+    codex_codegen: "[子 Agent 执行结果]\n  Agent：{agent_id}\n  任务：{task}\n  结果：{result_text}\n  说明：这是技术处理中间结果。请整理成夏目蓝会直接对用户说的话，先给用户一个简洁结论，再自然展开。不要提\
       \ Agent、工具、草稿、JSON、ReAct、网关这些内部词，也不要复读内部术语。\n"
     recent_turn_direct: "[当前已核实的信息]\n  结果：{result_text}\n  说明：这里提供的是已经核实过的事实，不是最终台词。请直接用自然、简洁、像夏目蓝本人说话的方式回答。\n"
     phatic_fastpath: "[当前语义目标]\n  结果：{result_text}\n  说明：这是寒暄场景的语义目标，不是最终台词。请只保留核心意图，用夏目蓝自己的说话方式重新组织，避免模板腔和机械重复。\n"
@@ -388,7 +388,7 @@ templates:
       file_read: 第{step_index}步，我已经把文件内容看过了。
       file_write: 第{step_index}步，我已经把文件写好了。
       file_list: 第{step_index}步，我已经把目录内容看过了。
-      code_agent: 第{step_index}步，我已经把代码相关的处理整理好了。
+      codex_codegen: 第{step_index}步，我已经把代码相关的处理整理好了。
       intent_agent: 第{step_index}步，我已经把执行方案确认好了。
       __with_result: 第{step_index}步，{description_or_target}这部分我已经处理好了。
       __default: 第{step_index}步，我已经把{description_or_target}这部分处理好了。
@@ -522,7 +522,7 @@ templates:
     delegate_rule: 如果用户的请求需要以下专业能力，在回复中嵌入 [DELEGATE:agent_id:任务描述] 标记委托对应 Agent。
     direct_reply_rule: 如果是日常闲聊/情感交流/知识问答，直接回复即可，不需要委托。
     agent_line: '- {agent_id}：{desc}'
-    delegate_example: 委托格式示例：[DELEGATE:code_agent:写一个快速排序算法]
+    delegate_example: 委托格式示例：[DELEGATE:intent_agent:请调用 codex_codegen 写一个快速排序算法]
 - template_id: cortex_prompt_builder.sections
   category: prompt
   scope: cortex_prompt_builder

@@ -83,11 +83,14 @@ _AFFECTION_STANCE_MARKERS = (
     "心动",
     "会认真对待",
     "会认真记住",
+    "会认真记着",
     "慢慢走近",
     "慢慢了解",
     "还太早",
     "还没到",
     "不想把话说得太满",
+    "不想把话说得很满",
+    "把话说得很满",
 )
 _AFFECTION_EVASION_MARKERS = (
     "我在这里",
@@ -115,7 +118,9 @@ def _contains_affection_stance(text: str) -> bool:
         return True
     if "不讨厌" in normalized and "你" in normalized:
         return True
-    if "现在" in normalized and ("太早" in normalized or "说得太满" in normalized):
+    if "现在" in normalized and ("太早" in normalized or "说得太满" in normalized or "说得很满" in normalized):
+        return True
+    if "我做不到" in normalized and ("说得太满" in normalized or "说得很满" in normalized):
         return True
     return False
 

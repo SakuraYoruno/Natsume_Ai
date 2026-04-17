@@ -91,6 +91,42 @@ def test_refresh_plan_infers_mouth_parameter_from_available_list(monkeypatch) ->
     assert health["silence"][0] == "VoiceSilence"
 
 
+def test_set_mouth_open_level_retries_unfiltered_candidates_when_available_filter_is_stale(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_set(*, vts, param_name: str, value: float, timeout_s: float) -> None:
+        _ = (vts, value, timeout_s)
+        calls.append(param_name)
+        if param_name == "VoiceVolumePlusMouthOpen":
+            raise RuntimeError("parameter locked")
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._set_vts_parameter", _fake_set)
+
+    driver = VTubeStudioDriver(
+        config=VtsConfig(
+            mouth_param_candidates=("ParamMouthOpenY",),
+            mouth_volume_param_candidates=("VoiceVolumePlusMouthOpen",),
+            voice_silence_param_candidates=(),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+    driver._mouth_parameter_plan = {
+        "selected": ["VoiceVolumePlusMouthOpen"],
+        "mouth": ["VoiceVolumePlusMouthOpen"],
+        "volume": ["VoiceVolumePlusMouthOpen"],
+        "silence": [],
+        "available": ["VoiceVolumePlusMouthOpen"],
+        "last_value": 0.0,
+    }
+
+    result = driver.set_mouth_open_level(0.81)
+
+    assert result.success is True
+    assert calls[:2] == ["VoiceVolumePlusMouthOpen", "ParamMouthOpenY"]
+    assert driver.health()["mouth_parameters"]["selected"] == ["ParamMouthOpenY"]
+
+
 def test_set_expression_does_not_fallback_to_unrelated_hotkey(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -163,3 +199,30 @@ def test_set_expression_neutral_skips_reset_all_hotkey(monkeypatch) -> None:
     assert result.success is True
     assert result.expression_id == "hotkey_neutral_eye"
     assert calls == ["exp_neutral_01", "hotkey_neutral_eye"]
+
+
+def test_set_expression_refreshes_hotkeys_after_primary_failure(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_trigger(*, vts, hotkey_id: str, timeout_s: float) -> None:
+        _ = (vts, timeout_s)
+        calls.append(hotkey_id)
+        if hotkey_id == "exp_happy_01":
+            raise RuntimeError("VTS API error 500: Given parameter ParamBrowRY does not exist.")
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._trigger_vts_hotkey", _fake_trigger)
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._list_vts_hotkeys",
+        lambda *, vts, timeout_s: [{"id": "hotkey_exp_happy", "name": "happy expression"}],
+    )
+
+    driver = VTubeStudioDriver(VtsConfig())
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+    driver._hotkey_catalog = []
+
+    result = driver.set_expression("HAPPY")
+
+    assert result.success is True
+    assert result.expression_id == "hotkey_exp_happy"
+    assert calls == ["exp_happy_01", "hotkey_exp_happy"]

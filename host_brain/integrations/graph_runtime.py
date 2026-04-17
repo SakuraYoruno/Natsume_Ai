@@ -78,6 +78,19 @@ def _inject_execution_profile_from_payload_only(
     return from_payload
 
 
+def _sanitize_model_nodes_for_state(model_nodes: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Strip non-serializable callable fields before storing model nodes in state."""
+
+    sanitized: dict[str, dict[str, Any]] = {}
+    for model_node_id, spec in model_nodes.items():
+        sanitized[str(model_node_id)] = {
+            str(key): value
+            for key, value in dict(spec).items()
+            if not callable(value)
+        }
+    return sanitized
+
+
 class GraphRuntimeContract:
     """Deterministic graph orchestration runtime backed by LangGraph execution graph.
 
@@ -176,8 +189,10 @@ class GraphRuntimeContract:
             gateway_factory=self._gateway_factory,
             default_timeout_ms=self.default_timeout_ms,
             ledger=self.ledger,
+            model_nodes=model_nodes,
         )
         compiled = executor.compile_runtime_graph()
+        serialized_model_nodes = _sanitize_model_nodes_for_state(model_nodes)
         # M36-C：初始化双时钟字段
         policy_timeout_ms = int(
             graph_config.get("policy_timeout_ms") or timeout_limit or DEFAULT_POLICY_TIMEOUT_MS
@@ -220,7 +235,7 @@ class GraphRuntimeContract:
             "fallback_map": fallback_map,
             "node_bindings": node_bindings,
             "dependency_statuses": dict(dependency_statuses or {}),
-            "model_nodes": model_nodes,
+            "model_nodes": serialized_model_nodes,
             "model_profile_id": model_profile_id,
             "model_calls": [],
             "emotion_context": (emotion_context or None),

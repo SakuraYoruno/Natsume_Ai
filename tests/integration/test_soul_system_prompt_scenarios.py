@@ -121,7 +121,7 @@ def _make_payload(
             "core_reasoner_primary": {
                 "payload": {
                     "narrative": {"text": "core narrative"},
-                    "intent_draft": {"skill_name": "narrative_only", "args": {}},
+                    "intent_draft": {"route": "chat", "target_id": "", "action": "narrative_only", "args": {}},
                 }
             },
             "planner_constraints": {"payload": {"narrative": {"text": "planner ok"}}},

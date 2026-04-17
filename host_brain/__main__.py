@@ -9,8 +9,7 @@ import sys
 from pathlib import Path
 
 # 在所有模块导入之前加载 .env 文件（不覆盖已有的系统环境变量）
-def _load_dotenv_file() -> None:
-    env_path = Path(__file__).resolve().parents[1] / ".env"
+def _load_env_file(env_path: Path, *, override: bool = False) -> None:
     if not env_path.exists():
         return
     with open(env_path, encoding="utf-8") as f:
@@ -21,8 +20,25 @@ def _load_dotenv_file() -> None:
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip()
-            if key and key not in os.environ:  # 不覆盖已有的系统环境变量
+            if not key:
+                continue
+            if override or key not in os.environ:
                 os.environ[key] = value
+
+
+def _load_dotenv_file() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    _load_env_file(repo_root / ".env", override=False)
+
+    runtime_env_raw = str(os.environ.get("HOST_RUNTIME_ENV_FILE") or "").strip()
+    runtime_env_path = (
+        Path(runtime_env_raw)
+        if runtime_env_raw
+        else (repo_root / "runtime" / "host" / "host.runtime.env")
+    )
+    if not runtime_env_path.is_absolute():
+        runtime_env_path = repo_root / runtime_env_path
+    _load_env_file(runtime_env_path, override=True)
 
 _load_dotenv_file()
 

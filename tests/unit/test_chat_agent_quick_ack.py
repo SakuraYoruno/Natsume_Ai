@@ -5,6 +5,7 @@ from host_brain.app.chat_agent import (
     render_quick_gateway_progress_text,
     render_quick_gateway_realign_text,
 )
+from tests.text_quality_assertions import assert_natsume_style
 
 
 def test_render_quick_gateway_ack_prefers_close_stage_template(monkeypatch) -> None:
@@ -113,3 +114,54 @@ def test_render_quick_gateway_realign_notice(monkeypatch) -> None:
     text = render_quick_gateway_realign_text(sender_name="测试用户")
 
     assert "执行方向可能有点偏" in text
+
+
+def test_render_quick_gateway_ack_actual_template_keeps_natsume_voice() -> None:
+    text = render_quick_gateway_ack_text(
+        user_message="帮我看一下这段日志",
+        bond_stage="FRIEND",
+        emotion_tag="NEUTRAL",
+    )
+
+    assert len(text) <= 60
+    assert_natsume_style(
+        user_message="帮我看一下这段日志",
+        reply=text,
+        emotion_tag="neutral",
+        bond_stage="FRIEND",
+        max_chars=60,
+        required_markers=("我",),
+    )
+
+
+def test_render_quick_gateway_progress_failed_actual_template_stays_natural() -> None:
+    text = render_quick_gateway_progress_text(
+        status="FAILED",
+        target_id="翻译任务",
+        progress_message="网关波动",
+        elapsed_ms=12_300,
+    )
+
+    assert "遇到了点问题" in text
+    assert_natsume_style(
+        user_message="翻译好了吗",
+        reply=text,
+        emotion_tag="neutral",
+        bond_stage="STRANGER",
+        max_chars=120,
+        required_markers=("我",),
+    )
+
+
+def test_render_quick_gateway_realign_actual_template_stays_in_character() -> None:
+    text = render_quick_gateway_realign_text(bond_stage="FRIEND", emotion_tag="NEUTRAL")
+
+    assert "偏" in text
+    assert_natsume_style(
+        user_message="你刚才跑偏了",
+        reply=text,
+        emotion_tag="neutral",
+        bond_stage="FRIEND",
+        max_chars=80,
+        required_markers=("我",),
+    )

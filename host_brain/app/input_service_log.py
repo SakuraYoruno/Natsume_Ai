@@ -86,7 +86,8 @@ def log_input_event(
                 "platform", "conversation_id", "msg_id", "msg_type",
                 "from_id", "to_id", "sender_name", "media_url",
                 "reply_to_msg_id", "is_group", "decision",
-                "gateway_status", "gateway_latency_ms", "reply_text_len", "reply_preview",
+                "gateway_status", "gateway_reason_code", "gateway_detail", "gateway_latency_ms",
+                "reply_text_len", "reply_preview", "reply_form", "reply_form_reason", "voice_sent",
                 "immediate_ack_status", "immediate_ack_latency_ms",
                 "immediate_ack_preview", "immediate_ack_reason",
                 "progress_fastpath_status", "progress_fastpath_latency_ms",
@@ -95,6 +96,11 @@ def log_input_event(
                 "progress_push_preview", "progress_push_updates",
                 "deviation_reason", "deviation_overlap_ratio",
                 "deviation_retry_applied", "deviation_retry_overlap_ratio",
+                "gateway_voice_waited", "gateway_voice_success", "gateway_voice_status",
+                "gateway_voice_reason_code", "gateway_voice_detail",
+                "gateway_voice_latency_ms", "gateway_voice_started",
+                "gateway_voice_vts_started", "gateway_voice_vts_expression_success",
+                "gateway_voice_event",
             )
             for field in gateway_fields:
                 value = (input_payload or {}).get(field)

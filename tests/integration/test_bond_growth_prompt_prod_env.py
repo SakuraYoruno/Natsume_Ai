@@ -145,7 +145,7 @@ def test_prompt_builder_prod_renders_growth_awareness_and_bond_narrative() -> No
         'planning_execution': {'success': True, 'executed_skills': ['memory_recall'], 'step_results': [{'description': '回顾最近关系变化', 'status': 'completed'}]},
         'skill_dag': {'total_nodes': 1, 'execution_order': [['n1_memory_recall']], 'node_ids': ['n1_memory_recall']},
         'skill_execution': {'success': True, 'completed_nodes': 1, 'total_nodes': 1, 'output_preview': {'n1_memory_recall': 'memory ok'}},
-        'core_reasoner_primary': {'payload': {'narrative': {'text': 'core summary'}, 'intent_draft': {'skill_name': 'narrative_only', 'args': {}}}},
+        'core_reasoner_primary': {'payload': {'narrative': {'text': 'core summary'}, 'intent_draft': {'route': 'chat', 'target_id': '', 'action': 'narrative_only', 'args': {}}}},
         'planner_constraints': {'payload': {'narrative': {'text': 'constraints ok'}}},
         'safety_verifier': {'payload': {'narrative': {'text': 'safe ok'}}},
     }

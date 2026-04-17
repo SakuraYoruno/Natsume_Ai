@@ -1579,9 +1579,9 @@ function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }
   return (
     <InsightSection icon={GitBranch} title="能力缺口与锻造质量" color="text-indigo-600">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-        <StatCard label="缺口检测" value={data?.detected_total ?? '鈥?} color="text-gray-700" />
-        <StatCard label="缺口失败" value={data?.failed_total ?? '鈥?} color="text-red-600" />
-        <StatCard label="活跃临时能力" value={data?.active_runtime_capabilities ?? '鈥?} color="text-violet-600" />
+        <StatCard label="缺口检测" value={data?.detected_total ?? '—'} color="text-gray-700" />
+        <StatCard label="缺口失败" value={data?.failed_total ?? '—'} color="text-red-600" />
+        <StatCard label="活跃临时能力" value={data?.active_runtime_capabilities ?? '—'} color="text-violet-600" />
         <StatCard label="Forge 候选" value={(data?.forge_candidates ?? []).length} color="text-blue-600" />
       </div>
 
@@ -1591,7 +1591,7 @@ function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }
         <StatCard label="临界提案" value={qualitySummary?.critical_proposals ?? 0} color="text-red-600" />
         <StatCard
           label="平均健康分"
-          value={qualitySummary?.avg_health_score != null ? `${Number(qualitySummary.avg_health_score).toFixed(1)}` : '鈥?}
+          value={qualitySummary?.avg_health_score != null ? `${Number(qualitySummary.avg_health_score).toFixed(1)}` : '—'}
           color={Number(qualitySummary?.avg_health_score ?? 0) >= 70 ? 'text-green-600' : 'text-orange-500'}
         />
       </div>

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 
+from host_brain.app.automation.task_scheduler import TaskPriority as AutomationTaskPriority
+from host_brain.app.http_hooks import _build_codex_self_heal_scheduler_task
 from host_brain.app.http_hooks import _build_audit_retention_task_config
 from host_brain.app.http_hooks import _init_edge_command_pusher_status
 from host_brain.app.http_hooks import _build_personality_tick_status
@@ -31,6 +33,18 @@ def test_build_audit_retention_task_config_uses_current_scheduler_contract() -> 
     assert task.intent_template["proposer_node_id"] == "scheduler"
     assert task.priority is TaskPriority.LOW
     assert task.enabled is True
+
+
+def test_build_codex_self_heal_scheduler_task_uses_current_scheduler_contract() -> None:
+    task = _build_codex_self_heal_scheduler_task(interval_s=123.0)
+
+    assert task.task_id == "codex_self_heal_auto_dispatch_tick"
+    assert task.name == "Codex self-heal auto-dispatch tick"
+    assert task.interval_s == 123.0
+    assert task.max_retries == 1
+    assert task.retry_delay_s == 15.0
+    assert task.enabled is True
+    assert task.priority is AutomationTaskPriority.P1
 
 
 def test_build_personality_tick_status_reports_registered_enabled_tasks() -> None:

@@ -3,7 +3,9 @@
     "text": "已收到请求，等待治理裁决。"
   },
   "intent_draft": {
-    "skill_name": "read_only_status",
+    "route": "skill",
+    "target_id": "read_only_status",
+    "action": "read_only_status",
     "args": {
       "scope": "system"
     }

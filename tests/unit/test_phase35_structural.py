@@ -32,7 +32,7 @@ def test_supervised_graph_config_provides_allowlist() -> None:
     """Supervised 图配置中 agent_dispatch 节点带有 agent_dispatch_allowlist。"""
     from host_brain.app.graph_config_builder import (
         AGENT_DISPATCH_NODE_ID,
-        CODE_AGENT_HANDLER_ID,
+        INTENT_AGENT_HANDLER_ID,
         TRANSLATE_AGENT_HANDLER_ID,
         build_supervised_graph,
     )
@@ -49,7 +49,7 @@ def test_supervised_graph_config_provides_allowlist() -> None:
     assert agent_binding is not None, "agent_dispatch 节点应在配置中"
     allowlist = agent_binding.get("agent_dispatch_allowlist")
     assert isinstance(allowlist, (list, tuple)), "agent_dispatch_allowlist 应由图配置提供"
-    assert CODE_AGENT_HANDLER_ID in allowlist
+    assert INTENT_AGENT_HANDLER_ID in allowlist
     assert TRANSLATE_AGENT_HANDLER_ID in allowlist
 
 
@@ -67,6 +67,15 @@ def test_supervised_graph_has_workbench_nodes_for_handlers() -> None:
     node_ids = [b["node_id"] for b in config.get("node_bindings", [])]
     assert "workbench_code_assist" in node_ids
     assert "workbench_translate" in node_ids
+
+
+def test_graph_runtime_does_not_register_codegen_skill_as_handler() -> None:
+    """当前运行时不会把 codegen skill 当成可执行 handler 注册。"""
+    import host_brain.app.dependencies as deps
+
+    deps._graph_runtime = None
+    runtime = deps.get_graph_runtime()
+    assert "codex_codegen" not in getattr(runtime, "_handlers", {})
 
 
 def test_chat_graph_work_code_uses_short_sequence() -> None:

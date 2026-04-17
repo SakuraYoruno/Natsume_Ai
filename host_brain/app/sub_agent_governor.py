@@ -85,7 +85,7 @@ def sub_agent_pre_exec_check(
     """子 Agent 执行前的 Governor 检查。
 
     仅对执行型子 Agent（intent_agent）做完整门控。
-    code_agent / translate_agent 是只读的，门控极轻。
+    translate_agent / vision_agent 等只读型子 Agent 门控较轻。
 
     Returns:
         {"decision": "APPROVE"} 或 {"decision": "REJECT", "reason_code": "..."}
@@ -99,7 +99,7 @@ def sub_agent_pre_exec_check(
             "agent_id": agent_id,
         }
 
-    # sleep 模式：拒绝执行类（intent），允许只读类（code/translate）
+    # sleep 模式：拒绝执行类（intent），允许只读类（translate/vision）
     if sys_mode == "sleep" and agent_id == "intent_agent":
         return {
             "decision": "REJECT",

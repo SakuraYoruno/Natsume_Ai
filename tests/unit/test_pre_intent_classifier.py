@@ -12,6 +12,7 @@ import pytest
 from host_brain.app.graph_config_builder import (
     SCENE_CHAT,
     SCENE_EXEC_INTENT,
+    SCENE_TYPE_SOURCE_TRIBE_DECIDER,
     SCENE_VISION_UI,
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
@@ -227,9 +228,9 @@ def test_pic_16_chat_defaults_to_scene_chat_when_preclassifier_disabled(monkeypa
     scene_type, scene_type_source = _resolve_chat_scene_type(
         request_body=ChatRequest(message="把这句话翻成日语：今天也要加油。")
     )
-    # Phase XV 后，默认返回 AUTO，由 cortex_tribe_decider 决策
+    # Phase XV 后，默认返回 AUTO，由 tribe 场景决策层继续判断；intent 编译已由 thalamus 接管
     assert scene_type in {SCENE_CHAT, "AUTO"}
-    assert scene_type_source in {"default_chat", "cortex_tribe_decider"}
+    assert scene_type_source == SCENE_TYPE_SOURCE_TRIBE_DECIDER
 
 
 def test_pic_17_chat_allows_preclassifier_when_enabled(monkeypatch):

@@ -40,7 +40,7 @@ class TestQAComplianceContract(unittest.TestCase):
         self.assertTrue(result.rewrite_attempted)
         self.assertFalse(result.downgraded)
         self.assertEqual(STAGE_QA_REWRITE_OK, result.stage)
-        self.assertEqual("narrative_only", result.payload["intent_draft"]["skill_name"])
+        self.assertEqual("narrative_only", result.payload["intent_draft"]["action"])
         # Ensure the resulting payload remains strict-contract JSON.
         self.assertTrue(
             lint_llm_output(json.dumps(result.payload, ensure_ascii=False)).valid

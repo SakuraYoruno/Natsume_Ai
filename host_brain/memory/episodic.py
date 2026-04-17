@@ -11,6 +11,7 @@ import logging
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import (
+    CHROMA_VECTOR_DIM_MISMATCH,
     MEMORY_EVIDENCE_REQUIRED,
     MEMORY_MERGE_INVALID,
     MEMORY_NOT_FOUND,
@@ -20,6 +21,7 @@ from host_brain.memory.chroma_client import (
     ChromaClientProtocol,
     build_runtime_chroma_client,
     embed_text,
+    hash_embed_text,
     resolve_collection_vector_dim,
 )
 
@@ -692,7 +694,8 @@ class EpisodicStore:
         while len(self._records) > self._MAX_RECORDS:
             oldest_id, _ = self._records.popitem(last=False)
             _logger.debug("EpisodicStore LRU 淘汰内存记录: %s", oldest_id)
-        self.chroma.upsert(
+        self._upsert_record_with_fallback(
+            record=record,
             memory_id=memory_id,
             text=normalized_text,
             embedding=embedding,
@@ -712,6 +715,42 @@ class EpisodicStore:
             },
         )
         return record
+
+    def _upsert_record_with_fallback(
+        self,
+        *,
+        record: EpisodicRecord,
+        memory_id: str,
+        text: str,
+        embedding: list[float],
+        metadata: dict[str, Any],
+    ) -> None:
+        try:
+            self.chroma.upsert(
+                memory_id=memory_id,
+                text=text,
+                embedding=embedding,
+                metadata=dict(metadata or {}),
+            )
+        except ValueError as exc:
+            if str(exc) != CHROMA_VECTOR_DIM_MISMATCH:
+                raise
+            fallback_dim = self._resolve_embedding_dim()
+            fallback_embedding, fallback_model_id = hash_embed_text(text, dim=fallback_dim)
+            fallback_metadata = dict(metadata or {})
+            fallback_metadata["embedding_model_id"] = fallback_model_id
+            record.embedding_model_id = fallback_model_id
+            _logger.warning(
+                "EpisodicStore chroma vector dim mismatch; fallback to hash embedding dim=%s text=%s",
+                fallback_dim,
+                str(text or "")[:80],
+            )
+            self.chroma.upsert(
+                memory_id=memory_id,
+                text=text,
+                embedding=fallback_embedding,
+                metadata=fallback_metadata,
+            )
 
     def _log_memory_op(
         self,

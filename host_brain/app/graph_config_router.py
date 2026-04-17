@@ -32,6 +32,13 @@ SCENE_ROUTER_POST_CORE_NODE_ID = "scene_router_post_core"
 SCENE_ROUTER_ENTRY_HANDLER_ID = "scene_router_entry"
 SCENE_ROUTER_POST_CORE_HANDLER_ID = "scene_router_post_core"
 SCENE_TYPE_AUTO = "AUTO"
+SCENE_TYPE_SOURCE_TRIBE_DECIDER = "tribe_scene_decider"
+SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT = "tribe_scene_decider_default"
+
+_LEGACY_SCENE_TYPE_SOURCE_ALIASES: dict[str, str] = {
+    "cortex_tribe_decider": SCENE_TYPE_SOURCE_TRIBE_DECIDER,
+    "cortex_tribe_decider_default": SCENE_TYPE_SOURCE_TRIBE_DECIDER_DEFAULT,
+}
 
 # SUPERVISOR_DISPATCH_NODE_ID / SUPERVISOR_DISPATCH_HANDLER_ID 已移至 graph_config_builder.py
 # 此处不再重复定义，避免双轨维护
@@ -104,6 +111,13 @@ def _normalize_scene_type(scene_type: str | None) -> str:
     return SCENE_CHAT
 
 
+def _normalize_scene_type_source(scene_type_source: str | None) -> str | None:
+    source = str(scene_type_source or "").strip()
+    if not source:
+        return None
+    return _LEGACY_SCENE_TYPE_SOURCE_ALIASES.get(source, source)
+
+
 def _extract_scene_router_message(payload: dict[str, Any]) -> str:
     request_payload = payload.get("request")
     if isinstance(request_payload, dict):
@@ -168,7 +182,7 @@ def _resolve_route_target_family(*, route_target: str, scene_type: str, next_nod
 def pre_intent_classifier(user_input: str) -> str:
     """[已废弃] 轻量规则预分类器。
 
-    Phase XV 架构重设计后，意图识别统一由 cortex_route_decider.classify_task_intent() 完成。
+    Phase XV+ 架构收口后，意图识别统一由 thalamus_agent 收口完成。
     此函数仅保留以兼容 graph_config_builder 的导入，不应在新代码中调用。
     """
     text = str(user_input or "").strip().lower()
@@ -232,7 +246,7 @@ def build_unified_route_decision(
         "route_target": resolved_route_target,
         "route_reason_code": (str(route_reason_code or "").strip() or None),
         "scene_type": resolved_scene,
-        "scene_type_source": (str(scene_type_source or "").strip() or "graph_entry_router"),
+        "scene_type_source": (_normalize_scene_type_source(scene_type_source) or "graph_entry_router"),
         "next_node": resolved_next_node,
         "router_node": (str(router_node or "").strip() or None),
         "provider": (str(provider_name or "").strip() or None),
@@ -254,9 +268,9 @@ def resolve_graph_entry_scene_type(*, payload: dict[str, Any]) -> tuple[str, str
         explicit_nested = str(payload["input"].get("scene_type") or "").strip().upper()
         if explicit_nested:
             return _normalize_scene_type(explicit_nested), "explicit"
-    # Phase XV：意图识别已下沉到 cortex_route_decider，此处不再调用 pre_intent_classifier。
-    # graph 入口场景类型默认为 AUTO，由 cortex_orchestrator 在 tribe 层统一决策。
-    return SCENE_TYPE_AUTO, "cortex_tribe_decider"
+    # Phase XV：意图编译统一由 thalamus_agent 收口，此处不再调用 pre_intent_classifier。
+    # graph 入口场景类型默认保持 AUTO，占位后续由 cortex_orchestrator 的 tribe 层统一决策。
+    return SCENE_TYPE_AUTO, SCENE_TYPE_SOURCE_TRIBE_DECIDER
 
 
 def graph_scene_router_entry_handler(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -278,7 +292,7 @@ def graph_scene_router_entry_handler(payload: dict[str, Any], context: dict[str,
 
 def graph_scene_router_post_core_handler(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     resolved_scene = _normalize_scene_type(str(payload.get("scene_type") or ""))
-    source = str(payload.get("scene_type_source") or "graph_entry_router")
+    source = _normalize_scene_type_source(payload.get("scene_type_source")) or "graph_entry_router"
     next_node = _scene_router_post_core_next_node(resolved_scene)
     route_decision = build_unified_route_decision(
         scene_type=resolved_scene, scene_type_source=source,
@@ -298,9 +312,9 @@ def resolve_chat_scene_type(*, request_body: Any) -> tuple[str, str]:
     explicit_scene_type = str(getattr(request_body, "scene_type", None) or "").strip().upper()
     if explicit_scene_type:
         return explicit_scene_type, "explicit"
-    # Phase XV：意图识别已下沉到 cortex_route_decider，此处不再调用 pre_intent_classifier。
-    # 返回 AUTO，由 cortex_orchestrator 在 tribe 层统一决策。
-    return SCENE_TYPE_AUTO, "cortex_tribe_decider"
+    # Phase XV：意图编译统一由 thalamus_agent 收口，此处不再调用 pre_intent_classifier。
+    # 返回 AUTO，由 cortex_orchestrator 的 tribe 层统一完成场景决策。
+    return SCENE_TYPE_AUTO, SCENE_TYPE_SOURCE_TRIBE_DECIDER
 
 
 def resolve_chat_retrieval_gate(*, scene_type: str) -> tuple[bool, str | None]:

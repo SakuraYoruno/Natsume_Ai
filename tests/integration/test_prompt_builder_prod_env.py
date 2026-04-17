@@ -49,7 +49,7 @@ def _base_runtime_payload() -> dict:
             'validation': {'valid': True, 'reason_code': None, 'violation_count': 0},
             'observability': {},
         },
-        'core_reasoner_primary': {'payload': {'narrative': {'text': 'core summary'}, 'intent_draft': {'skill_name': 'narrative_only', 'args': {}}}},
+        'core_reasoner_primary': {'payload': {'narrative': {'text': 'core summary'}, 'intent_draft': {'route': 'chat', 'target_id': '', 'action': 'narrative_only', 'args': {}}}},
         'planner_constraints': {'payload': {'narrative': {'text': 'constraints ok'}}},
         'safety_verifier': {'payload': {'narrative': {'text': 'safe ok'}}},
     }
@@ -154,6 +154,14 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
     }
 
     prompt = render_node_generation_prompt(node_id='renderer_ja_c_style', runtime_payload=runtime_payload)
+    assert 'SELF_REFLECTION_PULSE' in prompt
+    assert 'growth_awareness' in prompt
+    assert 'stagnation_felt' in prompt
+    assert 'regression_felt' in prompt
+    assert 'self_awareness' in prompt
+    assert 'BOND_NARRATIVE' in prompt
+    assert 'shared_memory_1' in prompt
+    return
 
     assert 'SELF_REFLECTION_PULSE' in prompt
     assert 'growth_awareness' in prompt

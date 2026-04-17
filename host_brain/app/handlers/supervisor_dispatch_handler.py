@@ -13,7 +13,6 @@ from host_brain.app.agents.agent_contract import (
 )
 from host_brain.app.agents.agent_registry import (
     AGENT_ID_CHAT,
-    AGENT_ID_CODE,
     AGENT_ID_EMOTION,
     AGENT_ID_INTENT,
     AGENT_ID_RETRIEVAL,
@@ -29,13 +28,44 @@ from host_brain.app.prompt_builder import (
     SCENE_WORK_CODE,
     SCENE_WORK_TRANSLATE,
 )
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+
+
+def _load_prompt_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("supervisor_dispatch_handler.prompt_templates")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _mapping_text(mapping: Mapping[str, Any], key: str, *, default: str = "", **kwargs: Any) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _resolve_supervisor_system_prompt() -> str:
+    templates = _load_prompt_templates()
+    return _mapping_text(templates, "system_prompt")
+
+
+def _build_supervisor_user_prompt(scene_type: str, user_input: str) -> str:
+    templates = _load_prompt_templates()
+    return _mapping_text(
+        templates,
+        "user_prompt_template",
+        scene_type=scene_type,
+        user_input=user_input,
+    )
 
 # ---------------------------------------------------------------------------
 # 场景 → Agent 映射（Phase XIV 遗留，仅作兜底，优先级低于 intent_draft.route）
 # ---------------------------------------------------------------------------
 _SCENE_DEFAULT_AGENT: dict[str, str] = {
     SCENE_CHAT: AGENT_ID_CHAT,
-    SCENE_WORK_CODE: AGENT_ID_CODE,
+    SCENE_WORK_CODE: AGENT_ID_INTENT,
     SCENE_WORK_TRANSLATE: AGENT_ID_TRANSLATE,
     SCENE_EXEC_INTENT: AGENT_ID_INTENT,
     SCENE_VISION_UI: AGENT_ID_INTENT,
@@ -43,7 +73,7 @@ _SCENE_DEFAULT_AGENT: dict[str, str] = {
 
 _SCENE_DEFAULT_RISK_MODE: dict[str, str] = {
     SCENE_CHAT: RISK_MODE_SAFE,
-    SCENE_WORK_CODE: RISK_MODE_GUARDED,
+    SCENE_WORK_CODE: RISK_MODE_STRICT,
     SCENE_WORK_TRANSLATE: RISK_MODE_SAFE,
     SCENE_EXEC_INTENT: RISK_MODE_STRICT,
     SCENE_VISION_UI: RISK_MODE_STRICT,
@@ -89,7 +119,6 @@ _ROUTE_NEED_JUDGE: dict[str, bool] = {
 
 # delegate 时合法的 target_id → agent_id 映射
 _DELEGATE_TARGET_TO_AGENT: dict[str, str] = {
-    "code_agent":       AGENT_ID_CODE,
     "translate_agent":  AGENT_ID_TRANSLATE,
     "intent_agent":     AGENT_ID_INTENT,
     "vision_agent":     AGENT_ID_INTENT,   # vision_agent 暂复用 intent_agent
@@ -122,7 +151,7 @@ def _resolve_agent_from_intent_draft(
     if not route or route not in _ROUTE_TO_AGENT:
         return None
 
-    target_id = str(intent_draft.get("target_id") or intent_draft.get("delegate_agent") or "").strip()
+    target_id = str(intent_draft.get("target_id") or "").strip()
     risk_mode = _ROUTE_TO_RISK_MODE.get(route, RISK_MODE_SAFE)
     need_judge = _ROUTE_NEED_JUDGE.get(route, False)
 
@@ -150,7 +179,7 @@ def supervisor_dispatch_handler(
     """Supervisor 分派处理器。
 
     Phase XV 改造：
-    - 优先消费 intent_draft.route/target_id（由 cortex_route_decider.classify_task_intent 填充）
+    - 优先消费 intent_draft.route/target_id（由 thalamus_agent 统一收口后填充）
     - _SCENE_DEFAULT_AGENT 降为兜底（scene_type 有效时使用）
     - SUPERVISOR_MODE=llm 不再独立调用 LLM，改为复用 intent_draft 中已有的 LLM 路由结果
     """
@@ -195,8 +224,8 @@ def supervisor_dispatch_handler(
         decision_source = f"scene_type:{scene_type}:rule_fallback"
 
     # ── SUPERVISOR_MODE 观测（不再影响决策，仅记录）──────────────────────────
-    # Phase XV：SUPERVISOR_MODE=llm 不再独立调用 LLM，intent_draft 中已包含 LLM 路由结果
-    # （route_source="llm" 时说明 classify_task_intent 已走过 LLM 兜底）
+    # Phase XV：SUPERVISOR_MODE=llm 不再独立调用 LLM，intent_draft 中已包含 LLM 路由结果。
+    # route_source="llm" 时，说明 thalamus 的 canonical classifier 已走过 LLM 兜底。
     raw_mode = str(os.environ.get("SUPERVISOR_MODE") or "rule").strip().lower()
     supervisor_mode = "llm" if raw_mode == "llm" else "rule"
     supervisor_failure_code: str | None = None
