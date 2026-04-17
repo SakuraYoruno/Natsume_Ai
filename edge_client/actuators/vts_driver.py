@@ -474,7 +474,49 @@ class VTubeStudioDriver:
             action=TALK_END,
         )
 
-    def set_mouth_open_level(self, value: float) -> VtsDriverResult:
+    @staticmethod
+    def _is_recoverable_runtime_api_error(detail: str | None) -> bool:
+        text = str(detail or "").strip().lower()
+        if not text:
+            return False
+        hints = (
+            "protocol error",
+            "received 1002",
+            "sent 1002",
+            "connectionclosed",
+            "websocket",
+            "no close frame",
+            "closing handshake",
+            "cannot write to closing transport",
+            "sent 1000",
+            "received 1000",
+        )
+        return any(hint in text for hint in hints)
+
+    def _force_runtime_reconnect(self, reason: str) -> VtsDriverResult:
+        self._connection_error = str(reason or "").strip() or None
+        logger.warning("VTS runtime reconnect requested: %s", reason)
+        with self._lock:
+            self._vts = None
+            self._state = VtsState.DISCONNECTED
+            self._talking = False
+        self._shutdown_event.clear()
+        result = self.connect()
+        event = {
+            "event": VTS_RECONNECTED if result.success else VTS_RECONNECT_EXHAUSTED,
+            "attempt": 1,
+            "ts_ms": now_ms(),
+            "detail": f"runtime reconnect: {reason}",
+            "success": bool(result.success),
+        }
+        self._reconnect_events.append(event)
+        if result.success:
+            self._total_reconnects += 1
+        else:
+            self._total_reconnect_failures += 1
+        return result
+
+    def set_mouth_open_level(self, value: float, *, _retry_on_reconnect: bool = True) -> VtsDriverResult:
         """Drive mouth-open related VTS parameters with runtime fallback."""
         try:
             level = max(0.0, min(1.0, float(value)))
@@ -543,6 +585,10 @@ class VTubeStudioDriver:
                     if errors:
                         detail = f"{detail}: {'; '.join(errors)}"
             if selected_primary is None:
+                if _retry_on_reconnect and self._is_recoverable_runtime_api_error(detail):
+                    reconnect_result = self._force_runtime_reconnect(detail)
+                    if reconnect_result.success:
+                        return self.set_mouth_open_level(level, _retry_on_reconnect=False)
                 return VtsDriverResult(
                     success=False,
                     reason_code=VTS_API_ERROR,
@@ -605,7 +651,13 @@ class VTubeStudioDriver:
             action="set_mouth_open_level",
         )
 
-    def set_expression(self, emotion_tag: str, *, intensity: float = 0.5) -> VtsDriverResult:
+    def set_expression(
+        self,
+        emotion_tag: str,
+        *,
+        intensity: float = 0.5,
+        _retry_on_reconnect: bool = True,
+    ) -> VtsDriverResult:
         """Set expression via deterministic emotion_tag -> expression_id mapping.
 
         Rejects unknown tags and free-form parameters.
@@ -712,6 +764,14 @@ class VTubeStudioDriver:
                     )
                 except Exception:
                     pass
+            if _retry_on_reconnect and self._is_recoverable_runtime_api_error(str(e)):
+                reconnect_result = self._force_runtime_reconnect(str(e))
+                if reconnect_result.success:
+                    return self.set_expression(
+                        normalized,
+                        intensity=intensity,
+                        _retry_on_reconnect=False,
+                    )
             return VtsDriverResult(
                 success=False,
                 reason_code=VTS_API_ERROR,
