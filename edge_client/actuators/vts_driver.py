@@ -429,7 +429,10 @@ class VTubeStudioDriver:
                     action=TALK_START,
                 )
 
-        mouth_result = self.set_mouth_open_level(VTS_MOUTH_OPEN_VALUE)
+        mouth_result = self.set_mouth_open_level(
+            VTS_MOUTH_OPEN_VALUE,
+            _include_companions=False,
+        )
         if not mouth_result.success:
             return VtsDriverResult(
                 success=False,
@@ -458,7 +461,10 @@ class VTubeStudioDriver:
                 action=TALK_END,
             )
 
-        mouth_result = self.set_mouth_open_level(VTS_MOUTH_CLOSE_VALUE)
+        mouth_result = self.set_mouth_open_level(
+            VTS_MOUTH_CLOSE_VALUE,
+            _include_companions=False,
+        )
         if not mouth_result.success:
             return VtsDriverResult(
                 success=False,
@@ -516,7 +522,13 @@ class VTubeStudioDriver:
             self._total_reconnect_failures += 1
         return result
 
-    def set_mouth_open_level(self, value: float, *, _retry_on_reconnect: bool = True) -> VtsDriverResult:
+    def set_mouth_open_level(
+        self,
+        value: float,
+        *,
+        _retry_on_reconnect: bool = True,
+        _include_companions: bool = True,
+    ) -> VtsDriverResult:
         """Drive mouth-open related VTS parameters with runtime fallback."""
         try:
             level = max(0.0, min(1.0, float(value)))
@@ -588,7 +600,11 @@ class VTubeStudioDriver:
                 if _retry_on_reconnect and self._is_recoverable_runtime_api_error(detail):
                     reconnect_result = self._force_runtime_reconnect(detail)
                     if reconnect_result.success:
-                        return self.set_mouth_open_level(level, _retry_on_reconnect=False)
+                        return self.set_mouth_open_level(
+                            level,
+                            _retry_on_reconnect=False,
+                            _include_companions=_include_companions,
+                        )
                 return VtsDriverResult(
                     success=False,
                     reason_code=VTS_API_ERROR,
@@ -597,6 +613,18 @@ class VTubeStudioDriver:
                 )
 
         # Optional companion parameters: failures here should not fail playback.
+        if not _include_companions:
+            plan = dict(self._mouth_parameter_plan)
+            plan["selected"] = [selected_primary]
+            plan["last_value"] = round(level, 4)
+            self._mouth_parameter_plan = plan
+            return VtsDriverResult(
+                success=True,
+                reason_code=None,
+                detail=f"mouth level set via {selected_primary}: {level:.3f}",
+                action="set_mouth_open_level",
+            )
+
         volume_params = [
             str(item)
             for item in (plan.get("volume") or self._candidate_tuple(self._config.mouth_volume_param_candidates))
@@ -1523,7 +1551,13 @@ def _list_vts_input_parameter_ids(*, vts: Any, timeout_s: float) -> list[str]:
             for row in rows:
                 if not isinstance(row, dict):
                     continue
-                pid = str(row.get("id") or "").strip()
+                pid = str(
+                    row.get("id")
+                    or row.get("name")
+                    or row.get("parameterID")
+                    or row.get("parameterId")
+                    or ""
+                ).strip()
                 if pid:
                     ids.append(pid)
         seen: set[str] = set()

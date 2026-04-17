@@ -67,6 +67,32 @@ def test_set_mouth_open_level_falls_back_to_volume_parameter(monkeypatch) -> Non
     assert driver.health()["mouth_parameters"]["selected"] == ["VoiceVolumePlusMouthOpen"]
 
 
+def test_set_mouth_open_level_primary_only_skips_companion_parameters(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_set(*, vts, param_name: str, value: float, timeout_s: float) -> None:
+        _ = (vts, value, timeout_s)
+        calls.append(param_name)
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._set_vts_parameter", _fake_set)
+
+    driver = VTubeStudioDriver(
+        config=VtsConfig(
+            mouth_param_candidates=(VTS_MOUTH_PARAM,),
+            mouth_volume_param_candidates=("VoiceVolumePlusMouthOpen",),
+            voice_silence_param_candidates=("VoiceSilence",),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+
+    result = driver.set_mouth_open_level(0.51, _include_companions=False)
+
+    assert result.success is True
+    assert calls == [VTS_MOUTH_PARAM]
+    assert driver.health()["mouth_parameters"]["selected"] == [VTS_MOUTH_PARAM]
+
+
 def test_refresh_plan_infers_mouth_parameter_from_available_list(monkeypatch) -> None:
     monkeypatch.setattr(
         "edge_client.actuators.vts_driver._list_vts_input_parameter_ids",
@@ -89,6 +115,29 @@ def test_refresh_plan_infers_mouth_parameter_from_available_list(monkeypatch) ->
     assert health["mouth"][0] == "ParamJawOpen"
     assert health["volume"][0] == "VoiceVolume"
     assert health["silence"][0] == "VoiceSilence"
+
+
+def test_refresh_plan_accepts_parameter_names_from_vts_response(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._list_vts_input_parameter_ids",
+        lambda *, vts, timeout_s: ["MouthOpen", "VoiceVolumePlusMouthOpen", "VoiceSilence"],
+    )
+
+    driver = VTubeStudioDriver(
+        config=VtsConfig(
+            mouth_param_candidates=("ParamMouthOpenY",),
+            mouth_volume_param_candidates=("VoiceVolume",),
+            voice_silence_param_candidates=("VoiceSilence",),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+
+    driver._refresh_mouth_parameter_plan()
+
+    health = driver.health()["mouth_parameters"]
+    assert health["available"][:3] == ["MouthOpen", "VoiceVolumePlusMouthOpen", "VoiceSilence"]
+    assert health["mouth"][0] == "MouthOpen"
 
 
 def test_set_mouth_open_level_retries_unfiltered_candidates_when_available_filter_is_stale(monkeypatch) -> None:

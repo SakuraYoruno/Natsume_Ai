@@ -695,7 +695,10 @@ class EdgeVoicePipeline:
         debug["envelope_avg"] = round(sum(envelope) / len(envelope), 4)
         probe_value = max(0.18, min(0.92, float(envelope[0])))
         debug["probe_value"] = round(probe_value, 4)
-        probe_result = self.vts_driver.set_mouth_open_level(probe_value)
+        probe_result = self.vts_driver.set_mouth_open_level(
+            probe_value,
+            _include_companions=False,
+        )
         if not probe_result.success:
             debug["state"] = "blocked"
             debug["reason"] = "mouth_param_unwritable"
@@ -706,7 +709,10 @@ class EdgeVoicePipeline:
                 probe_result.detail,
             )
             return debug
-        self.vts_driver.set_mouth_open_level(0.0)
+        self.vts_driver.set_mouth_open_level(
+            0.0,
+            _include_companions=False,
+        )
 
         stop_event = self._mouth_sync_stop
         frame_interval_s = max(0.02, min(0.08, 1.0 / 24.0))
@@ -721,14 +727,20 @@ class EdgeVoicePipeline:
             for value in envelope:
                 if stop_event.is_set():
                     break
-                result = self.vts_driver.set_mouth_open_level(value)
+                result = self.vts_driver.set_mouth_open_level(
+                    value,
+                    _include_companions=False,
+                )
                 debug["frames_sent"] = int(debug.get("frames_sent") or 0) + 1
                 debug["last_value"] = round(float(value), 4)
                 if not result.success:
                     debug["last_error"] = result.detail
                 time.sleep(frame_interval_s)
             if not stop_event.is_set():
-                self.vts_driver.set_mouth_open_level(0.0)
+                self.vts_driver.set_mouth_open_level(
+                    0.0,
+                    _include_companions=False,
+                )
                 debug["state"] = "finished"
             else:
                 debug["state"] = "stopped"
