@@ -70,6 +70,7 @@ def _run_main_with_fakes(
     tmp_path: Path,
     edge_events_body: dict[str, Any] | None = None,
     commit_event: dict[str, Any] | None = None,
+    audit_db_result: dict[str, Any] | None = None,
     extra_args: list[str] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     module = _load_probe_module()
@@ -108,7 +109,8 @@ def _run_main_with_fakes(
     monkeypatch.setattr(
         module,
         "_query_audit_db",
-        lambda **_kwargs: {"available": True, "voice_event_count": 2, "avatar_action_count": 1},
+        lambda **_kwargs: audit_db_result
+        or {"available": True, "voice_event_count": 2, "avatar_action_count": 1},
     )
 
     argv = [
@@ -120,6 +122,8 @@ def _run_main_with_fakes(
         "--report-dir",
         str(tmp_path),
         "--allow-synthetic-asr",
+        "--voice-evidence-wait-s",
+        "0",
     ]
     if extra_args:
         argv.extend(extra_args)
@@ -186,3 +190,72 @@ def test_runtime_probe_main_allows_degraded_tts_when_flag_is_enabled(monkeypatch
     assert report["overall"]["passed"] is True
     matrix = {row["node"]: row for row in report["matrix"]}
     assert matrix["tts.rpc"]["passed"] is True
+
+
+def test_runtime_probe_main_falls_back_to_audit_db_when_commit_audit_refs_are_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    commit_without_voice = {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "APPROVE",
+        "request_id": "chat-req-001",
+    }
+    audit_db_result = {
+        "available": True,
+        "voice_event_count": 2,
+        "avatar_action_count": 1,
+        "avatar_action_latest": [
+            {
+                "trigger": "HOST",
+                "emotion_tag": "HAPPY",
+                "expression_id": "exp_happy_01",
+                "status": "APPLIED",
+                "reason_code": None,
+                "stage": "S_AVATAR_EXPRESSION_MAP",
+                "detail": "expression resolved via fixed mapping",
+                "ts_ms": 1776434994932,
+            }
+        ],
+        "tts_event_latest": [
+            {
+                "event_type": "TTS_PLAYBACK_FINISHED",
+                "status": "ACCEPTED",
+                "reason_code": None,
+                "stage": "S_VOICE_TTS_PLAYBACK",
+                "detail": "tts playback finished",
+                "payload": {
+                    "event_type": "TTS_PLAYBACK_FINISHED",
+                    "request_id": "chat-req-001",
+                },
+                "ts_ms": 1776435000001,
+            },
+            {
+                "event_type": "TTS_PLAYBACK_STARTED",
+                "status": "ACCEPTED",
+                "reason_code": None,
+                "stage": "S_VOICE_TTS_PLAYBACK",
+                "detail": "tts playback started",
+                "payload": {
+                    "event_type": "TTS_PLAYBACK_STARTED",
+                    "request_id": "chat-req-001",
+                },
+                "ts_ms": 1776435000000,
+            },
+        ],
+    }
+
+    exit_code, report = _run_main_with_fakes(
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        commit_event=commit_without_voice,
+        audit_db_result=audit_db_result,
+    )
+
+    assert exit_code == 0
+    assert report["overall"]["passed"] is True
+    assert report["steps"]["runtime_voice_sources"] == {"tts": "audit_db", "vts": "audit_db"}
+    matrix = {row["node"]: row for row in report["matrix"]}
+    assert matrix["tts.rpc"]["passed"] is True
+    assert matrix["vts.rpc"]["passed"] is True
