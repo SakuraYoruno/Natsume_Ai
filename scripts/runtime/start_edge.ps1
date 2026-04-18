@@ -80,6 +80,31 @@ function Ensure-ProcessEnvDefault {
   return $true
 }
 
+function Resolve-PythonInterpreter {
+  param(
+    [string]$RepoRootPath,
+    [string]$PreferredPath = ""
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+    return $PreferredPath
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($RepoRootPath)) {
+    $venvPython = Join-Path $RepoRootPath '.venv\Scripts\python.exe'
+    if (Test-Path -Path $venvPython) {
+      return $venvPython
+    }
+  }
+
+  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($null -ne $pythonCmd) {
+    return $pythonCmd.Source
+  }
+
+  throw "python executable not found; set PATH or provide a preferred interpreter"
+}
+
 function Get-NvidiaCudaDllDirs {
   param([string]$PythonRoot)
   $dirs = New-Object System.Collections.Generic.List[string]
@@ -1384,12 +1409,8 @@ if ($null -ne $listeningPid) {
   Start-Sleep -Milliseconds 500
 }
 
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if ($null -eq $pythonCmd) {
-  throw "python executable not found in PATH"
-}
-
-$cudaRuntimeDirs = Get-NvidiaCudaDllDirs -PythonRoot (Split-Path -Parent $pythonCmd.Source)
+$pythonPath = Resolve-PythonInterpreter -RepoRootPath $repoRoot
+$cudaRuntimeDirs = Get-NvidiaCudaDllDirs -PythonRoot (Split-Path -Parent $pythonPath)
 $cudaRuntimePathInjected = $false
 if ($cudaRuntimeDirs.Count -gt 0) {
   $mergedPath = Merge-PathEntries -CurrentPath ([string]$env:PATH) -ExtraEntries $cudaRuntimeDirs
@@ -1416,7 +1437,7 @@ function Start-EdgeAttempt {
     [Environment]::SetEnvironmentVariable($key, [string]$EnvOverrides[$key], "Process")
   }
   $proc = Start-EdgeProcess `
-    -PythonPath $pythonCmd.Source `
+    -PythonPath $pythonPath `
     -RepoRoot $repoRoot `
     -StdoutLog $stdoutLog `
     -StderrLog $stderrLog `
