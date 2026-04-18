@@ -146,6 +146,31 @@ def test_maybe_build_phatic_fastpath_reply_handles_playful_cute_teasing() -> Non
     )
 
 
+def test_maybe_build_phatic_fastpath_reply_handles_deep_companionship_opening() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-deep-001",
+        session_id="session-phatic-deep-001",
+        person_id="person-phatic-deep-001",
+        user_message="我今天其实有点想和你认真聊聊最近的状态，想听你接着我这句话慢慢陪我说下去。",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert "慢慢" in str(reply) or "认真" in str(reply)
+    assert_natsume_style(
+        user_message="我今天其实有点想和你认真聊聊最近的状态，想听你接着我这句话慢慢陪我说下去。",
+        reply=str(reply),
+        emotion_tag="CALM",
+        bond_stage="FRIEND",
+        max_chars=90,
+        min_warmth=0.50,
+        min_sensitivity=0.50,
+        min_playfulness=0.35,
+    )
+
+
 def test_maybe_build_phatic_fastpath_reply_skips_ack_during_active_task_context() -> None:
     reply = _maybe_build_phatic_fastpath_reply(
         request_id="req-phatic-ack-active-001",

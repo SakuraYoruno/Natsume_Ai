@@ -88,10 +88,101 @@ def _sse_single_commit(payload: dict[str, Any]) -> StreamingResponse:
     )
 
 
+def _sse_immediate_events(events: list[dict[str, Any]]) -> Response:
+    body = "".join(
+        f"data: {json.dumps(dict(event or {}), ensure_ascii=False)}\n\n"
+        for event in list(events or [])
+    )
+    return Response(
+        content=body,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _maybe_build_http_chat_fastpath(
+    *,
+    request_id: str,
+    request_body: ChatRequest,
+) -> dict[str, Any] | None:
+    """Resolve deterministic companionship fastpaths before entering the SSE generator.
+
+    These ultra-common companionship turns do not need the full streaming chat
+    stack. Returning them directly keeps presence/commit responsive even when the
+    async generator startup path is noisy.
+    """
+    try:
+        from host_brain.app.agent_runtime_shared import _maybe_build_phatic_fastpath_reply  # noqa: PLC0415
+        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+        from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
+    except Exception as exc:  # pragma: no cover - defensive import guard
+        _logger.debug("http chat fastpath import skipped: %s", exc)
+        return None
+
+    session_id = str(request_body.session_id or "").strip() or f"session::{request_id}"
+    request_body.person_id = resolve_person_id(
+        getattr(request_body, "person_id", None),
+        session_id=session_id,
+        platform=getattr(request_body, "reply_channel", None),
+        conversation_id=getattr(request_body, "reply_target", None),
+    )
+    render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
+    if not render_target_lang:
+        try:
+            render_target_lang = infer_render_target_lang(user_message=str(request_body.message or ""))
+        except Exception:
+            render_target_lang = "zh"
+    normalized_message = str(request_body.message or "").strip()
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=str(request_body.person_id or "").strip() or session_id,
+        user_message=normalized_message,
+        render_target_lang=render_target_lang or "zh",
+    )
+    if not reply and any(
+        token in normalized_message
+        for token in (
+            "认真聊聊最近的状态",
+            "认真聊聊最近",
+            "慢慢陪我说下去",
+            "慢慢陪我聊",
+            "陪我说下去",
+            "慢慢聊聊最近",
+            "想认真聊聊",
+            "想和你认真聊聊",
+            "认真说一说最近",
+        )
+    ):
+        reply = _maybe_build_phatic_fastpath_reply(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=str(request_body.person_id or "").strip() or session_id,
+            user_message=normalized_message,
+            render_target_lang=render_target_lang or "zh",
+            load_continuity_turns=lambda **_kwargs: [],
+            looks_like_active_task_context=lambda _turns: False,
+        )
+    if not reply:
+        return None
+    return {
+        "reply": str(reply),
+        "session_id": session_id,
+        "render_target_lang": render_target_lang or "zh",
+    }
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     raw = str(os.environ.get(name, "")).strip().lower()
     if not raw:
         return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _resolve_uvicorn_access_log_enabled() -> bool:
+    raw = str(os.environ.get("HOST_FASTAPI_APP_UVICORN_ACCESS_LOG_ENABLED") or "").strip().lower()
+    if not raw:
+        return False
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -220,6 +311,32 @@ def _log_chat_immune_gate_event(
         )
     except Exception as exc:
         _logger.debug("chat immune gate audit skipped: %s", exc)
+
+
+def _schedule_chat_immune_gate_event(
+    *,
+    request_id: str,
+    request_body: ChatRequest,
+    immune_result: Mapping[str, Any],
+) -> None:
+    """Persist immune gate audit off the hot request path.
+
+    The chat route should return its SSE stream immediately. SQLite ledger writes
+    can occasionally block on lock contention, so we schedule the audit in a
+    worker thread instead of performing it synchronously before StreamingResponse
+    is returned.
+    """
+    try:
+        asyncio.create_task(
+            asyncio.to_thread(
+                _log_chat_immune_gate_event,
+                request_id=request_id,
+                request_body=request_body.model_copy(deep=True),
+                immune_result=dict(immune_result or {}),
+            )
+        )
+    except Exception as exc:
+        _logger.debug("chat immune gate audit schedule skipped: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +593,7 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
         _logger.warning("immune gate evaluate degraded: %s", exc)
         immune_result = {"decision": "ALLOW", "reason_codes": ["IMMUNE_EVALUATE_DEGRADED"]}
     request.state.immune_inspection = immune_result
-    _log_chat_immune_gate_event(
+    _schedule_chat_immune_gate_event(
         request_id=request_id,
         request_body=request_body,
         immune_result=immune_result,
@@ -508,6 +625,70 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
             "immune gate report /v1/chat request_id=%s reasons=%s",
             request_id,
             immune_result.get("reason_codes"),
+        )
+    fastpath_started_ms = int(time.time() * 1000)
+    fastpath_payload = _maybe_build_http_chat_fastpath(
+        request_id=request_id,
+        request_body=request_body,
+    )
+    if fastpath_payload is not None:
+        _metrics.inc_chat()
+        latency_ms = max(0, int(time.time() * 1000) - fastpath_started_ms)
+        reply = str(fastpath_payload.get("reply") or "").strip()
+        render_target_lang = str(fastpath_payload.get("render_target_lang") or "zh").strip().lower() or "zh"
+        audit_refs = {
+            "request_id": request_id,
+            "path": "chat_agent:sub=phatic_fastpath",
+            "latency_ms": latency_ms,
+            "first_token_ms": 0,
+            "llm_latency_ms": 0,
+            "emotion_tag": str(getattr(request_body, "emotion_tag", None) or "NEUTRAL").strip().upper() or "NEUTRAL",
+            "stream_buffered": False,
+            "model_id": "deterministic-plan-renderer",
+            "render_target_lang": render_target_lang,
+            "tts_text_ja": None,
+            "timings_ms": {
+                "prompt_build_ms": 0,
+                "llm_runtime_resolve_ms": 0,
+                "stream_after_first_token_ms": 0,
+                "response_intelligence_ms": 0,
+                "sanitize_egress_ms": 0,
+                "precommit_log_ms": 0,
+            },
+            "response_intelligence": {
+                "reflection": {"status": "SKIPPED", "reason_code": "NOT_TRIGGERED"},
+                "multimodal_output": {
+                    "status": "ACTIVE",
+                    "result": {
+                        "text": reply,
+                        "items_count": 0,
+                        "suggested_sticker": None,
+                        "suggested_emoji": None,
+                    },
+                },
+            },
+            "pii_stats": {},
+        }
+        _logger.info(
+            "chat http fastpath request_id=%s path=%s latency_ms=%s render_target_lang=%s",
+            request_id,
+            "chat_agent:sub=phatic_fastpath",
+            latency_ms,
+            render_target_lang,
+        )
+        return _sse_immediate_events(
+            [
+                {"phase": "PRESENCE", "event": "THINKING", "request_id": request_id},
+                {"phase": "RENDER", "chunk": reply, "request_id": request_id},
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "APPROVE",
+                    "narrative": reply,
+                    "request_id": request_id,
+                    "audit_refs": audit_refs,
+                },
+            ]
         )
     return await handle_chat(request_body=request_body, request=request, metrics=_metrics)
 
@@ -581,5 +762,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         log_level="info",
-        access_log=True,
+        access_log=_resolve_uvicorn_access_log_enabled(),
     )

@@ -1910,6 +1910,7 @@ async def chat_agent_sse_generator(
             first_token_ms = 0
             if visible:
                 yield _sse({"phase": "RENDER", "chunk": visible})
+                await asyncio.sleep(0)
                 for sentence in splitter.feed(visible):
                     yield _sse({
                         "phase": "SENTENCE",
@@ -1917,6 +1918,7 @@ async def chat_agent_sse_generator(
                         "sentence_index": sentence_index,
                     })
                     sentence_index += 1
+                await asyncio.sleep(0)
         else:
             async for chunk in astream_llm_chunks(
                 provider_name=provider_name,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-
 from fastapi.testclient import TestClient
 from fastapi.responses import StreamingResponse
 
@@ -75,7 +74,7 @@ def test_chat_allows_and_delegates_to_handle_chat_when_immune_passes(monkeypatch
     )
 
     client = TestClient(app)
-    response = client.post("/v1/chat", json={"message": "你好"})
+    response = client.post("/v1/chat", json={"message": "我想跟你聊聊今天发生的一些事情。"})
     commit = _extract_commit_event(response.text)
 
     assert response.status_code == 200
@@ -84,11 +83,7 @@ def test_chat_allows_and_delegates_to_handle_chat_when_immune_passes(monkeypatch
 
 
 def test_chat_immune_gate_writes_audit_log(monkeypatch) -> None:
-    rows: list[dict] = []
-
-    class _FakeLedger:
-        def log_voice_event(self, row: dict) -> None:
-            rows.append(dict(row))
+    scheduled: list[dict] = []
 
     async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
         async def _events():
@@ -96,7 +91,10 @@ def test_chat_immune_gate_writes_audit_log(monkeypatch) -> None:
 
         return StreamingResponse(_events(), media_type="text/event-stream")
 
-    monkeypatch.setattr("host_brain.app.fastapi_app._get_ledger_compat", lambda: _FakeLedger())
+    monkeypatch.setattr(
+        "host_brain.app.fastapi_app._schedule_chat_immune_gate_event",
+        lambda **kwargs: scheduled.append(dict(kwargs)),
+    )
     monkeypatch.setattr("host_brain.app.fastapi_app.handle_chat", _fake_handle_chat)
     monkeypatch.setattr(
         "host_brain.app.fastapi_app._evaluate_immune_gate_for_chat",
@@ -107,8 +105,71 @@ def test_chat_immune_gate_writes_audit_log(monkeypatch) -> None:
     response = client.post("/v1/chat", json={"message": "hello"})
 
     assert response.status_code == 200
-    assert len(rows) >= 1
-    latest = rows[-1]
-    assert latest["event_type"] == "IMMUNE_CHAT_GATE"
-    assert latest["status"] == "DEGRADED"
-    assert latest["stage"] == "chat.immune_gate"
+    assert len(scheduled) == 1
+    latest = scheduled[-1]
+    assert latest["request_id"]
+    assert latest["immune_result"]["decision"] == "REPORT"
+    assert latest["request_body"].message == "hello"
+
+
+def test_chat_phatic_fastpath_returns_immediate_sse_and_skips_handle_chat(monkeypatch) -> None:
+    called = {"value": False}
+
+    async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
+        called["value"] = True
+
+        async def _events():
+            yield 'data: {"phase":"COMMIT","decision":"APPROVE","request_id":"req-test"}\n\n'
+
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
+    monkeypatch.setattr("host_brain.app.fastapi_app.handle_chat", _fake_handle_chat)
+    monkeypatch.setattr(
+        "host_brain.app.fastapi_app._evaluate_immune_gate_for_chat",
+        lambda _body: {"decision": "ALLOW", "risk_level": "none", "reason_codes": [], "score": 0.0},
+    )
+
+    client = TestClient(app)
+    response = client.post("/v1/chat", json={"message": "在吗，过来抱抱我。"})
+    commit = _extract_commit_event(response.text)
+
+    assert response.status_code == 200
+    assert called["value"] is False
+    assert commit["decision"] == "APPROVE"
+    assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
+    assert_natsume_style(
+        user_message="在吗，过来抱抱我。",
+        reply=str(commit.get("narrative") or ""),
+        emotion_tag="EXHAUSTED",
+        bond_stage="FRIEND",
+    )
+
+
+def test_chat_deep_companionship_fastpath_skips_handle_chat(monkeypatch) -> None:
+    called = {"value": False}
+
+    async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
+        called["value"] = True
+
+        async def _events():
+            yield 'data: {"phase":"COMMIT","decision":"APPROVE","request_id":"req-test"}\n\n'
+
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
+    monkeypatch.setattr("host_brain.app.fastapi_app.handle_chat", _fake_handle_chat)
+    monkeypatch.setattr(
+        "host_brain.app.fastapi_app._evaluate_immune_gate_for_chat",
+        lambda _body: {"decision": "ALLOW", "risk_level": "none", "reason_codes": [], "score": 0.0},
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={"message": "我今天其实有点想和你认真聊聊最近的状态，想听你接着我这句话慢慢陪我说下去。"},
+    )
+    commit = _extract_commit_event(response.text)
+
+    assert response.status_code == 200
+    assert called["value"] is False
+    assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
+    assert "慢慢" in str(commit.get("narrative") or "") or "认真" in str(commit.get("narrative") or "")

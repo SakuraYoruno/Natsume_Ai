@@ -93,6 +93,9 @@ _COMFORT_FASTPATH_RE = re.compile(
 _REUNION_FASTPATH_RE = re.compile(r"(好久不见|很久不见|有想我吗|想我吗|会想我吗|想过我吗)")
 _RIFT_REPAIR_FASTPATH_RE = re.compile(r"(在意之前.*争执|那次争执|之前那次争执|还在意.*争执|之前那次吵架|那次吵架|闹得有点不开心|上次.*不开心)")
 _PLAYFUL_FASTPATH_RE = re.compile(r"(更会逗我开心|逗我开心|会逗我|会哄我开心|更会哄我|更会逗我|偷偷觉得我.*可爱|觉得我.*可爱|有点可爱)")
+_DEEP_COMPANIONSHIP_FASTPATH_RE = re.compile(
+    r"(认真聊聊最近的状态|认真聊聊最近|慢慢陪我说下去|慢慢陪我聊|陪我说下去|慢慢聊聊最近|想认真聊聊|想和你认真聊聊|认真说一说最近)"
+)
 _PHATIC_FASTPATH_BLOCKING_TOKENS = (
     "翻译",
     "代码",
@@ -154,6 +157,11 @@ _PHATIC_FASTPATH_VARIANTS_ZH: dict[str, list[str]] = {
         "哈哈，你这样夸我，我会有点不好意思呀。可如果真能把你哄开心一点，我就想偷偷再逗你一下啦。",
         "哇，你这么说，我会偷偷得意一下呀。要是你今天能更开心一点，那我就当自己这次逗对了。",
         "嘿嘿，被你这么一夸，我都想把这句收起来啦。只要能让你笑一下，我就会跟着开心一点。",
+    ],
+    "deep_companionship": [
+        "好啊，我在呢。你今天既然想认真聊，我就不催你往下赶。最近这段时间心里最压着你的那一块，想先从哪里说起？",
+        "嗯，我在。你想慢慢说，我就慢慢陪着你，不会催你。最近这段时间，有哪一块一直压在心里，让你最放不下？",
+        "好，我陪你慢慢说。你不用急着整理得很清楚，想到哪里就说到哪里。最近这段时间，你最想先让我接住的是哪一部分？",
     ],
 }
 _PHATIC_FASTPATH_VARIANTS_JA: dict[str, list[str]] = {
@@ -1365,6 +1373,8 @@ def _maybe_build_phatic_fastpath_reply(
         category = "rift_repair"
     elif _REUNION_FASTPATH_RE.search(normalized):
         category = "reunion"
+    elif _DEEP_COMPANIONSHIP_FASTPATH_RE.search(normalized) and not active_task:
+        category = "deep_companionship"
     elif _looks_like_comfort(normalized):
         category = "comfort"
     elif _PLAYFUL_FASTPATH_RE.search(normalized):
