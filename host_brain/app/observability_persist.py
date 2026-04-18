@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import hashlib
 import json
 import time
@@ -31,6 +33,16 @@ def build_payload_digest(value: Any) -> str | None:
     if not serialized:
         return None
     return hashlib.sha256(serialized.encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _run_distillation_batch_sync(engine: Any) -> Any:
+    coroutine = engine.run_batch()
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coroutine).result(timeout=30)
 
 
 def persist_chat_observability_rows(
@@ -312,7 +324,7 @@ def persist_chat_episodic_memory(
         }
         if consolidation_decision.should_trigger:
             try:
-                report = get_distillation_engine().run_batch()
+                report = _run_distillation_batch_sync(get_distillation_engine())
                 consolidation_summary["distillation"] = {
                     "status": getattr(report, "status", "OK"),
                     "processed": getattr(report, "processed_count", None),

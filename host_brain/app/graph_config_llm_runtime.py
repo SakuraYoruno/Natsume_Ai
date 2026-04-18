@@ -524,7 +524,7 @@ def resolve_chat_agent_llm_runtime(*, base_runtime: dict, speed_profile: str | N
             timeout_env_name="HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
             timeout_default_ms=12_000,
             timeout_max_ms=60_000,
-            gen_params={"temperature": 0.78, "top_p": 0.9},
+            gen_params={"temperature": 0.74, "top_p": 0.88, "max_tokens": 96},
             fallback_model_env_names=("HOST_GEMINI_MODEL_ID", "HOST_DISPATCH_AGENT_MODEL_ID"),
             fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
         )
@@ -536,7 +536,7 @@ def resolve_chat_agent_llm_runtime(*, base_runtime: dict, speed_profile: str | N
             timeout_env_name="HOST_CHAT_AGENT_CONTEXT_TIMEOUT_MS",
             timeout_default_ms=18_000,
             timeout_max_ms=90_000,
-            gen_params={"temperature": 0.8, "top_p": 0.92},
+            gen_params={"temperature": 0.7, "top_p": 0.86, "max_tokens": 96},
             fallback_model_env_names=(
                 "HOST_CHAT_AGENT_DIRECT_MODEL_ID",
                 "HOST_GEMINI_MODEL_ID",
@@ -547,7 +547,7 @@ def resolve_chat_agent_llm_runtime(*, base_runtime: dict, speed_profile: str | N
                 "HOST_CHAT_AGENT_TIMEOUT_MS",
             ),
         )
-    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.8, "top_p": 0.92})
+    return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
 
 
 def resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:

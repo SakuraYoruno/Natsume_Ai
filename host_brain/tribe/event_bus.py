@@ -50,6 +50,8 @@ class InMemoryTribeEventBus:
         self._max_events = max(1, int(max_events))
         self._events: Deque[TribeEvent] = deque(maxlen=self._max_events)
         self._lock = threading.RLock()
+        self._queue_full_last_warn_ms = 0
+        self._queue_full_dropped = 0
 
         # 订阅表：event_type → [handler, ...]
         self._subscribers: dict[str, list[EventHandler]] = {}
@@ -130,11 +132,7 @@ class InMemoryTribeEventBus:
             try:
                 self._queue.put_nowait(event)
             except asyncio.QueueFull:
-                logger.warning(
-                    "TribeEventBus 分发队列已满，丢弃事件: event_type=%s event_id=%s",
-                    event.event_type,
-                    event.event_id,
-                )
+                self._record_queue_full_drop(event=event, batch=False)
         return event
 
     def publish_batch(self, events: list[TribeEvent]) -> list[TribeEvent]:
@@ -162,11 +160,7 @@ class InMemoryTribeEventBus:
                 try:
                     self._queue.put_nowait(event)
                 except asyncio.QueueFull:
-                    logger.warning(
-                        "TribeEventBus 分发队列已满（batch），丢弃事件: event_type=%s event_id=%s",
-                        event.event_type,
-                        event.event_id,
-                    )
+                    self._record_queue_full_drop(event=event, batch=True)
         return events
 
     # ── 分发循环 ──────────────────────────────────────────────────────────────
@@ -176,7 +170,10 @@ class InMemoryTribeEventBus:
         if self._running:
             logger.debug("TribeEventBus 分发循环已在运行，跳过重复启动")
             return
-        self._queue = asyncio.Queue(maxsize=512)
+        self._queue = asyncio.Queue(maxsize=4096)
+        with self._lock:
+            self._queue_full_last_warn_ms = 0
+            self._queue_full_dropped = 0
         self._running = True
         self._dispatch_task = asyncio.create_task(
             self._dispatch_loop(), name="tribe_event_bus_dispatch"
@@ -225,6 +222,32 @@ class InMemoryTribeEventBus:
                         exc,
                         exc_info=True,
                     )
+
+    def _record_queue_full_drop(self, *, event: TribeEvent, batch: bool) -> None:
+        """对高频 queue-full 进行节流汇总，避免 warning 日志反向拖慢主链。"""
+        queue_size = -1
+        if self._queue is not None:
+            try:
+                queue_size = int(self._queue.qsize())
+            except Exception:
+                queue_size = -1
+        with self._lock:
+            self._queue_full_dropped += 1
+            dropped = self._queue_full_dropped
+            ts = now_ms()
+            if ts - int(self._queue_full_last_warn_ms or 0) < 5000:
+                return
+            self._queue_full_last_warn_ms = ts
+            self._queue_full_dropped = 0
+        logger.warning(
+            "TribeEventBus 分发队列已满，过去5s累计丢弃=%s latest_event_type=%s latest_event_id=%s batch=%s queue_size=%s queue_maxsize=%s",
+            dropped,
+            event.event_type,
+            event.event_id,
+            batch,
+            queue_size,
+            int(getattr(self._queue, "maxsize", 0) or 0),
+        )
 
     # ── 查询 ──────────────────────────────────────────────────────────────────
 

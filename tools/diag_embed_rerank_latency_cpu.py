@@ -1,8 +1,8 @@
 """
 实测嵌入/重排模型在 CPU 上的耗时（与 F-17 主链路时延口径一致）。
 
-- 发送若干次 /v1/chat/stream 请求，从 COMMIT 的 audit_refs.trace_metrics 取
-  first_token_latency_ms、retrieval_latency_ms，以及墙钟 commit 时间。
+- 发送若干次 /v1/chat 请求，记录客户端墙钟 first_event / first_render / commit。
+- 从 COMMIT 的 audit_refs 中抽取服务端 latency / first_token / ChatAgent timings。
 - 从 audit 库 retrieval_event_log 按 request_id 取 EMBEDDING / RERANK 的
   payload.latency_ms，得到单次请求内 embed_ms、rerank_ms。
 - 汇总 min/avg/p95，写出 JSON + MD 报告到 20_chain_quality/。
@@ -19,7 +19,7 @@ import os
 import sqlite3
 import statistics
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,14 +31,34 @@ class RunResult:
     run_index: int
     request_id: str | None
     ok: bool
+    response_started_ms: float | None = None
     first_event_ms: float | None = None
     first_render_ms: float | None = None
     commit_ms: float | None = None
+    server_latency_ms: int | None = None
     first_token_latency_ms: int | None = None
     retrieval_latency_ms: int | None = None
+    path: str | None = None
+    model_id: str | None = None
+    stream_buffered: bool | None = None
+    prompt_build_ms: int | None = None
+    llm_runtime_resolve_ms: int | None = None
+    stream_after_first_token_ms: int | None = None
+    response_intelligence_ms: int | None = None
+    sanitize_egress_ms: int | None = None
+    precommit_log_ms: int | None = None
     embed_ms: int | None = None
     rerank_ms: int | None = None
     error: str | None = None
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _percentile(values: list[float], p: float) -> float | None:
@@ -56,6 +76,34 @@ def _percentile(values: list[float], p: float) -> float | None:
     return sorted_v[low] * (1.0 - frac) + sorted_v[high] * frac
 
 
+def _extract_commit_audit_metrics(event: dict[str, Any]) -> dict[str, Any]:
+    audit_refs = event.get("audit_refs") or {}
+    trace_metrics = audit_refs.get("trace_metrics") or {}
+    timings_ms = audit_refs.get("timings_ms") or {}
+    first_token_latency_ms = _coerce_int(audit_refs.get("first_token_ms"))
+    if first_token_latency_ms is None:
+        first_token_latency_ms = _coerce_int(trace_metrics.get("first_token_latency_ms"))
+    retrieval_latency_ms = _coerce_int(trace_metrics.get("retrieval_latency_ms"))
+    return {
+        "server_latency_ms": _coerce_int(audit_refs.get("latency_ms")),
+        "first_token_latency_ms": first_token_latency_ms,
+        "retrieval_latency_ms": retrieval_latency_ms,
+        "path": str(audit_refs.get("path") or "").strip() or None,
+        "model_id": str(audit_refs.get("model_id") or "").strip() or None,
+        "stream_buffered": (
+            bool(audit_refs.get("stream_buffered"))
+            if audit_refs.get("stream_buffered") is not None
+            else None
+        ),
+        "prompt_build_ms": _coerce_int(timings_ms.get("prompt_build_ms")),
+        "llm_runtime_resolve_ms": _coerce_int(timings_ms.get("llm_runtime_resolve_ms")),
+        "stream_after_first_token_ms": _coerce_int(timings_ms.get("stream_after_first_token_ms")),
+        "response_intelligence_ms": _coerce_int(timings_ms.get("response_intelligence_ms")),
+        "sanitize_egress_ms": _coerce_int(timings_ms.get("sanitize_egress_ms")),
+        "precommit_log_ms": _coerce_int(timings_ms.get("precommit_log_ms")),
+    }
+
+
 def _read_sse_run(
     *,
     client: httpx.Client,
@@ -66,17 +114,29 @@ def _read_sse_run(
     timeout_s: float,
 ) -> RunResult:
     body = {"message": message, "session_id": f"{session_prefix}-{run_index}"}
+    response_started_ms: float | None = None
     first_event_ms: float | None = None
     first_render_ms: float | None = None
     commit_ms: float | None = None
     request_id: str | None = None
+    server_latency_ms: int | None = None
     first_token_latency_ms: int | None = None
     retrieval_latency_ms: int | None = None
+    path: str | None = None
+    model_id: str | None = None
+    stream_buffered: bool | None = None
+    prompt_build_ms: int | None = None
+    llm_runtime_resolve_ms: int | None = None
+    stream_after_first_token_ms: int | None = None
+    response_intelligence_ms: int | None = None
+    sanitize_egress_ms: int | None = None
+    precommit_log_ms: int | None = None
 
     start = time.perf_counter()
     try:
         with client.stream("POST", url, json=body, timeout=timeout_s) as response:
             response.raise_for_status()
+            response_started_ms = (time.perf_counter() - start) * 1000.0
             for raw_line in response.iter_lines():
                 if not raw_line:
                     continue
@@ -100,13 +160,19 @@ def _read_sse_run(
                     first_render_ms = now_ms
                 if phase == "COMMIT":
                     commit_ms = now_ms
-                    audit_refs = event.get("audit_refs") or {}
-                    trace_metrics = audit_refs.get("trace_metrics") or {}
-                    if isinstance(trace_metrics, dict):
-                        ft = trace_metrics.get("first_token_latency_ms")
-                        first_token_latency_ms = int(ft) if ft is not None else None
-                        rt = trace_metrics.get("retrieval_latency_ms")
-                        retrieval_latency_ms = int(rt) if rt is not None else None
+                    commit_metrics = _extract_commit_audit_metrics(event)
+                    server_latency_ms = commit_metrics["server_latency_ms"]
+                    first_token_latency_ms = commit_metrics["first_token_latency_ms"]
+                    retrieval_latency_ms = commit_metrics["retrieval_latency_ms"]
+                    path = commit_metrics["path"]
+                    model_id = commit_metrics["model_id"]
+                    stream_buffered = commit_metrics["stream_buffered"]
+                    prompt_build_ms = commit_metrics["prompt_build_ms"]
+                    llm_runtime_resolve_ms = commit_metrics["llm_runtime_resolve_ms"]
+                    stream_after_first_token_ms = commit_metrics["stream_after_first_token_ms"]
+                    response_intelligence_ms = commit_metrics["response_intelligence_ms"]
+                    sanitize_egress_ms = commit_metrics["sanitize_egress_ms"]
+                    precommit_log_ms = commit_metrics["precommit_log_ms"]
                     break
 
     except Exception as exc:
@@ -114,11 +180,22 @@ def _read_sse_run(
             run_index=run_index,
             request_id=request_id,
             ok=False,
+            response_started_ms=response_started_ms,
             first_event_ms=first_event_ms,
             first_render_ms=first_render_ms,
             commit_ms=commit_ms,
+            server_latency_ms=server_latency_ms,
             first_token_latency_ms=first_token_latency_ms,
             retrieval_latency_ms=retrieval_latency_ms,
+            path=path,
+            model_id=model_id,
+            stream_buffered=stream_buffered,
+            prompt_build_ms=prompt_build_ms,
+            llm_runtime_resolve_ms=llm_runtime_resolve_ms,
+            stream_after_first_token_ms=stream_after_first_token_ms,
+            response_intelligence_ms=response_intelligence_ms,
+            sanitize_egress_ms=sanitize_egress_ms,
+            precommit_log_ms=precommit_log_ms,
             error=str(exc),
         )
 
@@ -126,11 +203,22 @@ def _read_sse_run(
         run_index=run_index,
         request_id=request_id,
         ok=True,
+        response_started_ms=response_started_ms,
         first_event_ms=first_event_ms,
         first_render_ms=first_render_ms,
         commit_ms=commit_ms,
+        server_latency_ms=server_latency_ms,
         first_token_latency_ms=first_token_latency_ms,
         retrieval_latency_ms=retrieval_latency_ms,
+        path=path,
+        model_id=model_id,
+        stream_buffered=stream_buffered,
+        prompt_build_ms=prompt_build_ms,
+        llm_runtime_resolve_ms=llm_runtime_resolve_ms,
+        stream_after_first_token_ms=stream_after_first_token_ms,
+        response_intelligence_ms=response_intelligence_ms,
+        sanitize_egress_ms=sanitize_egress_ms,
+        precommit_log_ms=precommit_log_ms,
     )
 
 
@@ -161,6 +249,19 @@ def _fetch_embed_rerank_latency(conn: sqlite3.Connection, request_id: str) -> tu
             elif op_kind == "RERANK":
                 rerank_ms = lat_int
     return embed_ms, rerank_ms
+
+
+def _stats(vals: list[float]) -> dict[str, float]:
+    if not vals:
+        return {"min": 0.0, "max": 0.0, "avg": 0.0, "p50": 0.0, "p95": 0.0, "n": 0}
+    return {
+        "min": min(vals),
+        "max": max(vals),
+        "avg": statistics.fmean(vals),
+        "p50": _percentile(vals, 50) or 0.0,
+        "p95": _percentile(vals, 95) or 0.0,
+        "n": len(vals),
+    }
 
 
 def main() -> int:
@@ -209,9 +310,15 @@ def main() -> int:
     else:
         print(f"Warning: audit DB not found at {audit_db}, embed/rerank from DB will be missing.")
 
-    with httpx.Client(http2=False) as client:
-        for i in range(1, args.runs + 1):
-            message = args.messages[(i - 1) % len(args.messages)]
+    for i in range(1, args.runs + 1):
+        message = args.messages[(i - 1) % len(args.messages)]
+        # Use a fresh direct connection per SSE run so keep-alive reuse does not
+        # skew first-event timing for long-lived streaming responses.
+        with httpx.Client(
+            http2=False,
+            trust_env=False,
+            headers={"Connection": "close"},
+        ) as client:
             row = _read_sse_run(
                 client=client,
                 url=url,
@@ -220,64 +327,109 @@ def main() -> int:
                 session_prefix=args.session_prefix,
                 timeout_s=float(args.timeout_s),
             )
-            if row.ok and row.request_id and conn:
-                embed_ms, rerank_ms = _fetch_embed_rerank_latency(conn, row.request_id)
-                row.embed_ms = embed_ms
-                row.rerank_ms = rerank_ms
-            results.append(row)
-            print(
-                f"[run {i:02d}] ok={row.ok} req_id={row.request_id or '-'} "
-                f"first_token={row.first_token_latency_ms}ms commit={row.commit_ms}ms "
-                f"retrieval={row.retrieval_latency_ms}ms embed={row.embed_ms}ms rerank={row.rerank_ms}ms"
-            )
+        if row.ok and row.request_id and conn:
+            row.embed_ms, row.rerank_ms = _fetch_embed_rerank_latency(conn, row.request_id)
+        results.append(row)
+        print(
+            f"[run {i:02d}] ok={row.ok} req_id={row.request_id or '-'} "
+            f"path={row.path or '-'} model={row.model_id or '-'} "
+            f"resp_started={row.response_started_ms}ms first_event={row.first_event_ms}ms first_render={row.first_render_ms}ms "
+            f"server_commit={row.server_latency_ms}ms first_token={row.first_token_latency_ms}ms "
+            f"commit={row.commit_ms}ms retrieval={row.retrieval_latency_ms}ms "
+            f"embed={row.embed_ms}ms rerank={row.rerank_ms}ms"
+        )
 
     if conn:
         conn.close()
 
     success = [r for r in results if r.ok]
-    embed_list = [r.embed_ms for r in success if r.embed_ms is not None]
-    rerank_list = [r.rerank_ms for r in success if r.rerank_ms is not None]
+    embed_list = [float(r.embed_ms) for r in success if r.embed_ms is not None]
+    rerank_list = [float(r.rerank_ms) for r in success if r.rerank_ms is not None]
+    response_started_list = [float(r.response_started_ms) for r in success if r.response_started_ms is not None]
+    first_event_list = [float(r.first_event_ms) for r in success if r.first_event_ms is not None]
+    first_render_list = [float(r.first_render_ms) for r in success if r.first_render_ms is not None]
+    server_latency_list = [float(r.server_latency_ms) for r in success if r.server_latency_ms is not None]
     first_token_list = [float(r.first_token_latency_ms) for r in success if r.first_token_latency_ms is not None]
     commit_list = [float(r.commit_ms) for r in success if r.commit_ms is not None]
     retrieval_list = [float(r.retrieval_latency_ms) for r in success if r.retrieval_latency_ms is not None]
+    prompt_build_list = [float(r.prompt_build_ms) for r in success if r.prompt_build_ms is not None]
+    llm_runtime_resolve_list = [float(r.llm_runtime_resolve_ms) for r in success if r.llm_runtime_resolve_ms is not None]
+    stream_after_first_token_list = [float(r.stream_after_first_token_ms) for r in success if r.stream_after_first_token_ms is not None]
+    response_intelligence_list = [float(r.response_intelligence_ms) for r in success if r.response_intelligence_ms is not None]
+    sanitize_egress_list = [float(r.sanitize_egress_ms) for r in success if r.sanitize_egress_ms is not None]
+    precommit_log_list = [float(r.precommit_log_ms) for r in success if r.precommit_log_ms is not None]
+    wall_minus_server_commit_list = [
+        float(r.commit_ms) - float(r.server_latency_ms)
+        for r in success
+        if r.commit_ms is not None and r.server_latency_ms is not None
+    ]
 
-    def stats(vals: list[float]) -> dict[str, float]:
-        if not vals:
-            return {"min": 0.0, "max": 0.0, "avg": 0.0, "p50": 0.0, "p95": 0.0, "n": 0}
-        return {
-            "min": min(vals),
-            "max": max(vals),
-            "avg": statistics.fmean(vals),
-            "p50": _percentile(vals, 50) or 0.0,
-            "p95": _percentile(vals, 95) or 0.0,
-            "n": len(vals),
-        }
-
-    embed_stats = stats([float(x) for x in embed_list])
-    rerank_stats = stats([float(x) for x in rerank_list])
-    first_token_stats = stats(first_token_list)
-    commit_stats = stats(commit_list)
-    retrieval_stats = stats(retrieval_list)
+    embed_stats = _stats(embed_list)
+    rerank_stats = _stats(rerank_list)
+    response_started_stats = _stats(response_started_list)
+    first_event_stats = _stats(first_event_list)
+    first_render_stats = _stats(first_render_list)
+    server_latency_stats = _stats(server_latency_list)
+    first_token_stats = _stats(first_token_list)
+    commit_stats = _stats(commit_list)
+    retrieval_stats = _stats(retrieval_list)
+    prompt_build_stats = _stats(prompt_build_list)
+    llm_runtime_resolve_stats = _stats(llm_runtime_resolve_list)
+    stream_after_first_token_stats = _stats(stream_after_first_token_list)
+    response_intelligence_stats = _stats(response_intelligence_list)
+    sanitize_egress_stats = _stats(sanitize_egress_list)
+    precommit_log_stats = _stats(precommit_log_list)
+    wall_minus_server_commit_stats = _stats(wall_minus_server_commit_list)
 
     ts_tag = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
     payload = {
         "device": "cpu",
         "note": "embed/rerank 模型运行在 CPU，实测主链路与检索子阶段耗时",
+        "client_transport": "fresh_httpx_client_per_run_connection_close",
         "ts_utc": ts_tag,
         "runs": len(results),
         "success": len(success),
         "embed_ms": embed_stats,
         "rerank_ms": rerank_stats,
+        "response_started_ms": response_started_stats,
+        "first_event_ms": first_event_stats,
+        "first_render_ms": first_render_stats,
+        "server_latency_ms": server_latency_stats,
         "first_token_latency_ms": first_token_stats,
         "commit_ms": commit_stats,
         "retrieval_latency_ms": retrieval_stats,
+        "prompt_build_ms": prompt_build_stats,
+        "llm_runtime_resolve_ms": llm_runtime_resolve_stats,
+        "stream_after_first_token_ms": stream_after_first_token_stats,
+        "response_intelligence_ms": response_intelligence_stats,
+        "sanitize_egress_ms": sanitize_egress_stats,
+        "precommit_log_ms": precommit_log_stats,
+        "wall_minus_server_commit_ms": wall_minus_server_commit_stats,
         "samples": [
             {
                 "run_index": r.run_index,
                 "request_id": r.request_id,
+                "path": r.path,
+                "model_id": r.model_id,
+                "stream_buffered": r.stream_buffered,
+                "response_started_ms": r.response_started_ms,
+                "first_event_ms": r.first_event_ms,
+                "first_render_ms": r.first_render_ms,
+                "server_latency_ms": r.server_latency_ms,
                 "first_token_latency_ms": r.first_token_latency_ms,
                 "commit_ms": r.commit_ms,
                 "retrieval_latency_ms": r.retrieval_latency_ms,
+                "prompt_build_ms": r.prompt_build_ms,
+                "llm_runtime_resolve_ms": r.llm_runtime_resolve_ms,
+                "stream_after_first_token_ms": r.stream_after_first_token_ms,
+                "response_intelligence_ms": r.response_intelligence_ms,
+                "sanitize_egress_ms": r.sanitize_egress_ms,
+                "precommit_log_ms": r.precommit_log_ms,
+                "wall_minus_server_commit_ms": (
+                    (float(r.commit_ms) - float(r.server_latency_ms))
+                    if r.commit_ms is not None and r.server_latency_ms is not None
+                    else None
+                ),
                 "embed_ms": r.embed_ms,
                 "rerank_ms": r.rerank_ms,
             }
@@ -290,7 +442,6 @@ def main() -> int:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"\nWrote {out_json}")
 
-    # MD 报告
     md_lines = [
         "# F-17 嵌入/重排 CPU 实测耗时",
         "",
@@ -305,13 +456,29 @@ def main() -> int:
         f"| embed_ms | {embed_stats['min']:.0f} | {embed_stats['avg']:.1f} | {embed_stats['p50']:.0f} | {embed_stats['p95']:.0f} | {embed_stats['max']:.0f} | {embed_stats['n']} |",
         f"| rerank_ms | {rerank_stats['min']:.0f} | {rerank_stats['avg']:.1f} | {rerank_stats['p50']:.0f} | {rerank_stats['p95']:.0f} | {rerank_stats['max']:.0f} | {rerank_stats['n']} |",
         "",
-        "## 主链路（trace_metrics / 墙钟）",
+        "## 主链路（客户端墙钟 + 服务端 audit_refs）",
         "",
         "| 指标 | min | avg | p50 | p95 | max | n |",
         "|------|-----|-----|-----|-----|-----|---|",
+        f"| response_started_ms | {response_started_stats['min']:.0f} | {response_started_stats['avg']:.1f} | {response_started_stats['p50']:.0f} | {response_started_stats['p95']:.0f} | {response_started_stats['max']:.0f} | {response_started_stats['n']} |",
+        f"| first_event_ms | {first_event_stats['min']:.0f} | {first_event_stats['avg']:.1f} | {first_event_stats['p50']:.0f} | {first_event_stats['p95']:.0f} | {first_event_stats['max']:.0f} | {first_event_stats['n']} |",
+        f"| first_render_ms | {first_render_stats['min']:.0f} | {first_render_stats['avg']:.1f} | {first_render_stats['p50']:.0f} | {first_render_stats['p95']:.0f} | {first_render_stats['max']:.0f} | {first_render_stats['n']} |",
+        f"| server_latency_ms | {server_latency_stats['min']:.0f} | {server_latency_stats['avg']:.1f} | {server_latency_stats['p50']:.0f} | {server_latency_stats['p95']:.0f} | {server_latency_stats['max']:.0f} | {server_latency_stats['n']} |",
         f"| first_token_latency_ms | {first_token_stats['min']:.0f} | {first_token_stats['avg']:.1f} | {first_token_stats['p50']:.0f} | {first_token_stats['p95']:.0f} | {first_token_stats['max']:.0f} | {first_token_stats['n']} |",
         f"| commit_ms (wall) | {commit_stats['min']:.0f} | {commit_stats['avg']:.1f} | {commit_stats['p50']:.0f} | {commit_stats['p95']:.0f} | {commit_stats['max']:.0f} | {commit_stats['n']} |",
+        f"| wall_minus_server_commit_ms | {wall_minus_server_commit_stats['min']:.0f} | {wall_minus_server_commit_stats['avg']:.1f} | {wall_minus_server_commit_stats['p50']:.0f} | {wall_minus_server_commit_stats['p95']:.0f} | {wall_minus_server_commit_stats['max']:.0f} | {wall_minus_server_commit_stats['n']} |",
         f"| retrieval_latency_ms | {retrieval_stats['min']:.0f} | {retrieval_stats['avg']:.1f} | {retrieval_stats['p50']:.0f} | {retrieval_stats['p95']:.0f} | {retrieval_stats['max']:.0f} | {retrieval_stats['n']} |",
+        "",
+        "## ChatAgent 分段（audit_refs.timings_ms）",
+        "",
+        "| 指标 | min | avg | p50 | p95 | max | n |",
+        "|------|-----|-----|-----|-----|-----|---|",
+        f"| prompt_build_ms | {prompt_build_stats['min']:.0f} | {prompt_build_stats['avg']:.1f} | {prompt_build_stats['p50']:.0f} | {prompt_build_stats['p95']:.0f} | {prompt_build_stats['max']:.0f} | {prompt_build_stats['n']} |",
+        f"| llm_runtime_resolve_ms | {llm_runtime_resolve_stats['min']:.0f} | {llm_runtime_resolve_stats['avg']:.1f} | {llm_runtime_resolve_stats['p50']:.0f} | {llm_runtime_resolve_stats['p95']:.0f} | {llm_runtime_resolve_stats['max']:.0f} | {llm_runtime_resolve_stats['n']} |",
+        f"| stream_after_first_token_ms | {stream_after_first_token_stats['min']:.0f} | {stream_after_first_token_stats['avg']:.1f} | {stream_after_first_token_stats['p50']:.0f} | {stream_after_first_token_stats['p95']:.0f} | {stream_after_first_token_stats['max']:.0f} | {stream_after_first_token_stats['n']} |",
+        f"| response_intelligence_ms | {response_intelligence_stats['min']:.0f} | {response_intelligence_stats['avg']:.1f} | {response_intelligence_stats['p50']:.0f} | {response_intelligence_stats['p95']:.0f} | {response_intelligence_stats['max']:.0f} | {response_intelligence_stats['n']} |",
+        f"| sanitize_egress_ms | {sanitize_egress_stats['min']:.0f} | {sanitize_egress_stats['avg']:.1f} | {sanitize_egress_stats['p50']:.0f} | {sanitize_egress_stats['p95']:.0f} | {sanitize_egress_stats['max']:.0f} | {sanitize_egress_stats['n']} |",
+        f"| precommit_log_ms | {precommit_log_stats['min']:.0f} | {precommit_log_stats['avg']:.1f} | {precommit_log_stats['p50']:.0f} | {precommit_log_stats['p95']:.0f} | {precommit_log_stats['max']:.0f} | {precommit_log_stats['n']} |",
         "",
     ]
     out_md = Path(report_dir) / f"F-17_embed_rerank_cpu_latency_{ts_tag}.md"
@@ -320,10 +487,15 @@ def main() -> int:
     print(f"Wrote {out_md}")
 
     print("\n--- Summary ---")
-    print(f"embed_ms:    min={embed_stats['min']:.0f} avg={embed_stats['avg']:.1f} p95={embed_stats['p95']:.0f}")
-    print(f"rerank_ms:   min={rerank_stats['min']:.0f} avg={rerank_stats['avg']:.1f} p95={rerank_stats['p95']:.0f}")
-    print(f"first_token: min={first_token_stats['min']:.0f} avg={first_token_stats['avg']:.1f} p95={first_token_stats['p95']:.0f}")
-    print(f"commit:      min={commit_stats['min']:.0f} avg={commit_stats['avg']:.1f} p95={commit_stats['p95']:.0f}")
+    print(f"embed_ms:      min={embed_stats['min']:.0f} avg={embed_stats['avg']:.1f} p95={embed_stats['p95']:.0f}")
+    print(f"rerank_ms:     min={rerank_stats['min']:.0f} avg={rerank_stats['avg']:.1f} p95={rerank_stats['p95']:.0f}")
+    print(f"resp_started:  min={response_started_stats['min']:.0f} avg={response_started_stats['avg']:.1f} p95={response_started_stats['p95']:.0f}")
+    print(f"first_event:   min={first_event_stats['min']:.0f} avg={first_event_stats['avg']:.1f} p95={first_event_stats['p95']:.0f}")
+    print(f"first_render:  min={first_render_stats['min']:.0f} avg={first_render_stats['avg']:.1f} p95={first_render_stats['p95']:.0f}")
+    print(f"server_commit: min={server_latency_stats['min']:.0f} avg={server_latency_stats['avg']:.1f} p95={server_latency_stats['p95']:.0f}")
+    print(f"first_token:   min={first_token_stats['min']:.0f} avg={first_token_stats['avg']:.1f} p95={first_token_stats['p95']:.0f}")
+    print(f"commit_wall:   min={commit_stats['min']:.0f} avg={commit_stats['avg']:.1f} p95={commit_stats['p95']:.0f}")
+    print(f"wall_delta:    min={wall_minus_server_commit_stats['min']:.0f} avg={wall_minus_server_commit_stats['avg']:.1f} p95={wall_minus_server_commit_stats['p95']:.0f}")
     return 0
 
 

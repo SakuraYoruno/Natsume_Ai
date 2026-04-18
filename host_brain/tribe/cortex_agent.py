@@ -168,6 +168,8 @@ class CortexAgent:
         request_id: str | None = None,
         emotion_tag: str = "NEUTRAL",
         emotion_intensity: float = 0.5,
+        chat_speed_profile: str | None = None,
+        skip_default_mode_inner_activity: bool = False,
         summary: dict[str, Any] | None = None,
     ) -> None:
         """对话结束时调用，向 TribeEventBus 发布 CONVERSATION_ENDED 和 INTERACTION_RECORDED 事件。
@@ -184,6 +186,10 @@ class CortexAgent:
                 "emotion_tag": str(emotion_tag or "NEUTRAL").strip().upper(),
                 "emotion_intensity": float(emotion_intensity),
             }
+            if chat_speed_profile:
+                base_payload["chat_speed_profile"] = str(chat_speed_profile).strip().lower()
+            if skip_default_mode_inner_activity:
+                base_payload["skip_default_mode_inner_activity"] = True
             emit_tribe_event(
                 event_type="CONVERSATION_ENDED",
                 source_agent="cortex_agent",
@@ -608,7 +614,8 @@ class CortexAgent:
             try:
                 _pusher = get_edge_command_pusher()
                 if _pusher is not None and _pusher.enabled:
-                    _pusher.push_gate_control(
+                    await asyncio.to_thread(
+                        _pusher.push_gate_control,
                         gate_open=True,
                         reason="platform_connected",
                         platform=platform,
@@ -654,7 +661,8 @@ class CortexAgent:
             try:
                 _pusher = get_edge_command_pusher()
                 if _pusher is not None and _pusher.enabled:
-                    _pusher.push_gate_control(
+                    await asyncio.to_thread(
+                        _pusher.push_gate_control,
                         gate_open=False,
                         reason="platform_disconnected",
                         platform=platform,

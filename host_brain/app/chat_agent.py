@@ -179,15 +179,23 @@ def _build_compact_chat_prompt(
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
     use_ja = str(render_target_lang).strip().lower() == "ja"
     if speed_profile == "context_fast":
+        response_policy = {
+            "should_be_brief": True,
+            "max_sentences": 3,
+            "max_chars": 110,
+            "min_sentences": 1,
+            "allow_followup": True,
+            "allow_topic_shift": False,
+        }
         relation_line = (
             f"当前关系阶段：{bond_stage or 'UNKNOWN'}。当前情绪：{emotion_tag}。"
             if not use_ja
             else f"現在の関係段階：{bond_stage or 'UNKNOWN'}。現在の感情タグ：{emotion_tag}。"
         )
         brevity_line = (
-            "这是日常聊天的中速快路径：优先自然接话，不要长篇总结；通常 2 到 4 句，像正在陪身边的人说话。"
+            "这是日常聊天的中速快路径：先接住用户当下这句话，再自然陪着往下说；通常 1 到 3 句，除非对方明确要求展开。"
             if not use_ja
-            else "これは日常会話向けの中速ファストパス。長い要約は避け、自然に会話を受けて、ふつうは2〜4文で返すこと。"
+            else "これは日常会話向けの中速ファストパス。まず相手の今の一言を受け止め、そのあと自然に寄り添って返すこと。通常は1〜3文で、相手が明確に求めた時だけ長めに話す。"
         )
         system_prompt = (
             (_CONTEXT_FAST_PERSONA_JA if use_ja else _CONTEXT_FAST_PERSONA_ZH)
@@ -201,9 +209,12 @@ def _build_compact_chat_prompt(
                 render_target_lang=render_target_lang,
                 bond_stage=bond_stage,
             ).strip()
-            + "\n先回应用户当前这句话，不要过度分析，不要自报流程。只输出最终会对用户说的话。"
+            + "\n先回应用户当前这句话，不要过度分析，不要自报流程，也不要主动扩成长独白。严格控制在三句以内，优先把第一句说完整。只输出最终会对用户说的话。"
         )
-        return user_message, system_prompt, {}, {"compact_prompt_profile": "context_fast"}
+        return user_message, system_prompt, {}, {
+            "compact_prompt_profile": "context_fast",
+            "response_policy": response_policy,
+        }
 
     relation_line = (
         f"当前关系阶段：{bond_stage or 'UNKNOWN'}。当前情绪：{emotion_tag}。"
@@ -264,6 +275,31 @@ def _build_context_fast_prompt(
     )
 
 
+def _should_cut_stream_after_policy_cap(
+    *,
+    response_policy: Any,
+    rendered_text: str,
+    visible_text: str,
+) -> bool:
+    policy, max_chars, max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+    if not policy:
+        return False
+    if not rendered_text or not visible_text:
+        return False
+    if visible_text != rendered_text:
+        return False
+
+    if max_chars > 0 and len(visible_text) >= max_chars:
+        return True
+
+    if max_sentences > 0:
+        visible_sentences = _split_text_into_sentences(visible_text)
+        if len(visible_sentences) >= max_sentences:
+            return True
+
+    return False
+
+
 def _airlock_sanitize_output(text: str) -> str:
     """出口净化：null byte + 长度截断。"""
     text = text.replace("\x00", "").strip()
@@ -300,6 +336,7 @@ def _should_schedule_commit_tts_fallback(
     tts_sentence_index: int,
     suppress_tts: bool,
     reply_channel: str | None,
+    voice_outputs_enabled: bool,
 ) -> bool:
     """Decide whether ChatAgent should schedule COMMIT-time TTS fallback.
 
@@ -308,12 +345,22 @@ def _should_schedule_commit_tts_fallback(
     """
     if not str(narrative or "").strip():
         return False
+    if not voice_outputs_enabled:
+        return False
 
     channel = str(reply_channel or "").strip().upper()
     if suppress_tts and channel:
         return False
 
     return bool(suppress_tts) or int(tts_sentence_index) == 0
+
+
+def _should_enable_edge_voice_outputs(*, reply_channel: str | None) -> bool:
+    channel = str(reply_channel or "").strip().upper()
+    if channel:
+        return channel not in {"CHAT_API", "WEB", "HTTP", "API"}
+    enabled_raw = str(os.environ.get("HOST_CHAT_API_EDGE_VOICE_ENABLED") or "false").strip().lower()
+    return enabled_raw in {"1", "true", "yes", "on"}
 
 
 def _coerce_response_policy(raw_policy: Any) -> Dict[str, Any]:
@@ -1550,11 +1597,22 @@ async def chat_agent_sse_generator(
     system_prompt = ""
     gen_params: Dict[str, Any] = {}
     prompt_runtime_payload: Dict[str, Any] = {}
+    prompt_build_started_ms = int(time.time() * 1000)
+    prompt_build_ms = 0
+    llm_runtime_resolve_ms = 0
+    response_intelligence_ms = 0
+    sanitize_egress_ms = 0
+    precommit_log_ms = 0
     _compact_prompt_speed_profile = _resolve_compact_prompt_speed_profile(
         intent_draft=intent_draft,
         sub_agent_ctx=sub_agent_ctx,
         deterministic_reply=deterministic_reply,
     )
+    if _compact_prompt_speed_profile and not str(trace_stage_meta.get("chat_speed_profile") or "").strip():
+        trace_stage_meta["chat_speed_profile"] = _compact_prompt_speed_profile
+    if _compact_prompt_speed_profile in {"direct_fast", "context_fast"}:
+        trace_stage_meta.setdefault("skip_heavy_persona_postprocess", True)
+        trace_stage_meta.setdefault("skip_default_mode_on_conversation_end", True)
     _use_direct_fast_prompt_path = _compact_prompt_speed_profile == "direct_fast"
     if _compact_prompt_speed_profile == "direct_fast":
         prompt_text, system_prompt, gen_params, prompt_runtime_payload = _build_direct_fast_prompt(
@@ -1563,6 +1621,7 @@ async def chat_agent_sse_generator(
             emotion_context=emotion_context,
             bond_summary=bond_summary,
         )
+        prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
     elif _compact_prompt_speed_profile == "context_fast":
         prompt_text, system_prompt, gen_params, prompt_runtime_payload = _build_context_fast_prompt(
             user_message=user_message,
@@ -1570,6 +1629,9 @@ async def chat_agent_sse_generator(
             emotion_context=emotion_context,
             bond_summary=bond_summary,
         )
+        prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
+    if not response_policy and prompt_runtime_payload:
+        response_policy = _coerce_response_policy(prompt_runtime_payload.get("response_policy"))
 
     # 确定性子结果渲染不依赖 LLM，也不需要构建完整 prompt。
     if not deterministic_reply and _compact_prompt_speed_profile is None:
@@ -1638,6 +1700,7 @@ async def chat_agent_sse_generator(
             else:
                 prompt_text, system_prompt, gen_params = prompt_result
                 prompt_runtime_payload = {}
+            prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
             if not response_policy:
                 response_policy = _coerce_response_policy(prompt_runtime_payload.get("response_policy"))
         except Exception as _pb_exc:
@@ -1661,6 +1724,7 @@ async def chat_agent_sse_generator(
         }
     else:
         llm_runtime = agent_input.llm_runtime
+        llm_runtime_resolve_started_ms = int(time.time() * 1000)
 
         def _schedule_llm_unavailable_post_process(
             fallback_narrative: str,
@@ -1755,6 +1819,7 @@ async def chat_agent_sse_generator(
                     "narrative": fallback_narrative,
                 })
                 return
+        llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_resolve_started_ms)
 
         if not llm_runtime.get("available"):
             fallback_narrative = _build_llm_unavailable_fallback_narrative()
@@ -1819,11 +1884,15 @@ async def chat_agent_sse_generator(
         api_key = ""
         base_url = None
 
+    _voice_outputs_enabled = _should_enable_edge_voice_outputs(
+        reply_channel=agent_input.reply_channel,
+    )
     # Phase XV P7：分句 TTS 开关
-    # suppress_edge_tts=True 时（Gateway 模式），本地 TTS 不触发
-    _suppress_tts = bool(agent_input.suppress_edge_tts)
+    # suppress_edge_tts=True 时（Gateway 模式），或入口本身不是语音通道时，本地 TTS 不触发
+    _suppress_tts = bool(agent_input.suppress_edge_tts) or not _voice_outputs_enabled
     _tts_sentence_stream_enabled = (
-        not _suppress_tts
+        _voice_outputs_enabled
+        and not _suppress_tts
         and str(os.environ.get("HOST_TTS_SENTENCE_STREAM_ENABLED") or "true").strip().lower()
         not in ("0", "false", "no", "off")
     )
@@ -1880,6 +1949,18 @@ async def chat_agent_sse_generator(
                 else:
                     new_chunk = visible
                 if not new_chunk:
+                    if _should_cut_stream_after_policy_cap(
+                        response_policy=response_policy,
+                        rendered_text=rendered_text,
+                        visible_text=visible,
+                    ):
+                        full_text = visible
+                        _logger.info(
+                            "[%s] ChatAgent stream cut after response_policy cap speed_profile=%s",
+                            request_id,
+                            _chat_speed_profile or "default",
+                        )
+                        break
                     continue
 
                 rendered_text = visible
@@ -1973,53 +2054,65 @@ async def chat_agent_sse_generator(
 
     # ── 5. apply_response_intelligence（反思链 + 多模态后缀）─────────
     response_intelligence_meta: dict[str, Any] = {}
-    try:
-        from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
+    _response_intelligence_started_ms = int(time.time() * 1000)
+    _skip_response_intelligence = _chat_speed_profile in {"direct_fast", "context_fast"} and sub_agent_ctx is None
+    if _skip_response_intelligence:
+        response_intelligence_meta = {
+            "reflection": {"status": "SKIPPED", "reason_code": "FAST_CHAT_RESPONSE_INTELLIGENCE_BYPASS"},
+            "multimodal_output": {"status": "SKIPPED", "reason_code": "FAST_CHAT_RESPONSE_INTELLIGENCE_BYPASS"},
+        }
+    else:
+        try:
+            from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
 
-        narrative, response_intelligence_meta = apply_response_intelligence(
-            request_id=request_id,
-            user_message=user_message,
-            narrative=narrative,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary or None,
-            render_lang=render_target_lang,
-            allow_rewrite=buffer_stream,
-        )
-        narrative = _extract_visible_text(narrative) or narrative
-        narrative = _apply_response_policy_hard_guard(
-            narrative,
-            response_policy,
-            user_message=user_message,
-            bond_stage=str((bond_summary or {}).get("stage") or ""),
-        )
+            narrative, response_intelligence_meta = apply_response_intelligence(
+                request_id=request_id,
+                user_message=user_message,
+                narrative=narrative,
+                emotion_context=emotion_context,
+                bond_summary=bond_summary or None,
+                render_lang=render_target_lang,
+                allow_rewrite=buffer_stream,
+            )
+            narrative = _extract_visible_text(narrative) or narrative
+            narrative = _apply_response_policy_hard_guard(
+                narrative,
+                response_policy,
+                user_message=user_message,
+                bond_stage=str((bond_summary or {}).get("stage") or ""),
+            )
 
-        if buffer_stream and narrative:
-            rendered_text = narrative
-            yield _sse({"phase": "RENDER", "chunk": narrative})
-            for sentence in splitter.feed(narrative):
-                yield _sse({
-                    "phase": "SENTENCE",
-                    "sentence": sentence,
-                    "sentence_index": sentence_index,
-                })
-                sentence_index += 1
-        elif narrative.startswith(rendered_text):
-            postprocess_chunk = narrative[len(rendered_text):]
-            if postprocess_chunk:
+            if buffer_stream and narrative:
                 rendered_text = narrative
-                yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
-                for sentence in splitter.feed(postprocess_chunk):
+                yield _sse({"phase": "RENDER", "chunk": narrative})
+                for sentence in splitter.feed(narrative):
                     yield _sse({
                         "phase": "SENTENCE",
                         "sentence": sentence,
                         "sentence_index": sentence_index,
                     })
                     sentence_index += 1
-    except Exception as _ri_exc:
-        response_intelligence_meta = {
-            "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
-        }
-        _logger.debug("[%s] ChatAgent response_intelligence failed: %s", request_id, _ri_exc)
+            elif narrative.startswith(rendered_text):
+                postprocess_chunk = narrative[len(rendered_text):]
+                if postprocess_chunk:
+                    rendered_text = narrative
+                    yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
+                    for sentence in splitter.feed(postprocess_chunk):
+                        yield _sse({
+                            "phase": "SENTENCE",
+                            "sentence": sentence,
+                            "sentence_index": sentence_index,
+                        })
+                        sentence_index += 1
+        except Exception as _ri_exc:
+            response_intelligence_meta = {
+                "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
+            }
+            _logger.debug("[%s] ChatAgent response_intelligence failed: %s", request_id, _ri_exc)
+    try:
+        response_intelligence_ms = max(0, int(time.time() * 1000) - _response_intelligence_started_ms)
+    except Exception:
+        response_intelligence_ms = 0
 
     # flush 剩余
     remainder = splitter.flush()
@@ -2032,6 +2125,7 @@ async def chat_agent_sse_generator(
         sentence_index += 1
 
     # ── 6. 出口净化 ──────────────────────────────────────────────────
+    _sanitize_started_ms = int(time.time() * 1000)
     narrative = _strip_internal_delegate_markers(narrative)
     narrative = _airlock_sanitize_output(narrative)
     narrative = _apply_response_policy_hard_guard(
@@ -2061,10 +2155,12 @@ async def chat_agent_sse_generator(
                 }
     except Exception:
         pass
+    sanitize_egress_ms = max(0, int(time.time() * 1000) - _sanitize_started_ms)
 
     # ── 7. INPUT_COMPLETED 同步写入 ──────────────────────────────────
     total_latency_ms = int(time.time() * 1000) - ts_ms
     llm_latency_ms = int(time.time() * 1000) - llm_started_ms
+    _precommit_started_ms = int(time.time() * 1000)
 
     try:
         from host_brain.app.dependencies import get_ledger as _get_pre_ledger  # noqa: PLC0415
@@ -2092,6 +2188,22 @@ async def chat_agent_sse_generator(
         })
     except Exception as _ve_exc:
         _logger.debug("[%s] pre-commit INPUT_COMPLETED failed: %s", request_id, _ve_exc)
+    finally:
+        precommit_log_ms = max(0, int(time.time() * 1000) - _precommit_started_ms)
+
+    timings_ms = {
+        "prompt_build_ms": prompt_build_ms,
+        "llm_runtime_resolve_ms": llm_runtime_resolve_ms,
+        "stream_after_first_token_ms": (
+            max(0, llm_latency_ms - int(first_token_ms or 0))
+            if first_token_ms is not None
+            else llm_latency_ms
+        ),
+        "response_intelligence_ms": response_intelligence_ms,
+        "sanitize_egress_ms": sanitize_egress_ms,
+        "precommit_log_ms": precommit_log_ms,
+    }
+    _logger.info("[%s] ChatAgent timings_ms=%s", request_id, timings_ms)
 
     # ── 8. COMMIT ────────────────────────────────────────────────────
     yield _sse({
@@ -2111,6 +2223,8 @@ async def chat_agent_sse_generator(
             "model_id": model_id,
             "render_target_lang": render_target_lang,
             "tts_text_ja": tts_text or None,
+            "timings_ms": timings_ms,
+            "response_intelligence": response_intelligence_meta,
             "pii_stats": {"egress": _pii_egress_stats} if _pii_egress_stats else {},
         },
     })
@@ -2123,6 +2237,7 @@ async def chat_agent_sse_generator(
         tts_sentence_index=tts_sentence_index,
         suppress_tts=_suppress_tts,
         reply_channel=agent_input.reply_channel,
+        voice_outputs_enabled=_voice_outputs_enabled,
     ):
         _commit_emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         _commit_emotion_intensity: float | None = None
@@ -2199,7 +2314,10 @@ async def chat_agent_sse_generator(
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
                 motive_state=prompt_runtime_payload.get("motive_state"),
                 response_policy=response_policy,
-                trace_stage_meta=trace_stage_meta,
+                trace_stage_meta={
+                    **dict(trace_stage_meta or {}),
+                    "voice_outputs_enabled": _voice_outputs_enabled,
+                },
             )
         )
     except Exception as _pp_exc:

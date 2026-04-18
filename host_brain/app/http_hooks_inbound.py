@@ -17,6 +17,9 @@ from host_brain.core.ids import new_request_id
 
 _AUDIT_SILENT_PATH_PREFIXES: tuple[str, ...] = (
     "/monitor/",
+    "/obs/",
+    "/api/ui/",
+    "/internal/tribe_event",
     "/docs",
     "/openapi",
     "/favicon",
@@ -58,11 +61,6 @@ async def add_request_id_and_audit(
                 "client": request.client.host if request.client else "unknown",
             },
         )
-    else:
-        logger.debug(
-            "HTTP request started",
-            extra={"request_id": request_id, "path": path, "method": method},
-        )
     try:
         metrics.inc_request()
         response = await call_next(request)
@@ -80,8 +78,6 @@ async def add_request_id_and_audit(
             or int(response.status_code) >= 400
         ):
             logger.info("HTTP request completed", extra=completed_extra)
-        else:
-            logger.debug("HTTP request completed", extra=completed_extra)
         return response
     except Exception as exc:
         duration_ms = int((time.time() - start_time) * 1000)

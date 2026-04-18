@@ -16,9 +16,10 @@ import asyncio
 import logging
 import os
 import threading
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping, TypeVar
 
 _logger = logging.getLogger("Natsume.startup")
+_AsyncT = TypeVar("_AsyncT")
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +323,34 @@ def collect_dependency_probes_sync() -> dict[str, dict[str, Any]]:
     return result
 
 
+def _run_async_sync(coro_factory: Callable[[], Awaitable[_AsyncT]]) -> _AsyncT:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro_factory())
+
+    result: _AsyncT | None = None
+    error: Exception | None = None
+
+    def _runner() -> None:
+        nonlocal result, error
+        try:
+            result = asyncio.run(coro_factory())
+        except Exception as exc:  # pragma: no cover - forwarded to caller
+            error = exc
+
+    thread = threading.Thread(
+        target=_runner,
+        name="startup-async-warmup",
+        daemon=True,
+    )
+    thread.start()
+    thread.join()
+    if error is not None:
+        raise error
+    return result  # type: ignore[return-value]
+
+
 # ---------------------------------------------------------------------------
 # 启动预热函数（从 dependencies.py 中的 get_xxx 内部逻辑提取）
 # ---------------------------------------------------------------------------
@@ -370,6 +399,144 @@ def warmup_graph_runtime() -> str:
         return f"DEGRADED: {exc}"
 
 
+def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
+    """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
+    try:
+        from host_brain.app.prompt_template_defs import list_prompt_template_definitions  # noqa: PLC0415
+        from host_brain.app.dependencies import (  # noqa: PLC0415
+            get_intent_engine,
+            get_prompt_template_store,
+            get_routing_matrix,
+            get_state_write_arbiter,
+        )
+        from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
+
+        template_count = len(list_prompt_template_definitions())
+        get_prompt_template_store()
+        get_routing_matrix()
+        get_intent_engine()
+        get_state_write_arbiter()
+        get_thalamus_agent()
+
+        warmed_parts = [
+            f"templates={template_count}",
+            "prompt_store=ready",
+            "routing_matrix=ready",
+            "intent_engine=ready",
+            "state_write_arbiter=ready",
+            "thalamus=ready",
+        ]
+
+        if eager_persona:
+            from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
+            from host_brain.persona.emotional_silence import get_silence_engine  # noqa: PLC0415
+            from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
+
+            PersonaEngine.get_instance()
+            get_silence_engine()
+            get_body_sense_model()
+            warmed_parts.append("persona_runtime=ready")
+        else:
+            warmed_parts.append("persona_runtime=lazy")
+
+        _logger.info("Chat runtime 预热完成: %s", warmed_parts)
+        return f"OK ({', '.join(warmed_parts)})"
+    except Exception as exc:
+        _logger.warning("Chat runtime 预热失败（降级）: %s", exc)
+        return f"DEGRADED: {exc}"
+
+
+def warmup_chat_llm_runtime_profiles() -> str:
+    """预热聊天主链最常用的 LLM runtime 解析路径，压低首轮 direct/context chat 冷启动。"""
+    try:
+        from host_brain.app.graph_config_builder import SCENE_CHAT  # noqa: PLC0415
+        from host_brain.app.graph_config_llm_runtime import (  # noqa: PLC0415
+            resolve_chat_agent_llm_runtime,
+            resolve_executive_router_llm_runtime,
+            resolve_host_llm_runtime_async,
+            resolve_subagent_llm_runtime,
+        )
+
+        base_runtime = _run_async_sync(
+            lambda: resolve_host_llm_runtime_async(
+                rollout_key="startup::chat-warmup",
+                scene_type=SCENE_CHAT,
+            )
+        )
+
+        direct_runtime = resolve_chat_agent_llm_runtime(
+            base_runtime=base_runtime,
+            speed_profile="direct_fast",
+        )
+        context_runtime = resolve_chat_agent_llm_runtime(
+            base_runtime=base_runtime,
+            speed_profile="context_fast",
+        )
+        default_runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
+        router_runtime = resolve_executive_router_llm_runtime(base_runtime=base_runtime)
+        subagent_runtime = resolve_subagent_llm_runtime(base_runtime=base_runtime)
+
+        warmed_parts = [
+            f"base={str(base_runtime.get('provider_name') or 'unknown')}:{str(base_runtime.get('model_id') or 'unknown')}",
+            f"direct={str(direct_runtime.get('model_id') or 'unknown')}",
+            f"context={str(context_runtime.get('model_id') or 'unknown')}",
+            f"default={str(default_runtime.get('model_id') or 'unknown')}",
+            f"router={str(router_runtime.get('model_id') or 'unknown')}",
+            f"subagent={str(subagent_runtime.get('model_id') or 'unknown')}",
+        ]
+        _logger.info("Chat LLM runtime 预热完成: %s", warmed_parts)
+        return f"OK ({', '.join(warmed_parts)})"
+    except Exception as exc:
+        _logger.warning("Chat LLM runtime 预热失败（降级）: %s", exc)
+        return f"DEGRADED: {exc}"
+
+
+def warmup_retrieval_runtime_basics() -> str:
+    """预热 retrieval / embedding / Chroma 关键冷启动路径，降低首轮完整 chat 抖动。"""
+    try:
+        from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
+
+        store = get_episodic_store()
+        warm_vector, warm_model_id = store._embed_text("startup retrieval warmup")
+        chroma_hits = store.chroma.search(
+            query_embedding=warm_vector,
+            top_k=1,
+            collection=store.chroma.default_collection,
+        )
+
+        pipeline_name = "SKIPPED"
+        orchestrator_name = "SKIPPED"
+        try:
+            from host_brain.app.dependencies import (  # noqa: PLC0415
+                get_retrieval_orchestrator,
+                get_retrieval_pipeline,
+            )
+
+            pipeline = get_retrieval_pipeline()
+            orchestrator = get_retrieval_orchestrator()
+            pipeline_name = type(pipeline).__name__
+            orchestrator_name = type(orchestrator).__name__
+        except Exception as retrieval_exc:
+            pipeline_name = f"DEGRADED:{retrieval_exc.__class__.__name__}"
+            orchestrator_name = f"DEGRADED:{retrieval_exc.__class__.__name__}"
+            _logger.warning("Retrieval pipeline/orchestrator 预热跳过（降级）: %s", retrieval_exc)
+
+        warmed_parts = [
+            f"embed_model={warm_model_id}",
+            f"embed_dim={len(warm_vector)}",
+            f"collection={store.chroma.default_collection}",
+            f"collection_dim={store._resolve_embedding_dim()}",
+            f"chroma_hits={len(list(chroma_hits or []))}",
+            f"pipeline={pipeline_name}",
+            f"orchestrator={orchestrator_name}",
+        ]
+        _logger.info("Retrieval runtime 预热完成: %s", warmed_parts)
+        return f"OK ({', '.join(warmed_parts)})"
+    except Exception as exc:
+        _logger.warning("Retrieval runtime 预热失败（降级）: %s", exc)
+        return f"DEGRADED: {exc}"
+
+
 def warmup_all(*, eager: bool = False) -> dict[str, str]:
     """执行所有启动预热，返回各模块状态字典。
 
@@ -384,6 +551,9 @@ def warmup_all(*, eager: bool = False) -> dict[str, str]:
     # 快速预热（始终执行）
     statuses["skill_registry"] = warmup_skill_registry()
     statuses["graph_runtime"] = warmup_graph_runtime()
+    statuses["chat_runtime"] = warmup_chat_runtime_basics(eager_persona=eager)
+    statuses["chat_llm_runtime"] = warmup_chat_llm_runtime_profiles()
+    statuses["retrieval_runtime"] = warmup_retrieval_runtime_basics()
 
     # 慢速预热（仅 eager 模式）
     if eager:
@@ -406,5 +576,8 @@ __all__ = [
     "warmup_emotion_timeline",
     "warmup_skill_registry",
     "warmup_graph_runtime",
+    "warmup_chat_runtime_basics",
+    "warmup_chat_llm_runtime_profiles",
+    "warmup_retrieval_runtime_basics",
     "warmup_all",
 ]

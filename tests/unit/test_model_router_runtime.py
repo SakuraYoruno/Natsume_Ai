@@ -262,6 +262,7 @@ def test_chat_runtime_direct_fast_prefers_direct_model_override(monkeypatch) -> 
     assert runtime["model_id"] == "gemini-2.0-flash"
     assert runtime["agent_role"] == "chat_agent_direct"
     assert runtime["llm_api_key"] == "k1"
+    assert runtime["agent_gen_params"]["max_tokens"] == 96
 
 
 def test_chat_runtime_context_fast_prefers_context_or_direct_override(monkeypatch) -> None:
@@ -286,6 +287,27 @@ def test_chat_runtime_context_fast_prefers_context_or_direct_override(monkeypatc
     assert runtime["model_id"] == "gemini-2.5-flash-lite"
     assert runtime["agent_role"] == "chat_agent_context"
     assert runtime["llm_api_key"] == "k1"
+    assert runtime["agent_gen_params"]["max_tokens"] == 96
+    assert runtime["agent_gen_params"]["temperature"] == 0.7
+
+
+def test_chat_runtime_default_profile_sets_output_cap(monkeypatch) -> None:
+    model_router._reset_gemini_key_pool_cursor_for_tests()
+    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
+    monkeypatch.setenv("HOST_GEMINI_KEY_POOL_ALLOW_ENV_FALLBACK", "true")
+    monkeypatch.setenv("HOST_GEMINI_API_KEYS", "k1")
+    monkeypatch.setenv("HOST_CHAT_AGENT_MODEL_ID", "gemini-2.5-pro")
+
+    runtime = graph_builder.resolve_chat_agent_llm_runtime(
+        base_runtime={
+            "provider_name": "gemini",
+            "model_id": "gemini-2.5-pro",
+            "llm_api_key": None,
+        }
+    )
+
+    assert runtime["agent_role"] == "chat_agent"
+    assert runtime["agent_gen_params"]["max_tokens"] == 220
 
 
 def test_subagent_runtime_keeps_legacy_agent_role_value(monkeypatch) -> None:

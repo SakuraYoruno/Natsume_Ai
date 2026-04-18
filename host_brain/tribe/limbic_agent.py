@@ -1303,7 +1303,8 @@ class LimbicAgent:
                 from host_brain.tribe.edge_command_pusher import get_edge_command_pusher  # noqa: PLC0415
                 _pusher = get_edge_command_pusher()
                 if _pusher is not None and _pusher.enabled:
-                    _push_result = _pusher.push_emotion_state(
+                    _push_result = await asyncio.to_thread(
+                        _pusher.push_emotion_state,
                         emotion_tag=emotion_tag,
                         intensity=(
                             float(emotion_intensity)

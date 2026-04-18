@@ -16,6 +16,7 @@ Phase XV 收口架构：
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -54,6 +55,73 @@ from host_brain.app.observability_persist import (  # noqa: F401
 )
 
 _logger = logging.getLogger("Natsume.chat_handler")
+
+
+def _resolve_governor_executor_workers() -> int:
+    raw = str(os.environ.get("HOST_GOVERNOR_EXECUTOR_WORKERS") or "4").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 4
+    return max(2, min(value, 12))
+
+
+_GOVERNOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_resolve_governor_executor_workers(),
+    thread_name_prefix="governor",
+)
+
+
+def _should_use_inline_governor(intent_draft: Dict[str, Any] | None) -> bool:
+    speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
+    return speed_profile in {"direct_fast", "context_fast"}
+
+
+async def _evaluate_governor_with_timing(
+    *,
+    engine: Any,
+    intent_draft: Dict[str, Any] | None,
+    request_id: str,
+    thread_id: str | None,
+    governance_snapshot: Dict[str, Any],
+    inline: bool = False,
+) -> tuple[Dict[str, Any], dict[str, int]]:
+    submit_started_ms = int(time.time() * 1000)
+    timing: dict[str, int] = {
+        "submit_started_ms": submit_started_ms,
+        "executor_started_ms": 0,
+        "executor_finished_ms": 0,
+    }
+
+    def _run() -> Dict[str, Any]:
+        timing["executor_started_ms"] = int(time.time() * 1000)
+        try:
+            return dict(
+                engine.evaluate_intent(
+                    raw_intent=intent_draft,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    governance_snapshot=governance_snapshot,
+                )
+                or {}
+            )
+        finally:
+            timing["executor_finished_ms"] = int(time.time() * 1000)
+
+    if inline:
+        result = _run()
+    else:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(_GOVERNOR_EXECUTOR, _run)
+    finished_ms = int(time.time() * 1000)
+    executor_started_ms = int(timing.get("executor_started_ms") or finished_ms)
+    executor_finished_ms = int(timing.get("executor_finished_ms") or finished_ms)
+    summary = {
+        "total_latency_ms": max(0, finished_ms - submit_started_ms),
+        "queue_wait_ms": max(0, executor_started_ms - submit_started_ms),
+        "execute_ms": max(0, executor_finished_ms - executor_started_ms),
+    }
+    return result, summary
 
 
 def _resolve_sys_mode_narrative(mode: str) -> str:
@@ -157,7 +225,14 @@ async def _unified_chat_sse_generator(
         request_id,
         first_presence_delay_ms,
     )
-    yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
+    try:
+        from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction  # noqa: PLC0415
+
+        mark_recent_foreground_interaction(ts_ms=request_started_ms)
+    except Exception:
+        pass
+    yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id}) + ": keepalive\n\n"
+    await asyncio.sleep(0)
 
     try:
         if intent_draft is None:
@@ -203,22 +278,29 @@ async def _unified_chat_sse_generator(
             )
         else:
             engine = get_intent_engine()
+            use_inline_governor = _should_use_inline_governor(intent_draft)
             governor_started_ms = int(time.time() * 1000)
-            governor_result = await asyncio.to_thread(
-                engine.evaluate_intent,
-                raw_intent=intent_draft,
+            governor_result, governor_timing = await _evaluate_governor_with_timing(
+                engine=engine,
+                intent_draft=intent_draft,
                 request_id=request_id,
                 thread_id=request_body.thread_id,
                 governance_snapshot=governance_snapshot,
+                inline=use_inline_governor,
             )
             governor_latency_ms = int(time.time() * 1000) - governor_started_ms
             if isinstance(governor_result, dict):
                 governor_result.setdefault("latency_ms", governor_latency_ms)
+                governor_result.setdefault("queue_wait_ms", int(governor_timing.get("queue_wait_ms") or 0))
+                governor_result.setdefault("execute_ms", int(governor_timing.get("execute_ms") or 0))
             _logger.info(
-                "[%s] chat_handler governor_latency_ms=%s request_to_governor_ms=%s decision=%s reason=%s",
+                "[%s] chat_handler governor_latency_ms=%s request_to_governor_ms=%s queue_wait_ms=%s execute_ms=%s inline=%s decision=%s reason=%s",
                 request_id,
                 governor_latency_ms,
                 max(0, governor_started_ms - int(request_started_ms or ts_ms)),
+                int(governor_timing.get("queue_wait_ms") or 0),
+                int(governor_timing.get("execute_ms") or 0),
+                use_inline_governor,
                 str((dict(governor_result or {})).get("decision") or ""),
                 str((dict(governor_result or {})).get("reason_code") or ""),
             )
@@ -239,6 +321,7 @@ async def _unified_chat_sse_generator(
             return
 
         yield _sse({"phase": "PRESENCE", "event": "GOV_APPROVED", "request_id": request_id})
+        await asyncio.sleep(0)
 
         # ── 鉴权后分类场景 ────────────────────────────────────────────────
         # 修复审计问题 #3：对客户端显式传入的 scene_type 进行合法性校验，

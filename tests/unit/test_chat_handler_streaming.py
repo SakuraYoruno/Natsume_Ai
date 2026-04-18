@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import importlib
 from typing import Any
 
 import pytest
 from starlette.requests import Request
 
 from host_brain.app.chat_handler import handle_chat
+import host_brain.app.chat_handler as chat_handler_module
 from host_brain.app.schemas import ChatRequest
 
 
@@ -124,3 +126,53 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         remaining.append(_parse_sse_chunk(chunk))
 
     assert any(event.get("phase") == "COMMIT" for event in remaining)
+
+
+def test_resolve_governor_executor_workers_defaults_to_four(monkeypatch) -> None:
+    monkeypatch.delenv("HOST_GOVERNOR_EXECUTOR_WORKERS", raising=False)
+    reloaded = importlib.reload(chat_handler_module)
+
+    assert reloaded._resolve_governor_executor_workers() == 4
+
+
+@pytest.mark.asyncio
+async def test_evaluate_governor_with_timing_reports_queue_and_execute_ms() -> None:
+    engine = _FakeIntentEngine()
+
+    result, timing = await chat_handler_module._evaluate_governor_with_timing(
+        engine=engine,
+        intent_draft={"route": "chat"},
+        request_id="req-governor-timing",
+        thread_id="thread-1",
+        governance_snapshot={},
+    )
+
+    assert result["decision"] == "APPROVE"
+    assert timing["total_latency_ms"] >= 0
+    assert timing["queue_wait_ms"] >= 0
+    assert timing["execute_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_governor_with_timing_inline_mode_skips_queue_wait() -> None:
+    engine = _FakeIntentEngine()
+
+    result, timing = await chat_handler_module._evaluate_governor_with_timing(
+        engine=engine,
+        intent_draft={"route": "chat", "chat_speed_profile": "context_fast"},
+        request_id="req-governor-inline",
+        thread_id="thread-1",
+        governance_snapshot={},
+        inline=True,
+    )
+
+    assert result["decision"] == "APPROVE"
+    assert timing["queue_wait_ms"] == 0
+    assert timing["execute_ms"] >= 0
+
+
+def test_should_use_inline_governor_only_for_fast_chat_profiles() -> None:
+    assert chat_handler_module._should_use_inline_governor({"chat_speed_profile": "direct_fast"}) is True
+    assert chat_handler_module._should_use_inline_governor({"chat_speed_profile": "context_fast"}) is True
+    assert chat_handler_module._should_use_inline_governor({"chat_speed_profile": "normal"}) is False
+    assert chat_handler_module._should_use_inline_governor({"route": "chat"}) is False

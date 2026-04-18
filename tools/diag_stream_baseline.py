@@ -189,9 +189,13 @@ def main() -> int:
     url = f"{str(args.base_url).rstrip('/')}/{str(args.path).lstrip('/')}"
     results: list[StreamRunResult] = []
 
-    with httpx.Client(http2=False) as client:
-        for i in range(1, args.runs + 1):
-            message = args.messages[(i - 1) % len(args.messages)]
+    for i in range(1, args.runs + 1):
+        message = args.messages[(i - 1) % len(args.messages)]
+        with httpx.Client(
+            http2=False,
+            trust_env=False,
+            headers={"Connection": "close"},
+        ) as client:
             row = _read_sse_run(
                 client=client,
                 url=url,
@@ -200,12 +204,12 @@ def main() -> int:
                 session_prefix=args.session_prefix,
                 timeout_s=float(args.timeout_s),
             )
-            results.append(row)
-            print(
-                f"[run {i:02d}] ok={row.ok} first_event={row.first_event_ms}ms "
-                f"first_render={row.first_render_ms}ms commit={row.commit_ms}ms "
-                f"retrieval={row.retrieval_status or '-'}"
-            )
+        results.append(row)
+        print(
+            f"[run {i:02d}] ok={row.ok} first_event={row.first_event_ms}ms "
+            f"first_render={row.first_render_ms}ms commit={row.commit_ms}ms "
+            f"retrieval={row.retrieval_status or '-'}"
+        )
 
     _print_summary(results)
     return 0

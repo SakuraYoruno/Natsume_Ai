@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -12,6 +14,81 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
+
+
+def _resolve_foreground_chat_cooldown_ms() -> int:
+    raw = str(os.environ.get("HOST_DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN_MS") or "15000").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 15_000
+    return max(0, min(value, 120_000))
+
+
+def _resolve_background_tick_foreground_cooldown_ms() -> int:
+    raw = str(os.environ.get("HOST_BACKGROUND_TICK_FOREGROUND_CHAT_COOLDOWN_MS") or "90000").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 90_000
+    return max(0, min(value, 300_000))
+
+
+_FOREGROUND_INTERACTION_LOCK = threading.Lock()
+_FOREGROUND_INTERACTION_CACHE: dict[str, Any] = {
+    "ts_ms": 0,
+    "speed_profile": "",
+}
+
+
+def mark_recent_foreground_interaction(
+    *,
+    ts_ms: int | None = None,
+    speed_profile: str | None = None,
+) -> None:
+    with _FOREGROUND_INTERACTION_LOCK:
+        _FOREGROUND_INTERACTION_CACHE["ts_ms"] = int(ts_ms or now_ms())
+        if speed_profile is not None:
+            _FOREGROUND_INTERACTION_CACHE["speed_profile"] = str(speed_profile or "").strip().lower()
+
+
+def _resolve_recent_foreground_interaction(*, current_ts_ms: int) -> dict[str, Any]:
+    cooldown_ms = _resolve_foreground_chat_cooldown_ms()
+    with _FOREGROUND_INTERACTION_LOCK:
+        last_ts_ms = int(_FOREGROUND_INTERACTION_CACHE.get("ts_ms") or 0)
+        speed_profile = str(_FOREGROUND_INTERACTION_CACHE.get("speed_profile") or "").strip().lower()
+    active = cooldown_ms > 0 and last_ts_ms > 0 and (int(current_ts_ms) - last_ts_ms) < cooldown_ms
+    return {
+        "active": bool(active),
+        "cooldown_ms": cooldown_ms,
+        "last_ts_ms": last_ts_ms,
+        "speed_profile": speed_profile,
+    }
+
+
+def resolve_recent_foreground_interaction_state(*, current_ts_ms: int | None = None) -> dict[str, Any]:
+    return _resolve_recent_foreground_interaction(current_ts_ms=int(current_ts_ms or now_ms()))
+
+
+def resolve_background_tick_guard_state(*, current_ts_ms: int | None = None) -> dict[str, Any]:
+    ts_ms = int(current_ts_ms or now_ms())
+    recent = _resolve_recent_foreground_interaction(current_ts_ms=ts_ms)
+    cooldown_ms = _resolve_background_tick_foreground_cooldown_ms()
+    last_ts_ms = int(recent.get("last_ts_ms") or 0)
+    active = cooldown_ms > 0 and last_ts_ms > 0 and (ts_ms - last_ts_ms) < cooldown_ms
+    remaining_ms = max(0, cooldown_ms - max(0, ts_ms - last_ts_ms)) if active else 0
+    return {
+        "active": bool(active),
+        "cooldown_ms": cooldown_ms,
+        "cooldown_remaining_ms": remaining_ms,
+        "last_ts_ms": last_ts_ms,
+        "speed_profile": str(recent.get("speed_profile") or "").strip().lower(),
+    }
+
+
+def _is_recursive_glymphatic_tick_source(source: str) -> bool:
+    normalized = str(source or "").strip().lower()
+    return normalized.startswith("glymphatic_deep_clean")
 
 
 @dataclass(slots=True)
@@ -71,17 +148,27 @@ class DefaultModeAgent:
         focus = "self"
         reason = ""
         llm_meta: dict[str, Any] = {}
-        try:
-            note, focus, reason, llm_meta = generate_inner_activity_note(
-                persona_user_id=user_id,
-                absence_band=absence_band,
-                offline_hours=offline_hours,
-                inner_state=resolved_inner_state,
-                now_ms=ts_ms,
-                topic_phrase=str(topic_phrase or ""),
-            )
-        except Exception as exc:
-            reason = f"DEFAULT_MODE_NOTE_FAILED:{str(exc)[:64]}"
+        recent_foreground = _resolve_recent_foreground_interaction(current_ts_ms=ts_ms)
+        suppress_llm_note = source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active"))
+        if suppress_llm_note:
+            reason = "DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN"
+            llm_meta = {
+                "suppressed": True,
+                "foreground_cooldown_ms": int(recent_foreground.get("cooldown_ms") or 0),
+                "foreground_speed_profile": str(recent_foreground.get("speed_profile") or ""),
+            }
+        else:
+            try:
+                note, focus, reason, llm_meta = generate_inner_activity_note(
+                    persona_user_id=user_id,
+                    absence_band=absence_band,
+                    offline_hours=offline_hours,
+                    inner_state=resolved_inner_state,
+                    now_ms=ts_ms,
+                    topic_phrase=str(topic_phrase or ""),
+                )
+            except Exception as exc:
+                reason = f"DEFAULT_MODE_NOTE_FAILED:{str(exc)[:64]}"
 
         if not note:
             anticipation = list(offline_state.get("anticipation_topics") or [])
@@ -119,6 +206,10 @@ class DefaultModeAgent:
             "llm_meta": dict(llm_meta or {}),
             "ts_ms": ts_ms,
         }
+        suppress_background_side_effects = (
+            (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
+            or _is_recursive_glymphatic_tick_source(source)
+        )
         prev = self.state_registry.get_state("default_mode_agent") or {}
         prev_state = dict(prev.get("state") or {})
         prev_state["last_tick"] = result
@@ -131,6 +222,14 @@ class DefaultModeAgent:
         prev_state["last_tick_ts_ms"] = ts_ms
         prev_state["tick_count"] = int(prev_state.get("tick_count") or 0) + 1
         self.state_registry.set_state("default_mode_agent", prev_state, writer="default_mode_agent")
+
+        if suppress_background_side_effects:
+            result["background_side_effects_suppressed"] = True
+            if _is_recursive_glymphatic_tick_source(source):
+                result["reason_code"] = "DEFAULT_MODE_GLYMPHATIC_RECURSION_SUPPRESSED"
+                result["llm_meta"].setdefault("recursive_glymphatic_source", True)
+            result["llm_meta"].setdefault("background_side_effects_suppressed", True)
+            return result
 
         emit_tribe_event(
             event_type="DEFAULT_MODE_TICKED",
@@ -253,6 +352,11 @@ class DefaultModeAgent:
 
     async def _on_conversation_ended(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
+        if bool(payload.get("skip_default_mode_inner_activity")):
+            return
+        speed_profile = str(payload.get("chat_speed_profile") or "").strip().lower()
+        if speed_profile in {"direct_fast", "context_fast"}:
+            return
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(
             self.tick_idle_cycle,
@@ -278,7 +382,12 @@ def set_default_mode_agent(agent: DefaultModeAgent | None) -> None:
     _DEFAULT_MODE_AGENT = agent
 
 
-__all__ = ["DefaultModeAgent", "get_default_mode_agent", "set_default_mode_agent"]
+__all__ = [
+    "DefaultModeAgent",
+    "get_default_mode_agent",
+    "set_default_mode_agent",
+    "mark_recent_foreground_interaction",
+]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -11,6 +12,53 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
+
+
+def _resolve_noop_cycle_emit_cooldown_ms() -> int:
+    raw = str(os.getenv("HOST_GLYMPHATIC_NOOP_EMIT_COOLDOWN_MS", "12000")).strip()
+    try:
+        return max(0, int(raw))
+    except Exception:
+        return 12000
+
+
+def _should_suppress_noop_cycle_event(
+    *,
+    current_cycle: dict[str, Any],
+    previous_cycle: dict[str, Any],
+    now_ts_ms: int,
+) -> bool:
+    if not previous_cycle:
+        return False
+    if bool(current_cycle.get("executed")):
+        return False
+    if bool(previous_cycle.get("executed")):
+        return False
+    if float(current_cycle.get("consolidation_score") or 0.0) > 0.0:
+        return False
+    if float(current_cycle.get("noise_decay_factor") or 0.0) > 0.0:
+        return False
+    if bool(current_cycle.get("memory_written")):
+        return False
+    cooldown_ms = _resolve_noop_cycle_emit_cooldown_ms()
+    if cooldown_ms <= 0:
+        return False
+    previous_ts_ms = int(previous_cycle.get("ts_ms") or 0)
+    if previous_ts_ms <= 0 or (now_ts_ms - previous_ts_ms) >= cooldown_ms:
+        return False
+    comparable_keys = (
+        "executed",
+        "reason_code",
+        "phase",
+        "sleep_pressure",
+        "consolidation_score",
+        "noise_decay_factor",
+        "memory_layers_available",
+        "memory_write_type",
+        "homeostasis_status",
+        "memory_written",
+    )
+    return all(current_cycle.get(key) == previous_cycle.get(key) for key in comparable_keys)
 
 
 @dataclass(slots=True)
@@ -104,14 +152,22 @@ class GlymphaticAgent:
         result["memory_written"] = memory_written
         prev = self.state_registry.get_state("glymphatic_agent") or {}
         prev_state = dict(prev.get("state") or {})
+        previous_cycle = dict(prev_state.get("last_cycle") or {})
+        suppress_noop_emit = _should_suppress_noop_cycle_event(
+            current_cycle=result,
+            previous_cycle=previous_cycle,
+            now_ts_ms=resolved_ts,
+        )
+        result["event_suppressed"] = suppress_noop_emit
         prev_state["last_cycle"] = result
         prev_state["cycle_count"] = int(prev_state.get("cycle_count") or 0) + 1
         self.state_registry.set_state("glymphatic_agent", prev_state, writer="glymphatic_agent")
-        emit_tribe_event(
-            event_type="GLYMPHATIC_CYCLE_COMPLETED",
-            source_agent="glymphatic_agent",
-            payload=result,
-        )
+        if not suppress_noop_emit:
+            emit_tribe_event(
+                event_type="GLYMPHATIC_CYCLE_COMPLETED",
+                source_agent="glymphatic_agent",
+                payload=result,
+            )
 
         # T-290：恢复周期完成且巩固分数达标时，联动 LimbicAgent 触发轻度正向情绪偏移（恢复感）
         if recovery_window and consolidation_score >= 0.45:
@@ -286,6 +342,7 @@ class GlymphaticAgent:
             "noise_decay_factor": float(last_cycle.get("noise_decay_factor") or 0.0),
             "homeostasis_status": str(last_cycle.get("homeostasis_status") or "stable"),
             "memory_written": bool(last_cycle.get("memory_written", False)),
+            "event_suppressed": bool(last_cycle.get("event_suppressed", False)),
             "cycle_count": int(prev_state.get("cycle_count") or 0),
             "last_updated_ts_ms": int(last_cycle.get("ts_ms") or 0),
         }
