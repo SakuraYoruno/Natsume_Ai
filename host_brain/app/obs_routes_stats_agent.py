@@ -21,6 +21,17 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 logger = logging.getLogger("Natsume.obs")
 
 
+def _resolve_fetch_table(ledger, *candidates: str) -> str | None:
+    resolver = getattr(ledger, "resolve_fetch_table", None)
+    if callable(resolver):
+        return resolver(*candidates)
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return None
+
+
 from .obs_routes_core import (
     _build_trace_summary,
     router,
@@ -168,10 +179,13 @@ def get_memory_stats(
     since_ms = now - window_minutes * 60 * 1000
 
     # ── EpisodicStore 写入统计 ────────────────────────────────────────────
-    try:
-        episodic_rows = ledger.fetch_by_time_range("episodic_store_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        episodic_rows = []
+    episodic_rows = []
+    episodic_table = _resolve_fetch_table(ledger, "episodic_store_log")
+    if episodic_table:
+        try:
+            episodic_rows = ledger.fetch_by_time_range(episodic_table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            episodic_rows = []
 
     ep_total = len(episodic_rows)
     ep_success = sum(1 for r in episodic_rows if str(r.get("status", "")).upper() in ("OK", "WRITTEN", "SUCCESS"))
@@ -180,10 +194,13 @@ def get_memory_stats(
     ep_last = max((r.get("ts_ms") or 0 for r in episodic_rows), default=None)
 
     # ── MemoryGuard 拒绝统计 ──────────────────────────────────────────────
-    try:
-        guard_rows = ledger.fetch_by_time_range("memory_guard_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        guard_rows = []
+    guard_rows = []
+    guard_table = _resolve_fetch_table(ledger, "memory_guard_log")
+    if guard_table:
+        try:
+            guard_rows = ledger.fetch_by_time_range(guard_table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            guard_rows = []
 
     # 从 error_log 中补充 MemoryGuard 相关记录（MEMORY_GUARD_FILTERED 标签）
     try:
@@ -208,10 +225,13 @@ def get_memory_stats(
     guard_last = max((r.get("ts_ms") or 0 for r in all_guard_rows), default=None)
 
     # ── ContextCompressor 压缩统计 ────────────────────────────────────────
-    try:
-        compress_rows = ledger.fetch_by_time_range("context_compress_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        compress_rows = []
+    compress_rows = []
+    compress_table = _resolve_fetch_table(ledger, "context_compress_log")
+    if compress_table:
+        try:
+            compress_rows = ledger.fetch_by_time_range(compress_table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            compress_rows = []
 
     comp_total = len(compress_rows)
     comp_success = sum(1 for r in compress_rows if str(r.get("status", "")).upper() in ("OK", "DONE", "SUCCESS"))
@@ -230,10 +250,13 @@ def get_memory_stats(
     comp_last = max((r.get("ts_ms") or 0 for r in compress_rows), default=None)
 
     # ── LongTermDistiller 蒸馏统计 ────────────────────────────────────────
-    try:
-        distill_rows = ledger.fetch_by_time_range("distill_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        distill_rows = []
+    distill_rows = []
+    distill_table = _resolve_fetch_table(ledger, "distill_log")
+    if distill_table:
+        try:
+            distill_rows = ledger.fetch_by_time_range(distill_table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            distill_rows = []
 
     distill_total = len(distill_rows)
     distill_success = sum(1 for r in distill_rows if str(r.get("status", "")).upper() in ("OK", "DONE", "SUCCESS"))
@@ -556,5 +579,3 @@ def get_memory_resident_context():
         prompt_context_available=bool(latest_snapshot),
         timestamp=now,
     )
-
-

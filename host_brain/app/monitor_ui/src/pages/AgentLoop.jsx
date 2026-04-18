@@ -10,15 +10,14 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import {
-  fetchAgentLoopHistory,
-  fetchAgentLoopStats,
-  fetchUIAssertionStats,
-} from '../api/obs.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { resolveLoadState } from '../models/loadState.js'
+import { useAgentLoopConsoleQuery } from '../queries/agentLoopQueries.js'
+import useAppStore from '../store/useAppStore.js'
 
 function parseSseBlock(block) {
   const data = block
@@ -73,6 +72,9 @@ function PhaseBadge({ phase }) {
 }
 
 export default function AgentLoop() {
+  const pollingEnabled = useAppStore((state) => state.pollingEnabled)
+  const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
   const [goal, setGoal] = useState('')
   const [maxRounds, setMaxRounds] = useState(5)
   const [roundTimeout, setRoundTimeout] = useState(30)
@@ -83,58 +85,26 @@ export default function AgentLoop() {
   const [running, setRunning] = useState(false)
   const [events, setEvents] = useState([])
   const [loopResult, setLoopResult] = useState(null)
-  const [agentInfo, setAgentInfo] = useState(null)
-  const [infoLoading, setInfoLoading] = useState(false)
-  const [infoError, setInfoError] = useState(null)
-  const [statsLoading, setStatsLoading] = useState(true)
-  const [statsError, setStatsError] = useState(null)
-  const [uiAssertionData, setUiAssertionData] = useState(null)
-  const [agentLoopStats, setAgentLoopStats] = useState(null)
-  const [loopHistory, setLoopHistory] = useState([])
   const abortRef = useRef(null)
   const eventsEndRef = useRef(null)
-
-  const loadInfo = useCallback(async () => {
-    setInfoLoading(true)
-    setInfoError(null)
-    try {
-      const response = await fetch('/v1/agent/info')
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      setAgentInfo(await response.json())
-    } catch (error) {
-      setAgentInfo(null)
-      setInfoError(error?.message || '配置加载失败')
-    } finally {
-      setInfoLoading(false)
-    }
-  }, [])
-
-  const loadStats = useCallback(async () => {
-    setStatsLoading(true)
-    setStatsError(null)
-    try {
-      const [uiRes, statsRes, historyRes] = await Promise.all([
-        fetchUIAssertionStats({ window_minutes: 60 }).catch(() => null),
-        fetchAgentLoopStats({ window_minutes: 1440, limit: 6 }).catch(() => null),
-        fetchAgentLoopHistory({ window_minutes: 1440, limit: 10 }).catch(() => null),
-      ])
-
-      setUiAssertionData(uiRes)
-      setAgentLoopStats(statsRes)
-      setLoopHistory(historyRes?.items ?? [])
-    } catch (error) {
-      setStatsError(error?.message || 'Agent Loop 统计加载失败')
-    } finally {
-      setStatsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadInfo()
-    loadStats()
-  }, [loadInfo, loadStats])
+  const {
+    agentInfo,
+    infoError,
+    uiAssertionData,
+    agentLoopStats,
+    loopHistory,
+    statsError,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+    stale,
+  } = useAgentLoopConsoleQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -148,6 +118,15 @@ export default function AgentLoop() {
       latency: loopResult.total_latency_ms ?? '—',
     }
   }, [loopResult])
+
+  const agentLoopLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: error || (infoError ? new Error(infoError) : null) || (statsError ? new Error(statsError) : null),
+    hasData: Boolean(agentInfo || agentLoopStats || uiAssertionData || loopHistory.length > 0),
+    hasSamples: Boolean((agentLoopStats?.total_loops ?? 0) > 0 || loopHistory.length > 0 || (uiAssertionData?.total_assertions ?? 0) > 0),
+    available: true,
+    stale,
+  })
 
   const handleRun = useCallback(async () => {
     if (!goal.trim()) return
@@ -199,7 +178,7 @@ export default function AgentLoop() {
         }
       }
 
-      await loadStats()
+      await refetch()
     } catch (error) {
       if (error.name !== 'AbortError') {
         setEvents((previous) => [
@@ -211,7 +190,7 @@ export default function AgentLoop() {
       setRunning(false)
       abortRef.current = null
     }
-  }, [goal, imageConsent, loadStats, maxRounds, roundTimeout, totalTimeout, useEdgeRpc, useMock])
+  }, [goal, imageConsent, maxRounds, refetch, roundTimeout, totalTimeout, useEdgeRpc, useMock])
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort()
@@ -228,8 +207,8 @@ export default function AgentLoop() {
           </h1>
           <p className="text-sm text-gray-500">执行视觉自动化回路，实时观察轮次、阶段和最终结果。</p>
         </div>
-        <button className="btn-secondary" onClick={() => Promise.allSettled([loadInfo(), loadStats()])} disabled={infoLoading || statsLoading}>
-          <RefreshCw size={14} className={infoLoading || statsLoading ? 'animate-spin' : ''} />
+        <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+          <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
           刷新
         </button>
       </div>
@@ -246,10 +225,22 @@ export default function AgentLoop() {
           `UI 断言：${uiAssertionData?.total_assertions ?? 0}`,
           `敏感拦截：${uiAssertionData?.sensitive_blocked ?? 0}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={agentLoopLoadState}
+            sampleSize={(agentLoopStats?.total_loops ?? 0) + loopHistory.length}
+            sampleLabel="执行样本"
+            updatedAt={lastUpdatedAt}
+            source="agent info + loop stats + history"
+            definition="Agent Loop 页把控制台配置、最近执行与断言守卫摘要统一交给 query 层，页面本身只保留运行控制与 SSE 事件流。"
+          />
+        )}
       />
 
       {infoError ? <NoticeBanner variant="warning" title="Agent 配置加载失败">{infoError}</NoticeBanner> : null}
       {statsError ? <NoticeBanner variant="error" title="统计加载失败">{statsError}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error" title="Agent Loop 数据加载失败">{error.message}</NoticeBanner> : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="目标达成率" value={agentLoopStats?.achievement_rate != null ? `${agentLoopStats.achievement_rate}%` : '—'} hint={`成功 ${agentLoopStats?.achieved ?? 0} / ${agentLoopStats?.total_loops ?? 0}`} tone="text-green-600" />

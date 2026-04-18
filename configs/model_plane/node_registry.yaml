@@ -7,7 +7,7 @@ nodes:
   chat_direct_ja:
     description: "聊天单节点日文直出（ChatDirect.v1）"
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-2.5-flash-lite
     temperature: 0.45
     max_output_tokens: 420
     node_allowlist_envs: [dev, staging, prod]
@@ -23,7 +23,7 @@ nodes:
   core_reasoner_secondary:
     description: "主推理备选（CoreDraft.v1）"
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-2.5-flash-lite
     temperature: 0.30
     max_output_tokens: 360
     node_allowlist_envs: [dev, staging, prod]
@@ -39,7 +39,7 @@ nodes:
   tool_planner:
     description: "工具选择与参数草案（CoreDraft.v1）"
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-2.5-flash-lite
     temperature: 0.20
     max_output_tokens: 280
     node_allowlist_envs: [dev, staging, prod]
@@ -63,7 +63,7 @@ nodes:
   renderer_ja_c_style:
     description: "日文 C 风格渲染（RenderDraft.v1）"
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-2.5-flash-lite
     temperature: 0.45
     max_output_tokens: 360
     node_allowlist_envs: [dev, staging, prod]
@@ -99,7 +99,7 @@ nodes:
   dispatch_agent_node:
     description: "DispatchAgent 意图路由节点（Phase XV）"
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-2.5-flash-lite
     temperature: 0.10
     max_output_tokens: 400
     node_allowlist_envs: [dev, staging, prod]
@@ -109,7 +109,7 @@ nodes:
   sub_agent_node:
     description: "SubAgent ReAct 循环节点（Phase XV）"
     provider: gemini
-    model_id: gemini-2.5-flash
+    model_id: gemini-2.5-pro
     temperature: 0.30
     max_output_tokens: 4000
     node_allowlist_envs: [dev, staging, prod]

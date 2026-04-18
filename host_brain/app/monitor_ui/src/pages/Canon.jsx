@@ -1,14 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   approveCanonProposal,
-  fetchCanonDocuments,
-  fetchCanonProposals,
-  fetchVaultStats,
   rejectCanonProposal,
   rollbackCanonProposal,
   submitCanonProposal,
-} from '../api/obs.js'
+} from '../api/canon.js'
 import {
   BookOpen,
   CheckCircle,
@@ -24,8 +21,15 @@ import {
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SectionHeading from '../components/SectionHeading.jsx'
+import { resolveLoadState } from '../models/loadState.js'
+import {
+  useCanonDocumentsQuery,
+  useCanonProposalsQuery,
+  useCanonVaultStatsQuery,
+} from '../queries/canonQueries.js'
 
 const STATUS_STYLES = {
   pending: 'border-yellow-200 bg-yellow-100 text-yellow-700',
@@ -347,67 +351,65 @@ function DocCard({ doc }) {
 }
 
 export default function Canon() {
-  const [proposals, setProposals] = useState([])
-  const [documents, setDocuments] = useState([])
   const [statusFilter, setStatusFilter] = useState('')
   const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [docsLoading, setDocsLoading] = useState(false)
-  const [error, setError] = useState('')
   const [showSubmitModal, setShowSubmitModal] = useState(false)
   const [activeTab, setActiveTab] = useState('proposals')
-  const [vaultData, setVaultData] = useState(null)
   const [docKeyword, setDocKeyword] = useState('')
+  const {
+    proposalsData,
+    proposals,
+    total,
+    proposalsError,
+    loading: proposalsLoading,
+    refreshing: proposalsRefreshing,
+    stale: proposalsStale,
+    lastUpdatedAt: proposalsUpdatedAt,
+    refetch: refetchProposals,
+  } = useCanonProposalsQuery({
+    status: statusFilter,
+    page,
+    pageSize: PAGE_SIZE,
+  })
+  const {
+    documentsData,
+    documents,
+    documentsError,
+    loading: documentsLoading,
+    refreshing: documentsRefreshing,
+    stale: documentsStale,
+    lastUpdatedAt: documentsUpdatedAt,
+    refetch: refetchDocuments,
+  } = useCanonDocumentsQuery()
+  const {
+    vaultData,
+    vaultError,
+    loading: vaultLoading,
+    refreshing: vaultRefreshing,
+    stale: vaultStale,
+    lastUpdatedAt: vaultUpdatedAt,
+    refetch: refetchVaultStats,
+  } = useCanonVaultStatsQuery({ limit: 10 })
 
-  const loadProposals = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const data = await fetchCanonProposals({
-        status: statusFilter || undefined,
-        page,
-        page_size: PAGE_SIZE,
-      })
-      setProposals(data?.items || [])
-      setTotal(data?.total || 0)
-    } catch (loadError) {
-      setError(loadError.message || '提案加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [page, statusFilter])
-
-  const loadDocuments = useCallback(async () => {
-    setDocsLoading(true)
-    setError('')
-    try {
-      const data = await fetchCanonDocuments()
-      setDocuments(data?.items || data?.documents || [])
-    } catch (loadError) {
-      setError(loadError.message || '文档加载失败')
-    } finally {
-      setDocsLoading(false)
-    }
-  }, [])
-
-  const loadVaultStats = useCallback(async () => {
-    try {
-      const data = await fetchVaultStats({ limit: 10 })
-      setVaultData(data)
-    } catch {
-      setVaultData(null)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'proposals') {
-      void loadProposals()
-    } else {
-      void loadDocuments()
-    }
-    void loadVaultStats()
-  }, [activeTab, loadDocuments, loadProposals, loadVaultStats])
+  const activeError = activeTab === 'proposals' ? proposalsError : documentsError
+  const activeLoadState = resolveLoadState({
+    loading: activeTab === 'proposals'
+      ? proposalsLoading || proposalsRefreshing
+      : documentsLoading || documentsRefreshing,
+    error: activeError,
+    hasData: activeTab === 'proposals' ? Boolean(proposalsData) : Boolean(documentsData),
+    hasSamples: activeTab === 'proposals' ? total > 0 : documents.length > 0,
+    available: activeTab === 'proposals' ? Boolean(proposalsData) : Boolean(documentsData),
+    stale: activeTab === 'proposals' ? proposalsStale : documentsStale,
+  })
+  const vaultLoadState = resolveLoadState({
+    loading: vaultLoading || vaultRefreshing,
+    error: vaultError,
+    hasData: Boolean(vaultData),
+    hasSamples: Number(vaultData?.total_manifests ?? 0) > 0,
+    available: Boolean(vaultData),
+    stale: vaultStale,
+  })
 
   const handleApprove = async (item) => {
     if (!window.confirm(`确认通过提案 ${item.proposal_id || '—'}？`)) {
@@ -419,7 +421,7 @@ export default function Canon() {
         proposed_tags: [],
         proposed_body: item.summary || '',
       })
-      await loadProposals()
+      await Promise.allSettled([refetchProposals(), refetchDocuments(), refetchVaultStats()])
       toast.success('提案已通过')
     } catch (actionError) {
       toast.error(`审核失败：${actionError.message}`)
@@ -433,7 +435,7 @@ export default function Canon() {
     }
     try {
       await rejectCanonProposal(item.proposal_id, { reason })
-      await loadProposals()
+      await Promise.allSettled([refetchProposals(), refetchVaultStats()])
       toast.success('提案已拒绝')
     } catch (actionError) {
       toast.error(`拒绝失败：${actionError.message}`)
@@ -447,7 +449,7 @@ export default function Canon() {
     }
     try {
       await rollbackCanonProposal(item.proposal_id, { rollback_reason: reason })
-      await loadProposals()
+      await Promise.allSettled([refetchProposals(), refetchDocuments(), refetchVaultStats()])
       toast.success('提案已回滚')
     } catch (actionError) {
       toast.error(`回滚失败：${actionError.message}`)
@@ -456,7 +458,7 @@ export default function Canon() {
 
   const handleSubmit = async (formData) => {
     await submitCanonProposal(formData)
-    await loadProposals()
+    await Promise.allSettled([refetchProposals(), refetchVaultStats()])
     toast.success('提案已提交')
   }
 
@@ -487,20 +489,46 @@ export default function Canon() {
             `文档数：${documents.length}`,
             `清单：${vaultData?.total_manifests ?? 0}`,
           ]}
+          aside={(
+            <SampleMeta
+              className="max-w-md"
+              loadState={activeLoadState}
+              sampleSize={activeTab === 'proposals' ? total : documents.length}
+              sampleLabel={activeTab === 'proposals' ? '提案' : '文档'}
+              updatedAt={activeTab === 'proposals' ? proposalsUpdatedAt : documentsUpdatedAt}
+              source={activeTab === 'proposals' ? 'canon proposals' : 'canon documents'}
+              definition={
+                activeTab === 'proposals'
+                  ? '提案审核与主设定文档现在拆成独立查询；当前标签页的失败、无样本和过期状态会单独表达。'
+                  : '主设定文档与提案列表分离取数，切换标签页不会再把另一块数据的失败混在一起。'
+              }
+            />
+          )}
         />
 
         <div className="flex items-center gap-2">
           <button
             className="flex items-center gap-1.5 rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50"
             onClick={() => {
-              if (activeTab === 'proposals') {
-                void loadProposals()
-              } else {
-                void loadDocuments()
-              }
+              void Promise.allSettled([
+                activeTab === 'proposals' ? refetchProposals() : refetchDocuments(),
+                refetchVaultStats(),
+              ])
             }}
           >
-            <RefreshCw size={13} className={loading || docsLoading ? 'animate-spin' : ''} />
+            <RefreshCw
+              size={13}
+              className={
+                proposalsLoading
+                || proposalsRefreshing
+                || documentsLoading
+                || documentsRefreshing
+                || vaultLoading
+                || vaultRefreshing
+                  ? 'animate-spin'
+                  : ''
+              }
+            />
             刷新
           </button>
           <button
@@ -513,6 +541,12 @@ export default function Canon() {
         </div>
       </div>
 
+      {!vaultData && vaultError ? (
+        <NoticeBanner variant="warning" title="变更清单统计暂不可用">
+          {vaultError}
+        </NoticeBanner>
+      ) : null}
+
       {vaultData ? (
         <div className="card border border-gray-200 p-4">
           <SectionHeading icon={Lock} title="变更清单统计" tone="text-violet-600" />
@@ -522,6 +556,23 @@ export default function Canon() {
             <MetricCard label="已撤销" value={vaultData.undone_count ?? 0} variant="stacked" tone="text-orange-500" />
             <MetricCard label="已回收" value={vaultData.gc_count ?? 0} variant="stacked" tone="text-gray-500" />
           </div>
+
+          <div className="mb-3">
+            <SampleMeta
+              loadState={vaultLoadState}
+              sampleSize={vaultData.total_manifests ?? 0}
+              sampleLabel="清单"
+              updatedAt={vaultUpdatedAt}
+              source="vault manifest"
+              definition="变更清单统计独立于提案/文档加载；如果这里只失败，不会再误伤当前标签页的主数据状态。"
+            />
+          </div>
+
+          {vaultError ? (
+            <NoticeBanner variant="warning" title="变更清单统计暂不可用">
+              {vaultError}
+            </NoticeBanner>
+          ) : null}
 
           {vaultData.total_manifests > 0 ? (
             <div className="mb-3">
@@ -604,7 +655,7 @@ export default function Canon() {
         ))}
       </div>
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {activeError ? <NoticeBanner variant="error">{activeError}</NoticeBanner> : null}
 
       {activeTab === 'proposals' ? (
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
@@ -639,7 +690,7 @@ export default function Canon() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {loading ? (
+                {proposalsLoading || proposalsRefreshing ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
                       <span className="inline-flex items-center gap-2">
@@ -697,7 +748,7 @@ export default function Canon() {
             />
           </div>
 
-          {docsLoading ? (
+          {documentsLoading || documentsRefreshing ? (
             <NoticeBanner variant="info">文档加载中…</NoticeBanner>
           ) : filteredDocuments.length === 0 ? (
             <EmptyStateCard title="暂无主设定文档" hint="当前没有匹配的文档结果。" className="p-8" />

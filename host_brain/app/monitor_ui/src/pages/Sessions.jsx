@@ -1,17 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Clock3, Download, ExternalLink, RefreshCw, Search } from 'lucide-react'
-import { exportSessionsCsv, fetchSessions } from '../api/obs.js'
+import { exportSessionsCsv } from '../api/sessions.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useSessionsListQuery } from '../queries/sessionsQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { compactText, DASH, formatAlertTitle, formatDateTime } from '../utils/digitalLife.js'
 import { sanitizeRecentRequests } from '../utils/sessionList.js'
@@ -24,10 +27,6 @@ const WINDOW_OPTIONS = [
   { label: '24h', value: 1440, timeRange: '24h' },
   { label: '7d', value: 10080, timeRange: '7d' },
 ]
-
-function getTimeRange(minutes) {
-  return WINDOW_OPTIONS.find((option) => option.value === minutes)?.timeRange || '24h'
-}
 
 function getWindowLabel(minutes) {
   return WINDOW_OPTIONS.find((option) => option.value === minutes)?.label || `${minutes}m`
@@ -168,14 +167,10 @@ export default function Sessions() {
   const setSelectedRequestId = useAppStore((state) => state.setSelectedRequestId)
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
 
-  const [sessions, setSessions] = useState([])
-  const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [exporting, setExporting] = useState(false)
-  const [suppressedCount, setSuppressedCount] = useState(0)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
   const [windowMinutes, setWindowMinutes] = useState(1440)
@@ -186,39 +181,42 @@ export default function Sessions() {
     windowMinutes,
   })
 
-  const load = useCallback(async (targetPage = page) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await fetchSessions({
-        page: targetPage,
-        page_size: PAGE_SIZE,
-        keyword: keyword || undefined,
-        status: status || undefined,
-        time_range: getTimeRange(windowMinutes),
-      })
-      const rawItems = response.items || []
-      const sanitizedItems = sanitizeRecentRequests(rawItems, { keyword })
-      setSessions(sanitizedItems)
-      setSuppressedCount(Math.max(0, rawItems.length - sanitizedItems.length))
-      setTotal(response.total || 0)
-      setPage(response.page || targetPage)
-    } catch (loadError) {
-      setError(loadError.message || '会话流加载失败')
-      setSuppressedCount(0)
-    } finally {
-      setLoading(false)
-    }
-  }, [keyword, page, status, windowMinutes])
+  const {
+    sessionsData,
+    listError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useSessionsListQuery({
+    page,
+    pageSize: PAGE_SIZE,
+    keyword,
+    status,
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
-  useEffect(() => {
-    load(page)
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(() => load(page), pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, page, pollingEnabled, pollingInterval])
-
+  const rawItems = sessionsData?.items || []
+  const sessions = useMemo(
+    () => sanitizeRecentRequests(rawItems, { keyword }),
+    [keyword, rawItems],
+  )
+  const suppressedCount = Math.max(0, rawItems.length - sessions.length)
+  const total = sessionsData?.total || 0
+  const currentPage = sessionsData?.page || page
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const sessionsLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: listError && !sessionsData ? new Error(listError) : null,
+    hasData: Boolean(sessionsData),
+    hasSamples: total > 0 || sessions.length > 0,
+    available: Boolean(sessionsData),
+    stale,
+  })
 
   const summary = useMemo(() => {
     const healthyCount = sessions.filter((item) => normalizeStatus(item.status) === 'healthy').length
@@ -245,9 +243,12 @@ export default function Sessions() {
   ]), [sessions.length, summary, windowMinutes])
 
   const handleSearch = useCallback(() => {
-    setPage(1)
-    load(1)
-  }, [load])
+    if (page !== 1) {
+      setPage(1)
+      return
+    }
+    void refetch()
+  }, [page, refetch])
 
   const handleExport = useCallback(async () => {
     setExporting(true)
@@ -267,8 +268,8 @@ export default function Sessions() {
 
   const openSessionTrace = useCallback((requestId) => {
     if (!requestId) return
-    setSelectedRequestId(requestId)
-    navigate(`/trace/${requestId}`)
+      setSelectedRequestId(requestId)
+      navigate(`/trace/${requestId}`)
   }, [navigate, setSelectedRequestId])
 
   return (
@@ -284,9 +285,9 @@ export default function Sessions() {
             <Download size={14} className={exporting ? 'animate-pulse' : ''} />
             {exporting ? '导出中' : '导出 CSV'}
           </button>
-          <button className="btn-secondary" onClick={() => load(page)} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {loading ? '刷新中' : '刷新'}
+          <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
+            {loading || refreshing ? '刷新中' : '刷新'}
           </button>
         </div>
       </div>
@@ -302,11 +303,23 @@ export default function Sessions() {
         }
         gradientClass="from-sky-50 via-white to-indigo-50"
         metaItems={[
-          `当前页：${page} / ${totalPages}`,
+          `当前页：${currentPage} / ${totalPages}`,
           `顺流：${summary.healthyCount}`,
           `回撤：${summary.degradedCount}`,
           `异常：${summary.errorCount}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={sessionsLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={total}
+            sampleLabel="请求"
+            updatedAt={lastUpdatedAt}
+            source="sessions"
+            definition="会话页按时间窗、关键词和状态聚合最近请求流；筛掉的噪声记录会单独提示，不会混入有效样本。"
+          />
+        )}
       />
 
       <LivingPulseStrip
@@ -315,15 +328,21 @@ export default function Sessions() {
         nodes={pulseNodes}
       />
 
-      {error ? (
+      {listError ? (
         <NoticeBanner variant="error" title="会话流加载失败">
-          {error}
+          {listError}
         </NoticeBanner>
       ) : null}
 
-      {!error && suppressedCount > 0 ? (
+      {!listError && suppressedCount > 0 ? (
         <NoticeBanner variant="info" title="已隐藏噪声记录">
           当前页已自动隐藏 {suppressedCount} 条测试会话、纯问号占位消息或不可读摘要记录。
+        </NoticeBanner>
+      ) : null}
+
+      {!listError && !loading && !refreshing && sessionsLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info" title="当前窗口暂无会话沉积">
+          当前筛选条件下还没有可展示的请求样本。
         </NoticeBanner>
       ) : null}
 
@@ -383,9 +402,9 @@ export default function Sessions() {
       </FlowSection>
 
       <FlowSection title="会话沉积流" hint={`共 ${total} 条，单页 ${PAGE_SIZE} 条。`}>
-        {loading ? <SessionSkeleton /> : null}
+        {loading && !sessionsData ? <SessionSkeleton /> : null}
 
-        {!loading && !error && sessions.length === 0 ? (
+        {!loading && !refreshing && !listError && sessions.length === 0 ? (
           <EmptyStateCard
             title="暂无会话沉积"
             hint="可以调整筛选条件，或等待新的对话请求进入系统。"
@@ -393,7 +412,7 @@ export default function Sessions() {
           />
         ) : null}
 
-        {!loading && !error && sessions.length > 0 ? (
+        {!loading && !listError && sessions.length > 0 ? (
           <div className="grid gap-3 xl:grid-cols-2">
             {sessions.map((item) => (
               <SessionCard key={item.request_id} item={item} onOpen={openSessionTrace} />
@@ -403,29 +422,27 @@ export default function Sessions() {
       </FlowSection>
 
       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
-        <span>当前页 {page} / {totalPages}</span>
+        <span>当前页 {currentPage} / {totalPages}</span>
         <div className="flex items-center gap-2">
           <button
             className="btn-secondary px-3 py-1.5 text-xs"
-            disabled={page <= 1}
+            disabled={currentPage <= 1}
             onClick={() => {
-              const nextPage = Math.max(1, page - 1)
+              const nextPage = Math.max(1, currentPage - 1)
               setPage(nextPage)
-              load(nextPage)
             }}
           >
             上一页
           </button>
           <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-xs text-gray-600">
-            {page} / {totalPages}
+            {currentPage} / {totalPages}
           </span>
           <button
             className="btn-secondary px-3 py-1.5 text-xs"
-            disabled={page >= totalPages}
+            disabled={currentPage >= totalPages}
             onClick={() => {
-              const nextPage = Math.min(totalPages, page + 1)
+              const nextPage = Math.min(totalPages, currentPage + 1)
               setPage(nextPage)
-              load(nextPage)
             }}
           >
             下一页

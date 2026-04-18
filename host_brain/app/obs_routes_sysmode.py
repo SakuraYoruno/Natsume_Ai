@@ -22,6 +22,7 @@ from typing import Literal
 import threading
 
 from .obs_routes_core import router, _get_ledger, _now_ms
+from .obs_routes_core import _env_int, _get_obs_route_cached_response
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -33,6 +34,29 @@ import threading  # noqa: E402 — sys-mode 区域需要 threading.Lock
 # 全局 ModeTransitionService 实例（延迟初始化）
 _mode_transition_service = None
 _mode_transition_lock = threading.Lock()
+_RUNTIME_SNAPSHOT_CACHE_TTL_MS = _env_int("OBS_RUNTIME_SNAPSHOT_CACHE_TTL_MS", 2500, minimum=0)
+_RUNTIME_SNAPSHOT_WARM_ENABLED = str(
+    os.getenv("HOST_OBS_RUNTIME_SNAPSHOT_WARM_ENABLED", "true")
+).strip().lower() not in {"0", "false", "no", "off"}
+_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS = _env_int(
+    "HOST_OBS_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS",
+    4000,
+    minimum=1000,
+)
+_RUNTIME_SNAPSHOT_WARM_STALE_MS = _env_int(
+    "HOST_OBS_RUNTIME_SNAPSHOT_WARM_STALE_MS",
+    max(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS * 3, 12000),
+    minimum=2000,
+)
+_runtime_snapshot_warm_thread: threading.Thread | None = None
+_runtime_snapshot_warm_stop = threading.Event()
+_runtime_snapshot_warm_lock = threading.Lock()
+_runtime_snapshot_warm_state: dict[str, Any] = {
+    "value": None,
+    "updated_ts_ms": 0,
+    "last_duration_ms": 0,
+    "last_error": None,
+}
 
 
 def _sync_obs_routes_compat_handles() -> None:
@@ -246,19 +270,15 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     timestamp: int
 
 
-@router.get("/sys-mode", response_model=SysModeStatusResponse)
-def get_sys_mode():
-    """获取当前系统运行模式 + 自动切换规则状态 + 空闲信息。"""
-    service = _get_mode_transition_service()
-    status = service.get_current_status()
-    return SysModeStatusResponse(**status)
+def _clone_runtime_snapshot_response(
+    value: "DigitalLifeRuntimeSnapshotResponse",
+) -> "DigitalLifeRuntimeSnapshotResponse":
+    if hasattr(value, "model_copy"):
+        return value.model_copy(deep=True)
+    return value.copy(deep=True)
 
 
-@router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
-def get_digital_life_runtime_snapshot(
-    current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
-):
-    """获取统一数字生命 runtime snapshot（只读观测面）。"""
+def _build_runtime_snapshot_response(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse:
     from host_brain.app.http_hooks_runtime_helpers import build_digital_life_runtime_snapshot  # noqa: PLC0415
 
     service = _get_mode_transition_service()
@@ -279,6 +299,122 @@ def get_digital_life_runtime_snapshot(
         slot_status["sys_mode_status"] = "live"
         payload["slot_status"] = slot_status
     return DigitalLifeRuntimeSnapshotResponse(**payload)
+
+
+def _refresh_runtime_snapshot_warm_once() -> None:
+    started_at = _now_ms()
+    try:
+        payload = _build_runtime_snapshot_response("")
+    except Exception as exc:
+        with _runtime_snapshot_warm_lock:
+            _runtime_snapshot_warm_state["last_error"] = str(exc)[:200]
+            _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
+        logger.warning("runtime snapshot warm refresh degraded: %s", exc)
+        return
+
+    with _runtime_snapshot_warm_lock:
+        _runtime_snapshot_warm_state["value"] = _clone_runtime_snapshot_response(payload)
+        _runtime_snapshot_warm_state["updated_ts_ms"] = _now_ms()
+        _runtime_snapshot_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
+        _runtime_snapshot_warm_state["last_error"] = None
+
+
+def _runtime_snapshot_warm_loop() -> None:
+    while not _runtime_snapshot_warm_stop.is_set():
+        _refresh_runtime_snapshot_warm_once()
+        wait_seconds = max(float(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS) / 1000.0, 0.25)
+        _runtime_snapshot_warm_stop.wait(wait_seconds)
+
+
+def start_runtime_snapshot_warm_cache() -> dict[str, Any]:
+    if not _RUNTIME_SNAPSHOT_WARM_ENABLED:
+        return {"enabled": False, "status": "disabled"}
+
+    global _runtime_snapshot_warm_thread
+    with _runtime_snapshot_warm_lock:
+        if _runtime_snapshot_warm_thread is not None and _runtime_snapshot_warm_thread.is_alive():
+            return get_runtime_snapshot_warm_status()
+        _runtime_snapshot_warm_stop.clear()
+        _runtime_snapshot_warm_thread = threading.Thread(
+            target=_runtime_snapshot_warm_loop,
+            name="obs-runtime-snapshot-warm",
+            daemon=True,
+        )
+        _runtime_snapshot_warm_thread.start()
+    return get_runtime_snapshot_warm_status()
+
+
+def stop_runtime_snapshot_warm_cache() -> dict[str, Any]:
+    global _runtime_snapshot_warm_thread
+    _runtime_snapshot_warm_stop.set()
+    thread = _runtime_snapshot_warm_thread
+    if thread is not None:
+        thread.join(timeout=2.0)
+    _runtime_snapshot_warm_thread = None
+    return get_runtime_snapshot_warm_status()
+
+
+def get_runtime_snapshot_warm_status() -> dict[str, Any]:
+    with _runtime_snapshot_warm_lock:
+        updated_ts_ms = int(_runtime_snapshot_warm_state.get("updated_ts_ms") or 0)
+        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms > 0 else None
+        has_value = _runtime_snapshot_warm_state.get("value") is not None
+        last_duration_ms = int(_runtime_snapshot_warm_state.get("last_duration_ms") or 0)
+        last_error = str(_runtime_snapshot_warm_state.get("last_error") or "").strip() or None
+    running = _runtime_snapshot_warm_thread is not None and _runtime_snapshot_warm_thread.is_alive()
+    return {
+        "enabled": bool(_RUNTIME_SNAPSHOT_WARM_ENABLED),
+        "running": bool(running),
+        "has_value": bool(has_value),
+        "updated_ts_ms": updated_ts_ms or None,
+        "age_ms": age_ms,
+        "interval_ms": int(_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS),
+        "stale_after_ms": int(_RUNTIME_SNAPSHOT_WARM_STALE_MS),
+        "last_duration_ms": last_duration_ms,
+        "last_error": last_error,
+    }
+
+
+def _get_warmed_runtime_snapshot(current_topic: str) -> DigitalLifeRuntimeSnapshotResponse | None:
+    if str(current_topic or "").strip():
+        return None
+    if not _RUNTIME_SNAPSHOT_WARM_ENABLED:
+        return None
+
+    with _runtime_snapshot_warm_lock:
+        value = _runtime_snapshot_warm_state.get("value")
+        updated_ts_ms = int(_runtime_snapshot_warm_state.get("updated_ts_ms") or 0)
+
+    if value is None or updated_ts_ms <= 0:
+        return None
+    if max(0, _now_ms() - updated_ts_ms) > int(_RUNTIME_SNAPSHOT_WARM_STALE_MS):
+        return None
+    return _clone_runtime_snapshot_response(value)
+
+
+@router.get("/sys-mode", response_model=SysModeStatusResponse)
+def get_sys_mode():
+    """获取当前系统运行模式 + 自动切换规则状态 + 空闲信息。"""
+    service = _get_mode_transition_service()
+    status = service.get_current_status()
+    return SysModeStatusResponse(**status)
+
+
+@router.get("/runtime-snapshot", response_model=DigitalLifeRuntimeSnapshotResponse)
+def get_digital_life_runtime_snapshot(
+    current_topic: str = Query("", max_length=200, description="用于计算 silence/motive/policy 的当前话题提示"),
+):
+    """获取统一数字生命 runtime snapshot（只读观测面）。"""
+    warmed = _get_warmed_runtime_snapshot(current_topic)
+    if warmed is not None:
+        return warmed
+
+    return _get_obs_route_cached_response(
+        cache_name="runtime_snapshot",
+        cache_key={"current_topic": str(current_topic or "").strip()},
+        ttl_ms=_RUNTIME_SNAPSHOT_CACHE_TTL_MS,
+        builder=lambda: _build_runtime_snapshot_response(current_topic),
+    )
 
 
 @router.post("/sys-mode", response_model=SysModeSwitchResponse)

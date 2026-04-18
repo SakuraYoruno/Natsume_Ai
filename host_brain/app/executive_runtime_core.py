@@ -328,6 +328,8 @@ def _hard_rule_route(
     target_hint = _normalize_text(intent_draft.get("target_id"))
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
+    if route_hint == "plan":
+        return _RouteSelection("plan", target_hint or "skill_dag", "intent_draft:plan")
     if route_hint == "skill" and target_hint:
         return _RouteSelection("skill", target_hint, "intent_draft:skill")
     if route_hint == "delegate" and target_hint:
@@ -511,6 +513,34 @@ def _extract_skill_args(intent_draft: dict[str, Any], request_body: Any, user_me
         "text": user_message,
         "user_message": user_message,
     }
+
+
+def _merge_plan_node_args(
+    *,
+    base_intent_draft: dict[str, Any],
+    node: SkillDagNode,
+    task_text: str,
+) -> dict[str, Any]:
+    merged_args = dict(dict(base_intent_draft or {}).get("args") or {})
+    node_args = dict(getattr(node, "args_payload", {}) or {})
+    merged_args.update(node_args)
+    normalized_target = _normalize_text(node.target_id, lower=True)
+    if not _normalize_text(merged_args.get("query")):
+        merged_args["query"] = task_text
+    if not _normalize_text(merged_args.get("text")):
+        merged_args["text"] = task_text
+    if not _normalize_text(merged_args.get("user_message")):
+        merged_args["user_message"] = task_text
+    if normalized_target == "memory_store" and not _normalize_text(merged_args.get("content")):
+        merged_args["content"] = task_text
+    if normalized_target == "codex_codegen":
+        if not _normalize_text(merged_args.get("task")):
+            merged_args["task"] = _normalize_text(merged_args.get("problem_statement")) or task_text
+        if not _normalize_text(merged_args.get("problem_statement")):
+            merged_args["problem_statement"] = _normalize_text(merged_args.get("task")) or task_text
+        if not _normalize_text(merged_args.get("workspace_strategy"), lower=True):
+            merged_args["workspace_strategy"] = "runtime_repo"
+    return merged_args
 
 
 def _flatten_result_text(payload: Any) -> str:
@@ -919,6 +949,7 @@ def _build_failure_recovery_plan(
 
 def _build_chat_input(
     *,
+    request_body,
     request_id: str,
     session_id: str,
     person_id: str,
@@ -938,6 +969,11 @@ def _build_chat_input(
 ):
     from host_brain.app.chat_agent import ChatAgentInput  # noqa: PLC0415
 
+    normalized_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
+    resolved_llm_runtime = dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime
+    if normalized_speed_profile in {"direct_fast", "context_fast"} and sub_agent_context is None:
+        resolved_llm_runtime = None
+
     return ChatAgentInput(
         request_id=request_id,
         session_id=session_id,
@@ -951,10 +987,13 @@ def _build_chat_input(
         retrieval_summary=dict(retrieval_summary or {}),
         sub_agent_context=sub_agent_context,
         render_target_lang=render_target_lang,
+        reply_channel=getattr(request_body, "reply_channel", None),
+        suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
+        suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
         ts_ms=ts_ms,
         intent_draft=dict(intent_draft or {}),
         trace_stage_meta=dict(trace_stage_meta or {}),
-        llm_runtime=dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime,
+        llm_runtime=resolved_llm_runtime,
     )
 
 
@@ -974,6 +1013,59 @@ def _build_sub_agent_context(
         latency_ms=outcome.latency_ms,
         error=outcome.error_text,
         payload=dict(outcome.payload or {}),
+    )
+
+
+def _build_plan_chat_outcome(
+    *,
+    plan: SkillDagPlan,
+    outcome: _ExecutionOutcome,
+    plan_meta: dict[str, Any],
+) -> _ExecutionOutcome:
+    payload = dict(outcome.payload or {})
+    plan_trace = list(plan_meta.get("plan_trace") or payload.get("plan_trace") or [])
+    trace_by_node_id = {
+        str(item.get("node_id") or "").strip(): dict(item or {})
+        for item in plan_trace
+        if isinstance(item, dict) and str(item.get("node_id") or "").strip()
+    }
+    steps: list[dict[str, Any]] = []
+    success_count = 0
+    for node in list(plan.nodes or []):
+        trace = trace_by_node_id.get(str(node.node_id or "").strip(), {})
+        step_success = bool(trace.get("success"))
+        if step_success:
+            success_count += 1
+        steps.append(
+            {
+                "step_index": int(node.step_index or 0),
+                "target_id": str(node.target_id or "").strip(),
+                "description": str(node.description or "").strip(),
+                "task_description": str(node.task_description or "").strip(),
+                "success": step_success,
+                "result_text": str(trace.get("result_text") or "").strip(),
+                "error": str(trace.get("error_text") or "").strip(),
+            }
+        )
+    payload.update(
+        {
+            "plan": plan.as_dict(),
+            "plan_trace": plan_trace,
+            "steps": steps,
+            "total_steps": len(steps),
+            "success_count": success_count,
+            "parallel_enabled": bool(plan_meta.get("parallel_enabled")),
+        }
+    )
+    return _ExecutionOutcome(
+        route_type=outcome.route_type,
+        target_id=outcome.target_id,
+        skill_family=outcome.skill_family,
+        success=outcome.success,
+        result_text=outcome.result_text,
+        error_text=outcome.error_text,
+        latency_ms=outcome.latency_ms,
+        payload=payload,
     )
 
 
@@ -1002,6 +1094,12 @@ async def _execute_plan_node(
         task_text = f"{task_text}\n\nDependency context:\n" + "\n".join(dependency_context_parts)
 
     if node.route == "skill":
+        plan_intent_draft = dict(intent_draft or {})
+        plan_intent_draft["args"] = _merge_plan_node_args(
+            base_intent_draft=plan_intent_draft,
+            node=node,
+            task_text=task_text,
+        )
         return await asyncio.to_thread(
             _execute_skill,
             request_body=request_body,
@@ -1013,7 +1111,7 @@ async def _execute_plan_node(
             task_text=task_text,
             user_message=task_text,
             governor_result=governor_result,
-            intent_draft={**dict(intent_draft or {}), "args": {"query": task_text, "text": task_text}},
+            intent_draft=plan_intent_draft,
             emotion_context=emotion_context,
             recall_slot_text=recall_slot_text,
             render_target_lang=render_target_lang,
@@ -1350,6 +1448,7 @@ async def _execute_explicit_skill_dag(
 
 async def _stream_chat_with_context(
     *,
+    request_body: Any,
     route_reason: str,
     request_id: str,
     session_id: str,
@@ -1377,6 +1476,7 @@ async def _stream_chat_with_context(
     )
 
     chat_input = _build_chat_input(
+        request_body=request_body,
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
@@ -1715,11 +1815,14 @@ async def _executive_runtime_core_impl(
 
     runtime_capability_payload = None
     if route.route_type == "chat":
+        _chat_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
         # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
         _skip_capability_synthesis = (
             _prefrontal_plan_enabled
             and bool(_prefrontal_plan.get("action"))
         )
+        if _chat_speed_profile in {"direct_fast", "context_fast"}:
+            _skip_capability_synthesis = True
         if not _skip_capability_synthesis:
             runtime_capability_payload = _maybe_synthesize_runtime_capability(
                 request_id=request_id,
@@ -1779,6 +1882,7 @@ async def _executive_runtime_core_impl(
 
     if route.route_type == "chat":
         async for event in _stream_chat_with_context(
+            request_body=request_body,
             route_reason=route.reason_code,
             request_id=request_id,
             session_id=session_id,
@@ -1835,6 +1939,11 @@ async def _executive_runtime_core_impl(
             recall_slot_text=recall_slot_text,
             render_target_lang=render_target_lang,
         )
+        plan_chat_outcome = _build_plan_chat_outcome(
+            plan=plan,
+            outcome=plan_outcome,
+            plan_meta=plan_meta,
+        )
         trace_stage_meta = {
             "cortex_orchestrator_used": True,
             "executive_router_used": True,
@@ -1846,7 +1955,7 @@ async def _executive_runtime_core_impl(
             # Phase B-4: 器官族路由影响可观测性字段
             "organ_route_override": _organ_route_override,
             "organ_route_reason": _organ_route_reason,
-            "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
+                "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
         }
         if plan_outcome.success:
             runtime_task_registry.mark_completed(
@@ -1864,6 +1973,7 @@ async def _executive_runtime_core_impl(
                 result_text=plan_outcome.result_text,
             )
         async for event in _stream_chat_with_context(
+            request_body=request_body,
             route_reason=route.reason_code,
             request_id=request_id,
             session_id=session_id,
@@ -1881,9 +1991,9 @@ async def _executive_runtime_core_impl(
             intent_draft=intent_draft,
             trace_stage_meta=trace_stage_meta,
             sub_agent_context=_build_sub_agent_context(
-                agent_id="executive_planner",
+                agent_id="plan_execution",
                 task_text=sanitized_message,
-                outcome=plan_outcome,
+                outcome=plan_chat_outcome,
             ),
             runtime_capability_payload=runtime_capability_payload,
         ):
@@ -2016,6 +2126,7 @@ async def _executive_runtime_core_impl(
         "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
     }
     async for event in _stream_chat_with_context(
+        request_body=request_body,
         route_reason=route.reason_code,
         request_id=request_id,
         session_id=session_id,

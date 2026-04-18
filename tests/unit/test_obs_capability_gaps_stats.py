@@ -6,6 +6,15 @@ from fastapi.testclient import TestClient
 from host_brain.app.capability_forge import CapabilityForgeService
 from host_brain.app.obs_routes import router
 from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
+from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
+
+
+def setup_function() -> None:
+    _clear_obs_route_response_cache()
+
+
+def teardown_function() -> None:
+    _clear_obs_route_response_cache()
 
 
 def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
@@ -125,3 +134,69 @@ def test_obs_capability_gap_forge_candidates_endpoint(monkeypatch) -> None:
     assert top["suggested_family"] == "code"
     assert top["recommended_action"] == "forge_with_reliability_tests"
     assert payload["candidate_thresholds"]["min_detected_count"] == 2
+
+
+def test_obs_capability_gaps_stats_endpoint_uses_short_ttl_cache(monkeypatch) -> None:
+    class _FakeTelemetry:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def snapshot(self, **kwargs):
+            self.calls += 1
+            return {
+                "timestamp": 1700000000000,
+                "detected_total": 1,
+                "executed_total": 1,
+                "success_total": 1,
+                "failed_total": 0,
+                "success_rate": 1.0,
+                "active_runtime_capabilities": 1,
+                "by_reason": [{"key": "ACTION_INTENT_FALLBACK_CHAT", "count": 1}],
+                "by_family": [{"key": "code", "count": 1}],
+                "by_executor": [{"key": "codex_codegen", "count": 1}],
+                "hotspots": [],
+                "forge_candidates": [],
+                "candidate_thresholds": {
+                    "min_detected_count": 3,
+                    "min_unique_sessions": 2,
+                    "min_failure_rate": 0.35,
+                    "min_failed_count": 2,
+                },
+                "recent_events": [],
+            }
+
+    class _FakeForgeService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def runtime_quality_stats(self, limit=8):
+            self.calls += 1
+            return {
+                "timestamp": 1700000000000,
+                "summary": {
+                    "tracked_proposals": 0,
+                    "unhealthy_proposals": 0,
+                    "critical_proposals": 0,
+                    "avg_health_score": 0.0,
+                    "avg_window_failure_rate": 0.0,
+                    "avg_window_p95_latency_ms": 0.0,
+                },
+                "items": [],
+            }
+
+    telemetry = _FakeTelemetry()
+    forge_service = _FakeForgeService()
+    monkeypatch.setattr("host_brain.app.dependencies.get_capability_gap_telemetry", lambda: telemetry)
+    monkeypatch.setattr("host_brain.app.dependencies.get_capability_forge_service", lambda: forge_service)
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    first = client.get("/obs/capability-gaps/stats?limit_recent=5")
+    second = client.get("/obs/capability-gaps/stats?limit_recent=5")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert telemetry.calls == 1
+    assert forge_service.calls == 1

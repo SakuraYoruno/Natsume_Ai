@@ -27,12 +27,52 @@ from pydantic import BaseModel, Field
 
 from host_brain.app.obs_routes_core import (
     router,
+    _env_int,
     _get_ledger,
+    _get_obs_route_cached_response,
     _now_ms,
     _safe_json,
 )
 
 logger = logging.getLogger("Natsume.obs")
+_PROMPT_BUILDER_STATS_CACHE_TTL_MS = _env_int("OBS_PROMPT_BUILDER_STATS_CACHE_TTL_MS", 5000, minimum=0)
+
+
+def _fetch_first_available_rows(
+    ledger,
+    *table_candidates: str,
+    start_ms: int,
+    end_ms: int,
+) -> list[dict[str, Any]]:
+    resolver = getattr(ledger, "resolve_fetch_table", None)
+    for table in table_candidates:
+        resolved = resolver(table) if callable(resolver) else table
+        if not resolved:
+            continue
+        try:
+            fetched = ledger.fetch_by_time_range(resolved, start_ms=start_ms, end_ms=end_ms)
+        except Exception:
+            continue
+        if fetched:
+            return fetched
+    return []
+
+
+def _fetch_rows_if_available(
+    ledger,
+    table: str,
+    *,
+    start_ms: int,
+    end_ms: int,
+) -> list[dict[str, Any]]:
+    resolver = getattr(ledger, "resolve_fetch_table", None)
+    resolved = resolver(table) if callable(resolver) else table
+    if not resolved:
+        return []
+    try:
+        return ledger.fetch_by_time_range(resolved, start_ms=start_ms, end_ms=end_ms)
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +108,7 @@ def get_ui_assertion_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     except Exception:
         ui_rows = []
     if not ui_rows:
-        try:
-            ui_rows = ledger.fetch_by_time_range("ui_assertion_log", start_ms=since_ms, end_ms=now)
-        except Exception:
-            ui_rows = []
+        ui_rows = _fetch_rows_if_available(ledger, "ui_assertion_log", start_ms=since_ms, end_ms=now)
     total = len(ui_rows)
     sensitive_blocked = sum(1 for r in ui_rows if str(r.get("reason_code") or r.get("audit_event") or "").upper() == "SENSITIVE_UI_BLOCKED")
     precondition_failed = sum(1 for r in ui_rows if str(r.get("reason_code") or r.get("audit_event") or "").upper() == "UI_PRECONDITION_FAILED")
@@ -119,15 +156,7 @@ def get_failure_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("failure_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(ledger, "failure_log", "error_log", start_ms=since_ms, end_ms=now)
     _failure_events = {"GOVERNOR_BLOCK", "EVIDENCE_EMPTY", "MODEL_FALLBACK", "QA_REWRITE", "EDGE_UNREACHABLE", "VISION_LOW_CONFIDENCE", "MODULE_TIMEOUT"}
     failure_rows = [r for r in rows if str(r.get("reason_code") or r.get("event") or r.get("stage") or "").upper() in _failure_events]
     total = len(failure_rows)
@@ -183,15 +212,14 @@ def get_permission_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("permission_log", "audit_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "permission_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     denied_rows = [r for r in rows if "PERMISSION_DENIED" in str(r.get("audit_tag") or r.get("reason_code") or r.get("stage") or "").upper()]
     allowed_rows = [r for r in rows if "PERMISSION_ALLOWED" in str(r.get("audit_tag") or r.get("stage") or "").upper()]
     total_checks = len(denied_rows) + len(allowed_rows)
@@ -273,15 +301,14 @@ def get_scheduler_history(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("scheduler_log", "task_log", "audit_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "scheduler_log",
+        "task_log",
+        "audit_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     scheduler_tasks: list[dict] = []
     try:
         from host_brain.scheduler.scheduler_routes import get_scheduler_health_snapshot_safe
@@ -394,15 +421,14 @@ def get_action_plan_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("action_plan_log", "vision_log", "audit_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "action_plan_log",
+        "vision_log",
+        "audit_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     total = len(rows)
     if total == 0:
         return ActionPlanStatsResponse(window_minutes=window_minutes, total_plans=0, success_count=0, fallback_count=0, success_rate=None, avg_confidence=None, avg_action_count=None, top_action_types=[], fallback_reasons=[], timestamp=now)
@@ -471,15 +497,14 @@ def get_memory_guard_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("memory_guard_log", "audit_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "memory_guard_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     _mg_tags = {"MEMORY_GUARD_FILTERED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE", "EPISODIC_WRITTEN", "EPISODIC_SKIPPED"}
     mg_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _mg_tags)]
     try:
@@ -542,15 +567,14 @@ def get_state_arbiter_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("state_arbiter_log", "audit_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "state_arbiter_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     _sa_tags = {"STATE_SOURCE_CONFLICT", "STATE_SOURCE_FALLBACK", "STATE_ARBITER_CONFLICT", "SESSION_OVERRIDE_WRITTEN"}
     sa_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _sa_tags)]
     total = len(sa_rows)
@@ -596,15 +620,14 @@ def get_context_compressor_stats(window_minutes: int = Query(60, ge=1, le=10080)
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("context_compressor_log", "audit_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "context_compressor_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     cc_rows = [r for r in rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or r.get("stage") or "").upper() or "CONTEXT_COMPRESSOR" in str(r.get("stage") or r.get("reason_code") or "").upper()]
     total = len(cc_rows)
     active_count = sum(1 for r in cc_rows if "CTX_COMPRESSED" in str(r.get("audit_tag") or "").upper())
@@ -656,45 +679,52 @@ class PromptBuilderStatsResponse(BaseModel):
 @router.get("/prompt-builder/stats", response_model=PromptBuilderStatsResponse)
 def get_prompt_builder_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     """Ref #65: PromptBuilder 构建统计。"""
-    ledger = _get_ledger()
-    now = _now_ms()
-    since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("prompt_builder_log", "audit_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
-    pb_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in ("PROMPT_BUILT", "PROMPT_INJECTION", "PROMPT_BUILDER", "INJECTION_DETECTED"))]
-    total = len(pb_rows)
-    injection_detected_count = sum(1 for r in pb_rows if "INJECTION_DETECTED" in str(r.get("audit_tag") or "").upper())
-    injection_blocked_count = sum(1 for r in pb_rows if "INJECTION_BLOCKED" in str(r.get("audit_tag") or "").upper())
-    injection_detection_rate = round(injection_detected_count / total * 100, 1) if total > 0 else None
-    degraded_count = sum(1 for r in pb_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
-    high_risk_count = 0
-    critical_risk_count = 0
-    slot_counter: Counter = Counter()
-    msg_lens: list = []
-    for r in pb_rows:
-        try:
-            detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
-        except Exception:
-            detail = {}
-        risk_level = str(detail.get("risk_level") or r.get("risk_level") or "").upper()
-        if risk_level == "HIGH":
-            high_risk_count += 1
-        elif risk_level == "CRITICAL":
-            critical_risk_count += 1
-        for slot in list(detail.get("slots_filled") or r.get("slots_filled") or []):
-            slot_counter[str(slot)] += 1
-        msg_len = int(detail.get("user_message_len") or r.get("user_message_len") or 0)
-        if msg_len > 0:
-            msg_lens.append(msg_len)
-    total_slot_fills = sum(slot_counter.values())
-    return PromptBuilderStatsResponse(window_minutes=window_minutes, total_builds=total, injection_detected_count=injection_detected_count, injection_blocked_count=injection_blocked_count, injection_detection_rate=injection_detection_rate, high_risk_count=high_risk_count, critical_risk_count=critical_risk_count, slot_fill_distribution=[{"slot": s, "count": c, "pct": round(c / total_slot_fills * 100, 1) if total_slot_fills > 0 else 0.0} for s, c in slot_counter.most_common(10)], avg_user_message_len=round(sum(msg_lens) / len(msg_lens), 1) if msg_lens else None, degraded_count=degraded_count, timestamp=now)
+    def _build_response() -> PromptBuilderStatsResponse:
+        ledger = _get_ledger()
+        now = _now_ms()
+        since_ms = now - window_minutes * 60 * 1000
+        rows = _fetch_first_available_rows(
+            ledger,
+            "prompt_builder_log",
+            "audit_log",
+            "error_log",
+            start_ms=since_ms,
+            end_ms=now,
+        )
+        pb_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in ("PROMPT_BUILT", "PROMPT_INJECTION", "PROMPT_BUILDER", "INJECTION_DETECTED"))]
+        total = len(pb_rows)
+        injection_detected_count = sum(1 for r in pb_rows if "INJECTION_DETECTED" in str(r.get("audit_tag") or "").upper())
+        injection_blocked_count = sum(1 for r in pb_rows if "INJECTION_BLOCKED" in str(r.get("audit_tag") or "").upper())
+        injection_detection_rate = round(injection_detected_count / total * 100, 1) if total > 0 else None
+        degraded_count = sum(1 for r in pb_rows if "DEGRADED" in str(r.get("audit_tag") or r.get("stage") or "").upper())
+        high_risk_count = 0
+        critical_risk_count = 0
+        slot_counter: Counter = Counter()
+        msg_lens: list = []
+        for r in pb_rows:
+            try:
+                detail = json.loads(r.get("detail") or "{}") if isinstance(r.get("detail"), str) else {}
+            except Exception:
+                detail = {}
+            risk_level = str(detail.get("risk_level") or r.get("risk_level") or "").upper()
+            if risk_level == "HIGH":
+                high_risk_count += 1
+            elif risk_level == "CRITICAL":
+                critical_risk_count += 1
+            for slot in list(detail.get("slots_filled") or r.get("slots_filled") or []):
+                slot_counter[str(slot)] += 1
+            msg_len = int(detail.get("user_message_len") or r.get("user_message_len") or 0)
+            if msg_len > 0:
+                msg_lens.append(msg_len)
+        total_slot_fills = sum(slot_counter.values())
+        return PromptBuilderStatsResponse(window_minutes=window_minutes, total_builds=total, injection_detected_count=injection_detected_count, injection_blocked_count=injection_blocked_count, injection_detection_rate=injection_detection_rate, high_risk_count=high_risk_count, critical_risk_count=critical_risk_count, slot_fill_distribution=[{"slot": s, "count": c, "pct": round(c / total_slot_fills * 100, 1) if total_slot_fills > 0 else 0.0} for s, c in slot_counter.most_common(10)], avg_user_message_len=round(sum(msg_lens) / len(msg_lens), 1) if msg_lens else None, degraded_count=degraded_count, timestamp=now)
+
+    return _get_obs_route_cached_response(
+        cache_name="prompt_builder_stats",
+        cache_key={"window_minutes": int(window_minutes)},
+        ttl_ms=_PROMPT_BUILDER_STATS_CACHE_TTL_MS,
+        builder=_build_response,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -720,15 +750,14 @@ def get_episodic_store_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    rows = []
-    for table in ("episodic_store_log", "audit_log", "error_log"):
-        try:
-            fetched = ledger.fetch_by_time_range(table, start_ms=since_ms, end_ms=now)
-            if fetched:
-                rows = fetched
-                break
-        except Exception:
-            continue
+    rows = _fetch_first_available_rows(
+        ledger,
+        "episodic_store_log",
+        "audit_log",
+        "error_log",
+        start_ms=since_ms,
+        end_ms=now,
+    )
     _ep_tags = {"EPISODIC_WRITTEN", "EPISODIC_SKIPPED", "MEMORY_GUARD_DREAM_BLOCKED", "MEMORY_GUARD_NARRATIVE_BLOCKED", "MEMORY_GUARD_DISTILL_ELIGIBLE", "SKIPPED_MEMORY_GUARD"}
     ep_rows = [r for r in rows if any(tag in str(r.get("audit_tag") or r.get("stage") or r.get("reason_code") or "").upper() for tag in _ep_tags)]
     try:
@@ -792,11 +821,8 @@ def get_chain_stats(window_minutes: int = Query(60, ge=1, le=10080)):
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    try:
-        rows = ledger.fetch_by_time_range("audit_log", start_ms=since_ms, end_ms=now)
-        audit_rows = [r for r in rows if str(r.get("stage") or "").upper() in ("AUDIT_SNAPSHOT", "COMMIT")]
-    except Exception:
-        audit_rows = []
+    rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
+    audit_rows = [r for r in rows if str(r.get("stage") or "").upper() in ("AUDIT_SNAPSHOT", "COMMIT")]
     total_requests = len(audit_rows)
     governor_block_count = recall_degraded_count = episodic_written_count = qa_rewrite_count = canon_proposal_count = 0
     _KNOWN_NODES = ["airlock", "governor", "retrieval", "prompt_builder", "llm_stream", "response_intelligence", "sub_agent", "airlock_output", "episodic_store"]
@@ -883,11 +909,8 @@ def get_agent_loop_history(window_minutes: int = Query(1440, ge=1, le=10080), li
     ledger = _get_ledger()
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
-    try:
-        rows = ledger.fetch_by_time_range("audit_log", start_ms=since_ms, end_ms=now)
-        loop_rows = [r for r in rows if str(r.get("stage") or "").upper() == "LOOP_DONE"]
-    except Exception:
-        loop_rows = []
+    rows = _fetch_rows_if_available(ledger, "audit_log", start_ms=since_ms, end_ms=now)
+    loop_rows = [r for r in rows if str(r.get("stage") or "").upper() == "LOOP_DONE"]
     loop_rows.sort(key=lambda r: r.get("ts_ms") or 0, reverse=True)
     loop_rows = loop_rows[:limit]
     items = []

@@ -204,13 +204,19 @@ def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatc
 def test_http_chat_route_infers_codex_codegen_from_code_request(monkeypatch) -> None:
     client, ledger = _build_client(monkeypatch)
     deps._skill_registry.register_decorated(IDESkillProvider())
-    monkeypatch.setattr(
-        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
-        lambda payload: {
+    captured: dict[str, Any] = {}
+
+    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+        captured["payload"] = dict(payload)
+        return {
             "status": "EXECUTED",
             "result_text": "```python\nprint('fixed')\n```",
             "tool": payload.get("tool"),
-        },
+        }
+
+    monkeypatch.setattr(
+        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        _fake_dispatch,
     )
     try:
         response = client.post(
@@ -231,12 +237,57 @@ def test_http_chat_route_infers_codex_codegen_from_code_request(monkeypatch) -> 
         assert route_event["target_id"] == "codex_codegen"
         assert commit_event["decision"] == "APPROVE"
         assert "print('fixed')" in str(commit_event.get("narrative") or "")
+        assert captured["payload"]["workspace_strategy"] == "runtime_repo"
+        assert captured["payload"]["run_mode"] == "worker"
 
         request_id = str(commit_event["request_id"])
         trace = ledger.trace_request(request_id)
         assert len(trace["skill_exec_log"]) == 1
         assert trace["skill_exec_log"][0]["skill_name"] == "codex_codegen"
         assert trace["skill_exec_log"][0]["result_status"] == "SUCCESS"
+    finally:
+        _close_client(client, ledger)
+
+
+def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(monkeypatch) -> None:
+    client, ledger = _build_client(monkeypatch)
+    deps._skill_registry.register_decorated(IDESkillProvider())
+    captured: dict[str, Any] = {}
+
+    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+        captured["payload"] = dict(payload)
+        return {
+            "status": "EXECUTED",
+            "result_text": "def dedupe_by_frequency(arr):\n    return []",
+            "tool": payload.get("tool"),
+        }
+
+    monkeypatch.setattr(
+        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        _fake_dispatch,
+    )
+    try:
+        response = client.post(
+            "/v1/chat",
+            json={
+                "message": "写一个 Python 函数，输入数组后去重并按出现频次降序返回。",
+                "session_id": "sess_http_skill_smoke_codex_light_001",
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response)
+        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+
+        assert route_event["route_type"] == "skill"
+        assert route_event["target_id"] == "codex_codegen"
+        assert commit_event["decision"] == "APPROVE"
+        assert "dedupe_by_frequency" in str(commit_event.get("narrative") or "")
+        assert captured["payload"]["run_mode"] == "inspect"
+        assert captured["payload"]["allow_temp_workspace"] is True
+        assert str(captured["payload"].get("workspace_strategy") or "").strip() == ""
     finally:
         _close_client(client, ledger)
 
@@ -362,7 +413,7 @@ def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch
 
         assert route_event["route_type"] == "plan"
         assert route_event["target_id"] == "skill_dag"
-        assert route_event["reason_code"] == "hard_rule:multi_step"
+        assert route_event["reason_code"] == "intent_draft:plan"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
         assert "emotion_query" in str(commit_event.get("narrative") or "")
@@ -423,7 +474,7 @@ def test_http_chat_route_executes_skill_plan(monkeypatch) -> None:
 
         assert route_event["route_type"] == "plan"
         assert route_event["target_id"] == "skill_dag"
-        assert route_event["reason_code"] == "hard_rule:multi_step"
+        assert route_event["reason_code"] == "intent_draft:plan"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
         assert "emotion_query" in str(commit_event.get("narrative") or "")
@@ -435,6 +486,84 @@ def test_http_chat_route_executes_skill_plan(monkeypatch) -> None:
             "session_summary",
         ]
         assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
+    finally:
+        _close_client(client, ledger)
+
+
+def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypatch) -> None:
+    client, ledger = _build_client(monkeypatch)
+    deps._skill_registry.register_decorated(IDESkillProvider())
+    captured: list[dict[str, Any]] = []
+
+    def _fake_dispatch(payload: dict[str, Any]) -> dict[str, Any]:
+        captured.append(dict(payload))
+        return {
+            "status": "EXECUTED",
+            "result_text": "```python\nprint('plan-fixed')\n```",
+            "tool": payload.get("tool"),
+        }
+
+    monkeypatch.setattr(
+        "host_brain.app.executive_runtime_core.dispatch_executor_payload",
+        _fake_dispatch,
+    )
+    try:
+        response = client.post(
+            "/v1/chat",
+            json={
+                "message": "first fix the failing test then summarize the current session",
+                "session_id": "sess_http_plan_codex_runtime_repo_001",
+                "intent_draft": {
+                    "planned_steps": [
+                        {
+                            "step_index": 1,
+                            "route": "skill",
+                            "target_id": "codex_codegen",
+                            "description": "fix the failing test",
+                            "task_description": "fix the failing test",
+                            "route_reason": "test:http_plan:codex_codegen",
+                            "allow_parallel": True,
+                            "skill_family": "code",
+                            "risk_level": 2,
+                            "args": {
+                                "workspace_strategy": "runtime_repo",
+                                "task": "fix the failing test",
+                            },
+                        },
+                        {
+                            "step_index": 2,
+                            "route": "skill",
+                            "target_id": "session_summary",
+                            "description": "summarize session",
+                            "task_description": "summarize current session state",
+                            "route_reason": "test:http_plan:session_summary",
+                            "allow_parallel": True,
+                            "skill_family": "social",
+                            "risk_level": 1,
+                        },
+                    ]
+                },
+            },
+        )
+
+        assert response.status_code == 200
+
+        events = _parse_sse_events(response)
+        route_event = next(event for event in events if event.get("phase") == "EXECUTIVE_ROUTE")
+        commit_event = next(event for event in events if event.get("phase") == "COMMIT")
+
+        assert route_event["route_type"] == "plan"
+        assert route_event["target_id"] == "skill_dag"
+        assert commit_event["decision"] == "APPROVE"
+        assert captured[0]["workspace_strategy"] == "runtime_repo"
+        assert captured[0]["task"] == "fix the failing test"
+
+        request_id = str(commit_event["request_id"])
+        trace = ledger.trace_request(request_id)
+        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
+            "codex_codegen",
+            "session_summary",
+        ]
     finally:
         _close_client(client, ledger)
 
@@ -499,7 +628,7 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch) -> N
 
         assert route_event["route_type"] == "plan"
         assert route_event["target_id"] == "skill_dag"
-        assert route_event["reason_code"] == "hard_rule:multi_step"
+        assert route_event["reason_code"] == "intent_draft:plan"
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
         assert "emotion_query" in str(commit_event.get("narrative") or "")

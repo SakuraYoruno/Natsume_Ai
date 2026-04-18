@@ -883,12 +883,15 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
     agent_id = str(ctx.agent_id or "").strip()
     if render_target_lang != "zh":
         return None
+    result_text = str(ctx.result_text or "").strip()
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx)
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx)
     if agent_id in {"codex_codegen", "translate_agent", "intent_agent"}:
         return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang)
+    if agent_id in {"phatic_fastpath", "recent_turn_direct", "task_progress_direct"}:
+        return result_text or None
     return None
 
 

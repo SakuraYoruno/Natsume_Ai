@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import copy
 from dataclasses import dataclass
 import json
 import logging
 import os
+import threading
 import time
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
@@ -50,10 +52,22 @@ def _env_float(name: str, default: float, *, minimum: float) -> float:
         return max(default, minimum)
 
 
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return max(int(default), minimum)
+    try:
+        return max(int(raw), minimum)
+    except (TypeError, ValueError):
+        return max(int(default), minimum)
+
+
 _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimum=1.0)
 _TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
+_OBS_CACHE_WAIT_TIMEOUT_SEC = _env_float("OBS_CACHE_WAIT_TIMEOUT_SEC", 10.0, minimum=1.0)
+_OBS_SESSIONS_CACHE_TTL_MS = _env_int("OBS_SESSIONS_CACHE_TTL_MS", 3000, minimum=0)
 
 # ---------------------------------------------------------------------------
 # 依赖注入
@@ -84,6 +98,74 @@ def _safe_json(text: Any) -> Any:
         except Exception:
             return text
     return text
+
+
+_OBS_ROUTE_RESPONSE_CACHE: dict[str, dict[str, Any]] = {}
+_OBS_ROUTE_RESPONSE_INFLIGHT: dict[str, concurrent.futures.Future[Any]] = {}
+_OBS_ROUTE_RESPONSE_CACHE_LOCK = threading.Lock()
+
+
+def _clone_obs_cached_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        if hasattr(value, "model_copy"):
+            return value.model_copy(deep=True)
+        if hasattr(value, "copy"):
+            return value.copy(deep=True)
+    return copy.deepcopy(value)
+
+
+def _get_obs_route_cached_response(
+    *,
+    cache_name: str,
+    cache_key: Any,
+    ttl_ms: int,
+    builder: Callable[[], Any],
+) -> Any:
+    ttl_ms = max(0, int(ttl_ms))
+    cache_slot = f"{str(cache_name).strip()}::{repr(cache_key)}"
+    now = _now_ms()
+    owner = False
+
+    with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
+        cached = _OBS_ROUTE_RESPONSE_CACHE.get(cache_slot)
+        if ttl_ms > 0 and isinstance(cached, dict) and int(cached.get("expires_at_ms") or 0) > now:
+            return _clone_obs_cached_value(cached.get("value"))
+
+        future = _OBS_ROUTE_RESPONSE_INFLIGHT.get(cache_slot)
+        if future is None:
+            future = concurrent.futures.Future()
+            _OBS_ROUTE_RESPONSE_INFLIGHT[cache_slot] = future
+            owner = True
+
+    if not owner:
+        value = future.result(timeout=_OBS_CACHE_WAIT_TIMEOUT_SEC)
+        return _clone_obs_cached_value(value)
+
+    try:
+        value = builder()
+        cloned = _clone_obs_cached_value(value)
+        if ttl_ms > 0:
+            with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
+                _OBS_ROUTE_RESPONSE_CACHE[cache_slot] = {
+                    "expires_at_ms": _now_ms() + ttl_ms,
+                    "value": cloned,
+                }
+        future.set_result(cloned)
+        return value
+    except Exception as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
+            current = _OBS_ROUTE_RESPONSE_INFLIGHT.get(cache_slot)
+            if current is future:
+                _OBS_ROUTE_RESPONSE_INFLIGHT.pop(cache_slot, None)
+
+
+def _clear_obs_route_response_cache() -> None:
+    with _OBS_ROUTE_RESPONSE_CACHE_LOCK:
+        _OBS_ROUTE_RESPONSE_CACHE.clear()
+        _OBS_ROUTE_RESPONSE_INFLIGHT.clear()
 
 
 def _voice_event_node_type(event_type: str) -> tuple[str, str]:
@@ -2887,13 +2969,24 @@ def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """WARN-BE-002: 调用 SessionQueryService.query() 而非内联查询逻辑。"""
-    return _build_sessions_response(
-        _get_ledger(),
-        page=page,
-        page_size=page_size,
-        status=status,
-        window_minutes=window_minutes,
-        keyword=keyword,
+    return _get_obs_route_cached_response(
+        cache_name="obs_sessions",
+        cache_key={
+            "page": int(page),
+            "page_size": int(page_size),
+            "status": status or "",
+            "window_minutes": int(window_minutes),
+            "keyword": keyword or "",
+        },
+        ttl_ms=_OBS_SESSIONS_CACHE_TTL_MS,
+        builder=lambda: _build_sessions_response(
+            _get_ledger(),
+            page=page,
+            page_size=page_size,
+            status=status,
+            window_minutes=window_minutes,
+            keyword=keyword,
+        ),
     )
 
 
@@ -3219,7 +3312,7 @@ def get_graph_schema():
         graph_config = _build_graph_config_by_profile(
             execution_profile=PROFILE_CHAT_FAST,
             provider_name=_HOST_CHAT_14B_DEFAULT_PROVIDER,
-            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash",
+            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash-lite",
             timeout_ms=60000,
             available=False,
             api_key=None,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from host_brain.app.chat_agent import (
+    _should_schedule_commit_tts_fallback,
     render_quick_gateway_ack_text,
     render_quick_gateway_progress_text,
     render_quick_gateway_realign_text,

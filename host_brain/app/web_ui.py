@@ -4,6 +4,7 @@
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from fastapi import APIRouter, Query, HTTPException
@@ -20,6 +21,10 @@ from host_brain.app.main import (
 )
 
 logger = logging.getLogger("Natsume.web_ui")
+_SEARCH_REQUESTS_CACHE_TTL_MS = max(
+    int(os.getenv("OBS_SEARCH_REQUESTS_CACHE_TTL_MS", "3000") or 3000),
+    0,
+)
 
 # Web UI API路由
 router = APIRouter(prefix="/ui", tags=["web-ui"])
@@ -210,27 +215,43 @@ def search_requests(
 ):
     """搜索请求记录"""
     try:
-        ledger = get_ledger()
+        from host_brain.app.obs_routes_core import _get_obs_route_cached_response
 
-        # 转换为时间戳
-        start_ts = int(start_time.timestamp() * 1000)
-        end_ts = int(end_time.timestamp() * 1000)
+        def _build_response() -> Dict[str, Any]:
+            ledger = get_ledger()
 
-        search_results = search_webui_requests(
-            ledger=ledger,
-            query=query,
-            start_time=start_ts,
-            end_time=end_ts,
-            page=page,
-            page_size=page_size
+            # 转换为时间戳
+            start_ts = int(start_time.timestamp() * 1000)
+            end_ts = int(end_time.timestamp() * 1000)
+
+            search_results = search_webui_requests(
+                ledger=ledger,
+                query=query,
+                start_time=start_ts,
+                end_time=end_ts,
+                page=page,
+                page_size=page_size
+            )
+
+            return {
+                "results": search_results["results"],
+                "total": search_results["total"],
+                "page": page,
+                "page_size": page_size
+            }
+
+        return _get_obs_route_cached_response(
+            cache_name="webui_search_requests",
+            cache_key={
+                "query": query,
+                "start_time": int(start_time.timestamp() * 1000),
+                "end_time": int(end_time.timestamp() * 1000),
+                "page": int(page),
+                "page_size": int(page_size),
+            },
+            ttl_ms=_SEARCH_REQUESTS_CACHE_TTL_MS,
+            builder=_build_response,
         )
-
-        return {
-            "results": search_results["results"],
-            "total": search_results["total"],
-            "page": page,
-            "page_size": page_size
-        }
 
     except Exception as e:
         logger.error(f"Failed to search requests: {e}")

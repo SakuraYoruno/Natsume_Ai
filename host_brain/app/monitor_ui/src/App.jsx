@@ -1,34 +1,35 @@
-import React, { Suspense, lazy } from 'react'
+import React, { Suspense } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Layout from './components/Layout.jsx'
-import SelfModelDashboard from './pages/SelfModelDashboard.jsx'
-
-const DigitalLifeOverview = lazy(() => import('./pages/DigitalLifeOverview.jsx'))
-const Overview = lazy(() => import('./pages/Overview.jsx'))
-const Sessions = lazy(() => import('./pages/Sessions.jsx'))
-const Trace = lazy(() => import('./pages/Trace.jsx'))
-const Metrics = lazy(() => import('./pages/Metrics.jsx'))
-const Insights = lazy(() => import('./pages/Insights.jsx'))
-const Canon = lazy(() => import('./pages/Canon.jsx'))
-const Bond = lazy(() => import('./pages/Bond.jsx'))
-const Tools = lazy(() => import('./pages/Tools.jsx'))
-const Automation = lazy(() => import('./pages/Automation.jsx'))
-const AgentLoop = lazy(() => import('./pages/AgentLoop.jsx'))
-const Gateway = lazy(() => import('./pages/Gateway.jsx'))
-const SkillsHub = lazy(() => import('./pages/SkillsHub.jsx'))
-const ChatDebug = lazy(() => import('./pages/ChatDebug.jsx'))
-const Alerts = lazy(() => import('./pages/Alerts.jsx'))
-const LogStream = lazy(() => import('./pages/LogStream.jsx'))
-const EmotionDashboard = lazy(() => import('./pages/EmotionDashboard.jsx'))
-const MemoryBrowser = lazy(() => import('./pages/MemoryBrowser.jsx'))
-const SystemConfig = lazy(() => import('./pages/SystemConfig.jsx'))
-const RuntimeMode = lazy(() => import('./pages/RuntimeMode.jsx'))
-const PromptConfig = lazy(() => import('./pages/PromptConfig.jsx'))
-const PersonaPromptOps = lazy(() => import('./pages/PersonaPromptOps.jsx'))
-const InnerWorldDashboard = lazy(() => import('./pages/InnerWorldDashboard.jsx'))
-const ResponsePolicyDashboard = lazy(() => import('./pages/ResponsePolicyDashboard.jsx'))
+import {
+  AgentLoop,
+  Alerts,
+  Automation,
+  Bond,
+  Canon,
+  ChatDebug,
+  DigitalLifeOverview,
+  EmotionDashboard,
+  Gateway,
+  InnerWorldDashboard,
+  Insights,
+  LogStream,
+  MemoryBrowser,
+  Metrics,
+  Overview,
+  PersonaPromptOps,
+  PromptConfig,
+  ResponsePolicyDashboard,
+  RuntimeMode,
+  SelfModelDashboard,
+  Sessions,
+  SkillsHub,
+  SystemConfig,
+  Tools,
+  Trace,
+} from './routes/routeLoaders.js'
 
 
 function RouteLoading() {
@@ -72,7 +73,7 @@ function withSuspense(element) {
 export default function App() {
   return (
     <ErrorBoundary>
-      <HashRouter>
+      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/digital-life" replace />} />

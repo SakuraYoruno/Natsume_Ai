@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
 import {
   RefreshCw,
   MessageSquare,
@@ -13,13 +13,17 @@ import {
   Wifi,
   Zap,
 } from 'lucide-react'
-import { fetchGatewayStats, fetchWeChatStats, resetWeChatChannel } from '../api/obs.js'
+import { resetWeChatChannel } from '../api/gateway.js'
 import MetricCard from '../components/MetricCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import DrilldownLink from '../components/obs/DrilldownLink.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SectionHeading from '../components/SectionHeading.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useGatewayOverviewQuery } from '../queries/gatewayQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const PLATFORM_META = {
@@ -131,38 +135,25 @@ function PlatformCard({ data }) {
 export default function Gateway() {
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingTick = useAppStore((s) => s.pollingTick)
 
   const [windowMinutes, setWindowMinutes] = useState(60)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [data, setData] = useState(null)
-  const [wechatDetail, setWechatDetail] = useState(null)
   const [resetting, setResetting] = useState(false)
   const [resetMsg, setResetMsg] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [gatewayRes, wechatRes] = await Promise.all([
-        fetchGatewayStats({ window_minutes: windowMinutes }),
-        fetchWeChatStats({ window_minutes: windowMinutes, limit: 20 }).catch(() => null),
-      ])
-      setData(gatewayRes)
-      setWechatDetail(wechatRes)
-    } catch (loadError) {
-      setError(`加载失败：${loadError.message}`)
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const {
+    gatewayData: data,
+    wechatDetail,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+  } = useGatewayOverviewQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const handleReset = async () => {
     setResetting(true)
@@ -170,7 +161,7 @@ export default function Gateway() {
     try {
       const result = await resetWeChatChannel({ reason: 'manual_ui' })
       setResetMsg({ ok: true, text: result.detail || '重置成功' })
-      await load()
+      await refetch()
     } catch (resetError) {
       setResetMsg({ ok: false, text: `重置失败：${resetError.message}` })
     } finally {
@@ -190,6 +181,14 @@ export default function Gateway() {
 
   const hasWeChatRateLimits = (wechatDetail?.rate_limits ?? []).length > 0
   const hasWeChatEvents = (wechatDetail?.recent_events ?? []).length > 0
+  const gatewayEventCount = Number(data?.total_inbound ?? 0) + Number(data?.total_outbound ?? 0) + Number(data?.total_errors ?? 0)
+  const gatewayLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(data || wechatDetail),
+    hasSamples: !isInitialState && gatewayEventCount > 0,
+    available: Boolean(data || wechatDetail),
+  })
 
   return (
     <div className="space-y-6">
@@ -205,8 +204,8 @@ export default function Gateway() {
             options={WINDOW_OPTIONS}
             className="rounded border border-gray-300 px-2 py-1.5 text-xs"
           />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
+          <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} /> 刷新
           </button>
         </div>
       </div>
@@ -226,11 +225,28 @@ export default function Gateway() {
           `拟人化：${data?.humanize_enabled ? '开启' : '关闭'}`,
           `窗口：${windowMinutes} 分钟`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={gatewayLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={gatewayEventCount}
+            sampleLabel="事件计数"
+            updatedAt={lastUpdatedAt}
+            source="gateway + wechat detail"
+            definition="Gateway 页同时展示平台健康态和窗口内消息事件；空流量与接口不可用会明确区分。"
+          />
+        )}
       />
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
+      {!error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.UNAVAILABLE ? (
+        <NoticeBanner variant="warning">
+          网关观测接口当前未返回可用数据，页面会保留中性占位，避免把不可用误判为空流量。
+        </NoticeBanner>
+      ) : null}
 
-      {!error && isInitialState ? (
+      {!error && !loading && !refreshing && gatewayLoadState === LOAD_STATES.NO_SAMPLE ? (
         <div className="card p-4 text-sm text-gray-500">
           <div className="mb-1 text-xs text-gray-400">
             当前数据为空流量初始态，页面显示的是健康快照，不是接口故障。
@@ -273,6 +289,12 @@ export default function Gateway() {
           variant="stacked"
         />
       </div>
+
+      <DrilldownLink
+        to="/trace"
+        label="进入 Trace"
+        hint="如果平台健康但用户仍感知异常，优先从 request 级链路继续追 Gateway 前后的主流程。"
+      />
 
       <div>
         <SectionHeading icon={Wifi} title="平台状态" />

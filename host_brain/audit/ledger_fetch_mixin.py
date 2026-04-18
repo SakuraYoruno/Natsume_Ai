@@ -26,6 +26,7 @@ class LedgerFetchMixin:
     _conn: sqlite3.Connection
     _column_cache: dict[str, set[str]]
     _column_cache_lock: threading.Lock
+    _table_name_cache: set[str] | None
     _write_lock: threading.Lock
 
     def _insert(self, table: str, payload: dict[str, Any]) -> None:
@@ -205,9 +206,40 @@ class LedgerFetchMixin:
                     self._column_cache[table] = cached
         return cached is not None and column in cached
 
+    def _get_table_names(self) -> set[str]:
+        cached = self._table_name_cache
+        if cached is None:
+            with self._column_cache_lock:
+                cached = self._table_name_cache
+                if cached is None:
+                    rows = self._conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                    cached = {
+                        str(row["name"]) if isinstance(row, sqlite3.Row) else str(row[0])
+                        for row in rows
+                    }
+                    self._table_name_cache = cached
+        return set(cached)
+
+    def table_exists(self, table: str) -> bool:
+        return str(table or "").strip() in self._get_table_names()
+
+    def can_fetch_table(self, table: str) -> bool:
+        normalized = str(table or "").strip()
+        return bool(normalized) and normalized in _ALLOWED_TABLES and self.table_exists(normalized)
+
+    def resolve_fetch_table(self, *candidates: str) -> str | None:
+        for candidate in candidates:
+            normalized = str(candidate or "").strip()
+            if self.can_fetch_table(normalized):
+                return normalized
+        return None
+
     def _invalidate_schema_cache(self, table: str | None = None) -> None:
         """清空表结构缓存（M25-C：迁移后调用，确保下次查询重新读取 PRAGMA）。"""
         with self._column_cache_lock:
+            self._table_name_cache = None
             if table is not None:
                 self._column_cache.pop(table, None)
             else:

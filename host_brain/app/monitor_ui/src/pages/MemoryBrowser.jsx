@@ -1,21 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Archive, BookOpen, Brain, Database, RefreshCw } from 'lucide-react'
-import {
-  fetchCanonDocuments,
-  fetchContextCompressorStats,
-  fetchDistillationStats,
-  fetchEpisodicStoreStats,
-  fetchMemoryStats,
-  fetchRecallPackStats,
-  fetchResidentMemoryContext,
-} from '../api/obs.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SectionHeading from '../components/SectionHeading.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useMemoryOverviewQuery } from '../queries/memoryQueries.js'
 import useAppStore from '../store/useAppStore.js'
+import { getSuccessRateTone, summarizeSuccessRateSamples } from '../utils/successRate.js'
 
 const WINDOW_OPTIONS = [
   { label: '1h', value: 60 },
@@ -32,54 +27,28 @@ function formatDocStatus(status) {
 export default function MemoryBrowser() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
 
   const [windowMinutes, setWindowMinutes] = useState(360)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [memoryData, setMemoryData] = useState(null)
-  const [episodicData, setEpisodicData] = useState(null)
-  const [distillData, setDistillData] = useState(null)
-  const [canonDocs, setCanonDocs] = useState(null)
-  const [recallData, setRecallData] = useState(null)
-  const [compressData, setCompressData] = useState(null)
-  const [residentContext, setResidentContext] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [memory, episodic, distill, canon, recall, compress, resident] = await Promise.all([
-        fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchEpisodicStoreStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchDistillationStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchCanonDocuments().catch(() => null),
-        fetchRecallPackStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchContextCompressorStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchResidentMemoryContext().catch(() => null),
-      ])
-
-      setMemoryData(memory)
-      setEpisodicData(episodic)
-      setDistillData(distill)
-      setCanonDocs(canon)
-      setRecallData(recall)
-      setCompressData(compress)
-      setResidentContext(resident)
-    } catch (loadError) {
-      setError(`加载失败：${loadError.message}`)
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-    if (!pollingEnabled) {
-      return undefined
-    }
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const {
+    memoryData,
+    episodicData,
+    distillData,
+    canonDocs,
+    recallData,
+    compressData,
+    residentContext,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+  } = useMemoryOverviewQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const subsystems = memoryData?.subsystems || []
   const docs = canonDocs?.documents || canonDocs?.items || []
@@ -93,15 +62,19 @@ export default function MemoryBrowser() {
   const latestMemoryRecallSummary = residentContext?.latest_memory_recall_summary || ''
   const promptContextAvailable = Boolean(residentContext?.prompt_context_available)
   const residentDocCount = worldDocs.length + personaDocs.length + styleDocs.length
-
-  const avgSuccessRate = subsystems.length > 0
-    ? Math.round(
-      subsystems.reduce((sum, item) => sum + Number(item?.success_rate || 0), 0) / subsystems.length
-    )
-    : null
+  const hasMemoryObservabilityData = Boolean(
+    memoryData || episodicData || distillData || canonDocs || recallData || compressData || residentContext
+  )
+  const subsystemOperationCount = subsystems.reduce((sum, item) => sum + Number(item?.total || 0), 0)
+  const {
+    averageRate: avgSuccessRate,
+    sampledCount: sampledSubsystemCount,
+    configuredCount: configuredSubsystemCount,
+  } = summarizeSuccessRateSamples(subsystems)
+  const hasSubsystemSamples = avgSuccessRate != null
 
   const hasMemoryTraffic = (
-    subsystems.length > 0
+    sampledSubsystemCount > 0
     || worldDocs.length > 0
     || personaDocs.length > 0
     || styleDocs.length > 0
@@ -112,6 +85,13 @@ export default function MemoryBrowser() {
     || (distillData?.total_cycles ?? 0) > 0
     || (compressData?.total_compressions ?? 0) > 0
   )
+  const memoryLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: hasMemoryObservabilityData,
+    hasSamples: hasMemoryTraffic,
+    available: hasMemoryObservabilityData,
+  })
 
   return (
     <div className="space-y-6">
@@ -122,8 +102,8 @@ export default function MemoryBrowser() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
           </button>
         </div>
@@ -132,10 +112,10 @@ export default function MemoryBrowser() {
       <PageHero
         icon={Database}
         eyebrow="海马体记忆总览"
-        title={`${subsystems.length} 个子系统`}
+        title={configuredSubsystemCount > 0 ? `${configuredSubsystemCount} 个记忆子系统` : '记忆链路待采样'}
         description={
-          avgSuccessRate != null
-            ? `近窗口平均成功率 ${avgSuccessRate}% · 常驻设定 ${residentDocCount} 份 · 召回槽位 ${slots.length} 个`
+          hasSubsystemSamples
+            ? `近窗口平均成功率 ${avgSuccessRate}% · ${sampledSubsystemCount}/${configuredSubsystemCount} 个子系统有样本 · 常驻设定 ${residentDocCount} 份`
             : '当前窗口还没有足够的记忆流量样本。'
         }
         gradientClass="from-primary-50 via-white to-cyan-50"
@@ -145,17 +125,35 @@ export default function MemoryBrowser() {
           `风格常驻：${activeStyleBindings.length}`,
           `情景写入：${episodicData?.total_writes ?? 0}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={memoryLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={subsystemOperationCount}
+            sampleLabel="记忆操作"
+            updatedAt={lastUpdatedAt}
+            source="memory / recall / distill"
+            definition="记忆页把子系统读写、召回包、蒸馏和常驻设定放在同一观察面；无样本与暂不可用会明确区分。"
+          />
+        )}
       />
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
 
-      {!error && !hasMemoryTraffic ? (
+      {!error && !loading && !refreshing && memoryLoadState === LOAD_STATES.UNAVAILABLE ? (
+        <NoticeBanner variant="warning">
+          记忆观测接口当前未返回可用数据，页面会保留中性占位而不是把不可用误报成 0。
+        </NoticeBanner>
+      ) : null}
+
+      {!error && !loading && !refreshing && memoryLoadState === LOAD_STATES.NO_SAMPLE ? (
         <NoticeBanner variant="info">
           当前还是空样本初始态。记忆链路尚未产生可观测数据时，卡片显示 0 或空列表属于预期。
         </NoticeBanner>
       ) : null}
 
-      {subsystems.length > 0 ? (
+      {hasSubsystemSamples ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {subsystems.map((subsystem) => (
             <MetricCard
@@ -163,13 +161,7 @@ export default function MemoryBrowser() {
               label={subsystem.display_name}
               value={subsystem.success_rate != null ? `${subsystem.success_rate}%` : '—'}
               hint={`${subsystem.total ?? 0} 次操作`}
-              tone={
-                subsystem.success_rate >= 90
-                  ? 'text-green-600'
-                  : subsystem.success_rate >= 70
-                    ? 'text-orange-500'
-                    : 'text-red-500'
-              }
+              tone={getSuccessRateTone(subsystem.success_rate)}
               variant="stacked"
             />
           ))}

@@ -129,7 +129,7 @@ def _normalize_openai_compat_base_url(value: str | None) -> str | None:
 def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
     normalized_chain = str(chain_name or "").strip().lower()
     if normalized_chain == "gemini":
-        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if normalized_chain == "codex":
         return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if normalized_chain == "deepseek":
@@ -499,18 +499,54 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     timeout_value = _first_non_empty_env(timeout_env_name, *fallback_timeout_env_names)
     timeout_ms = max(800, _parse_int(timeout_value, default=timeout_default_ms, min_value=800, max_value=timeout_max_ms))
     selected_api_key = str(base_runtime.get("llm_api_key") or base_runtime.get("chat_llm_api_key") or "").strip() or None
+    explicit_model_override = _first_non_empty_env(model_env_name, *fallback_model_env_names)
     model_route: dict[str, Any] = {}
     if provider_name == PROVIDER_GEMINI:
         model_route = resolve_gemini_model_route(role=role, preferred_api_key=selected_api_key, route_key=(str(base_runtime.get("route_reason_code") or "").strip() or str(base_runtime.get("route_target") or "").strip() or None))
-        model_id = str(model_route.get("model_id") or base_runtime.get("model_id") or base_runtime.get("chat_model_id") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+        if explicit_model_override and explicit_model_override.lower().startswith("gemini-"):
+            model_id = explicit_model_override
+        else:
+            model_id = str(model_route.get("model_id") or base_runtime.get("model_id") or base_runtime.get("chat_model_id") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
         selected_api_key = str(model_route.get("api_key") or selected_api_key or "").strip() or None
     else:
         model_id = _resolve_non_gemini_agent_model_id_v2(provider_name=provider_name, base_runtime=base_runtime, model_env_names=(model_env_name, *fallback_model_env_names))
     return {**base_runtime, "model_id": model_id, "chat_model_id": model_id, "timeout_ms": timeout_ms, "chat_timeout_ms": timeout_ms, "llm_api_key": selected_api_key, "chat_llm_api_key": selected_api_key, "agent_gen_params": dict(gen_params), "agent_role": role, "agent_model_route": (model_route or None)}
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
+def resolve_chat_agent_llm_runtime(*, base_runtime: dict, speed_profile: str | None = None) -> dict:
     """ChatAgent（夏目蓝本人）的 LLM 运行时配置。"""
+    normalized_speed_profile = str(speed_profile or "").strip().lower()
+    if normalized_speed_profile == "direct_fast":
+        return _resolve_agent_llm_runtime_v2(
+            base_runtime=base_runtime,
+            role="chat_agent_direct",
+            model_env_name="HOST_CHAT_AGENT_DIRECT_MODEL_ID",
+            timeout_env_name="HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
+            timeout_default_ms=12_000,
+            timeout_max_ms=60_000,
+            gen_params={"temperature": 0.78, "top_p": 0.9},
+            fallback_model_env_names=("HOST_GEMINI_MODEL_ID", "HOST_DISPATCH_AGENT_MODEL_ID"),
+            fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
+        )
+    if normalized_speed_profile == "context_fast":
+        return _resolve_agent_llm_runtime_v2(
+            base_runtime=base_runtime,
+            role="chat_agent_context",
+            model_env_name="HOST_CHAT_AGENT_CONTEXT_MODEL_ID",
+            timeout_env_name="HOST_CHAT_AGENT_CONTEXT_TIMEOUT_MS",
+            timeout_default_ms=18_000,
+            timeout_max_ms=90_000,
+            gen_params={"temperature": 0.8, "top_p": 0.92},
+            fallback_model_env_names=(
+                "HOST_CHAT_AGENT_DIRECT_MODEL_ID",
+                "HOST_GEMINI_MODEL_ID",
+                "HOST_CHAT_AGENT_MODEL_ID",
+            ),
+            fallback_timeout_env_names=(
+                "HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
+                "HOST_CHAT_AGENT_TIMEOUT_MS",
+            ),
+        )
     return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.8, "top_p": 0.92})
 
 

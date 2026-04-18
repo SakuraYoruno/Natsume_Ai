@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   approveCapabilityForgeProposal,
-  fetchCapabilityForgeProposals,
   rollbackCapabilityForgeProposal,
-} from '../api/obs.js'
+} from '../api/forge.js'
+import { useCapabilityForgeProposalsQuery } from '../queries/forgeQueries.js'
 
 const APPROVER_ID = 'ui.forge_risk_bar'
 const OPERATOR_ID = 'ui.forge_risk_bar'
@@ -30,9 +30,8 @@ export default function ForgeRiskActionBar({
   capabilityGapData = null,
   pollingEnabled = false,
   pollingInterval = 30,
+  pollingTick = 0,
 }) {
-  const [proposalItems, setProposalItems] = useState([])
-  const [loading, setLoading] = useState(false)
   const [busyAction, setBusyAction] = useState('')
 
   const qualitySummary = capabilityGapData?.forge_runtime_quality?.summary || {}
@@ -43,33 +42,18 @@ export default function ForgeRiskActionBar({
   const avgHealth = Number(qualitySummary.avg_health_score || 0)
   const hasRisk = critical > 0 || unhealthy > 0
   const shouldShow = hasRisk || tracked > 0
-
-  const loadProposals = useCallback(async () => {
-    if (!shouldShow) {
-      setProposalItems([])
-      return
-    }
-    setLoading(true)
-    try {
-      const response = await fetchCapabilityForgeProposals({ limit: 20 })
-      setProposalItems(Array.isArray(response?.items) ? response.items : [])
-    } catch {
-      setProposalItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [shouldShow])
-
-  useEffect(() => {
-    loadProposals().catch(() => {})
-    if (!pollingEnabled || !shouldShow) {
-      return undefined
-    }
-    const timer = setInterval(() => {
-      loadProposals().catch(() => {})
-    }, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [loadProposals, pollingEnabled, pollingInterval, shouldShow])
+  const {
+    proposals: proposalItems,
+    loading,
+    refreshing,
+    refetch: refetchProposals,
+  } = useCapabilityForgeProposalsQuery({
+    limit: 20,
+    enabled: shouldShow,
+    pollingEnabled: pollingEnabled && shouldShow,
+    pollingTick,
+    pollingInterval,
+  })
 
   const selectedProposal = useMemo(() => {
     if (!shouldShow) return null
@@ -117,13 +101,13 @@ export default function ForgeRiskActionBar({
         target_stage: 'canary',
       })
       toast.success(`Forge proposal approved to canary: ${proposalId.slice(0, 16)}`)
-      await loadProposals()
+      await refetchProposals()
     } catch (error) {
       toast.error(`Approve failed: ${parseApiError(error)}`)
     } finally {
       setBusyAction('')
     }
-  }, [loadProposals, selectedProposal])
+  }, [refetchProposals, selectedProposal])
 
   const handleRollback = useCallback(async () => {
     if (!selectedProposal) return
@@ -136,13 +120,13 @@ export default function ForgeRiskActionBar({
         reason: 'manual rollback from forge risk action bar',
       })
       toast.success(`Forge proposal rolled back: ${proposalId.slice(0, 16)}`)
-      await loadProposals()
+      await refetchProposals()
     } catch (error) {
       toast.error(`Rollback failed: ${parseApiError(error)}`)
     } finally {
       setBusyAction('')
     }
-  }, [loadProposals, selectedProposal])
+  }, [refetchProposals, selectedProposal])
 
   if (!shouldShow) {
     return null
@@ -178,7 +162,7 @@ export default function ForgeRiskActionBar({
           {`proposal ${(String(selectedProposal.proposal_id || '').slice(0, 14) || '--')} | ${selectedStatus || '--'} | ${selectedStage || '--'} | h ${selectedHealth.toFixed(1)}`}
         </span>
       ) : (
-        <span className="text-[11px] text-gray-600">{loading ? 'loading proposals...' : 'no proposal loaded'}</span>
+        <span className="text-[11px] text-gray-600">{loading || refreshing ? 'loading proposals...' : 'no proposal loaded'}</span>
       )}
 
       <button

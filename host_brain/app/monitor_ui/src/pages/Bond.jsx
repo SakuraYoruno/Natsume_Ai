@@ -1,20 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Heart, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
-import {
-  fetchBondHealth,
-  fetchBondStage,
-  fetchBondUsers,
-  submitBondEvent,
-} from '../api/obs.js'
+import { submitBondEvent } from '../api/bond.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import KeyValueRow from '../components/KeyValueRow.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useBondOverviewQuery, useBondUserDetailQuery } from '../queries/bondQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import {
   formatDateTime,
-  formatEmotionTag,
   formatStage,
   formatTransitionStatus,
   formatTrend,
@@ -215,123 +212,79 @@ function EventForm({ onSubmit, loading, selectedUser }) {
 export default function Bond() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
 
-  const [health, setHealth] = useState(null)
-  const [users, setUsers] = useState([])
   const [selectedUser, setSelectedUser] = useState(null)
-  const [userDetail, setUserDetail] = useState(null)
-  const [stageDist, setStageDist] = useState([])
   const [submitResult, setSubmitResult] = useState(null)
   const [submitLoading, setSubmitLoading] = useState(false)
-  const [detailLoading, setDetailLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [loading, setLoading] = useState(false)
+  const {
+    health,
+    users,
+    stageDist,
+    stageSampleCount,
+    overviewError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useBondOverviewQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [healthResponse, usersResponse] = await Promise.all([
-        fetchBondHealth(),
-        fetchBondUsers(),
-      ])
+  const {
+    userDetail,
+    detailError,
+    loading: detailLoading,
+    refreshing: detailRefreshing,
+    lastUpdatedAt: detailUpdatedAt,
+    refetch: refetchUserDetail,
+  } = useBondUserDetailQuery({
+    userId: selectedUser,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
-      const userList = Array.isArray(usersResponse?.users)
-        ? usersResponse.users
-        : Array.isArray(usersResponse)
-          ? usersResponse
-          : []
-
-      setHealth(healthResponse)
-      setUsers(userList)
-
-      const samples = await Promise.all(
-        userList.slice(0, 24).map((userId) => fetchBondStage(userId).catch(() => null))
-      )
-
-      const distribution = samples.reduce((result, item) => {
-        if (!item?.current_stage) return result
-        result[item.current_stage] = (result[item.current_stage] || 0) + 1
-        return result
-      }, {})
-
-      setStageDist(
-        Object.entries(distribution).map(([stage, count]) => ({
-          stage,
-          count,
-        }))
-      )
-
-      if (!selectedUser && userList.length > 0) {
-        setSelectedUser(userList[0])
-      }
-    } catch (loadError) {
-      setError(loadError.message || '关系数据加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [selectedUser])
-
-  const loadUserDetail = useCallback(async (userId) => {
-    if (!userId) {
-      setUserDetail(null)
+  useEffect(() => {
+    if (!selectedUser && users.length > 0) {
+      setSelectedUser(users[0])
       return
     }
-
-    setDetailLoading(true)
-    try {
-      const detail = await fetchBondStage(userId)
-      setUserDetail(detail)
-    } catch {
-      setUserDetail(null)
-    } finally {
-      setDetailLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
-
-  useEffect(() => {
-    if (selectedUser) {
-      loadUserDetail(selectedUser)
-    }
-  }, [loadUserDetail, selectedUser])
-
-  useEffect(() => {
     if (selectedUser && !users.includes(selectedUser)) {
       setSelectedUser(users[0] || null)
-      setUserDetail(null)
     }
   }, [selectedUser, users])
+
+  const bondLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: overviewError,
+    hasData: Boolean(health || users.length > 0 || stageDist.length > 0),
+    hasSamples: users.length > 0 || stageSampleCount > 0 || Number(health?.user_count ?? 0) > 0,
+    available: Boolean(health || users.length > 0 || stageDist.length > 0),
+    stale,
+  })
 
   const handleSubmitEvent = async (body) => {
     setSubmitLoading(true)
     setSubmitResult(null)
+    const shouldRefreshDetail = body.user_id === selectedUser
     try {
       const result = await submitBondEvent(body)
       setSubmitResult({ ok: true, data: result })
+      await refetch()
+      if (shouldRefreshDetail) {
+        await refetchUserDetail()
+      }
       setSelectedUser(body.user_id)
-      await load()
-      await loadUserDetail(body.user_id)
     } catch (submitError) {
       setSubmitResult({ ok: false, error: submitError.message || '提交失败' })
     } finally {
       setSubmitLoading(false)
     }
   }
-
-  const stageSampleCount = useMemo(
-    () => stageDist.reduce((sum, item) => sum + item.count, 0),
-    [stageDist]
-  )
 
   return (
     <div className="space-y-6">
@@ -340,8 +293,12 @@ export default function Bond() {
           <h1 className="text-xl font-semibold text-gray-900">社交脑</h1>
           <p className="text-sm text-gray-500">查看关系阶段、趋势、用户详情与事件补录入口。</p>
         </div>
-        <button className="btn-secondary" onClick={load} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        <button
+          className="btn-secondary"
+          onClick={() => Promise.allSettled([refetch(), selectedUser ? refetchUserDetail() : Promise.resolve()])}
+          disabled={loading || refreshing || detailLoading || detailRefreshing}
+        >
+          <RefreshCw size={14} className={loading || refreshing || detailLoading || detailRefreshing ? 'animate-spin' : ''} />
           刷新
         </button>
       </div>
@@ -362,9 +319,32 @@ export default function Bond() {
           `分布样本：${stageSampleCount}`,
           `已选用户：${selectedUser || '未选择'}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={bondLoadState}
+            sampleSize={stageSampleCount}
+            sampleLabel="关系样本"
+            updatedAt={lastUpdatedAt}
+            source="bond / stage"
+            definition="社交脑页聚合关系健康、用户列表、阶段分布与当前用户详情；无样本、暂不可用与加载失败会明确区分。"
+          />
+        )}
       />
 
-      {error ? <NoticeBanner variant="error" title="关系数据加载失败">{error}</NoticeBanner> : null}
+      {overviewError ? <NoticeBanner variant="error" title="关系数据加载失败">{overviewError}</NoticeBanner> : null}
+
+      {!overviewError && !loading && !refreshing && bondLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info" title="关系链路待采样">
+          当前还没有可用的 Bond 用户或阶段样本，页面会保留中性占位。
+        </NoticeBanner>
+      ) : null}
+
+      {!overviewError && !loading && !refreshing && bondLoadState === LOAD_STATES.UNAVAILABLE ? (
+        <NoticeBanner variant="warning" title="关系观测暂不可用">
+          Bond 相关接口当前未返回可用快照，建议稍后重试。
+        </NoticeBanner>
+      ) : null}
 
       {submitResult ? (
         <NoticeBanner
@@ -425,8 +405,13 @@ export default function Bond() {
               <Heart size={15} className="text-gray-500" />
               <h2 className="text-sm font-semibold text-gray-800">用户详情</h2>
             </div>
-            {detailLoading ? (
+            {detailLoading || detailRefreshing ? (
               <NoticeBanner variant="info">正在加载用户关系详情…</NoticeBanner>
+            ) : detailError ? (
+              <NoticeBanner variant="warning" title="用户详情暂不可用">
+                {detailError}
+                {detailUpdatedAt ? ` · 最近更新时间 ${formatDateTime(detailUpdatedAt)}` : ''}
+              </NoticeBanner>
             ) : userDetail ? (
               <div className="space-y-3">
                 <KeyValueRow label="用户 ID" value={userDetail.user_id} />

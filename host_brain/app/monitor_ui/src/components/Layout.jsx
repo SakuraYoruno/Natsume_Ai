@@ -30,10 +30,11 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { fetchCapabilityGapStats } from '../api/obs.js'
 import ForgeRiskActionBar from './ForgeRiskActionBar.jsx'
 import useAppStore from '../store/useAppStore.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { useCapabilityGapStatsQuery } from '../queries/diagnosticQueries.js'
+import { preloadRoute } from '../routes/routeLoaders.js'
 import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
 
 const NAV_SECTIONS = [
@@ -102,10 +103,17 @@ function NavBadge({ value, severity = 'info' }) {
 }
 
 function NavPill({ to, icon: Icon, label, onClick, badge = null }) {
+  const handlePrefetch = () => {
+    void preloadRoute(to)
+  }
+
   return (
     <NavLink
       to={to}
       onClick={onClick}
+      onMouseEnter={handlePrefetch}
+      onFocus={handlePrefetch}
+      onTouchStart={handlePrefetch}
       className={({ isActive }) =>
         `inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-medium transition-all ${
           isActive
@@ -146,13 +154,24 @@ function SectionFlowRail({ sections }) {
 export default function Layout() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
+  const pageVisible = useAppStore((state) => state.pageVisible)
+  const bumpPollingTick = useAppStore((state) => state.bumpPollingTick)
   const setPollingEnabled = useAppStore((state) => state.setPollingEnabled)
   const setPollingInterval = useAppStore((state) => state.setPollingInterval)
+  const setPageVisible = useAppStore((state) => state.setPageVisible)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
-  const [capabilityGapData, setCapabilityGapData] = useState(null)
   const location = useLocation()
+  const {
+    statsData: capabilityGapData,
+  } = useCapabilityGapStatsQuery({
+    windowMinutes: 1440,
+    pollingEnabled: pollingEnabled && pageVisible,
+    pollingTick,
+    pollingInterval,
+  })
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
-    pollingEnabled,
+    pollingEnabled: pollingEnabled && pageVisible,
     pollingInterval,
     windowMinutes: 60,
   })
@@ -163,44 +182,29 @@ export default function Layout() {
   }, [location.pathname])
 
   useEffect(() => {
-    let cancelled = false
-
-    const loadCapabilityGapData = async () => {
-      try {
-        const data = await fetchCapabilityGapStats({
-          limit_recent: 20,
-          limit_hotspots: 8,
-          limit_candidates: 8,
-          min_candidate_detected: 3,
-          min_candidate_sessions: 2,
-          min_candidate_failure_rate: 0.35,
-          min_candidate_failed: 2,
-        })
-        if (!cancelled) {
-          setCapabilityGapData(data)
-        }
-      } catch {
-        if (!cancelled) {
-          setCapabilityGapData(null)
-        }
+    const syncPageVisibility = () => {
+      const visible = typeof document === 'undefined' ? true : document.visibilityState !== 'hidden'
+      setPageVisible(visible)
+      if (visible && pollingEnabled) {
+        bumpPollingTick()
       }
     }
-
-    loadCapabilityGapData().catch(() => {})
-    if (!pollingEnabled) {
-      return () => {
-        cancelled = true
-      }
-    }
-
-    const timer = setInterval(() => {
-      loadCapabilityGapData().catch(() => {})
-    }, pollingInterval * 1000)
+    syncPageVisibility()
+    document.addEventListener('visibilitychange', syncPageVisibility)
     return () => {
-      cancelled = true
-      clearInterval(timer)
+      document.removeEventListener('visibilitychange', syncPageVisibility)
     }
-  }, [pollingEnabled, pollingInterval])
+  }, [bumpPollingTick, pollingEnabled, setPageVisible])
+
+  useEffect(() => {
+    if (!pollingEnabled || !pageVisible) {
+      return undefined
+    }
+    const timer = setInterval(() => {
+      bumpPollingTick()
+    }, pollingInterval * 1000)
+    return () => clearInterval(timer)
+  }, [bumpPollingTick, pageVisible, pollingEnabled, pollingInterval])
 
   const runtimeAlertBadge = runtimeAlerts.length > 0
     ? { value: runtimeAlerts.length, severity: runtimeAlerts[0]?.severity || 'info' }
@@ -270,6 +274,7 @@ export default function Layout() {
             capabilityGapData={capabilityGapData}
             pollingEnabled={pollingEnabled}
             pollingInterval={pollingInterval}
+            pollingTick={pollingTick}
           />
 
           <nav className="hidden flex-wrap gap-3 lg:flex" role="navigation" aria-label="主导航">

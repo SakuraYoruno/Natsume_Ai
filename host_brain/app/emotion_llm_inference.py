@@ -7,7 +7,7 @@
 
 环境变量：
   HOST_EMOTION_LLM_INFERENCE_ENABLED: 主开关（默认 false）
-  HOST_EMOTION_LLM_MODEL_ID: 推理用模型（默认 gemini-2.5-flash）
+  HOST_EMOTION_LLM_MODEL_ID: 推理用模型（默认 gemini-2.5-flash-lite）
   HOST_EMOTION_LLM_TIMEOUT_MS: LLM 推理超时毫秒（默认 300）
   HOST_EMOTION_LLM_CONFIDENCE_THRESHOLD: Level 1 跳过阈值（默认 0.7）
 """
@@ -200,7 +200,7 @@ async def infer_emotion_via_llm(
         EmotionLlmResult: 推理结果（含 user_emotion/natsume_emotion/reason/confidence）
     """
     t0 = time.monotonic()
-    model_id = str(os.environ.get("HOST_EMOTION_LLM_MODEL_ID") or "gemini-2.5-flash").strip()
+    model_id = str(os.environ.get("HOST_EMOTION_LLM_MODEL_ID") or "gemini-2.5-flash-lite").strip()
 
     prompt_text = _build_inference_prompt(
         user_message=user_message,
@@ -470,7 +470,7 @@ class EmotionInferenceCascade:
                 "confidence": llm_result.confidence,
                 "keyword_result": dict(keyword_result),
                 "latency_ms": llm_result.latency_ms,
-                "llm_model": str(os.environ.get("HOST_EMOTION_LLM_MODEL_ID") or "gemini-2.5-flash"),
+                "llm_model": str(os.environ.get("HOST_EMOTION_LLM_MODEL_ID") or "gemini-2.5-flash-lite"),
                 "signal_counts": keyword_result.get("signal_counts", {}),
             }
 

@@ -15,6 +15,7 @@ DevSpec §25：Bond 阶段自动晋级。
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -98,8 +99,31 @@ _STAGE_CN_MAP: dict[str, str] = {
 class BondSummaryCount(str):
     """String-safe count wrapper that still compares equal to legacy int checks."""
 
-    def __new__(cls, count: int) -> "BondSummaryCount":
-        normalized = max(0, int(count))
+    @staticmethod
+    def _coerce_count_value(count: Any) -> int:
+        if isinstance(count, BondSummaryCount):
+            return max(0, int(count))
+        if isinstance(count, (int, float)):
+            return max(0, int(count))
+
+        text = str(count or "").strip().lower()
+        if not text or text == "no shared memory yet":
+            return 0
+
+        match = re.match(r"^(?P<count>\d+)\s+shared\s+memor(?:y|ies)$", text)
+        if match is not None:
+            return max(0, int(match.group("count")))
+
+        # Deep-copy / pickle for str subclasses may reconstruct from the humanized
+        # string payload. Fall back to the first integer token when possible.
+        fallback = re.search(r"(?P<count>\d+)", text)
+        if fallback is not None:
+            return max(0, int(fallback.group("count")))
+
+        raise ValueError(f"unsupported BondSummaryCount payload: {count!r}")
+
+    def __new__(cls, count: Any) -> "BondSummaryCount":
+        normalized = cls._coerce_count_value(count)
         if normalized <= 0:
             text = "no shared memory yet"
         elif normalized == 1:

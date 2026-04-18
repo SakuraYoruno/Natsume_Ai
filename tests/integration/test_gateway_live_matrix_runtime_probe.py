@@ -163,6 +163,17 @@ def test_extract_request_id_prefers_lines_bound_to_current_conversation() -> Non
     assert probe._extract_request_id(log_chunk, conversation_id="case_456") == "req_c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2"
 
 
+def test_extract_request_id_returns_none_when_conversation_id_has_no_bound_lines() -> None:
+    log_chunk = "\n".join(
+        [
+            "2026-04-17 02:01:01,000 - Natsume.input_routes - INFO - input_routes: received edge input source=GATEWAY request_id=req_a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
+            "2026-04-17 02:01:02,000 - Natsume.tribe.ans_agent - INFO - ANSAgent request_id=req_b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1 session_id=other_case_123",
+        ]
+    )
+
+    assert probe._extract_request_id(log_chunk, conversation_id="case_999") is None
+
+
 def test_fetch_input_completed_event_falls_back_to_conversation_id(tmp_path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     conn = sqlite3.connect(str(db_path))
@@ -215,3 +226,124 @@ def test_fetch_input_completed_event_falls_back_to_conversation_id(tmp_path) -> 
     assert event is not None
     assert event["request_id"] == "req_new"
     assert event["payload"]["gateway_voice_success"] is True
+
+
+def test_fetch_input_completed_event_returns_none_when_no_conversation_match(tmp_path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE voice_event_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT,
+            event_type TEXT,
+            status TEXT,
+            reason_code TEXT,
+            detail TEXT,
+            payload TEXT,
+            ts_ms INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO voice_event_log (request_id, event_type, status, reason_code, detail, payload, ts_ms)
+        VALUES (?, 'INPUT_COMPLETED', 'OK', NULL, 'translate', ?, ?)
+        """,
+        (
+            "req_translate",
+            '{"source":"GATEWAY","conversation_id":"translate_case"}',
+            2000,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    event = probe._fetch_input_completed_event(
+        db_path,
+        None,
+        conversation_id="planning_case",
+        min_ts_ms=1500,
+    )
+
+    assert event is None
+
+
+def test_fetch_gateway_event_by_conversation_returns_bound_route_decided(tmp_path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE voice_event_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT,
+            event_type TEXT,
+            status TEXT,
+            reason_code TEXT,
+            detail TEXT,
+            payload TEXT,
+            ts_ms INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO voice_event_log (request_id, event_type, status, reason_code, detail, payload, ts_ms)
+        VALUES (?, 'INPUT_ROUTE_DECIDED', 'OK', NULL, 'route', ?, ?)
+        """,
+        (
+            "req_other",
+            '{"source":"GATEWAY","conversation_id":"other_case","route_target":"memory_store"}',
+            1000,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO voice_event_log (request_id, event_type, status, reason_code, detail, payload, ts_ms)
+        VALUES (?, 'INPUT_ROUTE_DECIDED', 'OK', NULL, 'route', ?, ?)
+        """,
+        (
+            "req_bound",
+            '{"source":"GATEWAY","conversation_id":"case_123","route_target":"intent_agent"}',
+            2000,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    event = probe._fetch_gateway_event_by_conversation(
+        db_path,
+        conversation_id="case_123",
+        min_ts_ms=1500,
+    )
+
+    assert event is not None
+    assert event["request_id"] == "req_bound"
+
+
+def test_edge_voice_pipeline_idle_returns_true_when_queue_and_playback_are_clear() -> None:
+    body = {
+        "event": {
+            "components": {
+                "resource_gate": {"snapshot": {"active_tasks": [], "metrics": {"queue_depth": 0}}},
+                "tts_playback_device": {"health": {"playing": False}},
+                "voice_pipeline": {"health": {"mouth_sync_thread_alive": False}},
+            }
+        }
+    }
+
+    assert probe._edge_voice_pipeline_idle(body) is True
+
+
+def test_edge_voice_pipeline_idle_returns_false_when_playback_is_active() -> None:
+    body = {
+        "event": {
+            "components": {
+                "resource_gate": {"snapshot": {"active_tasks": ["PLAYBACK"], "metrics": {"queue_depth": 1}}},
+                "tts_playback_device": {"health": {"playing": True}},
+                "voice_pipeline": {"health": {"mouth_sync_thread_alive": True}},
+            }
+        }
+    }
+
+    assert probe._edge_voice_pipeline_idle(body) is False

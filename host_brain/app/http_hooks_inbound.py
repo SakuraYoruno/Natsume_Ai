@@ -44,6 +44,7 @@ async def add_request_id_and_audit(
     request_id = new_request_id()
     request.state.request_id = request_id
     start_time = time.time()
+    request.state.request_started_ms = int(start_time * 1000)
     path = request.url.path
     method = request.method
     emit_info = should_emit_request_info(path)

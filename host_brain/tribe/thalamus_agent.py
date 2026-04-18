@@ -38,6 +38,9 @@ _DIRECT_SUMMARIZE_MARKERS = (
 )
 _DIRECT_SUMMARIZE_CONTEXT_MARKERS = (
     "session",
+    "会话",
+    "这段会话",
+    "当前会话",
     "对话",
     "聊天",
     "今天聊",
@@ -58,6 +61,8 @@ _DIRECT_EMOTION_QUERY_MARKERS = (
     "snapshot",
     "分析",
     "查询",
+    "查一下",
+    "查下",
     "看看",
     "读取",
 )
@@ -130,6 +135,7 @@ _HUB_SEARCH_PATTERNS = (
     re.compile(r"(?:search|find)\s+(?:skills?|skill)\s*(?:for|about)?\s*(?P<query>.+)$", re.IGNORECASE),
 )
 _EXPLICIT_MULTI_STEP_SPLITTERS = (
+    ("再", re.compile(r"\s*(?:，|,|；|;)?\s*再\s*", re.IGNORECASE)),
     ("然后", re.compile(r"\s*(?:，|,|；|;)?\s*然后\s*", re.IGNORECASE)),
     ("接着", re.compile(r"\s*(?:，|,|；|;)?\s*接着\s*", re.IGNORECASE)),
     ("之后", re.compile(r"\s*(?:，|,|；|;)?\s*之后\s*", re.IGNORECASE)),
@@ -160,8 +166,41 @@ _TASK_RECENT_TURN_RE = re.compile(
     re.IGNORECASE,
 )
 _TASK_PROGRESS_QUERY_RE = re.compile(
-    r"(进度|进展|状态|结果呢|有结果吗|完成了\??|做好了吗|好了没|搞定了吗|到哪了|还要多久|eta|done\??|status|progress|update)",
+    r"(进度|进展|任务状态|执行状态|结果呢|有结果吗|完成了\??|做好了吗|好了没|搞定了吗|到哪了|还要多久|eta|done\??|status|progress|update)",
     re.IGNORECASE,
+)
+_TASK_INTENT_PLANNING_RE = re.compile(
+    r"(三步建议|几步建议|下一步|先做什么|该怎么做|应该怎么做|怎么安排|帮我整理.*建议"
+    r"|next steps?|what should i do (?:first|next)|three[- ]step (?:advice|plan)|action plan|plan this out)",
+    re.IGNORECASE,
+)
+_PHATIC_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+_PHATIC_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
+_PHATIC_ACK_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+_PHATIC_COMFORT_RE = re.compile(
+    r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了)",
+    re.IGNORECASE,
+)
+_PHATIC_FASTPATH_MAX_CHARS = 24
+_PHATIC_COMFORT_BLOCKING_TOKENS: tuple[str, ...] = (
+    "翻译",
+    "代码",
+    "搜索",
+    "总结",
+    "记住",
+    "技能",
+    "计划",
+    "步骤",
+    "文件",
+    "脚本",
+    "函数",
+    "报错",
+    "bug",
+    "执行",
+    "处理",
+    "列出",
+    "分析",
+    "修复",
 )
 _TASK_EXEC_ACTION_MARKERS: tuple[str, ...] = (
     "请",
@@ -203,6 +242,7 @@ _TASK_EXEC_ACTION_MARKERS: tuple[str, ...] = (
     "deploy",
     "search",
 )
+_CONTEXT_CHAT_FAST_MAX_CHARS = 180
 _TASK_ENTERTAINMENT_RE = re.compile(
     r"(动漫|漫画|番剧|动画|电影|电视剧|剧集|综艺|音乐|歌曲|歌手|专辑|小说|读书|游戏|爱好|兴趣|趣味)",
     re.IGNORECASE,
@@ -235,6 +275,32 @@ def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in normalized for marker in markers)
 
 
+def _normalize_phatic_match_text(value: Any) -> str:
+    return re.sub(r"[\s，。！？,.!?~～…]+", "", str(value or "").strip().lower())
+
+
+def _detect_short_companion_chat_reason(text: str) -> str | None:
+    cleaned = _strip_step_lead_in(text)
+    if not cleaned:
+        return None
+
+    compact = _normalize_phatic_match_text(cleaned)
+    if not compact or len(compact) > _PHATIC_FASTPATH_MAX_CHARS:
+        return None
+
+    if _PHATIC_GREETING_RE.match(cleaned):
+        return "THALAMUS_RULE_PHATIC_GREETING"
+    if _PHATIC_PRESENCE_RE.match(cleaned):
+        return "THALAMUS_RULE_PHATIC_PRESENCE"
+    if _PHATIC_ACK_RE.match(cleaned):
+        return "THALAMUS_RULE_PHATIC_ACK"
+    if _PHATIC_COMFORT_RE.search(compact):
+        if any(token in compact for token in _PHATIC_COMFORT_BLOCKING_TOKENS):
+            return None
+        return "THALAMUS_RULE_PHATIC_COMFORT"
+    return None
+
+
 def _strip_step_lead_in(text: str) -> str:
     stripped = _normalize_text(text)
     while True:
@@ -263,6 +329,25 @@ def _infer_codex_runtime_mode(text: str) -> str | None:
     if any(marker in normalized for marker in _SELF_HEAL_MARKERS):
         return "self_heal"
     return None
+
+
+def _looks_like_lightweight_codex_request(text: str) -> bool:
+    normalized = _normalize_match_text(text)
+    if not normalized:
+        return False
+    heavyweight_markers = (
+        "fix", "debug", "bug", "failing test", "test", "traceback", "stack trace",
+        "workspace", "repo", "repository", "project", "file", "files", "patch", "diff",
+        "修复", "报错", "错误", "异常", "测试", "仓库", "项目", "文件", "路径", "重构", "集成",
+    )
+    if any(marker in normalized for marker in heavyweight_markers):
+        return False
+    lightweight_markers = (
+        "写一个", "写个", "写一段", "函数", "示例代码", "代码示例", "python 函数",
+        "code snippet", "example code", "write a function", "write a python function",
+        "implement a function", "generate a function",
+    )
+    return any(marker in normalized for marker in lightweight_markers)
 
 
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
@@ -315,7 +400,7 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
         return ("skill", "hub_skill_search", "THALAMUS_RULE_HUB_SKILL_SEARCH")
     if _contains_any(cleaned, _HUB_SKILL_LIST_MARKERS):
         return ("skill", "hub_skill_list", "THALAMUS_RULE_HUB_SKILL_LIST")
-    if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS):
+    if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return ("skill", "session_summary", "THALAMUS_RULE_SESSION_SUMMARY")
     if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS):
         return ("skill", "emotion_query", "THALAMUS_RULE_EMOTION_QUERY")
@@ -386,6 +471,31 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
                 "text": cleaned,
                 "user_message": cleaned,
             },
+        }
+
+    phatic_reason = _detect_short_companion_chat_reason(cleaned)
+    if phatic_reason:
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": cleaned,
+            "reason_code": phatic_reason,
+            "confidence": 0.99,
+            "route_source": "thalamus.rule",
+            "chat_speed_profile": "direct_fast",
+            "args": {
+                "text": cleaned,
+            },
+        }
+
+    if _TASK_INTENT_PLANNING_RE.search(cleaned):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": cleaned,
+            "reason_code": "RULE_FORCE_INTENT_AGENT",
+            "confidence": 0.94,
+            "route_source": "rule",
         }
 
     step_segments = _split_explicit_step_segments(cleaned)
@@ -540,6 +650,16 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
+    if _TASK_INTENT_PLANNING_RE.search(normalized):
+        return {
+            "route": "delegate",
+            "target_id": "intent_agent",
+            "task": normalized,
+            "reason_code": "RULE_FORCE_INTENT_AGENT",
+            "confidence": 0.94,
+            "route_source": "rule",
+        }
+
     if _TASK_MEMORY_RE.search(normalized):
         return {
             "route": "skill",
@@ -574,6 +694,47 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
     if any(marker in compact_lower for marker in _TASK_EXEC_ACTION_MARKERS):
         return None
     return None
+
+
+def _should_prefer_context_fast_chat(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+
+    if "```" in normalized:
+        return False
+
+    lowered = normalized.lower()
+    if "http://" in lowered or "https://" in lowered:
+        return False
+
+    if len(normalized) > _CONTEXT_CHAT_FAST_MAX_CHARS:
+        return False
+
+    compact_lower = lowered.replace(" ", "")
+    if any(marker in compact_lower for marker in _TASK_EXEC_ACTION_MARKERS):
+        return False
+
+    if _TASK_PROGRESS_QUERY_RE.search(compact_lower):
+        return False
+    if _TASK_RECENT_TURN_RE.search(normalized):
+        return False
+    if _TASK_VISION_UI_RE.search(normalized):
+        return False
+    if _TASK_TRANSLATE_RE.search(normalized):
+        return False
+    if _TASK_INTENT_PLANNING_RE.search(normalized):
+        return False
+    if _TASK_MEMORY_RE.search(normalized):
+        return False
+    if _TASK_CODE_RE.search(normalized) and not _TASK_ENTERTAINMENT_RE.search(normalized):
+        return False
+    if len(_split_explicit_step_segments(normalized)) > 1:
+        return False
+    if normalized.startswith(("/", "!", "run ", "exec ")):
+        return False
+
+    return True
 
 
 async def classify_task_intent_by_llm(
@@ -718,6 +879,17 @@ async def classify_task_intent(
     if rule_result is not None:
         return rule_result
 
+    if _should_prefer_context_fast_chat(normalized):
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "THALAMUS_RULE_CONTEXT_CHAT",
+            "confidence": 0.84,
+            "route_source": "thalamus.rule",
+            "chat_speed_profile": "context_fast",
+        }
+
     llm_result = await classify_task_intent_by_llm(
         request_id=request_id,
         session_id=session_id,
@@ -848,6 +1020,25 @@ def _backfill_canonical_args(
                 merged["task"] = _normalize_text(merged.get("problem_statement")) or fallback_text
             if not _normalize_text(merged.get("problem_statement")):
                 merged["problem_statement"] = _normalize_text(merged.get("task")) or fallback_text
+            explicit_workspace = any(
+                _normalize_text(merged.get(key))
+                for key in ("workspace", "file_path", "path", "project_path", "repo_alias", "git_url")
+            )
+            explicit_workspace = explicit_workspace or bool(
+                _normalize_text(merged.get("workspace_strategy"), lower=True)
+                or merged.get("allow_temp_workspace")
+            )
+            if not _normalize_text(merged.get("run_mode"), lower=True):
+                if _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
+                    merged["run_mode"] = "inspect"
+                else:
+                    merged["run_mode"] = "worker"
+            resolved_run_mode = _normalize_text(merged.get("run_mode"), lower=True)
+            if not explicit_workspace:
+                if resolved_run_mode == "inspect":
+                    merged["allow_temp_workspace"] = True
+                elif not _normalize_text(merged.get("workspace_strategy"), lower=True):
+                    merged["workspace_strategy"] = "runtime_repo"
         return merged
 
     if normalized_route == "chat":

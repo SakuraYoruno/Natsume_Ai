@@ -6,6 +6,8 @@ param(
   [int]$Port = 0,
   [string]$UpstreamHost = "",
   [int]$UpstreamPort = 0,
+  [string]$ObsUpstreamHost = "",
+  [int]$ObsUpstreamPort = 0,
   [string]$StaticDir = "",
   [int]$WaitSeconds = 20,
   [switch]$ForceRestart
@@ -67,6 +69,42 @@ function Get-ListeningPid {
     return $null
   }
   return [int]$conn.OwningProcess
+}
+
+function Get-MonitorProxyPids {
+  param([string]$PrefixPath)
+  $needle = ([string]$PrefixPath).Trim().ToLowerInvariant()
+  if (-not $needle) {
+    return @()
+  }
+  $pids = @()
+  foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name = 'nginx.exe'" -ErrorAction SilentlyContinue)) {
+    $cmd = ([string]$proc.CommandLine).ToLowerInvariant()
+    if ($cmd -and $cmd.Contains($needle)) {
+      $pids += [int]$proc.ProcessId
+    }
+  }
+  return ($pids | Sort-Object -Unique)
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return $false
+  }
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $proc) {
+    return $true
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($left) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+    Start-Sleep -Milliseconds 300
+    $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  }
+  return ($null -eq $left)
 }
 
 function Wait-Http {
@@ -194,6 +232,29 @@ if ($UpstreamPort -le 0) {
   }
 }
 
+if (-not $ObsUpstreamHost) {
+  if ($envValues.ContainsKey("HOST_OBS_APP_HOST")) {
+    $ObsUpstreamHost = [string]$envValues["HOST_OBS_APP_HOST"]
+  } elseif ($env:HOST_OBS_APP_HOST) {
+    $ObsUpstreamHost = [string]$env:HOST_OBS_APP_HOST
+  } else {
+    $ObsUpstreamHost = $UpstreamHost
+  }
+}
+if ($ObsUpstreamHost -eq "0.0.0.0") {
+  $ObsUpstreamHost = "127.0.0.1"
+}
+
+if ($ObsUpstreamPort -le 0) {
+  if ($envValues.ContainsKey("HOST_OBS_APP_PORT")) {
+    $ObsUpstreamPort = [int]$envValues["HOST_OBS_APP_PORT"]
+  } elseif ($env:HOST_OBS_APP_PORT) {
+    $ObsUpstreamPort = [int]$env:HOST_OBS_APP_PORT
+  } else {
+    $ObsUpstreamPort = 18082
+  }
+}
+
 if (-not $StaticDir) {
   $StaticDir = Join-Path $repoRoot "host_brain\app\static\monitor"
 }
@@ -242,6 +303,8 @@ $pidFile = Join-Path $logsDir "nginx.pid"
 $confPath = Join-Path $confDir "nginx.conf"
 $errorLog = Join-Path $logsDir "error.log"
 $accessLog = Join-Path $logsDir "access.log"
+$cacheDir = Join-Path $nginxPrefix "cache"
+Ensure-Directory -Path $cacheDir
 
 $existingPid = Get-ListeningPid -ProbePort $Port
 if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
@@ -253,6 +316,7 @@ if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
     port = $Port
     monitor_url = "http://$BindHost`:$Port/monitor/"
     upstream = "http://$UpstreamHost`:$UpstreamPort"
+    obs_upstream = "http://$ObsUpstreamHost`:$ObsUpstreamPort"
     nginx_exe = $nginxPath
     config_path = $confPath
     env_file = $EnvFile
@@ -261,8 +325,14 @@ if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
   exit 0
 }
 if ($null -ne $existingPid -and $ForceRestart.IsPresent) {
-  Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
+  Stop-ProcessTree -ProcessId ([int]$existingPid) | Out-Null
   Start-Sleep -Milliseconds 500
+}
+
+if ($ForceRestart.IsPresent) {
+  foreach ($procId in @(Get-MonitorProxyPids -PrefixPath $nginxPrefix)) {
+    Stop-ProcessTree -ProcessId ([int]$procId) | Out-Null
+  }
 }
 
 $monitorPath = Convert-WindowsPathToNginxPath -Path $StaticDir
@@ -271,6 +341,8 @@ if (-not $monitorPath.EndsWith("/")) {
 }
 $monitorAssetsPath = $monitorPath + "assets/"
 $escapedUpstreamHost = $UpstreamHost.Replace("'", "''")
+$escapedObsUpstreamHost = $ObsUpstreamHost.Replace("'", "''")
+$nginxCachePath = Convert-WindowsPathToNginxPath -Path $cacheDir
 
 $config = @"
 worker_processes  1;
@@ -288,6 +360,7 @@ http {
     tcp_nodelay     on;
     keepalive_timeout  65;
     server_tokens off;
+    proxy_cache_path $nginxCachePath levels=1:2 keys_zone=obs_microcache:16m max_size=256m inactive=60s use_temp_path=off;
 
     gzip on;
     gzip_min_length 1024;
@@ -296,6 +369,11 @@ http {
 
     upstream host_backend {
         server ${escapedUpstreamHost}:$UpstreamPort;
+        keepalive 32;
+    }
+
+    upstream obs_backend {
+        server ${escapedObsUpstreamHost}:$ObsUpstreamPort;
         keepalive 32;
     }
 
@@ -332,8 +410,21 @@ http {
             add_header Cache-Control "no-cache";
         }
 
+        location /obs/ws/health {
+            proxy_pass http://obs_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade `$http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host `$host;
+            proxy_set_header X-Real-IP `$remote_addr;
+            proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto `$scheme;
+            proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
+        }
+
         location /obs/trace-feed/live {
-            proxy_pass http://host_backend;
+            proxy_pass http://obs_backend;
             proxy_http_version 1.1;
             proxy_set_header Connection "";
             proxy_set_header Host `$host;
@@ -344,6 +435,44 @@ http {
             proxy_cache off;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
+        }
+
+        location /obs/ {
+            proxy_pass http://obs_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host `$host;
+            proxy_set_header X-Real-IP `$remote_addr;
+            proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto `$scheme;
+            proxy_cache obs_microcache;
+            proxy_cache_methods GET HEAD;
+            proxy_cache_key `$scheme`$proxy_host`$request_uri;
+            proxy_cache_lock on;
+            proxy_cache_valid 200 2s;
+            proxy_cache_use_stale updating error timeout invalid_header http_500 http_502 http_503 http_504;
+            add_header X-Natsume-Obs-Cache `$upstream_cache_status always;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+        }
+
+        location /api/ui/ {
+            proxy_pass http://obs_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host `$host;
+            proxy_set_header X-Real-IP `$remote_addr;
+            proxy_set_header X-Forwarded-For `$proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto `$scheme;
+            proxy_cache obs_microcache;
+            proxy_cache_methods GET HEAD;
+            proxy_cache_key `$scheme`$proxy_host`$request_uri;
+            proxy_cache_lock on;
+            proxy_cache_valid 200 1s;
+            proxy_cache_use_stale updating error timeout invalid_header http_500 http_502 http_503 http_504;
+            add_header X-Natsume-Obs-Cache `$upstream_cache_status always;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
         }
 
         location / {
@@ -367,7 +496,7 @@ if (Test-Path -Path $pidFile) {
   Remove-Item -Path $pidFile -Force -ErrorAction SilentlyContinue
 }
 
-& $nginxPath -p "$nginxPrefix\" -c "conf/nginx.conf" | Out-Null
+$nginxStart = Start-Process -FilePath $nginxPath -ArgumentList @('-p', "$nginxPrefix\", '-c', 'conf/nginx.conf') -WorkingDirectory $nginxPrefix -WindowStyle Hidden -PassThru
 
 $probeHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
 $monitorUrl = "http://$probeHost`:$Port/monitor/index.html"
@@ -392,6 +521,7 @@ if (-not $monitorOk -or -not $metricsOk) {
     port = $Port
     monitor_url = "http://$BindHost`:$Port/monitor/"
     upstream = "http://$UpstreamHost`:$UpstreamPort"
+    obs_upstream = "http://$ObsUpstreamHost`:$ObsUpstreamPort"
     nginx_exe = $nginxPath
     config_path = $confPath
     error_log = $errorLog
@@ -402,25 +532,29 @@ if (-not $monitorOk -or -not $metricsOk) {
   exit 0
 }
 
-$pid = $null
+$proxyPidValue = $null
 if (Test-Path -Path $pidFile) {
   $pidText = (Get-Content -Path $pidFile -Raw -Encoding ASCII).Trim()
   if ($pidText) {
-    $pid = [int]$pidText
+    $proxyPidValue = [int]$pidText
   }
 }
-if ($null -eq $pid) {
-  $pid = Get-ListeningPid -ProbePort $Port
+if ($null -eq $proxyPidValue) {
+  $proxyPidValue = Get-ListeningPid -ProbePort $Port
+}
+if ($null -eq $proxyPidValue -and $null -ne $nginxStart) {
+  $proxyPidValue = [int]$nginxStart.Id
 }
 
 $result = [ordered]@{
   side = "monitor_proxy"
   status = "started"
-  pid = $pid
+  pid = $proxyPidValue
   host = $BindHost
   port = $Port
   monitor_url = "http://$BindHost`:$Port/monitor/"
   upstream = "http://$UpstreamHost`:$UpstreamPort"
+  obs_upstream = "http://$ObsUpstreamHost`:$ObsUpstreamPort"
   nginx_exe = $nginxPath
   config_path = $confPath
   access_log = $accessLog

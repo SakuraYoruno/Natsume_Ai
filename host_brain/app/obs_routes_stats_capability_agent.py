@@ -33,12 +33,15 @@ from host_brain.retrieval.model_suite import resolve_retrieval_model_suite
 
 from host_brain.app.obs_routes_core import (
     router,
+    _env_int,
     _get_ledger,
+    _get_obs_route_cached_response,
     _now_ms,
     _safe_json,
 )
 
 logger = logging.getLogger("Natsume.obs")
+_CAPABILITY_GAP_STATS_CACHE_TTL_MS = _env_int("OBS_CAPABILITY_GAP_STATS_CACHE_TTL_MS", 5000, minimum=0)
 
 
 # ---------------------------------------------------------------------------
@@ -694,13 +697,30 @@ def _build_capability_gap_runtime_quality(snapshot: Optional[Mapping[str, Any]])
 @router.get("/capability-gaps/stats", response_model=CapabilityGapStatsResponse)
 def get_capability_gaps_stats(limit_recent: int = Query(20, ge=1, le=200), limit_hotspots: int = Query(8, ge=1, le=50), limit_candidates: int = Query(8, ge=1, le=50), min_candidate_detected: int = Query(3, ge=1, le=100), min_candidate_sessions: int = Query(2, ge=1, le=100), min_candidate_failure_rate: float = Query(0.35, ge=0.0, le=1.0), min_candidate_failed: int = Query(2, ge=0, le=100)):
     """能力缺口统计。"""
-    from host_brain.app.dependencies import get_capability_forge_service, get_capability_gap_telemetry
-    snapshot = get_capability_gap_telemetry().snapshot(limit_recent=limit_recent, limit_hotspots=limit_hotspots, limit_candidates=limit_candidates, min_candidate_detected=min_candidate_detected, min_candidate_sessions=min_candidate_sessions, min_candidate_failure_rate=min_candidate_failure_rate, min_candidate_failed=min_candidate_failed)
-    try:
-        forge_quality_snapshot = get_capability_forge_service().runtime_quality_stats(limit=8)
-    except Exception:
-        forge_quality_snapshot = {"timestamp": _now_ms(), "summary": {"tracked_proposals": 0, "unhealthy_proposals": 0, "critical_proposals": 0, "avg_health_score": 0.0, "avg_window_failure_rate": 0.0, "avg_window_p95_latency_ms": 0.0}, "items": []}
-    return CapabilityGapStatsResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), detected_total=int(snapshot.get("detected_total") or 0), executed_total=int(snapshot.get("executed_total") or 0), success_total=int(snapshot.get("success_total") or 0), failed_total=int(snapshot.get("failed_total") or 0), success_rate=float(snapshot.get("success_rate") or 0.0), active_runtime_capabilities=int(snapshot.get("active_runtime_capabilities") or 0), by_reason=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_reason") or []) if isinstance(item, Mapping)], by_family=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_family") or []) if isinstance(item, Mapping)], by_executor=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_executor") or []) if isinstance(item, Mapping)], hotspots=_build_capability_gap_hotspots(snapshot), forge_candidates=_build_capability_gap_forge_candidates(snapshot), forge_runtime_quality=_build_capability_gap_runtime_quality(forge_quality_snapshot), candidate_thresholds=_build_capability_gap_thresholds(snapshot), recent_events=[dict(item) for item in list(snapshot.get("recent_events") or []) if isinstance(item, Mapping)])
+    def _build_response() -> CapabilityGapStatsResponse:
+        from host_brain.app.dependencies import get_capability_forge_service, get_capability_gap_telemetry
+
+        snapshot = get_capability_gap_telemetry().snapshot(limit_recent=limit_recent, limit_hotspots=limit_hotspots, limit_candidates=limit_candidates, min_candidate_detected=min_candidate_detected, min_candidate_sessions=min_candidate_sessions, min_candidate_failure_rate=min_candidate_failure_rate, min_candidate_failed=min_candidate_failed)
+        try:
+            forge_quality_snapshot = get_capability_forge_service().runtime_quality_stats(limit=8)
+        except Exception:
+            forge_quality_snapshot = {"timestamp": _now_ms(), "summary": {"tracked_proposals": 0, "unhealthy_proposals": 0, "critical_proposals": 0, "avg_health_score": 0.0, "avg_window_failure_rate": 0.0, "avg_window_p95_latency_ms": 0.0}, "items": []}
+        return CapabilityGapStatsResponse(timestamp=int(snapshot.get("timestamp") or _now_ms()), detected_total=int(snapshot.get("detected_total") or 0), executed_total=int(snapshot.get("executed_total") or 0), success_total=int(snapshot.get("success_total") or 0), failed_total=int(snapshot.get("failed_total") or 0), success_rate=float(snapshot.get("success_rate") or 0.0), active_runtime_capabilities=int(snapshot.get("active_runtime_capabilities") or 0), by_reason=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_reason") or []) if isinstance(item, Mapping)], by_family=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_family") or []) if isinstance(item, Mapping)], by_executor=[CapabilityGapStatItem(key=str(item.get("key") or "UNKNOWN"), count=int(item.get("count") or 0)) for item in list(snapshot.get("by_executor") or []) if isinstance(item, Mapping)], hotspots=_build_capability_gap_hotspots(snapshot), forge_candidates=_build_capability_gap_forge_candidates(snapshot), forge_runtime_quality=_build_capability_gap_runtime_quality(forge_quality_snapshot), candidate_thresholds=_build_capability_gap_thresholds(snapshot), recent_events=[dict(item) for item in list(snapshot.get("recent_events") or []) if isinstance(item, Mapping)])
+
+    return _get_obs_route_cached_response(
+        cache_name="capability_gap_stats",
+        cache_key={
+            "limit_recent": int(limit_recent),
+            "limit_hotspots": int(limit_hotspots),
+            "limit_candidates": int(limit_candidates),
+            "min_candidate_detected": int(min_candidate_detected),
+            "min_candidate_sessions": int(min_candidate_sessions),
+            "min_candidate_failure_rate": float(min_candidate_failure_rate),
+            "min_candidate_failed": int(min_candidate_failed),
+        },
+        ttl_ms=_CAPABILITY_GAP_STATS_CACHE_TTL_MS,
+        builder=_build_response,
+    )
 
 
 @router.get("/capability-gaps/forge-candidates", response_model=CapabilityGapForgeCandidatesResponse)

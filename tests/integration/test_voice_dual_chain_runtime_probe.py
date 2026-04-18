@@ -247,3 +247,74 @@ def test_runtime_probe_main_falls_back_to_input_completed_payload_when_logs_are_
     matrix = {row["node"]: row for row in report["matrix"]}
     assert matrix["tts.rpc"]["passed"] is True
     assert matrix["vts.rpc"]["passed"] is True
+
+
+def test_build_tts_summary_prefers_finished_event_when_present() -> None:
+    module = _load_probe_module()
+    summary = module._build_tts_summary_from_event_rows(
+        [
+            {
+                "event_type": "TTS_PLAYBACK_STARTED",
+                "status": "ACCEPTED",
+                "reason_code": None,
+                "payload": {"event_type": "TTS_PLAYBACK_STARTED"},
+            },
+            {
+                "event_type": "TTS_PLAYBACK_FINISHED",
+                "status": "ACCEPTED",
+                "reason_code": None,
+                "payload": {"event_type": "TTS_PLAYBACK_FINISHED"},
+            },
+        ]
+    )
+
+    assert summary["event"]["event_type"] == "TTS_PLAYBACK_FINISHED"
+    assert summary["success"] is True
+
+
+def test_await_gateway_runtime_evidence_waits_for_playback_after_queue(monkeypatch) -> None:
+    module = _load_probe_module()
+
+    queued_audit = _healthy_audit_db_result()
+    queued_audit["tts_event_latest"] = [
+        {
+            "event_type": "TTS_QUEUED",
+            "status": "ACCEPTED",
+            "reason_code": None,
+            "payload": {"event_type": "TTS_QUEUED", "queue_depth": 2},
+            "ts_ms": 1776435000000,
+        }
+    ]
+    queued_audit["tts_event_count"] = 1
+
+    started_audit = _healthy_audit_db_result()
+    calls = {"count": 0}
+
+    def _fake_query_gateway_audit_db(**_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return queued_audit
+        return started_audit
+
+    tick = {"value": 0.0}
+
+    def _fake_time() -> float:
+        tick["value"] += 0.1
+        return tick["value"]
+
+    monkeypatch.setattr(module, "_query_gateway_audit_db", _fake_query_gateway_audit_db)
+    monkeypatch.setattr(module.time, "time", _fake_time)
+    monkeypatch.setattr(module.time, "sleep", lambda _seconds: None)
+
+    result = module._await_gateway_runtime_evidence(
+        db_path=Path("unused.sqlite3"),
+        request_id="gateway-req-001",
+        wait_seconds=2.0,
+        allow_degraded_tts=False,
+        allow_degraded_vts=False,
+        require_mouth_sync=True,
+        poll_interval_s=0.0,
+    )
+
+    assert calls["count"] >= 2
+    assert result["tts_event_latest"][0]["event_type"] == "TTS_PLAYBACK_FINISHED"

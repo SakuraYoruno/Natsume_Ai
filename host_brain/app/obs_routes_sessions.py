@@ -10,6 +10,7 @@ import csv
 import datetime as _dt
 import io
 import logging
+import os
 import time
 from typing import List, Optional
 
@@ -20,6 +21,7 @@ from pydantic import BaseModel
 logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
+_SESSIONS_CACHE_TTL_MS = max(int(os.getenv("OBS_SESSIONS_CACHE_TTL_MS", "3000") or 3000), 0)
 
 _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
 
@@ -190,13 +192,26 @@ def get_sessions(
     keyword: Optional[str] = Query(None),
 ):
     """会话列表（分页 + 过滤）。"""
-    return _build_sessions_response(
-        _get_ledger(),
-        page=page,
-        page_size=page_size,
-        status=status,
-        window_minutes=window_minutes,
-        keyword=keyword,
+    from host_brain.app.obs_routes_core import _get_obs_route_cached_response
+
+    return _get_obs_route_cached_response(
+        cache_name="obs_sessions",
+        cache_key={
+            "page": int(page),
+            "page_size": int(page_size),
+            "status": status or "",
+            "window_minutes": int(window_minutes),
+            "keyword": keyword or "",
+        },
+        ttl_ms=_SESSIONS_CACHE_TTL_MS,
+        builder=lambda: _build_sessions_response(
+            _get_ledger(),
+            page=page,
+            page_size=page_size,
+            status=status,
+            window_minutes=window_minutes,
+            keyword=keyword,
+        ),
     )
 
 

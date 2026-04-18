@@ -41,6 +41,42 @@ function Get-ListeningPid {
   return [int]$conn.OwningProcess
 }
 
+function Get-MonitorProxyPids {
+  param([string]$PrefixPath)
+  $needle = ([string]$PrefixPath).Trim().ToLowerInvariant()
+  if (-not $needle) {
+    return @()
+  }
+  $pids = @()
+  foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name = 'nginx.exe'" -ErrorAction SilentlyContinue)) {
+    $cmd = ([string]$proc.CommandLine).ToLowerInvariant()
+    if ($cmd -and $cmd.Contains($needle.ToLowerInvariant())) {
+      $pids += [int]$proc.ProcessId
+    }
+  }
+  return ($pids | Sort-Object -Unique)
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return $false
+  }
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $proc) {
+    return $true
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($left) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+    Start-Sleep -Milliseconds 300
+    $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  }
+  return ($null -eq $left)
+}
+
 function Resolve-NginxExe {
   param(
     [string]$Candidate,
@@ -125,7 +161,7 @@ if (Test-Path -Path $pidFile) {
   }
 }
 
-if ($nginxPath -and (Test-Path -Path $confPath)) {
+if ($nginxPath -and (Test-Path -Path $confPath) -and (Test-Path -Path $pidFile)) {
   try {
     & $nginxPath -p "$nginxPrefix\" -c "conf/nginx.conf" -s quit | Out-Null
     Start-Sleep -Milliseconds 700
@@ -134,11 +170,18 @@ if ($nginxPath -and (Test-Path -Path $confPath)) {
   }
 }
 
+$matchingPids = @(Get-MonitorProxyPids -PrefixPath $nginxPrefix)
+foreach ($procId in $matchingPids) {
+  if ($null -eq $proxyPid) {
+    $proxyPid = [int]$procId
+  }
+  Stop-ProcessTree -ProcessId ([int]$procId) | Out-Null
+}
+
 $listeningPid = Get-ListeningPid -ProbePort $Port
 if ($null -ne $listeningPid) {
   if ($null -eq $proxyPid -or [int]$listeningPid -eq [int]$proxyPid) {
-    Stop-Process -Id $listeningPid -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
+    Stop-ProcessTree -ProcessId ([int]$listeningPid) | Out-Null
   }
 }
 

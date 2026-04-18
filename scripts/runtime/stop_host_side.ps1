@@ -155,6 +155,34 @@ if (-not $stopped) {
 
 Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
 
+$obsProcessResult = $null
+$stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
+if (Test-Path -Path $stopObsScript) {
+  try {
+    $obsRaw = & $stopObsScript -EnvFile $EnvFile
+    $obsJson = ($obsRaw | Out-String).Trim()
+    if ($obsJson) {
+      try {
+        $obsProcessResult = $obsJson | ConvertFrom-Json
+      } catch {
+        $obsProcessResult = [ordered]@{
+          side = "obs"
+          status = "degraded"
+          reason = "invalid_json_output"
+          raw = $obsJson
+        }
+      }
+    }
+  } catch {
+    $obsProcessResult = [ordered]@{
+      side = "obs"
+      status = "degraded"
+      reason = "stop_failed"
+      detail = $_.Exception.Message
+    }
+  }
+}
+
 $monitorProxyResult = $null
 $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
 if (Test-Path -Path $stopMonitorScript) {
@@ -190,6 +218,7 @@ $result = [ordered]@{
   pid_file = $PidFile
   port = $Port
   detail = $detail
+  obs_process = $obsProcessResult
   monitor_proxy = $monitorProxyResult
 }
 $result | ConvertTo-Json -Depth 6

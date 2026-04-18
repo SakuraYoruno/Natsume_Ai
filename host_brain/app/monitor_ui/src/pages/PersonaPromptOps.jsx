@@ -1,13 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
-  fetchPersonaFirstBatchCatalog,
-  fetchPromptTemplate,
-  updatePromptTemplate,
-  resetPromptTemplate,
   reloadPromptTemplates,
-} from '../api/obs.js'
+  resetPromptTemplate,
+  updatePromptTemplate,
+} from '../api/promptOps.js'
 import {
   Database,
   FileText,
@@ -22,8 +20,14 @@ import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import {
+  usePersonaPromptCatalogQuery,
+  usePromptTemplateDetailQuery,
+} from '../queries/promptQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 function SourceBadge({ source }) {
@@ -54,65 +58,52 @@ export default function PersonaPromptOps() {
     windowMinutes: 60,
   })
 
-  const [bundles, setBundles] = useState([])
   const [selectedId, setSelectedId] = useState('')
-  const [selected, setSelected] = useState(null)
   const [draftContent, setDraftContent] = useState('')
   const [draftEnabled, setDraftEnabled] = useState(true)
-  const [loadingCatalog, setLoadingCatalog] = useState(false)
-  const [loadingDetail, setLoadingDetail] = useState(false)
   const [saving, setSaving] = useState(false)
   const [reloading, setReloading] = useState(false)
-
-  const loadCatalog = useCallback(async () => {
-    setLoadingCatalog(true)
-    try {
-      const data = await fetchPersonaFirstBatchCatalog()
-      const nextBundles = data.bundles || []
-      setBundles(nextBundles)
-      const entryIds = flattenEntries(nextBundles).map((entry) => entry.template_id)
-      if (!entryIds.length) {
-        setSelected(null)
-        setDraftContent('')
-        setDraftEnabled(true)
-      }
-      setSelectedId((current) => {
-        if (!entryIds.length) return ''
-        if (!current || !entryIds.includes(current)) return entryIds[0]
-        return current
-      })
-    } catch (error) {
-      toast.error(`加载人格文案目录失败：${error.message}`)
-    } finally {
-      setLoadingCatalog(false)
-    }
-  }, [])
-
-  const loadDetail = useCallback(async (templateId) => {
-    if (!templateId) return
-    setLoadingDetail(true)
-    try {
-      const data = await fetchPromptTemplate(templateId)
-      const item = data.item
-      setSelected(item)
-      setDraftContent(item.override_content ?? item.resolved_content ?? '')
-      setDraftEnabled(item.has_override ? Boolean(item.enabled) : true)
-    } catch (error) {
-      toast.error(`加载模板详情失败：${error.message}`)
-    } finally {
-      setLoadingDetail(false)
-    }
-  }, [])
+  const {
+    catalogData,
+    bundles,
+    catalogError,
+    loading: catalogLoading,
+    refreshing: catalogRefreshing,
+    stale: catalogStale,
+    lastUpdatedAt: catalogUpdatedAt,
+    refetch: refetchCatalog,
+  } = usePersonaPromptCatalogQuery()
+  const {
+    item: selected,
+    detailError,
+    loading: detailLoading,
+    refreshing: detailRefreshing,
+    stale: detailStale,
+    lastUpdatedAt: detailUpdatedAt,
+    refetch: refetchDetail,
+  } = usePromptTemplateDetailQuery({ templateId: selectedId })
 
   useEffect(() => {
-    void loadCatalog()
-  }, [loadCatalog])
+    const entryIds = flattenEntries(bundles).map((entry) => entry.template_id)
+    if (!entryIds.length) {
+      setSelectedId('')
+      return
+    }
+    setSelectedId((current) => {
+      if (!current || !entryIds.includes(current)) return entryIds[0]
+      return current
+    })
+  }, [bundles])
 
   useEffect(() => {
-    if (selectedId) {
-      void loadDetail(selectedId)
+    if (!selected) {
+      setDraftContent('')
+      setDraftEnabled(true)
+      return
     }
-  }, [selectedId, loadDetail])
+    setDraftContent(selected.override_content ?? selected.resolved_content ?? '')
+    setDraftEnabled(selected.has_override ? Boolean(selected.enabled) : true)
+  }, [selected])
 
   const selectedEntry = useMemo(() => {
     for (const bundle of bundles) {
@@ -132,6 +123,15 @@ export default function PersonaPromptOps() {
     json: entries.filter((entry) => entry.item?.content_type === 'json').length,
   }), [bundles, entries])
 
+  const catalogLoadState = resolveLoadState({
+    loading: catalogLoading || catalogRefreshing,
+    error: catalogError,
+    hasData: Boolean(catalogData),
+    hasSamples: Number(summary.entries) > 0,
+    available: Boolean(catalogData),
+    stale: catalogStale,
+  })
+
   const isDirty = useMemo(() => {
     if (!selected) return false
     const baseContent = selected.override_content ?? selected.resolved_content ?? ''
@@ -143,14 +143,11 @@ export default function PersonaPromptOps() {
     if (!selected) return
     setSaving(true)
     try {
-      const data = await updatePromptTemplate(selected.template_id, {
+      await updatePromptTemplate(selected.template_id, {
         content: draftContent,
         enabled: draftEnabled,
       })
-      setSelected(data.item)
-      setDraftContent(data.item.override_content ?? data.item.resolved_content ?? '')
-      setDraftEnabled(Boolean(data.item.enabled))
-      await loadCatalog()
+      await Promise.allSettled([refetchCatalog(), refetchDetail()])
       toast.success('人格文案已保存')
     } catch (error) {
       toast.error(`保存失败：${error.message}`)
@@ -164,11 +161,8 @@ export default function PersonaPromptOps() {
     if (!window.confirm(`确认恢复 ${selected.template_id} 的代码默认值？`)) return
     setSaving(true)
     try {
-      const data = await resetPromptTemplate(selected.template_id)
-      setSelected(data.item)
-      setDraftContent(data.item.resolved_content ?? '')
-      setDraftEnabled(true)
-      await loadCatalog()
+      await resetPromptTemplate(selected.template_id)
+      await Promise.allSettled([refetchCatalog(), refetchDetail()])
       toast.success('已恢复默认值')
     } catch (error) {
       toast.error(`恢复默认失败：${error.message}`)
@@ -181,8 +175,7 @@ export default function PersonaPromptOps() {
     setReloading(true)
     try {
       await reloadPromptTemplates()
-      await loadCatalog()
-      if (selectedId) await loadDetail(selectedId)
+      await Promise.allSettled([refetchCatalog(), selectedId ? refetchDetail() : Promise.resolve(null)])
       toast.success('模板缓存已刷新')
     } catch (error) {
       toast.error(`刷新失败：${error.message}`)
@@ -228,11 +221,28 @@ export default function PersonaPromptOps() {
         description="聚焦首批最影响人格体验的模板，直接调整语气、温度和关系感。"
         gradientClass="from-primary-50 via-white to-pink-50"
         aside={(
-          <div className="max-w-xl rounded-xl border border-pink-100 bg-pink-50 px-4 py-3 text-xs leading-6 text-pink-800">
-            这里适合调“像不像夏目蓝”的表达风格；不适合改业务逻辑、状态机规则或 JSON 结构。
+          <div className="space-y-3">
+            <SampleMeta
+              className="max-w-xl"
+              loadState={catalogLoadState}
+              sampleSize={summary.entries}
+              sampleLabel="模板"
+              updatedAt={catalogUpdatedAt}
+              source="persona-first-batch"
+              definition="人格运营页把目录与模板详情拆成独立查询；专题包空态、详情失败和刷新状态会各自独立表达。"
+            />
+            <div className="max-w-xl rounded-xl border border-pink-100 bg-pink-50 px-4 py-3 text-xs leading-6 text-pink-800">
+              这里适合调“像不像夏目蓝”的表达风格；不适合改业务逻辑、状态机规则或 JSON 结构。
+            </div>
           </div>
         )}
       />
+
+      {catalogError ? (
+        <NoticeBanner variant="error" title="人格文案目录加载失败">
+          {catalogError}
+        </NoticeBanner>
+      ) : null}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard icon={Database} label="专题包" value={summary.bundles} hint="按人格域分组" tone="text-blue-600" />
@@ -254,8 +264,8 @@ export default function PersonaPromptOps() {
           </div>
 
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{loadingCatalog ? '正在加载目录…' : `共 ${entries.length} 个模板`}</span>
-            <button className="text-primary hover:underline" onClick={loadCatalog}>刷新目录</button>
+            <span>{catalogLoading ? '正在加载目录…' : catalogRefreshing ? '正在刷新目录…' : `共 ${entries.length} 个模板`}</span>
+            <button className="text-primary hover:underline" onClick={() => void refetchCatalog()}>刷新目录</button>
           </div>
 
           <div className="space-y-3 max-h-[72vh] overflow-y-auto">
@@ -302,7 +312,7 @@ export default function PersonaPromptOps() {
                 </div>
               </div>
             ))}
-            {!loadingCatalog && bundles.length === 0 && (
+            {!catalogLoading && bundles.length === 0 && (
               <EmptyStateCard title="暂无人格模板" hint="等待目录同步完成后重试。" className="p-4" />
             )}
           </div>
@@ -390,14 +400,14 @@ export default function PersonaPromptOps() {
                   />
 
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button className="btn-primary" onClick={handleSave} disabled={!isDirty || saving || loadingDetail}>
+                    <button className="btn-primary" onClick={handleSave} disabled={!isDirty || saving || detailLoading || detailRefreshing}>
                       <Save size={14} /> 保存
                     </button>
                     <button className="btn-secondary" onClick={handleReset} disabled={!selected.has_override || saving}>
                       <RotateCcw size={14} /> 恢复默认
                     </button>
                     {isDirty && <span className="text-xs text-orange-500">有未保存修改</span>}
-                    {loadingDetail && <span className="text-xs text-gray-400">正在同步模板详情…</span>}
+                    {detailLoading || detailRefreshing ? <span className="text-xs text-gray-400">正在同步模板详情…</span> : null}
                   </div>
                 </div>
 
@@ -429,11 +439,18 @@ export default function PersonaPromptOps() {
                 </div>
               </div>
 
-              {loadingDetail && (
-                <NoticeBanner variant="info" title="模板刷新中">
-                  正在更新当前模板详情…
+              {detailError ? (
+                <NoticeBanner variant="warning" title="模板详情暂不可用">
+                  {detailError}
+                  {detailUpdatedAt ? ` · 最近更新时间 ${new Date(detailUpdatedAt).toLocaleString('zh-CN')}` : ''}
                 </NoticeBanner>
-              )}
+              ) : null}
+
+              {detailLoading || detailRefreshing || detailStale ? (
+                <NoticeBanner variant="info" title="模板刷新中">
+                  {detailLoading || detailRefreshing ? '正在更新当前模板详情…' : '当前模板详情已超过建议新鲜度阈值，可手动刷新。'}
+                </NoticeBanner>
+              ) : null}
             </div>
           )}
         </div>

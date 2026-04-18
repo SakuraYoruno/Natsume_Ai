@@ -79,3 +79,34 @@ def test_build_skill_dag_plan_honors_parallel_window_and_merge_metadata() -> Non
     assert "dependencies" in merged_steps[0]
     assert "retry_limit" in merged_steps[0]
 
+
+def test_build_skill_dag_plan_preserves_step_args_payload() -> None:
+    steps = [
+        {
+            "step_index": 1,
+            "route": "skill",
+            "target_id": "codex_codegen",
+            "description": "fix test",
+            "task_description": "fix failing test",
+            "allow_parallel": True,
+            "args": {
+                "workspace_strategy": "runtime_repo",
+                "task": "fix failing test",
+            },
+        },
+        {
+            "step_index": 2,
+            "route": "skill",
+            "target_id": "session_summary",
+            "description": "summarize",
+            "task_description": "summarize current session",
+            "allow_parallel": True,
+        },
+    ]
+
+    dag = build_skill_dag_plan(plan_id="plan::args", steps=steps, parallel_window=2)
+    merged_steps = merge_plan_steps_with_dag(steps=steps, dag_plan=dag)
+
+    assert dag.nodes[0].args_payload["workspace_strategy"] == "runtime_repo"
+    assert dag.nodes[0].args_payload["task"] == "fix failing test"
+    assert merged_steps[0]["args_payload"]["workspace_strategy"] == "runtime_repo"

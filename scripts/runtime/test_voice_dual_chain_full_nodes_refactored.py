@@ -275,6 +275,15 @@ def _build_tts_summary_from_event_rows(rows: Any) -> JsonDict:
     latest_row = next((row for row in rows if isinstance(row, dict)), None)
     if latest_row is None:
         return {}
+    finished_row = next(
+        (
+            row
+            for row in rows
+            if isinstance(row, dict)
+            and str(row.get("event_type") or "").upper() == "TTS_PLAYBACK_FINISHED"
+        ),
+        None,
+    )
     playback_row = next(
         (
             row
@@ -293,7 +302,7 @@ def _build_tts_summary_from_event_rows(rows: Any) -> JsonDict:
         ),
         None,
     )
-    target_row = playback_row or latest_row
+    target_row = finished_row or playback_row or latest_row
     event_type = str(target_row.get("event_type") or "").upper()
     reason_code = str(target_row.get("reason_code") or "").strip()
     event_payload = target_row.get("payload") if isinstance(target_row.get("payload"), dict) else {}
@@ -377,6 +386,32 @@ def _build_vts_summary_from_gateway_completion(completion_summary: Any) -> JsonD
     }
 
 
+def _has_tts_terminal_playback(tts_summary: Any) -> bool:
+    if not isinstance(tts_summary, dict):
+        return False
+    event = tts_summary.get("event") if isinstance(tts_summary.get("event"), dict) else {}
+    start_event = event.get("start_event") if isinstance(event.get("start_event"), dict) else {}
+    event_type = str(event.get("event_type") or "").upper()
+    start_event_type = str(start_event.get("event_type") or "").upper()
+    return event_type == "TTS_PLAYBACK_FINISHED" or start_event_type == "TTS_PLAYBACK_FINISHED"
+
+
+def _is_tts_terminal_failure(tts_summary: Any) -> bool:
+    if not isinstance(tts_summary, dict):
+        return False
+    status = str(tts_summary.get("status") or "").upper()
+    reason_code = str(tts_summary.get("reason_code") or "").strip()
+    return bool(reason_code) or status in {"REJECTED", "FAILED"}
+
+
+def _is_vts_terminal_failure(vts_summary: Any) -> bool:
+    if not isinstance(vts_summary, dict):
+        return False
+    status = str(vts_summary.get("status") or "").upper()
+    reason_code = str(vts_summary.get("reason_code") or "").strip()
+    return bool(reason_code) or status in {"REJECTED", "FAILED"}
+
+
 def _is_tts_ok(tts_summary: Any, *, allow_degraded: bool) -> bool:
     if not isinstance(tts_summary, dict):
         return False
@@ -441,6 +476,9 @@ def _await_gateway_runtime_evidence(
     db_path: Path,
     request_id: str | None,
     wait_seconds: float,
+    allow_degraded_tts: bool,
+    allow_degraded_vts: bool,
+    require_mouth_sync: bool,
     poll_interval_s: float = 1.0,
 ) -> JsonDict:
     audit_db = _query_gateway_audit_db(db_path=db_path, request_id=request_id)
@@ -458,7 +496,17 @@ def _await_gateway_runtime_evidence(
         )
         if completion_summary and not bool(completion_summary.get("voice_sent")):
             return audit_db
-        if completion_summary and tts_summary and vts_summary:
+        tts_ok = _is_tts_ok(tts_summary, allow_degraded=allow_degraded_tts)
+        vts_ok = _is_vts_ok(
+            vts_summary,
+            allow_degraded=allow_degraded_vts,
+            require_mouth_sync=require_mouth_sync,
+        )
+        if completion_summary and _is_tts_terminal_failure(tts_summary):
+            return audit_db
+        if completion_summary and _is_vts_terminal_failure(vts_summary):
+            return audit_db
+        if completion_summary and tts_ok and vts_ok and _has_tts_terminal_playback(tts_summary):
             return audit_db
         time.sleep(poll_interval_s)
         audit_db = _query_gateway_audit_db(db_path=db_path, request_id=request_id)
@@ -516,7 +564,7 @@ def main() -> int:
     parser.add_argument(
         "--voice-evidence-wait-s",
         type=float,
-        default=45.0,
+        default=75.0,
         help="Seconds to wait for gateway completion and TTS/VTS evidence in audit DB",
     )
     parser.add_argument("--report-dir", default="artifacts/release/reports", help="Report output directory")
@@ -533,6 +581,9 @@ def main() -> int:
         help="Unused legacy compatibility flag",
     )
     parser.add_argument("--gateway-platform", default="wechat", help="Platform value for /v1/host/input")
+    parser.set_defaults(
+        chat_message="あいさつだけして。ひらがなだけで、とてもみじかく、いちぶんでへんじして。こえとくちぱくとひょうじょうも。"
+    )
     args = parser.parse_args()
 
     env_file_path = Path(args.env_file)
@@ -571,7 +622,7 @@ def main() -> int:
         "msg_type": "text",
         "raw_extra": {
             "force_dual_voice_reply": True,
-            "wait_voice_reply_result": True,
+            "wait_voice_reply_result": False,
             "allow_voice_reply_on_primary_failure": True,
         },
     }
@@ -588,6 +639,9 @@ def main() -> int:
         db_path=audit_db_path,
         request_id=gateway_request_id,
         wait_seconds=float(args.voice_evidence_wait_s),
+        allow_degraded_tts=args.allow_degraded_tts,
+        allow_degraded_vts=args.allow_degraded_vts,
+        require_mouth_sync=(not args.allow_vts_no_mouth_sync),
     )
     gateway_completion = _build_gateway_completion_summary(audit_db)
     tts_summary = _build_tts_summary_from_event_rows(audit_db.get("tts_event_latest")) or _build_tts_summary_from_gateway_completion(

@@ -8,11 +8,14 @@ is disconnected or API calls fail.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from host_brain.core.errors import (
@@ -154,6 +157,147 @@ EXPRESSION_HOTKEY_BLOCKED_TOKENS: tuple[str, ...] = (
 DEFAULT_MAX_RECONNECT_ATTEMPTS = 10
 DEFAULT_RECONNECT_BASE_DELAY_S = 1.0
 DEFAULT_RECONNECT_MAX_DELAY_S = 16.0
+_DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _dedupe_text_list(values: list[str] | tuple[str, ...] | None) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw in values or ():
+        text = str(raw or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _load_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def normalize_vts_token_path(token_path: str | None) -> str:
+    normalized = str(token_path or "").strip() or DEFAULT_VTS_TOKEN_PATH
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        return str(candidate)
+    return str((_DEFAULT_REPO_ROOT / candidate).resolve())
+
+
+def _find_vts_streaming_assets_root() -> Path | None:
+    candidates: list[Path] = []
+
+    try:
+        import psutil  # type: ignore
+
+        for proc in psutil.process_iter(["name", "exe"]):
+            try:
+                name = str(proc.info.get("name") or "").strip()
+                exe = str(proc.info.get("exe") or "").strip()
+            except Exception:
+                continue
+            if "VTube Studio" not in name and not exe.lower().endswith("vtube studio.exe"):
+                continue
+            if exe:
+                exe_path = Path(exe)
+                candidates.append(exe_path.parent / "VTube Studio_Data" / "StreamingAssets")
+    except Exception:
+        pass
+
+    local_appdata = str(os.environ.get("LOCALAPPDATA") or "").strip()
+    if local_appdata:
+        candidates.append(
+            Path(local_appdata) / "Programs" / "VTube Studio" / "VTube Studio_Data" / "StreamingAssets"
+        )
+    candidates.append(
+        Path.home() / "Documents" / "VTube Studio" / "VTube Studio_Data" / "StreamingAssets"
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _resolve_current_model_vtube_path() -> Path | None:
+    root = _find_vts_streaming_assets_root()
+    if root is None:
+        return None
+
+    history_path = root / "Config" / "model_history.json"
+    history_data = _load_json_file(history_path)
+    if history_data:
+        rows = list(history_data.get("HistoryMainModels") or [])
+        rows.sort(key=lambda row: int(row.get("LastLoaded") or 0), reverse=True)
+        for row in rows:
+            file_path = str(row.get("ModelFilePath") or "").strip()
+            if file_path:
+                candidate = Path(file_path)
+                if candidate.exists():
+                    return candidate
+            base_path = str(row.get("ModelBasePath") or "").strip()
+            file_name = str(row.get("ModelFileNameWithExtention") or "").strip()
+            if base_path and file_name:
+                candidate = Path(base_path) / file_name
+                if candidate.exists():
+                    return candidate
+
+    config_path = root / "Config" / "vts_config.json"
+    config_data = _load_json_file(config_path)
+    if config_data:
+        for row in config_data.get("StringData") or []:
+            if str(row.get("Key") or "").strip() != "Config_LastModelPath":
+                continue
+            candidate = Path(str(row.get("Value") or "").strip().replace("\\", "/"))
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _discover_current_model_mouth_bindings() -> dict[str, Any]:
+    vtube_path = _resolve_current_model_vtube_path()
+    result: dict[str, Any] = {
+        "vtube_path": str(vtube_path) if vtube_path else None,
+        "model_base_path": str(vtube_path.parent) if vtube_path else None,
+        "open_inputs": [],
+        "form_inputs": [],
+        "smile_inputs": [],
+        "last_error": None,
+    }
+    if vtube_path is None or not vtube_path.exists():
+        return result
+
+    data = _load_json_file(vtube_path)
+    if not data:
+        result["last_error"] = "unable to parse vtube json"
+        return result
+
+    open_inputs: list[str] = []
+    form_inputs: list[str] = []
+    smile_inputs: list[str] = []
+    for row in data.get("ParameterSettings") or []:
+        input_name = str(row.get("Input") or "").strip()
+        output_name = str(row.get("OutputLive2D") or "").strip()
+        display_name = str(row.get("Name") or "").strip().lower()
+        if not input_name or not output_name:
+            continue
+        output_lower = output_name.lower()
+        if output_lower.startswith("parammouthopen") or "mouth open" in display_name:
+            open_inputs.append(input_name)
+            continue
+        if output_lower.startswith("parammouthform2") or "mouth smile" in display_name:
+            smile_inputs.append(input_name)
+            continue
+        if output_lower.startswith("parammouthform") or "嘴" in str(row.get("Name") or ""):
+            form_inputs.append(input_name)
+
+    result["open_inputs"] = _dedupe_text_list(open_inputs)
+    result["form_inputs"] = _dedupe_text_list(form_inputs)
+    result["smile_inputs"] = _dedupe_text_list(smile_inputs)
+    return result
 
 
 def normalize_vts_plugin_name(plugin_name: str | None) -> str:
@@ -225,6 +369,7 @@ class VtsConfig:
 
     def __post_init__(self) -> None:
         self.plugin_name = normalize_vts_plugin_name(self.plugin_name)
+        self.token_path = normalize_vts_token_path(self.token_path)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -316,6 +461,12 @@ class VTubeStudioDriver:
             "silence": list(initial_silence),
             "available": [],
             "last_value": 0.0,
+            "model_open_inputs": [],
+            "model_form_inputs": [],
+            "model_smile_inputs": [],
+            "model_vtube_path": None,
+            "model_base_path": None,
+            "model_binding_error": None,
         }
 
     @property
@@ -729,7 +880,12 @@ class VTubeStudioDriver:
         if override_hotkey and self._is_disallowed_expression_hotkey(override_hotkey):
             self._expression_hotkey_overrides.pop(normalized, None)
             override_hotkey = ""
-        hotkey_id = override_hotkey or expression_id
+        discovered_hotkey = self._resolve_hotkey_for_emotion(
+            emotion_tag=normalized,
+            preferred_hotkey=expression_id,
+            include_preferred=False,
+        )
+        hotkey_id = override_hotkey or discovered_hotkey or expression_id
         try:
             _trigger_vts_hotkey(
                 vts=self._vts,
@@ -936,9 +1092,11 @@ class VTubeStudioDriver:
     @staticmethod
     def _candidate_tuple(values: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
         out: list[str] = []
+        seen: set[str] = set()
         for raw in values or ():
             text = str(raw or "").strip()
-            if text:
+            if text and text not in seen:
+                seen.add(text)
                 out.append(text)
         return tuple(out)
 
@@ -1007,8 +1165,17 @@ class VTubeStudioDriver:
             timeout_s=self._config.api_timeout_s,
         )
 
-        mouth_candidates = self._candidate_tuple(self._config.mouth_param_candidates)
-        volume_candidates = self._candidate_tuple(self._config.mouth_volume_param_candidates)
+        model_binding = _discover_current_model_mouth_bindings()
+        model_open_inputs = self._candidate_tuple(model_binding.get("open_inputs"))
+        model_form_inputs = self._candidate_tuple(model_binding.get("form_inputs"))
+        model_smile_inputs = self._candidate_tuple(model_binding.get("smile_inputs"))
+
+        mouth_candidates = self._candidate_tuple(
+            list(model_open_inputs) + list(self._config.mouth_param_candidates)
+        )
+        volume_candidates = self._candidate_tuple(
+            list(model_open_inputs) + list(self._config.mouth_volume_param_candidates)
+        )
         silence_candidates = self._candidate_tuple(self._config.voice_silence_param_candidates)
 
         if available:
@@ -1072,6 +1239,12 @@ class VTubeStudioDriver:
             "silence": list(selected_silence),
             "available": list(available),
             "last_value": float(self._mouth_parameter_plan.get("last_value") or 0.0),
+            "model_open_inputs": list(model_open_inputs),
+            "model_form_inputs": list(model_form_inputs),
+            "model_smile_inputs": list(model_smile_inputs),
+            "model_vtube_path": model_binding.get("vtube_path"),
+            "model_base_path": model_binding.get("model_base_path"),
+            "model_binding_error": model_binding.get("last_error"),
         }
 
     def _preferred_mouth_parameters(self, *, include_volume_fallback: bool = True) -> list[str]:
@@ -1302,6 +1475,12 @@ class VTubeStudioDriver:
                 "silence": list(self._mouth_parameter_plan.get("silence") or []),
                 "available": list(self._mouth_parameter_plan.get("available") or []),
                 "last_value": float(self._mouth_parameter_plan.get("last_value") or 0.0),
+                "model_open_inputs": list(self._mouth_parameter_plan.get("model_open_inputs") or []),
+                "model_form_inputs": list(self._mouth_parameter_plan.get("model_form_inputs") or []),
+                "model_smile_inputs": list(self._mouth_parameter_plan.get("model_smile_inputs") or []),
+                "model_vtube_path": self._mouth_parameter_plan.get("model_vtube_path"),
+                "model_base_path": self._mouth_parameter_plan.get("model_base_path"),
+                "model_binding_error": self._mouth_parameter_plan.get("model_binding_error"),
             },
             "config": self._config.as_dict(),
             "connection_error": self._connection_error,
@@ -1486,17 +1665,30 @@ def _set_vts_parameter(
         return
 
     async def _set() -> None:
-        request = vts.vts_request.BaseRequest(
-            "InjectParameterDataRequest",
-            {
-                "parameterValues": [
-                    {
-                        "id": param_name,
-                        "value": value,
-                    }
-                ],
-            },
-        )
+        request_builder = getattr(vts, "vts_request", None)
+        if request_builder is not None and hasattr(request_builder, "requestSetParameterValue"):
+            request = request_builder.requestSetParameterValue(
+                param_name,
+                float(value),
+                weight=1.0,
+                face_found=True,
+                mode="set",
+            )
+        else:
+            request = vts.vts_request.BaseRequest(
+                "InjectParameterDataRequest",
+                {
+                    "faceFound": True,
+                    "mode": "set",
+                    "parameterValues": [
+                        {
+                            "id": param_name,
+                            "weight": 1.0,
+                            "value": float(value),
+                        }
+                    ],
+                },
+            )
         response = await asyncio.wait_for(
             vts.request(request),
             timeout=timeout_s,

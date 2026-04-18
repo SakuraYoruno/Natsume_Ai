@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -42,6 +43,9 @@ _MAX_WORKER_CONTEXT_CHARS = 12_000
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_CODEX_RUNS_ROOT = _REPO_ROOT / "artifacts" / "codex_runs"
 _ALLOWED_CODEX_RUN_MODES = {"inspect", "worker", "self_heal", "self_evolve"}
+_DEFAULT_DIRECT_CODEGEN_MODEL_ID = "gpt-4o-mini"
+_DEFAULT_DIRECT_GEMINI_MODEL_ID = "gemini-2.5-flash-lite"
+_DEFAULT_DIRECT_CODEGEN_TIMEOUT_SECONDS = 25
 
 
 def _reject(
@@ -146,6 +150,105 @@ def _coerce_codex_run_mode(payload: dict[str, Any]) -> str:
     if payload.get("auto_apply"):
         return "worker"
     return "inspect"
+
+
+def _parse_bool_env(name: str, *, default: bool) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return bool(default)
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _coerce_direct_codegen_timeout_seconds() -> int:
+    raw = str(os.environ.get("HOST_CODEX_INSPECT_DIRECT_TIMEOUT_SECONDS") or "").strip()
+    try:
+        timeout_value = int(raw) if raw else _DEFAULT_DIRECT_CODEGEN_TIMEOUT_SECONDS
+    except ValueError:
+        timeout_value = _DEFAULT_DIRECT_CODEGEN_TIMEOUT_SECONDS
+    return max(5, min(timeout_value, 120))
+
+
+def _resolve_direct_codegen_model_id() -> str:
+    for env_name in (
+        "HOST_CODEX_INSPECT_DIRECT_MODEL_ID",
+        "HOST_CODEX_MODEL_ID",
+        "HOST_OPENAI_MODEL_ID",
+    ):
+        value = str(os.environ.get(env_name) or "").strip()
+        if value:
+            return value
+    return _DEFAULT_DIRECT_CODEGEN_MODEL_ID
+
+
+def _resolve_direct_codegen_api_key() -> str | None:
+    for env_name in ("OPENAI_API_KEY", "CODEX_API_KEY"):
+        value = str(os.environ.get(env_name) or "").strip()
+        if value:
+            return value
+    try:
+        from host_brain.app.config import load_host_config
+    except Exception:
+        return None
+    for provider_name in ("openai", "codex"):
+        try:
+            load_result = load_host_config(local_overrides={"HOST_LLM_PROVIDER": provider_name})
+        except Exception as exc:
+            logger.debug("failed to resolve %s api key from host config: %s", provider_name, exc)
+            continue
+        if not load_result.success or load_result.config is None:
+            continue
+        value = str(load_result.config.llm_api_key or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _resolve_direct_codegen_base_url() -> str | None:
+    for env_name in ("HOST_OPENAI_BASE_URL", "HOST_CODEX_BASE_URL"):
+        value = str(os.environ.get(env_name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _resolve_direct_codegen_runtime() -> dict[str, str] | None:
+    api_key = _resolve_direct_codegen_api_key()
+    if api_key:
+        return {
+            "provider": "openai_compat",
+            "api_key": api_key,
+            "model_id": _resolve_direct_codegen_model_id(),
+            "base_url": str(_resolve_direct_codegen_base_url() or "").strip(),
+            "backend": "direct_openai",
+        }
+    try:
+        from host_brain.app.model_router import resolve_gemini_key_pool
+    except Exception:
+        resolve_gemini_key_pool = None  # type: ignore[assignment]
+    if resolve_gemini_key_pool is not None:
+        try:
+            gemini_keys = resolve_gemini_key_pool()
+        except Exception as exc:
+            logger.debug("failed to resolve gemini key pool for direct codegen: %s", exc)
+            gemini_keys = []
+        if gemini_keys:
+            model_id = str(os.environ.get("HOST_GEMINI_MODEL_ID") or _DEFAULT_DIRECT_GEMINI_MODEL_ID).strip()
+            base_url = str(
+                os.environ.get("HOST_GEMINI_BASE_URL")
+                or "https://generativelanguage.googleapis.com/v1beta/openai"
+            ).strip()
+            return {
+                "provider": "gemini",
+                "api_key": str(gemini_keys[0]).strip(),
+                "model_id": model_id or _DEFAULT_DIRECT_GEMINI_MODEL_ID,
+                "base_url": base_url,
+                "backend": "direct_gemini_openai_compat",
+            }
+    return None
 
 
 def _coerce_runs_root(payload: dict[str, Any]) -> Path:
@@ -403,6 +506,87 @@ def _collect_runtime_diagnostics(*, stdout: str, stderr: str) -> dict[str, Any]:
     }
 
 
+def _strip_wrapping_code_fence(text: str) -> str:
+    stripped = str(text or "").strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) < 3 or lines[-1].strip() != "```":
+        return stripped
+    return "\n".join(lines[1:-1]).strip()
+
+
+def _extract_direct_codegen_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text_value = str(item.get("text") or item.get("content") or "").strip()
+                if text_value:
+                    parts.append(text_value)
+            else:
+                text_value = str(getattr(item, "text", "") or getattr(item, "content", "") or "").strip()
+                if text_value:
+                    parts.append(text_value)
+        return "\n".join(parts).strip()
+    if isinstance(content, dict):
+        return str(content.get("text") or content.get("content") or "").strip()
+    return str(content or "").strip()
+
+
+def _should_use_direct_codegen_fast_path(
+    *,
+    mode: str,
+    run_mode: str,
+    workspace_source: str,
+) -> bool:
+    if str(mode or "").strip().lower() != "codegen":
+        return False
+    if str(run_mode or "").strip().lower() != "inspect":
+        return False
+    if str(workspace_source or "").strip().lower() != "temp_workspace":
+        return False
+    return _parse_bool_env("HOST_CODEX_INSPECT_DIRECT_LLM_ENABLED", default=True)
+
+
+def _execute_direct_codegen_fast_path(
+    *,
+    prompt: str,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    from langchain_core.messages import HumanMessage  # noqa: PLC0415
+    from langchain_openai import ChatOpenAI  # noqa: PLC0415
+
+    runtime = _resolve_direct_codegen_runtime()
+    if not runtime:
+        raise RuntimeError("direct inspect codegen unavailable: no direct provider credentials configured")
+
+    model_id = str(runtime.get("model_id") or "").strip() or _DEFAULT_DIRECT_CODEGEN_MODEL_ID
+    api_key = str(runtime.get("api_key") or "").strip()
+    base_url = str(runtime.get("base_url") or "").strip() or None
+    llm = ChatOpenAI(
+        model=model_id,
+        api_key=api_key,
+        base_url=base_url,
+        timeout=max(1.0, float(timeout_seconds)),
+        max_retries=1,
+        temperature=0.1,
+    )
+    response = llm.invoke([HumanMessage(content=prompt)])
+    output_text = _strip_wrapping_code_fence(_extract_direct_codegen_text(getattr(response, "content", "")))
+    if not output_text:
+        raise RuntimeError("direct inspect codegen returned empty output")
+    return {
+        "result_text": output_text[:_MAX_CODEX_OUTPUT_CHARS].strip(),
+        "backend": str(runtime.get("backend") or "direct_openai"),
+        "model_id": model_id,
+        "base_url": base_url,
+        "provider": str(runtime.get("provider") or "").strip() or None,
+    }
+
+
 def _pump_stream(stream: Any, sink: list[str]) -> None:
     if stream is None:
         return
@@ -602,17 +786,6 @@ def execute_codex_codegen(payload: dict[str, Any]) -> dict[str, Any]:
             request_id=request_id,
         )
 
-    codex_cmd = shutil.which("codex")
-    if codex_cmd is None:
-        logger.info("[codex_codegen] codex CLI unavailable task=%r context=%r", task, context)
-        return _degraded(
-            event_id=event_id,
-            reason_code=CODEX_CLI_UNAVAILABLE,
-            detail="codex CLI not found in PATH",
-            ts_ms=ts,
-            request_id=request_id,
-        )
-
     try:
         workspace_resolution = resolve_workspace(payload, request_id=str(request_id or "").strip() or None)
     except ValueError as exc:
@@ -638,6 +811,113 @@ def execute_codex_codegen(payload: dict[str, Any]) -> dict[str, Any]:
     metadata_path = artifact_dir / "metadata.json"
     changed_files_path = artifact_dir / "changed_files.json"
     verification_path = artifact_dir / "verification.json"
+
+    if _should_use_direct_codegen_fast_path(
+        mode=mode,
+        run_mode=run_mode,
+        workspace_source=workspace_resolution.source,
+    ):
+        try:
+            direct_timeout_seconds = _coerce_direct_codegen_timeout_seconds()
+            direct_result = _execute_direct_codegen_fast_path(
+                prompt=prompt,
+                timeout_seconds=direct_timeout_seconds,
+            )
+            git_summary_before = _collect_git_summary(workspace)
+            git_summary_after = _collect_git_summary(workspace)
+            git_summary = _diff_git_summary(git_summary_before, git_summary_after)
+            verification = _run_optional_python_verification(
+                payload,
+                request_id=str(request_id or "").strip() or None,
+                intent_id=event_id,
+            )
+            runtime_diagnostics = {
+                "reconnect_count": 0,
+                "transport_fallback_detected": False,
+                "plugin_sync_forbidden_detected": False,
+                "stderr_chars": 0,
+                "stdout_chars": len(str(direct_result.get("result_text") or "")),
+                "execution_backend": direct_result.get("backend"),
+            }
+            _write_text_file(stdout_path, str(direct_result.get("result_text") or ""))
+            _write_text_file(stderr_path, "")
+            _write_text_file(events_path, "")
+            _write_text_file(last_message_path, str(direct_result.get("result_text") or ""))
+            _write_json_file(changed_files_path, git_summary)
+            _write_json_file(verification_path, verification)
+            metadata = {
+                "event_id": event_id,
+                "request_id": request_id,
+                "mode": mode,
+                "run_mode": run_mode,
+                "workspace": str(workspace),
+                "workspace_source": workspace_resolution.source,
+                "repo_alias": workspace_resolution.repo_alias,
+                "git_url": workspace_resolution.git_url,
+                "created_workspace": workspace_resolution.created_workspace,
+                "cloned_workspace": workspace_resolution.cloned_workspace,
+                "thread_id": None,
+                "resume_thread_id": None,
+                "resumed": False,
+                "timed_out": False,
+                "completed_from_output": False,
+                "prompt_profile": "inspect_direct_openai_codegen",
+                "prompt_chars": len(prompt),
+                "timeout_seconds": direct_timeout_seconds,
+                "runtime_diagnostics": runtime_diagnostics,
+                "returncode": 0,
+                "artifact_dir": str(artifact_dir),
+                "sandbox_mode": "direct-llm",
+                "execution_backend": direct_result.get("backend"),
+                "model_id": direct_result.get("model_id"),
+                "base_url": direct_result.get("base_url"),
+                "ts_ms": ts,
+            }
+            _write_json_file(metadata_path, metadata)
+            return {
+                "status": STATUS_EXECUTED,
+                "event_id": event_id,
+                "manifest_ref": payload.get("manifest_ref") or f"codex_codegen::{task[:60]}",
+                "task": task,
+                "workspace": str(workspace),
+                "mode": mode,
+                "run_mode": run_mode,
+                "thread_id": None,
+                "resumed": False,
+                "artifacts_dir": str(artifact_dir),
+                "timed_out": False,
+                "completed_from_output": False,
+                "prompt_profile": "inspect_direct_openai_codegen",
+                "prompt_chars": len(prompt),
+                "timeout_seconds": direct_timeout_seconds,
+                "runtime_diagnostics": runtime_diagnostics,
+                "stderr": "",
+                "stdout": "",
+                "returncode": 0,
+                "changed_files": git_summary.get("changed_files") or [],
+                "git_diff_stat": git_summary.get("git_diff_stat"),
+                "verification": verification,
+                "request_id": request_id,
+                "ts_ms": ts,
+                "result_text": direct_result.get("result_text"),
+                "text": direct_result.get("result_text"),
+                "detail": "direct inspect codegen completed",
+                "execution_backend": direct_result.get("backend"),
+                "model_id": direct_result.get("model_id"),
+            }
+        except Exception as exc:
+            logger.warning("direct inspect codegen fast path failed, falling back to codex CLI: %s", exc)
+
+    codex_cmd = shutil.which("codex")
+    if codex_cmd is None:
+        logger.info("[codex_codegen] codex CLI unavailable task=%r context=%r", task, context)
+        return _degraded(
+            event_id=event_id,
+            reason_code=CODEX_CLI_UNAVAILABLE,
+            detail="codex CLI not found in PATH",
+            ts_ms=ts,
+            request_id=request_id,
+        )
 
     resume_thread_id = str(payload.get("resume_thread_id") or "").strip() or None
     sandbox_mode = "read-only" if run_mode == "inspect" else "workspace-write"

@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from edge_client.actuators.vts_driver import VTS_MOUTH_PARAM, VtsConfig, VtsState, VTubeStudioDriver
+from edge_client.actuators.vts_driver import (
+    VTS_MOUTH_PARAM,
+    VtsConfig,
+    VtsState,
+    VTubeStudioDriver,
+    _discover_current_model_mouth_bindings,
+    _set_vts_parameter,
+)
 
 
 def test_set_mouth_open_level_fallbacks_to_next_parameter(monkeypatch) -> None:
@@ -175,6 +182,69 @@ def test_refresh_plan_accepts_parameter_names_from_vts_response(monkeypatch) -> 
     assert health["mouth"][0] == "MouthOpen"
 
 
+def test_discover_current_model_mouth_bindings_reads_vtube_parameter_settings(monkeypatch, tmp_path) -> None:
+    vtube_path = tmp_path / "TestModel.vtube.json"
+    vtube_path.write_text(
+        """
+        {
+          "ParameterSettings": [
+            {"Name": "Mouth Open", "Input": "VoiceVolume", "OutputLive2D": "ParamMouthOpenY"},
+            {"Name": "Mouth Smile", "Input": "MouthSmile", "OutputLive2D": "ParamMouthForm2"},
+            {"Name": "嘴宽窄", "Input": "MouthPucker", "OutputLive2D": "ParamMouthForm"}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._resolve_current_model_vtube_path",
+        lambda: vtube_path,
+    )
+
+    result = _discover_current_model_mouth_bindings()
+
+    assert result["vtube_path"] == str(vtube_path)
+    assert result["open_inputs"] == ["VoiceVolume"]
+    assert result["smile_inputs"] == ["MouthSmile"]
+    assert result["form_inputs"] == ["MouthPucker"]
+
+
+def test_refresh_plan_prioritizes_model_bound_open_input(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._list_vts_input_parameter_ids",
+        lambda *, vts, timeout_s: ["MouthOpen", "VoiceVolume", "VoiceSilence"],
+    )
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._discover_current_model_mouth_bindings",
+        lambda: {
+            "vtube_path": "D:/Models/Test.vtube.json",
+            "model_base_path": "D:/Models",
+            "open_inputs": ["VoiceVolume"],
+            "form_inputs": [],
+            "smile_inputs": [],
+            "last_error": None,
+        },
+    )
+
+    driver = VTubeStudioDriver(
+        config=VtsConfig(
+            mouth_param_candidates=(VTS_MOUTH_PARAM, "ParamMouthOpenY"),
+            mouth_volume_param_candidates=("VoiceVolumePlusMouthOpen",),
+            voice_silence_param_candidates=("VoiceSilence",),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+
+    driver._refresh_mouth_parameter_plan()
+
+    health = driver.health()["mouth_parameters"]
+    assert health["selected"][0] == "VoiceVolume"
+    assert health["mouth"][0] == "VoiceVolume"
+    assert health["model_open_inputs"] == ["VoiceVolume"]
+
+
 def test_set_mouth_open_level_retries_unfiltered_candidates_when_available_filter_is_stale(monkeypatch) -> None:
     calls: list[str] = []
 
@@ -256,7 +326,7 @@ def test_set_expression_skips_blocked_hotkey_and_uses_safe_hint_match(monkeypatc
 
     assert result.success is True
     assert result.expression_id == "hotkey_exp_happy"
-    assert calls == ["exp_happy_01", "hotkey_exp_happy"]
+    assert calls == ["hotkey_exp_happy"]
 
 
 def test_set_expression_neutral_skips_reset_all_hotkey(monkeypatch) -> None:
@@ -282,7 +352,7 @@ def test_set_expression_neutral_skips_reset_all_hotkey(monkeypatch) -> None:
 
     assert result.success is True
     assert result.expression_id == "hotkey_neutral_eye"
-    assert calls == ["exp_neutral_01", "hotkey_neutral_eye"]
+    assert calls == ["hotkey_neutral_eye"]
 
 
 def test_set_expression_refreshes_hotkeys_after_primary_failure(monkeypatch) -> None:
@@ -309,7 +379,7 @@ def test_set_expression_refreshes_hotkeys_after_primary_failure(monkeypatch) -> 
 
     assert result.success is True
     assert result.expression_id == "hotkey_exp_happy"
-    assert calls == ["exp_happy_01", "hotkey_exp_happy"]
+    assert calls == ["hotkey_exp_happy"]
 
 
 def test_set_mouth_open_level_reconnects_once_on_protocol_error(monkeypatch) -> None:
@@ -372,3 +442,57 @@ def test_set_expression_reconnects_once_on_protocol_error(monkeypatch) -> None:
     assert result.success is True
     assert reconnect_calls == ["connect"]
     assert calls == ["stale-conn:exp_happy_01", "fresh-conn:exp_happy_01"]
+
+
+def test_set_vts_parameter_uses_face_found_weight_and_mode_when_helper_available(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeRequestBuilder:
+        def requestSetParameterValue(self, parameter, value, *, weight=1.0, face_found=False, mode="set"):  # noqa: ANN001
+            captured["parameter"] = parameter
+            captured["value"] = value
+            captured["weight"] = weight
+            captured["face_found"] = face_found
+            captured["mode"] = mode
+            return {"messageType": "InjectParameterDataRequest", "data": {"ok": True}}
+
+    class _FakeVts:
+        def __init__(self) -> None:
+            self.vts_request = _FakeRequestBuilder()
+
+        async def request(self, request):  # noqa: ANN001
+            captured["request"] = request
+            return {"data": {}}
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._run_in_vts_loop", lambda coro, *, timeout_s: __import__("asyncio").run(coro))
+
+    _set_vts_parameter(vts=_FakeVts(), param_name="MouthOpen", value=0.8, timeout_s=1.0)
+
+    assert captured["parameter"] == "MouthOpen"
+    assert captured["value"] == 0.8
+    assert captured["weight"] == 1.0
+    assert captured["face_found"] is True
+    assert captured["mode"] == "set"
+
+
+def test_set_expression_prefers_discovered_hotkey_before_legacy_expression_id(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_trigger(*, vts, hotkey_id: str, timeout_s: float) -> None:
+        _ = (vts, timeout_s)
+        calls.append(hotkey_id)
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._trigger_vts_hotkey", _fake_trigger)
+
+    driver = VTubeStudioDriver(VtsConfig())
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+    driver._hotkey_catalog = [
+        {"id": "8bab2dee930d408381db550315a99d51", "name": "HK_Happy"},
+    ]
+
+    result = driver.set_expression("HAPPY")
+
+    assert result.success is True
+    assert result.expression_id == "8bab2dee930d408381db550315a99d51"
+    assert calls == ["8bab2dee930d408381db550315a99d51"]

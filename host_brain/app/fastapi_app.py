@@ -18,7 +18,7 @@ from typing import Any, AsyncGenerator, Callable, Dict, Mapping, Optional
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from host_brain.app.schemas import (
@@ -85,6 +85,81 @@ def _sse_single_commit(payload: dict[str, Any]) -> StreamingResponse:
         _single_event(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "")).strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _normalize_bind_host(raw: str, fallback: str = "127.0.0.1") -> str:
+    value = str(raw or "").strip()
+    if not value or value == "0.0.0.0":
+        return fallback
+    return value
+
+
+def _build_redirect_target(
+    *,
+    host: str,
+    port: int,
+    path: str,
+    query_string: bytes,
+) -> str:
+    target = f"http://{host}:{port}{path}"
+    if query_string:
+        target = f"{target}?{query_string.decode('utf-8', errors='ignore')}"
+    return target
+
+
+def _resolve_obs_redirect_target(request: Request) -> str | None:
+    if not _env_flag("HOST_MAIN_OBS_REDIRECT_ENABLED", default=False):
+        return None
+    path = str(request.url.path or "")
+    if not (path.startswith("/obs/") or path.startswith("/api/ui/")):
+        return None
+    host = _normalize_bind_host(
+        os.environ.get("HOST_OBS_APP_HOST", os.environ.get("HOST_APP_HOST", "127.0.0.1"))
+    )
+    try:
+        port = int(os.environ.get("HOST_OBS_APP_PORT", "18082"))
+    except Exception:
+        port = 18082
+    return _build_redirect_target(
+        host=host,
+        port=port,
+        path=path,
+        query_string=request.scope.get("query_string", b""),
+    )
+
+
+def _resolve_monitor_redirect_target(request: Request) -> str | None:
+    if not _env_flag("HOST_MAIN_MONITOR_REDIRECT_ENABLED", default=False):
+        return None
+    path = str(request.url.path or "")
+    if path == "/panel":
+        path = "/monitor/"
+    elif not (
+        path.startswith("/monitor")
+        or path.startswith("/static/monitor")
+    ):
+        return None
+    host = _normalize_bind_host(os.environ.get("HOST_MONITOR_PROXY_HOST", "127.0.0.1"))
+    try:
+        port = int(os.environ.get("HOST_MONITOR_PROXY_PORT", "18180"))
+    except Exception:
+        port = 18180
+    if path.startswith("/static/monitor"):
+        suffix = path[len("/static/monitor"):]
+        path = "/monitor" + suffix
+    return _build_redirect_target(
+        host=host,
+        port=port,
+        path=path,
+        query_string=request.scope.get("query_string", b""),
     )
 
 
@@ -338,6 +413,25 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 async def add_request_id_and_audit(request: Request, call_next: Callable) -> Response:
     """Attach request ids to incoming requests — 委托给 http_hooks._add_request_id_fn。"""
     return await _add_request_id_fn(request=request, call_next=call_next, metrics=_metrics, logger=_logger)
+
+
+@app.middleware("http")
+async def redirect_obs_and_monitor_traffic(request: Request, call_next: Callable) -> Response:
+    """Optionally offload monitor/obs traffic away from host-main.
+
+    Runtime scripts can enable this redirect so accidental use of host-main
+    monitor URLs does not send heavy observability traffic back into the main
+    chat process.
+    """
+    monitor_target = _resolve_monitor_redirect_target(request)
+    if monitor_target:
+        return RedirectResponse(url=monitor_target, status_code=307)
+
+    obs_target = _resolve_obs_redirect_target(request)
+    if obs_target:
+        return RedirectResponse(url=obs_target, status_code=307)
+
+    return await call_next(request)
 
 
 @app.middleware("http")

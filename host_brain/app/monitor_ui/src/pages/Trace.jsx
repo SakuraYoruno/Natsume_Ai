@@ -25,25 +25,19 @@ import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
-import TraceRequestDetail from './TraceRequestDetail.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { applyDagreLayout } from '../utils/traceLayout.js'
 import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
+import { useSessionsListQuery } from '../queries/sessionsQueries.js'
+import { useTraceLiveSnapshotQuery, useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../queries/traceQueries.js'
 import { sanitizeRecentRequests } from '../utils/sessionList.js'
 import {
   connectTraceLiveFeed,
-  fetchTraceNodes,
-  fetchTraceStreamEvents,
-  fetchGraphSchema,
-  fetchCheckpoints,
-  fetchChainStats,
-  fetchObsMetrics,
-  fetchSessions,
-  fetchTribeEvents,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
 const NODE_TYPES = { customNode: CustomNode }
+const TraceRequestDetail = React.lazy(() => import('./TraceRequestDetail.jsx'))
 
 const GROUPS = [
   {
@@ -1727,8 +1721,6 @@ function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenSta
 
 function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, setLoading, error, setError }) {
   const [inputId, setInputId] = useState('')
-  const [recentRequests, setRecentRequests] = useState([])
-  const [recentLoading, setRecentLoading] = useState(false)
   const [recentKeyword, setRecentKeyword] = useState('')
   const [recentStatusFilter, setRecentStatusFilter] = useState('')
   const [historyExpanded, setHistoryExpanded] = useState(false)
@@ -1736,163 +1728,134 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const [advancedViewsExpanded, setAdvancedViewsExpanded] = useState(false)
   const [liveTraceItems, setLiveTraceItems] = useState([])
   const [liveTraceTimelineEntries, setLiveTraceTimelineEntries] = useState({})
-  const [liveTraceLoading, setLiveTraceLoading] = useState(false)
-  const [liveTraceError, setLiveTraceError] = useState(null)
+  const [liveFeedError, setLiveFeedError] = useState(null)
   const [liveFeedConnected, setLiveFeedConnected] = useState(false)
   const [liveFeedLastTs, setLiveFeedLastTs] = useState(null)
-  const [tribeEvents, setTribeEvents] = useState([])
-  const [tribeEventsLoading, setTribeEventsLoading] = useState(false)
-  const [tribeEventsError, setTribeEventsError] = useState(null)
   const inlineOverviewRef = useRef(null)
   const navigate = useNavigate()
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingTick = useAppStore((s) => s.pollingTick)
+  const pageVisible = useAppStore((s) => s.pageVisible)
   const selectedRequestId = useAppStore((s) => s.selectedRequestId)
   const setSelectedRequestId = useAppStore((s) => s.setSelectedRequestId)
+  const liveFeedEnabled = pollingEnabled && pageVisible
+  const liveTraceLimit = recentKeyword ? 12 : 6
   const { runtimeSnapshot, promptStats: promptBuilderData } = useDigitalLifeRuntimeSignals({
-    pollingEnabled,
+    pollingEnabled: liveFeedEnabled,
     pollingInterval,
     windowMinutes: 60,
     minIntervalSeconds: 10,
+  })
+  const recentRequestsQuery = useSessionsListQuery({
+    page: 1,
+    pageSize: 12,
+    keyword: recentKeyword,
+    status: recentStatusFilter,
+    windowMinutes: 1440,
+    pollingEnabled: liveFeedEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const liveSnapshotParams = React.useMemo(() => ({
+    limit: liveTraceLimit,
+    window_minutes: 1440,
+    active_within_ms: 60000,
+    keyword: recentKeyword || undefined,
+  }), [liveTraceLimit, recentKeyword])
+  const liveSnapshotQuery = useTraceLiveSnapshotQuery({
+    queryParams: liveSnapshotParams,
+    enabled: true,
+    pollingEnabled: liveFeedEnabled,
+    pollingTick,
+    pollingInterval: Math.max(10, pollingInterval),
+  })
+  const recentRequestsBase = React.useMemo(() => (
+    sanitizeRecentRequests(recentRequestsQuery.sessionsData?.items, { keyword: recentKeyword })
+  ), [recentKeyword, recentRequestsQuery.sessionsData?.items])
+  const recentRequests = React.useMemo(() => {
+    if (recentKeyword) return recentRequestsBase
+    const previousById = new Map(recentRequestsBase.map((item) => [item.request_id, item]))
+    const merged = liveTraceItems
+      .map((item) => item?.session)
+      .filter(Boolean)
+      .map((session) => ({
+        ...(previousById.get(session.request_id) ?? {}),
+        ...session,
+      }))
+    recentRequestsBase.forEach((session) => {
+      if (!merged.some((item) => item.request_id === session.request_id)) {
+        merged.push(session)
+      }
+    })
+    return merged.slice(0, 12)
+  }, [liveTraceItems, recentKeyword, recentRequestsBase])
+  const recentLoading = recentRequestsQuery.loading || recentRequestsQuery.refreshing
+  const liveTraceLoading = liveSnapshotQuery.loading || liveSnapshotQuery.refreshing
+  const liveTraceError = liveFeedError || liveSnapshotQuery.liveSnapshotError
+  const selectedSessionForQuery = React.useMemo(() => (
+    liveTraceItems.find((item) => item?.session?.request_id === selectedRequestId)?.session
+    ?? recentRequests.find((item) => item?.request_id === selectedRequestId)
+    ?? null
+  ), [liveTraceItems, recentRequests, selectedRequestId])
+  const selectedSessionIdForQuery = String(
+    selectedSessionForQuery?.session_id
+    ?? traceData?.summary?.session_id
+    ?? ''
+  ).trim()
+  const selectedConversationIdForQuery = String(
+    selectedSessionForQuery?.conversation_id
+    ?? traceData?.summary?.conversation_id
+    ?? ''
+  ).trim()
+  const tribeFeedParams = React.useMemo(() => {
+    const params = { limit: selectedRequestId ? 200 : 60 }
+    if (selectedRequestId) {
+      params.request_id = selectedRequestId
+    } else if (selectedSessionIdForQuery) {
+      params.session_id = selectedSessionIdForQuery
+    } else if (selectedConversationIdForQuery) {
+      params.conversation_id = selectedConversationIdForQuery
+    }
+    return params
+  }, [selectedConversationIdForQuery, selectedRequestId, selectedSessionIdForQuery])
+  const tribeFeedQuery = useTraceTribeFeedQuery({
+    queryParams: tribeFeedParams,
+    enabled: Boolean(selectedRequestId || selectedSessionIdForQuery || selectedConversationIdForQuery),
+    pollingEnabled: liveFeedEnabled,
+    pollingTick,
+    pollingInterval: Math.max(10, pollingInterval),
+  })
+  const tribeEvents = Array.isArray(tribeFeedQuery.tribeFeedPayload?.items) ? tribeFeedQuery.tribeFeedPayload.items : []
+  const tribeEventsLoading = tribeFeedQuery.loading || tribeFeedQuery.refreshing
+  const tribeEventsError = tribeFeedQuery.tribeFeedError
+  const selectedTraceQuery = useTraceSnapshotQuery({
+    requestId: selectedRequestId,
+    enabled: Boolean(selectedRequestId),
+    pollingEnabled: liveFeedEnabled && !liveFeedConnected,
+    pollingTick,
+    pollingInterval,
   })
 
   const load = useCallback(async (id, options = {}) => {
     if (!id?.trim()) return
     const showOverview = options.showOverview ?? true
-    setLoading(true)
     setError(null)
-    try {
-      const data = await fetchTraceNodes(id)
-      setSelectedRequestId(id)
-      setTraceData(data)
-      setTraceInfo({ status: data.status, latency: data.total_latency_ms, nodeCount: (data.nodes ?? []).length })
-      if (showOverview) {
-        setInlineOverviewVisible(true)
-      }
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
+    setSelectedRequestId(id)
+    if (showOverview) {
+      setInlineOverviewVisible(true)
     }
   }, [setLoading, setError, setSelectedRequestId, setTraceData, setTraceInfo])
 
-  const loadRecentRequests = useCallback(async (keyword = '') => {
-    setRecentLoading(true)
-    try {
-      const data = await fetchSessions({
-        page: 1,
-        page_size: 12,
-        time_range: '24h',
-        keyword: keyword || undefined,
-        status: recentStatusFilter || undefined,
-      })
-      setRecentRequests(sanitizeRecentRequests(data.items, { keyword }))
-      setRecentKeyword(keyword)
-    } catch (fetchError) {
-      console.warn('[Trace] failed to load recent requests:', fetchError)
-      setRecentRequests([])
-    } finally {
-      setRecentLoading(false)
-    }
-  }, [recentStatusFilter])
-
   useEffect(() => {
-    loadRecentRequests()
-  }, [loadRecentRequests])
-
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const timer = setInterval(() => loadRecentRequests(recentKeyword), pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [pollingEnabled, pollingInterval, loadRecentRequests, recentKeyword])
-
-  const loadTribeEvents = useCallback(async () => {
-    setTribeEventsLoading(true)
-    try {
-      const selectedSession =
-        liveTraceItems.find((item) => item?.session?.request_id === selectedRequestId)?.session
-        ?? recentRequests.find((item) => item?.request_id === selectedRequestId)
-        ?? null
-      const sessionId = String(
-        selectedSession?.session_id
-        ?? traceData?.summary?.session_id
-        ?? ''
-      ).trim()
-      const conversationId = String(
-        selectedSession?.conversation_id
-        ?? traceData?.summary?.conversation_id
-        ?? ''
-      ).trim()
-      const params = { limit: selectedRequestId ? 200 : 60 }
-      if (selectedRequestId) {
-        params.request_id = selectedRequestId
-      } else if (sessionId) {
-        params.session_id = sessionId
-      } else if (conversationId) {
-        params.conversation_id = conversationId
-      }
-      const data = await fetchTribeEvents(params)
-      setTribeEvents(Array.isArray(data?.items) ? data.items : [])
-      setTribeEventsError(null)
-    } catch (loadError) {
-      setTribeEvents([])
-      setTribeEventsError(loadError.message || 'Tribe 事件加载失败')
-    } finally {
-      setTribeEventsLoading(false)
-    }
-  }, [liveTraceItems, recentRequests, selectedRequestId, traceData])
-
-  useEffect(() => {
-    loadTribeEvents()
-  }, [loadTribeEvents])
-
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const timer = setInterval(loadTribeEvents, Math.max(pollingInterval, 10) * 1000)
-    return () => clearInterval(timer)
-  }, [pollingEnabled, pollingInterval, loadTribeEvents])
-
-  const liveTraceLimit = recentKeyword ? 12 : 6
-
-  const loadLiveTraces = useCallback(async () => {
-    const candidates = recentRequests.slice(0, liveTraceLimit)
-    if (candidates.length === 0) {
-      setLiveTraceItems([])
-      setLiveTraceError(null)
-      return
-    }
-
-    setLiveTraceLoading(true)
-    setLiveTraceError(null)
-    try {
-      const items = await Promise.all(
-        candidates.map(async (session) => {
-          try {
-            const trace = await fetchTraceNodes(session.request_id)
-            return { session, trace }
-          } catch (loadError) {
-            return { session, trace: null, error: loadError.message }
-          }
-        })
-      )
-      setLiveTraceItems(items)
-    } catch (loadError) {
-      setLiveTraceItems([])
-      setLiveTraceError(loadError.message)
-    } finally {
-      setLiveTraceLoading(false)
-    }
-  }, [recentRequests, liveTraceLimit])
-
-  useEffect(() => {
-    if (!pollingEnabled) {
+    if (!liveFeedEnabled) {
       setLiveFeedConnected(false)
       return undefined
     }
 
     let closed = false
     let connection
-    setLiveTraceLoading(true)
+    setLiveFeedError(null)
 
     try {
       connection = connectTraceLiveFeed(
@@ -1907,7 +1870,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           onOpen: () => {
             if (closed) return
             setLiveFeedConnected(true)
-            setLiveTraceError(null)
+            setLiveFeedError(null)
           },
           onSnapshot: (payload) => {
             if (closed) return
@@ -1931,24 +1894,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               }
               return next
             })
-            setLiveTraceLoading(false)
-            setLiveTraceError(null)
-            if (!recentKeyword) {
-              const streamedSessions = items.map((item) => item.session).filter(Boolean)
-              setRecentRequests((previous) => {
-                const previousById = new Map(previous.map((item) => [item.request_id, item]))
-                const merged = streamedSessions.map((session) => ({
-                  ...(previousById.get(session.request_id) ?? {}),
-                  ...session,
-                }))
-                previous.forEach((session) => {
-                  if (!merged.some((item) => item.request_id === session.request_id)) {
-                    merged.push(session)
-                  }
-                })
-                return merged.slice(0, 12)
-              })
-            }
+            setLiveFeedError(null)
           },
           onDelta: (payload) => {
             if (closed) return
@@ -1965,7 +1911,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           },
           onError: (payload) => {
             if (closed) return
-            setLiveTraceError(payload?.detail || '实时链路流异常')
+            setLiveFeedError(payload?.detail || '实时链路流异常')
           },
           onConnectionError: () => {
             if (closed) return
@@ -1975,8 +1921,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       )
     } catch (connectionError) {
       setLiveFeedConnected(false)
-      setLiveTraceError(connectionError.message)
-      setLiveTraceLoading(false)
+      setLiveFeedError(connectionError.message)
       return undefined
     }
 
@@ -1984,14 +1929,46 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       closed = true
       connection?.close?.()
     }
-  }, [pollingEnabled, recentKeyword, liveTraceLimit])
+  }, [liveFeedEnabled, recentKeyword, liveTraceLimit])
 
   useEffect(() => {
-    if (liveTraceLoading) return
-    // SSE 已连接但快照为空时也需要兜底拉取，避免“已连接但无卡片”。
+    const items = Array.isArray(liveSnapshotQuery.liveSnapshot?.items) ? liveSnapshotQuery.liveSnapshot.items : []
+    if (items.length === 0) {
+      if (!liveFeedConnected) {
+        setLiveTraceItems([])
+      }
+      return
+    }
     if (liveFeedConnected && liveTraceItems.length > 0) return
-    loadLiveTraces()
-  }, [liveFeedConnected, liveTraceItems.length, liveTraceLoading, loadLiveTraces])
+    setLiveTraceItems(items)
+    if (!liveFeedLastTs && liveSnapshotQuery.liveSnapshot?.timestamp) {
+      setLiveFeedLastTs(liveSnapshotQuery.liveSnapshot.timestamp)
+    }
+  }, [liveFeedConnected, liveFeedLastTs, liveSnapshotQuery.liveSnapshot, liveTraceItems.length])
+
+  useEffect(() => {
+    setLiveTraceItems([])
+    setLiveTraceTimelineEntries({})
+  }, [recentKeyword])
+
+  useEffect(() => {
+    setLoading(selectedTraceQuery.loading)
+    setError(selectedTraceQuery.traceError)
+  }, [selectedTraceQuery.loading, selectedTraceQuery.traceError, setError, setLoading])
+
+  useEffect(() => {
+    if (!selectedRequestId) {
+      setLoading(false)
+      return
+    }
+    if (!selectedTraceQuery.traceSnapshot) return
+    setTraceData(selectedTraceQuery.traceSnapshot)
+    setTraceInfo({
+      status: selectedTraceQuery.traceSnapshot.status,
+      latency: selectedTraceQuery.traceSnapshot.total_latency_ms,
+      nodeCount: (selectedTraceQuery.traceSnapshot.nodes ?? []).length,
+    })
+  }, [selectedRequestId, selectedTraceQuery.traceSnapshot, setLoading, setTraceData, setTraceInfo])
 
   const revealInlineOverview = useCallback(() => {
     setInlineOverviewVisible(true)
@@ -2063,7 +2040,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
     const value = searchValue
     if (!value) {
       setHistoryExpanded(false)
-      loadRecentRequests('')
+      setRecentKeyword('')
       return
     }
     if (searchLooksLikeRequestId) {
@@ -2071,21 +2048,25 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       return
     }
     setHistoryExpanded(false)
-    loadRecentRequests(value)
+    setRecentKeyword(value)
   }
 
   const currentTraceStatus = String(traceInfo?.status || '').toUpperCase()
   const currentTraceHealthy = ['OK', 'UP', 'SUCCESS'].includes(currentTraceStatus)
   const liveFeedStatusClass = !pollingEnabled
     ? 'border-primary-200 bg-primary-50/45 text-primary-700'
-    : liveFeedConnected
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-      : 'border-amber-200 bg-amber-50 text-amber-700'
+    : !pageVisible
+      ? 'border-slate-200 bg-slate-50 text-slate-600'
+      : liveFeedConnected
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-amber-200 bg-amber-50 text-amber-700'
   const liveFeedStatusText = !pollingEnabled
     ? '实时流已暂停'
-    : liveFeedConnected
-      ? 'SSE 实时流已连接'
-      : '实时流重连中，当前降级轮询'
+    : !pageVisible
+      ? '页面隐藏，实时流已停'
+      : liveFeedConnected
+        ? 'SSE 实时流已连接'
+        : '实时流重连中，当前降级轮询'
   const selectedLiveTraceItem = liveTraceItems.find((item) => item.session.request_id === selectedRequestId)
     ?? liveTraceItems[0]
     ?? null
@@ -2139,7 +2120,13 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
   const selectedRunningCount = getTraceRunningCount(traceData)
   const selectedCurrentNodeLabel = traceData ? getLiveTraceCurrentLabel(traceData) : '等待选中请求'
   const selectedOutputPreview = traceData ? getLiveTraceOutputPreview(traceData) : ''
-  const liveModeLabel = !pollingEnabled ? '实时暂停' : liveFeedConnected ? 'SSE 实时流' : '轮询兜底'
+  const liveModeLabel = !pollingEnabled
+    ? '实时暂停'
+    : !pageVisible
+      ? '页面隐藏'
+      : liveFeedConnected
+        ? 'SSE 实时流'
+        : '轮询兜底'
   const liveModeCaption = liveFeedLastTs
     ? `最近事件 ${formatRecentTraceTime(liveFeedLastTs)}`
     : (liveTraceItems.length > 0 ? `${liveTraceItems.length} 条活跃请求` : '等待活跃请求')
@@ -2166,7 +2153,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
       label: '实时模式',
       value: liveModeLabel,
       tone: 'amber',
-      active: pollingEnabled,
+      active: liveFeedEnabled,
     },
     {
       label: '联动事件',
@@ -2280,7 +2267,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
           <select
             className="shrink-0 rounded-lg border border-primary-100/70 bg-white/92 px-2 py-1.5 text-sm focus:border-blue-300 focus:outline-none focus:ring-2 focus:ring-primary-200"
             value={recentStatusFilter}
-            onChange={(e) => { setRecentStatusFilter(e.target.value); loadRecentRequests(recentKeyword) }}
+            onChange={(e) => { setRecentStatusFilter(e.target.value) }}
           >
             <option value="">全部状态</option>
             <option value="ok">成功</option>
@@ -2293,7 +2280,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               onClick={() => {
                 setInputId('')
                 setHistoryExpanded(false)
-                loadRecentRequests('')
+                setRecentKeyword('')
               }}
               disabled={recentLoading}
             >
@@ -2365,7 +2352,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
             <div className="flex items-center gap-2">
               <button
                 className="btn-secondary text-xs"
-                onClick={loadTribeEvents}
+                onClick={() => { void tribeFeedQuery.refetch() }}
                 disabled={tribeEventsLoading}
               >
                 <RefreshCw size={12} className={tribeEventsLoading ? 'animate-spin' : ''} />
@@ -2490,7 +2477,9 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               </div>
               <button
                 className="btn-secondary text-xs"
-                onClick={() => loadRecentRequests(recentKeyword)}
+                onClick={() => {
+                  void Promise.allSettled([recentRequestsQuery.refetch(), liveSnapshotQuery.refetch()])
+                }}
                 disabled={recentLoading || liveTraceLoading}
               >
                 <RefreshCw size={12} className={(recentLoading || liveTraceLoading) ? 'animate-spin' : ''} />
@@ -2589,7 +2578,7 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
               )}
               <button
                 className="btn-secondary text-xs"
-                onClick={() => loadRecentRequests(recentKeyword)}
+                onClick={() => { void recentRequestsQuery.refetch() }}
                 disabled={recentLoading}
               >
                 <RefreshCw size={12} className={recentLoading ? 'animate-spin' : ''} />
@@ -2838,7 +2827,22 @@ export default function Trace() {
       <Route index element={<TraceHome {...sharedProps} />} />
       <Route path="full" element={<FullChainView traceData={traceData} />} />
       <Route path="group/:groupId" element={<GroupDagViewWrapper traceData={traceData} />} />
-      <Route path=":requestId" element={<TraceRequestDetail />} />
+      <Route
+        path=":requestId"
+        element={(
+          <React.Suspense
+            fallback={(
+              <div className="card p-4">
+                <NoticeBanner variant="info" title="加载中">
+                  正在打开请求级 Trace 详情…
+                </NoticeBanner>
+              </div>
+            )}
+          >
+            <TraceRequestDetail />
+          </React.Suspense>
+        )}
+      />
     </Routes>
   )
 }

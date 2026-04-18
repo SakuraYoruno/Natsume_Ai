@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -75,6 +76,22 @@ def test_summary_count_and_texture_mid_hint_and_recent_scores_trim() -> None:
     state = engine.get_state("trim-user")
     assert len(state.recent_scores) == bond_mod.TREND_WINDOW * 2
     assert bond_mod.BondScoreState(user_id="u", recent_scores=[1, 1, 1]).trend_intensity() == "中"
+
+
+def test_bond_summary_count_accepts_humanized_strings_and_deepcopy() -> None:
+    zero = bond_mod.BondSummaryCount("no shared memory yet")
+    assert zero == "no shared memory yet"
+    assert int(zero) == 0
+    assert zero == 0
+
+    three = bond_mod.BondSummaryCount("3 shared memories")
+    assert three == "3 shared memories"
+    assert int(three) == 3
+    assert three == 3
+
+    cloned = copy.deepcopy(bond_mod.BondSummaryCount(0))
+    assert cloned == "no shared memory yet"
+    assert int(cloned) == 0
 
 
 def test_apply_event_with_milestone_tracker_triggers_growth(monkeypatch) -> None:

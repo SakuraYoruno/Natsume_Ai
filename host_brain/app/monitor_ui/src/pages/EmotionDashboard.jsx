@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -9,15 +9,18 @@ import {
   Smile,
   Zap,
 } from 'lucide-react'
-import { fetchMemoryStats, fetchVtsStats } from '../api/obs.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useEmotionOverviewQuery } from '../queries/runtimeQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatEmotionTag, formatNumber, formatStage } from '../utils/digitalLife.js'
+import { getSuccessRateTone } from '../utils/successRate.js'
 
 const MOOD_STYLES = {
   calm: { icon: Meh, color: 'text-blue-500', bg: 'bg-blue-50', label: '平静' },
@@ -109,44 +112,33 @@ function Gauge({ label, value, color }) {
 export default function EmotionDashboard() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
   const [windowMinutes, setWindowMinutes] = useState(360)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [vtsData, setVtsData] = useState(null)
-  const [memoryData, setMemoryData] = useState(null)
+  const {
+    vtsData,
+    memoryData,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+  } = useEmotionOverviewQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
-  const { runtimeSnapshot } = useDigitalLifeRuntimeSignals({
+  const {
+    runtimeSnapshot,
+    loading: runtimeLoading,
+    error: runtimeError,
+    lastUpdatedAt: runtimeUpdatedAt,
+  } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes,
   })
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const [vts, memory] = await Promise.all([
-        fetchVtsStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
-      ])
-      setVtsData(vts)
-      setMemoryData(memory)
-    } catch (loadError) {
-      setError(loadError.message || '情绪数据加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
 
   const emotionContext = runtimeSnapshot?.emotion_context || {}
   const selfModel = runtimeSnapshot?.self_model_snapshot || {}
@@ -178,6 +170,17 @@ export default function EmotionDashboard() {
   const gateState = String(endocrineState?.gate_state || 'open').toLowerCase()
   const gateLabel = GATE_LABELS[gateState] || gateState
   const gateTone = gateState === 'protective' ? 'text-red-600' : gateState === 'cautious' ? 'text-orange-500' : 'text-green-600'
+  const emotionObservabilityData = Boolean(runtimeSnapshot || vtsData || memoryData)
+  const emotionSampleCount = Number(vtsData?.total_events ?? topEmotions.length ?? 0)
+  const emotionHasSamples = Boolean(runtimeSnapshot?.emotion_context || emotionSampleCount > 0)
+  const emotionLoadState = resolveLoadState({
+    loading: loading || refreshing || runtimeLoading,
+    error: error || runtimeError,
+    hasData: emotionObservabilityData,
+    hasSamples: emotionHasSamples,
+    available: emotionObservabilityData,
+  })
+  const emotionUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
 
   return (
     <div className="space-y-6">
@@ -188,8 +191,8 @@ export default function EmotionDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
           </button>
         </div>
@@ -206,9 +209,32 @@ export default function EmotionDashboard() {
           `关系温度：${(bondTemperature * 100).toFixed(0)}%`,
           `表情样本：${topEmotions.length}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={emotionLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={emotionSampleCount}
+            sampleLabel="VTS 事件"
+            updatedAt={emotionUpdatedAt}
+            source="runtime snapshot + /obs/vts/stats"
+            definition="情绪页优先融合运行快照与 VTS 聚合；无样本时仍可保留运行态上下文，但不会把空窗误报成失败。"
+          />
+        )}
       />
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
+      {!error && runtimeError ? <NoticeBanner variant="warning">{runtimeError}</NoticeBanner> : null}
+      {!error && !loading && !refreshing && !runtimeLoading && emotionLoadState === LOAD_STATES.UNAVAILABLE ? (
+        <NoticeBanner variant="warning">
+          情绪观测数据当前暂不可用，页面会保留中性占位并等待运行快照或 VTS 聚合恢复。
+        </NoticeBanner>
+      ) : null}
+      {!error && !loading && !refreshing && !runtimeLoading && emotionLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">
+          当前窗口还没有足够的表情样本，页面主要展示运行快照中的情绪上下文与关系温度。
+        </NoticeBanner>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="当前情绪" value={emotionTagLabel} hint={moodStyle.label} tone="text-pink-600" />
@@ -350,13 +376,7 @@ export default function EmotionDashboard() {
                 <div key={subsystem.subsystem} className="flex items-center justify-between text-xs">
                   <span className="text-gray-600">{subsystem.display_name}</span>
                   <span
-                    className={
-                      subsystem.success_rate >= 90
-                        ? 'text-green-600'
-                        : subsystem.success_rate >= 70
-                          ? 'text-orange-500'
-                          : 'text-red-500'
-                    }
+                    className={getSuccessRateTone(subsystem.success_rate)}
                   >
                     {subsystem.success_rate ?? '—'}%
                   </span>

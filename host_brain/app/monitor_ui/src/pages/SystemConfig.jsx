@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useMemo, useState, useCallback } from 'react'
 import {
   Cpu,
   Database,
@@ -10,20 +10,16 @@ import {
   Shield,
   Zap,
 } from 'lucide-react'
-import {
-  fetchLlmCallStats,
-  fetchLlmRouteStats,
-  fetchRateLimitBackendStats,
-  fetchRetrievalRuntime,
-  fetchServicesHealth,
-} from '../api/obs.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import { useSystemConfigQuery } from '../queries/systemConfigQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatMode, formatReplyPosture } from '../utils/digitalLife.js'
 
@@ -39,54 +35,37 @@ const FALLBACK_TEXT = '—'
 export default function SystemConfig() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
   const [windowMinutes, setWindowMinutes] = useState(60)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [routeData, setRouteData] = useState(null)
-  const [callData, setCallData] = useState(null)
-  const [rateData, setRateData] = useState(null)
-  const [healthData, setHealthData] = useState(null)
-  const [retrievalRuntime, setRetrievalRuntime] = useState(null)
+  const {
+    routeData,
+    callData,
+    rateData,
+    healthData,
+    retrievalRuntime,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+    stale,
+  } = useSystemConfigQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
-  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+  const {
+    runtimeSnapshot,
+    promptStats,
+    reload: reloadRuntime,
+    lastUpdatedAt: runtimeUpdatedAt,
+  } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes,
   })
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const [route, call, rate, health, retrieval] = await Promise.all([
-        fetchLlmRouteStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchLlmCallStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchRateLimitBackendStats({}).catch(() => null),
-        fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
-        fetchRetrievalRuntime({ limit: 5 }).catch(() => null),
-      ])
-
-      setRouteData(route)
-      setCallData(call)
-      setRateData(rate)
-      setHealthData(health)
-      setRetrievalRuntime(retrieval)
-    } catch (fetchError) {
-      setError(fetchError.message || '系统底座加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
 
   const routeStats = routeData?.model_routes || []
   const callStats = callData?.models || []
@@ -98,6 +77,19 @@ export default function SystemConfig() {
 
   const replyPosture = formatReplyPosture(runtimeSnapshot?.runtime_summary?.reply_posture?.style || FALLBACK_TEXT)
   const sysMode = formatMode(runtimeSnapshot?.sys_mode || FALLBACK_TEXT)
+  const systemConfigUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
+  const systemConfigLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(routeData || callData || rateData || healthData || retrievalRuntime),
+    hasSamples: Boolean(routeStats.length || callStats.length || healthData?.total || retrievalRuntime?.latest),
+    available: true,
+    stale,
+  })
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.allSettled([refetch(), reloadRuntime()])
+  }, [refetch, reloadRuntime])
 
   return (
     <div className="space-y-6">
@@ -108,14 +100,14 @@ export default function SystemConfig() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <button className="btn-secondary" onClick={handleRefresh} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
           </button>
         </div>
       </div>
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error">{error.message}</NoticeBanner> : null}
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
@@ -131,6 +123,18 @@ export default function SystemConfig() {
           `限流后端：${rateData?.backend_type || FALLBACK_TEXT}`,
           `检索套件：${retrievalRuntime?.suite_profile || '自定义'}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={systemConfigLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={routeStats.length + callStats.length + (healthData?.total ?? 0)}
+            sampleLabel="底座对象"
+            updatedAt={systemConfigUpdatedAt}
+            source="system-config queries + runtime"
+            definition="SystemConfig 聚焦模型路由、检索运行时、限流后端和器官健康摘要，主数据已统一交给 query 层。"
+          />
+        )}
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

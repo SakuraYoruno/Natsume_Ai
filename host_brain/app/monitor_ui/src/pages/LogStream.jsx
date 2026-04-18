@@ -1,10 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, Database, Pause, Play, RefreshCw, Search, Trash2 } from 'lucide-react'
-import { fetchErrors } from '../api/obs.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useErrorLogBatchQuery } from '../queries/logQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
 
@@ -73,6 +76,7 @@ function LogLine({ entry, highlight }) {
 export default function LogStream() {
   const pollingInterval = useAppStore((state) => state.pollingInterval)
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
+  const pollingTick = useAppStore((state) => state.pollingTick)
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
@@ -80,41 +84,52 @@ export default function LogStream() {
   })
 
   const [logs, setLogs] = useState([])
-  const [loading, setLoading] = useState(true)
   const [paused, setPaused] = useState(false)
   const [keyword, setKeyword] = useState('')
   const [levelFilter, setLevelFilter] = useState('ALL')
   const [autoScroll, setAutoScroll] = useState(true)
   const logEndRef = useRef(null)
-
-  const load = useCallback(async () => {
-    if (paused) return
-    try {
-      setLoading(true)
-      const response = await fetchErrors({ window_minutes: 60, limit: 100 })
-      const entries = response?.recent_errors || response?.errors || []
-      setLogs((prev) => {
-        const existing = new Set(prev.map((item) => `${item.ts_ms}-${item.reason_code}-${item.stage}`))
-        const next = entries.filter((item) => !existing.has(`${item.ts_ms}-${item.reason_code}-${item.stage}`))
-        return [...prev, ...next].slice(-500)
-      })
-    } catch {
-    } finally {
-      setLoading(false)
-    }
-  }, [paused])
+  const {
+    logBatch,
+    batchError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useErrorLogBatchQuery({
+    windowMinutes: 60,
+    limit: 100,
+    pollingEnabled: pollingEnabled && !paused,
+    pollingTick,
+    pollingInterval: Math.min(pollingInterval, 15),
+  })
 
   useEffect(() => {
-    load()
-    const timer = setInterval(load, Math.min(pollingInterval, 15) * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingInterval])
+    const entries = logBatch?.recent_errors || logBatch?.errors || []
+    if (!entries.length) return
+    setLogs((prev) => {
+      const existing = new Set(prev.map((item) => `${item.ts_ms}-${item.reason_code}-${item.stage}`))
+      const next = entries.filter((item) => !existing.has(`${item.ts_ms}-${item.reason_code}-${item.stage}`))
+      return [...prev, ...next].slice(-500)
+    })
+  }, [lastUpdatedAt, logBatch])
 
   useEffect(() => {
     if (autoScroll) {
       logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [logs, autoScroll])
+
+  const batchEntries = logBatch?.recent_errors || logBatch?.errors || []
+  const logLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: batchError && logs.length === 0 ? new Error(batchError) : null,
+    hasData: Boolean(logBatch || logs.length > 0),
+    hasSamples: logs.length > 0 || batchEntries.length > 0,
+    available: Boolean(logBatch || logs.length > 0),
+    stale,
+  })
 
   const filtered = useMemo(() => logs.filter((entry) => {
     if (keyword && !JSON.stringify(entry).toLowerCase().includes(keyword.toLowerCase())) return false
@@ -142,9 +157,33 @@ export default function LogStream() {
           `拉取周期：${Math.min(pollingInterval, 15)}s`,
           autoScroll ? '自动滚动：开启' : '自动滚动：关闭',
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={logLoadState}
+            windowMinutes={60}
+            sampleSize={logs.length}
+            sampleLabel="日志"
+            updatedAt={lastUpdatedAt}
+            source="errors"
+            definition="日志流页会持续拉取最近错误批次并在页面内累积成滚动日志；暂停只会停止轮询，不会清空已收集的日志。"
+          />
+        )}
       />
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
+
+      {batchError ? (
+        <NoticeBanner variant={logs.length > 0 ? 'warning' : 'error'} title="日志批次加载异常">
+          {batchError}
+        </NoticeBanner>
+      ) : null}
+
+      {!batchError && !loading && !refreshing && logLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info" title="当前暂无生理日志">
+          系统当前还没有可观测的错误或异常日志写入。
+        </NoticeBanner>
+      ) : null}
 
       <div className="flex min-h-[32rem] flex-col">
         <div className="mb-3 flex items-center justify-between gap-2 flex-wrap">
@@ -172,8 +211,8 @@ export default function LogStream() {
             <button className="btn-secondary text-xs" onClick={() => setLogs([])}>
               <Trash2 size={12} />
             </button>
-            <button className="btn-secondary text-xs" onClick={() => load()} disabled={loading}>
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            <button className="btn-secondary text-xs" onClick={() => refetch()} disabled={loading || refreshing}>
+              <RefreshCw size={12} className={loading || refreshing ? 'animate-spin' : ''} />
               刷新
             </button>
           </div>

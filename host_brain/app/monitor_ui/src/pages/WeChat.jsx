@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useState } from 'react'
 import {
   RefreshCw,
   MessageSquare,
@@ -8,12 +8,15 @@ import {
   HelpCircle,
   RotateCcw,
 } from 'lucide-react'
-import { fetchWeChatStats, resetWeChatChannel } from '../api/obs.js'
+import { resetWeChatChannel } from '../api/gateway.js'
 import MetricCard from '../components/MetricCard.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SectionHeading from '../components/SectionHeading.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useWeChatChannelQuery } from '../queries/wechatQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
 
@@ -69,33 +72,25 @@ const WINDOW_OPTIONS = [
 export default function WeChat() {
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingTick = useAppStore((s) => s.pollingTick)
 
   const [windowMinutes, setWindowMinutes] = useState(60)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [data, setData] = useState(null)
   const [resetting, setResetting] = useState(false)
   const [resetMsg, setResetMsg] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchWeChatStats({ window_minutes: windowMinutes, limit: 30 })
-      setData(result)
-    } catch (loadError) {
-      setError(loadError.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const {
+    channelData: data,
+    channelError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useWeChatChannelQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const handleReset = async () => {
     setResetting(true)
@@ -103,7 +98,7 @@ export default function WeChat() {
     try {
       const result = await resetWeChatChannel({ reason: 'manual_ui' })
       setResetMsg({ ok: true, text: result.detail || '通道计数器已重置' })
-      await load()
+      await refetch()
     } catch (resetError) {
       setResetMsg({ ok: false, text: `重置失败：${resetError.message}` })
     } finally {
@@ -115,6 +110,14 @@ export default function WeChat() {
   const successRateText = data?.success_rate != null ? `${data.success_rate}%` : '—'
   const topWxidCount = data?.top_wxids?.length ?? 0
   const hasRecentEvents = (data?.recent_events?.length ?? 0) > 0
+  const wechatLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: channelError && !data ? new Error(channelError) : null,
+    hasData: Boolean(data),
+    hasSamples: (data?.total_events ?? 0) > 0 || hasRecentEvents || topWxidCount > 0,
+    available: Boolean(data),
+    stale,
+  })
 
   return (
     <div className="space-y-8">
@@ -149,9 +152,9 @@ export default function WeChat() {
             <RotateCcw size={14} className={resetting ? 'animate-spin' : ''} />
             {resetting ? '重置中...' : '重置通道'}
           </button>
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {loading ? '刷新中...' : '刷新'}
+          <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
+            {loading || refreshing ? '刷新中...' : '刷新'}
           </button>
         </div>
       </div>
@@ -167,11 +170,29 @@ export default function WeChat() {
           `events: ${data?.total_events ?? 0}`,
           `last: ${formatTime(data?.last_event_ts)}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={wechatLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={data?.total_events ?? 0}
+            sampleLabel="通道事件"
+            updatedAt={lastUpdatedAt}
+            source="wechat channel"
+            definition="WeChat 页聚合单通道事件、成功率、频率限制和近期事件日志，窗口切换与轮询统一走 query 层。"
+          />
+        )}
       />
 
-      {error ? (
+      {channelError ? (
         <NoticeBanner variant="error" title="WeChat 通道数据加载失败">
-          {error}
+          {channelError}
+        </NoticeBanner>
+      ) : null}
+
+      {!channelError && !loading && !refreshing && wechatLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info" title="当前窗口暂无通道事件">
+          WeChat 通道当前没有产生可观测事件，页面会保留中性占位。
         </NoticeBanner>
       ) : null}
 

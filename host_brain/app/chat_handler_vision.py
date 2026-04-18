@@ -314,7 +314,7 @@ async def _call_vision_llm(
     import asyncio as _asyncio
 
     provider_name = str(llm_runtime.get("cloud_provider_name") or llm_runtime.get("provider_name") or PROVIDER_GEMINI)
-    model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash")
+    model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash-lite")
     api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
     timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 15000)
     available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))

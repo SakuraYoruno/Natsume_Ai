@@ -67,6 +67,8 @@ _PLACEHOLDER_GATEWAY_CONVERSATIONS: set[str] = {
 }
 _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
+_VOICE_JA_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff]")
+_VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 
 
 class InputPayload(BaseModel):
@@ -260,6 +262,48 @@ def _should_send_gateway_immediate_ack(
     )
 
 
+def _should_send_gateway_route_started_voice_ack(
+    *,
+    source: str,
+    payload: dict[str, Any],
+    route_type: str,
+    target_id: str,
+) -> tuple[bool, str]:
+    if str(source or "").strip().upper() != "GATEWAY":
+        return False, "ROUTE_ACK_SOURCE_NOT_GATEWAY"
+    if not _parse_bool_env("HOST_GATEWAY_ROUTE_ACK_VOICE_ENABLED", default=True):
+        return False, "ROUTE_ACK_DISABLED"
+    if not str(payload.get("platform") or "").strip() or not str(payload.get("conversation_id") or "").strip():
+        return False, "ROUTE_ACK_TARGET_MISSING"
+
+    normalized_route = str(route_type or "").strip().lower()
+    normalized_target = str(target_id or "").strip().lower()
+    if normalized_route == "plan":
+        return True, "ROUTE_ACK_PLAN"
+    if normalized_route == "delegate" and normalized_target in {"translate_agent", "intent_agent"}:
+        return True, f"ROUTE_ACK_{normalized_target.upper()}"
+    if normalized_route == "skill" and normalized_target == "codex_codegen":
+        return True, "ROUTE_ACK_CODEX_CODEGEN"
+    return False, "ROUTE_ACK_FAST_ROUTE"
+
+
+def _build_gateway_route_started_voice_ack_text(
+    *,
+    route_type: str,
+    target_id: str,
+) -> str:
+    normalized_route = str(route_type or "").strip().lower()
+    normalized_target = str(target_id or "").strip().lower()
+    if normalized_route == "delegate" and normalized_target == "translate_agent":
+        return "今、訳してるよ。まとまったらすぐ返すね。"
+    if normalized_route == "delegate" and normalized_target == "intent_agent":
+        return "今、ちゃんと整理して考えてるよ。少しだけ待ってて。"
+    if normalized_route == "skill" and normalized_target == "codex_codegen":
+        return "今、コードを見てるよ。できたらすぐ持ってくるね。"
+    if normalized_route == "plan":
+        return "今、順番を整えてるよ。少しだけ待ってて。"
+    return "今やってるから、少しだけ待ってて。終わったらすぐ返すね。"
+
 def _detect_gateway_execution_deviation(
     *,
     source: str,
@@ -443,6 +487,24 @@ def _build_gateway_reply_text(
         return str(templates.get("reject_default") or "")
     _ = reason_code
     return str(templates.get("approve_empty") or "")
+
+
+def _build_gateway_voice_text(*, reply_text: str, tts_text_ja: str | None) -> str:
+    candidate = str(tts_text_ja or "").strip()
+    if candidate and _VOICE_JA_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
+        return candidate
+
+    normalized_reply = str(reply_text or "").strip()
+    if normalized_reply and _VOICE_JA_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
+        return normalized_reply
+
+    if "```" in normalized_reply or _VOICE_LATIN_PATTERN.search(normalized_reply):
+        return "結果は画面にまとめておいたよ。必要なら次に要点だけ読み上げるね。"
+
+    if normalized_reply:
+        return "結果をまとめたよ。画面を見ればすぐ分かるようにしておいたから、必要なら次に読み上げるね。"
+
+    return ""
 
 
 # ── gateway 路由函数已迁移到 input_service_gateway.py ──────────────────────
@@ -960,6 +1022,133 @@ async def _stop_progress_push_task(
         return
 
 
+def _maybe_schedule_gateway_route_started_voice_ack(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    payload: dict[str, Any],
+    route_type: str,
+    target_id: str,
+    ledger: Any,
+) -> None:
+    should_send, reason = _should_send_gateway_route_started_voice_ack(
+        source=source,
+        payload=payload,
+        route_type=route_type,
+        target_id=target_id,
+    )
+    now_ms = int(time.time() * 1000)
+    if not should_send:
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={
+                **dict(payload or {}),
+                "route_ack_reason": reason,
+                "route_type": route_type,
+                "route_target": target_id,
+            },
+            phase="ROUTE_ACK_SKIPPED",
+            status="IGNORED",
+            reason_code=reason,
+            detail=f"gateway route-started voice ack skipped: {reason}",
+            ts_ms=now_ms,
+        )
+        return
+
+    ack_text = _build_gateway_route_started_voice_ack_text(
+        route_type=route_type,
+        target_id=target_id,
+    )
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        input_payload={
+            **dict(payload or {}),
+            "route_type": route_type,
+            "route_target": target_id,
+            "route_ack_preview": _build_reply_preview(ack_text, limit=60),
+        },
+        phase="ROUTE_ACK_PENDING",
+        status="ACCEPTED",
+        detail="gateway route-started voice ack scheduled",
+        ts_ms=now_ms,
+    )
+    _logger.info(
+        "[%s] gateway route-started voice ack scheduled route=%s target=%s",
+        request_id,
+        route_type,
+        target_id,
+    )
+
+    async def _runner() -> None:
+        start_ms = int(time.time() * 1000)
+        try:
+            voice_result = await _send_gateway_voice_reply(
+                platform=str(payload.get("platform") or "").strip().lower(),
+                conversation_id=str(payload.get("conversation_id") or "").strip(),
+                tts_text=ack_text,
+                request_id=f"{request_id}::route_ack",
+                emotion_tag=str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
+            )
+        except Exception as exc:
+            finish_ms = int(time.time() * 1000)
+            _log_input_event(
+                ledger=ledger,
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload={
+                    **dict(payload or {}),
+                    "route_type": route_type,
+                    "route_target": target_id,
+                },
+                phase="ROUTE_ACK_FAILED",
+                status="FAILED",
+                reason_code="ROUTE_ACK_EXCEPTION",
+                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+                latency_ms=max(0, finish_ms - start_ms),
+                ts_ms=finish_ms,
+            )
+            return
+
+        finish_ms = int(time.time() * 1000)
+        success = bool(voice_result.get("voice_success"))
+        _logger.info(
+            "[%s] gateway route-started voice ack completed success=%s status=%s",
+            request_id,
+            success,
+            voice_result.get("voice_status"),
+        )
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload={
+                **dict(payload or {}),
+                "route_type": route_type,
+                "route_target": target_id,
+                "route_ack_preview": _build_reply_preview(ack_text, limit=60),
+                "route_ack_voice_status": voice_result.get("voice_status"),
+                "route_ack_voice_reason_code": voice_result.get("voice_reason_code"),
+            },
+            phase=("ROUTE_ACKED" if success else "ROUTE_ACK_FAILED"),
+            status=("OK" if success else "FAILED"),
+            reason_code=(str(voice_result.get("voice_reason_code") or "") or None),
+            detail=f"gateway route-started voice ack success={success} status={voice_result.get('voice_status')}",
+            latency_ms=max(0, finish_ms - start_ms),
+            ts_ms=finish_ms,
+        )
+
+    asyncio.create_task(_runner()).add_done_callback(_log_gateway_ack_task_exception)
+
+
 def _maybe_schedule_gateway_immediate_ack(
     *,
     request_id: str,
@@ -1057,6 +1246,7 @@ async def _run_cortex_orchestrator_pipeline(
     text: str,
     payload: dict[str, Any],
     ts_ms: int,
+    intent_draft_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from host_brain.app.emotion_context import (  # noqa: PLC0415
         build_chat_emotion_snapshot,
@@ -1082,9 +1272,9 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        # Phase XV：Gateway 回复时 TTS/VTS 与 ASR 链路一致，Natsume 在微信里回复时本地同步发声 + VTS 动画
-        suppress_edge_tts=None,
-        suppress_edge_vts=None,
+        # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 ChatAgent 在 COMMIT 后重复补播。
+        suppress_edge_tts=(source == "GATEWAY"),
+        suppress_edge_vts=(source == "GATEWAY"),
         # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
         # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
         render_target_lang=("zh" if source == "GATEWAY" else None),
@@ -1095,15 +1285,17 @@ async def _run_cortex_orchestrator_pipeline(
         source=f"input_routes.{str(source or '').lower()}",
         ts_ms=ts_ms,
     )
-    intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
-        request_id=request_id,
-        session_id=session_id,
-        user_message=text,
-        person_id=person_id,
-        source="input_routes",
-        input_source=source,
-        ts_ms=ts_ms,
-    )
+    intent_draft = dict(intent_draft_override or {})
+    if not intent_draft:
+        intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+            request_id=request_id,
+            session_id=session_id,
+            user_message=text,
+            person_id=person_id,
+            source="input_routes",
+            input_source=source,
+            ts_ms=ts_ms,
+        )
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
     commit_event: dict[str, Any] | None = None
@@ -1175,6 +1367,24 @@ async def _maybe_realign_gateway_pipeline(
     pipeline_result: dict[str, Any],
     ledger: Any,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    route_decision = dict(pipeline_result.get("route_decision") or {})
+    route_type = str(route_decision.get("route") or "").strip().lower()
+    route_target = str(route_decision.get("target_id") or "").strip().lower()
+    if (route_type == "skill" and route_target == "codex_codegen") or (
+        route_type == "delegate" and route_target == "translate_agent"
+    ):
+        reason_code = (
+            "DEVIATION_SKIPPED_CODEX_CODEGEN"
+            if route_target == "codex_codegen"
+            else "DEVIATION_SKIPPED_TRANSLATE_AGENT"
+        )
+        return pipeline_result, {
+            "triggered": False,
+            "reason_code": reason_code,
+            "route_type": route_type,
+            "route_target": route_target,
+        }
+
     decision = str(pipeline_result.get("decision") or "REJECT").strip().upper()
     narrative = str(pipeline_result.get("narrative") or "").strip()
     detection = _detect_gateway_execution_deviation(
@@ -1291,6 +1501,7 @@ async def _deliver_gateway_reply(
         narrative=narrative,
         reason_code=reason_code,
     )
+    voice_text = _build_gateway_voice_text(reply_text=reply_text, tts_text_ja=tts_text_ja)
     preview = _build_reply_preview(reply_text, limit=120)
     voice_options = _resolve_gateway_voice_reply_options(payload)
     voice_result: dict[str, Any] = {
@@ -1315,7 +1526,7 @@ async def _deliver_gateway_reply(
                     await _send_gateway_voice_reply(
                         platform=platform,
                         conversation_id=conversation_id,
-                        tts_text=str(tts_text_ja or reply_text or "").strip(),
+                        tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
                     )
@@ -1327,7 +1538,7 @@ async def _deliver_gateway_reply(
                     _send_gateway_voice_reply(
                         platform=platform,
                         conversation_id=conversation_id,
-                        tts_text=str(tts_text_ja or reply_text or "").strip(),
+                        tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
                     )
@@ -1403,7 +1614,6 @@ async def _deliver_gateway_reply(
 
     async def _trigger_voice_reply() -> dict[str, Any]:
         nonlocal voice_result
-        voice_text = str(tts_text_ja or reply_text or "").strip()
         if not voice_text or form_decision.secondary != MsgType.VOICE:
             return dict(voice_result)
 
@@ -1489,7 +1699,7 @@ async def _deliver_gateway_reply(
     if False and form_decision.is_dual:
         # P3/P6 完整实现：用 tts_text_ja 做 TTS 合成后发语音
         # P4 当前：发送一条文字作为语音消息的占位（保留接口，等 P6 双语输出完成后启用真正的 TTS）
-        _voice_text = tts_text_ja or reply_text  # P6 完成后改为只用 tts_text_ja
+        _voice_text = voice_text
         if _voice_text and form_decision.secondary == MsgType.VOICE:
             try:
                 # 异步发送，不等待结果，不阻塞主回复
@@ -1701,6 +1911,7 @@ async def _dispatch_to_graph_worker(
     source_upper = str(source or "").strip().upper()
     progress_push_stop_event: asyncio.Event | None = None
     progress_push_task: asyncio.Task | None = None
+    preclassified_intent_draft: dict[str, Any] | None = None
     _log_input_event(
         ledger=ledger,
         request_id=request_id,
@@ -1712,6 +1923,22 @@ async def _dispatch_to_graph_worker(
         detail=f"dispatch_mode={dispatch_mode} source={source}",
         ts_ms=dispatch_ts,
     )
+    if source_upper == "GATEWAY":
+        try:
+            from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
+
+            preclassified_intent_draft = classify_task_intent_by_rules(text)
+            _maybe_schedule_gateway_route_started_voice_ack(
+                request_id=request_id,
+                session_id=session_id,
+                source=source_upper,
+                payload=payload,
+                route_type=str((preclassified_intent_draft or {}).get("route") or "").strip().lower(),
+                target_id=str((preclassified_intent_draft or {}).get("target_id") or "").strip(),
+                ledger=ledger,
+            )
+        except Exception as route_ack_exc:
+            _logger.debug("[%s] gateway route-started ack preclassify failed: %s", request_id, route_ack_exc)
     if source_upper == "GATEWAY":
         should_push, push_reason = _should_start_gateway_progress_push(
             source=source_upper,
@@ -1764,6 +1991,7 @@ async def _dispatch_to_graph_worker(
             text=text,
             payload=payload,
             ts_ms=ts_ms,
+            intent_draft_override=preclassified_intent_draft,
         )
         deviation_meta: dict[str, Any] | None = None
         if source_upper == "GATEWAY":
@@ -1829,6 +2057,7 @@ async def _dispatch_to_graph_worker(
             commit_event = pipeline_result.get("commit_event") or {}
             audit_refs = commit_event.get("audit_refs") or {}
             _emotion_tag = str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper()
+            _tts_text_ja = str(audit_refs.get("tts_text_ja") or "").strip() or None
             # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 STRANGER
             _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper()
             _user_msg_type = str(payload.get("msg_type") or "text").strip().lower()
@@ -1840,6 +2069,7 @@ async def _dispatch_to_graph_worker(
                     decision=decision,
                     reason_code=reason_code,
                     narrative=narrative,
+                    tts_text_ja=_tts_text_ja,
                     emotion_tag=_emotion_tag,
                     bond_stage=_bond_stage,
                     user_msg_type=_user_msg_type,

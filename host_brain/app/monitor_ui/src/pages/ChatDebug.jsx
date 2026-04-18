@@ -15,10 +15,12 @@ import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
+import InlineQueryMeta from '../components/obs/InlineQueryMeta.jsx'
 import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import { useTraceSnapshotQuery } from '../queries/traceQueries.js'
 import useAppStore from '../store/useAppStore.js'
-import { fetchTraceNodes } from '../api/obs.js'
 import {
   formatAlertTitle,
   formatDecision,
@@ -114,12 +116,23 @@ export default function ChatDebug() {
   const [requestId, setRequestId] = useState(null)
   const [error, setError] = useState(null)
   const [stats, setStats] = useState(null)
-  const [traceSnapshot, setTraceSnapshot] = useState(null)
-  const [traceLoading, setTraceLoading] = useState(false)
-  const [traceError, setTraceError] = useState(null)
   const abortRef = useRef(null)
   const chatEndRef = useRef(null)
   const eventsEndRef = useRef(null)
+  const {
+    traceSnapshot,
+    traceError,
+    loading: traceLoading,
+    refreshing: traceRefreshing,
+    stale: traceStale,
+    lastUpdatedAt: traceUpdatedAt,
+    refetch: refetchTraceSnapshot,
+  } = useTraceSnapshotQuery({
+    requestId,
+    enabled: Boolean(requestId),
+    pollingEnabled: Boolean(requestId) && !streaming && pollingEnabled,
+    pollingInterval,
+  })
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -154,44 +167,20 @@ export default function ChatDebug() {
     || chatHistory.filter((item) => item.role === 'assistant').slice(-1)[0]?.content,
     180
   )
-
-  const loadTraceSnapshot = useCallback(async () => {
-    if (!requestId) {
-      setTraceSnapshot(null)
-      setTraceError(null)
-      setTraceLoading(false)
-      return
-    }
-
-    setTraceLoading(true)
-    try {
-      const data = await fetchTraceNodes(requestId)
-      setTraceSnapshot(data)
-      setTraceError(null)
-    } catch (fetchError) {
-      const messageText = fetchError.message || 'Trace 摘要拉取失败'
-      setTraceSnapshot(null)
-      setTraceError(messageText.includes('404') ? '链路摘要尚未落盘，流结束后会自动补拉。' : messageText)
-    } finally {
-      setTraceLoading(false)
-    }
-  }, [requestId])
-
-  useEffect(() => {
-    if (!requestId) {
-      setTraceSnapshot(null)
-      setTraceError(null)
-      setTraceLoading(false)
-      return
-    }
-    void loadTraceSnapshot()
-  }, [requestId, loadTraceSnapshot])
+  const traceLoadState = resolveLoadState({
+    loading: traceLoading || traceRefreshing,
+    error: traceError,
+    hasData: Boolean(traceSnapshot),
+    hasSamples: (traceSnapshot?.node_count ?? traceSnapshot?.nodes?.length ?? 0) > 0,
+    available: Boolean(requestId),
+    stale: traceStale,
+  })
 
   useEffect(() => {
     if (requestId && !streaming) {
-      void loadTraceSnapshot()
+      void refetchTraceSnapshot()
     }
-  }, [requestId, streaming, loadTraceSnapshot])
+  }, [refetchTraceSnapshot, requestId, streaming])
 
   const sendMessage = useCallback(async () => {
     if (!message.trim() || streaming) return
@@ -204,8 +193,6 @@ export default function ChatDebug() {
     setCurrentResponse('')
     setRequestId(null)
     setStats(null)
-    setTraceSnapshot(null)
-    setTraceError(null)
     setStreaming(true)
 
     const controller = new AbortController()
@@ -417,13 +404,21 @@ export default function ChatDebug() {
             </div>
             <div className="flex items-center gap-2">
               {requestId ? (
-                <button className="btn-secondary text-xs" onClick={() => void loadTraceSnapshot()} disabled={traceLoading}>
+                <button className="btn-secondary text-xs" onClick={() => void refetchTraceSnapshot()} disabled={traceLoading || traceRefreshing}>
                   {traceLoading ? <Loader2 size={12} className="animate-spin" /> : '刷新 Trace'}
                 </button>
               ) : null}
               <span className="text-xs text-gray-400">{chainEvents.length} 节点事件</span>
             </div>
           </div>
+          <InlineQueryMeta
+            loadState={traceLoadState}
+            loadStateDetail={traceError}
+            updatedAt={traceUpdatedAt}
+            staleAfterMs={15_000}
+            windowMinutes={60}
+            source="trace"
+          />
           <div className="mt-3 space-y-2 text-xs text-gray-600">
             <div className="rounded-lg bg-gray-50 px-3 py-2">
               <div className="text-gray-400">Request ID</div>

@@ -12,17 +12,91 @@ from host_brain.skills.impl.ide_executor import (
     _build_codex_skill_prompt,
     _coerce_codex_timeout_seconds,
     _diff_git_summary,
+    _resolve_direct_codegen_runtime,
     execute_codex_codegen,
 )
 
 
-def test_execute_codex_codegen_degrades_when_cli_missing(monkeypatch) -> None:
+def test_execute_codex_codegen_degrades_when_cli_missing(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("host_brain.skills.impl.ide_executor.shutil.which", lambda _name: None)
 
-    result = execute_codex_codegen({"task": "write a helper"})
+    result = execute_codex_codegen({"task": "write a helper", "workspace": str(tmp_path)})
 
     assert result["status"] == STATUS_DEGRADED
     assert result["reason_code"] == CODEX_CLI_UNAVAILABLE
+
+
+def test_execute_codex_codegen_uses_direct_fast_path_for_temp_workspace_inspect(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_CODEX_INSPECT_DIRECT_LLM_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr("host_brain.skills.impl.ide_executor.shutil.which", lambda _name: None)
+    monkeypatch.setattr(
+        "host_brain.skills.impl.ide_executor._execute_direct_codegen_fast_path",
+        lambda *, prompt, timeout_seconds: {
+            "result_text": "def add(a, b):\n    return a + b",
+            "backend": "direct_openai",
+            "model_id": "gpt-4o-mini",
+            "base_url": None,
+        },
+    )
+
+    result = execute_codex_codegen(
+        {
+            "task": "write an add helper",
+            "allow_temp_workspace": True,
+            "request_id": "req-direct-fast",
+        }
+    )
+
+    assert result["status"] == STATUS_EXECUTED
+    assert result["prompt_profile"] == "inspect_direct_openai_codegen"
+    assert result["execution_backend"] == "direct_openai"
+    assert result["model_id"] == "gpt-4o-mini"
+    assert "def add(a, b)" in str(result["result_text"])
+    assert Path(str(result["artifacts_dir"])).exists()
+
+
+def test_resolve_direct_codegen_runtime_uses_host_config_resolution(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+
+    class _Config:
+        llm_api_key = "resolved-openai-key"
+
+    class _LoadResult:
+        success = True
+        config = _Config()
+
+    monkeypatch.setattr(
+        "host_brain.app.config.load_host_config",
+        lambda local_overrides=None: _LoadResult(),
+    )
+
+    runtime = _resolve_direct_codegen_runtime()
+    assert runtime is not None
+    assert runtime["api_key"] == "resolved-openai-key"
+    assert runtime["backend"] == "direct_openai"
+
+
+def test_resolve_direct_codegen_runtime_falls_back_to_gemini_pool(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CODEX_API_KEY", raising=False)
+    monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash-lite")
+    monkeypatch.setattr(
+        "host_brain.app.config.load_host_config",
+        lambda local_overrides=None: type("_LoadResult", (), {"success": False, "config": None})(),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.model_router.resolve_gemini_key_pool",
+        lambda preferred_api_key=None: ["gemini-fast-key"],
+    )
+
+    runtime = _resolve_direct_codegen_runtime()
+    assert runtime is not None
+    assert runtime["provider"] == "gemini"
+    assert runtime["api_key"] == "gemini-fast-key"
+    assert runtime["model_id"] == "gemini-2.5-flash-lite"
+    assert runtime["backend"] == "direct_gemini_openai_compat"
 
 
 def test_coerce_codex_timeout_seconds_uses_run_mode_defaults() -> None:

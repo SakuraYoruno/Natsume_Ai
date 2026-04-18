@@ -1,13 +1,26 @@
-import React, { useEffect, useCallback } from 'react'
+import React from 'react'
 import { RefreshCw, Database, BookLock, GitMerge, Minimize2, FileCode, Archive, ScrollText, Activity, Layers, Search } from 'lucide-react'
 import LineChart from '../components/charts/LineChart.jsx'
 import BarChart from '../components/charts/BarChart.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import InlineQueryMeta from '../components/obs/InlineQueryMeta.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { fetchMetricsTimeseries, fetchRateLimitBackendStats, fetchMemoryGuardStats, fetchStateArbiterStats, fetchContextCompressorStats, fetchPromptBuilderStats, fetchEpisodicStoreStats, fetchCanonProposalStats, fetchChainStats, fetchDistillationStats, fetchSemanticRecallStats } from '../api/obs.js'
+import { resolveLoadState } from '../models/loadState.js'
+import {
+  useCanonProposalStatsQuery,
+  useChainStatsQuery,
+  useContextCompressorStatsQuery,
+  useDistillationStatsQuery,
+  useEpisodicStoreStatsQuery,
+  useMemoryGuardStatsQuery,
+  usePromptBuilderStatsQuery,
+  useSemanticRecallStatsQuery,
+  useStateArbiterStatsQuery,
+} from '../queries/diagnosticQueries.js'
+import { useMetricsOverviewQuery } from '../queries/metricsQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const TIME_RANGES = [
@@ -17,76 +30,39 @@ const TIME_RANGES = [
   { label: '7d',  value: '7d',  minutes: 10080 },
 ]
 
-// ===== 将后端 points[] 格式转换为图表所需格式 =====
-function transformApiData(apiData) {
-  const points = apiData?.points ?? []
-  const intervalMs = apiData?.interval_ms ?? 300000
+function hasMetricSamples(data, sampleKeys = []) {
+  if (!data) return false
+  if (sampleKeys.length === 0) return true
 
-  const timestamps = points.map((p) => {
-    const d = new Date(p.ts_ms)
-    const rangeMs = apiData?.range_ms ?? 3600000
-    if (rangeMs <= 3600000) {
-      return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-    } else if (rangeMs <= 86400000) {
-      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-    } else {
-      return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit' })
-    }
+  return sampleKeys.some((key) => {
+    const value = data?.[key]
+    if (Array.isArray(value)) return value.length > 0
+    if (typeof value === 'number') return value > 0
+    return value != null
   })
-
-  const total = points.map((p) => p.requests ?? 0)
-  const rejections = points.map((p) => p.rejections ?? 0)
-  const rejection_rate = points.map((p) => {
-    const req = p.requests ?? 0
-    const rej = p.rejections ?? 0
-    return req > 0 ? parseFloat((rej / req * 100).toFixed(1)) : 0
-  })
-  const avg_latency = points.map((p) => p.avg_latency_ms ?? null)
-
-  return {
-    timeseries: { timestamps, total, rejections, rejection_rate, avg_latency },
-    // reason_codes 和 latency 后端暂未返回，使用空数组
-    reason_codes: apiData?.reason_codes ?? [],
-    latency: apiData?.latency ?? [],
-    summary: {
-      total_requests: apiData?.total_requests ?? 0,
-      total_rejections: apiData?.total_rejections ?? 0,
-      rejection_rate: apiData?.rejection_rate ?? 0,
-    },
-  }
 }
 
-// ===== Mock 数据（后端不可用时降级） =====
-function buildMockData(rangeMinutes) {
-  const now = Date.now()
-  const interval = rangeMinutes <= 60 ? 5 : rangeMinutes <= 360 ? 30 : rangeMinutes <= 1440 ? 60 : 360
-  const count = Math.min(Math.floor(rangeMinutes / interval), 24)
-  const timestamps = Array.from({ length: count }, (_, i) => {
-    const ts = now - (count - 1 - i) * interval * 60 * 1000
-    return new Date(ts).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+function resolveMetricQueryLoadState(queryState, sampleKeys = []) {
+  const data = queryState?.statsData ?? null
+  return resolveLoadState({
+    loading: queryState?.loading || queryState?.refreshing,
+    error: queryState?.queryError,
+    hasData: Boolean(data),
+    hasSamples: hasMetricSamples(data, sampleKeys),
+    available: true,
+    stale: queryState?.stale,
   })
-  const total = timestamps.map(() => Math.floor(Math.random() * 30 + 5))
-  const rejections = total.map((v) => Math.floor(v * Math.random() * 0.1))
-  const rejection_rate = total.map((v, i) => parseFloat((rejections[i] / v * 100).toFixed(1)))
+}
 
-  return {
-    timeseries: { timestamps, total, rejections, rejection_rate, avg_latency: [] },
-    reason_codes: [
-      { code: 'RATE_LIMIT_EXCEEDED',    count: 12 },
-      { code: 'TRUST_INSUFFICIENT',     count: 8  },
-      { code: 'SYSMODE_FORBIDDEN',      count: 5  },
-      { code: 'INTENT_SCHEMA_INVALID',  count: 3  },
-      { code: 'DEPENDENCY_UNAVAILABLE', count: 2  },
-    ],
-    latency: [
-      { service: 'ASR',      p50: 120, p95: 280  },
-      { service: 'TTS',      p50: 180, p95: 420  },
-      { service: 'LLM Main', p50: 820, p95: 1800 },
-      { service: 'Governor', p50: 12,  p95: 35   },
-      { service: 'Memory',   p50: 89,  p95: 210  },
-    ],
-    summary: { total_requests: 0, total_rejections: 0, rejection_rate: 0 },
-  }
+function MiniCardMeta({ queryState, windowMinutes, sampleKeys = [] }) {
+  return (
+    <InlineQueryMeta
+      loadState={resolveMetricQueryLoadState(queryState, sampleKeys)}
+      loadStateDetail={queryState?.queryError}
+      updatedAt={queryState?.lastUpdatedAt}
+      windowMinutes={windowMinutes}
+    />
+  )
 }
 
 export default function Metrics() {
@@ -94,49 +70,29 @@ export default function Metrics() {
   const setTimeRange = useAppStore((s) => s.setTimeRange)
   const pollingEnabled = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
-  const [data, setData]       = React.useState(null)
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError]     = React.useState(null)
-  const [isMock, setIsMock]   = React.useState(false)
-  const [rlData, setRlData]   = React.useState(null)  // Ref #43: 速率限制后端状态
+  const pollingTick = useAppStore((s) => s.pollingTick)
   const rangeCfg = TIME_RANGES.find((r) => r.value === timeRange) ?? TIME_RANGES[0]
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes: rangeCfg.minutes,
   })
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    setIsMock(false)
-    try {
-      let res
-      try {
-        const apiRes = await fetchMetricsTimeseries({ time_range: timeRange })
-        res = transformApiData(apiRes)
-      } catch {
-        // 后端不可用时使用 mock
-        res = buildMockData(rangeCfg.minutes)
-        setIsMock(true)
-      }
-      setData(res)
-      const rl = await fetchRateLimitBackendStats({ top_k: 10 }).catch(() => null)
-      setRlData(rl)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [rangeCfg.minutes, timeRange])
-
-  useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const {
+    metricsData: data,
+    rateLimitData: rlData,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    metricsError: error,
+    isMock,
+    refetch,
+  } = useMetricsOverviewQuery({
+    timeRange,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const ts       = data?.timeseries ?? {}
   const xData    = ts.timestamps ?? []
@@ -146,7 +102,15 @@ export default function Metrics() {
   const latP50   = (data?.latency ?? []).map((l) => l.p50)
   const latP95   = (data?.latency ?? []).map((l) => l.p95)
   const summary  = data?.summary ?? {}
-  const isInitialState = !loading && !error && (summary.total_requests ?? 0) === 0
+  const pageLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(data),
+    hasSamples: (summary.total_requests ?? 0) > 0 || rcCodes.length > 0 || latSvcs.length > 0,
+    available: true,
+    stale,
+  })
+  const isInitialState = !loading && !refreshing && !error && (summary.total_requests ?? 0) === 0
 
   return (
     <div className="space-y-6">
@@ -174,8 +138,8 @@ export default function Metrics() {
               </button>
             ))}
           </div>
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <button className="btn-secondary" onClick={() => void refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
           </button>
         </div>
@@ -194,6 +158,14 @@ export default function Metrics() {
           `拒绝率：${summary.rejection_rate != null ? `${summary.rejection_rate.toFixed(1)}%` : '—'}`,
           isMock ? '当前为模拟数据' : '当前为实时数据',
         ]}
+      />
+
+      <InlineQueryMeta
+        loadState={pageLoadState}
+        loadStateDetail={error}
+        updatedAt={lastUpdatedAt}
+        windowMinutes={rangeCfg.minutes}
+        source={isMock ? 'metrics/mock-fallback' : 'metrics'}
       />
 
       {!loading && !error && (
@@ -344,39 +316,38 @@ export default function Metrics() {
       )}
 
       {/* ===== Ref #62: MemoryGuard / StateArbiter / ContextCompressor 迷你卡片 ===== */}
-      <MemoryGuardMiniCard />
-      <StateArbiterMiniCard />
-      <ContextCompressorMiniCard />
+      <MemoryGuardMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
+      <StateArbiterMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
+      <ContextCompressorMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
 
       {/* ===== Ref #74: PromptBuilder / EpisodicStore 迷你卡片 ===== */}
-      <PromptBuilderMiniCard />
-      <EpisodicStoreMiniCard />
+      <PromptBuilderMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
+      <EpisodicStoreMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
 
       {/* ===== Ref #80: Canon 提案迷你卡片 ===== */}
-      <CanonProposalMiniCard />
+      <CanonProposalMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
 
       {/* ===== Ref #92: 请求链路迷你卡片 ===== */}
-      <ChainMiniCard />
+      <ChainMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
 
       {/* ===== Ref #106: 蒸馏统计 + 语义召回迷你卡片 ===== */}
-      <DistillationMiniCard />
-      <SemanticRecallMiniCard />
+      <DistillationMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
+      <SemanticRecallMiniCard pollingEnabled={pollingEnabled} pollingInterval={pollingInterval} />
     </div>
   )
 }
 
 // ── Ref #62: MemoryGuard 迷你卡片 ──────────────────────────────────────────
-function MemoryGuardMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchMemoryGuardStats({ window_minutes: 60 }).then(setData).catch(() => {})
-  }, [])
+function MemoryGuardMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useMemoryGuardStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <BookLock size={14} className="text-emerald-600" />
         <span className="text-sm font-semibold text-gray-700">记忆守卫规则校验（近 1h）</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={60} sampleKeys={['total_checks', 'blocked_count', 'top_reject_reasons']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总校验', value: data?.total_checks, color: 'text-gray-700' },
@@ -406,11 +377,9 @@ function MemoryGuardMiniCard() {
 }
 
 // ── Ref #62: StateArbiter 迷你卡片（Phase XIV v4: 精简为仅 bond 查询）────────
-function StateArbiterMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchStateArbiterStats({ window_minutes: 60 }).then(setData).catch(() => {})
-  }, [])
+function StateArbiterMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useStateArbiterStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
@@ -418,6 +387,7 @@ function StateArbiterMiniCard() {
         <span className="text-sm font-semibold text-gray-700">状态仲裁关系查询（近 1h）</span>
         <span className="text-xs text-gray-400">仅关系图快照</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={60} sampleKeys={['total_resolutions', 'top_sources']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总查询', value: data?.total_resolutions, color: 'text-gray-700' },
@@ -436,17 +406,16 @@ function StateArbiterMiniCard() {
 }
 
 // ── Ref #62: ContextCompressor 迷你卡片 ────────────────────────────────────
-function ContextCompressorMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchContextCompressorStats({ window_minutes: 60 }).then(setData).catch(() => {})
-  }, [])
+function ContextCompressorMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useContextCompressorStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Minimize2 size={14} className="text-teal-600" />
         <span className="text-sm font-semibold text-gray-700">上下文压缩效率（近 1h）</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={60} sampleKeys={['total_compressions', 'summary_generated_count', 'total_tokens_saved']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总压缩', value: data?.total_compressions, color: 'text-gray-700' },
@@ -476,17 +445,16 @@ function ContextCompressorMiniCard() {
 }
 
 // ── Ref #74: PromptBuilder 迷你卡片 ────────────────────────────────────────
-function PromptBuilderMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchPromptBuilderStats({ window_minutes: 60 }).then(setData).catch(() => {})
-  }, [])
+function PromptBuilderMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = usePromptBuilderStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <FileCode size={14} className="text-violet-600" />
         <span className="text-sm font-semibold text-gray-700">提示构建安全（近 1h）</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={60} sampleKeys={['total_builds', 'degraded_count', 'high_risk_count']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总构建', value: data?.total_builds, color: 'text-gray-700' },
@@ -521,17 +489,16 @@ function PromptBuilderMiniCard() {
 }
 
 // ── Ref #74: EpisodicStore 迷你卡片 ────────────────────────────────────────
-function EpisodicStoreMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchEpisodicStoreStats({ window_minutes: 60 }).then(setData).catch(() => {})
-  }, [])
+function EpisodicStoreMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useEpisodicStoreStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Archive size={14} className="text-amber-600" />
         <span className="text-sm font-semibold text-gray-700">情景记忆写入（近 1h）</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={60} sampleKeys={['total_attempts', 'written_count', 'memory_guard_blocked_count']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总尝试', value: data?.total_attempts, color: 'text-gray-700' },
@@ -563,11 +530,9 @@ function EpisodicStoreMiniCard() {
 }
 
 // ── Ref #80: Canon 提案迷你卡片 ────────────────────────────────────────────
-function CanonProposalMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchCanonProposalStats({ window_minutes: 1440 }).then(setData).catch(() => {})
-  }, [])
+function CanonProposalMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useCanonProposalStatsQuery({ windowMinutes: 1440, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
@@ -579,6 +544,7 @@ function CanonProposalMiniCard() {
           </span>
         )}
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={1440} sampleKeys={['total', 'pending', 'recent_proposals']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总提案', value: data?.total, color: 'text-gray-700' },
@@ -610,17 +576,16 @@ function CanonProposalMiniCard() {
 }
 
 // ── Ref #106: 蒸馏统计迷你卡片 ───────────────────────────────────────────
-function DistillationMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchDistillationStats({ window_minutes: 1440 }).then(setData).catch(() => {})
-  }, [])
+function DistillationMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useDistillationStatsQuery({ windowMinutes: 1440, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Layers size={14} className="text-purple-600" />
         <span className="text-sm font-semibold text-gray-700">情节记忆蒸馏（近 24h）</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={1440} sampleKeys={['total_candidates', 'distilled_count', 'failed_count']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总候选', value: data?.total_candidates, color: 'text-gray-700' },
@@ -652,11 +617,9 @@ function DistillationMiniCard() {
 }
 
 // ── Ref #106: 语义召回迷你卡片 ────────────────────────────────────────────
-function SemanticRecallMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchSemanticRecallStats().then(setData).catch(() => {})
-  }, [])
+function SemanticRecallMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useSemanticRecallStatsQuery({ pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   const isOk = data?.status === 'OK'
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -673,6 +636,7 @@ function SemanticRecallMiniCard() {
           </span>
         )}
       </div>
+      <MiniCardMeta queryState={queryState} sampleKeys={['status', 'top_k']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '召回上限', value: data?.top_k, color: 'text-gray-700' },
@@ -701,17 +665,16 @@ function SemanticRecallMiniCard() {
 }
 
 // ── Ref #92: 请求链路迷你卡片（Phase XIV v4）──────────────────────────────
-function ChainMiniCard() {
-  const [data, setData] = React.useState(null)
-  useEffect(() => {
-    fetchChainStats({ window_minutes: 60 }).then(setData).catch(() => {})
-  }, [])
+function ChainMiniCard({ pollingEnabled = false, pollingInterval = 30 }) {
+  const queryState = useChainStatsQuery({ windowMinutes: 60, pollingEnabled, pollingInterval })
+  const { statsData: data } = queryState
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center gap-2 mb-3">
         <Activity size={14} className="text-blue-600" />
         <span className="text-sm font-semibold text-gray-700">请求链路统计（近 1h）</span>
       </div>
+      <MiniCardMeta queryState={queryState} windowMinutes={60} sampleKeys={['total_requests', 'episodic_written_count', 'qa_rewrite_count']} />
       <div className="grid grid-cols-4 gap-3 text-center">
         {[
           { label: '总请求', value: data?.total_requests, color: 'text-gray-700' },

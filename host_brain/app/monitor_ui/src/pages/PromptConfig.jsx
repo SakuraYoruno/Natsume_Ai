@@ -1,13 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import {
-  fetchPromptTemplates,
-  fetchPromptTemplate,
-  updatePromptTemplate,
-  resetPromptTemplate,
   reloadPromptTemplates,
-} from '../api/obs.js'
+  resetPromptTemplate,
+  updatePromptTemplate,
+} from '../api/promptOps.js'
 import {
   RefreshCw,
   Save,
@@ -22,8 +20,14 @@ import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import {
+  usePromptTemplateDetailQuery,
+  usePromptTemplateListQuery,
+} from '../queries/promptQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 function SourceBadge({ source }) {
@@ -56,15 +60,30 @@ export default function PromptConfig() {
     category: String(searchParams.get('category') || ''),
     source: String(searchParams.get('source') || ''),
   }))
-  const [items, setItems] = useState([])
-  const [loadingList, setLoadingList] = useState(false)
   const [selectedId, setSelectedId] = useState('')
-  const [selected, setSelected] = useState(null)
-  const [loadingDetail, setLoadingDetail] = useState(false)
   const [draftContent, setDraftContent] = useState('')
   const [draftEnabled, setDraftEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
   const [reloading, setReloading] = useState(false)
+  const {
+    templatesData,
+    items,
+    listError,
+    loading: listLoading,
+    refreshing: listRefreshing,
+    stale: listStale,
+    lastUpdatedAt: listUpdatedAt,
+    refetch: refetchList,
+  } = usePromptTemplateListQuery({ filters })
+  const {
+    item: selected,
+    detailError,
+    loading: detailLoading,
+    refreshing: detailRefreshing,
+    stale: detailStale,
+    lastUpdatedAt: detailUpdatedAt,
+    refetch: refetchDetail,
+  } = usePromptTemplateDetailQuery({ templateId: selectedId })
 
   const scopes = useMemo(() => [...new Set(items.map((item) => item.scope).filter(Boolean))], [items])
   const categories = useMemo(() => [...new Set(items.map((item) => item.category).filter(Boolean))], [items])
@@ -76,53 +95,26 @@ export default function PromptConfig() {
     guarded: items.filter((item) => String(item.category || '').includes('fallback') || String(item.category || '').includes('guard')).length,
   }), [items])
 
-  const loadList = useCallback(async () => {
-    setLoadingList(true)
-    try {
-      const data = await fetchPromptTemplates(filters)
-      const nextItems = data.items || []
-      setItems(nextItems)
-      if (!nextItems.length) {
-        setSelectedId('')
-        setSelected(null)
-        return
-      }
-      const hasCurrent = nextItems.some((item) => item.template_id === selectedId)
-      if (!selectedId || !hasCurrent) {
-        setSelectedId(nextItems[0].template_id)
-      }
-    } catch (error) {
-      toast.error(`加载模板失败：${error.message}`)
-    } finally {
-      setLoadingList(false)
+  useEffect(() => {
+    if (!items.length) {
+      setSelectedId('')
+      return
     }
-  }, [filters, selectedId])
-
-  const loadDetail = useCallback(async (templateId) => {
-    if (!templateId) return
-    setLoadingDetail(true)
-    try {
-      const data = await fetchPromptTemplate(templateId)
-      const item = data.item
-      setSelected(item)
-      setDraftContent(item.override_content ?? item.resolved_content ?? '')
-      setDraftEnabled(item.has_override ? Boolean(item.enabled) : true)
-    } catch (error) {
-      toast.error(`加载模板详情失败：${error.message}`)
-    } finally {
-      setLoadingDetail(false)
+    const hasCurrent = items.some((item) => item.template_id === selectedId)
+    if (!selectedId || !hasCurrent) {
+      setSelectedId(items[0].template_id)
     }
-  }, [])
+  }, [items, selectedId])
 
   useEffect(() => {
-    void loadList()
-  }, [loadList])
-
-  useEffect(() => {
-    if (selectedId) {
-      void loadDetail(selectedId)
+    if (!selected) {
+      setDraftContent('')
+      setDraftEnabled(true)
+      return
     }
-  }, [selectedId, loadDetail])
+    setDraftContent(selected.override_content ?? selected.resolved_content ?? '')
+    setDraftEnabled(selected.has_override ? Boolean(selected.enabled) : true)
+  }, [selected])
 
   const isDirty = useMemo(() => {
     if (!selected) return false
@@ -131,18 +123,24 @@ export default function PromptConfig() {
     return draftContent !== baseContent || draftEnabled !== baseEnabled
   }, [draftContent, draftEnabled, selected])
 
+  const listMetaState = resolveLoadState({
+    loading: listLoading || listRefreshing,
+    error: listError,
+    hasData: Boolean(templatesData),
+    hasSamples: true,
+    available: Boolean(templatesData),
+    stale: listStale,
+  })
+
   const handleSave = async () => {
     if (!selected) return
     setSaving(true)
     try {
-      const data = await updatePromptTemplate(selected.template_id, {
+      await updatePromptTemplate(selected.template_id, {
         content: draftContent,
         enabled: draftEnabled,
       })
-      setSelected(data.item)
-      setDraftContent(data.item.override_content ?? data.item.resolved_content ?? '')
-      setDraftEnabled(Boolean(data.item.enabled))
-      await loadList()
+      await Promise.allSettled([refetchList(), refetchDetail()])
       toast.success('模板已保存')
     } catch (error) {
       toast.error(`保存失败：${error.message}`)
@@ -156,11 +154,8 @@ export default function PromptConfig() {
     if (!window.confirm(`确认恢复 ${selected.template_id} 的代码默认值？`)) return
     setSaving(true)
     try {
-      const data = await resetPromptTemplate(selected.template_id)
-      setSelected(data.item)
-      setDraftContent(data.item.resolved_content ?? '')
-      setDraftEnabled(true)
-      await loadList()
+      await resetPromptTemplate(selected.template_id)
+      await Promise.allSettled([refetchList(), refetchDetail()])
       toast.success('已恢复默认值')
     } catch (error) {
       toast.error(`恢复默认失败：${error.message}`)
@@ -173,8 +168,7 @@ export default function PromptConfig() {
     setReloading(true)
     try {
       await reloadPromptTemplates()
-      await loadList()
-      if (selectedId) await loadDetail(selectedId)
+      await Promise.allSettled([refetchList(), selectedId ? refetchDetail() : Promise.resolve(null)])
       toast.success('模板缓存已刷新')
     } catch (error) {
       toast.error(`刷新失败：${error.message}`)
@@ -209,11 +203,28 @@ export default function PromptConfig() {
         description="当前模板池覆盖主链路提示词、守卫型兜底与部分可运营文案。"
         gradientClass="from-primary-50 via-white to-indigo-50"
         aside={(
-          <div className="max-w-xl rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs leading-6 text-orange-800">
-            建议优先调整语气、关系感与表达节奏；不要修改 JSON 键名，也不要把运营文案写成系统指令。
+          <div className="space-y-3">
+            <SampleMeta
+              className="max-w-xl"
+              loadState={listMetaState}
+              sampleSize={summary.total}
+              sampleLabel="模板"
+              updatedAt={listUpdatedAt}
+              source="prompt-config"
+              definition="提示运营页把模板列表与模板详情拆成独立查询；筛选为空结果不会再和系统无样本、接口失败混淆。"
+            />
+            <div className="max-w-xl rounded-xl border border-orange-100 bg-orange-50 px-4 py-3 text-xs leading-6 text-orange-800">
+              建议优先调整语气、关系感与表达节奏；不要修改 JSON 键名，也不要把运营文案写成系统指令。
+            </div>
           </div>
         )}
       />
+
+      {listError ? (
+        <NoticeBanner variant="error" title="模板列表加载失败">
+          {listError}
+        </NoticeBanner>
+      ) : null}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard icon={Database} label="模板总数" value={summary.total} hint={`${scopes.length} 个 scope`} tone="text-blue-600" />
@@ -264,8 +275,8 @@ export default function PromptConfig() {
           </div>
 
           <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{loadingList ? '加载中…' : `共 ${items.length} 项`}</span>
-            <button className="text-primary hover:underline" onClick={loadList}>刷新列表</button>
+            <span>{listLoading ? '加载中…' : listRefreshing ? '刷新中…' : `共 ${items.length} 项`}</span>
+            <button className="text-primary hover:underline" onClick={() => void refetchList()}>刷新列表</button>
           </div>
 
           <div className="space-y-2 max-h-[70vh] overflow-y-auto">
@@ -296,7 +307,7 @@ export default function PromptConfig() {
                 </button>
               )
             })}
-            {!loadingList && items.length === 0 && (
+            {!listLoading && items.length === 0 && (
               <EmptyStateCard title="没有匹配模板" hint="可调整关键词或筛选条件重试。" className="p-4" />
             )}
           </div>
@@ -350,7 +361,7 @@ export default function PromptConfig() {
                     spellCheck={false}
                   />
                   <div className="flex items-center gap-2">
-                    <button className="btn-primary" onClick={handleSave} disabled={!isDirty || saving || loadingDetail}>
+                    <button className="btn-primary" onClick={handleSave} disabled={!isDirty || saving || detailLoading || detailRefreshing}>
                       <Save size={14} /> 保存
                     </button>
                     <button className="btn-secondary" onClick={handleReset} disabled={!selected.has_override || saving}>
@@ -387,11 +398,18 @@ export default function PromptConfig() {
                 </div>
               </div>
 
-              {loadingDetail && (
-                <NoticeBanner variant="info" title="模板刷新中">
-                  正在同步模板详情…
+              {detailError ? (
+                <NoticeBanner variant="warning" title="模板详情暂不可用">
+                  {detailError}
+                  {detailUpdatedAt ? ` · 最近更新时间 ${new Date(detailUpdatedAt).toLocaleString('zh-CN')}` : ''}
                 </NoticeBanner>
-              )}
+              ) : null}
+
+              {detailLoading || detailRefreshing || detailStale ? (
+                <NoticeBanner variant="info" title="模板刷新中">
+                  {detailLoading || detailRefreshing ? '正在同步模板详情…' : '模板详情已超过建议新鲜度阈值，可手动刷新。'}
+                </NoticeBanner>
+              ) : null}
             </div>
           )}
         </div>

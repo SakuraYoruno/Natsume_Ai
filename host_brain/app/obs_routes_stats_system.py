@@ -21,6 +21,17 @@ from host_brain.audit.sqlite_ledger import SQLiteLedger
 logger = logging.getLogger("Natsume.obs")
 
 
+def _resolve_fetch_table(ledger, *candidates: str) -> str | None:
+    resolver = getattr(ledger, "resolve_fetch_table", None)
+    if callable(resolver):
+        return resolver(*candidates)
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return None
+
+
 from .obs_routes_core import (
     _build_trace_summary,
     router,
@@ -67,10 +78,13 @@ def get_vts_stats(
     since_ms = now - window_minutes * 60 * 1000
 
     # ── VTS 表情事件统计 ──────────────────────────────────────────────────
-    try:
-        vts_rows = ledger.fetch_by_time_range("vts_event_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        vts_rows = []
+    vts_rows = []
+    vts_table = _resolve_fetch_table(ledger, "vts_event_log")
+    if vts_table:
+        try:
+            vts_rows = ledger.fetch_by_time_range(vts_table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            vts_rows = []
 
     # 补充从 voice_event_log 中过滤 VTS 相关事件
     try:
@@ -121,10 +135,13 @@ def get_vts_stats(
     ]
 
     # ── Talk Gate 事件统计 ────────────────────────────────────────────────
-    try:
-        talk_gate_rows = ledger.fetch_by_time_range("talk_gate_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        talk_gate_rows = []
+    talk_gate_rows = []
+    talk_gate_table = _resolve_fetch_table(ledger, "talk_gate_log")
+    if talk_gate_table:
+        try:
+            talk_gate_rows = ledger.fetch_by_time_range(talk_gate_table, start_ms=since_ms, end_ms=now)
+        except Exception:
+            talk_gate_rows = []
 
     talk_gate_total = len(talk_gate_rows)
     talk_gate_allowed = sum(
@@ -545,15 +562,11 @@ def get_qa_stats(
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    try:
-        rows = ledger.fetch_by_time_range("qa_violation_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        rows = []
-
-    # 兼容旧表名 qa_violation
-    if not rows:
+    rows = []
+    qa_table = _resolve_fetch_table(ledger, "qa_violation_log", "qa_violation")
+    if qa_table:
         try:
-            rows = ledger.fetch_by_time_range("qa_violation", start_ms=since_ms, end_ms=now)
+            rows = ledger.fetch_by_time_range(qa_table, start_ms=since_ms, end_ms=now)
         except Exception:
             rows = []
 
@@ -670,15 +683,11 @@ def get_llm_call_stats(
     now = _now_ms()
     since_ms = now - window_minutes * 60 * 1000
 
-    try:
-        rows = ledger.fetch_by_time_range("llm_call_log", start_ms=since_ms, end_ms=now)
-    except Exception:
-        rows = []
-
-    # 兼容 llm_node_call_log 表名
-    if not rows:
+    rows = []
+    llm_table = _resolve_fetch_table(ledger, "llm_call_log", "llm_node_call_log")
+    if llm_table:
         try:
-            rows = ledger.fetch_by_time_range("llm_node_call_log", start_ms=since_ms, end_ms=now)
+            rows = ledger.fetch_by_time_range(llm_table, start_ms=since_ms, end_ms=now)
         except Exception:
             rows = []
 
@@ -792,15 +801,11 @@ def get_checkpoints(
     ledger = _get_ledger()
     now = _now_ms()
 
-    try:
-        rows = ledger.fetch_by_time_range("checkpoints", start_ms=0, end_ms=now)
-    except Exception:
-        rows = []
-
-    # 兼容 graph_checkpoint 表名
-    if not rows:
+    rows = []
+    checkpoint_table = _resolve_fetch_table(ledger, "checkpoints", "graph_checkpoint")
+    if checkpoint_table:
         try:
-            rows = ledger.fetch_by_time_range("graph_checkpoint", start_ms=0, end_ms=now)
+            rows = ledger.fetch_by_time_range(checkpoint_table, start_ms=0, end_ms=now)
         except Exception:
             rows = []
 
@@ -1121,5 +1126,3 @@ def get_llm_route_stats(
         task_types=task_types,
         timestamp=now,
     )
-
-

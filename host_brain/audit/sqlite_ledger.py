@@ -89,6 +89,7 @@ class SQLiteLedger(
         # 表结构缓存：避免每次 _table_has_column 调用 PRAGMA table_info
         self._column_cache: dict[str, set[str]] = {}
         self._column_cache_lock = threading.Lock()
+        self._table_name_cache: set[str] | None = None
         self._apply_wal_config()
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._ensure_schema()

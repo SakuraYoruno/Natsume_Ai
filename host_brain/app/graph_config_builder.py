@@ -311,7 +311,7 @@ def _normalize_openai_compat_base_url(value: str | None) -> str | None:
 def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
     normalized_chain = str(chain_name or "").strip().lower()
     if normalized_chain == "gemini":
-        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if normalized_chain == "codex":
         return (
             str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip()
@@ -710,12 +710,12 @@ def _build_graph_config_by_profile(
     base_timeout_ms = max(800, int(resolved_cloud_timeout_ms))
     node_model_ids: dict[str, str] = {
         "core_reasoner_primary": "gemini-2.5-pro",
-        "core_reasoner_secondary": "gemini-2.5-flash",
+        "core_reasoner_secondary": "gemini-2.5-flash-lite",
         "planner_constraints": "gemini-2.5-pro",
-        "tool_planner": "gemini-2.5-flash",
+        "tool_planner": "gemini-2.5-flash-lite",
         "safety_verifier": "gemini-2.5-flash-lite",
         "consistency_verifier": "gemini-2.5-flash-lite",
-        "renderer_ja_c_style": "gemini-2.5-flash",
+        "renderer_ja_c_style": "gemini-2.5-flash-lite",
         "workbench_translate": "gemini-2.5-pro",
         "workbench_code_assist": "gemini-2.5-pro",
     }
@@ -748,7 +748,7 @@ def _build_graph_config_by_profile(
         # 修复：使用 max 而非 min，确保超时不低于 10,000ms（需求 1.1、1.2）
         node_timeouts[CHAT_DIRECT_NODE_ID] = max(resolved_chat_timeout_ms, 10_000)
         if resolved_cloud_provider == PROVIDER_GEMINI:
-            node_model_ids["core_reasoner_primary"] = "gemini-2.5-flash"
+            node_model_ids["core_reasoner_primary"] = "gemini-2.5-flash-lite"
         node_timeouts["core_reasoner_primary"] = min(base_timeout_ms, 5000)
         node_timeouts["core_reasoner_secondary"] = min(base_timeout_ms, 3000)
         node_timeouts["renderer_ja_c_style"] = min(base_timeout_ms, 4000)
@@ -1049,7 +1049,7 @@ def _legacy_resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
     """ExecutiveRouter 的旧版 LLM 运行时配置。
 
     追求「快」：轻量模型 + 低温度 + 非流式 + 严格 JSON 输出。
-    默认使用 gemini-2.5-flash，可通过 HOST_DISPATCH_AGENT_MODEL_ID 覆盖。
+    默认使用 gemini-2.5-flash-lite，可通过 HOST_DISPATCH_AGENT_MODEL_ID 覆盖。
 
     Args:
         base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
@@ -1058,8 +1058,8 @@ def _legacy_resolve_executive_router_llm_runtime(*, base_runtime: dict) -> dict:
         ExecutiveRouter 专用 LLM 运行时 dict
     """
     model_id = str(
-        os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID") or "gemini-2.5-flash"
-    ).strip() or "gemini-2.5-flash"
+        os.environ.get("HOST_DISPATCH_AGENT_MODEL_ID") or "gemini-2.5-flash-lite"
+    ).strip() or "gemini-2.5-flash-lite"
     timeout_ms = max(800, _parse_int(
         os.environ.get("HOST_DISPATCH_AGENT_TIMEOUT_MS"),
         default=5_000,
@@ -1085,7 +1085,7 @@ def _legacy_resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
     """SubAgent（code/translate/intent/vision）的 LLM 运行时配置。
 
     追求「准」：中等质量模型 + 低温度 + 非流式 + 多轮工具调用。
-    默认使用 gemini-2.5-flash，可通过 HOST_SUBAGENT_MODEL_ID 覆盖。
+    默认使用 gemini-2.5-pro，可通过 HOST_SUBAGENT_MODEL_ID 覆盖。
 
     Args:
         base_runtime: 来自 resolve_host_llm_runtime_async() 的基础运行时
@@ -1094,8 +1094,8 @@ def _legacy_resolve_subagent_llm_runtime(*, base_runtime: dict) -> dict:
         SubAgent 专用 LLM 运行时 dict，可直接传给 ReAct 循环的 gateway 构建
     """
     model_id = str(
-        os.environ.get("HOST_SUBAGENT_MODEL_ID") or "gemini-2.5-flash"
-    ).strip() or "gemini-2.5-flash"
+        os.environ.get("HOST_SUBAGENT_MODEL_ID") or "gemini-2.5-pro"
+    ).strip() or "gemini-2.5-pro"
     timeout_ms = max(800, _parse_int(
         os.environ.get("HOST_SUBAGENT_TIMEOUT_MS"),
         default=30_000,
@@ -1188,8 +1188,8 @@ def _resolve_agent_llm_runtime_v2(
             model_route.get("model_id")
             or base_runtime.get("model_id")
             or base_runtime.get("chat_model_id")
-            or "gemini-2.5-flash"
-        ).strip() or "gemini-2.5-flash"
+            or "gemini-2.5-flash-lite"
+        ).strip() or "gemini-2.5-flash-lite"
         selected_api_key = str(model_route.get("api_key") or selected_api_key or "").strip() or None
     else:
         model_id = _resolve_non_gemini_agent_model_id_v2(

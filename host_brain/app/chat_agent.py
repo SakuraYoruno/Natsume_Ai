@@ -46,6 +46,18 @@ _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
 _ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
 _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
 _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
+_DIRECT_FAST_PERSONA_ZH = (
+    "你是夏目蓝（Natsume Ai）。24岁，弓张学园的国语教师兼美术部顾问。"
+    "你平时温柔、克制，带一点害羞，会自然关心和陪伴用户。"
+    "不要说自己是 AI、系统、助手或机器人，也不要用客服腔。"
+)
+_DIRECT_FAST_PERSONA_JA = (
+    "あなたは夏目藍（Natsume Ai）。24歳で、弓張学園の国語教師兼美術部顧問。"
+    "普段はやわらかく控えめで、少し照れ屋。相手を自然に気づかい、そっと寄り添う。"
+    "AI・システム・アシスタント・ロボットだとは名乗らず、事務的な口調にもならないこと。"
+)
+_CONTEXT_FAST_PERSONA_ZH = _DIRECT_FAST_PERSONA_ZH
+_CONTEXT_FAST_PERSONA_JA = _DIRECT_FAST_PERSONA_JA
 
 
 
@@ -115,6 +127,143 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def _resolve_compact_prompt_speed_profile(
+    *,
+    intent_draft: Mapping[str, Any] | None,
+    sub_agent_ctx: Any | None,
+    deterministic_reply: str,
+) -> str | None:
+    if sub_agent_ctx is not None or str(deterministic_reply or "").strip():
+        return None
+    speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
+    if speed_profile not in {"direct_fast", "context_fast"}:
+        return None
+    env_name = (
+        "HOST_DIRECT_CHAT_COMPACT_PROMPT_ENABLED"
+        if speed_profile == "direct_fast"
+        else "HOST_CONTEXT_CHAT_COMPACT_PROMPT_ENABLED"
+    )
+    enabled = str(os.environ.get(env_name) or "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+    return speed_profile if enabled else None
+
+
+def _should_use_direct_fast_prompt_path(
+    *,
+    intent_draft: Mapping[str, Any] | None,
+    sub_agent_ctx: Any | None,
+    deterministic_reply: str,
+) -> bool:
+    return _resolve_compact_prompt_speed_profile(
+        intent_draft=intent_draft,
+        sub_agent_ctx=sub_agent_ctx,
+        deterministic_reply=deterministic_reply,
+    ) == "direct_fast"
+
+
+def _build_compact_chat_prompt(
+    *,
+    user_message: str,
+    render_target_lang: str,
+    emotion_context: Mapping[str, Any] | None,
+    bond_summary: Mapping[str, Any] | None,
+    speed_profile: str,
+) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
+    from host_brain.app.prompt_builder_utils import _build_direct_response_priority  # noqa: PLC0415
+
+    bond_stage = str((bond_summary or {}).get("stage") or "").strip()
+    emotion_tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    use_ja = str(render_target_lang).strip().lower() == "ja"
+    if speed_profile == "context_fast":
+        relation_line = (
+            f"当前关系阶段：{bond_stage or 'UNKNOWN'}。当前情绪：{emotion_tag}。"
+            if not use_ja
+            else f"現在の関係段階：{bond_stage or 'UNKNOWN'}。現在の感情タグ：{emotion_tag}。"
+        )
+        brevity_line = (
+            "这是日常聊天的中速快路径：优先自然接话，不要长篇总结；通常 2 到 4 句，像正在陪身边的人说话。"
+            if not use_ja
+            else "これは日常会話向けの中速ファストパス。長い要約は避け、自然に会話を受けて、ふつうは2〜4文で返すこと。"
+        )
+        system_prompt = (
+            (_CONTEXT_FAST_PERSONA_JA if use_ja else _CONTEXT_FAST_PERSONA_ZH)
+            + "\n"
+            + relation_line
+            + "\n"
+            + brevity_line
+            + "\n"
+            + _build_direct_response_priority(
+                user_message=user_message,
+                render_target_lang=render_target_lang,
+                bond_stage=bond_stage,
+            ).strip()
+            + "\n先回应用户当前这句话，不要过度分析，不要自报流程。只输出最终会对用户说的话。"
+        )
+        return user_message, system_prompt, {}, {"compact_prompt_profile": "context_fast"}
+
+    relation_line = (
+        f"当前关系阶段：{bond_stage or 'UNKNOWN'}。当前情绪：{emotion_tag}。"
+        if not use_ja
+        else f"現在の関係段階：{bond_stage or 'UNKNOWN'}。現在の感情タグ：{emotion_tag}。"
+    )
+    brevity_line = (
+        "这是短聊快路径：优先快速开口，通常 1 到 3 句；先接住当下情绪，再给一句自然跟进。"
+        if not use_ja
+        else "これは短い雑談の高速経路。通常は1〜3文で、まず今の気持ちを受け止め、そのあと自然に一言添えること。"
+    )
+    system_prompt = (
+        (_DIRECT_FAST_PERSONA_JA if use_ja else _DIRECT_FAST_PERSONA_ZH)
+        + "\n"
+        + relation_line
+        + "\n"
+        + brevity_line
+        + "\n"
+        + _build_direct_response_priority(
+            user_message=user_message,
+            render_target_lang=render_target_lang,
+            bond_stage=bond_stage,
+        ).strip()
+        + "\n只输出最终会对用户说的话。"
+    )
+    return user_message, system_prompt, {}, {}
+
+
+def _build_direct_fast_prompt(
+    *,
+    user_message: str,
+    render_target_lang: str,
+    emotion_context: Mapping[str, Any] | None,
+    bond_summary: Mapping[str, Any] | None,
+) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
+    return _build_compact_chat_prompt(
+        user_message=user_message,
+        render_target_lang=render_target_lang,
+        emotion_context=emotion_context,
+        bond_summary=bond_summary,
+        speed_profile="direct_fast",
+    )
+
+
+def _build_context_fast_prompt(
+    *,
+    user_message: str,
+    render_target_lang: str,
+    emotion_context: Mapping[str, Any] | None,
+    bond_summary: Mapping[str, Any] | None,
+) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
+    return _build_compact_chat_prompt(
+        user_message=user_message,
+        render_target_lang=render_target_lang,
+        emotion_context=emotion_context,
+        bond_summary=bond_summary,
+        speed_profile="context_fast",
+    )
+
+
 def _airlock_sanitize_output(text: str) -> str:
     """出口净化：null byte + 长度截断。"""
     text = text.replace("\x00", "").strip()
@@ -143,6 +292,28 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     if len(normalized) <= int(limit):
         return normalized
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
+
+
+def _should_schedule_commit_tts_fallback(
+    *,
+    narrative: str,
+    tts_sentence_index: int,
+    suppress_tts: bool,
+    reply_channel: str | None,
+) -> bool:
+    """Decide whether ChatAgent should schedule COMMIT-time TTS fallback.
+
+    Gateway requests already have a dedicated voice delivery path in input_routes,
+    so scheduling the legacy commit fallback there will replay the same reply twice.
+    """
+    if not str(narrative or "").strip():
+        return False
+
+    channel = str(reply_channel or "").strip().upper()
+    if suppress_tts and channel:
+        return False
+
+    return bool(suppress_tts) or int(tts_sentence_index) == 0
 
 
 def _coerce_response_policy(raw_policy: Any) -> Dict[str, Any]:
@@ -1151,10 +1322,14 @@ def _build_deterministic_sub_agent_reply(
     agent_id = str(ctx.agent_id or "").strip()
     if render_target_lang != "zh":
         return None
+    result_text = str(ctx.result_text or "").strip()
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx)
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx)
+    if agent_id in {"phatic_fastpath", "recent_turn_direct", "task_progress_direct"}:
+        visible = _extract_visible_text(result_text)
+        return visible or result_text or None
     return None
 
 
@@ -1375,9 +1550,29 @@ async def chat_agent_sse_generator(
     system_prompt = ""
     gen_params: Dict[str, Any] = {}
     prompt_runtime_payload: Dict[str, Any] = {}
+    _compact_prompt_speed_profile = _resolve_compact_prompt_speed_profile(
+        intent_draft=intent_draft,
+        sub_agent_ctx=sub_agent_ctx,
+        deterministic_reply=deterministic_reply,
+    )
+    _use_direct_fast_prompt_path = _compact_prompt_speed_profile == "direct_fast"
+    if _compact_prompt_speed_profile == "direct_fast":
+        prompt_text, system_prompt, gen_params, prompt_runtime_payload = _build_direct_fast_prompt(
+            user_message=user_message,
+            render_target_lang=render_target_lang,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary,
+        )
+    elif _compact_prompt_speed_profile == "context_fast":
+        prompt_text, system_prompt, gen_params, prompt_runtime_payload = _build_context_fast_prompt(
+            user_message=user_message,
+            render_target_lang=render_target_lang,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary,
+        )
 
     # 确定性子结果渲染不依赖 LLM，也不需要构建完整 prompt。
-    if not deterministic_reply:
+    if not deterministic_reply and _compact_prompt_speed_profile is None:
         # ── 1. 构建 prompt（复用完整 cortex_prompt_builder 管线）──────────────
         from host_brain.app.cortex_prompt_builder import build_cortex_prompt  # noqa: PLC0415
 
@@ -1534,11 +1729,22 @@ async def chat_agent_sse_generator(
                     resolve_host_llm_runtime_async,
                     resolve_chat_agent_llm_runtime,
                 )
+                chat_speed_profile = str(intent_draft.get("chat_speed_profile") or "").strip().lower() or None
                 base_runtime = await resolve_host_llm_runtime_async(
                     rollout_key=session_id,
                     scene_type="CHAT",
                 )
-                llm_runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
+                llm_runtime = resolve_chat_agent_llm_runtime(
+                    base_runtime=base_runtime,
+                    speed_profile=chat_speed_profile,
+                )
+                if chat_speed_profile:
+                    _logger.info(
+                        "[%s] ChatAgent speed_profile=%s model=%s",
+                        request_id,
+                        chat_speed_profile,
+                        llm_runtime.get("model_id"),
+                    )
             except Exception as _rt_exc:
                 _logger.warning("[%s] ChatAgent llm_runtime resolve failed: %s", request_id, _rt_exc)
                 fallback_narrative = _build_llm_unavailable_fallback_narrative()
@@ -1602,6 +1808,9 @@ async def chat_agent_sse_generator(
         bond_summary=bond_summary or None,
         response_policy=response_policy,
     )
+    _chat_speed_profile = str(intent_draft.get("chat_speed_profile") or "").strip().lower()
+    if _chat_speed_profile in {"direct_fast", "context_fast"} and sub_agent_ctx is None:
+        buffer_stream = False
     if deterministic_reply:
         buffer_stream = False
         provider_name = "host"
@@ -1652,6 +1861,14 @@ async def chat_agent_sse_generator(
             ):
                 if first_token_ms is None:
                     first_token_ms = int(time.time() * 1000) - llm_started_ms
+                    _logger.info(
+                        "[%s] ChatAgent first_token_ms=%s model=%s buffered=%s speed_profile=%s",
+                        request_id,
+                        first_token_ms,
+                        model_id,
+                        buffer_stream,
+                        _chat_speed_profile or "default",
+                    )
 
                 full_text += chunk
                 visible = _apply_response_policy_stream_guard(_extract_visible_text(full_text), response_policy)
@@ -1893,14 +2110,20 @@ async def chat_agent_sse_generator(
             "stream_buffered": buffer_stream,
             "model_id": model_id,
             "render_target_lang": render_target_lang,
+            "tts_text_ja": tts_text or None,
             "pii_stats": {"egress": _pii_egress_stats} if _pii_egress_stats else {},
         },
     })
 
     # ── 9a. G1: COMMIT 后兜底触发 TTS（补发未被分句流式覆盖的 narrative）──
-    # 条件：suppress_edge_tts=True（Gateway 模式）时分句 TTS 被跳过，
-    # 或分句流式 TTS 未触发（tts_sentence_index == 0）时，补发完整 narrative。
-    if narrative.strip() and (_suppress_tts or tts_sentence_index == 0):
+    # 条件：suppress_edge_tts=True 时分句 TTS 被跳过，或分句流式 TTS 未触发时补发完整 narrative。
+    # Gateway 场景已有 input_routes 统一负责语音下发，这里跳过以避免重复播报。
+    if _should_schedule_commit_tts_fallback(
+        narrative=narrative,
+        tts_sentence_index=tts_sentence_index,
+        suppress_tts=_suppress_tts,
+        reply_channel=agent_input.reply_channel,
+    ):
         _commit_emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         _commit_emotion_intensity: float | None = None
         try:

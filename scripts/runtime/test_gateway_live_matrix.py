@@ -24,6 +24,11 @@ DEFAULT_DB_PATH = ROOT / str(
 DEFAULT_GATEWAY_BASE_URL = str(
     os.environ.get("HOST_EDGE_GATEWAY_BASE_URL") or "http://192.168.1.101:19000"
 ).rstrip("/")
+DEFAULT_EDGE_BASE_URL = str(
+    os.environ.get("HOST_EDGE_RPC_BASE_URL")
+    or os.environ.get("EDGE_RPC_BASE_URL")
+    or "http://192.168.1.101:17800"
+).rstrip("/")
 DEFAULT_HOST_LOG_PATH = ROOT / "runtime" / "host" / "logs" / "host.stdout.log"
 DEFAULT_REPORT_DIR = ROOT / "artifacts" / "release" / "reports"
 REQUEST_ID_RE = re.compile(r"request_id=(req_[0-9a-f]+(?:::[^\\s]+)?)")
@@ -143,6 +148,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Audit SQLite path (default: {DEFAULT_DB_PATH})",
     )
     parser.add_argument(
+        "--edge-base-url",
+        default=DEFAULT_EDGE_BASE_URL,
+        help=f"Edge RPC base URL (default: {DEFAULT_EDGE_BASE_URL})",
+    )
+    parser.add_argument(
         "--host-log-path",
         default=str(DEFAULT_HOST_LOG_PATH),
         help=f"Host stdout log path (default: {DEFAULT_HOST_LOG_PATH})",
@@ -157,6 +167,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=180,
         help="Per-case wait timeout in seconds (default: 180)",
+    )
+    parser.add_argument(
+        "--inter-case-settle-s",
+        type=int,
+        default=20,
+        help="Max seconds to wait for edge voice pipeline to become idle between cases (default: 20)",
+    )
+    parser.add_argument(
+        "--edge-http-timeout-s",
+        type=int,
+        default=8,
+        help="Edge health HTTP timeout in seconds while waiting for idle (default: 8)",
     )
     parser.add_argument(
         "--case",
@@ -252,6 +274,93 @@ def _send_gateway_webhook(
         }
 
 
+def _http_json(*, method: str, url: str, timeout_s: int) -> dict[str, Any]:
+    request = urllib.request.Request(url, method=method.upper())
+    try:
+        with urllib.request.urlopen(request, timeout=max(1, int(timeout_s))) as response:
+            raw_body = response.read().decode("utf-8", errors="replace")
+            try:
+                parsed_body = json.loads(raw_body)
+            except json.JSONDecodeError:
+                parsed_body = {"raw": raw_body}
+            return {
+                "ok": True,
+                "status_code": response.status,
+                "body": parsed_body,
+            }
+    except urllib.error.HTTPError as exc:
+        raw_body = exc.read().decode("utf-8", errors="replace")
+        try:
+            parsed_body = json.loads(raw_body)
+        except json.JSONDecodeError:
+            parsed_body = {"raw": raw_body}
+        return {"ok": False, "status_code": exc.code, "body": parsed_body}
+    except Exception as exc:  # pragma: no cover - live runtime branch
+        return {"ok": False, "status_code": None, "body": {"error": f"{type(exc).__name__}: {exc}"}}
+
+
+def _edge_voice_pipeline_idle(edge_health_body: Any) -> bool:
+    if not isinstance(edge_health_body, dict):
+        return False
+    event = edge_health_body.get("event")
+    if not isinstance(event, dict):
+        return False
+    components = event.get("components")
+    if not isinstance(components, dict):
+        return False
+
+    resource_gate = components.get("resource_gate")
+    resource_gate_map = dict(resource_gate) if isinstance(resource_gate, dict) else {}
+    snapshot = dict(resource_gate_map.get("snapshot") or {})
+    metrics = dict(snapshot.get("metrics") or {})
+    active_tasks = list(snapshot.get("active_tasks") or [])
+    queue_depth = int(metrics.get("queue_depth", 0) or 0)
+
+    playback = components.get("tts_playback_device")
+    playback_map = dict(playback) if isinstance(playback, dict) else {}
+    playback_health = dict(playback_map.get("health") or {})
+    playing = bool(playback_health.get("playing"))
+
+    voice_pipeline = components.get("voice_pipeline")
+    voice_pipeline_map = dict(voice_pipeline) if isinstance(voice_pipeline, dict) else {}
+    voice_pipeline_health = dict(voice_pipeline_map.get("health") or {})
+    mouth_sync_thread_alive = bool(voice_pipeline_health.get("mouth_sync_thread_alive"))
+
+    return queue_depth <= 0 and not active_tasks and not playing and not mouth_sync_thread_alive
+
+
+def _wait_for_edge_voice_idle(
+    *,
+    edge_base_url: str,
+    settle_s: int,
+    http_timeout_s: int,
+) -> dict[str, Any]:
+    if settle_s <= 0:
+        return {"idle": True, "reason": "settle_disabled"}
+    deadline = time.time() + settle_s
+    last_snapshot: dict[str, Any] | None = None
+    while time.time() < deadline:
+        snapshot = _http_json(
+            method="GET",
+            url=f"{edge_base_url}/v1/edge/health",
+            timeout_s=http_timeout_s,
+        )
+        last_snapshot = snapshot
+        body = snapshot.get("body")
+        if snapshot.get("ok") and int(snapshot.get("status_code") or 0) == 200 and _edge_voice_pipeline_idle(body):
+            return {
+                "idle": True,
+                "reason": "edge_voice_pipeline_idle",
+                "snapshot": snapshot,
+            }
+        time.sleep(1)
+    return {
+        "idle": False,
+        "reason": "edge_voice_pipeline_busy_or_unreachable",
+        "snapshot": last_snapshot,
+    }
+
+
 def _connect_db(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(str(db_path))
     connection.row_factory = sqlite3.Row
@@ -276,6 +385,42 @@ def _fetch_graph_by_session(
             LIMIT 1
             """,
             (session_id, min_ts_ms - 1000),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        try:
+            nodes = json.loads(record.get("nodes_json") or "[]")
+        except json.JSONDecodeError:
+            nodes = []
+        record["node_ids"] = [str(node.get("node_id")) for node in nodes if node.get("node_id")]
+        record.pop("nodes_json", None)
+        return record
+    finally:
+        connection.close()
+
+
+def _fetch_graph_by_request_id(
+    *,
+    db_path: Path,
+    request_id: str,
+    min_ts_ms: int,
+) -> dict[str, Any] | None:
+    if not request_id:
+        return None
+    connection = _connect_db(db_path)
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT request_id, session_id, total_latency_ms, status, reason_code, node_count, nodes_json, ts_ms
+            FROM graph_run_trace
+            WHERE request_id = ? AND ts_ms >= ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (request_id, min_ts_ms - 1000),
         )
         row = cursor.fetchone()
         if row is None:
@@ -393,8 +538,57 @@ def _fetch_input_completed_event(
                     and str(payload.get("conversation_id") or "").strip() == conversation_id
                 ):
                     return record
+            return None
 
         return normalized_rows[0]
+    finally:
+        connection.close()
+
+
+def _fetch_gateway_event_by_conversation(
+    db_path: Path,
+    *,
+    conversation_id: str,
+    min_ts_ms: int,
+    event_types: tuple[str, ...] = (
+        "INPUT_ROUTE_DECIDED",
+        "INPUT_COMPLETED",
+        "INPUT_DISPATCHED",
+        "INPUT_ACCEPTED",
+    ),
+) -> dict[str, Any] | None:
+    if not conversation_id:
+        return None
+    connection = _connect_db(db_path)
+    try:
+        cursor = connection.cursor()
+        placeholders = ",".join("?" for _ in event_types)
+        params: list[Any] = [int(min_ts_ms) - 1000, *event_types]
+        cursor.execute(
+            f"""
+            SELECT request_id, event_type, status, reason_code, detail, payload, ts_ms
+            FROM voice_event_log
+            WHERE ts_ms >= ? AND event_type IN ({placeholders})
+            ORDER BY id DESC
+            LIMIT 120
+            """,
+            params,
+        )
+        for row in cursor.fetchall():
+            record = dict(row)
+            payload_raw = record.get("payload")
+            if isinstance(payload_raw, str) and payload_raw.strip():
+                try:
+                    record["payload"] = json.loads(payload_raw)
+                except json.JSONDecodeError:
+                    record["payload"] = {"raw": payload_raw}
+            payload = dict(record.get("payload") or {})
+            if (
+                payload.get("source") == "GATEWAY"
+                and str(payload.get("conversation_id") or "").strip() == conversation_id
+            ):
+                return record
+        return None
     finally:
         connection.close()
 
@@ -407,6 +601,7 @@ def _extract_request_id(log_chunk: str, *, conversation_id: str | None = None) -
             match = REQUEST_ID_RE.search(bound_lines[-1])
             if match:
                 return match.group(1)
+        return None
     matches = REQUEST_ID_RE.findall(log_chunk)
     return matches[-1] if matches else None
 
@@ -530,14 +725,20 @@ def _run_case(
     request_id: str | None = None
 
     while time.time() < deadline:
-        graph_row = _fetch_graph_by_session(
-            db_path=db_path,
-            session_id=conversation_id,
+        gateway_event = _fetch_gateway_event_by_conversation(
+            db_path,
+            conversation_id=conversation_id,
             min_ts_ms=sent_ts_ms,
         )
-        if graph_row is not None:
-            request_id = str(graph_row.get("request_id") or "").strip() or None
-            break
+        if gateway_event is not None:
+            request_id = str(gateway_event.get("request_id") or "").strip() or None
+            if request_id:
+                graph_row = _fetch_graph_by_request_id(
+                    db_path=db_path,
+                    request_id=request_id,
+                    min_ts_ms=sent_ts_ms,
+                )
+                break
         log_chunk = _read_log_chunk(host_log_path, log_offset)
         request_id = _extract_request_id(log_chunk, conversation_id=conversation_id)
         if request_id and (
@@ -550,6 +751,12 @@ def _run_case(
     log_chunk = _read_log_chunk(host_log_path, log_offset)
     if request_id is None:
         request_id = _extract_request_id(log_chunk, conversation_id=conversation_id)
+    if request_id and graph_row is None:
+        graph_row = _fetch_graph_by_request_id(
+            db_path=db_path,
+            request_id=request_id,
+            min_ts_ms=sent_ts_ms,
+        )
     input_completed = None
     if request_id or conversation_id:
         while time.time() < deadline:
@@ -662,6 +869,16 @@ def main(argv: list[str] | None = None) -> int:
             f"  -> {outcome.verdict} request_id={outcome.request_id} targets={outcome.targets_seen}{voice_summary} summary={outcome.summary}",
             flush=True,
         )
+        if index < len(cases):
+            settle_result = _wait_for_edge_voice_idle(
+                edge_base_url=args.edge_base_url,
+                settle_s=int(args.inter_case_settle_s),
+                http_timeout_s=int(args.edge_http_timeout_s),
+            )
+            print(
+                f"     settle idle={settle_result.get('idle')} reason={settle_result.get('reason')}",
+                flush=True,
+            )
 
     report = _build_report(
         gateway_base_url=args.gateway_base_url,
@@ -677,4 +894,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

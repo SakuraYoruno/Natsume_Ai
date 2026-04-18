@@ -78,6 +78,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     metrics.inc_chat()
     request_id = getattr(request.state, "request_id", None) or new_request_id()
     ts_ms = int(time.time() * 1000)
+    request_started_ms = int(getattr(request.state, "request_started_ms", ts_ms) or ts_ms)
     session_id = request_body.session_id or f"session::{request_id}"
     request_body.person_id = resolve_person_id(
         getattr(request_body, "person_id", None),
@@ -105,24 +106,14 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
-        request_id=request_id,
-        session_id=session_id,
-        user_message=request_body.message,
-        person_id=request_body.person_id,
-        existing_intent_draft=request_body.intent_draft,
-        source="chat_handler",
-        input_source=getattr(request_body, "input_source", None),
-        ts_ms=ts_ms,
-    )
-
     return StreamingResponse(
         _unified_chat_sse_generator(
             request_body=request_body,
             request_id=request_id,
             session_id=session_id,
             ts_ms=ts_ms,
-            intent_draft=intent_draft,
+            request_started_ms=request_started_ms,
+            intent_draft=None,
             metrics=metrics,
             _pre_classified_scene=None,  # Phase XV: 场景类型由 cortex_orchestrator 决定
         ),
@@ -140,7 +131,8 @@ async def _unified_chat_sse_generator(
     request_id: str,
     session_id: str,
     ts_ms: int,
-    intent_draft: Dict[str, Any],
+    request_started_ms: int,
+    intent_draft: Dict[str, Any] | None,
     metrics: Any,
     _pre_classified_scene: str | None = None,
     _pre_recall_evidence: list[dict] | None = None,
@@ -150,6 +142,7 @@ async def _unified_chat_sse_generator(
 
     流程：
       PRESENCE(THINKING)
+      → thalamus canonical intent 收口（若未预传入）
       → Governor 鉴权（若 _pre_approved_governor_result 传入则跳过重复鉴权）
       → PRESENCE(GOV_APPROVED)
       → Phase XV：场景类型由 cortex_orchestrator 内的 tribe 层决定（已废弃 pre_intent_classifier）
@@ -158,9 +151,37 @@ async def _unified_chat_sse_generator(
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
+    first_presence_delay_ms = max(0, int(time.time() * 1000) - int(request_started_ms or ts_ms))
+    _logger.info(
+        "[%s] chat_handler first_presence_delay_ms=%s",
+        request_id,
+        first_presence_delay_ms,
+    )
     yield _sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
     try:
+        if intent_draft is None:
+            classify_started_ms = int(time.time() * 1000)
+            intent_draft = await get_thalamus_agent().classify_and_compile_intent_draft(
+                request_id=request_id,
+                session_id=session_id,
+                user_message=request_body.message,
+                person_id=request_body.person_id,
+                existing_intent_draft=request_body.intent_draft,
+                source="chat_handler",
+                input_source=getattr(request_body, "input_source", None),
+                ts_ms=ts_ms,
+            )
+            classify_latency_ms = int(time.time() * 1000) - classify_started_ms
+            _logger.info(
+                "[%s] chat_handler thalamus classify_latency_ms=%s request_to_classify_ms=%s route=%s reason=%s",
+                request_id,
+                classify_latency_ms,
+                max(0, classify_started_ms - int(request_started_ms or ts_ms)),
+                str((dict(intent_draft or {})).get("route") or ""),
+                str((dict(intent_draft or {})).get("route_reason") or (dict(intent_draft or {})).get("reason_code") or ""),
+            )
+
         emotion_context = resolve_chat_emotion_context(request_body=request_body)
         governance_snapshot = build_chat_governance_snapshot(
             emotion_context=emotion_context,
@@ -182,12 +203,24 @@ async def _unified_chat_sse_generator(
             )
         else:
             engine = get_intent_engine()
+            governor_started_ms = int(time.time() * 1000)
             governor_result = await asyncio.to_thread(
                 engine.evaluate_intent,
                 raw_intent=intent_draft,
                 request_id=request_id,
                 thread_id=request_body.thread_id,
                 governance_snapshot=governance_snapshot,
+            )
+            governor_latency_ms = int(time.time() * 1000) - governor_started_ms
+            if isinstance(governor_result, dict):
+                governor_result.setdefault("latency_ms", governor_latency_ms)
+            _logger.info(
+                "[%s] chat_handler governor_latency_ms=%s request_to_governor_ms=%s decision=%s reason=%s",
+                request_id,
+                governor_latency_ms,
+                max(0, governor_started_ms - int(request_started_ms or ts_ms)),
+                str((dict(governor_result or {})).get("decision") or ""),
+                str((dict(governor_result or {})).get("reason_code") or ""),
             )
 
         decision = governor_result.get("decision")

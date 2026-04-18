@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import asyncio
 
-from edge_client.actuators.vts_driver import VtsConfig, _authenticate_vts
+from pathlib import Path
+
+from edge_client.actuators.vts_driver import (
+    VtsConfig,
+    _authenticate_vts,
+    normalize_vts_token_path,
+)
 
 
 class _FakeVtsRequestFactory:
@@ -100,3 +106,16 @@ def test_vts_config_normalizes_known_plugin_name_typo() -> None:
     cfg = VtsConfig(plugin_name=" NastumeAi ")
 
     assert cfg.plugin_name == "NatsumeAi"
+
+
+def test_vts_config_normalizes_relative_token_path_to_repo_root() -> None:
+    cfg = VtsConfig(token_path=".vts_token")
+
+    assert Path(cfg.token_path).is_absolute()
+    assert Path(cfg.token_path).name == ".vts_token"
+
+
+def test_normalize_vts_token_path_preserves_absolute_path() -> None:
+    path = normalize_vts_token_path(r"D:/custom/location/token.txt")
+
+    assert path == r"D:\custom\location\token.txt"

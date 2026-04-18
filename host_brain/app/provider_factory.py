@@ -218,7 +218,7 @@ def resolve_host_llm_model_id(provider_name: str) -> str:
     if override_model:
         return override_model
     if provider == PROVIDER_GEMINI:
-        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash").strip() or "gemini-2.5-flash"
+        return str(os.environ.get("HOST_GEMINI_MODEL_ID") or "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
     if provider == PROVIDER_CODEX:
         return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if provider == PROVIDER_OPENAI:

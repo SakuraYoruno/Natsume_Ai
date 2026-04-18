@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Brain,
@@ -12,22 +12,10 @@ import {
   Sparkles,
   Waves,
 } from 'lucide-react'
-import {
-  fetchCapabilityGapStats,
-  fetchInputHumanoidLoopAlerts,
-  fetchInputHumanoidLoopDiagnostics,
-  fetchInputHumanoidLoopHotspotTrend,
-  fetchInputHumanoidLoopHotspots,
-  fetchInputHumanoidLoopRemediation,
-  fetchInputHumanoidLoopSourceCorrelation,
-  fetchInputHumanoidLoopTrend,
-  fetchInputHumanoidLoopStats,
-  fetchMemoryStats,
-  fetchServicesHealth,
-  fetchSubsystemsStats,
-  fetchVtsStats,
-} from '../api/obs.js'
 import BackgroundRuntimeCard from '../components/BackgroundRuntimeCard.jsx'
+import DrilldownLink from '../components/obs/DrilldownLink.jsx'
+import RepresentativeRequests from '../components/obs/RepresentativeRequests.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import LineChart from '../components/charts/LineChart.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
@@ -39,8 +27,12 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import VitalLoopSummaryPanel from '../components/VitalLoopSummaryPanel.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { createRequestRefs } from '../models/observabilityRefs.js'
+import { resolveLoadState } from '../models/loadState.js'
+import { useDigitalLifeOverviewQuery } from '../queries/digitalLifeQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { getGrowthSignals } from '../utils/growthSignals.js'
+import { summarizeSuccessRateSamples } from '../utils/successRate.js'
 import {
   compactText,
   formatAbsenceBand,
@@ -67,6 +59,13 @@ const DOMAIN_STYLES = {
   wired: 'border-green-200 bg-green-50 text-green-700',
   degraded: 'border-orange-200 bg-orange-50 text-orange-700',
   pending: 'border-gray-200 bg-gray-50 text-gray-500',
+}
+
+const RUNTIME_PENDING_META = {
+  emoji: '◌',
+  label: '待连接',
+  desc: '运行快照暂不可用',
+  semantic: '当前尚未接到数字生命体运行快照，顶部态势会以占位信息展示。',
 }
 
 function formatPercent(value) {
@@ -202,22 +201,33 @@ function LifeSection({ title, hint, actionTo, actionLabel, children }) {
 export default function DigitalLifeOverview() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
   const [windowMinutes, setWindowMinutes] = useState(360)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [vtsData, setVtsData] = useState(null)
-  const [memoryData, setMemoryData] = useState(null)
-  const [servicesData, setServicesData] = useState(null)
-  const [subsystemsData, setSubsystemsData] = useState(null)
-  const [capabilityGapData, setCapabilityGapData] = useState(null)
-  const [humanoidLoopData, setHumanoidLoopData] = useState(null)
-  const [humanoidLoopTrendData, setHumanoidLoopTrendData] = useState(null)
-  const [humanoidLoopAlertsData, setHumanoidLoopAlertsData] = useState(null)
-  const [humanoidLoopRemediationData, setHumanoidLoopRemediationData] = useState(null)
-  const [humanoidLoopDiagnosticsData, setHumanoidLoopDiagnosticsData] = useState(null)
-  const [humanoidLoopHotspotsData, setHumanoidLoopHotspotsData] = useState(null)
-  const [humanoidLoopHotspotTrendData, setHumanoidLoopHotspotTrendData] = useState(null)
-  const [humanoidLoopSourceCorrelationData, setHumanoidLoopSourceCorrelationData] = useState(null)
+  const {
+    vtsData,
+    memoryData,
+    servicesData,
+    subsystemsData,
+    capabilityGapData,
+    humanoidLoopData,
+    humanoidLoopTrendData,
+    humanoidLoopAlertsData,
+    humanoidLoopRemediationData,
+    humanoidLoopDiagnosticsData,
+    humanoidLoopHotspotsData,
+    humanoidLoopHotspotTrendData,
+    humanoidLoopSourceCorrelationData,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt: lastOverviewUpdatedAt,
+    refetch: refetchOverview,
+  } = useDigitalLifeOverviewQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const {
     runtimeSnapshot,
@@ -225,116 +235,22 @@ export default function DigitalLifeOverview() {
     loading: runtimeLoading,
     error: runtimeError,
     reload: reloadRuntime,
+    lastUpdatedAt: runtimeUpdatedAt,
   } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes,
   })
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [
-        vtsRes,
-        memoryRes,
-        servicesRes,
-        subsystemsRes,
-        capabilityGapRes,
-        humanoidLoopRes,
-        humanoidLoopTrendRes,
-        humanoidLoopAlertsRes,
-        humanoidLoopRemediationRes,
-        humanoidLoopDiagnosticsRes,
-        humanoidLoopHotspotsRes,
-        humanoidLoopHotspotTrendRes,
-        humanoidLoopSourceCorrelationRes,
-      ] = await Promise.all([
-        fetchVtsStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchServicesHealth({ window_minutes: windowMinutes }).catch(() => null),
-        fetchSubsystemsStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchCapabilityGapStats({
-          limit_recent: 30,
-          limit_hotspots: 8,
-          limit_candidates: 8,
-          min_candidate_detected: 3,
-          min_candidate_sessions: 2,
-          min_candidate_failure_rate: 0.35,
-          min_candidate_failed: 2,
-        }).catch(() => null),
-        fetchInputHumanoidLoopStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchInputHumanoidLoopTrend({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-        }).catch(() => null),
-        fetchInputHumanoidLoopAlerts({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-          min_bucket_requests: 3,
-        }).catch(() => null),
-        fetchInputHumanoidLoopRemediation({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-          min_bucket_requests: 3,
-        }).catch(() => null),
-        fetchInputHumanoidLoopDiagnostics({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-          min_bucket_requests: 3,
-        }).catch(() => null),
-        fetchInputHumanoidLoopHotspots({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-          min_bucket_requests: 3,
-        }).catch(() => null),
-        fetchInputHumanoidLoopHotspotTrend({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-        }).catch(() => null),
-        fetchInputHumanoidLoopSourceCorrelation({
-          window_minutes: windowMinutes,
-          interval_minutes: toTrendIntervalMinutes(windowMinutes),
-          min_bucket_requests: 3,
-        }).catch(() => null),
-      ])
-
-      setVtsData(vtsRes)
-      setMemoryData(memoryRes)
-      setServicesData(servicesRes)
-      setSubsystemsData(subsystemsRes)
-      setCapabilityGapData(capabilityGapRes)
-      setHumanoidLoopData(humanoidLoopRes)
-      setHumanoidLoopTrendData(humanoidLoopTrendRes)
-      setHumanoidLoopAlertsData(humanoidLoopAlertsRes)
-      setHumanoidLoopRemediationData(humanoidLoopRemediationRes)
-      setHumanoidLoopDiagnosticsData(humanoidLoopDiagnosticsRes)
-      setHumanoidLoopHotspotsData(humanoidLoopHotspotsRes)
-      setHumanoidLoopHotspotTrendData(humanoidLoopHotspotTrendRes)
-      setHumanoidLoopSourceCorrelationData(humanoidLoopSourceCorrelationRes)
-    } catch (loadError) {
-      setError(loadError.message || '数字生命体总览加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
-
   const refreshAll = useCallback(async () => {
-    await Promise.allSettled([load(), reloadRuntime()])
-  }, [load, reloadRuntime])
+    await Promise.allSettled([refetchOverview(), reloadRuntime()])
+  }, [refetchOverview, reloadRuntime])
 
-  const modeKey = String(runtimeSnapshot?.sys_mode || 'normal').toLowerCase()
-  const modeMeta = MODE_META[modeKey] || MODE_META.normal
+  const hasRuntimeSnapshot = Boolean(runtimeSnapshot)
+  const modeKey = String(runtimeSnapshot?.sys_mode || '').toLowerCase()
+  const modeMeta = hasRuntimeSnapshot
+    ? (MODE_META[modeKey] || MODE_META.normal)
+    : RUNTIME_PENDING_META
   const runtimeAlerts = buildDigitalLifeAlerts(runtimeSnapshot, { promptStats })
   const nonLiveSlots = getNonLiveSlots(runtimeSnapshot)
   const bondState = runtimeSnapshot?.bond_state || {}
@@ -344,12 +260,25 @@ export default function DigitalLifeOverview() {
   const silenceState = runtimeSnapshot?.silence_state || {}
   const offlineState = runtimeSnapshot?.offline_state || {}
   const selfModelSnapshot = runtimeSnapshot?.self_model_snapshot || {}
+  const hasMemoryData = Boolean(memoryData)
   const topEmotion = emotionContext?.emotion_tag || vtsData?.top_emotions?.[0]?.emotion_tag
   const memorySubsystems = memoryData?.subsystems || []
-
-  const avgMemorySuccessRate = memorySubsystems.length > 0
-    ? Math.round(memorySubsystems.reduce((sum, item) => sum + Number(item?.success_rate || 0), 0) / memorySubsystems.length)
-    : null
+  const {
+    averageRate: avgMemorySuccessRate,
+    sampledCount: sampledMemorySubsystemCount,
+    configuredCount: configuredMemorySubsystemCount,
+  } = summarizeSuccessRateSamples(memorySubsystems)
+  const hasMemorySamples = avgMemorySuccessRate != null
+  const memorySummaryText = !hasMemoryData
+    ? '暂不可用'
+    : hasMemorySamples
+    ? `${avgMemorySuccessRate}% · ${sampledMemorySubsystemCount}/${configuredMemorySubsystemCount} 个子系统`
+    : '无样本'
+  const memorySummaryTextEn = !hasMemoryData
+    ? 'unavailable'
+    : hasMemorySamples
+    ? `${avgMemorySuccessRate}% / ${sampledMemorySubsystemCount}/${configuredMemorySubsystemCount} subsystems`
+    : 'no sample'
 
   const activeSubsystemCount = (subsystemsData?.subsystems || []).filter((item) => Number(item?.total || 0) > 0).length
   const currentBondStage = formatStage(bondState.current_stage)
@@ -367,14 +296,27 @@ export default function DigitalLifeOverview() {
   const avgForgeHealth = Number(forgeQualitySummary?.avg_health_score ?? 0)
   const forgeCriticalCount = Number(forgeQualitySummary?.critical_proposals ?? 0)
   const forgeUnhealthyCount = Number(forgeQualitySummary?.unhealthy_proposals ?? 0)
+  const hasHumanoidLoopData = Boolean(humanoidLoopData)
   const humanoidClosedLoopRate = formatPercent(humanoidLoopData?.closed_loop_rate)
   const humanoidAckTouchRate = formatPercent(humanoidLoopData?.ack_touch_rate)
   const humanoidProgressTouchRate = formatPercent(humanoidLoopData?.progress_touch_rate)
   const humanoidDeviationRecoveryRate = formatPercent(humanoidLoopData?.deviation_recovery_rate)
-  const humanoidTotalRequests = Number(humanoidLoopData?.total_gateway_requests ?? 0)
-  const humanoidClosedLoopRequests = Number(humanoidLoopData?.closed_loop_requests ?? 0)
-  const humanoidFailedRequests = Number(humanoidLoopData?.failed_requests ?? 0)
-  const humanoidDeviationDetected = Number(humanoidLoopData?.deviation_detected_requests ?? 0)
+  const humanoidTotalRequests = hasHumanoidLoopData ? Number(humanoidLoopData?.total_gateway_requests ?? 0) : null
+  const humanoidClosedLoopRequests = hasHumanoidLoopData ? Number(humanoidLoopData?.closed_loop_requests ?? 0) : null
+  const humanoidFailedRequests = hasHumanoidLoopData ? Number(humanoidLoopData?.failed_requests ?? 0) : 0
+  const humanoidDeviationDetected = hasHumanoidLoopData ? Number(humanoidLoopData?.deviation_detected_requests ?? 0) : null
+  const humanoidClosedLoopHint = humanoidClosedLoopRequests != null && humanoidTotalRequests != null
+    ? `${humanoidClosedLoopRequests}/${humanoidTotalRequests}`
+    : '--/--'
+  const humanoidAckHint = hasHumanoidLoopData
+    ? `确认 ${humanoidLoopData?.ack_confirmed_requests ?? 0}`
+    : '确认 —'
+  const humanoidProgressHint = hasHumanoidLoopData
+    ? `触达 ${humanoidLoopData?.progress_touched_requests ?? 0}`
+    : '触达 —'
+  const humanoidDeviationHint = humanoidDeviationDetected != null
+    ? `检测 ${humanoidDeviationDetected}`
+    : '检测 —'
   const humanoidTrendLabels = humanoidLoopTrendData?.timeseries_labels || []
   const humanoidClosedLoopRateSeries = humanoidLoopTrendData?.timeseries_closed_loop_rate || []
   const humanoidAckTouchRateSeries = humanoidLoopTrendData?.timeseries_ack_touch_rate || []
@@ -386,48 +328,86 @@ export default function DigitalLifeOverview() {
   const humanoidTrendClosedLoopColor = getHumanoidTrendTone(humanoidAlertStatus)
   const humanoidRemediationSteps = humanoidLoopRemediationData?.steps || []
   const humanoidRepresentativeRequests = humanoidLoopRemediationData?.representative_requests || []
+  const humanoidRepresentativeRefs = createRequestRefs(humanoidRepresentativeRequests)
   const humanoidDiagnostics = humanoidLoopDiagnosticsData?.diagnostics || []
   const humanoidHotspots = humanoidLoopHotspotsData?.hotspots || []
   const humanoidHotspotTrendLabels = humanoidLoopHotspotTrendData?.timeseries_labels || []
   const humanoidHotspotTrendSeries = humanoidLoopHotspotTrendData?.series || []
   const humanoidHotspotTrendBuckets = humanoidLoopHotspotTrendData?.dominant_buckets || []
   const humanoidSourceItems = humanoidLoopSourceCorrelationData?.items || []
+  const overviewUpdatedAt = Math.max(lastOverviewUpdatedAt || 0, runtimeUpdatedAt || 0) || null
+  const overviewTrackedSections = [
+    hasRuntimeSnapshot,
+    hasMemoryData,
+    hasHumanoidLoopData,
+    Boolean(vtsData),
+    Boolean(servicesData),
+    Boolean(capabilityGapData),
+  ].filter(Boolean).length
+  const overviewLoadState = resolveLoadState({
+    loading: loading || refreshing || runtimeLoading,
+    error: error || runtimeError,
+    hasData: overviewTrackedSections > 0,
+    hasSamples: hasRuntimeSnapshot || hasMemorySamples || (humanoidTotalRequests ?? 0) > 0,
+    available: true,
+  })
+  const runtimeVitalsLoadState = resolveLoadState({
+    loading: runtimeLoading,
+    error: runtimeError,
+    hasData: hasRuntimeSnapshot,
+    hasSamples: hasRuntimeSnapshot,
+    available: hasRuntimeSnapshot,
+  })
+  const gatewayLoopLoadState = resolveLoadState({
+    loading,
+    error,
+    hasData: hasHumanoidLoopData,
+    hasSamples: (humanoidTotalRequests ?? 0) > 0,
+    available: hasHumanoidLoopData,
+  })
+  const memoryOverviewLoadState = resolveLoadState({
+    loading,
+    error,
+    hasData: hasMemoryData,
+    hasSamples: hasMemorySamples,
+    available: hasMemoryData,
+  })
 
   const pulseNodes = [
-    { label: '存在态', value: modeMeta.label, tone: 'primary', active: true },
+    { label: '存在态', value: modeMeta.label, tone: 'primary', active: hasRuntimeSnapshot },
     { label: '关系', value: currentBondStage, tone: 'rose', active: Boolean(bondState.current_stage) },
     { label: '情绪', value: currentEmotion, tone: 'pink', active: Boolean(topEmotion) },
     { label: '回复', value: replyPosture, tone: 'violet', active: Boolean(replyPosture) },
     {
       label: '记忆',
-      value: avgMemorySuccessRate != null ? `${avgMemorySuccessRate}% · ${memorySubsystems.length} 个子系统` : '--',
+      value: memorySummaryText,
       tone: 'teal',
-      active: avgMemorySuccessRate != null,
+      active: hasMemorySamples,
     },
     {
       label: '内在世界',
-      value: offlineState.absence_band ? absenceBand : '在线',
+      value: offlineState.absence_band ? absenceBand : hasRuntimeSnapshot ? '在线' : '待连接',
       tone: 'amber',
-      active: Boolean(offlineState.absence_band),
+      active: hasRuntimeSnapshot && Boolean(offlineState.absence_band),
     },
     {
       label: '自我模型',
-      value: growthSignals.hasAnyGrowth ? '已形成样本' : '待成形',
+      value: hasRuntimeSnapshot ? (growthSignals.hasAnyGrowth ? '已形成样本' : '待成形') : '待连接',
       tone: 'gray',
-      active: growthSignals.hasAnyGrowth,
+      active: hasRuntimeSnapshot && growthSignals.hasAnyGrowth,
     },
   ]
 
   const pulseNodesView = [
-    { label: 'Mode', value: modeMeta.label, tone: 'primary', active: true },
+    { label: 'Mode', value: modeMeta.label, tone: 'primary', active: hasRuntimeSnapshot },
     { label: 'Bond', value: currentBondStage, tone: 'rose', active: Boolean(bondState.current_stage) },
     { label: 'Emotion', value: currentEmotion, tone: 'pink', active: Boolean(topEmotion) },
     { label: 'Reply', value: replyPosture, tone: 'violet', active: Boolean(replyPosture) },
     {
       label: 'Memory',
-      value: avgMemorySuccessRate != null ? `${avgMemorySuccessRate}% / ${memorySubsystems.length} subsystems` : '--',
+      value: memorySummaryTextEn,
       tone: 'teal',
-      active: avgMemorySuccessRate != null,
+      active: hasMemorySamples,
     },
     {
       label: 'Forge',
@@ -439,15 +419,15 @@ export default function DigitalLifeOverview() {
     },
     {
       label: 'Inner',
-      value: offlineState.absence_band ? absenceBand : 'online',
+      value: offlineState.absence_band ? absenceBand : hasRuntimeSnapshot ? 'online' : 'pending',
       tone: 'amber',
-      active: Boolean(offlineState.absence_band),
+      active: hasRuntimeSnapshot && Boolean(offlineState.absence_band),
     },
     {
       label: 'Self',
-      value: growthSignals.hasAnyGrowth ? 'available' : 'warming',
+      value: hasRuntimeSnapshot ? (growthSignals.hasAnyGrowth ? 'available' : 'warming') : 'pending',
       tone: 'gray',
-      active: growthSignals.hasAnyGrowth,
+      active: hasRuntimeSnapshot && growthSignals.hasAnyGrowth,
     },
   ]
 
@@ -457,69 +437,89 @@ export default function DigitalLifeOverview() {
         icon: Orbit,
         title: '存在态轴',
         desc: `${modeMeta.emoji} ${modeMeta.label} · ${modeMeta.desc}`,
-        status: 'wired',
+        status: hasRuntimeSnapshot ? 'wired' : 'pending',
         actionTo: '/runtime-mode',
         actionLabel: '查看存在态轴',
       },
       {
         icon: Heart,
         title: '关系状态',
-        desc: bondState.current_stage
+        desc: !hasRuntimeSnapshot
+          ? '等待运行快照恢复后补齐关系阶段与趋势摘要。'
+          : bondState.current_stage
           ? `${currentBondStage} · 趋势 ${formatTrend(bondState.trend)}`
           : '关系系统已在线，但当前窗口仍缺少阶段样本。',
-        status: bondState.current_stage ? 'wired' : 'degraded',
+        status: !hasRuntimeSnapshot ? 'pending' : bondState.current_stage ? 'wired' : 'degraded',
         actionTo: '/bond',
         actionLabel: '查看关系',
       },
       {
         icon: Waves,
         title: '情绪与表情',
-        desc: topEmotion
+        desc: !hasRuntimeSnapshot && !topEmotion
+          ? '等待运行快照恢复后补齐情绪与表情摘要。'
+          : topEmotion
           ? `当前情绪 ${currentEmotion} · VTS 降级率 ${vtsData?.degrade_rate ?? 0}%`
           : '情绪上下文已接入，但当前窗口还没有可用的表情样本。',
-        status: topEmotion || runtimeSnapshot?.slot_status?.emotion_context === 'live' ? 'wired' : 'degraded',
+        status: !hasRuntimeSnapshot && !topEmotion
+          ? 'pending'
+          : topEmotion || runtimeSnapshot?.slot_status?.emotion_context === 'live'
+            ? 'wired'
+            : 'degraded',
         actionTo: '/emotion',
         actionLabel: '查看情绪',
       },
       {
         icon: Database,
         title: '记忆系统',
-        desc: avgMemorySuccessRate != null
-          ? `平均成功率 ${avgMemorySuccessRate}% · ${memorySubsystems.length} 个子系统`
-          : '记忆页已接入，但首页摘要暂未形成样本。',
-        status: avgMemorySuccessRate != null ? 'wired' : 'degraded',
+        desc: !hasMemoryData
+          ? '记忆统计暂时不可用，等待接口恢复后再刷新摘要。'
+          : hasMemorySamples
+          ? `平均成功率 ${avgMemorySuccessRate}% · ${sampledMemorySubsystemCount}/${configuredMemorySubsystemCount} 个子系统有样本`
+          : '记忆页已接入，但当前窗口还没有记忆流量样本。',
+        status: hasMemoryData && hasMemorySamples ? 'wired' : 'pending',
         actionTo: '/memory',
         actionLabel: '查看记忆',
       },
       {
         icon: Sparkles,
         title: '回复策略',
-        desc: silenceState.willingness_level
+        desc: !hasRuntimeSnapshot
+          ? '等待运行快照恢复后补齐意愿与姿态摘要。'
+          : silenceState.willingness_level
           ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
           : '策略系统已接入，但当前窗口缺少稳定快照。',
-        status: silenceState.willingness_level ? 'wired' : 'degraded',
+        status: !hasRuntimeSnapshot ? 'pending' : silenceState.willingness_level ? 'wired' : 'degraded',
         actionTo: '/response-policy',
         actionLabel: '查看策略',
       },
       {
         icon: Brain,
         title: '自我模型',
-        desc: growthSignals.hasAnyGrowth
+        desc: !hasRuntimeSnapshot
+          ? '等待运行快照恢复后补齐成长与自我观察摘要。'
+          : growthSignals.hasAnyGrowth
           ? growthSignals.overviewSummary
           : selfModelSnapshot.recent_mood_trend
             ? `近期情绪趋势 ${formatTrend(selfModelSnapshot.recent_mood_trend)}`
             : '自我模型在线，等待更多成长样本聚合。',
-        status: growthSignals.hasAnyGrowth || selfModelSnapshot.recent_mood_trend ? 'wired' : 'degraded',
+        status: !hasRuntimeSnapshot
+          ? 'pending'
+          : growthSignals.hasAnyGrowth || selfModelSnapshot.recent_mood_trend
+            ? 'wired'
+            : 'degraded',
         actionTo: '/self-model',
         actionLabel: '查看自我模型',
       },
       {
         icon: MoonStar,
         title: '内在世界',
-        desc: offlineState.absence_band
+        desc: !hasRuntimeSnapshot
+          ? '等待运行快照恢复后补齐离线态与期待话题摘要。'
+          : offlineState.absence_band
           ? `${absenceBand} · 等待话题 ${(offlineState.anticipation_topics || []).length} 个`
           : '内在世界可访问，当前尚未形成完整离线态快照。',
-        status: offlineState.absence_band ? 'wired' : 'degraded',
+        status: !hasRuntimeSnapshot ? 'pending' : offlineState.absence_band ? 'wired' : 'degraded',
         actionTo: '/inner-world',
         actionLabel: '查看内在世界',
       },
@@ -540,13 +540,17 @@ export default function DigitalLifeOverview() {
       avgMemorySuccessRate,
       bondState.current_stage,
       bondState.trend,
+      configuredMemorySubsystemCount,
       currentBondStage,
       currentEmotion,
-      memorySubsystems.length,
+      hasRuntimeSnapshot,
       modeMeta,
       offlineState.absence_band,
       offlineState.anticipation_topics,
       replyPosture,
+      sampledMemorySubsystemCount,
+      hasMemorySamples,
+      hasMemoryData,
       growthSignals.hasAnyGrowth,
       growthSignals.overviewSummary,
       selfModelSnapshot.recent_mood_trend,
@@ -567,8 +571,8 @@ export default function DigitalLifeOverview() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={refreshAll} disabled={loading || runtimeLoading}>
-            <RefreshCw size={14} className={loading || runtimeLoading ? 'animate-spin' : ''} />
+          <button className="btn-secondary" onClick={refreshAll} disabled={loading || refreshing || runtimeLoading}>
+            <RefreshCw size={14} className={loading || refreshing || runtimeLoading ? 'animate-spin' : ''} />
             刷新
           </button>
         </div>
@@ -578,7 +582,13 @@ export default function DigitalLifeOverview() {
         icon={Sparkles}
         eyebrow="数字生命体运行态"
         title={`${modeMeta.emoji} ${modeMeta.label}`}
-        description={compactText(runtimeSnapshot?.runtime_summary?.headline || `${modeMeta.semantic}生命流正在穿过关系、情绪、记忆与回复层。`, 160)}
+        description={compactText(
+          runtimeSnapshot?.runtime_summary?.headline
+            || (hasRuntimeSnapshot
+              ? `${modeMeta.semantic}生命流正在穿过关系、情绪、记忆与回复层。`
+              : modeMeta.semantic),
+          160
+        )}
         gradientClass="from-primary-50 via-white to-pink-50"
         metaItems={[
           `关系：${currentBondStage}`,
@@ -586,6 +596,18 @@ export default function DigitalLifeOverview() {
           `主导动机：${dominantMotive}`,
           `风险：${riskLevel}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={overviewLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={overviewTrackedSections}
+            sampleLabel="关键分区"
+            updatedAt={overviewUpdatedAt}
+            source="runtime + memory + gateway"
+            definition="总览页优先表达态势与钻取入口；关键分区数量表示当前窗口中已成功返回数据的核心观测分区数。"
+          />
+        )}
       />
 
       <LivingPulseStrip
@@ -594,7 +616,7 @@ export default function DigitalLifeOverview() {
         nodes={pulseNodesView}
       />
 
-      {error ? <NoticeBanner variant="error" title="总览统计加载失败">{error}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error" title="总览统计加载失败">{error.message}</NoticeBanner> : null}
       {runtimeError ? (
         <NoticeBanner
           variant="info"
@@ -707,33 +729,45 @@ export default function DigitalLifeOverview() {
 
       <LifeSection
         title="人体闭环健康（Gateway）"
-        hint="展示请求从即时确认、进度触达到偏航修复与闭环完成的健康度。"
+        hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
         actionTo="/gateway"
         actionLabel="查看通道详情"
       >
+        <div className="mb-4">
+          <SampleMeta
+            loadState={gatewayLoopLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={humanoidTotalRequests}
+            sampleLabel="gateway request"
+            updatedAt={lastOverviewUpdatedAt}
+            source="/obs/input/humanoid-loop-stats"
+            definition="终态收束、ACK 触达、进度触达与偏航恢复都以当前窗口中的 gateway request 为基准口径。"
+          />
+        </div>
+
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <MetricCard
             label="闭环率"
             value={humanoidClosedLoopRate}
-            hint={`${humanoidClosedLoopRequests}/${humanoidTotalRequests}`}
+            hint={humanoidClosedLoopHint}
             tone="text-emerald-600"
           />
           <MetricCard
             label="ACK触达率"
             value={humanoidAckTouchRate}
-            hint={`确认 ${humanoidLoopData?.ack_confirmed_requests ?? 0}`}
+            hint={humanoidAckHint}
             tone="text-blue-600"
           />
           <MetricCard
             label="进度触达率"
             value={humanoidProgressTouchRate}
-            hint={`触达 ${humanoidLoopData?.progress_touched_requests ?? 0}`}
+            hint={humanoidProgressHint}
             tone="text-indigo-600"
           />
           <MetricCard
             label="偏航恢复率"
             value={humanoidDeviationRecoveryRate}
-            hint={`检测 ${humanoidDeviationDetected}`}
+            hint={humanoidDeviationHint}
             tone={humanoidDeviationDetected > 0 ? 'text-orange-600' : 'text-gray-600'}
           />
         </div>
@@ -799,7 +833,7 @@ export default function DigitalLifeOverview() {
               variant={humanoidFailedRequests > Math.max(2, Math.floor(humanoidTotalRequests * 0.2)) ? 'warning' : 'info'}
               title="闭环存在失败请求"
             >
-              {`failed=${humanoidFailedRequests}, completed=${humanoidLoopData?.completed_requests ?? 0}, completion_rate=${formatPercent(humanoidLoopData?.completion_rate)}`}
+              {`失败 ${humanoidFailedRequests} · 已进入终态 ${humanoidLoopData?.completed_requests ?? 0} · 终态率 ${formatPercent(humanoidLoopData?.completion_rate)}。该口径按是否出现终态事件统计，可能与失败计数重叠。`}
             </NoticeBanner>
           </div>
         ) : null}
@@ -825,7 +859,7 @@ export default function DigitalLifeOverview() {
               <div className="mb-2 text-xs font-semibold text-gray-600">闭环核心计数</div>
               <div className="space-y-3">
                 <KeyValueRow label="总 Gateway 请求" value={humanoidTotalRequests} />
-                <KeyValueRow label="已完成请求" value={humanoidLoopData?.completed_requests ?? 0} />
+                <KeyValueRow label="已进入终态" value={humanoidLoopData?.completed_requests ?? 0} />
                 <KeyValueRow label="失败请求" value={humanoidFailedRequests} valueClassName={humanoidFailedRequests > 0 ? 'text-red-600' : 'text-gray-700'} />
                 <KeyValueRow label="ACK 已确认" value={humanoidLoopData?.ack_confirmed_requests ?? 0} />
                 <KeyValueRow label="进度触达请求" value={humanoidLoopData?.progress_touched_requests ?? 0} />
@@ -867,22 +901,15 @@ export default function DigitalLifeOverview() {
               </div>
             ) : null}
 
-            {humanoidRepresentativeRequests.length > 0 ? (
-              <div className="mt-4">
-                <div className="mb-2 text-xs font-semibold text-gray-600">快速钻取请求</div>
-                <div className="flex flex-wrap gap-2">
-                  {humanoidRepresentativeRequests.map((item) => (
-                    <Link
-                      key={`${item.request_id}-${item.category}`}
-                      to={item.target_path}
-                      className="rounded-full border border-primary-200 bg-white px-3 py-1 text-xs font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-50"
-                    >
-                      {`${item.category} · ${String(item.request_id).slice(0, 14)}`}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            <div className="mt-4">
+              <RepresentativeRequests
+                title="快速钻取请求"
+                hint="优先打开一条代表性 request，把闭环异常还原到主链路。"
+                items={humanoidRepresentativeRefs}
+                emptyTitle="暂无代表性 request"
+                emptyHint="等异常样本更稳定后，这里会给出直达 Trace 的代表性 request。"
+              />
+            </div>
 
             {humanoidLoopHotspotsData ? (
               <div className="mt-4 rounded-2xl border border-rose-200 bg-[radial-gradient(circle_at_top_left,_rgba(244,63,94,0.08),_transparent_38%),radial-gradient(circle_at_bottom_right,_rgba(249,115,22,0.08),_transparent_40%)] p-4">
@@ -1086,19 +1113,14 @@ export default function DigitalLifeOverview() {
                           </Link>
                         </div>
 
-                        {(item.representative_requests || []).length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {(item.representative_requests || []).slice(0, 3).map((req) => (
-                              <Link
-                                key={`${item.hotspot_id}-${req.request_id}`}
-                                to={req.target_path}
-                                className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-medium text-primary-700 hover:border-primary-300 hover:bg-primary-100"
-                              >
-                                {`${req.status} · ${String(req.request_id).slice(0, 12)}`}
-                              </Link>
-                            ))}
-                          </div>
-                        ) : null}
+                        <div className="mt-3">
+                          <RepresentativeRequests
+                            title="病灶样本"
+                            items={createRequestRefs((item.representative_requests || []).slice(0, 3))}
+                            emptyTitle="暂无病灶样本"
+                            emptyHint="当前病灶还未沉淀出稳定的代表性 request。"
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1278,6 +1300,23 @@ export default function DigitalLifeOverview() {
             ))}
           </div>
         ) : null}
+
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+          <SampleMeta
+            loadState={runtimeVitalsLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={Object.keys(runtimeSnapshot?.slot_status || {}).length || null}
+            sampleLabel="关键槽位"
+            updatedAt={runtimeUpdatedAt}
+            source="runtime snapshot"
+            definition="体征核心指标来自运行快照，用于快速判定是否继续向情绪、关系、策略或 Trace 深钻。"
+          />
+          <DrilldownLink
+            to="/trace"
+            label="进入 Trace"
+            hint="如果体征异常，优先沿 request / session / tick 主链继续排查。"
+          />
+        </div>
       </LifeSection>
 
       <LifeSection
@@ -1390,7 +1429,10 @@ export default function DigitalLifeOverview() {
               <KeyValueRow label="回复上限" value={responsePolicy.max_chars != null ? `${responsePolicy.max_chars} 字` : '--'} />
               <KeyValueRow label="允许追问" value={responsePolicy.allow_followup == null ? '--' : responsePolicy.allow_followup ? '是' : '否'} />
               <KeyValueRow label="允许换题" value={responsePolicy.allow_topic_shift == null ? '--' : responsePolicy.allow_topic_shift ? '是' : '否'} />
-              <KeyValueRow label="平均记忆成功率" value={avgMemorySuccessRate != null ? `${avgMemorySuccessRate}%` : '--'} />
+              <KeyValueRow
+                label="平均记忆成功率"
+                value={!hasMemoryData ? '--' : hasMemorySamples ? `${avgMemorySuccessRate}%` : '无样本'}
+              />
             </div>
           </div>
 
@@ -1399,7 +1441,13 @@ export default function DigitalLifeOverview() {
               <Orbit size={16} className="text-gray-500" />
               <h3 className="text-sm font-semibold text-gray-800">非在线槽位</h3>
             </div>
-            {nonLiveSlots.length > 0 ? (
+            {!hasRuntimeSnapshot ? (
+              <EmptyStateCard
+                title="运行快照暂不可用"
+                hint="等待 runtime snapshot 恢复后，这里会展示缺席或降级的槽位。"
+                className="p-5"
+              />
+            ) : nonLiveSlots.length > 0 ? (
               <div className="space-y-3">
                 {nonLiveSlots.map(([slot, status]) => (
                   <KeyValueRow
@@ -1418,6 +1466,23 @@ export default function DigitalLifeOverview() {
               />
             )}
           </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
+          <SampleMeta
+            loadState={memoryOverviewLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={sampledMemorySubsystemCount}
+            sampleLabel="有样本子系统"
+            updatedAt={lastOverviewUpdatedAt}
+            source="/obs/memory/stats"
+            definition="平均记忆成功率只统计当前窗口内有样本的子系统；无样本会保持中性展示，不再误报为 0%。"
+          />
+          <DrilldownLink
+            to="/memory"
+            label="查看记忆详情"
+            hint="从这里继续下钻到子系统成功率、召回包预算、蒸馏与常驻设定。"
+          />
         </div>
       </LifeSection>
     </div>

@@ -15,16 +15,15 @@ import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import { useSystemOverviewQuery } from '../queries/overviewQueries.js'
 import {
   connectHealthWebSocket,
-  fetchAgentLoopStats,
-  fetchServicesHealth,
-  fetchSubsystemsStats,
-  fetchUIAssertionStats,
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -74,25 +73,44 @@ function getSubsystemFootnote(subsystem) {
 export default function Overview() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
+  const pageVisible = useAppStore((state) => state.pageVisible)
   const [windowMinutes, setWindowMinutes] = useState(60)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [data, setData] = useState(null)
-  const [subsysData, setSubsysData] = useState(null)
-  const [agentLoopData, setAgentLoopData] = useState(null)
-  const [uiAssertionData, setUiAssertionData] = useState(null)
+  const [liveHealthData, setLiveHealthData] = useState(null)
+  const [liveHealthUpdatedAt, setLiveHealthUpdatedAt] = useState(null)
   const [wsConnected, setWsConnected] = useState(false)
   const [wsAlerts, setWsAlerts] = useState([])
   const wsRef = useRef(null)
   const wsReconnectTimer = useRef(null)
   const wsReconnectDelay = useRef(1000)
+  const liveFeedEnabled = pollingEnabled && pageVisible
+  const {
+    healthData,
+    subsysData,
+    agentLoopData,
+    uiAssertionData,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+    stale,
+  } = useSystemOverviewQuery({
+    windowMinutes,
+    pollingEnabled: liveFeedEnabled,
+    pollingTick,
+    pollingInterval,
+  })
   const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
-    pollingEnabled,
+    pollingEnabled: liveFeedEnabled,
     pollingInterval,
     windowMinutes,
   })
 
   const connectWs = useCallback(() => {
+    if (!pageVisible) {
+      return
+    }
     wsRef.current?.close()
     clearTimeout(wsReconnectTimer.current)
 
@@ -100,9 +118,11 @@ export default function Overview() {
       const conn = connectHealthWebSocket(
         (msg) => {
           if (msg.type === 'health_snapshot' && msg.data) {
-            setData(msg.data)
+            setLiveHealthData(msg.data)
+            setLiveHealthUpdatedAt(Date.now())
           } else if (msg.services) {
-            setData(msg)
+            setLiveHealthData(msg)
+            setLiveHealthUpdatedAt(Date.now())
           }
           if (Array.isArray(msg.alerts) && msg.alerts.length > 0) {
             setWsAlerts((previous) => [...msg.alerts, ...previous].slice(0, 20))
@@ -110,12 +130,14 @@ export default function Overview() {
         },
         () => {
           setWsConnected(false)
+          if (!pageVisible) return
           const delay = wsReconnectDelay.current
           wsReconnectDelay.current = Math.min(delay * 2, 30000)
           wsReconnectTimer.current = setTimeout(connectWs, delay)
         },
         () => {
           setWsConnected(false)
+          if (!pageVisible) return
           const delay = wsReconnectDelay.current
           wsReconnectDelay.current = Math.min(delay * 2, 30000)
           wsReconnectTimer.current = setTimeout(connectWs, delay)
@@ -127,48 +149,31 @@ export default function Overview() {
     } catch (_) {
       setWsConnected(false)
     }
-  }, [])
+  }, [pageVisible])
 
   useEffect(() => {
+    if (!pageVisible) {
+      wsRef.current?.close()
+      clearTimeout(wsReconnectTimer.current)
+      setWsConnected(false)
+      return undefined
+    }
     connectWs()
     return () => {
       wsRef.current?.close()
       clearTimeout(wsReconnectTimer.current)
     }
-  }, [connectWs])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [healthRes, subsysRes, agentLoopRes, uiAssertionRes] = await Promise.all([
-        wsConnected ? Promise.resolve(null) : fetchServicesHealth({ window_minutes: windowMinutes }),
-        fetchSubsystemsStats({ window_minutes: windowMinutes }).catch(() => null),
-        fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 6 }).catch(() => null),
-        fetchUIAssertionStats({ window_minutes: windowMinutes }).catch(() => null),
-      ])
-
-      if (healthRes) setData(healthRes)
-      setSubsysData(subsysRes)
-      setAgentLoopData(agentLoopRes)
-      setUiAssertionData(uiAssertionRes)
-    } catch (loadError) {
-      setError(loadError.message || '全局总览加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes, wsConnected])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
-
+  }, [connectWs, pageVisible])
+  const data = wsConnected && liveHealthData ? liveHealthData : (healthData || liveHealthData)
+  const overviewUpdatedAt = Math.max(lastUpdatedAt || 0, liveHealthUpdatedAt || 0) || null
+  const overviewLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(data || subsysData || agentLoopData || uiAssertionData),
+    hasSamples: Boolean((data?.services ?? []).length || (subsysData?.subsystems ?? []).length || (agentLoopData?.total_loops ?? 0) > 0),
+    available: true,
+    stale,
+  })
   const services = data?.services ?? []
   const edgeServices = useMemo(
     () => services.filter((service) => service.service_type === 'edge'),
@@ -206,8 +211,8 @@ export default function Overview() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
             刷新
           </button>
         </div>
@@ -226,6 +231,18 @@ export default function Overview() {
           `未知：${data?.unknown ?? '—'}`,
           `活跃子系统：${activeSubsystems.length}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={overviewLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={services.length + activeSubsystems.length}
+            sampleLabel="观测对象"
+            updatedAt={overviewUpdatedAt}
+            source={wsConnected ? 'health websocket + overview queries' : 'overview queries'}
+            definition="Overview 保留实时健康快照，同时通过查询层统一拉取器官子系统、执行护栏与界面断言摘要。"
+          />
+        )}
       />
 
       <LivingPulseStrip
@@ -235,7 +252,7 @@ export default function Overview() {
         compact
       />
 
-      {error ? <NoticeBanner variant="error" title="总览加载失败">{error}</NoticeBanner> : null}
+      {error ? <NoticeBanner variant="error" title="总览加载失败">{error.message}</NoticeBanner> : null}
 
       {wsAlerts.length > 0 ? (
         <NoticeBanner variant="warning" title={`实时告警 ${wsAlerts.length} 条`}>

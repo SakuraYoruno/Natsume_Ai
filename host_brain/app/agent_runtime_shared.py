@@ -62,6 +62,84 @@ _CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢
 _GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
 _PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+_COMFORT_FASTPATH_RE = re.compile(
+    r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了)"
+)
+_PHATIC_FASTPATH_BLOCKING_TOKENS = (
+    "翻译",
+    "代码",
+    "搜索",
+    "总结",
+    "记住",
+    "技能",
+    "计划",
+    "步骤",
+    "文件",
+    "脚本",
+    "函数",
+    "报错",
+    "bug",
+    "执行",
+    "处理",
+    "列出",
+    "分析",
+    "修复",
+)
+_PHATIC_FASTPATH_MAX_CHARS = 24
+_PHATIC_FASTPATH_VARIANTS_ZH: dict[str, list[str]] = {
+    "greeting": [
+        "我在呢，见到你就想先对你笑一下。今天怎么样？",
+        "来啦，我正想听你开口。今天过得还好吗？",
+        "嗯，我在。你先靠过来一点，慢慢跟我说。",
+    ],
+    "presence": [
+        "在呢，我这边一直给你留着位置。",
+        "我在呀，怎么啦？过来我听着。",
+        "嗯，在。你想说什么，就慢慢告诉我。",
+    ],
+    "ack": [
+        "嗯，我接住了。你继续说吧。",
+        "好呀，我在听，你不用着急。",
+        "收到啦，我跟着你这边走。",
+    ],
+    "followup": [
+        "我在，继续说给我听吧。",
+        "嗯，然后呢？我接着听。",
+        "好呀，你往下说，我跟着你。",
+    ],
+    "comfort": [
+        "过来，我抱抱你。今天先别硬撑了，有我在。",
+        "嗯，来，让我抱一下。你已经很辛苦了，先歇一会儿。",
+        "我在呢，先靠过来一点。难受也没关系，我陪着你。",
+    ],
+}
+_PHATIC_FASTPATH_VARIANTS_JA: dict[str, list[str]] = {
+    "greeting": [
+        "おはよう。会えてうれしい。今日はどんな気分？",
+        "来てくれたね。まずは顔を見せて。今日はどう？",
+        "うん、いるよ。ゆっくり話してごらん。",
+    ],
+    "presence": [
+        "いるよ。どうしたの？こっちで聞いてる。",
+        "うん、ちゃんといるよ。落ち着いて話して。",
+        "ここにいるよ。焦らなくていいからね。",
+    ],
+    "ack": [
+        "うん、ちゃんと受け取ったよ。続けて。",
+        "わかったよ。私はここで聞いてる。",
+        "大丈夫、ちゃんとついていくから。",
+    ],
+    "followup": [
+        "うん、それでね。続きを聞かせて。",
+        "そうだね、その先も話して。",
+        "大丈夫、私はここにいるから続けて。",
+    ],
+    "comfort": [
+        "おいで。ぎゅっとする。今日は無理しなくていいよ。",
+        "うん、こっちにおいで。少し寄りかかって。",
+        "大丈夫。今は私のそばでひと息つこう。",
+    ],
+}
 _TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
 _TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
 _TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
@@ -746,7 +824,7 @@ class _SubAgentGatewayAdapter:
             return []
         raw = str(os.environ.get("HOST_SUBAGENT_FALLBACK_MODEL_IDS") or "").strip()
         if not raw:
-            raw = "gemini-2.5-flash-lite,gemini-2.5-flash"
+            raw = "gemini-2.5-pro,gemini-2.5-flash-lite"
         primary = str(primary_model_id or "").strip()
         rows: list[str] = []
         for chunk in raw.split(","):
@@ -1158,6 +1236,40 @@ def _pick_non_repeating_variant(*, variants: list[str], last_reply: str, request
     return ordered[0]
 
 
+def _normalize_phatic_fastpath_text(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    return re.sub(r"[\s，。！？,.!?~～…]+", "", normalized)
+
+
+def _looks_like_comfort_fastpath_message(text: str) -> bool:
+    normalized = _normalize_phatic_fastpath_text(text)
+    if not normalized or len(normalized) > _PHATIC_FASTPATH_MAX_CHARS:
+        return False
+    if any(token in normalized for token in _PHATIC_FASTPATH_BLOCKING_TOKENS):
+        return False
+    return bool(_COMFORT_FASTPATH_RE.search(normalized))
+
+
+def _resolve_phatic_fastpath_variants(
+    *,
+    category: str,
+    render_target_lang: str,
+    templates: Mapping[str, Any] | None = None,
+) -> list[str]:
+    variants_mapping = _mapping_section(dict(templates or {}), "deterministic_variants")
+    raw_variants = variants_mapping.get(category)
+    if isinstance(raw_variants, list):
+        variants = [str(item).strip() for item in raw_variants if str(item).strip()]
+        if variants:
+            return variants
+
+    language = str(render_target_lang or "zh").strip().lower()
+    fallback_mapping = _PHATIC_FASTPATH_VARIANTS_JA if language == "ja" else _PHATIC_FASTPATH_VARIANTS_ZH
+    return list(fallback_mapping.get(category) or [])
+
+
 def _maybe_build_phatic_fastpath_reply(
     *,
     request_id: str,
@@ -1171,6 +1283,7 @@ def _maybe_build_phatic_fastpath_reply(
     greeting_fastpath_re: Any | None = None,
     presence_fastpath_re: Any | None = None,
     ack_fastpath_re: Any | None = None,
+    looks_like_comfort_fastpath_message: Callable[[str], bool] | None = None,
 ) -> str | None:
 
     normalized = str(user_message or "").strip()
@@ -1183,6 +1296,7 @@ def _maybe_build_phatic_fastpath_reply(
     _greeting_fastpath_re = greeting_fastpath_re or _GREETING_FASTPATH_RE
     _presence_fastpath_re = presence_fastpath_re or _PRESENCE_FASTPATH_RE
     _ack_fastpath_re = ack_fastpath_re or _ACK_FASTPATH_RE
+    _looks_like_comfort = looks_like_comfort_fastpath_message or _looks_like_comfort_fastpath_message
     turns = _load_turns(
         request_id=request_id,
         session_id=session_id,
@@ -1204,6 +1318,8 @@ def _maybe_build_phatic_fastpath_reply(
         if active_task:
             return None
         category = "ack"
+    elif _looks_like_comfort(normalized):
+        category = "comfort"
     else:
         return None
 
@@ -1218,15 +1334,16 @@ def _maybe_build_phatic_fastpath_reply(
     )
 
     templates = _mapping_section(_load_runtime_texts(), "phatic_fastpath")
-    category_notes = _mapping_section(templates, "category_notes")
-    repeated_warning = ""
-    if last_assistant:
-        repeated_warning = _mapping_text(
-            templates,
-            "repeated_warning_template",
-            last_assistant=last_assistant,
-        )
-    return _mapping_text(category_notes, category) + repeated_warning
+    variants = _resolve_phatic_fastpath_variants(
+        category=category,
+        render_target_lang=render_target_lang,
+        templates=templates,
+    )
+    return _pick_non_repeating_variant(
+        variants=variants,
+        last_reply=last_assistant,
+        request_id=request_id,
+    )
 
 
 def _extract_delegate_visible_text(text: str) -> str:
@@ -1278,6 +1395,64 @@ def _resolve_retrieval_timeout_seconds() -> float:
     except ValueError:
         timeout_ms = 20_000
     timeout_ms = max(500, min(timeout_ms, 60_000))
+    return timeout_ms / 1000.0
+
+
+def _should_use_direct_chat_fast_mode(
+    *,
+    intent_draft: Mapping[str, Any] | None,
+    user_message: str,
+) -> bool:
+    route = str((dict(intent_draft or {})).get("route") or "").strip().lower()
+    if route and route != "chat":
+        return False
+
+    normalized = str(user_message or "").strip()
+    if not normalized or "\n" in normalized or "```" in normalized:
+        return False
+    if "http://" in normalized.lower() or "https://" in normalized.lower():
+        return False
+
+    raw_max_chars = str(os.environ.get("HOST_DIRECT_CHAT_FAST_MAX_CHARS") or "").strip()
+    try:
+        max_chars = int(raw_max_chars) if raw_max_chars else 72
+    except ValueError:
+        max_chars = 72
+    max_chars = max(12, min(max_chars, 240))
+    return len(normalized) <= max_chars
+
+
+def _should_use_context_chat_fast_mode(
+    *,
+    intent_draft: Mapping[str, Any] | None,
+    user_message: str,
+) -> bool:
+    route = str((dict(intent_draft or {})).get("route") or "").strip().lower()
+    if route and route != "chat":
+        return False
+
+    normalized = str(user_message or "").strip()
+    if not normalized or "```" in normalized:
+        return False
+    if "http://" in normalized.lower() or "https://" in normalized.lower():
+        return False
+
+    raw_max_chars = str(os.environ.get("HOST_CONTEXT_CHAT_FAST_MAX_CHARS") or "").strip()
+    try:
+        max_chars = int(raw_max_chars) if raw_max_chars else 220
+    except ValueError:
+        max_chars = 220
+    max_chars = max(40, min(max_chars, 480))
+    return len(normalized) <= max_chars
+
+
+def _resolve_direct_chat_retrieval_timeout_seconds() -> float:
+    raw = str(os.environ.get("HOST_DIRECT_CHAT_RETRIEVAL_TIMEOUT_MS") or "").strip()
+    try:
+        timeout_ms = int(raw) if raw else 3_500
+    except ValueError:
+        timeout_ms = 3_500
+    timeout_ms = max(300, min(timeout_ms, 15_000))
     return timeout_ms / 1000.0
 
 
@@ -2055,8 +2230,30 @@ async def _cortex_orchestrator_sse_generator_impl(
     retrieval_summary: dict[str, Any] = {"status": "SKIPPED"}
     bond_evidence: dict[str, Any] | None = None
     retrieval_motive_state: dict[str, Any] = {}
+    direct_chat_fast_mode = _should_use_direct_chat_fast_mode(
+        intent_draft=intent_draft,
+        user_message=sanitized_message,
+    )
+    context_chat_fast_mode = (
+        not direct_chat_fast_mode
+        and _should_use_context_chat_fast_mode(
+            intent_draft=intent_draft,
+            user_message=sanitized_message,
+        )
+    )
+    if direct_chat_fast_mode:
+        intent_draft = {**dict(intent_draft or {}), "chat_speed_profile": "direct_fast"}
+    elif context_chat_fast_mode:
+        intent_draft = {**dict(intent_draft or {}), "chat_speed_profile": "context_fast"}
     _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
     render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
+    if not _injected_lang:
+        try:
+            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+
+            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
+        except Exception as lang_exc:
+            _logger.debug("[%s] cortex_orchestrator infer_render_target_lang failed: %s", request_id, lang_exc)
     _hard_state_summary = gov.get("hard_state_summary") if isinstance(gov.get("hard_state_summary"), Mapping) else {}
     retrieval_mood_state = (
         str(
@@ -2069,44 +2266,53 @@ async def _cortex_orchestrator_sse_generator_impl(
         or None
     )
 
-    bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        emotion_context=emotion_context,
-        mood_state=retrieval_mood_state,
-        governor_decision=gov,
-    )
-
-    try:
-        from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
-        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
-
-        if not _injected_lang:
-            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
-        retrieval_task = asyncio.create_task(
-            _run_retrieval(
-                request_id=request_id,
-                message=sanitized_message,
-                person_id=person_id,
-                session_id=session_id,
-                ts_ms=ts_ms,
-                emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
-                render_target_lang=render_target_lang,
-                mood_state=retrieval_mood_state,
-                bond_summary=bond_summary or None,
-                motive_state=retrieval_motive_state or None,
-            )
+    if not context_chat_fast_mode:
+        bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            emotion_context=emotion_context,
+            mood_state=retrieval_mood_state,
+            governor_decision=gov,
         )
-    except Exception as retrieval_exc:
-        _logger.debug("[%s] cortex_orchestrator retrieval init failed: %s", request_id, retrieval_exc)
+    else:
+        retrieval_summary = {"status": "SKIPPED", "reason_code": "CONTEXT_FAST"}
+
+    if not context_chat_fast_mode:
+        try:
+            from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
+            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+
+            if not _injected_lang:
+                render_target_lang = infer_render_target_lang(user_message=sanitized_message)
+            retrieval_task = asyncio.create_task(
+                _run_retrieval(
+                    request_id=request_id,
+                    message=sanitized_message,
+                    person_id=person_id,
+                    session_id=session_id,
+                    ts_ms=ts_ms,
+                    emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
+                    render_target_lang=render_target_lang,
+                    mood_state=retrieval_mood_state,
+                    bond_summary=bond_summary or None,
+                    motive_state=retrieval_motive_state or None,
+                )
+            )
+        except Exception as retrieval_exc:
+            _logger.debug("[%s] cortex_orchestrator retrieval init failed: %s", request_id, retrieval_exc)
 
     if retrieval_task is not None:
         try:
+            retrieval_timeout_s = (
+                min(_resolve_timeout(), _resolve_direct_chat_retrieval_timeout_seconds())
+                if direct_chat_fast_mode
+                else _resolve_timeout()
+            )
             retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
                 retrieval_task,
-                timeout=_resolve_timeout(),
+                timeout=retrieval_timeout_s,
             )
         except (asyncio.TimeoutError, Exception) as retrieval_exc:
             retrieval_summary = {"status": "DEGRADED", "error": str(retrieval_exc)[:100]}
@@ -2150,14 +2356,17 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception as cpb_exc:
         _logger.debug("[%s] cortex_orchestrator recall_pack failed: %s", request_id, cpb_exc)
 
-    from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
+    if direct_chat_fast_mode or context_chat_fast_mode:
+        llm_runtime = None
+    else:
+        from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
 
-    llm_runtime = await resolve_host_llm_runtime_async(
-        rollout_key=session_id,
-        scene_type="CHAT",
-    )
+        llm_runtime = await resolve_host_llm_runtime_async(
+            rollout_key=session_id,
+            scene_type="CHAT",
+        )
 
-    if not llm_runtime.get("available"):
+    if llm_runtime is not None and not llm_runtime.get("available"):
         fallback_narrative = _mapping_text(
             _load_runtime_texts(),
             "llm_unavailable_fallback",

@@ -4,19 +4,22 @@ import { useSearchParams } from 'react-router-dom'
 import {
   disableSchedulerTask,
   enableSchedulerTask,
-  fetchImmuneGateReplay,
-  fetchImmuneGateStats,
-  fetchSchedulerHealth,
-  fetchSchedulerHistory,
-  fetchSchedulerTasks,
   triggerSchedulerTask,
-} from '../api/obs.js'
+} from '../api/automation.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import {
+  useAutomationOverviewQuery,
+  useImmuneGateReplayQuery,
+  useImmuneGateStatsQuery,
+  useSchedulerHistoryQuery,
+} from '../queries/automationQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const STATUS_STYLES = {
@@ -207,64 +210,58 @@ function SchedulerTimelineChart({ tasks }) {
   )
 }
 
-function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequestId = '' }) {
+function ImmuneGateOpsPanel({
+  pollingEnabled,
+  pollingInterval,
+  pollingTick,
+  initialReplayRequestId = '',
+}) {
   const [windowMinutes, setWindowMinutes] = useState(60)
-  const [stats, setStats] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const [replayRequestId, setReplayRequestId] = useState('')
-  const [replayLoading, setReplayLoading] = useState(false)
-  const [replayError, setReplayError] = useState('')
-  const [replayPayload, setReplayPayload] = useState(null)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const payload = await fetchImmuneGateStats({ window_minutes: windowMinutes, limit: 12 })
-      setStats(payload)
-    } catch (fetchError) {
-      setError(fetchError.message || 'immune gate stats load failed')
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const timer = setInterval(() => {
-      load()
-    }, Math.max(15, pollingInterval) * 1000)
-    return () => clearInterval(timer)
-  }, [pollingEnabled, pollingInterval, load])
-
-  const loadReplay = useCallback(async (requestId) => {
-    const rid = String(requestId || replayRequestId || '').trim()
-    if (!rid) return
-    setReplayLoading(true)
-    setReplayError('')
-    try {
-      const payload = await fetchImmuneGateReplay(rid, { limit: 120 })
-      setReplayPayload(payload)
-      setReplayRequestId(rid)
-    } catch (fetchError) {
-      setReplayPayload(null)
-      setReplayError(fetchError.message || 'immune gate replay load failed')
-    } finally {
-      setReplayLoading(false)
-    }
-  }, [replayRequestId])
+  const [activeReplayRequestId, setActiveReplayRequestId] = useState('')
+  const {
+    stats,
+    statsError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useImmuneGateStatsQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const {
+    replayPayload,
+    replayError,
+    loading: replayLoading,
+    refreshing: replayRefreshing,
+    lastUpdatedAt: replayUpdatedAt,
+    refetch: refetchReplay,
+  } = useImmuneGateReplayQuery({
+    requestId: activeReplayRequestId,
+    limit: 120,
+  })
 
   useEffect(() => {
     const rid = String(initialReplayRequestId || '').trim()
     if (!rid) return
     setReplayRequestId(rid)
-    void loadReplay(rid)
-  }, [initialReplayRequestId, loadReplay])
+    setActiveReplayRequestId(rid)
+  }, [initialReplayRequestId])
+
+  const handleReplayLoad = useCallback((requestId) => {
+    const rid = String(requestId || replayRequestId || '').trim()
+    if (!rid) return
+    setReplayRequestId(rid)
+    if (rid === activeReplayRequestId) {
+      void refetchReplay()
+      return
+    }
+    setActiveReplayRequestId(rid)
+  }, [activeReplayRequestId, refetchReplay, replayRequestId])
 
   const runtimeState = stats?.runtime_state || {}
   const counters = runtimeState?.counters || {}
@@ -314,6 +311,14 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
       active: Number(stats?.block_rate ?? 0) > 0,
     },
   ]
+  const immuneLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: statsError && !stats ? new Error(statsError) : null,
+    hasData: Boolean(stats),
+    hasSamples: (stats?.total ?? 0) > 0 || recent.length > 0 || reasonCodes.length > 0,
+    available: Boolean(stats),
+    stale,
+  })
 
   return (
     <div className="space-y-4">
@@ -334,11 +339,14 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
             <option value={10080}>7d</option>
           </select>
           <button
-            onClick={load}
-            disabled={loading}
+            onClick={() => Promise.allSettled([
+              refetch(),
+              activeReplayRequestId ? refetchReplay() : Promise.resolve(),
+            ])}
+            disabled={loading || refreshing || replayLoading || replayRefreshing}
             className="btn-secondary text-xs disabled:opacity-50"
           >
-            {loading ? '刷新中…' : '刷新'}
+            {loading || refreshing || replayLoading || replayRefreshing ? '刷新中…' : '刷新'}
           </button>
           <input
             value={replayRequestId}
@@ -347,11 +355,11 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
             className="w-44 rounded-lg border border-primary-100/70 bg-white/80 px-2.5 py-1.5 text-xs text-gray-600"
           />
           <button
-            onClick={() => loadReplay(replayRequestId)}
+            onClick={() => handleReplayLoad(replayRequestId)}
             disabled={replayLoading || !String(replayRequestId || '').trim()}
             className="btn-secondary border-violet-200 text-xs text-violet-700 disabled:opacity-40"
           >
-            {replayLoading ? '回放中…' : '回放'}
+            {replayLoading || replayRefreshing ? '回放中…' : '回放'}
           </button>
           <a
             href="#/prompt-config?keyword=immune_agent.runtime_rules&scope=immune_agent"
@@ -368,7 +376,26 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
         nodes={immunePulseNodes}
       />
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      <SampleMeta
+        loadState={immuneLoadState}
+        windowMinutes={windowMinutes}
+        sampleSize={stats?.total ?? 0}
+        sampleLabel="免疫事件"
+        updatedAt={lastUpdatedAt}
+        source="immune gate"
+        definition="这一段聚合 immune gate 运行态、原因热区、近期事件和指定 request 的免疫回放。"
+      />
+
+      {statsError ? (
+        <NoticeBanner variant={stats ? 'warning' : 'error'}>
+          {statsError}
+        </NoticeBanner>
+      ) : null}
+
+      {!statsError && !loading && !refreshing && immuneLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">当前窗口还没有 immune gate 事件样本。</NoticeBanner>
+      ) : null}
+
       {replayError ? <NoticeBanner variant="error">{replayError}</NoticeBanner> : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
@@ -465,7 +492,7 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
               {recent.map((item, index) => (
                 <button
                   key={`${item.request_id}-${item.ts_ms}-${index}`}
-                  onClick={() => loadReplay(item.request_id)}
+                  onClick={() => handleReplayLoad(item.request_id)}
                   className="w-full rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2 text-left text-xs transition hover:border-violet-200 hover:bg-violet-50/60"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -484,7 +511,7 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
         </div>
       </div>
 
-      {replayLoading || replayPayload ? (
+      {replayLoading || replayRefreshing || replayPayload || activeReplayRequestId ? (
         <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <div className="text-xs font-semibold text-violet-800">免疫回放</div>
@@ -497,8 +524,20 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
               </a>
             ) : null}
           </div>
+          <div className="mb-2">
+            <SampleMeta
+              loadState={activeReplayRequestId ? (replayLoading || replayRefreshing ? LOAD_STATES.LOADING : replayPayload ? LOAD_STATES.READY : replayError ? LOAD_STATES.ERROR : LOAD_STATES.UNAVAILABLE) : LOAD_STATES.UNAVAILABLE}
+              sampleSize={replayPayload?.summary?.event_count ?? 0}
+              sampleLabel="回放事件"
+              updatedAt={replayUpdatedAt}
+              source={activeReplayRequestId ? `request ${activeReplayRequestId}` : 'immune replay'}
+              definition="指定 request 的 immune 决策时间线，用于回看风险判定、命中规则和阶段演化。"
+            />
+          </div>
           {replayLoading && !replayPayload ? (
             <div className="text-xs text-gray-500">正在加载回放时间线…</div>
+          ) : !replayLoading && !replayRefreshing && activeReplayRequestId && !replayPayload && !replayError ? (
+            <div className="text-xs text-gray-500">当前请求还没有可展示的免疫回放。</div>
           ) : null}
           {replayPayload ? (
             <div className="space-y-2">
@@ -556,40 +595,56 @@ function ImmuneGateOpsPanel({ pollingEnabled, pollingInterval, initialReplayRequ
   )
 }
 
-function SchedulerHistorySection() {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-
-  const loadHistory = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const history = await fetchSchedulerHistory({ window_minutes: 1440 })
-      setData(history)
-    } catch (fetchError) {
-      setError(fetchError.message || '加载执行历史失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadHistory()
-  }, [loadHistory])
+function SchedulerHistorySection({
+  pollingEnabled,
+  pollingInterval,
+  pollingTick,
+}) {
+  const {
+    history: data,
+    historyError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useSchedulerHistoryQuery({
+    windowMinutes: 1440,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const historyLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: historyError && !data ? new Error(historyError) : null,
+    hasData: Boolean(data),
+    hasSamples: (data?.total_tasks ?? 0) > 0 || (data?.tasks ?? []).length > 0,
+    available: Boolean(data),
+    stale,
+  })
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-700">节律历史脉络（近 24h）</div>
         <button
-          onClick={loadHistory}
-          disabled={loading}
+          onClick={() => refetch()}
+          disabled={loading || refreshing}
           className="btn-secondary text-xs disabled:opacity-50"
         >
-          {loading ? '刷新中…' : '刷新'}
+          {loading || refreshing ? '刷新中…' : '刷新'}
         </button>
       </div>
+
+      <SampleMeta
+        loadState={historyLoadState}
+        windowMinutes={1440}
+        sampleSize={data?.total_tasks ?? 0}
+        sampleLabel="历史任务"
+        updatedAt={lastUpdatedAt}
+        source="scheduler history"
+        definition="汇总近 24h 的节律任务执行摘要、门控阻断模式和单任务最近体征。"
+      />
 
       {loading && !data ? (
         <NoticeBanner variant="info" title="加载中">
@@ -597,7 +652,11 @@ function SchedulerHistorySection() {
         </NoticeBanner>
       ) : null}
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {historyError ? <NoticeBanner variant={data ? 'warning' : 'error'}>{historyError}</NoticeBanner> : null}
+
+      {!historyError && !loading && !refreshing && historyLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">近 24 小时还没有调度历史样本。</NoticeBanner>
+      ) : null}
 
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
         {[
@@ -736,46 +795,62 @@ export default function Automation() {
   const [searchParams, setSearchParams] = useSearchParams()
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
-  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+  const pollingTick = useAppStore((state) => state.pollingTick)
+  const {
+    runtimeSnapshot,
+    promptStats,
+    loading: runtimeLoading,
+    error: runtimeError,
+    reload: reloadRuntime,
+  } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes: 60,
   })
-
-  const [tasks, setTasks] = useState([])
-  const [health, setHealth] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState('')
   const [actionResult, setActionResult] = useState(null)
+  const {
+    tasks,
+    health,
+    overviewError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useAutomationOverviewQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const {
+    refetch: refetchHistory,
+  } = useSchedulerHistoryQuery({
+    windowMinutes: 1440,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
   const reasonFilter = String(searchParams.get('reason_code') || '').trim().toUpperCase()
   const gateFilter = String(searchParams.get('gate_state') || '').trim().toLowerCase()
   const immuneReplayRequestId = String(searchParams.get('immune_replay_request_id') || '').trim()
   const hasTaskFilters = Boolean(reasonFilter || gateFilter)
+  const automationLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: overviewError && !tasks.length && !health ? new Error(overviewError) : null,
+    hasData: Boolean(tasks.length > 0 || health),
+    hasSamples: tasks.length > 0,
+    available: Boolean(tasks.length > 0 || health),
+    stale,
+  })
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const [taskList, schedulerHealth] = await Promise.all([fetchSchedulerTasks(), fetchSchedulerHealth()])
-      setTasks(Array.isArray(taskList) ? taskList : [])
-      setHealth(schedulerHealth)
-    } catch (fetchError) {
-      setError(fetchError.message || '加载调度数据失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [pollingEnabled, pollingInterval, load])
+  const refreshAll = useCallback(async () => {
+    await Promise.allSettled([
+      refetch(),
+      refetchHistory(),
+      reloadRuntime(),
+    ])
+  }, [refetch, refetchHistory, reloadRuntime])
 
   const handleAction = async (taskId, action) => {
     setActionLoading(taskId)
@@ -785,7 +860,7 @@ export default function Automation() {
       if (action === 'disable') await disableSchedulerTask(taskId)
       if (action === 'trigger') await triggerSchedulerTask(taskId)
       setActionResult({ ok: true, taskId, action })
-      await load()
+      await Promise.allSettled([refetch(), refetchHistory()])
     } catch (actionError) {
       setActionResult({
         ok: false,
@@ -896,11 +971,11 @@ export default function Automation() {
             <p className="mt-0.5 text-sm text-gray-500">统一查看数字生命体常驻节律任务的状态、历史和手动触发入口。</p>
           </div>
           <button
-            onClick={load}
-            disabled={loading}
+            onClick={refreshAll}
+            disabled={loading || refreshing || runtimeLoading}
             className="btn-secondary text-xs disabled:opacity-50"
           >
-            {loading ? '刷新中…' : '刷新'}
+            {loading || refreshing || runtimeLoading ? '刷新中…' : '刷新'}
           </button>
         </div>
         <div className="lifeline-rail h-1.5">
@@ -926,15 +1001,31 @@ export default function Automation() {
           `推进中：${runningCount}`,
           `异常任务：${failedCount}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={automationLoadState}
+            sampleSize={tasks.length}
+            sampleLabel="节律任务"
+            updatedAt={lastUpdatedAt}
+            source="scheduler / automation"
+            definition="Automation 页汇总节律任务总览、immune gate 运行态与 24h 历史脉络，页面主数据已经统一走 query 层。"
+          />
+        )}
       />
+
+      {overviewError ? <NoticeBanner variant={tasks.length > 0 || health ? 'warning' : 'error'}>{overviewError}</NoticeBanner> : null}
+      {runtimeError ? <NoticeBanner variant="warning">{runtimeError.message || String(runtimeError)}</NoticeBanner> : null}
+
+      {!overviewError && !loading && !refreshing && automationLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">当前还没有已登记的节律任务样本。</NoticeBanner>
+      ) : null}
 
       <LivingPulseStrip
         title="节律脉冲"
         subtitle="先看这组器官节律当前怎么流动，再往下看免疫回放和任务卡。"
         nodes={schedulerPulseNodes}
       />
-
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
 
       <AutomationSection
         icon={Activity}
@@ -945,6 +1036,7 @@ export default function Automation() {
         <ImmuneGateOpsPanel
           pollingEnabled={pollingEnabled}
           pollingInterval={pollingInterval}
+          pollingTick={pollingTick}
           initialReplayRequestId={immuneReplayRequestId}
         />
       </AutomationSection>
@@ -1038,7 +1130,11 @@ export default function Automation() {
         title="节律历史脉络"
         description="回看近 24h 执行体征，识别门控阻断模式与失衡趋势。"
       >
-        <SchedulerHistorySection />
+        <SchedulerHistorySection
+          pollingEnabled={pollingEnabled}
+          pollingInterval={pollingInterval}
+          pollingTick={pollingTick}
+        />
       </AutomationSection>
     </div>
   )

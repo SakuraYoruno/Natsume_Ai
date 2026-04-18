@@ -81,7 +81,7 @@ async def generate_action_plan(
     import asyncio as _asyncio
 
     provider_fn = llm_runtime.get("cloud_provider_fn") or llm_runtime.get("provider_fn")
-    model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash")
+    model_id = str(llm_runtime.get("cloud_model_id") or llm_runtime.get("model_id") or "gemini-2.5-flash-lite")
     api_key = str(llm_runtime.get("cloud_llm_api_key") or llm_runtime.get("llm_api_key") or "").strip()
     timeout_ms = int(llm_runtime.get("cloud_timeout_ms") or llm_runtime.get("timeout_ms") or 20000)
     available = bool(llm_runtime.get("cloud_available", llm_runtime.get("available", False)))

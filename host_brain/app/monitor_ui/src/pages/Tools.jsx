@@ -1,20 +1,23 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Wrench } from 'lucide-react'
 import {
-  fetchActionPlanStats,
-  fetchCustomSkillProviders,
-  fetchCustomSkillProviderTemplate,
-  fetchPermissionStats,
-  fetchToolHealth,
-  fetchToolMetaPack,
   executeTool,
   installCustomSkillProvider,
-} from '../api/obs.js'
+} from '../api/tools.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import {
+  useActionPlanStatsQuery,
+  useCustomSkillProviderTemplateQuery,
+  useCustomSkillProvidersQuery,
+  usePermissionStatsQuery,
+  useToolsCatalogQuery,
+} from '../queries/toolsQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const SIDE_EFFECT_STYLES = {
@@ -213,56 +216,73 @@ function ProviderLoadingState() {
 }
 
 function CustomSkillInstaller() {
-  const [providers, setProviders] = useState([])
-  const [providersLoading, setProvidersLoading] = useState(false)
-  const [templateLoading, setTemplateLoading] = useState(false)
   const [installing, setInstalling] = useState(false)
-  const [error, setError] = useState('')
   const [result, setResult] = useState(null)
   const [form, setForm] = useState({
     filename: 'my_skill_provider.py',
     source_code: '',
     activate_now: true,
   })
-
-  const loadProviders = useCallback(async () => {
-    setProvidersLoading(true)
-    setError('')
-    try {
-      const response = await fetchCustomSkillProviders()
-      setProviders(response.items || [])
-    } catch (fetchError) {
-      setError(fetchError.message || '获取提供器列表失败')
-    } finally {
-      setProvidersLoading(false)
-    }
-  }, [])
-
-  const loadTemplate = useCallback(async (force = false) => {
-    setTemplateLoading(true)
-    setError('')
-    try {
-      const response = await fetchCustomSkillProviderTemplate()
-      setForm((prev) => ({
-        ...prev,
-        filename: prev.filename || response.filename_hint || 'my_skill_provider.py',
-        source_code: force || !prev.source_code ? response.source_code || '' : prev.source_code,
-      }))
-    } catch (fetchError) {
-      setError(fetchError.message || '加载模板失败')
-    } finally {
-      setTemplateLoading(false)
-    }
-  }, [])
+  const {
+    providersData,
+    providers,
+    providersError,
+    loading: providersLoading,
+    refreshing: providersRefreshing,
+    stale: providersStale,
+    lastUpdatedAt: providersUpdatedAt,
+    refetch: refetchProviders,
+  } = useCustomSkillProvidersQuery()
+  const {
+    templateData,
+    templateError,
+    loading: templateLoading,
+    refreshing: templateRefreshing,
+    stale: templateStale,
+    lastUpdatedAt: templateUpdatedAt,
+    refetch: refetchTemplate,
+  } = useCustomSkillProviderTemplateQuery()
 
   useEffect(() => {
-    loadProviders()
-    loadTemplate(false)
-  }, [loadProviders, loadTemplate])
+    if (!templateData) return
+    setForm((prev) => ({
+      ...prev,
+      filename: prev.filename || templateData.filename_hint || 'my_skill_provider.py',
+      source_code: prev.source_code || templateData.source_code || '',
+    }))
+  }, [templateData])
+
+  const providersLoadState = resolveLoadState({
+    loading: providersLoading || providersRefreshing,
+    error: providersError,
+    hasData: Boolean(providersData),
+    hasSamples: providers.length > 0,
+    available: Boolean(providersData),
+    stale: providersStale,
+  })
+
+  const templateLoadState = resolveLoadState({
+    loading: templateLoading || templateRefreshing,
+    error: templateError,
+    hasData: Boolean(templateData),
+    hasSamples: Boolean(templateData?.source_code),
+    available: Boolean(templateData),
+    stale: templateStale,
+  })
+
+  const handleReloadTemplate = async (force = false) => {
+    const response = await refetchTemplate()
+    const nextTemplate = response?.data
+    if (!nextTemplate) return
+    setForm((prev) => ({
+      ...prev,
+      filename: prev.filename || nextTemplate.filename_hint || 'my_skill_provider.py',
+      source_code: force || !prev.source_code ? nextTemplate.source_code || '' : prev.source_code,
+    }))
+  }
 
   const handleInstall = async () => {
     setInstalling(true)
-    setError('')
     setResult(null)
     try {
       const data = await installCustomSkillProvider({
@@ -271,7 +291,7 @@ function CustomSkillInstaller() {
         activate_now: form.activate_now,
       })
       setResult({ ok: true, data })
-      await loadProviders()
+      await refetchProviders()
     } catch (installError) {
       setResult({ ok: false, error: installError.message || '安装失败' })
     } finally {
@@ -290,24 +310,33 @@ function CustomSkillInstaller() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => loadTemplate(true)}
-            disabled={templateLoading}
+            onClick={() => void handleReloadTemplate(true)}
+            disabled={templateLoading || templateRefreshing}
             className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
           >
-            {templateLoading ? '加载中…' : '加载模板'}
+            {templateLoading || templateRefreshing ? '加载中…' : '加载模板'}
           </button>
           <button
-            onClick={loadProviders}
-            disabled={providersLoading}
+            onClick={() => void refetchProviders()}
+            disabled={providersLoading || providersRefreshing}
             className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
           >
-            {providersLoading ? '刷新中…' : '刷新列表'}
+            {providersLoading || providersRefreshing ? '刷新中…' : '刷新列表'}
           </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="space-y-3">
+          <SampleMeta
+            loadState={templateLoadState}
+            sampleSize={templateData?.source_code ? 1 : 0}
+            sampleLabel="模板"
+            updatedAt={templateUpdatedAt}
+            source="custom provider template"
+            definition="安装器中的模板源码已独立进入 query 层；手动点击“加载模板”只会刷新模板，不会再重新触发整页副作用。"
+          />
+
           <div>
             <label className="mb-1 block text-xs text-gray-500">提供器文件名</label>
             <input
@@ -353,7 +382,11 @@ function CustomSkillInstaller() {
             </div>
           </div>
 
-          {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+          {templateError ? (
+            <NoticeBanner variant="warning" title="模板暂不可用">
+              {templateError}
+            </NoticeBanner>
+          ) : null}
 
           {result ? (
             result.ok ? (
@@ -378,7 +411,24 @@ function CustomSkillInstaller() {
         </div>
 
         <div className="space-y-3">
-          <div className="text-sm font-semibold text-gray-700">已安装自定义提供器</div>
+          <div className="space-y-3">
+            <div className="text-sm font-semibold text-gray-700">已安装自定义提供器</div>
+            <SampleMeta
+              loadState={providersLoadState}
+              sampleSize={providers.length}
+              sampleLabel="提供器"
+              updatedAt={providersUpdatedAt}
+              source="custom providers"
+              definition="提供器列表已独立进入 query 层；刷新列表只会刷新 provider 清单，不会影响模板编辑区的本地草稿。"
+            />
+          </div>
+
+          {providersError ? (
+            <NoticeBanner variant="warning" title="提供器列表暂不可用">
+              {providersError}
+            </NoticeBanner>
+          ) : null}
+
           {providersLoading && providers.length === 0 ? (
             <ProviderLoadingState />
           ) : providers.length === 0 ? (
@@ -442,16 +492,47 @@ function CustomSkillInstaller() {
   )
 }
 
-function PermissionGuardStats() {
-  const [data, setData] = useState(null)
-
-  useEffect(() => {
-    fetchPermissionStats({ window_minutes: 1440 }).then(setData).catch(() => {})
-  }, [])
+function PermissionGuardStats({
+  data,
+  loading,
+  refreshing,
+  stale,
+  error,
+  updatedAt,
+  windowMinutes = 1440,
+}) {
+  const loadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(data),
+    hasSamples: Number(data?.total_checks ?? 0) > 0,
+    available: Boolean(data),
+    stale,
+  })
 
   return (
     <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
       <div className="text-sm font-semibold text-gray-700">权限拦截统计（近 24 小时）</div>
+      <SampleMeta
+        loadState={loadState}
+        windowMinutes={windowMinutes}
+        sampleSize={data?.total_checks ?? 0}
+        sampleLabel="校验"
+        updatedAt={updatedAt}
+        source="permission-guard"
+        definition="展示工具权限校验总量、拦截量和高频被拦截工具，便于识别误拦或异常提案。"
+      />
+
+      {error ? (
+        <NoticeBanner variant="warning" title="权限统计暂不可用">
+          {error}
+        </NoticeBanner>
+      ) : null}
+
+      {!error && !loading && !refreshing && loadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">当前窗口还没有权限校验样本。</NoticeBanner>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: '总校验次数', value: data?.total_checks, color: 'text-gray-700' },
@@ -489,16 +570,47 @@ function PermissionGuardStats() {
   )
 }
 
-function ActionPlanStats() {
-  const [data, setData] = useState(null)
-
-  useEffect(() => {
-    fetchActionPlanStats({ window_minutes: 1440 }).then(setData).catch(() => {})
-  }, [])
+function ActionPlanStats({
+  data,
+  loading,
+  refreshing,
+  stale,
+  error,
+  updatedAt,
+  windowMinutes = 1440,
+}) {
+  const loadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(data),
+    hasSamples: Number(data?.total_plans ?? 0) > 0,
+    available: Boolean(data),
+    stale,
+  })
 
   return (
     <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
       <div className="text-sm font-semibold text-gray-700">执行计划统计（近 24 小时）</div>
+      <SampleMeta
+        loadState={loadState}
+        windowMinutes={windowMinutes}
+        sampleSize={data?.total_plans ?? 0}
+        sampleLabel="计划"
+        updatedAt={updatedAt}
+        source="action-plan"
+        definition="展示执行计划成功、降级和指令类型分布，用于判断规划器是否频繁 fallback。"
+      />
+
+      {error ? (
+        <NoticeBanner variant="warning" title="执行计划统计暂不可用">
+          {error}
+        </NoticeBanner>
+      ) : null}
+
+      {!error && !loading && !refreshing && loadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">当前窗口还没有执行计划样本。</NoticeBanner>
+      ) : null}
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: '总计划数', value: data?.total_plans, color: 'text-gray-700' },
@@ -540,47 +652,81 @@ function ActionPlanStats() {
 export default function Tools() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
-  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+  const pollingTick = useAppStore((state) => state.pollingTick)
+  const {
+    runtimeSnapshot,
+    promptStats,
+    loading: runtimeLoading,
+    reload: reloadRuntime,
+  } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes: 60,
   })
 
-  const [health, setHealth] = useState(null)
-  const [tools, setTools] = useState([])
   const [selectedTool, setSelectedTool] = useState(null)
   const [executeTarget, setExecuteTarget] = useState(null)
   const [filter, setFilter] = useState('ALL')
   const [query, setQuery] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const {
+    health,
+    tools,
+    catalogError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch: refetchCatalog,
+  } = useToolsCatalogQuery({
+    query,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const {
+    permissionStats,
+    statsError: permissionError,
+    loading: permissionLoading,
+    refreshing: permissionRefreshing,
+    stale: permissionStale,
+    lastUpdatedAt: permissionUpdatedAt,
+    refetch: refetchPermissionStats,
+  } = usePermissionStatsQuery({
+    windowMinutes: 1440,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const {
+    actionPlanStats,
+    statsError: actionPlanError,
+    loading: actionPlanLoading,
+    refreshing: actionPlanRefreshing,
+    stale: actionPlanStale,
+    lastUpdatedAt: actionPlanUpdatedAt,
+    refetch: refetchActionPlanStats,
+  } = useActionPlanStatsQuery({
+    windowMinutes: 1440,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError('')
-    try {
-      const [healthResponse, pack] = await Promise.all([
-        fetchToolHealth(),
-        fetchToolMetaPack({ include_write: true, k: 20, query }),
-      ])
-      setHealth(healthResponse)
-      setTools(pack.tool_meta_pack || [])
-    } catch (fetchError) {
-      setError(fetchError.message || '加载工具信息失败')
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (!selectedTool) return
+    const nextSelectedTool = tools.find((tool) => tool.id === selectedTool.id)
+    if (!nextSelectedTool) {
+      setSelectedTool(null)
+      setExecuteTarget(null)
+      return
     }
-  }, [query])
-
-  useEffect(() => {
-    load()
-  }, [load])
-
-  useEffect(() => {
-    if (!pollingEnabled) return
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [pollingEnabled, pollingInterval, load])
+    if (nextSelectedTool !== selectedTool) {
+      setSelectedTool(nextSelectedTool)
+    }
+    if (executeTarget?.id === nextSelectedTool.id && executeTarget !== nextSelectedTool) {
+      setExecuteTarget(nextSelectedTool)
+    }
+  }, [executeTarget, selectedTool, tools])
 
   const filteredTools = useMemo(
     () =>
@@ -594,6 +740,23 @@ export default function Tools() {
 
   const readCount = useMemo(() => tools.filter((tool) => tool.side_effect_level === 'READ').length, [tools])
   const writeCount = useMemo(() => tools.filter((tool) => tool.side_effect_level === 'WRITE').length, [tools])
+  const toolsLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: catalogError,
+    hasData: Boolean(health || tools.length > 0),
+    hasSamples: Number(health?.catalog_size ?? 0) > 0 || tools.length > 0,
+    available: Boolean(health || tools.length > 0),
+    stale,
+  })
+
+  const handleRefresh = async () => {
+    await Promise.allSettled([
+      refetchCatalog(),
+      refetchPermissionStats(),
+      refetchActionPlanStats(),
+      reloadRuntime(),
+    ])
+  }
 
   return (
     <div className="space-y-6">
@@ -603,11 +766,21 @@ export default function Tools() {
           <p className="mt-0.5 text-sm text-gray-500">统一查看工具目录、权限等级、健康状态与手动执行入口。</p>
         </div>
         <button
-          onClick={load}
-          disabled={loading}
+          onClick={handleRefresh}
+          disabled={
+            loading
+            || refreshing
+            || permissionLoading
+            || permissionRefreshing
+            || actionPlanLoading
+            || actionPlanRefreshing
+            || runtimeLoading
+          }
           className="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
         >
-          {loading ? '刷新中…' : '刷新'}
+          {loading || refreshing || permissionLoading || permissionRefreshing || actionPlanLoading || actionPlanRefreshing || runtimeLoading
+            ? '刷新中…'
+            : '刷新'}
         </button>
       </div>
 
@@ -623,9 +796,28 @@ export default function Tools() {
           `写入工具：${writeCount}`,
           `当前筛选：${filter}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={toolsLoadState}
+            sampleSize={health?.catalog_size ?? tools.length}
+            sampleLabel="工具"
+            updatedAt={lastUpdatedAt}
+            source="tool catalog"
+            definition="工具页把工具目录、权限拦截与执行计划拆成独立观测面；搜索为空结果不会被误判成系统无样本。"
+          />
+        )}
       />
 
-      {error ? <NoticeBanner variant="error">{error}</NoticeBanner> : null}
+      {catalogError ? <NoticeBanner variant="error">{catalogError}</NoticeBanner> : null}
+
+      {!catalogError && !loading && !refreshing && toolsLoadState === LOAD_STATES.UNAVAILABLE ? (
+        <NoticeBanner variant="warning">工具目录接口当前未返回可用快照，页面会保留中性占位。</NoticeBanner>
+      ) : null}
+
+      {!catalogError && !loading && !refreshing && toolsLoadState === LOAD_STATES.NO_SAMPLE ? (
+        <NoticeBanner variant="info">当前系统还没有可观测的工具目录样本。</NoticeBanner>
+      ) : null}
 
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
 
@@ -765,8 +957,24 @@ export default function Tools() {
       </div>
 
       <CustomSkillInstaller />
-      <PermissionGuardStats />
-      <ActionPlanStats />
+      <PermissionGuardStats
+        data={permissionStats}
+        loading={permissionLoading}
+        refreshing={permissionRefreshing}
+        stale={permissionStale}
+        error={permissionError}
+        updatedAt={permissionUpdatedAt}
+        windowMinutes={1440}
+      />
+      <ActionPlanStats
+        data={actionPlanStats}
+        loading={actionPlanLoading}
+        refreshing={actionPlanRefreshing}
+        stale={actionPlanStale}
+        error={actionPlanError}
+        updatedAt={actionPlanUpdatedAt}
+        windowMinutes={1440}
+      />
     </div>
   )
 }

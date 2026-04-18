@@ -11,14 +11,16 @@ import {
   Wrench,
   XCircle,
 } from 'lucide-react'
-import { fetchCapabilityGapStats, fetchErrors, fetchServicesHealth } from '../api/obs.js'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import { useAlertsCenterQuery } from '../queries/alertsQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { classNames, compactText, formatAlertTitle, formatDateTime, formatServiceStatus, humanizeToken } from '../utils/digitalLife.js'
 import { buildDigitalLifeAlerts } from '../utils/runtimeHealth.js'
@@ -156,13 +158,9 @@ export default function Alerts() {
   const navigate = useNavigate()
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
 
   const [windowMinutes, setWindowMinutes] = useState(360)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [alerts, setAlerts] = useState([])
-  const [serviceAlerts, setServiceAlerts] = useState([])
-  const [capabilityGapData, setCapabilityGapData] = useState(null)
   const [filterCode, setFilterCode] = useState('')
 
   const applyFilterCode = useCallback((nextCode) => {
@@ -185,67 +183,32 @@ export default function Alerts() {
     )
   }, [location.search, navigate])
 
-  const { runtimeSnapshot, promptStats } = useDigitalLifeRuntimeSignals({
+  const {
+    runtimeSnapshot,
+    promptStats,
+    reload: reloadRuntime,
+    lastUpdatedAt: runtimeUpdatedAt,
+  } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes,
   })
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [errorRes, healthRes, capabilityGapRes] = await Promise.all([
-        fetchErrors({ window_minutes: windowMinutes, limit: 100 }),
-        fetchServicesHealth({ window_minutes: 60 }).catch(() => null),
-        fetchCapabilityGapStats({
-          limit_recent: 20,
-          limit_hotspots: 8,
-          limit_candidates: 8,
-          min_candidate_detected: 3,
-          min_candidate_sessions: 2,
-          min_candidate_failure_rate: 0.35,
-          min_candidate_failed: 2,
-        }).catch(() => null),
-      ])
-
-      const errorAlerts = (errorRes?.recent_errors || errorRes?.errors || []).map((item) => ({
-        ...item,
-        title: item.title || (item.reason_code ? formatAlertTitle(item.reason_code) : ''),
-        severity: normalizeAlertSeverity(item),
-      }))
-
-      const runtimeServiceAlerts = (healthRes?.services || [])
-        .filter((service) => ['DOWN', 'DEGRADED'].includes(String(service.status || '').toUpperCase()))
-        .map((service) => ({
-          reason_code: `SERVICE_${String(service.status || '').toUpperCase()}`,
-          title: `${service.display_name || service.service_id} ${formatServiceStatus(service.status)}`,
-          detail: compactText(
-            service.status_detail || `当前状态：${formatServiceStatus(service.status)}`,
-            180
-          ),
-          ts_ms: Date.now(),
-          severity: String(service.status || '').toUpperCase() === 'DOWN' ? 'critical' : 'warning',
-          source: 'service-health',
-          to: '/overview',
-        }))
-
-      setAlerts(errorAlerts)
-      setServiceAlerts(runtimeServiceAlerts)
-      setCapabilityGapData(capabilityGapRes)
-    } catch (loadError) {
-      setError(loadError.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const {
+    errorRes,
+    healthRes,
+    capabilityGapData,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+    stale,
+  } = useAlertsCenterQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -256,6 +219,33 @@ export default function Alerts() {
   const runtimeAlerts = useMemo(
     () => buildDigitalLifeAlerts(runtimeSnapshot, { promptStats, capabilityGapData }),
     [runtimeSnapshot, promptStats, capabilityGapData]
+  )
+
+  const alerts = useMemo(
+    () => (errorRes?.recent_errors || errorRes?.errors || []).map((item) => ({
+      ...item,
+      title: item.title || (item.reason_code ? formatAlertTitle(item.reason_code) : ''),
+      severity: normalizeAlertSeverity(item),
+    })),
+    [errorRes]
+  )
+
+  const serviceAlerts = useMemo(
+    () => (healthRes?.services || [])
+      .filter((service) => ['DOWN', 'DEGRADED'].includes(String(service.status || '').toUpperCase()))
+      .map((service) => ({
+        reason_code: `SERVICE_${String(service.status || '').toUpperCase()}`,
+        title: `${service.display_name || service.service_id} ${formatServiceStatus(service.status)}`,
+        detail: compactText(
+          service.status_detail || `当前状态：${formatServiceStatus(service.status)}`,
+          180
+        ),
+        ts_ms: Date.now(),
+        severity: String(service.status || '').toUpperCase() === 'DOWN' ? 'critical' : 'warning',
+        source: 'service-health',
+        to: '/overview',
+      })),
+    [healthRes]
   )
 
   const allAlerts = useMemo(
@@ -288,6 +278,19 @@ export default function Alerts() {
   const warningCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'warning').length
   const infoCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'info').length
   const isForgeRiskFiltered = FORGE_REASON_CODES.has(String(filterCode || '').toUpperCase())
+  const alertsUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
+  const alertsLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: Boolean(errorRes || healthRes || capabilityGapData || runtimeSnapshot),
+    hasSamples: allAlerts.length > 0,
+    available: true,
+    stale,
+  })
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.allSettled([refetch(), reloadRuntime()])
+  }, [refetch, reloadRuntime])
 
   const heroTitle = criticalCount > 0
     ? `${criticalCount} 条严重告警待处理`
@@ -310,9 +313,9 @@ export default function Alerts() {
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-          <button className="btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            {loading ? '刷新中' : '刷新'}
+          <button className="btn-secondary" onClick={handleRefresh} disabled={loading || refreshing}>
+            <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
+            {loading || refreshing ? '刷新中' : '刷新'}
           </button>
         </div>
       </div>
@@ -329,11 +332,23 @@ export default function Alerts() {
           `器官异常：${serviceAlerts.length}`,
           `错误事件：${alerts.length}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={alertsLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={allAlerts.length}
+            sampleLabel="告警项"
+            updatedAt={alertsUpdatedAt}
+            source="runtime + errors + services + capability gap"
+            definition="告警中心把运行态、器官健康和错误事件合并成同一套告警流，便于按 reason_code 和严重度集中处理。"
+          />
+        )}
       />
 
       {error ? (
         <NoticeBanner variant="error" title="告警数据加载失败">
-          {error}
+          {error.message}
         </NoticeBanner>
       ) : null}
 

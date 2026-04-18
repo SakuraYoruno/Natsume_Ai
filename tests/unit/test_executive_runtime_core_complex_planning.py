@@ -5,9 +5,13 @@ from types import SimpleNamespace
 from host_brain.app.capability_gap_detector import CapabilityGapDecision
 from host_brain.app.executive_runtime_core import (
     _RouteSelection,
+    _ExecutionOutcome,
+    _build_plan_chat_outcome,
+    _hard_rule_route,
     _maybe_build_multi_step_plan,
     _should_force_complex_plan,
 )
+from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan
 
 
 class _StubSkillRegistry:
@@ -42,15 +46,8 @@ class _StubPlanningAgent:
         return SimpleNamespace(steps=steps)
 
 
-def test_maybe_build_multi_step_plan_uses_planning_agent_without_split_markers(monkeypatch) -> None:
+def test_maybe_build_multi_step_plan_requires_explicit_steps_in_intent_draft(monkeypatch) -> None:
     monkeypatch.setenv("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_ENABLED", "true")
-    monkeypatch.setenv("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_MIN_CHARS", "10")
-    monkeypatch.setenv("HOST_EXECUTIVE_AUTO_COMPLEX_PLAN_PARALLEL_ENABLED", "false")
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_planning_agent",
-        lambda: _StubPlanningAgent(needs_planning=True),
-    )
-
     plan = _maybe_build_multi_step_plan(
         request_id="req-plan-001",
         sanitized_message="请先分析当前问题并整理关键日志，再执行修复并验证输出是否正确",
@@ -58,11 +55,7 @@ def test_maybe_build_multi_step_plan_uses_planning_agent_without_split_markers(m
         skill_registry=_StubSkillRegistry(),
     )
 
-    assert plan is not None
-    assert plan.plan_id == "plan::req-plan-001"
-    assert len(plan.nodes) >= 2
-    assert plan.nodes[0].step_index == 1
-    assert any(len(batch) >= 1 for batch in plan.execution_batches)
+    assert plan is None
 
 
 def test_should_force_complex_plan_returns_false_for_chat_without_action_gap(monkeypatch) -> None:
@@ -117,3 +110,83 @@ def test_should_force_complex_plan_returns_true_for_chat_action_gap(monkeypatch)
         llm_route_used=True,
     )
     assert forced is True
+
+
+def test_hard_rule_route_respects_explicit_plan_before_keyword_rule() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "plan",
+            "target_id": "skill_dag",
+            "planned_steps": [
+                {"route": "skill", "target_id": "session_summary"},
+                {"route": "skill", "target_id": "emotion_query"},
+            ],
+        },
+        sanitized_message="先帮我总结一下这段会话，然后再查一下当前情绪状态。",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "plan"
+    assert route.target_id == "skill_dag"
+    assert route.reason_code == "intent_draft:plan"
+
+
+def test_build_plan_chat_outcome_preserves_structured_steps() -> None:
+    plan = SkillDagPlan(
+        plan_id="plan::req-structured",
+        nodes=[
+            SkillDagNode(
+                node_id="step-1",
+                step_index=1,
+                description="summarize session",
+                task_description="summarize current session",
+                route="skill",
+                target_id="session_summary",
+                route_reason="test:plan:session_summary",
+                allow_parallel=True,
+                skill_family="social",
+                risk_level=1,
+            ),
+            SkillDagNode(
+                node_id="step-2",
+                step_index=2,
+                description="read emotion snapshot",
+                task_description="read current emotion snapshot",
+                route="skill",
+                target_id="emotion_query",
+                route_reason="test:plan:emotion_query",
+                allow_parallel=True,
+                skill_family="social",
+                risk_level=1,
+            ),
+        ],
+        execution_batches=[["step-1", "step-2"]],
+    )
+    outcome = _ExecutionOutcome(
+        route_type="plan",
+        target_id="plan::req-structured",
+        skill_family="executive",
+        success=True,
+        result_text="[1] session_summary: done\n[2] emotion_query: done",
+        error_text="",
+        latency_ms=42,
+        payload={"plan_trace": []},
+    )
+
+    enriched = _build_plan_chat_outcome(
+        plan=plan,
+        outcome=outcome,
+        plan_meta={
+            "parallel_enabled": True,
+            "plan_trace": [
+                {"node_id": "step-1", "success": True, "result_text": "summary ok", "error_text": ""},
+                {"node_id": "step-2", "success": True, "result_text": "emotion ok", "error_text": ""},
+            ],
+        },
+    )
+
+    assert enriched.payload["total_steps"] == 2
+    assert enriched.payload["success_count"] == 2
+    assert enriched.payload["parallel_enabled"] is True
+    assert enriched.payload["steps"][0]["target_id"] == "session_summary"
+    assert enriched.payload["steps"][1]["target_id"] == "emotion_query"

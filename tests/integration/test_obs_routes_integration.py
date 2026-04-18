@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app import obs_routes
 from host_brain.app.obs_routes import router, set_ledger_provider
+from host_brain.app.obs_routes_core import _clear_obs_route_response_cache
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +316,10 @@ def client(ledger):
     app = FastAPI()
     app.include_router(router)
     set_ledger_provider(lambda: ledger)
-    return TestClient(app)
+    _clear_obs_route_response_cache()
+    client = TestClient(app)
+    yield client
+    _clear_obs_route_response_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +464,91 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert "glymphatic_state" in data
     assert "vestibular_state" in data
     assert "homeostasis_report" in data
+
+
+def test_runtime_snapshot_uses_short_ttl_cache(client, monkeypatch):
+    """Regression: repeated runtime snapshot reads should reuse the short TTL cache."""
+
+    calls = {"snapshot": 0, "status": 0}
+
+    def _fake_snapshot(current_topic=""):
+        calls["snapshot"] += 1
+        return {
+            "persona_user_id": "persona-user-cache",
+            "current_topic": current_topic,
+            "sys_mode": "normal",
+            "sys_mode_status": {},
+            "hard_state": {},
+            "activity_monitor": {},
+            "emotion_context": {},
+            "endocrine_state": {},
+            "immune_state": {},
+            "bond_state": {},
+            "bond_summary": {},
+            "bond_summary_human": {},
+            "inner_world_state": {},
+            "offline_state": {},
+            "silence_state": {},
+            "body_sense": {},
+            "self_model_snapshot": {},
+            "self_reflection_pulse": {},
+            "bond_narrative": {},
+            "motive_state": {},
+            "response_policy": {},
+            "somatic_state": {},
+            "peripheral_state": {},
+            "circadian_state": {},
+            "proprioception_state": {},
+            "initiative_decision": {},
+            "default_mode_state": {},
+            "mirror_neuron_state": {},
+            "memory_layers": {},
+            "language_dual_system": {},
+            "homeostasis_report": {},
+            "interoception_state": {},
+            "motor_cortex_state": {},
+            "cerebellum_state": {},
+            "glymphatic_state": {},
+            "vestibular_state": {},
+            "runtime_summary": {},
+            "background_runtime": {},
+            "slot_status": {},
+            "degraded": False,
+            "degraded_reasons": [],
+            "timestamp": 1700000000000,
+        }
+
+    class _FakeModeService:
+        def get_current_status(self):
+            calls["status"] += 1
+            return {
+                "sys_mode": "normal",
+                "auto_rules": {},
+                "idle_ms": 0,
+                "idle_minutes": 0,
+                "last_interaction_ts_ms": 1700000000000,
+                "is_night_time": False,
+                "valid_transitions": [],
+                "ts_ms": 1700000000000,
+                "degraded": False,
+                "degraded_reason": None,
+            }
+
+    monkeypatch.setattr(
+        "host_brain.app.http_hooks_runtime_helpers.build_digital_life_runtime_snapshot",
+        _fake_snapshot,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.obs_routes_sysmode._get_mode_transition_service",
+        lambda: _FakeModeService(),
+    )
+
+    first = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
+    second = client.get("/obs/runtime-snapshot?current_topic=cache-demo")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert calls == {"snapshot": 1, "status": 1}
 
 
 # ---------------------------------------------------------------------------

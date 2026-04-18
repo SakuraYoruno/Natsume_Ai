@@ -14,6 +14,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Literal, Optional
 
@@ -43,6 +44,23 @@ _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimu
 _TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
+_TRACE_FEED_WARM_ENABLED = str(
+    os.getenv("HOST_OBS_TRACE_FEED_WARM_ENABLED", "true")
+).strip().lower() not in {"0", "false", "no", "off"}
+_TRACE_FEED_WARM_INTERVAL_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_INTERVAL_MS", 2500.0, minimum=500.0)), 500)
+_TRACE_FEED_WARM_STALE_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_MS", 10000.0, minimum=1000.0)), 1000)
+_TRACE_FEED_WARM_LIMIT = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_LIMIT", 6.0, minimum=1.0)), 1)
+_TRACE_FEED_WARM_WINDOW_MINUTES = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_WINDOW_MINUTES", 1440.0, minimum=1.0)), 1)
+_TRACE_FEED_WARM_ACTIVE_WITHIN_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_ACTIVE_WITHIN_MS", 60000.0, minimum=1000.0)), 1000)
+_trace_feed_warm_thread: threading.Thread | None = None
+_trace_feed_warm_stop = threading.Event()
+_trace_feed_warm_lock = threading.Lock()
+_trace_feed_warm_state: dict[str, Any] = {
+    "value": None,
+    "updated_ts_ms": 0,
+    "last_duration_ms": 0,
+    "last_error": None,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +301,140 @@ def _get_trace_builders():
     )
 
 
+def _clone_trace_live_feed_snapshot(snapshot: TraceLiveFeedSnapshot) -> TraceLiveFeedSnapshot:
+    if hasattr(snapshot, "model_copy"):
+        return snapshot.model_copy(deep=True)
+    return snapshot.copy(deep=True)
+
+
+def _build_trace_live_feed_snapshot_sync(
+    *,
+    limit: int,
+    window_minutes: int,
+    keyword: Optional[str],
+    active_within_ms: int,
+) -> TraceLiveFeedSnapshot:
+    (_, __, _build_trace_live_feed_snapshot, *___) = _get_trace_builders()
+    return _build_trace_live_feed_snapshot(
+        _get_ledger(),
+        limit=limit,
+        window_minutes=window_minutes,
+        keyword=keyword,
+        active_within_ms=active_within_ms,
+    )
+
+
+def _refresh_trace_feed_warm_once() -> None:
+    started_at = _now_ms()
+    try:
+        snapshot = _build_trace_live_feed_snapshot_sync(
+            limit=_TRACE_FEED_WARM_LIMIT,
+            window_minutes=_TRACE_FEED_WARM_WINDOW_MINUTES,
+            keyword=None,
+            active_within_ms=_TRACE_FEED_WARM_ACTIVE_WITHIN_MS,
+        )
+    except Exception as exc:
+        with _trace_feed_warm_lock:
+            _trace_feed_warm_state["last_error"] = str(exc)[:200]
+            _trace_feed_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
+        logger.warning("trace feed warm refresh degraded: %s", exc)
+        return
+
+    with _trace_feed_warm_lock:
+        _trace_feed_warm_state["value"] = _clone_trace_live_feed_snapshot(snapshot)
+        _trace_feed_warm_state["updated_ts_ms"] = _now_ms()
+        _trace_feed_warm_state["last_duration_ms"] = max(0, _now_ms() - started_at)
+        _trace_feed_warm_state["last_error"] = None
+
+
+def _trace_feed_warm_loop() -> None:
+    while not _trace_feed_warm_stop.is_set():
+        _refresh_trace_feed_warm_once()
+        wait_seconds = max(float(_TRACE_FEED_WARM_INTERVAL_MS) / 1000.0, 0.25)
+        _trace_feed_warm_stop.wait(wait_seconds)
+
+
+def start_trace_feed_warm_cache() -> dict[str, Any]:
+    if not _TRACE_FEED_WARM_ENABLED:
+        return {"enabled": False, "status": "disabled"}
+
+    global _trace_feed_warm_thread
+    with _trace_feed_warm_lock:
+        if _trace_feed_warm_thread is not None and _trace_feed_warm_thread.is_alive():
+            return get_trace_feed_warm_status()
+        _trace_feed_warm_stop.clear()
+        _trace_feed_warm_thread = threading.Thread(
+            target=_trace_feed_warm_loop,
+            name="obs-trace-feed-warm",
+            daemon=True,
+        )
+        _trace_feed_warm_thread.start()
+    return get_trace_feed_warm_status()
+
+
+def stop_trace_feed_warm_cache() -> dict[str, Any]:
+    global _trace_feed_warm_thread
+    _trace_feed_warm_stop.set()
+    thread = _trace_feed_warm_thread
+    if thread is not None:
+        thread.join(timeout=2.0)
+    _trace_feed_warm_thread = None
+    return get_trace_feed_warm_status()
+
+
+def get_trace_feed_warm_status() -> dict[str, Any]:
+    with _trace_feed_warm_lock:
+        updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
+        age_ms = max(0, _now_ms() - updated_ts_ms) if updated_ts_ms > 0 else None
+        has_value = _trace_feed_warm_state.get("value") is not None
+        last_duration_ms = int(_trace_feed_warm_state.get("last_duration_ms") or 0)
+        last_error = str(_trace_feed_warm_state.get("last_error") or "").strip() or None
+    running = _trace_feed_warm_thread is not None and _trace_feed_warm_thread.is_alive()
+    return {
+        "enabled": bool(_TRACE_FEED_WARM_ENABLED),
+        "running": bool(running),
+        "has_value": bool(has_value),
+        "updated_ts_ms": updated_ts_ms or None,
+        "age_ms": age_ms,
+        "interval_ms": int(_TRACE_FEED_WARM_INTERVAL_MS),
+        "stale_after_ms": int(_TRACE_FEED_WARM_STALE_MS),
+        "last_duration_ms": last_duration_ms,
+        "last_error": last_error,
+        "limit": int(_TRACE_FEED_WARM_LIMIT),
+        "window_minutes": int(_TRACE_FEED_WARM_WINDOW_MINUTES),
+        "active_within_ms": int(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS),
+    }
+
+
+def _get_warmed_trace_feed_snapshot(
+    *,
+    limit: int,
+    window_minutes: int,
+    keyword: Optional[str],
+    active_within_ms: int,
+) -> TraceLiveFeedSnapshot | None:
+    if not _TRACE_FEED_WARM_ENABLED:
+        return None
+    if str(keyword or "").strip():
+        return None
+    if int(limit) != int(_TRACE_FEED_WARM_LIMIT):
+        return None
+    if int(window_minutes) != int(_TRACE_FEED_WARM_WINDOW_MINUTES):
+        return None
+    if int(active_within_ms) != int(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS):
+        return None
+
+    with _trace_feed_warm_lock:
+        value = _trace_feed_warm_state.get("value")
+        updated_ts_ms = int(_trace_feed_warm_state.get("updated_ts_ms") or 0)
+
+    if value is None or updated_ts_ms <= 0:
+        return None
+    if max(0, _now_ms() - updated_ts_ms) > int(_TRACE_FEED_WARM_STALE_MS):
+        return None
+    return _clone_trace_live_feed_snapshot(value)
+
+
 # ---------------------------------------------------------------------------
 # GET /obs/trace/{request_id}
 # ---------------------------------------------------------------------------
@@ -369,6 +521,29 @@ def get_trace_stream_events(request_id: str):
 # ---------------------------------------------------------------------------
 # GET /obs/trace-feed/live
 # ---------------------------------------------------------------------------
+@router.get("/trace-feed/snapshot", response_model=TraceLiveFeedSnapshot)
+def get_trace_live_feed_snapshot(
+    limit: int = Query(_TRACE_FEED_WARM_LIMIT, ge=1, le=12),
+    window_minutes: int = Query(_TRACE_FEED_WARM_WINDOW_MINUTES, ge=1, le=10080),
+    active_within_ms: int = Query(_TRACE_FEED_WARM_ACTIVE_WITHIN_MS, ge=1000, le=3600000),
+    keyword: Optional[str] = Query(None),
+):
+    warmed = _get_warmed_trace_feed_snapshot(
+        limit=limit,
+        window_minutes=window_minutes,
+        keyword=keyword,
+        active_within_ms=active_within_ms,
+    )
+    if warmed is not None:
+        return warmed
+    return _build_trace_live_feed_snapshot_sync(
+        limit=limit,
+        window_minutes=window_minutes,
+        keyword=keyword,
+        active_within_ms=active_within_ms,
+    )
+
+
 @router.get("/trace-feed/live")
 async def stream_trace_live_feed(
     request: Request,
@@ -499,7 +674,7 @@ def get_graph_schema():
         graph_config = _build_graph_config_by_profile(
             execution_profile=PROFILE_CHAT_FAST,
             provider_name=_HOST_CHAT_14B_DEFAULT_PROVIDER,
-            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash",
+            model_id=_HOST_CHAT_14B_DEFAULT_MODEL_ID or "gemini-2.5-flash-lite",
             timeout_ms=60000,
             available=False,
             api_key=None,

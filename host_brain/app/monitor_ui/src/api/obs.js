@@ -5,9 +5,52 @@ import { deepRepairMojibake } from '../utils/text.js'
  */
 
 const BASE = ''
-const REQUEST_TIMEOUT_MS = 15_000
+// The overview dashboard fans out many concurrent /obs requests on first paint.
+// In local dogfooding, those bursts can exceed 15s and caused sections to
+// silently fall back to null, which then rendered misleading zeros / empty states.
+const REQUEST_TIMEOUT_MS = 35_000
+const HOT_GET_CACHE_TTL_MS = 1_500
+const HOT_GET_PREFIXES = [
+  '/obs/runtime-snapshot',
+  '/obs/prompt-builder/stats',
+  '/obs/capability-gaps/stats',
+  '/obs/insights/summary-snapshot',
+  '/obs/digital-life/overview-snapshot',
+  '/obs/trace-feed/snapshot',
+]
+const inflightHotGets = new Map()
+const hotGetCache = new Map()
 
-async function request(url, options = {}) {
+function shouldDedupHotGet(url, method) {
+  return String(method || 'GET').toUpperCase() === 'GET'
+    && HOT_GET_PREFIXES.some((prefix) => String(url || '').startsWith(prefix))
+}
+
+function cloneObsPayload(payload) {
+  if (typeof globalThis.structuredClone === 'function') {
+    return globalThis.structuredClone(payload)
+  }
+  return JSON.parse(JSON.stringify(payload))
+}
+
+function getHotGetCached(url) {
+  const cached = hotGetCache.get(url)
+  if (!cached) return null
+  if (cached.expiresAtMs <= Date.now()) {
+    hotGetCache.delete(url)
+    return null
+  }
+  return cloneObsPayload(cached.data)
+}
+
+function setHotGetCached(url, data) {
+  hotGetCache.set(url, {
+    expiresAtMs: Date.now() + HOT_GET_CACHE_TTL_MS,
+    data: cloneObsPayload(data),
+  })
+}
+
+async function executeRequest(url, options = {}) {
   const { timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = options
   const controller = new AbortController()
   const timeout = globalThis.setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || REQUEST_TIMEOUT_MS))
@@ -31,6 +74,35 @@ async function request(url, options = {}) {
   } finally {
     globalThis.clearTimeout(timeout)
   }
+}
+
+async function request(url, options = {}) {
+  const method = String(options?.method || 'GET').toUpperCase()
+  if (!shouldDedupHotGet(url, method)) {
+    return executeRequest(url, options)
+  }
+
+  const cached = getHotGetCached(url)
+  if (cached != null) {
+    return cached
+  }
+
+  const inflight = inflightHotGets.get(url)
+  if (inflight) {
+    return inflight.then((data) => cloneObsPayload(data))
+  }
+
+  const promise = executeRequest(url, options)
+    .then((data) => {
+      setHotGetCached(url, data)
+      return data
+    })
+    .finally(() => {
+      inflightHotGets.delete(url)
+    })
+
+  inflightHotGets.set(url, promise)
+  return promise.then((data) => cloneObsPayload(data))
 }
 
 // ===== 工具函数 =====
@@ -145,6 +217,27 @@ export function connectTraceLiveFeed(params = {}, handlers = {}) {
     close: () => source.close(),
     source,
   }
+}
+
+export function fetchTraceLiveSnapshot(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/trace-feed/snapshot${qs ? '?' + qs : ''}`)
+}
+
+export function fetchInsightsSummarySnapshot(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/insights/summary-snapshot${qs ? '?' + qs : ''}`)
+}
+
+export function fetchDigitalLifeOverviewSnapshot(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/digital-life/overview-snapshot${qs ? '?' + qs : ''}`)
 }
 
 export function connectTraceRequestLive(requestId, handlers = {}, params = {}) {

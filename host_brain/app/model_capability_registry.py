@@ -20,29 +20,11 @@ class ModelCapabilityProfile:
 _KNOWN_PROFILES: tuple[ModelCapabilityProfile, ...] = (
     ModelCapabilityProfile(
         provider_name="gemini",
-        model_id="gemini-3.1-pro-preview",
-        modality="multimodal",
-        reasoning_tier="high",
-        context_tier="xlarge",
-        cost_tier="high",
-        stability_tier="high",
-    ),
-    ModelCapabilityProfile(
-        provider_name="gemini",
         model_id="gemini-2.5-pro",
         modality="multimodal",
         reasoning_tier="high",
         context_tier="large",
         cost_tier="high",
-        stability_tier="high",
-    ),
-    ModelCapabilityProfile(
-        provider_name="gemini",
-        model_id="gemini-2.5-flash",
-        modality="multimodal",
-        reasoning_tier="medium",
-        context_tier="large",
-        cost_tier="low",
         stability_tier="high",
     ),
     ModelCapabilityProfile(

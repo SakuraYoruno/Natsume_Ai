@@ -24,11 +24,6 @@ import {
 } from 'lucide-react'
 import {
   connectTraceRequestLive,
-  fetchImmuneGateReplay,
-  fetchTribeEvents,
-  fetchTraceNodes,
-  fetchTraceStreamEvents,
-  fetchRetrievalRuntime,
 } from '../api/obs.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
@@ -38,6 +33,14 @@ import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { getTraceNodeDisplayName, normalizeTraceNodeKey } from '../components/trace/traceNodeText.js'
+import { useImmuneGateReplayQuery } from '../queries/automationQueries.js'
+import {
+  useTraceRetrievalRuntimeQuery,
+  useTraceSnapshotQuery,
+  useTraceStreamEventsQuery,
+  useTraceTribeEventsQuery,
+} from '../queries/traceQueries.js'
+import useAppStore from '../store/useAppStore.js'
 import { applyDagreLayout } from '../utils/traceLayout.js'
 
 const ISSUE_STATUSES = new Set(['DEGRADED', 'FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECT', 'REJECTED'])
@@ -1404,116 +1407,84 @@ export default function TraceRequestDetail() {
   const { requestId } = useParams()
   const [traceData, setTraceData] = useState(null)
   const [fallbackEvents, setFallbackEvents] = useState([])
-  const [tribeEvents, setTribeEvents] = useState([])
-  const [retrievalRuntime, setRetrievalRuntime] = useState(null)
-  const [immuneReplay, setImmuneReplay] = useState(null)
   const [selectedNode, setSelectedNode] = useState(null)
   const [liveEntries, setLiveEntries] = useState([])
   const [liveConnected, setLiveConnected] = useState(false)
   const [liveLastTs, setLiveLastTs] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [eventsLoading, setEventsLoading] = useState(false)
-  const [tribeEventsLoading, setTribeEventsLoading] = useState(false)
-  const [immuneReplayLoading, setImmuneReplayLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [eventsError, setEventsError] = useState(null)
-  const [tribeEventsError, setTribeEventsError] = useState(null)
-  const [immuneReplayError, setImmuneReplayError] = useState(null)
+  const pollingEnabled = useAppStore((state) => state.pollingEnabled)
+  const pollingInterval = useAppStore((state) => state.pollingInterval)
+  const pollingTick = useAppStore((state) => state.pollingTick)
+  const pageVisible = useAppStore((state) => state.pageVisible)
+  const detailPollingEnabled = pollingEnabled && pageVisible
+  const traceQuery = useTraceSnapshotQuery({
+    requestId,
+    enabled: Boolean(requestId),
+    pollingEnabled: detailPollingEnabled && !liveConnected,
+    pollingTick,
+    pollingInterval,
+  })
+  const streamEventsQuery = useTraceStreamEventsQuery({
+    requestId,
+    enabled: Boolean(requestId),
+    pollingEnabled: detailPollingEnabled && !liveConnected,
+    pollingTick,
+    pollingInterval,
+  })
+  const tribeEventsQuery = useTraceTribeEventsQuery({
+    requestId,
+    limit: 120,
+    enabled: Boolean(requestId),
+    pollingEnabled: detailPollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(10, pollingInterval),
+  })
+  const retrievalRuntimeQuery = useTraceRetrievalRuntimeQuery({
+    requestId,
+    limit: 5,
+    enabled: Boolean(requestId),
+    pollingEnabled: detailPollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(15, pollingInterval),
+  })
+  const immuneReplayQuery = useImmuneGateReplayQuery({
+    requestId,
+    limit: 160,
+    pollingEnabled: detailPollingEnabled,
+    pollingTick,
+    pollingInterval: Math.max(10, pollingInterval),
+  })
+  const loading = traceQuery.loading
+  const error = traceQuery.traceError
+  const eventsLoading = streamEventsQuery.loading
+  const eventsError = streamEventsQuery.streamEventsError
+  const tribeEventsLoading = tribeEventsQuery.loading
+  const tribeEventsError = tribeEventsQuery.tribeEventsError
+  const immuneReplayLoading = immuneReplayQuery.loading
+  const immuneReplayError = (() => {
+    const message = String(immuneReplayQuery.replayError || '')
+    return message.includes('HTTP 404') ? null : (message || null)
+  })()
+  const tribeEvents = Array.isArray(tribeEventsQuery.tribeEventsPayload?.items) ? tribeEventsQuery.tribeEventsPayload.items : []
+  const retrievalRuntime = retrievalRuntimeQuery.retrievalRuntime
+  const immuneReplay = immuneReplayQuery.replayPayload
 
-  const loadTrace = useCallback(async ({ showLoading = false } = {}) => {
-    if (!requestId) return
-    if (showLoading) setLoading(true)
-    try {
-      const traceResponse = await fetchTraceNodes(requestId)
-      setTraceData(traceResponse)
-      setError(null)
-      void fetchRetrievalRuntime({ request_id: requestId, limit: 5, include_legacy: true })
-        .then((runtimeResponse) => {
-          setRetrievalRuntime(runtimeResponse)
-        })
-        .catch(() => {
-          setRetrievalRuntime(null)
-        })
-    } catch (err) {
-      setError(err.message)
+  useEffect(() => {
+    setFallbackEvents(streamEventsQuery.streamEventsPayload?.events ?? [])
+  }, [streamEventsQuery.streamEventsPayload])
+
+  useEffect(() => {
+    if (!requestId) {
       setTraceData(null)
-      setRetrievalRuntime(null)
-    } finally {
-      if (showLoading) setLoading(false)
+      return
     }
-  }, [requestId])
-
-  const loadEvents = useCallback(async ({ showLoading = false } = {}) => {
-    if (!requestId) return
-    if (showLoading) setEventsLoading(true)
-    try {
-      const data = await fetchTraceStreamEvents(requestId)
-      setFallbackEvents(data.events ?? [])
-      setEventsError(null)
-    } catch (err) {
-      setFallbackEvents([])
-      setEventsError(err.message)
-    } finally {
-      if (showLoading) setEventsLoading(false)
-    }
-  }, [requestId])
-
-  const loadTribeEvents = useCallback(async ({ showLoading = false } = {}) => {
-    if (!requestId) return
-    if (showLoading) setTribeEventsLoading(true)
-    try {
-      const data = await fetchTribeEvents({ request_id: requestId, limit: 120 })
-      setTribeEvents(Array.isArray(data?.items) ? data.items : [])
-      setTribeEventsError(null)
-    } catch (err) {
-      setTribeEvents([])
-      setTribeEventsError(err.message)
-    } finally {
-      if (showLoading) setTribeEventsLoading(false)
-    }
-  }, [requestId])
-
-  const loadImmuneReplay = useCallback(async ({ showLoading = false } = {}) => {
-    if (!requestId) return
-    if (showLoading) setImmuneReplayLoading(true)
-    try {
-      const payload = await fetchImmuneGateReplay(requestId, { limit: 160 })
-      setImmuneReplay(payload)
-      setImmuneReplayError(null)
-    } catch (err) {
-      const message = String(err?.message || '')
-      if (message.includes('HTTP 404')) {
-        setImmuneReplay(null)
-        setImmuneReplayError(null)
-      } else {
-        setImmuneReplay(null)
-        setImmuneReplayError(message || 'immune replay load failed')
-      }
-    } finally {
-      if (showLoading) setImmuneReplayLoading(false)
-    }
-  }, [requestId])
+    setTraceData(traceQuery.traceSnapshot)
+  }, [requestId, traceQuery.traceSnapshot])
 
   useEffect(() => {
-    if (!requestId) return
-    setLoading(true)
-    void loadTrace({ showLoading: true })
-    void loadEvents({ showLoading: true })
-    void loadTribeEvents({ showLoading: true })
-    void loadImmuneReplay({ showLoading: true })
-  }, [requestId, loadTrace, loadEvents, loadTribeEvents, loadImmuneReplay])
-
-  useEffect(() => {
-    if (!requestId) return undefined
-    const timer = setInterval(() => {
-      void loadTribeEvents()
-      void loadImmuneReplay()
-    }, 10000)
-    return () => clearInterval(timer)
-  }, [requestId, loadTribeEvents, loadImmuneReplay])
-
-  useEffect(() => {
-    if (!requestId) return undefined
+    if (!requestId || !pageVisible) {
+      setLiveConnected(false)
+      return undefined
+    }
     let closed = false
     let connection
     try {
@@ -1549,7 +1520,7 @@ export default function TraceRequestDetail() {
       closed = true
       connection?.close?.()
     }
-  }, [requestId])
+  }, [pageVisible, requestId])
 
   const nodes = useMemo(() => {
     const items = Array.isArray(traceData?.nodes) ? [...traceData.nodes] : []
@@ -1616,6 +1587,15 @@ export default function TraceRequestDetail() {
       active: liveConnected,
     },
   ]
+  const handleRefresh = useCallback(async () => {
+    await Promise.allSettled([
+      traceQuery.refetch(),
+      streamEventsQuery.refetch(),
+      tribeEventsQuery.refetch(),
+      retrievalRuntimeQuery.refetch(),
+      immuneReplayQuery.refetch(),
+    ])
+  }, [immuneReplayQuery, retrievalRuntimeQuery, streamEventsQuery, traceQuery, tribeEventsQuery])
 
   return (
     <div className="space-y-4">
@@ -1659,7 +1639,7 @@ export default function TraceRequestDetail() {
                 打开 Immune Ops
               </a>
             ) : null}
-            <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => { void loadTrace({ showLoading: true }); void loadEvents({ showLoading: true }); void loadTribeEvents({ showLoading: true }); void loadImmuneReplay({ showLoading: true }) }}>
+            <button className="btn-secondary flex items-center gap-1 text-xs" onClick={() => void handleRefresh()}>
               <RefreshCw size={12} />
               刷新
             </button>
@@ -1703,7 +1683,7 @@ export default function TraceRequestDetail() {
             loading={immuneReplayLoading}
             error={immuneReplayError}
             requestId={requestId}
-            onReload={() => { void loadImmuneReplay({ showLoading: true }) }}
+            onReload={() => { void immuneReplayQuery.refetch() }}
           />
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">

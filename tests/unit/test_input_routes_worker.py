@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.input_routes import (
     _build_gateway_reply_text,
+    _build_gateway_voice_text,
     _deliver_gateway_reply,
     _detect_gateway_execution_deviation,
     _dispatch_to_graph,
@@ -17,6 +18,7 @@ from host_brain.app.input_routes import (
     _run_cortex_pipeline,
     _should_start_gateway_progress_push,
     _should_send_gateway_immediate_ack,
+    _should_send_gateway_route_started_voice_ack,
     _try_handle_gateway_progress_fastpath,
 )
 from host_brain.app.prompt_template_store import PromptTemplateStore
@@ -227,6 +229,57 @@ def test_dispatch_worker_persists_gateway_voice_result_in_completed_payload() ->
         assert payload["gateway_voice_started"] is True
         assert payload["gateway_voice_vts_started"] is True
         assert payload["gateway_voice_event"]["event_type"] == "TTS_PLAYBACK_STARTED"
+    finally:
+        ledger.close()
+
+
+def test_dispatch_worker_passes_tts_text_ja_to_gateway_reply() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        mocked_deliver = AsyncMock(
+            return_value={"success": True, "status": "OK", "latency_ms": 30, "reply_text_len": 14}
+        )
+        with patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "我记住了，你明天上午九点有个会。",
+                    "commit_event": {
+                        "phase": "COMMIT",
+                        "decision": "APPROVE",
+                        "audit_refs": {
+                            "emotion_tag": "NEUTRAL",
+                            "tts_text_ja": "明日の朝九時に会議があること、ちゃんと覚えてるよ。",
+                        },
+                    },
+                }
+            ),
+        ), patch(
+            "host_brain.app.input_routes._deliver_gateway_reply",
+            new=mocked_deliver,
+        ):
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_worker_tts_text_ja",
+                    session_id="qq_dm_tts_text_ja",
+                    source="GATEWAY",
+                    text="请记住：我明天上午 9 点开会。",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_tts_text_ja",
+                        "msg_id": "msg_tts_text_ja",
+                    },
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                )
+            )
+
+        mocked_deliver.assert_awaited_once()
+        assert mocked_deliver.await_args.kwargs["tts_text_ja"] == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
     finally:
         ledger.close()
 
@@ -618,6 +671,26 @@ def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> 
     )
 
 
+def test_build_gateway_voice_text_prefers_tts_text_ja_when_available() -> None:
+    assert (
+        _build_gateway_voice_text(
+            reply_text="我记住了，你明天上午九点有个会。",
+            tts_text_ja="明日の朝九時に会議があること、ちゃんと覚えてるよ。",
+        )
+        == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
+    )
+
+
+def test_build_gateway_voice_text_falls_back_to_safe_japanese_summary_for_latin_or_code() -> None:
+    voice_text = _build_gateway_voice_text(
+        reply_text="可以直接这样写：```python\\nfrom collections import Counter\\n```",
+        tts_text_ja=None,
+    )
+    assert "画面" in voice_text
+    assert "読み上げる" in voice_text
+    assert "python" not in voice_text.lower()
+
+
 def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     result = _run(
@@ -677,6 +750,9 @@ def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabl
         )
 
     speak_mock.assert_awaited_once()
+    voiced_text = speak_mock.await_args.kwargs["text"]
+    assert "画面" in voiced_text
+    assert "python" not in voiced_text.lower()
     assert result["success"] is True
     assert result["status"] == "SKIPPED"
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
@@ -873,6 +949,18 @@ def test_should_skip_gateway_immediate_ack_for_progress_query() -> None:
     assert reason == "ACK_PROGRESS_QUERY"
 
 
+def test_should_send_gateway_route_started_voice_ack_for_translate_delegate() -> None:
+    should_send, reason = _should_send_gateway_route_started_voice_ack(
+        source="GATEWAY",
+        payload={"platform": "qq", "conversation_id": "qq_dm_route_ack"},
+        route_type="delegate",
+        target_id="translate_agent",
+    )
+
+    assert should_send is True
+    assert reason == "ROUTE_ACK_TRANSLATE_AGENT"
+
+
 def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
@@ -903,6 +991,62 @@ def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
             )
 
         ack_mock.assert_called_once()
+    finally:
+        ledger.close()
+
+
+def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+
+    try:
+        with patch(
+            "host_brain.tribe.thalamus_agent.classify_task_intent_by_rules",
+            return_value={
+                "route": "delegate",
+                "target_id": "translate_agent",
+                "task": "translate",
+            },
+        ), patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "translated",
+                    "route_decision": {
+                        "route": "delegate",
+                        "target_id": "translate_agent",
+                        "task": "translate",
+                    },
+                }
+            ),
+        ), patch(
+            "host_brain.app.input_routes._deliver_gateway_reply",
+            new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 12}),
+        ), patch(
+            "host_brain.app.input_routes._maybe_schedule_gateway_route_started_voice_ack",
+        ) as route_ack_mock:
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_worker_route_ack",
+                    session_id="qq_dm_route_ack",
+                    source="GATEWAY",
+                    text="帮我翻译这段话",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_route_ack",
+                    },
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                )
+            )
+
+        route_ack_mock.assert_called_once()
+        kwargs = route_ack_mock.call_args.kwargs
+        assert kwargs["route_type"] == "delegate"
+        assert kwargs["target_id"] == "translate_agent"
     finally:
         ledger.close()
 
@@ -1156,5 +1300,93 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
             emotion_tag="neutral",
             bond_stage="STRANGER",
         )
+    finally:
+        ledger.close()
+
+
+def test_maybe_realign_gateway_pipeline_skips_for_codex_codegen_skill(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
+        with patch(
+            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
+        ) as notice_mock, patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(),
+        ) as rerun_mock:
+            result, meta = _run(
+                _maybe_realign_gateway_pipeline(
+                    request_id="req_codegen_skip_001",
+                    session_id="wechat_dm_9001",
+                    source="GATEWAY",
+                    user_text="写一个 Python 函数，输入数组后去重并按出现频次降序返回。",
+                    payload={
+                        "platform": "wechat",
+                        "conversation_id": "wechat_dm_9001",
+                        "sender_name": "测试用户",
+                    },
+                    ts_ms=123456,
+                    pipeline_result={
+                        "decision": "APPROVE",
+                        "reason_code": None,
+                        "narrative": "from collections import Counter\n\ndef sort_by_frequency(arr):\n    return []",
+                        "route_decision": {"route": "skill", "target_id": "codex_codegen"},
+                        "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
+                    },
+                    ledger=ledger,
+                )
+            )
+
+        assert result["route_decision"]["target_id"] == "codex_codegen"
+        assert meta is not None
+        assert meta["triggered"] is False
+        assert meta["reason_code"] == "DEVIATION_SKIPPED_CODEX_CODEGEN"
+        notice_mock.assert_not_awaited()
+        rerun_mock.assert_not_awaited()
+    finally:
+        ledger.close()
+
+
+def test_maybe_realign_gateway_pipeline_skips_for_translate_delegate(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
+        with patch(
+            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
+        ) as notice_mock, patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(),
+        ) as rerun_mock:
+            result, meta = _run(
+                _maybe_realign_gateway_pipeline(
+                    request_id="req_translate_skip_001",
+                    session_id="wechat_dm_9002",
+                    source="GATEWAY",
+                    user_text="把“今天辛苦了，早点休息”翻译成英文。",
+                    payload={
+                        "platform": "wechat",
+                        "conversation_id": "wechat_dm_9002",
+                        "sender_name": "测试用户",
+                    },
+                    ts_ms=123456,
+                    pipeline_result={
+                        "decision": "APPROVE",
+                        "reason_code": None,
+                        "narrative": "You've worked hard today. Get some rest early.",
+                        "route_decision": {"route": "delegate", "target_id": "translate_agent"},
+                        "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
+                    },
+                    ledger=ledger,
+                )
+            )
+
+        assert result["route_decision"]["target_id"] == "translate_agent"
+        assert meta is not None
+        assert meta["triggered"] is False
+        assert meta["reason_code"] == "DEVIATION_SKIPPED_TRANSLATE_AGENT"
+        notice_mock.assert_not_awaited()
+        rerun_mock.assert_not_awaited()
     finally:
         ledger.close()

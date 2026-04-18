@@ -25,6 +25,7 @@ class SkillDagNode:
     skill_family: str | None
     risk_level: int
     capability_tags: tuple[str, ...] = ()
+    args_payload: dict[str, Any] = field(default_factory=dict)
     dependencies: tuple[str, ...] = ()
     retry_limit: int = 0
     retry_backoff_ms: int = 0
@@ -44,6 +45,7 @@ class SkillDagNode:
             "skill_family": self.skill_family,
             "risk_level": self.risk_level,
             "capability_tags": list(self.capability_tags),
+            "args_payload": dict(self.args_payload or {}),
             "dependencies": list(self.dependencies),
             "retry_limit": self.retry_limit,
             "retry_backoff_ms": self.retry_backoff_ms,
@@ -326,6 +328,7 @@ def build_skill_dag_plan(
             skill_family=skill_family,
             risk_level=risk_level,
             capability_tags=capability_tags,
+            args_payload=dict(step.get("args") or {}) if isinstance(step.get("args"), dict) else {},
             dependencies=(),
             retry_limit=retry_limit,
             retry_backoff_ms=retry_backoff_ms,
@@ -403,4 +406,3 @@ __all__ = [
     "build_skill_dag_plan",
     "merge_plan_steps_with_dag",
 ]
-

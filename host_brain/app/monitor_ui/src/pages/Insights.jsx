@@ -10,35 +10,31 @@ import InsightSection from '../components/insights/InsightSection.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import InlineQueryMeta from '../components/obs/InlineQueryMeta.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
 import {
-  fetchGovernorStats,
-  fetchErrors,
-  fetchSubsystemsStats,
-  fetchAgentLoopStats,
-  fetchMemoryStats,
-  fetchVtsStats,
-  fetchQaStats,
-  fetchLlmCallStats,
-  fetchLlmRouteStats,
-  fetchCapabilityGapStats,
-  fetchRecallPackStats,
-  fetchUIAssertionStats,
-  fetchFailureStats,
-  fetchPermissionStats,
-  fetchSchedulerHistory,
-  fetchTribeEvents,
-  fetchMemoryGuardStats,
-  fetchStateArbiterStats,
-  fetchContextCompressorStats,
-  fetchPromptBuilderStats,
-  fetchEpisodicStoreStats,
-  fetchCanonProposalStats,
-  fetchChainStats,
-  fetchErrorHeatmap,
-} from '../api/obs.js'
+  useCapabilityGapStatsQuery,
+  useCanonProposalStatsQuery,
+  useChainStatsQuery,
+  useContextCompressorStatsQuery,
+  useEpisodicStoreStatsQuery,
+  useErrorHeatmapQuery,
+  useFailureStatsQuery,
+  useLlmRouteStatsQuery,
+  useMemoryGuardStatsQuery,
+  usePermissionStatsQuery,
+  usePromptBuilderStatsQuery,
+  useRecallPackStatsQuery,
+  useSchedulerGateStatsQuery,
+  useStateArbiterStatsQuery,
+  useUiAssertionStatsQuery,
+} from '../queries/diagnosticQueries.js'
+import { useInsightsSummaryQuery } from '../queries/insightsQueries.js'
+import { useTraceTribeFeedQuery } from '../queries/traceQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatAlertTitle, formatEmotionTag, humanizeToken } from '../utils/digitalLife.js'
 
@@ -110,10 +106,46 @@ const StatCard = ({ label, value, sub, color = 'text-gray-800' }) => (
   <MetricCard label={label} value={value} hint={sub ?? ''} tone={color} variant="stacked" />
 )
 
+function hasInsightSamples(data, sampleKeys = []) {
+  if (!data) return false
+  if (sampleKeys.length === 0) return true
+
+  return sampleKeys.some((key) => {
+    const value = data?.[key]
+    if (Array.isArray(value)) return value.length > 0
+    if (typeof value === 'number') return value > 0
+    return value != null
+  })
+}
+
+function resolveInsightSectionLoadState(queryState, sampleKeys = []) {
+  const data = queryState?.statsData ?? null
+  return resolveLoadState({
+    loading: queryState?.loading || queryState?.refreshing,
+    error: queryState?.queryError,
+    hasData: Boolean(data),
+    hasSamples: hasInsightSamples(data, sampleKeys),
+    available: true,
+    stale: queryState?.stale,
+  })
+}
+
+function SectionQueryMeta({ queryState, windowMinutes, sampleKeys = [] }) {
+  return (
+    <InlineQueryMeta
+      loadState={resolveInsightSectionLoadState(queryState, sampleKeys)}
+      loadStateDetail={queryState?.queryError}
+      updatedAt={queryState?.lastUpdatedAt}
+      windowMinutes={windowMinutes}
+    />
+  )
+}
+
 // ===== 主页面 =====
 export default function Insights() {
   const pollingEnabled  = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingTick = useAppStore((s) => s.pollingTick)
   const navigate = useNavigate()
   const location = useLocation()
   const currentGroup = location.pathname.split('/').pop()
@@ -122,18 +154,33 @@ export default function Insights() {
   const currentGroupMeta = INSIGHT_GROUPS.find((group) => group.id === currentGroup) || null
 
   const [windowMinutes, setWindowMinutes] = useState(60)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(null)
-
-  const [govData,     setGovData]     = useState(null)
-  const [errData,     setErrData]     = useState(null)
-  const [subsysData,  setSubsysData]  = useState(null)
-  const [agentData,   setAgentData]   = useState(null)
-  const [memoryData,  setMemoryData]  = useState(null)
-  const [vtsData,     setVtsData]     = useState(null)
-  const [qaData,      setQaData]      = useState(null)
-  const [llmCallData, setLlmCallData] = useState(null)
-  const { runtimeSnapshot, promptStats: promptBuilderData } = useDigitalLifeRuntimeSignals({
+  const {
+    govData,
+    errData,
+    subsysData,
+    agentData,
+    memoryData,
+    vtsData,
+    qaData,
+    llmCallData,
+    loading,
+    refreshing,
+    error,
+    lastUpdatedAt,
+    refetch,
+    stale,
+  } = useInsightsSummaryQuery({
+    windowMinutes,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const {
+    runtimeSnapshot,
+    promptStats: promptBuilderData,
+    reload: reloadRuntime,
+    lastUpdatedAt: runtimeUpdatedAt,
+  } = useDigitalLifeRuntimeSignals({
     pollingEnabled,
     pollingInterval,
     windowMinutes,
@@ -177,43 +224,6 @@ export default function Insights() {
     },
   ]
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const intervalMinutes = windowMinutes <= 60 ? 5 : windowMinutes <= 360 ? 30 : windowMinutes <= 1440 ? 60 : 360
-      const [gov, err, subsys, agent, memory, vts, qa, llmCall] = await Promise.allSettled([
-        fetchGovernorStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes }),
-        fetchErrors({ window_minutes: windowMinutes, interval_minutes: intervalMinutes, limit: 15 }),
-        fetchSubsystemsStats({ window_minutes: windowMinutes }),
-        fetchAgentLoopStats({ window_minutes: windowMinutes, limit: 8 }),
-        fetchMemoryStats({ window_minutes: windowMinutes }),
-        fetchVtsStats({ window_minutes: windowMinutes }),
-        fetchQaStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes, limit: 15 }),
-        fetchLlmCallStats({ window_minutes: windowMinutes, interval_minutes: intervalMinutes }),
-      ])
-      if (gov.status === 'fulfilled')     setGovData(gov.value)
-      if (err.status === 'fulfilled')     setErrData(err.value)
-      if (subsys.status === 'fulfilled')  setSubsysData(subsys.value)
-      if (agent.status === 'fulfilled')   setAgentData(agent.value)
-      if (memory.status === 'fulfilled')  setMemoryData(memory.value)
-      if (vts.status === 'fulfilled')     setVtsData(vts.value)
-      if (qa.status === 'fulfilled')      setQaData(qa.value)
-      if (llmCall.status === 'fulfilled') setLlmCallData(llmCall.value)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [windowMinutes])
-
-  useEffect(() => {
-    load()
-    if (!pollingEnabled) return
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
-
   useEffect(() => {
     if (currentGroup !== 'global' || focusTarget !== 'forge-risk') {
       return undefined
@@ -223,6 +233,35 @@ export default function Insights() {
     }, 120)
     return () => clearTimeout(timer)
   }, [currentGroup, focusTarget])
+
+  const insightsUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
+  const insightsSourceCount = [
+    govData,
+    errData,
+    subsysData,
+    agentData,
+    memoryData,
+    vtsData,
+    qaData,
+    llmCallData,
+  ].filter(Boolean).length
+  const insightsLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error,
+    hasData: insightsSourceCount > 0,
+    hasSamples: insightsSourceCount > 0,
+    available: true,
+    stale,
+  })
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.allSettled([refetch(), reloadRuntime()])
+  }, [refetch, reloadRuntime])
+  const deepQueryProps = {
+    pollingEnabled,
+    pollingInterval,
+    pollingTick,
+  }
 
   return (
     <div className="space-y-8">
@@ -234,9 +273,9 @@ export default function Insights() {
           </div>
           <div className="flex items-center gap-2">
             <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
-            <button className="btn-secondary" onClick={load} disabled={loading}>
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-              {loading ? '刷新中' : '刷新'}
+            <button className="btn-secondary" onClick={handleRefresh} disabled={loading || refreshing}>
+              <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} />
+              {loading || refreshing ? '刷新中' : '刷新'}
             </button>
           </div>
         </div>
@@ -268,6 +307,18 @@ export default function Insights() {
           `Agent Loop：${agentData?.total_loops ?? 0}`,
           `VTS 事件：${vtsData?.total_events ?? 0}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={insightsLoadState}
+            windowMinutes={windowMinutes}
+            sampleSize={insightsSourceCount}
+            sampleLabel="摘要分区"
+            updatedAt={insightsUpdatedAt}
+            source="insights summary + runtime"
+            definition="Insights 的页首摘要已经切到统一 query 层，后续各分组 section 会继续逐步迁移。"
+          />
+        )}
       />
 
       {isRoot ? (
@@ -278,7 +329,7 @@ export default function Insights() {
         />
       ) : null}
 
-      {error && <NoticeBanner variant="error">加载失败：{error}</NoticeBanner>}
+      {error && <NoticeBanner variant="error">加载失败：{error.message}</NoticeBanner>}
       <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptBuilderData} compact={!isRoot} />
       {isRoot ? (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -422,10 +473,10 @@ export default function Insights() {
           </div>
         )}
       </InsightSection>
-              <ErrorHeatmapSection windowMinutes={windowMinutes} />
-              <CapabilityGapStatsSection windowMinutes={windowMinutes} highlightForgeRisk={focusTarget === 'forge-risk'} />
-              <ChainStatsSection windowMinutes={windowMinutes} />
-              <FailureStatsSection windowMinutes={windowMinutes} />
+              <ErrorHeatmapSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <CapabilityGapStatsSection windowMinutes={windowMinutes} highlightForgeRisk={focusTarget === 'forge-risk'} {...deepQueryProps} />
+              <ChainStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <FailureStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
             </>
           )}
 
@@ -523,8 +574,8 @@ export default function Insights() {
           )}
         </div>
       </InsightSection>
-              <EpisodicStoreStatsSection windowMinutes={windowMinutes} />
-              <ContextCompressorStatsSection windowMinutes={windowMinutes} />
+              <EpisodicStoreStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <ContextCompressorStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
             </>
           )}
 
@@ -667,9 +718,9 @@ export default function Insights() {
           </div>
         )}
       </InsightSection>
-              <RouteStatsSection windowMinutes={windowMinutes} />
-              <PromptBuilderStatsSection windowMinutes={windowMinutes} />
-              <RecallPackSection windowMinutes={windowMinutes} />
+              <RouteStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <PromptBuilderStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <RecallPackSection windowMinutes={windowMinutes} {...deepQueryProps} />
             </>
           )}
 
@@ -753,18 +804,18 @@ export default function Insights() {
           </div>
         )}
       </InsightSection>
-              <PermissionStatsSection windowMinutes={windowMinutes} />
-              <SchedulerGateStatsSection windowMinutes={windowMinutes} />
-              <MemoryGuardStatsSection windowMinutes={windowMinutes} />
-              <UIAssertionSection windowMinutes={windowMinutes} />
-              <TribeEventsSection windowMinutes={windowMinutes} />
+              <PermissionStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <SchedulerGateStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <MemoryGuardStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <UIAssertionSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <TribeEventsSection windowMinutes={windowMinutes} {...deepQueryProps} />
             </>
           )}
 
           {currentGroup === 'state' && (
             <>
-              <StateArbiterStatsSection windowMinutes={windowMinutes} />
-              <CanonProposalStatsSection windowMinutes={windowMinutes} />
+              <StateArbiterStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
+              <CanonProposalStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
             </>
           )}
 
@@ -856,29 +907,33 @@ export default function Insights() {
 }
 
 // ===== Ref #47: 路由决策统计子组件 =====
-function TribeEventsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
+function TribeEventsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
   const [eventTypeFilter, setEventTypeFilter] = React.useState('')
   const [sourceFilter, setSourceFilter] = React.useState('')
   const [targetFilter, setTargetFilter] = React.useState('')
-  const [loading, setLoading] = React.useState(false)
-
-  const load = React.useCallback(() => {
-    setLoading(true)
-    return fetchTribeEvents({
+  const tribeFeedParams = React.useMemo(() => ({
       limit: 20,
       event_type: eventTypeFilter || undefined,
       source_agent: sourceFilter || undefined,
       target_agent: targetFilter || undefined,
-    })
-      .then(setData)
-      .catch(() => setData({ total: 0, items: [] }))
-      .finally(() => setLoading(false))
-  }, [eventTypeFilter, sourceFilter, targetFilter])
+    }), [eventTypeFilter, sourceFilter, targetFilter])
+  const queryState = useTraceTribeFeedQuery({
+    queryParams: tribeFeedParams,
+    enabled: true,
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
+  const data = queryState.tribeFeedPayload
+  const loading = queryState.loading || queryState.refreshing
+
+  const load = React.useCallback(() => {
+    return queryState.refetch()
+  }, [queryState])
 
   React.useEffect(() => {
-    load()
-  }, [windowMinutes, load])
+    void queryState.refetch()
+  }, [windowMinutes, queryState])
 
   const items = data?.items ?? []
   const eventTypeCounter = new Map()
@@ -892,6 +947,7 @@ function TribeEventsSection({ windowMinutes }) {
 
   return (
     <InsightSection icon={GitBranch} title="Tribe 事件总线观测" color="text-emerald-700">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total', 'items']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="最近事件数" value={loading ? '...' : (data?.total ?? '—')} color="text-gray-700" />
         <StatCard label="窗口分钟" value={windowMinutes} color="text-gray-700" />
@@ -925,7 +981,7 @@ function TribeEventsSection({ windowMinutes }) {
             onChange={(e) => setTargetFilter(e.target.value)}
           />
           <div className="flex items-center gap-2">
-            <button className="btn-secondary text-xs" onClick={load} disabled={loading}>
+            <button className="btn-secondary text-xs" onClick={() => void load()} disabled={loading}>
               <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
               刷新
             </button>
@@ -943,6 +999,12 @@ function TribeEventsSection({ windowMinutes }) {
           </div>
         </div>
       </div>
+
+      {queryState.tribeFeedError ? (
+        <NoticeBanner variant="error" title="Tribe 事件加载失败">
+          {queryState.tribeFeedError}
+        </NoticeBanner>
+      ) : null}
 
       {topEventTypes.length > 0 && (
         <div className="card p-4 mb-4">
@@ -999,19 +1061,20 @@ function TribeEventsSection({ windowMinutes }) {
           </table>
         </div>
       ) : (
-        <EmptyStateCard title="暂无 Tribe 事件数据" hint="当前窗口未采集到事件。" />
+        !loading && !queryState.tribeFeedError
+          ? <EmptyStateCard title="暂无 Tribe 事件数据" hint="当前窗口未采集到事件。" />
+          : null
       )}
     </InsightSection>
   )
 }
 
-function RouteStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchLlmRouteStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function RouteStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useLlmRouteStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={GitBranch} title="模型路由决策统计" color="text-indigo-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_decisions', 'models', 'task_types']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总路由决策" value={data?.total_decisions ?? '—'} color="text-indigo-600" />
         <StatCard label="降级次数" value={data?.fallback_count ?? '—'} color={data?.fallback_rate > 20 ? 'text-red-500' : 'text-orange-500'} />
@@ -1062,13 +1125,12 @@ function RouteStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #49: RecallPack budget stats =====
-function RecallPackSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchRecallPackStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function RecallPackSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useRecallPackStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={Layers} title="召回包词元预算" color="text-cyan-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_packs', 'slots']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="召回包总数" value={data?.total_packs ?? '—'} color="text-cyan-600" />
         <StatCard label="平均词元数" value={data?.avg_total_tokens != null ? Math.round(data.avg_total_tokens) : '—'} color="text-blue-600" />
@@ -1098,13 +1160,12 @@ function RecallPackSection({ windowMinutes }) {
 }
 
 // ===== Ref #53: FailureMatrix 失败事件统计子组件 =====
-function FailureStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchFailureStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function FailureStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useFailureStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={TriangleAlert} title="失败事件统计" color="text-amber-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_failures', 'top_events']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总失败事件" value={data?.total_failures ?? '—'} color="text-gray-700" />
         <StatCard label="中止次数" value={data?.abort_count ?? '—'} color="text-red-600" />
@@ -1133,13 +1194,12 @@ function FailureStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #54: PermissionGuard 权限拒绝统计子组件 =====
-function PermissionStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchPermissionStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function PermissionStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = usePermissionStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={Lock} title="权限拒绝统计" color="text-violet-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_checks', 'denied_count', 'top_denied_tools']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
         <StatCard label="允许次数" value={data?.allowed_count ?? '—'} color="text-green-600" />
@@ -1167,12 +1227,10 @@ function PermissionStatsSection({ windowMinutes }) {
   )
 }
 
-function SchedulerGateStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
+function SchedulerGateStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useSchedulerGateStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   const navigate = useNavigate()
-  React.useEffect(() => {
-    fetchSchedulerHistory({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
   const goAutomation = React.useCallback(
     (params = {}) => {
       const search = new URLSearchParams()
@@ -1188,6 +1246,7 @@ function SchedulerGateStatsSection({ windowMinutes }) {
 
   return (
     <InsightSection icon={ShieldAlert} title="节律门控统计" color="text-amber-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['gate_blocked_total', 'blocked_reason_codes', 'gate_states']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="门控拦截" value={data?.gate_blocked_total ?? '—'} color="text-orange-500" />
         <StatCard
@@ -1272,13 +1331,12 @@ function SchedulerGateStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #59: MemoryGuard 宪法校验统计子组件 =====
-function MemoryGuardStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchMemoryGuardStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function MemoryGuardStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useMemoryGuardStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={BookLock} title="记忆守卫校验统计" color="text-emerald-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_checks', 'blocked_count', 'top_reject_reasons']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总校验次数" value={data?.total_checks ?? '—'} color="text-gray-700" />
         <StatCard label="通过次数" value={data?.passed_count ?? '—'} color="text-green-600" />
@@ -1311,13 +1369,12 @@ function MemoryGuardStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #60: StateArbiter Bond 查询统计子组件（Phase XIV v4: 仅 bond_graph）=====
-function StateArbiterStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchStateArbiterStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function StateArbiterStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useStateArbiterStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={GitMerge} title="状态仲裁关系查询统计" color="text-cyan-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_resolutions', 'top_sources']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总查询次数" value={data?.total_resolutions ?? '—'} color="text-gray-700" />
         <StatCard label="冲突次数" value={data?.conflict_count ?? '—'} color="text-red-600" />
@@ -1345,13 +1402,12 @@ function StateArbiterStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #61: ContextCompressor 压缩效率统计子组件 =====
-function ContextCompressorStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchContextCompressorStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function ContextCompressorStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useContextCompressorStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={Minimize2} title="上下文压缩效率统计" color="text-teal-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_compressions', 'summary_generated_count', 'strategy_distribution']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总压缩次数" value={data?.total_compressions ?? '—'} color="text-gray-700" />
         <StatCard label="活跃压缩" value={data?.active_count ?? '—'} color="text-green-600" />
@@ -1384,13 +1440,12 @@ function ContextCompressorStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #65: PromptBuilder 构建统计子组件 =====
-function PromptBuilderStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchPromptBuilderStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function PromptBuilderStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = usePromptBuilderStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={FileCode} title="提示构建统计" color="text-violet-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_builds', 'degraded_count', 'slot_fill_distribution']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总构建次数" value={data?.total_builds ?? '—'} color="text-gray-700" />
         <StatCard label="注入检测" value={data?.injection_detected_count ?? '—'} color="text-red-600" />
@@ -1423,13 +1478,12 @@ function PromptBuilderStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #66: EpisodicStore 写入统计子组件 =====
-function EpisodicStoreStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchEpisodicStoreStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function EpisodicStoreStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useEpisodicStoreStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={Archive} title="情景记忆写入统计" color="text-amber-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_attempts', 'written_count', 'memory_guard_blocked_count']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总尝试次数" value={data?.total_attempts ?? '—'} color="text-gray-700" />
         <StatCard label="写入成功" value={data?.written_count ?? '—'} color="text-green-600" />
@@ -1447,13 +1501,12 @@ function EpisodicStoreStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #50: UIAssertion 统计子组件 =====
-function UIAssertionSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchUIAssertionStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function UIAssertionSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useUiAssertionStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={ShieldAlert} title="UI 断言安全统计" color="text-red-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_assertions', 'precondition_failed', 'top_failed_reasons']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总断言事件" value={data?.total_assertions ?? '—'} color="text-gray-700" />
         <StatCard label="敏感界面拦截" value={data?.sensitive_blocked ?? '—'} color="text-red-600" />
@@ -1481,11 +1534,9 @@ function UIAssertionSection({ windowMinutes }) {
 }
 
 // ===== Ref #84: 请求链路统计子组件（Phase XIV v4）=====
-function ChainStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchChainStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function ChainStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useChainStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
 
   const nodes = data?.node_stats ?? []
   const maxAvg = Math.max(...nodes.map(n => n.avg_latency_ms ?? 0), 1)
@@ -1504,6 +1555,7 @@ function ChainStatsSection({ windowMinutes }) {
 
   return (
     <InsightSection icon={Activity} title="请求链路统计" color="text-blue-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_requests', 'node_stats']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总请求数" value={data?.total_requests ?? '—'} color="text-gray-700" />
         <StatCard label="入口守护拦截率" value={data?.governor_block_rate != null ? `${data.governor_block_rate}%` : '—'} color={data?.governor_block_rate > 10 ? 'text-red-500' : 'text-gray-700'} />
@@ -1555,20 +1607,15 @@ function ChainStatsSection({ windowMinutes }) {
 }
 
 /*
-function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }) {
-  const [data, setData] = React.useState(null)
-
-  React.useEffect(() => {
-    fetchCapabilityGapStats({
-      limit_recent: 30,
-      limit_hotspots: 8,
-      limit_candidates: 8,
-      min_candidate_detected: 3,
-      min_candidate_sessions: 2,
-      min_candidate_failure_rate: 0.35,
-      min_candidate_failed: 2,
-    }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function CapabilityGapStatsSection({
+  windowMinutes,
+  highlightForgeRisk = false,
+  pollingEnabled = false,
+  pollingInterval = 30,
+  pollingTick = 0,
+}) {
+  const queryState = useCapabilityGapStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
 
   const qualitySummary = data?.forge_runtime_quality?.summary || {}
   const qualityItems = data?.forge_runtime_quality?.items || []
@@ -1655,20 +1702,15 @@ function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }
 
 */
 
-function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }) {
-  const [data, setData] = React.useState(null)
-
-  React.useEffect(() => {
-    fetchCapabilityGapStats({
-      limit_recent: 30,
-      limit_hotspots: 8,
-      limit_candidates: 8,
-      min_candidate_detected: 3,
-      min_candidate_sessions: 2,
-      min_candidate_failure_rate: 0.35,
-      min_candidate_failed: 2,
-    }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function CapabilityGapStatsSection({
+  windowMinutes,
+  highlightForgeRisk = false,
+  pollingEnabled = false,
+  pollingInterval = 30,
+  pollingTick = 0,
+}) {
+  const queryState = useCapabilityGapStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
 
   const qualitySummary = data?.forge_runtime_quality?.summary || {}
   const qualityItems = data?.forge_runtime_quality?.items || []
@@ -1684,6 +1726,7 @@ function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }
         </NoticeBanner>
       ) : null}
       <InsightSection icon={GitBranch} title="Capability Gap & Forge Quality" color="text-indigo-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['detected_total', 'hotspots', 'forge_runtime_quality']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="Gap Detected" value={data?.detected_total ?? '--'} color="text-gray-700" />
         <StatCard label="Gap Failed" value={data?.failed_total ?? '--'} color="text-red-600" />
@@ -1760,13 +1803,12 @@ function CapabilityGapStatsSection({ windowMinutes, highlightForgeRisk = false }
   )
 }
 
-function CanonProposalStatsSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    fetchCanonProposalStats({ window_minutes: windowMinutes }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function CanonProposalStatsSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useCanonProposalStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
   return (
     <InsightSection icon={ScrollText} title="主设定提案统计" color="text-indigo-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total', 'recent_proposals', 'status_distribution']} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         <StatCard label="总提案数" value={data?.total ?? '—'} color="text-gray-700" />
         <StatCard label="待审核" value={data?.pending ?? '—'} color={data?.pending > 0 ? 'text-orange-500' : 'text-gray-400'} />
@@ -1859,12 +1901,9 @@ function CanonProposalStatsSection({ windowMinutes }) {
 }
 
 // ===== Ref #89: 错误热力图子组件 =====
-function ErrorHeatmapSection({ windowMinutes }) {
-  const [data, setData] = React.useState(null)
-  React.useEffect(() => {
-    const windowHours = Math.max(1, Math.round(windowMinutes / 60))
-    fetchErrorHeatmap({ window_hours: windowHours }).then(setData).catch(() => {})
-  }, [windowMinutes])
+function ErrorHeatmapSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
+  const queryState = useErrorHeatmapQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
+  const { statsData: data } = queryState
 
   const cells = data?.cells ?? []
   const nodes = data?.nodes ?? []
@@ -1882,6 +1921,7 @@ function ErrorHeatmapSection({ windowMinutes }) {
 
   return (
     <InsightSection icon={Flame} title="错误热力图" color="text-red-600">
+      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_errors', 'cells', 'nodes']} />
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
         <StatCard label="总错误数" value={data?.total_errors ?? '—'} color={data?.total_errors > 0 ? 'text-red-600' : 'text-green-600'} />
         <StatCard label="统计窗口" value={data?.window_hours != null ? `${data.window_hours}h` : '—'} color="text-gray-700" />

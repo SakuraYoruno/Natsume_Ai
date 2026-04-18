@@ -9,15 +9,16 @@ import {
 } from 'lucide-react'
 import useAppStore from '../store/useAppStore.js'
 import {
-  fetchSysModeHistory,
-  fetchSysModeStatus,
   switchSysMode,
   updateAutoRules,
-} from '../api/obs.js'
+} from '../api/runtimeMode.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useRuntimeModeConsoleQuery } from '../queries/runtimeModeQueries.js'
 import { DASH, formatMode, MODE_META } from '../utils/digitalLife.js'
 
 const MODE_ORDER = ['normal', 'focus', 'gaming', 'sleep', 'maintenance', 'locked']
@@ -140,44 +141,23 @@ function ModeButton({ mode, currentMode, validTransitions, onSwitch, switching }
 export default function RuntimeMode() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
-  const [status, setStatus] = useState(null)
-  const [history, setHistory] = useState([])
+  const pollingTick = useAppStore((state) => state.pollingTick)
   const [switching, setSwitching] = useState(false)
   const [switchResult, setSwitchResult] = useState(null)
-  const [error, setError] = useState(null)
-
-  const loadStatus = useCallback(async () => {
-    try {
-      const data = await fetchSysModeStatus()
-      setStatus(data)
-      setError(null)
-    } catch (fetchError) {
-      setError(fetchError.message || '生命体存在态轴加载失败')
-    }
-  }, [])
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const data = await fetchSysModeHistory({ limit: 15 })
-      setHistory(data.items || [])
-    } catch (fetchError) {
-      console.warn('Failed to load mode history:', fetchError)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadStatus()
-    loadHistory()
-  }, [loadHistory, loadStatus])
-
-  useEffect(() => {
-    if (!pollingEnabled) return undefined
-    const timer = setInterval(() => {
-      loadStatus()
-      loadHistory()
-    }, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [loadHistory, loadStatus, pollingEnabled, pollingInterval])
+  const {
+    statusData: status,
+    historyData: history,
+    consoleError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useRuntimeModeConsoleQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const handleSwitch = async (targetMode) => {
     const meta = MODE_META[targetMode] || { label: targetMode, semantic: '' }
@@ -194,7 +174,7 @@ export default function RuntimeMode() {
         source: 'manual',
       })
       setSwitchResult(result)
-      await Promise.all([loadStatus(), loadHistory()])
+      await refetch()
     } catch (switchError) {
       setSwitchResult({ success: false, error: switchError.message || '切换失败' })
     } finally {
@@ -206,7 +186,7 @@ export default function RuntimeMode() {
   const handleToggleRule = async (ruleKey, currentValue) => {
     try {
       await updateAutoRules({ rules: { [ruleKey]: !currentValue } })
-      await loadStatus()
+      await refetch()
     } catch (updateError) {
       console.warn('Failed to update auto rule:', updateError)
     }
@@ -220,23 +200,14 @@ export default function RuntimeMode() {
     () => Object.entries(AUTO_RULE_DEFS).filter(([key]) => autoRules[key] !== false).length,
     [autoRules]
   )
-
-  if (error && !status) {
-    return (
-      <div className="space-y-4">
-        <NoticeBanner variant="error" title="生命体存在态轴加载失败">{error}</NoticeBanner>
-        <button className="btn-primary" onClick={loadStatus}>重试</button>
-      </div>
-    )
-  }
-
-  if (!status && !error) {
-    return (
-      <div className="space-y-4">
-        <NoticeBanner variant="info" title="加载中">正在同步生命体存在态轴快照…</NoticeBanner>
-      </div>
-    )
-  }
+  const runtimeModeLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: consoleError && !status ? new Error(consoleError) : null,
+    hasData: Boolean(status || history.length > 0),
+    hasSamples: Boolean(status || history.length > 0),
+    available: Boolean(status || history.length > 0),
+    stale,
+  })
 
   return (
     <div className="space-y-6">
@@ -245,8 +216,8 @@ export default function RuntimeMode() {
           <h1 className="text-xl font-semibold text-gray-900">生命体存在态轴</h1>
           <p className="text-sm text-gray-500">管理数字生命体的硬状态，不直接覆盖离线时长、动机和回复姿态。</p>
         </div>
-        <button className="btn-secondary" onClick={() => Promise.allSettled([loadStatus(), loadHistory()])} disabled={switching}>
-          <RefreshCw size={14} className={switching ? 'animate-spin' : ''} />
+        <button className="btn-secondary" onClick={() => refetch()} disabled={switching || loading || refreshing}>
+          <RefreshCw size={14} className={switching || loading || refreshing ? 'animate-spin' : ''} />
           刷新
         </button>
       </div>
@@ -263,7 +234,22 @@ export default function RuntimeMode() {
           `自动规则：${enabledRules}/${Object.keys(AUTO_RULE_DEFS).length}`,
           status?.is_night_time ? '夜间窗口' : '日间窗口',
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={runtimeModeLoadState}
+            sampleSize={history.length}
+            sampleLabel="切换记录"
+            updatedAt={lastUpdatedAt}
+            source="sys-mode"
+            definition="存在态轴页聚合当前 sys_mode、自动切换规则与最近切换历史；它表达的是最外层硬状态，不等于完整人格状态。"
+          />
+        )}
       />
+
+      {loading && !status && !consoleError ? (
+        <NoticeBanner variant="info" title="加载中">正在同步生命体存在态轴快照…</NoticeBanner>
+      ) : null}
 
       {switchResult ? (
         <NoticeBanner
@@ -276,7 +262,11 @@ export default function RuntimeMode() {
         </NoticeBanner>
       ) : null}
 
-      {error && status ? <NoticeBanner variant="warning" title="状态同步异常">{error}</NoticeBanner> : null}
+      {consoleError ? <NoticeBanner variant={status ? 'warning' : 'error'} title="状态同步异常">{consoleError}</NoticeBanner> : null}
+
+      {!consoleError && !loading && !refreshing && runtimeModeLoadState === LOAD_STATES.UNAVAILABLE ? (
+        <NoticeBanner variant="warning">生命体存在态轴当前未返回可用快照。</NoticeBanner>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="当前模式" value={currentMeta.label} hint={currentMeta.scheduler} tone="text-primary" />

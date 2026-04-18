@@ -228,6 +228,27 @@ def test_classify_and_compile_intent_draft_builds_explicit_supported_plan() -> N
     ]
 
 
+def test_classify_and_compile_intent_draft_builds_chinese_supported_plan() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-supported-plan-zh",
+            session_id="session-thalamus-supported-plan-zh",
+            user_message="先帮我总结一下这段会话，再查一下当前情绪状态。",
+            source="chat_handler",
+            ts_ms=1776349003210,
+        )
+    )
+
+    assert compiled["route"] == "plan"
+    assert compiled["target_id"] == "skill_dag"
+    assert [step["target_id"] for step in compiled["planned_steps"]] == [
+        "session_summary",
+        "emotion_query",
+    ]
+
+
 def test_classify_and_compile_intent_draft_keeps_canonical_route_seed_without_reclassifying() -> None:
     agent = ThalamusAgent()
 
@@ -305,6 +326,73 @@ def test_classify_task_intent_by_rules_keeps_legacy_translate_rule() -> None:
     assert decision["reason_code"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
+def test_classify_task_intent_by_rules_routes_planning_advice_to_intent_agent() -> None:
+    decision = classify_task_intent_by_rules("帮我整理一下我现在应该先做什么，再给我一个三步建议。")
+
+    assert decision is not None
+    assert decision["route"] == "delegate"
+    assert decision["target_id"] == "intent_agent"
+
+
+def test_classify_and_compile_intent_draft_routes_short_comfort_chat_to_direct_fast() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-phatic-comfort",
+            session_id="session-thalamus-phatic-comfort",
+            user_message="今天有点累，抱抱我吧。",
+            source="chat_handler",
+            ts_ms=1776349003300,
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_PHATIC_COMFORT"
+    assert compiled["chat_speed_profile"] == "direct_fast"
+    assert compiled["args"]["text"] == "今天有点累，抱抱我吧。"
+
+
+def test_classify_and_compile_intent_draft_does_not_misroute_task_like_message_as_phatic_chat() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-not-phatic-task",
+            session_id="session-thalamus-not-phatic-task",
+            user_message="今天有点累，但还是帮我把这段翻译一下。",
+            source="chat_handler",
+            ts_ms=1776349003310,
+        )
+    )
+
+    assert compiled["route"] != "chat"
+    assert compiled["target_id"] == "translate_agent"
+    assert compiled["route_source"] == "rule"
+    assert compiled["route_reason"] == "RULE_FORCE_TRANSLATE_AGENT"
+
+
+def test_classify_and_compile_intent_draft_routes_normal_daily_chat_to_context_fast() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-context-fast",
+            session_id="session-thalamus-context-fast",
+            user_message="我今天其实有点想和你认真聊聊最近的状态，想听你接着我这句话慢慢陪我说下去。",
+            source="chat_handler",
+            ts_ms=1776349003320,
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
+    assert compiled["chat_speed_profile"] == "context_fast"
+    assert compiled["route_source"] == "thalamus.rule"
+
+
 def test_classify_and_compile_intent_draft_routes_self_heal_to_codex(monkeypatch) -> None:
     agent = ThalamusAgent()
     monkeypatch.setattr(
@@ -337,6 +425,46 @@ def test_classify_and_compile_intent_draft_routes_self_heal_to_codex(monkeypatch
     assert "EDGE_RPC_DOWN" in compiled["args"]["context"]
 
 
+def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_requests() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-codex-runtime-repo",
+            session_id="session-thalamus-codex-runtime-repo",
+            user_message="please fix the failing test and show me the code",
+            source="chat_handler",
+            ts_ms=1776349003550,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_codegen"
+    assert compiled["args"]["workspace_strategy"] == "runtime_repo"
+    assert compiled["args"]["run_mode"] == "worker"
+    assert compiled["args"]["task"] == "please fix the failing test and show me the code"
+
+
+def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_lightweight_code_snippet() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-codex-light-snippet",
+            session_id="session-thalamus-codex-light-snippet",
+            user_message="写一个 Python 函数，输入数组后去重并按出现频次降序返回。",
+            source="chat_handler",
+            ts_ms=1776349003560,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "codex_codegen"
+    assert compiled["args"]["run_mode"] == "inspect"
+    assert compiled["args"]["allow_temp_workspace"] is True
+    assert "workspace_strategy" not in compiled["args"]
+
+
 def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm() -> None:
     agent = ThalamusAgent()
 
@@ -348,7 +476,16 @@ def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm(
             agent.classify_and_compile_intent_draft(
                 request_id="req-thalamus-default-chat",
                 session_id="session-thalamus-default-chat",
-                user_message="just chatting a bit",
+                user_message=(
+                    "我想和你聊聊最近这段时间的很多事情，包括工作上的疲惫、和朋友之间的距离感、"
+                    "还有我对未来节奏的犹豫。我不一定马上要结论，只是想把这些感觉慢慢说给你听，"
+                    "也想看看你会怎么接住我。"
+                    "\n\n"
+                    "这段话我会继续补充很多细节，比如过去几周发生的事情、我对自己状态的反思、"
+                    "还有我为什么会在这种时候更想慢慢聊，而不是马上要一个短回答。"
+                    "我也想把每一个让我犹豫、拧巴、停不下来的瞬间都描述得更完整一点，"
+                    "包括那些我没来得及和别人说、但其实一直压在心里的部分。"
+                ),
                 source="chat_handler",
                 ts_ms=1776349003400,
             )

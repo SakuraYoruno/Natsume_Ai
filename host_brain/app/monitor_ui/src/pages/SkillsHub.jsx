@@ -1,12 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useState } from 'react'
 import {
   RefreshCw, Package, CheckCircle, XCircle, AlertTriangle,
   Shield, Search, FolderOpen, Globe, Zap, Tag,
 } from 'lucide-react'
-import { fetchSkillsHubStats } from '../api/obs.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
+import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { useSkillsHubQuery } from '../queries/skillsHubQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
 const CLEARANCE_STYLES = {
@@ -71,31 +73,22 @@ function SkillCard({ skill }) {
 export default function SkillsHub() {
   const pollingEnabled  = useAppStore((s) => s.pollingEnabled)
   const pollingInterval = useAppStore((s) => s.pollingInterval)
+  const pollingTick = useAppStore((s) => s.pollingTick)
 
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [data, setData] = useState(null)
   const [filter, setFilter] = useState('')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await fetchSkillsHubStats()
-      setData(result)
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    load()
-    if (!pollingEnabled) return
-    const timer = setInterval(load, pollingInterval * 1000)
-    return () => clearInterval(timer)
-  }, [load, pollingEnabled, pollingInterval])
+  const {
+    hubData: data,
+    hubError,
+    loading,
+    refreshing,
+    stale,
+    lastUpdatedAt,
+    refetch,
+  } = useSkillsHubQuery({
+    pollingEnabled,
+    pollingTick,
+    pollingInterval,
+  })
 
   const skills = data?.skills ?? []
   const filtered = filter
@@ -105,6 +98,14 @@ export default function SkillsHub() {
   // 按来源分组
   const builtinSkills = filtered.filter(s => s.source === 'builtin')
   const hubSkills = filtered.filter(s => s.source !== 'builtin')
+  const skillsHubLoadState = resolveLoadState({
+    loading: loading || refreshing,
+    error: hubError && !data ? new Error(hubError) : null,
+    hasData: Boolean(data),
+    hasSamples: skills.length > 0,
+    available: Boolean(data),
+    stale,
+  })
 
   return (
     <div className="space-y-6">
@@ -113,8 +114,8 @@ export default function SkillsHub() {
           <h1 className="text-xl font-semibold text-gray-900">技能中心</h1>
           <p className="text-sm text-gray-500 mt-0.5">技能管理 · 热加载 · 外部目录扫描</p>
         </div>
-        <button className="btn-secondary" onClick={load} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> 刷新
+        <button className="btn-secondary" onClick={() => refetch()} disabled={loading || refreshing}>
+          <RefreshCw size={14} className={loading || refreshing ? 'animate-spin' : ''} /> 刷新
         </button>
       </div>
 
@@ -130,9 +131,24 @@ export default function SkillsHub() {
           `加载失败：${data?.failed_skills ?? 0}`,
           `过滤结果：${filtered.length}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={skillsHubLoadState}
+            sampleSize={skills.length}
+            sampleLabel="技能"
+            updatedAt={lastUpdatedAt}
+            source="skills hub"
+            definition="技能中心页聚合技能总览、来源分布和过滤结果；搜索为空结果不会被误判为系统无样本。"
+          />
+        )}
       />
 
-      {error && <NoticeBanner variant="error">{error}</NoticeBanner>}
+      {hubError && <NoticeBanner variant={data ? 'warning' : 'error'}>{hubError}</NoticeBanner>}
+
+      {!hubError && !loading && !refreshing && skillsHubLoadState === LOAD_STATES.NO_SAMPLE && (
+        <NoticeBanner variant="info">当前还没有已加载技能样本，页面会保留中性占位。</NoticeBanner>
+      )}
 
       {/* 概览统计 */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
