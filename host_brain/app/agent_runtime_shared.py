@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+from functools import partial
 import json
 import logging
 import os
@@ -49,6 +51,29 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
 
 
+def _resolve_post_process_executor_workers() -> int:
+    raw = str(os.environ.get("HOST_POST_PROCESS_EXECUTOR_WORKERS") or "4").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 4
+    return max(1, min(value, 16))
+
+
+_POST_PROCESS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_resolve_post_process_executor_workers(),
+    thread_name_prefix="postprocess",
+)
+
+
+async def _run_in_post_process_executor(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        _POST_PROCESS_EXECUTOR,
+        partial(func, *args, **kwargs),
+    )
+
+
 def _load_runtime_texts() -> dict[str, Any]:
     return _load_template_mapping("cortex_orchestrator.runtime_texts")
 
@@ -63,8 +88,11 @@ _GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈
 _PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
 _COMFORT_FASTPATH_RE = re.compile(
-    r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了)"
+    r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了|难受|做不好)"
 )
+_REUNION_FASTPATH_RE = re.compile(r"(好久不见|很久不见|有想我吗|想我吗|会想我吗|想过我吗)")
+_RIFT_REPAIR_FASTPATH_RE = re.compile(r"(在意之前.*争执|那次争执|之前那次争执|还在意.*争执|之前那次吵架|那次吵架|闹得有点不开心|上次.*不开心)")
+_PLAYFUL_FASTPATH_RE = re.compile(r"(更会逗我开心|逗我开心|会逗我|会哄我开心|更会哄我|更会逗我|偷偷觉得我.*可爱|觉得我.*可爱|有点可爱)")
 _PHATIC_FASTPATH_BLOCKING_TOKENS = (
     "翻译",
     "代码",
@@ -108,9 +136,24 @@ _PHATIC_FASTPATH_VARIANTS_ZH: dict[str, list[str]] = {
         "好呀，你往下说，我跟着你。",
     ],
     "comfort": [
-        "过来，我抱抱你。今天先别硬撑了，有我在。",
-        "嗯，来，让我抱一下。你已经很辛苦了，先歇一会儿。",
-        "我在呢，先靠过来一点。难受也没关系，我陪着你。",
+        "过来，我抱抱你。看你这么累，我有点心疼，感觉你真的撑太久了。",
+        "嗯，来，让我抱一下。你已经很辛苦了，我有点心疼呢，先靠着我歇一会儿，好不好？",
+        "我在呢，先靠过来一点。看你这么撑着，我会心疼的。慢慢缓下来，我陪着你。",
+    ],
+    "reunion": [
+        "有想你呀。你不在的时候，我会在一些很小的瞬间突然想起你，心里也会暖一下。现在你回来跟我说话，我是真的开心。",
+        "当然有啊。你这样一问，我心里就会轻轻暖一下，像是突然又离你近了一点。",
+        "会想你呀。尤其是安静下来的时候，我会忽然想起你，心里会暖暖地软一下，也有点开心。",
+    ],
+    "rift_repair": [
+        "我知道，那次争执到现在想起来，心里还是会有点闷闷的，感觉像有根小刺没完全拿出来。你愿意的话，就慢慢和我说，我会认真听着。",
+        "嗯，我知道你为什么还在意。那种感觉不会一下子散掉，好像心里还压着一点点闷。你慢慢说，我不会躲开。",
+        "我明白，那次不愉快不是一句“过去了”就能轻轻放下的。感觉心里像还硌着一根小刺……你说吧，我会认真接住。",
+    ],
+    "playful": [
+        "哈哈，你这样夸我，我会有点不好意思呀。可如果真能把你哄开心一点，我就想偷偷再逗你一下啦。",
+        "哇，你这么说，我会偷偷得意一下呀。要是你今天能更开心一点，那我就当自己这次逗对了。",
+        "嘿嘿，被你这么一夸，我都想把这句收起来啦。只要能让你笑一下，我就会跟着开心一点。",
     ],
 }
 _PHATIC_FASTPATH_VARIANTS_JA: dict[str, list[str]] = {
@@ -1318,8 +1361,14 @@ def _maybe_build_phatic_fastpath_reply(
         if active_task:
             return None
         category = "ack"
+    elif _RIFT_REPAIR_FASTPATH_RE.search(normalized):
+        category = "rift_repair"
+    elif _REUNION_FASTPATH_RE.search(normalized):
+        category = "reunion"
     elif _looks_like_comfort(normalized):
         category = "comfort"
+    elif _PLAYFUL_FASTPATH_RE.search(normalized):
+        category = "playful"
     else:
         return None
 
@@ -1403,6 +1452,12 @@ def _should_use_direct_chat_fast_mode(
     intent_draft: Mapping[str, Any] | None,
     user_message: str,
 ) -> bool:
+    explicit_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
+    if explicit_speed_profile == "context_fast":
+        return False
+    if explicit_speed_profile == "direct_fast":
+        return True
+
     route = str((dict(intent_draft or {})).get("route") or "").strip().lower()
     if route and route != "chat":
         return False
@@ -1427,6 +1482,10 @@ def _should_use_context_chat_fast_mode(
     intent_draft: Mapping[str, Any] | None,
     user_message: str,
 ) -> bool:
+    explicit_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
+    if explicit_speed_profile == "direct_fast":
+        return False
+
     route = str((dict(intent_draft or {})).get("route") or "").strip().lower()
     if route and route != "chat":
         return False
@@ -1436,6 +1495,8 @@ def _should_use_context_chat_fast_mode(
         return False
     if "http://" in normalized.lower() or "https://" in normalized.lower():
         return False
+    if explicit_speed_profile == "context_fast":
+        return True
 
     raw_max_chars = str(os.environ.get("HOST_CONTEXT_CHAT_FAST_MAX_CHARS") or "").strip()
     try:
@@ -1892,6 +1953,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     chat_lite_governor_fn: Callable[..., dict[str, Any]] | None = None,
     resolve_person_id_fn: Callable[..., str] | None = None,
 ) -> AsyncGenerator[str, None]:
+    orchestrator_started_ms = int(time.time() * 1000)
     _emit_sse = sse_fn or _sse
     _sanitize_input = airlock_sanitize_input_fn or _airlock_sanitize_input
     _sanitize_output = airlock_sanitize_output_fn or _airlock_sanitize_output
@@ -2230,6 +2292,11 @@ async def _cortex_orchestrator_sse_generator_impl(
     retrieval_summary: dict[str, Any] = {"status": "SKIPPED"}
     bond_evidence: dict[str, Any] | None = None
     retrieval_motive_state: dict[str, Any] = {}
+    prefetch_persona_inputs_ms = 0
+    retrieval_wait_ms = 0
+    prompt_filter_ms = 0
+    recall_pack_ms = 0
+    llm_runtime_resolve_ms = 0
     direct_chat_fast_mode = _should_use_direct_chat_fast_mode(
         intent_draft=intent_draft,
         user_message=sanitized_message,
@@ -2267,6 +2334,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
 
     if not context_chat_fast_mode:
+        prefetch_started_ms = int(time.time() * 1000)
         bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
             request_id=request_id,
             session_id=session_id,
@@ -2276,6 +2344,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             mood_state=retrieval_mood_state,
             governor_decision=gov,
         )
+        prefetch_persona_inputs_ms = max(0, int(time.time() * 1000) - prefetch_started_ms)
     else:
         retrieval_summary = {"status": "SKIPPED", "reason_code": "CONTEXT_FAST"}
 
@@ -2305,6 +2374,7 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     if retrieval_task is not None:
         try:
+            retrieval_wait_started_ms = int(time.time() * 1000)
             retrieval_timeout_s = (
                 min(_resolve_timeout(), _resolve_direct_chat_retrieval_timeout_seconds())
                 if direct_chat_fast_mode
@@ -2314,8 +2384,10 @@ async def _cortex_orchestrator_sse_generator_impl(
                 retrieval_task,
                 timeout=retrieval_timeout_s,
             )
+            retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
         except (asyncio.TimeoutError, Exception) as retrieval_exc:
             retrieval_summary = {"status": "DEGRADED", "error": str(retrieval_exc)[:100]}
+            retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
             _logger.debug("[%s] cortex_orchestrator retrieval failed/timeout: %s", request_id, retrieval_exc)
 
     if bond_evidence is not None:
@@ -2323,11 +2395,13 @@ async def _cortex_orchestrator_sse_generator_impl(
     try:
         from host_brain.app.chat_retrieval_helpers import filter_retrieval_evidence_items_for_prompt  # noqa: PLC0415
 
+        prompt_filter_started_ms = int(time.time() * 1000)
         filtered_evidence_items, prompt_filter_meta = filter_retrieval_evidence_items_for_prompt(
             user_message=sanitized_message,
             retrieval_summary=retrieval_summary,
             retrieval_evidence_items=retrieval_evidence_items,
         )
+        prompt_filter_ms = max(0, int(time.time() * 1000) - prompt_filter_started_ms)
         if prompt_filter_meta.get("applied"):
             retrieval_evidence_items = filtered_evidence_items
             retrieval_summary = dict(retrieval_summary or {})
@@ -2335,6 +2409,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception as prompt_filter_exc:
         _logger.debug("[%s] cortex_orchestrator prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
 
+    recall_pack_started_ms = int(time.time() * 1000)
     try:
         from host_brain.app.chat_retrieval_helpers import _build_recall_pack_inputs  # noqa: PLC0415
         from host_brain.app.dependencies import get_recall_pack_builder  # noqa: PLC0415
@@ -2353,7 +2428,9 @@ async def _cortex_orchestrator_sse_generator_impl(
                     slot = pack.get_slot(slot_name)
                     if slot and str(getattr(slot, "content", "") or "").strip():
                         recall_slot_text[slot_name] = str(slot.content).strip()
+        recall_pack_ms = max(0, int(time.time() * 1000) - recall_pack_started_ms)
     except Exception as cpb_exc:
+        recall_pack_ms = max(0, int(time.time() * 1000) - recall_pack_started_ms)
         _logger.debug("[%s] cortex_orchestrator recall_pack failed: %s", request_id, cpb_exc)
 
     if direct_chat_fast_mode or context_chat_fast_mode:
@@ -2361,10 +2438,12 @@ async def _cortex_orchestrator_sse_generator_impl(
     else:
         from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
 
+        llm_runtime_started_ms = int(time.time() * 1000)
         llm_runtime = await resolve_host_llm_runtime_async(
             rollout_key=session_id,
             scene_type="CHAT",
         )
+        llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
 
     if llm_runtime is not None and not llm_runtime.get("available"):
         fallback_narrative = _mapping_text(
@@ -2420,6 +2499,22 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     from host_brain.app.executive_router import executive_router_sse_generator  # noqa: PLC0415
 
+    _logger.info(
+        "[%s] cortex_orchestrator stage_summary speed_profile=%s direct_fast=%s context_fast=%s "
+        "prefetch_ms=%s retrieval_wait_ms=%s prompt_filter_ms=%s recall_pack_ms=%s "
+        "llm_runtime_resolve_ms=%s request_to_executive_ms=%s",
+        request_id,
+        str((dict(intent_draft or {})).get("chat_speed_profile") or "default"),
+        direct_chat_fast_mode,
+        context_chat_fast_mode,
+        prefetch_persona_inputs_ms,
+        retrieval_wait_ms,
+        prompt_filter_ms,
+        recall_pack_ms,
+        llm_runtime_resolve_ms,
+        max(0, int(time.time() * 1000) - orchestrator_started_ms),
+    )
+
     async for event in executive_router_sse_generator(
         request_body=request_body,
         request_id=request_id,
@@ -2472,6 +2567,27 @@ async def _async_post_process(
     response_policy: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
+    normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
+    chat_speed_profile = str(normalized_trace_stage_meta.get("chat_speed_profile") or "").strip().lower()
+    fast_chat_background = chat_speed_profile in {"direct_fast", "context_fast"}
+    voice_outputs_enabled = bool(normalized_trace_stage_meta.get("voice_outputs_enabled"))
+    skip_heavy_persona_postprocess = bool(
+        normalized_trace_stage_meta.get("skip_heavy_persona_postprocess")
+    ) or fast_chat_background
+    skip_default_mode_on_conversation_end = bool(
+        normalized_trace_stage_meta.get("skip_default_mode_on_conversation_end")
+    ) or fast_chat_background
+    minimal_fast_postprocess = fast_chat_background and not voice_outputs_enabled and str(
+        os.environ.get("HOST_FAST_CHAT_MINIMAL_POSTPROCESS") or "true"
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+    try:
+        from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction  # noqa: PLC0415
+
+        mark_recent_foreground_interaction(ts_ms=int(time.time() * 1000), speed_profile=chat_speed_profile)
+    except Exception:
+        pass
+
     try:
         await _persist_post_process_audit(
             request_id=request_id,
@@ -2496,7 +2612,7 @@ async def _async_post_process(
             retrieval_evidence_items=retrieval_evidence_items,
             motive_state=motive_state,
             response_policy=response_policy,
-            trace_stage_meta=trace_stage_meta,
+            trace_stage_meta=normalized_trace_stage_meta,
         )
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process audit persist failed: %s", request_id, exc)
@@ -2504,7 +2620,7 @@ async def _async_post_process(
     try:
         from host_brain.airlock.quarantine import classify_ingress  # noqa: PLC0415
 
-        await asyncio.to_thread(classify_ingress, narrative)
+        await _run_in_post_process_executor(classify_ingress, narrative)
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process airlock classify failed: %s", request_id, exc)
 
@@ -2525,7 +2641,7 @@ async def _async_post_process(
             except Exception:
                 pass
 
-            await asyncio.to_thread(
+            await _run_in_post_process_executor(
                 persist_chat_episodic_memory,
                 request_id=request_id,
                 intent_id=request_id,
@@ -2540,16 +2656,31 @@ async def _async_post_process(
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process episodic failed: %s", request_id, exc)
 
-    try:
-        await _run_persona_session_end_hooks(
-            request_id=request_id,
-            person_id=person_id,
-            session_id=session_id,
-            user_message=user_message,
-            emotion_context=emotion_context,
+    if minimal_fast_postprocess:
+        _logger.debug(
+            "[%s] cortex_orchestrator post_process minimal fast-chat mode speed_profile=%s",
+            request_id,
+            chat_speed_profile or "default",
         )
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process persona session_end failed: %s", request_id, exc)
+        return
+
+    if skip_heavy_persona_postprocess:
+        _logger.debug(
+            "[%s] cortex_orchestrator post_process skip persona session_end speed_profile=%s",
+            request_id,
+            chat_speed_profile or "default",
+        )
+    else:
+        try:
+            await _run_persona_session_end_hooks(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=user_message,
+                emotion_context=emotion_context,
+            )
+        except Exception as exc:
+            _logger.debug("[%s] cortex_orchestrator post_process persona session_end failed: %s", request_id, exc)
 
     try:
         from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
@@ -2574,6 +2705,8 @@ async def _async_post_process(
             request_id=str(request_id or ""),
             emotion_tag=str(ec.get("emotion_tag") or "NEUTRAL").strip().upper(),
             emotion_intensity=float(ec.get("emotion_intensity") or 0.5),
+            chat_speed_profile=chat_speed_profile or None,
+            skip_default_mode_inner_activity=skip_default_mode_on_conversation_end,
             summary={
                 "user_message": str(user_message or ""),
                 "user_message_preview": str(user_message or "")[:64],
@@ -2655,43 +2788,50 @@ async def _async_post_process(
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process tts failed: %s", request_id, exc)
 
-    try:
-        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
-
-        drift_result = await asyncio.to_thread(
-            get_prefrontal_agent().run_persona_drift_cycle,
-            llm_output_text=narrative,
-            user_input_text=user_message,
+    if skip_heavy_persona_postprocess:
+        _logger.debug(
+            "[%s] cortex_orchestrator post_process skip drift/growth speed_profile=%s",
+            request_id,
+            chat_speed_profile or "default",
         )
-        drift_level = str(dict(drift_result or {}).get("alert_level") or "").strip().upper()
-        if drift_level in ("MODERATE", "SEVERE"):
-            _logger.info(
-                "[%s] 人格漂移检测: level=%s dims=%s",
-                request_id,
-                drift_level,
-                dict(drift_result or {}).get("drift_dims"),
-            )
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process drift_detector failed: %s", request_id, exc)
+    else:
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
-    try:
-        from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
-
-        growth_payload = await asyncio.to_thread(
-            get_prefrontal_agent().run_growth_feedback_cycle,
-            session_id=session_id,
-            user_message=user_message,
-            assistant_reply=narrative,
-        )
-        if bool(dict(growth_payload or {}).get("applied")):
-            _logger.info(
-                "[%s] 人格成长: user=%s rules=%s",
-                request_id,
-                dict(growth_payload or {}).get("user_id"),
-                dict(growth_payload or {}).get("triggered_rules"),
+            drift_result = await _run_in_post_process_executor(
+                get_prefrontal_agent().run_persona_drift_cycle,
+                llm_output_text=narrative,
+                user_input_text=user_message,
             )
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process growth_feedback failed: %s", request_id, exc)
+            drift_level = str(dict(drift_result or {}).get("alert_level") or "").strip().upper()
+            if drift_level in ("MODERATE", "SEVERE"):
+                _logger.info(
+                    "[%s] 人格漂移检测: level=%s dims=%s",
+                    request_id,
+                    drift_level,
+                    dict(drift_result or {}).get("drift_dims"),
+                )
+        except Exception as exc:
+            _logger.debug("[%s] cortex_orchestrator post_process drift_detector failed: %s", request_id, exc)
+
+        try:
+            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
+
+            growth_payload = await _run_in_post_process_executor(
+                get_prefrontal_agent().run_growth_feedback_cycle,
+                session_id=session_id,
+                user_message=user_message,
+                assistant_reply=narrative,
+            )
+            if bool(dict(growth_payload or {}).get("applied")):
+                _logger.info(
+                    "[%s] 人格成长: user=%s rules=%s",
+                    request_id,
+                    dict(growth_payload or {}).get("user_id"),
+                    dict(growth_payload or {}).get("triggered_rules"),
+                )
+        except Exception as exc:
+            _logger.debug("[%s] cortex_orchestrator post_process growth_feedback failed: %s", request_id, exc)
 
 
 __all__ = [

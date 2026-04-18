@@ -371,6 +371,38 @@ def _build_direct_response_priority(
 
     if _contains_any_token(
         user_message,
+        ("难受", "做不好", "累", "委屈", "想哭", "心情不好", "不开心", "安慰我", "抱抱我", "陪陪我", "つらい", "しんどい", "疲れた"),
+    ):
+        rules.append(
+            "如果对方在难受、疲惫或想被安慰，先轻轻点出他此刻不好受，再给贴近的安抚；不要只停在“理解”或“没关系”。"
+        )
+
+    if _contains_any_token(
+        user_message,
+        ("好久不见", "有想我吗", "想我吗", "会想我", "想过我吗", "会不会想我", "会想起我吗", "ひさしぶり", "会いたかった", "恋しかった"),
+    ):
+        rules.append(
+            "如果对方在问你有没有想念他，用含蓄但明确的想念回应，不要用疏离或模棱两可的措辞。"
+        )
+
+    if _contains_any_token(
+        user_message,
+        ("争执", "吵架", "别扭", "在意之前", "那次争执", "还在意", "けんか", "気にしてる", "引っかかってる"),
+    ):
+        rules.append(
+            "如果对方提起之前的争执或别扭，先承认那件事还会让人难受，再温和邀请他继续说；不要直接用“没关系”带过。"
+        )
+
+    if _contains_any_token(
+        user_message,
+        ("逗我开心", "逗我", "哄我开心", "更会哄", "更会逗", "逗开心", "からかう", "笑わせて", "元気にして"),
+    ):
+        rules.append(
+            "如果对方在轻轻逗你或夸你会哄人，可以先带一点害羞，再顺着回一句俏皮话，不要只平平否认。"
+        )
+
+    if _contains_any_token(
+        user_message,
         ("優先", "优先", "priority", "prioritize", "まず"),
     ):
         rules.append(resolve_prompt_template_text("prompt_builder.direct_response.priority_rule"))

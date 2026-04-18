@@ -87,6 +87,22 @@ def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
         user_message="normal request",
         render_target_lang="zh",
     )
+    comfort_rules = pb._build_direct_response_priority(
+        user_message="今天有点难受，感觉什么都做不好。",
+        render_target_lang="zh",
+    )
+    reunion_rules = pb._build_direct_response_priority(
+        user_message="好久不见，这段时间你有想我吗？",
+        render_target_lang="zh",
+    )
+    rift_rules = pb._build_direct_response_priority(
+        user_message="我还是有点在意之前那次争执。",
+        render_target_lang="zh",
+    )
+    playful_rules = pb._build_direct_response_priority(
+        user_message="你最近是不是更会逗我开心了？",
+        render_target_lang="zh",
+    )
 
     assert "For affection or confession messages" in close_rules
     assert "answer your stance explicitly in the first sentence" in close_rules
@@ -96,6 +112,10 @@ def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
     assert "问问他晚饭吃了没有" in hinted_rules
     assert "第一人称" in hinted_rules or "感受" in hinted_rules
     assert "仅在用户请求确实不明确" in default_rules or "追问" in default_rules
+    assert "先轻轻点出他此刻不好受" in comfort_rules
+    assert "含蓄但明确的想念回应" in reunion_rules
+    assert "不要直接用“没关系”带过" in rift_rules
+    assert "带一点害羞" in playful_rules
 
 
 def test_builtin_direct_response_templates_are_clean() -> None:

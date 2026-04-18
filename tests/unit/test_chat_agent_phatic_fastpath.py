@@ -35,6 +35,117 @@ def test_maybe_build_phatic_fastpath_reply_returns_final_comfort_line() -> None:
     )
 
 
+def test_maybe_build_phatic_fastpath_reply_returns_reunion_line() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-reunion-001",
+        session_id="session-phatic-reunion-001",
+        person_id="person-phatic-reunion-001",
+        user_message="好久不见，这段时间你有想我吗？",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert_natsume_style(
+        user_message="好久不见，这段时间你有想我吗？",
+        reply=str(reply),
+        emotion_tag="LONGING",
+        bond_stage="FRIEND",
+        max_chars=70,
+        min_warmth=0.55,
+        min_sensitivity=0.50,
+        min_playfulness=0.35,
+    )
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_rift_repair_line() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-rift-001",
+        session_id="session-phatic-rift-001",
+        person_id="person-phatic-rift-001",
+        user_message="我还是有点在意之前那次争执。",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert_natsume_style(
+        user_message="我还是有点在意之前那次争执。",
+        reply=str(reply),
+        emotion_tag="HURT",
+        bond_stage="FRIEND",
+        max_chars=80,
+        min_warmth=0.50,
+        min_sensitivity=0.58,
+        min_playfulness=0.20,
+    )
+
+
+def test_maybe_build_phatic_fastpath_reply_keeps_rift_repair_ahead_of_comfort() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-rift-002",
+        session_id="session-phatic-rift-002",
+        person_id="person-phatic-rift-002",
+        user_message="我还在想上次我们闹得有点不开心的事情。",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert "争执" in str(reply) or "不愉快" in str(reply) or "小刺" in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_playful_line() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-playful-001",
+        session_id="session-phatic-playful-001",
+        person_id="person-phatic-playful-001",
+        user_message="你最近是不是更会逗我开心了？",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert_natsume_style(
+        user_message="你最近是不是更会逗我开心了？",
+        reply=str(reply),
+        emotion_tag="HAPPY",
+        bond_stage="FRIEND",
+        max_chars=80,
+        min_warmth=0.50,
+        min_sensitivity=0.45,
+        min_playfulness=0.55,
+    )
+
+
+def test_maybe_build_phatic_fastpath_reply_handles_playful_cute_teasing() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-playful-002",
+        session_id="session-phatic-playful-002",
+        person_id="person-phatic-playful-002",
+        user_message="你是不是偷偷觉得我今天有点可爱？",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert_natsume_style(
+        user_message="你是不是偷偷觉得我今天有点可爱？",
+        reply=str(reply),
+        emotion_tag="HAPPY",
+        bond_stage="FRIEND",
+        max_chars=80,
+        min_warmth=0.50,
+        min_sensitivity=0.45,
+        min_playfulness=0.55,
+    )
+
+
 def test_maybe_build_phatic_fastpath_reply_skips_ack_during_active_task_context() -> None:
     reply = _maybe_build_phatic_fastpath_reply(
         request_id="req-phatic-ack-active-001",
