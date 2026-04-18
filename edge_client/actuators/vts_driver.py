@@ -31,6 +31,7 @@ logger = logging.getLogger("Natsume.edge.vts")
 _VTS_IO_LOOP: asyncio.AbstractEventLoop | None = None
 _VTS_IO_THREAD: threading.Thread | None = None
 _VTS_IO_LOCK = threading.Lock()
+_VTS_REQUEST_LOCK = threading.RLock()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -545,7 +546,9 @@ class VTubeStudioDriver:
                     action="set_mouth_open_level",
                 )
 
-        preferred_mouth_params = self._preferred_mouth_parameters()
+        preferred_mouth_params = self._preferred_mouth_parameters(
+            include_volume_fallback=_include_companions,
+        )
         mouth_params = list(preferred_mouth_params)
         plan = dict(self._mouth_parameter_plan or {})
         available_params = {
@@ -1071,14 +1074,16 @@ class VTubeStudioDriver:
             "last_value": float(self._mouth_parameter_plan.get("last_value") or 0.0),
         }
 
-    def _preferred_mouth_parameters(self) -> list[str]:
+    def _preferred_mouth_parameters(self, *, include_volume_fallback: bool = True) -> list[str]:
         plan = dict(self._mouth_parameter_plan or {})
         selected = [str(item) for item in (plan.get("selected") or []) if str(item).strip()]
         plan_mouth = [str(item) for item in (plan.get("mouth") or []) if str(item).strip()]
         cfg_candidates = [str(item) for item in self._candidate_tuple(self._config.mouth_param_candidates)]
         plan_volume = [str(item) for item in (plan.get("volume") or []) if str(item).strip()]
         cfg_volume = [str(item) for item in self._candidate_tuple(self._config.mouth_volume_param_candidates)]
-        ordered = selected + plan_mouth + cfg_candidates + plan_volume + cfg_volume + [VTS_MOUTH_PARAM]
+        ordered = selected + plan_mouth + cfg_candidates + [VTS_MOUTH_PARAM]
+        if include_volume_fallback:
+            ordered += plan_volume + cfg_volume
         deduped: list[str] = []
         seen: set[str] = set()
         for item in ordered:
@@ -1614,8 +1619,9 @@ def _list_vts_hotkeys(*, vts: Any, timeout_s: float) -> list[dict[str, str]]:
 def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:
     """Run coroutine on dedicated VTS IO loop to avoid ASGI loop conflicts."""
     loop = _ensure_vts_io_loop()
-    future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return future.result(timeout=max(float(timeout_s), 1.0))
+    with _VTS_REQUEST_LOCK:
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=max(float(timeout_s), 1.0))
 
 
 def _ensure_vts_io_loop() -> asyncio.AbstractEventLoop:

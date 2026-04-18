@@ -93,6 +93,41 @@ def test_set_mouth_open_level_primary_only_skips_companion_parameters(monkeypatc
     assert driver.health()["mouth_parameters"]["selected"] == [VTS_MOUTH_PARAM]
 
 
+def test_set_mouth_open_level_primary_only_does_not_fallback_to_volume_parameter(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_set(*, vts, param_name: str, value: float, timeout_s: float) -> None:
+        _ = (vts, value, timeout_s)
+        calls.append(param_name)
+        raise RuntimeError("parameter busy")
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._set_vts_parameter", _fake_set)
+
+    driver = VTubeStudioDriver(
+        config=VtsConfig(
+            mouth_param_candidates=(VTS_MOUTH_PARAM,),
+            mouth_volume_param_candidates=("VoiceVolumePlusMouthOpen",),
+            voice_silence_param_candidates=("VoiceSilence",),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+    driver._mouth_parameter_plan = {
+        "selected": [VTS_MOUTH_PARAM],
+        "mouth": [VTS_MOUTH_PARAM],
+        "volume": ["VoiceVolumePlusMouthOpen"],
+        "silence": ["VoiceSilence"],
+        "available": [VTS_MOUTH_PARAM, "VoiceVolumePlusMouthOpen", "VoiceSilence"],
+        "last_value": 0.0,
+    }
+
+    result = driver.set_mouth_open_level(0.42, _include_companions=False)
+
+    assert result.success is False
+    assert calls == [VTS_MOUTH_PARAM]
+    assert driver.health()["mouth_parameters"]["selected"] == [VTS_MOUTH_PARAM]
+
+
 def test_refresh_plan_infers_mouth_parameter_from_available_list(monkeypatch) -> None:
     monkeypatch.setattr(
         "edge_client.actuators.vts_driver._list_vts_input_parameter_ids",
