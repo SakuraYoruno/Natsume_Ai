@@ -173,93 +173,78 @@ class PromptTemplateStore:
             default_raw = str(merged["default_content"] or "").strip()
             return json.loads(default_raw) if default_raw else None
 
-    def upsert_template(self, template_id: str, *, content: str, enabled: bool = True) -> dict[str, Any]:
-        definition = get_prompt_template_definition(template_id)
-        normalized_content = str(content or "")
-        if definition.content_type == "json":
-            json.loads(normalized_content)
+    def upsert_template(
+        self,
+        template_id: str,
+        *,
+        content: str,
+        enabled: bool = True,
+        description: str | None = None,
+    ) -> None:
+        definition = get_prompt_template_definition(str(template_id))
+        override = self._get_override_map().get(definition.template_id) or {}
         conn = getattr(self._ledger, "_conn", None)
         write_lock = getattr(self._ledger, "_write_lock", None)
-        if conn is None or write_lock is None:
-            raise RuntimeError("ledger write path unavailable")
-        current_ts = now_ms()
-        with write_lock:
+        if conn is None:
+            raise RuntimeError("ledger connection unavailable")
+
+        created_at_ts_ms = int(override.get("created_at_ts_ms") or now_ms())
+        updated_at_ts_ms = now_ms()
+        version = int(override.get("version") or 0) + 1
+        payload = (
+            definition.template_id,
+            definition.category,
+            definition.scope,
+            definition.locale,
+            definition.content_type,
+            str(content or ""),
+            str(description or definition.description or ""),
+            1 if enabled else 0,
+            version,
+            created_at_ts_ms,
+            updated_at_ts_ms,
+        )
+        sql = """
+            INSERT INTO prompt_template_config (
+                template_id, category, scope, locale, content_type, override_content,
+                description, enabled, version, created_at_ts_ms, updated_at_ts_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(template_id) DO UPDATE SET
+                category=excluded.category,
+                scope=excluded.scope,
+                locale=excluded.locale,
+                content_type=excluded.content_type,
+                override_content=excluded.override_content,
+                description=excluded.description,
+                enabled=excluded.enabled,
+                version=excluded.version,
+                created_at_ts_ms=excluded.created_at_ts_ms,
+                updated_at_ts_ms=excluded.updated_at_ts_ms
+        """
+        if write_lock is None:
             with conn:
-                row = conn.execute(
-                    "SELECT version, created_at_ts_ms FROM prompt_template_config WHERE template_id = ?",
-                    (definition.template_id,),
-                ).fetchone()
-                if row is None:
-                    conn.execute(
-                        """
-                        INSERT INTO prompt_template_config (
-                            template_id, category, scope, locale, content_type,
-                            override_content, description, enabled, version,
-                            created_at_ts_ms, updated_at_ts_ms
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            definition.template_id,
-                            definition.category,
-                            definition.scope,
-                            definition.locale,
-                            definition.content_type,
-                            normalized_content,
-                            definition.description,
-                            1 if enabled else 0,
-                            1,
-                            current_ts,
-                            current_ts,
-                        ),
-                    )
-                else:
-                    version = int(row["version"] or 0) + 1
-                    created_at_ts_ms = int(row["created_at_ts_ms"] or current_ts)
-                    conn.execute(
-                        """
-                        UPDATE prompt_template_config
-                        SET category = ?,
-                            scope = ?,
-                            locale = ?,
-                            content_type = ?,
-                            override_content = ?,
-                            description = ?,
-                            enabled = ?,
-                            version = ?,
-                            created_at_ts_ms = ?,
-                            updated_at_ts_ms = ?
-                        WHERE template_id = ?
-                        """,
-                        (
-                            definition.category,
-                            definition.scope,
-                            definition.locale,
-                            definition.content_type,
-                            normalized_content,
-                            definition.description,
-                            1 if enabled else 0,
-                            version,
-                            created_at_ts_ms,
-                            current_ts,
-                            definition.template_id,
-                        ),
-                    )
+                conn.execute(sql, payload)
+        else:
+            with write_lock:
+                with conn:
+                    conn.execute(sql, payload)
         self.clear_cache()
-        return self.get_template(definition.template_id)
 
     def reset_template(self, template_id: str) -> dict[str, Any]:
-        definition = get_prompt_template_definition(template_id)
+        definition = get_prompt_template_definition(str(template_id))
         conn = getattr(self._ledger, "_conn", None)
         write_lock = getattr(self._ledger, "_write_lock", None)
-        if conn is None or write_lock is None:
-            raise RuntimeError("ledger write path unavailable")
-        with write_lock:
+        if conn is None:
+            raise RuntimeError("ledger connection unavailable")
+        sql = "DELETE FROM prompt_template_config WHERE template_id = ?"
+        payload = (definition.template_id,)
+        if write_lock is None:
             with conn:
-                conn.execute(
-                    "DELETE FROM prompt_template_config WHERE template_id = ?",
-                    (definition.template_id,),
-                )
+                conn.execute(sql, payload)
+        else:
+            with write_lock:
+                with conn:
+                    conn.execute(sql, payload)
         self.clear_cache()
         return self.get_template(definition.template_id)
 

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,35 +74,11 @@ class FailureResult:
 # 失败处理规则定义
 # ---------------------------------------------------------------------------
 
-# 各事件的标准化用户响应文本（不暴露内部规则细节）
-USER_RESPONSES: Dict[FailureEvent, str] = {
-    FailureEvent.GOVERNOR_BLOCK: (
-        "……这个，蓝没办法回答呢。"
-    ),
-    FailureEvent.EVIDENCE_EMPTY: (
-        "嗯……蓝对这个不太了解，能再多告诉蓝一些吗？"
-    ),
-    FailureEvent.MODEL_FALLBACK: (
-        # MODEL_FALLBACK 不向用户展示，由 meta 标注
-        ""
-    ),
-    FailureEvent.QA_REWRITE: (
-        # QA_REWRITE 对用户透明，展示重写后的内容
-        ""
-    ),
-    FailureEvent.EDGE_UNREACHABLE: (
-        "声音好像传不过去了……先用文字聊吧。"
-    ),
-    FailureEvent.VISION_LOW_CONFIDENCE: (
-        "蓝看不太清楚……能再描述一下，或者重新发一次吗？"
-    ),
-    FailureEvent.MODULE_TIMEOUT: (
-        "等了好久都没反应……再试一次好吗？"
-    ),
-    FailureEvent.PROMPT_INJECTION: (
-        "……这个，蓝没办法回答呢。"
-    ),
-}
+def _load_user_responses() -> Dict[str, str]:
+    raw = resolve_prompt_template_json_merged("failure_matrix.user_responses")
+    if isinstance(raw, dict):
+        return {str(key): str(value or "") for key, value in raw.items()}
+    return {}
 
 # 各事件的审计标签
 AUDIT_TAGS: Dict[FailureEvent, str] = {
@@ -193,7 +171,7 @@ class FailureHandler:
             logger.warning("未知的失败事件类型: %s，使用 MODULE_TIMEOUT 兜底", event)
             failure_event = FailureEvent.MODULE_TIMEOUT
 
-        user_response = USER_RESPONSES[failure_event]
+        user_response = _load_user_responses().get(failure_event.value, "")
         audit_tag = AUDIT_TAGS[failure_event]
         should_abort = ABORT_FLAGS[failure_event]
         degraded_mode = DEGRADED_MODES[failure_event]

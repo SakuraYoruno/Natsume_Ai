@@ -136,13 +136,31 @@ function Is-HostProcess {
   if (-not $cmd) {
     return $false
   }
-  if ($cmd -like "*-m host_brain*") {
+  if ($cmd -like "*-m host_brain.obs_main*") {
+    return $false
+  }
+  if ($cmd -like "*-m host_brain --host*") {
     return $true
   }
   if ($cmd -like "*host_brain.app.fastapi_app*") {
     return $true
   }
   return $false
+}
+
+function Get-HostProcessIds {
+  $result = @()
+  $processes = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+  foreach ($procInfo in @($processes)) {
+    $procId = [int]$procInfo.ProcessId
+    if ($procId -le 0) {
+      continue
+    }
+    if (Is-HostProcess -ProcessId $procId) {
+      $result += $procId
+    }
+  }
+  return @($result | Sort-Object -Unique)
 }
 
 function Wait-Http {
@@ -551,6 +569,12 @@ if ($null -ne $listeningPid) {
   }
   Stop-Process -Id $listeningPid -Force -ErrorAction SilentlyContinue
   Start-Sleep -Milliseconds 500
+}
+
+if ($ForceRestart.IsPresent) {
+  foreach ($candidatePid in @(Get-HostProcessIds)) {
+    Stop-ProcessTree -ProcessId ([int]$candidatePid) | Out-Null
+  }
 }
 
 function Test-PythonRuntime {

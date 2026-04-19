@@ -516,6 +516,26 @@ def runtime_lifespan(
                         name, exc,
                         extra={"startup_module": name, "error": str(exc)},
                     )
+            try:
+                from host_brain.app.startup import (  # noqa: PLC0415
+                    warmup_chat_llm_runtime_profiles,
+                    warmup_chat_runtime_basics,
+                    warmup_retrieval_runtime_basics,
+                )
+
+                new_module_statuses["chat_runtime_warmup"] = warmup_chat_runtime_basics(
+                    eager_persona=True,
+                )
+                new_module_statuses["chat_llm_runtime_warmup"] = warmup_chat_llm_runtime_profiles()
+                new_module_statuses["retrieval_runtime_warmup"] = warmup_retrieval_runtime_basics()
+            except Exception as _chat_warmup_exc:
+                new_module_statuses["chat_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
+                new_module_statuses["chat_llm_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
+                new_module_statuses["retrieval_runtime_warmup"] = f"DEGRADED: {_chat_warmup_exc}"
+                logger.warning(
+                    "Chat runtime 预热失败（降级）: %s",
+                    _chat_warmup_exc,
+                )
 
             # [选项二] 接入 StateArbiter：注册状态源（WorldCanon、StyleCanon、EpisodicStore）
             try:

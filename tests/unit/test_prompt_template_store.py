@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.reasoning.reflection_chain import ReflectionChain
@@ -11,20 +13,22 @@ def test_prompt_template_store_uses_default_and_override() -> None:
 
     default_item = store.get_template("reflection_chain.contextual_fallback.default")
     assert default_item["source"] == "default"
-    assert default_item["resolved_content"] == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
+    assert store.resolve_json("reflection_chain.contextual_fallback.default")["zh"] == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
 
-    updated = store.upsert_template(
+    store.upsert_template(
         "reflection_chain.contextual_fallback.default",
-        content="先让我想一想，我重新接住这句。",
+        content=json.dumps({"zh": "先让我想一想，我重新接住这句。", "ja": "少しだけ言い直しますね。"}, ensure_ascii=False),
         enabled=True,
     )
+    updated = store.get_template("reflection_chain.contextual_fallback.default")
     assert updated["source"] == "override"
-    assert updated["resolved_content"] == "先让我想一想，我重新接住这句。"
+    assert store.resolve_json("reflection_chain.contextual_fallback.default")["zh"] == "先让我想一想，我重新接住这句。"
     assert updated["has_override"] is True
 
-    reset = store.reset_template("reflection_chain.contextual_fallback.default")
+    store.reset_template("reflection_chain.contextual_fallback.default")
+    reset = store.get_template("reflection_chain.contextual_fallback.default")
     assert reset["source"] == "default"
-    assert reset["resolved_content"] == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
+    assert store.resolve_json("reflection_chain.contextual_fallback.default")["zh"] == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
     assert reset["has_override"] is False
 
 
@@ -47,7 +51,7 @@ def test_reflection_chain_runtime_uses_prompt_template_override(monkeypatch) -> 
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
     store.upsert_template(
         "reflection_chain.contextual_fallback.default",
-        content="先别急，我把这句话重新接一下。",
+        content=json.dumps({"zh": "先别急，我把这句话重新接一下。", "ja": "少し待ってください。今の返事を整えます。"}, ensure_ascii=False),
         enabled=True,
     )
 
@@ -71,7 +75,7 @@ def test_reflection_chain_runtime_uses_empathy_prefix_template_override(monkeypa
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
     store.upsert_template(
         "reflection_chain.revision_empathy_prefix",
-        content="我在，先缓一缓。",
+        content=json.dumps({"zh": "我在，先缓一缓。", "ja": "大丈夫です。まずは落ち着きましょう。"}, ensure_ascii=False),
         enabled=True,
     )
 
@@ -110,7 +114,8 @@ def test_runtime_template_defaults_include_input_and_qa_fallbacks() -> None:
     input_routes_defaults = store.resolve_json("input_routes.fallback_texts")
     qa_defaults = store.resolve_json("core.qa.fallback_texts")
 
-    assert input_routes_defaults["reject_default"] == "刚刚这一步有点卡住了，我马上重试一下，别担心。"
-    assert input_routes_defaults["approve_empty"] == "好呀，我收到了，马上去处理。"
+    assert input_routes_defaults["zh"]["reject_default"] == "刚才那一下有点卡住了，我这边马上重试，你先别急。"
+    assert input_routes_defaults["zh"]["approve_empty"] == "好，我接到了，这就去处理。"
+    assert input_routes_defaults["ja"]["approve_empty"] == "ええ、受け取りました。すぐ取りかかります。"
     assert qa_defaults["default"] == "嗯…脑子有点转不过来，等我缓一下再回你。"
     assert qa_defaults["angry_or_frustrated"] == "我需要冷静一下…等会儿再好好说。"

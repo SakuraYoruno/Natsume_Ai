@@ -162,7 +162,7 @@ class TestMCPBrokerContract(unittest.TestCase):
         self.broker.register_handler("github", "create_issue", lambda args: {"id": 1001, "title": args.get("title", "")})
 
     def test_t_mcp_02_write_no_token_rejected(self) -> None:
-        """WRITE 无 token → MCP_WRITE_TOKEN_REQUIRED 拒绝 + mcp_exec_log 写入 decision=REJECT。"""
+        """WRITE 无 token → MCP_WRITE_TOKEN_REQUIRED 拒绝 + skill_exec_log 写入拒绝记录。"""
         self._register_tools()
         result = self.broker.call(
             provider_id="github",
@@ -185,7 +185,7 @@ class TestMCPBrokerContract(unittest.TestCase):
         self.assertEqual(MCP_WRITE_TOKEN_REQUIRED, skill_rows[0]["result_code"])
 
     def test_t_mcp_02_read_no_token_approved(self) -> None:
-        """READ 无 token → 正常执行 + mcp_exec_log 写入 decision=APPROVE。"""
+        """READ 无 token → 正常执行 + skill_exec_log 写入成功记录。"""
         self._register_tools()
         result = self.broker.call(
             provider_id="github",

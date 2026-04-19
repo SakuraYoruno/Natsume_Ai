@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from host_brain.app.agent_runtime_shared import _maybe_build_phatic_fastpath_reply
 from host_brain.app.chat_agent import SubAgentContext, _build_deterministic_sub_agent_reply
 from tests.text_quality_assertions import assert_natsume_style
@@ -169,6 +171,139 @@ def test_maybe_build_phatic_fastpath_reply_handles_deep_companionship_opening() 
         min_sensitivity=0.50,
         min_playfulness=0.35,
     )
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_greeting_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-greeting-001",
+        session_id="session-phatic-ja-greeting-001",
+        person_id="person-phatic-ja-greeting-001",
+        user_message="おはよう",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert "你好" not in str(reply)
+    assert "AI" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_presence_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-presence-001",
+        session_id="session-phatic-ja-presence-001",
+        person_id="person-phatic-ja-presence-001",
+        user_message="いる？",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert "怎么" not in str(reply)
+    assert "客服" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_ack_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-ack-001",
+        session_id="session-phatic-ja-ack-001",
+        person_id="person-phatic-ja-ack-001",
+        user_message="うん",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("分か", "そうですか", "なるほど"))
+    assert "你好" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_followup_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-followup-001",
+        session_id="session-phatic-ja-followup-001",
+        person_id="person-phatic-ja-followup-001",
+        user_message="それで",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("それで", "続き", "どうな"))
+    assert "怎么" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_comfort_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-comfort-001",
+        session_id="session-phatic-ja-comfort-001",
+        person_id="person-phatic-ja-comfort-001",
+        user_message="今日はちょっとしんどい。少し付き合って。",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("大丈夫", "休み", "話し", "聞いて"))
+    assert "慢慢" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_reunion_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-reunion-001",
+        session_id="session-phatic-ja-reunion-001",
+        person_id="person-phatic-ja-reunion-001",
+        user_message="少し会えなかったけど、私のこと思い出した？",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("思い出", "うれしい", "静か"))
+
+
+def test_maybe_build_phatic_fastpath_reply_returns_playful_line_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-playful-001",
+        session_id="session-phatic-ja-playful-001",
+        person_id="person-phatic-ja-playful-001",
+        user_message="今日の私、ちょっと可愛いと思ってたりする？",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("可愛", "反則", "ふふ"))
+
+
+def test_maybe_build_phatic_fastpath_reply_handles_deep_companionship_opening_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-deep-001",
+        session_id="session-phatic-ja-deep-001",
+        person_id="person-phatic-ja-deep-001",
+        user_message="今日は少し真面目に近頃のことを話したい。急がせずに付き合ってくれる？",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("ゆっくり", "聞き", "話して"))
 
 
 def test_maybe_build_phatic_fastpath_reply_skips_ack_during_active_task_context() -> None:

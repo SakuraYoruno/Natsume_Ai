@@ -104,38 +104,59 @@ def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
         render_target_lang="zh",
     )
 
-    assert "For affection or confession messages" in close_rules
-    assert "answer your stance explicitly in the first sentence" in close_rules
-    assert "Never reply with only a generic thanks or acknowledgement." in close_rules
-    assert "priority" in close_rules.lower() or "优先" in close_rules
-    assert "TTS" in close_rules or "日本" in close_rules
+    assert "好意や告白" in close_rules
+    assert "一文目" in close_rules
+    assert "優先順位" in close_rules
+    assert "日本語" in close_rules or "TTS" in close_rules
     assert "问问他晚饭吃了没有" in hinted_rules
-    assert "第一人称" in hinted_rules or "感受" in hinted_rules
-    assert "仅在用户请求确实不明确" in default_rules or "追问" in default_rules
-    assert "先轻轻点出他此刻不好受" in comfort_rules
+    assert "第一人称" in hinted_rules or "自己的感受" in hinted_rules
+    assert "信息明显不够" in default_rules or "先接住" in default_rules or "追问" in default_rules
+    assert "先点出他此刻不好受" in comfort_rules
     assert "含蓄但明确的想念回应" in reunion_rules
     assert "不要直接用“没关系”带过" in rift_rules
-    assert "带一点害羞" in playful_rules
+    assert "俏皮要克制" in playful_rules or "轻微不好意思" in playful_rules
 
 
 def test_builtin_direct_response_templates_are_clean() -> None:
     base_rules = resolve_prompt_template_json_merged("prompt_builder.direct_response.base_rules")
     affection_rules = resolve_prompt_template_json_merged("prompt_builder.direct_response.affection_rules")
+    block_title = resolve_prompt_template_json_merged("prompt_builder.direct_response.block_title")
+    followup_hint_prefix = resolve_prompt_template_json_merged("prompt_builder.direct_response.followup_hint_prefix")
+    default_followup_rule = resolve_prompt_template_json_merged("prompt_builder.direct_response.default_followup_rule")
+    brief_rule = resolve_prompt_template_json_merged("prompt_builder.direct_response.brief_rule")
+    daily_life_rule = resolve_prompt_template_json_merged("prompt_builder.direct_response.daily_life_rule")
+    priority_rule = resolve_prompt_template_json_merged("prompt_builder.direct_response.priority_rule")
+    ja_output_rule = resolve_prompt_template_json_merged("prompt_builder.direct_response.ja_output_rule")
+    zh_output_rule = resolve_prompt_template_json_merged("prompt_builder.direct_response.zh_output_rule")
+    scenario_rules = resolve_prompt_template_json_merged("prompt_builder.direct_response.scenario_rules")
 
-    assert resolve_prompt_template_text("prompt_builder.direct_response.block_title") == "【回答优先级】"
-    assert resolve_prompt_template_text("prompt_builder.direct_response.followup_hint_prefix") == "追问建议："
-    assert resolve_prompt_template_text("prompt_builder.direct_response.default_followup_rule") == "仅在用户请求确实不明确或信息不完整时才追问。"
-    assert resolve_prompt_template_text("prompt_builder.direct_response.brief_rule") == "如果用户要求简短，就把回复控制在一两句短句内。"
-    assert "第一人称" in resolve_prompt_template_text("prompt_builder.direct_response.daily_life_rule")
-    assert "优先级相关请求" in resolve_prompt_template_text("prompt_builder.direct_response.priority_rule")
-    assert "TTS" in resolve_prompt_template_text("prompt_builder.direct_response.ja_output_rule")
-    assert "简体中文" in resolve_prompt_template_text("prompt_builder.direct_response.zh_output_rule")
+    assert block_title["zh"] == "【回应原则】"
+    assert block_title["ja"] == "【応答の方針】"
+    assert followup_hint_prefix["zh"] == "追问建议："
+    assert followup_hint_prefix["ja"] == "問い返しの方向："
+    assert "信息明显不够" in default_followup_rule["zh"] or "先接住" in default_followup_rule["zh"]
+    assert "情報が明らかに足りない" in default_followup_rule["ja"] or "まず受け止め" in default_followup_rule["ja"]
+    assert "一两句" in brief_rule["zh"] or "空话" in brief_rule["zh"]
+    assert "一、二文" in brief_rule["ja"] or "中身を抜かない" in brief_rule["ja"]
+    assert "第一人称" in daily_life_rule["zh"] or "自己的感受" in daily_life_rule["zh"] or "咨询师" in daily_life_rule["zh"]
+    assert "自分の感じ" in daily_life_rule["ja"] or "相談窓口" in daily_life_rule["ja"]
+    assert "优先级" in priority_rule["zh"]
+    assert "優先順位" in priority_rule["ja"]
+    assert "TTS" in ja_output_rule["zh"]
+    assert "日本語" in ja_output_rule["ja"] or "TTS" in ja_output_rule["ja"]
+    assert "简体中文" in zh_output_rule["zh"]
+    assert "量产陪聊" in zh_output_rule["zh"] or "老师" in zh_output_rule["zh"]
+    assert "簡体字中国語" in zh_output_rule["ja"] and "年上" in zh_output_rule["ja"]
 
-    assert isinstance(base_rules, list)
-    assert base_rules[0] == "先回应用户当下最具体的诉求。"
+    assert isinstance(base_rules, dict)
+    assert base_rules["zh"][0] == "先回应用户此刻最具体的诉求。"
+    assert "まず相手が今いちばん答えてほしい点に応えること。" in base_rules["ja"]
 
-    assert isinstance(affection_rules, list)
-    assert "For affection or confession messages" in affection_rules[0]
+    assert isinstance(affection_rules, dict)
+    assert "告白" in affection_rules["zh"][0]
+    assert "好意や告白" in affection_rules["ja"][0]
+    assert "deep_companionship" in scenario_rules["zh"]
+    assert "deep_companionship" in scenario_rules["ja"]
 
 
 def test_builtin_prompt_builder_runtime_templates_are_clean() -> None:
@@ -152,14 +173,20 @@ def test_builtin_prompt_builder_runtime_templates_are_clean() -> None:
     assert host_generation_templates["intro"] == "You are the Natsume core reasoning node.\n"
     assert host_generation_templates["evidence_title"] == "Evidence:\n"
     assert host_generation_templates["evidence_empty"] == "- (none)"
-    assert render_contract_templates["empty_placeholder"] == "- (none)"
-    assert persona_expression_templates["title"] == "PERSONA_EXPRESSION_HINT:\n"
-    assert persona_expression_templates["default_guidance"] == "保持真诚自然"
+    assert render_contract_templates["zh"]["empty_placeholder"] == "- (none)"
+    assert render_contract_templates["ja"]["empty_placeholder"] == "- (none)"
+    assert persona_expression_templates["zh"]["title"] == "PERSONA_EXPRESSION_HINT:\n"
+    assert persona_expression_templates["ja"]["title"] == "PERSONA_EXPRESSION_HINT:\n"
+    assert persona_expression_templates["zh"]["default_guidance"] == "保持真诚、克制和分寸。"
+    assert persona_expression_templates["ja"]["default_guidance"] == "誠実に、静かに、分を越えずに。"
     assert runtime_section_templates["bond_aware_title"] == "BOND_AWARE_STYLE:\n"
     assert runtime_section_templates["memory_recall_evidence_guidance"].startswith("- Use these tagged recall snippets")
-    assert emotion_binding_templates["echo_intensity"]["high"] == "强烈共鸣"
-    assert emotion_binding_templates["vad"]["default"] == "情绪平稳"
-    assert self_reflection_templates["narrative_instruction_prefix"] == "自我叙事约束：{instruction}"
+    assert emotion_binding_templates["zh"]["echo_intensity"]["high"] == "明显被带动"
+    assert emotion_binding_templates["ja"]["echo_intensity"]["high"] == "強く引かれている"
+    assert emotion_binding_templates["zh"]["vad"]["default"] == "情绪平稳"
+    assert emotion_binding_templates["ja"]["vad"]["default"] == "情緒は落ち着いている"
+    assert self_reflection_templates["zh"]["narrative_instruction_prefix"] == "自我叙事约束：{instruction}"
+    assert self_reflection_templates["ja"]["narrative_instruction_prefix"] == "自己叙述の制約：{instruction}"
 
 
 def test_build_character_dynamic_patch_uses_prompt_template_override(

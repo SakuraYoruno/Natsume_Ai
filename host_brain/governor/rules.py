@@ -1,4 +1,4 @@
-"""Governor gate rules (R1-R7) with stable rule_trace outputs."""
+"""Governor gate rules (R1-R8) with stable rule_trace outputs."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class GateSnapshot:
 
 
 def evaluate_governor_gates(input_snapshot: dict[str, Any] | None) -> dict[str, Any]:
-    """Evaluate R1-R7 in fixed order and emit stable trace."""
+    """Evaluate R1-R8 in fixed order and emit stable trace."""
 
     snapshot = _normalize_snapshot(input_snapshot or {})
     trace: list[dict[str, Any]] = []

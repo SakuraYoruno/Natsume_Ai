@@ -54,11 +54,27 @@ from host_brain.app.http_hooks import (
     add_request_id_and_audit as _add_request_id_fn,
 )
 from host_brain.app.chat_handler import handle_chat
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.system_handler import receive_edge_events_response
 from host_brain.core.ids import new_request_id
 
 
 _logger = logging.getLogger("Natsume.fastapi")
+
+def _load_runtime_texts(template_id: str) -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _runtime_text(mapping: Mapping[str, Any], key: str, *, default: str = "", **kwargs: Any) -> str:
+    text = str(mapping.get(key, default) or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
+
 
 # Legacy injectable globals retained for compatibility with older E2E tests.
 _ledger = None
@@ -600,6 +616,7 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
     )
     immune_decision = str(immune_result.get("decision") or "ALLOW").strip().upper()
     if immune_decision == "BLOCK":
+        runtime_texts = _load_runtime_texts("fastapi_app.runtime_texts")
         _logger.warning(
             "immune gate blocked /v1/chat request_id=%s reasons=%s",
             request_id,
@@ -611,7 +628,10 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
                 "done": True,
                 "decision": "REJECT",
                 "reason_code": "IMMUNE_BLOCKED_HIGH_RISK",
-                "narrative": "我先停一下，这条输入里有高风险指令模式。换个表达我会继续接住你。",
+                "narrative": _runtime_text(
+                    runtime_texts,
+                    "immune_blocked_high_risk",
+                ),
                 "request_id": request_id,
                 "immune": {
                     "risk_level": immune_result.get("risk_level"),
@@ -626,6 +646,9 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
             request_id,
             immune_result.get("reason_codes"),
         )
+    current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
+    if current_sys_mode in {"locked", "maintenance"}:
+        return await handle_chat(request_body=request_body, request=request, metrics=_metrics)
     fastpath_started_ms = int(time.time() * 1000)
     fastpath_payload = _maybe_build_http_chat_fastpath(
         request_id=request_id,

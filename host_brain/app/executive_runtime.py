@@ -6,6 +6,7 @@ This module hosts the canonical execution implementation for executive routing.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -336,6 +337,7 @@ async def stream_chat_route(
     if str(route or "").strip().lower() != "chat":
         return
 
+    chat_route_started_ms = int(time.time() * 1000)
     _logger.info("[%s] ExecutiveRuntime -> chat (reason=%s)", request_id, route_reason)
     record_dispatch_handoff_fn(
         handoff_route="chat",
@@ -343,7 +345,28 @@ async def stream_chat_route(
         handoff_reason=route_reason,
         extra={"skill_family": skill_family, **dict(runtime_capability_handoff_extra or {})},
     )
+    first_event_logged = False
+    first_render_logged = False
     async for event in chat_agent_sse_generator_fn(chat_input):
+        if not first_event_logged:
+            first_event_logged = True
+            _logger.info(
+                "[%s] ExecutiveRuntime chat_first_event_ms=%s",
+                request_id,
+                max(0, int(time.time() * 1000) - chat_route_started_ms),
+            )
+        if not first_render_logged and event.startswith("data: "):
+            try:
+                payload = json.loads(event[6:].strip())
+            except Exception:
+                payload = {}
+            if str(payload.get("phase") or "").strip().upper() == "RENDER":
+                first_render_logged = True
+                _logger.info(
+                    "[%s] ExecutiveRuntime chat_first_render_ms=%s",
+                    request_id,
+                    max(0, int(time.time() * 1000) - chat_route_started_ms),
+                )
         yield event
 
 

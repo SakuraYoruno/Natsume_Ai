@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any, Mapping
 
@@ -112,6 +113,15 @@ _BUILTIN_COMPOSER_SPECS: tuple[SkillSpec, ...] = (
         avg_latency_ms=20.0,
     ),
 )
+
+_TASK_SCENE_TYPES = frozenset({
+    "EXEC_INTENT",
+    "WORK_CODE",
+    "WORK_TRANSLATE",
+    "WORK_SKILL",
+    "PLAN",
+    "SKILL",
+})
 
 
 def _is_direct_affection_turn(user_message: str) -> bool:
@@ -228,7 +238,13 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
     )
 
     planning_agent = get_planning_agent()
-    needs_planning = scene_type in {"EXEC_INTENT", "WORK_CODE", "WORK_TRANSLATE"} or planning_agent.needs_planning(user_message)
+    allow_task_planning = _should_enable_task_prompt_intelligence(
+        scene_type=scene_type,
+        skill_manifest=skill_manifest,
+    )
+    needs_planning = allow_task_planning and (
+        scene_type in _TASK_SCENE_TYPES or planning_agent.needs_planning(user_message)
+    )
     if needs_planning:
         available_skills = list(safe_skill_names)
         plan = planning_agent.create_plan(
@@ -266,35 +282,51 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
                 },
             )
 
-    composer = SkillComposer()
-    _register_builtin_composer_skills(composer=composer)
-    skill_aliases = _register_manifest_skills(composer=composer, skill_manifest=skill_manifest)
-    for alias, skill_name in skill_aliases.items():
-        runner = safe_skill_runners.get(skill_name)
-        if runner is not None and alias not in safe_skill_runners:
-            safe_skill_runners[alias] = runner
-    skill_dag = composer.plan(user_message) if safe_skill_runners else None
-    if skill_dag is not None and skill_dag.nodes:
-        intelligence["skill_dag"] = {
-            **skill_dag.as_dict(),
-            "node_ids": [node.node_id for node in skill_dag.nodes],
-        }
-        execution_result = composer.execute(
-            skill_dag,
-            skill_runners=safe_skill_runners,
-        )
-        intelligence["skill_execution"] = execution_result.as_dict()
-        meta_learning.record(
-            "skill_composer",
-            success=bool(execution_result.success),
-            latency_ms=float(execution_result.elapsed_ms),
-            custom={
-                "nodes": float(len(skill_dag.nodes)),
-                "completed_nodes": float(execution_result.completed_nodes),
-            },
-        )
+    if allow_task_planning:
+        composer = SkillComposer()
+        _register_builtin_composer_skills(composer=composer)
+        skill_aliases = _register_manifest_skills(composer=composer, skill_manifest=skill_manifest)
+        for alias, skill_name in skill_aliases.items():
+            runner = safe_skill_runners.get(skill_name)
+            if runner is not None and alias not in safe_skill_runners:
+                safe_skill_runners[alias] = runner
+        skill_dag = composer.plan(user_message) if safe_skill_runners else None
+        if skill_dag is not None and skill_dag.nodes:
+            intelligence["skill_dag"] = {
+                **skill_dag.as_dict(),
+                "node_ids": [node.node_id for node in skill_dag.nodes],
+            }
+            execution_result = composer.execute(
+                skill_dag,
+                skill_runners=safe_skill_runners,
+            )
+            intelligence["skill_execution"] = execution_result.as_dict()
+            meta_learning.record(
+                "skill_composer",
+                success=bool(execution_result.success),
+                latency_ms=float(execution_result.elapsed_ms),
+                custom={
+                    "nodes": float(len(skill_dag.nodes)),
+                    "completed_nodes": float(execution_result.completed_nodes),
+                },
+            )
 
     return intelligence
+
+
+def _should_enable_task_prompt_intelligence(
+    *,
+    scene_type: str,
+    skill_manifest: list[dict[str, Any]] | None,
+) -> bool:
+    raw = str(os.environ.get("HOST_CHAT_PROMPT_INTELLIGENCE_TASK_ONLY") or "true").strip().lower()
+    task_only = raw not in {"0", "false", "no", "off"}
+    if not task_only:
+        return True
+    normalized_scene = str(scene_type or "").strip().upper()
+    if normalized_scene in _TASK_SCENE_TYPES:
+        return True
+    return bool(list(skill_manifest or []))
 
 
 def apply_response_intelligence(
@@ -352,6 +384,7 @@ def apply_response_intelligence(
                     ai_response=raw_text,
                     emotion_tag=emotion_tag,
                     bond_stage=bond_stage,
+                    render_target_lang=render_lang,
                 )
                 revised_text = _sanitize_narrative(
                     text=revision.revised_text,

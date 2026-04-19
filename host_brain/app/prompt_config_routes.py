@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, List, Optional
 
@@ -45,15 +46,9 @@ class PromptTemplateResponse(BaseModel):
 
 
 class PromptTemplateUpdateRequest(BaseModel):
-    content: str = Field(..., description="覆盖内容；json 类型模板需要提交合法 JSON 文本")
-    enabled: bool = Field(True, description="是否启用这条覆盖")
-
-
-class PromptTemplateReloadResponse(BaseModel):
-    reloaded: bool
-    total_templates: int
-    request_id: str
-    timestamp: int
+    content: str
+    enabled: bool = True
+    description: Optional[str] = None
 
 
 class PersonaPromptTemplateEntry(BaseModel):
@@ -123,6 +118,47 @@ async def get_prompt_template(template_id: str) -> PromptTemplateResponse:
     return PromptTemplateResponse(item=item, request_id=request_id, timestamp=timestamp)
 
 
+@router.put("/templates/{template_id}", response_model=PromptTemplateResponse)
+async def update_prompt_template(
+    template_id: str,
+    payload: PromptTemplateUpdateRequest,
+) -> PromptTemplateResponse:
+    request_id = new_request_id()
+    timestamp = int(time.time() * 1000)
+    store = get_prompt_template_store()
+    try:
+        current = store.get_template(template_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if str(current.get("content_type") or "").strip().lower() == "json":
+        try:
+            json.loads(str(payload.content or "").strip())
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid json override: {exc}") from exc
+
+    store.upsert_template(
+        template_id,
+        content=str(payload.content or ""),
+        enabled=bool(payload.enabled),
+        description=payload.description,
+    )
+    item = _to_item(store.get_template(template_id))
+    return PromptTemplateResponse(item=item, request_id=request_id, timestamp=timestamp)
+
+
+@router.post("/templates/{template_id}/reset", response_model=PromptTemplateResponse)
+async def reset_prompt_template(template_id: str) -> PromptTemplateResponse:
+    request_id = new_request_id()
+    timestamp = int(time.time() * 1000)
+    store = get_prompt_template_store()
+    try:
+        item = _to_item(store.reset_template(template_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PromptTemplateResponse(item=item, request_id=request_id, timestamp=timestamp)
+
+
 @router.get("/catalog/persona-first-batch", response_model=PersonaPromptTemplateCatalogResponse)
 async def get_persona_first_batch_catalog() -> PersonaPromptTemplateCatalogResponse:
     request_id = new_request_id()
@@ -151,58 +187,6 @@ async def get_persona_first_batch_catalog() -> PersonaPromptTemplateCatalogRespo
     return PersonaPromptTemplateCatalogResponse(
         bundles=bundles,
         total_templates=sum(len(bundle.entries) for bundle in bundles),
-        request_id=request_id,
-        timestamp=timestamp,
-    )
-
-
-@router.put("/templates/{template_id}", response_model=PromptTemplateResponse)
-async def update_prompt_template(
-    template_id: str,
-    request: PromptTemplateUpdateRequest,
-) -> PromptTemplateResponse:
-    request_id = new_request_id()
-    timestamp = int(time.time() * 1000)
-    store = get_prompt_template_store()
-    try:
-        item = _to_item(
-            store.upsert_template(
-                template_id,
-                content=request.content,
-                enabled=request.enabled,
-            )
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return PromptTemplateResponse(item=item, request_id=request_id, timestamp=timestamp)
-
-
-@router.post("/templates/{template_id}/reset", response_model=PromptTemplateResponse)
-async def reset_prompt_template(template_id: str) -> PromptTemplateResponse:
-    request_id = new_request_id()
-    timestamp = int(time.time() * 1000)
-    store = get_prompt_template_store()
-    try:
-        item = _to_item(store.reset_template(template_id))
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return PromptTemplateResponse(item=item, request_id=request_id, timestamp=timestamp)
-
-
-@router.post("/reload", response_model=PromptTemplateReloadResponse)
-async def reload_prompt_templates() -> PromptTemplateReloadResponse:
-    request_id = new_request_id()
-    timestamp = int(time.time() * 1000)
-    store = get_prompt_template_store()
-    store.clear_cache()
-    total = len(store.list_templates())
-    return PromptTemplateReloadResponse(
-        reloaded=True,
-        total_templates=total,
         request_id=request_id,
         timestamp=timestamp,
     )

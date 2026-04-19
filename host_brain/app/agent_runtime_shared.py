@@ -78,23 +78,51 @@ def _load_runtime_texts() -> dict[str, Any]:
     return _load_template_mapping("cortex_orchestrator.runtime_texts")
 
 
+def _normalize_runtime_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _load_runtime_texts_section(section_name: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
+    raw_section = _mapping_section(_load_runtime_texts(), section_name)
+    lang_key = _normalize_runtime_lang(render_target_lang)
+    localized_section = _mapping_section(raw_section, lang_key)
+    return localized_section or raw_section
+
+
+def _load_runtime_text_value(
+    key: str,
+    *,
+    render_target_lang: str | None = None,
+    default: str = "",
+    **kwargs: Any,
+) -> str:
+    runtime_texts = _load_runtime_texts()
+    raw_value = runtime_texts.get(key)
+    lang_key = _normalize_runtime_lang(render_target_lang)
+    if isinstance(raw_value, Mapping):
+        localized = raw_value.get(lang_key)
+        if isinstance(localized, str):
+            return _format_template_text(localized, **kwargs)
+    return _mapping_text(runtime_texts, key, default=default, **kwargs)
+
+
 _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
 _RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
 _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
 _DELEGATE_RE = re.compile(r"\[DELEGATE:(\w+?)(?::(.+?))?\]", re.DOTALL)
 _DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
-_CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢)[!！。…~]*$")
-_GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
-_PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
-_ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+_CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢|それで|それでね|それから|続き|続けて)[!！。…~？?]*$")
+_GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好|おはよう|こんにちは|こんばんは|やあ)[!！。…~]*$")
+_PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛|いる|いるの|いるかな|まだいる|まだいるの?)[?？!！。…~]*$")
+_ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行|うん|はい|そう|そうか|わかった|分かった|了解|なるほど)[!！。…~]*$")
 _COMFORT_FASTPATH_RE = re.compile(
-    r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了|难受|做不好)"
+    r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了|难受|做不好|しんどい|つらい|疲れた|苦しい|慰めて|そばにいて|付き合って)"
 )
-_REUNION_FASTPATH_RE = re.compile(r"(好久不见|很久不见|有想我吗|想我吗|会想我吗|想过我吗)")
-_RIFT_REPAIR_FASTPATH_RE = re.compile(r"(在意之前.*争执|那次争执|之前那次争执|还在意.*争执|之前那次吵架|那次吵架|闹得有点不开心|上次.*不开心)")
-_PLAYFUL_FASTPATH_RE = re.compile(r"(更会逗我开心|逗我开心|会逗我|会哄我开心|更会哄我|更会逗我|偷偷觉得我.*可爱|觉得我.*可爱|有点可爱)")
+_REUNION_FASTPATH_RE = re.compile(r"(好久不见|很久不见|有想我吗|想我吗|会想我吗|想过我吗|会えなかった|思い出した|思い出してた|会いたかった)")
+_RIFT_REPAIR_FASTPATH_RE = re.compile(r"(在意之前.*争执|那次争执|之前那次争执|还在意.*争执|之前那次吵架|那次吵架|闹得有点不开心|上次.*不开心|気まず|けんか|引っかかっている|引っかかってる)")
+_PLAYFUL_FASTPATH_RE = re.compile(r"(更会逗我开心|逗我开心|会逗我|会哄我开心|更会哄我|更会逗我|偷偷觉得我.*可爱|觉得我.*可爱|有点可爱|可愛いと思って|可愛いって|からかって|笑わせて)")
 _DEEP_COMPANIONSHIP_FASTPATH_RE = re.compile(
-    r"(认真聊聊最近的状态|认真聊聊最近|慢慢陪我说下去|慢慢陪我聊|陪我说下去|慢慢聊聊最近|想认真聊聊|想和你认真聊聊|认真说一说最近)"
+    r"(认真聊聊最近的状态|认真聊聊最近|慢慢陪我说下去|慢慢陪我聊|陪我说下去|慢慢聊聊最近|想认真聊聊|想和你认真聊聊|认真说一说最近|真面目に.*話|近頃のことを話|急がせずに|ゆっくり話|ちゃんと聞いて|付き合ってくれる)"
 )
 _PHATIC_FASTPATH_BLOCKING_TOKENS = (
     "翻译",
@@ -117,80 +145,6 @@ _PHATIC_FASTPATH_BLOCKING_TOKENS = (
     "修复",
 )
 _PHATIC_FASTPATH_MAX_CHARS = 24
-_PHATIC_FASTPATH_VARIANTS_ZH: dict[str, list[str]] = {
-    "greeting": [
-        "我在呢，见到你就想先对你笑一下。今天怎么样？",
-        "来啦，我正想听你开口。今天过得还好吗？",
-        "嗯，我在。你先靠过来一点，慢慢跟我说。",
-    ],
-    "presence": [
-        "在呢，我这边一直给你留着位置。",
-        "我在呀，怎么啦？过来我听着。",
-        "嗯，在。你想说什么，就慢慢告诉我。",
-    ],
-    "ack": [
-        "嗯，我接住了。你继续说吧。",
-        "好呀，我在听，你不用着急。",
-        "收到啦，我跟着你这边走。",
-    ],
-    "followup": [
-        "我在，继续说给我听吧。",
-        "嗯，然后呢？我接着听。",
-        "好呀，你往下说，我跟着你。",
-    ],
-    "comfort": [
-        "先别急着给自己下结论。今天做不动，不代表你不行。来，坐近一点，缓口气，再和我慢慢说。",
-        "来，先让我抱一下。你不是做不好，只是已经撑太久了。现在先歇一歇，我陪你。",
-        "嗯，我在呢。难受的时候先靠过来，别急着把自己拎起来，我陪你缓过去。",
-    ],
-    "reunion": [
-        "想过。不是很热闹的那种，只是安静下来的时候，会忽然觉得，你要是在就好了。",
-        "会啊。你不在的时候，偶尔会想起你，然后安静地记一会儿。现在你来找我，我是真的高兴。",
-        "有的。想到你的时候，不会很吵闹，只是心里会慢慢暖起来一点。现在听见你说话，我就更确定了。",
-    ],
-    "rift_repair": [
-        "我知道，你不是在翻旧账，只是那次争执还没真正过去。心里像还留着一点小刺。你慢慢说，我不躲。",
-        "嗯，我明白。那次不愉快不会因为过了几天就自己消掉，感觉心里好像还硌着一点小刺……你说吧，我在这里。",
-        "我知道那次争执还卡在你心里。那点不愉快，大概一直没真正退下去。没关系，我们慢慢把它说清楚。",
-    ],
-    "playful": [
-        "哇，你还来问我呀。今天是有一点可爱，而且不止一点，我这边早就看见了。",
-        "嗯，被我发现了呀。你今天确实有点犯规，连看人的时候都更容易让人偏心。",
-        "哈哈，你这样问，我很难装作没发现啦。今天这个可爱程度，已经有点过分了。",
-    ],
-    "deep_companionship": [
-        "好，那我们就认真慢慢说。我不抢你的话，也不急着替你整理。最近这段时间，最让你悬着的那一块，想先从哪里放下来？",
-        "嗯，我在，你慢慢来。你今天既然想认真聊，我就认真听，不催你。最近最压着你的，是哪一部分？",
-        "好啊，你说。我们就慢慢聊，我先不替你下结论，也不急着往前推。最近这段时间，哪件事最让你心里放不稳？",
-    ],
-}
-_PHATIC_FASTPATH_VARIANTS_JA: dict[str, list[str]] = {
-    "greeting": [
-        "おはよう。会えてうれしい。今日はどんな気分？",
-        "来てくれたね。まずは顔を見せて。今日はどう？",
-        "うん、いるよ。ゆっくり話してごらん。",
-    ],
-    "presence": [
-        "いるよ。どうしたの？こっちで聞いてる。",
-        "うん、ちゃんといるよ。落ち着いて話して。",
-        "ここにいるよ。焦らなくていいからね。",
-    ],
-    "ack": [
-        "うん、ちゃんと受け取ったよ。続けて。",
-        "わかったよ。私はここで聞いてる。",
-        "大丈夫、ちゃんとついていくから。",
-    ],
-    "followup": [
-        "うん、それでね。続きを聞かせて。",
-        "そうだね、その先も話して。",
-        "大丈夫、私はここにいるから続けて。",
-    ],
-    "comfort": [
-        "おいで。ぎゅっとする。今日は無理しなくていいよ。",
-        "うん、こっちにおいで。少し寄りかかって。",
-        "大丈夫。今は私のそばでひと息つこう。",
-    ],
-}
 _TASK_PROGRESS_QUERY_RE = re.compile(r"(进度|做到哪|到哪了|还在.*(执行|跑|做)|上个任务.*(怎么样|进度)|刚才.*任务.*(怎么样|进度)|修好了吗|处理到哪)")
 _TASK_FAILURE_QUERY_RE = re.compile(r"(哪一步.*失败|哪个步骤.*失败|为什么失败|失败原因|哪一步没成功|哪个步骤没成功)")
 _TASK_STEP_INDEX_RE = re.compile(r"第\s*(\d+)\s*步")
@@ -439,7 +393,10 @@ async def _persist_post_process_audit(
         runtime_task_registry = get_runtime_task_registry()
         runtime_task = runtime_task_registry.get_by_request_id(request_id)
         if runtime_task is not None and str(runtime_task.status).upper() in {"RUNNING", "RECOVERING"}:
-            runtime_task_status_templates = _mapping_section(_load_runtime_texts(), "runtime_task_status")
+            runtime_task_status_templates = _load_runtime_texts_section(
+                "runtime_task_status",
+                render_target_lang=render_target_lang,
+            )
             has_failure = bool(runtime_task.error or runtime_task.result_code)
             if has_failure:
                 runtime_task_registry.mark_failed(
@@ -1092,9 +1049,12 @@ def _maybe_build_recent_turn_answer(
         "",
     )
 
-    templates = _mapping_section(_load_runtime_texts(), "recent_turn_answer")
+    templates = _load_runtime_texts_section(
+        "recent_turn_answer",
+        render_target_lang=render_target_lang,
+    )
     if query_role == "user" and latest_user:
-        fallback = f"你上一句是「{latest_user}」。"
+        fallback = ""
         return _finalize_recent_turn_text(
             _mapping_text(
                 templates,
@@ -1105,7 +1065,7 @@ def _maybe_build_recent_turn_answer(
             fallback=fallback,
         )
     if query_role == "assistant" and latest_assistant:
-        fallback = f"我上一句说的是「{latest_assistant}」。"
+        fallback = ""
         return _finalize_recent_turn_text(
             _mapping_text(
                 templates,
@@ -1310,15 +1270,16 @@ def _resolve_phatic_fastpath_variants(
     templates: Mapping[str, Any] | None = None,
 ) -> list[str]:
     variants_mapping = _mapping_section(dict(templates or {}), "deterministic_variants")
-    raw_variants = variants_mapping.get(category)
+    language = str(render_target_lang or "zh").strip().lower()
+    localized_mapping = _mapping_section(variants_mapping, language)
+    raw_variants = localized_mapping.get(category)
+    if not raw_variants:
+        raw_variants = variants_mapping.get(category)
     if isinstance(raw_variants, list):
         variants = [str(item).strip() for item in raw_variants if str(item).strip()]
         if variants:
             return variants
-
-    language = str(render_target_lang or "zh").strip().lower()
-    fallback_mapping = _PHATIC_FASTPATH_VARIANTS_JA if language == "ja" else _PHATIC_FASTPATH_VARIANTS_ZH
-    return list(fallback_mapping.get(category) or [])
+    return []
 
 
 def _maybe_build_phatic_fastpath_reply(
@@ -1423,11 +1384,15 @@ def _render_delegated_result_naturally(
     agent_id: str,
     result_text: str,
     reply_template: str | None,
+    render_target_lang: str = "zh",
     extract_delegate_visible_text: Callable[[str], str] | None = None,
 ) -> str:
     _extract_visible = extract_delegate_visible_text or _extract_delegate_visible_text
     visible = _extract_visible(result_text)
-    templates = _mapping_section(_load_runtime_texts(), "delegated_result")
+    templates = _load_runtime_texts_section(
+        "delegated_result",
+        render_target_lang=render_target_lang,
+    )
     empty_visible_templates = _mapping_section(templates, "empty_visible_result")
     if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
         if agent_id == "codex_codegen":
@@ -1533,6 +1498,7 @@ def _maybe_build_task_progress_fastpath(
     session_id: str,
     person_id: str,
     user_message: str,
+    render_target_lang: str = "zh",
     task_progress_query_re: Any | None = None,
     task_failure_query_re: Any | None = None,
     task_step_index_re: Any | None = None,
@@ -1554,7 +1520,10 @@ def _maybe_build_task_progress_fastpath(
         )
     except Exception:
         summary = None
-    templates = _mapping_section(_load_runtime_texts(), "task_progress")
+    templates = _load_runtime_texts_section(
+        "task_progress",
+        render_target_lang=render_target_lang,
+    )
     default_labels = _mapping_section(templates, "defaults")
     if not summary:
         return _mapping_text(templates, "no_summary")
@@ -1769,7 +1738,10 @@ def _maybe_build_previous_meaning_answer(
     if not latest_assistant:
         return None
 
-    templates = _mapping_section(_load_runtime_texts(), "clarification_direct_answer")
+    templates = _load_runtime_texts_section(
+        "clarification_direct_answer",
+        render_target_lang=render_target_lang,
+    )
     return _mapping_text(
         templates,
         "assistant_meaning_template",
@@ -2043,11 +2015,22 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception:
         pass
 
+    _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
+    render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
+    if not _injected_lang:
+        try:
+            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+
+            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
+        except Exception as lang_exc:
+            _logger.debug("[%s] cortex_orchestrator infer_render_target_lang failed: %s", request_id, lang_exc)
+
     task_progress_answer = _task_progress_fastpath(
         request_id=request_id,
         session_id=session_id,
         person_id=person_id,
         user_message=sanitized_message,
+        render_target_lang=render_target_lang,
     )
     if task_progress_answer:
         narrative = _sanitize_output(str(task_progress_answer).strip())
@@ -2077,7 +2060,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 emotion_context=emotion_context,
                 bond_summary={},
                 ts_ms=ts_ms,
-                render_target_lang="zh",
+                render_target_lang=render_target_lang,
                 total_latency_ms=total_latency_ms,
                 llm_latency_ms=0,
                 first_token_ms=None,
@@ -2104,7 +2087,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         session_id=session_id,
         person_id=person_id,
         user_message=sanitized_message,
-        render_target_lang="zh",
+        render_target_lang=render_target_lang,
     )
     if recent_turn_answer:
         narrative = _sanitize_output(str(recent_turn_answer).strip())
@@ -2134,7 +2117,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 emotion_context=emotion_context,
                 bond_summary={},
                 ts_ms=ts_ms,
-                render_target_lang="zh",
+                render_target_lang=render_target_lang,
                 total_latency_ms=total_latency_ms,
                 llm_latency_ms=0,
                 first_token_ms=None,
@@ -2161,7 +2144,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         session_id=session_id,
         person_id=person_id,
         user_message=sanitized_message,
-        render_target_lang="zh",
+        render_target_lang=render_target_lang,
     )
     if clarification_direct_answer:
         narrative = _sanitize_output(str(clarification_direct_answer).strip())
@@ -2191,7 +2174,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 emotion_context=emotion_context,
                 bond_summary={},
                 ts_ms=ts_ms,
-                render_target_lang="zh",
+                render_target_lang=render_target_lang,
                 total_latency_ms=total_latency_ms,
                 llm_latency_ms=0,
                 first_token_ms=None,
@@ -2218,7 +2201,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         session_id=session_id,
         person_id=person_id,
         user_message=sanitized_message,
-        render_target_lang="zh",
+        render_target_lang=render_target_lang,
     )
     if phatic_fastpath_reply:
         from host_brain.app.chat_agent import (  # noqa: PLC0415
@@ -2246,7 +2229,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             retrieval_evidence_items=[],
             retrieval_summary={"status": "SKIPPED", "reason_code": "PHATIC_FASTPATH"},
             sub_agent_context=phatic_ctx,
-            render_target_lang="zh",
+            render_target_lang=render_target_lang,
             reply_channel=getattr(request_body, "reply_channel", None),
             suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
             suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
@@ -2274,7 +2257,10 @@ async def _cortex_orchestrator_sse_generator_impl(
     try:
         from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
-        runtime_task_status_templates = _mapping_section(_load_runtime_texts(), "runtime_task_status")
+        runtime_task_status_templates = _load_runtime_texts_section(
+            "runtime_task_status",
+            render_target_lang=render_target_lang,
+        )
         runtime_task_registry = get_runtime_task_registry()
         if runtime_task_registry.get_by_request_id(request_id) is None:
             runtime_task_registry.create_task(
@@ -2322,15 +2308,6 @@ async def _cortex_orchestrator_sse_generator_impl(
         intent_draft = {**dict(intent_draft or {}), "chat_speed_profile": "direct_fast"}
     elif context_chat_fast_mode:
         intent_draft = {**dict(intent_draft or {}), "chat_speed_profile": "context_fast"}
-    _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
-    render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
-    if not _injected_lang:
-        try:
-            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
-
-            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
-        except Exception as lang_exc:
-            _logger.debug("[%s] cortex_orchestrator infer_render_target_lang failed: %s", request_id, lang_exc)
     _hard_state_summary = gov.get("hard_state_summary") if isinstance(gov.get("hard_state_summary"), Mapping) else {}
     retrieval_mood_state = (
         str(
@@ -2456,9 +2433,9 @@ async def _cortex_orchestrator_sse_generator_impl(
         llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
 
     if llm_runtime is not None and not llm_runtime.get("available"):
-        fallback_narrative = _mapping_text(
-            _load_runtime_texts(),
+        fallback_narrative = _load_runtime_text_value(
             "llm_unavailable_fallback",
+            render_target_lang=render_target_lang,
         )
         total_latency_ms = int(time.time() * 1000) - ts_ms
         try:

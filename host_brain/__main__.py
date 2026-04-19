@@ -108,6 +108,29 @@ def setup_logging(log_level: str) -> None:
             logging.StreamHandler(sys.stdout),
         ],
     )
+    _configure_dependency_log_levels()
+
+
+def _configure_dependency_log_levels() -> None:
+    dependency_overrides = {
+        "httpx": logging.WARNING,
+        "httpcore": logging.WARNING,
+        "openai": logging.WARNING,
+        "openai._base_client": logging.WARNING,
+        "urllib3": logging.WARNING,
+        "sentence_transformers": logging.WARNING,
+        "chromadb": logging.WARNING,
+        "uvicorn.access": logging.WARNING,
+    }
+    for logger_name, level in dependency_overrides.items():
+        logging.getLogger(logger_name).setLevel(level)
+
+
+def _resolve_uvicorn_access_log_enabled() -> bool:
+    raw = str(os.environ.get("HOST_UVICORN_ACCESS_LOG_ENABLED") or "").strip().lower()
+    if not raw:
+        return False
+    return raw in {"1", "true", "yes", "on"}
 
 
 def run_startup_check(db_path: str) -> bool:
@@ -204,7 +227,7 @@ def main() -> int:
             port=args.port,
             reload=args.reload,
             log_level=args.log_level.lower(),
-            access_log=True,
+            access_log=_resolve_uvicorn_access_log_enabled(),
         )
         return 0
     except KeyboardInterrupt:

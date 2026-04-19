@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.input_routes import (
+    _build_gateway_route_started_voice_ack_text,
     _build_gateway_reply_text,
     _build_gateway_voice_text,
     _deliver_gateway_reply,
@@ -669,6 +670,66 @@ def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> 
         emotion_tag="neutral",
         bond_stage="STRANGER",
     )
+
+
+def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "input_routes.fallback_texts",
+        content=json.dumps(
+            {
+                "route_started_voice_ack": {
+                    "translate_agent": "自定义翻译等待中。",
+                    "intent_agent": "自定义整理等待中。",
+                    "codex_codegen": "自定义代码处理中。",
+                    "plan": "自定义计划处理中。",
+                    "default": "自定义默认等待中。",
+                }
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == "自定义翻译等待中。"
+    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == "自定义整理等待中。"
+    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="codex_codegen") == "自定义代码处理中。"
+    assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == "自定义计划处理中。"
+    assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == "自定义默认等待中。"
+
+
+def test_build_gateway_voice_text_uses_prompt_template_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "input_routes.fallback_texts",
+        content=json.dumps(
+            {
+                "voice_summary": {
+                    "code_or_latin": "自定义代码朗读摘要。",
+                    "reply_present": "自定义结果朗读摘要。",
+                }
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    assert _build_gateway_voice_text(reply_text="```python\nprint('hi')\n```", tts_text_ja=None) == "自定义代码朗读摘要。"
+    assert _build_gateway_voice_text(reply_text="这是中文结果。", tts_text_ja=None) == "自定义结果朗读摘要。"
+    assert _build_gateway_voice_text(reply_text="Result ready", tts_text_ja=None) == "自定义代码朗读摘要。"
+    assert _build_gateway_voice_text(reply_text="有结果但没有日语", tts_text_ja="") == "自定义结果朗读摘要。"
 
 
 def test_build_gateway_voice_text_prefers_tts_text_ja_when_available() -> None:

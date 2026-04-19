@@ -53,9 +53,9 @@ class TestCortexPromptBuilder:
         assert "SYSTEM_PROMPT" in system_prompt
         assert gen_params == {"temperature": 0.42}
         assert prompt_text.startswith("PROMPT_BODY")
-        assert "【可用能力" in prompt_text
+        assert "【使える能力" in prompt_text
         assert "codex_codegen" in prompt_text
-        assert "【用户消息】\nhello world" in prompt_text
+        assert "【相手のメッセージ】\nhello world" in prompt_text
         assert build_runtime_input.call_count == 1
         assert build_prompt_payload.call_count == 1
         assert render_prompt.call_count == 1
@@ -202,10 +202,10 @@ class TestCortexPromptBuilder:
                 max_turns=2,
             )
 
-        assert "Recent session context:" in block
-        assert "User: 贪吃蛇" in block
-        assert "Assistant: 贪吃蛇啊……是说那个游戏吗？" in block
-        assert "Assistant: 贪吃蛇……你是想玩这个游戏吗？" in block
+        assert "直近セッションの流れ：" in block
+        assert "相手: 贪吃蛇" in block
+        assert "藍: 贪吃蛇啊……是说那个游戏吗？" in block
+        assert "藍: 贪吃蛇……你是想玩这个游戏吗？" in block
         assert "当前请求不应进入上下文" not in block
 
     def test_build_recent_session_context_block_filters_japanese_and_corrupted_rows_for_zh(self) -> None:
@@ -251,10 +251,10 @@ class TestCortexPromptBuilder:
                 max_turns=4,
             )
 
-        assert "Recent session context:" in block
-        assert "User: 贪吃蛇" in block
-        assert "Assistant: 贪吃蛇啊……是说那个游戏吗？" in block
-        assert "User: 我刚才说什么了啊" in block
+        assert "最近一次会话里的上下文：" in block
+        assert "用户: 贪吃蛇" in block
+        assert "夏目蓝: 贪吃蛇啊……是说那个游戏吗？" in block
+        assert "用户: 我刚才说什么了啊" in block
         assert "ちょっと待ってね…" not in block
         assert "????????" not in block
         assert "?????" not in block
@@ -313,7 +313,7 @@ class TestCortexPromptBuilder:
                 render_target_lang="zh",
             )
 
-        assert "Recent continuity context:" in block
+        assert "近期连续对话上下文：" in block
         assert "微信刚才说过的话" in block
         assert "QQ里说过的话" in block
         assert "别人的内容" not in block
@@ -378,7 +378,7 @@ class TestCortexPromptBuilder:
                 render_target_lang="zh",
             )
 
-        assert "Recent continuity context:" in block
+        assert "近期连续对话上下文：" in block
         assert block.count("hello blue") == 1
         assert block.count("hi there") == 1
         assert "foreign session" not in block
@@ -474,10 +474,10 @@ class TestCortexPromptBuilder:
                 max_turns=2,
             )
 
-        assert "Recent session context:" in block
+        assert "最近一次会话里的上下文：" in block
         assert "recent topic one" in block
         assert "recent topic two" in block
-        assert "Earlier continuity summary:" in block
+        assert "更早之前的连续摘要：" in block
         assert "old topic alpha" in block or "old topic beta" in block
 
     def test_build_recent_session_context_block_uses_continuity_template_override(self, monkeypatch) -> None:

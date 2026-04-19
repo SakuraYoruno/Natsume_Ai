@@ -202,6 +202,29 @@ _PHATIC_COMFORT_BLOCKING_TOKENS: tuple[str, ...] = (
     "分析",
     "修复",
 )
+_COMPANION_OPEN_CHAT_MARKERS: tuple[str, ...] = (
+    "认真聊",
+    "聊一会儿",
+    "聊聊最近",
+    "想和你聊",
+    "想跟你聊",
+    "先听我说",
+    "陪我说下去",
+    "陪我理顺",
+    "接住我",
+    "不是为了完成什么任务",
+    "不是为了让你",
+    "不是要你列清单",
+    "不是要你帮我做任务",
+    "不是要你帮我",
+    "只是想和你聊",
+    "慢慢陪我",
+    "认真聊聊",
+    "talk for a while",
+    "hear me out",
+    "listen to me first",
+    "stay with me",
+)
 _TASK_EXEC_ACTION_MARKERS: tuple[str, ...] = (
     "请",
     "麻烦",
@@ -301,6 +324,27 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
     return None
 
 
+def _looks_like_companion_open_chat(text: str) -> bool:
+    normalized = _normalize_match_text(text)
+    if not normalized:
+        return False
+    has_companion_marker = any(marker in normalized for marker in _COMPANION_OPEN_CHAT_MARKERS)
+    if not has_companion_marker:
+        return False
+    if any(marker in normalized for marker in _TASK_EXEC_ACTION_MARKERS):
+        calming_negations = (
+            "不是要你帮我",
+            "不是要你",
+            "不是为了完成什么任务",
+            "先听我说",
+            "只是想和你聊",
+            "接住我",
+        )
+        if not any(marker in normalized for marker in calming_negations):
+            return False
+    return True
+
+
 def _strip_step_lead_in(text: str) -> str:
     stripped = _normalize_text(text)
     while True:
@@ -394,6 +438,8 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
     cleaned = _strip_step_lead_in(text)
     if not cleaned:
         return None
+    if _looks_like_companion_open_chat(cleaned):
+        return None
 
     search_query = _extract_hub_skill_search_query(cleaned)
     if search_query:
@@ -402,7 +448,7 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
         return ("skill", "hub_skill_list", "THALAMUS_RULE_HUB_SKILL_LIST")
     if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return ("skill", "session_summary", "THALAMUS_RULE_SESSION_SUMMARY")
-    if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS):
+    if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS) and not _looks_like_companion_open_chat(cleaned):
         return ("skill", "emotion_query", "THALAMUS_RULE_EMOTION_QUERY")
     if _contains_any(cleaned, _DIRECT_BOND_MARKERS):
         return ("skill", "bond_query", "THALAMUS_RULE_BOND_QUERY")
@@ -447,6 +493,20 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     cleaned = _strip_step_lead_in(text)
     if not cleaned:
         return None
+
+    if _looks_like_companion_open_chat(cleaned):
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": cleaned,
+            "reason_code": "THALAMUS_RULE_CONTEXT_CHAT",
+            "confidence": 0.9,
+            "route_source": "thalamus.rule",
+            "chat_speed_profile": "context_fast",
+            "args": {
+                "text": cleaned,
+            },
+        }
 
     codex_runtime_mode = _infer_codex_runtime_mode(cleaned)
     if codex_runtime_mode:
@@ -567,7 +627,11 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "route_source": "thalamus.rule",
         }
 
-    if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS) and _contains_any(cleaned, _DIRECT_EMOTION_QUERY_MARKERS):
+    if (
+        _contains_any(cleaned, _DIRECT_EMOTION_MARKERS)
+        and _contains_any(cleaned, _DIRECT_EMOTION_QUERY_MARKERS)
+        and not _looks_like_companion_open_chat(cleaned)
+    ):
         return {
             "route": "skill",
             "target_id": "emotion_query",
@@ -701,6 +765,9 @@ def _should_prefer_context_fast_chat(text: str) -> bool:
     if not normalized:
         return False
 
+    if _looks_like_companion_open_chat(normalized):
+        return True
+
     if "```" in normalized:
         return False
 
@@ -777,19 +844,12 @@ async def classify_task_intent_by_llm(
         emotion_label = str(vital_signs.get("emotion_label") or ctx.get("emotion_label") or "neutral").strip()
         tribe_summary = f"bond_stage={bond_stage}, emotion={emotion_label}"
 
-        fallback_system_prompt = (
-            "You are an intent route classifier. Output a single JSON object only.\n"
-            "route must be one of: chat / delegate / skill / task_progress / recent_turn\n"
-            "delegate target_id must be one of: intent_agent / translate_agent / vision_agent\n"
-            "skill target_id must be a valid skill name such as memory_store / codex_codegen.\n"
-            'Fields: {"route","target_id","task","confidence","reason"}'
-        )
-        fallback_user_prompt_template = "tribe={tribe_summary}\nuser={text}\nReturn JSON only."
-
         raw_templates = _resolve_intent_classification_prompt_templates()
         templates = dict(raw_templates) if isinstance(raw_templates, _Mapping) else {}
-        system_prompt = str(templates.get("system_prompt") or fallback_system_prompt).strip()
-        user_prompt_template = str(templates.get("user_prompt_template") or fallback_user_prompt_template).strip()
+        system_prompt = str(templates.get("system_prompt") or "").strip()
+        user_prompt_template = str(templates.get("user_prompt_template") or "").strip()
+        if not system_prompt or not user_prompt_template:
+            return None
         user_prompt = user_prompt_template.format(tribe_summary=tribe_summary, text=str(text or "").strip())
 
         timeout_ms = int(os.environ.get("HOST_CORTEX_INTENT_LLM_TIMEOUT_MS", "4000"))

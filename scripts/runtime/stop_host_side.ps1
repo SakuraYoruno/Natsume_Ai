@@ -51,13 +51,31 @@ function Is-HostProcess {
   if (-not $cmd) {
     return $false
   }
-  if ($cmd -like "*-m host_brain*") {
+  if ($cmd -like "*-m host_brain.obs_main*") {
+    return $false
+  }
+  if ($cmd -like "*-m host_brain --host*") {
     return $true
   }
   if ($cmd -like "*host_brain.app.fastapi_app*") {
     return $true
   }
   return $false
+}
+
+function Get-HostProcessIds {
+  $result = @()
+  $processes = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+  foreach ($procInfo in @($processes)) {
+    $procId = [int]$procInfo.ProcessId
+    if ($procId -le 0) {
+      continue
+    }
+    if (Is-HostProcess -ProcessId $procId) {
+      $result += $procId
+    }
+  }
+  return @($result | Sort-Object -Unique)
 }
 
 function Stop-ProcessTree {
@@ -151,6 +169,21 @@ if (-not $stopped) {
   } elseif (-not $detail) {
     $detail = "host not running"
   }
+}
+
+$remainingHostPids = @()
+foreach ($candidatePid in @(Get-HostProcessIds)) {
+  if ($hostPid -ne $null -and [int]$candidatePid -eq [int]$hostPid) {
+    continue
+  }
+  $ok = Stop-ProcessTree -ProcessId ([int]$candidatePid)
+  if ($ok) {
+    $stopped = $true
+    $remainingHostPids += [int]$candidatePid
+  }
+}
+if ($remainingHostPids.Count -gt 0) {
+  $detail = ("stopped residual host processes: {0}" -f (($remainingHostPids | Sort-Object -Unique) -join ","))
 }
 
 Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue

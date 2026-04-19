@@ -18,6 +18,9 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_user_message,
 )
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.prompt_builder_utils import (
+    _resolve_template_payload_with_mirror,
+)
 from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
@@ -39,8 +42,14 @@ from host_brain.app.prompt_builder import (
 _logger = logging.getLogger("Natsume.provider_factory")
 
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+def _load_template_mapping(template_id: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
+    if render_target_lang:
+        raw = _resolve_template_payload_with_mirror(
+            template_id,
+            render_target_lang=str(render_target_lang or "zh"),
+        )
+    else:
+        raw = resolve_prompt_template_json_merged(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -76,14 +85,17 @@ def _build_host_openai_system_prompt(node_id: str | None) -> str:
 
 
 def _build_host_mock_reply_text(node_id: str | None, runtime_payload: dict[str, Any]) -> str:
-    templates = _load_template_mapping("provider_factory.host_mock.reply_templates")
+    render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
+    templates = _load_template_mapping(
+        "provider_factory.host_mock.reply_templates",
+        render_target_lang=render_target_lang,
+    )
     resolved_node_id = str(node_id or "").strip()
     user_message = (
         _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=120)
         or _mapping_text(templates, "fallback_user_message")
     )
     if resolved_node_id in {CHAT_RENDER_NODE_ID, CHAT_DIRECT_NODE_ID}:
-        render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
         if render_target_lang == "zh":
             return _mapping_text(
                 templates,

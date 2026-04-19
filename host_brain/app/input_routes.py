@@ -21,6 +21,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 # ── service 层 import ──────────────────────────────────────────────────────
 from host_brain.app.input_service_log import (
@@ -287,22 +288,47 @@ def _should_send_gateway_route_started_voice_ack(
     return False, "ROUTE_ACK_FAST_ROUTE"
 
 
+def _load_gateway_fallback_texts() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("input_routes.fallback_texts")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _normalize_gateway_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _load_gateway_fallback_texts_localized(*, render_target_lang: str) -> dict[str, Any]:
+    raw = _load_gateway_fallback_texts()
+    localized = raw.get(_normalize_gateway_template_lang(render_target_lang))
+    selected: dict[str, Any] = dict(localized) if isinstance(localized, dict) else {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            key_text = str(key)
+            if key_text in {"zh", "ja"}:
+                continue
+            selected[key_text] = value
+    return selected or (dict(raw) if isinstance(raw, dict) else {})
+
+
 def _build_gateway_route_started_voice_ack_text(
     *,
     route_type: str,
     target_id: str,
+    render_target_lang: str = "ja",
 ) -> str:
     normalized_route = str(route_type or "").strip().lower()
     normalized_target = str(target_id or "").strip().lower()
+    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
+    route_templates = dict(templates.get("route_started_voice_ack") or {})
     if normalized_route == "delegate" and normalized_target == "translate_agent":
-        return "今、訳してるよ。まとまったらすぐ返すね。"
+        return str(route_templates.get("translate_agent") or "")
     if normalized_route == "delegate" and normalized_target == "intent_agent":
-        return "今、ちゃんと整理して考えてるよ。少しだけ待ってて。"
+        return str(route_templates.get("intent_agent") or "")
     if normalized_route == "skill" and normalized_target == "codex_codegen":
-        return "今、コードを見てるよ。できたらすぐ持ってくるね。"
+        return str(route_templates.get("codex_codegen") or "")
     if normalized_route == "plan":
-        return "今、順番を整えてるよ。少しだけ待ってて。"
-    return "今やってるから、少しだけ待ってて。終わったらすぐ返すね。"
+        return str(route_templates.get("plan") or "")
+    return str(route_templates.get("default") or "")
 
 def _detect_gateway_execution_deviation(
     *,
@@ -475,11 +501,10 @@ def _build_gateway_reply_text(
     decision: str,
     narrative: str,
     reason_code: str | None,
+    render_target_lang: str = "zh",
 ) -> str:
     """构建 gateway 最终回复文本。"""
-    from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
-    templates_raw = resolve_prompt_template_json_merged("input_routes.fallback_texts")
-    templates = dict(templates_raw) if isinstance(templates_raw, dict) else {}
+    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
     reply_text = str(narrative or "").strip()
     if reply_text:
         return reply_text
@@ -489,7 +514,14 @@ def _build_gateway_reply_text(
     return str(templates.get("approve_empty") or "")
 
 
-def _build_gateway_voice_text(*, reply_text: str, tts_text_ja: str | None) -> str:
+def _build_gateway_voice_text(
+    *,
+    reply_text: str,
+    tts_text_ja: str | None,
+    render_target_lang: str = "ja",
+) -> str:
+    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
+    voice_templates = dict(templates.get("voice_summary") or {})
     candidate = str(tts_text_ja or "").strip()
     if candidate and _VOICE_JA_CHAR_PATTERN.search(candidate) and not _VOICE_LATIN_PATTERN.search(candidate):
         return candidate
@@ -499,10 +531,10 @@ def _build_gateway_voice_text(*, reply_text: str, tts_text_ja: str | None) -> st
         return normalized_reply
 
     if "```" in normalized_reply or _VOICE_LATIN_PATTERN.search(normalized_reply):
-        return "結果は画面にまとめておいたよ。必要なら次に要点だけ読み上げるね。"
+        return str(voice_templates.get("code_or_latin") or "")
 
     if normalized_reply:
-        return "結果をまとめたよ。画面を見ればすぐ分かるようにしておいたから、必要なら次に読み上げるね。"
+        return str(voice_templates.get("reply_present") or "")
 
     return ""
 
@@ -1062,6 +1094,7 @@ def _maybe_schedule_gateway_route_started_voice_ack(
     ack_text = _build_gateway_route_started_voice_ack_text(
         route_type=route_type,
         target_id=target_id,
+        render_target_lang="ja",
     )
     _log_input_event(
         ledger=ledger,
@@ -1433,6 +1466,7 @@ async def _maybe_realign_gateway_pipeline(
         retry_message = _build_realign_user_message(
             original_user_text=user_text,
             first_narrative=narrative,
+            render_target_lang=str(payload.get("render_target_lang") or "zh"),
         )
         retry_result = await _run_cortex_orchestrator_pipeline(
             request_id=f"{request_id}::realign",
@@ -1500,8 +1534,13 @@ async def _deliver_gateway_reply(
         decision=decision,
         narrative=narrative,
         reason_code=reason_code,
+        render_target_lang="zh",
     )
-    voice_text = _build_gateway_voice_text(reply_text=reply_text, tts_text_ja=tts_text_ja)
+    voice_text = _build_gateway_voice_text(
+        reply_text=reply_text,
+        tts_text_ja=tts_text_ja,
+        render_target_lang="ja",
+    )
     preview = _build_reply_preview(reply_text, limit=120)
     voice_options = _resolve_gateway_voice_reply_options(payload)
     voice_result: dict[str, Any] = {

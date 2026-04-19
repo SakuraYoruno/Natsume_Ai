@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -34,22 +36,23 @@ def test_prompt_config_routes_list_get_update_reset(monkeypatch) -> None:
 
     get_response = client.get(f"/prompt-config/templates/{template_id}")
     assert get_response.status_code == 200
-    assert get_response.json()["item"]["resolved_content"] == "等我一下，我刚才这句没接稳。"
+    get_item = get_response.json()["item"]
+    assert json.loads(get_item["resolved_content"])["zh"] == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
 
     update_response = client.put(
         f"/prompt-config/templates/{template_id}",
-        json={"content": "这句我重新接一下。", "enabled": True},
+        json={"content": json.dumps({"zh": "这句我重新接一下。", "ja": "この返事をつなぎ直します。"}, ensure_ascii=False), "enabled": True},
     )
     assert update_response.status_code == 200
     updated_item = update_response.json()["item"]
     assert updated_item["source"] == "override"
-    assert updated_item["resolved_content"] == "这句我重新接一下。"
+    assert json.loads(updated_item["resolved_content"])["zh"] == "这句我重新接一下。"
 
     reset_response = client.post(f"/prompt-config/templates/{template_id}/reset")
     assert reset_response.status_code == 200
     reset_item = reset_response.json()["item"]
     assert reset_item["source"] == "default"
-    assert reset_item["resolved_content"] == "等我一下，我刚才这句没接稳。"
+    assert json.loads(reset_item["resolved_content"])["zh"] == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
 
 
 def test_prompt_config_routes_reject_invalid_json(monkeypatch) -> None:

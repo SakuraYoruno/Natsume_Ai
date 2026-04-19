@@ -91,6 +91,7 @@ def _build_character_dynamic_patch(
     emotion_tag: str = "",
     is_holiday: bool = False,
     holiday_name: str = "",
+    render_target_lang: str = "zh",
 ) -> str:
     """生成角色人设的动态补丁文本，追加在静态人设之后。
 
@@ -104,7 +105,10 @@ def _build_character_dynamic_patch(
     """
     import datetime as _dt
 
-    templates = _load_template_mapping("prompt_builder.character_dynamic_patch.templates")
+    templates = _load_template_mapping(
+        "prompt_builder.character_dynamic_patch.templates",
+        render_target_lang=render_target_lang,
+    )
     season_templates = _mapping_section(templates, "seasons")
     holiday_templates = _mapping_section(templates, "holiday_patches")
     emotion_templates = _mapping_section(templates, "emotion_patches")
@@ -245,13 +249,63 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
         return text
 
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
+def _normalize_template_lang(render_target_lang: str) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _merge_localized_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    merged = {str(key): value for key, value in base.items()}
+    for key, value in overlay.items():
+        key_text = str(key)
+        if key_text in {"zh", "ja"}:
+            continue
+        current = merged.get(key_text)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[key_text] = _merge_localized_mapping(current, value)
+        else:
+            merged[key_text] = value
+    return merged
+
+
+def _resolve_localized_template_payload(template_id: str, *, render_target_lang: str) -> Any:
+    lang_key = _normalize_template_lang(render_target_lang)
     raw = resolve_prompt_template_json_merged(template_id)
+    if isinstance(raw, Mapping):
+        localized = raw.get(lang_key)
+        if localized is not None:
+            if isinstance(localized, Mapping):
+                return _merge_localized_mapping(localized, raw)
+            return localized
+    return raw
+
+
+def _load_template_mapping(
+    template_id: str,
+    *,
+    render_target_lang: str | None = None,
+) -> dict[str, Any]:
+    raw = (
+        _resolve_localized_template_payload(
+            template_id,
+            render_target_lang=render_target_lang or "zh",
+        )
+        if render_target_lang
+        else resolve_prompt_template_json_merged(template_id)
+    )
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
-def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, Any]:
+def _mapping_section(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    render_target_lang: str | None = None,
+) -> dict[str, Any]:
     raw = mapping.get(key)
+    if isinstance(raw, Mapping) and render_target_lang:
+        localized = raw.get(_normalize_template_lang(render_target_lang))
+        if isinstance(localized, Mapping):
+            raw = localized
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -260,13 +314,25 @@ def _mapping_text(
     key: str,
     *,
     default: str = "",
+    render_target_lang: str | None = None,
     **kwargs: Any,
 ) -> str:
-    return _format_template_text(mapping.get(key, default), **kwargs)
+    value = mapping.get(key, default)
+    if isinstance(value, Mapping) and render_target_lang:
+        lang_key = _normalize_template_lang(render_target_lang)
+        value = value.get(lang_key, value.get("zh", default))
+    return _format_template_text(value, **kwargs)
 
 
-def _mapping_list(mapping: Mapping[str, Any], key: str) -> list[str]:
+def _mapping_list(
+    mapping: Mapping[str, Any],
+    key: str,
+    *,
+    render_target_lang: str | None = None,
+) -> list[str]:
     raw = mapping.get(key)
+    if isinstance(raw, Mapping) and render_target_lang:
+        raw = raw.get(_normalize_template_lang(render_target_lang), raw.get("zh"))
     if not isinstance(raw, list):
         return []
     return [str(item).strip() for item in raw if str(item).strip()]
@@ -319,101 +385,14 @@ def _build_direct_response_priority(
     follow_up_hint: str = "",
     bond_stage: str = "",
 ) -> str:
-    base_rules = resolve_prompt_template_json("prompt_builder.direct_response.base_rules")
-    rules: list[str] = [
-        str(item).strip()
-        for item in (base_rules or [])
-        if str(item).strip()
-    ]
+    from host_brain.app.prompt_builder_utils import _build_direct_response_priority as _build_direct_response_priority_shared  # noqa: PLC0415
 
-    # 追问策略：根据 bond_stage 和 follow_up_hint 决定是否鼓励追问
-    _close_stages = {"CLOSE_FRIEND", "CONFIDANT", "SOULMATE", "FRIEND"}
-    if bond_stage.upper() in _close_stages:
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.close_followup_rule"))
-    elif follow_up_hint:
-        rules.append(
-            f"{resolve_prompt_template_text('prompt_builder.direct_response.followup_hint_prefix')}{follow_up_hint}"
-        )
-    else:
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.default_followup_rule"))
-
-    if _contains_any_token(
-        user_message,
-        ("短く", "简短", "短い", "brief", "short", "一文", "一句", "一言", "one sentence"),
-    ):
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.brief_rule"))
-
-    # 日常互动类问题：直接回答，不反弹问题
-    if _contains_any_token(
-        user_message,
-        (
-            "気分", "調子", "状态", "心情", "感觉", "感受",
-            "今日", "今天", "最近", "どうだった", "怎么样",
-            "有没有", "今日どう", "今日は", "最近どう",
-            "过得", "过的", "今天过",
-        ),
-    ):
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.daily_life_rule"))
-
-    if _contains_any_token(
-        user_message,
-        (
-            "我爱你", "爱你", "喜欢你", "好喜欢你", "想你", "抱抱", "亲亲", "陪陪我",
-            "愛してる", "好き", "会いたい",
-        ),
-    ):
-        affection_rules = resolve_prompt_template_json("prompt_builder.direct_response.affection_rules")
-        rules.extend(
-            str(item).strip()
-            for item in (affection_rules or [])
-            if str(item).strip()
-        )
-
-    if _contains_any_token(
-        user_message,
-        ("难受", "做不好", "累", "委屈", "想哭", "心情不好", "不开心", "安慰我", "抱抱我", "陪陪我", "つらい", "しんどい", "疲れた"),
-    ):
-        rules.append(
-            "如果对方在难受、疲惫或想被安慰，先轻轻点出他此刻不好受，再给贴近的安抚；不要只停在“理解”或“没关系”。"
-        )
-
-    if _contains_any_token(
-        user_message,
-        ("好久不见", "有想我吗", "想我吗", "会想我", "想过我吗", "会不会想我", "会想起我吗", "ひさしぶり", "会いたかった", "恋しかった"),
-    ):
-        rules.append(
-            "如果对方在问你有没有想念他，用含蓄但明确的想念回应，不要用疏离或模棱两可的措辞。"
-        )
-
-    if _contains_any_token(
-        user_message,
-        ("争执", "吵架", "别扭", "在意之前", "那次争执", "还在意", "けんか", "気にしてる", "引っかかってる"),
-    ):
-        rules.append(
-            "如果对方提起之前的争执或别扭，先承认那件事还会让人难受，再温和邀请他继续说；不要直接用“没关系”带过。"
-        )
-
-    if _contains_any_token(
-        user_message,
-        ("逗我开心", "逗我", "哄我开心", "更会哄", "更会逗", "逗开心", "からかう", "笑わせて", "元気にして"),
-    ):
-        rules.append(
-            "如果对方在轻轻逗你或夸你会哄人，可以先带一点害羞，再顺着回一句俏皮话，不要只平平否认。"
-        )
-
-    if _contains_any_token(
-        user_message,
-        ("優先", "优先", "priority", "prioritize", "まず"),
-    ):
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.priority_rule"))
-
-    if str(render_target_lang).strip().lower() == "ja":
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.ja_output_rule"))
-    else:
-        rules.append(resolve_prompt_template_text("prompt_builder.direct_response.zh_output_rule"))
-
-    block_title = resolve_prompt_template_text("prompt_builder.direct_response.block_title")
-    return f"{block_title}\n" + "\n".join(f"- {rule}" for rule in rules) + "\n\n"
+    return _build_direct_response_priority_shared(
+        user_message=user_message,
+        render_target_lang=render_target_lang,
+        follow_up_hint=follow_up_hint,
+        bond_stage=bond_stage,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -205,16 +205,32 @@ def stream_llm_chunks(
     params = dict(gen_params or {})
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
+    max_tokens = None
+    for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+        raw_value = params.get(token_key)
+        try:
+            parsed = int(raw_value) if raw_value is not None else 0
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            max_tokens = parsed
+            break
+
+    llm_kwargs: dict[str, Any] = {
+        "model": str(model_id or "").strip() or "default",
+        "api_key": api_key,
+        "base_url": base_url,
+        "timeout": max(1.0, float(timeout_ms) / 1000.0),
+        "max_retries": 1,
+        "temperature": temperature,
+        "top_p": top_p,
+        "streaming": True,
+    }
+    if max_tokens is not None:
+        llm_kwargs["max_tokens"] = max_tokens
 
     llm = ChatOpenAI(
-        model=str(model_id or "").strip() or "default",
-        api_key=api_key,
-        base_url=base_url,
-        timeout=max(1.0, float(timeout_ms) / 1000.0),
-        max_retries=1,
-        temperature=temperature,
-        top_p=top_p,
-        streaming=True,
+        **llm_kwargs,
     )
 
     messages = [

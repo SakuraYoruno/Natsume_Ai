@@ -74,14 +74,31 @@ def _load_template_mapping(template_id: str) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
-def _load_continuity_templates() -> dict[str, str]:
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _resolve_localized_template_value(value: Any, *, render_target_lang: str | None = None) -> Any:
+    if not isinstance(value, Mapping):
+        return value
+    lang_key = _normalize_template_lang(render_target_lang)
+    if lang_key in value:
+        return value.get(lang_key)
+    if "zh" in value:
+        return value.get("zh")
+    if "ja" in value:
+        return value.get("ja")
+    return value
+
+
+def _load_continuity_templates(*, render_target_lang: str = "zh") -> dict[str, str]:
     raw = _load_template_mapping("cortex_prompt_builder.continuity_sections")
     return {
-        "user_label": str(raw.get("user_label") or "User"),
-        "assistant_label": str(raw.get("assistant_label") or "Assistant"),
-        "recent_session_title": str(raw.get("recent_session_title") or "Recent session context:"),
-        "recent_continuity_title": str(raw.get("recent_continuity_title") or "Recent continuity context:"),
-        "earlier_summary_title": str(raw.get("earlier_summary_title") or "Earlier continuity summary:"),
+        "user_label": str(_resolve_localized_template_value(raw.get("user_label"), render_target_lang=render_target_lang) or "User"),
+        "assistant_label": str(_resolve_localized_template_value(raw.get("assistant_label"), render_target_lang=render_target_lang) or "Assistant"),
+        "recent_session_title": str(_resolve_localized_template_value(raw.get("recent_session_title"), render_target_lang=render_target_lang) or "Recent session context:"),
+        "recent_continuity_title": str(_resolve_localized_template_value(raw.get("recent_continuity_title"), render_target_lang=render_target_lang) or "Recent continuity context:"),
+        "earlier_summary_title": str(_resolve_localized_template_value(raw.get("earlier_summary_title"), render_target_lang=render_target_lang) or "Earlier continuity summary:"),
     }
 
 
@@ -327,7 +344,7 @@ def _build_older_history_summary(
 ) -> str:
     from host_brain.app.recall import truncate_to_token_limit  # noqa: PLC0415
 
-    continuity_templates = _load_continuity_templates()
+    continuity_templates = _load_continuity_templates(render_target_lang=render_target_lang)
     lines: list[str] = []
     for turn in list(turns or []):
         role = str(turn.get("role") or "user").strip().lower()
@@ -362,7 +379,7 @@ def _build_recent_session_context_block(
     if not resolved_session_id and not resolved_person_id:
         return ""
 
-    continuity_templates = _load_continuity_templates()
+    continuity_templates = _load_continuity_templates(render_target_lang=render_target_lang)
     turn_limit = _normalize_continuity_turn_limit(max_turns)
     request_id_text = str(request_id or "").strip()
 
@@ -529,7 +546,7 @@ def build_cortex_prompt(
             full_prompt = full_prompt + "\n" + DEFAULT_CLARIFICATION_GUARD
 
     # ── 4. 追加子 Agent 能力描述 ─────────────────────────────────────
-    agent_block = _build_agent_capabilities_block()
+    agent_block = _build_agent_capabilities_block(render_target_lang=render_target_lang)
     full_prompt = full_prompt + "\n\n" + agent_block
 
     # ── 5. 拆分 system_prompt 和 prompt_text ─────────────────────────
@@ -559,14 +576,14 @@ def build_cortex_prompt(
     if _cp_text:
         _parts.append(
             _format_template_text(
-                _section_templates.get("profile_title", "【角色人设】\n")
+                _resolve_localized_template_value(_section_templates.get("profile_title"), render_target_lang=render_target_lang) or "【角色人设】\n"
             )
             + _cp_text
         )
     if _style_text:
         _parts.append(
             _format_template_text(
-                _section_templates.get("style_title", "【说话风格（必须遵守）】\n")
+                _resolve_localized_template_value(_section_templates.get("style_title"), render_target_lang=render_target_lang) or "【说话风格（必须遵守）】\n"
             )
             + _style_text
         )
@@ -578,7 +595,7 @@ def build_cortex_prompt(
         full_prompt
         + "\n\n"
         + _format_template_text(
-            _section_templates.get("user_message_title", "【用户消息】\n")
+            _resolve_localized_template_value(_section_templates.get("user_message_title"), render_target_lang=render_target_lang) or "【用户消息】\n"
         )
         + user_message
     )
@@ -592,13 +609,13 @@ def build_cortex_prompt(
 # 子 Agent 能力描述
 # ---------------------------------------------------------------------------
 
-def _build_agent_capabilities_block() -> str:
+def _build_agent_capabilities_block(*, render_target_lang: str = "zh") -> str:
     """构建子 Agent 能力描述块。"""
     templates = _load_template_mapping("cortex_prompt_builder.delegate.block_templates")
-    lines = [_format_template_text(templates.get("title"))]
-    lines.append(_format_template_text(templates.get("delegate_rule")))
-    lines.append(_format_template_text(templates.get("direct_reply_rule")))
+    lines = [_format_template_text(_resolve_localized_template_value(templates.get("title"), render_target_lang=render_target_lang))]
+    lines.append(_format_template_text(_resolve_localized_template_value(templates.get("delegate_rule"), render_target_lang=render_target_lang)))
+    lines.append(_format_template_text(_resolve_localized_template_value(templates.get("direct_reply_rule"), render_target_lang=render_target_lang)))
     for agent_id, desc in get_agent_capabilities().items():
-        lines.append(_format_template_text(templates.get("agent_line"), agent_id=agent_id, desc=desc))
-    lines.append(_format_template_text(templates.get("delegate_example")))
+        lines.append(_format_template_text(_resolve_localized_template_value(templates.get("agent_line"), render_target_lang=render_target_lang), agent_id=agent_id, desc=desc))
+    lines.append(_format_template_text(_resolve_localized_template_value(templates.get("delegate_example"), render_target_lang=render_target_lang)))
     return "\n".join(lines)

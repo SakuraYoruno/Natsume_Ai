@@ -99,6 +99,20 @@ class _DummyPredictiveStateEngine:
         return None
 
 
+class _NoPlanningAgent:
+    def __init__(self) -> None:
+        self.needs_calls = 0
+        self.create_calls = 0
+
+    def needs_planning(self, request: str) -> bool:  # noqa: ARG002
+        self.needs_calls += 1
+        return True
+
+    def create_plan(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        self.create_calls += 1
+        raise AssertionError("create_plan should not run for plain chat prompt intelligence")
+
+
 def _patch_dependencies(monkeypatch) -> None:
     import host_brain.app.dependencies as deps
 
@@ -145,6 +159,39 @@ def test_build_prompt_intelligence_executes_safe_planning_and_skill_nodes(monkey
     assert skill_execution.get("success") is True
     output_preview = dict(skill_execution.get("output_preview") or {})
     assert output_preview
+
+
+def test_build_prompt_intelligence_skips_task_planning_for_plain_chat(monkeypatch) -> None:
+    _patch_dependencies(monkeypatch)
+    import host_brain.app.dependencies as deps
+
+    planner = _NoPlanningAgent()
+    monkeypatch.setattr(deps, "get_planning_agent", lambda: planner)
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-intel-chat",
+        session_id="session-intel-chat",
+        thread_id=None,
+        user_message="我想和你认真聊聊最近状态。",
+        retrieval_summary={},
+        retrieval_evidence_items=[],
+        emotion_state={"emotion_tag": "CALM", "mood_state": "steady"},
+        bond_summary={"stage": "FRIEND"},
+        render_target_lang="zh",
+        scene_type="CHAT",
+    )
+
+    intelligence = build_prompt_intelligence(
+        request_id="req-intel-chat",
+        runtime_input=runtime_input,
+    )
+
+    assert "planning_outline" not in intelligence
+    assert "planning_execution" not in intelligence
+    assert "skill_dag" not in intelligence
+    assert "skill_execution" not in intelligence
+    assert planner.needs_calls == 0
+    assert planner.create_calls == 0
 
 
 def test_apply_response_intelligence_revises_high_risk_reply(monkeypatch) -> None:
@@ -300,7 +347,7 @@ def test_reflection_chain_revise_uses_minimal_fallback_for_empty_reply() -> None
         bond_stage="ACQUAINTANCE",
     )
 
-    assert result.revised_text == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
+    assert result.revised_text == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
 
 
 def test_reflection_chain_revise_replaces_too_short_reply_with_minimal_fallback() -> None:
@@ -313,7 +360,21 @@ def test_reflection_chain_revise_replaces_too_short_reply_with_minimal_fallback(
         bond_stage="ACQUAINTANCE",
     )
 
-    assert result.revised_text == "嗯，我在呢。刚才那句我想再整理一下，马上接上你。"
+    assert result.revised_text == "嗯，我在。刚才那句我想再理一下，马上接着你说。"
+
+
+def test_reflection_chain_revise_uses_japanese_localized_fallback() -> None:
+    chain = ReflectionChain()
+
+    result = chain.revise(
+        user_message="いる？",
+        ai_response="",
+        emotion_tag="",
+        bond_stage="ACQUAINTANCE",
+        render_target_lang="ja",
+    )
+
+    assert result.revised_text == "ええ、います。今の返事、少しだけ言い直しますね。"
 
 
 def test_sanitize_narrative_uses_prompt_template_override(monkeypatch) -> None:

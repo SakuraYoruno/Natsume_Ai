@@ -45,7 +45,11 @@ from host_brain.app.prompt_builder_utils import (
 def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
     """节点生成提示词（完整版，含 prompt_context 所有上下文注入）。"""
     user_message = _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=1000)
-    injection_templates = _load_template_mapping("prompt_builder.injection_guard.templates")
+    render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
+    injection_templates = _load_template_mapping(
+        "prompt_builder.injection_guard.templates",
+        render_target_lang=render_target_lang,
+    )
 
     # ── Ref #64：MemoryGuard 提示词注入检测 ──────────────────────────────
     _injection_meta: dict[str, Any] = {"mode": "SKIPPED"}
@@ -71,8 +75,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     retrieval = get_chat_runtime_retrieval(runtime_payload)
     retrieval_status = str(retrieval.get("status") or "UNKNOWN").strip() or "UNKNOWN"
     retrieval_reason = str(retrieval.get("reason_code") or "").strip() or "NONE"
-    _render_contract_templates = _load_template_mapping("prompt_builder.render_contract.blocks")
-    _runtime_section_templates = _load_template_mapping("prompt_builder.runtime_sections.templates")
+    _render_contract_templates = _load_template_mapping(
+        "prompt_builder.render_contract.blocks",
+        render_target_lang=render_target_lang,
+    )
+    _runtime_section_templates = _load_template_mapping(
+        "prompt_builder.runtime_sections.templates",
+        render_target_lang=render_target_lang,
+    )
     _render_contract_empty_placeholder = _mapping_text(_render_contract_templates, "empty_placeholder")
 
     retrieval_slot_rows = prompt_context.get("retrieval")
@@ -302,7 +312,10 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _bt_rift_active = bool(bond_texture.get("rift_active", False))
     _bt_rift_hint = str(bond_texture.get("rift_hint") or "").strip()
     _emotion_reunion_type = str(runtime_payload.get("emotion_reunion_type") or "").strip()
-    _reunion_guidance_templates = _load_template_mapping("prompt_builder.reunion.guidance")
+    _reunion_guidance_templates = _load_template_mapping(
+        "prompt_builder.reunion.guidance",
+        render_target_lang=render_target_lang,
+    )
     _emotion_reunion_guidance = _mapping_text(_reunion_guidance_templates, _emotion_reunion_type)
 
     # ── 离线状态 / 沉默状态 / Tribe 生命体征 / 身体感知 ──────────────────
@@ -371,7 +384,10 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _rp_reasons = [str(item).strip() for item in (_response_policy.get("policy_reason_tags") or []) if str(item).strip()]
     _rp_active = bool(_response_policy)
     _rp_is_affection_turn = _contains_any_token(user_message, ("你喜欢我吗", "喜欢我吗", "我喜欢你", "喜欢你", "我爱你", "爱你", "好喜欢你", "想你", "抱抱", "亲亲", "陪陪我", "好き", "愛してる", "会いたい"))
-    _response_policy_templates = _load_template_mapping("prompt_builder.response_policy.directives")
+    _response_policy_templates = _load_template_mapping(
+        "prompt_builder.response_policy.directives",
+        render_target_lang=render_target_lang,
+    )
     _response_policy_bond_stage = _mapping_section(_response_policy_templates, "bond_stage")
     _rp_directives: list[str] = []
     if _rp_should_be_brief or (_rp_max_sentences and _rp_max_sentences <= 3):
@@ -488,7 +504,10 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
                 _ng_max_sentences = _sr_ng.get("max_self_narrative_sentences")
                 _ng_prompt_directives = [_truncate_for_prompt(item, limit=120) or "" for item in (_sr_ng.get("prompt_directives") or []) if _truncate_for_prompt(item, limit=120)]
                 if _ng_instruction:
-                    _self_reflection_templates = _load_template_mapping("prompt_builder.self_reflection.templates")
+                    _self_reflection_templates = _load_template_mapping(
+                        "prompt_builder.self_reflection.templates",
+                        render_target_lang=render_target_lang,
+                    )
                     _rp_directives.append(_mapping_text(_self_reflection_templates, "narrative_instruction_prefix", instruction=_ng_instruction))
                 if _ng_max_sentences is not None:
                     _sr_parts.append(f"- max_self_narrative_sentences: {_ng_max_sentences}")
@@ -516,7 +535,10 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             _peh_echo_mod = float(_peh.get("echo_weight_modifier") or 0.0)
             _peh_follow_up = float(_peh.get("follow_up_tendency") or 0.0)
             _peh_motive_guidance = _truncate_for_prompt(_peh.get("motive_guidance"), limit=220) or ""
-            _persona_expression_templates = _load_template_mapping("prompt_builder.persona_expression.templates")
+            _persona_expression_templates = _load_template_mapping(
+                "prompt_builder.persona_expression.templates",
+                render_target_lang=render_target_lang,
+            )
             _peh_guidance = _mapping_text(_mapping_section(_persona_expression_templates, "tone_guidance"), _peh_tone) or _mapping_text(_persona_expression_templates, "default_guidance") or "保持真诚自然"
             _persona_expression_hint_block = (
                 _mapping_text(_persona_expression_templates, "title")
@@ -531,7 +553,10 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         pass
 
     # ── EMOTION_BINDING 数值字段转自然语言 ──────────────────────────────
-    _emotion_binding_templates = _load_template_mapping("prompt_builder.emotion_binding.texts")
+    _emotion_binding_templates = _load_template_mapping(
+        "prompt_builder.emotion_binding.texts",
+        render_target_lang=render_target_lang,
+    )
     _echo_intensity_templates = _mapping_section(_emotion_binding_templates, "echo_intensity")
     _vad_templates = _mapping_section(_emotion_binding_templates, "vad")
 
@@ -665,8 +690,6 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         if ev_lines:
             memory_recall_evidence_block = _mapping_text(_runtime_section_templates, "memory_recall_evidence_title") + _mapping_text(_runtime_section_templates, "memory_recall_evidence_guidance") + "\n".join(ev_lines) + "\n\n"
 
-    render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
-
     # ── episodic_vector 槽位注入 ─────────────────────────────────────────
     _episodic_vector_raw = prompt_context.get("episodic_vector") or runtime_payload.get("episodic_vector")
     _episodic_vector_text = ""
@@ -745,7 +768,12 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         _cp_emotion_tag = str(merged_emotion_context.get("emotion_tag") or emotion_context.get("emotion_tag") or "").strip().upper()
         _cp_is_holiday = bool(runtime_payload.get("is_holiday") or prompt_context.get("is_holiday"))
         _cp_holiday_name = str(runtime_payload.get("holiday_name") or prompt_context.get("holiday_name") or "").strip()
-        _cp_patch = _build_character_dynamic_patch(emotion_tag=_cp_emotion_tag, is_holiday=_cp_is_holiday, holiday_name=_cp_holiday_name)
+        _cp_patch = _build_character_dynamic_patch(
+            emotion_tag=_cp_emotion_tag,
+            is_holiday=_cp_is_holiday,
+            holiday_name=_cp_holiday_name,
+            render_target_lang=render_target_lang,
+        )
         character_profile_title = str(_render_contract_section_titles.get("character_profile") or "【角色人设】")
         character_profile_block = f"{character_profile_title}\n{_cp_text}{_cp_patch}\n\n"
 

@@ -9,17 +9,19 @@ def test_should_schedule_commit_tts_fallback_skips_external_voice_path() -> None
         tts_sentence_index=0,
         suppress_tts=True,
         reply_channel="wechat",
+        voice_outputs_enabled=True,
     )
 
     assert should_schedule is False
 
 
-def test_should_schedule_commit_tts_fallback_keeps_chat_api_fallback() -> None:
+def test_should_schedule_commit_tts_fallback_skips_chat_api_when_voice_outputs_disabled() -> None:
     should_schedule = _should_schedule_commit_tts_fallback(
         narrative="おはよう。",
         tts_sentence_index=0,
         suppress_tts=False,
         reply_channel=None,
+        voice_outputs_enabled=False,
     )
 
-    assert should_schedule is True
+    assert should_schedule is False

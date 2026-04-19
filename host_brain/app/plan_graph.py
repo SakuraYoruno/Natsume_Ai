@@ -32,7 +32,44 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+
 _logger = logging.getLogger("Natsume.plan_graph")
+
+
+def _load_prompt_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("plan_graph.synthesize.prompt_templates")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+class _SafeTemplateDict(dict[str, str]):
+    def __missing__(self, key: object) -> str:
+        return "{" + str(key) + "}"
+
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    payload = _SafeTemplateDict({str(key): "" if value is None else str(value) for key, value in kwargs.items()})
+    try:
+        return text.format_map(payload)
+    except Exception:
+        return text
+
+
+def _build_synthesize_prompts(*, user_message: str, sub_results_text: str) -> tuple[str, str]:
+    templates = _load_prompt_templates()
+    system_prompt = str(templates.get("system_prompt") or "").strip()
+    user_prompt_template = str(templates.get("user_prompt_template") or "").strip()
+    if not system_prompt or not user_prompt_template:
+        return "", ""
+    user_prompt = _format_template_text(
+        user_prompt_template,
+        user_message=user_message,
+        sub_results_text=sub_results_text,
+    ).strip()
+    return system_prompt, user_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -274,42 +311,35 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                     gen_params = {"temperature": 0.4, "top_p": 0.9}
 
                     sub_results_text = "\n".join(parts)
-                    system_prompt = (
-                        "你是一个任务综合助手。用户提出了一个复杂请求，"
-                        "系统已将其拆解为多个子任务并分别执行。"
-                        "请根据所有子任务的执行结果，生成一个连贯、完整、自然的最终回复。"
-                        "要求：语言流畅，不要逐条列举，不要暴露内部子任务编号，"
-                        "如有失败的子任务请简要说明影响。"
-                    )
-                    user_prompt = (
-                        f"用户原始请求：{user_message}\n\n"
-                        f"各子任务执行结果：\n{sub_results_text}\n\n"
-                        "请生成最终回复："
+                    system_prompt, user_prompt = _build_synthesize_prompts(
+                        user_message=user_message,
+                        sub_results_text=sub_results_text,
                     )
 
-                    chunks: list[str] = []
-                    for chunk in stream_llm_chunks(
-                        provider_name=provider_name,
-                        model_id=model_id,
-                        api_key=api_key,
-                        timeout_ms=timeout_ms,
-                        prompt_text=user_prompt,
-                        system_prompt=system_prompt,
-                        gen_params=gen_params,
-                        base_url_override=base_url_override,
-                    ):
-                        chunks.append(str(chunk or ""))
-                        if sum(len(c) for c in chunks) >= 4000:
-                            break
+                    if system_prompt and user_prompt:
+                        chunks: list[str] = []
+                        for chunk in stream_llm_chunks(
+                            provider_name=provider_name,
+                            model_id=model_id,
+                            api_key=api_key,
+                            timeout_ms=timeout_ms,
+                            prompt_text=user_prompt,
+                            system_prompt=system_prompt,
+                            gen_params=gen_params,
+                            base_url_override=base_url_override,
+                        ):
+                            chunks.append(str(chunk or ""))
+                            if sum(len(c) for c in chunks) >= 4000:
+                                break
 
-                    llm_text = "".join(chunks).strip()
-                    if llm_text:
-                        final_answer = llm_text
-                        llm_used = True
-                        _logger.info(
-                            "[%s] synthesize_node: LLM 语义整合成功，输出 %d 字符",
-                            request_id, len(final_answer),
-                        )
+                        llm_text = "".join(chunks).strip()
+                        if llm_text:
+                            final_answer = llm_text
+                            llm_used = True
+                            _logger.info(
+                                "[%s] synthesize_node: LLM 语义整合成功，输出 %d 字符",
+                                request_id, len(final_answer),
+                            )
 
         except Exception as llm_exc:
             _logger.warning(

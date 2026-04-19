@@ -667,7 +667,10 @@ def test_v1_chat_task_progress_route_commit_text_stays_in_natsume_voice(monkeypa
     commit_event = next(event for event in events if event.get("phase") == "COMMIT")
 
     assert route_event["route_type"] == "task_progress"
-    assert "遇到了点问题" in str(commit_event["narrative"])
+    assert any(
+        marker in str(commit_event["narrative"])
+        for marker in ("遇到了点问题", "出了点岔子")
+    )
     assert_natsume_style(
         user_message="上个任务进度到哪了",
         reply=str(commit_event["narrative"]),

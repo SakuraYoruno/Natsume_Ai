@@ -5,7 +5,7 @@ Call chain:
     → registry check (must be registered)
     → Governor gate (WRITE requires token)
     → MCP SDK invoke (via handler)
-    → Audit (mcp_exec_log)
+    → Audit (skill_exec_log via log_skill_exec)
 
 Error codes:
   MCP_TOOL_NOT_REGISTERED   - tool not in registry
@@ -306,5 +306,5 @@ def _handler_key(provider_id: str, tool_id: str) -> str:
 
 
 def _is_write(meta: ToolMeta) -> bool:
-    """Determine if a tool is a WRITE operation based on risk_level or access_level."""
+    """Determine if a tool should be treated as WRITE based on risk/reversibility."""
     return meta.risk_level in {"MEDIUM", "HIGH"} or not meta.reversible

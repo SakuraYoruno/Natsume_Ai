@@ -13,6 +13,10 @@ from host_brain.app.input_service_log import (
     get_request_skill_exec_rows,
     log_input_event,
 )
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.prompt_builder_utils import (
+    _resolve_template_payload_with_mirror,
+)
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -43,6 +47,14 @@ _ALIGNMENT_STOPWORDS: set[str] = {
     "任务", "结果", "进度", "状态", "一下吧",
     "the", "and", "for", "with", "this", "that",
 }
+
+
+def _load_runtime_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
+    raw = _resolve_template_payload_with_mirror(
+        "input_service_quality.runtime_texts",
+        render_target_lang=render_target_lang,
+    )
+    return dict(raw) if isinstance(raw, dict) else {}
 
 
 def _parse_bool_env(name: str, *, default: bool) -> bool:
@@ -261,17 +273,26 @@ def detect_gateway_execution_deviation(
     }
 
 
-def build_realign_user_message(*, original_user_text: str, first_narrative: str) -> str:
+def build_realign_user_message(
+    *,
+    original_user_text: str,
+    first_narrative: str,
+    render_target_lang: str = "zh",
+) -> str:
     """构建偏航纠偏重试消息。"""
     original = str(original_user_text or "").strip()
     first = str(first_narrative or "").strip()
-    return (
-        "[执行纠偏]\n"
-        "刚才结果可能偏离了用户真实意图。请仅围绕原始请求重新执行，并给出可执行/可验证结果。\n"
-        f"原始请求：{original}\n"
-        f"偏航输出：{first}\n"
-        "要求：不要泛泛闲聊，不要复述偏航内容，直接回到用户要你做的事。"
-    )
+    templates = _load_runtime_texts(render_target_lang=render_target_lang)
+    parts = dict(templates.get("realign_user_message") or {})
+    header = str(parts.get("header") or "").strip()
+    intro = str(parts.get("intro") or "").strip()
+    original_template = str(parts.get("original_template") or "").strip()
+    drifted_template = str(parts.get("drifted_template") or "").strip()
+    original_line = original_template.format(original=original) if original_template else ""
+    first_line = drifted_template.format(first=first) if drifted_template else ""
+    requirement = str(parts.get("requirement") or "").strip()
+    sections = [item for item in (header, intro, original_line, first_line, requirement) if item]
+    return "\n".join(sections)
 
 
 async def maybe_send_gateway_realign_notice(

@@ -867,6 +867,7 @@ class _BondAwareStyleEngineProxy:
         natsume_mood: str = "NEUTRAL",
         rift_severity: str = "medium",
         rift_progress: float = 0.0,
+        render_target_lang: str = "zh",
     ) -> _BondAwareStyleResultView:
         from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
 
@@ -881,6 +882,7 @@ class _BondAwareStyleEngineProxy:
             bond_trend=str(bond_trend or ""),
             texture_hint=str(texture_hint or ""),
             shared_memory_hints=list(shared_memory_hints or []) or None,
+            render_target_lang=str(render_target_lang or "zh"),
         )
         return _BondAwareStyleResultView(payload)
 

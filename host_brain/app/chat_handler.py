@@ -124,12 +124,16 @@ async def _evaluate_governor_with_timing(
     return result, summary
 
 
-def _resolve_sys_mode_narrative(mode: str) -> str:
+def _resolve_sys_mode_narrative(mode: str, *, render_target_lang: str = "zh") -> str:
     templates = resolve_prompt_template_json_merged("chat_handler.sys_mode.narratives")
     mapping = dict(templates) if isinstance(templates, dict) else {}
     mode_key = str(mode or "").strip().lower()
     fallback_key = mode_key if mode_key in {"locked", "maintenance"} else "maintenance"
-    return str(mapping.get(fallback_key) or mapping.get("maintenance") or "")
+    raw = mapping.get(fallback_key) or mapping.get("maintenance") or ""
+    if isinstance(raw, dict):
+        lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
+        return str(raw.get(lang_key) or raw.get("zh") or raw.get("ja") or "").strip()
+    return str(raw or "")
 
 
 async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:
@@ -148,6 +152,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     ts_ms = int(time.time() * 1000)
     request_started_ms = int(getattr(request.state, "request_started_ms", ts_ms) or ts_ms)
     session_id = request_body.session_id or f"session::{request_id}"
+    render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
     request_body.person_id = resolve_person_id(
         getattr(request_body, "person_id", None),
         session_id=session_id,
@@ -159,7 +164,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     _current_sys_mode = str(os.environ.get("HOST_SYS_MODE") or "normal").strip().lower()
     if _current_sys_mode == "locked":
         async def _locked_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': _resolve_sys_mode_narrative('locked'), 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_LOCKED', 'narrative': _resolve_sys_mode_narrative('locked', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _locked_sse(),
             media_type="text/event-stream",
@@ -167,7 +172,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
         )
     if _current_sys_mode == "maintenance":
         async def _maintenance_sse():
-            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance'), 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'phase': 'COMMIT', 'done': True, 'decision': 'REJECT', 'reason_code': 'SYS_MODE_MAINTENANCE', 'narrative': _resolve_sys_mode_narrative('maintenance', render_target_lang=render_target_lang), 'request_id': request_id}, ensure_ascii=False)}\n\n"
         return StreamingResponse(
             _maintenance_sse(),
             media_type="text/event-stream",

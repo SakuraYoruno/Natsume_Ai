@@ -187,6 +187,25 @@ def test_classify_and_compile_intent_draft_routes_hub_skill_search_with_query() 
     assert compiled["route_reason"] == "THALAMUS_RULE_HUB_SKILL_SEARCH"
 
 
+def test_classify_and_compile_intent_draft_prefers_context_fast_for_companion_open_chat() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-context-fast-open-chat",
+            session_id="session-thalamus-context-fast-open-chat",
+            user_message="我不是要你帮我解决问题，我只是想让你认真听我把最近的疲惫和委屈说完，然后再轻一点接住我。",
+            source="chat_handler",
+            ts_ms=1776349003110,
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
+    assert compiled["route_source"] == "thalamus.rule"
+    assert compiled["chat_speed_profile"] == "context_fast"
+
+
 def test_classify_and_compile_intent_draft_backfills_memory_store_content() -> None:
     agent = ThalamusAgent()
 
@@ -391,6 +410,30 @@ def test_classify_and_compile_intent_draft_routes_normal_daily_chat_to_context_f
     assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
     assert compiled["chat_speed_profile"] == "context_fast"
     assert compiled["route_source"] == "thalamus.rule"
+
+
+def test_classify_and_compile_intent_draft_keeps_long_support_chat_out_of_emotion_query() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-long-support-chat",
+            session_id="session-thalamus-long-support-chat",
+            user_message=(
+                "我想和你认真聊一会儿。不是为了完成什么任务，也不是为了让你替我列清单，"
+                "而是我最近脑子里堆了很多事情：工作上的疲惫、和朋友之间说不清的别扭，"
+                "还有我自己都分不太清现在到底是焦虑、委屈，还是只是太累了。"
+                "我想让你先听我说，再慢慢陪我理顺。"
+            ),
+            source="chat_handler",
+            ts_ms=1776349003330,
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
+    assert compiled["chat_speed_profile"] == "context_fast"
 
 
 def test_classify_and_compile_intent_draft_routes_self_heal_to_codex(monkeypatch) -> None:
