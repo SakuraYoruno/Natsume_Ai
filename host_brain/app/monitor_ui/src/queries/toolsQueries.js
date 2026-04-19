@@ -8,6 +8,7 @@ import {
   fetchToolMetaPack,
 } from '../api/tools.js'
 import { OBS_STALE_TIMES } from './freshness.js'
+import { executeQuery, serializeQueryKey } from './queryCache.js'
 import { OBS_QUERY_KEYS } from './queryKeys.js'
 import useObservabilityQuery from './useObservabilityQuery.js'
 
@@ -191,4 +192,52 @@ export function useCustomSkillProviderTemplateQuery() {
     templateData: queryState.data?.data ?? null,
     templateError: queryState.data?.templateError ?? null,
   }
+}
+
+export function refreshPermissionStatsQuery({
+  windowMinutes = 1440,
+} = {}) {
+  return executeQuery({
+    cacheKey: serializeQueryKey(OBS_QUERY_KEYS.toolPermissionStats(windowMinutes)),
+    queryFn: async () => {
+      try {
+        const data = await fetchPermissionStats({ window_minutes: windowMinutes })
+        return {
+          data,
+          statsError: null,
+        }
+      } catch (error) {
+        return {
+          data: null,
+          statsError: error?.message || '权限拦截统计加载失败',
+        }
+      }
+    },
+    staleTimeMs: OBS_STALE_TIMES.toolPermissionStats,
+    force: true,
+  })
+}
+
+export function refreshActionPlanStatsQuery({
+  windowMinutes = 1440,
+} = {}) {
+  return executeQuery({
+    cacheKey: serializeQueryKey(OBS_QUERY_KEYS.toolActionPlanStats(windowMinutes)),
+    queryFn: async () => {
+      try {
+        const data = await fetchActionPlanStats({ window_minutes: windowMinutes })
+        return {
+          data,
+          statsError: null,
+        }
+      } catch (error) {
+        return {
+          data: null,
+          statsError: error?.message || '执行计划统计加载失败',
+        }
+      }
+    },
+    staleTimeMs: OBS_STALE_TIMES.toolActionPlanStats,
+    force: true,
+  })
 }

@@ -7,6 +7,7 @@ import {
   fetchSchedulerTasks,
 } from '../api/automation.js'
 import { OBS_STALE_TIMES } from './freshness.js'
+import { executeQuery, serializeQueryKey } from './queryCache.js'
 import { OBS_QUERY_KEYS } from './queryKeys.js'
 import useObservabilityQuery from './useObservabilityQuery.js'
 
@@ -170,4 +171,28 @@ export function useSchedulerHistoryQuery({
     history: query.data?.history ?? null,
     historyError: query.data?.historyError ?? null,
   }
+}
+
+export function refreshSchedulerHistoryQuery({
+  windowMinutes = 1440,
+} = {}) {
+  return executeQuery({
+    cacheKey: serializeQueryKey(OBS_QUERY_KEYS.schedulerHistory(windowMinutes)),
+    queryFn: async () => {
+      try {
+        const history = await fetchSchedulerHistory({ window_minutes: windowMinutes })
+        return {
+          history,
+          historyError: null,
+        }
+      } catch (error) {
+        return {
+          history: null,
+          historyError: error?.message || '加载执行历史失败',
+        }
+      }
+    },
+    staleTimeMs: OBS_STALE_TIMES.schedulerHistory,
+    force: true,
+  })
 }

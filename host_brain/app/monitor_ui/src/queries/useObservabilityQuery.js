@@ -13,6 +13,8 @@ export default function useObservabilityQuery({
   queryFn,
   enabled = true,
   staleTimeMs = 0,
+  retryCount = 0,
+  retryDelayMs = 1_200,
   pollingEnabled = false,
   pollingTick = 0,
   pollingIntervalMs = 0,
@@ -20,12 +22,20 @@ export default function useObservabilityQuery({
 }) {
   const cacheKey = serializeQueryKey(queryKey)
   const queryFnRef = useRef(queryFn)
+  const retryTimerRef = useRef(null)
   const pageVisible = useAppStore((state) => state.pageVisible)
   const effectivePollingEnabled = Boolean(pollingEnabled && pageVisible)
 
   useEffect(() => {
     queryFnRef.current = queryFn
   }, [queryFn])
+
+  useEffect(() => () => {
+    if (retryTimerRef.current) {
+      globalThis.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+  }, [])
 
   const subscribe = useCallback((listener) => subscribeQuery(cacheKey, listener), [cacheKey])
   const getSnapshot = useCallback(() => getQuerySnapshot(cacheKey), [cacheKey])
@@ -44,6 +54,35 @@ export default function useObservabilityQuery({
     if (!enabled) return
     runQuery(false).catch(() => {})
   }, [enabled, runQuery])
+
+  useEffect(() => {
+    if (retryTimerRef.current) {
+      globalThis.clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+
+    if (!enabled || retryCount <= 0) {
+      return undefined
+    }
+    if (snapshot.status !== 'error' || !snapshot.error) {
+      return undefined
+    }
+    if ((snapshot.failureCount || 0) > retryCount) {
+      return undefined
+    }
+
+    retryTimerRef.current = globalThis.setTimeout(() => {
+      retryTimerRef.current = null
+      runQuery(true).catch(() => {})
+    }, Math.max(250, retryDelayMs))
+
+    return () => {
+      if (retryTimerRef.current) {
+        globalThis.clearTimeout(retryTimerRef.current)
+        retryTimerRef.current = null
+      }
+    }
+  }, [enabled, retryCount, retryDelayMs, runQuery, snapshot.error, snapshot.failureCount, snapshot.status])
 
   useEffect(() => {
     if (!enabled || !effectivePollingEnabled || pollingTick <= 0) {
@@ -73,6 +112,7 @@ export default function useObservabilityQuery({
     refreshing: snapshot.status === 'refreshing',
     stale: isStale || snapshot.status === 'stale',
     status: snapshot.status,
+    failureCount: snapshot.failureCount || 0,
     lastUpdatedAt: snapshot.updatedAt,
     refetch: useCallback(() => runQuery(true), [runQuery]),
   }

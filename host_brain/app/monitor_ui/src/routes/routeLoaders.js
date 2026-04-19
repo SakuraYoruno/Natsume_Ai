@@ -2,6 +2,9 @@ import { lazy } from 'react'
 
 export const PAGE_LOADERS = Object.freeze({
   '/digital-life': () => import('../pages/DigitalLifeOverview.jsx'),
+  '/life-timeline': () => import('../pages/LifeTimelinePage.jsx'),
+  '/pathologies': () => import('../pages/PathologyCenterPage.jsx'),
+  '/pathology-detail': () => import('../pages/PathologyDetailPage.jsx'),
   '/overview': () => import('../pages/Overview.jsx'),
   '/sessions': () => import('../pages/Sessions.jsx'),
   '/trace': () => import('../pages/Trace.jsx'),
@@ -33,6 +36,9 @@ function lazyPage(path) {
 }
 
 export const DigitalLifeOverview = lazyPage('/digital-life')
+export const LifeTimelinePage = lazyPage('/life-timeline')
+export const PathologyCenterPage = lazyPage('/pathologies')
+export const PathologyDetailPage = lazyPage('/pathology-detail')
 export const Overview = lazyPage('/overview')
 export const Sessions = lazyPage('/sessions')
 export const Trace = lazyPage('/trace')

@@ -1,13 +1,15 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Heart, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { submitBondEvent } from '../api/bond.js'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import KeyValueRow from '../components/KeyValueRow.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { buildBondOrganSystemModel } from '../models/organSystemModel.js'
 import { useBondOverviewQuery, useBondUserDetailQuery } from '../queries/bondQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import {
@@ -266,6 +268,38 @@ export default function Bond() {
     available: Boolean(health || users.length > 0 || stageDist.length > 0),
     stale,
   })
+  const bondUpdatedAt = Math.max(lastUpdatedAt || 0, detailUpdatedAt || 0) || null
+  const currentStageLabel = formatStage(userDetail?.current_stage)
+  const currentTrendLabel = formatTrend(userDetail?.trend)
+  const lastEventLabel = formatDateTime(userDetail?.last_event_ts_ms)
+  const bondOrganModel = useMemo(() => buildBondOrganSystemModel({
+    loadState: bondLoadState,
+    updatedAt: bondUpdatedAt,
+    healthStatus: formatHealthStatus(health?.status),
+    selectedUser,
+    userCount: health?.user_count ?? users.length,
+    stageSampleCount,
+    currentStageLabel,
+    trendLabel: currentTrendLabel,
+    totalScore: userDetail?.total_score,
+    eventCount: userDetail?.event_count,
+    capabilityHint: userDetail?.capability_hint,
+    lastEventLabel,
+  }), [
+    bondLoadState,
+    bondUpdatedAt,
+    currentStageLabel,
+    currentTrendLabel,
+    health?.status,
+    health?.user_count,
+    lastEventLabel,
+    selectedUser,
+    stageSampleCount,
+    userDetail?.capability_hint,
+    userDetail?.event_count,
+    userDetail?.total_score,
+    users.length,
+  ])
 
   const handleSubmitEvent = async (body) => {
     setSubmitLoading(true)
@@ -325,7 +359,7 @@ export default function Bond() {
             loadState={bondLoadState}
             sampleSize={stageSampleCount}
             sampleLabel="关系样本"
-            updatedAt={lastUpdatedAt}
+            updatedAt={bondUpdatedAt}
             source="bond / stage"
             definition="社交脑页聚合关系健康、用户列表、阶段分布与当前用户详情；无样本、暂不可用与加载失败会明确区分。"
           />
@@ -346,6 +380,8 @@ export default function Bond() {
         </NoticeBanner>
       ) : null}
 
+      <OrganSystemOverview model={bondOrganModel} />
+
       {submitResult ? (
         <NoticeBanner
           variant={submitResult.ok ? 'success' : 'error'}
@@ -359,9 +395,9 @@ export default function Bond() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="引擎状态" value={formatHealthStatus(health?.status)} hint={`用户 ${health?.user_count ?? users.length}`} tone="text-green-600" />
-        <MetricCard label="当前阶段" value={formatStage(userDetail?.current_stage)} hint={`趋势 ${formatTrend(userDetail?.trend)}`} tone="text-pink-600" />
+        <MetricCard label="当前阶段" value={currentStageLabel} hint={`趋势 ${currentTrendLabel}`} tone="text-pink-600" />
         <MetricCard label="累计积分" value={userDetail?.total_score ?? '—'} hint={`事件 ${userDetail?.event_count ?? 0} 次`} tone="text-purple-600" />
-        <MetricCard label="最近事件" value={formatDateTime(userDetail?.last_event_ts_ms)} hint={userDetail?.capability_hint || '等待选择用户'} tone="text-blue-600" />
+        <MetricCard label="最近事件" value={lastEventLabel} hint={userDetail?.capability_hint || '等待选择用户'} tone="text-blue-600" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)_360px]">

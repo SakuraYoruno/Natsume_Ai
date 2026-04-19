@@ -1,17 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import toast from 'react-hot-toast'
-import {
-  reloadPromptTemplates,
-  resetPromptTemplate,
-  updatePromptTemplate,
-} from '../api/promptOps.js'
 import {
   Database,
   FileText,
   RefreshCw,
-  RotateCcw,
-  Save,
   Wand2,
   Heart,
   Sparkles,
@@ -29,6 +21,8 @@ import {
   usePromptTemplateDetailQuery,
 } from '../queries/promptQueries.js'
 import useAppStore from '../store/useAppStore.js'
+
+const PromptTemplateEditorPanel = React.lazy(() => import('../components/promptOps/PromptTemplateEditorPanel.jsx'))
 
 function SourceBadge({ source }) {
   const cls = source === 'override'
@@ -59,10 +53,7 @@ export default function PersonaPromptOps() {
   })
 
   const [selectedId, setSelectedId] = useState('')
-  const [draftContent, setDraftContent] = useState('')
-  const [draftEnabled, setDraftEnabled] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [reloading, setReloading] = useState(false)
+  const [refreshingView, setRefreshingView] = useState(false)
   const {
     catalogData,
     bundles,
@@ -95,16 +86,6 @@ export default function PersonaPromptOps() {
     })
   }, [bundles])
 
-  useEffect(() => {
-    if (!selected) {
-      setDraftContent('')
-      setDraftEnabled(true)
-      return
-    }
-    setDraftContent(selected.override_content ?? selected.resolved_content ?? '')
-    setDraftEnabled(selected.has_override ? Boolean(selected.enabled) : true)
-  }, [selected])
-
   const selectedEntry = useMemo(() => {
     for (const bundle of bundles) {
       const entry = (bundle.entries || []).find((item) => item.template_id === selectedId)
@@ -132,66 +113,12 @@ export default function PersonaPromptOps() {
     stale: catalogStale,
   })
 
-  const isDirty = useMemo(() => {
-    if (!selected) return false
-    const baseContent = selected.override_content ?? selected.resolved_content ?? ''
-    const baseEnabled = selected.has_override ? Boolean(selected.enabled) : true
-    return draftContent !== baseContent || draftEnabled !== baseEnabled
-  }, [draftContent, draftEnabled, selected])
-
-  const handleSave = async () => {
-    if (!selected) return
-    setSaving(true)
+  const handleRefreshView = async () => {
+    setRefreshingView(true)
     try {
-      await updatePromptTemplate(selected.template_id, {
-        content: draftContent,
-        enabled: draftEnabled,
-      })
-      await Promise.allSettled([refetchCatalog(), refetchDetail()])
-      toast.success('人格文案已保存')
-    } catch (error) {
-      toast.error(`保存失败：${error.message}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleReset = async () => {
-    if (!selected) return
-    if (!window.confirm(`确认恢复 ${selected.template_id} 的代码默认值？`)) return
-    setSaving(true)
-    try {
-      await resetPromptTemplate(selected.template_id)
-      await Promise.allSettled([refetchCatalog(), refetchDetail()])
-      toast.success('已恢复默认值')
-    } catch (error) {
-      toast.error(`恢复默认失败：${error.message}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleReload = async () => {
-    setReloading(true)
-    try {
-      await reloadPromptTemplates()
       await Promise.allSettled([refetchCatalog(), selectedId ? refetchDetail() : Promise.resolve(null)])
-      toast.success('模板缓存已刷新')
-    } catch (error) {
-      toast.error(`刷新失败：${error.message}`)
     } finally {
-      setReloading(false)
-    }
-  }
-
-  const handleFormatJson = () => {
-    if (selected?.content_type !== 'json') return
-    try {
-      const formatted = JSON.stringify(JSON.parse(draftContent), null, 2)
-      setDraftContent(formatted)
-      toast.success('JSON 已格式化')
-    } catch (error) {
-      toast.error(`JSON 格式不合法：${error.message}`)
+      setRefreshingView(false)
     }
   }
 
@@ -199,15 +126,15 @@ export default function PersonaPromptOps() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-gray-900">语言系统文案运营</h1>
-          <p className="text-sm text-gray-500">首批面向人格体验的核心文案模板：自我叙事、表达风格与关系感。</p>
+          <h1 className="text-xl font-semibold text-gray-900">语言系统文案总览</h1>
+          <p className="text-sm text-gray-500">按人格语义查看 YAML 默认文案、当前生效值与现存 runtime override。</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <button className="btn-secondary" onClick={() => navigate('/prompt-config')}>
             <FileText size={14} /> 打开通用模板页
           </button>
-          <button className="btn-secondary" onClick={handleReload} disabled={reloading}>
-            <RefreshCw size={14} className={reloading ? 'animate-spin' : ''} /> 刷新缓存
+          <button className="btn-secondary" onClick={handleRefreshView} disabled={refreshingView}>
+            <RefreshCw size={14} className={refreshingView ? 'animate-spin' : ''} /> 刷新视图
           </button>
         </div>
       </div>
@@ -216,9 +143,9 @@ export default function PersonaPromptOps() {
 
       <PageHero
         icon={Heart}
-        eyebrow="语言系统文案运营台"
+        eyebrow="语言系统文案观测台"
         title={summary.entries}
-        description="聚焦首批最影响人格体验的模板，直接调整语气、温度和关系感。"
+        description="按人格专题查看 YAML 默认文案、当前生效值与已有 override，用于核对现在的表达风格是否偏离预期。"
         gradientClass="from-primary-50 via-white to-pink-50"
         aside={(
           <div className="space-y-3">
@@ -229,14 +156,18 @@ export default function PersonaPromptOps() {
               sampleLabel="模板"
               updatedAt={catalogUpdatedAt}
               source="persona-first-batch"
-              definition="人格运营页把目录与模板详情拆成独立查询；专题包空态、详情失败和刷新状态会各自独立表达。"
+              definition="人格文案页当前是只读观测台：展示专题包、YAML 默认值、当前生效值与现存 override，不再提供前端编辑入口。"
             />
             <div className="max-w-xl rounded-xl border border-pink-100 bg-pink-50 px-4 py-3 text-xs leading-6 text-pink-800">
-              这里适合调“像不像夏目蓝”的表达风格；不适合改业务逻辑、状态机规则或 JSON 结构。
+              YAML 已经是唯一真源。这里更适合做人格表达核对和 drift 排查，而不是在线改文案。
             </div>
           </div>
         )}
       />
+
+      <NoticeBanner variant="info" title="前端已切换为只读模式">
+        人格文案模板的正式变更统一通过 YAML 完成。当前页面只读展示 `default / resolved / override` 三层结果，用于判断表达风格是否发生漂移。
+      </NoticeBanner>
 
       {catalogError ? (
         <NoticeBanner variant="error" title="人格文案目录加载失败">
@@ -253,15 +184,15 @@ export default function PersonaPromptOps() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[380px,1fr] gap-4">
         <div className="card p-4 space-y-4">
-          <div className="rounded-xl border border-primary-100 bg-primary-50 p-3 text-sm text-primary-900">
-            <div className="flex items-center gap-2 font-medium">
-              <Wand2 size={15} />
-              当前页聚焦首批高价值可运营模板
-            </div>
-            <div className="mt-2 text-xs leading-6 text-primary-800">
-              优先调语气、温度、关系感和节奏感；不要改 JSON 键名，也不要把提示词写成系统命令。
-            </div>
+        <div className="rounded-xl border border-primary-100 bg-primary-50 p-3 text-sm text-primary-900">
+          <div className="flex items-center gap-2 font-medium">
+            <Wand2 size={15} />
+            当前页聚焦首批高价值人格模板
           </div>
+          <div className="mt-2 text-xs leading-6 text-primary-800">
+            当前只做只读核对：优先观察语气、温度、关系感和节奏感是否与 YAML 设定一致。
+          </div>
+        </div>
 
           <div className="flex items-center justify-between text-xs text-gray-500">
             <span>{catalogLoading ? '正在加载目录…' : catalogRefreshing ? '正在刷新目录…' : `共 ${entries.length} 个模板`}</span>
@@ -319,31 +250,31 @@ export default function PersonaPromptOps() {
         </div>
 
         <div className="card p-5">
-          {!selected || !selectedEntry ? (
-            <EmptyStateCard title="请选择人格模板" hint="从左侧列表选择模板后开始编辑。" className="min-h-[420px] flex flex-col items-center justify-center" />
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <div className="text-xs text-gray-400 mb-1">
-                    {selectedEntry.bundle.title} / {selected.scope}
-                  </div>
-                  <h2 className="text-base font-semibold text-gray-900">{selectedEntry.entry.title}</h2>
-                  <p className="text-sm text-gray-500 mt-1 leading-6">{selectedEntry.entry.description}</p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <SourceBadge source={selected.source} />
-                  <TypeBadge value={selected.content_type} />
-                  {selected.has_override && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium bg-orange-100 text-orange-700 border-orange-200">
-                      v{selected.version}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-4">
-                <div className="space-y-3">
+          {selected && selectedEntry ? (
+            <React.Suspense
+              fallback={(
+                <NoticeBanner variant="info" title="按需加载中">
+                  正在装配人格模板详情只读区…
+                </NoticeBanner>
+              )}
+            >
+              <PromptTemplateEditorPanel
+                selected={selected}
+                headerEyebrow={`${selectedEntry.bundle.title} / ${selected.scope}`}
+                title={selectedEntry.entry.title}
+                description={selectedEntry.entry.description}
+                badges={(
+                  <>
+                    <SourceBadge source={selected.source} />
+                    <TypeBadge value={selected.content_type} />
+                    {selected.has_override ? (
+                      <span className="inline-flex items-center rounded border border-orange-200 bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">
+                        v{selected.version}
+                      </span>
+                    ) : null}
+                  </>
+                )}
+                inspectorTop={(
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
                     <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
                       <Database size={14} />
@@ -353,105 +284,43 @@ export default function PersonaPromptOps() {
                       {(selectedEntry.entry.focus_keys || []).map((key) => (
                         <span
                           key={key}
-                          className="inline-flex items-center rounded-full bg-white border border-gray-200 px-2.5 py-1 text-xs text-gray-600"
+                          className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600"
                         >
                           {key}
                         </span>
                       ))}
                     </div>
-                    {(selectedEntry.entry.operator_notes || []).length > 0 && (
+                    {(selectedEntry.entry.operator_notes || []).length > 0 ? (
                       <div className="space-y-1 pt-1">
                         {(selectedEntry.entry.operator_notes || []).map((note) => (
                           <div key={note} className="text-xs text-gray-500 leading-5">- {note}</div>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
-
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                      <FileText size={14} />
-                      覆盖内容
-                    </label>
-                    <div className="flex items-center gap-3">
-                      {selected.content_type === 'json' && (
-                        <button className="text-xs text-primary hover:underline" onClick={handleFormatJson}>
-                          格式化 JSON
-                        </button>
-                      )}
-                      <label className="text-xs text-gray-600 flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={draftEnabled}
-                          onChange={(e) => setDraftEnabled(e.target.checked)}
-                        />
-                        启用覆盖
-                      </label>
-                    </div>
-                  </div>
-
-                  <textarea
-                    className={`w-full min-h-[360px] border border-gray-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-200 resize-y ${
-                      selected.content_type === 'json' ? 'font-mono' : ''
-                    }`}
-                    value={draftContent}
-                    onChange={(e) => setDraftContent(e.target.value)}
-                    spellCheck={false}
-                  />
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button className="btn-primary" onClick={handleSave} disabled={!isDirty || saving || detailLoading || detailRefreshing}>
-                      <Save size={14} /> 保存
-                    </button>
-                    <button className="btn-secondary" onClick={handleReset} disabled={!selected.has_override || saving}>
-                      <RotateCcw size={14} /> 恢复默认
-                    </button>
-                    {isDirty && <span className="text-xs text-orange-500">有未保存修改</span>}
-                    {detailLoading || detailRefreshing ? <span className="text-xs text-gray-400">正在同步模板详情…</span> : null}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <div className="text-xs font-medium text-gray-700 mb-2">代码默认值</div>
-                    <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-[220px] overflow-y-auto">
-                      {selected.default_content}
-                    </pre>
-                  </div>
-
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <div className="text-xs font-medium text-gray-700 mb-2">当前生效值</div>
-                    <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-[220px] overflow-y-auto">
-                      {selected.resolved_content}
-                    </pre>
-                  </div>
-
+                )}
+                detailLoading={detailLoading}
+                detailRefreshing={detailRefreshing}
+                detailError={detailError}
+                detailUpdatedAt={detailUpdatedAt}
+                detailStale={detailStale}
+                detailMeta={(
                   <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs text-gray-500 space-y-1">
                     <div>template_id：{selected.template_id}</div>
                     <div>locale：{selected.locale}</div>
                     <div>source：{selected.source}</div>
                     <div>override：{selected.has_override ? 'yes' : 'no'}</div>
+                    <div>enabled：{selected.enabled ? 'yes' : 'no'}</div>
                     <div>updated：{selected.updated_at_ts_ms ? new Date(selected.updated_at_ts_ms).toLocaleString('zh-CN') : '-'}</div>
-                    {selected.content_type === 'json' && (
-                      <div className="text-orange-500">JSON 类型模板需提交合法 JSON。</div>
-                    )}
+                    {selected.content_type === 'json' ? (
+                      <div className="text-orange-500">JSON 类型模板当前只读展示；正式修改请直接更新 YAML。</div>
+                    ) : null}
                   </div>
-                </div>
-              </div>
-
-              {detailError ? (
-                <NoticeBanner variant="warning" title="模板详情暂不可用">
-                  {detailError}
-                  {detailUpdatedAt ? ` · 最近更新时间 ${new Date(detailUpdatedAt).toLocaleString('zh-CN')}` : ''}
-                </NoticeBanner>
-              ) : null}
-
-              {detailLoading || detailRefreshing || detailStale ? (
-                <NoticeBanner variant="info" title="模板刷新中">
-                  {detailLoading || detailRefreshing ? '正在更新当前模板详情…' : '当前模板详情已超过建议新鲜度阈值，可手动刷新。'}
-                </NoticeBanner>
-              ) : null}
-            </div>
+                )}
+              />
+            </React.Suspense>
+          ) : (
+            <EmptyStateCard title="请选择人格模板" hint="从左侧列表选择模板后查看 YAML 默认文案与当前生效值。" className="min-h-[420px] flex flex-col items-center justify-center" />
           )}
         </div>
       </div>

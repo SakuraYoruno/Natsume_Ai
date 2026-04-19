@@ -84,6 +84,23 @@ def setup_logging(log_level: str) -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+    dependency_overrides = {
+        "httpx": logging.WARNING,
+        "httpcore": logging.WARNING,
+        "openai": logging.WARNING,
+        "openai._base_client": logging.WARNING,
+        "urllib3": logging.WARNING,
+        "uvicorn.access": logging.WARNING,
+    }
+    for logger_name, logger_level in dependency_overrides.items():
+        logging.getLogger(logger_name).setLevel(logger_level)
+
+
+def _resolve_uvicorn_access_log_enabled() -> bool:
+    raw = str(os.environ.get("HOST_OBS_UVICORN_ACCESS_LOG_ENABLED") or "").strip().lower()
+    if not raw:
+        return False
+    return raw in {"1", "true", "yes", "on"}
 
 
 def main() -> int:
@@ -115,7 +132,7 @@ def main() -> int:
             port=args.port,
             reload=args.reload,
             log_level=args.log_level.lower(),
-            access_log=True,
+            access_log=_resolve_uvicorn_access_log_enabled(),
         )
         return 0
     except KeyboardInterrupt:

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Activity, History, ListChecks, Workflow } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -6,19 +6,19 @@ import {
   enableSchedulerTask,
   triggerSchedulerTask,
 } from '../api/automation.js'
-import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
+import ViewportLazySection from '../components/obs/ViewportLazySection.jsx'
 import PageHero from '../components/PageHero.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { buildEndocrineOrganSystemModel } from '../models/organSystemModel.js'
 import {
   useAutomationOverviewQuery,
-  useImmuneGateReplayQuery,
-  useImmuneGateStatsQuery,
-  useSchedulerHistoryQuery,
+  refreshSchedulerHistoryQuery,
 } from '../queries/automationQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -37,11 +37,8 @@ const PRIORITY_STYLES = {
   LOW: 'text-gray-500 bg-gray-50',
 }
 
-function formatPercent(value, digits = 0) {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return '—'
-  return `${numeric.toFixed(digits)}%`
-}
+const AutomationImmuneSectionContent = React.lazy(() => import('../components/automation/AutomationImmuneSectionContent.jsx'))
+const AutomationHistorySectionContent = React.lazy(() => import('../components/automation/AutomationHistorySectionContent.jsx'))
 
 function AutomationSection({ icon: Icon, title, description, actions = null, children }) {
   return (
@@ -166,623 +163,6 @@ function TaskCard({ item, onEnable, onDisable, onTrigger, actionLoading }) {
   )
 }
 
-function SchedulerTimelineChart({ tasks }) {
-  if (!tasks || tasks.length === 0) return null
-  const maxRun = Math.max(...tasks.map((task) => task.run_count ?? 0), 1)
-
-  return (
-    <div className="mt-4">
-      <div className="mb-3 text-xs font-semibold text-gray-600">各节律执行量对比（近 24h）</div>
-      <div className="space-y-2">
-        {tasks.map((task) => {
-          const runPct = Math.max(((task.run_count ?? 0) / maxRun) * 100, 1)
-          const errPct = task.run_count > 0 ? Math.min(((task.error_count ?? 0) / task.run_count) * 100, 100) : 0
-          return (
-            <div key={task.task_id} className="flex items-center gap-2">
-              <div className="w-40 shrink-0 truncate text-xs text-gray-600" title={task.task_id}>
-                {task.task_id}
-              </div>
-              <div className="relative h-3 flex-1 overflow-hidden rounded-full bg-gray-100">
-                <div className="absolute left-0 top-0 h-3 rounded-full bg-green-400 transition-all" style={{ width: `${runPct}%` }} />
-                {errPct > 0 ? (
-                  <div className="absolute left-0 top-0 h-3 rounded-full bg-red-400 transition-all" style={{ width: `${(runPct * errPct) / 100}%` }} />
-                ) : null}
-              </div>
-              <div className="w-20 shrink-0 text-right text-xs text-gray-500">
-                {task.run_count ?? 0} 次
-                {task.error_count > 0 ? <span className="ml-1 text-red-500">/ {task.error_count} 失败</span> : null}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="mt-3 flex items-center gap-4 text-xs text-gray-400">
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-3 rounded bg-green-400" />
-          执行次数
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block h-2 w-3 rounded bg-red-400" />
-          失败次数（叠加）
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function ImmuneGateOpsPanel({
-  pollingEnabled,
-  pollingInterval,
-  pollingTick,
-  initialReplayRequestId = '',
-}) {
-  const [windowMinutes, setWindowMinutes] = useState(60)
-  const [replayRequestId, setReplayRequestId] = useState('')
-  const [activeReplayRequestId, setActiveReplayRequestId] = useState('')
-  const {
-    stats,
-    statsError,
-    loading,
-    refreshing,
-    stale,
-    lastUpdatedAt,
-    refetch,
-  } = useImmuneGateStatsQuery({
-    windowMinutes,
-    pollingEnabled,
-    pollingTick,
-    pollingInterval,
-  })
-  const {
-    replayPayload,
-    replayError,
-    loading: replayLoading,
-    refreshing: replayRefreshing,
-    lastUpdatedAt: replayUpdatedAt,
-    refetch: refetchReplay,
-  } = useImmuneGateReplayQuery({
-    requestId: activeReplayRequestId,
-    limit: 120,
-  })
-
-  useEffect(() => {
-    const rid = String(initialReplayRequestId || '').trim()
-    if (!rid) return
-    setReplayRequestId(rid)
-    setActiveReplayRequestId(rid)
-  }, [initialReplayRequestId])
-
-  const handleReplayLoad = useCallback((requestId) => {
-    const rid = String(requestId || replayRequestId || '').trim()
-    if (!rid) return
-    setReplayRequestId(rid)
-    if (rid === activeReplayRequestId) {
-      void refetchReplay()
-      return
-    }
-    setActiveReplayRequestId(rid)
-  }, [activeReplayRequestId, refetchReplay, replayRequestId])
-
-  const runtimeState = stats?.runtime_state || {}
-  const counters = runtimeState?.counters || {}
-  const reasonCodes = Array.isArray(stats?.reason_codes) ? stats.reason_codes : []
-  const recent = Array.isArray(stats?.recent) ? stats.recent : []
-  const runtimeStatus = String(runtimeState?.status || 'unknown').toLowerCase()
-  const statusClass = runtimeStatus === 'live'
-    ? 'border-green-200 bg-green-50 text-green-700'
-    : runtimeStatus === 'degraded'
-      ? 'border-orange-200 bg-orange-50 text-orange-700'
-      : 'border-gray-200 bg-gray-50 text-gray-600'
-  const immunePulseNodes = [
-    {
-      label: '运行态',
-      value: runtimeStatus.toUpperCase() || 'UNKNOWN',
-      tone: 'primary',
-      active: runtimeStatus === 'live',
-    },
-    {
-      label: '总事件',
-      value: String(stats?.total ?? 0),
-      tone: 'teal',
-      active: (stats?.total ?? 0) > 0,
-    },
-    {
-      label: '允许',
-      value: String(stats?.allow ?? 0),
-      tone: 'teal',
-      active: (stats?.allow ?? 0) > 0,
-    },
-    {
-      label: '报告',
-      value: String(stats?.report ?? 0),
-      tone: 'amber',
-      active: (stats?.report ?? 0) > 0,
-    },
-    {
-      label: '拦截',
-      value: String(stats?.block ?? 0),
-      tone: 'rose',
-      active: (stats?.block ?? 0) > 0,
-    },
-    {
-      label: '拦截率',
-      value: formatPercent(stats?.block_rate, 0),
-      tone: 'violet',
-      active: Number(stats?.block_rate ?? 0) > 0,
-    },
-  ]
-  const immuneLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: statsError && !stats ? new Error(statsError) : null,
-    hasData: Boolean(stats),
-    hasSamples: (stats?.total ?? 0) > 0 || recent.length > 0 || reasonCodes.length > 0,
-    available: Boolean(stats),
-    stale,
-  })
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div>
-          <div className="text-sm font-semibold text-gray-700">护栏与回放</div>
-          <div className="text-xs text-gray-500">运行态、事件统计与原因排行。</div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            className="rounded-lg border border-primary-100/70 bg-white/80 px-2.5 py-1.5 text-xs text-gray-600"
-            value={windowMinutes}
-            onChange={(event) => setWindowMinutes(Number(event.target.value))}
-          >
-            <option value={60}>60m</option>
-            <option value={360}>6h</option>
-            <option value={1440}>24h</option>
-            <option value={10080}>7d</option>
-          </select>
-          <button
-            onClick={() => Promise.allSettled([
-              refetch(),
-              activeReplayRequestId ? refetchReplay() : Promise.resolve(),
-            ])}
-            disabled={loading || refreshing || replayLoading || replayRefreshing}
-            className="btn-secondary text-xs disabled:opacity-50"
-          >
-            {loading || refreshing || replayLoading || replayRefreshing ? '刷新中…' : '刷新'}
-          </button>
-          <input
-            value={replayRequestId}
-            onChange={(event) => setReplayRequestId(event.target.value)}
-            placeholder="request_id"
-            className="w-44 rounded-lg border border-primary-100/70 bg-white/80 px-2.5 py-1.5 text-xs text-gray-600"
-          />
-          <button
-            onClick={() => handleReplayLoad(replayRequestId)}
-            disabled={replayLoading || !String(replayRequestId || '').trim()}
-            className="btn-secondary border-violet-200 text-xs text-violet-700 disabled:opacity-40"
-          >
-            {replayLoading || replayRefreshing ? '回放中…' : '回放'}
-          </button>
-          <a
-            href="#/prompt-config?keyword=immune_agent.runtime_rules&scope=immune_agent"
-            className="btn-secondary border-blue-200 text-xs text-blue-700"
-          >
-            编辑规则
-          </a>
-        </div>
-      </div>
-
-      <LivingPulseStrip
-        title="免疫脉冲"
-        subtitle="把免疫门禁的运行态、事件总量和拦截/报告分布压成一条可读节律。"
-        nodes={immunePulseNodes}
-      />
-
-      <SampleMeta
-        loadState={immuneLoadState}
-        windowMinutes={windowMinutes}
-        sampleSize={stats?.total ?? 0}
-        sampleLabel="免疫事件"
-        updatedAt={lastUpdatedAt}
-        source="immune gate"
-        definition="这一段聚合 immune gate 运行态、原因热区、近期事件和指定 request 的免疫回放。"
-      />
-
-      {statsError ? (
-        <NoticeBanner variant={stats ? 'warning' : 'error'}>
-          {statsError}
-        </NoticeBanner>
-      ) : null}
-
-      {!statsError && !loading && !refreshing && immuneLoadState === LOAD_STATES.NO_SAMPLE ? (
-        <NoticeBanner variant="info">当前窗口还没有 immune gate 事件样本。</NoticeBanner>
-      ) : null}
-
-      {replayError ? <NoticeBanner variant="error">{replayError}</NoticeBanner> : null}
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
-        <div className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-          <div className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${statusClass}`}>
-            {runtimeStatus.toUpperCase() || 'UNKNOWN'}
-          </div>
-          <div className="mt-1 text-xs text-gray-400">运行态</div>
-        </div>
-        <div className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-          <div className="text-lg font-bold text-gray-700">{stats?.total ?? 0}</div>
-          <div className="text-xs text-gray-400">总事件</div>
-        </div>
-        <div className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-          <div className="text-lg font-bold text-green-600">{stats?.allow ?? 0}</div>
-          <div className="text-xs text-gray-400">允许</div>
-        </div>
-        <div className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-          <div className="text-lg font-bold text-amber-600">{stats?.report ?? 0}</div>
-          <div className="text-xs text-gray-400">报告</div>
-        </div>
-        <div className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-          <div className="text-lg font-bold text-red-500">{stats?.block ?? 0}</div>
-          <div className="text-xs text-gray-400">拦截</div>
-        </div>
-        <div className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-          <div className="text-lg font-bold text-red-500">{stats?.block_rate ?? 0}%</div>
-          <div className="text-xs text-gray-400">拦截率</div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <div className="rounded-2xl border border-primary-100/80 bg-white/75 p-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">运行配置</div>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2">
-              <div className="text-gray-400">enabled</div>
-              <div className="mt-1 font-semibold text-gray-800">{String(runtimeState?.enabled ?? '-')}</div>
-            </div>
-            <div className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2">
-              <div className="text-gray-400">blocking</div>
-              <div className="mt-1 font-semibold text-gray-800">{String(runtimeState?.blocking_enabled ?? '-')}</div>
-            </div>
-            <div className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2">
-              <div className="text-gray-400">warn / block</div>
-              <div className="mt-1 font-semibold text-gray-800">{runtimeState?.warn_threshold ?? '-'} / {runtimeState?.block_threshold ?? '-'}</div>
-            </div>
-            <div className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2">
-              <div className="text-gray-400">rules</div>
-              <div className="mt-1 font-semibold text-gray-800">{runtimeState?.template_rule_count ?? 0} / {runtimeState?.total_rule_count ?? 0}</div>
-            </div>
-            <div className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2">
-              <div className="text-gray-400">last decision</div>
-              <div className="mt-1 font-semibold text-gray-800">{runtimeState?.last_decision || '-'}</div>
-            </div>
-            <div className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2">
-              <div className="text-gray-400">last risk</div>
-              <div className="mt-1 font-semibold text-gray-800">{runtimeState?.last_risk_level || '-'}</div>
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-gray-500">
-            counter(total/allow/report/block): {counters.total ?? 0} / {counters.allow ?? 0} / {counters.report ?? 0} / {counters.block ?? 0}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-primary-100/80 bg-white/75 p-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">原因热区</div>
-          {reasonCodes.length > 0 ? (
-            <div className="mt-3 space-y-2">
-              {reasonCodes.slice(0, 6).map((item) => (
-                <div key={item.reason_code} className="rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-orange-600">{item.reason_code}</span>
-                    <span className="text-gray-500">{item.count} ({item.pct}%)</span>
-                  </div>
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-orange-400 to-amber-400"
-                      style={{ width: `${Math.min(Number(item.pct ?? 0), 100)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyStateCard title="暂无原因热区数据" hint="等待免疫事件积累后展示。" className="mt-3 p-4" />
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-primary-100/80 bg-white/75 p-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">近期事件</div>
-          {recent.length > 0 ? (
-            <div className="mt-3 max-h-72 space-y-2 overflow-y-auto pr-1">
-              {recent.map((item, index) => (
-                <button
-                  key={`${item.request_id}-${item.ts_ms}-${index}`}
-                  onClick={() => handleReplayLoad(item.request_id)}
-                  className="w-full rounded-xl border border-primary-100/70 bg-white/70 px-3 py-2 text-left text-xs transition hover:border-violet-200 hover:bg-violet-50/60"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-mono text-blue-600">{item.request_id || '-'}</div>
-                    <div className="text-gray-500">{item.decision} / {item.risk_level || 'none'}</div>
-                  </div>
-                  <div className="mt-1 text-gray-500">
-                    {item.event_type} · score={item.score ?? '-'} · {item.reason_codes?.join(', ') || '-'}
-                  </div>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <EmptyStateCard title="暂无免疫事件" hint="当前时间窗内没有免疫门禁事件。" className="mt-3 p-4" />
-          )}
-        </div>
-      </div>
-
-      {replayLoading || replayRefreshing || replayPayload || activeReplayRequestId ? (
-        <div className="rounded-xl border border-violet-200 bg-violet-50/40 p-3">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold text-violet-800">免疫回放</div>
-            {replayPayload?.request_id ? (
-              <a
-                href={`#/trace/${encodeURIComponent(replayPayload.request_id)}`}
-                className="btn-secondary border-blue-200 px-2 py-0.5 text-[11px] text-blue-700"
-              >
-                打开链路
-              </a>
-            ) : null}
-          </div>
-          <div className="mb-2">
-            <SampleMeta
-              loadState={activeReplayRequestId ? (replayLoading || replayRefreshing ? LOAD_STATES.LOADING : replayPayload ? LOAD_STATES.READY : replayError ? LOAD_STATES.ERROR : LOAD_STATES.UNAVAILABLE) : LOAD_STATES.UNAVAILABLE}
-              sampleSize={replayPayload?.summary?.event_count ?? 0}
-              sampleLabel="回放事件"
-              updatedAt={replayUpdatedAt}
-              source={activeReplayRequestId ? `request ${activeReplayRequestId}` : 'immune replay'}
-              definition="指定 request 的 immune 决策时间线，用于回看风险判定、命中规则和阶段演化。"
-            />
-          </div>
-          {replayLoading && !replayPayload ? (
-            <div className="text-xs text-gray-500">正在加载回放时间线…</div>
-          ) : !replayLoading && !replayRefreshing && activeReplayRequestId && !replayPayload && !replayError ? (
-            <div className="text-xs text-gray-500">当前请求还没有可展示的免疫回放。</div>
-          ) : null}
-          {replayPayload ? (
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded border border-violet-100 bg-white/90 px-2 py-1">
-                  请求 ID: <span className="font-mono">{replayPayload.request_id}</span>
-                </div>
-                <div className="rounded border border-violet-100 bg-white/90 px-2 py-1">
-                  会话 ID: <span className="font-mono">{replayPayload.session_id || '-'}</span>
-                </div>
-                <div className="rounded border border-violet-100 bg-white/90 px-2 py-1">
-                  首次→末次: {replayPayload.summary?.first_decision || '-'} → {replayPayload.summary?.last_decision || '-'}
-                </div>
-                <div className="rounded border border-violet-100 bg-white/90 px-2 py-1">
-                  事件数/最高分: {replayPayload.summary?.event_count ?? 0} / {replayPayload.summary?.max_score ?? '-'}
-                </div>
-              </div>
-              {replayPayload.input_preview ? (
-                <div className="rounded border border-violet-100 bg-white/90 px-2 py-1.5 text-xs text-gray-700">
-                  输入预览: {replayPayload.input_preview}
-                </div>
-              ) : null}
-              <div className="flex flex-wrap gap-1.5">
-                {(replayPayload.summary?.reason_codes || []).slice(0, 8).map((reasonCode) => (
-                  <span key={`replay-reason-${reasonCode}`} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700">
-                    {reasonCode}
-                  </span>
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(replayPayload.summary?.matched_rules || []).slice(0, 6).map((rule) => (
-                  <span key={`replay-rule-${rule}`} className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">
-                    {rule}
-                  </span>
-                ))}
-              </div>
-              <div className="max-h-56 space-y-1.5 overflow-y-auto rounded border border-violet-100 bg-white/90 p-2">
-                {(replayPayload.decisions || []).map((item, index) => (
-                  <div key={`${item.ts_ms}-${item.event_type}-${index}`} className="rounded border border-gray-100 bg-gray-50 px-2 py-1.5 text-xs">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="font-mono text-gray-700">{item.event_type}</div>
-                      <div className="text-gray-500">{item.decision} / {item.risk_level || 'none'}</div>
-                    </div>
-                    <div className="mt-1 text-gray-500">
-                      {item.stage || '-'} · score={item.score ?? '-'} · {item.reason_codes?.join(', ') || '-'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function SchedulerHistorySection({
-  pollingEnabled,
-  pollingInterval,
-  pollingTick,
-}) {
-  const {
-    history: data,
-    historyError,
-    loading,
-    refreshing,
-    stale,
-    lastUpdatedAt,
-    refetch,
-  } = useSchedulerHistoryQuery({
-    windowMinutes: 1440,
-    pollingEnabled,
-    pollingTick,
-    pollingInterval,
-  })
-  const historyLoadState = resolveLoadState({
-    loading: loading || refreshing,
-    error: historyError && !data ? new Error(historyError) : null,
-    hasData: Boolean(data),
-    hasSamples: (data?.total_tasks ?? 0) > 0 || (data?.tasks ?? []).length > 0,
-    available: Boolean(data),
-    stale,
-  })
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-semibold text-gray-700">节律历史脉络（近 24h）</div>
-        <button
-          onClick={() => refetch()}
-          disabled={loading || refreshing}
-          className="btn-secondary text-xs disabled:opacity-50"
-        >
-          {loading || refreshing ? '刷新中…' : '刷新'}
-        </button>
-      </div>
-
-      <SampleMeta
-        loadState={historyLoadState}
-        windowMinutes={1440}
-        sampleSize={data?.total_tasks ?? 0}
-        sampleLabel="历史任务"
-        updatedAt={lastUpdatedAt}
-        source="scheduler history"
-        definition="汇总近 24h 的节律任务执行摘要、门控阻断模式和单任务最近体征。"
-      />
-
-      {loading && !data ? (
-        <NoticeBanner variant="info" title="加载中">
-          正在同步节律历史脉络…
-        </NoticeBanner>
-      ) : null}
-
-      {historyError ? <NoticeBanner variant={data ? 'warning' : 'error'}>{historyError}</NoticeBanner> : null}
-
-      {!historyError && !loading && !refreshing && historyLoadState === LOAD_STATES.NO_SAMPLE ? (
-        <NoticeBanner variant="info">近 24 小时还没有调度历史样本。</NoticeBanner>
-      ) : null}
-
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-        {[
-          { label: '总任务', value: data?.total_tasks, color: 'text-gray-700' },
-          { label: '运行中', value: data?.running_count, color: 'text-blue-600' },
-          { label: '成功', value: data?.success_count, color: 'text-green-600' },
-          { label: '失败', value: data?.failed_count, color: 'text-red-500' },
-          { label: '已禁用', value: data?.disabled_count, color: 'text-gray-400' },
-          {
-            label: '整体错误率',
-            value: data?.overall_error_rate != null ? `${data.overall_error_rate}%` : '—',
-            color: data?.overall_error_rate > 20 ? 'text-red-500' : 'text-green-600',
-          },
-          {
-            label: '门控拦截',
-            value: data?.gate_blocked_total ?? '—',
-            color: (data?.gate_blocked_total ?? 0) > 0 ? 'text-orange-500' : 'text-green-600',
-          },
-          {
-            label: '门控拦截率',
-            value: data?.gate_blocked_rate != null ? `${data.gate_blocked_rate}%` : '—',
-            color: (data?.gate_blocked_rate ?? 0) > 20 ? 'text-red-500' : 'text-gray-500',
-          },
-        ].map(({ label, value, color }) => (
-          <div key={label} className="rounded-xl border border-primary-100/70 bg-white/70 p-2 text-center">
-            <div className={`text-lg font-bold ${color}`}>{value ?? '—'}</div>
-            <div className="mt-0.5 text-xs text-gray-400">{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {(data?.blocked_reason_codes?.length > 0 || data?.gate_states?.length > 0) ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="rounded-xl border border-primary-100/80 bg-white/75 p-3">
-            <div className="mb-2 text-xs font-semibold text-gray-600">门控原因 Top</div>
-            <div className="space-y-1.5">
-              {(data?.blocked_reason_codes || []).slice(0, 5).map((item) => (
-                <div key={item.reason_code} className="flex items-center justify-between text-xs">
-                  <span className="font-mono text-orange-600">{item.reason_code}</span>
-                  <span className="text-gray-500">{item.count} ({item.pct}%)</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-xl border border-primary-100/80 bg-white/75 p-3">
-            <div className="mb-2 text-xs font-semibold text-gray-600">Gate 分布</div>
-            <div className="space-y-1.5">
-              {(data?.gate_states || []).slice(0, 5).map((item) => (
-                <div key={item.gate_state} className="flex items-center justify-between text-xs">
-                  <span className="font-mono text-blue-600">{item.gate_state}</span>
-                  <span className="text-gray-500">{item.count} ({item.pct}%)</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {!loading && (data?.tasks ?? []).length > 0 ? (
-        <>
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {(data?.tasks ?? []).map((task) => {
-              const status = String(task.status || 'UNKNOWN').toUpperCase()
-              const statusTone = status === 'SUCCESS'
-                ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
-                : status === 'FAILED'
-                  ? 'border-rose-200 bg-rose-50/70 text-rose-700'
-                  : status === 'RUNNING'
-                    ? 'border-sky-200 bg-sky-50/70 text-sky-700'
-                    : 'border-gray-200 bg-gray-50 text-gray-600'
-              return (
-                <div key={task.task_id} className="rounded-2xl border border-primary-100/80 bg-white/75 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="font-mono text-sm font-semibold text-gray-900">{task.task_id}</div>
-                      <div className="mt-1 text-xs text-gray-500">
-                        {task.last_reason_code || '暂无最近原因'}
-                      </div>
-                    </div>
-                    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${statusTone}`}>
-                      {status}
-                    </span>
-                  </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                    <div className="rounded-xl border border-primary-100/70 bg-white/70 px-2.5 py-2 text-center">
-                      <div className="font-semibold text-gray-800">{task.run_count}</div>
-                      <div className="text-gray-400">节律次数</div>
-                    </div>
-                    <div className="rounded-xl border border-primary-100/70 bg-white/70 px-2.5 py-2 text-center">
-                      <div className="font-semibold text-gray-800">{task.error_count}</div>
-                      <div className="text-gray-400">失衡次数</div>
-                    </div>
-                    <div className="rounded-xl border border-primary-100/70 bg-white/70 px-2.5 py-2 text-center">
-                      <div className="font-semibold text-gray-800">{task.error_rate != null ? `${task.error_rate}%` : '—'}</div>
-                      <div className="text-gray-400">错误率</div>
-                    </div>
-                  </div>
-                  <div className="mt-3 space-y-2 text-xs text-gray-500">
-                    <div>Gate: {task.last_gate_state || '—'}</div>
-                    <div>
-                      Immune: {task.last_immune_decision
-                        ? `${task.last_immune_decision}${task.last_immune_risk_level ? `/${task.last_immune_risk_level}` : ''}`
-                        : '—'}
-                    </div>
-                    <div className="truncate" title={Array.isArray(task.last_immune_reason_codes) && task.last_immune_reason_codes.length > 0 ? task.last_immune_reason_codes.join(', ') : '—'}>
-                      Immune Reason: {Array.isArray(task.last_immune_reason_codes) && task.last_immune_reason_codes.length > 0
-                        ? task.last_immune_reason_codes.join(', ')
-                        : '—'}
-                    </div>
-                    <div className="truncate" title={task.last_error || '—'}>
-                      最近错误: {task.last_error || '—'}
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <SchedulerTimelineChart tasks={data.tasks} />
-        </>
-      ) : !loading ? (
-        <EmptyStateCard title="暂无节律历史" hint="等待任务运行后会出现脉络数据。" className="p-6" />
-      ) : null}
-    </div>
-  )
-}
-
 function LoadingTasksNotice() {
   return (
     <NoticeBanner variant="info" title="加载中">
@@ -823,14 +203,6 @@ export default function Automation() {
     pollingTick,
     pollingInterval,
   })
-  const {
-    refetch: refetchHistory,
-  } = useSchedulerHistoryQuery({
-    windowMinutes: 1440,
-    pollingEnabled,
-    pollingTick,
-    pollingInterval,
-  })
   const reasonFilter = String(searchParams.get('reason_code') || '').trim().toUpperCase()
   const gateFilter = String(searchParams.get('gate_state') || '').trim().toLowerCase()
   const immuneReplayRequestId = String(searchParams.get('immune_replay_request_id') || '').trim()
@@ -847,10 +219,10 @@ export default function Automation() {
   const refreshAll = useCallback(async () => {
     await Promise.allSettled([
       refetch(),
-      refetchHistory(),
+      refreshSchedulerHistoryQuery({ windowMinutes: 1440 }),
       reloadRuntime(),
     ])
-  }, [refetch, refetchHistory, reloadRuntime])
+  }, [refetch, reloadRuntime])
 
   const handleAction = async (taskId, action) => {
     setActionLoading(taskId)
@@ -860,7 +232,10 @@ export default function Automation() {
       if (action === 'disable') await disableSchedulerTask(taskId)
       if (action === 'trigger') await triggerSchedulerTask(taskId)
       setActionResult({ ok: true, taskId, action })
-      await Promise.allSettled([refetch(), refetchHistory()])
+      await Promise.allSettled([
+        refetch(),
+        refreshSchedulerHistoryQuery({ windowMinutes: 1440 }),
+      ])
     } catch (actionError) {
       setActionResult({
         ok: false,
@@ -961,6 +336,29 @@ export default function Automation() {
       active: hasTaskFilters,
     },
   ]), [enabledCount, failedCount, filteredCount, hasTaskFilters, runningCount, schedulerState.label, schedulerState.running, tasks.length])
+  const endocrineOrganModel = useMemo(() => buildEndocrineOrganSystemModel({
+    loadState: automationLoadState,
+    updatedAt: lastUpdatedAt,
+    schedulerState,
+    taskCount: tasks.length,
+    enabledCount,
+    runningCount,
+    failedCount,
+    filteredCount,
+    hasTaskFilters,
+    backgroundRuntime: runtimeSnapshot?.background_runtime,
+  }), [
+    automationLoadState,
+    enabledCount,
+    failedCount,
+    filteredCount,
+    hasTaskFilters,
+    lastUpdatedAt,
+    runningCount,
+    runtimeSnapshot?.background_runtime,
+    schedulerState,
+    tasks.length,
+  ])
 
   return (
     <div className="space-y-6">
@@ -1021,6 +419,8 @@ export default function Automation() {
         <NoticeBanner variant="info">当前还没有已登记的节律任务样本。</NoticeBanner>
       ) : null}
 
+      <OrganSystemOverview model={endocrineOrganModel} />
+
       <LivingPulseStrip
         title="节律脉冲"
         subtitle="先看这组器官节律当前怎么流动，再往下看免疫回放和任务卡。"
@@ -1032,13 +432,31 @@ export default function Automation() {
         title="生命体运行与免疫护栏"
         description="把生命体实时快照、免疫门禁统计和事件回放汇聚在同一段体内流。"
       >
-        <DigitalLifeRuntimeCard runtimeSnapshot={runtimeSnapshot} promptStats={promptStats} compact />
-        <ImmuneGateOpsPanel
-          pollingEnabled={pollingEnabled}
-          pollingInterval={pollingInterval}
-          pollingTick={pollingTick}
-          initialReplayRequestId={immuneReplayRequestId}
-        />
+        <ViewportLazySection
+          rootMargin="240px 0px"
+          placeholder={(
+            <NoticeBanner variant="info" title="按需加载中">
+              免疫护栏与回放分区将在滚动进入视口后展开。
+            </NoticeBanner>
+          )}
+        >
+          <React.Suspense
+            fallback={(
+              <NoticeBanner variant="info" title="按需加载中">
+                正在装配生命体运行与免疫护栏分区…
+              </NoticeBanner>
+            )}
+          >
+            <AutomationImmuneSectionContent
+              pollingEnabled={pollingEnabled}
+              pollingInterval={pollingInterval}
+              pollingTick={pollingTick}
+              initialReplayRequestId={immuneReplayRequestId}
+              runtimeSnapshot={runtimeSnapshot}
+              promptStats={promptStats}
+            />
+          </React.Suspense>
+        </ViewportLazySection>
       </AutomationSection>
 
       <AutomationSection
@@ -1130,11 +548,28 @@ export default function Automation() {
         title="节律历史脉络"
         description="回看近 24h 执行体征，识别门控阻断模式与失衡趋势。"
       >
-        <SchedulerHistorySection
-          pollingEnabled={pollingEnabled}
-          pollingInterval={pollingInterval}
-          pollingTick={pollingTick}
-        />
+        <ViewportLazySection
+          rootMargin="240px 0px"
+          placeholder={(
+            <NoticeBanner variant="info" title="按需加载中">
+              节律历史脉络会在滚动接近后再展开，避免首屏提前拉取大块历史数据。
+            </NoticeBanner>
+          )}
+        >
+          <React.Suspense
+            fallback={(
+              <NoticeBanner variant="info" title="按需加载中">
+                正在装配节律历史脉络分区…
+              </NoticeBanner>
+            )}
+          >
+            <AutomationHistorySectionContent
+              pollingEnabled={pollingEnabled}
+              pollingInterval={pollingInterval}
+              pollingTick={pollingTick}
+            />
+          </React.Suspense>
+        </ViewportLazySection>
       </AutomationSection>
     </div>
   )

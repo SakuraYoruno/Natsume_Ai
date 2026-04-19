@@ -15,10 +15,13 @@ import {
   Gateway,
   InnerWorldDashboard,
   Insights,
+  LifeTimelinePage,
   LogStream,
   MemoryBrowser,
   Metrics,
   Overview,
+  PathologyCenterPage,
+  PathologyDetailPage,
   PersonaPromptOps,
   PromptConfig,
   ResponsePolicyDashboard,
@@ -78,6 +81,9 @@ export default function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/digital-life" replace />} />
             <Route path="digital-life" element={withSuspense(<DigitalLifeOverview />)} />
+            <Route path="life-timeline" element={withSuspense(<LifeTimelinePage />)} />
+            <Route path="pathologies" element={withSuspense(<PathologyCenterPage />)} />
+            <Route path="pathologies/:pathologyId" element={withSuspense(<PathologyDetailPage />)} />
             <Route path="overview" element={withSuspense(<Overview />)} />
             <Route path="sessions" element={withSuspense(<Sessions />)} />
             <Route path="trace/*" element={withSuspense(<Trace />)} />

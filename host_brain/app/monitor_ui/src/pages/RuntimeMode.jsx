@@ -15,9 +15,11 @@ import {
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { buildRuntimeModeOrganSystemModel } from '../models/organSystemModel.js'
 import { useRuntimeModeConsoleQuery } from '../queries/runtimeModeQueries.js'
 import { DASH, formatMode, MODE_META } from '../utils/digitalLife.js'
 
@@ -208,6 +210,30 @@ export default function RuntimeMode() {
     available: Boolean(status || history.length > 0),
     stale,
   })
+  const endocrineOrganModel = useMemo(() => buildRuntimeModeOrganSystemModel({
+    loadState: runtimeModeLoadState,
+    updatedAt: lastUpdatedAt,
+    currentModeLabel: currentMeta.label,
+    currentModeKey: currentMode,
+    schedulerLabel: currentMeta.scheduler,
+    idleMinutes: status?.idle_minutes,
+    validTransitionCount: validTransitions.length,
+    enabledRuleCount: enabledRules,
+    totalRuleCount: Object.keys(AUTO_RULE_DEFS).length,
+    isNightTime: status?.is_night_time,
+    degraded: status?.degraded,
+  }), [
+    currentMeta.label,
+    currentMeta.scheduler,
+    currentMode,
+    enabledRules,
+    lastUpdatedAt,
+    runtimeModeLoadState,
+    status?.degraded,
+    status?.idle_minutes,
+    status?.is_night_time,
+    validTransitions.length,
+  ])
 
   return (
     <div className="space-y-6">
@@ -267,6 +293,8 @@ export default function RuntimeMode() {
       {!consoleError && !loading && !refreshing && runtimeModeLoadState === LOAD_STATES.UNAVAILABLE ? (
         <NoticeBanner variant="warning">生命体存在态轴当前未返回可用快照。</NoticeBanner>
       ) : null}
+
+      <OrganSystemOverview model={endocrineOrganModel} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="当前模式" value={currentMeta.label} hint={currentMeta.scheduler} tone="text-primary" />

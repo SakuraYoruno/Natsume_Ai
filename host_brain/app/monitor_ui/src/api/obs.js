@@ -16,6 +16,9 @@ const HOT_GET_PREFIXES = [
   '/obs/capability-gaps/stats',
   '/obs/insights/summary-snapshot',
   '/obs/digital-life/overview-snapshot',
+  '/obs/life-body',
+  '/obs/life-timeline',
+  '/obs/pathologies',
   '/obs/trace-feed/snapshot',
 ]
 const inflightHotGets = new Map()
@@ -240,6 +243,27 @@ export function fetchDigitalLifeOverviewSnapshot(params = {}) {
   return request(`/obs/digital-life/overview-snapshot${qs ? '?' + qs : ''}`)
 }
 
+export function fetchLifeBody(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/life-body${qs ? '?' + qs : ''}`)
+}
+
+export function fetchLifeTimeline(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/life-timeline${qs ? '?' + qs : ''}`)
+}
+
+export function fetchPathologies(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/pathologies${qs ? '?' + qs : ''}`)
+}
+
 export function connectTraceRequestLive(requestId, handlers = {}, params = {}) {
   if (!requestId) {
     throw new Error('requestId is required')
@@ -384,25 +408,6 @@ export function fetchPromptTemplate(templateId) {
 
 export function fetchPersonaFirstBatchCatalog() {
   return request('/prompt-config/catalog/persona-first-batch')
-}
-
-export function updatePromptTemplate(templateId, payload) {
-  return request(`/prompt-config/templates/${encodeURIComponent(templateId)}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  })
-}
-
-export function resetPromptTemplate(templateId) {
-  return request(`/prompt-config/templates/${encodeURIComponent(templateId)}/reset`, {
-    method: 'POST',
-  })
-}
-
-export function reloadPromptTemplates() {
-  return request('/prompt-config/reload', {
-    method: 'POST',
-  })
 }
 
 /**

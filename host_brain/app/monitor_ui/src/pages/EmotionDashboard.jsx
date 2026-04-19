@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
@@ -10,6 +10,7 @@ import {
   Zap,
 } from 'lucide-react'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -17,6 +18,7 @@ import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { buildLimbicOrganSystemModel } from '../models/organSystemModel.js'
 import { useEmotionOverviewQuery } from '../queries/runtimeQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { formatEmotionTag, formatNumber, formatStage } from '../utils/digitalLife.js'
@@ -167,6 +169,7 @@ export default function EmotionDashboard() {
   const moodStyle = MOOD_STYLES[emotionState.mood] || MOOD_STYLES.steady
   const MoodIcon = moodStyle.icon
   const emotionTagLabel = formatEmotionTag(emotionState.emotionTag)
+  const bondStageLabel = formatStage(emotionState.bondStage)
   const gateState = String(endocrineState?.gate_state || 'open').toLowerCase()
   const gateLabel = GATE_LABELS[gateState] || gateState
   const gateTone = gateState === 'protective' ? 'text-red-600' : gateState === 'cautious' ? 'text-orange-500' : 'text-green-600'
@@ -181,6 +184,41 @@ export default function EmotionDashboard() {
     available: emotionObservabilityData,
   })
   const emotionUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
+  const limbicOrganModel = useMemo(() => buildLimbicOrganSystemModel({
+    loadState: emotionLoadState,
+    updatedAt: emotionUpdatedAt,
+    moodLabel: moodStyle.label,
+    moodKey: emotionState.mood,
+    emotionTagLabel,
+    bondStageLabel,
+    relationshipTemperature: bondTemperature,
+    bondEventCount,
+    gateLabel,
+    gateState,
+    degradeRate: vtsData?.degrade_rate,
+    applyRate: vtsData?.apply_rate,
+    talkGateAllowed: vtsData?.talk_gate_allowed,
+    sampleCount: emotionSampleCount,
+    cortisolLevel: endocrineState?.cortisol_level,
+    emotionalStability: emotionHasSamples ? (100 - Number(vtsData?.degrade_rate || 0)) : null,
+  }), [
+    bondEventCount,
+    bondStageLabel,
+    bondTemperature,
+    emotionHasSamples,
+    emotionLoadState,
+    emotionSampleCount,
+    emotionState.mood,
+    emotionTagLabel,
+    emotionUpdatedAt,
+    endocrineState?.cortisol_level,
+    gateLabel,
+    gateState,
+    moodStyle.label,
+    vtsData?.apply_rate,
+    vtsData?.degrade_rate,
+    vtsData?.talk_gate_allowed,
+  ])
 
   return (
     <div className="space-y-6">
@@ -236,9 +274,11 @@ export default function EmotionDashboard() {
         </NoticeBanner>
       ) : null}
 
+      <OrganSystemOverview model={limbicOrganModel} />
+
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard label="当前情绪" value={emotionTagLabel} hint={moodStyle.label} tone="text-pink-600" />
-        <MetricCard label="关系阶段" value={formatStage(emotionState.bondStage)} hint={`事件 ${bondEventCount} 次`} tone="text-purple-600" />
+        <MetricCard label="关系阶段" value={bondStageLabel} hint={`事件 ${bondEventCount} 次`} tone="text-purple-600" />
         <MetricCard label="内分泌门控" value={gateLabel} hint={`cortisol ${(Number(endocrineState?.cortisol_level || 0)).toFixed(2)}`} tone={gateTone} />
         <MetricCard label="对话放行" value={vtsData?.talk_gate_allowed ?? 0} hint={`表情降级率 ${vtsData?.degrade_rate ?? 0}%`} tone="text-blue-600" />
       </div>
@@ -352,7 +392,7 @@ export default function EmotionDashboard() {
                   {(bondTemperature * 100).toFixed(0)}°
                 </text>
                 <text x="60" y="72" textAnchor="middle" className="fill-gray-500 text-[10px]">
-                  {formatStage(emotionState.bondStage)}
+                  {bondStageLabel}
                 </text>
               </svg>
             </div>
@@ -360,7 +400,7 @@ export default function EmotionDashboard() {
 
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="card p-2 text-center">
-              <div className="font-bold text-pink-600">{formatStage(emotionState.bondStage)}</div>
+              <div className="font-bold text-pink-600">{bondStageLabel}</div>
               <div className="text-gray-500">当前阶段</div>
             </div>
             <div className="card p-2 text-center">

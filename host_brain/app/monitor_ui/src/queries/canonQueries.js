@@ -12,6 +12,7 @@ export function useCanonProposalsQuery({
   status = '',
   page = 1,
   pageSize = 20,
+  enabled = true,
 } = {}) {
   const normalizedStatus = String(status || '').trim()
   const params = {
@@ -42,6 +43,7 @@ export function useCanonProposalsQuery({
   const query = useObservabilityQuery({
     queryKey: OBS_QUERY_KEYS.canonProposals(params),
     queryFn,
+    enabled,
     staleTimeMs: OBS_STALE_TIMES.canon,
   })
 
@@ -54,7 +56,7 @@ export function useCanonProposalsQuery({
   }
 }
 
-export function useCanonDocumentsQuery() {
+export function useCanonDocumentsQuery({ enabled = true } = {}) {
   const queryFn = useCallback(async () => {
     try {
       const response = await fetchCanonDocuments()
@@ -73,6 +75,7 @@ export function useCanonDocumentsQuery() {
   const query = useObservabilityQuery({
     queryKey: OBS_QUERY_KEYS.canonDocuments(),
     queryFn,
+    enabled,
     staleTimeMs: OBS_STALE_TIMES.canon,
   })
 

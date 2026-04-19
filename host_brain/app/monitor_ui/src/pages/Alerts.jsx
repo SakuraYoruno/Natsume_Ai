@@ -13,12 +13,15 @@ import {
 } from 'lucide-react'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
 import PageHero from '../components/PageHero.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { createRequestRefs } from '../models/observabilityRefs.js'
+import { buildImmuneOrganSystemModel } from '../models/organSystemModel.js'
 import { resolveLoadState } from '../models/loadState.js'
 import { useAlertsCenterQuery } from '../queries/alertsQueries.js'
 import useAppStore from '../store/useAppStore.js'
@@ -279,6 +282,11 @@ export default function Alerts() {
   const infoCount = filteredAlerts.filter((item) => normalizeAlertSeverity(item) === 'info').length
   const isForgeRiskFiltered = FORGE_REASON_CODES.has(String(filterCode || '').toUpperCase())
   const alertsUpdatedAt = Math.max(lastUpdatedAt || 0, runtimeUpdatedAt || 0) || null
+  const topReasonLabel = reasonBreakdown[0]?.[0] ? formatAlertTitle(reasonBreakdown[0][0]) : ''
+  const representativeRefs = useMemo(
+    () => createRequestRefs(filteredAlerts.filter((item) => item?.request_id).slice(0, 2)),
+    [filteredAlerts]
+  )
   const alertsLoadState = resolveLoadState({
     loading: loading || refreshing,
     error,
@@ -287,6 +295,33 @@ export default function Alerts() {
     available: true,
     stale,
   })
+  const immuneOrganModel = useMemo(() => buildImmuneOrganSystemModel({
+    loadState: alertsLoadState,
+    updatedAt: alertsUpdatedAt,
+    totalAlerts: filteredAlerts.length,
+    criticalCount,
+    warningCount,
+    infoCount,
+    runtimeAlertCount: runtimeAlerts.length,
+    serviceAlertCount: serviceAlerts.length,
+    errorEventCount: alerts.length,
+    topReasonLabel,
+    filterCode,
+    representativeRefs,
+  }), [
+    alerts.length,
+    alertsLoadState,
+    alertsUpdatedAt,
+    criticalCount,
+    filterCode,
+    filteredAlerts.length,
+    infoCount,
+    representativeRefs,
+    runtimeAlerts.length,
+    serviceAlerts.length,
+    topReasonLabel,
+    warningCount,
+  ])
 
   const handleRefresh = useCallback(async () => {
     await Promise.allSettled([refetch(), reloadRuntime()])
@@ -360,6 +395,8 @@ export default function Alerts() {
           </a>
         </NoticeBanner>
       ) : null}
+
+      <OrganSystemOverview model={immuneOrganModel} />
 
       <DigitalLifeRuntimeCard
         runtimeSnapshot={runtimeSnapshot}

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import {
   RefreshCw,
   MessageSquare,
@@ -16,6 +16,7 @@ import {
 import { resetWeChatChannel } from '../api/gateway.js'
 import MetricCard from '../components/MetricCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import DrilldownLink from '../components/obs/DrilldownLink.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -23,6 +24,7 @@ import PageHero from '../components/PageHero.jsx'
 import SectionHeading from '../components/SectionHeading.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { buildMotorOrganSystemModel } from '../models/organSystemModel.js'
 import { useGatewayOverviewQuery } from '../queries/gatewayQueries.js'
 import useAppStore from '../store/useAppStore.js'
 
@@ -182,6 +184,8 @@ export default function Gateway() {
   const hasWeChatRateLimits = (wechatDetail?.rate_limits ?? []).length > 0
   const hasWeChatEvents = (wechatDetail?.recent_events ?? []).length > 0
   const gatewayEventCount = Number(data?.total_inbound ?? 0) + Number(data?.total_outbound ?? 0) + Number(data?.total_errors ?? 0)
+  const downPlatformCount = platforms.filter((item) => item.status === 'DOWN').length
+  const degradedPlatformCount = platforms.filter((item) => item.status === 'DEGRADED').length
   const gatewayLoadState = resolveLoadState({
     loading: loading || refreshing,
     error,
@@ -189,6 +193,35 @@ export default function Gateway() {
     hasSamples: !isInitialState && gatewayEventCount > 0,
     available: Boolean(data || wechatDetail),
   })
+  const motorOrganModel = useMemo(() => buildMotorOrganSystemModel({
+    loadState: gatewayLoadState,
+    updatedAt: lastUpdatedAt,
+    platformCount: platforms.length,
+    activePlatformCount: activePlatforms.length,
+    downPlatformCount,
+    degradedPlatformCount,
+    totalInbound: data?.total_inbound,
+    totalOutbound: data?.total_outbound,
+    totalErrors: data?.total_errors,
+    humanizeEnabled: data?.humanize_enabled,
+    humanizeTypingSpeed: data?.humanize_typing_speed_cps,
+    rateLimitCount: wechatDetail?.rate_limits?.length,
+    recentEventCount: wechatDetail?.recent_events?.length,
+  }), [
+    activePlatforms.length,
+    data?.humanize_enabled,
+    data?.humanize_typing_speed_cps,
+    data?.total_errors,
+    data?.total_inbound,
+    data?.total_outbound,
+    degradedPlatformCount,
+    downPlatformCount,
+    gatewayLoadState,
+    lastUpdatedAt,
+    platforms.length,
+    wechatDetail?.rate_limits?.length,
+    wechatDetail?.recent_events?.length,
+  ])
 
   return (
     <div className="space-y-6">
@@ -254,6 +287,8 @@ export default function Gateway() {
           如果你正在压测或联调，请先触发一条网关输入后再观察分平台统计。
         </div>
       ) : null}
+
+      <OrganSystemOverview model={motorOrganModel} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <MetricCard

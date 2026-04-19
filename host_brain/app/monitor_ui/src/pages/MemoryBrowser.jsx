@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { Archive, BookOpen, Brain, Database, RefreshCw } from 'lucide-react'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import SampleMeta from '../components/obs/SampleMeta.jsx'
@@ -8,6 +9,7 @@ import PageHero from '../components/PageHero.jsx'
 import SectionHeading from '../components/SectionHeading.jsx'
 import TimeWindowSelect from '../components/TimeWindowSelect.jsx'
 import { LOAD_STATES, resolveLoadState } from '../models/loadState.js'
+import { buildMemoryOrganSystemModel } from '../models/organSystemModel.js'
 import { useMemoryOverviewQuery } from '../queries/memoryQueries.js'
 import useAppStore from '../store/useAppStore.js'
 import { getSuccessRateTone, summarizeSuccessRateSamples } from '../utils/successRate.js'
@@ -92,6 +94,33 @@ export default function MemoryBrowser() {
     hasSamples: hasMemoryTraffic,
     available: hasMemoryObservabilityData,
   })
+  const memoryOrganModel = useMemo(() => buildMemoryOrganSystemModel({
+    loadState: memoryLoadState,
+    updatedAt: lastUpdatedAt,
+    hasData: hasMemoryObservabilityData,
+    hasSamples: hasMemoryTraffic,
+    averageSuccessRate: avgSuccessRate,
+    sampledSubsystemCount,
+    configuredSubsystemCount,
+    recallPackCount: recallData?.total_packs,
+    residentDocCount,
+    promptContextAvailable,
+    distillCycles: distillData?.total_cycles,
+    episodicWrites: episodicData?.total_writes,
+  }), [
+    avgSuccessRate,
+    configuredSubsystemCount,
+    distillData?.total_cycles,
+    episodicData?.total_writes,
+    hasMemoryObservabilityData,
+    hasMemoryTraffic,
+    lastUpdatedAt,
+    memoryLoadState,
+    promptContextAvailable,
+    recallData?.total_packs,
+    residentDocCount,
+    sampledSubsystemCount,
+  ])
 
   return (
     <div className="space-y-6">
@@ -152,6 +181,8 @@ export default function MemoryBrowser() {
           当前还是空样本初始态。记忆链路尚未产生可观测数据时，卡片显示 0 或空列表属于预期。
         </NoticeBanner>
       ) : null}
+
+      <OrganSystemOverview model={memoryOrganModel} />
 
       {hasSubsystemSamples ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

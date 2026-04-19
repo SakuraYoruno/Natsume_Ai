@@ -3,7 +3,7 @@ import {
   fetchPersonaFirstBatchCatalog,
   fetchPromptTemplate,
   fetchPromptTemplates,
-} from '../api/promptOps.js'
+} from '../api/obs.js'
 import { OBS_STALE_TIMES } from './freshness.js'
 import { OBS_QUERY_KEYS } from './queryKeys.js'
 import useObservabilityQuery from './useObservabilityQuery.js'

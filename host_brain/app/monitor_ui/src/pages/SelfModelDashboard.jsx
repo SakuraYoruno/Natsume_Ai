@@ -1,11 +1,15 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Brain, Heart, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import KeyValueRow from '../components/KeyValueRow.jsx'
+import OrganSystemOverview from '../components/lifeBody/OrganSystemOverview.jsx'
 import MetricCard from '../components/MetricCard.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
 import PageHero from '../components/PageHero.jsx'
+import SampleMeta from '../components/obs/SampleMeta.jsx'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
+import { resolveLoadState } from '../models/loadState.js'
+import { buildSelfOrganSystemModel } from '../models/organSystemModel.js'
 import useAppStore from '../store/useAppStore.js'
 import { getGrowthSignals } from '../utils/growthSignals.js'
 import {
@@ -86,6 +90,45 @@ export default function SelfModelDashboard() {
     ? formatTrend(bondSummary.trend || runtimeSnapshot?.bond_state?.trend)
     : '-'
   const growthHeadline = growthSignals.primarySummary || selfReflection.growth_note || selfReflection.self_awareness || '当前暂无明显成长摘要。'
+  const selfModelLoadState = resolveLoadState({
+    loading,
+    error: error ? new Error(String(error)) : null,
+    hasData: Boolean(runtimeSnapshot),
+    hasSamples: growthSignals.hasAnyGrowth || milestones.length > 0 || personalityChanges.length > 0 || riskTags.length > 0,
+    available: true,
+  })
+  const selfUpdatedAt = Number(runtimeSnapshot?.timestamp || 0) || null
+  const selfOrganModel = useMemo(() => buildSelfOrganSystemModel({
+    loadState: selfModelLoadState,
+    updatedAt: selfUpdatedAt,
+    recentMoodTrendLabel,
+    riskLevelLabel,
+    riskLevelRaw,
+    growthHeadline,
+    sharedMemoryCount: selfModel.shared_memory_count,
+    milestoneCount: milestones.length,
+    growthCycleCount: growthSignals.cycleCount,
+    activeThemeCount: growthSignals.activeThemes.length,
+    personalityChangeCount: personalityChanges.length,
+    promptDirectiveCount: promptDirectives.length,
+    bondStageLabel: formatStage(runtimeSnapshot?.bond_state?.current_stage),
+    allowedStyleLabel,
+  }), [
+    allowedStyleLabel,
+    growthHeadline,
+    growthSignals.activeThemes.length,
+    growthSignals.cycleCount,
+    milestones.length,
+    personalityChanges.length,
+    promptDirectives.length,
+    recentMoodTrendLabel,
+    riskLevelLabel,
+    riskLevelRaw,
+    runtimeSnapshot?.bond_state?.current_stage,
+    selfModel.shared_memory_count,
+    selfModelLoadState,
+    selfUpdatedAt,
+  ])
 
   return (
     <div className="space-y-6">
@@ -112,6 +155,17 @@ export default function SelfModelDashboard() {
           `成长周期：${growthSignals.cycleCount || 0}`,
           `风险：${riskLevelLabel}`,
         ]}
+        aside={(
+          <SampleMeta
+            className="max-w-md"
+            loadState={selfModelLoadState}
+            sampleSize={milestones.length + personalityChanges.length + growthSignals.activeThemes.length}
+            sampleLabel="成长样本"
+            updatedAt={selfUpdatedAt}
+            source="runtime snapshot / self model"
+            definition="自我系统页聚合自我模型、成长脉冲与叙事护栏；无样本与暂不可用会按统一口径展示。"
+          />
+        )}
       />
 
       {error ? (
@@ -119,6 +173,8 @@ export default function SelfModelDashboard() {
           {error}
         </NoticeBanner>
       ) : null}
+
+      <OrganSystemOverview model={selfOrganModel} />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <MetricCard

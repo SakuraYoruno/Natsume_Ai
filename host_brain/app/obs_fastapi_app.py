@@ -29,6 +29,12 @@ from host_brain.app.obs_routes_summary import (
     stop_digital_life_overview_warm_cache,
     stop_insights_summary_warm_cache,
 )
+from host_brain.app.obs_routes_life_body import (
+    router as obs_life_body_router,
+    get_life_body_warm_status,
+    start_life_body_warm_cache,
+    stop_life_body_warm_cache,
+)
 from host_brain.app.obs_routes_sysmode import (
     get_runtime_snapshot_warm_status,
     start_runtime_snapshot_warm_cache,
@@ -62,9 +68,13 @@ async def lifespan(_app: FastAPI):
     _logger.info("obs insights summary warm cache startup: %s", insights_warm_status)
     digital_life_warm_status = start_digital_life_overview_warm_cache()
     _logger.info("obs digital life overview warm cache startup: %s", digital_life_warm_status)
+    life_body_warm_status = start_life_body_warm_cache()
+    _logger.info("obs life body warm cache startup: %s", life_body_warm_status)
     try:
         yield
     finally:
+        life_body_stop_status = stop_life_body_warm_cache()
+        _logger.info("obs life body warm cache shutdown: %s", life_body_stop_status)
         digital_life_stop_status = stop_digital_life_overview_warm_cache()
         _logger.info("obs digital life overview warm cache shutdown: %s", digital_life_stop_status)
         insights_stop_status = stop_insights_summary_warm_cache()
@@ -88,6 +98,7 @@ app.include_router(web_ui_router, prefix="/api")
 app.include_router(obs_router)
 app.include_router(obs_trace_router)
 app.include_router(obs_summary_router)
+app.include_router(obs_life_body_router)
 
 _cors_origins_raw = os.environ.get(
     "Natsume_CORS_ORIGINS",

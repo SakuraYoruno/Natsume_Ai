@@ -1,32 +1,30 @@
 ﻿import React, { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, useNavigate, Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { useNavigate, Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  useNodesState,
-  useEdgesState,
-  MarkerType,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
-import {
-  Search, Maximize2, Minimize2, RefreshCw, GitBranch, BarChart2,
-  Bookmark, Activity, Users, ChevronRight, Layers, Mic, Volume2,
-  Video, Brain, Shield, Database, Zap, ArrowRightLeft, Filter,
-  CheckCircle, ArrowLeft, Clock3,
+  Search, RefreshCw, GitBranch,
+  Activity, Bookmark, Users, ChevronRight, Layers, Volume2,
+  Video, Database, CheckCircle, Clock3, Shield,
 } from 'lucide-react'
-import CustomNode from '../components/trace/CustomNode.jsx'
 import DigitalLifeRuntimeCard from '../components/DigitalLifeRuntimeCard.jsx'
 import EmptyStateCard from '../components/EmptyStateCard.jsx'
 import LivingPulseStrip from '../components/LivingPulseStrip.jsx'
 import NoticeBanner from '../components/NoticeBanner.jsx'
-import NodeDetailPanel from '../components/trace/NodeDetailPanel.jsx'
 import PageHero from '../components/PageHero.jsx'
 import StatusBadge from '../components/StatusBadge.jsx'
 import { getTraceNodeDisplayName } from '../components/trace/traceNodeText.js'
+import {
+  GROUPS,
+  FULL_CHAIN_SCHEMA,
+  buildImmuneStageMeta,
+  getLatestPrimaryTraceNode,
+  getLatestTraceNode,
+  getLiveTraceFlow,
+  getTraceGroupNodeIds,
+  getTraceGroupState,
+  normalizeBadgeStatus,
+  normalizeTraceGroupNodeId,
+} from '../components/trace/traceFlowModel.js'
 import useDigitalLifeRuntimeSignals from '../hooks/useDigitalLifeRuntimeSignals.js'
-import { applyDagreLayout } from '../utils/traceLayout.js'
 import { formatAlertTitle, humanizeToken } from '../utils/digitalLife.js'
 import { useSessionsListQuery } from '../queries/sessionsQueries.js'
 import { useTraceLiveSnapshotQuery, useTraceSnapshotQuery, useTraceTribeFeedQuery } from '../queries/traceQueries.js'
@@ -36,472 +34,10 @@ import {
 } from '../api/obs.js'
 import useAppStore from '../store/useAppStore.js'
 
-const NODE_TYPES = { customNode: CustomNode }
 const TraceRequestDetail = React.lazy(() => import('./TraceRequestDetail.jsx'))
-
-const GROUPS = [
-  {
-    id: 'edge',
-    label: '边缘输入',
-    desc: 'ASR · 网关回调 · 输入上报',
-    icon: Mic,
-    color: '#059669',
-    bg: '#ECFDF5',
-    border: '#6EE7B7',
-    nodeIds: ['asr', 'gateway_webhook', 'input_reporter'],
-    traceNodeIds: ['asr', 'gateway_webhook', 'input_reporter'],
-  },
-  {
-    id: 'entry',
-    label: '入口守护',
-    desc: 'Airlock Ingress · Governor',
-    icon: ArrowRightLeft,
-    color: '#475467',
-    bg: '#F8FAFC',
-    border: '#CBD5E1',
-    nodeIds: ['airlock_ingress', 'governor'],
-    traceNodeIds: ['airlock_ingress', 'governor', 'host_input'],
-  },
-  {
-    id: 'immune',
-    label: '免疫门禁',
-    desc: 'Immune Gate · 风险扫描',
-    icon: Shield,
-    color: '#EA580C',
-    bg: '#FFF7ED',
-    border: '#FDBA74',
-    nodeIds: ['immune_gate'],
-    traceNodeIds: ['immune_gate'],
-  },
-  {
-    id: 'retrieval',
-    label: '检索规划',
-    desc: 'Query Planner · Agentic RAG · Recall Fusion',
-    icon: Filter,
-    color: '#0891B2',
-    bg: '#ECFEFF',
-    border: '#67E8F9',
-    nodeIds: ['query_planner', 'agentic_rag', 'recall_fusion'],
-    traceNodeIds: ['query_planner', 'agentic_rag', 'recall_fusion'],
-  },
-  {
-    id: 'persona',
-    label: '人格上下文',
-    desc: '情感 · 常驻记忆 · 动机状态',
-    icon: Bookmark,
-    color: '#0F766E',
-    bg: '#F0FDFA',
-    border: '#5EEAD4',
-    nodeIds: ['emotion_context', 'persona_resident_memory', 'motive_state'],
-    traceNodeIds: ['emotion_context', 'persona_resident_memory', 'motive_state'],
-  },
-  {
-    id: 'orchestration',
-    label: '编排决策',
-    desc: '响应策略 · Cortex Orchestrator',
-    icon: Shield,
-    color: '#7C3AED',
-    bg: '#F5F3FF',
-    border: '#C4B5FD',
-    nodeIds: ['response_policy', 'cortex_orchestrator'],
-    traceNodeIds: ['response_policy', 'cortex_orchestrator'],
-  },
-  {
-    id: 'agent',
-    label: '代理调度',
-    desc: 'Executive Router · Sub Agent · Chat Agent',
-    icon: Users,
-    color: '#9333EA',
-    bg: '#FAF5FF',
-    border: '#D8B4FE',
-    nodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
-    traceNodeIds: ['executive_router', 'sub_agent_code', 'sub_agent_translate', 'sub_agent_intent', 'sub_agent_vision', 'chat_agent'],
-  },
-  {
-    id: 'llm',
-    label: '提示与模型',
-    desc: 'Prompt Builder · LLM Stream',
-    icon: Brain,
-    color: '#2970FF',
-    bg: '#EEF4FF',
-    border: '#93C5FD',
-    nodeIds: ['prompt_builder', 'llm_stream'],
-    traceNodeIds: ['prompt_builder', 'llm_stream', 'llm_gateway', 'cortex_orchestrator_llm_stream'],
-  },
-  {
-    id: 'postprocess',
-    label: '收口输出',
-    desc: '出口净化 · PII · 记忆/Bond · TTS/VTS',
-    icon: Zap,
-    color: '#D97706',
-    bg: '#FFFBEB',
-    border: '#FCD34D',
-    nodeIds: ['airlock_egress', 'pii_filter', 'episodic_store', 'bond_update', 'tts', 'vts_driver'],
-    traceNodeIds: ['airlock_egress', 'pii_filter', 'episodic_store', 'bond_update', 'audit_snapshot', 'tts', 'vts_driver'],
-  },
-]
-
-const FULL_CHAIN_SCHEMA = {
-  graph_id: 'natsume.digital_life_trace_v2',
-  nodes: [
-    { node_id: 'asr', node_type: 'asr', display_name: '语音识别', layer: 'edge' },
-    { node_id: 'gateway_webhook', node_type: 'system', display_name: '网关回调', layer: 'edge' },
-    { node_id: 'input_reporter', node_type: 'system', display_name: '输入上报', layer: 'edge' },
-    { node_id: 'airlock_ingress', node_type: 'governor', display_name: '入口净化', layer: 'host' },
-    { node_id: 'governor', node_type: 'governor', display_name: '入口守护', layer: 'host' },
-    { node_id: 'immune_gate', node_type: 'immune', display_name: 'Immune Gate', layer: 'host' },
-    { node_id: 'query_planner', node_type: 'retrieval', display_name: '查询规划器', layer: 'host' },
-    { node_id: 'agentic_rag', node_type: 'retrieval', display_name: 'Agentic RAG', layer: 'host' },
-    { node_id: 'recall_fusion', node_type: 'recall', display_name: '召回融合', layer: 'host' },
-    { node_id: 'emotion_context', node_type: 'system', display_name: '情感上下文', layer: 'host' },
-    { node_id: 'persona_resident_memory', node_type: 'memory', display_name: '人设常驻记忆', layer: 'host' },
-    { node_id: 'motive_state', node_type: 'system', display_name: '动机状态', layer: 'host' },
-    { node_id: 'response_policy', node_type: 'system', display_name: '响应策略', layer: 'host' },
-    { node_id: 'cortex_orchestrator', node_type: 'system', display_name: 'Cortex Orchestrator', layer: 'host' },
-    { node_id: 'executive_router', node_type: 'agent', display_name: 'Executive Router', layer: 'host' },
-    { node_id: 'sub_agent_code', node_type: 'agent', display_name: '代码代理', layer: 'host' },
-    { node_id: 'sub_agent_translate', node_type: 'agent', display_name: '翻译代理', layer: 'host' },
-    { node_id: 'sub_agent_intent', node_type: 'agent', display_name: '意图代理', layer: 'host' },
-    { node_id: 'sub_agent_vision', node_type: 'agent', display_name: '视觉代理', layer: 'host' },
-    { node_id: 'chat_agent', node_type: 'agent', display_name: 'Chat Agent', layer: 'host' },
-    { node_id: 'prompt_builder', node_type: 'system', display_name: '提示构建器', layer: 'host' },
-    { node_id: 'llm_stream', node_type: 'llm', display_name: '模型流式生成', layer: 'host' },
-    { node_id: 'airlock_egress', node_type: 'governor', display_name: '出口净化', layer: 'host' },
-    { node_id: 'pii_filter', node_type: 'governor', display_name: '隐私过滤', layer: 'host' },
-    { node_id: 'episodic_store', node_type: 'memory', display_name: '记忆写入', layer: 'host' },
-    { node_id: 'bond_update', node_type: 'bond', display_name: '关系更新', layer: 'host' },
-    { node_id: 'tts', node_type: 'tts', display_name: '语音合成', layer: 'edge' },
-    { node_id: 'vts_driver', node_type: 'vts', display_name: '表情驱动', layer: 'edge' },
-  ],
-  edges: [
-    { source: 'asr', target: 'airlock_ingress' },
-    { source: 'gateway_webhook', target: 'airlock_ingress' },
-    { source: 'input_reporter', target: 'airlock_ingress' },
-    { source: 'airlock_ingress', target: 'governor' },
-    { source: 'governor', target: 'immune_gate' },
-    { source: 'immune_gate', target: 'query_planner' },
-    { source: 'query_planner', target: 'agentic_rag' },
-    { source: 'agentic_rag', target: 'recall_fusion' },
-    { source: 'recall_fusion', target: 'emotion_context' },
-    { source: 'emotion_context', target: 'persona_resident_memory' },
-    { source: 'persona_resident_memory', target: 'motive_state' },
-    { source: 'motive_state', target: 'response_policy' },
-    { source: 'response_policy', target: 'cortex_orchestrator' },
-    { source: 'cortex_orchestrator', target: 'executive_router' },
-    { source: 'cortex_orchestrator', target: 'prompt_builder' },
-    { source: 'executive_router', target: 'sub_agent_code' },
-    { source: 'executive_router', target: 'sub_agent_translate' },
-    { source: 'executive_router', target: 'sub_agent_intent' },
-    { source: 'executive_router', target: 'sub_agent_vision' },
-    { source: 'executive_router', target: 'chat_agent' },
-    { source: 'sub_agent_code', target: 'chat_agent' },
-    { source: 'sub_agent_translate', target: 'chat_agent' },
-    { source: 'sub_agent_intent', target: 'chat_agent' },
-    { source: 'sub_agent_vision', target: 'chat_agent' },
-    { source: 'chat_agent', target: 'prompt_builder' },
-    { source: 'prompt_builder', target: 'llm_stream' },
-    { source: 'llm_stream', target: 'airlock_egress' },
-    { source: 'airlock_egress', target: 'pii_filter' },
-    { source: 'airlock_egress', target: 'episodic_store' },
-    { source: 'airlock_egress', target: 'bond_update' },
-    { source: 'airlock_egress', target: 'tts' },
-    { source: 'airlock_egress', target: 'vts_driver' },
-  ],
-}
-
-const FULL_CHAIN_NODE_MAP = Object.fromEntries(FULL_CHAIN_SCHEMA.nodes.map((node) => [node.node_id, node]))
-const FULL_CHAIN_NODE_ID_SET = new Set(FULL_CHAIN_SCHEMA.nodes.map((node) => node.node_id))
-
-function getTraceGroupNodeIds(group) {
-  return group?.traceNodeIds ?? group?.nodeIds ?? []
-}
-
-function normalizeTraceGroupNodeId(nodeId = '', nodeType = '') {
-  const normalized = String(nodeId || '').trim()
-  const normalizedType = String(nodeType || '').trim().toLowerCase()
-  if (normalizedType === 'tts' || normalized.startsWith('voice_tts_')) return 'tts'
-  if (normalizedType === 'vts' || normalized.startsWith('voice_vts_')) return 'vts_driver'
-  if (normalizedType === 'asr' || normalized.startsWith('voice_asr_')) return 'asr'
-  if (normalizedType === 'immune' || normalized.startsWith('voice_immune_')) return 'immune_gate'
-  if (normalized.startsWith('voice_edge_')) return 'input_reporter'
-  if (normalized.startsWith('voice_')) return 'input_reporter'
-  if (normalized.startsWith('episodic_store')) return 'episodic_store'
-  if (normalized.startsWith('bond_update')) return 'bond_update'
-  if (normalized.startsWith('sub_agent:code') || normalized === 'sub_agent_code') return 'sub_agent_code'
-  if (normalized.startsWith('sub_agent:translate') || normalized === 'sub_agent_translate') return 'sub_agent_translate'
-  if (normalized.startsWith('sub_agent:intent') || normalized === 'sub_agent_intent') return 'sub_agent_intent'
-  if (normalized.startsWith('sub_agent:vision') || normalized === 'sub_agent_vision') return 'sub_agent_vision'
-  if (normalized.startsWith('sub_agent:')) return 'sub_agent_intent'
-  if (normalized.startsWith('airlock')) return normalized.includes('egress') ? 'airlock_egress' : 'airlock_ingress'
-  if (normalized === 'host_input') return 'airlock_ingress'
-  if (normalized === 'llm_gateway' || normalized === 'cortex_orchestrator_llm_stream') return 'llm_stream'
-  if (normalized.startsWith('retrieval_') || normalized === 'recall_fusion') return 'recall_fusion'
-  return normalized
-}
-
-function getTraceGroupState(group, traceData) {
-  if (!group || !traceData) {
-    return { groupNodes: [], groupEdges: [], activeNodeIds: [], activeCount: 0, traceNodeMap: {} }
-  }
-
-  const allowedIds = new Set(getTraceGroupNodeIds(group))
-  const groupNodes = (traceData.nodes ?? []).filter((node) => {
-    const explicitGroupId = String(node?.group_id || '').trim()
-    if (explicitGroupId) return explicitGroupId === group.id
-    return allowedIds.has(normalizeTraceGroupNodeId(node.node_id, node.node_type))
-  })
-  const groupNodeIdSet = new Set(groupNodes.map((node) => node.node_id))
-  const groupEdges = (traceData.edges ?? []).filter((edge) => groupNodeIdSet.has(edge.source) && groupNodeIdSet.has(edge.target))
-  const activeNodeIds = [...new Set(groupNodes.map((node) => normalizeTraceGroupNodeId(node.node_id, node.node_type)))]
-
-  return {
-    groupNodes,
-    groupEdges,
-    activeNodeIds,
-    activeCount: activeNodeIds.length,
-    traceNodeMap: Object.fromEntries(groupNodes.map((node) => [node.node_id, node])),
-  }
-}
-
-function getTraceStatusPriority(status = '') {
-  return {
-    error: 5,
-    degraded: 4,
-    running: 3,
-    healthy: 2,
-    unknown: 1,
-  }[normalizeBadgeStatus(status)] ?? 0
-}
-
-function mergeObservedNodesIntoCanonicalTraceNode(canonicalNode, observedNodes) {
-  const orderedNodes = [...observedNodes].sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
-  const latestNode = orderedNodes[orderedNodes.length - 1] ?? {}
-  const highlightedNode = orderedNodes.reduce((selected, current) => {
-    if (!selected) return current
-    const selectedPriority = getTraceStatusPriority(selected?.status)
-    const currentPriority = getTraceStatusPriority(current?.status)
-    if (currentPriority !== selectedPriority) {
-      return currentPriority > selectedPriority ? current : selected
-    }
-    return (current?.ts_ms ?? 0) >= (selected?.ts_ms ?? 0) ? current : selected
-  }, null)
-  const observedNodeIds = orderedNodes
-    .map((node) => String(node?.node_id || '').trim())
-    .filter(Boolean)
-  const statusBreakdown = orderedNodes.reduce((accumulator, node) => {
-    const key = String(node?.status || 'UNKNOWN').toUpperCase()
-    accumulator[key] = (accumulator[key] ?? 0) + 1
-    return accumulator
-  }, {})
-  const cumulativeLatencyMs = orderedNodes.reduce((total, node) => (
-    total + (Number.isFinite(Number(node?.latency_ms)) ? Number(node.latency_ms) : 0)
-  ), 0)
-
-  return {
-    ...canonicalNode,
-    ...latestNode,
-    node_id: canonicalNode.node_id,
-    display_name: canonicalNode.display_name,
-    node_type: canonicalNode.node_type,
-    layer: canonicalNode.layer,
-    side: canonicalNode.layer,
-    status: highlightedNode?.status ?? latestNode?.status ?? 'UNKNOWN',
-    reason_code: highlightedNode?.reason_code ?? latestNode?.reason_code ?? null,
-    error: highlightedNode?.error ?? highlightedNode?.reason_code ?? latestNode?.error ?? null,
-    latency_ms: cumulativeLatencyMs > 0 ? cumulativeLatencyMs : (latestNode?.latency_ms ?? null),
-    input_data: orderedNodes.length > 1 ? {
-      observed_node_count: orderedNodes.length,
-      latest_observed_node_id: latestNode?.node_id ?? null,
-      latest_input: latestNode?.input_data ?? null,
-    } : (latestNode?.input_data ?? null),
-    output_data: orderedNodes.length > 1 ? {
-      observed_node_count: orderedNodes.length,
-      observed_node_ids: observedNodeIds,
-      latest_observed_node_id: latestNode?.node_id ?? null,
-      latest_display_name: latestNode?.display_name ?? null,
-      latest_status: latestNode?.status ?? null,
-      latest_output: latestNode?.output_data ?? null,
-      status_breakdown: statusBreakdown,
-    } : (latestNode?.output_data ?? null),
-  }
-}
-
-function getObservedTraceSchema(traceData) {
-  if (!traceData) {
-    return {
-      ...FULL_CHAIN_SCHEMA,
-      activeNodeIds: null,
-      traceNodeMap: {},
-      rawNodeCount: 0,
-      rawEdgeCount: 0,
-      canonicalized: true,
-    }
-  }
-
-  const observedNodes = Array.isArray(traceData?.nodes)
-    ? traceData.nodes.map((node) => ({ ...node, layer: node.layer ?? node.side ?? 'host' }))
-    : []
-  const observedEdges = Array.isArray(traceData?.edges) ? traceData.edges : []
-  const groupedObservedNodes = {}
-
-  observedNodes.forEach((node) => {
-    const canonicalId = normalizeTraceGroupNodeId(node.node_id, node.node_type)
-    if (!FULL_CHAIN_NODE_ID_SET.has(canonicalId)) return
-    if (!groupedObservedNodes[canonicalId]) groupedObservedNodes[canonicalId] = []
-    groupedObservedNodes[canonicalId].push(node)
-  })
-
-  const activeNodeIds = Object.keys(groupedObservedNodes)
-
-  if (activeNodeIds.length === 0) {
-    return {
-      nodes: observedNodes,
-      edges: observedEdges,
-      activeNodeIds: observedNodes.map((node) => node.node_id),
-      traceNodeMap: Object.fromEntries(observedNodes.map((node) => [node.node_id, node])),
-      rawNodeCount: observedNodes.length,
-      rawEdgeCount: observedEdges.length,
-      canonicalized: false,
-    }
-  }
-
-  return {
-    nodes: FULL_CHAIN_SCHEMA.nodes,
-    edges: FULL_CHAIN_SCHEMA.edges,
-    activeNodeIds,
-    traceNodeMap: Object.fromEntries(
-      activeNodeIds.map((nodeId) => [
-        nodeId,
-        mergeObservedNodesIntoCanonicalTraceNode(FULL_CHAIN_NODE_MAP[nodeId], groupedObservedNodes[nodeId]),
-      ]),
-    ),
-    rawNodeCount: observedNodes.length,
-    rawEdgeCount: observedEdges.length,
-    canonicalized: true,
-  }
-}
-
-const LIVE_TRACE_GROUP_ORDER = ['edge', 'entry', 'immune', 'retrieval', 'persona', 'orchestration', 'agent', 'llm', 'postprocess']
-
-function normalizeBadgeStatus(status) {
-  const value = String(status || '').toUpperCase()
-  if (['OK', 'UP', 'SUCCESS', 'APPROVE', 'APPROVED', 'APPLIED', 'ACCEPTED', 'RECEIVED', 'DISPATCHED', 'QUEUED', 'SENT', 'SKIPPED'].includes(value)) return 'healthy'
-  if (['RUNNING', 'STARTED'].includes(value)) return 'running'
-  if (['DEGRADED'].includes(value)) return 'degraded'
-  if (['FAIL', 'FAILED', 'ERROR', 'DOWN', 'REJECTED', 'REJECT'].includes(value)) return 'error'
-  return 'unknown'
-}
-
-function getLiveTraceStageLabel(groupId) {
-  return {
-    edge: '输入',
-    entry: '入口',
-    immune: '免疫',
-    retrieval: '检索',
-    persona: '人格',
-    orchestration: '编排',
-    agent: '代理',
-    llm: '模型',
-    postprocess: '输出',
-  }[groupId] ?? groupId
-}
-
-function getLatestTraceNode(traceData) {
-  const nodes = Array.isArray(traceData?.nodes) ? [...traceData.nodes] : []
-  if (nodes.length === 0) return null
-  nodes.sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
-  return nodes[nodes.length - 1]
-}
-
-function buildImmuneStageMeta(groupNodes = []) {
-  const orderedNodes = [...(Array.isArray(groupNodes) ? groupNodes : [])]
-    .sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
-
-  let decision = ''
-  let riskLevel = ''
-  const reasonTags = []
-  const seenReasonTags = new Set()
-
-  const pushReasonTag = (value) => {
-    const normalized = String(value || '').trim()
-    if (!normalized || seenReasonTags.has(normalized)) return
-    seenReasonTags.add(normalized)
-    reasonTags.push(normalized)
-  }
-
-  orderedNodes.forEach((node) => {
-    const payload = (node?.output_data && typeof node.output_data === 'object') ? node.output_data : {}
-    const nestedImmune = (payload?.immune_gate && typeof payload.immune_gate === 'object') ? payload.immune_gate : {}
-    const mergedPayload = { ...nestedImmune, ...payload }
-
-    const payloadDecision = String(mergedPayload.decision || '').trim().toUpperCase()
-    const payloadRisk = String(mergedPayload.risk_level || '').trim().toLowerCase()
-    if (payloadDecision) decision = payloadDecision
-    if (payloadRisk) riskLevel = payloadRisk
-
-    const reasonCode = String(node?.reason_code || mergedPayload.reason_code || '').trim()
-    if (reasonCode) pushReasonTag(reasonCode)
-
-    const reasonCodes = Array.isArray(mergedPayload.reason_codes) ? mergedPayload.reason_codes : []
-    reasonCodes.forEach((code) => pushReasonTag(code))
-  })
-
-  return {
-    decision: decision || null,
-    riskLevel: riskLevel || null,
-    reasonTags: reasonTags.slice(0, 3),
-  }
-}
-
-function isOptionalTraceNode(node) {
-  const nodeType = String(node?.node_type || '').toLowerCase()
-  if (nodeType === 'tts' || nodeType === 'vts') return true
-  if (nodeType === 'recall') {
-    const candidateCount = node?.output_data?.candidate_count
-    return !node?.reason_code && Number(candidateCount || 0) === 0
-  }
-  return false
-}
-
-function getLatestPrimaryTraceNode(traceData) {
-  const nodes = Array.isArray(traceData?.nodes) ? [...traceData.nodes] : []
-  if (nodes.length === 0) return null
-  nodes.sort((a, b) => (a?.ts_ms ?? 0) - (b?.ts_ms ?? 0))
-  for (let index = nodes.length - 1; index >= 0; index -= 1) {
-    if (!isOptionalTraceNode(nodes[index])) return nodes[index]
-  }
-  return nodes[nodes.length - 1]
-}
-
-function getLiveTraceFlow(traceData) {
-  const latestNode = getLatestPrimaryTraceNode(traceData)
-  const latestNormalizedNodeId = latestNode ? normalizeTraceGroupNodeId(latestNode.node_id, latestNode.node_type) : null
-  const latestGroupId = String(latestNode?.group_id || '').trim() || null
-
-  return LIVE_TRACE_GROUP_ORDER
-    .map((groupId) => GROUPS.find((group) => group.id === groupId))
-    .filter(Boolean)
-    .map((group) => {
-      const traceGroupState = getTraceGroupState(group, traceData)
-      const hasError = traceGroupState.groupNodes.some((node) => ['FAIL', 'ERROR', 'DOWN'].includes(String(node.status || '').toUpperCase()))
-      const isCurrent = latestGroupId ? latestGroupId === group.id : (latestNormalizedNodeId ? getTraceGroupNodeIds(group).includes(latestNormalizedNodeId) : false)
-      const immuneMeta = group.id === 'immune' ? buildImmuneStageMeta(traceGroupState.groupNodes) : null
-      let status = 'idle'
-      if (traceGroupState.activeCount > 0) {
-        status = hasError ? 'error' : (isCurrent ? 'running' : 'done')
-      }
-      return {
-        groupId: group.id,
-        label: getLiveTraceStageLabel(group.id),
-        count: traceGroupState.activeCount,
-        total: Math.max(getTraceGroupNodeIds(group).length, 1),
-        status,
-        immuneDecision: immuneMeta?.decision ?? null,
-        immuneRiskLevel: immuneMeta?.riskLevel ?? null,
-        immuneReasonTags: immuneMeta?.reasonTags ?? [],
-      }
-    })
-}
+const TraceFullChainView = React.lazy(() => import('../components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.FullChainView })))
+const TraceGroupDagRoute = React.lazy(() => import('../components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.GroupDagRoute })))
+const TraceInlineFullChainOverview = React.lazy(() => import('../components/trace/TraceAdvancedViews.jsx').then((module) => ({ default: module.InlineFullChainOverview })))
 
 function getLiveTraceStageClasses(stage, group) {
   if (stage.status === 'error') {
@@ -1180,540 +716,6 @@ function LiveTraceStreamPreview({ item, timelineEntries = [], onHighlight, onOpe
       <div className="flex items-center gap-2">
         <button className="btn-secondary text-xs" onClick={onHighlight}>显示总览图</button>
         <button className="btn-primary text-xs" onClick={onOpenDetail}>打开详情</button>
-      </div>
-    </div>
-  )
-}
-
-// ===== 构建 Flow 数据 =====
-function buildFlowData(schemaNodes, schemaEdges, onSelect, activeNodeIds = null, traceNodeMap = {}) {
-  const activeSet = activeNodeIds ? new Set(activeNodeIds) : null
-
-  const flowNodes = schemaNodes.map((n) => {
-    const isActive   = activeSet ? activeSet.has(n.node_id) : false
-    // activeSet 为 null 表示没有 trace 数据，所有节点正常显示（非 inactive）
-    const isInactive = activeSet ? !isActive : false
-    const traceNode  = traceNodeMap[n.node_id]
-    return {
-      id: n.node_id,
-      type: 'customNode',
-      position: { x: 0, y: 0 },
-      data: {
-        ...n,
-        ...(isActive && traceNode ? traceNode : {}),
-        onSelect,
-        inactive: isInactive,
-        active: isActive,
-      },
-    }
-  })
-
-  const flowEdges = schemaEdges.map((e) => {
-    const isActiveEdge = activeSet
-      ? activeSet.has(e.source) && activeSet.has(e.target)
-      : false
-    return {
-      id: `e-${e.source}-${e.target}`,
-      source: e.source,
-      target: e.target,
-      type: 'smoothstep',
-      animated: isActiveEdge,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: isActiveEdge ? '#2970FF' : '#94A3B8',
-        width: 16, height: 16,
-      },
-      style: {
-        stroke: isActiveEdge ? '#2970FF' : '#94A3B8',
-        strokeWidth: isActiveEdge ? 2.5 : 1.5,
-        opacity: isActiveEdge ? 1 : 0.55,
-      },
-    }
-  })
-
-  return applyDagreLayout(flowNodes, flowEdges)
-}
-
-// ===== 甘特图 =====
-function computeGanttTimeline(traceData) {
-  const nodes = traceData.nodes ?? []
-  const edges = traceData.edges ?? []
-  const inEdges = {}
-  nodes.forEach((n) => { inEdges[n.node_id] = [] })
-  edges.forEach((e) => { if (inEdges[e.target] !== undefined) inEdges[e.target].push(e.source) })
-  const latencyMap = {}
-  nodes.forEach((n) => { latencyMap[n.node_id] = n.latency_ms ?? 0 })
-  const startMap = {}
-  const visited = new Set()
-  function calcStart(nodeId) {
-    if (visited.has(nodeId)) return startMap[nodeId] ?? 0
-    visited.add(nodeId)
-    const preds = inEdges[nodeId] ?? []
-    startMap[nodeId] = preds.length === 0
-      ? 0
-      : Math.max(...preds.map((p) => calcStart(p) + (latencyMap[p] ?? 0)))
-    return startMap[nodeId]
-  }
-  nodes.forEach((n) => calcStart(n.node_id))
-  const totalMs = Math.max(...nodes.map((n) => (startMap[n.node_id] ?? 0) + (n.latency_ms ?? 0)), 1)
-  return nodes.map((n) => ({ ...n, start_ms: startMap[n.node_id] ?? 0, end_ms: (startMap[n.node_id] ?? 0) + (n.latency_ms ?? 0), total_ms: totalMs }))
-}
-
-const NODE_TYPE_COLOR = {
-  intent: '#2970FF', governor: '#7A5AF8', memory: '#0BA5EC',
-  immune: '#EA580C',
-  llm: '#F79009', tts: '#12B76A', vts: '#EE46BC',
-  recall: '#0891B2', retrieval: '#0891B2', bond: '#D97706',
-  asr: '#059669', system: '#475467', agent: '#7C3AED',
-  skill: '#0891B2', router: '#475467', judge: '#059669',
-  edge: '#667085', branch: '#0891B2', default: '#667085',
-}
-function nodeColor(t) { return NODE_TYPE_COLOR[t] ?? NODE_TYPE_COLOR.default }
-
-function GanttView({ traceData, onSelectNode }) {
-  const timeline = React.useMemo(() => computeGanttTimeline(traceData), [traceData])
-  const [filter, setFilter] = React.useState('')
-  if (timeline.length === 0) return null
-  const totalMs = timeline[0]?.total_ms ?? 1
-  const filtered = filter.trim()
-    ? timeline.filter((node) => {
-      const searchText = `${getTraceNodeDisplayName(node)} ${node.node_id || ''}`.toLowerCase()
-      return searchText.includes(filter.toLowerCase())
-    })
-    : timeline
-  const ticks = Array.from({ length: 6 }, (_, i) => Math.round(totalMs * i / 5))
-  return (
-    <div className="h-full overflow-auto p-4 bg-white">
-      <div className="flex items-center justify-between mb-3 gap-3">
-        <span className="text-xs font-medium text-gray-500">节点执行甘特图（总耗时 {totalMs}ms）</span>
-        <div className="relative">
-          <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input className="pl-6 pr-2 py-1 text-xs border border-gray-300 rounded w-36 focus:outline-none focus:ring-1 focus:ring-blue-200"
-            placeholder="过滤节点…" value={filter} onChange={e => setFilter(e.target.value)} />
-        </div>
-      </div>
-      <div className="flex mb-2 pl-40">
-        {ticks.map((t, i) => (
-          <div key={i} className="flex-1 text-xs text-gray-400 text-center border-l border-gray-200 first:border-l-0">{t}ms</div>
-        ))}
-      </div>
-      <div className="space-y-1.5">
-        {filtered.map((node) => {
-          const leftPct = (node.start_ms / totalMs) * 100
-          const widthPct = Math.max((node.latency_ms ?? 0) / totalMs * 100, 0.5)
-          const color = nodeColor(node.node_type)
-          return (
-            <div key={node.node_id}
-              className="flex items-center gap-2 rounded border cursor-pointer hover:shadow-sm transition-shadow bg-gray-50 border-gray-200"
-              style={{ padding: '4px 8px' }}
-              onClick={() => onSelectNode?.(node)}
-              title={`${getTraceNodeDisplayName(node)}: ${node.start_ms}ms → ${node.end_ms}ms (${node.latency_ms ?? 0}ms) [${node.status ?? '未知'}]`}
-            >
-              <div className="w-36 shrink-0">
-                <div className="text-xs font-medium text-gray-700 truncate">{getTraceNodeDisplayName(node)}</div>
-                <div className="text-xs text-gray-400">{node.latency_ms ?? 0}ms</div>
-              </div>
-              <div className="flex-1 relative h-6 bg-gray-100 rounded overflow-hidden">
-                <div className="absolute top-0 h-full rounded"
-                  title={`${node.latency_ms ?? 0}ms`}
-                  style={{ left: `${leftPct}%`, width: `${widthPct}%`, backgroundColor: color, opacity: 0.85, minWidth: '4px' }} />
-              </div>
-              <span className={`text-xs font-medium w-10 text-right shrink-0 ${(node.status ?? '').toUpperCase() === 'OK' ? 'text-green-600' : 'text-red-500'}`}>
-                {node.status ?? '—'}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ===== 分组 DAG 子页面 =====
-function GroupDagView({ groupId, traceData, onSelectNode }) {
-  const group = GROUPS.find(g => g.id === groupId)
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [selectedNode, setSelectedNode] = useState(null)
-  const [viewMode, setViewMode] = useState('dag')
-  const navigate = useNavigate()
-  const traceGroupState = group && traceData ? getTraceGroupState(group, traceData) : null
-
-  const handleSelect = useCallback((data) => {
-    setSelectedNode(data)
-    onSelectNode?.(data)
-  }, [onSelectNode])
-
-  useEffect(() => {
-    if (!group) return
-    const hasObservedTrace = traceGroupState && traceGroupState.groupNodes.length > 0
-    const nodeIdSet = new Set(group.nodeIds)
-    const groupNodes = hasObservedTrace
-      ? traceGroupState.groupNodes.map((node) => ({ ...node, layer: node.layer ?? node.side ?? 'host' }))
-      : FULL_CHAIN_SCHEMA.nodes.filter(n => nodeIdSet.has(n.node_id))
-    const groupEdges = hasObservedTrace
-      ? traceGroupState.groupEdges
-      : FULL_CHAIN_SCHEMA.edges.filter(e => nodeIdSet.has(e.source) && nodeIdSet.has(e.target))
-
-    const activeNodeIds = hasObservedTrace
-      ? traceGroupState.groupNodes.map((node) => node.node_id)
-      : (traceData ? (traceData.nodes ?? []).map(n => n.node_id) : null)
-    const traceNodeMap  = hasObservedTrace
-      ? traceGroupState.traceNodeMap
-      : (traceData ? Object.fromEntries((traceData.nodes ?? []).map(n => [n.node_id, n])) : {})
-
-    const { nodes: fn, edges: fe } = buildFlowData(groupNodes, groupEdges, handleSelect, activeNodeIds, traceNodeMap)
-    setNodes(fn)
-    setEdges(fe)
-  }, [groupId, traceData, handleSelect, setNodes, setEdges])
-
-  if (!group) return <EmptyStateCard title="分组不存在" hint="请返回链路总览重新选择分组。" className="p-8" />
-
-  const Icon = group.icon
-  const activeCount = traceGroupState ? traceGroupState.activeCount : 0
-  const totalNodeCount = traceData ? getTraceGroupNodeIds(group).length : group.nodeIds.length
-  const immuneGroupMeta = group.id === 'immune'
-    ? buildImmuneStageMeta(traceGroupState?.groupNodes ?? [])
-    : null
-
-  return (
-    <div className="flex flex-col h-full flex-1">
-      {/* 子页面头部 */}
-      <div className="card mb-4 space-y-3 p-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            className="btn-secondary text-xs"
-            onClick={() => navigate('/trace')}
-          >
-            <ArrowLeft size={14} />
-            返回
-          </button>
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-8 h-8 rounded-lg"
-              style={{ background: group.bg, color: group.color }}>
-              <Icon size={16} />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold text-gray-900">{group.label}</h2>
-              <p className="text-xs text-gray-500">{group.desc}</p>
-            </div>
-          </div>
-          {traceData && (
-            <div className="ml-auto flex items-center gap-2 text-xs text-gray-500">
-              <span className="px-2 py-1 rounded-full font-medium"
-                style={{ background: group.bg, color: group.color }}>
-                {activeCount} / {totalNodeCount} 节点激活
-              </span>
-              {immuneGroupMeta && (immuneGroupMeta.decision || immuneGroupMeta.riskLevel) ? (
-                <span className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-2 py-1 font-medium text-orange-700">
-                  {(immuneGroupMeta.decision || 'IMMUNE').toUpperCase()}
-                  {immuneGroupMeta.riskLevel ? `/${String(immuneGroupMeta.riskLevel).toLowerCase()}` : ''}
-                </span>
-              ) : null}
-              {(immuneGroupMeta?.reasonTags || []).slice(0, 2).map((reasonCode) => (
-                <span key={`immune-group-meta-${reasonCode}`} className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-1 font-medium text-amber-700">
-                  {reasonCode}
-                </span>
-              ))}
-            </div>
-          )}
-          {/* 视图切换 */}
-          {traceData && (
-            <div className="flex rounded-lg border border-primary-100/80 overflow-hidden text-xs">
-              <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'dag' ? 'bg-blue-600 text-white' : 'bg-white/90 text-gray-600 hover:bg-blue-50'}`}
-                onClick={() => setViewMode('dag')}>
-                <GitBranch size={11} /> 拓扑图
-              </button>
-              <button className={`flex items-center gap-1 px-2.5 py-1.5 transition-colors ${viewMode === 'gantt' ? 'bg-blue-600 text-white' : 'bg-white/90 text-gray-600 hover:bg-blue-50'}`}
-                onClick={() => setViewMode('gantt')}>
-                <BarChart2 size={11} /> 甘特图
-              </button>
-            </div>
-          )}
-        </div>
-        <div className="lifeline-rail h-1.5">
-          <div className="lifeline-wave h-full w-full" />
-        </div>
-      </div>
-
-      {/* 主体 */}
-      <div className="flex gap-4 flex-1 min-h-0" style={{ height: 'calc(100vh - 260px)' }}>
-        <div className="flex-1 card overflow-hidden h-full"
-          style={{ borderColor: group.border, background: '#FAFAFA' }}>
-          {viewMode === 'dag' && (
-            <ReactFlow
-              nodes={nodes} edges={edges}
-              onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-              nodeTypes={NODE_TYPES}
-              fitView fitViewOptions={{ padding: 0.2 }}
-              proOptions={{ hideAttribution: true }}
-              minZoom={0.2} maxZoom={3}
-            >
-              <Background color="#E2E8F0" gap={20} size={1} />
-              <Controls showInteractive={false} />
-              <MiniMap
-                nodeColor={(n) => n.data?.active ? group.color : '#CBD5E1'}
-                maskColor="rgba(249,250,251,0.7)"
-              />
-            </ReactFlow>
-          )}
-          {viewMode === 'gantt' && traceData && (
-            <GanttView
-              traceData={{ ...traceData, nodes: traceGroupState?.groupNodes ?? [], edges: traceGroupState?.groupEdges ?? [] }}
-              onSelectNode={handleSelect}
-            />
-          )}
-        </div>
-        {selectedNode && (
-          <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ===== 全链路 DAG 子页面 =====
-function FullChainView({ traceData, onSelectNode }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [selectedNode, setSelectedNode] = useState(null)
-  const [fullscreen, setFullscreen] = useState(false)
-  const containerRef = useRef(null)
-  const navigate = useNavigate()
-
-  const handleSelect = useCallback((data) => {
-    setSelectedNode(data)
-    onSelectNode?.(data)
-  }, [onSelectNode])
-
-  const overviewSchema = React.useMemo(() => getObservedTraceSchema(traceData), [traceData])
-
-  useEffect(() => {
-    const { nodes: fn, edges: fe } = buildFlowData(
-      overviewSchema.nodes,
-      overviewSchema.edges,
-      handleSelect,
-      overviewSchema.activeNodeIds,
-      overviewSchema.traceNodeMap,
-    )
-    setNodes(fn)
-    setEdges(fe)
-  }, [overviewSchema, handleSelect, setNodes, setEdges])
-
-  return (
-    <div className="flex flex-col h-full flex-1">
-      <div className="card mb-4 space-y-3 p-4">
-        <div className="flex items-center gap-3 flex-wrap">
-        <button className="btn-secondary text-xs"
-          onClick={() => navigate('/trace')}>
-          <ArrowLeft size={14} /> 返回
-        </button>
-        <div className="flex items-center gap-2">
-          <Layers size={16} className="text-blue-600" />
-          <h2 className="text-base font-semibold text-gray-900">双端全链路拓扑图</h2>
-        </div>
-        <div className="flex items-center gap-3 text-xs text-gray-500 ml-auto">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded border-2 border-gray-300" />
-            <span>未激活</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded border-2 border-blue-500" style={{ boxShadow: '0 0 4px rgba(41,112,255,0.4)' }} />
-            <span>激活链路</span>
-          </div>
-        </div>
-        <button className="btn-secondary p-1.5" onClick={() => {
-          if (!fullscreen) containerRef.current?.requestFullscreen?.()
-          else document.exitFullscreen?.()
-          setFullscreen(!fullscreen)
-        }}>
-          {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
-        </div>
-        <div className="lifeline-rail h-1.5">
-          <div className="lifeline-wave h-full w-full" />
-        </div>
-      </div>
-      <div ref={containerRef} className="flex gap-4 flex-1 min-h-0"
-        style={{ height: fullscreen ? '100vh' : 'calc(100vh - 240px)' }}>
-        <div className="flex-1 card overflow-hidden h-full">
-          <ReactFlow
-            nodes={nodes} edges={edges}
-            onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
-            nodeTypes={NODE_TYPES}
-            fitView fitViewOptions={{ padding: 0.12 }}
-            proOptions={{ hideAttribution: true }}
-            minZoom={0.08} maxZoom={2}
-          >
-            <Background color="#F2F4F7" gap={20} size={1} />
-            <Controls showInteractive={false} />
-            <MiniMap
-              nodeColor={(n) => n.data?.active ? '#2970FF' : n.data?.inactive ? '#CBD5E1' : '#94A3B8'}
-              maskColor="rgba(249,250,251,0.7)"
-            />
-          </ReactFlow>
-        </div>
-        {selectedNode && (
-          <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ===== Trace 主页：卡片分组概览 =====
-function InlineFullChainOverview({ traceData, requestId, onOpenDetail, onOpenStandalone, onHide }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
-  const [selectedNode, setSelectedNode] = useState(null)
-
-  const handleSelect = useCallback((data) => {
-    setSelectedNode(data)
-  }, [])
-
-  const overviewSchema = React.useMemo(() => getObservedTraceSchema(traceData), [traceData])
-
-  useEffect(() => {
-    const { nodes: fn, edges: fe } = buildFlowData(
-      overviewSchema.nodes,
-      overviewSchema.edges,
-      handleSelect,
-      overviewSchema.activeNodeIds,
-      overviewSchema.traceNodeMap,
-    )
-    setNodes(fn)
-    setEdges(fe)
-  }, [overviewSchema, handleSelect, setNodes, setEdges])
-
-  if (!traceData) return null
-
-  const currentStatus = String(traceData.status || '').toUpperCase()
-  const currentHealthy = ['OK', 'UP', 'SUCCESS'].includes(currentStatus)
-  const flow = getLiveTraceFlow(traceData)
-  const activeNodeSet = new Set(overviewSchema.activeNodeIds ?? [])
-  const nodeCount = activeNodeSet.size
-  const edgeCount = overviewSchema.edges.filter((edge) => activeNodeSet.has(edge.source) && activeNodeSet.has(edge.target)).length
-  const rawNodeCount = overviewSchema.rawNodeCount
-
-  return (
-    <div className="card rounded-2xl p-4 md:p-5">
-      <div className="flex items-start gap-3 flex-wrap">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-blue-600 text-white shadow-sm">
-            <Layers size={18} />
-          </span>
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">当前请求总览图</h2>
-            <p className="text-xs text-gray-500">
-              高亮后直接在首页看完整链路，不再需要先点分组卡片再看效果。
-            </p>
-          </div>
-        </div>
-        <div className="ml-auto flex items-center gap-2 flex-wrap">
-          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${currentHealthy ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-            {currentStatus || '未知'}
-          </span>
-          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
-            {nodeCount} 拓扑节点
-          </span>
-          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
-            {edgeCount} 激活连线
-          </span>
-          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
-            {rawNodeCount} 原始事件
-          </span>
-          {traceData.total_latency_ms != null && (
-            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-600">
-              {traceData.total_latency_ms}ms
-            </span>
-          )}
-          <button className="btn-secondary text-xs" onClick={onOpenStandalone}>
-            独立大图
-          </button>
-          {requestId && (
-            <button className="btn-primary text-xs" onClick={onOpenDetail}>
-              打开详情
-            </button>
-          )}
-          <button className="btn-secondary text-xs" onClick={onHide}>
-            收起
-          </button>
-        </div>
-      </div>
-      <div className="lifeline-rail mt-3 h-1.5">
-        <div className="lifeline-wave h-full w-full" />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {flow.map((stage) => {
-          const group = GROUPS.find((itemGroup) => itemGroup.id === stage.groupId)
-          const className = getLiveTraceStageClasses(stage, group)
-          const style = stage.status === 'done' && group
-            ? { background: group.bg, color: group.color, borderColor: group.border }
-            : undefined
-          return (
-            <div key={`overview-${traceData.request_id}-${stage.groupId}`} className="inline-flex items-center gap-1.5">
-              <span
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}
-                style={style}
-              >
-                {stage.label}
-                {stage.count > 0 ? `${stage.count}/${stage.total}` : '0'}
-              </span>
-              {renderImmuneStageTags(stage, `overview-${traceData.request_id}-${stage.groupId}`)}
-            </div>
-          )
-        })}
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-4">
-        <div className="rounded-xl border border-primary-100/70 overflow-hidden bg-white/80" style={{ height: '34rem' }}>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            nodeTypes={NODE_TYPES}
-            fitView
-            fitViewOptions={{ padding: 0.12 }}
-            proOptions={{ hideAttribution: true }}
-            minZoom={0.08}
-            maxZoom={2}
-          >
-            <Background color="#F2F4F7" gap={20} size={1} />
-            <Controls showInteractive={false} />
-            <MiniMap
-              nodeColor={(n) => n.data?.active ? '#2970FF' : n.data?.inactive ? '#CBD5E1' : '#94A3B8'}
-              maskColor="rgba(249,250,251,0.7)"
-            />
-          </ReactFlow>
-        </div>
-
-        <div className="space-y-4">
-          <div className="rounded-xl border border-primary-100/70 bg-white/80 p-4">
-            <div className="text-xs font-medium text-gray-500">当前请求</div>
-            <div className="mt-1 text-sm font-semibold text-gray-900 break-all">
-              {traceData.summary?.input_text || requestId || traceData.request_id}
-            </div>
-            <div className="mt-2 text-xs text-gray-500 font-mono break-all">{traceData.request_id}</div>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
-              <div>
-                <div className="text-gray-400">输入来源</div>
-                <div className="mt-1 text-gray-700">{traceData.summary?.source || 'GATEWAY/ASR'}</div>
-              </div>
-              <div>
-                <div className="text-gray-400">最终状态</div>
-                <div className={`mt-1 font-medium ${currentHealthy ? 'text-green-600' : 'text-amber-600'}`}>{currentStatus || '未知'}</div>
-              </div>
-            </div>
-          </div>
-
-          {selectedNode ? (
-            <NodeDetailPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
-          ) : (
-            <EmptyStateCard title="请选择节点" hint="点击左侧节点后查看输入、输出与状态。" className="p-5" />
-          )}
-        </div>
       </div>
     </div>
   )
@@ -2533,13 +1535,25 @@ function TraceHome({ traceData, setTraceData, traceInfo, setTraceInfo, loading, 
 
       {inlineOverviewVisible && traceData && (
         <div ref={inlineOverviewRef}>
-          <InlineFullChainOverview
-            traceData={traceData}
-            requestId={selectedRequestId}
-            onOpenDetail={() => selectedRequestId && openRequestTrace(selectedRequestId)}
-            onOpenStandalone={() => navigate('/trace/full')}
-            onHide={() => setInlineOverviewVisible(false)}
-          />
+          <React.Suspense
+            fallback={(
+              <div className="card p-4">
+                <NoticeBanner variant="info" title="加载中">
+                  正在加载当前请求总览图…
+                </NoticeBanner>
+              </div>
+            )}
+          >
+            <TraceInlineFullChainOverview
+              traceData={traceData}
+              requestId={selectedRequestId}
+              onOpenDetail={() => selectedRequestId && openRequestTrace(selectedRequestId)}
+              onOpenStandalone={() => navigate('/trace/full')}
+              onHide={() => setInlineOverviewVisible(false)}
+              renderImmuneStageTags={renderImmuneStageTags}
+              getLiveTraceStageClasses={getLiveTraceStageClasses}
+            />
+          </React.Suspense>
         </div>
       )}
 
@@ -2825,8 +1839,38 @@ export default function Trace() {
   return (
     <Routes>
       <Route index element={<TraceHome {...sharedProps} />} />
-      <Route path="full" element={<FullChainView traceData={traceData} />} />
-      <Route path="group/:groupId" element={<GroupDagViewWrapper traceData={traceData} />} />
+      <Route
+        path="full"
+        element={(
+          <React.Suspense
+            fallback={(
+              <div className="card p-4">
+                <NoticeBanner variant="info" title="加载中">
+                  正在加载全链路拓扑图…
+                </NoticeBanner>
+              </div>
+            )}
+          >
+            <TraceFullChainView traceData={traceData} />
+          </React.Suspense>
+        )}
+      />
+      <Route
+        path="group/:groupId"
+        element={(
+          <React.Suspense
+            fallback={(
+              <div className="card p-4">
+                <NoticeBanner variant="info" title="加载中">
+                  正在加载分组链路图…
+                </NoticeBanner>
+              </div>
+            )}
+          >
+            <TraceGroupDagRoute traceData={traceData} />
+          </React.Suspense>
+        )}
+      />
       <Route
         path=":requestId"
         element={(
@@ -2845,9 +1889,4 @@ export default function Trace() {
       />
     </Routes>
   )
-}
-
-function GroupDagViewWrapper({ traceData }) {
-  const { groupId } = useParams()
-  return <GroupDagView groupId={groupId} traceData={traceData} />
 }

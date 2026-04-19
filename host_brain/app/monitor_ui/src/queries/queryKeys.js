@@ -1,4 +1,7 @@
 export const OBS_QUERY_KEYS = Object.freeze({
+  lifeBody: (windowMinutes) => ['life-body', windowMinutes],
+  lifeTimeline: (params) => ['life-timeline', params],
+  pathologies: (params) => ['pathologies', params],
   runtimeSignals: (windowMinutes) => ['runtime-signals', windowMinutes],
   digitalLifeOverview: (windowMinutes) => ['digital-life-overview', windowMinutes],
   memoryOverview: (windowMinutes) => ['memory-overview', windowMinutes],

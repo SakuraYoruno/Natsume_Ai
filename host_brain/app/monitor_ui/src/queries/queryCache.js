@@ -12,6 +12,7 @@ function createEntry(cacheKey) {
     cacheKey,
     data: null,
     error: null,
+    failureCount: 0,
     status: 'idle',
     updatedAt: null,
     promise: null,
@@ -70,6 +71,7 @@ export async function executeQuery({
     .then((data) => {
       entry.data = data
       entry.error = null
+      entry.failureCount = 0
       entry.status = 'success'
       entry.updatedAt = Date.now()
       entry.promise = null
@@ -78,6 +80,7 @@ export async function executeQuery({
     })
     .catch((error) => {
       entry.error = error
+      entry.failureCount += 1
       entry.status = hasResolvedData ? 'stale' : 'error'
       entry.promise = null
       emit(entry)

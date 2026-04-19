@@ -1,4 +1,7 @@
 export const OBS_STALE_TIMES = Object.freeze({
+  lifeBody: 30_000,
+  lifeTimeline: 30_000,
+  pathologies: 30_000,
   runtime: 45_000,
   overview: 90_000,
   memory: 120_000,

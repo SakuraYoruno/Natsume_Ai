@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   BarChart2,
+  Activity,
   Bell,
   BookOpen,
   Bot,
@@ -42,6 +43,8 @@ const NAV_SECTIONS = [
     title: '数字生命体',
     items: [
       { to: '/digital-life', icon: Zap, label: '总览' },
+      { to: '/life-timeline', icon: Activity, label: '生命时间轴' },
+      { to: '/pathologies', icon: Bell, label: '病灶中心' },
       { to: '/emotion', icon: Smile, label: '情绪' },
       { to: '/bond', icon: Heart, label: '关系' },
       { to: '/memory', icon: Database, label: '记忆' },
