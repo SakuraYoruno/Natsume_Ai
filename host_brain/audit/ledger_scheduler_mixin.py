@@ -44,7 +44,7 @@ class LedgerSchedulerMixin:
                     str(task_config["trigger_mode"]),
                     json.dumps(task_config.get("trigger_config", {}), ensure_ascii=False),
                     json.dumps(task_config.get("intent_template", {}), ensure_ascii=False),
-                    str(task_config.get("priority", "NORMAL")),
+                    str(task_config.get("priority", "MEDIUM")),
                     int(task_config.get("enabled", 1)),
                     int(task_config.get("max_consecutive_failures", 3)),
                     ts,

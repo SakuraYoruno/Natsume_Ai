@@ -483,7 +483,7 @@ CREATE TABLE IF NOT EXISTS scheduler_tasks (
     trigger_mode    TEXT NOT NULL,
     trigger_config  TEXT NOT NULL,
     intent_template TEXT NOT NULL,
-    priority        TEXT NOT NULL DEFAULT 'NORMAL',
+    priority        TEXT NOT NULL DEFAULT 'MEDIUM',
     enabled         INTEGER NOT NULL DEFAULT 1,
     max_consecutive_failures INTEGER NOT NULL DEFAULT 3,
     registered_at   INTEGER NOT NULL,

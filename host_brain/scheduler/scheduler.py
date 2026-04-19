@@ -1014,7 +1014,7 @@ class NatsumeScheduler:
                     trigger_mode=TriggerMode(row["trigger_mode"]),
                     trigger_config=row.get("trigger_config", {}),
                     intent_template=row.get("intent_template", {}),
-                    priority=TaskPriority(row.get("priority", "NORMAL")),
+                    priority=TaskPriority(row.get("priority", "MEDIUM")),
                     enabled=bool(row.get("enabled", 1)),
                     max_consecutive_failures=int(row.get("max_consecutive_failures", 3)),
                 )
