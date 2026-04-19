@@ -1,223 +1,272 @@
 受众：MASTER
-标题：host_brain/core/ 层模块参考
+标题：host_brain/core/ 层模块参考（当前代码实况）
 
-# host_brain/core/ 层模块参考
-
-版本：v1.0
-日期：2026-03-19
+版本：v2.0
+日期：2026-04-19
 归属：docs/15_theory/
 
 ---
 
-## 概述
+定位：本文描述当前代码里的 `host_brain/core/` 层，而不是早期“纯 dataclass / validate_* / 无上游依赖”的理想化分层口径。
+若与旧文档冲突，以本文和代码为准。
 
-`host_brain/core/` 是整个系统的**基础数据契约层**，不包含业务逻辑，只定义：
+## 0. 代码证据入口
 
-- 数据结构（dataclass / TypedDict）
-- 验证函数（validate_*）
-- 归一化函数（normalize_*）
-- 常量与枚举
-
-上层模块（`integrations/`、`app/`、`lsp/`）均依赖此层，此层不得反向依赖上层。
+- `host_brain/core/prompt_context.py`
+- `host_brain/core/metabolism.py`
+- `host_brain/core/emotion_timeline.py`
+- `host_brain/core/endocrine.py`
+- `host_brain/core/services.py`
+- `host_brain/core/mode_transition.py`
+- `host_brain/core/activity_monitor.py`
+- `host_brain/core/predictive_state.py`
+- `host_brain/core/meta_learning_loop.py`
+- `host_brain/core/runtime_helpers.py`
+- `host_brain/core/errors.py`
+- `host_brain/core/ids.py`
+- `host_brain/core/config_snapshot.py`
+- `host_brain/core/key_profiles.py`
+- `host_brain/core/qa.py`
+- `host_brain/core/qa_checks.py`
 
 ---
 
-## 模块一览
+## 一、当前层定位
 
-| 文件 | 职责 |
+当前 `host_brain/core/` 仍然承担“基础状态与通用契约”的角色，但它已经不只是一个零业务依赖的数据层。
+
+当前现实更接近：
+
+- 一部分模块是底层状态/类型契约
+- 一部分模块是运行时辅助与监控工具
+- 少数模块已经直接依赖 `audit/` 或 `app/`
+
+典型例子：
+
+- `services.py` 直接依赖 `host_brain.audit.sqlite_ledger`
+- `runtime_helpers.py` 直接依赖 `host_brain.app.prompt_template_store`
+
+所以当前不能再把 `core/` 简化理解为“完全不碰业务的纯基础层”。
+
+---
+
+## 二、当前主模块一览
+
+| 文件 | 当前职责 |
 |---|---|
-| `prompt_context.py` | Prompt 上下文槽位契约与验证 |
-| `metabolism.py` | 硬状态（HardState）+ 情感向量（EmotionVector）+ 代谢机制 |
-| `emotion_timeline.py` | 情感时间线（从 metabolism 拆分，独立模块） |
-| `services.py` | 服务注册表、健康报告、启动编排 |
+| `prompt_context.py` | Prompt 上下文槽位契约、验证、动态槽位注册 |
+| `metabolism.py` | `HardState` / `EmotionVector`、硬状态演化、治理快照 |
+| `emotion_timeline.py` | 情感时间线与 `compute_emotion_echo` |
+| `endocrine.py` | 从离散硬状态派生连续内分泌基调 |
+| `services.py` | Service registry、健康报告、启动报告、节点清单校验 |
+| `mode_transition.py` | sys_mode 切换服务 |
+| `activity_monitor.py` | Host 本地活动/游戏/空闲监控 |
+| `predictive_state.py` | 周期性情绪模式预测 |
+| `meta_learning_loop.py` | 系统指标记录与参数调整建议 |
+| `runtime_helpers.py` | 模板、SSE、Airlock、trace 强制转换等纯函数工具 |
 | `errors.py` | 全局错误码常量 |
-| `ids.py` | ID 生成与时间戳工具 |
+| `ids.py` | request/intent/event/timestamp 工具 |
+| `config_snapshot.py` | 配置快照辅助 |
 | `key_profiles.py` | 密钥配置文件管理 |
-| `config_snapshot.py` | 配置快照工具 |
-| `qa.py` / `qa_checks.py` | QA 检查契约 |
+| `qa.py` / `qa_checks.py` | QA 契约与检查逻辑 |
 | `service_reporters.py` | 服务状态上报辅助 |
 
 ---
 
-## prompt_context.py
+## 三、prompt_context.py 当前契约
 
-### 槽位定义
+### 3.1 必填槽位
 
-`PromptContext` 是一个 `dict[str, Any]`，包含以下**必填槽位**：
+`EXPECTED_SLOTS` 当前定义的必填槽位：
 
-| 槽位名 | 类型 | 语义 |
-|---|---|---|
-| `hard_snapshot` | `dict` | 当前硬状态快照（mood_state、energy_level、allowed_emotion_tags 等） |
-| `bond_summary` | `dict` | 关系摘要（stage、trend、event_id、evidence_refs） |
-| `authoritative` | `list` | 权威知识条目（world_canon、宪法约束等） |
-| `retrieval` | `list` | 检索结果条目（RAG 召回内容） |
-| `style_pack` | `dict` | 风格包（语气、说话风格等） |
-| `constraints` | `dict` | 约束规则（安全约束、行为边界） |
-| `tool_meta_pack` | `list` | 工具元数据（工具描述，不含执行参数） |
+- `hard_snapshot`
+- `bond_summary`
+- `authoritative`
+- `retrieval`
+- `style_pack`
+- `constraints`
+- `tool_meta_pack`
 
-**可选槽位**：
+### 3.2 可选槽位
 
-| 槽位名 | 类型 | 语义 |
-|---|---|---|
-| `semantic_slot` | `list` | 语义记忆蒸馏结果（M10-C） |
-| `emotion_pulse` | `dict` | 当前情感脉冲（emotion_tag、mood_state、valence、arousal、intensity、style_hint） |
-| `bond_texture` | `dict` | 关系纹理（细粒度关系描述） |
-| `memory_emotion_hint` | `dict` | 记忆情感提示 |
+`OPTIONAL_SLOTS` 当前不止旧文档列的 4 项，还包括：
 
-### 槽位隔离规则
+- `semantic_slot`
+- `emotion_pulse`
+- `emotion_recall`
+- `bond_texture`
+- `memory_emotion_hint`
+- `memory_persona_evidence`
+- `memory_recall_summary`
+- `self_reflection_pulse`
+- `bond_narrative`
 
-- `authoritative` 槽位**禁止**包含 `tone`、`speaking_style`、`style_instruction` 等风格字段（防止 CP_SLOT_MIXED）
-- `style_pack` 槽位**禁止**包含 `event_id`、`evidence_refs`、`fact`、`snapshot` 等审计字段
-- `tool_meta_pack` 条目**禁止**包含 `args`、`command`、`input`、`result` 等执行字段（防止 CP_TOOL_META_FORBIDDEN_FIELD）
-- `authoritative` 中 `kind=world_canon` 的条目**禁止**断言执行事实（防止 CP_CANON_AS_FACT）
+这说明当前 prompt context 已经预留了：
 
-### 动态槽位注册（M28-G OPT-16）
+- 情绪回忆补充
+- 人格证据
+- 自省脉冲
+- 关系叙事
+
+等更丰富的注入位。
+
+### 3.3 动态槽位注册
+
+当前仍支持：
 
 ```python
-from host_brain.core.prompt_context import register_slot
-
-register_slot("my_slot", lambda ctx: ctx.get("my_data"))
+register_slot(name: str, builder_fn: Any)
 ```
 
-注册后，`validate_prompt_context()` 会自动识别该槽位，不再报 `PC_UNKNOWN_SLOT`。
+注册后，`validate_prompt_context()` 会把该槽位当成合法槽位处理。
 
-### 错误码
+### 3.4 当前验证重点
 
-| 错误码 | 含义 |
-|---|---|
-| `PROMPT_CONTEXT_MISSING_SLOT` | 缺少必填槽位 |
-| `PROMPT_CONTEXT_UNKNOWN_SLOT` | 出现未知槽位 |
-| `PROMPT_CONTEXT_TYPE_INVALID` | 槽位类型不匹配 |
-| `CONTEXT_SLOT_MIXED` | 槽位内容混入了其他槽位的字段 |
-| `CANON_AS_FACT_VIOLATION` | world_canon 内容断言了执行事实 |
-| `BOND_SUMMARY_NUMERIC_FORBIDDEN` | bond_summary 包含数值字段 |
-| `BOND_SUMMARY_FIELD_INVALID` | bond_summary 字段非法 |
-| `TOOL_META_INVALID` | tool_meta_pack 条目非法 |
-| `TOOL_META_FORBIDDEN_FIELD` | tool_meta_pack 包含执行字段 |
+当前验证仍重点防止：
+
+- `authoritative` 混入风格字段
+- `style_pack` 混入审计字段
+- `tool_meta_pack` 混入执行参数/结果
+- `world_canon` 条目断言执行事实
 
 ---
 
-## metabolism.py
+## 四、metabolism.py 当前契约
 
-### HardState（硬状态）
+### 4.1 HardState
 
-```python
-@dataclass(frozen=True)
-class HardState:
-    energy_level: int      # [0, 100]，能量值
-    mood_state: str        # calm / steady / engaged / tired / critical
-    sys_mode: str          # normal / focus / gaming / maintenance / locked
-    safety_flag: bool      # 安全标志
-    last_event_id: str | None
-    ts_ms: int             # 最后更新时间戳（毫秒）
-```
-
-**energy_bucket 映射**：
-
-| energy_level | bucket |
-|---|---|
-| < 20 | `very_low` |
-| 20–39 | `low` |
-| 40–69 | `normal` |
-| ≥ 70 | `high` |
-
-### EmotionVector（VAD 情绪连续体，M28-A OPT-1）
+当前核心状态结构仍是：
 
 ```python
-@dataclass
-class EmotionVector:
-    valence: float    # 效价 [-1.0, 1.0]，正=积极，负=消极
-    arousal: float    # 唤醒度 [-1.0, 1.0]，正=兴奋，负=平静
-    dominance: float  # 支配感 [-1.0, 1.0]，正=主导，负=顺从
-    ts_ms: int
+HardState(
+    energy_level: int,
+    mood_state: str,
+    sys_mode: str,
+    safety_flag: bool,
+    last_event_id: str | None,
+    ts_ms: int,
+)
 ```
 
-关键方法：
-- `decay(rate=0.05)` — 情绪衰减，向中性靠近
-- `blend(other, weight=0.3)` — 情绪混合
-- `to_mood_state()` — 映射为离散 mood_state
-- `to_emotion_tag()` — 映射为离散 emotion_tag（NEUTRAL/HAPPY/EXCITED/SAD/ANGRY/SURPRISED/CALM/THINKING）
+`sys_mode` 当前代码口径包括：
 
-### mood_state → emotion_tag 约束（M26-G）
+- `normal`
+- `focus`
+- `gaming`
+- `maintenance`
+- `locked`
+- `sleep`
 
-| mood_state | 允许的 emotion_tag（第一个为降级默认值） |
-|---|---|
-| `critical` | NEUTRAL, SAD |
-| `tired` | NEUTRAL, CALM, SAD |
-| `calm` | NEUTRAL, CALM, THINKING |
-| `steady` | NEUTRAL, CALM, HAPPY, THINKING, SAD, ANGRY |
-| `engaged` | HAPPY, EXCITED, SURPRISED, THINKING, NEUTRAL, ANGRY |
+### 4.2 EmotionVector
 
-### HardStateSnapshot（M28-B OPT-6）
+当前连续情绪结构：
 
-`build_hard_snapshot(state)` 从 `HardState` 构建快照，包含：
-- `mood_state`、`energy_level`
-- `allowed_emotion_tags`（tuple）
-- `emotion_range_hint`（中文情感范围提示）
-- `emotion_ts_ms`（情感状态时间戳，M29-K OPT-18）
+```python
+EmotionVector(
+    valence: float,
+    arousal: float,
+    dominance: float,
+    ts_ms: int,
+)
+```
 
-### 治理快照（governance_snapshot）
+当前主能力仍包括：
 
-`build_governance_snapshot(state, overrides=None)` 产出供 Governor 使用的快照，包含：
-- `trust_level`、`energy_level`、`sys_mode`
-- `rate_limit_hit`、`airlock_blocked`、`safety_flag`
-- `scope`、`scope_allowlist`
-- `hard_state_summary`（含 energy_bucket、mood_state、emotion_ts_ms）
-- `mood_state`、`emotion_tag`、`emotion_intensity`（M27-C OPT-22 透传）
+- `decay()`
+- `blend()`
+- `to_mood_state()`
+- `to_emotion_tag()`
 
-### 事件语义扩展（M28-E OPT-13）
+### 4.3 快照函数
 
-`evolve_hard_state()` 支持以下 `event_kind`：
+当前两个关键输出：
 
-| event_kind | 效果 |
-|---|---|
-| `emotion_spike` | 能量 +5，mood → engaged（energy≥60 时） |
-| `emotion_calm` | mood → calm（energy≥40 时） |
-| `bond_deepen` | 能量 +3 |
-| 其他 | 按 energy 自动推断 mood |
+- `build_hard_snapshot(state)`
+- `build_governance_snapshot(state, overrides=None)`
+
+其中 `build_governance_snapshot()` 会产出 Governor 直接消费的：
+
+- `trust_level`
+- `energy_level`
+- `sys_mode`
+- `rate_limit_hit`
+- `airlock_blocked`
+- `safety_flag`
+- `scope`
+- `scope_allowlist`
+- `hard_state_summary`
+- `mood_state`
+- `emotion_tag`
+- `emotion_intensity`
+
+所以 `core/metabolism.py` 现在不仅服务情绪层，也直接服务治理层。
 
 ---
 
-## emotion_timeline.py
+## 五、emotion_timeline.py 与 endocrine.py
 
-从 `metabolism.py` 拆分的独立模块，包含 `EmotionTimeline`、`EmotionTimelineEntry`、`compute_emotion_echo`。
+### 5.1 emotion_timeline.py
 
-### EmotionTimeline（M29-E OPT-9）
+当前该模块负责：
+
+- `EmotionTimeline`
+- `EmotionTimelineEntry`
+- `compute_emotion_echo()`
+
+其中 `rebuild_summary()` 会给出：
+
+- `dominant_emotion`
+- `trend`
+- `entry_count`
+- 最近窗口条目
+
+### 5.2 endocrine.py
+
+这是旧文档没有覆盖、但当前代码已真实存在的基础状态模块。
+
+核心接口：
 
 ```python
-timeline = EmotionTimeline(max_entries=50)
-timeline.append(ts_ms=..., emotion_tag="HAPPY", valence=0.6, arousal=0.4, source="user_input")
-summary = timeline.rebuild_summary(window_ms=300_000)  # 5 分钟窗口
+derive_endocrine_state(
+    hard_state=...,
+    emotion_tag: str | None = None,
+    emotion_intensity: float | None = None,
+) -> EndocrineState
 ```
 
-`rebuild_summary()` 返回：
-- `dominant_emotion`：窗口内出现最多的情感标签
-- `trend`：`improving` / `stable` / `declining`（基于前后半段 valence 均值对比，阈值 0.15）
-- `entry_count`、`entries`（最近 5 条）
+`EndocrineState` 当前输出：
 
-### compute_emotion_echo（M29-H OPT-12）
+- `dopamine_level`
+- `serotonin_level`
+- `cortisol_level`
+- `energy_reserve`
+- `gate_state`
 
-情感回声：Natsume 的情感向用户情感靠近（共情），但保持独立性（不完全镜像）。
+`gate_state` 当前为：
 
-```python
-echo = compute_emotion_echo("SAD", current_vector=vector, echo_weight=0.4)
-# 返回: echo_emotion_tag, echo_valence, echo_arousal, response_hint
-```
+- `protective`
+- `cautious`
+- `open`
+
+这套连续状态已经被 Scheduler/治理侧拿来做门控参考。
 
 ---
 
-## services.py
+## 六、services.py 当前契约
 
-### ServiceRegistry
+### 6.1 当前定位
 
-服务注册表，单一真相来源。
+`services.py` 不只是“服务清单工具”，而是：
 
-```python
-registry = ServiceRegistry()
-registry.register(ServiceSpec(service_id="host.audit.sqlite_ledger", owner="host", required=True))
-```
+- Service registry
+- 运行时健康汇总
+- 启动报告收口
+- 节点清单与依赖探针归一化
 
-默认注册表（`build_default_service_registry()`）包含 8 个 host 必需服务：
+### 6.2 build_default_service_registry()
+
+当前默认注册的 Host required 服务有 8 个：
+
 - `host.audit.sqlite_ledger`
 - `host.governor.decision`
 - `host.skills.loader`
@@ -227,40 +276,177 @@ registry.register(ServiceSpec(service_id="host.audit.sqlite_ledger", owner="host
 - `host.vision.screen_ocr`
 - `host.vision.camera_recognizer`
 
-Edge 服务为可选依赖，不可用时降级并记录 WARNING。
+同时：
 
-### ServiceHealthReporter
+- 会尝试从 `edge_client.rpc.edge_required_services()` 拉取 Edge 服务声明
+- Edge 不可用时按降级处理，不会阻断 Host 启动
 
-`build_report(request_id, runtime_statuses, ts_ms)` 产出服务健康报告：
-- `overall_status`：UP / DEGRADED
-- `services`：每个服务的 status（UP / DOWN / DEGRADED）、reason_code、detail
+### 6.3 ServiceHealthReporter
 
-### ServiceStartupOrchestrator
+`build_report()` 当前主要输出：
 
-`build_startup_report(...)` 合并 config/runtime/probe 三路状态，产出启动报告：
-- `boot_status`：READY / DEGRADED
-- `startup_issues`、`dependency_probes`、`services`
+- `summary.overall_status`
+- `required_total`
+- `required_unavailable`
+- `optional_unavailable`
+- `services[]`
 
-### NodeSpec 与节点清单
+状态值主要为：
 
-`NodeSpec` 字段：`node_id`、`region`、`role`、`services`、`health_endpoint`、`key_profile_id`
+- `UP`
+- `DOWN`
+- `DEGRADED`
 
-允许的 `role` 值：`orchestrator`、`audit`、`llm`、`retrieval`、`vision`、`edge_gateway`、`edge_voice`、`edge_realtime`、`standby`
+### 6.4 ServiceStartupOrchestrator
 
-`validate_node_inventory()` 检查：节点 ID 唯一性、角色唯一性、健康端点唯一性、必需服务覆盖率。
+`build_startup_report()` 会合并：
+
+- runtime statuses
+- dependency probes
+- startup issues
+
+并给出：
+
+- `boot_status`
+- `issue_count`
+- `probe_total`
+- `services`
+- `dependency_probes`
+- `startup_issues`
+
+### 6.5 NodeSpec / 节点清单
+
+`NodeSpec` 当前仍包含：
+
+- `node_id`
+- `region`
+- `role`
+- `services`
+- `health_endpoint`
+- `key_profile_id`
+
+`validate_node_inventory()` 负责检查：
+
+- 节点 ID 唯一性
+- health endpoint 唯一性
+- 角色冲突
+- 必需服务覆盖
 
 ---
 
-## 依赖关系
+## 七、mode_transition.py 与 activity_monitor.py
 
-```
-host_brain/core/
-  ├── errors.py          ← 无依赖（纯常量）
-  ├── ids.py             ← 无依赖
-  ├── metabolism.py      ← 依赖 ids.py
-  ├── emotion_timeline.py← 依赖 metabolism.py（TYPE_CHECKING only）
-  ├── prompt_context.py  ← 依赖 tools/catalog.py、bond/summarizer.py、memory/canon_world_store.py
-  └── services.py        ← 依赖 audit/sqlite_ledger.py、errors.py、ids.py
+这两份也是当前 `core/` 的有效运行时模块，旧文档未覆盖。
+
+### 7.1 ModeTransitionService
+
+`mode_transition.py` 当前负责：
+
+- 手动切换 sys_mode
+- 自动规则切换
+- 审计模式切换事件
+
+主要来源：
+
+- `manual`
+- `auto_gaming`
+- `auto_idle`
+- `auto_wakeup`
+- `auto_schedule`
+- `skill`
+
+### 7.2 ActivityMonitor
+
+`activity_monitor.py` 当前负责：
+
+- Windows 前台窗口/进程检测
+- 游戏进程匹配
+- 空闲检测
+- 早间唤醒检查
+
+它与 `ModeTransitionService` 共同组成当前 Host 端“模式切换自动化”的基础层。
+
+---
+
+## 八、predictive_state.py 与 meta_learning_loop.py
+
+这两份同样说明 `core/` 已经不只是静态 schema 层。
+
+### 8.1 PredictiveStateEngine
+
+`predictive_state.py` 当前通过历史时段样本预测：
+
+- 当前时段主导情绪
+- 置信度
+- 主动提示语
+
+### 8.2 MetaLearningLoop
+
+`meta_learning_loop.py` 当前负责：
+
+- 记录模块运行指标
+- 生成 `EvolutionReport`
+- 给出 `ParameterAdjustment`
+
+这两部分更接近“基础运行时能力”，而不是单纯数据结构。
+
+---
+
+## 九、runtime_helpers.py
+
+这也是旧文档未覆盖的重要现实模块。
+
+当前主要提供：
+
+- 模板读取/格式化工具
+- `_sse()` 输出封装
+- Airlock 输入/输出净化工具
+- reply preview 构造
+- trace mapping/bool/score 强制转换
+
+需要注意：
+
+- 它当前会依赖 `host_brain.app.prompt_template_store`
+- 因此它已经不是“完全脱离 app 层的纯基础工具”
+
+---
+
+## 十、当前依赖关系应如何理解
+
+当前更准确的理解是：
+
+```text
+core/
+  = 基础状态 + 通用约束 + 运行时辅助
 ```
 
-**禁止反向依赖**：`core/` 模块不得导入 `integrations/`、`app/`、`lsp/` 中的任何模块。
+而不是：
+
+```text
+core/
+  = 绝对纯净、零上游依赖、只放 dataclass/常量
+```
+
+当前实际代码里至少存在这些上游依赖：
+
+- `services.py -> audit.sqlite_ledger`
+- `runtime_helpers.py -> app.prompt_template_store`
+
+所以 `core/` 现在是“偏底层，但并非完全无业务耦合”的层。
+
+---
+
+## 十一、当前不再适用的旧口径
+
+以下说法不再准确：
+
+- `core/` 只定义 dataclass / validate_* / normalize_*，不含运行时模块
+- `core/` 不依赖任何 `app/`、`audit/` 相关模块
+- `core/` 只需要关注 `prompt_context / metabolism / services` 三四个老模块
+
+当前正确口径应是：
+
+1. `core/` 仍是基础层，但已经包含模式切换、活动监控、预测状态、元学习、内分泌基调等运行时辅助模块。
+2. `prompt_context.py` 的可选槽位已经明显扩展。
+3. `services.py` 已承担启动报告、服务健康和节点清单校验职责。
+4. `core/` 当前并不是严格零上游依赖层。

@@ -494,7 +494,7 @@ flowchart TD
 
 目标：把“页面级数据拼装”升级成“领域查询层 + 统一观测对象”。
 
-执行状态：第十六批落地完成（2026-04-18，本轮已完成 T2-39，累计完成 T2-1 ~ T2-39）
+执行状态：第二十九批落地完成（2026-04-19，本轮已完成 T2-64 ~ T2-65，累计完成 T2-1 ~ T2-65）
 
 执行 Todo：
 
@@ -576,6 +576,58 @@ flowchart TD
   - 完成情况：已新增 `src/routes/routeLoaders.js`，统一收口页面 loader 与 `lazy()` 定义；`Layout.jsx` 中的导航按钮现会在 hover/focus/touchstart 时调用 `preloadRoute()` 预取下一页 chunk，减少 `Trace / Insights / DigitalLifeOverview` 等重型页面的切页白屏等待。
 - [x] T2-39：继续拆分 `Trace` 重型 chunk，按需加载请求级详情视图
   - 完成情况：`Trace.jsx` 中的 `TraceRequestDetail` 已改为路由级 `React.lazy()` 按需加载，并补上了详情路由 fallback；重新构建后 `Trace-*` chunk 由约 `181.6 kB` 降到约 `72.6 kB`，同时生成独立的 `TraceRequestDetail-*` chunk（约 `55.2 kB`），显著降低了进入 `Trace` 首页时的下载体积。
+- [x] T2-40：继续拆分 `Trace` 高级拓扑视图，抽离共享链路模型与按需图视图模块
+  - 完成情况：已新增 `src/components/trace/traceFlowModel.js` 统一承载 `GROUPS / FULL_CHAIN_SCHEMA / getTraceGroupState / getLiveTraceFlow / normalizeBadgeStatus` 等共享链路对象模型，并新增 `src/components/trace/TraceAdvancedViews.jsx` 承载 `Trace` 的分组 DAG、全链路拓扑图和首页 inline 总览图；`Trace.jsx` 现改为按需懒加载这些高级图视图。重新构建后 `Trace-*` chunk 进一步收缩到约 `45.9 kB`，同时新增独立 `TraceAdvancedViews-*` chunk（约 `15.7 kB`）。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/trace`、`#/trace/full`、`#/trace/test-request-id` 的实测确认：`/trace` 首屏仅加载 `Trace.jsx`，`/trace/full` 才加载 `TraceAdvancedViews.jsx`，`/trace/:id` 继续只单独加载 `TraceRequestDetail.jsx`。
+- [x] T2-41：继续拆分 `Insights` 重型分组视图，把 `global` 深钻页从根页总览中按需拆出
+  - 完成情况：已新增 `src/components/insights/InsightsGlobalGroup.jsx`，将 `Insights` 的 `global` 分组主内容以及 `ErrorHeatmap / CapabilityGap / Chain / Failure` 等深钻 section 抽为独立懒加载模块；`Insights.jsx` 在 `currentGroup === 'global'` 时才通过 `React.lazy()` 加载。重新构建后 `Insights-*` 主 chunk 由约 `70.8 kB` 收缩到约 `54.9 kB`，同时新增独立 `InsightsGlobalGroup-*` chunk（约 `17.0 kB`）。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights` 与 `#/insights/global` 的实测确认：根页只加载 `Insights.jsx`，进入 `global` 分组后才额外加载 `InsightsGlobalGroup.jsx`。
+- [x] T2-42：继续拆分 `Insights` 的 `memory` 深钻页，把器官健康矩阵和记忆深钻 section 从根页主 chunk 中按需拆出
+  - 完成情况：已新增 `src/components/insights/InsightsMemoryGroup.jsx`，将 `memory` 分组的器官健康矩阵、记忆器官统计以及 `EpisodicStore / ContextCompressor` 深钻 section 抽为独立懒加载模块；`Insights.jsx` 在 `currentGroup === 'memory'` 时才通过 `React.lazy()` 加载。重新构建后 `Insights-*` 主 chunk 进一步由约 `54.9 kB` 收缩到约 `47.8 kB`，同时新增独立 `InsightsMemoryGroup-*` chunk（约 `8.9 kB`）。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights` 与 `#/insights/memory` 的实测确认：根页仍只加载 `Insights.jsx`，进入 `memory` 分组后才额外加载 `InsightsMemoryGroup.jsx`。
+- [x] T2-43：清理 `Insights` 主文件中已迁出的 `memory` 旧实现和残余依赖，收口本轮 `Insights` 分组拆分
+  - 完成情况：`Insights.jsx` 已移除迁出到 `InsightsMemoryGroup.jsx` 的旧 `memory` 分组内联实现、`ContextCompressorStatsSection / EpisodicStoreStatsSection` 定义，以及对应的无效依赖；再次执行 `npm run build` 通过，保持 `Insights-*` 主 chunk 约 `47.8 kB`，说明页面已经稳定切换到“根页 + 按需分组模块”的新结构。
+- [x] T2-44：继续拆分 `Insights` 的 `llm` 深钻页，把执行循环、推理成本和路由/提示/召回深钻从根页主 chunk 中按需拆出
+  - 完成情况：已新增 `src/components/insights/InsightsLlmGroup.jsx`，将 `llm` 分组的执行循环统计、推理成本统计以及 `Route / PromptBuilder / RecallPack` 深钻 section 抽为独立懒加载模块；`Insights.jsx` 在 `currentGroup === 'llm'` 时才通过 `React.lazy()` 加载。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights/llm` 的实测确认：该路由只额外加载 `InsightsLlmGroup.jsx` 与共享 `insightsGroupShared.jsx`，不再把其它分组逻辑一并拉进首屏。
+- [x] T2-45：继续拆分 `Insights` 的 `safety` 深钻页，把安全与护栏分组从根页主 chunk 中按需拆出
+  - 完成情况：已新增 `src/components/insights/InsightsSafetyGroup.jsx`，将 `safety` 分组的 `QA / Permission / SchedulerGate / MemoryGuard / UIAssertion / Tribe` 深钻 section 抽为独立懒加载模块；`Insights.jsx` 在 `currentGroup === 'safety'` 时才按需加载。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights/safety` 的实测确认：该路由只额外加载 `InsightsSafetyGroup.jsx` 与共享 `insightsGroupShared.jsx`。
+- [x] T2-46：继续拆分 `Insights` 的 `state` 深钻页，把状态与规范分组从根页主 chunk 中按需拆出
+  - 完成情况：已新增 `src/components/insights/InsightsStateGroup.jsx`，将 `state` 分组的 `StateArbiter / CanonProposal` 深钻 section 抽为独立懒加载模块；`Insights.jsx` 在 `currentGroup === 'state'` 时才按需加载。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights/state` 的实测确认：该路由只额外加载 `InsightsStateGroup.jsx` 与共享 `insightsGroupShared.jsx`。
+- [x] T2-47：继续拆分 `Insights` 的 `vts` 深钻页，把表情通道分组从根页主 chunk 中按需拆出
+  - 完成情况：已新增 `src/components/insights/InsightsVtsGroup.jsx`，将 `vts` 分组的表情通道统计与对话门控统计抽为独立懒加载模块；`Insights.jsx` 在 `currentGroup === 'vts'` 时才按需加载。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights/vts` 的实测确认：该路由只额外加载 `InsightsVtsGroup.jsx` 与共享 `insightsGroupShared.jsx`。
+- [x] T2-48：抽取 `Insights` 分组共享 helper 并清理根页残余深钻实现，完成 `Insights` 根页主包瘦身
+  - 完成情况：已新增 `src/components/insights/insightsGroupShared.jsx`，统一收口 `formatTime / StatCard / SectionQueryMeta / loadState` 等重复 helper，并回接到 `InsightsGlobalGroup.jsx`、`InsightsMemoryGroup.jsx` 及新拆出的四个分组模块；`Insights.jsx` 现仅保留根页摘要、分组导航和按需懒加载骨架，已移除全部内联深钻 section 旧实现。重新执行 `npm run build` 后，`Insights-*` 主 chunk 由约 `47.8 kB` 继续收缩到约 `10.8 kB`，同时新增独立的 `InsightsLlmGroup-*`（约 `13.3 kB`）、`InsightsSafetyGroup-*`（约 `16.9 kB`）、`InsightsStateGroup-*`（约 `6.1 kB`）、`InsightsVtsGroup-*`（约 `3.2 kB`）以及共享 `insightsGroupShared-*`（约 `1.8 kB`）；使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/insights` 的实测确认：根页只加载 `Insights.jsx`，不再提前加载任何具体分组实现。
+- [x] T2-49：为 `DigitalLifeOverview` 引入共享 section shell 与视口门控基础设施，给首屏以下生命体分区延迟激活打底
+  - 完成情况：已新增 `src/components/obs/ViewportLazySection.jsx` 作为基于 `IntersectionObserver` 的视口延迟加载容器，并新增 `src/components/digitalLife/digitalLifeSectionShared.jsx` 统一承载 `LifeSection / DomainCard / GrowthTextCard`；`LifeSection` 同时补上了 `content-visibility` 与 `contain-intrinsic-size`，让未进入视口的生命体分区减少首屏布局与绘制成本。
+- [x] T2-50：为 `DigitalLifeOverview` 的 Gateway 区块和下半屏生命体分区接入视口级延迟渲染，避免首页一进入就渲染完整长页
+  - 完成情况：`DigitalLifeOverview.jsx` 已把 `Gateway` 深区块和后续次级生命体分区统一包到 `ViewportLazySection` 中，首屏先展示轻量占位 banner，待视口接近后再激活真实内容；这一步先解决的是首屏渲染压力，而不是一次性把所有逻辑都继续塞在首屏同步渲染。
+- [x] T2-51：将 `DigitalLifeOverview` 下半屏次级生命体分区拆为独立懒加载模块，进一步收缩总览页主 chunk
+  - 完成情况：已新增 `src/components/digitalLife/DigitalLifeSecondarySections.jsx`，将“体征核心指标 / 非监督成长 / 器官系统联通态 / 体内快照与异常槽位”四个下半屏分区从 `DigitalLifeOverview.jsx` 中拆出，并在 `ViewportLazySection + React.Suspense` 中按需加载。重新执行 `npm run build` 后，`DigitalLifeOverview-*` 主 chunk 由约 `46.4 kB` 收缩到约 `38.6 kB`，同时新增独立 `DigitalLifeSecondarySections-*` chunk（约 `7.2 kB`）与共享 `digitalLifeSectionShared-*` chunk（约 `2.9 kB`）。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/digital-life` 的实测确认：首屏仅加载 `DigitalLifeOverview.jsx + digitalLifeSectionShared.jsx`，滚动到下半屏后才额外加载 `DigitalLifeSecondarySections.jsx`。
+- [x] T2-52：将 `DigitalLifeOverview` 的 Gateway 深区块拆为独立懒加载模块，进一步收缩总览页主 chunk
+  - 完成情况：已新增 `src/components/digitalLife/DigitalLifeGatewaySection.jsx`，把 `Gateway` 区块中的闭环趋势、病灶热区、源头归因、异常回放与自愈建议从 `DigitalLifeOverview.jsx` 中整体抽离，并改为通过 `React.lazy()` 独立加载；Gateway 相关格式化 helper、request 样本装配与深层派生逻辑也一起迁入该模块。重新执行 `npm run build` 后，`DigitalLifeOverview-*` 主 chunk 继续由约 `38.6 kB` 收缩到约 `17.0 kB`，同时新增独立 `DigitalLifeGatewaySection-*` chunk（约 `23.1 kB`）。
+- [x] T2-53：为 `DigitalLifeOverview` 的 Gateway 与次级生命体分区补齐分段按需加载验证，确认视口触发边界生效
+  - 完成情况：`DigitalLifeOverview.jsx` 已改为在 `ViewportLazySection` 内通过 `React.Suspense` 加载 `DigitalLifeGatewaySection`；使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/digital-life` 的实测确认：首屏只加载 `DigitalLifeOverview.jsx + digitalLifeSectionShared.jsx`，滚动到约 `scrollY=758` 时才额外加载 `DigitalLifeGatewaySection.jsx`，继续滚动到约 `scrollY=1852` 时才再加载 `DigitalLifeSecondarySections.jsx`，说明 Gateway 与下半屏分区已经形成分段式按需加载链路。
+- [x] T2-54：将 `DigitalLifeOverview` 的 `Capability Gap & Forge Loop` 区块拆为独立懒加载模块，继续压缩总览页主 chunk
+  - 完成情况：已新增 `src/components/digitalLife/DigitalLifeCapabilitySection.jsx`，把 `Capability Gap & Forge Loop` 中的 gap 摘要、forge 健康提示、热点列表和风险队列从 `DigitalLifeOverview.jsx` 抽离，并改为通过 `React.lazy()` 独立加载。重新执行 `npm run build` 后，`DigitalLifeOverview-*` 主 chunk 继续由约 `17.0 kB` 收缩到约 `14.3 kB`，同时新增独立 `DigitalLifeCapabilitySection-*` chunk（约 `4.2 kB`）。
+- [x] T2-55：为 `DigitalLifeOverview` 补齐 `Capability -> Gateway -> Secondary` 三级视口按需加载验证，确认长页分段加载顺序稳定
+  - 完成情况：`DigitalLifeOverview.jsx` 已把 `Capability Gap & Forge Loop` 接入 `ViewportLazySection + React.Suspense`。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/digital-life` 的实测确认：首屏仍只加载 `DigitalLifeOverview.jsx + digitalLifeSectionShared.jsx`；滚动到约 `scrollY=220` 时仅额外加载 `DigitalLifeCapabilitySection.jsx`，滚动到约 `scrollY=1100` 时再额外加载 `DigitalLifeGatewaySection.jsx`，继续滚动到约 `scrollY=1840` 时才加载 `DigitalLifeSecondarySections.jsx`，说明总览页已经形成稳定的三级分段加载链。
+- [x] T2-56：拆分 `Metrics` 深层诊断 mini cards，将后半段 diagnostics 区块迁为独立懒加载模块
+  - 完成情况：已新增 `src/components/metrics/MetricsDiagnosticsCards.jsx`，把 `MemoryGuard / StateArbiter / ContextCompressor / PromptBuilder / EpisodicStore / Canon / Chain / Distillation / SemanticRecall` 这组诊断 mini cards 及其 query helper 全部从 `Metrics.jsx` 中抽离，并改为通过 `React.lazy()` 独立加载。重新执行 `npm run build` 后，`Metrics-*` 主 chunk 由约 `26.6 kB` 收缩到约 `11.0 kB`，同时新增独立 `MetricsDiagnosticsCards-*` chunk（约 `16.8 kB`）。
+- [x] T2-57：为 `Metrics` 补齐深层 diagnostics 区块的视口按需加载验证，确认首屏不再提前拉取后半段 mini cards
+  - 完成情况：`Metrics.jsx` 已通过 `ViewportLazySection + React.Suspense` 接入 `MetricsDiagnosticsCards`。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/metrics` 的实测确认：首屏只加载 `Metrics.jsx + ViewportLazySection.jsx`，当滚动到约 `scrollY=946` 时才额外加载 `MetricsDiagnosticsCards.jsx`，同时页面上才出现“记忆守卫规则校验（近 1h）”“请求链路统计（近 1h）”“语义召回”等 diagnostics 卡片，说明 `Metrics` 已形成“主摘要先到、深层诊断后到”的按需加载结构。
+- [x] T2-58：将 `Automation` 的“生命体运行与免疫护栏”分区拆为独立懒加载模块，避免首屏提前装配 immune gate 统计与回放细节
+  - 完成情况：已新增 `src/components/automation/AutomationImmuneSectionContent.jsx`，把 `Automation.jsx` 中的 `DigitalLifeRuntimeCard`、immune gate 统计、原因热区、近期事件与指定 `request_id` 回放逻辑整体抽离，并通过 `React.lazy()` 挂回主页面；同时在 `src/queries/automationQueries.js` 补充 `refreshSchedulerHistoryQuery()`，保留顶部刷新与任务操作后的历史联动刷新能力。重新执行 `npm run build` 后，`Automation-*` 主 chunk 收敛到约 `14.9 kB`，immune 分区独立产出 `AutomationImmuneSectionContent-*` chunk（约 `14.2 kB`）。
+- [x] T2-59：将 `Automation` 的“节律历史脉络”分区拆为独立懒加载模块，并验证 `Automation` 页分段加载顺序
+  - 完成情况：已新增 `src/components/automation/AutomationHistorySectionContent.jsx`，把 24h 调度历史摘要、门控分布、任务级历史体征与执行量对比图从 `Automation.jsx` 中整体抽离，并在页面中改为 `ViewportLazySection + React.Suspense` 按需加载。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/automation` 的实测确认：首屏仅加载 `Automation.jsx + ViewportLazySection.jsx`；滚动到约 `scrollY=240` 时才额外加载 `AutomationImmuneSectionContent.jsx`，继续滚动到约 `scrollY=1820` 时才加载 `AutomationHistorySectionContent.jsx`，说明 `Automation` 已形成“主骨架 -> 免疫护栏 -> 历史脉络”的分段加载链。
+- [x] T2-60：将 `Tools` 的 provider 安装器与工具侧深层统计拆为独立懒加载模块，收缩工具页主 chunk
+  - 完成情况：已新增 `src/components/tools/ToolsOperationsSection.jsx`，把 `CustomSkillInstaller`、provider 列表、权限拦截统计和执行计划统计从 `Tools.jsx` 中整体抽离，并新增 `refreshPermissionStatsQuery()`、`refreshActionPlanStatsQuery()` 保留页首刷新与共享缓存联动。重新执行 `npm run build` 后，`Tools-*` 主 chunk 由约 `27.7 kB` 收缩到约 `13.1 kB`，同时新增独立 `ToolsOperationsSection-*` chunk（约 `12.7 kB`）。
+- [x] T2-61：为 `Tools` 补齐深层运维分区的视口按需加载验证，确认首屏不再提前拉取 provider 与深层统计
+  - 完成情况：`Tools.jsx` 已通过 `ViewportLazySection + React.Suspense` 接入 `ToolsOperationsSection`。使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/tools` 的实测确认：首屏仅加载 `Tools.jsx + ViewportLazySection.jsx`；当滚动到约 `scrollY=320` 时才额外加载 `ToolsOperationsSection.jsx`，说明工具页已经形成“目录与执行器先到、provider 与深层统计后到”的按需加载结构。
+- [x] T2-62：将 `Canon` 的提案审核、文档浏览与提交提案弹窗拆为独立懒加载模块，并关闭隐藏标签页的预取数
+  - 完成情况：已新增 `src/components/canon/CanonProposalsSection.jsx`、`src/components/canon/CanonDocumentsSection.jsx`、`src/components/canon/CanonSubmitModal.jsx`，并重写 `Canon.jsx` 使其只保留页级状态、英雄区与变更清单统计；同时为 `src/queries/canonQueries.js` 补充 `enabled` 参数，让未激活标签页不再提前发起查询。重新执行 `npm run build` 后，`Canon-*` 主 chunk 由约 `22.4 kB` 收缩到约 `9.6 kB`，并新增独立 `CanonProposalsSection-*` chunk（约 `7.3 kB`）、`CanonDocumentsSection-*` chunk（约 `3.2 kB`）与 `CanonSubmitModal-*` chunk（约 `4.3 kB`）。
+- [x] T2-63：为 `Canon` 补齐标签页与弹窗级按需加载验证，确认首屏只装当前提案审核分区
+  - 完成情况：使用 `agent-browser` 对 `http://127.0.0.1:4173/monitor/#/canon` 的实测确认：首屏加载时只出现 `Canon.jsx + CanonProposalsSection.jsx`，并未提前加载文档浏览与提交提案弹窗模块；切换到“主设定文档”后才额外加载 `CanonDocumentsSection.jsx`，点击“提交提案”后才加载 `CanonSubmitModal.jsx`。这说明 `Canon` 已形成“页级壳 -> 当前标签分区 -> 按需弹窗”的分层加载结构。
+- [x] T2-64：抽取 `PromptConfig / PersonaPromptOps` 共享模板详情编辑面板，收敛重复的保存、恢复、详情预览与状态展示逻辑
+  - 完成情况：已新增 `src/components/promptOps/PromptTemplateEditorPanel.jsx`，把两页重复的覆盖内容编辑、默认值/生效值预览、详情元信息、保存/恢复按钮和详情状态提示收敛到同一组件；并更新 `PromptConfig.jsx`、`PersonaPromptOps.jsx` 改为通过 `React.lazy()` 引入共享详情面板。重新执行 `npm run build` 后，`PromptConfig-*` 主 chunk 由约 `12.7 kB` 收缩到约 `10.5 kB`，`PersonaPromptOps-*` 主 chunk 由约 `13.6 kB` 收缩到约 `11.3 kB`，同时新增独立 `PromptTemplateEditorPanel-*` chunk（约 `4.1 kB`）。
+- [x] T2-65：验证 `PromptConfig / PersonaPromptOps` 两页共用同一个懒加载详情模块，确认共享 chunk 生效
+  - 完成情况：使用 `agent-browser` 分别打开 `http://127.0.0.1:4173/monitor/#/prompt-config` 和 `http://127.0.0.1:4173/monitor/#/persona-config`，确认两页都会加载同一个 `PromptTemplateEditorPanel.jsx` 资源，而不再各自携带一份独立详情编辑实现；`PromptConfig` 页面在模板详情出现后会补载该共享模块，切到 `PersonaPromptOps` 后则直接复用同一共享 chunk。
 
 交付项：
 

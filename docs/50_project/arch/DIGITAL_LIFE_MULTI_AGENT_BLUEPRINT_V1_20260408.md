@@ -1,10 +1,16 @@
 # 数字生命多智能体族蓝图 v1（2026-04-08）
 
 - 受众：MASTER / 核心研发
-- 状态：Draft（可直接进入 P0 实施）
+- 状态：蓝图留痕（2026-04-19 已校准；原文为 Draft / 可直接进入 P0 实施）
 - 目标：在保持“单一人格核心”的前提下，完成数字生命系统的多智能体族重构。
 
 ---
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-04-08 的多智能体族蓝图，不是当前运行时事实文档。
+- 当前仓库并不存在 `host_brain/app/top_agent.py`；现行入口以 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py -> executive_runtime*` 为准，`/v1/host/input` 回流以 `host_brain/app/input_routes.py` 为准。
+- 文中出现的 `ContextPack`、`StateArbiter`、主 DAG / 子图 DAG、P0-P3 迁移路线，应按蓝图/阶段设想理解，不直接作为当前任务来源。
+- 其中 `inner_activity_agent.py`、`inner_world.py`、`chat_context_builder.py`、`monitor_ui/src` 是仓库中的真实模块，但本文对它们的“代码映射”属于当时方案映射，不等同于当前接口契约。
 
 ## 1. 问题定义（为何要重构）
 
@@ -185,18 +191,18 @@
 
 ---
 
-## 9. 当前代码映射（v1 初始）
+## 9. 当时设想的代码映射（2026-04-08 草案）
 
 - `host_brain/persona/inner_activity_agent.py`：已作为动机情感族子模块起点
 - `host_brain/persona/inner_world.py`：内心流引擎（需继续协议化）
-- `host_brain/app/top_agent.py`：主链路编排（需拆分为标准 DAG 节点）
+- `host_brain/app/top_agent.py`：当时设想的主链路编排入口（当前仓库不存在，应以 `chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py` 现行链为准）
 - `host_brain/app/chat_context_builder.py`：状态注入中心（需升级为 ContextPack builder）
 - `host_brain/app/monitor_ui/src`：trace 可视化（需补全子图级展示）
 
 ---
 
-## 10. 立即执行结论
+## 10. 当时的执行结论（历史）
 
-本蓝图不是“先讨论后实现”，可以直接进入 `P0`。  
-P0 任务详见：`docs/35_quality/audits/DIGITAL_LIFE_MULTI_AGENT_P0_EXECUTION_20260408.md`
-
+2026-04-08 的原始结论是“本蓝图不是先讨论后实现，可以直接进入 `P0`”。  
+截至 2026-04-19，这一表述仅保留为阶段留痕；现行整理、实现与验收应以 `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md` 和实际代码为准。  
+历史执行稿仍可参见：`docs/35_quality/audits/DIGITAL_LIFE_MULTI_AGENT_P0_EXECUTION_20260408.md`

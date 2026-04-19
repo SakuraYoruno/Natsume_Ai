@@ -1,8 +1,8 @@
 受众：MASTER
 标题：host_brain 外围层接口契约（airlock / bond / channels / vision / lsp / mcp）
 
-版本：v1.0
-日期：2026-03-19
+版本：v1.1
+日期：2026-04-19
 归属：docs/15_theory/
 
 ---
@@ -15,7 +15,7 @@
 |---|------|---------|
 | Airlock | `airlock/` | 入站内容隔离分类与沙箱执行 |
 | Bond | `bond/` | 情感关系图谱（SSOT）写入与阶段晋级 |
-| Channels | `channels/` | VTube Studio / WeChat 双通道 I/O |
+| Channels | `channels/` | VTube Studio / Edge RPC / 审计化通道 I/O |
 | Vision | `vision/` | 摄像头多检测器并行执行与聚合 |
 | LSP / Vault | `lsp/` | 可逆工件库（ArtifactVault）管理 |
 | MCP Registry | `mcp/` | MCP 工具元数据注册与同步 |
@@ -221,7 +221,10 @@ class StageTransitionResult:
 | `vts_mapping_store.py` | VTS 情感→表情 ID 映射存储 |
 | `vts_rate_limiter.py` | VTS 速率限制器 |
 | `vts_runtime_mapping.py` | VTS 运行时映射 |
-| `wechat.py` | WeChat 通道（消息收发） |
+| `edge_rpc_client.py` | Host → Edge / Gateway HTTP 推送客户端（VTS / TTS / `/v1/gateway/reply`） |
+| `tts_context_router.py` | TTS 情感/语速/语言路由 |
+| `multimodal_processor.py` | 多模态信号加工 |
+| `wechat.py` | WeChat 审计化通道 I/O |
 | `wechat_health.py` | WeChat 健康检查 |
 
 ### 3.2 VTS 通道（VTube Studio）
@@ -446,48 +449,44 @@ class ToolMeta:
     reversible: bool       # 是否可撤销
     version: str = "1.0.0"
     schema_hash: str = ""  # 参数 Schema 哈希
+    domain_tags: list[str] = []            # 领域标签
+    emotion_requirement: list[str] = []    # 情感适用性约束；空列表表示无限制
 ```
 
 ### 6.3 MCPToolRegistry（注册表）
 
 ```python
 registry = MCPToolRegistry(
-    db_path: str | Path = "host_brain/data/mcp_registry.db",
+    db_path: str | Path = ":memory:",
+    check_same_thread: bool = True,
 )
 
-# 同步工具（upsert + 变更日志）
-sync_result = registry.sync_tools(
-    provider_id: str,
-    tools: list[ToolMeta],
-) -> SyncResult
+# 注册 / 更新单个工具（upsert + 变更日志）
+sync_entry = registry.register(meta: ToolMeta) -> dict[str, Any]
 
 # 查询工具
-tool = registry.get_tool(provider_id: str, tool_id: str) -> ToolMeta | None
+tool = registry.get(provider_id: str, tool_id: str) -> ToolMeta | None
 
 # 列出提供商所有工具
-tools = registry.list_tools(provider_id: str) -> list[ToolMeta]
-```
+tools = registry.list_by_provider(provider_id: str) -> list[ToolMeta]
 
-**SyncResult**：
+# 列出全部已注册工具
+all_tools = registry.list_all() -> list[ToolMeta]
 
-```python
-@dataclass
-class SyncResult:
-    added: int      # 新增工具数
-    updated: int    # 更新工具数
-    removed: int    # 移除工具数
-    unchanged: int  # 未变更工具数
+# 读取变更历史
+history = registry.sync_log() -> list[dict[str, Any]]
 ```
 
 **变更日志**（`mcp_sync_log` 表）：
-- 每次 `sync_tools` 对有变更的工具写入 before/after diff（append-only）
+- 每次 `register()` 都会写入 append-only 的 `INSERT` / `UPDATE` 记录
+- 日志项包含 `before / after / diff / ts_ms`
 - 用于审计 MCP 工具集的历史变更
 
 ### 6.4 MCP 与 host_brain/tools/ 的关系
 
 ```
 MCPToolRegistry（mcp/）
-  ↓ sync_tools()
+  ↓ register() / sync_log()
 MCP 工具元数据（SQLite）
   ↓ mcp_adapter.py（tools/）
 ToolCatalog（tools/catalog.py）
@@ -497,7 +496,7 @@ ToolBroker（tools/broker.py）
 ```
 
 - `mcp/tool_registry.py` 负责 MCP 工具的**持久化注册与变更追踪**
-- `tools/mcp_adapter.py` 负责将 MCP 工具**适配注册到 ToolCatalog**（见 `TOOLS_MEMORY_LAYER_CONTRACT.md`）
+- `tools/mcp_adapter.py` 负责将 MCP provider 工具**适配注册到 ToolCatalog**（见 `TOOLS_MEMORY_LAYER_CONTRACT.md`）
 - 两者职责不同，不可混用
 
 ---
@@ -511,8 +510,8 @@ Airlock → app/chat_handler.py
 Bond → integrations/graph_contract.py
   BondDynamicsWriter.apply_update() 由 graph 节点调用，evidence_ref 来自 EvidencePlane
 
-Channels/VTS → app/vts_emotion_driver.py + app/top_agent.py
-  流式输出时同步触发 VTS 表情控制
+Channels/VTS/Gateway → app/chat_agent.py + app/input_routes.py + channels/edge_rpc_client.py
+  ChatAgent 决定文字/语音输出策略；Gateway/ASR 回流由 input_routes 注入 `reply_channel / reply_target`；真正的外部平台回复与 VTS/TTS 推送通过 `edge_rpc_client.py` 发往 Edge / Gateway。
 
 Vision → app/chat_handler_vision.py
   摄像头帧数据经 MultiDetectorAggregator 处理后注入 GraphState

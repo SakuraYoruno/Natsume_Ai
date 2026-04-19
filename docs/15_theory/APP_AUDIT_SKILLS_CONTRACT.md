@@ -1,433 +1,291 @@
 受众：MASTER
-标题：host_brain 核心应用层契约（app / audit / skills / observability）
+标题：host_brain 核心应用层契约（当前代码实况：app / audit / skills / observability）
 
-版本：v1.0
-日期：2026-03-19
+版本：v2.2
+日期：2026-04-19
 归属：docs/15_theory/
 
 ---
 
-## 概述
+定位：本文只描述当前代码里 `host_brain` 应用层、审计层、技能层和观测层的真实入口与契约。
+若与旧文档中的 `SceneRouter / main_chain / top_agent / dispatch_agent / chat_handler_complex` 口径冲突，以本文和代码为准。
 
-本文档覆盖 `host_brain/` 下四个核心应用层的接口契约：
+## 0. 代码证据入口
 
-| 层 | 目录 | 核心职责 |
-|---|------|---------|
-| App | `app/` | FastAPI 应用入口、聊天处理、Prompt 构建、场景路由 |
-| Audit | `audit/` | SQLiteLedger 审计账本（全系统唯一写入口） |
-| Skills | `skills/` | 技能注册表与执行层（SkillRegistry） |
-| Observability | `observability/` | 指标采集与观测面 HTTP 路由 |
+- `host_brain/__main__.py`
+- `host_brain/obs_main.py`
+- `host_brain/app/fastapi_app.py`
+- `host_brain/app/obs_fastapi_app.py`
+- `host_brain/app/chat_handler.py`
+- `host_brain/app/cortex_orchestrator.py`
+- `host_brain/app/agent_runtime_shared.py`
+- `host_brain/app/executive_router.py`
+- `host_brain/app/executive_runtime.py`
+- `host_brain/app/executive_runtime_core.py`
+- `host_brain/app/input_routes.py`
+- `host_brain/app/agent_routes.py`
+- `host_brain/app/web_ui.py`
+- `host_brain/app/obs_routes_life_body.py`
+- `host_brain/audit/sqlite_ledger.py`
+- `host_brain/audit/ledger_log_mixin.py`
+- `host_brain/skills/registry.py`
+- `host_brain/skills/loader.py`
+- `host_brain/skills/executor_registry.py`
 
 ---
 
-## 一、App 层（FastAPI 应用）
+## 一、App 层（当前运行面）
 
-### 1.1 模块清单（核心）
+### 1.1 当前进程与主入口
 
-| 模块文件 | 职责 |
-|---------|------|
-| `fastapi_app.py` | FastAPI 应用实例与路由注册 |
-| `main.py` | 应用启动入口 |
-| `chat_handler.py` | POST /v1/chat 统一入口（Governor 鉴权 + 场景分类 + 路由分发） |
-| `chat_handler_complex.py` | 复杂场景 LangGraph 编排（`_complex_scene_sse_generator`） |
-| `chat_handler_edge.py` | Gaming Edge RPC 路由（`_gaming_edge_chat_sse_generator`） |
-| `chat_handler_vision.py` | 视觉界面场景（`_vision_ui_sse_generator`） |
-| `top_agent.py` | SSE 流式输出处理 |
-| `prompt_builder.py` | LLM 提示词渲染（从 fastapi_app.py 拆分） |
-| `entry_routing.py` | 入口路由工具（fast-pass、narrative 判定） |
-| `graph_config_builder.py` | 场景分类关键词配置与 pre_intent_classifier |
-| `emotion_context.py` | 情感快照构建（build_chat_emotion_snapshot 等） |
-| `chat_context_builder.py` | 聊天上下文构建 |
-| `chat_runtime_input.py` | 运行时输入解析（prompt_context/emotion/retrieval 等） |
-| `execution_profile.py` | 执行配置文件 |
-| `failure_matrix.py` | 失败矩阵（三图失败收口） |
-| `dependencies.py` | FastAPI 依赖注入（get_intent_engine 等） |
-| `startup_snapshot.py` | 启动时配置快照 |
-| `observability.py` | 观测面集成 |
-| `observability_persist.py` | 情节记忆持久化（persist_chat_episodic_memory） |
-| `provider_factory.py` | LLM 提供商工厂 |
-| `sentence_splitter.py` | 句子分割器（流式输出用） |
-| `system_handler.py` | 系统指令处理 |
-| `web_ui.py` | Web UI 路由 |
-| `webui_aggregation.py` | Web UI 数据聚合 |
+| 运行面 | 代码入口 | 说明 |
+|---|---|---|
+| Host Main | `host_brain/__main__.py` + `host_brain/app/fastapi_app.py` | 主运行时，承载 `/v1/chat`、`/v1/host/input`、`/v1/agent/*` 及大部分业务路由 |
+| Observability Backend | `host_brain/obs_main.py` + `host_brain/app/obs_fastapi_app.py` | 独立观测后端，承载 `/obs/*`、`/api/ui/*` 与 Monitor UI 观测类接口 |
+| Edge RPC | `edge_client/__main__.py` + `edge_client/app/fastapi_app.py` | 身体侧 RPC 能力与回调入口 |
 
-### 1.2 场景分类（SceneType）
+### 1.2 Host Main 当前路由面
 
-```python
-SCENE_CHAT          = "CHAT"           # 纯叙事对话
-SCENE_EXEC_INTENT   = "EXEC_INTENT"    # 执行意图（工具调用）
-SCENE_WORK_CODE     = "WORK_CODE"      # 代码工作
-SCENE_WORK_TRANSLATE = "WORK_TRANSLATE" # 翻译工作
-SCENE_VISION_UI     = "VISION_UI"      # 视觉界面
-```
+`host_brain/app/fastapi_app.py` 当前直接挂载或定义了以下主路由面：
 
-**场景分类流程**（`pre_intent_classifier`）：
+- `POST /v1/chat`
+- `POST /v1/edge/events`
+- `POST /v1/host/input`
+- `POST /v1/agent/run`
+- `GET /v1/agent/info`
+- `/canon/*`
+- `/scheduler/*`
+- `/host-scheduler/*`
+- `/tools/*`
+- `/bond/*`
+- `/prompt-config/*`
+- `/api/ui/*`
+- `/obs/*`
+- `/health`
+- `/ready`
+- `/startup`
+- `/metrics`
+- `/panel`
 
-```
-用户消息
-  ↓ is_narrative_only_fast_pass()
-  ├── True → SCENE_CHAT（fast-pass，锁 CHAT_FAST）
-  └── False → pre_intent_classifier()
-        ├── 含 EXEC_INTENT 关键词 → SCENE_EXEC_INTENT
-        ├── 含 WORK_CODE 关键词 → SCENE_WORK_CODE
-        ├── 含 WORK_TRANSLATE 关键词 → SCENE_WORK_TRANSLATE
-        └── 其余 → SCENE_CHAT
-```
+其中 `/v1/host/input` 由 `host_brain/app/input_routes.py` 提供，`/v1/agent/*` 由 `host_brain/app/agent_routes.py` 提供，`/api/ui/*` 由 `host_brain/app/web_ui.py` 提供，`/obs/*` 在主应用中保留兼容挂载，同时也有独立 Obs Backend。
 
-**fast-pass 条件**（`is_narrative_only_fast_pass`）：
-- 消息长度 ≤ 120 字符
-- 不含 `EXEC_INTENT`/`WORK_CODE`/`WORK_TRANSLATE` 关键词
+### 1.3 当前 `/v1/chat` 主链
 
-### 1.3 聊天处理链路（handle_chat）
+当前聊天主链已经不再是旧的 `SceneRouter -> top_agent -> dispatch_agent`。当前代码里的常规主链是：
 
-```
+```text
 POST /v1/chat
-  ↓ handle_chat()
-  ├── 1. 构建 GateSnapshot（build_chat_governance_snapshot）
-  ├── 2. Governor 鉴权（evaluate_governor_gates）
-  │     └── REJECT → 返回 SSE 错误流
-  ├── 3. 场景分类（pre_intent_classifier）
-  ├── 4. 路由分发（SceneRouter.route_sse）
-  │     ├── SCENE_CHAT → chat_direct / chat_fast
-  │     ├── SCENE_EXEC_INTENT → _complex_scene_sse_generator（LangGraph）
-  │     ├── SCENE_WORK_CODE → _complex_scene_sse_generator（LangGraph）
-  │     ├── SCENE_WORK_TRANSLATE → _complex_scene_sse_generator（LangGraph）
-  │     └── SCENE_VISION_UI → _vision_ui_sse_generator
-  └── 5. 返回 StreamingResponse（SSE）
+  -> host_brain.app.fastapi_app.chat
+  -> host_brain.app.fastapi_app._evaluate_immune_gate_for_chat
+  -> host_brain.app.fastapi_app._schedule_chat_immune_gate_event
+  -> host_brain.app.chat_handler.handle_chat
+  -> host_brain.app.chat_handler._unified_chat_sse_generator
+  -> thalamus_agent.classify_and_compile_intent_draft
+  -> IntentDecisionEngine.evaluate_intent
+  -> cortex_orchestrator_sse_generator
+  -> agent_runtime_shared._cortex_orchestrator_sse_generator_impl
+  -> executive_router_sse_generator
+  -> executive_runtime_sse_generator
+  -> executive_runtime_core
+       -> chat
+       -> skill
+       -> delegate
+       -> plan
+       -> recent_turn
+       -> task_progress
 ```
 
-### 1.4 Prompt 构建（prompt_builder.py）
+在进入 `chat_handler.handle_chat` 之前，`fastapi_app.chat` 还会处理 `request_id`、immune gate 审查与异步审计记录；若命中 `phatic_fastpath`，会直接在 HTTP 路由层返回 SSE，不再进入后续编排链。
 
-**场景节点 ID 映射**：
+链路中各层职责如下：
 
-| 场景 | 直接节点 | 渲染节点 | 意图来源节点 |
-|------|---------|---------|------------|
-| CHAT | `chat_direct_ja` | `renderer_ja_c_style` | `core_reasoner_primary` |
+| 层 | 当前模块 | 职责 |
+|---|---|---|
+| Intent 收口 | `host_brain/tribe/thalamus_agent.py` | 生成 canonical intent draft |
+| Governor | `host_brain/governor/decision.py` | 对 intent_draft 做审批与票据约束 |
+| Cortex 编排入口 | `host_brain/app/cortex_orchestrator.py` | 统一转交到共享运行时实现 |
+| 共享编排实现 | `host_brain/app/agent_runtime_shared.py` | 召回、bond、上下文、trace、后处理、SSE 贯通 |
+| Executive 路由 | `host_brain/app/executive_router.py` | 路由层薄门面 |
+| Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | skill-first 路由、计划执行、恢复策略、chat 回落 |
 
-**运行时输入解析**（`chat_runtime_input.py`）：
+### 1.4 当前外部输入与自动化入口
 
-| 函数 | 返回值 | 说明 |
-|------|--------|------|
-| `get_chat_runtime_prompt_context` | `PromptContext` | 当前 Prompt 上下文 |
-| `get_chat_runtime_emotion_snapshot` | `dict` | 情感快照 |
-| `get_chat_runtime_emotion_state` | `dict` | 情感状态（VAD） |
-| `get_chat_runtime_retrieval` | `dict` | 检索结果包 |
-| `get_chat_runtime_skill_manifest` | `dict` | 技能清单 |
-| `get_chat_runtime_user_message` | `str` | 归一化用户消息 |
-| `resolve_prompt_context_style_row` | `dict` | 风格 Canon 行 |
-| `get_chat_runtime_render_target_lang` | `str` | 渲染目标语言 |
+除了 `/v1/chat`，当前 app 层还有两条高频入口：
 
-**注入检测（MemoryGuard）**：
-- `prompt_builder.py` 内置线程局部变量 `_injection_meta_local`
-- 每次构建 Prompt 后，注入检测结果可通过 `get_last_injection_meta()` 读取
-- 调用方负责将结果写入 `audit_tags`（TODO-70）
+| 入口 | 当前模块 | 说明 |
+|---|---|---|
+| `POST /v1/host/input` | `host_brain/app/input_routes.py` | 接收 ASR / Gateway 回流；做输入质检、免疫门控、ACK、异步回流到 Host 主链 |
+| `POST /v1/agent/run` | `host_brain/app/agent_routes.py` | 单独的 Agent Loop 自动化入口，走视觉/自动化执行链，不属于 `/v1/chat` 主链 |
 
-### 1.5 情感快照构建（emotion_context.py）
+补充：`POST /v1/host/input` 当前只接受 `ASR` / `GATEWAY` 两类归一化输入；其他 Edge 运行时事件走 `POST /v1/edge/events`。
 
-```python
-# 构建聊天情感快照（用于 Prompt 构建）
-snapshot = build_chat_emotion_snapshot(
-    session_id: str,
-    request_id: str,
-    ...
-) -> dict
+### 1.5 App 层当前不应再使用的口径
 
-# 构建治理快照（用于 Governor 鉴权）
-gate_snapshot = build_chat_governance_snapshot(
-    session_id: str,
-    request_id: str,
-    ...
-) -> GateSnapshot
+以下描述不再代表当前 app 层主入口：
 
-# 解析情感上下文字符串（用于检索层 OPT-41）
-emotion_ctx = resolve_chat_emotion_context(
-    emotion_snapshot: dict,
-) -> str | None
-```
-
-### 1.6 失败矩阵（failure_matrix.py）
-
-三图失败收口矩阵（P7 阶段引入）：
-
-| 图类型 | 失败场景 | 收口策略 |
-|--------|---------|---------|
-| 主图（main_graph） | 节点超时/异常 | fallback → chat_direct |
-| 意图子图（intent_subgraph） | 工具执行失败 | 重试 N 次后降级 |
-| Judge 图（judge_graph） | 评判超时 | 跳过 Judge，直接输出 |
+- `SceneRouter.route_sse()` 是当前场景分流中心
+- `host_brain/app/graph/main_chain.py` 是聊天主编排入口
+- `top_agent.py` 是 SSE 主渲染器
+- `dispatch_agent.py` 是主调度层
+- `chat_handler_complex.py` 承担复杂场景主执行
 
 ---
 
-## 二、Audit 层（SQLiteLedger 审计账本）
+## 二、Audit 层（SQLiteLedger 为审计枢纽）
 
-### 2.1 模块清单
+### 2.1 当前模块结构
 
-| 模块文件 | 职责 |
-|---------|------|
-| `sqlite_ledger.py` | SQLiteLedger 主体（WAL 模式，线程安全） |
-| `ledger_constants.py` | 所有表的列定义与 WAL 配置 |
-| `ledger_log_mixin.py` | 写入方法（log_intent/log_governor/log_skill_exec 等） |
-| `ledger_fetch_mixin.py` | 查询方法（fetch_intent/fetch_governor 等） |
-| `ledger_query_mixin.py` | 复杂查询方法 |
-| `ledger_scheduler_mixin.py` | 调度器相关写入/查询 |
-| `ledger_wal_mixin.py` | WAL 模式管理 |
-| `ledger_schema.py` | 建表 DDL |
-| `migration_guard.py` | 迁移守卫（防止重复迁移） |
-| `migration_runner.py` | 迁移执行器 |
-| `drill.py` | 审计钻取工具 |
-| `retention.py` | 数据保留策略 |
+| 模块 | 说明 |
+|---|---|
+| `host_brain/audit/sqlite_ledger.py` | Ledger 主体，对外暴露统一写入/查询方法 |
+| `host_brain/audit/ledger_log_mixin.py` | LLM 节点调用、图运行追踪、LLM 路由等补充写接口 |
+| `host_brain/audit/ledger_fetch_mixin.py` | 拉取明细 |
+| `host_brain/audit/ledger_query_mixin.py` | 聚合查询 |
+| `host_brain/audit/ledger_scheduler_mixin.py` | 调度相关查询与写入 |
+| `host_brain/audit/ledger_schema.py` | DDL 与 schema 常量 |
+| `host_brain/audit/migration_guard.py` + `migration_runner.py` | 迁移执行与守卫 |
+| `host_brain/audit/migrations/*.sql` | 当前账本演进历史 |
 
-### 2.2 SQLiteLedger（审计账本）
+### 2.2 当前账本写接口分组
 
-```python
-ledger = SQLiteLedger(
-    db_path: str | Path = "host_brain/data/ledger.db",
-    wal_config: WalConfig | None = None,
-)
-```
+当前代码中，`SQLiteLedger` 与 mixin 暴露的写接口至少覆盖以下几组事件：
 
-**WAL 模式**：默认启用 WAL（Write-Ahead Logging），提升并发读写吞吐量。WAL 激活失败时降级为 DELETE 日志模式，写入 `AUDIT_WAL_FAILED`。
+| 类别 | 当前方法示例 |
+|---|---|
+| 主三联画 | `log_intent()` / `log_governor()` / `log_skill_exec()` |
+| 模型与编排 | `log_model_control()` / `log_llm_node_call()` / `log_graph_run_trace()` / `log_llm_route()` / `log_llm_route_config_change()` |
+| Canon / Memory / Vault | `log_canon_proposal()` / `log_canon_change()` / `log_memory_op()` / `log_vault_manifest()` / `log_vault_gc()` |
+| Runtime I/O | `log_airlock()` / `log_channel_io()` / `log_voice_event()` / `log_retrieval_event()` / `log_vision_event()` |
+| Agent / System | `log_agent_loop()` / `log_service_health()` / `log_config_snapshot()` / `log_migration()` / `log_scheduler_event()` |
+| 关系与执行 | `log_bond_update()` / `log_sandbox_exec()` / `log_capability_forge_proposal()` |
 
-### 2.3 审计表清单（完整 26 张表）
+### 2.3 当前契约口径
 
-| 表名 | 对应列常量 | 写入方法 | 说明 |
-|------|-----------|---------|------|
-| `intent_log` | `INTENT_COLUMNS` | `log_intent()` | 意图解析记录 |
-| `governor_log` | `GOVERNOR_COLUMNS` | `log_governor()` | 治理决策记录 |
-| `skill_exec_log` | `SKILL_EXEC_COLUMNS` | `log_skill_exec()` | 工具执行记录 |
-| `model_control_log` | `MODEL_CONTROL_COLUMNS` | `log_model_control()` | 模型控制记录 |
-| `canon_proposal_log` | `CANON_PROPOSAL_COLUMNS` | `log_canon_proposal()` | Canon 提案记录 |
-| `canon_change_log` | `CANON_CHANGE_COLUMNS` | `log_canon_change()` | Canon 变更记录 |
-| `world_canon_doc` | `WORLD_CANON_DOC_COLUMNS` | `upsert_world_canon_doc()` | World Canon 索引 |
-| `memory_op_log` | `MEMORY_OP_COLUMNS` | `log_memory_op()` | 记忆操作记录 |
-| `vault_manifest_log` | `VAULT_MANIFEST_COLUMNS` | `log_vault_manifest()` | 工件清单记录 |
-| `vault_gc_log` | `VAULT_GC_COLUMNS` | `log_vault_gc()` | 工件 GC 记录 |
-| `airlock_log` | `AIRLOCK_COLUMNS` | `log_airlock_event()` | 气闸隔离记录 |
-| `channel_io_log` | `CHANNEL_IO_COLUMNS` | `log_channel_io()` | 通道 I/O 记录 |
-| `avatar_action_log` | `AVATAR_ACTION_COLUMNS` | `log_avatar_action()` | Avatar 动作记录 |
-| `clawd_action_log` | `CLAWD_ACTION_COLUMNS` | `log_clawd_action()` | Clawd UI 动作记录 |
-| `agent_loop_log` | `AGENT_LOOP_COLUMNS` | `log_agent_loop()` | Agent 循环记录 |
-| `service_health_log` | `SERVICE_HEALTH_COLUMNS` | `log_service_health()` | 服务健康记录 |
-| `migration_log` | `MIGRATION_COLUMNS` | `log_migration()` | 迁移记录 |
-| `config_snapshot_log` | `CONFIG_SNAPSHOT_COLUMNS` | `log_config_snapshot()` | 配置快照记录 |
-| `voice_event_log` | `VOICE_EVENT_COLUMNS` | `log_voice_event()` | 语音事件记录 |
-| `retrieval_event_log` | `RETRIEVAL_EVENT_COLUMNS` | `log_retrieval_event()` | 检索事件记录 |
-| `vision_event_log` | `VISION_EVENT_COLUMNS` | `log_vision_event()` | 视觉事件记录 |
-| `bond_update_log` | `BOND_UPDATE_COLUMNS` | `log_bond_update()` | Bond 更新记录 |
-| `sandbox_exec_log` | `SANDBOX_EXEC_COLUMNS` | `log_sandbox_exec()` | 沙箱执行记录 |
-| `scheduler_event_log` | `SCHEDULER_EVENT_COLUMNS` | `log_scheduler_event()` | 调度器事件记录 |
-| `p8_subgraph_failure_log` | `P8_SUBGRAPH_FAILURE_LOG_COLUMNS` | `log_p8_subgraph_failure()` | P8 子图失败记录 |
-| `p8_graph_run_log` | `P8_GRAPH_RUN_LOG_COLUMNS` | `log_p8_graph_run()` | P8 图运行记录 |
-
-### 2.4 关键约束
-
-1. **单一写入口**：所有审计写入必须通过 `SQLiteLedger` 的 `log_*` 方法，不允许直接操作 SQLite
-2. **线程安全**：`SQLiteLedger` 内置 `threading.Lock`，所有写入操作加锁
-3. **WAL 降级**：WAL 激活失败时自动降级，不崩溃
-4. **append-only**：所有 `log_*` 方法只追加，不更新/删除（`world_canon_doc` 除外，使用 upsert）
-5. **intent_log 字段**：`tool_visibility_hash` 字段用于追踪工具集变更（见 `TOOLS_MEMORY_LAYER_CONTRACT.md`）
+- Ledger 仍是跨模块的审计枢纽，`request_id / intent_id / event_id / evidence_ref` 仍是主要串联键。
+- 表结构不是停留在旧文档里的固定“26 张表”口径，而是通过 `migrations/*.sql` 持续演化。
+- 当前代码事实应优先看 `sqlite_ledger.py`、`ledger_log_mixin.py` 和迁移目录，而不是旧阶段表数统计。
 
 ---
 
-## 三、Skills 层（技能注册表）
+## 三、Skills 层（动态注册 + 审计执行）
 
-### 3.1 模块清单
+### 3.1 当前技能元数据契约
 
-| 模块文件 | 职责 |
-|---------|------|
-| `registry.py` | SkillRegistry：技能注册表（核心） |
-| `loader.py` | 技能加载器（从注册文件加载） |
-| `hot_loader.py` | 热加载器（运行时动态加载） |
-| `mcp_skill_bridge.py` | MCP 技能桥接器 |
-| `builtin_registry.py` | 内置技能注册 |
-| `browser_registry.py` | 浏览器技能注册 |
-| `desktop_registry.py` | 桌面技能注册 |
-| `emotion_registry.py` | 情感技能注册 |
-| `file_registry.py` | 文件技能注册 |
-| `ide_registry.py` | IDE 技能注册 |
-| `memory_registry.py` | 记忆技能注册 |
-| `notification_registry.py` | 通知技能注册 |
-| `personality_registry.py` | 人格技能注册 |
-| `scheduler_registry.py` | 调度器技能注册 |
-| `shell_registry.py` | Shell 技能注册 |
-| `system_registry.py` | 系统技能注册 |
-| `web_registry.py` | Web 技能注册 |
+`host_brain/skills/registry.py` 中 `SkillMeta` 仍是当前技能元数据 SSOT，核心字段包括：
 
-### 3.2 SkillMeta（技能元数据契约）
+- `skill_name`
+- `clearance`
+- `risk_level`
+- `scope`
+- `reversible`
+- `handler`
+- `require_confirm`
+- `family`
+- `capability_tags`
+- `parallelizable`
+- `fallback_policy`
+- `scheduler_allowed`
+- `access_level`
 
-```python
-@dataclass(frozen=True)
-class SkillMeta:
-    skill_name: str           # 技能唯一名称（非空）
-    clearance: str            # "LOW" | "MEDIUM" | "HIGH"
-    risk_level: int           # [1, 5]（≥4 必须 require_confirm=True）
-    scope: str                # "host" | "memory" | "system"
-    reversible: bool          # 是否可撤销
-    handler: SkillHandler     # 执行回调 (args, context) -> dict
-    require_confirm: bool = False
-    description: str = ""
-    scheduler_allowed: bool = True   # 是否允许 SCHEDULER 来源调用
-    access_level: AccessLevel = AccessLevel.PUBLIC
-```
+当前 `SkillRegistry` 负责：
 
-**验证规则**（`validate()`）：
-- `skill_name` 非空字符串
-- `clearance` ∈ `{"LOW", "MEDIUM", "HIGH"}`
-- `risk_level` ∈ `[1, 5]`（整数）
-- `scope` ∈ `{"host", "memory", "system"}`
-- `reversible` 为 bool
-- `handler` 为 callable
-- `risk_level >= 4` 时 `require_confirm` 必须为 `True`
+- `register()` / `require()` / `get()` / `all()`
+- `list_skill_names()`
+- `build_skill_manifest()`
 
-### 3.3 SkillPermissionModel（权限模型）
+因此，当前技能集合不是旧文档里那种固定数量的静态清单，而是可由注册表、MCP bridge、自定义 provider 与 Hub 安装共同扩展。
 
-```python
-@dataclass(frozen=True)
-class SkillPermissionModel:
-    clearance: str        # "LOW" | "MEDIUM" | "HIGH"
-    scope: str            # "host" | "memory" | "system"
-    require_confirm: bool
-```
+### 3.2 当前执行路径
 
-### 3.4 SkillResult（执行结果）
+当前技能执行至少存在两条真实路径：
 
-```python
-@dataclass(frozen=True)
-class SkillResult:
-    status: str           # "SUCCESS" | "FAILED" | "REJECTED"
-    result_code: str      # 具体结果码
-    payload: dict         # 执行输出
-    detail: str | None    # 详细说明
-```
+| 路径 | 当前模块 | 说明 |
+|---|---|---|
+| 严格票据执行 | `host_brain/skills/loader.py` | `SkillLoader.execute()`：Governor 票据校验、幂等保护、审计写入、executor 分发 |
+| Skill-first 运行时 | `host_brain/app/executive_runtime_core.py` | `/v1/chat` 主链的 skill route，按 skill family / executor 执行并记录 `skill_exec` |
 
-### 3.5 技能实现清单（`skills/impl/`）
+### 3.3 当前执行器分发
 
-| 实现文件 | 技能类别 |
-|---------|---------|
-| `browser_executor.py` | 浏览器操作（打开/搜索/截图） |
-| `clawd_ui_action.py` | Clawd UI 动作（界面控制） |
-| `desktop_executor.py` | 桌面操作（窗口/鼠标/键盘） |
-| `desktop_note.py` | 桌面便签 |
-| `diary_writer.py` | 日记写入 |
-| `dream_generator.py` | 梦境生成 |
-| `emotion_executor.py` | 情感状态操作 |
-| `file_executor.py` | 文件操作（读/写/删除） |
-| `focus_mode.py` | 专注模式控制 |
-| `ide_executor.py` | IDE 操作（打开/编辑/运行） |
-| `memory_executor.py` | 记忆操作（写入/查询） |
-| `notification_executor.py` | 系统通知 |
-| `proactive_talk.py` | 主动发言触发 |
-| `scheduler_executor.py` | 调度器任务管理 |
-| `shell_executor.py` | Shell 命令执行 |
-| `system_executor.py` | 系统操作（关机/重启等） |
-| `web_executor.py` | Web 请求执行 |
+`host_brain/skills/executor_registry.py` 提供当前执行器分发面，内置覆盖：
 
-### 3.6 Skills 与 Tools 的关系
+- `file`
+- `notification`
+- `shell`
+- `browser`
+- `cursor` / `pycharm` / `codex`
+- `desktop`
+- `memory`
+- `emotion`
+- `scheduler`
+- `system`
+- `web`
+- `hub_skill`
 
-```
-SkillRegistry（skills/）
-  ↓ 注册 handler
-ToolCatalog（tools/catalog.py）
-  ↓ register(ToolMeta)
-ToolBroker（tools/broker.py）
-  ↓ execute()
-SkillRegistry.execute(skill_name, args, context)
-```
+此外，`host_brain/app/dependencies.py` 当前通过以下步骤构造技能能力面：
 
-- `SkillRegistry` 是技能的**元数据注册与执行层**
-- `ToolCatalog` 是工具的**对外暴露层**（供 LLM 选择）
-- `ToolBroker` 是工具的**执行门控层**（含令牌验证）
-- 三者协作：Skill 注册到 Catalog，Broker 执行时回调 Skill handler
+- `build_builtin_skill_registry()`
+- `register_mcp_tools_into_skill_registry(...)`
+- `register_configured_skill_providers(...)`
+
+因此，当前代码的正确口径是“动态技能注册与执行”，而不是“固定 17 个技能实现”。
 
 ---
 
-## 四、Observability 层（观测面）
+## 四、Observability 层（主应用兼容挂载 + 独立 Obs Backend）
 
-### 4.1 模块清单
+### 4.1 当前运行方式
 
-| 模块文件 | 职责 |
-|---------|------|
-| `observability/metrics.py` | MetricsCollector：指标采集（核心） |
-| `observability/metrics_timeseries.py` | 时序指标存储 |
-| `observability/routes.py` | GET /obs/metrics HTTP 路由 |
-| `observability/service_health_aggregator.py` | 服务健康聚合 |
-| `observability/service_health_heartbeat.py` | 服务健康心跳 |
-| `observability/session_query.py` | 会话查询 |
-| `observability/trace_node_builder.py` | 追踪节点构建 |
-| `observability/cross_timeline.py` | 跨时间线分析 |
-| `observability/p8_extended_metrics.py` | P8 扩展指标 |
-### 4.2 ObsMode（观测模式）
+当前观测层不是单一模块，而是两层并存：
 
-```python
-class ObsMode(str, Enum):
-    PROD = "prod"   # 生产模式：debug_trace 强制为 None
-    DEV  = "dev"    # 开发模式：debug_trace 包含 intent_draft/rules_hit/skill_params
-```
+| 运行方式 | 当前模块 | 说明 |
+|---|---|---|
+| 主应用兼容挂载 | `host_brain/app/fastapi_app.py` + `host_brain/app/obs_routes.py` | 让主应用也能提供观测接口 |
+| 独立 Obs Backend | `host_brain/app/obs_fastapi_app.py` | 面向 Monitor UI 的独立观测进程，支持 warm cache |
 
-**模式切换**：通过环境变量 `OBS_MODE` 控制（默认 `prod`）。
+### 4.2 当前路由分组
 
-### 4.3 build_obs_metrics_response（指标响应构建）
+当前观测相关接口主要分布在：
 
-```python
-response = build_obs_metrics_response(
-    collector: MetricsCollector,
-    request_id: str | None = None,
-    obs_mode: ObsMode | None = None,
-    recent_chains_n: int = 5,
-    ts_ms: int | None = None,
-) -> dict
-```
+- `host_brain/app/obs_routes.py`
+- `host_brain/app/obs_routes_trace.py`
+- `host_brain/app/obs_routes_summary.py`
+- `host_brain/app/obs_routes_life_body.py`
+- `host_brain/app/obs_routes_health.py`
+- `host_brain/app/obs_routes_metrics.py`
+- `host_brain/app/obs_routes_sessions.py`
+- `host_brain/app/obs_routes_stats*.py`
+- `host_brain/app/obs_routes_sysmode.py`
+- `host_brain/app/web_ui.py`
 
-**响应结构**：
+独立 Obs Backend 还会在启动时拉起：
 
-```json
-{
-  "status": "OK",
-  "ts_ms": 1234567890,
-  "metrics": {
-    "request_count": 100,
-    "error_count": 2,
-    "avg_latency_ms": 450,
-    ...
-  },
-  "service_health": {
-    "neo4j": "OK",
-    "chroma": "OK",
-    "vts": "DEGRADED",
-    ...
-  },
-  "recent_chains": [...],
-  "debug_trace": null   // prod 模式强制为 null
-}
-```
+- runtime snapshot warm cache
+- trace feed warm cache
+- insights summary warm cache
+- digital life overview warm cache
+- life body warm cache
 
-**安全约束**：`prod` 模式下 `debug_trace` 强制清除，防止敏感信息泄露。
+### 4.3 与 Monitor UI 的关系
 
-### 4.4 Observability 规范路径
+当前 Monitor UI 前端位于：
 
-`host_brain/observability/` 是唯一保留的观测实现路径。
+- `host_brain/app/monitor_ui/src/*`
+- `host_brain/app/static/monitor/*`
 
-所有新旧代码均应直接使用 `host_brain.observability`；历史 `host_brain/obs/` 兼容层已删除。
+因此，当前 observability 层的正确理解是：
+
+- 后端接口分布在 `obs_routes*`
+- `/api/ui/*` 聚合 / 搜索接口由 `web_ui.py` 提供
+- 独立进程入口在 `obs_fastapi_app.py`
+- 前端消费层在 `monitor_ui/`
 
 ---
 
-## 五、与其他层的接口关系
+## 五、结论
 
-```
-App/chat_handler.py
-  ├── Governor（governor/rules.py）← 鉴权
-  ├── Retrieval（retrieval/orchestrator.py）← 检索
-  ├── Integrations（integrations/graph_executor.py）← LangGraph 编排
-  ├── Channels/VTS（channels/vts.py）← 表情控制
-  ├── Audit（audit/sqlite_ledger.py）← 审计写入
-  └── Observability（observability/metrics.py）← 指标上报
+当前 `host_brain` 应用层的主事实是：
 
-Skills/impl/*.py
-  ├── Audit（audit/sqlite_ledger.py）← 执行审计
-  ├── Memory（memory/episodic.py）← 记忆读写
-  ├── Bond（bond/bond_dynamics.py）← Bond 更新
-  └── Channels（channels/vts.py）← Avatar 动作
-
-Audit/sqlite_ledger.py
-  ← 被所有层调用（全系统唯一审计写入口）
-  → 数据供 Observability 层读取与聚合
-```
+1. `/v1/chat` 主链已经收敛到 `fastapi_app.chat -> chat_handler -> cortex_orchestrator -> agent_runtime_shared -> executive_router -> executive_runtime -> executive_runtime_core`。
+2. Audit 以 `SQLiteLedger` 为枢纽，但表结构与写接口已持续演进，不应再复用旧表数口径。
+3. Skills 以 `SkillRegistry + SkillLoader + executor_registry` 为当前执行契约，且来源是动态扩展的。
+4. Observability 采用“主应用兼容挂载 + 独立 Obs Backend + Monitor UI”三层结构。

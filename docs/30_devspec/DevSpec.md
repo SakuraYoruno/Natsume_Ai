@@ -4,12 +4,16 @@
 本文只写“怎么做”与“如何验证”，不写产品愿景。
 
 # Natsume Ai 产品开发文档（Dev Spec）
-版本：v1.7
-日期：2026-03-18
+版本：v1.8
+日期：2026-04-19
 适用架构：Host_Brain（主脑终审与治理） + Edge Client（本地感知与执行） + 可选云端能力/多代理扩展能力（受 Host 主权约束）
 
 本文件用于把白皮书与 PRD 的原则/需求落成可实现的工程规格：模块边界、接口、Schema、日志、测试与里程碑。
 目标：即使仓库为空，也能按本文档给出的“目录骨架 + 契约 + 里程碑交付物”，从零重新开发到最小可运行闭环。
+
+当前代码对齐说明（2026-04-19）：
+- `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/dataflow_report.md` 是当前代码事实入口。
+- 本文仍保留“从零重建 / 目标架构蓝图”属性；若局部条目与当前代码冲突，以代码事实层文档和实际代码为准。
 
 ---
 
@@ -97,12 +101,12 @@ DevSpec 写作规则（工程契约级）：
 ├─ host_brain/
 │  ├─ pyproject.toml # 或 requirements*；必须可复现依赖版本
 │  ├─ app/
-│  │  ├─ main.py # HTTP API 入口（健康检查/链路入口）
+│  │  ├─ main.py # 健康/启动报告辅助模块；实际运行入口见 host_brain/__main__.py
 │  │  ├─ config.py # 配置加载（分层：defaults/local/secret）
 │  │  ├─ agents/ # 多 Agent 契约与注册（agent_contract / registry / react_loop）
 │  │  ├─ automation/ # Host 侧任务调度路由（scheduler_routes / task_scheduler）
-│  │  ├─ graph/ # 主链路时序编排器（MainChain + SceneRouter）
-│  │  ├─ handlers/ # 多 Agent handler（supervisor/chat/code/translate/intent/retrieval/judge）
+│  │  ├─ graph/ # 图配置与兼容层（当前 /v1/chat 主链不再以 MainChain + SceneRouter 为主入口）
+│  │  ├─ handlers/ # 多 Agent / 专项 handler（部分用于历史路径、专项能力或兼容场景）
 │  │  ├─ llm/ # 模型路由矩阵（能力路由 + 降级链）
 │  │  ├─ memory/ # 状态源仲裁器（StateArbiter）+ 记忆写入守卫（MemoryGuard）
 │  │  ├─ recall/ # RecallPack 组装器（token 预算截断 + 冲突检测）
@@ -182,11 +186,10 @@ DevSpec 写作规则（工程契约级）：
 │  │  ├─ cross_timeline.py # 跨端时间线聚合
 │  │  ├─ service_health_aggregator.py # 服务健康聚合
 │  │  ├─ service_health_heartbeat.py # 心跳检测
+│  │  ├─ service_registry.py # 服务注册快照与节点清单
 │  │  ├─ session_query.py # 会话查询
-│  │  ├─ trace_node_builder.py # Trace 节点构建
 │  │  ├─ p8_extended_metrics.py # P8 扩展指标
 │  │  └─ routes.py # 观测路由
-│  ├─ obs/ # 向后兼容 shim 层（实体已迁移至 observability/）
 │  ├─ release/
 │  │  ├─ release_manifest.py # 发布清单（model_plane digest 门禁）
 │  │  ├─ manifest_generators.py # 清单生成器
@@ -200,7 +203,7 @@ DevSpec 写作规则（工程契约级）：
 │  │  ├─ embedding.py # 向量化服务
 │  │  └─ evidence_pack.py # 证据包输出
 │  ├─ scheduler/
-│  │  ├─ scheduler.py # CRON 任务调度（APScheduler + SQLite 持久化）
+│  │  ├─ scheduler.py # NatsumeScheduler（threading timer + cron 检查线程 + Ledger 持久化恢复）
 │  │  ├─ task_registry.py # 任务注册表
 │  │  └─ scheduler_routes.py # 调度路由
 │  ├─ vision/
@@ -328,7 +331,7 @@ active.pointer 格式（必须）：
 ## 2. 运行时进程拓扑与通信
 
 2.1 Host 进程（主权裁决与统一编排）
-- 对外提供：`POST /v1/chat`（统一 SSE 入口：Governor 裁决 → SceneRouter 分流 → 场景处理链路）
+- 对外提供：`POST /v1/chat`（统一 SSE 入口：输入门控 → thalamus canonical intent → Governor → cortex_orchestrator → executive runtime）
 - 统一编排：所有 Agent 与链路编排仅在 Host 发生；Edge 端组件仅作为“远程能力提供者”被调用（draft-only，不具终审权）。
 - 必备内部服务（必须实现）：Governor/Token/Audit、SQLite Ledger、Neo4j Bond SSOT、Episodic 向量库、Embedding、Reranker、Recall/Fusion、Screen Capture、OCR/Vision、ClawdBot、Cloud Gateway + AIRLOCK、Observability。
 - 运行时不可用：任一服务不可用必须可观测降级并保持输出结构稳定（不得伪执行）。
@@ -1141,8 +1144,8 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 以下测试编号用于覆盖 M4 体验包新增功能的契约与行为断言：
 
 - T-Sched-01（SCHEDULER 注册与触发）：调度器注册/注销/触发可回放；system_initiated_intent 带 proposer_node_id=scheduler；触发频率符合配置。
-- T-Sched-02（SCHEDULER 模式门控）：Gaming 模式拦截低优先级任务（SYSMODE_FORBIDDEN）；Sleep 模式仅允许白名单任务；Focus 子模式暂停非紧急任务。
-- T-Sched-03（SCHEDULER 健康与降级）：连续失败自动暂停（SCHED_TASK_SUSPENDED）；健康快照可读取。
+- T-Sched-02（SCHEDULER 模式门控）：Gaming / Focus 模式仅允许 HIGH；Sleep 模式允许 HIGH / MEDIUM；显式 `mode_allowlist` 可覆盖默认矩阵。
+- T-Sched-03（SCHEDULER 健康与降级）：连续失败达到 `max_consecutive_failures` 自动暂停（SCHED_TASK_SUSPENDED）；健康快照可读取。
 - T-Desktop-01（桌面留言创建与撤销）：文件创建成功 + manifest 完整（before/after/path/hash）；undo 恢复原状态；路径穿越拒绝（SCOPE_VIOLATION）。
 - T-Desktop-02（桌面留言 QA）：内容含伪执行句时 QA 拦截并重写；写入审计链完整。
 - T-Dream-01（梦境生成与标签）：Sleep/空闲触发成功；写入 Episodic 带 dream 标签 + NARRATIVE_ONLY；Normal 非空闲拒绝。
@@ -1167,7 +1170,7 @@ Dev Spec 必须提供可执行的测试清单文件（见 `tests/e2e/`），建�
 落点：`host_brain/scheduler/` 目录（新增）。
 
 15.1.1 核心组件
-- `scheduler.py`：调度器主体（基于 APScheduler 或等价轻量库），支持 cron/interval/once 三种触发模式。
+- `scheduler.py`：调度器主体（当前为 threading timer + cron 检查线程 + ledger 恢复），支持 cron/interval/once 三种触发模式。
 - `task_registry.py`：调度任务注册表（task_id/trigger_config/intent_template/priority/mode_allowlist/enabled/max_consecutive_failures）。
 - `health.py`：任务健康快照（task_id/last_run_ts/next_run_ts/status/error_count/suspended_reason）。
 
@@ -1469,42 +1472,45 @@ GET /obs/metrics
   "tool_id": "string",
   "name": "string",
   "description": "string",
-  "access_level": "READ | WRITE",
-  "risk_level": 1,
+  "access_level": "PUBLIC | INTERNAL | RESTRICTED",
+  "risk_level": "LOW | MEDIUM | HIGH",
   "reversible": true,
-  "requires_token": false,
-  "schema_version": "string",
-  "synced_at_ms": 0
+  "version": "string",
+  "schema_hash": "string",
+  "domain_tags": ["string"],
+  "emotion_requirement": ["string"]
 }
 ```
 
 **同步规则**：
 - MCP provider 暴露的工具必须先同步为 ToolMeta（仅元数据），不得直接调用。
 - ToolMeta 写入 `mcp_tool_registry`（SQLite 表），变更写 `mcp_sync_log`（可回放）。
+- 当前注册表接口以 `register()` / `get()` / `list_by_provider()` / `list_all()` / `sync_log()` 为准，不再使用旧口径里的 `sync_tools()` / `SyncResult`。
 
 #### 17.2.2 ToolBroker 单入口
 
-**调用链**：`intent_draft.mcp_call → ToolBroker → Governor gate → Token（WRITE 必须）→ MCP SDK → Audit`
+**调用链**：`intent_draft.mcp_call → MCPToolBroker.call() → registry check → WRITE 判定（risk_level ∈ {MEDIUM,HIGH} 或不可逆）→ approval_token_ref → handler invoke → Audit`
 
-**审计字段**（写入 `mcp_exec_log`）：
+**审计字段**（当前写入 `skill_exec_log`，`skill_name=mcp::<provider>::<tool>`）：
 ```json
 {
   "request_id": "string",
   "intent_id": "string",
-  "provider_id": "string",
-  "tool_id": "string",
-  "access_level": "READ | WRITE",
-  "decision": "APPROVE | REJECT",
-  "reason_code": "string | null",
+  "event_id": "mcp_exec_xxx",
+  "skill_name": "mcp::provider::tool",
+  "approval_token_ref": "string | null",
+  "result_status": "SUCCESS | REJECTED",
+  "result_code": "string | null",
   "evidence_ref": "string",
   "ts_ms": 0
 }
 ```
 
 **门禁规则**：
-- `access_level=WRITE` 且无 approval_token → `reason_code=TOKEN_REQUIRED`，拒绝。
-- `access_level=WRITE` 且 token 未 APPROVE → `reason_code=TOKEN_NOT_APPROVED`，拒绝。
-- AIRLOCK 出站最小化：MCP 调用参数必须经 AIRLOCK 脱敏（敏感字段不出站）。
+- `risk_level ∈ {MEDIUM,HIGH}` 或 `reversible=false` 且无 `approval_token_ref` → `MCP_WRITE_TOKEN_REQUIRED`，拒绝。
+- 未注册工具 → `MCP_TOOL_NOT_REGISTERED`。
+- provider handler 缺失或执行异常 → `MCP_PROVIDER_UNAVAILABLE`。
+- AIRLOCK 出站最小化属于 `host_brain/tools/mcp_adapter.py` 适配层能力，不属于 `host_brain/mcp/tool_broker.py` 的直接职责。
 
 **错误码**：
 - `MCP_TOOL_NOT_REGISTERED`：工具未在 ToolMeta 注册。
@@ -1664,7 +1670,7 @@ GET /obs/metrics
 - `start_host_side.ps1` 在 `/health` 通过后，额外探测 `/obs/metrics`（期望 HTTP 200）；
 - 若 `/obs/metrics` 返回非 200，启动脚本输出 `obs_status=degraded`（不阻断启动，但写入 `startup_warnings`）；
 - 启动结果 JSON 新增字段：`obs_status`（ok/degraded）、`mcp_registry_status`（ok/degraded）；
-- `mcp_registry_status` 通过调用 `MCPToolRegistry.health_check()` 判断（SQLite 可写即 ok）。
+- `mcp_registry_status` 通过调用 `/health/mcp` 端点判断（端点内部会检查 MCP registry 可达性与已注册工具数）。
 
 **输出结构扩展**：
 ```json
@@ -1718,7 +1724,7 @@ GET /obs/metrics
 
 #### 18.3.1 p50/p95 响应时延基线（NFR-PERF-001）
 
-**采集方式**：在 `host_brain/obs/metrics.py` 的 `MetricsCollector` 中，从 `retrieval_event_log` 聚合检索链路时延；从 `governor_log` 聚合裁决时延；从 `skill_exec_log` 聚合执行时延。
+**采集方式**：在 `host_brain/observability/metrics.py` 的指标采集层中，从 `retrieval_event_log` 聚合检索链路时延；从 `governor_log` 聚合裁决时延；从 `skill_exec_log` 聚合执行时延。
 
 **基线指标**（本地基准机器，无外部依赖）：
 
@@ -2279,118 +2285,105 @@ def reject_proposal(
 ```
 host_brain/scheduler/
 ├── __init__.py
-├── scheduler_engine.py      # SchedulerEngine：任务注册/注销/触发/健康状态
-├── scheduler_models.py      # ScheduledTask、TaskHealth、SchedulerConfig Schema
-├── scheduler_store.py       # SQLite 持久化（scheduler_tasks 表）
-└── scheduler_routes.py      # FastAPI 路由：/scheduler/tasks CRUD + /scheduler/health
+├── task_registry.py      # TriggerMode / TaskPriority / SchedulerTaskConfig / Registry
+├── scheduler.py          # NatsumeScheduler：触发、门控、调度、持久化恢复
+├── health.py             # SchedulerHealthReporter：任务健康快照
+└── scheduler_routes.py   # FastAPI 路由：/scheduler/tasks CRUD + /scheduler/health
 ```
+
+相关持久化与审计不在本目录，而在：
+
+- `host_brain/audit/ledger_scheduler_mixin.py`：`scheduler_tasks` 表的持久化/恢复/删除
+- `host_brain/audit/migrations/0014_scheduler_event_schema.sql`：`scheduler_event_log` 审计表
+- `host_brain/audit/ledger_schema.py`：`scheduler_tasks` 基础表结构
 
 ### 21.2 核心 Schema
 
-#### ScheduledTask
+#### SchedulerTaskConfig
 ```python
 @dataclass
-class ScheduledTask:
-    task_id: str                    # UUID，唯一标识
-    name: str                       # 任务名称（可读）
-    cron_expr: str | None           # cron 表达式（如 "0 23 * * *"）
-    interval_seconds: int | None    # 周期触发（秒），与 cron_expr 二选一
-    intent_type: str                # 触发的 intent type（allowlist 校验）
-    intent_action: str              # 触发的 intent action
-    intent_args: dict               # 触发时附带的 args
-    sys_mode_allowlist: list[str]   # 允许触发的 sys_mode（如 ["NORMAL", "SLEEP"]）
-    priority: str                   # "HIGH" / "NORMAL" / "LOW"
-    enabled: bool                   # 是否启用
-    created_at: str                 # ISO8601
-    updated_at: str                 # ISO8601
-    config_version: int             # 配置版本号（每次更新递增）
+class SchedulerTaskConfig:
+    task_id: str
+    trigger_mode: TriggerMode           # cron / interval / once
+    trigger_config: dict[str, Any]      # {"hour": 23, "minute": 0} / {"seconds": 900} / {"delay_seconds": 30}
+    intent_template: dict[str, Any]     # {"skill_name": "...", "args": {...}}
+    priority: TaskPriority = MEDIUM     # HIGH / MEDIUM / LOW
+    mode_allowlist: list[str] | None = None
+    enabled: bool = True
+    max_consecutive_failures: int = 3
+    description: str = ""
 ```
 
-#### TaskHealth
-```python
-@dataclass
-class TaskHealth:
-    task_id: str
-    status: str                     # "RUNNING" / "PAUSED" / "SUSPENDED" / "DISABLED"
-    last_run_ts: str | None         # 上次触发时间
-    next_run_ts: str | None         # 下次预计触发时间
-    last_result: str | None         # "SUCCESS" / "FAILED" / "SKIPPED"
-    error_count: int                # 连续失败次数
-    suspended_reason: str | None    # 暂停原因（如 "SCHED_TASK_SUSPENDED"）
-```
+当前健康快照并没有单独落成 `TaskHealth` dataclass，而是由 `SchedulerHealthReporter.build_health_snapshot()` 返回字典结构：
+
+- `scheduler_status / total_tasks / enabled_tasks / suspended_tasks / error_tasks / ts_ms`
+- `tasks[*].task_id / trigger_mode / priority / enabled / status`
+- `tasks[*].last_run_ts / next_run_ts / error_count / suspended_reason / last_reason_code`
+- `tasks[*].last_gate_state / last_mood_state / last_endocrine_cortisol / last_endocrine_energy`
+- `tasks[*].last_immune_decision / last_immune_risk_level / last_immune_reason_codes`
 
 ### 21.3 SQLite 表：scheduler_tasks
 
 ```sql
 CREATE TABLE IF NOT EXISTS scheduler_tasks (
-    task_id         TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    cron_expr       TEXT,
-    interval_seconds INTEGER,
-    intent_type     TEXT NOT NULL,
-    intent_action   TEXT NOT NULL,
-    intent_args     TEXT NOT NULL DEFAULT '{}',   -- JSON
-    sys_mode_allowlist TEXT NOT NULL DEFAULT '["NORMAL"]',  -- JSON array
-    priority        TEXT NOT NULL DEFAULT 'NORMAL',
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id         TEXT NOT NULL UNIQUE,
+    task_name       TEXT NOT NULL,
+    trigger_mode    TEXT NOT NULL,
+    trigger_config  TEXT NOT NULL,
+    intent_template TEXT NOT NULL,
+    priority        TEXT NOT NULL DEFAULT 'MEDIUM',
     enabled         INTEGER NOT NULL DEFAULT 1,
-    status          TEXT NOT NULL DEFAULT 'RUNNING',
-    last_run_ts     TEXT,
-    next_run_ts     TEXT,
-    last_result     TEXT,
-    error_count     INTEGER NOT NULL DEFAULT 0,
-    suspended_reason TEXT,
-    config_version  INTEGER NOT NULL DEFAULT 1,
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
+    max_consecutive_failures INTEGER NOT NULL DEFAULT 3,
+    registered_at   INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    registered_by   TEXT NOT NULL DEFAULT 'scheduler'
 );
 ```
 
-### 21.4 SchedulerEngine 接口契约
+`scheduler_event_log` 则由迁移 `0014_scheduler_event_schema.sql` 创建，当前用于记录触发、跳过、失败、暂停、心跳告警等调度事件。
+
+### 21.4 NatsumeScheduler 当前契约
 
 ```python
-class SchedulerEngine:
-    def register_task(self, task: ScheduledTask) -> None:
-        """注册任务；task_id 重复则 raise SCHED_TASK_DUPLICATE"""
+class NatsumeScheduler:
+    def register_task(self, task: SchedulerTaskConfig) -> None: ...
+    def unregister_task(self, task_id: str) -> None: ...
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
 
-    def unregister_task(self, task_id: str) -> None:
-        """注销任务；不存在则 raise SCHED_TASK_NOT_FOUND"""
-
-    def enable_task(self, task_id: str) -> None: ...
-    def disable_task(self, task_id: str) -> None: ...
-
-    def get_health(self, task_id: str) -> TaskHealth: ...
-    def list_health(self) -> list[TaskHealth]: ...
-
-    def tick(self, current_ts: float, current_sys_mode: str) -> list[str]:
+    def _execute_task_now(self, task_id: str, current_mode: str) -> dict[str, Any]:
         """
-        调度心跳：检查所有 enabled 任务，返回本次触发的 task_id 列表。
-        - sys_mode 不在 allowlist → SKIPPED（不触发，不计入 error_count）
-        - 触发后生成 system_initiated_intent 并推入 intent_queue
-        - 连续失败 MAX_ERROR_COUNT 次 → status=SUSPENDED + 写 scheduler_config_log
+        当前执行路径：
+        - sys_mode / endocrine / immune 门控
+        - 生成 system_initiated_intent
+        - dispatcher 执行
+        - 更新 health snapshot
+        - 写 scheduler_event_log
         """
 
-    def _build_system_intent(self, task: ScheduledTask) -> dict:
+    def _build_system_intent(self, task: SchedulerTaskConfig, *, intent_id: str, request_id: str, ...) -> dict[str, Any]:
         """
-        构造 system_initiated_intent：
+        当前核心字段：
         - proposer_node_id = "scheduler"
-        - intent_id = uuid4()
-        - type = task.intent_type
-        - action = task.intent_action
-        - args = task.intent_args
-        - source_task_id = task.task_id
+        - task_id / intent_id / request_id
+        - skill_name / args / priority / trigger_mode / ts_ms
+        - emotion_tag / mood_state / endocrine_state / triggered_emotions
         """
 ```
 
 ### 21.5 sys_mode 门控规则
 
-| sys_mode | HIGH 优先级任务 | NORMAL 优先级任务 | LOW 优先级任务 |
-|---------|--------------|----------------|--------------|
-| NORMAL  | ✅ 触发 | ✅ 触发 | ✅ 触发 |
-| GAMING  | ✅ 触发 | ❌ SYSMODE_FORBIDDEN | ❌ SYSMODE_FORBIDDEN |
-| SLEEP   | ✅ 触发（白名单） | ❌ SYSMODE_FORBIDDEN | ❌ SYSMODE_FORBIDDEN |
-| FOCUS   | ✅ 触发 | ❌ SYSMODE_FORBIDDEN（proactive/dream 类） | ❌ SYSMODE_FORBIDDEN |
+| sys_mode | 允许优先级 |
+|---------|-----------|
+| `normal` | `HIGH`, `MEDIUM`, `LOW` |
+| `sleep` | `HIGH`, `MEDIUM` |
+| `gaming` | `HIGH` |
+| `focus` | `HIGH` |
+| `maintenance` | 空 |
+| `locked` | 空 |
 
-> SLEEP 模式下 HIGH 优先级白名单：`["diary_generate", "dream_generate"]`
+若任务显式配置 `mode_allowlist`，则以 allowlist 优先，而不是继续套默认矩阵。
 
 ### 21.6 REST API 端点
 
@@ -2399,16 +2392,18 @@ class SchedulerEngine:
 | POST | /scheduler/tasks | 注册新任务 |
 | GET  | /scheduler/tasks | 列出所有任务（含健康状态） |
 | GET  | /scheduler/tasks/{task_id} | 获取单个任务详情 |
-| PATCH | /scheduler/tasks/{task_id} | 更新任务配置（config_version 递增） |
+| PATCH | /scheduler/tasks/{task_id} | 更新 `trigger_config / intent_template / priority / mode_allowlist / enabled / max_consecutive_failures / description` |
 | DELETE | /scheduler/tasks/{task_id} | 注销任务 |
 | POST | /scheduler/tasks/{task_id}/enable | 启用任务 |
 | POST | /scheduler/tasks/{task_id}/disable | 禁用任务 |
 | GET  | /scheduler/health | 所有任务健康快照 |
 
-### 21.7 审计字段
+### 21.7 审计与持久化
 
-- `scheduler_config_log`：任务注册/注销/配置变更/暂停事件，字段：`task_id / event_type / config_version / reason / ts`
-- `system_initiated_intent`：调度触发的 intent，字段：`proposer_node_id="scheduler" / source_task_id / intent_id / ts`
+- `scheduler_tasks`：持久化任务配置，用于启动恢复与管理接口读取。
+- `scheduler_event_log`：记录 task trigger / skipped / rejected / failed / suspended / heartbeat alert 等事件。
+- `system_initiated_intent`：当前是运行时生成的 intent 包体，不是独立 SQL 表；核心字段见 `scheduler.py::_build_system_intent(...)`。
+- 当前代码里没有独立的 `scheduler_config_log` 或 `config_version` 递增机制，旧文档口径不再适用。
 
 ### 21.8 错误码
 
@@ -2418,19 +2413,20 @@ class SchedulerEngine:
 | SCHED_TASK_DUPLICATE | task_id 已存在 |
 | SCHED_TASK_SUSPENDED | 连续失败超限，任务自动暂停 |
 | SCHED_CONDITION_UNMET | 触发条件不满足（非 sys_mode 原因） |
-| SCHED_CONFIG_INVALID | cron_expr/interval_seconds 格式错误或两者均为空 |
+| SCHED_CONFIG_INVALID | `trigger_mode` / `priority` / `SchedulerTaskConfig.validate()` 校验失败 |
+| SYSMODE_FORBIDDEN | 当前 `sys_mode` 不允许该任务执行 |
 
 ### 21.9 测试编号
 
 | 测试编号 | 关联需求 | 断言描述 |
 |---------|---------|---------|
-| T-SCHED-01 | FR-SCHED-001 | 注册任务后 tick() 在正确时间触发，生成 system_initiated_intent |
-| T-SCHED-02 | FR-SCHED-001 | sys_mode=GAMING 时 NORMAL 优先级任务被跳过（SYSMODE_FORBIDDEN） |
-| T-SCHED-03 | FR-SCHED-001 | sys_mode=SLEEP 时 HIGH 优先级白名单任务正常触发 |
-| T-SCHED-04 | FR-SCHED-002 | 连续失败 MAX_ERROR_COUNT 次后 status=SUSPENDED，写 scheduler_config_log |
-| T-SCHED-05 | FR-SCHED-002 | /scheduler/health 返回所有任务健康快照，字段完整 |
-| T-SCHED-06 | FR-SCHED-001 | 注销任务后 tick() 不再触发 |
-| T-SCHED-07 | FR-SCHED-001 | system_initiated_intent 中 proposer_node_id="scheduler" 且 source_task_id 正确 |
+| T-SCHED-01 | FR-SCHED-001 | 注册任务后按 `trigger_mode + trigger_config` 触发，生成 `system_initiated_intent` |
+| T-SCHED-02 | FR-SCHED-001 | `gaming/focus` 仅允许 `HIGH`，`sleep` 允许 `HIGH/MEDIUM`，`mode_allowlist` 可覆盖默认矩阵 |
+| T-SCHED-03 | FR-SCHED-002 | 连续失败达到 `max_consecutive_failures` 后状态变为 `SUSPENDED`，并写入 `scheduler_event_log` |
+| T-SCHED-04 | FR-SCHED-002 | `/scheduler/health` 返回调度器总览与任务级健康字段（含 immune/gate 相关字段） |
+| T-SCHED-05 | FR-SCHED-001 | `PATCH /scheduler/tasks/{task_id}` 能更新当前支持的配置字段，不依赖 `config_version` |
+| T-SCHED-06 | FR-SCHED-001 | `DELETE /scheduler/tasks/{task_id}` 后 registry 与 `scheduler_tasks` 持久化记录同步移除 |
+| T-SCHED-07 | FR-SCHED-001 | `system_initiated_intent` 中 `proposer_node_id="scheduler"`，并带 `task_id / trigger_mode / priority` |
 
 ---
 
@@ -2748,7 +2744,7 @@ class SysModeEnum(str, Enum):
 | SCHED_TASK_DUPLICATE | 调度任务 ID 已存在 |
 | SCHED_TASK_SUSPENDED | 连续失败超限，任务自动暂停 |
 | SCHED_CONDITION_UNMET | 触发条件不满足（非 sys_mode 原因） |
-| SCHED_CONFIG_INVALID | cron_expr/interval_seconds 格式错误 |
+| SCHED_CONFIG_INVALID | trigger_mode / priority / task 配置字段非法 |
 | SCOPE_VIOLATION | 路径越界/路径穿越/符号链接 |
 | DESKTOP_MSG_QA_REJECTED | 桌面留言内容含伪执行句 |
 | DESKTOP_MSG_UNDO_INVALID | undo_token 无效/过期/manifest 不匹配 |
@@ -2765,9 +2761,10 @@ class SysModeEnum(str, Enum):
 
 ```
 host_brain/tools/
-  tool_broker.py          ← ToolBroker 单入口（NEW）
-  tool_meta_registry.py   ← ToolMeta 注册表（NEW）
-  tool_visibility.py      ← tool_visibility_hash 计算与审计（NEW）
+  catalog.py              ← ToolMeta SSOT + compute_tool_visibility_hash()
+  selector.py             ← Top-K 工具选择
+  broker.py               ← ToolBroker 单入口
+  mcp_adapter.py          ← MCP provider 工具适配到 ToolCatalog
 ```
 
 #### 24.1.2 ToolMeta Schema
@@ -2775,43 +2772,34 @@ host_brain/tools/
 ```python
 @dataclass(frozen=True)
 class ToolMeta:
-    tool_id: str                    # 唯一标识
-    provider_id: str                # MCP provider 或 internal
-    name: str                       # 展示名
-    description: str                # 功能描述（暴露给 LLM）
-    access_level: Literal["READ", "WRITE"]
-    requires_token: bool            # WRITE 必须为 True
-    clearance_level: int            # 0~4
-    risk_level: int                 # 0~4
-    scopes: list[str]
-    reversible: bool
+    id: str
+    name: str
+    desc: str
+    schema_hash: str
+    side_effect_level: Literal["READ", "WRITE"]
+    auth_level: Literal["NONE", "APPROVAL", "CONFIRM"]
+    domain_tags: tuple[str, ...]
     version: str
 ```
 
 #### 24.1.3 ToolBroker 接口
 
 ```python
-class ToolBroker:
-    def get_tool_meta_pack(
-        self,
-        context: dict,
-        top_k: int = 5,
-    ) -> ToolMetaPack:
-        """返回当前轮次可见的 Top-K 工具元数据（不含 WRITE 默认）。"""
+catalog = ToolCatalog()
+catalog.register(meta: ToolMeta | dict[str, Any]) -> None
+tool_meta_pack = catalog.export_meta(include_write: bool = True) -> list[dict[str, Any]]
+tool_visibility_hash = compute_tool_visibility_hash(tool_meta_pack) -> str
 
-    def execute_tool(
+class ToolBroker:
+    def execute(
         self,
         tool_id: str,
         args: dict,
-        context: dict,
-    ) -> ToolExecResult:
-        """执行工具（WRITE 必须有 approval_token）。"""
-
-    def compute_visibility_hash(
-        self,
-        tool_meta_pack: ToolMetaPack,
-    ) -> str:
-        """计算 tool_visibility_hash（SHA-256 of sorted tool_ids）。"""
+        context: dict | None = None,
+        approval_token_ref: str | None = None,
+        confirm_token_ref: str | None = None,
+    ) -> ToolExecutionResult:
+        """执行工具；WRITE 工具按 auth_level 走 approval/confirm token 校验。"""
 ```
 
 #### 24.1.4 tool_visibility_hash 审计字段
@@ -3492,18 +3480,20 @@ tests/integration/
   test_mcp_audit_chain.py ← T-MCP-AUDIT-01~03
 ```
 
-#### 27.3.2 MCP 调用审计字段
+#### 27.3.2 MCP 调用审计与返回关键字段
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
+| `skill_name` | str | 审计侧写为 `mcp::<provider>::<tool>` |
 | `provider_id` | str | MCP provider 唯一标识 |
-| `tool_id` | str | 工具唯一标识 |
+| `tool_id` | str | 原始 provider tool_id；返回结果里会映射为 `mcp::provider::tool` |
 | `request_id` | str | 关联 Host 请求 ID |
 | `intent_id` | str | 关联 intent |
 | `evidence_ref` | str | 执行证据引用 |
-| `access_level` | str | READ / WRITE |
-| `approval_token_ref` | str \| None | WRITE 必填 |
-| `airlock_sanitized` | bool | 是否经过 AIRLOCK 净化 |
+| `approval_token_ref` | str \| None | WRITE 工具必填 |
+| `result_status` | str | `SUCCESS` / `REJECTED` / `FAILED` |
+| `result_code` | str | 拒绝或失败原因码 |
+| `sanitization_report` | object | `execute_mcp_tool()` 返回的 AIRLOCK 净化报告 |
 | `ts_ms` | int | 时间戳 |
 
 #### 27.3.3 AIRLOCK 出站最小化要求
@@ -3520,13 +3510,14 @@ class MCPAdapter:
         self,
         provider_id: str,
         *,
-        provider_url: str,
+        tools: list[dict[str, Any]],
+        handlers: dict[str, Callable] | None = None,
     ) -> list[ToolMeta]:
         """
         同步 MCP provider 暴露的工具为 ToolMeta 列表。
         - 仅同步元数据，不执行
         - 按 READ/WRITE 分级
-        - 写入 tool_sync_log（审计）
+        - 适配注册到 ToolCatalog，并缓存 provider 工具清单
         """
 
     def execute_mcp_tool(
@@ -3534,15 +3525,18 @@ class MCPAdapter:
         tool_id: str,
         args: dict,
         *,
+        provider_id: str,
         request_id: str,
         intent_id: str,
-        approval_token: str | None = None,
+        session_id: str,
+        seq: int,
+        approval_token_ref: str | None = None,
     ) -> dict:
         """
         执行 MCP 工具（必须经 ToolBroker 单入口）。
-        - WRITE 必须有 approval_token
+        - WRITE 必须有 approval_token_ref
         - 出站经 AIRLOCK 净化
-        - 写入 mcp_call_log（审计）
+        - 返回包含 evidence_ref 与 sanitization_report 的结果
         """
 ```
 
@@ -4180,8 +4174,8 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 - 单服务超时时该服务 `status=DOWN`，其余正常返回。
 
 **落点**：
-- `host_brain/app/obs_routes.py`（新增端点）
-- `host_brain/obs/service_health_aggregator.py`（ServiceHealthAggregator）
+- `host_brain/app/obs_routes_core.py`（服务健康端点）
+- `host_brain/observability/service_health_aggregator.py`（ServiceHealthAggregator）
 - `tests/unit/test_service_health_aggregator.py`（T-OBS-HEALTH-01~06）
 
 #### 29.8.2 会话列表 API（§OBS-V3-API-002）
@@ -4215,9 +4209,9 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 - 过滤参数组合正确生效。
 
 **落点**：
-- `host_brain/app/obs_routes.py`（新增端点）
-- `host_brain/obs/session_query.py`（SessionQueryService）
-- `host_brain/audit/migrations/0019_obs_sessions_index.sql`（查询索引）
+- `host_brain/app/obs_routes_sessions.py`（会话列表端点）
+- `host_brain/observability/session_query.py`（SessionQueryService）
+- `host_brain/audit/ledger_schema.py`（复用当前 Ledger 索引定义；无独立 `0019_obs_sessions_index.sql`）
 - `tests/unit/test_session_query.py`（T-OBS-SESS-01~06）
 
 #### 29.8.3 链路节点详情 API（§OBS-V3-API-003）
@@ -4258,9 +4252,9 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 - 数据来源：从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建。
 
 **落点**：
-- `host_brain/app/obs_routes.py`（新增端点）
-- `host_brain/obs/trace_node_builder.py`（TraceNodeBuilder）
-- `tests/unit/test_trace_node_builder.py`（T-OBS-TRACE-01~08）
+- `host_brain/app/obs_routes_trace.py`（链路追踪端点）
+- `host_brain/app/obs_routes_core.py`（共享 trace 组装与 obs 依赖）
+- `tests/unit/test_obs_routes_trace_fallback.py`、`tests/integration/test_obs_routes_integration.py`
 
 #### 29.8.4 指标时序 API（§OBS-V3-API-004）
 
@@ -4297,8 +4291,8 @@ host_brain/app/static/monitor/          ← npm run build 产出（提交到仓�
 - 批量查询返回 `{metrics: {metric_name: {data_points: [...]}}}` 结构。
 
 **落点**：
-- `host_brain/app/obs_routes.py`（新增端点）
-- `host_brain/obs/metrics_timeseries.py`（MetricsTimeseriesService）
+- `host_brain/app/obs_routes_metrics.py`（时序指标端点）
+- `host_brain/observability/metrics_timeseries.py`（MetricsTimeseriesService）
 - `tests/unit/test_metrics_timeseries.py`（T-OBS-TS-01~06）
 
 ---

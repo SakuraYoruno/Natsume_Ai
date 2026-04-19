@@ -5,11 +5,16 @@
 
 **文档编号：** SOUL-UPGRADE-2026-03-23
 **创建日期：** 2026-03-23
-**状态：** ✅ 全部实施完成（2026-03-23）
+**状态：** 历史升级路径 / 蓝图留痕（2026-04-19 校准）
 **作者：** Claude-4.6 Opus
 **前置文档：**
 - `docs/15_theory/soul_emotion_optimization.md`（五大优化方向，已实施）
 - 方向 A-G 全部实施完毕（LLM 情感推理、情感 Agent、情感记忆闭环等）
+
+**当前代码校准说明（2026-04-19 优先）：**
+- 本文形成于 2026-03-23 的灵魂系统升级规划阶段，正文仍包含 `main_chain.py` 等旧主链入口写法，不应视为当前运行时事实。
+- 当前聊天与后处理收口应以 `chat_handler -> cortex_orchestrator -> agent_runtime_shared` 为准；灵魂/人格相关能力的现行落点需结合 `docs/15_theory/architecture_overview.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md` 与实际代码核对。
+- 本文可继续作为能力蓝图与拆解参考，但不再作为“全部实施完成”的现状证明，也不作为实现层任务来源。
 
 **关联代码模块：**
 - `host_brain/core/metabolism.py` — 情绪连续体、情感回声
@@ -762,4 +767,4 @@ tests/unit/test_persona_phase8.py         — 19 passed
 
 **文档结束。**
 
-> 本文档原为设计留痕文档，现已全部实施完成。8 大阶段 210 项验收测试全部通过。
+> 本文档原为设计留痕与升级蓝图。文中的 8 大阶段、文件改动建议与测试规模应按阶段规划理解，不代表当前代码已经按正文原样全部落地。

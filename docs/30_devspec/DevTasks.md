@@ -1489,8 +1489,6 @@ TASK-XXXX 标题
 - 输出：
   - `host_brain/mcp/__init__.py`（新增）：包初始化；
   - `host_brain/mcp/tool_registry.py`（新增）：ToolMeta 数据类 + MCPToolRegistry 注册表（SQLite 持久化 `mcp_tool_registry` 表）；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `mcp_tool_registry` 表 + `mcp_sync_log` 表 + `log_mcp_sync()` 方法；
-  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql`（新增）：建表 SQL；
   - `tests/contract/test_mcp_registry_contract.py`（新增）：ToolMeta 注册/更新/变更留痕验收测试；
   - `tests/fixtures/mcp/`（新增）：tool_meta_read.json / tool_meta_write.json / sync_log.json。
 - 验收标准：
@@ -1498,7 +1496,7 @@ TASK-XXXX 标题
   - 更新 ToolMeta 时 `mcp_sync_log` 写入变更记录（含 before/after diff）；
   - `access_level`/`risk_level`/`reversible` 字段完整且类型正确；
   - 注册表测试全部通过。
-- 涉及文件路径：host_brain/mcp/__init__.py（新增）；host_brain/mcp/tool_registry.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0015_mcp_tool_schema.sql（新增）；tests/contract/test_mcp_registry_contract.py（新增）；tests/fixtures/mcp/。
+- 涉及文件路径：host_brain/mcp/__init__.py（新增）；host_brain/mcp/tool_registry.py（新增，内部 `_ensure_schema()` 自管 `mcp_tool_registry` / `mcp_sync_log`）；tests/contract/test_mcp_registry_contract.py（新增）；tests/fixtures/mcp/。
 - 关联需求/测试：FR-MCP-001；T-MCP-01~03。
 
 ### TASK-0102 MCP ToolBroker：单入口调用 + Governor 门禁 + Token 治理 + 审计（M7 P0）
@@ -1506,17 +1504,16 @@ TASK-XXXX 标题
 - 输入：DevSpec §17.2.2；TASK-0101 输出的 MCPToolRegistry；host_brain/governor/rules.py；host_brain/core/token_ledger.py；host_brain/audit/sqlite_ledger.py。
 - 输出：
   - `host_brain/mcp/tool_broker.py`（新增）：ToolBroker 类，实现完整调用链；
-  - `host_brain/audit/sqlite_ledger.py` 扩展：新增 `mcp_exec_log` 表 + `log_mcp_exec()` 方法；
-  - `host_brain/audit/migrations/0015_mcp_tool_schema.sql` 扩展：`mcp_exec_log` 建表 SQL；
+  - `host_brain/audit/sqlite_ledger.py` / `ledger_log_mixin.py`：复用 `log_skill_exec()` 记录 MCP 执行审计；
   - `host_brain/core/errors.py` 扩展：`MCP_TOOL_NOT_REGISTERED`、`MCP_WRITE_TOKEN_REQUIRED`、`MCP_PROVIDER_UNAVAILABLE` 错误码；
-  - `tests/contract/test_mcp_broker_contract.py`（新增）：T-MCP-01~03 验收测试；
+  - `tests/contract/test_mcp_registry_contract.py`（覆盖 Broker 合同测试）：T-MCP-01~03 验收测试；
   - `tests/fixtures/mcp/` 扩展：write_no_token.json / read_no_token.json / provider_unavailable.json。
 - 验收标准：
-  - WRITE 无 token → `MCP_WRITE_TOKEN_REQUIRED` 拒绝 + `mcp_exec_log` 写入 decision=REJECT；
-  - READ 无 token → 正常执行 + `mcp_exec_log` 写入 decision=APPROVE；
+  - WRITE 无 token → `MCP_WRITE_TOKEN_REQUIRED` 拒绝 + `skill_exec_log` 写入拒绝记录；
+  - READ 无 token → 正常执行 + `skill_exec_log` 写入成功记录；
   - provider 不可达 → `MCP_PROVIDER_UNAVAILABLE` 降级 + 输出结构稳定；
   - T-MCP-01~03 全部通过。
-- 涉及文件路径：host_brain/mcp/tool_broker.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/migrations/0015_mcp_tool_schema.sql；host_brain/core/errors.py；tests/contract/test_mcp_broker_contract.py（新增）；tests/fixtures/mcp/。
+- 涉及文件路径：host_brain/mcp/tool_broker.py（新增）；host_brain/audit/sqlite_ledger.py；host_brain/audit/ledger_log_mixin.py；host_brain/core/errors.py；tests/contract/test_mcp_registry_contract.py（覆盖 Broker 用例）；tests/fixtures/mcp/。
 - 关联需求/测试：FR-MCP-001；T-MCP-01~03。
 
 ### TASK-0103 ASR 事件化上送：事件 Schema + 低置信度标注 + 审计（M7 P1）
@@ -1598,10 +1595,10 @@ TASK-XXXX 标题
 > 所有任务当前状态：DONE（2026-03-03）。
 
 ### TASK-0107 运行时脚本集成：start_host_side.ps1 接入 OBS/MCP 健康探测（M8 P0）
-- 任务描述：扩展 `start_host_side.ps1`，在 `/health` 通过后额外探测 `/obs/metrics` 与 `MCPToolRegistry.health_check()`，将 OBS/MCP 子系统健康状态写入启动结果 JSON，不可用时输出 `startup_warnings` 但不阻断启动。
-- 输入：DevSpec §18.1.1；scripts/runtime/start_host_side.ps1（现有）；host_brain/obs/routes.py；host_brain/mcp/tool_registry.py。
+- 任务描述：扩展 `start_host_side.ps1`，在 `/health` 通过后额外探测 `/obs/metrics` 与 `/health/mcp`，将 OBS/MCP 子系统健康状态写入启动结果 JSON，不可用时输出 `startup_warnings` 但不阻断启动。
+- 输入：DevSpec §18.1.1；scripts/runtime/start_host_side.ps1（现有）；host_brain/app/health_routes.py；host_brain/mcp/tool_registry.py。
 - 输出：
-  - `scripts/runtime/start_host_side.ps1` 扩展：新增 `/obs/metrics` HTTP 探测逻辑 + `MCPToolRegistry` SQLite 可写性检查；
+  - `scripts/runtime/start_host_side.ps1` 扩展：新增 `/obs/metrics` HTTP 探测逻辑 + `/health/mcp` HTTP 探测；
   - 启动结果 JSON 新增字段：`obs_status`（ok/degraded）、`mcp_registry_status`（ok/degraded）、`startup_warnings`（列表）；
   - `host_brain/core/errors.py` 扩展：`STARTUP_OBS_DEGRADED`、`STARTUP_MCP_DEGRADED` 错误码；
   - `tests/contract/test_startup_integration_contract.py`（新增）：T-RT-01 验收测试（启动结果 JSON 字段完整性 + OBS/MCP 状态可观测）；
@@ -2377,12 +2374,13 @@ TASK-XXXX 标题
 
 ### TASK-0155 M12-A-1：ToolBroker 核心实现
 - 状态：DONE（2026-03-04，broker.py/catalog.py/selector.py/mcp_adapter.py 已有完整实现；T-TOOL-01~06 17 passed）
-- 任务描述：实现 `ToolBroker`（单入口）+ `ToolMetaRegistry`（注册表）+ `ToolVisibility`（hash 计算）。
+- 任务描述：实现 `ToolBroker`（单入口）+ `ToolCatalog`（注册表）+ `compute_tool_visibility_hash`（hash 计算）。
 - 输入：DevSpec §24.1。
 - 输出：
-  - `host_brain/tools/tool_broker.py`；
-  - `host_brain/tools/tool_meta_registry.py`；
-  - `host_brain/tools/tool_visibility.py`；
+  - `host_brain/tools/broker.py`；
+  - `host_brain/tools/catalog.py`；
+  - `host_brain/tools/selector.py`；
+  - `host_brain/tools/mcp_adapter.py`；
   - `host_brain/core/errors.py`（新增 TOOL_* 错误码）。
 - 验收标准：T-TOOL-01~06 全部通过；全量测试 ≥1170 passed。
 - 关联需求/测试：FR-TOOL-001/002/003；T-TOOL-01~06。
@@ -2825,10 +2823,10 @@ TASK-XXXX 标题
 - 状态：DONE
 - 任务描述：
   实现 `GET /obs/services/health` 端点，并发探测双端所有已注册服务健康状态（Host 侧：LLM Gateway、Neo4j、SQLite、Chroma、Scheduler、Bond Engine、Memory Distiller、MCP Provider；Edge 侧：ASR、TTS、VTS、Audio Playback、Edge RPC）；聚合返回统一结构；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host|edge` 过滤。
-- 输入：DevSpec §OBS-V3-API-001；FR-OBS-008；现有 `host_brain/app/obs_routes.py`（或等价）。
+- 输入：DevSpec §OBS-V3-API-001；FR-OBS-008；现有 `host_brain/app/obs_routes.py`（或等价聚合入口）。
 - 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/services/health` 端点）；
-  - `host_brain/obs/service_health_aggregator.py`（ServiceHealthAggregator：并发探测 + 结果聚合）；
+  - `host_brain/app/obs_routes_core.py`（`/obs/services/health` 端点）；
+  - `host_brain/observability/service_health_aggregator.py`（ServiceHealthAggregator：并发探测 + 结果聚合）；
   - `tests/unit/test_service_health_aggregator.py`（T-OBS-HEALTH-01~06）。
 - 验收标准：
   - T-OBS-HEALTH-01~06 全部通过；
@@ -2844,9 +2842,9 @@ TASK-XXXX 标题
   实现 `GET /obs/sessions` 端点，从 SQLite Ledger 查询会话列表；支持过滤参数：start_time、end_time、status、channel、keyword；分页参数：page、page_size；响应包含 total_count；查询性能优化（必要时补充索引）。
 - 输入：DevSpec §OBS-V3-API-002；FR-OBS-009；现有 SQLite Ledger schema。
 - 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/sessions` 端点）；
-  - `host_brain/obs/session_query.py`（SessionQueryService：过滤 + 分页 + 性能优化）；
-  - `host_brain/audit/migrations/0019_obs_sessions_index.sql`（sessions 查询索引）；
+  - `host_brain/app/obs_routes_sessions.py`（`/obs/sessions` 端点；并由 `obs_routes.py` 聚合）；
+  - `host_brain/observability/session_query.py`（SessionQueryService：过滤 + 分页 + 性能优化）；
+  - `host_brain/audit/ledger_schema.py`（复用现有 Ledger 索引定义，无独立 sessions migration）；
   - `tests/unit/test_session_query.py`（T-OBS-SESS-01~06）。
 - 验收标准：
   - T-OBS-SESS-01~06 全部通过；
@@ -2862,9 +2860,9 @@ TASK-XXXX 标题
   实现 `GET /obs/trace/{request_id}` 端点，从审计链（intent_log / governor_log / skill_exec_log / asr_log / tts_log / vts_log 等）聚合构建结构化节点列表；每个节点包含 node_id、node_type、node_name、status、start_ts_ms、end_ts_ms、duration_ms、input、output、reason_code、parent_node_id、side；支持 `?include_io=false` 参数；input/output 超 64KB 截断并标注 truncated=true。
 - 输入：DevSpec §OBS-V3-API-003；FR-OBS-010；现有审计链 schema（intent_log/governor_log/skill_exec_log）。
 - 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/trace/{request_id}` 端点）；
-  - `host_brain/obs/trace_node_builder.py`（TraceNodeBuilder：多源日志聚合 + 节点树构建）；
-  - `tests/unit/test_trace_node_builder.py`（T-OBS-TRACE-01~08）。
+  - `host_brain/app/obs_routes_trace.py`（`/obs/trace/{request_id}` 端点）；
+  - `host_brain/app/obs_routes_core.py`（共享 trace 聚合与依赖注入）；
+  - `tests/unit/test_obs_routes_trace_fallback.py`、`tests/integration/test_obs_routes_integration.py`（覆盖 T-OBS-TRACE 核心场景）。
 - 验收标准：
   - T-OBS-TRACE-01~08 全部通过；
   - 给定有效 request_id 返回完整节点列表；
@@ -2880,8 +2878,8 @@ TASK-XXXX 标题
   实现 `GET /obs/metrics/timeseries` 端点，支持多维度时序数据查询（request_count / reject_rate / latency_p50 / latency_p95 / reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time、多 metric 批量查询；数据点上限 1000（超出自动降采样）；无数据区间返回 null 值点保证时序连续性。
 - 输入：DevSpec §OBS-V3-API-004；FR-OBS-011；现有 SQLite Ledger 审计数据。
 - 输出：
-  - `host_brain/app/obs_routes.py`（新增 `/obs/metrics/timeseries` 端点）；
-  - `host_brain/obs/metrics_timeseries.py`（MetricsTimeseriesService：时序聚合 + 降采样 + 批量查询）；
+  - `host_brain/app/obs_routes_metrics.py`（`/obs/metrics/timeseries` 端点）；
+  - `host_brain/observability/metrics_timeseries.py`（MetricsTimeseriesService：时序聚合 + 降采样 + 批量查询）；
   - `tests/unit/test_metrics_timeseries.py`（T-OBS-TS-01~06）。
 - 验收标准：
   - T-OBS-TS-01~06 全部通过；
@@ -2972,12 +2970,12 @@ TASK-XXXX 标题
   2. **WARN-BE-002**：`GET /obs/sessions` 端点改为调用 `SessionQueryService.query(filters, page, page_size)`，删除路由层内联的查询逻辑；
   3. **WARN-BE-003**：`GET /obs/metrics/timeseries` 端点改为调用 `MetricsTimeseriesService.query(metrics, interval, start_time, end_time)`，删除路由层内联的聚合逻辑。
   重构后确保响应结构与原有结构兼容（前端无需修改），并补充必要的依赖注入（通过 `request.app.state` 或参数传递 `ledger` 实例）。
-- 输入：`host_brain/app/obs_routes.py`；`host_brain/obs/service_health_aggregator.py`；`host_brain/obs/session_query.py`；`host_brain/obs/metrics_timeseries.py`；审查报告 WARN-BE-001~003。
+- 输入：`host_brain/app/obs_routes.py`；`host_brain/app/obs_routes_core.py`；`host_brain/app/obs_routes_sessions.py`；`host_brain/app/obs_routes_metrics.py`；`host_brain/observability/service_health_aggregator.py`；`host_brain/observability/session_query.py`；`host_brain/observability/metrics_timeseries.py`；审查报告 WARN-BE-001~003。
 - 输出：
-  - `host_brain/app/obs_routes.py`（三个端点重构为调用 Service 层，删除内联逻辑）；
-  - `host_brain/obs/service_health_aggregator.py`（如需调整接口签名以适配路由层调用）；
-  - `host_brain/obs/session_query.py`（如需调整接口签名）；
-  - `host_brain/obs/metrics_timeseries.py`（如需调整接口签名）。
+  - `host_brain/app/obs_routes.py`、`host_brain/app/obs_routes_core.py`、`host_brain/app/obs_routes_sessions.py`、`host_brain/app/obs_routes_metrics.py`（路由层仅保留参数解析 + Service 调用）；
+  - `host_brain/observability/service_health_aggregator.py`（如需调整接口签名以适配路由层调用）；
+  - `host_brain/observability/session_query.py`（如需调整接口签名）；
+  - `host_brain/observability/metrics_timeseries.py`（如需调整接口签名）。
 - 验收标准：
   - `obs_routes.py` 三个端点不再包含内联业务逻辑，仅做参数解析 + Service 调用 + 响应序列化；
   - 原有 T-OBS-HEALTH-01~06、T-OBS-SESS-01~06、T-OBS-TS-01~06 全部继续通过；
@@ -2987,16 +2985,17 @@ TASK-XXXX 标题
 
 ### TASK-0197 M19-E 修复 TraceNodeBuilder 全量加载 + 并行分支推断（BUG-BE-002 + WARN-BE-005）
 - 状态：DONE
+- 当前代码校准（2026-04-19）：后续 trace 实现已并入 `host_brain/app/obs_routes_trace.py` / `host_brain/app/obs_routes_core.py`，下述 `trace_node_builder.py` 路径仅代表当时任务落点，不应再当当前入口阅读。
 - 任务描述：
   修复 `trace_node_builder.py` 的两个核心问题：
   1. **BUG-BE-002**：`_fetch_intent_nodes`、`_fetch_governor_nodes`、`_fetch_skill_nodes`、`_fetch_voice_nodes` 四个方法改为按 `request_id` 直接过滤查询（在 SQL 层过滤而非全量加载后内存过滤）。需在 `SQLiteLedger` 中新增 `fetch_by_request_id(table, request_id)` 方法（或扩展现有 `fetch_by_time_range` 支持 `request_id` 过滤参数），并在 `sqlite_ledger.py` 中为相关表的 `request_id` 列补充索引（migration 文件）；
   2. **WARN-BE-005**：`_infer_parent_ids` 改为基于 `node_type` 的树形推断：`intent` 节点无 parent；`governor` 节点 parent 为 `intent`；`skill` / `llm` 节点 parent 为 `governor`；`asr` / `tts` / `vts` 节点 parent 为对应的 `skill` 节点（按 `start_ts_ms` 最近匹配）；支持多个节点共享同一 parent（并行分支）。
-- 输入：`host_brain/obs/trace_node_builder.py`；`host_brain/audit/sqlite_ledger.py`；审查报告 BUG-BE-002、WARN-BE-005；DevSpec §29.6.1。
+- 输入：`host_brain/app/obs_routes_trace.py`、`host_brain/app/obs_routes_core.py`（当前 trace 聚合落点）；`host_brain/audit/sqlite_ledger.py`；审查报告 BUG-BE-002、WARN-BE-005；DevSpec §29.6.1。
 - 输出：
-  - `host_brain/obs/trace_node_builder.py`（SQL 级过滤 + 树形 parent 推断）；
+  - `host_brain/app/obs_routes_trace.py`、`host_brain/app/obs_routes_core.py`（按 `request_id` 聚合 trace + 树形 parent 推断）；
   - `host_brain/audit/sqlite_ledger.py`（新增 `fetch_by_request_id` 方法）；
-  - `host_brain/audit/migrations/0020_trace_request_id_index.sql`（request_id 索引）；
-  - `tests/unit/test_trace_node_builder.py`（更新 T-OBS-TRACE-03 断言，补充并行分支测试用例 T-OBS-TRACE-09~10）。
+  - `host_brain/audit/ledger_schema.py`（复用现有 `request_id` 索引定义，无独立 `0020_trace_request_id_index.sql`）；
+  - `tests/unit/test_obs_routes_trace_fallback.py`、`tests/integration/test_obs_routes_integration.py`（覆盖 T-OBS-TRACE 核心场景）。
 - 验收标准：
   - `_fetch_*_nodes` 方法不再拉取全量数据，仅返回指定 `request_id` 的行；
   - 并行分支场景（两个 skill 节点共享同一 governor parent）正确推断 parent_node_id；

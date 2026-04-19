@@ -1,10 +1,16 @@
-# 🧬 Natsume_Ai · 多智能体族重构完整方案
+# 🧬 Natsume_Ai · 多智能体族重构完整方案（历史重构方案与实施记录留痕）
 
 > **文档版本**：v1.3
 > **创建日期**：2026-04-08
 > **更新日期**：2026-04-08（补充数字生命运行法则章节）
-> **状态**：草案（待评审）
+> **状态**：历史重构方案 + 实施记录留痕（2026-04-19 已校准）
 > **存放路径**：`docs/50_project/arch/TRIBE_AGENT_REFACTOR_PLAN_20260408.md`
+
+> 当前代码校准说明（2026-04-19）
+> - 本文混合了 2026-04-08 的 TRIBE 目标态蓝图与当时的实施记录，不能直接当作当前运行时架构图或默认入口说明。
+> - 文中 `top_agent`、`dispatch_agent`、`scene_router`、`top_agent_sse_generator` 等口径属于阶段语境；当前主聊天链路请以 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> executive_router.py -> executive_runtime.py / executive_runtime_core.py` 为准。
+> - 当前 Gateway / 外部输入链路请以 `host_brain/app/input_routes.py` 与 `host_brain/channels/edge_rpc_client.py` 的现行实现为准，而不是把本文里的早期 Supervisor / 事件桥方案直接当作现状。
+> - 文中的 T-xx 实施记录可作为迁移轨迹与落库痕迹参考，但模块接线、主链归属、可调用入口应以 `CURRENT_CODE_ARCHITECTURE.md`、`AGENT_ORCHESTRATION_DETAIL.md`、`CORE_MODULES_DETAILED_REFERENCE.md` 和实际代码为准。
 
 ---
 

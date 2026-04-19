@@ -1,7 +1,13 @@
 受众：CODEX
-标题：Phase X 智能编排层升级 — 六大方案技术文档
+标题：Phase X 智能编排层升级 — 六大方案技术文档（阶段方案留痕）
 
 # Phase X 智能编排层升级 — 六大方案
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-03-29 的阶段方案文档，不应直接当作当前实现任务清单。
+- 文中六个模块目前均已真实落库：`memory_worth_evaluator.py`、`adaptive_prompt_budget.py`、`semantic_dedup.py`、`bond_aware_style.py`、`consolidation_trigger.py`、`tts_context_router.py`。
+- 当前接线应以实际代码为准：`host_brain/retrieval/pipeline.py` 已接入 `AdaptivePromptBudget + SemanticDedup`，`host_brain/app/observability_persist.py` 已接入 `MemoryWorthEvaluator + ConsolidationTrigger`，`host_brain/app/chat_context_builder.py` / `host_brain/app/intelligent_runtime.py` 已接入 `BondAwareStyleEngine + TtsContextRouter`。
+- 若要查看现行接口与责任边界，请优先阅读 `docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md`、`docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md`、`docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md` 与实际代码。
 
 ## 概述
 

@@ -7,6 +7,12 @@
 - **生成日期**：2026-03-06
 - **适用范围**：`docs/30_devspec/ModelPlane.md`、`host_brain/integrations/graph_executor.py`、`graph_runtime.py`
 - **主题**：在**不放松 ModelPlane 硬约束**的前提下，如何更好地吸收 LangGraph 的高级编排能力
+- **状态**：理论方案留痕（2026-04-19 已校准，不作为当前主链事实）
+
+> 当前代码校准说明（2026-04-19）
+> - 本文用于解释 `Policy Plane / Execution Plane / Evidence Plane` 的治理化思路，属于理论层与方案层文档，不是当前 `/v1/chat` 或 `/v1/host/input` 运行时的逐文件事实说明。
+> - 当前仓库已经落有 `GraphRuntimeContract`、`GraphExecutor`、LangGraph checkpoint / subgraph 适配、`GovernedToolNode`、Evidence Plane 等能力，但主聊天主链并不是直接按本文的三层图逐步执行，而是收敛在 `chat_handler.py -> cortex_orchestrator.py -> executive_runtime*.py`。
+> - 阅读当前集成层代码应优先看 `INTEGRATIONS_LAYER_CONTRACT.md`、`CURRENT_CODE_ARCHITECTURE.md` 与实际代码；本文应作为治理设计与演进方向参考。
 
 ---
 

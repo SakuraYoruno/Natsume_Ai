@@ -1,11 +1,18 @@
 受众：MASTER
 标题：Phase XV 架构重构 — Dispatch Agent + Chat Agent 分离
 
-# Phase XV: Dispatch Agent + Chat Agent 分离架构
+# Phase XV: Dispatch Agent + Chat Agent 分离架构（历史阶段方案留痕）
 
 **日期**：2026-04-01
-**状态**：PROPOSAL（待哥哥确认）
-**前置**：Phase XIV v4（TopAgent 顶级 Agent 架构）
+**状态**：历史阶段方案留痕（2026-04-19 已校准，不作为当前主链事实）
+**前置**：Phase XIV v4（TopAgent 顶级 Agent 架构，历史语境）
+
+> 当前代码校准说明（2026-04-19）
+>
+> - 本文围绕 `TopAgent -> DispatchAgent -> ChatAgent` 分离展开，属于 2026-04-01 的阶段方案与问题复盘；文中 `top_agent.py`、`top_agent_prompt.py`、`_run_top_agent_pipeline()`、`gateway_orchestrator_handler.py` 等引用，不应再被视为当前入口事实。
+> - 当前 `/v1/chat` 主链已收敛为 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> executive_router.py -> executive_runtime.py / executive_runtime_core.py`。
+> - 当前 `/v1/host/input` 外部输入链路已收敛为 `host_brain/app/input_routes.py -> receive_input() -> _run_cortex_orchestrator_pipeline() -> host_brain/channels/edge_rpc_client.py:post_gateway_reply()`。
+> - 文中对上下文断裂、TTS / Gateway 双出站、技能执行路径等问题的分析可保留为阶段背景，但是否已修正应以当前代码和 `CURRENT_CODE_ARCHITECTURE.md`、`AGENT_ORCHESTRATION_DETAIL.md`、`UNIFIED_MESSAGE_GATEWAY_DESIGN.md` 为准。
 
 ---
 

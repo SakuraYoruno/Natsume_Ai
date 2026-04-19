@@ -1,182 +1,249 @@
-受众：CODEX
-标题：Agentic RAG 智能检索升级 — 架构文档
+受众：MASTER
+标题：Agentic RAG 智能检索架构（当前代码实况）
 
-# Agentic RAG 智能检索升级（Phase X）
+版本：v2.0
+日期：2026-04-19
 
-## 1. 概述
+---
 
-将 Natsume_Ai 的检索系统从"单次全量七路并行召回"升级为"意图驱动的自适应多轮检索"。
+定位：本文描述当前代码里的检索主链，而不是早期 `main_chain.py / RecallFusionNode` 方案草图。
+若与旧文档中的“七路全量召回 + Graph 注入点”口径冲突，以本文和代码为准。
 
-**核心改进**：
-- 简单寒暄跳过检索（省 ~3 秒）
-- 按意图动态选择 Store 子集（2-3 路 vs 全量 7 路）
-- 证据质量评估 + 自动改写重试（最多 3 轮）
-- Query 改写提升召回质量
+## 0. 代码证据入口
 
-**设计原则**：
-- 零侵入：在现有检索管线上层包装，不改动任何现有 Store 实现
-- 零 LLM：所有规划/评估/改写都是规则驱动，<5ms 延迟
-- 安全降级：任何模块不可用时静默回退到原有全量检索流程
+- `host_brain/app/agent_runtime_shared.py`
+- `host_brain/app/chat_retrieval_helpers.py`
+- `host_brain/tribe/hippocampus_agent.py`
+- `host_brain/retrieval/orchestrator.py`
+- `host_brain/retrieval/pipeline.py`
+- `host_brain/retrieval/query_planner.py`
+- `host_brain/retrieval/evidence_evaluator.py`
+- `host_brain/retrieval/agentic_retrieval_loop.py`
 
-## 2. 架构
+---
 
-### 2.1 升级前
+## 一、当前检索入口
 
-```
-用户消息 → Embed → 7路全量并行召回 → Rerank → EvidencePack → LLM → 回复
-                    ↑ 每次都跑 7 路 ↑
-```
+当前聊天主链中的检索入口不是 `main_chain.py`，而是：
 
-### 2.2 升级后
-
-```
-用户消息 → QueryPlanner（意图分类 + Store 路由 + Query 改写）
-  ├── greeting → 跳过检索 → LLM（仅用常驻上下文）→ 回复
-  └── 其他意图 → 选择 Store 子集 → Retrieve
-                  → EvidenceEvaluator（够了吗？）
-                    ├── 够了 → Rerank → EvidencePack → LLM → 回复
-                    └── 不够 → 改写 Query → Re-Retrieve（最多 2-3 轮）
-```
-
-### 2.3 常驻上下文 vs 检索上下文
-
-| 类型 | 来源 | 是否走检索 | 说明 |
-|------|------|-----------|------|
-| World Canon (Core) | 内存直读 | ❌ | 核心人设永远注入 |
-| Style Canon (Rules) | 内存直读 | ❌ | 语言风格规范永远注入 |
-| 人格特质向量 | 内存直读 | ❌ | 7 维特质永远注入 |
-| HardState | 内存直读 | ❌ | 情绪/心情/energy 永远注入 |
-| Bond 状态 | 内存直读 | ❌ | 关系阶段/亲密度永远注入 |
-| 时间上下文 | 系统注入 | ❌ | 时间/日期永远注入 |
-| episodic_vector | ChromaDB | ✅ | 对话历史 embedding |
-| sqlite_ledger | SQLite | ✅ | 意图日志/记忆操作 |
-| neo4j_bond | Neo4j/SQLite | ✅ | Bond 事件历史 |
-| style_canon (向量) | ChromaDB | ✅ | 风格典籍向量投影 |
-| world_canon (向量) | ChromaDB | ✅ | 世界观典籍向量投影 |
-| artifact_vault | SSOT | ✅ | 制品库 |
-| persona_utterance | ChromaDB | ✅ | 中日台词向量库 |
-
-**关键理解**：跳过检索 ≠ 跳过人格。AI 的灵魂（Canon + 情绪 + Bond + 人格）是常驻的。
-
-## 3. 模块详解
-
-### 3.1 QueryPlanner（查询规划器）
-
-**文件**：`host_brain/retrieval/query_planner.py`
-
-**意图分类规则**（优先级从高到低）：
-
-| 意图 | 判定条件 | 示例 |
-|------|---------|------|
-| `greeting` | 正则匹配 + 新对话首轮 | "早上好""你好""hello" |
-| `complex` | 长度>100 或 多个问号 | 长段落提问 |
-| `recall_memory` | 含"还记得/上次/之前/以前" | "你还记得上次聊的吗" |
-| `emotion` | 含"心情/难过/开心/累" | "我今天心情不好" |
-| `knowledge` | 含"设定/你是谁/规则" | "你叫什么名字" |
-| `tool` | 含"执行/搜索/帮我查" | "帮我搜一下" |
-| `chat` | 以上都不匹配 | 日常聊天 |
-
-**Store 路由表**：
-
-| 意图 | 选择的 Store | 跳过的 Store |
-|------|------------|------------|
-| `greeting` | 无（跳过） | 全部 7 路 |
-| `chat` | episodic_vector, persona_utterance | 5 路 |
-| `recall_memory` | episodic_vector, sqlite_ledger, persona_utterance | 4 路 |
-| `emotion` | neo4j_bond, episodic_vector, persona_utterance | 4 路 |
-| `knowledge` | world_canon, style_canon | 5 路 |
-| `tool` | artifact_vault | 6 路 |
-| `complex` | 全部 7 路 | 无 |
-
-**Query 改写**（三层，~40 条规则）：
-1. 停用词去除：去掉"你/我/的/了/吗"等
-2. 时间词归一化："昨天"→lookback 2天，"上次"→7天
-3. 情绪同义词扩展："心情不好"→补充"难过 低落 安慰"
-
-### 3.2 EvidenceEvaluator（证据评估器）
-
-**文件**：`host_brain/retrieval/evidence_evaluator.py`
-
-三维评估：
-
-| 维度 | 阈值 | 权重 |
-|------|------|------|
-| 数量 | ≥ 2 条 | 0.3 |
-| 质量（top_score） | ≥ 0.25 | 0.3 |
-| 覆盖度（关键词重叠） | ≥ 0.4 | 0.4 |
-
-评估建议：
-- `proceed`：证据充足，继续生成
-- `retry_with_rewrite`：质量不足，改写 query 重试
-- `expand_stores`：覆盖不足，扩展到更多 Store
-
-### 3.3 AgenticRetrievalLoop（检索循环）
-
-**文件**：`host_brain/retrieval/agentic_retrieval_loop.py`
-
-编排 Plan → Retrieve → Evaluate → Re-Retrieve 循环：
-
-```python
-for round_idx in range(plan.max_rounds):
-    current_query = queries[round_idx]
-    result = recall_fusion.recall(query=current_query, ...)
-    all_evidence = merge_dedupe(all_evidence, result.candidates)
-    evaluation = evaluator.evaluate(query, all_evidence)
-    if evaluation.sufficient:
-        break
-    # 根据建议调整下一轮策略
+```text
+/v1/chat
+  -> chat_handler
+  -> cortex_orchestrator
+  -> agent_runtime_shared._cortex_orchestrator_sse_generator_impl
+  -> chat_retrieval_helpers._run_retrieval
+  -> HippocampusAgent.recall
+  -> RetrievalOrchestrator.arun
+  -> RetrievalPipelineContract.run
 ```
 
-最大轮次：greeting=0, chat=1, recall/emotion=2, complex=3
+其中职责分工如下：
 
-### 3.4 Graph 集成
+| 层 | 当前模块 | 职责 |
+|---|---|---|
+| 主链触发 | `agent_runtime_shared.py` | 决定是否启动 retrieval task，并把结果回灌到 prompt / trace |
+| 检索桥接 | `chat_retrieval_helpers.py` | 调用 `HippocampusAgent.recall()`，做 prompt_filter、RecallPackBuilder 补充 |
+| 记忆/检索族入口 | `hippocampus_agent.py` | 构造 `RetrievalOrchestratorRequest` |
+| 编排入口 | `retrieval/orchestrator.py` | 统一输出 `retrieval_summary / retrieval_evidence_items / retrieval_bundle` |
+| 管线核心 | `retrieval/pipeline.py` | QueryPlanner → AgenticRetrievalLoop → Dedup → Rerank → EvidencePack |
 
-**文件**：`host_brain/app/graph/main_chain.py`（RecallFusionNode）
+---
 
-在 RecallFusionNode.execute() 的 orchestrator 调用之前注入 QueryPlanner：
-- `skip_retrieval=True` → 直接 return，跳过整个七路召回
-- `skip_retrieval=False` → 继续原有流程（Agentic 元数据写入审计）
-- QueryPlanner 不可用 → 静默降级到原有全量流程
+## 二、当前检索管线
 
-审计标签：`AGENTIC_SKIP_RETRIEVAL`（跳过时）
-审计元数据：`audit_refs.agentic_rag`（意图/Store/轮次等）
+当前 `RetrievalPipelineContract.run()` 的真实步骤是：
 
-## 4. 性能影响
+```text
+QueryPlanner
+  -> EmbeddingService.embed
+  -> AgenticRetrievalLoop.retrieve
+       -> RecallFusionService.recall (可多轮)
+       -> EvidenceEvaluator.evaluate
+  -> SemanticDedup.dedup
+  -> RerankerService.rerank
+  -> EvidencePackService.build_pack
+  -> Orchestrator 汇总 summary / bundle / evidence_items
+  -> agent_runtime_shared 做 prompt_filter 与 RecallPackBuilder
+```
 
-| 场景 | 原架构 | Agentic RAG | 变化 |
-|------|-------|-------------|------|
-| "早上好" | 7路全量 ~3s | 跳过 0ms | **-3s** |
-| "今天好无聊" | 7路 ~3s | 2路 ~0.8s | **-2.2s** |
-| "你还记得…" | 7路×1轮 ~3s | 3路×≤2轮 ~2s | **-1s + 质量↑** |
-| 复杂多层问题 | 7路×1轮 ~3s | 7路×≤3轮 ~5s | +2s（质量↑↑） |
-| **日均加权** | ~3s | **~1.5s** | **快 50%** |
+当前代码里，检索结果不仅返回候选证据，还会额外产出：
 
-## 5. 文件清单
+- `retrieval_summary`
+- `retrieval_evidence_items`
+- `query_plan`
+- `agentic_meta`
+- `adaptive_budget`
+- `cache` 元数据
 
-| 文件 | 状态 | 说明 |
-|------|------|------|
-| `host_brain/retrieval/query_planner.py` | 🆕 新建 | 查询规划器 |
-| `host_brain/retrieval/evidence_evaluator.py` | 🆕 新建 | 证据评估器 |
-| `host_brain/retrieval/agentic_retrieval_loop.py` | 🆕 新建 | 检索循环编排器 |
-| `host_brain/retrieval/__init__.py` | 修改 | 导出新模块 |
-| `host_brain/app/graph/main_chain.py` | 修改 | RecallFusionNode 注入 QueryPlanner |
+---
 
-## 6. 配置
+## 三、QueryPlanner 当前口径
 
-无新增环境变量。所有参数通过代码常量配置，后续可外部化到 Canon。
+`host_brain/retrieval/query_planner.py` 当前的 `ALL_STORE_IDS` 只有 5 路：
 
-## 7. 降级保护
+- `episodic_vector`
+- `sqlite_ledger`
+- `neo4j_bond`
+- `world_canon`
+- `artifact_vault`
 
-| 场景 | 行为 |
-|------|------|
-| QueryPlanner import 失败 | 静默降级到原有全量检索 |
-| 意图分类不确定 | 回退到 `chat`（2路检索）或 `complex`（7路全量） |
-| EvidenceEvaluator 失败 | 视为 sufficient，不重试 |
-| AgenticRetrievalLoop 异常 | 降级到单次全量检索 |
+文件内已经明确说明：
 
-## 8. 后续演进
+- `style_canon` 不再走这里的检索路由，而是常驻注入
+- `persona_utterance` 不再属于这里的 store map，而是独立通道
 
-- **Phase X.1**：Store 路由也外部化到 Canon（Master 可调）
-- **Phase X.2**：AgenticRetrievalLoop 在 RecallFusionNode 中全量替代 orchestrator（当前仅实现 skip 逻辑）
-- **Phase X.3**：LLM 辅助的高质量 Query 改写（仅在重试轮使用）
-- **Phase X.4**：基于历史检索效果的自适应阈值调整
+### 3.1 当前意图到 Store 路由
+
+| intent | target_stores |
+|---|---|
+| `greeting` | 空，直接跳过检索 |
+| `phatic` | `episodic_vector` |
+| `chat` | `episodic_vector` |
+| `recall_memory` | `episodic_vector`, `sqlite_ledger` |
+| `emotion` | `neo4j_bond`, `episodic_vector` |
+| `affection` | `neo4j_bond`, `episodic_vector` |
+| `knowledge` | `world_canon` |
+| `tool` | `artifact_vault` |
+| `complex` | 全量 5 路 |
+
+### 3.2 当前最大轮次
+
+| intent | max_rounds |
+|---|---|
+| `greeting` | 0 |
+| `phatic` | 1 |
+| `chat` | 1 |
+| `recall_memory` | 2 |
+| `emotion` | 2 |
+| `affection` | 1 |
+| `knowledge` | 1 |
+| `tool` | 1 |
+| `complex` | 3 |
+
+---
+
+## 四、EvidenceEvaluator 当前阈值
+
+`host_brain/retrieval/evidence_evaluator.py` 当前默认阈值是：
+
+| 维度 | 默认值 |
+|---|---|
+| 最少证据数 | `2` |
+| top_score 下限 | `0.25` |
+| coverage 下限 | `0.4` |
+
+当前建议类型有三种：
+
+- `proceed`
+- `retry_with_rewrite`
+- `expand_stores`
+
+因此，当前 Agentic RAG 不是“单次规划后只跑一次召回”，而是确实会根据评估结果触发：
+
+- 改写 query 重试
+- 扩展 store 范围
+- 或直接收口
+
+---
+
+## 五、AgenticRetrievalLoop 当前行为
+
+`host_brain/retrieval/agentic_retrieval_loop.py` 当前实现了：
+
+1. 读取已有 `QueryPlan`
+2. 若 `skip_retrieval=True`，直接返回 skipped 结果
+3. 否则按 `max_rounds` 循环
+4. 每轮调用 `RecallFusionService.recall(...)`
+5. 汇总 `routes / route_rows / route_errors`
+6. 用 `EvidenceEvaluator` 判断是否足够
+7. 不足时按建议追加 retry query 或扩展 stores
+
+当前 `AgenticRetrievalResult` 还会输出：
+
+- `queries_used`
+- `rounds`
+- `final_evaluation`
+- `recall_summary`
+
+---
+
+## 六、Orchestrator 与缓存
+
+`host_brain/retrieval/orchestrator.py` 当前除了包装 pipeline，还提供了：
+
+- 统一 request/result 数据类
+- `success / partial_failure / all_failure` 路径分类
+- LRU 风格缓存
+- `retrieval_bundle` 统一产物
+
+当前缓存元数据会进入 `retrieval_summary` / `retrieval_bundle.cache`，包括：
+
+- `cache_enabled`
+- `cache_hit`
+- `cache_ttl_ms`
+- `cache_age_ms`
+- `cache_key_scope`
+
+当前缓存 key 的 scope 还显式覆盖：
+
+- `person_id`
+- `session_id`
+- `query`
+- `top_k`
+- `intent_id`
+- `emotion_context`
+- `mood_state`
+- `bond_summary`
+- `motive_state`
+- `render_target_lang`
+- `turn_index`
+- `query_plan`
+
+---
+
+## 七、主链回灌与 Prompt 过滤
+
+`agent_runtime_shared.py` 当前不会直接把所有 retrieval 结果原样塞进 prompt，而是还会做两步后处理：
+
+### 7.1 Prompt Filter
+
+`chat_retrieval_helpers.filter_retrieval_evidence_items_for_prompt()` 会针对：
+
+- contextual follow-up
+- low-signal short chat
+
+做 prompt 证据裁剪，并把结果写回：
+
+- `retrieval_evidence_items`
+- `retrieval_summary["prompt_filter"]`
+
+### 7.2 RecallPackBuilder
+
+在 retrieval 完成后，主链还会：
+
+- 把 evidence items 重组为 `recall_results`
+- 调 `RecallPackBuilder.build(...)`
+- 生成更适合 prompt 槽位注入的 `recall_slot_text`
+
+所以当前正确理解是：
+
+- Agentic RAG 负责“检索决策与证据产出”
+- Prompt 注入还要经过主链的二次整理
+
+---
+
+## 八、当前与旧文档的关键差异
+
+以下说法已经不再代表当前代码事实：
+
+- `host_brain/app/graph/main_chain.py` 是 Agentic RAG 的当前注入点
+- 当前仍是固定“七路全量召回”
+- `style_canon` 与 `persona_utterance` 仍在当前主 store map 内
+- 检索结果从 Graph 节点直接进入最终 prompt，没有主链二次过滤
+
+当前实际口径应是：
+
+1. 检索从 `cortex_orchestrator -> hippocampus_agent -> retrieval.orchestrator` 进入。
+2. 当前主 store map 是 5 路，不是旧文档里的 7 路。
+3. Agentic RAG 已经真实落在 `QueryPlanner + AgenticRetrievalLoop + EvidenceEvaluator + Orchestrator` 上。
+4. 主链还会继续做 prompt_filter 和 RecallPackBuilder 整理。

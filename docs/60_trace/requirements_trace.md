@@ -752,7 +752,7 @@
 - 覆盖状态：DONE
 
 ## R-76
-- 系统级需求：MCP ToolBroker 单入口——WRITE 无 token 拒绝，provider 不可达降级，调用链完整审计（mcp_exec_log）
+- 系统级需求：MCP ToolBroker 单入口——高风险/不可逆工具无 token 拒绝，provider 不可达降级，调用链完整审计（skill_exec_log + evidence_ref）
 - PRD 需求编号（FR）：FR-MCP-001
 - 来源：PRD §4.18
 - DevSpec 落点：DevSpec §17.2.2
@@ -1007,10 +1007,10 @@
 
 | 编号 | 需求来源 | 实现描述 | 实现文件 | 测试编号 | 状态 | 里程碑 |
 |------|---------|---------|---------|---------|------|--------|
-| R-151 | FR-OBS-008 | ServiceHealthAggregator：asyncio 并发探测双端所有已注册服务（Host 侧：LLM Gateway/Neo4j/SQLite/Chroma/Scheduler/Bond Engine/Memory Distiller/MCP Provider；Edge 侧：ASR/TTS/VTS/Audio Playback/Edge RPC）；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host\|edge` 过滤；响应结构稳定（字段不随服务状态变化而缺失）；`GET /obs/services/health` 端点注册到 obs_routes.py | host_brain/obs/service_health_aggregator.py; host_brain/app/obs_routes.py | T-OBS-HEALTH-01~06 | DONE | M18-A |
-| R-152 | FR-OBS-009 | SessionQueryService：从 SQLite Ledger 查询会话列表；支持过滤参数（start_time/end_time/status/channel/keyword 模糊匹配）；分页参数（page/page_size，默认 20，最大 100）；响应含 total_count；空结果返回 results=[] 而非 404；`GET /obs/sessions` 端点注册到 obs_routes.py | host_brain/obs/session_query.py; host_brain/app/obs_routes.py | T-OBS-SESS-01~06 | DONE | M18-B |
-| R-153 | FR-OBS-010 | TraceNodeBuilder：从多源审计日志（intent_log/governor_log/skill_exec_log/asr_log/tts_log/vts_log 等）聚合构建结构化节点列表；每节点含 node_id/node_type/node_name/status/start_ts_ms/end_ts_ms/duration_ms/input/output/reason_code/parent_node_id/side；节点按 start_ts_ms 排序；input/output 超 64KB 截断并标注 truncated=true；支持 `?include_io=false` 参数；不存在的 request_id 返回 404 + 稳定错误结构；`GET /obs/trace/{request_id}` 端点注册到 obs_routes.py | host_brain/obs/trace_node_builder.py; host_brain/app/obs_routes.py | T-OBS-TRACE-01~08 | DONE | M18-C |
-| R-154 | FR-OBS-011 | MetricsTimeseriesService：多维度时序数据查询（request_count/reject_rate/latency_p50/latency_p95/reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time；数据点上限 1000（超出自动降采样，步长 = ceil(total/1000)）；无数据区间返回 null 值点保证时序连续性；支持多 metric 批量查询（返回 {metrics: {metric_name: {data_points: [...]}}} 结构）；`GET /obs/metrics/timeseries` 端点注册到 obs_routes.py | host_brain/obs/metrics_timeseries.py; host_brain/app/obs_routes.py | T-OBS-TS-01~06 | DONE | M18-D |
+| R-151 | FR-OBS-008 | ServiceHealthAggregator：asyncio 并发探测双端所有已注册服务（Host 侧：LLM Gateway/Neo4j/SQLite/Chroma/Scheduler/Bond Engine/Memory Distiller/MCP Provider；Edge 侧：ASR/TTS/VTS/Audio Playback/Edge RPC）；单服务超时（≤200ms）不阻塞其他服务；支持 `?side=host\|edge` 过滤；响应结构稳定（字段不随服务状态变化而缺失）；`GET /obs/services/health` 端点由 obs router 聚合注册 | host_brain/observability/service_health_aggregator.py; host_brain/app/obs_routes_core.py; host_brain/app/obs_routes.py | T-OBS-HEALTH-01~06 | DONE | M18-A |
+| R-152 | FR-OBS-009 | SessionQueryService：从 SQLite Ledger 查询会话列表；支持过滤参数（start_time/end_time/status/channel/keyword 模糊匹配）；分页参数（page/page_size，默认 20，最大 100）；响应含 total_count；空结果返回 results=[] 而非 404；`GET /obs/sessions` 端点由 obs router 聚合注册 | host_brain/observability/session_query.py; host_brain/app/obs_routes_sessions.py; host_brain/app/obs_routes.py | T-OBS-SESS-01~06 | DONE | M18-B |
+| R-153 | FR-OBS-010 | Trace 路由从多源审计日志（intent_log/governor_log/skill_exec_log/asr_log/tts_log/vts_log 等）按 request_id 聚合结构化节点列表；每节点含 node_id/node_type/node_name/status/start_ts_ms/end_ts_ms/duration_ms/input/output/reason_code/parent_node_id/side；节点按 start_ts_ms 排序；input/output 超 64KB 截断并标注 truncated=true；支持 `?include_io=false` 参数；不存在的 request_id 返回稳定错误结构；`GET /obs/trace/{request_id}` 端点由 obs router 聚合注册 | host_brain/app/obs_routes_trace.py; host_brain/app/obs_routes_core.py; host_brain/app/obs_routes.py | T-OBS-TRACE-01~08 | DONE | M18-C |
+| R-154 | FR-OBS-011 | MetricsTimeseriesService：多维度时序数据查询（request_count/reject_rate/latency_p50/latency_p95/reason_code_dist）；支持 interval（1m/5m/1h）、start_time、end_time；数据点上限 1000（超出自动降采样，步长 = ceil(total/1000)）；无数据区间返回 null 值点保证时序连续性；支持多 metric 批量查询（返回 {metrics: {metric_name: {data_points: [...]}}} 结构）；`GET /obs/metrics/timeseries` 端点由 obs router 聚合注册 | host_brain/observability/metrics_timeseries.py; host_brain/app/obs_routes_metrics.py; host_brain/app/obs_routes.py | T-OBS-TS-01~06 | DONE | M18-D |
 | R-155 | FR-OBS-003~011；NFR-REL-001；NFR-MAINT-001 | M17+M18 发布清单锁定：m17_release.json（前端 SPA 构建成功；四页面全量可用；zero_js_errors=true；design_review_passed=true）+ m18_release.json（26 个新增测试全部通过；1577 全量通过，2 skipped，0 failed；release_ready=true；all_api_endpoints_tested=true）；UI_UPGRADE_CHANGELOG.md v3.0 条目更新为已完成 | configs/release/; configs/release/; docs/50_project/UI_UPGRADE_CHANGELOG.md | T-REL-01（复用） | DONE | M18-E |
 
 
@@ -1257,4 +1257,3 @@
 - 验收测试（T-xx）：T-Gov-01；T-GOV-R8-01~04；T-SCHED-02
 - 当前进展（2026-03-18）：PRD/DevSpec 已同步 R1~R8 与六模式 sys_mode 门控矩阵，测试映射已登记。
 - 覆盖状态：SPEC_READY
-

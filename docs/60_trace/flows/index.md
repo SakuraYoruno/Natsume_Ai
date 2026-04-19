@@ -1,41 +1,71 @@
 受众：MASTER
-标题：Flow 生效索引（active.pointer 对照）
+标题：Flow 生效索引（active.pointer 对照，当前代码校准）
 
-版本：v1.0
-日期：2026-03-19
+版本：v2.0
+日期：2026-04-19
 
-定位：维护各环境当前生效的 Flow 导出资产，并与 `flows/active.pointer` 保持一一对应。
+定位：维护 `flows/active.pointer` 的当前指针值，并说明它与现行代码运行面的关系。
 
-> **2026-03-19 状态说明**：当前 Flow 导出体系处于 bootstrap 阶段，尚未建立正式的多环境 Flow 切换流程。
-> 实际运行时的图编排由 `host_brain/integrations/graph_runtime.py` 直接管理，不依赖 `flows/` 目录下的导出资产。
-> 本目录保留作为未来多环境 Flow 版本管理的预留结构。
+---
+
+## 当前状态
+
+`flows/active.pointer` 当前仍是占位型环境指针：
 
 | environment | active.pointer value | export status | notes |
 |---|---|---|---|
-| dev | flows/exports/2026-02-28_dev_skeleton/flow.json | placeholder | 尚未建立正式导出，当前以代码直接运行 |
-| staging | flows/exports/2026-02-28_staging_skeleton/flow.json | placeholder | 同上 |
-| prod | flows/exports/2026-02-28_prod_skeleton/flow.json | placeholder | 同上 |
+| dev | `flows/exports/2026-02-28_dev_skeleton/flow.json` | placeholder | 当前代码不直接读取该导出物作为 `/v1/chat` 主运行时 |
+| staging | `flows/exports/2026-02-28_staging_skeleton/flow.json` | placeholder | 同上 |
+| prod | `flows/exports/2026-02-28_prod_skeleton/flow.json` | placeholder | 同上 |
 
-## 当前图编排实际入口
+对应的 `flows/active.pointer` 当前内容为：
 
-P15 封板后，图编排的实际代码入口为：
+```json
+{
+  "dev": "flows/exports/2026-02-28_dev_skeleton/flow.json",
+  "staging": "flows/exports/2026-02-28_staging_skeleton/flow.json",
+  "prod": "flows/exports/2026-02-28_prod_skeleton/flow.json"
+}
+```
 
-| 模块 | 路径 | 说明 |
-|------|------|------|
-| 图运行时门面 | `host_brain/integrations/graph_runtime.py` | 统一图执行入口 |
-| 图执行器 | `host_brain/integrations/graph_executor.py` | 节点分派与 Agent 路由 |
-| 主链路编排 | `host_brain/app/graph/main_chain.py` | SceneRouter + 场景分支 |
-| 图配置构建 | `host_brain/app/graph_config_builder.py` | 按执行画像构建图 |
+---
+
+## 当前代码运行面说明
+
+当前代码里，`flows/` 目录仍是“可部署配置资产/占位索引”，但 `/v1/chat` 主链已经不是旧的导出 Flow 驱动口径。当前主聊天运行时实际入口是：
+
+| 层 | 当前模块 | 说明 |
+|---|---|---|
+| HTTP 入口 | `host_brain/app/fastapi_app.py` | 定义 `POST /v1/chat` |
+| 聊天入口 | `host_brain/app/chat_handler.py` | 统一 SSE 入口 |
+| Cortex 编排 | `host_brain/app/cortex_orchestrator.py` | 转交共享运行时 |
+| 共享运行时 | `host_brain/app/agent_runtime_shared.py` | 召回、trace、后处理 |
+| Executive 路由 | `host_brain/app/executive_router.py` | 路由薄门面 |
+| Executive 执行 | `host_brain/app/executive_runtime.py` + `host_brain/app/executive_runtime_core.py` | chat / skill / delegate / plan 主执行 |
+
+因此，当前正确口径是：
+
+- `flows/active.pointer` 仍应维护一致性
+- 但它当前不是 `/v1/chat` 运行主链的事实来源
+- 旧的 `main_chain.py / SceneRouter` 说法不应再写进本索引的“现行运行面”描述
+
+---
 
 ## 一致性规则
 
-1. `flows/active.pointer` 必须是单个合法 JSON，且仅包含 `dev/staging/prod` 三个键。
-2. 本索引表中每个环境的路径必须与 `active.pointer` 的值完全一致。
-3. 任何环境切换都需要同时更新 `active.pointer` 与本索引。
+1. `flows/active.pointer` 必须是单个合法 JSON，且只包含 `dev / staging / prod` 三个键。
+2. 本索引表中的三条路径必须与 `flows/active.pointer` 完全一致。
+3. 若未来恢复真正的 Flow 导出物驱动，需要同时更新：
+   - `flows/active.pointer`
+   - 本索引
+   - 对应当前代码事实文档
+
+---
 
 ## 变更记录
 
 | 版本 | 日期 | 说明 |
-|------|------|------|
-| v0.1 | 2026-02-28 | 初版，bootstrap placeholder |
-| v1.0 | 2026-03-19 | 补充当前状态说明，标注 flows/ 目录为预留结构，新增实际图编排入口对照表 |
+|---|---|---|
+| v0.1 | 2026-02-28 | 初版，占位 skeleton |
+| v1.0 | 2026-03-19 | 补充 bootstrap 说明 |
+| v2.0 | 2026-04-19 | 去除对 `main_chain.py / SceneRouter` 的现行描述，改为当前代码校准版 |

@@ -1,7 +1,14 @@
 受众：CODEX
-标题：Phase XII Host 本地操控能力 — 五阶段技术文档
+标题：Phase XII Host 本地操控能力 — 五阶段技术文档（阶段方案留痕）
 
 # Phase XII Host 本地操控能力
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-03-29 的阶段方案文档，不应直接当作当前运行时事实或实现任务清单。
+- 文中六个 Host 工具模块目前均已真实落库：`host_command_executor.py`、`secret_vault.py`、`file_forensics.py`、`browser_automation.py`、`file_organizer.py`、`system_monitor.py`（含 `ProcessGuard`）。
+- 当前工具执行面应以实际代码为准：`host_brain/tools/catalog.py` / `broker.py` / `mcp_adapter.py` 负责元数据、单入口执行与 MCP 适配，`host_brain/app/dependencies.py` 暴露 `ToolCatalog` / `ToolBroker`，`host_brain/app/tool_routes.py` 提供 `/tools/meta-pack`、`/tools/execute`、`/tools/health`，技能侧由 `SkillRegistry` 与各类 provider/registry 负责接线。
+- 因此，本文列出的能力应理解为“当前仓库已具备的 Host 工具实现方向”；是否对模型默认暴露、以何种方式暴露、是否需审批/确认，取决于运行时注册、allowlist 与 ToolBroker/SkillRegistry 配置，而不是由本文直接定义。
+- 若要查看现行契约与实际边界，请优先阅读 `docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md` 与实际代码。
 
 ## 概述
 

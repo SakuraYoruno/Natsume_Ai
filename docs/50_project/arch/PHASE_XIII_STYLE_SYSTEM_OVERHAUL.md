@@ -1,7 +1,13 @@
 受众：MASTER
-标题：Phase XIII — 风格系统彻底重构：台词蒸馏+情感检索+Prompt直注入
+标题：Phase XIII — 风格系统彻底重构：台词蒸馏+情感检索+Prompt直注入（阶段方案留痕）
 
 # Phase XIII：风格系统彻底重构
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-03-30 的阶段设计文档，不是当前运行时事实的唯一入口。
+- 文中核心模块目前均已真实落库：`host_brain/retrieval/style_distiller.py`、`host_brain/retrieval/emotion_utterance_index.py`、`host_brain/app/prompt_builder.py`、`host_brain/app/prompt_builder_node.py`、`host_brain/retrieval/reranker.py`、`scripts/runtime/run_style_distill_v5.py`。
+- 当前接线应以实际代码为准：`host_brain/retrieval/query_planner.py` 已把 `style_canon / persona_utterance` 排除在 5 路 store map 之外；`host_brain/app/prompt_builder_node.py` 已通过 `EmotionTaggedUtteranceIndex` 独立注入 `persona_examples_block`，并过滤 `persona_utterance` evidence；`host_brain/retrieval/reranker.py` 已明确这两类内容不再走 Reranker 竞争；`host_brain/app/chat_context_builder.py` / `chat_context_style.py` 负责当前 style canon 常驻装配。
+- 运行时资产当前以 `runtime/style_canon/*.jsonl`、`runtime/style_canon/*style_profile*.json` 等文件为主；文中示例产物名应按阶段方案理解，不保证与当前仓库文件集完全一致。
 
 > 从根本上修复"台词库/风格指导对最终生成文本无影响"的问题。
 > 不是调参数，而是改用法——台词库不是语义检索源，是说话方式训练数据。

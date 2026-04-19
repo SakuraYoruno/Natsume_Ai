@@ -1,10 +1,17 @@
-# 数字生命架构融合方案 V2.1（对齐 TRIBE 新版，含躯干族）
+# 数字生命架构融合方案 V2.1（历史融合方案留痕，对齐 TRIBE 新版，含躯干族）
 
 > 日期：2026-04-08  
+> 状态：阶段融合方案留痕（2026-04-19 已校准，不作为当前主链事实）  
 > 目标：把“P0可落地地基”与“TRIBE目标态重构”融合为一份可执行方案。  
 > 对齐基线：
 > - `docs/35_quality/audits/DIGITAL_LIFE_MULTI_AGENT_P0_EXECUTION_20260408.md`
 > - `docs/50_project/arch/TRIBE_AGENT_REFACTOR_PLAN_20260408.md`
+
+> 当前代码校准说明（2026-04-19）
+> - 本文是 2026-04-08 的融合迁移方案，核心目的是把当时的 P0 收口与 TRIBE 重构合并规划，不是当前运行时事实总览。
+> - 文中 `top_agent`、`dispatch_agent`、`chat_agent`、`Supervisor`、`EdgeTribeBridge` 等表述应按阶段设计理解；当前 `/v1/chat` 主链以 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> executive_router.py -> executive_runtime.py / executive_runtime_core.py` 为准。
+> - 当前 Gateway / 外部输入回流应以 `host_brain/app/input_routes.py -> receive_input() -> _run_cortex_orchestrator_pipeline() -> host_brain/channels/edge_rpc_client.py:post_gateway_reply()` 为准，而不是把本文中的迁移蓝图直接当作现行接线说明。
+> - 阅读当前代码请优先看 `CURRENT_CODE_ARCHITECTURE.md`、`AGENT_ORCHESTRATION_DETAIL.md`、`APP_AUDIT_SKILLS_CONTRACT.md`、`TOOLS_MEMORY_LAYER_CONTRACT.md`。
 
 ---
 

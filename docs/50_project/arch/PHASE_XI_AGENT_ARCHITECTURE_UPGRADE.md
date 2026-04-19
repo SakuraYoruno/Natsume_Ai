@@ -1,7 +1,14 @@
 受众：CODEX
-标题：Phase XI 智能体架构升级 — 七大方案技术文档
+标题：Phase XI 智能体架构升级 — 七大方案技术文档（阶段方案留痕）
 
 # Phase XI 智能体架构升级 — 七大方案
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-03-29 的阶段方案文档，不应直接当作当前运行时事实或实现任务清单。
+- 文中七个模块目前均已真实落库：`reflection_chain.py`、`episodic_memory_graph.py`、`predictive_state.py`、`planning_agent.py`、`meta_learning_loop.py`、`skill_composer.py`、`multimodal_processor.py`。
+- 当前接线应以实际代码为准：这些能力统一经 `host_brain/app/dependencies.py` 注册；`host_brain/app/intelligent_runtime.py` 连接 `MultimodalProcessor / PredictiveStateEngine / PlanningAgent / SkillComposer / ReflectionChain / MetaLearningLoop`，`host_brain/app/observability_persist.py` 连接 `PredictiveStateEngine / EpisodicMemoryGraph / MetaLearningLoop`，`host_brain/app/prompt_builder_node.py` 消费 `predictive_state`。
+- 这些能力并非每次 `/v1/chat` 请求都必经；当前主链仍应以 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py -> executive_router / executive_runtime*` 为准。
+- 其中 `planning_agent.py` 的部分旧接口已转向 `executive_runtime_core.py` 与 `plan_graph.py` 协同使用，阅读时应以实际代码签名和调用点为准。
 
 ## 概述
 

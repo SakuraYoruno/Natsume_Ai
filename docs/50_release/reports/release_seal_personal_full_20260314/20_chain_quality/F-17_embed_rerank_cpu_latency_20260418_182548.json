@@ -1,0 +1,48 @@
+{
+  "device": "cpu",
+  "note": "embed/rerank 模型运行在 CPU，实测主链路与检索子阶段耗时",
+  "ts_utc": "20260418_182548",
+  "runs": 4,
+  "success": 0,
+  "embed_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "rerank_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "first_token_latency_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "commit_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "retrieval_latency_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "samples": []
+}

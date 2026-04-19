@@ -1,7 +1,13 @@
 受众：MASTER
-标题：Phase XIV — 顶级 Agent 架构重构方案 v4（最终方案）
+标题：Phase XIV — 顶级 Agent 架构重构方案 v4（历史方案留痕）
 
 # Phase XIV — 顶级 Agent 架构重构方案 v4
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-03-31 的顶级 Agent 重构方案，不是当前运行时事实文档。
+- 当前仓库并不存在 `host_brain/app/top_agent.py`、`top_agent_prompt.py`、`sub_agent_protocol.py`、`sub_agent_governor.py`。
+- 现行运行链请以 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py -> executive_router / executive_runtime*` 为准；外部输入回流请以 `host_brain/app/input_routes.py` 为准。
+- 文中关于 `SceneRouter`、`main_chain.py`、`chat_handler_complex.py`、`一步到位替代旧链路`、`Phase 1+2 / Phase 3` 的描述应按阶段方案理解，不直接作为当前任务来源或代码事实。
 
 ## 修订历史
 
@@ -368,7 +374,7 @@ prompt 里已有完整角色人设，天然拟人化。
 
 ---
 
-## 6. 实施分阶段
+## 6. 当时设想的实施分阶段（历史）
 
 ### Phase 1+2（一步到位）：顶级 Agent + 子 Agent 调度
 
@@ -410,7 +416,7 @@ prompt 里已有完整角色人设，天然拟人化。
 
 ---
 
-## 7. 代码量估算
+## 7. 当时估算的代码量（历史）
 
 ### 新增
 
@@ -441,7 +447,7 @@ prompt 里已有完整角色人设，天然拟人化。
 
 ---
 
-## 8. 对白皮书的合规分析
+## 8. 对白皮书的合规分析（方案阶段）
 
 | 白皮书条款 | v4 是否合规 | 说明 |
 |-----------|-----------|------|

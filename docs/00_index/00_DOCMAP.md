@@ -1,8 +1,8 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v3.0
-日期：2026-03-27
+版本：v3.5
+日期：2026-04-19
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -18,6 +18,14 @@
 - 实现层的任务来源只能是 DevTasks（以及 AGENTS 工作规范）；不得把白皮书/PRD/Theory/Trace 当任务来源。
 - Project（文档代理）负责把讨论沉淀到 PRD/DevSpec/DevTasks，并维护 Trace 覆盖关系。
 
+当前代码优先阅读顺序（2026-04-19 起）：
+- `README.md`：仓库入口与运行面总览
+- `docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`：当前代码事实总览
+- `docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md`：主链核心模块与覆盖优先级
+- `docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`：前端主体化信息架构
+- `docs/50_project/arch/dataflow_report.md`：请求流与回流补充
+- `docs/60_trace/requirements_trace.md`：需求到设计/测试映射
+
 ---
 
 1）白皮书（宪法 + 人格/风格设定）
@@ -32,7 +40,7 @@
 
 3）开发文档（DevSpec + 任务 + 模型平面）
 - docs/30_devspec/DevSpec.md
-  用途：把 PRD 落到模块、接口、协议、Schema、日志、错误码、状态机；可直接指导实现。
+  用途：把 PRD 落到模块、接口、协议、Schema、日志、错误码、状态机；属于工程契约与蓝图层。若与当前代码事实文档冲突，以 `README.md`、`CURRENT_CODE_ARCHITECTURE.md` 和实际代码为准。
   读者：实现层（主要）、MASTER。
 
 - docs/30_devspec/DevTasks.md
@@ -74,7 +82,7 @@
   读者：CODEX、实现层。
 
 - docs/50_project/arch/GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md
-  用途：Gateway 中文文字链路完整节点分析（2026-03-27）。追踪从 HTTP 入口到最终 COMMIT 的全部节点，涵盖两条入口路径、19 步 Gateway Orchestrator 核心、10 个 MainChain 节点、七路召回管线（含语种分离路由）、10 个情感子系统数据流、7 个 Agent 注册表、Graph 编排层时序、Supervisor 分派逻辑、render_target_lang="zh" 三重保障、完整降级机制汇总。
+  用途：Gateway 中文文字链路完整节点分析（当前代码实况）。覆盖 `server.py -> /v1/host/input -> cortex_orchestrator -> post_gateway_reply -> OutboundDispatcher` 的当前回流与回送链，并明确 `render_target_lang="zh"` 的注入点。
   读者：MASTER、架构参考。
 
 - docs/50_project/guides/DEV_TEST_REPORT_TEMPLATE.md
@@ -90,7 +98,15 @@
   读者：MASTER、Project（文档代理）。
 
 - docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md
-  用途：当前代码目录、系统分层、服务请求链路、多 Agent 治理与 Graph 编排落点对齐文档（以代码事实为准）。
+  用途：当前代码事实总览。覆盖实际运行面（Host Main / Obs Backend / Edge RPC / Gateway / Monitor UI）、主入口、路由面、聊天主链、外部输入回流、Tribe family 现状。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/50_project/arch/CORE_MODULES_DETAILED_REFERENCE.md
+  用途：核心模块定位文档。用于快速识别哪些模块真的处在主链上、模块之间如何衔接、当前测试覆盖更应该补在哪一层。
+  读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
+
+- docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md
+  用途：数字生命体前端主体化方案。对齐当前 Monitor UI 的页面分组、生命时间轴/病灶中心/数字生命体导航等信息架构变化。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/arch/MODE_TRANSITION_SYSTEM.md
@@ -98,41 +114,59 @@
   读者：MASTER、实现层（查阅对齐）。
 
 - docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md
-  用途：Agentic RAG 智能检索升级架构文档（2026-03-29，Phase X）。将检索系统从单次全量七路并行召回升级为意图驱动的自适应多轮检索。包含 QueryPlanner（意图分类+Store路由+Query改写）、EvidenceEvaluator（三维证据评估）、AgenticRetrievalLoop（Plan→Retrieve→Evaluate→Re-Retrieve 循环）、Graph 集成方案。性能：简单寒暄跳过检索省 3s，日均响应快 50%。7 种意图分类、Store 路由表、Query 改写三层规则、降级保护策略。
+  用途：Agentic RAG 智能检索架构（当前代码实况）。覆盖 `hippocampus_agent -> retrieval.orchestrator -> retrieval.pipeline` 的现行检索入口、5 路 store map、QueryPlanner / EvidenceEvaluator / AgenticRetrievalLoop，以及主链的 prompt_filter / RecallPackBuilder 回灌。
   读者：MASTER、实现层（查阅对齐）。
 
 - docs/50_project/arch/PHASE_X_INTELLIGENT_ORCHESTRATION.md
-  用途：Phase X 智能编排层升级六大方案技术文档（2026-03-29）。在 Agentic RAG 基础上的六大方案：(1)智能记忆写入MemoryWorthEvaluator——评估对话价值减少30-50%无效写入；(2)自适应Prompt预算——按意图动态调整7槽位token分配；(3)语义去重SemanticDedup——Jaccard n-gram去除近似重复召回；(4)关系感知风格BondAwareStyleEngine——6级Bond阶段完整风格profile含禁用词/撒娇/吐槽控制；(5)主动记忆整合ConsolidationTrigger——量级触发+话题触发动态蒸馏；(6)TTS路由TtsContextRouter——7种情感风格动态调整语速/音调/能量+Bond亲密度微调+中日语言检测。
-  读者：MASTER、实现层（查阅对齐）。
+  用途：Phase X 智能编排层升级六大方案留痕（2026-03-29，2026-04-19 已加校准说明）。记录 `MemoryWorthEvaluator / AdaptivePromptBudget / SemanticDedup / BondAwareStyleEngine / ConsolidationTrigger / TtsContextRouter` 六项能力的原始设计意图；这些模块现已落库，但当前接线与接口应以现行契约文档和实际代码为准。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
 - docs/50_project/arch/PHASE_XI_AGENT_ARCHITECTURE_UPGRADE.md
-  用途：Phase XI 智能体架构升级七大方案技术文档（2026-03-29）。(1)ReflectionChain自我反思链——5维结构化评估+Generate→Reflect→Revise循环；(2)EpisodicMemoryGraph情景记忆图谱——话题聚类+主题线链接+graph walk召回；(3)PredictiveState预测性状态——6时段周期性模式预测+主动行为提示；(4)PlanningAgent任务规划——ReAct式分解+reason/act/ask/synthesize四步骤；(5)MetaLearningLoop元学习——模块指标EMA+自动调参+Evolution Report；(6)SkillComposer技能编排——DAG规划+拓扑排序+并行执行；(7)MultimodalProcessor多模态——emoji情绪信号+Vision LLM接口+颜文字建议。
-  读者：MASTER、实现层（查阅对齐）。
+  用途：Phase XI 智能体架构升级七大方案留痕（2026-03-29，2026-04-19 已加校准说明）。记录 `ReflectionChain / EpisodicMemoryGraph / PredictiveState / PlanningAgent / MetaLearningLoop / SkillComposer / MultimodalProcessor` 的原始设计意图；这些模块现已落库，当前多通过 `dependencies.py`、`intelligent_runtime.py`、`observability_persist.py` 等接线，但不应把本文当成当前主链默认行为说明。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
 - docs/50_project/arch/PHASE_XII_HOST_LOCAL_CONTROL.md
-  用途：Phase XII Host 本地操控能力技术文档（2026-03-29）。五阶段实现：(1)HostCommandExecutor安全命令执行——4级安全分层(L0只读/L1白名单写/L2需确认/L3双重确认/L4禁止)+命令白名单+沙箱目录+审计日志；(2)SecretVault加密密钥保险库——PBKDF2+XOR加密+按名称分类存取；(3)FileForensics智能文件处理——24种magic bytes签名检测+后缀自动修复+批量解压+密码列表尝试+递归解压；(4)BrowserAutomation浏览器自动化——Playwright封装+域名黑名单+敏感字段保护+每步截图留证+脚本编排；(5)FileOrganizer高级文件整理——9类70+后缀分类+日期归档+MD5去重+空目录清理；(6)SystemMonitor系统监控+ProcessGuard进程守护——CPU/内存/GPU/网络快照+进程管理+崩溃自动重启。
-  读者：MASTER、实现层（查阅对齐）。
+  用途：Phase XII Host 本地操控能力方案留痕（2026-03-29，2026-04-19 已加校准说明）。记录 `HostCommandExecutor / SecretVault / FileForensics / BrowserAutomation / FileOrganizer / SystemMonitor` 六类 Host 工具能力的原始设计意图；这些模块现已落库，但当前应通过 `ToolCatalog / ToolBroker / MCPAdapter / SkillRegistry / tool_routes` 的真实接线来理解其暴露与执行方式。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
+
+- docs/50_project/arch/DIGITAL_LIFE_MULTI_AGENT_BLUEPRINT_V1_20260408.md
+  用途：数字生命多智能体族蓝图留痕（2026-04-08，2026-04-19 已加校准说明）。记录多智能体族、`ContextPack` / `StateArbiter`、主 DAG / 子图 DAG 与 P0-P3 迁移路线的阶段性构想；正文含 `top_agent.py` 等未落地入口，应按蓝图/历史参考理解，不作为当前运行时事实或实现层任务来源。
+  读者：MASTER、Project（文档代理）。
 
 - docs/50_project/arch/PARENT_CHILD_AGENT_PERSONA_RENDERING.md
-  用途：Phase XIV 父子级 Agent 拟人化渲染架构升级方案（2026-03-31）。解决复杂场景（WORK_CODE/WORK_TRANSLATE/EXEC_INTENT/VISION_UI）回复缺乏角色人设的问题。设计父子级 Agent 架构：子 Agent 只负责"做事"（代码/翻译/执行），父 Agent（CHAT）负责拟人化渲染，复用 SCENE_CHAT 完整 prompt 管线（character_profile + style_canon v5 + 台词参考 + Bond + 情感）。含场景感知指令模板、延迟分析、配置开关、降级策略。
-  读者：MASTER、实现层（查阅对齐）。
+  用途：Phase XIV 顶级 Agent / 父子级渲染历史方案（2026-03-31，2026-04-19 已加校准说明）。记录通过 `top_agent.py` 统一拟人化渲染的阶段方案；正文含 `SceneRouter`、`main_chain.py`、`chat_handler_complex.py` 等旧链路假设，应按历史方案理解，不作为当前运行时事实或实现层任务来源。
+  读者：MASTER、Project（文档代理）。
 
 - docs/50_project/arch/PHASE_XIII_STYLE_SYSTEM_OVERHAUL.md
-  用途：Phase XIII 风格系统彻底重构技术文档（2026-03-30）。修复"台词库/风格指导对最终生成文本无影响"的根本问题。核心改变：台词库不再做语义检索，改为情感场景匹配+独立通道直注入。(1)StyleDistiller深度台词蒸馏——从1742条台词提取6种句式模板+8种情感回应模式+特征词汇+节奏模式，替代旧版纯统计数字；(2)EmotionTaggedUtteranceIndex情感标签台词索引——按emotion_tag场景匹配替代embedding检索，延迟<1ms，100%到达prompt；(3)PromptBuilder改造——台词独立通道绕过Reranker+位置从第16上移到第3-4位（紧跟STYLE_CANON_BINDING）；(4)Reranker保底——style_canon至少保留1条不被淘汰。
-  读者：MASTER、实现层（查阅对齐）。
-  用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责"流向"视角。
+  用途：Phase XIII 风格系统重构方案留痕（2026-03-30，2026-04-19 已加校准说明）。记录 `StyleDistiller / EmotionTaggedUtteranceIndex / persona_examples 独立注入 / style_canon 脱离 reranker` 的设计缘起；相关模块现已落库，现行接线请以 `prompt_builder_node.py`、`chat_context_builder.py`、`query_planner.py`、`reranker.py` 与实际运行产物为准。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
+
+- docs/50_project/arch/DIGITAL_LIFE_FUSION_V2_20260408.md
+  用途：数字生命架构融合方案 V2 留痕（2026-04-08，2026-04-19 已加校准说明）。记录当时“P0 地基收口 + TRIBE 渐进迁移 + Edge 躯干族”合并方案；正文含 `top_agent`、`dispatch_agent`、`Supervisor` 等阶段口径，应按历史融合方案理解，不作为当前主链事实或实现层任务来源。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
+
+- docs/50_project/arch/PHASE_XV_DISPATCH_CHAT_ARCHITECTURE.md
+  用途：Phase XV Dispatch / Chat 分离历史方案与问题复盘（2026-04-01，2026-04-19 已加校准说明）。记录 TopAgent 分拆、上下文断裂、TTS / Gateway 双通道等阶段性问题分析；当前 `/v1/chat` 与 `/v1/host/input` 已改为 cortex / executive runtime 主链，应按历史对照理解。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
+
+- docs/50_project/arch/TRIBE_AGENT_REFACTOR_PLAN_20260408.md
+  用途：TRIBE 多智能体族重构蓝图与实施记录留痕（2026-04-08，2026-04-19 已加校准说明）。混合记录目标态分族图与 T-xx 级落库记录；正文含 `top_agent` 等阶段入口，应按迁移轨迹/历史参考理解，不作为当前运行时事实或实现层任务来源。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
+
+- docs/50_project/arch/dataflow_report.md
+  用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/arch/UNIFIED_MESSAGE_GATEWAY_DESIGN.md
-  用途：外部消息统一网关（Unified Message Gateway）完整设计方案（2026-03-24）。包含当前 UIA 桌面自动化方案的问题诊断、协议级网关架构设计、UnifiedMessage/UnifiedReply 数据模型、各平台适配器设计（微信/QQ/飞书/企微）、与现有 EdgeInputReporter 的集成方案、EdgeConfig 扩展配置、以及分阶段实施路线图。
+  用途：外部消息统一网关设计与现状混合文档（2026-03-24，2026-04-19 已加校准说明）。文首给出当前 Gateway 真实主链：`server.py -> GatewayRouter -> /v1/host/input -> Host 主链 -> post_gateway_reply -> /v1/gateway/reply -> OutboundDispatcher`；正文保留 `SCENE_GATEWAY / SceneRouter / MainChain` 等历史方案留痕，阅读时应区分现行入口与设计背景。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/phases/MULTI_AGENT_UPGRADE_PLAN.md
-  用途：多 Agent 编排升级详细实施方案（2026-03-16）。基于当前单 agent 多节点路由架构，制定分四阶段升级为"Host 主权 + Supervisor 主 agent + 多专家子 agent + Judge 收口"体系的可落地方案。含角色定义、数据契约、各场景链路设计、文件改动清单、验收标准与风险评估。
-  读者：MASTER、Project（文档代理）。
+  用途：多 Agent 编排升级历史阶段方案（2026-03-16 起持续追加，2026-04-19 已加校准说明）。记录 `Supervisor / Judge / active_agent_id / graph_executor` 动态分发等 graph-runtime 方案演化；仓库仍保留部分 handler 与 contract，但现行 `/v1/chat` 主链不以本文的 `scene_router / main_chain / Supervisor-Judge` 口径为准。
+  读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
 - docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md
-  用途：Agent 编排详情（2026-03-18，当前实现对齐）。记录当前 Supervisor/子 agent/Judge 编排的实际实现口径，含历史草稿留痕。以本文件"当前口径"章节为准，历史草稿仅作参考。
+  用途：Agent 编排详情（当前运行时实况）。覆盖 `/v1/chat`、`/v1/host/input`、`/v1/agent/run` 与 Executive route 类型，说明当前 skill-first runtime 口径。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/50_project/phases/MULTI_AGENT_P4_SCOPE.md
@@ -196,7 +230,7 @@
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源。
 
 - docs/60_trace/flows/index.md
-  用途：Flow 指针与索引的一致性。
+  用途：Flow 指针与索引的一致性。说明 `flows/active.pointer` 当前仍是占位型环境指针，现行 `/v1/chat` 主链不直接由导出 Flow 驱动。
   读者：MASTER、Project（文档代理）。
 
 - docs/60_trace/risk_registry.md
@@ -355,6 +389,14 @@
   用途：Natsume AI 深度审计报告（2026-03-11）。覆盖意图识别、模型编排控制、Agent 路由、SSE 双端对齐、情感层接入、Bond 优化六大维度。
   读者：MASTER、Project（文档代理）。
 
+- docs/35_quality/GATEWAY_ARCH_REDESIGN.md
+  用途：Gateway 架构债与整改方案盘点（2026-04-15，2026-04-19 已加校准说明）。从质量视角记录 Gateway / ASR 双路径、意图识别割裂、TTS / VTS 抑制等问题背景；当前真实 Gateway 主链应以 `UNIFIED_MESSAGE_GATEWAY_DESIGN.md`、`GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md` 与实际代码为准。
+  读者：MASTER、Project（文档代理）、实现层（质量对照）。
+
+- docs/35_quality/ORGAN_TRIBE_UPGRADE_PLAN.md
+  用途：器官族能力分级升级盘点（2026-04-16，2026-04-19 已加校准说明）。记录按 A/B/C 评级推进器官族能力增强的阶段性计划；该评级不是当前 tribe family 的权威运行时总表，应按质量盘点/升级待办理解。
+  读者：MASTER、Project（文档代理）、实现层（质量对照）。
+
 - artifacts/trial_run_reports/
   用途：自动化试运行报告（T1-x 系列，按时间戳归档）。
   读者：MASTER、Project（文档代理）。
@@ -376,7 +418,7 @@
 
 8）理论文档（Theory：论证/原则推导/边界解释）
 - docs/15_theory/Theory.md
-  用途：解释"为什么这样设计"、关键机制的理论依据与判定口径；不作为实现任务清单。
+  用途：解释"为什么这样设计"、关键机制的理论依据与判定口径；2026-04-19 已补当前代码校准说明，明确其属于理论层，不作为实现任务清单。若与当前代码事实冲突，以 `README.md`、`CURRENT_CODE_ARCHITECTURE.md`、现行契约文档和实际代码为准。
   读者：MASTER、Project（文档代理）。实现层不应把它当任务来源（除非 MASTER 任务卡点名引用）。
 
 - docs/15_theory/soul_emotion_optimization.md
@@ -388,7 +430,7 @@
   读者：MASTER、Project（文档代理）。
 
 - docs/15_theory/LangGraph_Governed_Runtime_Solution.md
-  用途：LangGraph Governed Runtime 更优解法方案（2026-03-06）。提出三层架构（Policy Plane / Execution Plane / Evidence Plane）、Host Governance Overlay 方案、五阶段能力恢复路径与三句话架构结论。
+  用途：LangGraph Governed Runtime 理论方案留痕（2026-03-06，2026-04-19 已加校准说明）。提出三层架构（Policy Plane / Execution Plane / Evidence Plane）、Host Governance Overlay 方案、五阶段能力恢复路径与三句话架构结论；用于解释治理化设计思路，不作为当前 `/v1/chat` / `/v1/host/input` 主链事实说明。
   读者：MASTER、Project（文档代理）。
 
 - docs/15_theory/architecture_overview.md
@@ -396,35 +438,35 @@
   读者：MASTER、Project（文档代理）。
 
 - docs/15_theory/CORE_LAYER_MODULE_REFERENCE.md
-  用途：host_brain/core/ 层模块参考（2026-03-19）。覆盖 prompt_context 槽位契约与验证规则、metabolism 硬状态与情感向量机制、emotion_timeline 情感时间线、services 服务注册表与健康报告的完整接口语义与约束说明。
+  用途：host_brain/core/ 层模块参考（当前代码实况）。覆盖 `prompt_context`、`metabolism`、`endocrine`、`services`、`mode_transition`、`activity_monitor`、`predictive_state`、`meta_learning_loop` 等当前基础状态与运行时辅助模块，并明确 core 现状已不是“零上游依赖纯数据层”。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/INTEGRATIONS_LAYER_CONTRACT.md
-  用途：host_brain/integrations/ 层接口契约（2026-03-19）。覆盖 GraphState 全字段语义、graph_contract 核心函数、Evidence Plane 写入机制（CRITICAL/NON_CRITICAL/EvidenceWriteQueue）、治理约束规则（Rule 1–6）与 Multi-Agent 契约（P4–P7）。
+  用途：host_brain/integrations/ 层接口契约（当前代码实况）。覆盖 `GraphRuntimeContract`、`GraphExecutor`、LangGraph checkpoint/subgraph 适配、`GovernedToolNode`、Evidence Plane、LLM Gateway，以及当前依赖边界与恢复/降级口径。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/RETRIEVAL_LAYER_CONTRACT.md
-  用途：host_brain/retrieval/ 层接口契约（2026-03-19）。覆盖检索四阶段（Embed→RecallFusion→Rerank→EvidencePack）、RetrievalOrchestrator 入口契约与缓存机制、路径分类（success/partial_failure/all_failure）、降级摘要、情感上下文透传（OPT-41）与工厂函数 build_retrieval_pipeline_from_env。
+  用途：host_brain/retrieval/ 层接口契约（当前代码实况）。覆盖 QueryPlanner、AgenticRetrievalLoop、EvidenceEvaluator、RetrievalPipelineContract、RetrievalOrchestrator、5 路 store map、缓存与 `build_retrieval_pipeline_from_env` 的当前装配关系。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/GOVERNOR_SCHEDULER_CONTRACT.md
-  用途：host_brain/governor/ + scheduler/ 层接口契约（2026-03-19）。覆盖 R1–R8 八条门控规则（含 R8 情感感知门控）、GateSnapshot 快照归一化、TokenService WRITE 令牌验证；NatsumeScheduler 三种触发模式、任务持久化（F-40）、心跳健康检测（TASK-0200）、Edge 探针检查（TASK-0211）与情感状态门控（M29-N）。
+  用途：host_brain/governor/ + scheduler/ 层接口契约（当前代码实况）。覆盖 R1–R8 门控、TokenService 当前校验/消费顺序，以及两套调度面：`/scheduler/*` 的声明式 Intent 调度器与 `/host-scheduler/*` 的 Host 常驻任务调度器。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/TOOLS_MEMORY_LAYER_CONTRACT.md
-  用途：host_brain/tools/ + memory/ 层接口契约（2026-03-19）。覆盖 ToolMeta 元数据契约、ToolCatalog 注册表、ToolBroker WRITE 令牌门控与情感上下文注入（M27-J）、MCP 适配器；Canon 同步机制（sync_world_canon_index/detect_world_version_drift）、情节记忆、蒸馏与上下文压缩。
+  用途：host_brain/tools/ + memory/ 层接口契约（当前代码实况）。覆盖 ToolCatalog/ToolBroker/Selector/MCPAdapter、具体 Host 工具模块，以及 Canon SSOT、EpisodicStore、ContextCompressor、Distillation、MemoryWorthEvaluator、ConsolidationTrigger、EpisodicMemoryGraph 等现行记忆能力。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/PERIPHERAL_LAYERS_CONTRACT.md
-  用途：host_brain 外围层接口契约（2026-03-19）。覆盖 airlock 入站隔离分类（quarantine_ingress/SandboxExecutor）、bond 情感关系图谱写入（BondDynamicsWriter/BondStageEngine 六阶段晋级）、channels 双通道 I/O（VTS 16 种情感表情映射/WeChat 幂等去重）、vision 多检测器并行聚合（MultiDetectorAggregator）、lsp/ArtifactVault 可逆工件库（commit/undo/gc）、mcp/MCPToolRegistry 工具元数据注册与变更追踪。
+  用途：host_brain 外围层接口契约。覆盖 airlock、bond、channels、vision、lsp、mcp；其中 channels 口径已补到当前的 VTS / Edge RPC / Gateway 出站关系。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md
-  用途：host_brain 核心应用层契约（2026-03-19）。覆盖 app 层场景分类（CHAT/EXEC_INTENT/WORK_CODE/WORK_TRANSLATE/VISION_UI）、聊天处理链路（Governor→场景分类→SceneRouter）、Prompt 构建与注入检测；audit/SQLiteLedger 全系统唯一审计账本（26 张表、WAL 模式、append-only 约束）；skills/SkillRegistry 技能元数据契约（clearance/risk_level/scope/reversible）与 17 个技能实现；observability 指标采集（ObsMode PROD/DEV、debug_trace 安全约束）。
+  用途：host_brain 核心应用层契约（当前代码实况）。覆盖当前 app 运行面、`/v1/chat` 主链、`SQLiteLedger` 写接口分组、动态 SkillRegistry/SkillLoader 执行路径，以及独立 Obs Backend + Monitor UI 的观测结构。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
 
 - docs/15_theory/SOUL_SYSTEM_FULL_UPGRADE_PATH.md
-  用途：灵魂系统全面升级路径（2026-03-23）。覆盖 8 大升级阶段：Phase I 人格引擎基座（PersonaEngine + 7 维特质向量）、Phase II 情感-人格耦合（EmotionReactivity + ExpressionAdapter）、Phase III 自我意识模型（SelfModel + 自省日记）、Phase IV 人格成长系统（PersonaGrowth + TraitDriftGuard 安全机制）、Phase V Bond 深化（SharedMemoryIndex + MilestoneTracker + BondNarrative）、Phase VI 人格漂移检测（PersonaDriftDetector + 告警校正）、Phase VII 跨会话情感连续性（EmotionPersistence + 衰减恢复模型）、Phase VIII 场景化主动表达（SceneAwareTrigger + PersonaProactiveVoice）。含系统级全景诊断、新增/改动文件清单、风险缓解与实施路线图。待实施，不作为当前任务来源。
+  用途：灵魂系统升级蓝图与历史留痕（2026-03-23，2026-04-19 已加校准说明）。覆盖 8 大升级阶段与能力拆解，但正文仍含 `main_chain.py` 等旧入口口径，应按蓝图/历史参考理解，不作为当前运行时事实或实现层任务来源。
   读者：MASTER、Project（文档代理）。
 
 9）性能与稳定性监控（Metrics & Stability）

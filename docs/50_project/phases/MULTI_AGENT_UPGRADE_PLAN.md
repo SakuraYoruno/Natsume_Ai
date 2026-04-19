@@ -1,15 +1,21 @@
 受众：MASTER
-标题：多 Agent 编排升级详细实施方案
+标题：多 Agent 编排升级详细实施方案（历史阶段方案留痕）
 
 版本：v1.0
 日期：2026-03-16
-定位：基于当前 Natsume AI 单 agent 多节点路由架构，制定分阶段升级为"主 agent + 多专家子 agent"编排体系的可落地实施方案。
+定位：基于 2026-03-16 时点的 Natsume AI 单 agent 多节点路由架构，制定分阶段升级为"主 agent + 多专家子 agent"编排体系的实施计划；当前主要作为历史阶段方案留痕。
 关联文档：
 - docs/50_project/AGENT_ORCHESTRATION_DETAIL_2026-03-09.md（当前编排现状）
 - docs/30_devspec/ModelPlane.md（模型平面规格与治理约束）
 - docs/15_theory/LangGraph_Governed_Runtime_Solution_2026-03-06.md（Governed Runtime 理论基础）
 
 **架构重构约束（2026-03）**：**实施顺序与架构形态以 `MULTI_AGENT_ARCH_REFACTOR_2026-03.md` 为准**。先完成「图拆分 + 概念收口 + 开关收敛」（P0～P4），再推进 M-MA5/M-MA6 能力扩张；不再维护一张万能主图，不再用 MULTI_AGENT_ENABLED 切换路由模型。本升级计划保留为能力与契约参考。
+
+当前代码校准说明（2026-04-19）：
+- 本文是 2026-03-16 起持续追加的 graph-runtime 升级计划，不是当前 `/v1/chat` 主链的事实文档。
+- 当前聊天主链已不以 `pre_intent_classifier -> scene_router -> graph/main_chain.py -> Supervisor / Judge` 作为默认运行口径；现行主链应以 `host_brain/app/chat_handler.py -> cortex_orchestrator.py -> agent_runtime_shared.py -> executive_router / executive_runtime*` 为准，外部输入回流以 `host_brain/app/input_routes.py` 为准。
+- 仓库中仍保留并演化了部分计划产物，例如 `host_brain/app/handlers/supervisor_dispatch_handler.py`、`judge_agent_handler.py`、`host_brain/app/agents/*`、`host_brain/integrations/graph_executor.py`、`graph_contract.py`；这些更适合作为 graph/agent phase 留痕与局部能力参考，而不是当前主链入口说明。
+- 文中关于 M-MA4/M-MA5/M-MA6 的“已完成 / 待实施 / 补完”表述，应按阶段记录理解，不直接作为当前实现层任务来源或运行时事实。
 
 ---
 

@@ -3,8 +3,13 @@
 **文档编号**：GATEWAY-ARCH-REDESIGN-001
 **日期**：2026-04-15
 **版本**：v1.0（草稿，待微调）
-**状态**：规划中，待执行
+**状态**：质量层整改方案留痕（2026-04-19 已校准，不作为当前主链定义）
 **受众**：核心开发团队
+
+> 当前代码校准说明（2026-04-19）
+> - 本文是 2026-04-15 的 Gateway 架构债盘点与整改方案，不是当前 Gateway 主链事实定义。
+> - 当前 Gateway 真实链路应以 `edge_client/gateway/server.py -> GatewayRouter -> /v1/host/input -> host_brain/app/input_routes.py:receive_input() -> _run_cortex_orchestrator_pipeline() -> host_brain/channels/edge_rpc_client.py:post_gateway_reply() -> /v1/gateway/reply` 为准。
+> - 文中对 `pre_intent_classifier`、`build_gateway_intent_draft`、ASR/Gateway 双路径割裂、TTS/VTS 抑制等问题的分析可作为质量背景与整改依据，但是否仍成立应以当前代码、`UNIFIED_MESSAGE_GATEWAY_DESIGN.md` 与 `GATEWAY_ZH_CHAIN_NODE_ANALYSIS.md` 为准。
 
 ---
 

@@ -1,0 +1,121 @@
+{
+  "device": "cpu",
+  "note": "embed/rerank 模型运行在 CPU，实测主链路与检索子阶段耗时",
+  "ts_utc": "20260418_180117",
+  "runs": 8,
+  "success": 8,
+  "embed_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "rerank_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "first_token_latency_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "commit_ms": {
+    "min": 1858.4486999998262,
+    "max": 57696.54400000036,
+    "avg": 30960.353912500068,
+    "p50": 31534.888950000095,
+    "p95": 50980.15554500024,
+    "n": 8
+  },
+  "retrieval_latency_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "samples": [
+    {
+      "run_index": 1,
+      "request_id": "req_c47f48c50cd74562af895d55a94e8e80",
+      "first_token_latency_ms": null,
+      "commit_ms": 1858.4486999998262,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 2,
+      "request_id": "req_f8891c18d9474b2285c318d2d18e311b",
+      "first_token_latency_ms": null,
+      "commit_ms": 23434.253500000523,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 3,
+      "request_id": "req_910977e3b178481fb98220ed5305f741",
+      "first_token_latency_ms": null,
+      "commit_ms": 38506.862700000056,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 4,
+      "request_id": "req_6b27a824079d4a48a279b42144204b9a",
+      "first_token_latency_ms": null,
+      "commit_ms": 31424.794600000496,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 5,
+      "request_id": "req_ed022ef9d82643c29abce7995b5b07d1",
+      "first_token_latency_ms": null,
+      "commit_ms": 36721.0656999996,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 6,
+      "request_id": "req_2805622adba945b6acac8e11bcf0f639",
+      "first_token_latency_ms": null,
+      "commit_ms": 26395.87879999999,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 7,
+      "request_id": "req_c7b7cff9aca34c9ca833077018280d88",
+      "first_token_latency_ms": null,
+      "commit_ms": 57696.54400000036,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 8,
+      "request_id": "req_8442870e46c4436aace7a6989ebe5ac2",
+      "first_token_latency_ms": null,
+      "commit_ms": 31644.983299999694,
+      "retrieval_latency_ms": null,
+      "embed_ms": null,
+      "rerank_ms": null
+    }
+  ]
+}

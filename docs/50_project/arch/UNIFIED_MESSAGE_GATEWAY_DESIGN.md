@@ -1,10 +1,38 @@
 # 外部消息统一网关（Unified Message Gateway）设计方案
 
-> 文档版本：v1.1
+> 文档版本：v1.2
 > 创建日期：2026-03-24
-> 更新日期：2026-03-26
-> 状态：**已实施完成（Phase 1-6 全部完成）**
+> 更新日期：2026-04-19
+> 状态：**已实施；正文含历史方案留痕**
 > 关联模块：`edge_client/gateway/`、`tools/wx4_decrypt.py`、`edge_client/services/wx_db_service.py`
+
+---
+
+## 0. 当前代码校准说明（2026-04-19 优先）
+
+当前代码里，Unified Message Gateway 的真实主链已经是：
+
+```text
+平台 Webhook
+  -> edge_client/gateway/server.py
+  -> adapter.parse_inbound()
+  -> MessageNormalizer.normalize()
+  -> GatewayRouter.route()
+  -> EdgeInputReporter._send()
+  -> POST /v1/host/input
+  -> Host 主链生成结果
+  -> host_brain/channels/edge_rpc_client.py
+  -> POST /v1/gateway/reply
+  -> OutboundDispatcher.dispatch()
+  -> 平台适配器 send_reply()
+```
+
+因此，当前应优先记住以下几点：
+
+- Gateway 入站真实入口在 `edge_client/gateway/server.py`。
+- Gateway 入站回流 Host 的真实入口是 `POST /v1/host/input`，而不是旧的 `SCENE_GATEWAY -> SceneRouter -> main_chain`。
+- Gateway 出站回复真实发送面是 `host_brain/channels/edge_rpc_client.py` 调 `POST /v1/gateway/reply`，再由 `edge_client/gateway/outbound.py` 分发。
+- 本文后续大段关于 `SCENE_GATEWAY`、`SceneRouter`、`main_chain.py` 的内容应视为历史设计阶段留痕，不代表当前 Host 主链事实。
 
 ---
 
@@ -69,7 +97,8 @@
                                                 │
                           ┌─────────────────────▼──────────────────────┐
                           │   Host Brain  :8000                         │
-                          │   /v1/host/input → Main Chain → Reply Egress│
+                          │   /v1/host/input → cortex/executive runtime │
+                          │                  → Reply Egress             │
                           └─────────────────────────────────────────────┘
 
 微信专属数据通道（补充）
@@ -382,7 +411,9 @@ QQ_SELF_ID=                        # QQ 号（用于过滤自发消息）
 
 ### 7.4 Host 侧 `/v1/host/input` 适配
 
-Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确处理链路。回复时通过 Gateway 的 `/reply` 端点回发。
+当前代码中，这一适配已经由 `host_brain/app/input_routes.py` 承接：Gateway 消息进入 `receive_input()` 后，经 `_dispatch_to_graph_worker()` / `_run_cortex_orchestrator_pipeline()` 进入现行 Host 主链；回复则由 `host_brain/channels/edge_rpc_client.py` 的 `post_gateway_reply()` 回发到 Gateway 的 `/v1/gateway/reply` 端点。
+
+若后文仍提到 `SceneRouter`、`MainChain`、`SCENE_GATEWAY` 等旧口径，应按历史设计阶段留痕理解。
 
 ---
 
@@ -397,7 +428,7 @@ Host 侧需识别 `source=GATEWAY` 并提取 `platform` 字段，路由到正确
 | ~~ComWeChatBotClient~~ | ❌ 过时 | COM Hook，4.x 兼容性差 |
 | ~~WeChatFerryX~~ | ❌ 过时 | DLL 注入，分支维护，不稳定 |
 | ~~WeChatFerry (原版)~~ | ❌ 停更 | 原仓库已停更 |
-| UIA 桌面自动化 | ✅ 当前主路径 | 优先 UIAutomation + command queue；视觉/OCR 仅作降级备选 |
+| UIA 桌面自动化 | ⚠️ 当前保留为出站/备选能力 | 现行主链已收敛到 Gateway webhook + command queue / DB 解密等组合路径；UIAutomation 与视觉/OCR 不应再单独理解为统一消息主入口 |
 
 ### 解密脚本方案核心原理
 
@@ -721,9 +752,9 @@ Edge RPC Gateway（:17800）是 Host→Edge 的**下行通道**（Host 调用 Ed
 ## 十三、Gateway Orchestrator Agent 设计
 
 > 日期：2026-03-24
-> 状态：**已实施完成**
-> 关联模块：`host_brain/app/handlers/gateway_orchestrator_handler.py`
-> 当前运行时说明：该模块已收敛为薄适配层，实际回复生成委托 `top_agent.py`。以下内容保留历史方案背景。
+> 状态：**历史方案留痕（不作为当前主链事实）**
+> 关联模块：本节提到的 `gateway_orchestrator_handler.py`、`SceneRouter`、`SCENE_GATEWAY` 等属于当时方案语境；当前源码入口应以 `host_brain/app/input_routes.py` 与 `host_brain/channels/edge_rpc_client.py` 为准。
+> 当前运行时说明：Gateway 输入目前经 `receive_input() -> _run_cortex_orchestrator_pipeline()` 进入现行 Host 主链，回复经 `post_gateway_reply()` 回送 Edge Gateway。以下内容保留历史方案背景。
 
 ### 13.1 问题背景
 

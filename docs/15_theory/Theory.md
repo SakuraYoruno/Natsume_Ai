@@ -2,9 +2,15 @@
 标题：理论文档（Theory：架构原理与理论框架）
 
 # Natsume Ai 理论文档（Theory Paper）
-版本：v1.1.1
+版本：v1.2.0
 适用：本地优先部署（Host_Brain + Edge + 可选 Cloud/ClawdBot）
 定位：解释“为什么这样设计、理论上要保证什么、怎样判定系统没有跑偏”，用于指导实现与评审。
+
+当前代码校准说明（2026-04-19）：
+- 本文件属于理论/原则解释，不是当前运行时事实文档，也不作为实现任务清单。
+- 现行代码入口请优先阅读 `README.md`、`docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md`、`docs/50_project/arch/dataflow_report.md`、`docs/15_theory/APP_AUDIT_SKILLS_CONTRACT.md`、`docs/50_project/arch/AGENT_ORCHESTRATION_DETAIL.md`。
+- 当前聊天主链应从 `host_brain/app/fastapi_app.py` 的 `/v1/chat` HTTP 入口开始阅读，再进入 `host_brain/app/chat_handler.py -> host_brain/app/cortex_orchestrator.py -> host_brain/app/agent_runtime_shared.py -> executive_router / executive_runtime*`；外部输入回流以 `host_brain/app/input_routes.py` 为准。
+- 若本文件中的抽象术语与当前代码事实冲突，以代码事实文档和实际代码为准。
 
 ---
 

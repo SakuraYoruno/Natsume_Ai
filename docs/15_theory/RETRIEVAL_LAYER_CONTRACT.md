@@ -1,410 +1,412 @@
 受众：MASTER
-标题：host_brain/retrieval/ 层接口契约
+标题：host_brain/retrieval/ 层接口契约（当前代码实况）
 
-版本：v1.0
-日期：2026-03-19
+版本：v2.0
+日期：2026-04-19
 归属：docs/15_theory/
 
 ---
 
-## 概述
+定位：本文描述当前代码里的 `host_brain/retrieval/` 层契约，而不是早期“`Embed -> RecallFusion -> Rerank -> EvidencePack` 四段直连”简化口径。
+若与旧文档冲突，以本文、`docs/50_project/arch/AGENTIC_RAG_ARCHITECTURE.md` 和实际代码为准。
 
-`host_brain/retrieval/` 是 Natsume AI 的检索层，负责将用户查询转化为结构化的证据包（Evidence Pack），供 Prompt 构建层使用。整个检索链路分为四个串行阶段：
+## 0. 代码证据入口
 
-```
-Embed → RecallFusion → Rerank → EvidencePack
-```
-
-所有阶段均通过 `RetrievalPipelineContract` 串联，对外暴露统一的 `RetrievalOrchestrator` 入口。
-
----
-
-## 一、模块清单
-
-| 模块文件 | 职责 |
-|---------|------|
-| `orchestrator.py` | 检索编排器：统一入口、缓存、路径分类 |
-| `pipeline.py` | 检索管道契约：四阶段串联执行 |
-| `embedding.py` | 嵌入服务：文本向量化 |
-| `recall_fusion.py` | 多路召回融合服务 |
-| `recall_fusion_config.py` | 召回融合配置加载 |
-| `recall_fusion_stores.py` | 召回存储适配器（Chroma/Neo4j/Canon/Vault） |
-| `recall_fusion_utils.py` | 召回融合工具函数 |
-| `recall_schemas.py` | 召回结果 Schema 定义 |
-| `recall_search_mixin.py` | 召回搜索 Mixin |
-| `recall_config.py` | 召回运行时配置 |
-| `reranker.py` | 重排序服务契约 |
-| `reranker_config.py` | 重排序运行时配置 |
-| `reranker_providers.py` | 重排序提供商注册表 |
-| `reranker_schemas.py` | 重排序结果 Schema |
-| `evidence_pack.py` | 证据包构建服务 |
-| `hybrid_fusion.py` | 混合融合算法（RRF 等） |
-| `full_text_searcher.py` | 全文检索适配器 |
+- `host_brain/retrieval/query_planner.py`
+- `host_brain/retrieval/agentic_retrieval_loop.py`
+- `host_brain/retrieval/evidence_evaluator.py`
+- `host_brain/retrieval/pipeline.py`
+- `host_brain/retrieval/orchestrator.py`
+- `host_brain/retrieval/recall_fusion.py`
+- `host_brain/retrieval/recall_fusion_config.py`
+- `host_brain/retrieval/reranker.py`
+- `host_brain/retrieval/evidence_pack.py`
+- `host_brain/app/chat_retrieval_helpers.py`
+- `host_brain/tribe/hippocampus_agent.py`
 
 ---
 
-## 二、RetrievalOrchestrator（编排器）
+## 一、当前层定位
 
-### 2.1 入口契约
+`host_brain/retrieval/` 现在不是一个“被动四段式工具箱”，而是当前 Agentic RAG 主体：
+
+```text
+/v1/chat 或 /v1/host/input
+  -> agent_runtime_shared / chat_retrieval_helpers
+  -> HippocampusAgent.recall
+  -> RetrievalOrchestrator.arun
+  -> RetrievalPipelineContract.run
+```
+
+这意味着：
+
+- 当前检索入口已经不在 `main_chain.py`
+- `retrieval/` 层负责 QueryPlanner、可多轮 recall、证据评估、去重、重排、EvidencePack 和缓存包装
+- prompt 注入前还会由主链继续做 `prompt_filter` 与 `RecallPackBuilder`
+
+---
+
+## 二、模块清单（当前主模块）
+
+| 模块文件 | 当前职责 |
+|---|---|
+| `query_planner.py` | 纯规则规划：意图识别、store 路由、改写 query、决定 `skip_retrieval / max_rounds / time_lookback_days` |
+| `agentic_retrieval_loop.py` | 多轮检索循环：执行 recall、读取评估结果、必要时改写 query 或扩 store |
+| `evidence_evaluator.py` | 检查当前证据是否足够，给出 `proceed / retry_with_rewrite / expand_stores` |
+| `pipeline.py` | 检索总管线：Embedding → Agentic loop → SemanticDedup → Rerank → EvidencePack |
+| `orchestrator.py` | 统一请求/结果契约、线程池包装、路径分类、缓存、`retrieval_bundle` 汇总 |
+| `recall_fusion.py` | 多 store recall 执行 |
+| `recall_fusion_config.py` | recall 路由配置加载与 node/language 过滤 |
+| `reranker.py` | 候选重排 |
+| `evidence_pack.py` | 证据包构造 |
+| `embedding.py` | embedding provider 路由与 fallback |
+
+---
+
+## 三、QueryPlanner 当前契约
+
+### 3.1 当前 store map
+
+`query_planner.py` 当前 `ALL_STORE_IDS` 为 5 路：
+
+- `episodic_vector`
+- `sqlite_ledger`
+- `neo4j_bond`
+- `world_canon`
+- `artifact_vault`
+
+文件内已明确：
+
+- `style_canon` 不再走这里的检索路由，而是常驻注入
+- `persona_utterance` 不在当前主 store map 内，而走独立通道
+
+### 3.2 意图到 store 的当前路由
+
+| intent | target_stores |
+|---|---|
+| `greeting` | 空，跳过检索 |
+| `phatic` | `episodic_vector` |
+| `chat` | `episodic_vector` |
+| `recall_memory` | `episodic_vector`, `sqlite_ledger` |
+| `emotion` | `neo4j_bond`, `episodic_vector` |
+| `affection` | `neo4j_bond`, `episodic_vector` |
+| `knowledge` | `world_canon` |
+| `tool` | `artifact_vault` |
+| `complex` | 全量 5 路 |
+
+### 3.3 最大轮次
+
+| intent | max_rounds |
+|---|---|
+| `greeting` | `0` |
+| `phatic` | `1` |
+| `chat` | `1` |
+| `recall_memory` | `2` |
+| `emotion` | `2` |
+| `affection` | `1` |
+| `knowledge` | `1` |
+| `tool` | `1` |
+| `complex` | `3` |
+
+### 3.4 规划结果数据类
+
+当前 `QueryPlan` 的关键字段：
 
 ```python
-class RetrievalOrchestratorRequest:
-    trace_id: str          # 追踪 ID
-    query: str             # 用户查询文本
-    session_state: dict    # 会话状态（含 session_id 等）
-    request_id: str        # 请求 ID
-    session_id: str | None
-    intent_id: str | None  # 意图 ID（用于缓存键）
-    top_k: int = 5         # 最终返回证据条数（范围 1–20）
-    ts_ms: int | None      # 时间戳（毫秒）
-    emotion_context: str | None  # 情感上下文（OPT-41 透传）
-```
-
-```python
-class RetrievalOrchestratorResult:
-    success: bool
-    status: str                        # "OK" | "DEGRADED"
-    reason_code: str | None
-    path: str                          # 见路径分类
-    detail: str
-    trace_id: str
-    query: str
-    session_state: dict
-    retrieval_summary: dict            # 检索摘要（含缓存元数据）
-    retrieval_evidence_items: list     # 最终证据条目列表
-    retrieval_bundle: dict             # 完整检索包（含 summary + evidence_items + cache）
-```
-
-### 2.2 路径分类
-
-| 路径常量 | 含义 |
-|---------|------|
-| `success` | 全部阶段正常，有效证据 ≥ 1 |
-| `partial_failure` | 部分阶段降级，但仍有候选结果 |
-| `all_failure` | 全部阶段失败，无任何候选 |
-
-分类逻辑（`_classify_retrieval_path`）：
-- `status == "OK"` 且 `degraded == False` → `success`
-- `route_count > 0` 或 `candidate_count > 0` 或 `rerank_topk > 0` 或 `evidence_items > 0` → `partial_failure`
-- 其余 → `all_failure`
-
-### 2.3 缓存机制
-
-编排器内置 LRU 缓存（可选启用）：
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `cache_enabled` | `False` | 是否启用缓存 |
-| `cache_ttl_ms` | `3000` | 缓存 TTL（毫秒），范围 0–600000 |
-| `cache_max_entries` | `256` | 最大缓存条目数，范围 1–20000 |
-
-**缓存键范围**：`session_id + query + top_k + intent_id + emotion_context`（SHA-256）
-
-**缓存约束**：
-- 仅缓存 `status == "OK"` 的结果
-- 降级结果（`DEGRADED`）不写入缓存
-- 超时（`asyncio.TimeoutError`）不写入缓存
-
-缓存元数据注入到 `retrieval_bundle.cache`：
-```json
-{
-  "enabled": true,
-  "hit": false,
-  "ttl_ms": 3000,
-  "age_ms": 0,
-  "max_entries": 256,
-  "key_scope": "session_id+query+top_k+intent_id+emotion_context"
-}
-```
-
-### 2.4 降级摘要
-
-| 函数 | 触发场景 |
-|------|---------|
-| `build_skipped_retrieval_summary("HOST_CHAT_RETRIEVAL_DISABLED")` | 检索功能被禁用 |
-| `build_degraded_retrieval_summary("RETRIEVAL_TIMEOUT")` | 超时 |
-| `build_degraded_retrieval_summary("RETRIEVAL_FAILED")` | 异常 |
-
-降级摘要结构：
-```json
-{
-  "status": "DEGRADED",
-  "reason_code": "RETRIEVAL_TIMEOUT",
-  "route_count": 0,
-  "routes": [],
-  "route_rows": [],
-  "route_errors": [],
-  "candidate_count": 0,
-  "rerank_topk": 0,
-  "evidence_refs": [],
-  "reason_chain": [],
-  "degraded": true
-}
+QueryPlan(
+    original_query: str,
+    rewritten_queries: list[str],
+    intent: str,
+    target_stores: list[str],
+    skip_retrieval: bool,
+    max_rounds: int,
+    time_lookback_days: int | None,
+)
 ```
 
 ---
 
-## 三、RetrievalPipelineContract（管道）
+## 四、RetrievalPipelineContract 当前契约
 
-### 3.1 四阶段串联
+### 4.1 真实执行顺序
 
+当前 `RetrievalPipelineContract.run()` 不再是旧文档里的四步直连，而是：
+
+```text
+QueryPlan 归一化
+  -> EmbeddingService.embed
+  -> AgenticRetrievalLoop.retrieve
+       -> RecallFusionService.recall
+       -> EvidenceEvaluator.evaluate
+  -> SemanticDedup.dedup
+  -> RerankerService.rerank
+  -> EvidencePackService.build_pack
+  -> output 汇总
 ```
-query
-  ↓ EmbeddingServiceContract.embed()
-embedding_vector
-  ↓ RecallFusionServiceContract.recall()
-recall_candidates
-  ↓ RerankerServiceContract.rerank()
-rerank_topk
-  ↓ EvidencePackServiceContract.build_pack()
-evidence_pack
-```
 
-### 3.2 管道输出结构
+其中：
+
+- `AgenticRetrievalLoop` 会根据评估结果决定是否追加一轮
+- `phatic / affection` 这类低风险路径可能走 fast-path rerank
+- `SemanticDedup` 已经是当前主管线的一环
+
+### 4.2 `run()` 关键输入
+
+当前 `run()` 会接收的不只是 query，还包括：
+
+- `request_id`
+- `query`
+- `intent_id`
+- `person_id`
+- `session_id`
+- `top_k`
+- `emotion_context`
+- `mood_state`
+- `bond_summary`
+- `motive_state`
+- `render_target_lang`
+- `turn_index`
+- `query_plan`
+- `route_target`
+
+因此当前 retrieval 层已显式感知：
+
+- 对话身份与会话
+- 情感/Bond 相关上下文
+- 目标语言
+- 上游已生成的 query_plan
+
+### 4.3 `RetrievalPipelineResult`
 
 ```python
-class RetrievalPipelineResult:
-    success: bool
-    status: str          # "OK" | "DEGRADED"
-    reason_code: str | None
-    stage: str           # "S_RET_PIPELINE"
-    detail: str
-    output: dict         # 含 embedding/recall/rerank/evidence_pack/reason_chain
-```
-
-`output` 完整字段：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `request_id` | str | 请求 ID |
-| `intent_id` | str\|None | 意图 ID |
-| `query` | str | 归一化查询文本 |
-| `status` | str | "OK"\|"DEGRADED" |
-| `stage` | str | "S_RET_PIPELINE" |
-| `reason_code` | str\|None | 首个降级原因码 |
-| `reason_chain` | list[str] | 所有阶段降级原因码链 |
-| `degraded` | bool | 是否有任意阶段降级 |
-| `fallback_embedding_used` | bool | 是否使用了降级嵌入 |
-| `embedding` | dict | 嵌入阶段输出 |
-| `recall` | dict | 召回阶段输出 |
-| `rerank` | dict | 重排序阶段输出 |
-| `evidence_pack` | dict | 证据包阶段输出 |
-| `ts_ms` | int | 执行时间戳 |
-
-### 3.3 降级传播规则
-
-- 任意阶段返回非空 `reason_code` → `degraded = True`
-- `reason_chain` 收集所有阶段的 `reason_code`（去重）
-- `root_reason` = `reason_chain[0]`（首个降级原因）
-- 最终 `status = "OK"` 当且仅当 `degraded == False` 且 `evidence_pack_result.success == True`
-
-### 3.4 情感上下文透传（OPT-41）
-
-`emotion_context` 参数从 `RetrievalOrchestratorRequest` 透传至 `RerankerServiceContract.rerank()`，用于情感感知重排序。
-
----
-
-## 四、EmbeddingServiceContract（嵌入服务）
-
-### 4.1 接口
-
-```python
-embedding_service.embed(
-    request_id: str,
-    text: str,
-    intent_id: str | None,
-    ts_ms: int,
-) -> EmbeddingResult
-```
-
-### 4.2 输出
-
-```python
-EmbeddingResult.output = {
-    "embedding_vector": list[float],  # 嵌入向量
-    ...
-}
-```
-
-### 4.3 运行时配置（`load_embedding_runtime_config`）
-
-从 `.env` 加载，失败时抛出 `RuntimeError`。
-
----
-
-## 五、RecallFusionServiceContract（多路召回融合）
-
-### 5.1 接口
-
-```python
-recall_service.recall(
-    request_id: str,
-    query: str,
-    query_embedding: list[float],
-    intent_id: str | None,
-    session_id: str | None,
-    ts_ms: int,
-) -> RecallResult
-```
-
-### 5.2 召回路由
-
-召回融合服务支持多路并行召回，路由来源包括：
-
-| 路由 | 存储后端 | 说明 |
-|------|---------|------|
-| `chroma` | ChromaDB | 情节记忆向量检索 |
-| `neo4j` | Neo4j | Bond 关系图检索 |
-| `style_canon` | StyleCanonStore | 风格 Canon 检索 |
-| `world_canon` | WorldCanonStore | 世界观 Canon 检索 |
-| `artifact_vault` | ArtifactVault | 工件库检索 |
-
-### 5.3 输出结构
-
-```python
-RecallResult.output = {
-    "routes": list[str],          # 激活的路由名称
-    "route_rows": list[dict],     # 各路由原始结果行
-    "route_errors": list[dict],   # 各路由错误信息
-    "candidates": list[dict],     # 融合后候选列表
-    "candidate_count": int,
-}
-```
-
-### 5.4 ChromaHttpSearchClient
-
-管道内置 Chroma HTTP 客户端适配器：
-
-```python
-ChromaHttpSearchClient.search(
-    query_embedding: list[float],
-    top_k: int = 5,
-    collection: str | None = None,
-) -> list[dict]
-```
-
-距离转分数：`score = 1.0 / (1.0 + distance)`（`_distance_to_score`）
-
----
-
-## 六、RerankerServiceContract（重排序服务）
-
-### 6.1 接口
-
-```python
-reranker_service.rerank(
-    request_id: str,
-    query: str,
-    candidates: list[dict],
-    intent_id: str | None,
-    top_k: int | None,
-    ts_ms: int,
-    emotion_context: str | None,  # OPT-41
-) -> RerankerResult
-```
-
-### 6.2 输出结构
-
-```python
-RerankerResult.output = {
-    "topk": list[dict],   # 重排序后 top-k 结果
-    ...
-}
-```
-
-每条 `topk` 条目：
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `evidence_ref` | str | 证据引用 ID |
-| `source_ref` | str | 来源引用 |
-| `snippet` | str | 文本片段（截断至 240 字符） |
-| `score` | float | 重排序分数 |
-| `confidence` | float\|None | 置信度 |
-| `metadata` | dict | 元数据 |
-| `store_id` | str\|None | 存储 ID |
-
----
-
-## 七、EvidencePackServiceContract（证据包服务）
-
-### 7.1 接口
-
-```python
-evidence_pack_service.build_pack(
-    request_id: str,
-    intent_id: str | None,
-    query: str,
-    rerank_output: dict,
-    degraded: bool,
+RetrievalPipelineResult(
+    success: bool,
+    status: str,
     reason_code: str | None,
-    ts_ms: int,
-) -> EvidencePackResult
+    stage: str,
+    detail: str,
+    output: dict[str, Any],
+)
 ```
 
-### 7.2 输出结构
+当前 `output` 中的核心块包括：
+
+- `embedding`
+- `recall`
+- `rerank`
+- `evidence_pack`
+- `query_plan`
+- `agentic_meta`
+- `adaptive_budget`
+- `reason_chain`
+
+---
+
+## 五、EvidenceEvaluator 与 Agentic loop
+
+### 5.1 当前评估阈值
+
+`evidence_evaluator.py` 当前默认阈值：
+
+| 维度 | 默认值 |
+|---|---|
+| 最少证据数 | `2` |
+| top_score 下限 | `0.25` |
+| coverage 下限 | `0.4` |
+
+### 5.2 当前建议类型
+
+- `proceed`
+- `retry_with_rewrite`
+- `expand_stores`
+
+### 5.3 AgenticRetrievalLoop 当前输出
+
+`agentic_retrieval_loop.py` 会产出：
+
+- `queries_used`
+- `rounds`
+- `final_evaluation`
+- `recall_summary`
+- `routes / route_rows / route_errors`
+
+这说明当前 retrieval 层已经真实具备“先检索、再评估、必要时二次检索”的 agentic 行为。
+
+---
+
+## 六、RetrievalOrchestrator 当前契约
+
+### 6.1 请求对象
+
+当前 `RetrievalOrchestratorRequest` 关键字段：
 
 ```python
-EvidencePackResult.output = {
-    "evidence_refs": list[str],   # 证据引用 ID 列表
-    ...
-}
+RetrievalOrchestratorRequest(
+    trace_id: str,
+    query: str,
+    session_state: dict[str, Any],
+    request_id: str,
+    person_id: str | None = None,
+    session_id: str | None = None,
+    intent_id: str | None = None,
+    top_k: int = 8,
+    ts_ms: int | None = None,
+    emotion_context: str | None = None,
+    mood_state: str | None = None,
+    bond_summary: Mapping[str, Any] | None = None,
+    motive_state: Mapping[str, Any] | None = None,
+    render_target_lang: str | None = None,
+    turn_index: int = 0,
+    query_plan: QueryPlan | Mapping[str, Any] | None = None,
+    route_target: str = "",
+)
 ```
 
----
-
-## 八、build_retrieval_pipeline_from_env（工厂函数）
-
-从环境变量构建完整检索管道：
+### 6.2 结果对象
 
 ```python
-pipeline = build_retrieval_pipeline_from_env(
-    env=None,              # 环境变量字典，None 时使用 os.environ
-    local_overrides=None,  # 本地覆盖配置
-    ledger=None,           # SQLiteLedger 审计实例
-    node_id=None,          # 节点 ID（默认 "host.default"）
-    key_profiles=None,     # 密钥配置文件列表
-    secret_store=None,     # 密钥存储
-    current_epoch=None,    # 当前 epoch
-) -> RetrievalPipelineContract
+RetrievalOrchestratorResult(
+    success: bool,
+    status: str,
+    reason_code: str | None,
+    path: str,
+    detail: str,
+    trace_id: str,
+    query: str,
+    session_state: dict[str, Any],
+    retrieval_summary: dict[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+    retrieval_bundle: dict[str, Any],
+)
 ```
 
-**构建顺序**：
-1. 加载 `embedding_cfg`（失败则抛出 RuntimeError）
-2. 加载 `recall_cfg`（失败则抛出 RuntimeError）
-3. 加载 `rerank_cfg`（失败则抛出 RuntimeError）
-4. 加载 `chroma_cfg`（失败则抛出 RuntimeError）
-5. 加载 `host_cfg`（解析 OpenAI API Key）
-6. 构建 `embedding_registry`、`reranker_registry`
-7. 构建 `neo4j_client`（可选，失败时降级为 None）
-8. 构建 `chroma_client`、`style_store`、`world_store`、`artifact_vault`
-9. 组装 `RetrievalPipelineContract`
+### 6.3 路径分类
+
+当前路径分类仍是：
+
+- `success`
+- `partial_failure`
+- `all_failure`
+
+但其依据已经是当前 summary 字段：
+
+- `status == "OK"` 且 `degraded == False` -> `success`
+- 有 route/candidate/rerank/evidence 任一残留 -> `partial_failure`
+- 否则 -> `all_failure`
+
+### 6.4 summary 统一字段
+
+`build_summary_from_pipeline_result()` 当前会产出并汇总：
+
+- `route_count / routes / route_rows / route_errors`
+- `candidate_count`
+- `rerank_topk`
+- `evidence_refs / evidence_topk`
+- `query_plan`
+- `agentic_meta`
+- `adaptive_budget`
+- `embedding_model_id / embedding_provider / fallback_embedding_*`
+- `rerank_model_id / rerank_provider / fallback_reranker_*`
 
 ---
 
-## 九、关键约束
+## 七、跳过、降级与缓存
 
-1. **top_k 范围**：`_normalize_top_k` 强制限制在 `[1, 20]`，默认 5
-2. **snippet 截断**：`_extract_evidence_items` 截断至 240 字符（`_truncate_for_prompt`）
-3. **最大证据条数**：`_extract_evidence_items` 最多取 `rerank_topk[:5]`
-4. **缓存仅对 OK 结果生效**：降级结果不写入缓存
-5. **情感上下文透传**：`emotion_context` 从 Orchestrator → Pipeline → Reranker 全链路透传
-6. **审计写入**：`RetrievalPipelineContract._log_event` 在每次 `run()` 后写入 Ledger
+### 7.1 跳过/降级摘要
+
+当前 `orchestrator.py` 提供：
+
+- `build_skipped_retrieval_summary(reason_code)`
+- `build_degraded_retrieval_summary(reason_code)`
+
+其中：
+
+- 跳过态 `status = "SKIPPED"`
+- 降级态 `status = "DEGRADED"`
+
+### 7.2 缓存
+
+`RetrievalOrchestrator` 当前内置 LRU 风格缓存，关键配置：
+
+- `cache_enabled`
+- `cache_ttl_ms`
+- `cache_max_entries`
+
+缓存 key scope 当前显式覆盖：
+
+- `person_id`
+- `session_id`
+- `query`
+- `top_k`
+- `intent_id`
+- `emotion_context`
+- `mood_state`
+- `bond_summary`
+- `motive_state`
+- `render_target_lang`
+- `turn_index`
+- `query_plan`
+
+缓存元数据会回写到：
+
+- `retrieval_summary`
+- `retrieval_bundle.cache`
 
 ---
 
-## 十、与其他层的接口关系
+## 八、环境构建入口
 
-```
-prompt_context.py (core/)
-    ↓ 调用
-RetrievalOrchestrator.arun()
-    ↓ 返回
-retrieval_bundle → prompt_builder.py (app/)
-    ↓ 注入
-GraphState.retrieval_bundle (integrations/)
-```
+`build_retrieval_pipeline_from_env()` 仍是当前标准工厂函数。它当前会装配：
 
-- `retrieval_bundle` 是 `GraphState` 的标准字段，由 `graph_contract.py` 消费
-- 检索层不直接写入 `GraphState`，由 `graph_contract` 中的节点函数负责注入
-- 检索层的 `evidence_refs` 由 `EvidencePlane` 写入审计（见 `INTEGRATIONS_LAYER_CONTRACT.md`）
+- embedding runtime config
+- recall runtime config
+- reranker runtime config
+- Chroma runtime config
+- `ChromaHttpSearchClient`
+- Neo4j bond client（启用时）
+- `StyleCanonStore`
+- `WorldCanonStore`
+- `ArtifactVault`
+- `QueryPlanner`
+- `AdaptivePromptBudget`
+- `SemanticDedup`
+
+需要注意：
+
+- recall 适配层支持的 store id 以 `recall_fusion_config.py` 为准
+- 但当前主 `QueryPlanner` 默认只规划上文列出的 5 路 store
+
+---
+
+## 九、与主链的当前关系
+
+当前 retrieval 层不会直接把所有证据原样塞进 prompt。
+
+在 `chat_retrieval_helpers.py` / `agent_runtime_shared.py` 里，retrieval 结果还会经过：
+
+1. `filter_retrieval_evidence_items_for_prompt()`
+2. `RecallPackBuilder.build(...)`
+
+所以当前正确理解是：
+
+- `retrieval/` 负责“检索与证据组织”
+- prompt 注入仍由 app 主链继续收口
+
+---
+
+## 十、当前不再适用的旧口径
+
+以下说法不再代表当前代码事实：
+
+- retrieval 仍是固定 `Embed -> RecallFusion -> Rerank -> EvidencePack` 四步直连
+- 当前主入口仍是 `main_chain.py`
+- 当前仍是固定“七路全量召回”
+- `style_canon` / `persona_utterance` 仍在当前主 store map 内
+- retrieval 结果会不经筛选直接进入最终 prompt
+
+当前正确口径应是：
+
+1. 当前主入口是 `chat_retrieval_helpers -> HippocampusAgent -> RetrievalOrchestrator`。
+2. `QueryPlanner + AgenticRetrievalLoop + EvidenceEvaluator` 已是当前主检索结构。
+3. 当前主 store map 是 5 路。
+4. retrieval 之后主链还会继续做 `prompt_filter` 和 `RecallPackBuilder`。

@@ -1,0 +1,173 @@
+{
+  "device": "cpu",
+  "note": "embed/rerank 模型运行在 CPU，实测主链路与检索子阶段耗时",
+  "ts_utc": "20260418_190205",
+  "runs": 2,
+  "success": 2,
+  "embed_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "rerank_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "first_event_ms": {
+    "min": 4632.019499998933,
+    "max": 8461.929699999018,
+    "avg": 6546.9745999989755,
+    "p50": 6546.9745999989755,
+    "p95": 8270.434189999014,
+    "n": 2
+  },
+  "first_render_ms": {
+    "min": 9881.521699999212,
+    "max": 15737.833399998635,
+    "avg": 12809.677549998923,
+    "p50": 12809.677549998923,
+    "p95": 15445.017814998664,
+    "n": 2
+  },
+  "server_latency_ms": {
+    "min": 11671.0,
+    "max": 18899.0,
+    "avg": 15285.0,
+    "p50": 15285.0,
+    "p95": 18537.6,
+    "n": 2
+  },
+  "first_token_latency_ms": {
+    "min": 2484.0,
+    "max": 2874.0,
+    "avg": 2679.0,
+    "p50": 2679.0,
+    "p95": 2854.5,
+    "n": 2
+  },
+  "commit_ms": {
+    "min": 13961.734999998953,
+    "max": 24231.362099999387,
+    "avg": 19096.54854999917,
+    "p50": 19096.54854999917,
+    "p95": 23717.880744999366,
+    "n": 2
+  },
+  "retrieval_latency_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "prompt_build_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 2
+  },
+  "llm_runtime_resolve_ms": {
+    "min": 4.0,
+    "max": 5.0,
+    "avg": 4.5,
+    "p50": 4.5,
+    "p95": 4.95,
+    "n": 2
+  },
+  "stream_after_first_token_ms": {
+    "min": 6812.0,
+    "max": 10712.0,
+    "avg": 8762.0,
+    "p50": 8762.0,
+    "p95": 10517.0,
+    "n": 2
+  },
+  "response_intelligence_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 2
+  },
+  "sanitize_egress_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 2
+  },
+  "precommit_log_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 2
+  },
+  "wall_minus_server_commit_ms": {
+    "min": 2290.734999998953,
+    "max": 5332.362099999387,
+    "avg": 3811.54854999917,
+    "p50": 3811.54854999917,
+    "p95": 5180.280744999365,
+    "n": 2
+  },
+  "samples": [
+    {
+      "run_index": 1,
+      "request_id": "req_5c7a54e267ab44c7b66337f2dc613909",
+      "path": "chat_agent:direct",
+      "model_id": "gemini-2.5-flash-lite",
+      "stream_buffered": false,
+      "first_event_ms": 4632.019499998933,
+      "first_render_ms": 9881.521699999212,
+      "server_latency_ms": 11671,
+      "first_token_latency_ms": 2484,
+      "commit_ms": 13961.734999998953,
+      "retrieval_latency_ms": null,
+      "prompt_build_ms": 0,
+      "llm_runtime_resolve_ms": 5,
+      "stream_after_first_token_ms": 6812,
+      "response_intelligence_ms": 0,
+      "sanitize_egress_ms": 0,
+      "precommit_log_ms": 0,
+      "wall_minus_server_commit_ms": 2290.734999998953,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 2,
+      "request_id": "req_ddee48046f244a37b5bee40f2ca488bf",
+      "path": "chat_agent:direct",
+      "model_id": "gemini-2.5-flash-lite",
+      "stream_buffered": false,
+      "first_event_ms": 8461.929699999018,
+      "first_render_ms": 15737.833399998635,
+      "server_latency_ms": 18899,
+      "first_token_latency_ms": 2874,
+      "commit_ms": 24231.362099999387,
+      "retrieval_latency_ms": null,
+      "prompt_build_ms": 0,
+      "llm_runtime_resolve_ms": 4,
+      "stream_after_first_token_ms": 10712,
+      "response_intelligence_ms": 0,
+      "sanitize_egress_ms": 0,
+      "precommit_log_ms": 0,
+      "wall_minus_server_commit_ms": 5332.362099999387,
+      "embed_ms": null,
+      "rerank_ms": null
+    }
+  ]
+}

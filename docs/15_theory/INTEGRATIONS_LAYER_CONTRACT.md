@@ -1,280 +1,509 @@
 受众：MASTER
-标题：host_brain/integrations/ 层接口契约
+标题：host_brain/integrations/ 层接口契约（当前代码实况）
 
-# host_brain/integrations/ 层接口契约
-
-版本：v1.0
-日期：2026-03-19
+版本：v2.0
+日期：2026-04-19
 归属：docs/15_theory/
 
 ---
 
-## 概述
+定位：本文描述当前代码里的 `host_brain/integrations/` 层。
+需要特别注意：它现在是“自研 GraphRuntime + LangGraph 适配 + LLM Gateway + Evidence Plane”的混合层，而不只是早期文档中那种抽象的“LangGraph 治理层”。
 
-`host_brain/integrations/` 是 **LangGraph 治理层**的核心实现，负责：
+## 0. 代码证据入口
 
-1. **图编排**：图配置验证、节点执行、边路由、回退
-2. **治理约束**：Route Commitment、Dual-Clock、Airlock、Checkpoint/Resume
-3. **证据平面**：所有治理决策的可审计写入
-4. **流式输出**：Phase-Locked Streaming（PRESENCE → COMMIT → RENDER）
-5. **Multi-Agent**：Supervisor 编排、子图透明执行、预算治理
-
----
-
-## 模块一览
-
-### graph_* 系列（图编排与治理）
-
-| 文件 | 职责 |
-|---|---|
-| `graph_contract.py` | 共享类型、常量、GraphState、配置验证、辅助函数 |
-| `graph_runtime.py` | 图运行时入口（`run_graph()`） |
-| `graph_executor.py` | 节点执行器（`execute_node()`） |
-| `graph_model_resolve.py` | 模型节点解析（从 ModelPlane 配置解析模型参数） |
-| `graph_branch.py` | 只读并行分支（`run_parallel_branches()`，M37-F） |
-| `graph_checkpoint.py` | Checkpoint / Interrupt / Resume（M39-C） |
-| `graph_clock.py` | Dual-Clock 超时监控（M36-G） |
-| `graph_evidence.py` | 图级 Evidence Plane 写入 |
-| `graph_fallback.py` | 回退策略执行 |
-| `graph_streaming.py` | Phase-Locked Streaming 实现（M38-C） |
-| `graph_subgraph.py` | 透明子图编译与执行（M35-F） |
-
-### evidence_* 系列（证据平面）
-
-| 文件 | 职责 |
-|---|---|
-| `evidence_bench.py` | Evidence Bench：统一写入入口，区分 CRITICAL / NON_CRITICAL |
-| `evidence_circuit_breaker.py` | 熔断器：连续失败时暂停写入，保护 SQLite |
-| `evidence_priority.py` | 写入优先级定义（CRITICAL / NON_CRITICAL） |
-| `evidence_write_queue.py` | 异步写入队列（M41-C），NON_CRITICAL 写入缓冲 |
-
-### LLM 网关
-
-| 文件 | 职责 |
-|---|---|
-| `llm_gateway.py` | LLM 调用网关（多 provider 统一接口） |
-| `llm_gateway_schemas.py` | 网关请求/响应 schema |
-| `llm_helpers.py` | LLM 调用辅助函数 |
+- `host_brain/integrations/graph_contract.py`
+- `host_brain/integrations/graph_runtime.py`
+- `host_brain/integrations/graph_executor.py`
+- `host_brain/integrations/graph_fallback.py`
+- `host_brain/integrations/graph_branch.py`
+- `host_brain/integrations/graph_clock.py`
+- `host_brain/integrations/graph_streaming.py`
+- `host_brain/integrations/graph_checkpoint.py`
+- `host_brain/integrations/graph_langgraph_checkpoint.py`
+- `host_brain/integrations/graph_subgraph.py`
+- `host_brain/integrations/graph_langgraph_subgraph.py`
+- `host_brain/integrations/graph_governed_tool_node.py`
+- `host_brain/integrations/evidence_bench.py`
+- `host_brain/integrations/evidence_write_queue.py`
+- `host_brain/integrations/evidence_circuit_breaker.py`
+- `host_brain/integrations/llm_gateway.py`
+- `host_brain/integrations/llm_gateway_schemas.py`
+- `host_brain/integrations/llm_helpers.py`
 
 ---
 
-## GraphState 字段语义
+## 一、当前层定位
 
-`GraphState` 是贯穿整个图执行的共享状态（TypedDict），字段按功能分组：
+当前 `integrations/` 层主要承担四类职责：
 
-### 基础字段
+1. 图运行时契约与执行
+2. LangGraph checkpoint / subgraph 适配
+3. LLM Gateway 与模型调用治理
+4. Evidence Plane 与异步写入缓冲
 
-| 字段 | 类型 | 语义 |
-|---|---|---|
-| `request_id` | `str` | 请求唯一 ID |
-| `graph_id` | `str` | 图配置 ID |
-| `timeout_ms` | `int` | 节点级超时（毫秒） |
-| `payload` | `dict` | 请求载荷（用户输入、intent 等） |
-| `trace` | `list` | 节点执行追踪列表 |
-| `status` | `str` | 当前状态（OK / DEGRADED / FAILED / AIRLOCK_PENDING / POLICY_TIMEOUT） |
-| `reason_code` | `str \| None` | 失败原因码 |
-| `detail` | `str` | 详细描述 |
-| `execution_profile` | `str \| None` | 入口层写入，决定跑哪张图；**仅入口可写，下游只读** |
+因此它现在更准确的描述应是：
 
-### 路由字段（M35-A Route Commitment Rule）
-
-| 字段 | 写入方 | 语义 |
-|---|---|---|
-| `committed_route_token` | Host Governor（唯一） | 已提交的路由令牌 |
-| `committed_route_token_detail` | Host Governor（唯一） | 完整 CommittedRouteDecision（审计用） |
-| `pending_node_id` | 运行时 | 当前待执行节点 |
-| `edge_map` | 运行时 | from→to 边映射 |
-| `fallback_map` | 运行时 | 回退边映射 |
-
-### Dual-Clock 字段（M36-B）
-
-| 字段 | 语义 |
-|---|---|
-| `policy_start_ms` | 图级策略时钟启动时间戳（毫秒） |
-| `policy_timeout_ms` | 全局策略超时阈值（毫秒），默认 30,000 |
-| `clock_events` | 时钟事件列表（EXEC_TIMEOUT / POLICY_TIMEOUT） |
-| `node_exec_stats` | 节点执行统计（exec_start_ms / exec_end_ms / exec_duration_ms） |
-
-### 并行分支字段（M37-B）
-
-| 字段 | 写入方 | 语义 |
-|---|---|---|
-| `branch_specs` | 主图配置注入（只读） | 分支规格列表 |
-| `branch_manifest` | `run_parallel_branches()` | 分支执行结果清单 |
-
-### Phase-Locked Streaming 字段（M38-B）
-
-| 字段 | 写入方 | 语义 |
-|---|---|---|
-| `presence_events` | PresenceStreamEmitter | 在场流事件（只向 UI 输出，不作为下游节点输入） |
-| `commit_snapshot` | CommitStreamEmitter | 提交快照（GOV_OK_RENDER 时产生） |
-| `render_snapshot_ref` | RenderStreamEmitter | 渲染快照引用 |
-| `streaming_phase` | 运行时 | 当前流阶段（PRESENCE / COMMIT / RENDER / None） |
-
-### Checkpoint / Interrupt / Resume 字段（M39-B）
-
-| 字段 | 写入方 | 语义 |
-|---|---|---|
-| `gov_checkpoint_id` | CheckpointManager | 当前 checkpoint ID |
-| `interrupt_reason` | 运行时 | 中断原因（HUMAN_REVIEW / POLICY_TIMEOUT / AIRLOCK） |
-| `resume_allowed` | HostPolicyGuard | 是否允许恢复 |
-| `resume_deadline_at` | 运行时 | 恢复截止时间戳（毫秒），超过则写入 SyntheticTimeoutEvent |
-
-### barrier_join / RenderGuard 字段（M40-C）
-
-| 字段 | 写入方 | 语义 |
-|---|---|---|
-| `barrier_join_result` | `barrier_join()` | barrier_join 结果 |
-| `render_guard_result` | `RenderGuard.validate_render_output()` | RenderGuard 结果 |
-
-**RenderGuard 约束**：render 输出只能修改 `RENDER_ALLOWED_FIELDS`（`render_text`、`render_html`、`render_markdown`）或 `display_` 前缀字段。
-
-### 情感上下文字段（M45）
-
-| 字段 | 语义 |
-|---|---|
-| `emotion_context` | 情感上下文（chat → runtime → executor → gateway 透传） |
-| `emotion_tag` | 当前情感标签 |
-| `mood_state` | 当前 mood 状态 |
-| `emotion_range_hint` | 情感范围提示（中文） |
-
-### Multi-Agent 字段（M-MA3）
-
-> 第三阶段已统一到 GraphState 顶层，不再写 `payload["agent_runtime"]`。
-
-| 字段 | 写入方 | 语义 |
-|---|---|---|
-| `active_agent_id` | Supervisor | 当前活跃子 agent ID |
-| `handoff_history` | Supervisor | agent handoff 历史记录 |
-| `agent_budget` | 入口层 | 预算（max_hops / per_agent_timeout_ms / total_budget_ms） |
-| `agent_artifacts` | 子 agent | 子 agent 输出工件集合 `{agent_id: artifact_dict}` |
-| `judge_result` | JudgeAgent | 裁判结果 |
-
----
-
-## graph_contract.py 核心函数
-
-### validate_graph_config(graph_config)
-
-验证图配置，检查：
-- `graph_id`、`version`、`entry_node` 非空
-- `entry_node` 必须在 `node_bindings` 中定义
-- 所有边的 `from`/`to` 必须指向已定义节点
-- 每个节点必须有 `handler_id` 或 `model_node_id`（或图级 `model_profile_id`）
-
-返回：`{stage, status, reason_code, detail, summary, issues}`
-
-### pick_api_key(state, provider_name, model_node_id)
-
-API Key 查找优先级（确定性回退）：
-1. `model_nodes[model_node_id].api_key`
-2. `dependency_statuses[provider_name].api_key`
-3. 环境变量（`OPENAI_API_KEY` / `GEMINI_API_KEY` / `DEEPSEEK_API_KEY`）
-
-### validate_supervisor_proposal_for_graph(proposal, allowlist)
-
-P5 Supervisor proposal 校验：
-- 禁止键：`__next_node__`、`committed_route_token`、`branch_specs`、`execution_profile`、`active_agent_id`，以及所有 `committed_` 前缀键
-- 必填：`selected_agent`（且必须在 `allowlist` 内）
-- `risk_mode` 若存在，必须为 `safe` / `guarded` / `strict`
-
----
-
-## Evidence Plane 写入机制
-
-### 写入优先级（evidence_priority.py）
-
-| 级别 | 含义 | 写入方式 |
-|---|---|---|
-| `CRITICAL` | 治理决策、安全事件、路由提交 | 同步写入，失败则阻断 |
-| `NON_CRITICAL` | 性能指标、调试追踪、统计数据 | 异步队列写入（EvidenceWriteQueue） |
-
-### EvidenceWriteQueue（M41-C）
-
-```python
-queue = EvidenceWriteQueue(max_size=500)
-queue.enqueue(write_fn, *args, **kwargs)  # NON_CRITICAL 写入入队
-remaining = queue.flush(timeout_ms=100)   # 批量执行，支持超时
+```text
+Governed Runtime Integration Layer
+  = GraphRuntimeContract
+  + LangGraph adapters
+  + LLM Gateway
+  + Evidence Plane
 ```
 
-- 队列满（500）时自动触发 `flush()` 再入队
-- `flush()` 失败的任务重试一次，仍失败则丢弃（避免无限循环）
-- `clear()` 丢弃所有待执行任务
-
-### EvidenceCircuitBreaker（evidence_circuit_breaker.py）
-
-熔断器保护 SQLite 写入：
-- 连续失败达到阈值时进入 OPEN 状态，暂停写入
-- 冷却期后进入 HALF_OPEN 状态，允许探测写入
-- 探测成功则恢复 CLOSED 状态
+而不是单一的“LangGraph 治理层”。
 
 ---
 
-## 治理约束规则（ModelPlane.md §10 对应实现）
+## 二、当前主模块一览
 
-| 规则 | 实现模块 | 核心约束 |
-|---|---|---|
-| Rule 1：Route Commitment | `graph_contract.py` | `committed_route_token` 只能由 Host Governor 写入 |
-| Rule 2：Dual-Clock | `graph_clock.py` | 节点超时（exec）+ 全局策略超时（policy），双重保障 |
-| Rule 3：Transparent Subgraph | `graph_subgraph.py` | 子图执行追踪写入 `subgraph_trace`，由 `compile_governed_subgraph` 写入 |
-| Rule 4：Parallel Branch | `graph_branch.py` | `branch_specs` 只读注入，`branch_manifest` 由执行器写入；barrier_join 支持 strict / partial 策略 |
-| Rule 5：Phase-Locked Streaming | `graph_streaming.py` | PRESENCE → COMMIT → RENDER 三阶段，`presence_events` 只向 UI 输出 |
-| Rule 6：Checkpoint/Resume | `graph_checkpoint.py` | 中断原因：HUMAN_REVIEW / POLICY_TIMEOUT / AIRLOCK；恢复截止时间超过则写入 SyntheticTimeoutEvent |
-
----
-
-## Multi-Agent 契约（P4–P7）
-
-### P4：子图 payload 契约
-
-子图出口写入 `payload` 的固定键：
-
-| 键 | 含义 |
+| 文件 | 当前职责 |
 |---|---|
-| `subgraph_commit_summary` | 子图成功摘要（由 `build_subgraph_commit_summary()` 产出） |
-| `subgraph_failure` | 子图失败归一化输出（必含 `failed_node`、`error_code`、`safe_fallback_reason`、`trace_ref`） |
-
-### P5：Supervisor proposal 契约
-
-LLM 只产出提案，handler 校验后编译。提案允许的键：`selected_agent`、`reason`、`need_judge`、`risk_mode`、`budget`。
-
-失败码：`LLM_TIMEOUT` / `LLM_BAD_JSON` / `LLM_SCHEMA_INVALID` / `LLM_AGENT_NOT_ALLOWED` / `LLM_INTERNAL_ERROR`
-
-决策来源审计字段：`rule` / `llm` / `llm_fallback_rule`
-
-### P6：局部循环契约
-
-循环边界配置键（由 context / node_binding 注入）：
-- `max_local_steps`、`max_retry_count`、`local_loop_timeout_ms`
-
-失败码：`LOCAL_LOOP_MAX_STEPS` / `LOCAL_LOOP_TIMEOUT` / `LOCAL_LOOP_INTERNAL_ERROR`
-
-### P7：预算治理契约
-
-预算层级：`graph`（policy_timeout_ms）→ `subgraph`（local_loop_timeout_ms）→ `node`（timeout_ms）
-
-预算突破失败码集合（`BUDGET_BREACH_FAILURE_CODES`）：
-`ORCH_TIMEOUT`、`POLICY_TIMEOUT`、`EXEC_TIMEOUT`、`LOCAL_LOOP_TIMEOUT`、`LOCAL_LOOP_MAX_STEPS`、`LLM_TIMEOUT`
+| `graph_contract.py` | GraphState、常量、配置校验、P4/P5/P6/P7 契约、受保护字段 |
+| `graph_runtime.py` | `GraphRuntimeContract`：入口编排、状态初始化、恢复执行、结果收口 |
+| `graph_executor.py` | LangGraph `StateGraph` 的 step-by-step 执行器 |
+| `graph_fallback.py` | timeout / dependency-down / execution-error 统一降级 |
+| `graph_branch.py` | 只读并行分支与 barrier_join |
+| `graph_clock.py` | Dual-Clock 超时监督 |
+| `graph_streaming.py` | Presence / Commit / Render 三阶段流 |
+| `graph_checkpoint.py` | checkpoint / interrupt / resume / policy guard |
+| `graph_langgraph_checkpoint.py` | checkpoint 公共 facade，转发到 `graph_checkpoint.py` |
+| `graph_subgraph.py` | 透明子图公共入口，转发到 `graph_langgraph_subgraph.py` |
+| `graph_langgraph_subgraph.py` | LangGraph 原生子图构造与字段保护 |
+| `graph_governed_tool_node.py` | Governor 门控后的工具执行节点 |
+| `evidence_bench.py` | 写入延迟基准测量 |
+| `evidence_write_queue.py` | NON_CRITICAL 异步写入队列 |
+| `evidence_circuit_breaker.py` | 写入熔断保护 |
+| `llm_gateway.py` | 模型调用网关、探测、路由、QA/Airlock |
+| `llm_gateway_schemas.py` | `GatewayResult` / `LLMHealthProbeResult` / `LLMRouteResult` |
 
 ---
 
-## 依赖关系
+## 三、graph_contract.py 当前契约
 
-```
-host_brain/integrations/
-  ├── graph_contract.py      ← 依赖 core/errors.py（无其他 integrations 依赖）
-  ├── graph_runtime.py       ← 依赖 graph_contract, graph_executor, graph_clock, graph_evidence
-  ├── graph_executor.py      ← 依赖 graph_contract, llm_gateway, graph_model_resolve
-  ├── graph_branch.py        ← 依赖 graph_contract, graph_evidence
-  ├── graph_checkpoint.py    ← 依赖 graph_contract, evidence_bench
-  ├── graph_clock.py         ← 依赖 graph_contract
-  ├── graph_evidence.py      ← 依赖 evidence_bench, graph_contract
-  ├── graph_streaming.py     ← 依赖 graph_contract
-  ├── graph_subgraph.py      ← 依赖 graph_contract, graph_executor
-  ├── evidence_bench.py      ← 依赖 evidence_priority, evidence_write_queue, evidence_circuit_breaker
-  ├── evidence_write_queue.py← 无 integrations 依赖
-  ├── evidence_circuit_breaker.py ← 无 integrations 依赖
-  └── llm_gateway.py         ← 依赖 llm_gateway_schemas, llm_helpers
+### 3.1 GraphState
+
+`GraphState` 仍是当前图执行共享状态。
+
+关键字段分组仍包括：
+
+- 基础执行字段：`request_id / graph_id / timeout_ms / payload / trace / status / reason_code / detail`
+- 路由字段：`pending_node_id / edge_map / fallback_map / committed_route_token / committed_route_token_detail`
+- 模型字段：`model_nodes / model_profile_id / model_calls / dependency_statuses`
+- 情感字段：`emotion_context / emotion_tag / mood_state / emotion_range_hint`
+- Clock 字段：`policy_start_ms / policy_timeout_ms / clock_events / node_exec_stats`
+- 并行分支字段：`branch_specs / branch_manifest`
+- Streaming 字段：`presence_events / commit_snapshot / render_snapshot_ref / streaming_phase`
+- Checkpoint 字段：`gov_checkpoint_id / interrupt_reason / resume_allowed / resume_deadline_at`
+- Multi-Agent 字段：`active_agent_id / handoff_history / agent_budget / agent_artifacts / judge_result`
+- 入口控制字段：`execution_profile`
+
+### 3.2 当前核心函数
+
+当前最关键的契约函数有：
+
+- `validate_graph_config()`
+- `build_edge_map()`
+- `pick_model_profile_id()`
+- `build_model_param_hash()`
+- `extract_governance_refs()`
+- `extract_agent_runtime()`
+- `build_subgraph_commit_summary()`
+- `validate_supervisor_proposal_for_graph()`
+
+### 3.3 P4/P5/P6/P7 契约仍在代码中
+
+`graph_contract.py` 当前仍是以下阶段性契约的真实落点：
+
+- P4：`subgraph_commit_summary` / `subgraph_failure`
+- P5：Supervisor proposal allowlist/forbidden key/risk_mode 校验
+- P6：局部循环配置键与失败码
+- P7：预算突破失败码集合
+
+### 3.4 SUBGRAPH_PROTECTED_FIELDS
+
+当前子图显式受保护字段包括：
+
+- `committed_route_token`
+- `committed_route_token_detail`
+- `gov_checkpoint_id`
+- `interrupt_reason`
+- `resume_allowed`
+- `resume_deadline_at`
+- `execution_profile`
+- `tribe_governor_params`
+- `immune_threat_level`
+- `endocrine_state`
+
+这比旧文档“只看 committed_* 前缀”更严格，也更贴近当前实现。
+
+---
+
+## 四、GraphRuntimeContract 当前执行路径
+
+### 4.1 入口顺序
+
+`graph_runtime.py` 当前 `run_graph()` 的主流程是：
+
+```text
+validate_graph_config
+  -> resolve_model_nodes
+  -> GraphExecutor.compile_runtime_graph()
+  -> 读取 payload 中 graph/emotion runtime section
+  -> 构造 initial_state
+  -> LangGraph compiled.invoke(...)
+  -> _finalize(...)
 ```
 
-**禁止**：`integrations/` 模块不得导入 `app/`、`lsp/` 中的任何模块（单向依赖）。
+### 4.2 当前状态注入
+
+`run_graph()` 当前会从：
+
+- `host_brain.app.chat_runtime_input.get_chat_runtime_graph()`
+- `host_brain.app.chat_runtime_input.get_chat_runtime_emotion_state()`
+
+读取图运行时上下文，并把这些内容注入 `initial_state`。
+
+这意味着：
+
+- `integrations/` 当前并不是完全不依赖 `app/`
+- `graph_runtime.py` 明确会读取 app 层整理后的运行时输入
+
+### 4.3 GraphRunResult 当前输出
+
+`_finalize()` 最终会输出：
+
+- `request_id`
+- `graph_id`
+- `graph_version`
+- `graph_status`
+- `reason_code`
+- `stage`
+- `replay_ref`
+- `runtime_backend = "langgraph+langchain"`
+- `model_profile_id`
+- `model_control`
+- `graph_trace`
+- `payload`
+- `ts_ms`
+- `subgraph_trace`（有时）
+
+因此当前图运行时已经把 replay / model control / trace 全部统一收口。
+
+---
+
+## 五、GraphExecutor 当前行为
+
+### 5.1 运行时后端
+
+`GraphExecutor.compile_runtime_graph()` 当前直接构建：
+
+- LangGraph `StateGraph(GraphState)`
+- `step` 节点
+- `finish` 节点
+
+然后通过 `compile_graph_with_checkpoint()` 编译。
+
+### 5.2 当前执行特征
+
+`graph_executor.py` 当前不是简单节点串行器，而是同时负责：
+
+- handler 节点执行
+- model node 调用
+- dependency 检查
+- timeout / fallback 路由
+- Phase-Locked Streaming
+- barrier_join
+- 动态 agent handler 路由
+
+### 5.3 Trusted handler 与 Multi-Agent
+
+当前保留：
+
+- `_TRUSTED_HANDLER_ALLOWLIST`
+- `_AGENT_HANDLER_MAP`
+
+并且：
+
+- `active_agent_id` 已提升为 GraphState 顶层字段
+- model node 输出中的控制字段会被统一剥离
+
+这说明当前图执行器仍在承担多 Agent 动态控图的核心工作。
+
+---
+
+## 六、Fallback / Branch / Streaming / Clock
+
+### 6.1 graph_fallback.py
+
+当前统一处理：
+
+- dependency unavailable
+- timeout
+- execution error
+- hard failure
+
+主要出口函数：
+
+- `handle_dependency_unavailable()`
+- `handle_timeout()`
+- `handle_execution_error()`
+- `fail_hard()`
+- `pick_fallback_node()`
+- `pick_next_node()`
+
+### 6.2 graph_branch.py
+
+当前只读并行分支仍是真实实现，不是纸面设计。
+
+核心点：
+
+- `BranchSpec`
+- `BranchResult`
+- `BranchManifest`
+- `run_parallel_branches()`
+- `barrier_join()`
+
+分支执行规则当前包括：
+
+- 分支节点不能写 `committed_*`
+- 分支结果只能写入 `branch_manifest`
+- 分支失败静默降级，不直接打断主图
+
+### 6.3 graph_streaming.py
+
+当前仍实现三阶段流：
+
+- Presence
+- Commit
+- Render
+
+核心类：
+
+- `PresenceStreamEmitter`
+- `CommitStreamEmitter`
+- `RenderStreamEmitter`
+- `PhaseLockGuard`
+- `RenderGuard`
+
+关键规则：
+
+- Presence 只给 UI，不回流下游
+- Commit 只有 `committed_route_token = GOV_OK_RENDER` 时才产生
+- Render 必须建立在 commit snapshot 之上
+
+### 6.4 graph_clock.py
+
+当前 Dual-Clock 仍由专门模块负责：
+
+- 节点级 exec timeout
+- 图级 policy timeout
+
+并把结果写入：
+
+- `clock_events`
+- `node_exec_stats`
+
+---
+
+## 七、Checkpoint / Resume 当前契约
+
+### 7.1 当前公共接口
+
+`graph_checkpoint.py` 当前主要提供：
+
+- `get_checkpoint_db_path()`
+- `get_langgraph_checkpointer()`
+- `compile_graph_with_checkpoint()`
+- `build_interrupt_signal()`
+- `check_resume_allowed()`
+- `HostPolicyGuard`
+
+### 7.2 当前真实行为
+
+需要注意一个代码事实：
+
+- `get_langgraph_checkpointer()` 优先使用 LangGraph `SqliteSaver`
+- 若 sqlite backend 包不可用，会回退到 `MemorySaver`
+
+因此当前运行时是：
+
+- 优先持久化 checkpoint
+- 在缺依赖环境下允许内存降级
+
+这比旧文档里“只有单一路径、无任何 fallback”的描述更符合实际代码。
+
+### 7.3 graph_langgraph_checkpoint.py
+
+该文件当前只是 facade：
+
+- `compile_graph_with_checkpoint`
+- `get_checkpoint_db_path`
+- `get_langgraph_checkpointer`
+
+实际逻辑仍在 `graph_checkpoint.py`。
+
+---
+
+## 八、Subgraph 当前契约
+
+### 8.1 graph_subgraph.py
+
+`graph_subgraph.py` 当前不再自己实现子图编译，而是把公共接口转发到：
+
+- `graph_langgraph_subgraph.build_governed_subgraph()`
+
+并保留：
+
+- `compile_governed_subgraph()`
+- `compile_intent_agent_subgraph()`
+- `compile_code_refine_subgraph()`
+
+### 8.2 graph_langgraph_subgraph.py
+
+当前它直接使用 LangGraph 原生 `StateGraph` 构建子图。
+
+子图关键约束：
+
+- 使用独立 `SubgraphState`
+- 子图结果只把安全 payload 合并回主图
+- 受保护字段由 `SUBGRAPH_PROTECTED_FIELDS` 黑名单剥离
+- 自动生成 `subgraph_commit_summary`
+
+---
+
+## 九、GovernedToolNode 当前契约
+
+`graph_governed_tool_node.py` 当前实现的是“Governor 门控下的直接工具执行节点”。
+
+执行顺序：
+
+```text
+Governor evaluate_tool_call
+  -> 失败则只返回 route token，不执行工具
+  -> 成功则直接按 tool_name 执行工具
+  -> 写 Evidence Plane 审计
+```
+
+这说明当前工具调用链并不依赖 LangGraph 自带 ToolNode，而是走自定义节点实现。
+
+---
+
+## 十、Evidence Plane 当前契约
+
+### 10.1 evidence_bench.py
+
+`EvidenceBench` 当前负责测量：
+
+- `p50`
+- `p95`
+- `p99`
+- `mean`
+- `max`
+
+### 10.2 evidence_write_queue.py
+
+`EvidenceWriteQueue` 当前行为：
+
+- 队列满时自动 `flush()`
+- `flush()` 超时可提前返回剩余数量
+- 失败任务最多重入队一次
+- 可 `clear()`
+
+### 10.3 evidence_circuit_breaker.py
+
+当前仍负责连续失败熔断，保护 SQLite/写入平面。
+
+---
+
+## 十一、LLM Gateway 当前契约
+
+### 11.1 当前核心结构
+
+`llm_gateway.py` 当前主类是：
+
+- `LlmGatewayContract`
+
+返回结构由 `llm_gateway_schemas.py` 定义：
+
+- `GatewayResult`
+- `LLMHealthProbeResult`
+- `LLMRouteResult`
+
+### 11.2 当前能力
+
+`LlmGatewayContract` 当前不仅是“单次模型调用网关”，还负责：
+
+- `health_probe()`
+- `route_call()`
+- ingress quarantine
+- egress sanitize/gate
+- QA contract enforcement
+- provider timeout 包装
+- fallback provider 路由
+
+当前 provider 常量包括：
+
+- `openai`
+- `codex`
+- `gemini`
+- `deepseek`
+- `mock`
+- `disabled`
+
+### 11.3 当前路由现实
+
+`route_call()` 的口径是：
+
+- 主 provider
+- fallback providers
+- 全失败时稳定降级结果
+
+因此它已经是当前模型调用治理的一部分，而不只是薄 wrapper。
+
+---
+
+## 十二、当前依赖关系应如何理解
+
+当前更准确的理解是：
+
+```text
+integrations/
+  = 运行时集成层
+  = GraphRuntime + LangGraph adapters + LLM Gateway + Evidence Plane
+```
+
+而不是：
+
+```text
+integrations/
+  = 完全独立、只面向 LangGraph、严格不碰 app 层的纯治理层
+```
+
+当前代码中至少有这些现实依赖：
+
+- `graph_runtime.py -> app.chat_runtime_input`
+- `llm_gateway.py -> airlock / audit / core.qa`
+- `graph_runtime.py -> audit.sqlite_ledger`
+
+所以它是“治理/图执行/模型调用的集成层”，而不是完全隔离的纯中间层。
+
+---
+
+## 十三、当前不再适用的旧口径
+
+以下说法不再准确：
+
+- `integrations/` 只是抽象 LangGraph 治理层
+- 它严格不依赖 `app/`
+- checkpoint 后端只有单一路径、没有降级
+- 子图仍由自研 compile 逻辑主导
+- 工具执行仍依赖 LangGraph ToolNode
+
+当前正确口径应是：
+
+1. `GraphRuntimeContract + GraphExecutor` 是当前图运行时主体。
+2. `graph_checkpoint.py` 与 `graph_langgraph_subgraph.py` 是当前 LangGraph 适配核心。
+3. `GovernedToolNode` 是当前工具治理节点实现。
+4. `LlmGatewayContract` 与 Evidence Plane 都属于 `integrations/` 的现行职责范围。

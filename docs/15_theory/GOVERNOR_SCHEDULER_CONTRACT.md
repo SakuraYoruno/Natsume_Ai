@@ -1,76 +1,88 @@
 受众：MASTER
-标题：host_brain/governor/ + scheduler/ 层接口契约
+标题：host_brain/governor/ + scheduler/ 层接口契约（当前代码实况）
 
-版本：v1.0
-日期：2026-03-19
+版本：v2.0
+日期：2026-04-19
 归属：docs/15_theory/
 
 ---
 
-## 概述
+定位：本文描述当前代码里的 Governor 与 Scheduler 契约。
+需要特别注意：当前仓库里实际存在两套“调度”能力，一套是 `host_brain/scheduler/` 的声明式 Intent 调度器，另一套是 `host_brain/app/automation/task_scheduler.py` 的 Host 常驻任务调度器。若与旧文档冲突，以本文和代码为准。
 
-`host_brain/governor/` 是 Natsume AI 的治理门控层，负责在每次请求执行前评估 R1–R8 八条规则，决定是否放行（APPROVE）或拒绝（REJECT）。
+## 0. 代码证据入口
 
-`host_brain/scheduler/` 是定时调度层，负责按 cron/interval/once 三种模式触发系统主动 Intent，所有调度触发的 Intent 必须经过与用户请求相同的治理链路。
+- `host_brain/governor/rules.py`
+- `host_brain/governor/decision.py`
+- `host_brain/governor/tokens.py`
+- `host_brain/governor/schemas.py`
+- `host_brain/governor/policy_cache.py`
+- `host_brain/governor/tier_policy.py`
+- `host_brain/scheduler/task_registry.py`
+- `host_brain/scheduler/scheduler.py`
+- `host_brain/scheduler/health.py`
+- `host_brain/scheduler/scheduler_routes.py`
+- `host_brain/app/automation/task_scheduler.py`
+- `host_brain/app/automation/scheduler_routes.py`
+- `host_brain/app/fastapi_app.py`
 
 ---
 
 ## 一、Governor 层
 
-### 1.1 模块清单
+### 1.1 当前模块清单
 
-| 模块文件 | 职责 |
-|---------|------|
-| `rules.py` | R1–R8 门控规则评估（核心） |
-| `decision.py` | 治理决策聚合 |
+| 模块文件 | 当前职责 |
+|---|---|
+| `rules.py` | `evaluate_governor_gates()`：R1-R8 固定顺序评估 |
+| `decision.py` | 治理决策聚合、行级整理、审计行收口 |
+| `tokens.py` | approval / confirm / undo token 发放与绑定校验 |
+| `schemas.py` | Governor 输入输出 schema 校验 |
 | `policy_cache.py` | 策略缓存 |
-| `rate_limit_checker.py` | 速率限制检查器 |
-| `rate_limit_store.py` | 速率限制存储 |
-| `route_token.py` | 路由令牌 |
-| `schemas.py` | 治理 Schema 定义 |
-| `tier_policy.py` | 分层策略 |
-| `tokens.py` | TokenService（WRITE 令牌服务） |
+| `tier_policy.py` | 分层策略与阈值辅助 |
+| `rate_limit_checker.py` / `rate_limit_store.py` | 速率限制判定与存储 |
 
-### 1.2 GateSnapshot（快照输入）
+### 1.2 GateSnapshot 当前结构
+
+`rules.py` 当前 `GateSnapshot`：
 
 ```python
-@dataclass(frozen=True)
-class GateSnapshot:
-    trust_level: int          # 信任等级 [0, 100]
-    energy_level: int         # 能量等级 [0, 100]
-    sys_mode: str             # 系统模式（"normal"|"locked"|"maintenance"）
-    rate_limit_hit: bool      # 是否触发速率限制
-    scope: str                # 请求范围（"host"|"memory"|"system"）
-    scope_allowlist: tuple    # 允许的范围列表
-    safety_flag: bool         # 安全标志
-    airlock_blocked: bool     # 气闸阻断标志
-    # Rate Limit 扩展字段
-    rate_limit_backend: str | None
-    rate_limit_degraded: bool
-    rate_limit_degraded_from: str | None
-    rate_limit_reason_code: str | None
-    # M27-A 情感字段（OPT-19）
-    mood_state: str           # "steady"|"elevated"|"critical"
-    emotion_tag: str          # "NEUTRAL"|"HAPPY"|"ANGRY"|"FRUSTRATED"|...
-    emotion_intensity: float  # [0.0, 1.0]
+GateSnapshot(
+    trust_level: int,
+    energy_level: int,
+    sys_mode: str,
+    rate_limit_hit: bool,
+    scope: str,
+    scope_allowlist: tuple[str, ...],
+    safety_flag: bool,
+    airlock_blocked: bool,
+    rate_limit_backend: str | None = None,
+    rate_limit_degraded: bool = False,
+    rate_limit_degraded_from: str | None = None,
+    rate_limit_reason_code: str | None = None,
+    mood_state: str = "steady",
+    emotion_tag: str = "NEUTRAL",
+    emotion_intensity: float = 0.5,
+)
 ```
 
-**快照归一化规则**（`_normalize_snapshot`）：
-- `trust_level`：clamp 到 [0, 100]，默认 50
-- `energy_level`：clamp 到 [0, 100]，默认 60
-- `sys_mode`：lowercase，默认 "normal"
-- `scope_allowlist`：默认 `("host", "memory", "system")`，不允许为空
-- `mood_state`：lowercase，默认 "steady"
-- `emotion_tag`：uppercase，默认 "NEUTRAL"
-- `emotion_intensity`：float，默认 0.5
+归一化规则当前包括：
 
-### 1.3 evaluate_governor_gates（核心评估函数）
+- `trust_level` clamp 到 `[0, 100]`
+- `energy_level` clamp 到 `[0, 100]`
+- `sys_mode` lower-case，默认 `normal`
+- `scope_allowlist` 为空时回退到 `("host", "memory", "system")`
+- `mood_state` lower-case，默认 `steady`
+- `emotion_tag` upper-case，默认 `NEUTRAL`
+
+### 1.3 当前评估入口
 
 ```python
 result = evaluate_governor_gates(input_snapshot: dict | None) -> dict
 ```
 
-**输出结构**：
+输出结构稳定为：
+
 ```json
 {
   "decision": "APPROVE" | "REJECT",
@@ -82,301 +94,313 @@ result = evaluate_governor_gates(input_snapshot: dict | None) -> dict
       "threshold_summary": {...},
       "snapshot_summary": {...},
       "reason_hint": "PASS"
-    },
-    ...
+    }
   ]
 }
 ```
 
-**评估顺序**：R1 → R2 → R3 → R4 → R5 → R6 → R7 → R8（固定顺序，不可跳过）
+评估顺序固定为：
 
-**决策规则**：
-- 首个 `hit == True` 的规则触发 `REJECT`，`reason_code` = 该规则的 `reason_hint`
-- 后续规则继续评估（全量 trace），但不覆盖已有 `reason_code`
-- 所有规则均未命中 → `APPROVE`
+`R1 -> R2 -> R3 -> R4 -> R5 -> R6 -> R7 -> R8`
 
-### 1.4 八条门控规则
+决策规则当前是：
 
-#### R1_TRUST — 信任门控
-```
-条件：trust_level < 30
-错误码：TRUST_LOW
-```
+- 首个 `hit=True` 的 gate 决定总 `reason_code`
+- 后续规则仍继续执行，保留完整 trace
+- 全部未命中时返回 `APPROVE`
 
-#### R2_ENERGY — 能量门控
-```
-条件：energy_level < 20
-错误码：ENERGY_LOW
-```
+### 1.4 R1-R8 当前规则
 
-#### R3_SYSMODE — 系统模式门控
-```
-条件：sys_mode in ("locked", "maintenance")
-错误码：SYSMODE_BLOCKED
-```
+| Gate | 命中条件 | 错误码 |
+|---|---|---|
+| `R1_TRUST` | `trust_level < 30` | `TRUST_LOW` |
+| `R2_ENERGY` | `energy_level < 20` | `ENERGY_LOW` |
+| `R3_SYSMODE` | `sys_mode in ("locked", "maintenance")` | `SYSMODE_BLOCKED` |
+| `R4_RATE_LIMIT` | `rate_limit_hit is True` | `RATE_LIMITED` |
+| `R5_SCOPE` | `scope not in scope_allowlist` | `SCOPE_DENY` |
+| `R6_SAFETY` | `safety_flag is True` | `SAFETY_BLOCKED` |
+| `R7_AIRLOCK` | `airlock_blocked is True` | `AIRLOCK_BLOCKED` |
+| `R8_EMOTION` | `mood_state == "critical"` 且 `emotion_tag in {"ANGRY","FRUSTRATED"}` | `EMOTION_GATE_BLOCKED` |
 
-#### R4_RATE_LIMIT — 速率限制门控
-```
-条件：rate_limit_hit == True
-错误码：RATE_LIMITED
-附加信息：rate_limit_backend / rate_limit_degraded / rate_limit_reason_code
-```
+### 1.5 R8 的当前特殊行为
 
-#### R5_SCOPE — 范围门控
-```
-条件：scope not in scope_allowlist
-错误码：SCOPE_DENY
-```
+`R8_EMOTION` 除了拒绝判定，还有两个当前行为：
 
-#### R6_SAFETY — 安全门控
-```
-条件：safety_flag == True
-错误码：SAFETY_BLOCKED
-```
+- `mood_state == "critical"` 时会写入 `simplified_prompt = True`
+- 命中时会附带 `degraded_hint`
 
-#### R7_AIRLOCK — 气闸门控
-```
-条件：airlock_blocked == True
-错误码：AIRLOCK_BLOCKED
-```
+所以它不只是“拦不拦”，还会把降级提示透传给下游。
 
-#### R8_EMOTION — 情感感知门控（M27-A OPT-19）
-```
-条件：mood_state == "critical" AND emotion_tag in {"ANGRY", "FRUSTRATED"}
-错误码：EMOTION_GATE_BLOCKED
-附加字段：
-  simplified_prompt: bool  # mood_state == "critical" 时为 True（即使未 hit）
-  degraded_hint: str | None  # hit 时附加用户可见降级说明
-```
+### 1.6 TokenService 当前契约
 
-**R8 特殊行为**：
-- `mood_state == "critical"` 时，无论是否 hit，均注入 `simplified_prompt = True`
-- 仅 `critical + ANGRY/FRUSTRATED` 组合才触发 REJECT
-- `simplified_prompt` 标记供下游 Prompt 构建层使用（简化提示词）
+`governor/tokens.py` 当前支持三类 token：
 
-### 1.5 错误码对照
+- `approval`
+- `confirm`
+- `undo`
 
-| 错误码 | 来源规则 | 含义 |
-|--------|---------|------|
-| `TRUST_LOW` | R1 | 信任等级不足 |
-| `ENERGY_LOW` | R2 | 能量等级不足 |
-| `SYSMODE_BLOCKED` | R3 | 系统模式禁止 |
-| `RATE_LIMITED` | R4 | 速率限制触发 |
-| `SCOPE_DENY` | R5 | 范围不在白名单 |
-| `SAFETY_BLOCKED` | R6 | 安全标志触发 |
-| `AIRLOCK_BLOCKED` | R7 | 气闸阻断 |
-| `EMOTION_GATE_BLOCKED` | R8 | 情感状态触发门控 |
-
-### 1.6 TokenService（WRITE 令牌服务）
-
-`governor/tokens.py` 提供 WRITE 操作的令牌验证服务：
+关键数据结构：
 
 ```python
-validation = token_service.validate_execution_tokens(
+TokenRecord(
+    token_ref: str,
+    token_type: str,
     intent_id: str,
     skill_name: str,
     session_id: str,
     seq: int,
-    approval_token_ref: str | None,
-    confirm_token_ref: str | None,
-    require_confirm: bool,
-    now_ts_ms: int,
-) -> TokenValidationResult
-```
-
-- `side_effect_level == "WRITE"` 的工具必须通过令牌验证
-- `auth_level == "CONFIRM"` 的工具额外需要 `confirm_token_ref`
-- 验证失败返回 `TOKEN_INVALID` 或 `CONFIRM_REQUIRED`
-
----
-
-## 二、Scheduler 层
-
-### 2.1 模块清单
-
-| 模块文件 | 职责 |
-|---------|------|
-| `scheduler.py` | NatsumeScheduler 主体（核心） |
-| `task_registry.py` | 任务注册表与配置 |
-| `health.py` | 调度器健康状态报告 |
-| `health_check_prompt.py` | 心跳检测 Prompt 模板 |
-| `scheduler_health_mixin.py` | 健康状态 Mixin |
-| `scheduler_routes.py` | 调度器 HTTP 路由 |
-
-### 2.2 SchedulerTaskConfig（任务配置）
-
-```python
-@dataclass
-class SchedulerTaskConfig:
-    task_id: str                    # 任务唯一 ID
-    trigger_mode: TriggerMode       # INTERVAL | CRON | ONCE
-    trigger_config: dict            # 触发参数（见下表）
-    intent_template: dict           # Intent 模板（含 skill_name/args）
-    priority: TaskPriority          # HIGH | NORMAL | LOW | MEDIUM
-    enabled: bool                   # 是否启用
-    max_consecutive_failures: int   # 最大连续失败次数（超出则暂停）
-```
-
-**trigger_config 格式**：
-
-| trigger_mode | 参数 | 说明 |
-|-------------|------|------|
-| `INTERVAL` | `{"seconds": 900}` | 每 N 秒触发一次 |
-| `CRON` | `{"hour": 3, "minute": 0}` | 每天 HH:MM 触发 |
-| `ONCE` | `{"delay_seconds": 0}` | 延迟 N 秒后触发一次 |
-
-### 2.3 NatsumeScheduler（调度器主体）
-
-```python
-scheduler = NatsumeScheduler(
-    registry: SchedulerTaskRegistry,
-    health_reporter: SchedulerHealthReporter,
-    intent_dispatcher: IntentDispatcher | None,  # (intent_dict) -> result_dict
-    get_sys_mode: Callable[[], str] | None,
-    ledger: Any | None,
-    persist_tasks: bool = True,                  # F-40：任务持久化
-    get_emotion_state: Callable[[], dict] | None, # M29-N：情感状态获取
+    issued_ts_ms: int,
+    expiry_ts_ms: int,
+    nonce: str,
+    used: bool = False,
 )
 ```
 
-### 2.4 生命周期
+当前对外关键接口：
 
+- `issue_approval_token(...)`
+- `issue_confirm_token(...)`
+- `issue_undo_token(...)`
+- `validate_bound_token(...)`
+- `validate_execution_tokens(...)`
+
+`validate_execution_tokens(...)` 当前逻辑是：
+
+1. 先校验 `approval_token_ref`，暂不消费
+2. 若 `require_confirm=True`，再校验 `confirm_token_ref`
+3. 两者都通过后再统一消费
+
+这个顺序是当前代码里明确的重试保护，避免 confirm 失败时提前消耗 approval token。
+
+---
+
+## 二、Scheduler 层：当前有两套
+
+### 2.1 `host_brain/scheduler/`：声明式 Intent 调度器
+
+这套调度器面向“系统主动 Intent”，核心是：
+
+- `SchedulerTaskRegistry`
+- `NatsumeScheduler`
+- `SchedulerHealthReporter`
+
+它的文档口径是：
+
+- 按 `cron / interval / once` 触发
+- 生成 `system_initiated_intent`
+- 仍应走治理链和审计链
+
+### 2.2 `host_brain/app/automation/task_scheduler.py`：Host 常驻任务调度器
+
+这套调度器面向 Host 进程内部的后台协程任务，核心是：
+
+- `ScheduledTask`
+- `HostTaskScheduler`
+
+它不是声明式 Intent registry，而是常驻循环任务管理器。
+
+因此当前不要把两者混成同一个组件。
+
+---
+
+## 三、声明式 Scheduler（`host_brain/scheduler/`）
+
+### 3.1 任务配置
+
+`task_registry.py` 当前的 `SchedulerTaskConfig`：
+
+```python
+SchedulerTaskConfig(
+    task_id: str,
+    trigger_mode: TriggerMode,      # cron / interval / once
+    trigger_config: dict[str, Any],
+    intent_template: dict[str, Any],
+    priority: TaskPriority = MEDIUM,
+    mode_allowlist: list[str] | None = None,
+    enabled: bool = True,
+    max_consecutive_failures: int = 3,
+    description: str = "",
+)
 ```
-scheduler.start()
-  ├── 从 DB 恢复持久化任务（F-40）
-  ├── 为所有 enabled 任务启动定时器
-  └── 启动 cron 检查线程
 
-scheduler.stop()
-  ├── 取消所有定时器
-  └── 等待 cron 检查线程退出（timeout=5s）
-```
+### 3.2 触发模式
 
-### 2.5 任务触发流程
+| trigger_mode | 当前含义 |
+|---|---|
+| `cron` | 定时点触发 |
+| `interval` | 周期触发 |
+| `once` | 单次触发 |
 
-```
-_trigger_task(task_id)
-  ├── 检查任务是否存在 / 启用
-  ├── 检查连续失败次数（≥ max → SUSPENDED）
-  ├── sys_mode 门控（不允许的模式 → REJECTED）
-  ├── 情感状态门控（critical + 非 HIGH 优先级 → REJECTED）
-  ├── 生成 system_initiated_intent（含 emotion_tag/mood_state）
-  ├── 调用 intent_dispatcher(intent)
-  ├── 更新错误计数 / 健康状态
-  └── 写入 scheduler_event_log 审计
-```
+### 3.3 sys_mode 门控矩阵
 
-### 2.6 system_initiated_intent 结构
+`SYSMODE_PRIORITY_MATRIX` 当前规则：
+
+| sys_mode | 允许优先级 |
+|---|---|
+| `normal` | `HIGH`, `MEDIUM`, `LOW` |
+| `sleep` | `HIGH`, `MEDIUM` |
+| `gaming` | `HIGH` |
+| `focus` | `HIGH` |
+| `maintenance` | 空 |
+| `locked` | 空 |
+
+若任务显式配置 `mode_allowlist`，则以 allowlist 优先。
+
+### 3.4 NatsumeScheduler 当前职责
+
+`scheduler.py` 里的 `NatsumeScheduler` 当前负责：
+
+- 从 registry 读取 enabled 任务
+- 启动 interval/once timer
+- 启动 cron 检查线程
+- 维护错误计数、上次执行时间、健康状态
+- 在运行时做 endocrine / immune / sys_mode 等门控
+- 可选从 ledger 恢复持久化任务
+
+### 3.5 健康快照
+
+`SchedulerHealthReporter.build_health_snapshot()` 当前返回：
 
 ```json
 {
-  "intent_id": "intent_xxx",
-  "request_id": "req_xxx",
-  "proposer_node_id": "scheduler",
-  "task_id": "task_id",
-  "skill_name": "skill_name",
-  "args": {},
-  "priority": "NORMAL",
-  "trigger_mode": "INTERVAL",
-  "ts_ms": 1234567890,
-  "emotion_tag": "NEUTRAL",
-  "mood_state": "steady"
+  "scheduler_status": "HEALTHY" | "DEGRADED",
+  "total_tasks": 0,
+  "enabled_tasks": 0,
+  "suspended_tasks": 0,
+  "error_tasks": 0,
+  "tasks": [...]
 }
 ```
 
-**约束**：`proposer_node_id` 固定为 `"scheduler"`，用于审计追责。
+任务级别会带：
 
-### 2.7 情感状态门控（M29-N）
+- `status`
+- `last_run_ts`
+- `next_run_ts`
+- `error_count`
+- `suspended_reason`
+- `last_reason_code`
+- `last_gate_state`
+- `last_mood_state`
+- `last_endocrine_cortisol`
+- `last_endocrine_energy`
+- `last_immune_decision`
+- `last_immune_risk_level`
+- `last_immune_reason_codes`
 
-调度器在触发任务前检查情感状态：
+### 3.6 HTTP 路由
 
-```
-mood_state == "critical" AND task.priority != HIGH
-  → REJECTED（reason_code: "EMOTION_GATE_BLOCKED"）
-```
+`host_brain/scheduler/scheduler_routes.py` 当前挂载到：
 
-- 仅 `HIGH` 优先级任务在 `critical` 状态下仍可执行
-- 情感状态通过 `get_emotion_state()` 回调获取
+- `POST /scheduler/tasks`
+- `GET /scheduler/tasks`
+- `GET /scheduler/tasks/{task_id}`
+- `PATCH /scheduler/tasks/{task_id}`
+- `DELETE /scheduler/tasks/{task_id}`
+- `POST /scheduler/tasks/{task_id}/enable`
+- `POST /scheduler/tasks/{task_id}/disable`
+- `GET /scheduler/health`
 
-### 2.8 心跳健康检测（TASK-0200）
+---
+
+## 四、Host 常驻任务调度器（`app/automation/task_scheduler.py`）
+
+### 4.1 当前定位
+
+这套调度器面向“Host 进程内后台协程任务”，不是声明式 intent registry。
+
+当前关键类型：
 
 ```python
-scheduler.register_agent_health_check(
-    interval_seconds=1800,       # 默认 30 分钟
-    heartbeat_prompt=None,       # None 时使用默认模板
-    max_response_chars=MAX_RESPONSE_CHARS,
-    llm_caller=None,             # None 时降级为 LLM_UNAVAILABLE_RESPONSE
+ScheduledTask(
+    task_id: str,
+    name: str,
+    fn: TaskFn,
+    interval_s: float = 60.0,
+    max_retries: int = 3,
+    retry_delay_s: float = 5.0,
+    enabled: bool = True,
+    priority: TaskPriority = P2,
+    depends_on: list[str] = [],
 )
 ```
 
-**心跳流程**：
-1. 调用 `llm_caller(heartbeat_prompt)` 获取 LLM 响应
-2. `parse_heartbeat_response(response)` 解析状态（"OK" | "ALERT"）
-3. 状态为 "OK" → 静默丢弃，不写审计
-4. 状态为 "ALERT" → 写入 `HEARTBEAT_ALERT` 审计事件
-5. 无论状态如何，执行 Edge 传输层探针检查（TASK-0211 M23-B）
+任务状态枚举当前包括：
 
-**Edge 探针检查**（`_check_edge_transport_probes`）：
-- 调用 `build_edge_transport_probe_statuses(available=True)`
-- 任意探针 DOWN → 写入 `EDGE_PROBE_ALERT` 审计事件
-- `edge_client` 不可用时降级跳过（不崩溃）
+- `PENDING`
+- `RUNNING`
+- `SUCCESS`
+- `FAILED`
+- `DISABLED`
+- `CANCELLED`
+- `BLOCKED`
 
-### 2.9 任务持久化（F-40）
+### 4.2 HostTaskScheduler 当前能力
 
-```python
-# 注册并持久化
-scheduler.register_task(task)
+`HostTaskScheduler` 当前提供：
 
-# 注销并删除持久化记录
-scheduler.unregister_task(task_id)
+- `register()` / `unregister()`
+- `enable()` / `disable()`
+- `start()` / `stop()`
+- `trigger_now()`
+- `register_task()`
+- `get_all_tasks_status()`
+- `health()`
 
-# 重启后自动恢复（start() 时调用）
-scheduler._load_persisted_tasks()
-```
+当前调度循环特征：
 
-持久化存储在 `scheduler_tasks` 表（SQLiteLedger）。
+- 以秒级循环检查任务
+- 按优先级排序
+- 检查依赖是否满足
+- 支持失败重试
+- 可即时触发单任务
 
-### 2.10 健康状态
+### 4.3 当前路由面
 
-| 状态 | 含义 |
-|------|------|
-| `STATUS_OK` | 正常运行 |
-| `STATUS_ERROR` | 最近一次执行失败 |
-| `STATUS_SUSPENDED` | 连续失败次数超限，已暂停 |
+`host_brain/app/automation/scheduler_routes.py` 被 `fastapi_app.py` 以 `prefix="/host-scheduler"` 挂载。
 
-```python
-# 查看所有任务健康状态
-scheduler.list_health() -> list[dict]
+当前端点：
 
-# 手动重置错误计数（恢复暂停任务）
-scheduler.reset_error_count(task_id)
-```
-
----
-
-## 三、Governor × Scheduler 协作关系
-
-```
-NatsumeScheduler._trigger_task()
-  ├── sys_mode 门控（直接检查，不走 evaluate_governor_gates）
-  ├── 情感状态门控（直接检查，不走 evaluate_governor_gates）
-  └── 生成 system_initiated_intent
-        ↓
-  intent_dispatcher(intent)
-        ↓
-  Governor.evaluate_governor_gates()  ← 完整 R1-R8 评估
-        ↓
-  TokenService.validate_execution_tokens()  ← WRITE 令牌验证
-        ↓
-  ToolBroker.execute()
-```
-
-**关键约束**：调度器触发的 Intent 与用户请求享有**相同的治理链路**（R1–R8 + 令牌验证），不存在调度器绕过治理的路径。
+- `GET /host-scheduler/tasks`
+- `GET /host-scheduler/health`
+- `POST /host-scheduler/tasks/{task_id}/enable`
+- `POST /host-scheduler/tasks/{task_id}/disable`
+- `POST /host-scheduler/tasks/{task_id}/trigger`
+- `PATCH /host-scheduler/tasks/{task_id}`
 
 ---
 
-## 四、与其他层的接口关系
+## 五、当前代码里的关系图
 
-- **Governor → integrations/**：`evaluate_governor_gates` 的结果注入 `GraphState.governor_result`（见 `INTEGRATIONS_LAYER_CONTRACT.md`）
-- **Scheduler → tools/**：调度器生成的 Intent 最终由 `ToolBroker.execute()` 执行（见 `TOOLS_LAYER_CONTRACT.md`）
-- **Governor → core/**：`GateSnapshot` 的 `energy_level`/`mood_state`/`emotion_tag` 来自 `metabolism.py` 和 `prompt_context.py`（见 `CORE_LAYER_MODULE_REFERENCE.md`）
+```text
+/v1/chat
+  -> chat_handler
+  -> governor rules / decision
+  -> thalamus / cortex_orchestrator / executive runtime
+
+/scheduler/*
+  -> SchedulerTaskRegistry + NatsumeScheduler + SchedulerHealthReporter
+
+/host-scheduler/*
+  -> HostTaskScheduler
+```
+
+也就是说，Governor 是请求治理层；Scheduler 现在分成“主动 Intent 调度”和“Host 常驻任务调度”两块。
+
+---
+
+## 六、当前不再适用的旧口径
+
+以下说法不再准确：
+
+- 仓库里只有一套 scheduler
+- 所有调度路由都挂在同一实现上
+- scheduler 只负责 cron/interval/once，而不区分“声明式 Intent”和“Host 协程任务”
+- token 验证会在 confirm 前直接消费 approval token
+
+当前正确口径应是：
+
+1. Governor 仍以 `evaluate_governor_gates()` 为核心，R1-R8 全量 trace 保持不变。
+2. `TokenService.validate_execution_tokens()` 采用“先校验、后统一消费”的当前实现。
+3. `host_brain/scheduler/` 与 `app/automation/task_scheduler.py` 是两套不同调度面。
+4. Host Main 同时暴露 `/scheduler/*` 与 `/host-scheduler/*` 两类调度接口。

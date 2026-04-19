@@ -1,0 +1,229 @@
+{
+  "device": "cpu",
+  "note": "embed/rerank 模型运行在 CPU，实测主链路与检索子阶段耗时",
+  "ts_utc": "20260418_193227",
+  "runs": 4,
+  "success": 4,
+  "embed_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "rerank_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "response_started_ms": {
+    "min": 7.8626000013173325,
+    "max": 3608.1654999998136,
+    "avg": 1718.4530250005992,
+    "p50": 1628.8920000006328,
+    "p95": 3554.185210000014,
+    "n": 4
+  },
+  "first_event_ms": {
+    "min": 10.511300000871415,
+    "max": 3610.7009000006656,
+    "avg": 1721.5447250009674,
+    "p50": 1632.4833500011664,
+    "p95": 3556.518290000804,
+    "n": 4
+  },
+  "first_render_ms": {
+    "min": 699.613100001443,
+    "max": 4345.2847999997175,
+    "avg": 3163.573350000661,
+    "p50": 3804.6977500007415,
+    "p95": 4287.6230749998285,
+    "n": 4
+  },
+  "server_latency_ms": {
+    "min": 734.0,
+    "max": 3859.0,
+    "avg": 1584.25,
+    "p50": 872.0,
+    "p95": 3427.749999999999,
+    "n": 4
+  },
+  "first_token_latency_ms": {
+    "min": 646.0,
+    "max": 757.0,
+    "avg": 697.0,
+    "p50": 692.5,
+    "p95": 748.0,
+    "n": 4
+  },
+  "commit_ms": {
+    "min": 745.01489999966,
+    "max": 4594.467099999747,
+    "avg": 3305.1435249999486,
+    "p50": 3940.5460500001936,
+    "p95": 4506.975729999795,
+    "n": 4
+  },
+  "retrieval_latency_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 0
+  },
+  "prompt_build_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 4
+  },
+  "llm_runtime_resolve_ms": {
+    "min": 3.0,
+    "max": 5.0,
+    "avg": 4.0,
+    "p50": 4.0,
+    "p95": 4.85,
+    "n": 4
+  },
+  "stream_after_first_token_ms": {
+    "min": 42.0,
+    "max": 245.0,
+    "avg": 138.5,
+    "p50": 133.5,
+    "p95": 241.25,
+    "n": 4
+  },
+  "response_intelligence_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 4
+  },
+  "sanitize_egress_ms": {
+    "min": 0.0,
+    "max": 0.0,
+    "avg": 0.0,
+    "p50": 0.0,
+    "p95": 0.0,
+    "n": 4
+  },
+  "precommit_log_ms": {
+    "min": 0.0,
+    "max": 1.0,
+    "avg": 0.75,
+    "p50": 1.0,
+    "p95": 1.0,
+    "n": 4
+  },
+  "wall_minus_server_commit_ms": {
+    "min": 10.900800000323215,
+    "max": 3610.467099999747,
+    "avg": 1720.8935249999486,
+    "p50": 1631.103099999862,
+    "p95": 3556.575729999794,
+    "n": 4
+  },
+  "samples": [
+    {
+      "run_index": 1,
+      "request_id": "req_3b02a11ae3b046f8829b61401b5661ce",
+      "path": "chat_agent:direct",
+      "model_id": "gemini-2.5-flash-lite",
+      "stream_buffered": false,
+      "response_started_ms": 7.8626000013173325,
+      "first_event_ms": 10.511300000871415,
+      "first_render_ms": 699.613100001443,
+      "server_latency_ms": 734,
+      "first_token_latency_ms": 646,
+      "commit_ms": 745.01489999966,
+      "retrieval_latency_ms": null,
+      "prompt_build_ms": 0,
+      "llm_runtime_resolve_ms": 5,
+      "stream_after_first_token_ms": 42,
+      "response_intelligence_ms": 0,
+      "sanitize_egress_ms": 0,
+      "precommit_log_ms": 0,
+      "wall_minus_server_commit_ms": 11.014899999659974,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 2,
+      "request_id": "req_51ef6bd6df2c459a8368b687175b8105",
+      "path": "chat_agent:direct",
+      "model_id": "gemini-2.5-flash-lite",
+      "stream_buffered": false,
+      "response_started_ms": 3608.1654999998136,
+      "first_event_ms": 3610.7009000006656,
+      "first_render_ms": 4345.2847999997175,
+      "server_latency_ms": 984,
+      "first_token_latency_ms": 697,
+      "commit_ms": 4594.467099999747,
+      "retrieval_latency_ms": null,
+      "prompt_build_ms": 0,
+      "llm_runtime_resolve_ms": 4,
+      "stream_after_first_token_ms": 245,
+      "response_intelligence_ms": 0,
+      "sanitize_egress_ms": 0,
+      "precommit_log_ms": 1,
+      "wall_minus_server_commit_ms": 3610.467099999747,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 3,
+      "request_id": "req_631bf77d6806433bad674c174a1b562b",
+      "path": "chat_agent:direct",
+      "model_id": "gemini-2.5-flash-lite",
+      "stream_buffered": false,
+      "response_started_ms": 9.487100000114879,
+      "first_event_ms": 15.483200000744546,
+      "first_render_ms": 3648.5222000010253,
+      "server_latency_ms": 3859,
+      "first_token_latency_ms": 757,
+      "commit_ms": 3869.900800000323,
+      "retrieval_latency_ms": null,
+      "prompt_build_ms": 0,
+      "llm_runtime_resolve_ms": 4,
+      "stream_after_first_token_ms": 220,
+      "response_intelligence_ms": 0,
+      "sanitize_egress_ms": 0,
+      "precommit_log_ms": 1,
+      "wall_minus_server_commit_ms": 10.900800000323215,
+      "embed_ms": null,
+      "rerank_ms": null
+    },
+    {
+      "run_index": 4,
+      "request_id": "req_274eb647a22d4f94b928e9d357cbcb45",
+      "path": "chat_agent:direct",
+      "model_id": "gemini-2.5-flash-lite",
+      "stream_buffered": false,
+      "response_started_ms": 3248.296900001151,
+      "first_event_ms": 3249.4835000015883,
+      "first_render_ms": 3960.8733000004577,
+      "server_latency_ms": 760,
+      "first_token_latency_ms": 688,
+      "commit_ms": 4011.191300000064,
+      "retrieval_latency_ms": null,
+      "prompt_build_ms": 0,
+      "llm_runtime_resolve_ms": 3,
+      "stream_after_first_token_ms": 47,
+      "response_intelligence_ms": 0,
+      "sanitize_egress_ms": 0,
+      "precommit_log_ms": 1,
+      "wall_minus_server_commit_ms": 3251.191300000064,
+      "embed_ms": null,
+      "rerank_ms": null
+    }
+  ]
+}
