@@ -1,0 +1,54 @@
+{
+  "desktop_controller": {
+    "screenshot_success": "截图成功",
+    "action_success": "执行成功"
+  },
+  "input_reporter": {
+    "report_success": "上报成功"
+  },
+  "fastapi_app": {
+    "vlm_removed_detail": "Edge 端 VLM 模型已移除，视觉定位功能不可用"
+  },
+  "line_adapter": {
+    "image_fallback": "[图片]",
+    "image_content": "[图片]",
+    "video_content": "[视频]",
+    "audio_content": "[语音]",
+    "sticker_template": "[贴图:{package_id}/{sticker_id}]",
+    "default_file_name": "未知文件",
+    "file_template": "[文件:{file_name}]",
+    "default_location_title": "位置",
+    "location_template": "[位置:{title} {address} ({lat},{lng})]",
+    "unknown_message_template": "[{message_type}]"
+  },
+  "telegram_adapter": {
+    "image_content": "[图片]",
+    "voice_content": "[语音消息]",
+    "video_content": "[视频]",
+    "file_template": "[文件: {file_name}]",
+    "file_fallback": "[文件]",
+    "sticker_content": "[贴纸]"
+  },
+  "qq_adapter": {
+    "voice_content": "[语音消息]",
+    "image_content": "[图片消息]",
+    "video_content": "[视频消息]",
+    "file_content": "[文件消息]"
+  },
+  "wechat_adapter": {
+    "voice_content": "[语音消息]",
+    "image_content": "[图片消息]",
+    "video_content": "[视频消息]",
+    "file_content": "[文件消息]"
+  },
+  "feishu_adapter": {
+    "image_send_fallback": "[图片: {media_path}]"
+  },
+  "wecom_adapter": {
+    "image_send_fallback": "[图片: {media_path}]",
+    "image_content": "[图片: {value}]",
+    "voice_content": "[语音: {value}]",
+    "video_content": "[视频: {value}]",
+    "file_content": "[文件: {value}]"
+  }
+}

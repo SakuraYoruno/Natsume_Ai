@@ -411,11 +411,11 @@ class TelegramAdapter(AbstractPlatformAdapter):
         # 文本内容
         content = message.text or message.raw_text or ""
         if msg_type == MsgType.IMAGE and not content:
-            content = edge_runtime_text("telegram_adapter", "image_content", default="[图片]")
+            content = edge_runtime_text("telegram_adapter", "image_content", default="")
         elif msg_type == MsgType.VOICE and not content:
-            content = edge_runtime_text("telegram_adapter", "voice_content", default="[语音消息]")
+            content = edge_runtime_text("telegram_adapter", "voice_content", default="")
         elif msg_type == MsgType.VIDEO and not content:
-            content = edge_runtime_text("telegram_adapter", "video_content", default="[视频]")
+            content = edge_runtime_text("telegram_adapter", "video_content", default="")
         elif msg_type == MsgType.FILE and not content:
             doc = message.document
             filename = ""
@@ -428,14 +428,14 @@ class TelegramAdapter(AbstractPlatformAdapter):
                 edge_runtime_text(
                     "telegram_adapter",
                     "file_template",
-                    default="[文件: {file_name}]",
+                    default="",
                     file_name=filename,
                 )
                 if filename
-                else edge_runtime_text("telegram_adapter", "file_fallback", default="[文件]")
+                else edge_runtime_text("telegram_adapter", "file_fallback", default="")
             )
         elif msg_type == MsgType.EMOJI and not content:
-            content = edge_runtime_text("telegram_adapter", "sticker_content", default="[贴纸]")
+            content = edge_runtime_text("telegram_adapter", "sticker_content", default="")
 
         # 引用消息
         reply_to_msg_id = None

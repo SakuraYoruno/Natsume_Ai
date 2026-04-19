@@ -356,7 +356,7 @@ class LineAdapter(AbstractPlatformAdapter):
                     "text": edge_runtime_text(
                         "line_adapter",
                         "image_fallback",
-                        default="[图片]",
+                        default="",
                     ),
                 })
 
@@ -373,33 +373,33 @@ class LineAdapter(AbstractPlatformAdapter):
             return edge_runtime_text(
                 "line_adapter",
                 "sticker_template",
-                default="[贴图:{package_id}/{sticker_id}]",
+                default="",
                 package_id=package_id,
                 sticker_id=sticker_id,
             )
         if message_type == "image":
-            return edge_runtime_text("line_adapter", "image_content", default="[图片]")
+            return edge_runtime_text("line_adapter", "image_content", default="")
         if message_type == "video":
-            return edge_runtime_text("line_adapter", "video_content", default="[视频]")
+            return edge_runtime_text("line_adapter", "video_content", default="")
         if message_type == "audio":
-            return edge_runtime_text("line_adapter", "audio_content", default="[语音]")
+            return edge_runtime_text("line_adapter", "audio_content", default="")
         if message_type == "file":
             file_name = message.get("fileName") or edge_runtime_text(
                 "line_adapter",
                 "default_file_name",
-                default="未知文件",
+                default="",
             )
             return edge_runtime_text(
                 "line_adapter",
                 "file_template",
-                default="[文件:{file_name}]",
+                default="",
                 file_name=file_name,
             )
         if message_type == "location":
             title = message.get("title") or edge_runtime_text(
                 "line_adapter",
                 "default_location_title",
-                default="位置",
+                default="",
             )
             address = message.get("address") or ""
             lat = message.get("latitude", "")
@@ -407,13 +407,18 @@ class LineAdapter(AbstractPlatformAdapter):
             return edge_runtime_text(
                 "line_adapter",
                 "location_template",
-                default="[位置:{title} {address} ({lat},{lng})]",
+                default="",
                 title=title,
                 address=address,
                 lat=lat,
                 lng=lng,
             )
-        return f"[{message_type}]"
+        return edge_runtime_text(
+            "line_adapter",
+            "unknown_message_template",
+            default="",
+            message_type=message_type,
+        )
 
     @staticmethod
     def _map_msg_type(line_type: str) -> MsgType:

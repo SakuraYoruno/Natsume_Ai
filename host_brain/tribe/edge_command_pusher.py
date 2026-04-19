@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -68,14 +69,22 @@ class EdgeCommandPusher:
         edge_base_url: str,
         token: str | None = None,
         timeout_ms: int = 2000,
+        failure_cooldown_ms: int = 15000,
+        max_failure_cooldown_ms: int = 300000,
         enabled: bool = True,
         session: requests.Session | None = None,
     ) -> None:
         self.edge_base_url = str(edge_base_url or "").rstrip("/")
         self.token = str(token or "").strip()
         self.timeout_ms = max(200, int(timeout_ms))
+        self.failure_cooldown_ms = max(0, int(failure_cooldown_ms))
+        self.max_failure_cooldown_ms = max(self.failure_cooldown_ms, int(max_failure_cooldown_ms))
         self.enabled = bool(enabled and bool(self.edge_base_url))
         self._session = session or requests.Session()
+        self._state_lock = threading.Lock()
+        self._cooldown_until_ms = 0
+        self._consecutive_failures = 0
+        self._last_failure_log_ms = 0
 
     @classmethod
     def from_env(cls) -> "EdgeCommandPusher":
@@ -94,16 +103,73 @@ class EdgeCommandPusher:
         enabled_raw = str(os.environ.get("EDGE_COMMAND_PUSHER_ENABLED") or "true").strip().lower()
         enabled = enabled_raw not in {"0", "false", "no", "off"}
         timeout_ms_raw = os.environ.get("EDGE_COMMAND_TIMEOUT_MS")
+        failure_cooldown_ms_raw = os.environ.get("EDGE_COMMAND_FAILURE_COOLDOWN_MS")
+        max_failure_cooldown_ms_raw = os.environ.get("EDGE_COMMAND_MAX_FAILURE_COOLDOWN_MS")
         try:
             timeout_ms = int(timeout_ms_raw) if timeout_ms_raw else 2000
         except (TypeError, ValueError):
             timeout_ms = 2000
+        try:
+            failure_cooldown_ms = int(failure_cooldown_ms_raw) if failure_cooldown_ms_raw else 15000
+        except (TypeError, ValueError):
+            failure_cooldown_ms = 15000
+        try:
+            max_failure_cooldown_ms = (
+                int(max_failure_cooldown_ms_raw) if max_failure_cooldown_ms_raw else 300000
+            )
+        except (TypeError, ValueError):
+            max_failure_cooldown_ms = 300000
         return cls(
             edge_base_url=edge_base_url,
             token=token or None,
             timeout_ms=timeout_ms,
+            failure_cooldown_ms=failure_cooldown_ms,
+            max_failure_cooldown_ms=max_failure_cooldown_ms,
             enabled=enabled,
         )
+
+    def _now_ms(self) -> int:
+        return int(time.time() * 1000)
+
+    def _current_cooldown_remaining_ms(self) -> int:
+        with self._state_lock:
+            return max(0, int(self._cooldown_until_ms) - self._now_ms())
+
+    def _record_success(self) -> None:
+        with self._state_lock:
+            self._consecutive_failures = 0
+            self._cooldown_until_ms = 0
+
+    def _resolve_failure_backoff_ms(self, *, failures: int) -> int:
+        if self.failure_cooldown_ms <= 0:
+            return 0
+        attempt = max(1, int(failures))
+        cooldown_ms = int(self.failure_cooldown_ms) * (2 ** max(0, attempt - 1))
+        return min(max(int(self.failure_cooldown_ms), cooldown_ms), int(self.max_failure_cooldown_ms))
+
+    def _record_failure(self, *, reason: str, detail: str | None = None) -> None:
+        if self.failure_cooldown_ms <= 0:
+            return
+        now = self._now_ms()
+        cooldown_ms = int(self.failure_cooldown_ms)
+        with self._state_lock:
+            self._consecutive_failures += 1
+            cooldown_ms = self._resolve_failure_backoff_ms(failures=self._consecutive_failures)
+            self._cooldown_until_ms = max(
+                int(self._cooldown_until_ms),
+                now + cooldown_ms,
+            )
+            should_log = (now - int(self._last_failure_log_ms)) >= 5000
+            if should_log:
+                self._last_failure_log_ms = now
+        if should_log:
+            logger.warning(
+                "edge command pusher entering cooldown: cooldown_ms=%s failures=%s reason=%s detail=%s",
+                cooldown_ms,
+                self._consecutive_failures,
+                reason,
+                (detail or "")[:200],
+            )
 
     def push_command(
         self,
@@ -128,6 +194,13 @@ class EdgeCommandPusher:
             return {"ok": False, "reason": "PUSHER_DISABLED"}
         if not self.edge_base_url:
             return {"ok": False, "reason": "EDGE_BASE_URL_MISSING"}
+        cooldown_remaining_ms = self._current_cooldown_remaining_ms()
+        if cooldown_remaining_ms > 0:
+            return {
+                "ok": False,
+                "reason": "COOLDOWN_ACTIVE",
+                "cooldown_remaining_ms": cooldown_remaining_ms,
+            }
 
         url = f"{self.edge_base_url}/internal/tribe_command"
         headers = {"Content-Type": "application/json"}
@@ -149,6 +222,10 @@ class EdgeCommandPusher:
                 timeout=max(0.2, float(self.timeout_ms) / 1000.0),
             )
             if response.status_code >= 400:
+                self._record_failure(
+                    reason="HTTP_REJECTED",
+                    detail=f"status={response.status_code} body={response.text[:200]}",
+                )
                 logger.warning(
                     "edge command push rejected: status=%s body=%s",
                     response.status_code, response.text[:200],
@@ -158,6 +235,8 @@ class EdgeCommandPusher:
             accepted = bool(data.get("accepted", True))
             # 优先读取 edge 回包的 dispatched 字段；未提供时与 accepted 保持一致
             dispatched = bool(data["dispatched"]) if "dispatched" in data else accepted
+            if accepted and dispatched:
+                self._record_success()
             return {
                 "ok": bool(accepted and dispatched),
                 "accepted": accepted,
@@ -167,6 +246,7 @@ class EdgeCommandPusher:
                 "status_code": response.status_code,
             }
         except Exception as exc:  # pragma: no cover - network path
+            self._record_failure(reason="HTTP_ERROR", detail=str(exc))
             logger.warning("edge command push failed: %s", exc)
             return {"ok": False, "reason": "HTTP_ERROR", "detail": str(exc)}
 

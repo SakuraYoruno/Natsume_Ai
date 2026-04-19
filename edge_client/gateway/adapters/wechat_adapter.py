@@ -18,6 +18,7 @@ from typing import Any
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
 from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.gateway.normalizer import _PLACEHOLDER_CONVERSATION_IDS
+from edge_client.runtime_texts import edge_runtime_text
 from edge_client.services.wx_db_service import WxDbService, WxMessage
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.wechat")
@@ -776,10 +777,14 @@ class WeChatAdapter(AbstractPlatformAdapter):
 
     @staticmethod
     def _fallback_content_for_msg_type(msg_type: MsgType) -> str:
-        mapping: dict[MsgType, str] = {
-            MsgType.VOICE: "[语音消息]",
-            MsgType.IMAGE: "[图片消息]",
-            MsgType.VIDEO: "[视频消息]",
-            MsgType.FILE: "[文件消息]",
+        mapping: dict[MsgType, tuple[str, str]] = {
+            MsgType.VOICE: ("wechat_adapter", "voice_content"),
+            MsgType.IMAGE: ("wechat_adapter", "image_content"),
+            MsgType.VIDEO: ("wechat_adapter", "video_content"),
+            MsgType.FILE: ("wechat_adapter", "file_content"),
         }
-        return mapping.get(msg_type, "")
+        section_key = mapping.get(msg_type)
+        if not section_key:
+            return ""
+        section, key = section_key
+        return edge_runtime_text(section, key, default="")

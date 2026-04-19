@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from host_brain.channels.edge_rpc_client import (
     EdgeRpcCallResult,
     _EDGE_CLOCK_OFFSET_CACHE,
+    _EDGE_FAILURE_COOLDOWN_CACHE,
     _invalidate_edge_clock_offset_cache,
     _normalize_base_url,
     _post_to_edge,
@@ -37,6 +38,7 @@ class TestEdgeRpcConfigHelpers(unittest.TestCase):
                 "expires_at_ms": 0,
             }
         )
+        _EDGE_FAILURE_COOLDOWN_CACHE.clear()
 
     def test_invalidate_clock_offset_cache_respects_base_url_guard(self) -> None:
         _EDGE_CLOCK_OFFSET_CACHE.update(
@@ -154,6 +156,7 @@ class TestEdgeClockCalibration(unittest.IsolatedAsyncioTestCase):
                 "expires_at_ms": 0,
             }
         )
+        _EDGE_FAILURE_COOLDOWN_CACHE.clear()
 
     async def test_resolve_edge_clock_offset_supports_async_response_and_cache(self) -> None:
         async def _raise_for_status() -> None:
@@ -213,6 +216,9 @@ class TestEdgeClockCalibration(unittest.IsolatedAsyncioTestCase):
 
 
 class TestEdgeRpcCalls(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        _EDGE_FAILURE_COOLDOWN_CACHE.clear()
+
     async def test_post_to_edge_rejects_loopback_when_blocked(self) -> None:
         with patch.dict(
             os.environ,
@@ -233,6 +239,27 @@ class TestEdgeRpcCalls(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.success)
         self.assertEqual("REJECTED", result.status)
         self.assertEqual("EDGE_RPC_LOCAL_BLOCKED", result.reason_code)
+
+    async def test_post_to_edge_short_circuits_when_failure_cooldown_open(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "HOST_EDGE_RPC_BASE_URL": "http://edge-down:17800",
+                "HOST_EDGE_RPC_FAILURE_COOLDOWN_MS": "15000",
+            },
+            clear=False,
+        ):
+            _EDGE_FAILURE_COOLDOWN_CACHE[("http://edge-down:17800", "/v1/edge/speak")] = 9_999_999_999_999
+            with patch("httpx.AsyncClient") as mock_client:
+                result = await _post_to_edge(
+                    path="/v1/edge/speak",
+                    payload={"text": "hello"},
+                    request_id="req-cooldown-open",
+                )
+
+        self.assertFalse(result.success)
+        self.assertEqual("EDGE_RPC_COOLDOWN_OPEN", result.reason_code)
+        mock_client.assert_not_called()
 
     async def test_post_to_edge_recalibrates_once_after_auth_expired(self) -> None:
         auth_expired = MagicMock()

@@ -250,7 +250,7 @@ class EdgeInputReporter:
                 detail=edge_runtime_text(
                     "input_reporter",
                     "report_success",
-                    default="上报成功",
+                    default="",
                 ),
             )
         except Exception as exc:

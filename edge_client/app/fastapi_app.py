@@ -1401,7 +1401,7 @@ def _handle_visual_locate(runtime: EdgeRuntime, envelope: EdgeRpcEnvelope) -> Ed
         detail=edge_runtime_text(
             "fastapi_app",
             "vlm_removed_detail",
-            default="Edge 端 VLM 模型已移除，视觉定位功能不可用",
+            default="",
         ),
         event={},
     )

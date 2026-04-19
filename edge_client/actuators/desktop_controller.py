@@ -228,7 +228,7 @@ class DesktopController:
                     detail=edge_runtime_text(
                         "desktop_controller",
                         "screenshot_success",
-                        default="截图成功",
+                        default="",
                     ),
                 )
         except Exception as exc:
@@ -385,7 +385,7 @@ class DesktopController:
                 detail=edge_runtime_text(
                     "desktop_controller",
                     "action_success",
-                    default="执行成功",
+                    default="",
                 ),
                 latency_ms=latency_ms,
             )

@@ -36,6 +36,8 @@ _EDGE_CLOCK_OFFSET_CACHE: dict[str, Any] = {
     "expires_at_ms": 0,
 }
 _EDGE_CLOCK_OFFSET_LOCK = threading.Lock()
+_EDGE_FAILURE_COOLDOWN_LOCK = threading.Lock()
+_EDGE_FAILURE_COOLDOWN_CACHE: dict[tuple[str, str], int] = {}
 
 # ---------------------------------------------------------------------------
 # 结果数据类
@@ -148,6 +150,43 @@ def _invalidate_edge_clock_offset_cache(*, base_url: str | None = None) -> None:
                 "expires_at_ms": 0,
             }
         )
+
+
+def _resolve_failure_cooldown_ms() -> int:
+    raw = str(os.environ.get("HOST_EDGE_RPC_FAILURE_COOLDOWN_MS") or "15000").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 15_000
+    return max(0, min(value, 120_000))
+
+
+def _set_edge_failure_cooldown(*, base_url: str, path: str, now_ms: int | None = None) -> None:
+    cooldown_ms = _resolve_failure_cooldown_ms()
+    if cooldown_ms <= 0:
+        return
+    expires_at_ms = int(now_ms or now_ms_fn()) + cooldown_ms
+    with _EDGE_FAILURE_COOLDOWN_LOCK:
+        _EDGE_FAILURE_COOLDOWN_CACHE[(str(base_url), str(path))] = expires_at_ms
+
+
+def _clear_edge_failure_cooldown(*, base_url: str, path: str) -> None:
+    with _EDGE_FAILURE_COOLDOWN_LOCK:
+        _EDGE_FAILURE_COOLDOWN_CACHE.pop((str(base_url), str(path)), None)
+
+
+def _is_edge_failure_cooldown_open(*, base_url: str, path: str, now_ms: int | None = None) -> bool:
+    current_ms = int(now_ms or now_ms_fn())
+    with _EDGE_FAILURE_COOLDOWN_LOCK:
+        expires_at_ms = int(_EDGE_FAILURE_COOLDOWN_CACHE.get((str(base_url), str(path))) or 0)
+        if expires_at_ms <= current_ms:
+            _EDGE_FAILURE_COOLDOWN_CACHE.pop((str(base_url), str(path)), None)
+            return False
+        return True
+
+
+def now_ms_fn() -> int:
+    return int(now_ms())
 
 
 async def _resolve_edge_clock_offset_ms(
@@ -413,7 +452,14 @@ async def _post_to_edge(
     last_exc: Exception | None = None
     attempts: list[str] = []
 
+    cooldown_skipped_urls: list[str] = []
+    attempted_base_urls: list[str] = []
+
     for base_url in base_urls:
+        if _is_edge_failure_cooldown_open(base_url=base_url, path=path, now_ms=t0):
+            cooldown_skipped_urls.append(base_url)
+            attempts.append(f"{base_url}:COOLDOWN")
+            continue
         url = f"{base_url}{path}"
         clock_offset_ms = await _resolve_edge_clock_offset_ms(
             base_url=base_url,
@@ -422,6 +468,8 @@ async def _post_to_edge(
         forced_recalibrated = False
 
         for attempt in range(retries + 1):
+            if base_url not in attempted_base_urls:
+                attempted_base_urls.append(base_url)
             envelope = _build_envelope(
                 request_id=req_id,
                 payload=payload,
@@ -460,6 +508,7 @@ async def _post_to_edge(
                             clock_offset_ms,
                         )
                         continue
+                    _clear_edge_failure_cooldown(base_url=base_url, path=path)
                     return result
 
                 _logger.warning(
@@ -482,6 +531,21 @@ async def _post_to_edge(
                         attempt + 1,
                         exc,
                     )
+
+    if cooldown_skipped_urls and not attempted_base_urls:
+        latency_ms = max(0, int(time.time() * 1000) - t0)
+        attempted_detail = ", ".join(cooldown_skipped_urls)
+        return EdgeRpcCallResult(
+            success=False,
+            status="DEGRADED",
+            reason_code="EDGE_RPC_COOLDOWN_OPEN",
+            detail=f"edge rpc cooldown open; skipped={attempted_detail}",
+            event={},
+            latency_ms=latency_ms,
+        )
+
+    for attempted_base_url in attempted_base_urls:
+        _set_edge_failure_cooldown(base_url=attempted_base_url, path=path, now_ms=int(time.time() * 1000))
 
     latency_ms = max(0, int(time.time() * 1000) - t0)
     _logger.warning(

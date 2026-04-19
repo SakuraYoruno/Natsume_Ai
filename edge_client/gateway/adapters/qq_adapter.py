@@ -28,6 +28,7 @@ import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
 from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.qq")
 
@@ -586,10 +587,14 @@ class QQAdapter(AbstractPlatformAdapter):
 
     @staticmethod
     def _fallback_content_for_msg_type(msg_type: MsgType) -> str:
-        mapping: dict[MsgType, str] = {
-            MsgType.VOICE: "[语音消息]",
-            MsgType.IMAGE: "[图片消息]",
-            MsgType.VIDEO: "[视频消息]",
-            MsgType.FILE: "[文件消息]",
+        mapping: dict[MsgType, tuple[str, str]] = {
+            MsgType.VOICE: ("qq_adapter", "voice_content"),
+            MsgType.IMAGE: ("qq_adapter", "image_content"),
+            MsgType.VIDEO: ("qq_adapter", "video_content"),
+            MsgType.FILE: ("qq_adapter", "file_content"),
         }
-        return mapping.get(msg_type, "")
+        section_key = mapping.get(msg_type)
+        if not section_key:
+            return ""
+        section, key = section_key
+        return edge_runtime_text(section, key, default="")

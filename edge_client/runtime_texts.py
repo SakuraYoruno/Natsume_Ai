@@ -1,43 +1,32 @@
 from __future__ import annotations
 
+import json
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 
-_EDGE_RUNTIME_TEXTS: dict[str, dict[str, str]] = {
-    "desktop_controller": {
-        "screenshot_success": "截图成功",
-        "action_success": "执行成功",
-    },
-    "input_reporter": {
-        "report_success": "上报成功",
-    },
-    "fastapi_app": {
-        "vlm_removed_detail": "Edge 端 VLM 模型已移除，视觉定位功能不可用",
-    },
-    "line_adapter": {
-        "image_fallback": "[图片]",
-        "image_content": "[图片]",
-        "video_content": "[视频]",
-        "audio_content": "[语音]",
-        "sticker_template": "[贴图:{package_id}/{sticker_id}]",
-        "default_file_name": "未知文件",
-        "file_template": "[文件:{file_name}]",
-        "default_location_title": "位置",
-        "location_template": "[位置:{title} {address} ({lat},{lng})]",
-    },
-    "telegram_adapter": {
-        "image_content": "[图片]",
-        "voice_content": "[语音消息]",
-        "video_content": "[视频]",
-        "file_template": "[文件: {file_name}]",
-        "file_fallback": "[文件]",
-        "sticker_content": "[贴纸]",
-    },
-}
+@lru_cache(maxsize=1)
+def _load_edge_runtime_texts() -> dict[str, dict[str, str]]:
+    path = Path(__file__).with_name("runtime_texts.json")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    for section, mapping in raw.items():
+        if isinstance(mapping, dict):
+            result[str(section)] = {
+                str(key): str(value or "")
+                for key, value in mapping.items()
+            }
+    return result
 
 
 def edge_runtime_text(section: str, key: str, *, default: str = "", **kwargs: Any) -> str:
-    text = str(_EDGE_RUNTIME_TEXTS.get(section, {}).get(key, default) or "")
+    text = str(_load_edge_runtime_texts().get(section, {}).get(key, default) or "")
     if not kwargs:
         return text
     try:

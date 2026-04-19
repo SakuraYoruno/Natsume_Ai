@@ -23,6 +23,7 @@ import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
 from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.wecom")
 
@@ -158,7 +159,14 @@ class WeComAdapter(AbstractPlatformAdapter):
                     "touser": to_user,
                     "msgtype": "text",
                     "agentid": self._agent_id,
-                    "text": {"content": f"[图片: {reply.media_path}]"},
+                    "text": {
+                        "content": edge_runtime_text(
+                            "wecom_adapter",
+                            "image_send_fallback",
+                            default="",
+                            media_path=reply.media_path or "",
+                        )
+                    },
                 }
 
             resp = httpx.post(
@@ -227,13 +235,33 @@ class WeComAdapter(AbstractPlatformAdapter):
         if msg_type == "text":
             return str(raw.get("Content") or "")
         if msg_type == "image":
-            return f"[图片: {raw.get('PicUrl') or raw.get('MediaId') or ''}]"
+            return edge_runtime_text(
+                "wecom_adapter",
+                "image_content",
+                default="",
+                value=raw.get("PicUrl") or raw.get("MediaId") or "",
+            )
         if msg_type == "voice":
-            return f"[语音: {raw.get('MediaId') or ''}]"
+            return edge_runtime_text(
+                "wecom_adapter",
+                "voice_content",
+                default="",
+                value=raw.get("MediaId") or "",
+            )
         if msg_type == "video":
-            return f"[视频: {raw.get('MediaId') or ''}]"
+            return edge_runtime_text(
+                "wecom_adapter",
+                "video_content",
+                default="",
+                value=raw.get("MediaId") or "",
+            )
         if msg_type == "file":
-            return f"[文件: {raw.get('MediaId') or ''}]"
+            return edge_runtime_text(
+                "wecom_adapter",
+                "file_content",
+                default="",
+                value=raw.get("MediaId") or "",
+            )
         return str(raw.get("Content") or "")
 
     @staticmethod

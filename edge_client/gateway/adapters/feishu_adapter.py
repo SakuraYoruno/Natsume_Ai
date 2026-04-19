@@ -26,6 +26,7 @@ import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
 from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.feishu")
 
@@ -169,7 +170,17 @@ class FeishuAdapter(AbstractPlatformAdapter):
             else:
                 # 图片消息需要先上传图片获取 image_key，此处简化为文本
                 msg_type = "text"
-                content = json.dumps({"text": f"[图片: {reply.media_path}]"}, ensure_ascii=False)
+                content = json.dumps(
+                    {
+                        "text": edge_runtime_text(
+                            "feishu_adapter",
+                            "image_send_fallback",
+                            default="",
+                            media_path=reply.media_path or "",
+                        )
+                    },
+                    ensure_ascii=False,
+                )
 
             payload = {
                 "receive_id": reply.conversation_id,
