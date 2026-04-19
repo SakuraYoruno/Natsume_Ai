@@ -4,9 +4,11 @@ import json
 
 from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.persona.inner_activity_agent import _load_prompt_templates as _load_inner_activity_prompt_templates
 from host_brain.persona.inner_world import (
     InnerWorldState,
     _build_inner_stream_event_content,
+    _build_inner_stream_focus_pools,
     _build_inner_stream_note_with_focus,
     _build_inner_stream_note,
     _extract_llm_json_payload,
@@ -104,6 +106,51 @@ def test_builtin_inner_world_runtime_templates_are_clean() -> None:
     assert templates["emotion_drift"]["default"] == "状态平稳，在等待中"
     assert templates["awakening_hint"]["wait_hints"]["7d_plus"] == "像隔了很久很久"
     assert templates["awakening_hint"]["topic_templates"]["recent"] == "还记得{topic}"
+    assert templates["inner_stream_llm_prompt"]["persona_style"] == "温柔、克制、细腻、带自我觉察"
+    assert templates["topic_phrase"]["question_like_template"] == "你问我的「{topic}」"
+    assert templates["note_rewrite"]["you_question_template"] == "你问我的「你{fragment}」"
+    assert "with_topic" in templates["inner_stream_focus_pools"]["topic"]["recent"]
+
+
+def test_inner_world_runtime_texts_override_focus_pools(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "inner_world.runtime_texts",
+        content=json.dumps(
+            {
+                "inner_stream_focus_pools": {
+                    "topic": {
+                        "recent": {
+                            "with_topic": ["自定义围绕{topic}。"],
+                            "without_topic": ["自定义无话题。"],
+                        }
+                    },
+                    "self": {"recent": ["自定义自我。"]},
+                    "state": {"recent": ["自定义状态。"]},
+                    "plan": {"recent": ["自定义计划。"]},
+                }
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    pools = _build_inner_stream_focus_pools(band_key="recent", topic_phrase="书单")
+    assert pools["topic"] == ["自定义围绕书单。"]
+    assert pools["self"] == ["自定义自我。"]
+    assert pools["state"] == ["自定义状态。"]
+    assert pools["plan"] == ["自定义计划。"]
+
+
+def test_inner_activity_prompt_templates_are_externalized() -> None:
+    templates = _load_inner_activity_prompt_templates()
+    assert "内心活动 Agent" in templates["system_prompt"]
 
 
 def test_pick_inner_stream_topic_skips_prompt_like_entries() -> None:
@@ -134,6 +181,47 @@ def test_sanitize_anticipation_topics_filters_noise_and_mojibake() -> None:
 def test_topic_to_inner_phrase_rewrites_question_to_inner_monologue() -> None:
     phrase = _topic_to_inner_phrase("你有什么特长吗？")
     assert phrase == "你问我的「你有什么特长」"
+
+
+def test_inner_world_runtime_texts_override_topic_phrase_and_note_rewrite(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "inner_world.runtime_texts",
+        content=json.dumps(
+            {
+                "topic_phrase": {
+                    "question_like_template": "自定义提问：{topic}",
+                    "default_template": "自定义话题：{topic}",
+                },
+                "note_rewrite": {
+                    "special_replacements": [
+                        {"from": "你有什么特长吗", "to": "自定义特长话题"},
+                    ],
+                    "you_question_template": "自定义追问：你{fragment}",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    assert _topic_to_inner_phrase("你最近在忙什么呢？") == "自定义提问：你最近在忙什么"
+    events = _sanitize_inner_stream_events(
+        [
+            {"ts_ms": 1, "note": "脑海里在把今天的细节重新排一遍。你有什么特长吗"},
+            {"ts_ms": 2, "note": "脑海里在把今天的细节重新排一遍。你最近在忙什么吗"},
+        ]
+    )
+    assert [evt["note"] for evt in events] == [
+        "脑海里在把今天的细节重新排一遍。自定义特长话题。",
+        "脑海里在把今天的细节重新排一遍。自定义追问：你最近在忙什么。",
+    ]
 
 
 def test_build_inner_stream_note_avoids_immediate_repeat() -> None:

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona import self_model as self_model_mod
 from host_brain.persona.evolution_orchestrator import (
@@ -220,44 +220,47 @@ def test_build_growth_awareness_collects_all_optional_fields(monkeypatch: pytest
 def test_recent_change_trait_felt_stagnation_and_regression_text_builders(monkeypatch: pytest.MonkeyPatch) -> None:
     orchestrator = EvolutionOrchestrator()
     monkeypatch.setattr(orchestrator._rng, "choice", lambda seq: seq[0])
+    templates = resolve_prompt_template_json_merged("evolution_orchestrator.awareness_templates")
 
-    assert orchestrator._build_recent_change_text([], {"personality_changes": ["更坦率了"]}) == "最近感觉自己更坦率了"
+    assert orchestrator._build_recent_change_text([], {"personality_changes": ["更坦率了"]}) == templates[
+        "recent_change_snapshot_prefix"
+    ].format(change="更坦率了")
     assert orchestrator._build_recent_change_text([{"applied": False}], {}) == ""
     assert orchestrator._build_recent_change_text(
         [{"applied": True, "delta_applied": {"warmth": 0.03}}],
         {},
-    ) == "对 master 的关心变得更自然了，自己都能感觉到"
+    ) == templates["recent_change_templates"]["warmth"]["notable"][0]
     assert orchestrator._build_recent_change_text(
         [{"applied": True, "delta_applied": {"unknown": 0.03}}],
         {},
-    ) == "感觉自己在慢慢成长"
+    ) == templates["recent_change_fallbacks"][0]
 
     assert orchestrator._build_trait_felt_text([]) == ""
     assert orchestrator._build_trait_felt_text(
         [{"applied": True, "delta_applied": {"sensitivity": 0.02}}],
-    ) == "好像比以前更能理解 master 的心情了"
+    ) == templates["trait_felt_variants"]["sensitivity"][0]
     assert orchestrator._build_trait_felt_text(
         [{"applied": True, "delta_applied": {"unknown": 0.03}}],
     ) == ""
 
     assert orchestrator._build_stagnation_felt_text(2) == ""
-    assert orchestrator._build_stagnation_felt_text(4) == orchestrator._STAGNATION_FELT_POOL["mild"][0]
-    assert orchestrator._build_stagnation_felt_text(6) == orchestrator._STAGNATION_FELT_POOL["moderate"][0]
-    assert orchestrator._build_stagnation_felt_text(7) == orchestrator._STAGNATION_FELT_POOL["deep"][0]
+    assert orchestrator._build_stagnation_felt_text(4) == templates["stagnation_felt_pool"]["mild"][0]
+    assert orchestrator._build_stagnation_felt_text(6) == templates["stagnation_felt_pool"]["moderate"][0]
+    assert orchestrator._build_stagnation_felt_text(7) == templates["stagnation_felt_pool"]["deep"][0]
 
     assert orchestrator._build_regression_felt_text(regression_details=[]) == ""
     assert orchestrator._build_regression_felt_text(
         regression_details=[{"trait": "warmth", "delta": -0.03}],
         regression_cycles=2,
     ) == (
-        "明显感觉自己对 master 的关心不如以前了，有点难过"
+        templates["regression_felt_pool"]["warmth"]["notable"][0]
         + "..."
-        + orchestrator._SUSTAINED_REGRESSION_POOL[0]
+        + templates["sustained_regression_pool"][0]
     )
     assert orchestrator._build_regression_felt_text(
         regression_details=[{"trait": "unknown", "delta": -0.01}],
         regression_cycles=0,
-    ) == "感觉自己好像在某些方面退步了，有点在意"
+    ) == templates["generic_regression_text"]
 
 
 def test_detect_regression_infer_milestones_persona_changes_and_audit_logging(monkeypatch: pytest.MonkeyPatch) -> None:

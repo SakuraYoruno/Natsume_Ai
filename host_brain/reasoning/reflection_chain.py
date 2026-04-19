@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_text
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.reasoning.reflection_chain")
 
@@ -135,40 +135,96 @@ def _looks_like_affection_evasion(text: str) -> bool:
         return True
     return False
 
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
 
-def _build_affection_question_revision(*, bond_stage: str) -> str:
+
+def _resolve_localized_template_text(template_id: str, *, render_target_lang: str = "zh") -> str:
+    resolved = resolve_prompt_template_json_merged(template_id)
+    if isinstance(resolved, dict):
+        localized = resolved.get(_normalize_template_lang(render_target_lang))
+        if localized is not None:
+            return str(localized or "").strip()
+        for key, value in resolved.items():
+            if str(key) not in {"zh", "ja"} and isinstance(value, str) and value.strip():
+                return value.strip()
+    return str(resolved or "").strip()
+
+
+def _build_affection_question_revision(*, bond_stage: str, render_target_lang: str = "zh") -> str:
     stage = str(bond_stage or "").strip().upper()
     if stage in {"STRANGER", "ACQUAINTANCE"}:
-        return resolve_prompt_template_text("reflection_chain.affection_question.stranger")
+        return _resolve_localized_template_text(
+            "reflection_chain.affection_question.stranger",
+            render_target_lang=render_target_lang,
+        )
     if stage == "FRIEND":
-        return resolve_prompt_template_text("reflection_chain.affection_question.friend")
+        return _resolve_localized_template_text(
+            "reflection_chain.affection_question.friend",
+            render_target_lang=render_target_lang,
+        )
     if stage in {"CLOSE", "CLOSE_FRIEND", "INTIMATE", "CONFIDANT", "SOULMATE"}:
-        return resolve_prompt_template_text("reflection_chain.affection_question.close")
-    return resolve_prompt_template_text("reflection_chain.affection_question.default")
+        return _resolve_localized_template_text(
+            "reflection_chain.affection_question.close",
+            render_target_lang=render_target_lang,
+        )
+    return _resolve_localized_template_text(
+        "reflection_chain.affection_question.default",
+        render_target_lang=render_target_lang,
+    )
 
 
-def _build_affection_disclosure_revision(*, bond_stage: str) -> str:
+def _build_affection_disclosure_revision(*, bond_stage: str, render_target_lang: str = "zh") -> str:
     stage = str(bond_stage or "").strip().upper()
     if stage in {"STRANGER", "ACQUAINTANCE"}:
-        return resolve_prompt_template_text("reflection_chain.affection_disclosure.stranger")
+        return _resolve_localized_template_text(
+            "reflection_chain.affection_disclosure.stranger",
+            render_target_lang=render_target_lang,
+        )
     if stage == "FRIEND":
-        return resolve_prompt_template_text("reflection_chain.affection_disclosure.friend")
+        return _resolve_localized_template_text(
+            "reflection_chain.affection_disclosure.friend",
+            render_target_lang=render_target_lang,
+        )
     if stage in {"CLOSE", "CLOSE_FRIEND", "INTIMATE", "CONFIDANT", "SOULMATE"}:
-        return resolve_prompt_template_text("reflection_chain.affection_disclosure.close")
-    return resolve_prompt_template_text("reflection_chain.affection_disclosure.default")
+        return _resolve_localized_template_text(
+            "reflection_chain.affection_disclosure.close",
+            render_target_lang=render_target_lang,
+        )
+    return _resolve_localized_template_text(
+        "reflection_chain.affection_disclosure.default",
+        render_target_lang=render_target_lang,
+    )
 
 
-def _build_contextual_revision_fallback(*, user_message: str, bond_stage: str) -> str:
+def _build_contextual_revision_fallback(
+    *,
+    user_message: str,
+    bond_stage: str,
+    render_target_lang: str = "zh",
+) -> str:
     normalized = str(user_message or "").strip()
     if _FALLBACK_PRESENCE_RE.match(normalized):
-        return resolve_prompt_template_text("reflection_chain.contextual_fallback.presence")
+        return _resolve_localized_template_text(
+            "reflection_chain.contextual_fallback.presence",
+            render_target_lang=render_target_lang,
+        )
     if _FALLBACK_GREETING_RE.match(normalized):
-        return resolve_prompt_template_text("reflection_chain.contextual_fallback.greeting")
-    return resolve_prompt_template_text("reflection_chain.contextual_fallback.default")
+        return _resolve_localized_template_text(
+            "reflection_chain.contextual_fallback.greeting",
+            render_target_lang=render_target_lang,
+        )
+    return _resolve_localized_template_text(
+        "reflection_chain.contextual_fallback.default",
+        render_target_lang=render_target_lang,
+    )
 
 
-def _build_revision_empathy_prefix() -> str:
-    return resolve_prompt_template_text("reflection_chain.revision_empathy_prefix")
+def _build_revision_empathy_prefix(*, render_target_lang: str = "zh") -> str:
+    return _resolve_localized_template_text(
+        "reflection_chain.revision_empathy_prefix",
+        render_target_lang=render_target_lang,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +431,7 @@ class ReflectionChain:
         emotion_tag: str = "",
         bond_stage: str = "",
         canon_rules: list[str] | None = None,
+        render_target_lang: str = "zh",
     ) -> RevisionResult:
         """Apply a deterministic post-process revision and re-score it."""
         before = self.reflect(
@@ -389,7 +446,11 @@ class ReflectionChain:
         operations: list[str] = []
 
         if not original:
-            revised = _build_contextual_revision_fallback(user_message=user_message, bond_stage=bond_stage)
+            revised = _build_contextual_revision_fallback(
+                user_message=user_message,
+                bond_stage=bond_stage,
+                render_target_lang=render_target_lang,
+            )
             operations.append("fallback_empty")
         else:
             if _AI_SELF_REF_PATTERN.search(revised):
@@ -408,7 +469,7 @@ class ReflectionChain:
             if etag in {"sadness", "grief", "despair", "loneliness", "anxiety", "fear"}:
                 empathy_markers = ("我在", "陪你", "抱抱", "辛苦", "心疼", "理解", "别一个人扛")
                 if not any(marker in revised for marker in empathy_markers):
-                    prefix = _build_revision_empathy_prefix()
+                    prefix = _build_revision_empathy_prefix(render_target_lang=render_target_lang)
                     revised = f"{prefix}{revised}" if revised else prefix
                     operations.append("prepend_empathy")
 
@@ -431,17 +492,27 @@ class ReflectionChain:
                         operations.append(f"relax_{old}")
 
             if len(revised) < 6 and str(user_message or "").strip():
-                revised = _build_contextual_revision_fallback(user_message=user_message, bond_stage=bond_stage)
+                revised = _build_contextual_revision_fallback(
+                    user_message=user_message,
+                    bond_stage=bond_stage,
+                    render_target_lang=render_target_lang,
+                )
                 operations.append("replace_too_short_reply")
             elif _is_affection_question(user_message) and (
                 not _contains_affection_stance(revised) or _looks_like_affection_evasion(revised)
             ):
-                revised = _build_affection_question_revision(bond_stage=bond_stage)
+                revised = _build_affection_question_revision(
+                    bond_stage=bond_stage,
+                    render_target_lang=render_target_lang,
+                )
                 operations.append("repair_affection_question_directness")
             elif _is_affection_disclosure(user_message) and (
                 not _contains_affection_stance(revised) or _looks_like_affection_evasion(revised)
             ):
-                revised = _build_affection_disclosure_revision(bond_stage=bond_stage)
+                revised = _build_affection_disclosure_revision(
+                    bond_stage=bond_stage,
+                    render_target_lang=render_target_lang,
+                )
                 operations.append("repair_affection_disclosure_directness")
 
             user_len = len(str(user_message or "").strip())
@@ -455,7 +526,11 @@ class ReflectionChain:
 
             revised = re.sub(r"\s+", " ", revised).strip()
             if not revised:
-                revised = _build_contextual_revision_fallback(user_message=user_message, bond_stage=bond_stage)
+                revised = _build_contextual_revision_fallback(
+                    user_message=user_message,
+                    bond_stage=bond_stage,
+                    render_target_lang=render_target_lang,
+                )
                 operations.append("fallback_after_cleanup")
 
         after = self.reflect(

@@ -68,6 +68,27 @@ def test_inner_world_tick_emits_only_tick_when_spontaneous_too_old(monkeypatch) 
     assert event_types == ["INNER_WORLD_TICKED"]
 
 
+def test_inner_world_tick_skips_during_recent_foreground_chat(monkeypatch) -> None:
+    fake_limbic = _FakeLimbicAgent()
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.resolve_background_tick_guard_state",
+        lambda **_kwargs: {
+            "active": True,
+            "cooldown_remaining_ms": 42000,
+            "speed_profile": "context_fast",
+        },
+    )
+
+    result = execute_inner_world_tick(args={"user_id": "u-skip"})
+
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "BACKGROUND_TICK_FOREGROUND_CHAT_COOLDOWN"
+    assert result["cooldown_remaining_ms"] == 42000
+    assert fake_limbic.tick_calls == []
+    assert fake_limbic.calls == []
+
+
 def test_inner_world_session_end_emits_event_and_returns_state(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)

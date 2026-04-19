@@ -4,6 +4,21 @@ import time
 from typing import Any
 
 
+def _resolve_background_tick_guard(*, now_ms: int | None = None) -> dict[str, Any]:
+    try:
+        from host_brain.tribe.default_mode_agent import resolve_background_tick_guard_state  # noqa: PLC0415
+
+        return dict(resolve_background_tick_guard_state(current_ts_ms=now_ms))
+    except Exception:
+        return {
+            "active": False,
+            "cooldown_ms": 0,
+            "cooldown_remaining_ms": 0,
+            "last_ts_ms": 0,
+            "speed_profile": "",
+        }
+
+
 def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> str:
     raw_user_id = str((args or {}).get("user_id") or (context or {}).get("user_id") or "").strip()
     if raw_user_id:
@@ -40,6 +55,17 @@ def execute_inner_world_tick(
     from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     user_id = _resolve_user_id(args, context)
+    now_ms = int(time.time() * 1000)
+    foreground_guard = _resolve_background_tick_guard(now_ms=now_ms)
+    if bool(foreground_guard.get("active")) and not bool((args or {}).get("force_foreground_tick")):
+        return {
+            "status": "SKIPPED",
+            "user_id": user_id,
+            "reason_code": "BACKGROUND_TICK_FOREGROUND_CHAT_COOLDOWN",
+            "cooldown_remaining_ms": int(foreground_guard.get("cooldown_remaining_ms") or 0),
+            "foreground_speed_profile": str(foreground_guard.get("speed_profile") or ""),
+        }
+
     limbic = get_limbic_agent()
     result = dict(limbic.tick_inner_world(person_id=user_id) or {})
     result.setdefault("status", "OK")

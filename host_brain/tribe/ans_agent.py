@@ -8,6 +8,7 @@ from typing import Any
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 
 logger = logging.getLogger("Natsume.tribe.ans_agent")
+_GLYMPHATIC_LOG_COOLDOWN_MS = 30_000
 
 
 def _default_state_registry() -> Any:
@@ -40,6 +41,8 @@ class ANSAgent:
     _bond_stage: str = field(default="stranger", init=False, repr=False)  # T-37：记录当前关系阶段
     _recovery_mode: bool = field(default=False, init=False, repr=False)  # T-203：Glymphatic 恢复窗口标志
     _recovery_mode_ts_ms: int = field(default=0, init=False, repr=False)  # T-203：恢复窗口开始时间戳
+    _last_glymphatic_log_signature: tuple[bool, int] | None = field(default=None, init=False, repr=False)
+    _last_glymphatic_log_ts_ms: int = field(default=0, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.state_registry is None:
@@ -813,13 +816,23 @@ class ANSAgent:
             payload = dict(getattr(event, "payload", None) or {})
             executed = bool(payload.get("executed", False))
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
+            consolidation_score = float(payload.get("consolidation_score") or 0.0)
             self._recovery_mode = executed
             self._recovery_mode_ts_ms = ts_ms
-            logger.info(
-                "ANSAgent._on_glymphatic_cycle: recovery_mode=%s consolidation_score=%.3f",
-                executed,
-                float(payload.get("consolidation_score") or 0.0),
+            signature = (executed, int(round(consolidation_score * 1000.0)))
+            should_log = (
+                self._last_glymphatic_log_signature != signature
+                or self._last_glymphatic_log_ts_ms <= 0
+                or (ts_ms - int(self._last_glymphatic_log_ts_ms)) >= _GLYMPHATIC_LOG_COOLDOWN_MS
             )
+            if should_log:
+                self._last_glymphatic_log_signature = signature
+                self._last_glymphatic_log_ts_ms = ts_ms
+                logger.info(
+                    "ANSAgent._on_glymphatic_cycle: recovery_mode=%s consolidation_score=%.3f",
+                    executed,
+                    consolidation_score,
+                )
         except Exception as exc:
             logger.debug("ANSAgent._on_glymphatic_cycle 异常: %s", exc)
 

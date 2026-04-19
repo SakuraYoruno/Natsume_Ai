@@ -17,6 +17,9 @@ import logging
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.prompt_builder_utils import (
+    _resolve_template_payload_with_mirror,
+)
 
 from host_brain.persona.personality_traits import (
     ExpressionHint,
@@ -51,8 +54,14 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
         return text
 
 
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+def _load_template_mapping(template_id: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
+    if render_target_lang:
+        raw = _resolve_template_payload_with_mirror(
+            template_id,
+            render_target_lang=str(render_target_lang or "zh"),
+        )
+    else:
+        raw = resolve_prompt_template_json_merged(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -71,8 +80,11 @@ def _mapping_text(
     return _format_template_text(mapping.get(key, default), **kwargs)
 
 
-def _load_style_hint_templates() -> dict[str, Any]:
-    return _load_template_mapping("expression_adapter.style_hint.templates")
+def _load_style_hint_templates(*, render_target_lang: str | None = None) -> dict[str, Any]:
+    return _load_template_mapping(
+        "expression_adapter.style_hint.templates",
+        render_target_lang=render_target_lang,
+    )
 
 # ---------------------------------------------------------------------------
 # Bond 阶段 → 表达开放度
@@ -122,6 +134,7 @@ class PersonaExpressionAdapter:
         user_emotion_tag: str = "NEUTRAL",
         user_message: str = "",
         recent_user_msg_lengths: list[int] | None = None,
+        render_target_lang: str = "zh",
     ) -> ExpressionHint:
         """根据特质 + 情感 + 关系阶段 + 对话节奏生成表达策略提示。
 
@@ -154,7 +167,15 @@ class PersonaExpressionAdapter:
         )
 
         # 4. 综合生成 style_hint（加入节奏感知）
-        style_hint = self._build_style_hint(traits, tag, stage, modifiers, openness, pace)
+        style_hint = self._build_style_hint(
+            traits,
+            tag,
+            stage,
+            modifiers,
+            openness,
+            pace,
+            render_target_lang=render_target_lang,
+        )
 
         # 5. 确定 tone（加入节奏感知）
         tone = self._determine_tone(traits, tag, modifiers, openness, pace)
@@ -228,6 +249,8 @@ class PersonaExpressionAdapter:
         modifiers: ReactivityModifiers,
         openness: float,
         pace: str = PACE_NORMAL,
+        *,
+        render_target_lang: str = "zh",
     ) -> str:
         """构建综合风格提示字符串（含对话节奏感知）。"""
         parts: list[str] = []
@@ -236,7 +259,7 @@ class PersonaExpressionAdapter:
         _NEGATIVE = {"SAD", "ANGRY", "ANXIOUS", "FRUSTRATED", "CONFUSED"}
         _MILD_NEG = {"BORED", "FRUSTRATED", "CONFUSED"}
         _POSITIVE = {"HAPPY", "EXCITED", "LOVING", "PROUD", "GRATEFUL", "SURPRISED"}
-        templates = _load_style_hint_templates()
+        templates = _load_style_hint_templates(render_target_lang=render_target_lang)
         core_templates = _mapping_section(templates, "core")
         trait_templates = _mapping_section(templates, "traits")
         bond_templates = _mapping_section(templates, "bond")
@@ -402,7 +425,7 @@ class PersonaExpressionAdapter:
         # 默认 → gentle
         return "gentle"
 
-    def build_prompt_section(self, hint: ExpressionHint) -> str:
+    def build_prompt_section(self, hint: ExpressionHint, *, render_target_lang: str = "zh") -> str:
         """将 ExpressionHint 格式化为 prompt 注入段落。
 
         移除纯数值字段（echo_weight_modifier / follow_up_tendency），
@@ -411,7 +434,10 @@ class PersonaExpressionAdapter:
         Returns:
             可直接嵌入 system prompt 的文本段落
         """
-        templates = _load_template_mapping("expression_adapter.prompt_section.templates")
+        templates = _load_template_mapping(
+            "expression_adapter.prompt_section.templates",
+            render_target_lang=render_target_lang,
+        )
 
         # ── tone → 行为指导 ──────────────────────────────────────────────
         guidance = _mapping_text(

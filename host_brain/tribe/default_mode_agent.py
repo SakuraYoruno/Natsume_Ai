@@ -6,6 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
@@ -91,6 +92,27 @@ def _is_recursive_glymphatic_tick_source(source: str) -> bool:
     return normalized.startswith("glymphatic_deep_clean")
 
 
+def _load_runtime_texts() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("default_mode_agent.runtime_texts")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _template_text(mapping: Mapping[str, Any] | None, *keys: str, default: str = "", **kwargs: Any) -> str:
+    current: Any = mapping
+    for key in keys:
+        if not isinstance(current, Mapping):
+            current = None
+            break
+        current = current.get(key)
+    text = str(current or default)
+    if not kwargs:
+        return text
+    try:
+        return text.format(**kwargs)
+    except Exception:
+        return text
+
+
 @dataclass(slots=True)
 class DefaultModeAgent:
     descriptor: TribeAgentDescriptor = field(
@@ -173,10 +195,12 @@ class DefaultModeAgent:
         if not note:
             anticipation = list(offline_state.get("anticipation_topics") or [])
             topic = str(anticipation[0] if anticipation else topic_phrase).strip()
-            note = (
-                f"我在整理刚才的感受，也在想{topic}。"
-                if topic
-                else "我在把最近的情绪和记忆慢慢整理成线索。"
+            runtime_texts = _load_runtime_texts()
+            note = _template_text(
+                runtime_texts,
+                "fallback_note",
+                "with_topic" if topic else "without_topic",
+                topic=topic,
             )
             focus = "plan" if topic else "self"
 

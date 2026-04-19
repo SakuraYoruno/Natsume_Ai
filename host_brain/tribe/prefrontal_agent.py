@@ -44,6 +44,7 @@ class PrefrontalAgent:
         bond_summary: Mapping[str, Any] | None,
         now_ms: int,
         trigger_reason: str = "runtime_snapshot",
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
         from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
@@ -68,6 +69,7 @@ class PrefrontalAgent:
             build_self_reflection_pulse(
                 snapshot,
                 trigger_reason=str(trigger_reason or "runtime_snapshot"),
+                render_target_lang=str(render_target_lang or "zh"),
             )
             or {}
         ) if snapshot else {}
@@ -104,6 +106,7 @@ class PrefrontalAgent:
         arousal: float,
         dominance: float,
         ts_ms: int = 0,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
         from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
         from host_brain.persona.expression_adapter import PersonaExpressionAdapter  # noqa: PLC0415
@@ -122,6 +125,7 @@ class PrefrontalAgent:
             str(bond_stage or "STRANGER"),
             user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
             user_message=str(user_message or ""),
+            render_target_lang=str(render_target_lang or "zh"),
         )
         follow_up_tendency = getattr(
             hint,
@@ -149,6 +153,7 @@ class PrefrontalAgent:
         bond_trend: str,
         texture_hint: str = "",
         shared_memory_hints: list[str] | None = None,
+        render_target_lang: str = "zh",
     ) -> str:
         payload = self.resolve_bond_style_payload(
             bond_stage=bond_stage,
@@ -161,6 +166,7 @@ class PrefrontalAgent:
             bond_trend=bond_trend,
             texture_hint=texture_hint,
             shared_memory_hints=shared_memory_hints,
+            render_target_lang=render_target_lang,
         )
         return str(payload.get("prompt_injection") or "")
 
@@ -177,6 +183,7 @@ class PrefrontalAgent:
         bond_trend: str,
         texture_hint: str = "",
         shared_memory_hints: list[str] | None = None,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
         from host_brain.persona.bond_aware_style import BondAwareStyleEngine  # noqa: PLC0415
 
@@ -193,6 +200,7 @@ class PrefrontalAgent:
             bond_trend=str(bond_trend or ""),
             texture_hint=str(texture_hint or ""),
             shared_memory_hints=list(shared_memory_hints or []) or None,
+            render_target_lang=str(render_target_lang or "zh"),
         )
         as_dict_payload = {}
         if hasattr(result, "as_dict"):
@@ -231,6 +239,7 @@ class PrefrontalAgent:
         growth_awareness: Mapping[str, Any] | None,
         growth_summary: Mapping[str, Any] | None,
         style_evolution: Mapping[str, Any] | None = None,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
         from host_brain.persona.self_reflection import SelfReflection  # noqa: PLC0415
 
@@ -250,6 +259,7 @@ class PrefrontalAgent:
             growth_awareness=dict(growth_awareness or {}),
             growth_summary=dict(growth_summary or {}),
             style_evolution=dict(style_evolution or {}),
+            render_target_lang=str(render_target_lang or "zh"),
         )
         snapshot: dict[str, Any] = {}
         if isinstance(pulse, Mapping):
@@ -282,6 +292,7 @@ class PrefrontalAgent:
         motive_state: Mapping[str, Any] | None = None,
         response_policy: Mapping[str, Any] | None = None,
         runtime_flags: Mapping[str, Any] | None = None,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
         from host_brain.persona.self_reflection import align_self_reflection_pulse  # noqa: PLC0415
 
@@ -293,6 +304,7 @@ class PrefrontalAgent:
             motive_state=dict(motive_state or {}),
             response_policy=dict(response_policy or {}),
             runtime_flags=dict(runtime_flags or {}),
+            render_target_lang=str(render_target_lang or "zh"),
         )
         return dict(aligned or {})
 

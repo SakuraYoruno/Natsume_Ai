@@ -403,6 +403,85 @@ def test_build_chat_prompt_runtime_payload_uses_limbic_timeline_snapshot(
     assert dict(runtime_payload.get("emotion_timeline") or {})["entry_count"] == 2
 
 
+def test_build_chat_prompt_runtime_payload_skips_inner_world_awaken_during_recent_foreground_chat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ccb,
+        "build_chat_generation_prompt_payload",
+        lambda **kwargs: {
+            "prompt_context": {
+                "authoritative": [],
+                "retrieval": [],
+                "style_pack": {},
+                "constraints": {"retrieval_status": "OK"},
+            },
+            "prompt_context_validation": {"valid": True, "reason_code": None, "violation_count": 0},
+            "prompt_context_observability": {"source_stats": {}},
+            "emotion_context": {
+                "mood_state": "steady",
+                "emotion_tag": "CALM",
+                "emotion_intensity": 0.3,
+            },
+            "user_message": kwargs["user_message"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.app.intelligent_runtime.build_prompt_intelligence",
+        lambda **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.resolve_recent_foreground_interaction_state",
+        lambda **_kwargs: {"active": True, "speed_profile": "context_fast"},
+    )
+
+    called = {"awaken": 0}
+
+    class _Limbic:
+        def on_user_awaken(self, *, person_id: str | None):  # noqa: ARG002
+            called["awaken"] += 1
+            return {"offline_hours": 8.0, "awakening_hint": "等了很久"}
+
+        def resolve_emotion_timeline_snapshot(self, *, summary_window_ms: int | None, diary_window_ms: int | None):  # noqa: ARG002
+            return {"summary": {}, "diary": {}}
+
+        def resolve_persistent_emotion_state(self, **kwargs):  # noqa: ANN003
+            return {}
+
+        def resolve_silence_state(self):
+            return {}
+
+        def capture_conversation_body_sense(self, **kwargs):  # noqa: ANN003
+            return {"body_sense": {}, "is_active": False, "willingness_penalty": 0.0}
+
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _Limbic(),
+    )
+
+    runtime_input = build_chat_runtime_input(
+        request_id="req-foreground-skip-awaken",
+        person_id="person-foreground-skip-awaken",
+        session_id="session-foreground-skip-awaken",
+        thread_id=None,
+        user_message="我刚刚说到哪里了？",
+        render_target_lang="zh",
+        retrieval_summary={"status": "OK"},
+        retrieval_evidence_items=[],
+        emotion_state={"mood_state": "steady", "emotion_tag": "CALM", "emotion_intensity": 0.3},
+        bond_summary={"stage": "FRIEND"},
+        scene_type="CHAT",
+    )
+
+    runtime_payload = ccb.build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings={},
+    )
+
+    assert called["awaken"] == 0
+    assert "offline_state" not in runtime_payload
+
+
 def test_build_memory_persona_signal_summarizes_humanized_recall_metadata() -> None:
     signal = ccb._build_memory_persona_signal(
         [

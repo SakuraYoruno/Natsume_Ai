@@ -54,9 +54,9 @@ def test_build_style_hint_covers_empathy_distance_and_rapid_pass_branch() -> Non
         pace=PACE_RAPID,
     )
 
-    assert "温柔共情" in hint
-    assert "保持好奇心" in hint
-    assert "回复简洁利落" in hint
+    assert "温和地共情" in hint
+    assert "自然的追问" in hint
+    assert "句子短一点" in hint
 
     distant = adapter._build_style_hint(
         PersonalityTraits(
@@ -70,8 +70,8 @@ def test_build_style_hint_covers_empathy_distance_and_rapid_pass_branch() -> Non
         openness=0.3,
         pace=PACE_NORMAL,
     )
-    assert "自然温和" in distant
-    assert "注意保持适当距离" in distant
+    assert "自然、克制" in distant
+    assert "保持距离感" in distant
 
 
 def test_build_style_hint_covers_trait_and_deep_branches() -> None:
@@ -85,11 +85,11 @@ def test_build_style_hint_covers_trait_and_deep_branches() -> None:
         openness=0.85,
         pace=PACE_NORMAL,
     )
-    assert "温柔真诚" in bright
-    assert "可以适当俏皮" in bright
-    assert "语气自信" in bright
-    assert "可以更自在地表达喜悦" in bright
-    assert "偶尔撒个小娇也没关系" in bright
+    assert "语气温和、可靠" in bright
+    assert "轻一点、活一点" in bright
+    assert "态度稳" in bright
+    assert "把愉快和偏心稍微放出来一点" in bright
+    assert "别变成撒娇腔" in bright
 
     deep = adapter._build_style_hint(
         PersonalityTraits(sensitivity=0.8),
@@ -99,8 +99,8 @@ def test_build_style_hint_covers_trait_and_deep_branches() -> None:
         openness=0.5,
         pace=PACE_DEEP,
     )
-    assert "认真倾听" in deep
-    assert "细微情感" in deep
+    assert "放慢一些" in deep
+    assert "认真听" in deep
 
 
 def test_determine_tone_covers_remaining_priority_branches() -> None:
@@ -159,9 +159,9 @@ def test_build_prompt_section_describes_mid_negative_and_pace_variants() -> None
             pace_hint=PACE_RAPID,
         )
     )
-    assert "适当跟随他的情绪节奏" in rapid
-    assert "如果话题有趣，可以顺势追问" in rapid
-    assert "对方在快节奏聊天" in rapid
+    assert "适度贴着对方的情绪节奏" in rapid
+    assert "有需要就顺着追问" in rapid
+    assert "对方说得快" in rapid
 
     deep = adapter.build_prompt_section(
         ExpressionHint(
@@ -172,9 +172,9 @@ def test_build_prompt_section_describes_mid_negative_and_pace_variants() -> None
             pace_hint=PACE_DEEP,
         )
     )
-    assert "不过度卷入他的情绪波动" in deep
-    assert "可以自然地多问一句" in deep
-    assert "对方在认真倾诉或深度讨论" in deep
+    assert "保持稳，不被情绪一下子卷走" in deep
+    assert "可以再问一句" in deep
+    assert "对方在认真说" in deep
 
 
 def test_build_prompt_section_uses_prompt_template_override(monkeypatch) -> None:
@@ -224,3 +224,23 @@ def test_build_prompt_section_uses_prompt_template_override(monkeypatch) -> None
     assert "- 共鸣：顺着他的情绪一点点走" in section
     assert "- 追问：有空就顺手多问一句" in section
     assert "- 节奏：现在节奏快，短一点" in section
+
+
+def test_build_prompt_section_uses_japanese_templates() -> None:
+    adapter = PersonaExpressionAdapter()
+    section = adapter.build_prompt_section(
+        ExpressionHint(
+            style_hint="静かに受け止める",
+            tone="gentle",
+            echo_weight_modifier=0.06,
+            追问倾向=0.3,
+            pace_hint=PACE_RAPID,
+        ),
+        render_target_lang="ja",
+    )
+
+    assert "【" in section and "方針" in section
+    assert "静かに受け止める" in section
+    assert "情緒" in section or "受け止め" in section
+    assert "你" not in section
+    assert "我" not in section

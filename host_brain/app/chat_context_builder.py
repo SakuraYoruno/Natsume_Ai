@@ -98,18 +98,49 @@ def get_latest_prompt_context_runtime_snapshot() -> dict[str, Any]:
         return copy.deepcopy(_LATEST_PROMPT_CONTEXT_SNAPSHOT)
 
 
-def _load_runtime_guidance_templates() -> dict[str, Any]:
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _merge_localized_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    merged = {str(key): value for key, value in base.items()}
+    for key, value in overlay.items():
+        key_text = str(key)
+        if key_text in {"zh", "ja"}:
+            continue
+        current = merged.get(key_text)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[key_text] = _merge_localized_mapping(current, value)
+        else:
+            merged[key_text] = value
+    return merged
+
+
+def _resolve_localized_template_value(value: Any, *, render_target_lang: str | None) -> Any:
+    if isinstance(value, Mapping):
+        lang_key = _normalize_template_lang(render_target_lang)
+        localized = value.get(lang_key)
+        if localized is not None:
+            if isinstance(localized, Mapping):
+                return _merge_localized_mapping(localized, value)
+            return localized
+    return value
+
+
+def _load_runtime_guidance_templates(*, render_target_lang: str | None = None) -> dict[str, Any]:
     try:
         raw = resolve_prompt_template_json_merged("chat_context_builder.runtime_guidance_texts")
     except Exception:
         return {}
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    resolved = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
+    return dict(resolved) if isinstance(resolved, Mapping) else {}
 
 
 def _template_text(
     template_data: Mapping[str, Any] | None,
     *keys: str,
     default: str = "",
+    render_target_lang: str | None = None,
     **kwargs: Any,
 ) -> str:
     current: Any = template_data
@@ -118,6 +149,7 @@ def _template_text(
             current = None
             break
         current = current.get(key)
+    current = _resolve_localized_template_value(current, render_target_lang=render_target_lang)
     text = str(current or default)
     if not kwargs:
         return text
@@ -437,7 +469,10 @@ def build_chat_context_pack(
         "retrieval_status": str(retrieval_summary.get("status") or "UNKNOWN"),
         "retrieval_reason_code": str(retrieval_summary.get("reason_code") or "NONE"),
     }
-    memory_persona_signal = _build_memory_persona_signal(retrieval_evidence_items)
+    memory_persona_signal = _build_memory_persona_signal(
+        retrieval_evidence_items,
+        render_target_lang=render_target_lang,
+    )
     memory_persona_evidence = _build_memory_persona_evidence(retrieval_rows)
     memory_recall_summary = ""
     if memory_persona_signal:
@@ -457,7 +492,7 @@ def build_chat_context_pack(
         "emotion_tag": emotion_tag,
         "tone_hint": str(emotion_pulse.get("style_hint") or ""),
     }
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
     # Phase 4: 注入 BondEmotionalTexture 亲密温度和裂痕状态（让关系有温度）
     try:
         from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
@@ -482,6 +517,7 @@ def build_chat_context_pack(
                     "bond_texture",
                     "temperature_hints",
                     "gt_0_8",
+                    render_target_lang=render_target_lang,
                 )
             elif _texture.intimacy_temperature > 0.6:
                 bond_texture["texture_hint"] = _template_text(
@@ -489,6 +525,7 @@ def build_chat_context_pack(
                     "bond_texture",
                     "temperature_hints",
                     "gt_0_6",
+                    render_target_lang=render_target_lang,
                 )
             elif _texture.intimacy_temperature > 0.4:
                 bond_texture["texture_hint"] = _template_text(
@@ -496,6 +533,7 @@ def build_chat_context_pack(
                     "bond_texture",
                     "temperature_hints",
                     "gt_0_4",
+                    render_target_lang=render_target_lang,
                 )
             elif _texture.intimacy_temperature > 0.2:
                 bond_texture["texture_hint"] = _template_text(
@@ -503,6 +541,7 @@ def build_chat_context_pack(
                     "bond_texture",
                     "temperature_hints",
                     "gt_0_2",
+                    render_target_lang=render_target_lang,
                 )
             else:
                 bond_texture["texture_hint"] = _template_text(
@@ -510,6 +549,7 @@ def build_chat_context_pack(
                     "bond_texture",
                     "temperature_hints",
                     "default",
+                    render_target_lang=render_target_lang,
                 )
             # 裂痕状态
             _rift = _bond_state.rift
@@ -523,6 +563,7 @@ def build_chat_context_pack(
                         "bond_texture",
                         "rift_hints",
                         "repair_high",
+                        render_target_lang=render_target_lang,
                     )
                 elif _rift.repair_progress > 0.3:
                     bond_texture["rift_hint"] = _template_text(
@@ -530,6 +571,7 @@ def build_chat_context_pack(
                         "bond_texture",
                         "rift_hints",
                         "repair_mid",
+                        render_target_lang=render_target_lang,
                     )
                 else:
                     bond_texture["rift_hint"] = _template_text(
@@ -537,6 +579,7 @@ def build_chat_context_pack(
                         "bond_texture",
                         "rift_hints",
                         "repair_low_template",
+                        render_target_lang=render_target_lang,
                         rift_cause=_rift.rift_cause,
                     )
             else:
@@ -684,7 +727,11 @@ def _coerce_optional_bool(value: Any) -> bool | None:
     return None
 
 
-def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_memory_persona_signal(
+    retrieval_evidence_items: list[dict[str, Any]],
+    *,
+    render_target_lang: str = "zh",
+) -> dict[str, Any]:
     warm_tags = {"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"}
     fragile_tags = {"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"}
 
@@ -744,7 +791,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
     avg_distortion = distortion_sum / max(distorted_count, 1) if distorted_count > 0 else 0.0
     guidance_parts: list[str] = []
     recall_bias = "neutral"
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     if suppressed_count > 0:
         recall_bias = "guarded"
@@ -753,6 +800,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "suppressed",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -763,6 +811,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "distortion_high",
+                render_target_lang=render_target_lang,
             )
         )
     elif distorted_count > 0:
@@ -771,6 +820,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "distortion_low",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -782,6 +832,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "protective_recoil",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -798,6 +849,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "shared_history",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -809,6 +861,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "warm_emotion",
+                render_target_lang=render_target_lang,
             )
         )
     elif dominant_emotion in fragile_tags:
@@ -819,6 +872,7 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
                 runtime_guidance_templates,
                 "memory_signal_guidance",
                 "fragile_emotion",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -918,6 +972,8 @@ def _build_memory_recall_summary(memory_signal_raw: Mapping[str, Any] | None) ->
 def _apply_motive_state_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     motive_state_raw: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
     motive_state = dict(motive_state_raw or {}) if isinstance(motive_state_raw, Mapping) else {}
@@ -943,7 +999,7 @@ def _apply_motive_state_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     motive_guidance: list[str] = []
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     if care_drive >= 0.62 and care_drive >= retreat_drive:
         tone = "caring"
@@ -956,6 +1012,7 @@ def _apply_motive_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "motive_guidance",
                 "care",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -966,6 +1023,7 @@ def _apply_motive_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "motive_guidance",
                 "continuity",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -980,6 +1038,7 @@ def _apply_motive_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "motive_guidance",
                 "retreat",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1000,6 +1059,8 @@ def _apply_motive_state_to_persona_expression_hint(
 def _apply_offline_state_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     offline_state_raw: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
     offline_state = dict(offline_state_raw or {}) if isinstance(offline_state_raw, Mapping) else {}
@@ -1021,7 +1082,7 @@ def _apply_offline_state_to_persona_expression_hint(
     pace_hint = str(hint.get("pace_hint") or "").strip()
     offline_guidance: list[str] = []
     reconnect_style = str(reconnect_profile.get("reconnect_style") or "").strip()
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     if absence_band == "6h_plus":
         follow_up_tendency = max(follow_up_tendency, 0.04)
@@ -1033,6 +1094,7 @@ def _apply_offline_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "offline_guidance",
                 "6h_plus",
+                render_target_lang=render_target_lang,
             )
         )
     elif absence_band == "24h_plus":
@@ -1047,6 +1109,7 @@ def _apply_offline_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "offline_guidance",
                 "24h_plus",
+                render_target_lang=render_target_lang,
             )
         )
     elif absence_band == "72h_plus":
@@ -1060,6 +1123,7 @@ def _apply_offline_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "offline_guidance",
                 "72h_plus",
+                render_target_lang=render_target_lang,
             )
         )
     elif absence_band == "7d_plus":
@@ -1073,6 +1137,7 @@ def _apply_offline_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "offline_guidance",
                 "7d_plus",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1083,6 +1148,7 @@ def _apply_offline_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "offline_guidance",
                 "loneliness",
+                render_target_lang=render_target_lang,
             )
         )
     elif anticipation >= 0.6 and absence_band in {"24h_plus", "72h_plus", "7d_plus"}:
@@ -1091,6 +1157,7 @@ def _apply_offline_state_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "offline_guidance",
                 "anticipation",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1113,6 +1180,8 @@ def _apply_offline_state_to_persona_expression_hint(
 def _apply_activity_monitor_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     activity_monitor_raw: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
     activity_monitor = dict(activity_monitor_raw or {}) if isinstance(activity_monitor_raw, Mapping) else {}
@@ -1125,7 +1194,7 @@ def _apply_activity_monitor_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     activity_guidance: list[str] = []
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     recent_event_type = str(activity_monitor.get("recent_event_type") or "").strip().lower()
     try:
@@ -1148,6 +1217,7 @@ def _apply_activity_monitor_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "activity_guidance",
                 "wakeup",
+                render_target_lang=render_target_lang,
             )
         )
     elif (is_gaming or recent_event_type == "gaming_detected") and recent_event_age_s <= 900.0:
@@ -1162,6 +1232,7 @@ def _apply_activity_monitor_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "activity_guidance",
                 "gaming_detected",
+                render_target_lang=render_target_lang,
             )
         )
     elif recent_event_type == "gaming_exited" and recent_event_age_s <= 600.0:
@@ -1175,6 +1246,7 @@ def _apply_activity_monitor_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "activity_guidance",
                 "gaming_exited",
+                render_target_lang=render_target_lang,
             )
         )
     elif idle_minutes >= 20.0:
@@ -1189,6 +1261,7 @@ def _apply_activity_monitor_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "activity_guidance",
                 "idle_reentry",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1211,6 +1284,8 @@ def _apply_activity_monitor_to_persona_expression_hint(
 def _apply_scene_awareness_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     scene_awareness_raw: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
     scene_awareness = dict(scene_awareness_raw or {}) if isinstance(scene_awareness_raw, Mapping) else {}
@@ -1237,7 +1312,7 @@ def _apply_scene_awareness_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     scene_guidance: list[str] = []
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     if companion_suitable is False or scene_tags & {"focus_work", "fullscreen_video", "sleeping_screen", "meeting"}:
         tone = "gentle"
@@ -1250,6 +1325,7 @@ def _apply_scene_awareness_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "scene_guidance",
                 "focus",
+                render_target_lang=render_target_lang,
             )
         )
     elif scene_tags & {"gaming", "gameplay", "battle", "lobby"}:
@@ -1264,6 +1340,7 @@ def _apply_scene_awareness_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "scene_guidance",
                 "gaming",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1286,6 +1363,8 @@ def _apply_scene_awareness_to_persona_expression_hint(
 def _apply_runtime_mode_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     runtime_flags_raw: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
     runtime_flags = dict(runtime_flags_raw or {}) if isinstance(runtime_flags_raw, Mapping) else {}
@@ -1306,7 +1385,7 @@ def _apply_runtime_mode_to_persona_expression_hint(
     echo_weight_modifier = _coerce_optional_float(hint.get("echo_weight_modifier")) or 0.0
     pace_hint = str(hint.get("pace_hint") or "").strip()
     mode_guidance: list[str] = []
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     if sys_mode == "focus":
         if tone == "playful":
@@ -1320,6 +1399,7 @@ def _apply_runtime_mode_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "mode_guidance",
                 "focus",
+                render_target_lang=render_target_lang,
             )
         )
     elif sys_mode == "gaming":
@@ -1334,6 +1414,7 @@ def _apply_runtime_mode_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "mode_guidance",
                 "gaming",
+                render_target_lang=render_target_lang,
             )
         )
     elif sys_mode == "sleep":
@@ -1346,6 +1427,7 @@ def _apply_runtime_mode_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "mode_guidance",
                 "sleep",
+                render_target_lang=render_target_lang,
             )
         )
     elif sys_mode in {"maintenance", "locked"}:
@@ -1359,6 +1441,7 @@ def _apply_runtime_mode_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "mode_guidance",
                 "minimal",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1380,6 +1463,8 @@ def _apply_runtime_mode_to_persona_expression_hint(
 def _apply_memory_persona_signal_to_persona_expression_hint(
     hint_raw: Mapping[str, Any] | None,
     memory_signal_raw: Mapping[str, Any] | None,
+    *,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     hint = dict(hint_raw or {}) if isinstance(hint_raw, Mapping) else {}
     memory_signal = dict(memory_signal_raw or {}) if isinstance(memory_signal_raw, Mapping) else {}
@@ -1403,7 +1488,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
     warm_tags = {"NOSTALGIC", "WARM", "GRATEFUL", "LOVING", "TOUCHED", "HAPPY"}
     fragile_tags = {"SAD", "HURT", "LONELY", "ANXIOUS", "SCARED", "DEPRESSED", "MELANCHOLY"}
     memory_guidance: list[str] = []
-    runtime_guidance_templates = _load_runtime_guidance_templates()
+    runtime_guidance_templates = _load_runtime_guidance_templates(render_target_lang=render_target_lang)
 
     if suppressed_count > 0 or recall_bias == "guarded":
         follow_up_tendency = min(follow_up_tendency, 0.03)
@@ -1415,6 +1500,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "suppressed",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1425,6 +1511,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "uncertain",
+                render_target_lang=render_target_lang,
             )
         )
     elif distorted_count > 0:
@@ -1433,6 +1520,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "distorted",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1446,6 +1534,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "protective_recoil",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1458,6 +1547,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "warm",
+                render_target_lang=render_target_lang,
             )
         )
     elif dominant_emotion in fragile_tags:
@@ -1467,6 +1557,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "fragile",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -1484,6 +1575,7 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
                 runtime_guidance_templates,
                 "memory_hint_guidance",
                 "shared_history",
+                render_target_lang=render_target_lang,
             )
         )
 
@@ -2215,18 +2307,31 @@ def build_chat_prompt_runtime_payload(
 
         # ── Phase XVI：离线内心世界唤醒快照注入 ──────────────────────────
         try:
-            from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+            from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
 
-            _iw_snapshot = dict(get_limbic_agent().on_user_awaken(person_id=_persona_user_id) or {})
-            _iw_offline_hours = float(_iw_snapshot.get("offline_hours") or 0.0)
-            _iw_hint = str(_iw_snapshot.get("awakening_hint") or "")
-            if _iw_offline_hours >= 1.0 or _iw_hint:
-                runtime_payload["offline_state"] = _iw_snapshot
+            _recent_foreground = resolve_recent_foreground_interaction_state(current_ts_ms=int(time.time() * 1000))
+        except Exception:
+            _recent_foreground = {"active": False}
+
+        try:
+            if not bool(_recent_foreground.get("active")):
+                from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+                _iw_snapshot = dict(get_limbic_agent().on_user_awaken(person_id=_persona_user_id) or {})
+                _iw_offline_hours = float(_iw_snapshot.get("offline_hours") or 0.0)
+                _iw_hint = str(_iw_snapshot.get("awakening_hint") or "")
+                if _iw_offline_hours >= 1.0 or _iw_hint:
+                    runtime_payload["offline_state"] = _iw_snapshot
+                    logger.debug(
+                        "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
+                        _persona_user_id,
+                        _iw_offline_hours,
+                        _iw_hint[:30] if _iw_hint else "",
+                    )
+            else:
                 logger.debug(
-                    "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
-                    _persona_user_id,
-                    _iw_offline_hours,
-                    _iw_hint[:30] if _iw_hint else "",
+                    "OfflineInnerWorld 唤醒快照跳过: recent foreground chat active speed_profile=%s",
+                    str(_recent_foreground.get("speed_profile") or ""),
                 )
         except Exception as _iw_exc:
             logger.debug("OfflineInnerWorld 接入降级: %s", _iw_exc)
@@ -2293,7 +2398,14 @@ def build_chat_prompt_runtime_payload(
             from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
             _pf_agent = get_prefrontal_agent()
             _eg_engine = _pf_agent._get_emergent_growth_engine()
-            _eg_note = _eg_engine.get_latest_growth_note(_persona_user_id) if _eg_engine is not None else None
+            _eg_note = (
+                _eg_engine.get_latest_growth_note(
+                    _persona_user_id,
+                    render_target_lang=render_target_lang,
+                )
+                if _eg_engine is not None
+                else None
+            )
             if _eg_note:
                 # 注入到 self_reflection_pulse（如果已有则追加 emergent_growth_note 字段）
                 _existing_pulse = runtime_payload.get("self_reflection_pulse")
@@ -2329,6 +2441,7 @@ def build_chat_prompt_runtime_payload(
                 arousal=_cur_arousal,
                 dominance=_cur_dominance,
                 ts_ms=int(_vad.get("ts_ms") or 0),
+                render_target_lang=str(runtime_payload.get("render_target_lang") or "zh"),
             )
             or {}
         )
@@ -2429,6 +2542,7 @@ def build_chat_prompt_runtime_payload(
             growth_awareness=_sr_growth_awareness,
             growth_summary=_sr_growth_summary,
             style_evolution=_sr_style_evolution,
+            render_target_lang=render_target_lang,
         )
         _pulse = dict(_sr_cycle_payload.get("self_reflection_pulse") or {})
         _sr_alignment_snapshot = dict(_sr_cycle_payload.get("snapshot") or {})
@@ -2524,6 +2638,7 @@ def build_chat_prompt_runtime_payload(
             rift_progress=_bas_rift_progress,
             bond_trend=_bas_bond_trend,
             shared_memory_hints=_bas_shared_hints or None,
+            render_target_lang=str(runtime_payload.get("render_target_lang") or "zh"),
         )
         if _bond_style_instruction:
             runtime_payload["bond_style_instruction"] = _bond_style_instruction
@@ -2572,6 +2687,7 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["persona_expression_hint"] = _apply_motive_state_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("motive_state"),
+            render_target_lang=render_target_lang,
         )
         if (
             runtime_payload.get("self_reflection_pulse")
@@ -2587,6 +2703,7 @@ def build_chat_prompt_runtime_payload(
                     motive_state=runtime_payload.get("motive_state"),
                     response_policy=runtime_payload.get("response_policy"),
                     runtime_flags=runtime_payload.get("runtime_mode"),
+                    render_target_lang=render_target_lang,
                 )
             except Exception as _sr_align_exc:
                 logger.debug("SelfReflection narrative alignment degraded: %s", _sr_align_exc)
@@ -2598,30 +2715,35 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["persona_expression_hint"] = _apply_offline_state_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("offline_state"),
+            render_target_lang=render_target_lang,
         )
 
     if runtime_payload.get("persona_expression_hint") and runtime_payload.get("memory_persona_signal"):
         runtime_payload["persona_expression_hint"] = _apply_memory_persona_signal_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("memory_persona_signal"),
+            render_target_lang=render_target_lang,
         )
 
     if runtime_payload.get("persona_expression_hint") and runtime_payload.get("activity_monitor"):
         runtime_payload["persona_expression_hint"] = _apply_activity_monitor_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("activity_monitor"),
+            render_target_lang=render_target_lang,
         )
 
     if runtime_payload.get("persona_expression_hint") and runtime_payload.get("scene_awareness"):
         runtime_payload["persona_expression_hint"] = _apply_scene_awareness_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("scene_awareness"),
+            render_target_lang=render_target_lang,
         )
 
     if runtime_payload.get("persona_expression_hint") and runtime_payload.get("runtime_mode"):
         runtime_payload["persona_expression_hint"] = _apply_runtime_mode_to_persona_expression_hint(
             runtime_payload.get("persona_expression_hint"),
             runtime_payload.get("runtime_mode"),
+            render_target_lang=render_target_lang,
         )
 
     try:

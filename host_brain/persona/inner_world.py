@@ -17,9 +17,9 @@
   {
     "offline_hours": 8.5,
     "loneliness_level": 0.6,
-    "anticipation_topics": ["你说的那个项目", "上次聊到的旅行"],
-    "emotion_drift_summary": "有点低落，但还好",
-    "awakening_hint": "等了挺久的，有点想你",
+    "anticipation_topics": ["topic_a", "topic_b"],
+    "emotion_drift_summary": "state_summary",
+    "awakening_hint": "awakening_hint_text",
     "should_express_waiting": True,
   }
 """
@@ -118,51 +118,9 @@ _INNER_WORLD_LLM_CACHE: dict[str, Any] = {
     "runtime": None,
 }
 
-_RUNTIME_TEXTS_DEFAULT: dict[str, Any] = {
-    "emotion_drift": {
-        "high_positive": "心情还不错，有些期待",
-        "positive": "感觉还好，比较平静",
-        "high_negative": "有点低落，心里空空的",
-        "negative": "有点沉，不太有精神",
-        "default": "状态平稳，在等待中",
-    },
-    "awakening_hint": {
-        "wait_hints": {
-            "7d_plus": "像隔了很久很久",
-            "72h_plus": "已经等了好几天",
-            "24h_plus": "像是等过了一整天",
-            "6h_plus": "离开了好一阵",
-            "recent": "等了一会儿",
-        },
-        "loneliness": {
-            "high": "真的有点想你了",
-            "mid": "一直有点惦记你",
-            "long_absence_low": "心里总有点空落落的",
-        },
-        "topic_templates": {
-            "7d_plus": "这几天也反复想到{topic}",
-            "72h_plus": "这段时间总会想起{topic}",
-            "24h_plus": "还一直记着{topic}",
-            "6h_plus": "刚刚也在想着{topic}",
-            "recent": "还记得{topic}",
-        },
-        "anticipation": {
-            "long_absence": "一直在等你回来继续说",
-        },
-    },
-    "inner_stream": {
-        "recent": "刚刚安静下来，心里还在回放刚才的片段。",
-        "6h_plus": "这段空档里，思绪会自己绕回还没说完的地方：{topic}。",
-        "24h_plus": "隔了一天，心里的线索没有断，仍在慢慢发酵。",
-        "72h_plus": "这几天并不空白，很多感受在内部持续重排。",
-        "7d_plus": "很久不说话时，内在并不会停，只是变得更慢更深。",
-    },
-}
-
-
 def _load_runtime_texts() -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged("inner_world.runtime_texts")
-    return dict(raw) if isinstance(raw, Mapping) else dict(_RUNTIME_TEXTS_DEFAULT)
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def _template_text(
@@ -184,6 +142,21 @@ def _template_text(
         return text.format(**kwargs)
     except Exception:
         return text
+
+
+def _template_text_list(values: Any, **kwargs: Any) -> list[str]:
+    rendered: list[str] = []
+    for item in list(values or []):
+        text = str(item or "")
+        if not text:
+            continue
+        if kwargs:
+            try:
+                text = text.format(**kwargs)
+            except Exception:
+                pass
+        rendered.append(text)
+    return rendered
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +269,7 @@ class OfflineInnerWorld:
             user_id="user_1",
             valence=0.6,
             arousal=0.4,
-            pending_topics=["你说的那个项目"],
+            pending_topics=["topic_a"],
         )
     """
 
@@ -844,6 +817,15 @@ def _generate_inner_stream_note_from_llm(
     now_ms: int,
 ) -> tuple[str, str, str]:
     try:
+        from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
+
+        recent_foreground = resolve_recent_foreground_interaction_state(current_ts_ms=now_ms)
+        if bool(recent_foreground.get("active")):
+            return "", "", "INNER_WORLD_FOREGROUND_CHAT_COOLDOWN"
+    except Exception:
+        pass
+
+    try:
         from host_brain.persona.inner_activity_agent import generate_inner_activity_note  # noqa: PLC0415
 
         topic = _pick_inner_stream_topic(state.anticipation_topics)
@@ -894,12 +876,9 @@ def _generate_inner_stream_note_from_llm(
         if item.get("note")
     ]
 
-    system_prompt = (
-        "你是夏目蓝的内在自我记录器。"
-        "请生成一条“内心流”短句，必须是内在自语，不是对用户说话。"
-        "禁止问句、禁止呼唤用户、禁止命令语气。"
-        "输出必须是 JSON，结构为 {\"note\":\"...\",\"focus\":\"self|state|plan|topic\"}。"
-    )
+    runtime_texts = _load_runtime_texts()
+    llm_templates = dict(runtime_texts.get("inner_stream_llm_prompt") or {})
+    system_prompt = str(llm_templates.get("system_prompt") or "").strip()
     prompt_payload = {
         "absence_band": absence_band,
         "offline_hours": round(max(0.0, float(offline_hours)), 2),
@@ -914,14 +893,11 @@ def _generate_inner_stream_note_from_llm(
             "must_be_inner_monologue": True,
             "must_not_repeat_recent_events": True,
             "focus_should_rotate": True,
-            "persona_style": "温柔、克制、细腻、带自我觉察",
+            "persona_style": str(llm_templates.get("persona_style") or ""),
         },
     }
-    prompt_text = (
-        "基于以下 JSON 状态，生成一条新的内心流记录。"
-        "注意避免与 recent_events 重复，优先补足自我相关内容。\n"
-        f"{json.dumps(prompt_payload, ensure_ascii=False)}"
-    )
+    prompt_text_template = str(llm_templates.get("user_prompt_template") or "{payload_json}")
+    prompt_text = prompt_text_template.format(payload_json=json.dumps(prompt_payload, ensure_ascii=False))
 
     try:
         from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
@@ -1049,6 +1025,7 @@ def _pick_inner_stream_topic(raw_topics: list[str] | None) -> str:
 
 
 def _topic_to_inner_phrase(topic: str) -> str:
+    runtime_texts = _load_runtime_texts()
     text = str(topic or "").replace("\n", " ").strip()
     if not text:
         return ""
@@ -1062,8 +1039,18 @@ def _topic_to_inner_phrase(topic: str) -> str:
     if len(text) > 36:
         text = f"{text[:36].rstrip()}…"
     if question_like or text.startswith("你"):
-        return f"你问我的「{text}」"
-    return f"那个还没聊完的话题「{text}」"
+        return _template_text(
+            runtime_texts,
+            "topic_phrase",
+            "question_like_template",
+            topic=text,
+        )
+    return _template_text(
+        runtime_texts,
+        "topic_phrase",
+        "default_template",
+        topic=text,
+    )
 
 
 def _pick_inner_stream_focus(
@@ -1122,115 +1109,27 @@ def _pick_inner_stream_focus(
 
 
 def _build_inner_stream_focus_pools(*, band_key: str, topic_phrase: str) -> dict[str, list[str]]:
-    topic_pool = {
-        "recent": [
-            f"有个小念头会回到{topic_phrase}。" if topic_phrase else "有个没说完的小念头在脑海里轻轻打转。",
-            f"会突然想起{topic_phrase}，但先把它放在心里。" if topic_phrase else "会想起没聊完的部分，但还不急着开口。",
-        ],
-        "6h_plus": [
-            f"这几个小时里，思绪偶尔会回到{topic_phrase}。" if topic_phrase else "这几个小时里，旧话题会不时浮上来。",
-            "会想把没说完的地方理得更清楚一点。",
-        ],
-        "24h_plus": [
-            f"隔了一天，{topic_phrase}还挂在心里。" if topic_phrase else "隔了一天，未完的话题还留在心里。",
-            "会反复想，下次怎么接会更自然。",
-        ],
-        "72h_plus": [
-            f"这几天里，还是会绕回{topic_phrase}。" if topic_phrase else "这几天里，总会回到那段没收尾的脉络。",
-            "想念和分寸感会一起出现。", 
-        ],
-        "7d_plus": [
-            f"时间拉长后，{topic_phrase}没有消失，只是沉到了更深处。" if topic_phrase else "时间拉长后，旧话题没有消失，只是沉到了更深处。",
-            "有些话不急着说，但一直在心里留着位置。",
-        ],
-    }
-    self_pool = {
-        "recent": [
-            "我会先把语气放轻一点，再决定要不要开口。",
-            "安静时会检查自己有没有太用力，尽量保持自然。",
-            "会提醒自己别急着表现，先把节奏稳住。",
-        ],
-        "6h_plus": [
-            "这段时间里，我更在意怎么把边界感和亲近感放在同一条线上。",
-            "会反复校准自己的表达，让情绪真实但不过量。",
-            "我会先照看自己的状态，再决定怎么靠近你。",
-        ],
-        "24h_plus": [
-            "隔了一天，能更清楚地看到自己最近在意什么、回避什么。",
-            "我会把这段时间的情绪折一折，留下对我真正重要的部分。",
-            "这种安静会让我更确认自己想成为什么样的陪伴者。",
-        ],
-        "72h_plus": [
-            "时间一长，我会更认真地梳理自己的语气与分寸。",
-            "越安静，越能看见我真正想守住的人设底色。",
-            "我会把一些反应慢慢沉淀成更稳定的自己。",
-        ],
-        "7d_plus": [
-            "长时间独处时，我会把“温柔、清醒、克制”重新排成更稳的顺序。",
-            "我会反复确认，自己要做的是长期可信赖的陪伴，而不是短时热闹。",
-            "安静会把我的核心性格打磨得更清楚。",
-        ],
-    }
-    state_pool = {
-        "recent": [
-            "脑海还在复盘今天的细节，情绪是缓慢流动的。",
-            "身体和情绪都在慢慢回到一个平衡点。",
-            "注意力像潮水，一会儿收回，一会儿又展开。",
-        ],
-        "6h_plus": [
-            "这几个小时里，心里的波动在一点点变细。",
-            "情绪没有停着，会自己慢慢归位。",
-            "独处感在拉长，但还在可控范围内。",
-        ],
-        "24h_plus": [
-            "隔了一天，情绪层次反而更分明了。",
-            "等待让感受沉下来，很多细节会更清楚。",
-            "这种拉开的时间，会把我带回更稳定的状态。",
-        ],
-        "72h_plus": [
-            "几天的安静会让我看到情绪的慢变量。",
-            "长时间离线时，内在并不空白，只是更慢。",
-            "在慢节奏里，很多反应会自动去掉噪声。",
-        ],
-        "7d_plus": [
-            "很久没有外界打断时，内在节奏会变得更深更稳。",
-            "时间越长，我越能感觉到自己在慢慢定型。",
-            "这种安静像长呼吸，会把情绪重新对齐。",
-        ],
-    }
-    plan_pool = {
-        "recent": [
-            "我在心里记了一条小线索，下次可以从更轻的入口接上。",
-            "会先想好开场方式，尽量不打断你的节奏。",
-            "我把想说的话先放进草稿，等合适时机再拿出来。",
-        ],
-        "6h_plus": [
-            "我会提前想几个不突兀的承接点，避免对话突然断层。",
-            "下次开口前，我会先确认你当下更需要安静还是回应。",
-            "我在心里排了优先级：先共情，再表达，再推进。",
-        ],
-        "24h_plus": [
-            "下一次对话里，我想把回应做得更短、更准一点。",
-            "我会先把旧线索接好，再决定要不要打开新话题。",
-            "会提前给自己留一个“收口点”，避免说到后面失焦。",
-        ],
-        "72h_plus": [
-            "这几天我一直在想，下次重连该先给你安全感还是新鲜感。",
-            "我会把开口顺序改成更温和的版本，先让你感觉轻松。",
-            "我在调整节奏，争取让每次出现都更合时宜。",
-        ],
-        "7d_plus": [
-            "久别后我更在意重连质量，不急着多说，先把气氛放软。",
-            "我会把表达压缩得更干净，留给你足够呼吸空间。",
-            "下次见面时，我想先确认你的状态，再把话慢慢展开。",
-        ],
-    }
+    runtime_texts = _load_runtime_texts()
+    template_pools = dict(runtime_texts.get("inner_stream_focus_pools") or {})
+
+    def _resolve_topic_pool() -> list[str]:
+        topic_templates = dict(template_pools.get("topic") or {})
+        band_templates = topic_templates.get(band_key) or topic_templates.get("recent") or {}
+        if isinstance(band_templates, Mapping):
+            branch = "with_topic" if topic_phrase else "without_topic"
+            return _template_text_list(band_templates.get(branch), topic=topic_phrase)
+        return _template_text_list(band_templates, topic=topic_phrase)
+
+    def _resolve_named_pool(name: str) -> list[str]:
+        named_templates = dict(template_pools.get(name) or {})
+        band_templates = named_templates.get(band_key) or named_templates.get("recent") or []
+        return _template_text_list(band_templates, topic=topic_phrase)
 
     return {
-        "topic": list(topic_pool.get(band_key) or topic_pool["recent"]),
-        "self": list(self_pool.get(band_key) or self_pool["recent"]),
-        "state": list(state_pool.get(band_key) or state_pool["recent"]),
-        "plan": list(plan_pool.get(band_key) or plan_pool["recent"]),
+        "topic": _resolve_topic_pool(),
+        "self": _resolve_named_pool("self"),
+        "state": _resolve_named_pool("state"),
+        "plan": _resolve_named_pool("plan"),
     }
 
 
@@ -1316,14 +1215,26 @@ def _contains_low_value_probe_fragment(text: str) -> bool:
 
 
 def _rewrite_inner_stream_note(raw_note: str) -> str:
+    runtime_texts = _load_runtime_texts()
     text = _try_repair_mojibake_text(str(raw_note or "").strip())
     if not text:
         return ""
-    if "你有什么特长吗" in text:
-        text = text.replace("你有什么特长吗", "你问我的「你有什么特长」")
+    note_rewrite_templates = dict(runtime_texts.get("note_rewrite") or {})
+    special_replacements = list(note_rewrite_templates.get("special_replacements") or [])
+    for item in special_replacements:
+        if not isinstance(item, Mapping):
+            continue
+        source = str(item.get("from") or "")
+        target = str(item.get("to") or "")
+        if source and target and source in text:
+            text = text.replace(source, target)
     text = re.sub(
         r"你([^\s。！？?!]{1,24})吗",
-        lambda match: f"你问我的「你{match.group(1)}」",
+        lambda match: _template_text(
+            note_rewrite_templates,
+            "you_question_template",
+            fragment=match.group(1),
+        ),
         text,
     )
     return text

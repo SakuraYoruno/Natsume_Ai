@@ -4,24 +4,27 @@ import json
 import random
 
 import host_brain.persona.bond_aware_style as bas
-from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.app.prompt_template_store import PromptTemplateStore, resolve_prompt_template_json_merged
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.bond_aware_style import (
     BondAwareStyleEngine,
     _build_memory_style_instruction,
     _get_rift_adjustment,
     _get_substage_hint,
+    _load_localized_template_mapping,
 )
 
 
 def test_get_rift_adjustment_handles_default_and_progress_buckets() -> None:
+    templates = _load_localized_template_mapping("bond_aware_style.style_templates", render_target_lang="zh")
     assert _get_rift_adjustment(False) == ""
-    assert _get_rift_adjustment(True, "unknown", -1.0) == bas._RIFT_STYLE_MAP["medium"]["fresh"]
-    assert _get_rift_adjustment(True, "light", 0.5) == bas._RIFT_STYLE_MAP["light"]["healing"]
-    assert _get_rift_adjustment(True, "severe", 1.5) == bas._RIFT_STYLE_MAP["severe"]["almost_ok"]
+    assert _get_rift_adjustment(True, "unknown", -1.0) == templates["rift_style_map"]["medium"]["fresh"]
+    assert _get_rift_adjustment(True, "light", 0.5) == templates["rift_style_map"]["light"]["healing"]
+    assert _get_rift_adjustment(True, "severe", 1.5) == templates["rift_style_map"]["severe"]["almost_ok"]
 
 
 def test_get_substage_hint_handles_unknown_zero_span_and_boundaries(monkeypatch) -> None:
+    templates = _load_localized_template_mapping("bond_aware_style.style_templates", render_target_lang="zh")
     assert _get_substage_hint("MISSING", 0.4) == ""
 
     monkeypatch.setitem(
@@ -31,9 +34,9 @@ def test_get_substage_hint_handles_unknown_zero_span_and_boundaries(monkeypatch)
     )
     assert _get_substage_hint("BROKEN", 0.5) == "stable"
 
-    _, _, _, entry_hint, stable_hint = bas._BOND_SUBSTAGE_CONFIG["FRIEND"]
-    assert _get_substage_hint("FRIEND", 0.42) == entry_hint
-    assert _get_substage_hint("FRIEND", 0.59) == stable_hint
+    friend_config = templates["substage_config"]["FRIEND"]
+    assert _get_substage_hint("FRIEND", 0.42) == friend_config["entry_hint"]
+    assert _get_substage_hint("FRIEND", 0.59) == friend_config["stable_hint"]
 
 
 def test_generate_includes_rift_trend_texture_and_shared_memories(monkeypatch) -> None:
@@ -53,14 +56,14 @@ def test_generate_includes_rift_trend_texture_and_shared_memories(monkeypatch) -
         shared_memory_hints=["一起等过末班车", "", "你说过自己怕黑", "这条应被截断"],
     )
 
-    assert "- substage_context:" in result.prompt_injection
-    assert "- mood_adjustment:" in result.prompt_injection
-    assert "- natsume_self_mood:" in result.prompt_injection
-    assert "severity=severe, progress=80%" in result.prompt_injection
-    assert "trend_adjustment: 关系在降温" in result.prompt_injection
-    assert "- texture: 语气里带一点黏人" in result.prompt_injection
-    assert "- shared_memories: 一起等过末班车; 你说过自己怕黑; 这条应被截断" in result.prompt_injection
-    assert "- memory_style_guide:" in result.prompt_injection
+    assert "- 关系细节：" in result.prompt_injection
+    assert "- 对方状态：" in result.prompt_injection
+    assert "- 你此刻的状态：" in result.prompt_injection
+    assert "（程度 severe，修复 80%）" in result.prompt_injection
+    assert "- 关系走向：关系有点降温" in result.prompt_injection
+    assert "- 细节质感：语气里带一点黏人" in result.prompt_injection
+    assert "- 共同记忆：一起等过末班车; 你说过自己怕黑; 这条应被截断" in result.prompt_injection
+    assert "- 记忆使用方式：" in result.prompt_injection
     assert result.shared_memory_hint
     assert result.as_dict()["has_shared_memory_hint"] is True
 
@@ -75,23 +78,24 @@ def test_generate_stranger_skips_shared_memory_and_supports_rising_trend() -> No
         shared_memory_hints=["不该注入"],
     )
 
-    assert "trend_adjustment: 关系在变好" in result.prompt_injection
-    assert "- texture: 更克制一点" in result.prompt_injection
-    assert "shared_memories" not in result.prompt_injection
+    assert "- 关系走向：关系在往上走" in result.prompt_injection
+    assert "- 细节质感：更克制一点" in result.prompt_injection
+    assert "共同记忆" not in result.prompt_injection
     assert result.shared_memory_hint == ""
 
 
 def test_build_memory_style_instruction_handles_empty_unknown_and_known_stage(monkeypatch) -> None:
     monkeypatch.setattr(random, "choice", lambda seq: seq[0])
+    templates = _load_localized_template_mapping("bond_aware_style.style_templates", render_target_lang="zh")
 
     assert _build_memory_style_instruction("FRIEND", []) == ""
 
     unknown = _build_memory_style_instruction("UNKNOWN", ["a", "b", "c", "d"])
-    assert "不少共同记忆" in unknown
+    assert "共同记忆不少" in unknown
 
     known = _build_memory_style_instruction("ACQUAINTANCE", ["a", "b"])
-    assert "几段记忆" in known
-    assert bas._MEMORY_STYLE_GUIDES["ACQUAINTANCE"][0] in known
+    assert "几段共同经历" in known
+    assert templates["memory_style_guides"]["ACQUAINTANCE"][0] in known
 
 
 def test_style_templates_override_runtime_sections(monkeypatch) -> None:
@@ -169,3 +173,20 @@ def test_style_templates_override_runtime_sections(monkeypatch) -> None:
     assert "trend_adjustment: 自定义关系升温提醒" in result.prompt_injection
     assert _get_rift_adjustment(True, "light", 0.1) == "自定义轻裂痕 fresh"
     assert _build_memory_style_instruction("FRIEND", ["一起看过海"]) == "自定义一条记忆提示自定义朋友记忆指导"
+
+
+def test_generate_uses_japanese_bond_style_templates() -> None:
+    engine = BondAwareStyleEngine()
+    result = engine.generate(
+        bond_stage="FRIEND",
+        intimacy_score=0.45,
+        mood_state="negative",
+        natsume_mood="SAD",
+        bond_trend="rising",
+        render_target_lang="ja",
+    )
+
+    assert "【関係" in result.prompt_injection
+    assert "関係段階" in result.prompt_injection
+    assert "你" not in result.prompt_injection
+    assert "我" not in result.prompt_injection

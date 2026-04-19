@@ -42,6 +42,29 @@ def test_silence_tick_delegates_to_limbic(monkeypatch) -> None:
     assert fake_limbic.tick_calls[0]["current_topic"] == "topic-a"
 
 
+def test_silence_tick_skips_during_recent_foreground_chat(monkeypatch) -> None:
+    fake_limbic = _FakeLimbicAgent()
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.resolve_background_tick_guard_state",
+        lambda **_kwargs: {
+            "active": True,
+            "cooldown_remaining_ms": 31000,
+            "speed_profile": "context_fast",
+        },
+    )
+
+    result = execute_silence_tick(
+        args={"current_topic": "topic-a"},
+        context={"user_id": "u1"},
+    )
+
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "BACKGROUND_TICK_FOREGROUND_CHAT_COOLDOWN"
+    assert result["cooldown_remaining_ms"] == 31000
+    assert fake_limbic.tick_calls == []
+
+
 def test_silence_update_emotion_delegates_to_limbic(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)

@@ -170,6 +170,19 @@ def test_self_model_narrative_text_pools_use_template_override(monkeypatch) -> N
             "bond_text_pool": {
                 "变亲近": ["自定义更亲近"],
             },
+            "personality_change_templates": {
+                "positive": "自定义变得更{trait_cn}了",
+                "negative": "自定义{trait_cn}收敛",
+            },
+            "growth_milestone_templates": {
+                "stage_labels": {
+                    "SOULMATE": "灵魂伴侣",
+                },
+                "relationship_stage": "自定义和 master 已经成为{stage_cn}了",
+                "event_count_high": "自定义已经有 {event_count} 次互动了",
+                "event_count_mid": "自定义互动超过 {threshold} 次了",
+                "personality_growth": "自定义人格在慢慢成长中",
+            },
             "time_context_text_pool": {
                 "久别重逢": ["自定义重逢"],
             },
@@ -217,6 +230,18 @@ def test_self_model_narrative_text_pools_use_template_override(monkeypatch) -> N
             "growth_milestones": [],
         }
     ) == "包装::更坦率了"
+
+    model = sm.SelfModel()
+    changes = model._extract_personality_changes([_Record({"warmth": 0.03})])
+    assert changes == ["自定义变得更温柔了"]
+
+    milestones = model._extract_growth_milestones(
+        _BondState(current_stage="SOULMATE", event_count=120),
+        [_Record({"warmth": 0.03}), _Record({"humor": 0.02}), _Record({"resilience": 0.01})],
+    )
+    assert "自定义和 master 已经成为灵魂伴侣了" in milestones
+    assert "自定义已经有 120 次互动了" in milestones
+    assert "自定义人格在慢慢成长中" in milestones
 
 
 def test_build_state_aligned_self_awareness_uses_template_override(monkeypatch) -> None:
@@ -326,3 +351,106 @@ def test_builtin_self_model_narrative_text_pools_are_clean() -> None:
     assert templates["time_context_text_pool"]["久别重逢"][0] == "好久没见了，重新在一起感觉有点不真实"
     assert templates["mood_awareness_pool"]["stable"][0] == "今天整体感觉{emotion}，情绪比较稳定"
     assert templates["growth_note_wrappers"][0] == "感觉自己{change}"
+
+
+def test_self_model_localized_ja_templates_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "self_model.narrative_text_pools.ja",
+        content=json.dumps(
+            {
+                "mood_text_pool": {
+                    "偏好": ["最近は少し軽いです。"],
+                },
+                "bond_text_pool": {
+                    "变亲近": ["masterとの距離が少し近いです。"],
+                },
+                "time_context_text_pool": {
+                    "久别重逢": ["久しぶりに話せて、少し胸がほどけます。"],
+                },
+                "mood_awareness_pool": {
+                    "stable": ["今日は{emotion}のまま静かです。"],
+                },
+                "growth_note_wrappers": ["最近、自分が{change}気がします。"],
+                "emotion_cn": {
+                    "HAPPY": "うれしい",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+    store.upsert_template(
+        "self_model.state_alignment_texts.ja",
+        content=json.dumps(
+            {
+                "bond_perception_anchor": {
+                    "steady_default": "このやり取りの温度を保っていたいです。",
+                },
+                "absence_anchor": {
+                    "72h_plus": "数日ぶりに",
+                },
+                "reason_suffix": {
+                    "brief": "だから今は短く返したいです。",
+                },
+                "intent_text": {
+                    "continuity_default": "このやり取りを静かにつなぎたいです。",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    monkeypatch.setattr(sm.random, "choice", lambda pool: pool[0])
+    monkeypatch.setattr(sm.random, "random", lambda: 0.1)
+
+    text = sm.build_self_awareness_text(
+        {
+            "recent_mood_trend": "偏好",
+            "bond_growth_perception": "变亲近",
+            "event_count": 99,
+        },
+        time_context="久别重逢",
+        render_target_lang="ja",
+    )
+    assert "最近は少し軽いです。" in text
+    assert "masterとの距離が少し近いです。" in text
+    assert "久しぶりに話せて" in text
+
+    mood = sm.build_mood_awareness_text(
+        {
+            "dominant_recent_emotion": "HAPPY",
+            "emotional_stability": 0.9,
+        },
+        render_target_lang="ja",
+    )
+    assert mood == "今日はうれしいのまま静かです。"
+
+    growth = sm.build_growth_note_text(
+        {
+            "personality_changes": ["少しやわらかくなってきた"],
+            "growth_milestones": [],
+        },
+        render_target_lang="ja",
+    )
+    assert growth == "最近、自分が少しやわらかくなってきた気がします。"
+
+    aligned = sm.build_state_aligned_self_awareness(
+        {
+            "bond_growth_perception": "稳定",
+        },
+        offline_state={"offline_hours": 80.0},
+        motive_state={"continuity_drive": 0.8},
+        response_policy={"should_be_brief": True},
+        render_target_lang="ja",
+    )
+    assert "数日ぶりに" in aligned["self_awareness"]
+    assert "このやり取りの温度を保っていたいです" in aligned["self_awareness"]
+    assert "このやり取りを静かにつなぎたいです" in aligned["self_awareness"]
+    assert "だから今は短く返したいです。" in aligned["self_awareness"]

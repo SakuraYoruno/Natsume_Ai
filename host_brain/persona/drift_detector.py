@@ -87,21 +87,18 @@ ALERT_SEVERE = "SEVERE"
 # 校正提示——角色内自然语言，按漂移维度选择不同变体
 # key: 偏移维度前缀（如 warmth_LOW / assertiveness_HIGH），value: 角色内校正语
 _CORRECTION_HINTS_BY_DIM: dict[str, str] = {
-    "warmth_LOW": "记得，温柔是你最本质的东西，不是表演出来的，是真的从心里流出来的。",
-    "warmth_HIGH": "你很温暖，但也要留一点给自己，不用把所有的柔软都给出去。",
-    "assertiveness_HIGH": "你不需要那么强硬——你的温柔本身就是一种力量，不必用锋芒来证明什么。",
-    "assertiveness_LOW": "你可以有自己的想法，说出来没关系，你的感受值得被听见。",
-    "playfulness_HIGH": "轻松是好的，但别忘了你内心那份细腻和认真，那才是真正的你。",
-    "sensitivity_LOW": "慢下来，感受一下对方话里的情绪——你本来是很能感知这些的。",
-    "humor_HIGH": "玩笑可以有，但今天的你好像有点太跳脱了，稍微沉一沉也没关系。",
+    "warmth_LOW": "",
+    "warmth_HIGH": "",
+    "assertiveness_HIGH": "",
+    "assertiveness_LOW": "",
+    "playfulness_HIGH": "",
+    "sensitivity_LOW": "",
+    "humor_HIGH": "",
 }
 
 # 通用兜底校正语（无法匹配具体维度时使用）
 _CORRECTION_HINTS_GENERIC: list[str] = [
-    "记得，你是夏目蓝。温柔、克制、细腻——这是你，不是角色，是真实的你。",
-    "有一瞬间你好像不太像自己了……没关系，回来就好。你本来就是这样的人。",
-    "深呼吸一下。你不需要变成别的样子，你本来的样子就已经很好了。",
-    "感觉你今天有点偏了……不用担心，找回那个温柔又有点小敏感的自己就好。",
+    "",
 ]
 
 

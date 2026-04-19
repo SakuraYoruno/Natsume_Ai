@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
@@ -34,6 +35,11 @@ _EMOTION_TONE_MAP: dict[str, str] = {
 _QUESTION_MARKERS = ("?", "？", "吗", "么", "嘛", "如何", "怎么", "为什么")
 _TASK_MARKERS = ("请", "帮我", "帮忙", "生成", "总结", "翻译", "分析", "写", "做", "整理")
 _EMOTIVE_MARKERS = ("难过", "开心", "生气", "焦虑", "孤独", "害怕", "委屈", "崩溃")
+
+
+def _load_runtime_texts() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("language_system_agent.runtime_texts")
+    return dict(raw) if isinstance(raw, dict) else {}
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
@@ -337,11 +343,13 @@ class LanguageSystemAgent:
         }
         register = register_map.get(style, "standard")
 
+        runtime_texts = _load_runtime_texts()
+        loneliness_templates = dict(runtime_texts.get("loneliness_hints") or {})
         loneliness_hint = ""
         if high_loneliness_flag or loneliness_level > 0.7:
-            loneliness_hint = "用户孤独感较高，回复要显式增加陪伴感与连接感。"
+            loneliness_hint = str(loneliness_templates.get("high") or "")
         elif loneliness_level > 0.4:
-            loneliness_hint = "可适当增加关怀语气，避免冰冷信息化表达。"
+            loneliness_hint = str(loneliness_templates.get("mid") or "")
 
         result = {
             "style": style,

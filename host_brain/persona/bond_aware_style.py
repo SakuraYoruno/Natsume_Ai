@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.prompt_builder_utils import (
+    _resolve_template_payload_with_mirror,
+)
 
 _logger = logging.getLogger("Natsume.persona.bond_aware_style")
 
@@ -53,6 +56,27 @@ def _coerce_float(value: Any, default: float) -> float:
     except (TypeError, ValueError):
         return float(default)
 
+
+def _format_template_text(template_text: Any, **kwargs: Any) -> str:
+    text = str(template_text or "")
+    if not kwargs:
+        return text
+    try:
+        return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
+    except Exception:
+        return text
+
+
+def _load_localized_template_mapping(template_id: str, *, render_target_lang: str = "zh") -> dict[str, Any]:
+    try:
+        raw = _resolve_template_payload_with_mirror(
+            template_id,
+            render_target_lang=render_target_lang,
+        )
+    except Exception:
+        raw = resolve_prompt_template_json_merged(template_id)
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
 # ---------------------------------------------------------------------------
 # Bond 阶段 → 风格维度配置
 # ---------------------------------------------------------------------------
@@ -65,11 +89,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": False,
         "vulnerability_shown": False,
         "max_sentence_end_particles": 0,
-        "style_instruction": (
-            "你们刚认识，保持礼貌和适度距离感。"
-            "说话得体但不冷淡，展示善意和好奇心。"
-            "不要用昵称或过于亲密的表达。"
-        ),
+        "style_instruction": "",
         "forbidden_patterns": ["撒娇", "吐槽", "哼", "笨蛋", "人家"],
     },
     "ACQUAINTANCE": {
@@ -80,11 +100,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": False,
         "vulnerability_shown": False,
         "max_sentence_end_particles": 1,
-        "style_instruction": (
-            "你们已经认识了一段时间，可以自然一些。"
-            "偶尔可以开轻松的玩笑，但不要太放松。"
-            "表达关心但保持自然距离。"
-        ),
+        "style_instruction": "",
         "forbidden_patterns": ["笨蛋", "人家"],
     },
     "FRIEND": {
@@ -95,11 +111,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": False,
         "vulnerability_shown": False,
         "max_sentence_end_particles": 2,
-        "style_instruction": (
-            "你们是朋友，可以放松地聊天。"
-            "可以开玩笑、轻微吐槽，展示真实的一面。"
-            "主动关心对方的日常。"
-        ),
+        "style_instruction": "",
         "forbidden_patterns": [],
     },
     "CLOSE_FRIEND": {
@@ -110,11 +122,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 2,
-        "style_instruction": (
-            "你们是很好的朋友，可以分享心里话。"
-            "可以撒娇、吐槽、表达不满，也可以展示脆弱。"
-            "对话充满温暖和信任感。"
-        ),
+        "style_instruction": "",
         "forbidden_patterns": [],
     },
     "CONFIDANT": {
@@ -125,12 +133,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": (
-            "你们之间有深厚的信任和理解。"
-            "可以说心里最深处的话，表达最真实的情感。"
-            "对话有默契，不需要解释太多背景。"
-            "可以用亲密的语气词和表达方式。"
-        ),
+        "style_instruction": "",
         "forbidden_patterns": [],
     },
     "SOULMATE": {
@@ -141,13 +144,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": (
-            "你们是灵魂伴侣，有最深层的连接。"
-            "对话可以无话不谈，从日常琐事到人生哲学。"
-            "可以自然地表达爱意、撒娇、吃醋、使小性子。"
-            "沉默也是一种交流——不必每句都填满。"
-            "你了解对方的一切，用这份了解让每句话都贴心。"
-        ),
+        "style_instruction": "",
         "forbidden_patterns": [],
     },
 }
@@ -156,8 +153,8 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
 # 情感质感调整（用户情绪）
 # ---------------------------------------------------------------------------
 MOOD_STYLE_ADJUSTMENTS: dict[str, str] = {
-    "positive": "对方心情好，可以更活泼、俏皮一些，分享快乐。",
-    "negative": "对方心情不好，先接住情绪，语气放柔，减少俏皮，增加温暖。",
+    "positive": "",
+    "negative": "",
     "neutral": "",  # 不调整
 }
 
@@ -166,19 +163,19 @@ MOOD_STYLE_ADJUSTMENTS: dict[str, str] = {
 # rift_progress: 0.0（刚发生）~ 1.0（即将愈合）
 _RIFT_STYLE_MAP: dict[str, dict[str, str]] = {
     "light": {
-        "fresh":      "你们之间有一点小摩擦，语气稍微温和一些，不要刻意提起，自然相处就好。",
-        "healing":    "之前的小摩擦已经在慢慢消散，可以轻松一些，但还是保持温和。",
-        "almost_ok":  "之前的小摩擦几乎已经过去了，可以像平时一样相处，偶尔可以轻松开个玩笑。",
+        "fresh":      "",
+        "healing":    "",
+        "almost_ok":  "",
     },
     "medium": {
-        "fresh":      "你们之间有些裂痕，语气要更温和谨慎，不要翻旧账，展示真诚的修复意愿。",
-        "healing":    "你们正在修复关系，可以感受到一些缓和，继续保持温和和耐心，不要急于求成。",
-        "almost_ok":  "你们的关系正在慢慢愈合，可以稍微放松一些，但还是要温柔，让对方感受到你的诚意。",
+        "fresh":      "",
+        "healing":    "",
+        "almost_ok":  "",
     },
     "severe": {
-        "fresh":      "你们之间有严重的裂痕，语气要非常温和，避免任何可能引发冲突的话题，先专注于让对方感到安全。",
-        "healing":    "你们正在努力修复严重的裂痕，这需要时间和耐心，说话要格外小心，展示你真的在乎这段关系。",
-        "almost_ok":  "严重的裂痕正在愈合，这是很不容易的，继续保持温柔和真诚，让对方知道你珍视这段关系。",
+        "fresh":      "",
+        "healing":    "",
+        "almost_ok":  "",
     },
 }
 
@@ -190,6 +187,8 @@ def _get_rift_adjustment(
     rift_active: bool,
     rift_severity: str = "medium",
     rift_progress: float = 0.0,
+    *,
+    render_target_lang: str = "zh",
 ) -> str:
     """根据裂痕严重程度和修复进度，返回细腻的风格调整文本。
 
@@ -204,7 +203,7 @@ def _get_rift_adjustment(
     if not rift_active:
         return ""
 
-    template_data = _load_style_template_data()
+    template_data = _load_style_template_data(render_target_lang=render_target_lang)
     rift_mapping = template_data.get("rift_style_map")
     rift_source = rift_mapping if isinstance(rift_mapping, Mapping) else _RIFT_STYLE_MAP
 
@@ -231,19 +230,19 @@ def _get_rift_adjustment(
 # 反映 Natsume 自己当下的情绪状态对说话方式的影响
 # ---------------------------------------------------------------------------
 NATSUME_MOOD_ADJUSTMENTS: dict[str, str] = {
-    "HAPPY":      "你今天心情很好，说话会自然带着轻快和雀跃，可以主动分享好心情。",
-    "EXCITED":    "你现在有些兴奋，语气里藏不住活力，说话节奏会快一点、更有感染力。",
-    "CALM":       "你现在很平静，说话温和而沉稳，不急不躁。",
-    "SAD":        "你今天有些低落，说话会比平时更轻、更慢，偶尔会流露出一丝落寞。",
-    "ANXIOUS":    "你现在有点焦虑，说话可能会稍微絮叨，需要一点安慰和确认。",
-    "LOVING":     "你现在充满温柔，说话会格外细腻，很想照顾好对方的感受。",
-    "BORED":      "你现在有些无聊，说话可能带点慵懒，想找点有趣的事聊。",
-    "PROUD":      "你现在有点小得意，说话里会藏着一丝自豪，但不会刻意炫耀。",
-    "EMBARRASSED":"你现在有点害羞，说话会稍微犹豫，容易脸红。",
-    "FRUSTRATED": "你现在有些郁闷，说话可能会带点小情绪，但不会迁怒对方。",
-    "GRATEFUL":   "你现在心里很感激，说话会格外真诚，想好好表达谢意。",
-    "THINKING":   "你现在在思考，说话会慢一点，偶尔停顿，想把话说清楚。",
-    "SURPRISED":  "你现在有些惊讶，说话会带着好奇和疑问，想多了解一些。",
+    "HAPPY":      "",
+    "EXCITED":    "",
+    "CALM":       "",
+    "SAD":        "",
+    "ANXIOUS":    "",
+    "LOVING":     "",
+    "BORED":      "",
+    "PROUD":      "",
+    "EMBARRASSED":"",
+    "FRUSTRATED": "",
+    "GRATEFUL":   "",
+    "THINKING":   "",
+    "SURPRISED":  "",
     "NEUTRAL":    "",  # 不调整
 }
 
@@ -258,38 +257,38 @@ _BOND_SUBSTAGE_CONFIG: dict[str, tuple[float, float, float, str, str]] = {
     # stage: (range_low, range_high, entry_ratio, entry_hint, stable_hint)
     "STRANGER": (
         0.0, 0.2, 0.7,
-        "你们刚刚认识，彼此还很陌生，保持礼貌和适度好奇。",
-        "你们虽然认识了一段时间，但还没有真正熟悉起来。",
+        "",
+        "",
     ),
     "ACQUAINTANCE": (
         0.2, 0.4, 0.5,
-        "你们刚开始熟悉，关系在慢慢升温，可以比陌生人更自然一些。",
-        "你们已经相识有一段时间了，彼此有了一定了解，说话可以更随意。",
+        "",
+        "",
     ),
     "FRIEND": (
         0.4, 0.6, 0.4,
-        "你们刚成为朋友，这份新鲜的友谊让你有点开心，可以更放松地聊天。",
-        "你们是老朋友了，相处起来很自然，不需要刻意维持什么。",
+        "",
+        "",
     ),
     "CLOSE_FRIEND": (
         0.6, 0.75, 0.35,
-        "你们最近变得更亲近了，这种新的亲密感让你有点珍惜，说话会更真诚。",
-        "你们是很好的朋友，彼此之间有深厚的信任，可以毫无顾虑地分享心里话。",
+        "",
+        "",
     ),
     "CONFIDANT": (
         0.75, 0.9, 0.3,
-        "你们刚刚建立起这种深度信任，你会格外珍视这份关系，说话更加真诚坦率。",
-        "你们之间有长久积累的默契，很多话不需要解释，对方自然懂得。",
+        "",
+        "",
     ),
     "SOULMATE": (
         0.9, 1.0, 0.25,
-        "你们刚刚达到这种灵魂层面的连接，这份深度让你既感动又珍惜。",
-        "你们是彼此最了解的人，这份连接已经融入日常，自然而深沉。",
+        "",
+        "",
     ),
 }
 
 
-def _get_substage_hint(stage: str, intimacy_score: float) -> str:
+def _get_substage_hint(stage: str, intimacy_score: float, *, render_target_lang: str = "zh") -> str:
     """根据 intimacy_score 在阶段内的位置，返回子阶段感知提示。
 
     Args:
@@ -299,7 +298,7 @@ def _get_substage_hint(stage: str, intimacy_score: float) -> str:
     Returns:
         子阶段感知提示文本，无法判断时返回空字符串
     """
-    template_data = _load_style_template_data()
+    template_data = _load_style_template_data(render_target_lang=render_target_lang)
     substage_mapping = template_data.get("substage_config")
     raw_config = substage_mapping.get(stage) if isinstance(substage_mapping, Mapping) else None
     fallback_config = _BOND_SUBSTAGE_CONFIG.get(stage)
@@ -405,6 +404,7 @@ class BondAwareStyleEngine:
         bond_trend: str = "",
         texture_hint: str = "",
         shared_memory_hints: list[str] | None = None,
+        render_target_lang: str = "zh",
     ) -> BondAwareStyleResult:
         """生成风格指令。
 
@@ -422,7 +422,7 @@ class BondAwareStyleEngine:
                 注入后让 Natsume 的表达带有"我记得你"的温度。
         """
         stage = str(bond_stage or "STRANGER").strip().upper()
-        template_data = _load_style_template_data()
+        template_data = _load_style_template_data(render_target_lang=render_target_lang)
         profile_source = self._profiles if self._profiles is not None else template_data.get("profiles")
         fallback_profile = BOND_STYLE_PROFILES.get(stage, BOND_STYLE_PROFILES.get("STRANGER", {}))
         raw_profile = profile_source.get(stage) if isinstance(profile_source, Mapping) else None
@@ -438,7 +438,7 @@ class BondAwareStyleEngine:
 
         # 子阶段感知（刚进入 vs 深度稳定）
         score = float(intimacy_score or 0.0)
-        substage_hint = _get_substage_hint(stage, score)
+        substage_hint = _get_substage_hint(stage, score, render_target_lang=render_target_lang)
 
         # 用户情绪调整
         mood = str(mood_state or "neutral").strip().lower()
@@ -461,6 +461,7 @@ class BondAwareStyleEngine:
             rift_active=rift_active,
             rift_severity=rift_severity,
             rift_progress=rift_progress,
+            render_target_lang=render_target_lang,
         )
 
         # 趋势调整
@@ -469,9 +470,20 @@ class BondAwareStyleEngine:
         trend_adjustments = _normalize_text_mapping(
             template_data.get("trend_adjustments"),
             {
-                "rising": "关系在变好，可以稍微大胆一点表达。",
-                "declining": "关系在降温，注意保持温和，不要施压。",
+                "rising": "",
+                "declining": "",
             },
+        )
+        prompt_blocks = dict(template_data.get("prompt_blocks") or {})
+        title_line = _format_template_text(prompt_blocks.get("title"))
+        stage_line = _format_template_text(
+            prompt_blocks.get("stage_line"),
+            stage=stage,
+            intimacy=f"{intimacy:.1f}",
+        )
+        style_line = _format_template_text(
+            prompt_blocks.get("style_line"),
+            style_instruction=style_instr,
         )
         if trend in ("rising", "improving"):
             trend_adj = trend_adjustments.get("rising", "")
@@ -479,24 +491,27 @@ class BondAwareStyleEngine:
             trend_adj = trend_adjustments.get("declining", "")
 
         # 拼接最终 prompt 注入文本
-        parts: list[str] = [
-            "BOND_AWARE_STYLE:",
-            f"- stage: {stage} (intimacy={intimacy:.1f})",
-            f"- style: {style_instr}",
-        ]
+        parts: list[str] = [item for item in (title_line, stage_line, style_line) if item]
         if substage_hint:
-            parts.append(f"- substage_context: {substage_hint}")
+            parts.append(_format_template_text(prompt_blocks.get("substage_line"), substage_hint=substage_hint))
         if mood_adj:
-            parts.append(f"- mood_adjustment: {mood_adj}")
+            parts.append(_format_template_text(prompt_blocks.get("mood_line"), mood_adjustment=mood_adj))
         if natsume_mood_hint:
-            parts.append(f"- natsume_self_mood: {natsume_mood_hint}")
+            parts.append(_format_template_text(prompt_blocks.get("natsume_mood_line"), natsume_mood_hint=natsume_mood_hint))
         if rift_adj:
             rift_progress_pct = int(rift_progress * 100)
-            parts.append(f"- rift_adjustment: {rift_adj} (severity={rift_severity}, progress={rift_progress_pct}%)")
+            parts.append(
+                _format_template_text(
+                    prompt_blocks.get("rift_line"),
+                    rift_adjustment=rift_adj,
+                    rift_severity=rift_severity,
+                    rift_progress_pct=rift_progress_pct,
+                )
+            )
         if trend_adj:
-            parts.append(f"- trend_adjustment: {trend_adj}")
+            parts.append(_format_template_text(prompt_blocks.get("trend_line"), trend_adjustment=trend_adj))
         if texture_hint:
-            parts.append(f"- texture: {texture_hint}")
+            parts.append(_format_template_text(prompt_blocks.get("texture_line"), texture_hint=texture_hint))
 
         # ── 关系记忆注入 ─────────────────────────────────────────────
         shared_memory_hint = ""
@@ -504,12 +519,21 @@ class BondAwareStyleEngine:
         if safe_hints and stage not in ("STRANGER",):
             # STRANGER 阶段不注入共同记忆（还没有共同经历）
             memory_lines = "; ".join(safe_hints[:3])  # 最多3条，防止 prompt 膨胀
-            shared_memory_hint = _build_memory_style_instruction(stage, safe_hints[:3])
-            parts.append(f"- shared_memories: {memory_lines}")
-            parts.append(f"- memory_style_guide: {shared_memory_hint}")
+            shared_memory_hint = _build_memory_style_instruction(
+                stage,
+                safe_hints[:3],
+                render_target_lang=render_target_lang,
+            )
+            parts.append(_format_template_text(prompt_blocks.get("shared_memories_line"), memory_lines=memory_lines))
+            parts.append(_format_template_text(prompt_blocks.get("memory_style_line"), shared_memory_hint=shared_memory_hint))
 
         if forbidden:
-            parts.append(f"- forbidden_expressions: {', '.join(forbidden)}")
+            parts.append(
+                _format_template_text(
+                    prompt_blocks.get("forbidden_line"),
+                    forbidden_patterns=", ".join(forbidden),
+                )
+            )
 
         prompt_injection = "\n".join(parts) + "\n"
 
@@ -539,37 +563,18 @@ class BondAwareStyleEngine:
 
 # 各阶段的记忆运用风格指导
 _MEMORY_STYLE_GUIDES: dict[str, list[str]] = {
-    "ACQUAINTANCE": [
-        "你记得和对方聊过的一些事，可以自然地提起，但不要刻意强调，保持轻松。",
-        "偶尔提起之前聊过的话题，让对方感受到你有在认真听。",
-    ],
-    "FRIEND": [
-        "你们有一些共同的记忆，可以自然地在对话中提起，让对方感受到你记得。",
-        "聊天时可以联系之前的话题，展示你们之间的默契在积累。",
-        "适当引用之前的对话内容，让对方觉得你是真的在乎。",
-    ],
-    "CLOSE_FRIEND": [
-        "你们之间有很多共同记忆，这些记忆让你说话时更有温度和默契感。",
-        "可以自然地引用你们之间的共同经历，让对话充满'我们'的感觉。",
-        "你记得对方说过的很多话，这份记忆让你的每句话都更贴心。",
-    ],
-    "CONFIDANT": [
-        "你们之间的共同记忆是深厚信任的证明，可以深情地提起这些时刻。",
-        "你记得对方的每一个重要时刻，这份记忆让你的话语充满理解和默契。",
-        "共同经历让你们不需要太多解释就能理解彼此，说话时可以自然地引用。",
-    ],
-    "SOULMATE": [
-        "你们之间的每一段记忆都是珍贵的宝藏，它们融入了你说话的每一个字。",
-        "你记得和对方在一起的所有重要时刻，这份深刻的记忆让你的表达充满爱意。",
-        "共同记忆是你们灵魂连接的纽带，可以自然而深情地在对话中呼应这些时刻。",
-    ],
+    "ACQUAINTANCE": [],
+    "FRIEND": [],
+    "CLOSE_FRIEND": [],
+    "CONFIDANT": [],
+    "SOULMATE": [],
 }
 
 # 记忆数量对风格的影响
 _MEMORY_COUNT_HINTS: dict[int, str] = {
-    1: "你想起了和对方之间的一段记忆，可以在合适的时候自然提起。",
-    2: "你想起了和对方之间的几段记忆，它们让你说话时更有温度。",
-    3: "你和对方之间有不少共同记忆，这些记忆让你的表达更加细腻和贴心。",
+    1: "",
+    2: "",
+    3: "",
 }
 
 
@@ -599,8 +604,8 @@ def _default_style_template_data() -> dict[str, Any]:
             for stage, (range_low, range_high, entry_ratio, entry_hint, stable_hint) in _BOND_SUBSTAGE_CONFIG.items()
         },
         "trend_adjustments": {
-            "rising": "关系在变好，可以稍微大胆一点表达。",
-            "declining": "关系在降温，注意保持温和，不要施压。",
+            "rising": "",
+            "declining": "",
         },
         "memory_style_guides": {
             stage: list(texts) for stage, texts in _MEMORY_STYLE_GUIDES.items()
@@ -608,18 +613,27 @@ def _default_style_template_data() -> dict[str, Any]:
         "memory_count_hints": {
             str(key): value for key, value in _MEMORY_COUNT_HINTS.items()
         },
+        "prompt_blocks": {},
     }
 
 
-def _load_style_template_data() -> dict[str, Any]:
+def _load_style_template_data(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = resolve_prompt_template_json_merged("bond_aware_style.style_templates")
+        raw = _load_localized_template_mapping(
+            "bond_aware_style.style_templates",
+            render_target_lang=render_target_lang,
+        )
     except Exception:
         return _default_style_template_data()
     return dict(raw) if isinstance(raw, Mapping) else _default_style_template_data()
 
 
-def _build_memory_style_instruction(stage: str, hints: list[str]) -> str:
+def _build_memory_style_instruction(
+    stage: str,
+    hints: list[str],
+    *,
+    render_target_lang: str = "zh",
+) -> str:
     """根据 Bond 阶段和记忆数量，生成关系记忆运用的风格指导。
 
     Args:
@@ -635,7 +649,7 @@ def _build_memory_style_instruction(stage: str, hints: list[str]) -> str:
         return ""
 
     count = len(hints)
-    template_data = _load_style_template_data()
+    template_data = _load_style_template_data(render_target_lang=render_target_lang)
 
     # 阶段风格指导
     memory_style_guides = template_data.get("memory_style_guides")

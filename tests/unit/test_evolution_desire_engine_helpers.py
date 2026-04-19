@@ -6,6 +6,7 @@ import json
 import pytest
 
 import host_brain.persona.evolution_desire_engine as ede
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.persona.evolution_desire_engine import EvolutionDesireEngine
@@ -61,11 +62,12 @@ def test_generate_desire_uses_preference_branch_and_cooldown_fallback(
 def test_try_fulfilled_text_covers_skip_and_success(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = EvolutionDesireEngine(seed=0)
     monkeypatch.setattr(engine._rng, "choice", lambda seq: seq[0])
+    templates = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
 
     assert engine._try_fulfilled_text(None, 10) == ""
     assert engine._try_fulfilled_text({"unknown": 0.1}, 10) == ""
 
-    first_text = ede._DESIRE_FULFILLED_TEXTS["warmth"][0]
+    first_text = templates["fulfilled_texts"]["warmth"][0]
     engine._used_ts[first_text] = 100
     assert engine._try_fulfilled_text({"warmth": 0.03}, 100) == ""
 
@@ -82,6 +84,7 @@ def test_generate_from_traits_covers_all_levels_and_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = EvolutionDesireEngine(seed=0)
+    templates = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
 
     low_medium = engine._generate_from_traits(
         PersonalityTraits(
@@ -94,9 +97,15 @@ def test_generate_from_traits_covers_all_levels_and_fallback(
             resilience=0.9,
         )
     )
-    warmth_low = {text for level, text in ede._DESIRE_TEMPLATES["warmth"] if level == "low"}
+    warmth_low = {
+        item["text"]
+        for item in templates["trait_templates"]["warmth"]
+        if item["level"] == "low"
+    }
     curiosity_medium = {
-        text for level, text in ede._DESIRE_TEMPLATES["curiosity"] if level == "medium"
+        item["text"]
+        for item in templates["trait_templates"]["curiosity"]
+        if item["level"] == "medium"
     }
     assert warmth_low & set(low_medium)
     assert curiosity_medium & set(low_medium)
@@ -112,8 +121,16 @@ def test_generate_from_traits_covers_all_levels_and_fallback(
             resilience=0.9,
         )
     )
-    warmth_high = {text for level, text in ede._DESIRE_TEMPLATES["warmth"] if level == "high"}
-    humor_low = {text for level, text in ede._DESIRE_TEMPLATES["humor"] if level == "low"}
+    warmth_high = {
+        item["text"]
+        for item in templates["trait_templates"]["warmth"]
+        if item["level"] == "high"
+    }
+    humor_low = {
+        item["text"]
+        for item in templates["trait_templates"]["humor"]
+        if item["level"] == "low"
+    }
     assert warmth_high & set(high)
     assert humor_low & set(high)
 
@@ -156,12 +173,13 @@ def test_generate_from_time_context_covers_reunion_weekend_hours_and_exception(
 ) -> None:
     engine = EvolutionDesireEngine(seed=0)
     one_day_ms = 24 * 3600 * 1000
+    templates = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
 
     assert engine._generate_from_time_context(ts=8 * one_day_ms, last_deep_talk_ts_ms=0, is_weekend=True) == list(
-        ede._TIME_DESIRE_TEMPLATES["周末"]
+        templates["time_templates"]["周末"]
     )
     assert engine._generate_from_time_context(ts=8 * one_day_ms, last_deep_talk_ts_ms=0, is_weekend=False) == list(
-        ede._TIME_DESIRE_TEMPLATES["白天"]
+        templates["time_templates"]["白天"]
     )
 
     class _HourDateTime(datetime.datetime):
@@ -171,13 +189,13 @@ def test_generate_from_time_context_covers_reunion_weekend_hours_and_exception(
 
     monkeypatch.setattr(datetime, "datetime", _HourDateTime)
     assert engine._generate_from_time_context(ts=20_000, last_deep_talk_ts_ms=0, is_weekend=False) == list(
-        ede._TIME_DESIRE_TEMPLATES["居家夜晚"]
+        templates["time_templates"]["居家夜晚"]
     )
     assert engine._generate_from_time_context(ts=23_000, last_deep_talk_ts_ms=0, is_weekend=False) == list(
-        ede._TIME_DESIRE_TEMPLATES["深夜"]
+        templates["time_templates"]["深夜"]
     )
     assert engine._generate_from_time_context(ts=2_000, last_deep_talk_ts_ms=0, is_weekend=False) == list(
-        ede._TIME_DESIRE_TEMPLATES["凌晨"]
+        templates["time_templates"]["凌晨"]
     )
 
     assert engine._generate_from_time_context(
@@ -189,7 +207,7 @@ def test_generate_from_time_context_covers_reunion_weekend_hours_and_exception(
         ts=10 * one_day_ms,
         last_deep_talk_ts_ms=one_day_ms,
         is_weekend=False,
-    ) == list(ede._TIME_DESIRE_TEMPLATES["久别重逢"])
+    ) == list(templates["time_templates"]["久别重逢"])
 
     class _BrokenDateTime(datetime.datetime):
         @classmethod
@@ -205,14 +223,15 @@ def test_generate_from_event_count_preference_and_cooldown_helpers(
 ) -> None:
     engine = EvolutionDesireEngine(seed=0)
     monkeypatch.setattr(engine._rng, "choice", lambda seq: seq[0])
+    templates = resolve_prompt_template_json_merged("evolution_desire_engine.desire_templates")
 
     assert engine._generate_from_event_count(0) == []
-    assert engine._generate_from_event_count(15) == list(ede._EVENT_COUNT_DESIRE_TEMPLATES[1][2])
+    assert engine._generate_from_event_count(15) == list(templates["event_count_templates"][1]["texts"])
 
     assert engine._try_user_preference_desire(None, 1) == ""
     assert engine._try_user_preference_desire({"warmth": 0.5}, 1) == ""
 
-    pref_text = ede._USER_PREFERENCE_DESIRE_TEMPLATES["warmth"][0]
+    pref_text = templates["user_preference_templates"]["warmth"][0]
     engine._used_ts[pref_text] = 10
     assert engine._try_user_preference_desire({"warmth": 0.9}, 10) == ""
 

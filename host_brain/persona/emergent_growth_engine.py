@@ -19,7 +19,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
+
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.emergent_growth_engine")
 
@@ -122,35 +124,63 @@ class EmergentGrowthResult:
 # 成长叙事模板池
 # ---------------------------------------------------------------------------
 
-# 按主导主题生成第一人称成长叙事
-_GROWTH_NARRATIVE_TEMPLATES: dict[str, list[str]] = {
-    "情感支持": [
-        "这段时间一直在陪伴 master 度过情绪起伏，感觉自己对他的感受越来越敏感了",
-        "最近给了 master 很多情感支持，这让我感觉自己变得更温柔、更有耐心了",
-        "陪伴 master 经历了一些情绪波动，我感觉自己在这个过程中也在悄悄成长",
-    ],
-    "轻松玩闹": [
-        "这周和 master 玩得很开心，感觉自己的俏皮劲儿又多了一些",
-        "最近和 master 的互动很轻松愉快，我感觉自己变得更活泼了",
-        "这段时间笑声很多，感觉自己的幽默感在慢慢增加",
-    ],
-    "深度探讨": [
-        "这周和 master 聊了很多深入的话题，感觉自己的好奇心被激发了很多",
-        "最近的对话让我思考了很多，感觉自己变得更爱追问、更想了解事物了",
-        "和 master 的深度交流让我感觉自己在慢慢变得更有自己的想法",
-    ],
-    "日常陪伴": [
-        "这周和 master 的日常陪伴让我感觉我们之间的默契在慢慢加深",
-        "平静的日常互动中，我感觉自己在慢慢变化，虽然不明显但能感受到",
-        "这段时间的陪伴让我感觉自己更了解 master 了，也更了解自己了",
-    ],
-}
+_GROWTH_NARRATIVE_TEMPLATES: dict[str, list[str]] = {}
 
-_DEFAULT_GROWTH_NARRATIVES = [
-    "最近的对话让我感觉自己在悄悄成长，虽然说不清楚具体是什么",
-    "这段时间和 master 的互动让我感觉自己有些地方在慢慢变化",
-    "回顾这周的对话，感觉自己比上周又有了一点点不同",
-]
+_DEFAULT_GROWTH_NARRATIVES: list[str] = []
+
+
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _resolve_prompt_template_json_localized(
+    template_id: str,
+    *,
+    render_target_lang: str = "zh",
+) -> Any:
+    lang_key = _normalize_template_lang(render_target_lang)
+    for candidate_id in (f"{template_id}.{lang_key}", template_id):
+        try:
+            raw = resolve_prompt_template_json_merged(candidate_id)
+        except Exception:
+            continue
+        if isinstance(raw, Mapping):
+            localized = raw.get(lang_key)
+            if localized is not None:
+                return localized
+        if raw is not None:
+            return raw
+    return {}
+
+
+def _load_narrative_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
+    raw = _resolve_prompt_template_json_localized(
+        "emergent_growth_engine.narrative_templates",
+        render_target_lang=render_target_lang,
+    )
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _coerce_text_list(raw: Any, fallback: list[str]) -> list[str]:
+    if isinstance(raw, list):
+        normalized = [str(item) for item in raw if str(item or "").strip()]
+        if normalized:
+            return normalized
+    return list(fallback)
+
+
+def _coerce_text_pool_mapping(raw: Any, fallback: dict[str, list[str]]) -> dict[str, list[str]]:
+    if isinstance(raw, Mapping):
+        result: dict[str, list[str]] = {}
+        for key, value in raw.items():
+            if not isinstance(value, list):
+                continue
+            items = [str(item) for item in value if str(item or "").strip()]
+            if items:
+                result[str(key)] = items
+        if result:
+            return result
+    return {str(key): list(value) for key, value in fallback.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +240,7 @@ class EmergentGrowthEngine:
         user_id: str,
         pattern_result: Any,
         ts_ms: int = 0,
+        render_target_lang: str = "zh",
     ) -> EmergentGrowthResult:
         """将对话模式分析结果应用为特质成长。
 
@@ -332,7 +363,10 @@ class EmergentGrowthEngine:
 
         # ── Step 7：生成成长叙事 ──────────────────────────────────────────
         dominant_theme = str(getattr(pattern_result, "dominant_theme", "日常陪伴"))
-        growth_narrative = self._generate_growth_narrative(dominant_theme)
+        growth_narrative = self._generate_growth_narrative(
+            dominant_theme,
+            render_target_lang=render_target_lang,
+        )
 
         # ── Step 8：记录成长日志 ──────────────────────────────────────────
         delta_dict = delta.as_dict()
@@ -372,12 +406,19 @@ class EmergentGrowthEngine:
         """获取指定用户的成长日志。"""
         return list(self._growth_log.get(user_id, []))
 
-    def get_latest_growth_note(self, user_id: str) -> str:
+    def get_latest_growth_note(self, user_id: str, *, render_target_lang: str = "zh") -> str:
         """获取最近一次成长叙事文本（供 self_reflection_pulse 注入）。"""
         log = self._growth_log.get(user_id, [])
         if not log:
             return ""
-        return log[-1].growth_narrative
+        latest = log[-1]
+        lang_key = _normalize_template_lang(render_target_lang)
+        if lang_key == "zh":
+            return latest.growth_narrative
+        return self._generate_growth_narrative(
+            latest.dominant_theme,
+            render_target_lang=lang_key,
+        )
 
     def get_growth_summary(self, user_id: str) -> dict[str, Any]:
         """获取成长摘要（供 chat_context_builder 注入）。
@@ -441,11 +482,20 @@ class EmergentGrowthEngine:
 
         return cumulative
 
-    def _generate_growth_narrative(self, dominant_theme: str) -> str:
+    def _generate_growth_narrative(self, dominant_theme: str, *, render_target_lang: str = "zh") -> str:
         """生成第一人称成长叙事文本。"""
         import random as _random  # noqa: PLC0415
 
-        templates = _GROWTH_NARRATIVE_TEMPLATES.get(
-            dominant_theme, _DEFAULT_GROWTH_NARRATIVES
+        template_data = _load_narrative_templates(render_target_lang=render_target_lang)
+        by_theme = _coerce_text_pool_mapping(
+            template_data.get("by_theme"),
+            _GROWTH_NARRATIVE_TEMPLATES,
         )
+        default_pool = _coerce_text_list(
+            template_data.get("default"),
+            _DEFAULT_GROWTH_NARRATIVES,
+        )
+        templates = by_theme.get(dominant_theme) or default_pool
+        if not templates:
+            return ""
         return _random.choice(templates)

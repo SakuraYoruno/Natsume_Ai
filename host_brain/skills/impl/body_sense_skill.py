@@ -2,11 +2,37 @@ from __future__ import annotations
 
 from typing import Any
 
+
+def _resolve_background_tick_guard() -> dict[str, Any]:
+    try:
+        from host_brain.tribe.default_mode_agent import resolve_background_tick_guard_state  # noqa: PLC0415
+
+        return dict(resolve_background_tick_guard_state())
+    except Exception:
+        return {
+            "active": False,
+            "cooldown_ms": 0,
+            "cooldown_remaining_ms": 0,
+            "last_ts_ms": 0,
+            "speed_profile": "",
+        }
+
+
 def execute_body_sense_tick(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+    foreground_guard = _resolve_background_tick_guard()
+    if bool(foreground_guard.get("active")) and not bool((args or {}).get("force_foreground_tick")):
+        return {
+            "status": "SKIPPED",
+            "reason_code": "BACKGROUND_TICK_FOREGROUND_CHAT_COOLDOWN",
+            "cooldown_remaining_ms": int(foreground_guard.get("cooldown_remaining_ms") or 0),
+            "foreground_speed_profile": str(foreground_guard.get("speed_profile") or ""),
+            "body_sense": {},
+        }
 
     current_hour_raw = (args or {}).get("current_hour")
     try:

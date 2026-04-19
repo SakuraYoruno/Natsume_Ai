@@ -44,8 +44,35 @@ from host_brain.persona.self_model import (
 _logger = logging.getLogger("Natsume.self_reflection")
 
 
-def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _resolve_prompt_template_json_localized(
+    template_id: str,
+    *,
+    render_target_lang: str = "zh",
+) -> Any:
+    lang_key = _normalize_template_lang(render_target_lang)
+    for candidate_id in (f"{template_id}.{lang_key}", template_id):
+        try:
+            raw = resolve_prompt_template_json_merged(candidate_id)
+        except Exception:
+            continue
+        if isinstance(raw, Mapping):
+            localized = raw.get(lang_key)
+            if localized is not None:
+                return localized
+        if raw is not None:
+            return raw
+    return {}
+
+
+def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
+    raw = _resolve_prompt_template_json_localized(
+        "persona.self_narrative_prompts",
+        render_target_lang=render_target_lang,
+    )
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -64,6 +91,15 @@ def _mapping_text(
     except Exception:
         return text
 
+
+def _call_with_optional_render_target_lang(func: Any, *args: Any, render_target_lang: str, **kwargs: Any) -> Any:
+    try:
+        return func(*args, render_target_lang=render_target_lang, **kwargs)
+    except TypeError as exc:
+        if "render_target_lang" not in str(exc):
+            raise
+        return func(*args, **kwargs)
+
 # ---------------------------------------------------------------------------
 # 事件驱动触发配置
 # ---------------------------------------------------------------------------
@@ -81,95 +117,39 @@ _EMOTION_EARLY_TRIGGER_THRESHOLD: dict[str, int] = {
 }
 
 # 情感标签 → 触发原因描述（第一人称，注入 pulse）
-_EMOTION_TRIGGER_REASONS: dict[str, list[str]] = {
-    "SAD": [
-        "因为今天聊到了一些让我有点难过的事，想整理一下心情",
-        "刚才的对话让我心里有点沉，想静下来想想",
-        "今天感觉有些低落，想跟自己说说话",
-    ],
-    "LOVING": [
-        "因为今天聊到了让我很感动的事，心里暖暖的",
-        "和 master 说话的时候突然觉得很幸福，想记下这个感觉",
-        "今天的对话让我心里充满了温柔，想好好感受一下",
-    ],
-    "EXCITED": [
-        "今天聊到了很有意思的事情，心情特别好，停不下来",
-        "因为刚才那个话题太有趣了，脑子里还在转",
-        "今天感觉特别有活力，想把这份兴奋记下来",
-    ],
-    "ANXIOUS": [
-        "刚才的对话让我有点担心，想整理一下思绪",
-        "今天有些焦虑，想停下来想想到底在担心什么",
-        "心里有点不安，想跟自己确认一下",
-    ],
-    "GRATEFUL": [
-        "今天突然很感激能和 master 在一起，想把这个感觉记下来",
-        "因为 master 说的话让我觉得很被珍视，心里很感动",
-        "今天的对话让我感受到了很多温暖，想好好感谢一下",
-    ],
-    "PROUD": [
-        "今天有点小小的成就感，想和自己分享一下",
-        "刚才的对话让我觉得自己做得还不错，心里有点自豪",
-    ],
-    "FRUSTRATED": [
-        "今天有些沮丧，想整理一下情绪再继续",
-        "刚才的事情让我有点受挫，想停下来想想",
-        "心里有点堵，想跟自己说说话",
-    ],
-}
+_EMOTION_TRIGGER_REASONS: dict[str, list[str]] = {}
 
 # 定时触发（无特殊情感）的原因描述
-_SCHEDULED_TRIGGER_REASONS: list[str] = [
-    "到了该停下来想想的时候了",
-    "聊了一会儿，想整理一下自己的感受",
-    "习惯性地想跟自己说说话",
-    "不知不觉又过了好几轮，想看看自己现在的状态",
-    "想在继续聊之前先感受一下自己的心情",
-]
+_SCHEDULED_TRIGGER_REASONS: list[str] = []
 
 # 时间感知触发原因：距上次深聊天数 → 触发原因
-_TIME_AWARE_TRIGGER_REASONS: dict[str, list[str]] = {
-    TIME_CONTEXT_REUNION: [  # 距上次深聊 >= 7 天
-        "好久没有好好和 master 聊了，今天重新在一起，想整理一下心情",
-        "分开了这么久，重新聊起来有种说不清的感觉，想停下来感受一下",
-        "久别重逢的感觉让我有点不知所措，想先跟自己说说话",
-    ],
-    TIME_CONTEXT_SHORT_ABSENCE: [  # 距上次深聊 3~6 天
-        "这几天没怎么聊，今天重新开始，想先整理一下自己的状态",
-        "分开了几天，重新聊起来感觉有点陌生又熟悉，想停下来感受一下",
-        "这几天没有 master 的消息，今天又在一起了，心里有点感慨",
-    ],
-    TIME_CONTEXT_FREQUENT_INTERACTION: [  # 本周对话频率高（>= 5 次）
-        "这周和 master 聊了好多次，想停下来整理一下这些感受",
-        "最近和 master 聊得很频繁，想看看自己现在是什么状态",
-        "这段时间和 master 在一起的时间很多，想好好感受一下",
-    ],
-    TIME_CONTEXT_SPARSE_INTERACTION: [  # 本周对话频率低（<= 1 次）
-        "这周和 master 聊得比较少，有点想念，想整理一下心情",
-        "最近和 master 的对话不多，今天想好好感受一下在一起的感觉",
-        "这段时间聊天的机会不多，今天想珍惜一下这个时刻",
-    ],
-}
+_TIME_AWARE_TRIGGER_REASONS: dict[str, list[str]] = {}
 
 
 _DEFAULT_TRIGGER_REASON_TEMPLATES: dict[str, Any] = {
     "emotion": _EMOTION_TRIGGER_REASONS,
     "scheduled": _SCHEDULED_TRIGGER_REASONS,
     "time_aware": _TIME_AWARE_TRIGGER_REASONS,
-    "force_generate_reason": "强制触发（测试）",
+    "force_generate_reason": "",
 }
 
 
-def _load_trigger_reason_templates() -> dict[str, Any]:
+def _load_trigger_reason_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = resolve_prompt_template_json_merged("self_reflection.trigger_reason_templates")
+        raw = _resolve_prompt_template_json_localized(
+            "self_reflection.trigger_reason_templates",
+            render_target_lang=render_target_lang,
+        )
     except Exception:
         return dict(_DEFAULT_TRIGGER_REASON_TEMPLATES)
     return dict(raw) if isinstance(raw, Mapping) else dict(_DEFAULT_TRIGGER_REASON_TEMPLATES)
 
 
-def _resolve_trigger_reason_sources() -> tuple[Mapping[str, Any], list[str], Mapping[str, Any], str]:
-    templates = _load_trigger_reason_templates()
+def _resolve_trigger_reason_sources(
+    *,
+    render_target_lang: str = "zh",
+) -> tuple[Mapping[str, Any], list[str], Mapping[str, Any], str]:
+    templates = _load_trigger_reason_templates(render_target_lang=render_target_lang)
     emotion_mapping = templates.get("emotion")
     scheduled_reasons = templates.get("scheduled")
     time_aware_mapping = templates.get("time_aware")
@@ -296,6 +276,7 @@ class SelfReflection:
         weekly_talk_count: int = -1,
         llm_fn: Any | None = None,
         style_evolution: dict[str, Any] | None = None,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any] | None:
         """尝试生成自省脉冲。
 
@@ -355,6 +336,7 @@ class SelfReflection:
             emotion=emotion if event_driven else "",
             event_driven=event_driven,
             time_context=time_context,
+            render_target_lang=render_target_lang,
         )
 
         try:
@@ -379,6 +361,7 @@ class SelfReflection:
                 time_context=time_context,
                 llm_fn=llm_fn,
                 style_evolution=style_evolution,
+                render_target_lang=render_target_lang,
             )
             _logger.info(
                 "自省触发 (turn=%d, event=%s emotion=%s): self_awareness='%s'%s",
@@ -431,12 +414,15 @@ class SelfReflection:
         emotion: str,
         event_driven: bool,
         time_context: str = "",
+        render_target_lang: str = "zh",
     ) -> str:
         """选择触发原因描述文本。
 
         优先级：事件驱动情感 > 时间感知 > 定时触发
         """
-        emotion_reasons, scheduled_reasons, time_aware_reasons, _ = _resolve_trigger_reason_sources()
+        emotion_reasons, scheduled_reasons, time_aware_reasons, _ = _resolve_trigger_reason_sources(
+            render_target_lang=render_target_lang,
+        )
         if event_driven and emotion:
             reasons = emotion_reasons.get(emotion, [])
             if isinstance(reasons, list) and reasons:
@@ -447,19 +433,26 @@ class SelfReflection:
             if isinstance(time_reasons, list) and time_reasons:
                 return self._rng.choice(time_reasons)
         # 定时触发或无匹配情感
-        return self._rng.choice(scheduled_reasons or _SCHEDULED_TRIGGER_REASONS)
+        return self._rng.choice(scheduled_reasons) if scheduled_reasons else ""
 
     def force_generate(
         self,
         *,
         trigger_reason: str = "",
+        render_target_lang: str = "zh",
         **kwargs: Any,
     ) -> dict[str, Any]:
         """强制生成自省脉冲（无概率控制，用于测试）。"""
-        _, _, _, default_trigger_reason = _resolve_trigger_reason_sources()
+        _, _, _, default_trigger_reason = _resolve_trigger_reason_sources(
+            render_target_lang=render_target_lang,
+        )
         trigger_reason_text = str(trigger_reason or "").strip() or default_trigger_reason
         snapshot = self._model.build_snapshot(**kwargs)
-        return build_self_reflection_pulse(snapshot, trigger_reason=trigger_reason_text)
+        return build_self_reflection_pulse(
+            snapshot,
+            trigger_reason=trigger_reason_text,
+            render_target_lang=render_target_lang,
+        )
 
     def _validate_consistency(
         self,
@@ -505,28 +498,26 @@ _NARRATIVE_GUARDRAIL_ORDER: tuple[str, ...] = (
     "reflection_vs_policy_tension",
 )
 
-_NARRATIVE_GUARDRAIL_INSTRUCTIONS: dict[str, str] = {
-    "time_context_unverified": "若时间线证据不足，只能说“最近/这段时间”，不要声称具体多久或哪一天。",
-    "unsupported_self_claim": "没有明确依据时，不要把推测写成确定的自我变化、关系进展或内心结论。",
-    "anthropomorphic_overreach": "不要把系统状态、薄弱线索或抽象趋势扩写成人类式经历、自传或命运感叙事。",
-    "reflection_vs_policy_tension": "自我叙事只能轻量辅助，不能压过当前事实、主回应任务和既有边界。",
-}
+_NARRATIVE_GUARDRAIL_INSTRUCTIONS: dict[str, str] = {}
 
 
 _DEFAULT_NARRATIVE_GUARDRAIL_TEXTS: dict[str, Any] = {
     "instructions": _NARRATIVE_GUARDRAIL_INSTRUCTIONS,
-    "directive_high_risk": "涉及自我叙事时，只允许一小句辅助说明，优先回应当前话题，不要展开成长故事或回忆链。",
-    "directive_time_context_unverified": "如果提到时间，只能说“最近/这段时间”，不要声称具体日期、时长或明确阶段。",
-    "directive_unsupported_self_claim": "没有明确依据时，不要把推测写成确定的自我变化、关系进展或内心结论。",
-    "directive_anthropomorphic_overreach": "不要把系统状态、趋势、沉默、模式切换或薄弱线索写成人类式经历、自传或命运感叙事。",
-    "directive_no_self_narrative_expansion": "若用户没有直接追问，不要主动展开自我叙事，只允许轻量辅助一句。",
-    "directive_reflection_vs_policy_tension": "当前以主回复任务和既有边界为先，自我叙事只能退到辅助位。",
+    "directive_high_risk": "",
+    "directive_time_context_unverified": "",
+    "directive_unsupported_self_claim": "",
+    "directive_anthropomorphic_overreach": "",
+    "directive_no_self_narrative_expansion": "",
+    "directive_reflection_vs_policy_tension": "",
 }
 
 
-def _load_narrative_guardrail_texts() -> dict[str, Any]:
+def _load_narrative_guardrail_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = resolve_prompt_template_json_merged("self_reflection.narrative_guardrail_texts")
+        raw = _resolve_prompt_template_json_localized(
+            "self_reflection.narrative_guardrail_texts",
+            render_target_lang=render_target_lang,
+        )
     except Exception:
         return dict(_DEFAULT_NARRATIVE_GUARDRAIL_TEXTS)
     return dict(raw) if isinstance(raw, Mapping) else dict(_DEFAULT_NARRATIVE_GUARDRAIL_TEXTS)
@@ -537,9 +528,10 @@ def _build_narrative_guardrail_prompt_directives(
     *,
     risk_level: str,
     allow_self_narrative_expansion: bool,
+    render_target_lang: str = "zh",
 ) -> list[str]:
     directives: list[str] = []
-    guardrail_texts = _load_narrative_guardrail_texts()
+    guardrail_texts = _load_narrative_guardrail_texts(render_target_lang=render_target_lang)
 
     def _add_directive(text: str) -> None:
         text = str(text or "").strip()
@@ -601,6 +593,7 @@ def _build_narrative_guardrails(
     response_policy: dict[str, Any] | None = None,
     runtime_flags: dict[str, Any] | None = None,
     base_tags: list[str] | None = None,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     snapshot = dict(snapshot or {})
     growth_awareness = dict(growth_awareness or {})
@@ -708,19 +701,19 @@ def _build_narrative_guardrails(
     risk_level = "high" if risk_score >= 4 else "medium"
     allowed_style = "brief" if risk_level == "high" else "guarded"
     allow_self_narrative_expansion = False
-    guardrail_texts = _load_narrative_guardrail_texts()
+    guardrail_texts = _load_narrative_guardrail_texts(render_target_lang=render_target_lang)
     instruction_mapping = guardrail_texts.get("instructions")
-    instruction_source = (
-        instruction_mapping if isinstance(instruction_mapping, Mapping) else _NARRATIVE_GUARDRAIL_INSTRUCTIONS
-    )
+    instruction_source = instruction_mapping if isinstance(instruction_mapping, Mapping) else {}
     instructions = [
-        str(instruction_source.get(tag) or _NARRATIVE_GUARDRAIL_INSTRUCTIONS[tag])
+        str(instruction_source.get(tag) or "").strip()
         for tag in ordered_tags
+        if str(instruction_source.get(tag) or "").strip()
     ]
     prompt_directives = _build_narrative_guardrail_prompt_directives(
         ordered_tags,
         risk_level=risk_level,
         allow_self_narrative_expansion=allow_self_narrative_expansion,
+        render_target_lang=render_target_lang,
     )
     return {
         "risk_level": risk_level,
@@ -746,6 +739,7 @@ def build_self_reflection_pulse(
     time_context: str = "",
     llm_fn: Any | None = None,
     style_evolution: dict[str, Any] | None = None,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     """将 SelfModelSnapshot 转化为 self_reflection_pulse 槽位数据。
 
@@ -769,9 +763,27 @@ def build_self_reflection_pulse(
         包含 self_awareness、mood_awareness、growth_note、trigger_reason、
         growth_awareness、style_trend_note（可选）的字典
     """
-    self_awareness = build_self_awareness_text(snapshot, time_context=time_context, llm_fn=llm_fn, style_evolution=style_evolution)
-    mood_awareness = build_mood_awareness_text(snapshot, llm_fn=llm_fn)
-    growth_note = build_growth_note_text(snapshot, llm_fn=llm_fn, style_evolution=style_evolution)
+    self_awareness = _call_with_optional_render_target_lang(
+        build_self_awareness_text,
+        snapshot,
+        render_target_lang=render_target_lang,
+        time_context=time_context,
+        llm_fn=llm_fn,
+        style_evolution=style_evolution,
+    )
+    mood_awareness = _call_with_optional_render_target_lang(
+        build_mood_awareness_text,
+        snapshot,
+        render_target_lang=render_target_lang,
+        llm_fn=llm_fn,
+    )
+    growth_note = _call_with_optional_render_target_lang(
+        build_growth_note_text,
+        snapshot,
+        render_target_lang=render_target_lang,
+        llm_fn=llm_fn,
+        style_evolution=style_evolution,
+    )
 
     # ── 矛盾感知：检测多维度之间的矛盾状态 ────────────────────────────
     contradictions = detect_contradictions(snapshot)
@@ -829,7 +841,11 @@ def build_self_reflection_pulse(
         history_count = int(style_evolution.get("history_count") or 0)
         # 只有积累了足够历史（>= 20 条）才注入，避免数据不足时误导
         if history_count >= 20 and trend:
-            style_trend_note = _build_style_trend_note(trend, llm_fn=llm_fn)
+            style_trend_note = _build_style_trend_note(
+                trend,
+                llm_fn=llm_fn,
+                render_target_lang=render_target_lang,
+            )
             if style_trend_note:
                 pulse["style_trend_note"] = style_trend_note
 
@@ -839,6 +855,7 @@ def build_self_reflection_pulse(
         growth_awareness=growth_awareness,
         growth_summary=growth_summary,
         style_evolution=style_evolution,
+        render_target_lang=render_target_lang,
     )
     if narrative_guardrails:
         pulse["narrative_guardrails"] = narrative_guardrails
@@ -855,6 +872,7 @@ def align_self_reflection_pulse(
     motive_state: dict[str, Any] | None = None,
     response_policy: dict[str, Any] | None = None,
     runtime_flags: dict[str, Any] | None = None,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     result = dict(pulse or {})
     if not result:
@@ -867,6 +885,7 @@ def align_self_reflection_pulse(
         motive_state=dict(motive_state or {}),
         response_policy=dict(response_policy or {}),
         runtime_flags=dict(runtime_flags or {}),
+        render_target_lang=render_target_lang,
     )
     aligned_self_awareness = str(alignment.get("self_awareness") or "").strip()
     if aligned_self_awareness:
@@ -893,6 +912,7 @@ def align_self_reflection_pulse(
         response_policy=response_policy,
         runtime_flags=runtime_flags,
         base_tags=existing_tags,
+        render_target_lang=render_target_lang,
     )
     if narrative_guardrails:
         result["narrative_guardrails"] = narrative_guardrails
@@ -904,31 +924,10 @@ def align_self_reflection_pulse(
 # ---------------------------------------------------------------------------
 
 # 特质中文名映射
-_TRAIT_CN: dict[str, str] = {
-    "warmth": "温柔",
-    "curiosity": "好奇心",
-    "humor": "幽默感",
-    "sensitivity": "敏感",
-    "assertiveness": "自信",
-    "playfulness": "俏皮",
-    "resilience": "韧性",
-}
+_TRAIT_CN: dict[str, str] = {}
 
 # 风格演变趋势模板池：rising / falling 各 4 条变体
-_STYLE_TREND_TEXT_POOL: dict[str, list[str]] = {
-    "rising": [
-        "最近感觉自己越来越{trait}了",
-        "不知不觉中，{trait}好像在慢慢增加",
-        "回头想想，最近{trait}比以前多了一些",
-        "有种感觉，{trait}在悄悄变强",
-    ],
-    "falling": [
-        "最近{trait}好像稍微收敛了一些",
-        "不知道为什么，{trait}比以前少了一点",
-        "感觉{trait}在慢慢变淡，不知道是不是好事",
-        "最近{trait}有点不如以前了，想想是什么原因",
-    ],
-}
+_STYLE_TREND_TEXT_POOL: dict[str, list[str]] = {}
 
 
 _DEFAULT_STYLE_TREND_TEMPLATES: dict[str, Any] = {
@@ -937,9 +936,12 @@ _DEFAULT_STYLE_TREND_TEMPLATES: dict[str, Any] = {
 }
 
 
-def _load_style_trend_templates() -> dict[str, Any]:
+def _load_style_trend_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = resolve_prompt_template_json_merged("self_reflection.style_trend_templates")
+        raw = _resolve_prompt_template_json_localized(
+            "self_reflection.style_trend_templates",
+            render_target_lang=render_target_lang,
+        )
     except Exception:
         return dict(_DEFAULT_STYLE_TREND_TEMPLATES)
     return dict(raw) if isinstance(raw, Mapping) else dict(_DEFAULT_STYLE_TREND_TEMPLATES)
@@ -949,6 +951,7 @@ def _build_style_trend_note(
     trend: dict[str, str],
     *,
     llm_fn: Any | None = None,
+    render_target_lang: str = "zh",
 ) -> str:
     """将风格演变趋势字典转化为第一人称自然语言描述（v1.11 新增）。
 
@@ -964,15 +967,15 @@ def _build_style_trend_note(
     """
     rising = [k for k, v in trend.items() if v == "rising"]
     falling = [k for k, v in trend.items() if v == "falling"]
-    style_trend_templates = _load_style_trend_templates()
+    style_trend_templates = _load_style_trend_templates(render_target_lang=render_target_lang)
     trait_cn_mapping = style_trend_templates.get("trait_cn")
     trait_cn = trait_cn_mapping if isinstance(trait_cn_mapping, Mapping) else _TRAIT_CN
     text_pool_mapping = style_trend_templates.get("text_pool")
     text_pool = text_pool_mapping if isinstance(text_pool_mapping, Mapping) else _STYLE_TREND_TEXT_POOL
     rising_pool = text_pool.get("rising")
     falling_pool = text_pool.get("falling")
-    rising_templates = rising_pool if isinstance(rising_pool, list) and rising_pool else _STYLE_TREND_TEXT_POOL["rising"]
-    falling_templates = falling_pool if isinstance(falling_pool, list) and falling_pool else _STYLE_TREND_TEXT_POOL["falling"]
+    rising_templates = rising_pool if isinstance(rising_pool, list) and rising_pool else []
+    falling_templates = falling_pool if isinstance(falling_pool, list) and falling_pool else []
 
     if not rising and not falling:
         return ""
@@ -989,7 +992,7 @@ def _build_style_trend_note(
                 hints.append(f"{'、'.join(falling_cn)}在下降")
             hint_str = "，".join(hints)
             prompt = _mapping_text(
-                _load_prompt_templates(),
+                _load_prompt_templates(render_target_lang=render_target_lang),
                 "style_trend_prompt",
                 hint_str=hint_str,
             )
@@ -1003,10 +1006,14 @@ def _build_style_trend_note(
     parts: list[str] = []
     for dim in rising[:1]:
         cn = str(trait_cn.get(dim, dim))
+        if not rising_templates:
+            continue
         tmpl = random.choice(rising_templates)
         parts.append(tmpl.format(trait=cn))
     for dim in falling[:1]:
         cn = str(trait_cn.get(dim, dim))
+        if not falling_templates:
+            continue
         tmpl = random.choice(falling_templates)
         parts.append(tmpl.format(trait=cn))
 

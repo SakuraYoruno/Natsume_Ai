@@ -1,0 +1,34 @@
+templates:
+- template_id: fastapi_app.runtime_texts
+  category: render
+  scope: fastapi_app
+  locale: zh
+  content_type: json
+  description: FastAPI 主入口运行时文案模板（JSON）
+  default_content:
+    immune_blocked_high_risk: 我先停一下，这条输入里有高风险指令模式。换个表达我会继续接住你。
+- template_id: failure_matrix.user_responses
+  category: render
+  scope: failure_matrix
+  locale: zh
+  content_type: json
+  description: FailureMatrix 标准化用户响应文本模板（JSON）
+  default_content:
+    GOVERNOR_BLOCK: ……这个，蓝没办法回答呢。
+    EVIDENCE_EMPTY: 嗯……蓝对这个不太了解，能再多告诉蓝一些吗？
+    MODEL_FALLBACK: ''
+    QA_REWRITE: ''
+    EDGE_UNREACHABLE: 声音好像传不过去了……先用文字聊吧。
+    VISION_LOW_CONFIDENCE: 蓝看不太清楚……能再描述一下，或者重新发一次吗？
+    MODULE_TIMEOUT: 等了好久都没反应……再试一次好吗？
+    PROMPT_INJECTION: ……这个，蓝没办法回答呢。
+- template_id: default_mode_agent.runtime_texts
+  category: render
+  scope: default_mode_agent
+  locale: zh
+  content_type: json
+  description: DefaultModeAgent 运行时文案模板（JSON）
+  default_content:
+    fallback_note:
+      with_topic: 我在整理刚才的感受，也在想{topic}。
+      without_topic: 我在把最近的情绪和记忆慢慢整理成线索。

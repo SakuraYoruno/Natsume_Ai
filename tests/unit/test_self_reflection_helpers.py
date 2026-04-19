@@ -44,6 +44,7 @@ def test_maybe_generate_event_driven_updates_state(monkeypatch) -> None:
         "build_self_reflection_pulse",
         lambda snapshot, **kwargs: {"self_awareness": "ok", **kwargs},
     )
+    trigger_templates = resolve_prompt_template_json_merged("self_reflection.trigger_reason_templates")
 
     pulse = reflection.maybe_generate(
         turn_count=7,
@@ -54,7 +55,7 @@ def test_maybe_generate_event_driven_updates_state(monkeypatch) -> None:
     )
 
     assert pulse is not None
-    assert pulse["trigger_reason"] == sr_mod._EMOTION_TRIGGER_REASONS["SAD"][0]
+    assert pulse["trigger_reason"] == trigger_templates["emotion"]["SAD"][0]
     assert reflection.last_trigger_turn == 7
     assert reflection.next_trigger_turn == 11
     assert reflection._last_event_emotion == "SAD"
@@ -75,6 +76,7 @@ def test_time_context_buckets_and_trigger_reason_priority() -> None:
     reflection = SelfReflection(seed=0)
     reflection._rng = SimpleNamespace(choice=lambda seq: seq[-1])
     one_day_ms = 24 * 3600 * 1000
+    trigger_templates = resolve_prompt_template_json_merged("self_reflection.trigger_reason_templates")
 
     assert reflection._analyze_time_context(
         last_deep_talk_ts_ms=1_000,
@@ -101,17 +103,17 @@ def test_time_context_buckets_and_trigger_reason_priority() -> None:
         emotion="SAD",
         event_driven=True,
         time_context="久别重逢",
-    ) == sr_mod._EMOTION_TRIGGER_REASONS["SAD"][-1]
+    ) == trigger_templates["emotion"]["SAD"][-1]
     assert reflection._pick_trigger_reason(
         emotion="",
         event_driven=False,
         time_context="久别重逢",
-    ) == sr_mod._TIME_AWARE_TRIGGER_REASONS["久别重逢"][-1]
+    ) == trigger_templates["time_aware"]["久别重逢"][-1]
     assert reflection._pick_trigger_reason(
         emotion="",
         event_driven=False,
         time_context="",
-    ) == sr_mod._SCHEDULED_TRIGGER_REASONS[-1]
+    ) == trigger_templates["scheduled"][-1]
 
 
 def test_trigger_reason_templates_override(monkeypatch) -> None:
@@ -430,3 +432,105 @@ def test_build_style_trend_note_uses_prompt_template_override(monkeypatch) -> No
 
     assert text == "风格在变化"
     assert captured["prompt"].startswith("自定义风格趋势：")
+
+
+def test_self_reflection_localized_ja_templates_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "self_reflection.trigger_reason_templates.ja",
+        content=json.dumps(
+            {
+                "emotion": {
+                    "SAD": ["少し胸に残っているので、静かに考えています。"],
+                },
+                "scheduled": ["そろそろ自分の気持ちを見ておきたい頃合いです。"],
+                "time_aware": {
+                    "久别重逢": ["久しぶりに向き合えたので、今の気持ちを受け止めています。"],
+                },
+                "force_generate_reason": "強制トリガー（テスト）",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+    store.upsert_template(
+        "self_reflection.narrative_guardrail_texts.ja",
+        content=json.dumps(
+            {
+                "instructions": {
+                    "time_context_unverified": "時間は最近/このところに留めること。",
+                },
+                "directive_high_risk": "自己叙事は一言に留めること。",
+                "directive_time_context_unverified": "具体的な日付や長さを断定しないこと。",
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+    store.upsert_template(
+        "self_reflection.style_trend_templates.ja",
+        content=json.dumps(
+            {
+                "trait_cn": {
+                    "warmth": "やわらかさ",
+                },
+                "text_pool": {
+                    "rising": ["最近、自分の{trait}が少し増しています。"],
+                    "falling": ["最近は{trait}を少し抑えています。"],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+    monkeypatch.setattr(sr_mod.random, "choice", lambda seq: seq[0])
+    monkeypatch.setattr(
+        sr_mod,
+        "build_self_awareness_text",
+        lambda snapshot, **kwargs: "aware-ja",  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        sr_mod,
+        "build_mood_awareness_text",
+        lambda snapshot, **kwargs: "mood-ja",  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        sr_mod,
+        "build_growth_note_text",
+        lambda snapshot, **kwargs: "grow-ja",  # noqa: ARG005
+    )
+    monkeypatch.setattr(sr_mod, "detect_contradictions", lambda snapshot: [])  # noqa: ARG005
+    monkeypatch.setattr(sr_mod, "build_contradiction_awareness_text", lambda contradictions: "")  # noqa: ARG005
+
+    reflection = SelfReflection(seed=0)
+    reason = reflection._pick_trigger_reason(
+        emotion="SAD",
+        event_driven=True,
+        time_context="久别重逢",
+        render_target_lang="ja",
+    )
+    assert reason == "少し胸に残っているので、静かに考えています。"
+
+    pulse = sr_mod.build_self_reflection_pulse(
+        {"bond_growth_perception": "稳定"},
+        style_evolution={"trend": {"warmth": "rising"}, "history_count": 25},
+        render_target_lang="ja",
+    )
+    assert pulse["self_awareness"] == "aware-ja"
+    assert pulse["mood_awareness"] == "mood-ja"
+    assert pulse["growth_note"] == "grow-ja"
+    assert pulse["style_trend_note"] == "最近、自分のやわらかさが少し増しています。"
+    assert "時間は最近/このところに留めること。" in pulse["narrative_guardrails"]["instruction"]
+    assert any(
+        item in pulse["narrative_guardrails"]["prompt_directives"]
+        for item in (
+            "自己叙事は一言に留めること。",
+            "具体的な日付や長さを断定しないこと。",
+        )
+    )

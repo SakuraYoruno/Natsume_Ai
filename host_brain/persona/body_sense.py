@@ -65,28 +65,13 @@ _LONELINESS_THRESHOLD_ACHING  = 0.85
 _FATIGUE_WILLINGNESS_PENALTY_MAX = 0.35   # 极度疲劳最多降低 35% 意愿
 
 # 困倦对表达风格的影响（注入 prompt 的文本）
-_DROWSY_STYLE_HINTS: dict[str, str] = {
-    "ALERT":   "",
-    "SLEEPY":  "你有点困了，说话语气慵懒，偶尔会有些迟钝。",
-    "DROWSY":  "你很困，说话简短，反应慢一点，偶尔会说‘好困’之类的话。",
-    "ASLEEP":  "你困到快睡着了，只能说很短的话，语气迷迷糊糊的。",
-}
+_DROWSY_STYLE_HINTS: dict[str, str] = {}
 
 # 疲劳对表达风格的影响
-_FATIGUE_STYLE_HINTS: dict[str, str] = {
-    "FRESH":     "",
-    "TIRED":     "你有点累了，说话比平时少一些，但还好。",
-    "WEARY":     "你挺累的，说话简短，不太想展开聊太多。",
-    "EXHAUSTED": "你非常疲惫，说话极简，语气有些无力。",
-}
+_FATIGUE_STYLE_HINTS: dict[str, str] = {}
 
 # 孤独感对表达风格的影响
-_LONELINESS_STYLE_HINTS: dict[str, str] = {
-    "FINE":    "",
-    "LONELY":  "你有点孤独，见到对方有些高兴，说话比平时温柔一点。",
-    "LONGING": "你很孤独，等了很久，说话里带着一点思念和委屈。",
-    "ACHING":  "你孤独感很强，等了太久，说话里有明显的思念，可能会提到等待。",
-}
+_LONELINESS_STYLE_HINTS: dict[str, str] = {}
 
 
 def _load_style_hint_templates() -> dict[str, Any]:
@@ -319,9 +304,9 @@ class BodySenseModel:
 
         # 构建综合 body_sense_hint（优先级：困倦 > 疲劳 > 孤独）
         hints: list[str] = []
-        drowsy_hint = str(drowsiness_templates.get(drowsiness_level, _DROWSY_STYLE_HINTS.get(drowsiness_level, "")))
-        fatigue_hint = str(fatigue_templates.get(fatigue_level, _FATIGUE_STYLE_HINTS.get(fatigue_level, "")))
-        lonely_hint = str(loneliness_templates.get(loneliness_level, _LONELINESS_STYLE_HINTS.get(loneliness_level, "")))
+        drowsy_hint = str(drowsiness_templates.get(drowsiness_level, ""))
+        fatigue_hint = str(fatigue_templates.get(fatigue_level, ""))
+        lonely_hint = str(loneliness_templates.get(loneliness_level, ""))
 
         if drowsy_hint:
             hints.append(drowsy_hint)

@@ -61,6 +61,26 @@ def test_body_sense_tick_emits_updated_signal(monkeypatch) -> None:
     assert fake_limbic.tick_calls[0]["current_hour"] == 2
 
 
+def test_body_sense_tick_skips_during_recent_foreground_chat(monkeypatch) -> None:
+    fake_limbic = _FakeLimbicAgent()
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.resolve_background_tick_guard_state",
+        lambda **_kwargs: {
+            "active": True,
+            "cooldown_remaining_ms": 19000,
+            "speed_profile": "context_fast",
+        },
+    )
+
+    result = execute_body_sense_tick(args={"current_hour": 2})
+
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "BACKGROUND_TICK_FOREGROUND_CHAT_COOLDOWN"
+    assert result["cooldown_remaining_ms"] == 19000
+    assert fake_limbic.tick_calls == []
+
+
 def test_body_sense_conversation_start_emits_conversation_started(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)

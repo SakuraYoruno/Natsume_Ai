@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+
+from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.tribe.language_system_agent import LanguageSystemAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -41,5 +45,47 @@ def test_language_system_agent_get_language_style_compatibility() -> None:
 
     assert "dual_system" not in style_only
     assert style_with_dual["tone"] == "caring"
+    assert "陪伴感" in style_with_dual["loneliness_hint"]
     assert "dual_system" in style_with_dual
     assert style_with_dual["dual_system"]["wernicke"]["intent_type"] in {"question", "emotional_disclosure"}
+
+
+def test_language_system_agent_runtime_texts_override(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
+    store.upsert_template(
+        "language_system_agent.runtime_texts",
+        content=json.dumps(
+            {
+                "loneliness_hints": {
+                    "high": "自定义高孤独提示。",
+                    "mid": "自定义中孤独提示。",
+                }
+            },
+            ensure_ascii=False,
+        ),
+        enabled=True,
+    )
+
+    import host_brain.app.dependencies as deps
+
+    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
+    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
+
+    agent = LanguageSystemAgent(state_registry=TribeStateRegistry())
+
+    high_style = agent.get_language_style(
+        bond_stage="friend",
+        emotion_tag="NEUTRAL",
+        loneliness_level=0.85,
+        high_loneliness_flag=True,
+    )
+    mid_style = agent.get_language_style(
+        bond_stage="friend",
+        emotion_tag="NEUTRAL",
+        loneliness_level=0.5,
+        high_loneliness_flag=False,
+    )
+
+    assert high_style["loneliness_hint"] == "自定义高孤独提示。"
+    assert mid_style["loneliness_hint"] == "自定义中孤独提示。"

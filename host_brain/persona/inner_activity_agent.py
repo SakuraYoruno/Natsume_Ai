@@ -9,6 +9,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.persona.motive_runtime import (
     build_offline_state_from_inner_state,
     compute_runtime_motive_state,
@@ -42,6 +43,11 @@ _INNER_ACTIVITY_SELF_REFLECTION_LOCK = threading.Lock()
 _INNER_ACTIVITY_SELF_REFLECTION: Any | None = None
 _INNER_ACTIVITY_SELF_MODEL_LOCK = threading.Lock()
 _INNER_ACTIVITY_SELF_MODEL: Any | None = None
+
+
+def _load_prompt_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("inner_activity_agent.prompt_templates")
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def generate_inner_activity_note(
@@ -102,14 +108,8 @@ def generate_inner_activity_note(
     ]
     context_digest = _build_context_digest(context)
 
-    system_prompt = (
-        "你是夏目蓝的内心活动 Agent。"
-        "你只写内心独白，不对用户说话，不下指令，不提问。"
-        "你必须基于给定的 soul-layer 状态生成一个新的内心片段。"
-        "必须优先自我相关思考（self/state/plan），避免重复最近内心事件。"
-        "输出必须是 JSON："
-        '{"note":"...","focus":"self|state|plan|topic","meta":{"why":"..."}}。'
-    )
+    prompt_templates = _load_prompt_templates()
+    system_prompt = str(prompt_templates.get("system_prompt") or "").strip()
     prompt_payload = {
         "goal": "generate_inner_activity_note",
         "absence_band": absence_band,

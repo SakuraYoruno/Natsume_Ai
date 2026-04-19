@@ -159,3 +159,23 @@ def test_builtin_proactive_voice_runtime_templates_are_clean() -> None:
     assert templates["gaming_companion_followup"] == "你先专心打，等你这局打完再和我说说{topic_label}？"
     assert templates["generic_default_reply"] == "你好～"
     assert templates["trait_fallback"] == "自然风格"
+
+
+def test_proactive_voice_japanese_scene_and_runtime_templates() -> None:
+    voice = PersonaProactiveVoice()
+
+    content = voice._get_template(
+        SCENE_LATE_NIGHT,
+        "warm",
+        {"render_target_lang": "ja"},
+        _ts(2026, 1, 5, 1, 0),
+        "FRIEND",
+    )
+
+    assert any(ch in content for ch in "あいうえおアイウエオ")
+    assert "你" not in content
+    assert "我" not in content
+
+    trait = voice._describe_trait_influence(None, "default", render_target_lang="ja")
+    assert any(ch in trait for ch in "あいうえおアイウエオ")
+    assert "自然" not in trait or "自然で" in trait

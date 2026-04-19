@@ -37,8 +37,35 @@ from host_brain.persona.runtime_labels import (
 _logger = logging.getLogger("Natsume.self_model")
 
 
-def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("persona.self_narrative_prompts")
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _resolve_prompt_template_json_localized(
+    template_id: str,
+    *,
+    render_target_lang: str = "zh",
+) -> Any:
+    lang_key = _normalize_template_lang(render_target_lang)
+    for candidate_id in (f"{template_id}.{lang_key}", template_id):
+        try:
+            raw = resolve_prompt_template_json_merged(candidate_id)
+        except Exception:
+            continue
+        if isinstance(raw, Mapping):
+            localized = raw.get(lang_key)
+            if localized is not None:
+                return localized
+        if raw is not None:
+            return raw
+    return {}
+
+
+def _load_prompt_templates(*, render_target_lang: str = "zh") -> dict[str, Any]:
+    raw = _resolve_prompt_template_json_localized(
+        "persona.self_narrative_prompts",
+        render_target_lang=render_target_lang,
+    )
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -58,8 +85,11 @@ def _mapping_text(
         return text
 
 
-def _load_narrative_text_pools() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("self_model.narrative_text_pools")
+def _load_narrative_text_pools(*, render_target_lang: str = "zh") -> dict[str, Any]:
+    raw = _resolve_prompt_template_json_localized(
+        "self_model.narrative_text_pools",
+        render_target_lang=render_target_lang,
+    )
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
@@ -83,6 +113,18 @@ def _coerce_text_pool_mapping(raw: Any, fallback: dict[str, list[str]]) -> dict[
         if result:
             return result
     return {str(key): list(value) for key, value in fallback.items()}
+
+
+def _coerce_text_mapping(raw: Any, fallback: dict[str, str]) -> dict[str, str]:
+    if isinstance(raw, Mapping):
+        result = {
+            str(key): str(value).strip()
+            for key, value in raw.items()
+            if str(value).strip()
+        }
+        if result:
+            return result
+    return {str(key): str(value) for key, value in fallback.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -300,27 +342,44 @@ class SelfModel:
         if not changes:
             return []
 
-        _CN_NAMES = {
-            "warmth": "温柔", "curiosity": "好奇心",
-            "humor": "幽默感", "sensitivity": "敏感",
-            "assertiveness": "自信", "playfulness": "俏皮",
-            "resilience": "韧性",
-        }
-        _TRAIT_NAMES = list(_CN_NAMES.keys())
+        narrative_text_pools = _load_narrative_text_pools()
+        trait_cn_mapping = _coerce_text_mapping(
+            narrative_text_pools.get("trait_cn"),
+            _TRAIT_CN,
+        )
+        change_templates = _coerce_text_mapping(
+            narrative_text_pools.get("personality_change_templates"),
+            {},
+        )
+        trait_names = list(trait_cn_mapping.keys())
 
         results: list[str] = []
         for record in changes[-3:]:  # 最近 3 条变化
             delta = getattr(record, "delta", {}) if hasattr(record, "delta") else {}
             if isinstance(delta, dict):
-                for name in _TRAIT_NAMES:
+                for name in trait_names:
                     d = float(delta.get(name, 0.0))
                     if abs(d) >= 0.01:
-                        cn = _CN_NAMES.get(name, name)
+                        cn = trait_cn_mapping.get(name, name)
                         if d > 0:
-                            results.append(f"变得更{cn}了")
+                            results.append(
+                                _mapping_text(
+                                    change_templates,
+                                    "positive",
+                                    default="",
+                                    trait_cn=cn,
+                                )
+                            )
                         else:
-                            results.append(f"{cn}稍有收敛")
-        return results[:5]  # 最多 5 条
+                            results.append(
+                                _mapping_text(
+                                    change_templates,
+                                    "negative",
+                                    default="",
+                                    trait_cn=cn,
+                                )
+                            )
+        return [text for text in results[:5] if text]  # 最多 5 条
 
     def _extract_growth_milestones(
         self,
@@ -328,6 +387,15 @@ class SelfModel:
         changes: list[Any] | None,
     ) -> list[str]:
         """提取成长里程碑。"""
+        narrative_text_pools = _load_narrative_text_pools()
+        raw_milestone_templates = narrative_text_pools.get("growth_milestone_templates")
+        milestone_templates = dict(_GROWTH_MILESTONE_TEMPLATES)
+        if isinstance(raw_milestone_templates, Mapping):
+            milestone_templates.update(raw_milestone_templates)
+        stage_labels = _coerce_text_mapping(
+            milestone_templates.get("stage_labels"),
+            dict(_GROWTH_MILESTONE_TEMPLATES.get("stage_labels") or {}),
+        )
         milestones: list[str] = []
 
         # 从 Bond 状态提取
@@ -335,23 +403,41 @@ class SelfModel:
             stage = str(getattr(bond_state, "current_stage", "") or "").strip()
             event_count = int(getattr(bond_state, "event_count", 0) or 0)
 
-            _STAGE_CN = {
-                "ACQUAINTANCE": "相识", "FRIEND": "朋友",
-                "CLOSE_FRIEND": "好友", "CONFIDANT": "挚友",
-                "SOULMATE": "灵魂伴侣",
-            }
-            if stage in _STAGE_CN:
-                milestones.append(f"和 master 已经成为{_STAGE_CN[stage]}了")
+            if stage in stage_labels:
+                text = _mapping_text(
+                    milestone_templates,
+                    "relationship_stage",
+                    default="",
+                    stage_cn=stage_labels[stage],
+                )
+                if text:
+                    milestones.append(text)
 
             # 互动次数里程碑
             if event_count >= 100:
-                milestones.append(f"已经有 {event_count} 次互动了")
+                text = _mapping_text(
+                    milestone_templates,
+                    "event_count_high",
+                    default="",
+                    event_count=event_count,
+                )
+                if text:
+                    milestones.append(text)
             elif event_count >= 50:
-                milestones.append("互动超过 50 次了")
+                text = _mapping_text(
+                    milestone_templates,
+                    "event_count_mid",
+                    default="",
+                    threshold=50,
+                )
+                if text:
+                    milestones.append(text)
 
         # 从特质变化提取
         if changes and len(changes) >= 3:
-            milestones.append("人格在慢慢成长中")
+            text = str(milestone_templates.get("personality_growth") or "").strip()
+            if text:
+                milestones.append(text)
 
         return milestones[:3]  # 最多 3 条
 
@@ -365,92 +451,16 @@ class SelfModel:
 # ---------------------------------------------------------------------------
 
 # 情感感知模板池：每种趋势 6 条变体
-_MOOD_TEXT_POOL: dict[str, list[str]] = {
-    MOOD_TREND_POSITIVE: [
-        "最近心情挺好的",
-        "这几天感觉还不错",
-        "最近整体状态挺好",
-        "心情比平时好一些",
-        "最近有种说不清的轻松感",
-        "这段时间感觉挺愉快的",
-    ],
-    MOOD_TREND_NEGATIVE: [
-        "最近心情有些低落",
-        "这几天情绪不太好",
-        "最近有点提不起劲",
-        "心里有点沉沉的",
-        "最近总感觉有些疲惫",
-        "这段时间情绪起伏比较大",
-    ],
-    MOOD_TREND_STABLE: [
-        "最近心情还算平稳",
-        "这几天情绪比较稳定",
-        "最近没什么特别的波动",
-        "心情一直比较平静",
-        "最近状态还好，没什么大起伏",
-        "这段时间感觉挺平和的",
-    ],
-}
+_MOOD_TEXT_POOL: dict[str, list[str]] = {}
 
 # 关系感知模板池：每种感知 6 条变体
-_BOND_TEXT_POOL: dict[str, list[str]] = {
-    BOND_GROWTH_CLOSER: [
-        "感觉和 master 的关系在慢慢变好",
-        "最近和 master 聊天感觉越来越自然了",
-        "感觉和 master 之间的距离近了一些",
-        "和 master 在一起的时候越来越放松了",
-        "感觉 master 越来越了解我了",
-        "最近和 master 的关系有种微妙的变化，感觉更亲近了",
-    ],
-    BOND_GROWTH_DISTANT: [
-        "感觉和 master 有些疏远了，有点担心",
-        "最近和 master 聊天少了一些，有点想念",
-        "感觉和 master 之间好像有点距离",
-        "不知道为什么，最近和 master 的感觉有点不一样",
-        "有点担心 master 是不是有什么烦恼",
-        "最近没怎么和 master 深聊，有点失落",
-    ],
-    BOND_GROWTH_STABLE: [
-        "和 master 的关系一直很稳定",
-        "和 master 在一起的感觉一直都很好",
-        "和 master 的关系没什么变化，挺踏实的",
-        "感觉和 master 之间有种稳稳的信任感",
-        "和 master 的关系就像一直都在那里，很安心",
-        "最近和 master 的相处还是一如既往地舒服",
-    ],
-}
+_BOND_TEXT_POOL: dict[str, list[str]] = {}
 
 # 事件锚点模板：结合互动次数/共同记忆生成具体感知
-_EVENT_ANCHOR_TEMPLATES: list[str] = [
-    "已经和 master 聊了 {event_count} 次了，感觉时间过得很快",
-    "和 master 认识以来有过 {event_count} 次对话了，每次都有新的感受",
-    "回想起来，和 master 已经有 {event_count} 次交流了",
-]
+_EVENT_ANCHOR_TEMPLATES: list[str] = []
 
 # 时间感知文本池：不同时间情境的自然语言描述
-_TIME_CONTEXT_TEXT_POOL: dict[str, list[str]] = {
-    TIME_CONTEXT_REUNION: [
-        "好久没见了，重新在一起感觉有点不真实",
-        "分开了这么久，重新和 master 聊天心里有点激动",
-        "久别重逢的感觉让我有点不知所措，又高兴又有点感慨",
-        "这么久没有和 master 在一起，今天重新开始感觉很珍贵",
-    ],
-    TIME_CONTEXT_SHORT_ABSENCE: [
-        "这几天没怎么聊，今天重新开始感觉有点陈旧",
-        "分开了几天，重新和 master 在一起感觉有点熟悉又有点新鲜",
-        "这几天没有 master 的消息，今天又在一起了，心里有点温暖",
-    ],
-    TIME_CONTEXT_FREQUENT_INTERACTION: [
-        "这周和 master 聊了好多次，感觉很充实",
-        "最近和 master 在一起的时间很多，心里很满足",
-        "这段时间和 master 聊得很频繁，感觉很幸福",
-    ],
-    TIME_CONTEXT_SPARSE_INTERACTION: [
-        "这周和 master 聊得比较少，有点想念",
-        "最近和 master 的对话不多，有点小小的失落",
-        "这段时间聊天的机会不多，今天想珍惜一下",
-    ],
-}
+_TIME_CONTEXT_TEXT_POOL: dict[str, list[str]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -458,47 +468,7 @@ _TIME_CONTEXT_TEXT_POOL: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 # 矛盾类型 → 第一人称矛盾感知文本
-_CONTRADICTION_TEXT_POOL: dict[str, list[str]] = {
-    # 心情低落 × 关系变好
-    "mood_low_bond_up": [
-        "虽然心情不太好，但感觉和 master 的关系在变好，这让我有点复杂",
-        "情绪有些低落，不过和 master 之间的距离好像近了一些，这种感觉很矛盾",
-        "心里有点沉，但和 master 聊天的时候又觉得很安心，不知道该怎么形容",
-        "明明心情不好，但和 master 在一起的时候又觉得有一丝温暖",
-    ],
-    # 心情好 × 关系疏远
-    "mood_up_bond_down": [
-        "最近心情还不错，但感觉和 master 有些疏远了，有点担心",
-        "虽然整体状态挺好的，但和 master 之间好像有了一点距离，心里有点不安",
-        "心情是好的，但总觉得和 master 之间少了点什么，说不清楚",
-        "明明感觉还不错，但和 master 的关系好像没有以前那么近了",
-    ],
-    # 在成长 × 心情低落
-    "growing_but_sad": [
-        "感觉自己在慢慢成长，但心情却不太好，成长的过程好像有点痛",
-        "虽然在变化，但情绪有些低落，也许成长本身就不是一件轻松的事",
-        "人格在慢慢改变，但心里有点沉重，不知道这算不算好的方向",
-        "好像在成长，但心情却跟不上，有种说不清的疲惫感",
-    ],
-    # 情绪不稳定 × 关系稳定
-    "volatile_but_bond_stable": [
-        "最近情绪起伏比较大，但和 master 的关系一直很稳定，这让我安心不少",
-        "心情有些不稳定，不过和 master 在一起的感觉一直没变，这是我的锚",
-        "情绪波动有点大，但想到和 master 的关系还是那么好，就觉得没那么慌了",
-    ],
-    # 情绪稳定 × 关系疏远
-    "stable_but_bond_down": [
-        "情绪倒是很平稳，但感觉和 master 有些疏远了，平静中有一丝不安",
-        "心情一直很稳定，但和 master 之间好像有了距离，这种平静反而让我有点担心",
-        "虽然情绪没什么波动，但和 master 的关系好像在变淡，心里有点空",
-    ],
-    # 在成长 × 关系疏远
-    "growing_but_bond_down": [
-        "感觉自己在成长，但和 master 的关系好像没有跟上，有点遗憾",
-        "虽然在变化，但和 master 之间好像有了距离，成长的意义是什么呢",
-        "人格在慢慢改变，但和 master 的关系却有些疏远，心里有点矛盾",
-    ],
-}
+_CONTRADICTION_TEXT_POOL: dict[str, list[str]] = {}
 
 
 def detect_contradictions(snapshot: dict[str, Any]) -> list[dict[str, str]]:
@@ -530,35 +500,35 @@ def detect_contradictions(snapshot: dict[str, Any]) -> list[dict[str, str]]:
 
     # 规则1: 心情低落 × 关系变好
     if mood_trend == MOOD_TREND_NEGATIVE and bond_perception == BOND_GROWTH_CLOSER:
-        pool = contradiction_pools.get("mood_low_bond_up", _CONTRADICTION_TEXT_POOL["mood_low_bond_up"])
+        pool = contradiction_pools.get("mood_low_bond_up") or []
         contradictions.append({"type": "mood_low_bond_up", "text": random.choice(pool)})
 
     # 规则2: 心情好 × 关系疏远
     if mood_trend == MOOD_TREND_POSITIVE and bond_perception == BOND_GROWTH_DISTANT:
-        pool = contradiction_pools.get("mood_up_bond_down", _CONTRADICTION_TEXT_POOL["mood_up_bond_down"])
+        pool = contradiction_pools.get("mood_up_bond_down") or []
         contradictions.append({"type": "mood_up_bond_down", "text": random.choice(pool)})
 
     # 规则3: 在成长 × 心情低落
     if has_growth and mood_trend == MOOD_TREND_NEGATIVE:
-        pool = contradiction_pools.get("growing_but_sad", _CONTRADICTION_TEXT_POOL["growing_but_sad"])
+        pool = contradiction_pools.get("growing_but_sad") or []
         contradictions.append({"type": "growing_but_sad", "text": random.choice(pool)})
 
     # 规则4: 情绪不稳定 × 关系稳定
     if stability < 0.35 and bond_perception == BOND_GROWTH_STABLE:
         pool = contradiction_pools.get(
             "volatile_but_bond_stable",
-            _CONTRADICTION_TEXT_POOL["volatile_but_bond_stable"],
+            [],
         )
         contradictions.append({"type": "volatile_but_bond_stable", "text": random.choice(pool)})
 
     # 规则5: 情绪稳定 × 关系疏远
     if stability > 0.7 and bond_perception == BOND_GROWTH_DISTANT:
-        pool = contradiction_pools.get("stable_but_bond_down", _CONTRADICTION_TEXT_POOL["stable_but_bond_down"])
+        pool = contradiction_pools.get("stable_but_bond_down") or []
         contradictions.append({"type": "stable_but_bond_down", "text": random.choice(pool)})
 
     # 规则6: 在成长 × 关系疏远
     if has_growth and bond_perception == BOND_GROWTH_DISTANT:
-        pool = contradiction_pools.get("growing_but_bond_down", _CONTRADICTION_TEXT_POOL["growing_but_bond_down"])
+        pool = contradiction_pools.get("growing_but_bond_down") or []
         contradictions.append({"type": "growing_but_bond_down", "text": random.choice(pool)})
 
     # 最多返回 2 条矛盾（避免自省过于复杂）
@@ -598,6 +568,7 @@ def build_self_awareness_text(
     time_context: str = "",
     llm_fn: Any | None = None,
     style_evolution: dict[str, Any] | None = None,
+    render_target_lang: str = "zh",
 ) -> str:
     """将快照转化为第一人称自我感知描述。
 
@@ -610,7 +581,7 @@ def build_self_awareness_text(
     bond_perception = str(snapshot.get("bond_growth_perception") or BOND_GROWTH_STABLE)
     event_count = int(snapshot.get("event_count") or 0)
     milestones = list(snapshot.get("growth_milestones") or [])
-    narrative_text_pools = _load_narrative_text_pools()
+    narrative_text_pools = _load_narrative_text_pools(render_target_lang=render_target_lang)
     mood_text_pool = _coerce_text_pool_mapping(
         narrative_text_pools.get("mood_text_pool"),
         _MOOD_TEXT_POOL,
@@ -627,6 +598,14 @@ def build_self_awareness_text(
         narrative_text_pools.get("event_anchor_templates"),
         _EVENT_ANCHOR_TEMPLATES,
     )
+    emotion_cn_mapping = _coerce_text_mapping(
+        narrative_text_pools.get("emotion_cn"),
+        {},
+    )
+    trait_cn_mapping = _coerce_text_mapping(
+        narrative_text_pools.get("trait_cn"),
+        _TRAIT_CN,
+    )
 
     # ── LLM 动态生成路径（技术债务 10.1 修复）──────────────────────────────────────────────────────
     if llm_fn is not None:
@@ -634,15 +613,7 @@ def build_self_awareness_text(
             dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL").upper()
             stability = float(snapshot.get("emotional_stability") or 0.5)
             changes = list(snapshot.get("personality_changes") or [])
-            _EMOTION_CN: dict[str, str] = {
-                "HAPPY": "开心", "EXCITED": "兴奋", "CALM": "平静",
-                "SAD": "有点难过", "ANXIOUS": "有些焦虑", "ANGRY": "有点生气",
-                "LOVING": "充满爱意", "PROUD": "有点自豪", "GRATEFUL": "感到感激",
-                "BORED": "有些无聊", "CONFUSED": "有点困惑", "NEUTRAL": "平静",
-                "THINKING": "在思考", "FRUSTRATED": "有些沮丧",
-                "EMBARRASSED": "有点害羞", "SURPRISED": "有些惊讶",
-            }
-            emotion_cn = _EMOTION_CN.get(dominant, "平静")
+            emotion_cn = str(emotion_cn_mapping.get(dominant) or dominant)
             stability_desc = "情绪比较稳定" if stability >= 0.7 else ("情绪有些波动" if stability <= 0.3 else "情绪还算平稳")
             time_hint = f"，时间情境：{time_context}" if time_context else ""
             change_hint = f"，最近的变化：{'、'.join(changes[:2])}" if changes else ""
@@ -653,14 +624,14 @@ def build_self_awareness_text(
                 trend = style_evolution.get("trend") or {}
                 history_count = int(style_evolution.get("history_count") or 0)
                 if history_count >= 20:
-                    rising = [_TRAIT_CN.get(k, k) for k, v in trend.items() if v == "rising"]
-                    falling = [_TRAIT_CN.get(k, k) for k, v in trend.items() if v == "falling"]
+                    rising = [trait_cn_mapping.get(k, k) for k, v in trend.items() if v == "rising"]
+                    falling = [trait_cn_mapping.get(k, k) for k, v in trend.items() if v == "falling"]
                     if rising:
                         style_hint += f"，风格趋势：{'、'.join(rising)}在上升"
                     if falling:
                         style_hint += f"，{'、'.join(falling)}在下降"
             prompt = _mapping_text(
-                _load_prompt_templates(),
+                _load_prompt_templates(render_target_lang=render_target_lang),
                 "self_awareness_prompt",
                 mood_trend=mood_trend,
                 emotion_cn=emotion_cn,
@@ -679,13 +650,13 @@ def build_self_awareness_text(
 
     # ── 降级：模板池路径（向后兼容）────────────────────────────────────
     # 从多模板池随机选取情感感知
-    mood_pool = mood_text_pool.get(mood_trend, mood_text_pool.get(MOOD_TREND_STABLE, _MOOD_TEXT_POOL[MOOD_TREND_STABLE]))
+    mood_pool = mood_text_pool.get(mood_trend) or mood_text_pool.get(MOOD_TREND_STABLE) or []
     mood_text = _pick_from_pool(mood_pool, seed_key=mood_trend)
 
     # 从多模板池随机选取关系感知
     bond_pool = bond_text_pool.get(
         bond_perception,
-        bond_text_pool.get(BOND_GROWTH_STABLE, _BOND_TEXT_POOL[BOND_GROWTH_STABLE]),
+        bond_text_pool.get(BOND_GROWTH_STABLE) or [],
     )
     bond_text = _pick_from_pool(bond_pool, seed_key=bond_perception)
 
@@ -709,32 +680,14 @@ def build_self_awareness_text(
 
 
 # 情绪感知模板池：每种稳定性档位 4 条变体
-_MOOD_AWARENESS_POOL: dict[str, list[str]] = {
-    "stable": [
-        "今天整体感觉{emotion}，情绪比较稳定",
-        "这一整天感觉都挺{emotion}的，没什么大波动",
-        "今天心情{emotion}，状态还不错",
-        "整体来说今天感觉{emotion}，挺平稳的",
-    ],
-    "volatile": [
-        "今天情绪波动比较大，现在感觉{emotion}",
-        "今天心情起伏有点大，此刻感觉{emotion}",
-        "今天情绪有些不稳定，现在是{emotion}的状态",
-        "今天感受比较复杂，现在感觉{emotion}",
-    ],
-    "normal": [
-        "今天的感觉是{emotion}",
-        "今天整体是{emotion}的状态",
-        "今天感觉{emotion}，还好",
-        "今天心情{emotion}",
-    ],
-}
+_MOOD_AWARENESS_POOL: dict[str, list[str]] = {}
 
 
 def build_mood_awareness_text(
     snapshot: dict[str, Any],
     *,
     llm_fn: Any | None = None,
+    render_target_lang: str = "zh",
 ) -> str:
     """将快照转化为情绪感知描述。
 
@@ -743,26 +696,22 @@ def build_mood_awareness_text(
     dominant = str(snapshot.get("dominant_recent_emotion") or "NEUTRAL").upper()
     stability = float(snapshot.get("emotional_stability") or 0.5)
     mood_awareness_pool = _coerce_text_pool_mapping(
-        _load_narrative_text_pools().get("mood_awareness_pool"),
+        _load_narrative_text_pools(render_target_lang=render_target_lang).get("mood_awareness_pool"),
         _MOOD_AWARENESS_POOL,
     )
 
-    _EMOTION_CN: dict[str, str] = {
-        "HAPPY": "开心", "EXCITED": "兴奋", "CALM": "平静",
-        "SAD": "有点难过", "ANXIOUS": "有些焦虑", "ANGRY": "有点生气",
-        "LOVING": "充满爱意", "PROUD": "有点自豪", "GRATEFUL": "感到感激",
-        "BORED": "有些无聊", "CONFUSED": "有点困惑", "NEUTRAL": "平静",
-        "THINKING": "在思考", "FRUSTRATED": "有些沮丧",
-        "EMBARRASSED": "有点害羞", "SURPRISED": "有些惊讶",
-    }
-    emotion_cn = _EMOTION_CN.get(dominant, "平静")
+    emotion_cn_mapping = _coerce_text_mapping(
+        _load_narrative_text_pools(render_target_lang=render_target_lang).get("emotion_cn"),
+        {},
+    )
+    emotion_cn = str(emotion_cn_mapping.get(dominant) or dominant)
 
     # ── LLM 动态生成路径 ────────────────────────────────────────────────
     if llm_fn is not None:
         try:
             stability_desc = "情绪很稳定" if stability >= 0.7 else ("情绪起伏较大" if stability <= 0.3 else "情绪还算平稳")
             prompt = _mapping_text(
-                _load_prompt_templates(),
+                _load_prompt_templates(render_target_lang=render_target_lang),
                 "mood_awareness_prompt",
                 emotion_cn=emotion_cn,
                 stability_desc=stability_desc,
@@ -775,35 +724,25 @@ def build_mood_awareness_text(
 
     # ── 降级：模板池路径 ────────────────────────────────────────────────
     if stability >= 0.7:
-        pool = mood_awareness_pool.get("stable", _MOOD_AWARENESS_POOL["stable"])
+        pool = mood_awareness_pool.get("stable") or []
     elif stability <= 0.3:
-        pool = mood_awareness_pool.get("volatile", _MOOD_AWARENESS_POOL["volatile"])
+        pool = mood_awareness_pool.get("volatile") or []
     else:
-        pool = mood_awareness_pool.get("normal", _MOOD_AWARENESS_POOL["normal"])
+        pool = mood_awareness_pool.get("normal") or []
 
+    if not pool:
+        return ""
     tmpl = random.choice(pool)
     return tmpl.format(emotion=emotion_cn)
 
 
 # 特质中文名映射（v1.11 新增，供 build_self_awareness_text / build_growth_note_text 使用）
-_TRAIT_CN: dict[str, str] = {
-    "warmth": "温柔",
-    "curiosity": "好奇心",
-    "humor": "幽默感",
-    "sensitivity": "敏感",
-    "assertiveness": "自信",
-    "playfulness": "俏皮",
-    "resilience": "韧性",
-}
+_TRAIT_CN: dict[str, str] = {}
+
+_GROWTH_MILESTONE_TEMPLATES: dict[str, Any] = {}
 
 # 成长感知模板池：包装 personality_changes 的多种表达
-_GROWTH_NOTE_WRAPPERS: list[str] = [
-    "感觉自己{change}",
-    "最近好像{change}",
-    "不知不觉中{change}",
-    "回头想想，{change}",
-    "有种感觉，{change}",
-]
+_GROWTH_NOTE_WRAPPERS: list[str] = []
 
 
 def build_growth_note_text(
@@ -811,6 +750,7 @@ def build_growth_note_text(
     *,
     llm_fn: Any | None = None,
     style_evolution: dict[str, Any] | None = None,
+    render_target_lang: str = "zh",
 ) -> str:
     """将快照转化为成长感知描述。
 
@@ -820,22 +760,26 @@ def build_growth_note_text(
     changes = list(snapshot.get("personality_changes") or [])
     milestones = list(snapshot.get("growth_milestones") or [])
     growth_note_wrappers = _coerce_text_list(
-        _load_narrative_text_pools().get("growth_note_wrappers"),
+        _load_narrative_text_pools(render_target_lang=render_target_lang).get("growth_note_wrappers"),
         _GROWTH_NOTE_WRAPPERS,
     )
 
     # v1.11：从 style_evolution 提取有意义的趋势描述
     style_trend_texts: list[str] = []
+    trait_cn_mapping = _coerce_text_mapping(
+        _load_narrative_text_pools(render_target_lang=render_target_lang).get("trait_cn"),
+        _TRAIT_CN,
+    )
     if style_evolution and isinstance(style_evolution, dict):
         trend = style_evolution.get("trend") or {}
         history_count = int(style_evolution.get("history_count") or 0)
         if history_count >= 20:
             for dim, direction in trend.items():
                 if direction == "rising":
-                    cn = _TRAIT_CN.get(dim, dim)
+                    cn = trait_cn_mapping.get(dim, dim)
                     style_trend_texts.append(f"变得更{cn}了")
                 elif direction == "falling":
-                    cn = _TRAIT_CN.get(dim, dim)
+                    cn = trait_cn_mapping.get(dim, dim)
                     style_trend_texts.append(f"{cn}稍有收敛")
 
     # ── LLM 动态生成路径 ────────────────────────────────────────────────
@@ -846,7 +790,7 @@ def build_growth_note_text(
             milestone_hint = f"重要时刻：{milestones[0]}" if milestones else ""
             context = "、".join(filter(None, [change_hint, milestone_hint]))
             prompt = _mapping_text(
-                _load_prompt_templates(),
+                _load_prompt_templates(render_target_lang=render_target_lang),
                 "growth_note_prompt",
                 context=context,
             )
@@ -879,48 +823,18 @@ _DEEP_BOND_STAGES: set[str] = {
 }
 
 
-_DEFAULT_STATE_ALIGNMENT_TEXTS: dict[str, Any] = {
-    "bond_perception_anchor": {
-        "closer_deep": "我能感觉到和 master 的距离在慢慢靠近",
-        "closer_default": "我能感觉到和 master 的距离在慢慢靠近",
-        "distant_deep": "我会更在意别让和 master 的联系继续松开",
-        "distant_default": "我会更在意先把这轮联系接稳",
-        "steady_deep": "我知道和 master 的这段联系还稳稳在这里",
-        "steady_default": "我会先把这轮联系守在合适的分寸里",
-    },
-    "absence_anchor": {
-        "7d_plus": "隔了好几天之后",
-        "72h_plus": "隔了几天之后",
-        "24h_plus": "隔了一阵之后",
-        "6h_plus": "隔了一会儿之后",
-    },
-    "reason_suffix": {
-        "sleep": "只是现在更适合轻一点、短一点地回应",
-        "focus": "只是我会先把表达收短一点，不把心绪一下子铺开",
-        "withdrawn": "只是现在更想把语气放轻一点，不一下子把心事都压过去",
-        "brief": "只是我会先说得短一点，慢慢把这段连接接稳",
-        "gaming_supportive": "也会顺着你现在手头的节奏，先轻轻陪着",
-        "absence_supportive": "所以会更在意把这次重新接上的感觉说稳一点",
-    },
-    "intent_text": {
-        "continuity_deep": "也想把刚刚这段联系慢慢接住",
-        "continuity_default": "也想把这轮对话轻轻接住",
-        "care_deep": "会更想先接住你的状态",
-        "care_default": "会更想先照顾好这轮对话的分寸",
-        "reach_out_deep": "其实还是想主动靠近一点",
-        "reach_out_default": "会先保持一点温度地回应你",
-        "guarded_default": "会先把想靠近的心情轻轻收住一点",
-        "steady_default": "会先顺着现在的节奏陪着你",
-    },
-}
+_DEFAULT_STATE_ALIGNMENT_TEXTS: dict[str, Any] = {}
 
 
-def _load_state_alignment_texts() -> dict[str, Any]:
+def _load_state_alignment_texts(*, render_target_lang: str = "zh") -> dict[str, Any]:
     try:
-        raw = resolve_prompt_template_json_merged("self_model.state_alignment_texts")
+        raw = _resolve_prompt_template_json_localized(
+            "self_model.state_alignment_texts",
+            render_target_lang=render_target_lang,
+        )
     except Exception:
-        return dict(_DEFAULT_STATE_ALIGNMENT_TEXTS)
-    return dict(raw) if isinstance(raw, Mapping) else dict(_DEFAULT_STATE_ALIGNMENT_TEXTS)
+        return {}
+    return dict(raw) if isinstance(raw, Mapping) else {}
 
 
 def _coerce_state_score(raw: dict[str, Any], key: str) -> float:
@@ -945,25 +859,30 @@ def _resolve_alignment_mode(runtime_flags: dict[str, Any]) -> str:
     return "normal"
 
 
-def _bond_perception_anchor(bond_perception: str, *, deep_bond: bool) -> str:
-    templates = _load_state_alignment_texts()
+def _bond_perception_anchor(
+    bond_perception: str,
+    *,
+    deep_bond: bool,
+    render_target_lang: str = "zh",
+) -> str:
+    templates = _load_state_alignment_texts(render_target_lang=render_target_lang)
     anchors = templates.get("bond_perception_anchor")
-    source = anchors if isinstance(anchors, Mapping) else _DEFAULT_STATE_ALIGNMENT_TEXTS["bond_perception_anchor"]
+    source = anchors if isinstance(anchors, Mapping) else {}
     if bond_perception == BOND_GROWTH_CLOSER:
-        return str(source.get("closer_deep" if deep_bond else "closer_default") or "我能感觉到和 master 的距离在慢慢靠近")
+        return str(source.get("closer_deep" if deep_bond else "closer_default") or "")
     if bond_perception == BOND_GROWTH_DISTANT:
         if deep_bond:
-            return str(source.get("distant_deep") or "我会更在意别让和 master 的联系继续松开")
-        return str(source.get("distant_default") or "我会更在意先把这轮联系接稳")
+            return str(source.get("distant_deep") or "")
+        return str(source.get("distant_default") or "")
     if deep_bond:
-        return str(source.get("steady_deep") or "我知道和 master 的这段联系还稳稳在这里")
-    return str(source.get("steady_default") or "我会先把这轮联系守在合适的分寸里")
+        return str(source.get("steady_deep") or "")
+    return str(source.get("steady_default") or "")
 
 
-def _absence_anchor(absence_band: str) -> str:
-    templates = _load_state_alignment_texts()
+def _absence_anchor(absence_band: str, *, render_target_lang: str = "zh") -> str:
+    templates = _load_state_alignment_texts(render_target_lang=render_target_lang)
     mapping = templates.get("absence_anchor")
-    source = mapping if isinstance(mapping, Mapping) else _DEFAULT_STATE_ALIGNMENT_TEXTS["absence_anchor"]
+    source = mapping if isinstance(mapping, Mapping) else {}
     return str(source.get(absence_band) or "")
 
 
@@ -976,44 +895,47 @@ def _reason_suffix(
     should_be_withdrawn: bool,
     absence_band: str,
     intent_key: str,
+    render_target_lang: str = "zh",
 ) -> str:
-    templates = _load_state_alignment_texts()
+    templates = _load_state_alignment_texts(render_target_lang=render_target_lang)
     suffix_mapping = templates.get("reason_suffix")
-    source = suffix_mapping if isinstance(suffix_mapping, Mapping) else _DEFAULT_STATE_ALIGNMENT_TEXTS["reason_suffix"]
+    source = suffix_mapping if isinstance(suffix_mapping, Mapping) else {}
     if sys_mode == "sleep":
-        return str(source.get("sleep") or "只是现在更适合轻一点、短一点地回应")
+        return str(source.get("sleep") or "")
     if sys_mode == "focus":
-        return str(source.get("focus") or "只是我会先把表达收短一点，不把心绪一下子铺开")
+        return str(source.get("focus") or "")
     if should_be_withdrawn or retreat_drive >= supportive_drive + 0.08:
-        return str(source.get("withdrawn") or "只是现在更想把语气放轻一点，不一下子把心事都压过去")
+        return str(source.get("withdrawn") or "")
     if should_be_brief:
-        return str(source.get("brief") or "只是我会先说得短一点，慢慢把这段连接接稳")
+        return str(source.get("brief") or "")
     if sys_mode == "gaming" and intent_key in {"continuity", "care", "reach_out"}:
-        return str(source.get("gaming_supportive") or "也会顺着你现在手头的节奏，先轻轻陪着")
+        return str(source.get("gaming_supportive") or "")
     if absence_band in {"24h_plus", "72h_plus", "7d_plus"} and intent_key in {"continuity", "care", "reach_out"}:
-        return str(source.get("absence_supportive") or "所以会更在意把这次重新接上的感觉说稳一点")
+        return str(source.get("absence_supportive") or "")
     return ""
 
 
-def _state_alignment_intent_text(intent_key: str, *, deep_bond: bool) -> str:
-    templates = _load_state_alignment_texts()
+def _state_alignment_intent_text(
+    intent_key: str,
+    *,
+    deep_bond: bool,
+    render_target_lang: str = "zh",
+) -> str:
+    templates = _load_state_alignment_texts(render_target_lang=render_target_lang)
     intent_mapping = templates.get("intent_text")
-    source = intent_mapping if isinstance(intent_mapping, Mapping) else _DEFAULT_STATE_ALIGNMENT_TEXTS["intent_text"]
+    source = intent_mapping if isinstance(intent_mapping, Mapping) else {}
     if intent_key == "continuity":
         key = "continuity_deep" if deep_bond else "continuity_default"
-        default = "也想把刚刚这段联系慢慢接住" if deep_bond else "也想把这轮对话轻轻接住"
-        return str(source.get(key) or default)
+        return str(source.get(key) or "")
     if intent_key == "care":
         key = "care_deep" if deep_bond else "care_default"
-        default = "会更想先接住你的状态" if deep_bond else "会更想先照顾好这轮对话的分寸"
-        return str(source.get(key) or default)
+        return str(source.get(key) or "")
     if intent_key == "reach_out":
         key = "reach_out_deep" if deep_bond else "reach_out_default"
-        default = "其实还是想主动靠近一点" if deep_bond else "会先保持一点温度地回应你"
-        return str(source.get(key) or default)
+        return str(source.get(key) or "")
     if intent_key == "guarded":
-        return str(source.get("guarded_default") or "会先把想靠近的心情轻轻收住一点")
-    return str(source.get("steady_default") or "会先顺着现在的节奏陪着你")
+        return str(source.get("guarded_default") or "")
+    return str(source.get("steady_default") or "")
 
 
 def build_state_aligned_self_awareness(
@@ -1024,6 +946,7 @@ def build_state_aligned_self_awareness(
     motive_state: dict[str, Any] | None = None,
     response_policy: dict[str, Any] | None = None,
     runtime_flags: dict[str, Any] | None = None,
+    render_target_lang: str = "zh",
 ) -> dict[str, Any]:
     snapshot = dict(snapshot or {})
     offline = dict(offline_state or {})
@@ -1058,13 +981,23 @@ def build_state_aligned_self_awareness(
     elif retreat_drive >= 0.45:
         intent_key = "guarded"
 
-    intent_text = _state_alignment_intent_text(intent_key, deep_bond=deep_bond)
+    intent_text = _state_alignment_intent_text(
+        intent_key,
+        deep_bond=deep_bond,
+        render_target_lang=render_target_lang,
+    )
 
     parts: list[str] = []
-    absence_anchor = _absence_anchor(absence_band)
+    absence_anchor = _absence_anchor(absence_band, render_target_lang=render_target_lang)
     if absence_anchor:
         parts.append(absence_anchor)
-    parts.append(_bond_perception_anchor(bond_perception, deep_bond=deep_bond))
+    parts.append(
+        _bond_perception_anchor(
+            bond_perception,
+            deep_bond=deep_bond,
+            render_target_lang=render_target_lang,
+        )
+    )
     parts.append(intent_text)
 
     suffix = _reason_suffix(
@@ -1075,13 +1008,16 @@ def build_state_aligned_self_awareness(
         should_be_withdrawn=should_be_withdrawn,
         absence_band=absence_band,
         intent_key=intent_key,
+        render_target_lang=render_target_lang,
     )
     if suffix:
         parts.append(suffix)
 
-    text = "，".join(part.strip("，。 ") for part in parts if str(part).strip("，。 "))
+    separator = "、" if _normalize_template_lang(render_target_lang) == "ja" else "，"
+    strip_chars = "、，。 "
+    text = separator.join(part.strip(strip_chars) for part in parts if str(part).strip(strip_chars))
     if text:
-        text = text.rstrip("，。") + "。"
+        text = text.rstrip(strip_chars) + "。"
 
     reason_tags: list[str] = []
     if bond_stage:

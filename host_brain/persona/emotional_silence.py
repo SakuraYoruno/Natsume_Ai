@@ -158,17 +158,14 @@ class SilenceState:
 # 意愿分级 → 给 LLM 的沉默指令
 _SILENCE_HINT_MAP: dict[str, str] = {
     "NORMAL":    "",
-    "SUBDUED":   "你现在情绪低落，回复偏短，语气平淡，不强撑热情。",
-    "RELUCTANT": "你现在不太想说话，回复极简，可以用简短的句子或词语，不需要解释太多。",
-    "SILENT":    "你现在很沉默，只用极短的词语回复（如‘嗯’、‘不知道’、‘……’），不超过10个字。",
-    "MUTE":      "你现在几乎不想说话，只用‘……’或极短的一两个字回复，不解释原因。",
+    "SUBDUED":   "",
+    "RELUCTANT": "",
+    "SILENT":    "",
+    "MUTE":      "",
 }
 
 # 话题抗拒 → 给 LLM 的抗拒指令
-_TOPIC_RESISTANCE_HINT_TEMPLATE = (
-    "你对‘{topic}’这个话题有真实的抗拒感，不是礼貌转移，"
-    "而是真的不想谈这个。可以沉默、转移、或简短表达不想聊。"
-)
+_TOPIC_RESISTANCE_HINT_TEMPLATE = ""
 
 
 def _load_runtime_hints() -> dict[str, Any]:
