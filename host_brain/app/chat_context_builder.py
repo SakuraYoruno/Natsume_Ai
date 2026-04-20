@@ -30,6 +30,7 @@ from host_brain.core.prompt_context import (
     validate_prompt_context as validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
+from host_brain.core.soft_fail import soft_fail
 
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
@@ -657,16 +658,18 @@ def _build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[
     ).strip().lower() or "normal"
 
     runtime_flags: dict[str, Any] = {"sys_mode": sys_mode}
-    try:
+    # OPT-3：activity_monitor 读取失败属于"业务路径的非致命降级"，
+    # 原来是 try/except Exception: pass，现统一走 soft_fail 以纳入观测。
+    with soft_fail("chat.runtime_mode.activity_monitor", fallback=None) as _box:
         from host_brain.app import dependencies as _deps  # noqa: PLC0415
 
         monitor = getattr(_deps, "_activity_monitor_ref", None)
         if monitor is not None and hasattr(monitor, "get_status"):
             activity_status = monitor.get_status()
             if isinstance(activity_status, Mapping):
-                runtime_flags["activity_monitor"] = dict(activity_status)
-    except Exception:
-        pass
+                _box[0] = dict(activity_status)
+    if _box[0] is not None:
+        runtime_flags["activity_monitor"] = _box[0]
 
     return runtime_flags
 

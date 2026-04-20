@@ -121,6 +121,7 @@ class TestObsMetricsContract(unittest.TestCase):
             "supervisor_metrics",    # 新增
             "budget_breach_metrics", # 新增
             "agent_metrics",         # 新增
+            "soft_failure_metrics",  # OPT-3 新增：进程内 SoftFailure 计数
         }
         self.assertEqual(required_keys, set(result.keys()))
 

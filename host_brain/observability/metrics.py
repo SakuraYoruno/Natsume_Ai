@@ -15,6 +15,7 @@ from typing import Any
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import PERF_BASELINE_STALE
 from host_brain.core.ids import now_ms
+from host_brain.core.soft_fail import snapshot_soft_failures
 from host_brain.integrations.graph_contract import is_budget_breach_failure_code
 from host_brain.observability.p8_extended_metrics import (
     P8ExtendedMetricsCollector,
@@ -124,6 +125,9 @@ class MetricsCollector:
         # P7-3：预算突破观测（从 supervisor_decision_log 等聚合 budget breach 类失败码）
         budget_breach_metrics = self._query_budget_breach_metrics()
 
+        # OPT-3：SoftFailure 进程内计数快照（由 host_brain.core.soft_fail 维护）
+        soft_failure_metrics = self._collect_soft_failure_metrics()
+
         # P8-1：扩展观测聚合（开关控制，默认关闭）
         p8_metrics: dict[str, Any] | None = None
         if is_p8_enabled():
@@ -147,6 +151,8 @@ class MetricsCollector:
             "supervisor_metrics": supervisor_metrics,
             # P7-3：预算突破观测（超时/超步数等）
             "budget_breach_metrics": budget_breach_metrics,
+            # OPT-3：SoftFailure 降级计数（stage × exc_type）
+            "soft_failure_metrics": soft_failure_metrics,
             "debug_trace": None,
         }
 
@@ -735,6 +741,60 @@ class MetricsCollector:
             "budget_breach_by_code": budget_breach_by_code,
             "budget_breach_rate_pct": budget_breach_rate_pct,
             "total_supervisor_decisions": total_supervisor,
+        }
+
+    def _collect_soft_failure_metrics(self) -> dict[str, Any]:
+        """OPT-3：聚合进程内 SoftFailure 计数快照。
+
+        数据源：``host_brain.core.soft_fail._counter``（通过 ``snapshot_soft_failures`` 读取）。
+        聚合维度：
+          - ``by_stage``：每个 stage 的总计数（跨 exc_type 求和）
+          - ``by_stage_exc_type``：stage × exc_type 的细粒度分布
+          - ``total``：所有 SoftFailure 总次数
+          - ``top_stages``：出现次数最多的 Top 5 stage（用于 obs/ui 快速定位）
+        """
+        try:
+            snapshot = snapshot_soft_failures()
+        except Exception:
+            snapshot = {}
+
+        by_stage: dict[str, int] = {}
+        by_stage_exc_type: dict[str, dict[str, int]] = {}
+        total = 0
+        for stage, exc_map in snapshot.items():
+            if not isinstance(exc_map, dict):
+                continue
+            stage_total = 0
+            exc_copy: dict[str, int] = {}
+            for exc_type, count in exc_map.items():
+                try:
+                    c = int(count)
+                except (TypeError, ValueError):
+                    continue
+                if c <= 0:
+                    continue
+                exc_copy[str(exc_type)] = c
+                stage_total += c
+            if stage_total <= 0:
+                continue
+            by_stage[str(stage)] = stage_total
+            by_stage_exc_type[str(stage)] = exc_copy
+            total += stage_total
+
+        top_stages = sorted(
+            (
+                {"stage": stage, "count": count}
+                for stage, count in by_stage.items()
+            ),
+            key=lambda item: item["count"],
+            reverse=True,
+        )[:5]
+
+        return {
+            "total": total,
+            "by_stage": by_stage,
+            "by_stage_exc_type": by_stage_exc_type,
+            "top_stages": top_stages,
         }
 
     def _query_emotion_metrics(self) -> dict[str, Any]:
