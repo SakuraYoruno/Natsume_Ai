@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
-from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.gateway.normalizer import _PLACEHOLDER_CONVERSATION_IDS
 from edge_client.runtime_texts import edge_runtime_text
 from edge_client.services.wx_db_service import WxDbService, WxMessage
@@ -84,6 +84,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 or bool(raw_payload.get("is_group_hint"))
             )
             self._stats["inbound_parsed"] += 1
+            attachments = self._build_attachments(
+                msg_id=str(raw_payload.get("msg_id") or raw_payload.get("id") or f"wechat-{ts_ms}"),
+                msg_type=msg_type,
+                media_url=media_url,
+                content=content,
+                raw_payload=raw_payload,
+            )
             return UnifiedMessage(
                 msg_id=str(raw_payload.get("msg_id") or raw_payload.get("id") or f"wechat-{ts_ms}"),
                 platform=Platform.WECHAT,
@@ -95,6 +102,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
                 ts_ms=ts_ms,
                 is_group=is_group,
                 media_url=media_url,
+                attachments=attachments,
                 sender_name=sender_name,
                 raw_extra=dict(raw_payload),
             )
@@ -122,6 +130,13 @@ class WeChatAdapter(AbstractPlatformAdapter):
             self._stats["inbound_skipped"] += 1
             return None
         self._stats["inbound_parsed"] += 1
+        attachments = self._build_attachments(
+            msg_id=str(wx_msg.msg_id),
+            msg_type=msg_type,
+            media_url=wx_msg.media_url,
+            content=content,
+            raw_payload=dict(wx_msg.raw or {}),
+        )
         return UnifiedMessage(
             msg_id=str(wx_msg.msg_id),
             platform=Platform.WECHAT,
@@ -133,6 +148,7 @@ class WeChatAdapter(AbstractPlatformAdapter):
             ts_ms=int(wx_msg.ts_ms),
             is_group=conversation_id.endswith("@chatroom"),
             media_url=wx_msg.media_url,
+            attachments=attachments,
             sender_name=str((wx_msg.raw or {}).get("sender_name") or wx_msg.from_wxid or "").strip() or None,
             raw_extra=dict(wx_msg.raw or {}),
         )
@@ -788,3 +804,37 @@ class WeChatAdapter(AbstractPlatformAdapter):
             return ""
         section, key = section_key
         return edge_runtime_text(section, key, default="")
+
+    @staticmethod
+    def _build_attachments(
+        *,
+        msg_id: str,
+        msg_type: MsgType,
+        media_url: str | None,
+        content: str,
+        raw_payload: dict[str, Any],
+    ) -> list[GatewayAttachment]:
+        attachment_type_map: dict[MsgType, str] = {
+            MsgType.IMAGE: "image",
+            MsgType.VOICE: "voice",
+            MsgType.VIDEO: "video",
+            MsgType.FILE: "file",
+            MsgType.EMOJI: "emoji",
+        }
+        attachment_type = attachment_type_map.get(msg_type)
+        if not attachment_type:
+            return []
+        media_ref = str(media_url or "").strip()
+        is_remote = media_ref.startswith(("http://", "https://"))
+        file_name = str(raw_payload.get("file_name") or raw_payload.get("StrFileName") or "").strip() or None
+        return [
+            GatewayAttachment(
+                attachment_id=f"{msg_id}:0",
+                type=attachment_type,
+                local_path=(None if is_remote or not media_ref else media_ref),
+                remote_url=(media_ref if is_remote else None),
+                file_name=file_name,
+                caption=str(content or "").strip() or None,
+                extra={"platform": "wechat"},
+            )
+        ]

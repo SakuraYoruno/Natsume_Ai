@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
-from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.feishu")
@@ -133,6 +133,12 @@ class FeishuAdapter(AbstractPlatformAdapter):
         is_group = chat_type == "group"
 
         self._stats["inbound_parsed"] += 1
+        attachments = self._build_attachments(
+            message_id=message_id,
+            message_type=message_type,
+            message=message,
+            content=content,
+        )
         return UnifiedMessage(
             msg_id=message_id,
             platform=Platform.FEISHU,
@@ -143,6 +149,7 @@ class FeishuAdapter(AbstractPlatformAdapter):
             content=content,
             ts_ms=ts_ms,
             is_group=is_group,
+            attachments=attachments,
             raw_extra=raw_payload,
         )
 
@@ -279,3 +286,30 @@ class FeishuAdapter(AbstractPlatformAdapter):
             "sticker": MsgType.EMOJI,
         }
         return _MAP.get(feishu_type, MsgType.UNKNOWN)
+
+    @staticmethod
+    def _build_attachments(
+        *,
+        message_id: str,
+        message_type: str,
+        message: dict[str, Any],
+        content: str,
+    ) -> list[GatewayAttachment]:
+        attachment_type_map: dict[str, str] = {
+            "image": "image",
+            "audio": "voice",
+            "media": "video",
+            "file": "file",
+            "sticker": "emoji",
+        }
+        attachment_type = attachment_type_map.get(str(message_type or "").strip().lower())
+        if not attachment_type:
+            return []
+        return [
+            GatewayAttachment(
+                attachment_id=f"{message_id}:0",
+                type=attachment_type,
+                caption=str(content or "").strip() or None,
+                extra=dict(message or {}),
+            )
+        ]

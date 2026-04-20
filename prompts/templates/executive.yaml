@@ -534,6 +534,23 @@ templates:
       original_template: 原始请求：{original}
       drifted_template: 偏航结果：{first}
       requirement: 要求：不要闲聊，不要复述偏掉的内容，直接回到用户真正要你做的事。
+- template_id: input_routes.multimodal_runtime_texts
+  category: fallback
+  scope: input_routes
+  locale: '*'
+  content_type: json
+  description: InputRoutes Gateway 多模态入站运行时文案（JSON，中日双语）
+  default_content:
+    zh:
+      async_accept_video: 我先看看这个视频，整理好再和你说。
+      async_accept_file: 我先把你发来的文件过一遍，整理好再和你说。
+      async_accept_generic: 我先看看你发来的内容，整理一下再接着说。
+      async_processing_failed: 刚才那份附件我这边没有顺利看完。你可以再发一次，或者换个更小一点的文件给我。
+    ja:
+      async_accept_video: まずこの動画を見て、整理してから返します。
+      async_accept_file: まず送ってくれたファイルを見て、整理してから返します。
+      async_accept_generic: まず送ってくれた内容を見て、整理してから返します。
+      async_processing_failed: さっきの添付はうまく読み切れませんでした。もう一度送るか、少し小さいものにしてもらえると助かります。
 - template_id: provider_factory.host_mock.reply_templates
   category: fallback
   scope: provider_factory

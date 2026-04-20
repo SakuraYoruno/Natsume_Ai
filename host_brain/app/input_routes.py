@@ -101,6 +101,7 @@ class InputPayload(BaseModel):
     is_group: bool | None = Field(None, description="[GATEWAY] Is group message")
     sender_name: str | None = Field(None, description="[GATEWAY] Sender display name")
     media_url: str | None = Field(None, description="[GATEWAY] Media URL")
+    attachments: list[dict[str, Any]] | None = Field(None, description="[GATEWAY] Structured attachments")
     reply_to_msg_id: str | None = Field(None, description="[GATEWAY] Reply-to message ID")
     raw_extra: dict[str, Any] | None = Field(None, description="[GATEWAY] Extra fields")
 
@@ -205,6 +206,15 @@ def _coerce_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 
@@ -365,6 +375,128 @@ def _load_gateway_fallback_texts_localized(*, render_target_lang: str) -> dict[s
                 continue
             selected[key_text] = value
     return selected or (dict(raw) if isinstance(raw, dict) else {})
+
+
+def _load_gateway_multimodal_runtime_texts() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("input_routes.multimodal_runtime_texts")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _load_gateway_multimodal_runtime_texts_localized(*, render_target_lang: str) -> dict[str, Any]:
+    raw = _load_gateway_multimodal_runtime_texts()
+    localized = raw.get(_normalize_gateway_template_lang(render_target_lang))
+    selected: dict[str, Any] = dict(localized) if isinstance(localized, dict) else {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            key_text = str(key)
+            if key_text in {"zh", "ja"}:
+                continue
+            selected[key_text] = value
+    return selected or (dict(raw) if isinstance(raw, dict) else {})
+
+
+def _gateway_attachment_type_from_msg_type(msg_type: str | None) -> str:
+    normalized = str(msg_type or "").strip().lower()
+    if normalized in {"image", "emoji", "voice", "video", "file"}:
+        return normalized
+    return "file"
+
+
+def _normalize_gateway_attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    normalized_items: list[dict[str, Any]] = []
+    attachments_raw = payload.get("attachments")
+    if isinstance(attachments_raw, list):
+        for index, raw in enumerate(attachments_raw):
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            attachment_id = str(item.get("attachment_id") or "").strip() or f"att_{index + 1}"
+            attachment_type = _gateway_attachment_type_from_msg_type(str(item.get("type") or payload.get("msg_type") or "file"))
+            local_path = str(item.get("local_path") or "").strip() or None
+            remote_url = str(item.get("remote_url") or "").strip() or None
+            normalized_items.append(
+                {
+                    "attachment_id": attachment_id,
+                    "type": attachment_type,
+                    "mime_type": str(item.get("mime_type") or "").strip() or None,
+                    "local_path": local_path,
+                    "remote_url": remote_url,
+                    "file_name": str(item.get("file_name") or "").strip() or None,
+                    "size_bytes": _coerce_int(item.get("size_bytes")),
+                    "duration_ms": _coerce_int(item.get("duration_ms")),
+                    "width": _coerce_int(item.get("width")),
+                    "height": _coerce_int(item.get("height")),
+                    "sha256": str(item.get("sha256") or "").strip() or None,
+                    "caption": str(item.get("caption") or "").strip() or None,
+                    "ocr_text": str(item.get("ocr_text") or "").strip() or None,
+                    "transcript": str(item.get("transcript") or "").strip() or None,
+                    "extra": dict(item.get("extra") or {}),
+                }
+            )
+
+    if not normalized_items:
+        media_url = str(payload.get("media_url") or "").strip()
+        if media_url:
+            attachment_type = _gateway_attachment_type_from_msg_type(payload.get("msg_type"))
+            is_remote = media_url.startswith("http://") or media_url.startswith("https://")
+            normalized_items.append(
+                {
+                    "attachment_id": "legacy_media_1",
+                    "type": attachment_type,
+                    "mime_type": None,
+                    "local_path": (None if is_remote else media_url),
+                    "remote_url": (media_url if is_remote else None),
+                    "file_name": None,
+                    "size_bytes": None,
+                    "duration_ms": None,
+                    "width": None,
+                    "height": None,
+                    "sha256": None,
+                    "caption": str(payload.get("content") or "").strip() or None,
+                    "ocr_text": None,
+                    "transcript": None,
+                    "extra": {},
+                }
+            )
+
+    asr_info = dict((payload.get("raw_extra") or {}).get("gateway_voice_asr") or {}) if isinstance(payload.get("raw_extra"), dict) else {}
+    transcript = str(asr_info.get("text") or "").strip()
+    if transcript:
+        for item in normalized_items:
+            if item.get("type") == "voice" and not str(item.get("transcript") or "").strip():
+                item["transcript"] = transcript
+
+    return normalized_items
+
+
+def _build_gateway_multimodal_placeholder_text(*, content: str, attachments: list[dict[str, Any]]) -> str:
+    normalized = str(content or "").strip()
+    if normalized:
+        return normalized
+    if not attachments:
+        return normalized
+    types = [str(item.get("type") or "").strip().lower() for item in attachments]
+    if len(types) > 3:
+        return "我发了几个附件，帮我一起看看。"
+    if "video" in types:
+        return "你先看看这个视频。"
+    if "voice" in types:
+        return "这段语音在说什么？"
+    if "image" in types or "emoji" in types:
+        return "你看一下这张图。"
+    if "file" in types:
+        return "帮我看看这个文件。"
+    return "我发了一个附件，帮我看看。"
+
+
+def _build_gateway_multimodal_async_ack_text(*, attachments: list[dict[str, Any]], render_target_lang: str = "zh") -> str:
+    templates = _load_gateway_multimodal_runtime_texts_localized(render_target_lang=render_target_lang)
+    types = {str(item.get("type") or "").strip().lower() for item in attachments}
+    if "video" in types:
+        return str(templates.get("async_accept_video") or "")
+    if "file" in types:
+        return str(templates.get("async_accept_file") or "")
+    return str(templates.get("async_accept_generic") or "")
 
 
 def _build_gateway_route_started_voice_ack_text(
@@ -720,13 +852,15 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 ts_ms=ts_ms,
             )
     elif source == "GATEWAY":
-        if not body.content or not body.conversation_id or not body.platform:
+        initial_payload = body.model_dump(exclude_none=True)
+        gateway_attachments = _normalize_gateway_attachments(initial_payload)
+        if ((not body.content and not gateway_attachments) or not body.conversation_id or not body.platform):
             return InputResponse(
                 success=False,
                 request_id=request_id,
                 source=source,
                 status="REJECTED",
-                detail="GATEWAY input missing required fields: content, conversation_id, platform",
+                detail="GATEWAY input missing required fields: content|attachments, conversation_id, platform",
                 ts_ms=ts_ms,
             )
         if _is_invalid_gateway_conversation_id(body.conversation_id):
@@ -738,7 +872,10 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 detail=f"invalid gateway conversation_id: {body.conversation_id}",
                 ts_ms=ts_ms,
             )
-        text = str(body.content).strip()
+        text = _build_gateway_multimodal_placeholder_text(
+            content=str(body.content or ""),
+            attachments=gateway_attachments,
+        )
         session_id = str(body.conversation_id).strip()
     else:
         return InputResponse(
@@ -751,6 +888,10 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         )
 
     payload = body.model_dump(exclude_none=True)
+    if source == "GATEWAY":
+        gateway_attachments = _normalize_gateway_attachments(payload)
+        if gateway_attachments:
+            payload["attachments"] = gateway_attachments
     if source == "GATEWAY":
         gateway_dedupe_key = _build_gateway_dedupe_key(payload=body, text=text)
         gateway_dedupe_expiry = _mark_gateway_dedupe(gateway_dedupe_key)
@@ -863,6 +1004,41 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         notify_user_interaction()
     except Exception:
         pass
+
+    if source == "GATEWAY" and list(payload.get("attachments") or []):
+        from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
+
+        observer_result = get_multimodal_observer().observe(
+            request_id=request_id,
+            platform=str(body.platform or "").strip(),
+            conversation_id=session_id,
+            user_text=text,
+            attachments=list(payload.get("attachments") or []),
+            render_target_lang="zh",
+        )
+        payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
+        payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
+        payload["attachment_processing_mode"] = str(observer_result.get("mode") or "sync")
+        payload["multimodal_safety_flags"] = list(observer_result.get("safety_flags") or [])
+        if str(observer_result.get("mode") or "").strip().lower() == "async":
+            job = _schedule_gateway_multimodal_async_job(
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                text=text,
+                payload=payload,
+                ts_ms=ts_ms,
+                ledger=_get_ledger_safe(),
+            )
+            payload["multimodal_job"] = job
+            return InputResponse(
+                success=True,
+                request_id=request_id,
+                source=source,
+                status="ACCEPTED",
+                detail="gateway multimodal accepted for async processing",
+                ts_ms=ts_ms,
+            )
 
     if source == "GATEWAY":
         handled_by_progress_fastpath = await _try_handle_gateway_progress_fastpath(
@@ -1013,6 +1189,198 @@ async def _try_handle_gateway_progress_fastpath(
         ts_ms=finished_ms,
     )
     return success
+
+
+def _log_multimodal_job_task_exception(task: asyncio.Task) -> None:
+    try:
+        task.result()
+    except Exception as exc:  # pragma: no cover - defensive callback
+        _logger.error("input_routes: multimodal async job task failed: %s", exc)
+
+
+def _schedule_gateway_multimodal_async_job(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    ledger: Any,
+) -> dict[str, Any]:
+    from host_brain.app.multimodal_jobs import create_multimodal_job  # noqa: PLC0415
+
+    attachments = list(payload.get("attachments") or [])
+    job = create_multimodal_job(
+        request_id=request_id,
+        conversation_id=str(payload.get("conversation_id") or "").strip(),
+        platform=str(payload.get("platform") or "").strip(),
+        job_type="gateway_multimodal_async",
+        payload={
+            "attachment_count": len(attachments),
+            "attachment_types": [str(item.get("type") or "") for item in attachments],
+        },
+    )
+
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        input_payload={**dict(payload or {}), "multimodal_job": job},
+        phase="MULTIMODAL_ASYNC_ACCEPTED",
+        status="ACCEPTED",
+        detail=f"gateway multimodal async accepted job_id={job['job_id']}",
+        ts_ms=ts_ms,
+    )
+
+    async def _runner() -> None:
+        await _run_gateway_multimodal_async_job(
+            job_id=str(job["job_id"]),
+            request_id=request_id,
+            session_id=session_id,
+            text=text,
+            payload=dict(payload or {}),
+            ledger=ledger,
+        )
+
+    asyncio.create_task(_runner()).add_done_callback(_log_multimodal_job_task_exception)
+    return job
+
+
+async def _run_gateway_multimodal_async_job(
+    *,
+    job_id: str,
+    request_id: str,
+    session_id: str,
+    text: str,
+    payload: dict[str, Any],
+    ledger: Any,
+) -> None:
+    from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
+    from host_brain.app.multimodal_jobs import update_multimodal_job  # noqa: PLC0415
+    from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
+
+    platform = str(payload.get("platform") or "").strip().lower()
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    attachments = list(payload.get("attachments") or [])
+    ack_text = _build_gateway_multimodal_async_ack_text(
+        attachments=attachments,
+        render_target_lang="zh",
+    )
+    if _gateway_auto_reply_enabled() and platform and conversation_id and ack_text:
+        try:
+            await post_gateway_reply(
+                platform=platform,
+                conversation_id=conversation_id,
+                content=ack_text,
+                msg_type="text",
+                request_id=request_id,
+                wait_result=True,
+                timeout_ms=6000,
+            )
+        except Exception as exc:
+            _logger.debug("gateway multimodal async ack degraded request_id=%s err=%s", request_id, exc)
+
+    update_multimodal_job(job_id, status="RUNNING")
+    _log_input_event(
+        ledger=ledger,
+        request_id=request_id,
+        session_id=session_id,
+        source="GATEWAY",
+        input_payload={**dict(payload or {}), "multimodal_job_id": job_id},
+        phase="MULTIMODAL_ASYNC_RUNNING",
+        status="RUNNING",
+        detail=f"gateway multimodal async running job_id={job_id}",
+        ts_ms=int(time.time() * 1000),
+    )
+
+    try:
+        observer_result = get_multimodal_observer().observe(
+            request_id=request_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            user_text=text,
+            attachments=attachments,
+            render_target_lang="zh",
+            processing_mode_hint="background",
+        )
+        payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
+        payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
+        payload["attachment_processing_mode"] = "async"
+        update_multimodal_job(
+            job_id,
+            status="OBSERVED",
+            result={
+                "summary_for_chat": payload["attachment_summary"],
+                "observed_types": list((payload["multimodal_observations"] or {}).get("observed_types") or []),
+            },
+        )
+
+        pipeline_result = await _run_cortex_orchestrator_pipeline(
+            request_id=request_id,
+            session_id=session_id,
+            source="GATEWAY",
+            text=text,
+            payload=payload,
+            ts_ms=int(time.time() * 1000),
+        )
+        commit_event = dict(pipeline_result.get("commit_event") or {})
+        audit_refs = dict(commit_event.get("audit_refs") or {})
+        gateway_delivery = await _deliver_gateway_reply(
+            request_id=request_id,
+            payload=payload,
+            decision=str(pipeline_result.get("decision") or "REJECT"),
+            reason_code=str(pipeline_result.get("reason_code") or "").strip() or None,
+            narrative=str(pipeline_result.get("narrative") or "").strip(),
+            tts_text_ja=str(audit_refs.get("tts_text_ja") or "").strip() or None,
+            emotion_tag=str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper(),
+            bond_stage=str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper(),
+            user_msg_type=str(payload.get("msg_type") or "text").strip().lower(),
+        )
+        update_multimodal_job(job_id, status="COMPLETED", result={"gateway_delivery": gateway_delivery})
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source="GATEWAY",
+            input_payload={**dict(payload or {}), "multimodal_job_id": job_id},
+            phase="MULTIMODAL_ASYNC_COMPLETED",
+            status=("OK" if gateway_delivery.get("success") else "DEGRADED"),
+            reason_code=str(gateway_delivery.get("reason_code") or "").strip() or None,
+            detail=f"gateway multimodal async completed job_id={job_id}",
+            ts_ms=int(time.time() * 1000),
+        )
+    except Exception as exc:
+        update_multimodal_job(job_id, status="FAILED", error=f"{type(exc).__name__}: {exc}")
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source="GATEWAY",
+            input_payload={**dict(payload or {}), "multimodal_job_id": job_id},
+            phase="MULTIMODAL_ASYNC_FAILED",
+            status="FAILED",
+            reason_code="GATEWAY_MULTIMODAL_ASYNC_FAILED",
+            detail=f"{type(exc).__name__}: {str(exc)[:200]}",
+            ts_ms=int(time.time() * 1000),
+        )
+        if platform and conversation_id:
+            templates = _load_gateway_multimodal_runtime_texts_localized(render_target_lang="zh")
+            failure_text = str(templates.get("async_processing_failed") or "")
+            if failure_text:
+                try:
+                    await post_gateway_reply(
+                        platform=platform,
+                        conversation_id=conversation_id,
+                        content=failure_text,
+                        msg_type="text",
+                        request_id=request_id,
+                        wait_result=True,
+                        timeout_ms=6000,
+                    )
+                except Exception:
+                    pass
 
 
 def _should_start_gateway_progress_push(
@@ -1386,6 +1754,13 @@ async def _run_cortex_orchestrator_pipeline(
 
     reply_channel = str(payload.get("platform") or "").strip() or None
     reply_target = str(payload.get("conversation_id") or "").strip() or None
+    attachments = list(payload.get("attachments") or [])
+    multimodal_observations = dict(payload.get("multimodal_observations") or {})
+    message_text = (
+        str(text or "").strip()
+        or str(payload.get("attachment_summary") or "").strip()
+        or _build_gateway_multimodal_placeholder_text(content="", attachments=attachments)
+    )
     person_id = resolve_person_id(
         str(payload.get("person_id") or "").strip() or None,
         session_id=session_id,
@@ -1394,12 +1769,14 @@ async def _run_cortex_orchestrator_pipeline(
         conversation_id=reply_target,
     )
     request_body = ChatRequest(
-        message=text,
+        message=message_text,
         person_id=person_id,
         session_id=session_id,
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
+        attachments=(attachments or None),
+        multimodal_observations=(multimodal_observations or None),
         # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 ChatAgent 在 COMMIT 后重复补播。
         suppress_edge_tts=(source == "GATEWAY"),
         suppress_edge_vts=(source == "GATEWAY"),

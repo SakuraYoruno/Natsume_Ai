@@ -33,7 +33,7 @@ import time
 from typing import Any
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
-from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.telegram")
@@ -309,6 +309,13 @@ class TelegramAdapter(AbstractPlatformAdapter):
             content=str(raw_payload.get("text", "")),
             ts_ms=ts_ms,
             media_url=raw_payload.get("media_path"),
+            attachments=self._build_attachments(
+                msg_id=msg_id,
+                msg_type=msg_type,
+                media_ref=str(raw_payload.get("media_path") or "").strip(),
+                content=str(raw_payload.get("text", "") or "").strip(),
+                extra=dict(raw_payload),
+            ),
             is_group=is_group,
             sender_name=raw_payload.get("from_name"),
             raw_extra=raw_payload,
@@ -462,6 +469,16 @@ class TelegramAdapter(AbstractPlatformAdapter):
             is_group=is_group,
             sender_name=sender_name,
             reply_to_msg_id=reply_to_msg_id,
+            attachments=self._build_attachments(
+                msg_id=msg_id,
+                msg_type=msg_type,
+                media_ref="",
+                content=content,
+                extra={
+                    "telegram_chat_id": chat_id,
+                    "telegram_msg_id": msg_id,
+                },
+            ),
             raw_extra={
                 "telegram_chat_id": chat_id,
                 "telegram_msg_id": msg_id,
@@ -679,3 +696,34 @@ class TelegramAdapter(AbstractPlatformAdapter):
             return int(conversation_id)
         except ValueError:
             return None
+
+    @staticmethod
+    def _build_attachments(
+        *,
+        msg_id: str,
+        msg_type: MsgType,
+        media_ref: str,
+        content: str,
+        extra: dict[str, Any],
+    ) -> list[GatewayAttachment]:
+        attachment_type_map: dict[MsgType, str] = {
+            MsgType.IMAGE: "image",
+            MsgType.VOICE: "voice",
+            MsgType.VIDEO: "video",
+            MsgType.FILE: "file",
+            MsgType.EMOJI: "emoji",
+        }
+        attachment_type = attachment_type_map.get(msg_type)
+        if not attachment_type:
+            return []
+        is_remote = str(media_ref or "").startswith(("http://", "https://"))
+        return [
+            GatewayAttachment(
+                attachment_id=f"{msg_id}:0",
+                type=attachment_type,
+                local_path=(None if is_remote or not media_ref else media_ref),
+                remote_url=(media_ref if is_remote else None),
+                caption=str(content or "").strip() or None,
+                extra=dict(extra or {}),
+            )
+        ]

@@ -130,14 +130,25 @@ class GatewayRouter:
             "media_ref": asr_result.get("media_ref"),
             "segments": asr_result.get("segments"),
         }
+        attachments = list(msg.attachments or [])
+        if attachments:
+            patched_attachments = []
+            patched = False
+            for attachment in attachments:
+                if str(getattr(attachment, "type", "") or "").strip().lower() == "voice":
+                    patched_attachments.append(replace(attachment, transcript=text))
+                    patched = True
+                else:
+                    patched_attachments.append(attachment)
+            if patched:
+                attachments = patched_attachments
         logger.info(
             "GatewayRouter: voice ASR transcript applied platform=%s msg_id=%s len=%d",
             msg.platform.value,
             msg.msg_id,
             len(text),
         )
-        return replace(msg, content=text, raw_extra=raw_extra)
+        return replace(msg, content=text, raw_extra=raw_extra, attachments=attachments)
 
     def stats(self) -> dict[str, Any]:
         return dict(self._stats)
-

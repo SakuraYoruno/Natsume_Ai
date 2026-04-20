@@ -202,6 +202,95 @@ def test_receive_input_gateway_duplicate_msg_id_is_ignored() -> None:
     input_routes_module._GATEWAY_DEDUPE_CACHE.clear()
 
 
+def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_mm_sync_001",
+        msg_type="image",
+        attachments=[
+            {
+                "attachment_id": "att_img_1",
+                "type": "image",
+                "ocr_text": "图片里写着你好",
+            }
+        ],
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    observer = SimpleNamespace(
+        observe=lambda **_: {
+            "mode": "sync",
+            "observations": {
+                "items": [{"type": "image"}],
+                "observed_types": ["image"],
+                "summary_for_chat": "收到一张图片。图片里写着你好。",
+            },
+            "summary_for_chat": "收到一张图片。图片里写着你好。",
+            "safety_flags": [],
+        }
+    )
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
+        new=AsyncMock(return_value=False),
+    ), patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer), patch(
+        "host_brain.app.dependencies.notify_user_interaction",
+        return_value=None,
+    ), patch("host_brain.app.input_routes._log_input_event"):
+        response = _run(receive_input(body, SimpleNamespace()))
+
+    assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_count == 1
+    dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert dispatched_payload["attachment_processing_mode"] == "sync"
+    assert dispatched_payload["attachment_summary"] == "收到一张图片。图片里写着你好。"
+    assert dispatched_payload["attachments"][0]["type"] == "image"
+
+
+def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_mm_async_001",
+        msg_type="video",
+        attachments=[
+            {
+                "attachment_id": "att_video_1",
+                "type": "video",
+                "file_name": "demo.mp4",
+            }
+        ],
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    observer = SimpleNamespace(
+        observe=lambda **_: {
+            "mode": "async",
+            "observations": {
+                "items": [],
+                "observed_types": ["video"],
+                "summary_for_chat": "我先看看这个视频，整理好再和你说。",
+            },
+            "summary_for_chat": "我先看看这个视频，整理好再和你说。",
+            "safety_flags": ["ASYNC_PROCESSING_REQUIRED"],
+        }
+    )
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.dependencies.get_multimodal_observer",
+        return_value=observer,
+    ), patch("host_brain.app.input_routes._schedule_gateway_multimodal_async_job") as schedule_mock, patch(
+        "host_brain.app.dependencies.notify_user_interaction",
+        return_value=None,
+    ), patch("host_brain.app.input_routes._log_input_event"):
+        schedule_mock.return_value = {"job_id": "mmjob_test"}
+        response = _run(receive_input(body, SimpleNamespace()))
+
+    assert response.status == "ACCEPTED"
+    assert "async processing" in response.detail
+    assert dispatch_mock.await_count == 0
+    assert schedule_mock.call_count == 1
+
+
 def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> None:
     reply_text = _build_gateway_reply_text(
         decision="APPROVE",

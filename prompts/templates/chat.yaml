@@ -2449,6 +2449,12 @@ templates:
     emotion_signals_label: '- emotion_signals: {value}
 
       '
+    multimodal_summary_label: '- summary_for_chat: {value}
+
+      '
+    multimodal_observations_label: '- structured_observations: {value}
+
+      '
     emotion_recall_title: 'EMOTION_RECALL_BINDING:
 
       '

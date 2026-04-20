@@ -269,11 +269,43 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         multimodal_raw = runtime_payload.get("multimodal_input")
         multimodal = dict(multimodal_raw) if isinstance(multimodal_raw, Mapping) else {}
         if multimodal:
+            multimodal_summary = _truncate_for_prompt(
+                multimodal.get("summary_for_chat")
+                or ((dict(multimodal.get("observations") or {})).get("summary_for_chat") if isinstance(multimodal.get("observations"), Mapping) else ""),
+                limit=320,
+            )
+            multimodal_observations_block = ""
+            multimodal_observations_raw = multimodal.get("observations")
+            multimodal_observations = (
+                dict(multimodal_observations_raw)
+                if isinstance(multimodal_observations_raw, Mapping)
+                else {}
+            )
+            if multimodal_observations:
+                multimodal_observations_json = _truncate_for_prompt(
+                    json.dumps(multimodal_observations, ensure_ascii=False, sort_keys=True),
+                    limit=600,
+                )
+                multimodal_observations_block = _mapping_text(
+                    _runtime_section_templates,
+                    "multimodal_observations_label",
+                    value=multimodal_observations_json,
+                )
             multimodal_input_block = (
                 _mapping_text(_runtime_section_templates, "multimodal_input_title")
                 + _mapping_text(_runtime_section_templates, "primary_modality_label", value=_truncate_for_prompt(multimodal.get("primary_modality"), limit=24) or "text")
                 + _mapping_text(_runtime_section_templates, "modalities_label", value=", ".join(list(multimodal.get("modalities") or [])[:5]) or "text")
                 + _mapping_text(_runtime_section_templates, "emotion_signals_label", value=", ".join(list(multimodal.get("emotion_signals") or [])[:5]) or "NONE")
+                + (
+                    _mapping_text(
+                        _runtime_section_templates,
+                        "multimodal_summary_label",
+                        value=multimodal_summary,
+                    )
+                    if multimodal_summary
+                    else ""
+                )
+                + multimodal_observations_block
                 + "\n"
             )
     except Exception:

@@ -68,6 +68,92 @@ class MsgType(str, Enum):
 
 
 @dataclass
+class GatewayAttachment:
+    """统一附件结构。
+
+    作为 gateway 多模态入站的正式载体，兼容旧的 media_url 单附件模式。
+    """
+
+    attachment_id: str
+    type: str
+    mime_type: str | None = None
+    local_path: str | None = None
+    remote_url: str | None = None
+    file_name: str | None = None
+    size_bytes: int | None = None
+    duration_ms: int | None = None
+    width: int | None = None
+    height: int | None = None
+    sha256: str | None = None
+    caption: str | None = None
+    ocr_text: str | None = None
+    transcript: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def as_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "attachment_id": self.attachment_id,
+            "type": self.type,
+        }
+        if self.mime_type:
+            payload["mime_type"] = self.mime_type
+        if self.local_path:
+            payload["local_path"] = self.local_path
+        if self.remote_url:
+            payload["remote_url"] = self.remote_url
+        if self.file_name:
+            payload["file_name"] = self.file_name
+        if self.size_bytes is not None:
+            payload["size_bytes"] = int(self.size_bytes)
+        if self.duration_ms is not None:
+            payload["duration_ms"] = int(self.duration_ms)
+        if self.width is not None:
+            payload["width"] = int(self.width)
+        if self.height is not None:
+            payload["height"] = int(self.height)
+        if self.sha256:
+            payload["sha256"] = self.sha256
+        if self.caption:
+            payload["caption"] = self.caption
+        if self.ocr_text:
+            payload["ocr_text"] = self.ocr_text
+        if self.transcript:
+            payload["transcript"] = self.transcript
+        if self.extra:
+            payload["extra"] = dict(self.extra)
+        return payload
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> "GatewayAttachment":
+        return cls(
+            attachment_id=str(payload.get("attachment_id") or ""),
+            type=str(payload.get("type") or ""),
+            mime_type=str(payload.get("mime_type") or "").strip() or None,
+            local_path=str(payload.get("local_path") or "").strip() or None,
+            remote_url=str(payload.get("remote_url") or "").strip() or None,
+            file_name=str(payload.get("file_name") or "").strip() or None,
+            size_bytes=_coerce_int(payload.get("size_bytes")),
+            duration_ms=_coerce_int(payload.get("duration_ms")),
+            width=_coerce_int(payload.get("width")),
+            height=_coerce_int(payload.get("height")),
+            sha256=str(payload.get("sha256") or "").strip() or None,
+            caption=str(payload.get("caption") or "").strip() or None,
+            ocr_text=str(payload.get("ocr_text") or "").strip() or None,
+            transcript=str(payload.get("transcript") or "").strip() or None,
+            extra=dict(payload.get("extra") or {}),
+        )
+
+
+def _coerce_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass
 class UnifiedMessage:
     """跨平台统一消息信封。
 
@@ -87,6 +173,7 @@ class UnifiedMessage:
     # ── 可选字段 ──
     media_url: str | None = None         # 媒体文件本地路径或远程 URL
     media_data: bytes | None = None      # 媒体二进制数据（小文件内联）
+    attachments: list[GatewayAttachment] = field(default_factory=list)  # 正式附件数组（多模态主载体）
     reply_to_msg_id: str | None = None   # 引用的消息 ID
     is_group: bool = False               # 是否群消息
     sender_name: str | None = None       # 发送者昵称（显示用）
@@ -114,6 +201,8 @@ class UnifiedMessage:
             payload["sender_name"] = self.sender_name
         if self.media_url:
             payload["media_url"] = self.media_url
+        if self.attachments:
+            payload["attachments"] = [item.as_payload() for item in self.attachments]
         if self.reply_to_msg_id:
             payload["reply_to_msg_id"] = self.reply_to_msg_id
         if self.raw_extra:

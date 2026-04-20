@@ -17,7 +17,7 @@ import threading
 import time
 from typing import Any
 
-from edge_client.gateway.models import MsgType, UnifiedMessage
+from edge_client.gateway.models import GatewayAttachment, MsgType, UnifiedMessage
 
 logger = logging.getLogger("Natsume.edge.gateway.normalizer")
 
@@ -175,6 +175,9 @@ class MessageNormalizer:
             self._stats["system_skipped"] += 1
             return None
 
+        # ── 附件兼容回填（旧链路只传 media_url） ──
+        self._backfill_attachments(msg)
+
         # ── 去重 ──
         if self._dedup.is_duplicate(msg.dedup_key()):
             self._stats["deduplicated"] += 1
@@ -207,3 +210,34 @@ class MessageNormalizer:
         if not normalized:
             return True
         return normalized in _PLACEHOLDER_CONVERSATION_IDS
+
+    @staticmethod
+    def _backfill_attachments(msg: UnifiedMessage) -> None:
+        if list(msg.attachments or []):
+            return
+        media_url = str(msg.media_url or "").strip()
+        if not media_url:
+            return
+
+        attachment_type_map: dict[MsgType, str] = {
+            MsgType.IMAGE: "image",
+            MsgType.EMOJI: "emoji",
+            MsgType.VOICE: "voice",
+            MsgType.VIDEO: "video",
+            MsgType.FILE: "file",
+        }
+        attachment_type = attachment_type_map.get(msg.msg_type)
+        if not attachment_type:
+            return
+
+        is_remote = media_url.startswith(("http://", "https://"))
+        attachment_id = str(msg.msg_id or media_url)
+        msg.attachments = [
+            GatewayAttachment(
+                attachment_id=f"{attachment_id}:0",
+                type=attachment_type,
+                local_path=(None if is_remote else media_url),
+                remote_url=(media_url if is_remote else None),
+                caption=str(msg.content or "").strip() or None,
+            )
+        ]

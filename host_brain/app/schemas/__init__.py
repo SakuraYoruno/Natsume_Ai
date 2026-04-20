@@ -82,6 +82,11 @@ class ChatRequest(BaseModel):
     suppress_edge_vts: Optional[bool] = Field(None, description="Optional per-request flag to suppress edge VTS")
     reply_channel: Optional[str] = Field(None, description="Optional reply channel, e.g. WECHAT")
     reply_target: Optional[str] = Field(None, description="Optional reply target id for channel delivery")
+    attachments: Optional[List[Dict[str, Any]]] = Field(None, description="Optional structured inbound attachments")
+    multimodal_observations: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional structured multimodal observations derived from attachments",
+    )
     # [任务4] SCENE_VISION_UI 专用字段：视觉上下文
     # 支持格式：
     #   image_base64: str       — Base64 编码的截图（优先级最高）

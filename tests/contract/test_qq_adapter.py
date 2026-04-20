@@ -158,6 +158,8 @@ class TestQQAdapterInbound(unittest.TestCase):
         msg = adapter.parse_inbound(payload)
         assert msg is not None
         self.assertEqual(msg.msg_type, MsgType.IMAGE)
+        self.assertEqual(len(msg.attachments), 1)
+        self.assertEqual(msg.attachments[0].type, "image")
 
     def test_voice_message_type(self) -> None:
         """T-QQ-INBOUND-07: 语音消息类型识别。"""
@@ -171,6 +173,8 @@ class TestQQAdapterInbound(unittest.TestCase):
         msg = adapter.parse_inbound(payload)
         assert msg is not None
         self.assertEqual(msg.msg_type, MsgType.VOICE)
+        self.assertEqual(len(msg.attachments), 1)
+        self.assertEqual(msg.attachments[0].type, "voice")
 
     def test_skip_non_message_post_type(self) -> None:
         """T-QQ-INBOUND-08: 非 message/notice/request 事件被跳过。"""

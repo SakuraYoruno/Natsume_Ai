@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
-from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.qq")
@@ -153,6 +153,13 @@ class QQAdapter(AbstractPlatformAdapter):
             enriched_extra["_at_self"] = True
 
         self._stats["inbound_parsed"] += 1
+        attachments = self._build_attachments(
+            msg_id=message_id,
+            msg_type=msg_type,
+            media_url=media_url,
+            raw_payload=raw_payload,
+            content=content,
+        )
         return UnifiedMessage(
             msg_id=message_id,
             platform=Platform.QQ,
@@ -165,6 +172,7 @@ class QQAdapter(AbstractPlatformAdapter):
             is_group=is_group,
             sender_name=sender_name or None,
             media_url=media_url,
+            attachments=attachments,
             raw_extra=enriched_extra,
         )
 
@@ -598,3 +606,37 @@ class QQAdapter(AbstractPlatformAdapter):
             return ""
         section, key = section_key
         return edge_runtime_text(section, key, default="")
+
+    @staticmethod
+    def _build_attachments(
+        *,
+        msg_id: str,
+        msg_type: MsgType,
+        media_url: str | None,
+        raw_payload: dict[str, Any],
+        content: str,
+    ) -> list[GatewayAttachment]:
+        attachment_type_map: dict[MsgType, str] = {
+            MsgType.IMAGE: "image",
+            MsgType.VOICE: "voice",
+            MsgType.VIDEO: "video",
+            MsgType.FILE: "file",
+            MsgType.EMOJI: "emoji",
+        }
+        attachment_type = attachment_type_map.get(msg_type)
+        if not attachment_type:
+            return []
+        media_ref = str(media_url or "").strip()
+        if not media_ref and msg_type == MsgType.EMOJI:
+            media_ref = QQAdapter._extract_media_url(raw_payload, msg_type=MsgType.IMAGE) or ""
+        is_remote = media_ref.startswith(("http://", "https://"))
+        return [
+            GatewayAttachment(
+                attachment_id=f"{msg_id}:0",
+                type=attachment_type,
+                local_path=(None if is_remote or not media_ref else media_ref),
+                remote_url=(media_ref if is_remote else None),
+                caption=str(content or "").strip() or None,
+                extra={"platform": "qq"},
+            )
+        ]

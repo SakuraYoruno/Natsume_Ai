@@ -28,7 +28,7 @@ from typing import Any
 import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
-from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.line")
@@ -170,6 +170,12 @@ class LineAdapter(AbstractPlatformAdapter):
         reply_token = str(event.get("replyToken") or "")
 
         self._stats["inbound_parsed"] += 1
+        attachments = self._build_attachments(
+            message_id=message_id,
+            message_type=message_type,
+            message=message,
+            content=content,
+        )
         return UnifiedMessage(
             msg_id=message_id,
             platform=Platform.LINE,
@@ -180,6 +186,7 @@ class LineAdapter(AbstractPlatformAdapter):
             content=content,
             ts_ms=ts_ms,
             is_group=is_group,
+            attachments=attachments,
             raw_extra={
                 "reply_token": reply_token,
                 "source_type": source_type,
@@ -433,3 +440,31 @@ class LineAdapter(AbstractPlatformAdapter):
             "location": MsgType.TEXT,
         }
         return _MAP.get(line_type, MsgType.UNKNOWN)
+
+    @staticmethod
+    def _build_attachments(
+        *,
+        message_id: str,
+        message_type: str,
+        message: dict[str, Any],
+        content: str,
+    ) -> list[GatewayAttachment]:
+        attachment_type_map: dict[str, str] = {
+            "image": "image",
+            "video": "video",
+            "audio": "voice",
+            "file": "file",
+            "sticker": "emoji",
+        }
+        attachment_type = attachment_type_map.get(str(message_type or "").strip().lower())
+        if not attachment_type:
+            return []
+        return [
+            GatewayAttachment(
+                attachment_id=f"{message_id}:0",
+                type=attachment_type,
+                file_name=str(message.get("fileName") or "").strip() or None,
+                caption=str(content or "").strip() or None,
+                extra=dict(message or {}),
+            )
+        ]

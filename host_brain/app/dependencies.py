@@ -48,6 +48,7 @@ from host_brain.retrieval.orchestrator import RetrievalOrchestrator
 from host_brain.reasoning.reflection_chain import ReflectionChain
 from host_brain.channels.multimodal_processor import MultimodalProcessor
 from host_brain.channels.tts_context_router import TtsContextRouter
+from host_brain.app.multimodal_observer import MultimodalObserver
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
 from host_brain.memory.episodic_memory_graph import EpisodicMemoryGraph
 from host_brain.memory.consolidation_trigger import ConsolidationTrigger
@@ -123,6 +124,7 @@ _bond_aware_style_engine: Optional[Any] = None
 _reflection_chain: Optional[ReflectionChain] = None
 _tts_context_router: Optional[TtsContextRouter] = None
 _multimodal_processor: Optional[MultimodalProcessor] = None
+_multimodal_observer: Optional[MultimodalObserver] = None
 _memory_worth_evaluator: Optional[MemoryWorthEvaluator] = None
 _episodic_memory_graph: Optional[EpisodicMemoryGraph] = None
 _consolidation_trigger: Optional[ConsolidationTrigger] = None
@@ -913,6 +915,13 @@ def get_multimodal_processor() -> MultimodalProcessor:
     if _multimodal_processor is None:
         _multimodal_processor = MultimodalProcessor()
     return _multimodal_processor
+
+
+def get_multimodal_observer() -> MultimodalObserver:
+    global _multimodal_observer
+    if _multimodal_observer is None:
+        _multimodal_observer = MultimodalObserver()
+    return _multimodal_observer
 
 
 def get_memory_worth_evaluator() -> MemoryWorthEvaluator:

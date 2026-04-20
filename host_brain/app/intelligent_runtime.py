@@ -162,7 +162,10 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
     meta_learning = get_meta_learning_loop()
     safe_skill_runners, safe_skill_names = _build_safe_skill_runners(runtime_input=runtime_input)
 
-    multimodal = get_multimodal_processor().process_input(text=user_message)
+    multimodal = get_multimodal_processor().process_input(
+        text=user_message,
+        attachments=list(getattr(runtime_input, "attachments", []) or []),
+    )
     multimodal_payload = multimodal.as_dict()
     multimodal_payload["items"] = [
         {
@@ -171,6 +174,9 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
         }
         for item in multimodal.items
     ]
+    multimodal_observations = dict(getattr(runtime_input, "multimodal_observations", {}) or {})
+    if multimodal_observations:
+        multimodal_payload["observations"] = multimodal_observations
     intelligence["multimodal_input"] = multimodal_payload
     meta_learning.record(
         "multimodal_processor",

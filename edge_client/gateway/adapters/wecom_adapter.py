@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 
 from edge_client.gateway.adapters.base import AbstractPlatformAdapter
-from edge_client.gateway.models import MsgType, Platform, UnifiedMessage, UnifiedReply
+from edge_client.gateway.models import GatewayAttachment, MsgType, Platform, UnifiedMessage, UnifiedReply
 from edge_client.runtime_texts import edge_runtime_text
 
 logger = logging.getLogger("Natsume.edge.gateway.adapters.wecom")
@@ -108,6 +108,12 @@ class WeComAdapter(AbstractPlatformAdapter):
         conversation_id = f"wecom_{from_user}"
 
         self._stats["inbound_parsed"] += 1
+        attachments = self._build_attachments(
+            msg_id=msg_id,
+            msg_type=msg_type,
+            raw=raw_payload,
+            content=content,
+        )
         return UnifiedMessage(
             msg_id=msg_id,
             platform=Platform.WECOM,
@@ -118,6 +124,7 @@ class WeComAdapter(AbstractPlatformAdapter):
             content=content,
             ts_ms=ts_ms,
             is_group=False,
+            attachments=attachments,
             raw_extra=raw_payload,
         )
 
@@ -276,3 +283,33 @@ class WeComAdapter(AbstractPlatformAdapter):
             "event": MsgType.SYSTEM,
         }
         return _MAP.get(wecom_type, MsgType.UNKNOWN)
+
+    @staticmethod
+    def _build_attachments(
+        *,
+        msg_id: str,
+        msg_type: MsgType,
+        raw: dict[str, Any],
+        content: str,
+    ) -> list[GatewayAttachment]:
+        attachment_type_map: dict[MsgType, str] = {
+            MsgType.IMAGE: "image",
+            MsgType.VOICE: "voice",
+            MsgType.VIDEO: "video",
+            MsgType.FILE: "file",
+        }
+        attachment_type = attachment_type_map.get(msg_type)
+        if not attachment_type:
+            return []
+        media_id = str(raw.get("MediaId") or raw.get("PicUrl") or "").strip()
+        is_remote = media_id.startswith(("http://", "https://"))
+        return [
+            GatewayAttachment(
+                attachment_id=f"{msg_id}:0",
+                type=attachment_type,
+                remote_url=(media_id if is_remote else None),
+                local_path=(None if is_remote or not media_id else media_id),
+                caption=str(content or "").strip() or None,
+                extra={"media_id": media_id} if media_id else {},
+            )
+        ]
