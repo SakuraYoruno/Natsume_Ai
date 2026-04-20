@@ -10,7 +10,9 @@
 from __future__ import annotations
 
 import base64
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -160,6 +162,74 @@ class TestQQAdapterInbound(unittest.TestCase):
         self.assertEqual(msg.msg_type, MsgType.IMAGE)
         self.assertEqual(len(msg.attachments), 1)
         self.assertEqual(msg.attachments[0].type, "image")
+
+    def test_image_message_prefers_remote_url_over_file_token(self) -> None:
+        """QQ 图片若同时带 file token 和 url，应优先保留可远程访问的 url。"""
+        adapter = _adapter()
+        payload = _make_ob_message(
+            user_id=789012,
+            raw_message="[CQ:image,file=ABC.jpg,url=http://example.com/img.jpg]",
+            message=[
+                {"type": "image", "data": {"file": "ABC.jpg", "url": "http://example.com/img.jpg"}},
+            ],
+        )
+        msg = adapter.parse_inbound(payload)
+        assert msg is not None
+        self.assertEqual(msg.msg_type, MsgType.IMAGE)
+        self.assertEqual(msg.media_url, "http://example.com/img.jpg")
+        self.assertEqual(msg.attachments[0].remote_url, "http://example.com/img.jpg")
+
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
+    def test_image_message_resolves_onebot_get_image_url(self, mock_get: MagicMock) -> None:
+        """QQ 图片若只有 file token，应通过 get_image 换出真正 url。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "status": "ok",
+            "retcode": 0,
+            "data": {"url": "http://example.com/resolved.jpg"},
+        }
+        mock_get.return_value = mock_resp
+
+        adapter = _adapter()
+        payload = _make_ob_message(
+            user_id=789012,
+            raw_message="[CQ:image,file=ABC.jpg]",
+            message=[
+                {"type": "image", "data": {"file": "ABC.jpg"}},
+            ],
+        )
+        msg = adapter.parse_inbound(payload)
+        assert msg is not None
+        self.assertEqual(msg.media_url, "http://example.com/resolved.jpg")
+        self.assertEqual(msg.attachments[0].remote_url, "http://example.com/resolved.jpg")
+
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
+    def test_image_message_resolves_onebot_local_path_to_data_url(self, mock_get: MagicMock) -> None:
+        """若 get_image 只返回本地路径，适配器应编码成 data url 供 host 多模态读取。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sticker.png"
+            path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tmfQAAAAASUVORK5CYII="))
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = {
+                "status": "ok",
+                "retcode": 0,
+                "data": {"file": str(path)},
+            }
+            mock_get.return_value = mock_resp
+
+            adapter = _adapter()
+            payload = _make_ob_message(
+                user_id=789012,
+                raw_message="[CQ:image,file=ABC.png]",
+                message=[
+                    {"type": "image", "data": {"file": "ABC.png"}},
+                ],
+            )
+            msg = adapter.parse_inbound(payload)
+            assert msg is not None
+            assert msg.media_url is not None
+            self.assertTrue(msg.media_url.startswith("data:image/png;base64,"))
+            self.assertEqual(msg.attachments[0].remote_url, msg.media_url)
 
     def test_mface_message_type(self) -> None:
         """QQ 自定义表情应识别为 emoji 附件。"""

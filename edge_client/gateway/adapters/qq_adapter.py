@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import base64
 import logging
+import mimetypes
 import re
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -136,6 +138,7 @@ class QQAdapter(AbstractPlatformAdapter):
         # 消息类型判断
         msg_type = self._detect_msg_type(raw_payload)
         media_url = self._extract_media_url(raw_payload, msg_type=msg_type)
+        media_url = self._resolve_inbound_media_ref(raw_payload, msg_type=msg_type, media_ref=media_url)
         if msg_type != MsgType.TEXT:
             normalized_content = str(content or "").strip()
             if (not normalized_content) or normalized_content.lower().startswith("[cq:"):
@@ -566,10 +569,9 @@ class QQAdapter(AbstractPlatformAdapter):
             data = seg.get("data")
             if not isinstance(data, dict):
                 continue
-            for key in ("file", "url", "path"):
-                value = str(data.get(key) or "").strip()
-                if value:
-                    return value
+            value = QQAdapter._pick_inbound_media_ref(data, msg_type=msg_type)
+            if value:
+                return value
         return QQAdapter._extract_media_url_from_cq(raw_payload, msg_type=msg_type)
 
     @staticmethod
@@ -592,13 +594,122 @@ class QQAdapter(AbstractPlatformAdapter):
             if not match:
                 continue
             payload = str(match.group(1) or "")
-            for key in ("file", "url", "path"):
+            for key in QQAdapter._preferred_media_keys(msg_type):
                 key_match = re.search(rf"(?:^|,){re.escape(key)}=([^,\]]+)", payload, flags=re.IGNORECASE)
                 if key_match:
                     value = str(key_match.group(1) or "").strip()
                     if value:
                         return value
         return None
+
+    @staticmethod
+    def _preferred_media_keys(msg_type: MsgType) -> tuple[str, ...]:
+        if msg_type in {MsgType.IMAGE, MsgType.EMOJI, MsgType.VIDEO}:
+            return ("url", "path", "file")
+        if msg_type == MsgType.FILE:
+            return ("path", "url", "file")
+        return ("file", "url", "path")
+
+    @staticmethod
+    def _pick_inbound_media_ref(data: dict[str, Any], *, msg_type: MsgType) -> str | None:
+        for key in QQAdapter._preferred_media_keys(msg_type):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return None
+
+    def _resolve_inbound_media_ref(
+        self,
+        raw_payload: dict[str, Any],
+        *,
+        msg_type: MsgType,
+        media_ref: str | None,
+    ) -> str | None:
+        normalized = str(media_ref or "").strip()
+        if not normalized:
+            return None
+        if msg_type not in {MsgType.IMAGE, MsgType.EMOJI}:
+            return normalized
+        if self._is_remote_media_ref(normalized):
+            return normalized
+        if self._looks_like_local_path(normalized):
+            data_url = self._encode_local_image_as_data_url(normalized)
+            return data_url or normalized
+
+        resolved = self._resolve_qq_image_ref(raw_payload, normalized)
+        return resolved or normalized
+
+    @staticmethod
+    def _is_remote_media_ref(value: str) -> bool:
+        lowered = str(value or "").strip().lower()
+        return lowered.startswith(("http://", "https://", "data:"))
+
+    @staticmethod
+    def _looks_like_local_path(value: str) -> bool:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return False
+        if normalized.startswith(("file:///", "file://")):
+            return True
+        if re.match(r"^[A-Za-z]:[\\/]", normalized):
+            return True
+        return Path(normalized).is_absolute()
+
+    def _resolve_qq_image_ref(self, raw_payload: dict[str, Any], media_ref: str) -> str | None:
+        token = str(media_ref or "").strip()
+        if not token:
+            return None
+        try:
+            resp = httpx.get(
+                f"{self._api_base}/get_image",
+                params={"file": token},
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            body = resp.json()
+            status_ok = str(body.get("status") or "").strip().lower() == "ok"
+            ret_ok = int(body.get("retcode") or 0) == 0
+            if not (status_ok or ret_ok):
+                return None
+            data = body.get("data")
+            if not isinstance(data, dict):
+                return None
+            for key in ("url", "file", "path"):
+                candidate = str(data.get(key) or "").strip()
+                if not candidate:
+                    continue
+                if self._is_remote_media_ref(candidate):
+                    return candidate
+                encoded = self._encode_local_image_as_data_url(candidate)
+                if encoded:
+                    return encoded
+                if self._looks_like_local_path(candidate):
+                    return candidate
+        except Exception as exc:
+            logger.info(
+                "QQAdapter: get_image failed msg_id=%s detail=%s",
+                str(raw_payload.get("message_id") or ""),
+                str(exc)[:120],
+            )
+            return None
+        return None
+
+    @staticmethod
+    def _encode_local_image_as_data_url(path_ref: str) -> str | None:
+        normalized = str(path_ref or "").strip()
+        if normalized.startswith("file:///"):
+            normalized = normalized.removeprefix("file:///")
+        elif normalized.startswith("file://"):
+            normalized = normalized.removeprefix("file://")
+        path = Path(normalized)
+        if not path.exists() or not path.is_file():
+            return None
+        mime_type = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+        try:
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        except Exception:
+            return None
+        return f"data:{mime_type};base64,{encoded}"
 
     @staticmethod
     def _fallback_content_for_msg_type(msg_type: MsgType) -> str:
@@ -637,7 +748,7 @@ class QQAdapter(AbstractPlatformAdapter):
         media_ref = str(media_url or "").strip()
         if not media_ref and msg_type == MsgType.EMOJI:
             media_ref = QQAdapter._extract_media_url(raw_payload, msg_type=MsgType.IMAGE) or ""
-        is_remote = media_ref.startswith(("http://", "https://"))
+        is_remote = media_ref.startswith(("http://", "https://", "data:"))
         return [
             GatewayAttachment(
                 attachment_id=f"{msg_id}:0",
