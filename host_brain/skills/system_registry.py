@@ -110,6 +110,23 @@ def _normalize_network_status(args: dict[str, Any], ctx: dict[str, Any] | None) 
     }
 
 
+def _normalize_open_app(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
+    app_name = str((args or {}).get("app_name") or (args or {}).get("target") or "").strip() or None
+    app_id = str((args or {}).get("app_id") or "").strip() or None
+    target_path = str((args or {}).get("path") or (args or {}).get("target_path") or "").strip() or None
+    query = str((args or {}).get("query") or (args or {}).get("text") or (args or {}).get("user_message") or "").strip() or None
+
+    return {
+        "app_name": app_name,
+        "app_id": app_id,
+        "path": target_path,
+        "query": query,
+        "manifest_ref": f"open_app::{app_name or app_id or target_path or 'unknown'}",
+        "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
+        "_context": ctx or {},
+    }
+
+
 class SystemSkillProvider(DeclarativeSkillProvider):
     skill_specs = (
         DeclarativeSkillSpec(
@@ -156,6 +173,19 @@ class SystemSkillProvider(DeclarativeSkillProvider):
             tool="system",
             action="network_status",
             normalize_args=_normalize_network_status,
+        ),
+        DeclarativeSkillSpec(
+            skill_name="open_app",
+            clearance="MEDIUM",
+            risk_level=3,
+            scope="system",
+            reversible=False,
+            description="打开本地应用程序（优先解析开始菜单快捷方式、已知别名或显式路径）。",
+            tool="system",
+            action="open_app",
+            normalize_args=_normalize_open_app,
+            family="system",
+            capability_tags=("os", "desktop", "launch"),
         ),
     )
 

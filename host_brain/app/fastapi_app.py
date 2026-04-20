@@ -142,8 +142,11 @@ def _maybe_build_http_chat_fastpath(
         platform=getattr(request_body, "reply_channel", None),
         conversation_id=getattr(request_body, "reply_target", None),
     )
+    input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
-    if not render_target_lang:
+    if input_source == "GATEWAY":
+        render_target_lang = "zh"
+    elif not render_target_lang:
         try:
             render_target_lang = infer_render_target_lang(user_message=str(request_body.message or ""))
         except Exception:

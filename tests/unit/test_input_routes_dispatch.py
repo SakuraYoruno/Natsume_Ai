@@ -4,8 +4,17 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import host_brain.app.input_routes as input_routes_module
 from host_brain.audit.sqlite_ledger import SQLiteLedger
-from host_brain.app.input_routes import InputPayload, _dispatch_to_graph, _log_input_event, receive_input
+from host_brain.app.input_routes import (
+    InputPayload,
+    _build_gateway_reply_text,
+    _build_gateway_voice_text,
+    _dispatch_to_graph,
+    _log_input_event,
+    _send_gateway_voice_reply,
+    receive_input,
+)
 
 
 def _run(coro):
@@ -164,3 +173,75 @@ def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
+
+
+def test_receive_input_gateway_duplicate_msg_id_is_ignored() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_dup_001",
+        msg_id="qq-msg-dup-001",
+        from_id="230749497",
+        to_id="natsume",
+        content="hello",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    input_routes_module._GATEWAY_DEDUPE_CACHE.clear()
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
+        new=AsyncMock(return_value=False),
+    ), patch("host_brain.app.input_routes._log_input_event"):
+        first = _run(receive_input(body, SimpleNamespace()))
+        second = _run(receive_input(body, SimpleNamespace()))
+
+    assert first.status == "ACCEPTED"
+    assert second.status == "IGNORED"
+    assert "duplicate gateway input ignored" in second.detail
+    assert dispatch_mock.await_count == 1
+    input_routes_module._GATEWAY_DEDUPE_CACHE.clear()
+
+
+def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> None:
+    reply_text = _build_gateway_reply_text(
+        decision="APPROVE",
+        narrative="我在呢，你慢慢说。",
+        reason_code=None,
+        render_target_lang="zh",
+    )
+    voice_text = _build_gateway_voice_text(
+        reply_text=reply_text,
+        tts_text_ja=None,
+        render_target_lang="ja",
+    )
+
+    assert reply_text == "我在呢，你慢慢说。"
+    assert any("\u3040" <= ch <= "\u30ff" for ch in voice_text)
+    assert "結果" in voice_text or "画面" in voice_text
+
+
+def test_send_gateway_voice_reply_uses_japanese_tts_lang_hint() -> None:
+    post_speak_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="ACCEPTED",
+            detail="playback started",
+            latency_ms=12,
+            event={},
+        )
+    )
+
+    with patch("host_brain.channels.edge_rpc_client.post_speak", new=post_speak_mock):
+        result = _run(
+            _send_gateway_voice_reply(
+                platform="qq",
+                conversation_id="qq_dm_voice_lang_001",
+                tts_text="こんにちは。",
+                request_id="req_gateway_voice_lang",
+            )
+    )
+
+    assert post_speak_mock.await_count == 1
+    assert post_speak_mock.await_args.kwargs["lang_hint"] == "ja"
+    assert result["voice_status"] == "ACCEPTED"
+    assert result["voice_success"] is True

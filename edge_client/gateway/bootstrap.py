@@ -15,6 +15,27 @@ from typing import Any
 logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
 
 
+def _resolve_input_report_timeout_s() -> float:
+    """Resolve Edge → Host gateway input report timeout.
+
+    QQ / gateway chat replies on Host commonly take several seconds.  The old
+    3s default caused EdgeInputReporter to time out, cache, and retry even when
+    Host eventually processed the request successfully.  Keep a safer default
+    while still allowing env override.
+    """
+    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_TIMEOUT_S") or "").strip()
+    if not raw:
+        return 15.0
+    try:
+        return max(3.0, float(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Gateway: invalid EDGE_GATEWAY_INPUT_REPORT_TIMEOUT_S=%r, fallback to 15s",
+            raw,
+        )
+        return 15.0
+
+
 @dataclass
 class GatewayConfig:
     """Gateway 启动配置。"""
@@ -270,6 +291,7 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
     reporter = EdgeInputReporter(
         host_url=config.host_url,
         hmac_key=config.hmac_key,
+        timeout_s=_resolve_input_report_timeout_s(),
     )
     reporter.start_retry_loop()
     instance.reporter = reporter

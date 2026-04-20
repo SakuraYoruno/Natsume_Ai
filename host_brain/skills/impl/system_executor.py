@@ -7,14 +7,27 @@
   - process_list：列出进程
   - process_kill：终止进程
   - network_status：检测网络状态
+  - open_app：打开本地应用
 """
 
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+import subprocess
 from typing import Any
 
 _logger = logging.getLogger("Natsume.skills.system_executor")
+_START_MENU_DIRS = (
+    Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+    Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+)
+_KNOWN_APP_ALIASES: dict[str, dict[str, Any]] = {
+    "酷狗音乐": {"search_terms": ("酷狗音乐", "酷狗", "kugou"), "app_id": "kugou"},
+    "酷狗": {"search_terms": ("酷狗音乐", "酷狗", "kugou"), "app_id": "kugou"},
+    "kugou": {"search_terms": ("酷狗音乐", "酷狗", "kugou"), "app_id": "kugou"},
+}
 
 
 def execute_system_skill(args: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -33,11 +46,14 @@ def execute_system_skill(args: dict[str, Any], context: dict[str, Any] | None = 
 
     try:
         result = _dispatch_system_action(action, payload, context)
+        success = not (isinstance(result, dict) and result.get("success") is False)
+        reason_code = str(result.get("reason_code") or "").strip() if isinstance(result, dict) else ""
         return {
-            "status": "OK",
+            "status": "OK" if success else "FAILED",
             "manifest_ref": manifest_ref,
             "action": action,
             "detail": result,
+            "reason_code": reason_code or None,
         }
     except Exception as exc:
         _logger.warning("System executor 执行失败（action=%s）: %s", action, exc)
@@ -60,6 +76,7 @@ def _dispatch_system_action(
         "process_list": _execute_process_list,
         "process_kill": _execute_process_kill,
         "network_status": _execute_network_status,
+        "open_app": _execute_open_app,
     }
     handler = _action_map.get(action)
     if handler is None:
@@ -240,3 +257,200 @@ def _execute_network_status(payload: dict[str, Any], context: dict[str, Any] | N
 
     _logger.info("网络状态检测: host=%s, reachable=%s", host, result.get("reachable"))
     return result
+
+
+def _iter_open_app_terms(payload: dict[str, Any]) -> list[str]:
+    raw_values = [
+        payload.get("app_name"),
+        payload.get("app_id"),
+        payload.get("query"),
+        payload.get("path"),
+    ]
+    terms: list[str] = []
+    for raw in raw_values:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        terms.append(value)
+        normalized = value.lower()
+        alias = _KNOWN_APP_ALIASES.get(value) or _KNOWN_APP_ALIASES.get(normalized)
+        if alias:
+            for term in alias.get("search_terms", ()):
+                term_text = str(term or "").strip()
+                if term_text:
+                    terms.append(term_text)
+        else:
+            for alias_key, alias_meta in _KNOWN_APP_ALIASES.items():
+                alias_key_text = str(alias_key or "").strip().lower()
+                if alias_key_text and alias_key_text in normalized:
+                    for term in alias_meta.get("search_terms", ()):
+                        term_text = str(term or "").strip()
+                        if term_text:
+                            terms.append(term_text)
+            cleaned = (
+                value.replace("帮我", "")
+                .replace("替我", "")
+                .replace("本地的", "")
+                .replace("本地", "")
+                .replace("应用程序", "")
+                .replace("应用", "")
+                .replace("打开", "")
+                .replace("启动", "")
+                .replace("一下", "")
+                .replace("吧", "")
+                .replace("吗", "")
+                .replace("？", "")
+                .replace("。", "")
+                .strip()
+            )
+            if cleaned and cleaned.lower() != normalized:
+                terms.append(cleaned)
+    unique: list[str] = []
+    seen: set[str] = set()
+    for item in terms:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _resolve_open_app_target(payload: dict[str, Any]) -> tuple[str, str]:
+    explicit_path = str(payload.get("path") or "").strip()
+    if explicit_path:
+        path_obj = Path(explicit_path)
+        if path_obj.exists():
+            return ("path", str(path_obj))
+
+    terms = _iter_open_app_terms(payload)
+    lowered_terms = tuple(term.lower() for term in terms if term)
+
+    for root in _START_MENU_DIRS:
+        if not root.exists():
+            continue
+        try:
+            for candidate in root.rglob("*"):
+                if not candidate.is_file():
+                    continue
+                if candidate.suffix.lower() not in {".lnk", ".exe", ".url"}:
+                    continue
+                candidate_name = candidate.stem.lower()
+                if any(term in candidate_name for term in lowered_terms):
+                    return ("path", str(candidate))
+        except Exception:
+            continue
+
+    app_id = str(payload.get("app_id") or "").strip()
+    if not app_id:
+        for term in terms:
+            alias = _KNOWN_APP_ALIASES.get(term) or _KNOWN_APP_ALIASES.get(term.lower())
+            if alias and str(alias.get("app_id") or "").strip():
+                app_id = str(alias.get("app_id")).strip()
+                break
+    if app_id:
+        return ("app_id", app_id)
+
+    raise FileNotFoundError(f"unable to resolve local app target from terms={terms!r}")
+
+
+def _resolve_open_app_display_name(payload: dict[str, Any], *, target_kind: str, target_value: str) -> str:
+    explicit_name = str(payload.get("app_name") or "").strip()
+    if explicit_name:
+        cleaned_name = (
+            explicit_name.replace("帮我", "")
+            .replace("替我", "")
+            .replace("本地的", "")
+            .replace("本地", "")
+            .replace("应用程序", "")
+            .replace("应用", "")
+            .replace("软件", "")
+            .replace("程序", "")
+            .replace("打开", "")
+            .replace("启动", "")
+            .replace("运行", "")
+            .replace("一下", "")
+            .replace("吧", "")
+            .replace("吗", "")
+            .replace("？", "")
+            .replace("。", "")
+            .strip()
+        )
+        return cleaned_name or explicit_name
+
+    query = str(payload.get("query") or "").strip()
+    lowered_query = query.lower()
+    for alias_key, alias_meta in _KNOWN_APP_ALIASES.items():
+        search_terms = tuple(str(item or "").strip().lower() for item in alias_meta.get("search_terms", ()))
+        if any(term and term in lowered_query for term in search_terms):
+            return str(alias_key).strip()
+
+    if target_kind == "path":
+        try:
+            return Path(target_value).stem or target_value
+        except Exception:
+            return target_value
+
+    if target_kind == "app_id":
+        for alias_key, alias_meta in _KNOWN_APP_ALIASES.items():
+            if str(alias_meta.get("app_id") or "").strip().lower() == str(target_value or "").strip().lower():
+                return str(alias_key).strip()
+
+    return target_value
+
+
+def _launch_windows_shell_app_id(app_id: str) -> dict[str, Any]:
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        f'Start-Process "shell:AppsFolder\\\\{app_id}"',
+    ]
+    proc = subprocess.Popen(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    return {
+        "success": True,
+        "launch_mode": "app_id",
+        "target": app_id,
+        "pid": int(getattr(proc, "pid", 0) or 0),
+        "message": f"已为你打开 {app_id}。",
+    }
+
+
+def _launch_windows_path(target_path: str) -> dict[str, Any]:
+    os.startfile(target_path)  # type: ignore[attr-defined]
+    return {
+        "success": True,
+        "launch_mode": "path",
+        "target": target_path,
+        "message": f"已经替你打开了。",
+    }
+
+
+def _execute_open_app(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
+    """打开本地应用，优先使用显式路径/开始菜单快捷方式，其次回退到 shell app id。"""
+    _ = context
+    try:
+        target_kind, target_value = _resolve_open_app_target(payload)
+        if target_kind == "path":
+            result = _launch_windows_path(target_value)
+        else:
+            result = _launch_windows_shell_app_id(target_value)
+        result["app_name"] = _resolve_open_app_display_name(payload, target_kind=target_kind, target_value=target_value)
+        if not str(result.get("message") or "").strip():
+            result["message"] = f"已经替你打开 {result['app_name']}。"
+        _logger.info("打开本地应用: app=%s target=%s mode=%s", result["app_name"], target_value, result["launch_mode"])
+        return result
+    except Exception as exc:
+        _logger.warning("打开本地应用失败: payload=%s error=%s", payload, exc)
+        return {
+            "success": False,
+            "reason_code": "APP_LAUNCH_FAILED",
+            "detail": str(exc),
+            "app_name": str(payload.get("app_name") or ""),
+            "message": "抱歉，我这边没能把这个应用打开。",
+        }

@@ -173,3 +173,34 @@ def test_chat_deep_companionship_fastpath_skips_handle_chat(monkeypatch) -> None
     assert called["value"] is False
     assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
     assert "慢慢" in str(commit.get("narrative") or "") or "认真" in str(commit.get("narrative") or "")
+
+
+def test_chat_gateway_fastpath_forces_chinese_render_target(monkeypatch) -> None:
+    called = {"value": False}
+
+    async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
+        called["value"] = True
+
+        async def _events():
+            yield 'data: {"phase":"COMMIT","decision":"APPROVE","request_id":"req-test"}\n\n'
+
+        return StreamingResponse(_events(), media_type="text/event-stream")
+
+    monkeypatch.setattr("host_brain.app.fastapi_app.handle_chat", _fake_handle_chat)
+    monkeypatch.setattr(
+        "host_brain.app.fastapi_app._evaluate_immune_gate_for_chat",
+        lambda _body: {"decision": "ALLOW", "risk_level": "none", "reason_codes": [], "score": 0.0},
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={"message": "こんにちは", "input_source": "GATEWAY", "reply_channel": "qq", "reply_target": "qq_dm_test"},
+    )
+    commit = _extract_commit_event(response.text)
+
+    assert response.status_code == 200
+    assert called["value"] is False
+    assert commit["decision"] == "APPROVE"
+    assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
+    assert commit["audit_refs"]["render_target_lang"] == "zh"
