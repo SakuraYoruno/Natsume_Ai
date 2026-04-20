@@ -1,0 +1,21 @@
+name: session_summary
+description: |
+  统计指定时间窗（毫秒时间戳）内各 session_id 的事件总数与平均延迟。
+  数据源：chat_events 表（ts 为毫秒时间戳，latency_ms 为毫秒级延迟）。
+  用于 /obs/stats/session 端点的基础聚合。
+sql: |
+  SELECT session_id,
+         COUNT(*)          AS event_count,
+         AVG(latency_ms)   AS avg_latency_ms,
+         MAX(latency_ms)   AS max_latency_ms,
+         MIN(ts)           AS first_ts_ms,
+         MAX(ts)           AS last_ts_ms
+  FROM chat_events
+  WHERE ts BETWEEN :start AND :end
+  GROUP BY session_id
+  ORDER BY event_count DESC
+  LIMIT :limit
+params:
+  start: datetime_ms
+  end: datetime_ms
+  limit: int

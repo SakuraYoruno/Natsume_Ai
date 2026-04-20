@@ -98,8 +98,14 @@ def _safe_int(value: Any, *, default: int, minimum: int | None = None, maximum: 
 def _resolve_parallel_window(value: Any | None = None) -> int:
     if value is not None:
         return _safe_int(value, default=4, minimum=1, maximum=16)
-    env_value = os.getenv("HOST_SKILL_DAG_PARALLEL_WINDOW")
-    return _safe_int(env_value, default=4, minimum=1, maximum=16)
+    # OPT-4 第三批：env 读取统一走 CoreSettings；保留原 _safe_int 边界约束以容错非法值
+    from host_brain.app.settings import get_core_settings  # noqa: PLC0415
+    return _safe_int(
+        get_core_settings().skill_dag_parallel_window,
+        default=4,
+        minimum=1,
+        maximum=16,
+    )
 
 
 def _coerce_dependencies(

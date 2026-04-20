@@ -1660,7 +1660,9 @@ async def _executive_runtime_core_impl(
     # 基于器官族完整状态产出"我要做什么"的决策，结果注入 intent_draft 供 chat_agent 使用
     # 仅在 PREFRONTAL_PLAN_ENABLED=true 时启用（默认关，逐步灰度）
     _prefrontal_plan: dict[str, Any] = {}
-    _prefrontal_plan_enabled = os.environ.get("PREFRONTAL_PLAN_ENABLED", "false").lower() == "true"
+    # OPT-4 第三批：env 读取统一走 CoreSettings
+    from host_brain.app.settings import get_core_settings as _get_core_settings  # noqa: PLC0415
+    _prefrontal_plan_enabled = bool(_get_core_settings().prefrontal_plan_enabled)
     if _prefrontal_plan_enabled:
         try:
             from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415

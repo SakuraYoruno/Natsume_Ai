@@ -1,0 +1,30 @@
+name: error_summary
+description: |
+  统计指定时间窗（毫秒时间戳）内的错误分布，按 stage + reason_code 聚合。
+  数据源：error_log 表（字段取自 host_brain/audit/ledger_schema.py）。
+
+  用途：/obs/stats/errors 端点的基础聚合，用来：
+    - 识别高频失败 stage（如 chat_agent.pre_commit、hippocampus.recall）；
+    - 观察稳定 reason_code 的分布趋势；
+    - 与 soft_fail_metrics 对照（OPT-3 soft_fail 属于"非致命降级"，
+      而 error_log 属于显式上报的失败，两者合并分析才能定位真实问题源）。
+
+  字段语义：
+    - stage：业务阶段字符串（非高基数 label，由开发者受控填写）；
+    - reason_code：稳定 reason_code 常量；
+    - ts_ms：毫秒时间戳。
+sql: |
+  SELECT COALESCE(stage, '')        AS stage,
+         COALESCE(reason_code, '')  AS reason_code,
+         COUNT(*)                   AS error_count,
+         MIN(ts_ms)                 AS first_ts_ms,
+         MAX(ts_ms)                 AS last_ts_ms
+  FROM error_log
+  WHERE ts_ms BETWEEN :start AND :end
+  GROUP BY stage, reason_code
+  ORDER BY error_count DESC
+  LIMIT :limit
+params:
+  start: datetime_ms
+  end: datetime_ms
+  limit: int

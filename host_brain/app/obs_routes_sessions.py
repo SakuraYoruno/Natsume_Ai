@@ -21,7 +21,10 @@ from pydantic import BaseModel
 logger = logging.getLogger("Natsume.obs")
 
 router = APIRouter(prefix="/obs", tags=["observability"])
-_SESSIONS_CACHE_TTL_MS = max(int(os.getenv("OBS_SESSIONS_CACHE_TTL_MS", "3000") or 3000), 0)
+# OPT-4 首批迁移：从 settings.observability 读取，替代 os.getenv
+from host_brain.app.settings.observability import get_observability_settings  # noqa: E402
+
+_SESSIONS_CACHE_TTL_MS = max(int(get_observability_settings().obs_sessions_cache_ttl_ms), 0)
 
 _DEBUG_SESSION_PREFIXES = ("smoke_", "sess-clarify-", "debug-", "chat-debug-")
 

@@ -108,9 +108,12 @@ class DigitalLifeOverviewSnapshotResponse(BaseModel):
     humanoidLoopSourceCorrelationData: Optional[Dict[str, Any]] = None
 
 
-_INSIGHTS_SUMMARY_WARM_ENABLED = str(
-    os.getenv("HOST_OBS_INSIGHTS_SUMMARY_WARM_ENABLED", "true")
-).strip().lower() not in {"0", "false", "no", "off"}
+_INSIGHTS_SUMMARY_WARM_ENABLED = bool(
+    # OPT-4 首批迁移：从 settings.observability 读取
+    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
+    .get_observability_settings()
+    .obs_insights_summary_warm_enabled
+)
 _INSIGHTS_SUMMARY_WARM_INTERVAL_MS = max(
     int(_env_float("HOST_OBS_INSIGHTS_SUMMARY_WARM_INTERVAL_MS", 5000.0, minimum=1000.0)),
     1000,
@@ -124,9 +127,12 @@ _INSIGHTS_SUMMARY_WARM_WINDOW_MINUTES = max(
     1,
 )
 
-_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED = str(
-    os.getenv("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED", "true")
-).strip().lower() not in {"0", "false", "no", "off"}
+_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED = bool(
+    # OPT-4 首批迁移：从 settings.observability 读取
+    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
+    .get_observability_settings()
+    .obs_digital_life_overview_warm_enabled
+)
 _DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS = max(
     int(_env_float("HOST_OBS_DIGITAL_LIFE_OVERVIEW_WARM_INTERVAL_MS", 5000.0, minimum=1000.0)),
     1000,

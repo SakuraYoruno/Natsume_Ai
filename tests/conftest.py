@@ -161,6 +161,51 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "asyncio: run test in asyncio event loop")
 
 
+# ─────────────────────────────────────────────────────
+# OPTIMIZATION-PLAN-20260420 / OPT-2：按目录与文件名规则自动贴分层 marker
+# ─────────────────────────────────────────────────────
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """按路径/文件名模式为测试项自动贴分层 marker。
+
+    规则（优先级从上到下）：
+      - tests/e2e/**                      → e2e
+      - tests/integration/**              → integration
+      - tests/contract/**                 → contract
+      - tests/unit/**                     → unit
+    附加规则（可与上面叠加）：
+      - 文件名含 "_hw_contract" 或 "_hw"  → hw
+      - 文件名含 "_prod_env"              → prod_env
+      - 文件名含 "_runtime_probe"         → runtime_probe
+      - 文件名含 "_docker"                → docker
+    """
+
+    for item in items:
+        path_str = str(item.fspath).replace("\\", "/")
+        filename = path_str.rsplit("/", 1)[-1]
+
+        # 分层主标（互斥）
+        if "/tests/e2e/" in path_str:
+            item.add_marker(pytest.mark.e2e)
+        elif "/tests/integration/" in path_str:
+            item.add_marker(pytest.mark.integration)
+        elif "/tests/contract/" in path_str:
+            item.add_marker(pytest.mark.contract)
+        elif "/tests/unit/" in path_str:
+            item.add_marker(pytest.mark.unit)
+
+        # 附加能力标（可叠加）
+        if "_hw_contract" in filename or filename.endswith("_hw.py"):
+            item.add_marker(pytest.mark.hw)
+        if "_prod_env" in filename:
+            item.add_marker(pytest.mark.prod_env)
+        if "_runtime_probe" in filename:
+            item.add_marker(pytest.mark.runtime_probe)
+        if "_docker" in filename:
+            item.add_marker(pytest.mark.docker)
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_pyfunc_call(pyfuncitem: pytest.Function):
     test_fn = pyfuncitem.obj

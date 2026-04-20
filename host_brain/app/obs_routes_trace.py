@@ -44,9 +44,12 @@ _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimu
 _TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
-_TRACE_FEED_WARM_ENABLED = str(
-    os.getenv("HOST_OBS_TRACE_FEED_WARM_ENABLED", "true")
-).strip().lower() not in {"0", "false", "no", "off"}
+_TRACE_FEED_WARM_ENABLED = bool(
+    # OPT-4 首批迁移：从 settings.observability 读取
+    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
+    .get_observability_settings()
+    .obs_trace_feed_warm_enabled
+)
 _TRACE_FEED_WARM_INTERVAL_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_INTERVAL_MS", 2500.0, minimum=500.0)), 500)
 _TRACE_FEED_WARM_STALE_MS = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_STALE_MS", 10000.0, minimum=1000.0)), 1000)
 _TRACE_FEED_WARM_LIMIT = max(int(_env_float("HOST_OBS_TRACE_FEED_WARM_LIMIT", 6.0, minimum=1.0)), 1)

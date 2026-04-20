@@ -1,0 +1,30 @@
+name: skill_execution_stats
+description: |
+  统计指定时间窗（毫秒时间戳）内各 skill_name 的执行状态计数。
+  数据源：skill_exec_log 表（字段取自 host_brain/audit/ledger_schema.py）。
+
+  用途：/obs/stats/skill 端点的基础聚合，用来观察：
+    - 每个 skill 最近窗口内的成功 / 失败 / 降级计数；
+    - 排查高失败率技能、识别需要回滚的版本。
+
+  字段语义：
+    - skill_name：技能注册名（host_brain.skills 下的 id）；
+    - result_status：OK / FAILED / DEGRADED / TIMEOUT 等稳定状态字符串；
+    - result_code：稳定 reason_code（见 host_brain.core.errors）；
+    - ts_ms：毫秒时间戳。
+sql: |
+  SELECT COALESCE(skill_name, '')        AS skill_name,
+         COALESCE(result_status, '')     AS result_status,
+         COALESCE(result_code, '')       AS result_code,
+         COUNT(*)                        AS exec_count,
+         MIN(ts_ms)                      AS first_ts_ms,
+         MAX(ts_ms)                      AS last_ts_ms
+  FROM skill_exec_log
+  WHERE ts_ms BETWEEN :start AND :end
+  GROUP BY skill_name, result_status, result_code
+  ORDER BY exec_count DESC
+  LIMIT :limit
+params:
+  start: datetime_ms
+  end: datetime_ms
+  limit: int

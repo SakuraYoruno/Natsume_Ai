@@ -34,6 +34,7 @@ from host_brain.app.prompt_template_store import (
     resolve_prompt_template_json_merged,
     resolve_prompt_template_text,
 )
+from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch C：业务路径统一降级
 
 _logger = logging.getLogger("Natsume.chat_agent")
 
@@ -604,10 +605,13 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
             for key, value in kwargs.items()
         }
     )
-    try:
-        return text.format_map(payload)
-    except Exception:
-        return text
+    with soft_fail(
+        "chat_agent.template_format_map",
+        fallback=text,
+        expected_exc=(KeyError, IndexError, ValueError),
+    ) as _fmt_box:
+        _fmt_box[0] = text.format_map(payload)
+    return _fmt_box[0]
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
@@ -1625,7 +1629,14 @@ def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
             parts.append(_mapping_text(templates, "skill_suffix", render_target_lang=render_target_lang, preview_skills=preview_skills))
         parts.append(_mapping_text(templates, "cta", render_target_lang=render_target_lang))
         return "\n".join(parts)
-    except Exception:
+    except Exception as _cap_exc:
+        _logger.debug("chat_agent.capability_tip build fallback: %s", _cap_exc)
+        from host_brain.core.soft_fail import _emit_metric  # noqa: PLC0415
+
+        _emit_metric(
+            stage="chat_agent.capability_tip_build",
+            exc_type=type(_cap_exc).__name__,
+        )
         return _mapping_text(templates, "fallback", render_target_lang=render_target_lang)
 
 
@@ -1653,7 +1664,14 @@ def _should_buffer_stream_output(
                 turn_count=int((emotion_context or {}).get("turn_count") or 1),
             )
         )
-    except Exception:
+    except Exception as _sb_exc:
+        _logger.debug("chat_agent.should_reflect soft fail: %s", _sb_exc)
+        from host_brain.core.soft_fail import _emit_metric  # noqa: PLC0415
+
+        _emit_metric(
+            stage="chat_agent.should_reflect",
+            exc_type=type(_sb_exc).__name__,
+        )
         return False
 
 
@@ -2303,10 +2321,13 @@ async def chat_agent_sse_generator(
                 "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
             }
             _logger.debug("[%s] ChatAgent response_intelligence failed: %s", request_id, _ri_exc)
-    try:
-        response_intelligence_ms = max(0, int(time.time() * 1000) - _response_intelligence_started_ms)
-    except Exception:
-        response_intelligence_ms = 0
+    with soft_fail(
+        "chat_agent.response_intelligence_ms",
+        fallback=0,
+        expected_exc=(TypeError, ValueError, OverflowError),
+    ) as _rims_box:
+        _rims_box[0] = max(0, int(time.time() * 1000) - _response_intelligence_started_ms)
+    response_intelligence_ms = _rims_box[0]
 
     # flush 剩余
     remainder = splitter.flush()
@@ -2331,7 +2352,7 @@ async def chat_agent_sse_generator(
 
     # PII 出口检查
     _pii_egress_stats: dict[str, Any] = {}
-    try:
+    with soft_fail("chat_agent.pii_scrub_egress", fallback=None):
         from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
         if _check_channel("EGRESS"):
             _pii_eg = pii_scrub_text(narrative, context="egress")
@@ -2347,8 +2368,6 @@ async def chat_agent_sse_generator(
                     "detections": _pii_eg.total_detections,
                     "rules": sorted({d["rule_id"] for d in _pii_eg.detections}),
                 }
-    except Exception:
-        pass
     sanitize_egress_ms = max(0, int(time.time() * 1000) - _sanitize_started_ms)
 
     # ── 7. INPUT_COMPLETED 同步写入 ──────────────────────────────────
@@ -2435,7 +2454,7 @@ async def chat_agent_sse_generator(
     ):
         _commit_emotion_tag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
         _commit_emotion_intensity: float | None = None
-        try:
+        with soft_fail("chat_agent.commit_tts_broca_params", fallback=None):
             from host_brain.app.chat_agent_postprocessor import broca_to_tts_params  # noqa: PLC0415
             from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: PLC0415
             _lang_agent = get_language_system_agent()
@@ -2448,8 +2467,6 @@ async def chat_agent_sse_generator(
                 )
                 _commit_emotion_tag = _tts_params["emotion_tag"]
                 _commit_emotion_intensity = _tts_params["emotion_intensity"]
-        except Exception:
-            pass
         try:
             from host_brain.app.chat_agent_postprocessor import trigger_tts_after_commit  # noqa: PLC0415
             asyncio.create_task(trigger_tts_after_commit(

@@ -62,7 +62,9 @@ def _load_registry() -> dict[str, PromptTemplateDefinition]:
         _logger.warning("模板目录不存在: %s", _TEMPLATES_DIR)
         return registry
 
-    for yaml_file in sorted(_TEMPLATES_DIR.glob("*.yaml")):
+    # OPT-6: 使用 rglob 递归扫描，支持未来的分片目录结构
+    # 例如 prompts/templates/chat/zh/greeting.yaml 与 prompts/templates/chat.yaml 并存
+    for yaml_file in sorted(_TEMPLATES_DIR.rglob("*.yaml")):
         try:
             with open(yaml_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
@@ -71,6 +73,12 @@ def _load_registry() -> dict[str, PromptTemplateDefinition]:
                     continue
                 template_id = str(item.get("template_id") or "").strip()
                 if not template_id:
+                    continue
+                if template_id in registry:
+                    _logger.warning(
+                        "duplicate prompt template_id=%s in %s (ignored, first one wins)",
+                        template_id, yaml_file.name,
+                    )
                     continue
                 content_type = str(item.get("content_type") or "text").strip()
                 registry[template_id] = PromptTemplateDefinition(

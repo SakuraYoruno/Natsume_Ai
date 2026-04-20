@@ -30,6 +30,7 @@ from host_brain.core.prompt_context import (
     validate_prompt_context as validate_context_pack,
 )
 from host_brain.core.qa import check_wcanon_slot_violation
+from host_brain.core.soft_fail import soft_fail
 
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
@@ -128,9 +129,10 @@ def _resolve_localized_template_value(value: Any, *, render_target_lang: str | N
 
 
 def _load_runtime_guidance_templates(*, render_target_lang: str | None = None) -> dict[str, Any]:
-    try:
-        raw = resolve_prompt_template_json_merged("chat_context_builder.runtime_guidance_texts")
-    except Exception:
+    with soft_fail("chat_context.runtime_guidance_templates", fallback=None) as _box:
+        _box[0] = resolve_prompt_template_json_merged("chat_context_builder.runtime_guidance_texts")
+    raw = _box[0]
+    if raw is None:
         return {}
     resolved = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
     return dict(resolved) if isinstance(resolved, Mapping) else {}
@@ -153,14 +155,21 @@ def _template_text(
     text = str(current or default)
     if not kwargs:
         return text
-    try:
-        return text.format(**kwargs)
-    except Exception:
-        return text
+    with soft_fail(
+        "chat_context.template_text_format",
+        fallback=text,
+        expected_exc=(KeyError, IndexError, ValueError),
+    ) as _box:
+        _box[0] = text.format(**kwargs)
+    return _box[0]
 
 
 def _resolve_offline_reconnect_profile(offline_state: Mapping[str, Any] | None) -> dict[str, str]:
-    try:
+    default_profile = {
+        "absence_band": "recent",
+        "reconnect_style": "soft_resume",
+    }
+    with soft_fail("chat_context.offline_reconnect_profile", fallback=None) as _box:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         payload = get_limbic_agent().resolve_offline_reconnect_profile(
@@ -169,16 +178,12 @@ def _resolve_offline_reconnect_profile(offline_state: Mapping[str, Any] | None) 
         if isinstance(payload, Mapping):
             absence_band = str(payload.get("absence_band") or "recent").strip() or "recent"
             reconnect_style = str(payload.get("reconnect_style") or "").strip()
-            return {
+            _box[0] = {
                 "absence_band": absence_band,
                 "reconnect_style": reconnect_style,
             }
-    except Exception:
-        pass
-    return {
-        "absence_band": "recent",
-        "reconnect_style": "soft_resume",
-    }
+    resolved = _box[0]
+    return resolved if isinstance(resolved, dict) else default_profile
 
 
 def normalize_node_style_bindings(
@@ -243,20 +248,18 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
     # 兼容路径：允许通过 StyleCanonStore seam 覆写（用于回归测试与低耦合场景）
     legacy_store = None
     if callable(StyleCanonStore):
-        try:
-            legacy_store = StyleCanonStore(style_root=style_root, ledger=get_ledger())
-        except Exception:
-            legacy_store = None
+        with soft_fail("chat_context.style.legacy_store_init", fallback=None) as _box:
+            _box[0] = StyleCanonStore(style_root=style_root, ledger=get_ledger())
+        legacy_store = _box[0]
 
     # T-143: 默认通过 SocialBrainAgent.resolve_style_canon() 族化调用
     social_agent = None
     if legacy_store is None:
-        try:
+        with soft_fail("chat_context.style.social_agent_lookup", fallback=None) as _box:
             from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
 
-            social_agent = get_social_brain_agent()
-        except Exception:
-            social_agent = None
+            _box[0] = get_social_brain_agent()
+        social_agent = _box[0]
 
     resolved: dict[str, dict[str, Any]] = {}
     mapping = [
@@ -270,10 +273,9 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
             continue
         entry_dict = None
         if legacy_store is not None:
-            try:
-                entry = legacy_store.get(canon_id)
-            except Exception:
-                entry = None
+            with soft_fail("chat_context.style.legacy_store_get", fallback=None) as _box:
+                _box[0] = legacy_store.get(canon_id)
+            entry = _box[0]
             if entry is not None:
                 entry_dict = {
                     "canon_id": getattr(entry, "canon_id", canon_id),
@@ -285,13 +287,12 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
                     "citation": f"style_canon:{canon_id}",
                 }
         if entry_dict is None and social_agent is not None:
-            try:
-                entry_dict = social_agent.resolve_style_canon(
+            with soft_fail("chat_context.style.social_agent_resolve", fallback=None) as _box:
+                _box[0] = social_agent.resolve_style_canon(
                     canon_id=canon_id,
                     style_root=style_root,
                 )
-            except Exception:
-                entry_dict = None
+            entry_dict = _box[0]
             if not entry_dict or entry_dict.get("status") in ("NOT_FOUND", "ERROR", "NO_AGENT"):
                 entry_dict = None
         if entry_dict is None:
@@ -335,13 +336,16 @@ def _load_v5_style_instruction(render_lang: str) -> str:
     if not v5_path.exists():
         return ""
 
-    try:
+    with soft_fail(
+        "chat_context.style.v5_load",
+        fallback="",
+        expected_exc=(OSError, ValueError, _json.JSONDecodeError),
+    ) as _box:
         data = _json.loads(v5_path.read_text(encoding="utf-8"))
         key = "instruction_ja" if render_lang == "ja" else "instruction_cn"
         text = str(data.get(key) or "").strip()
-        return text if len(text) > 100 else ""  # 至少 100 字才算有效
-    except Exception:
-        return ""
+        _box[0] = text if len(text) > 100 else ""  # 至少 100 字才算有效
+    return _box[0]
 
 
 def build_chat_context_pack(
@@ -591,7 +595,16 @@ def build_chat_context_pack(
         "hard_snapshot": {
             "session_id": session_id,
             "thread_id": thread_id,
-            "sys_mode": str(os.environ.get("HOST_SYS_MODE") or "normal").strip() or "normal",
+            # OPT-4 第三批：env 统一走 CoreSettings
+            "sys_mode": (
+                str(
+                    __import__(
+                        "host_brain.app.settings", fromlist=["get_core_settings"]
+                    ).get_core_settings().sys_mode
+                    or "normal"
+                ).strip()
+                or "normal"
+            ),
             "mood_state": mood_state,
             "allowed_emotion_tags": allowed_emotion_tags,
             "emotion_range_hint": emotion_range_hint,
@@ -695,21 +708,26 @@ def _build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[
 
     sys_mode = str(
         hard_snapshot.get("sys_mode")
-        or os.environ.get("HOST_SYS_MODE")
+        # OPT-4 第三批：env 统一走 CoreSettings
+        or __import__(
+            "host_brain.app.settings", fromlist=["get_core_settings"]
+        ).get_core_settings().sys_mode
         or "normal"
     ).strip().lower() or "normal"
 
     runtime_flags: dict[str, Any] = {"sys_mode": sys_mode}
-    try:
+    # OPT-3：activity_monitor 读取失败属于"业务路径的非致命降级"，
+    # 原来是 try/except Exception: pass，现统一走 soft_fail 以纳入观测。
+    with soft_fail("chat.runtime_mode.activity_monitor", fallback=None) as _box:
         from host_brain.app import dependencies as _deps  # noqa: PLC0415
 
         monitor = getattr(_deps, "_activity_monitor_ref", None)
         if monitor is not None and hasattr(monitor, "get_status"):
             activity_status = monitor.get_status()
             if isinstance(activity_status, Mapping):
-                runtime_flags["activity_monitor"] = dict(activity_status)
-    except Exception:
-        pass
+                _box[0] = dict(activity_status)
+    if _box[0] is not None:
+        runtime_flags["activity_monitor"] = _box[0]
 
     return runtime_flags
 
@@ -2089,6 +2107,34 @@ def build_chat_prompt_runtime_payload(
     style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
     cpb_slots: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Chat runtime payload 主入口（OPT-5 重构后为 adapter）。
+
+    实际实现已拆分到 host_brain.app.chat_payload_builder.PromptPayloadBuilder
+    流水线中，每个阶段由 soft_fail 守护。本函数仅作为向后兼容的薄 adapter，
+    同时保留 ``_emotion_persistence`` / ``_self_reflection`` /
+    ``_evolution_orchestrator`` / ``_turn_counter`` 等函数属性供测试 monkey-patch。
+    """
+    from host_brain.app.chat_payload_builder import (  # noqa: PLC0415
+        run_build_chat_prompt_runtime_payload,
+    )
+
+    return run_build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings=style_bindings,
+        cpb_slots=cpb_slots,
+    )
+
+
+def _legacy_build_chat_prompt_runtime_payload_body(  # noqa: D401  (kept for reference)
+    *,
+    runtime_input: Any,
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """保留原 God Function 完整实现作为回滚参考。
+
+    ⚠️ 请勿直接调用：新路径走 PromptPayloadBuilder。本函数只作为诊断/回滚备份。
+    """
     from host_brain.app.chat_runtime_input import ChatRuntimeInput  # noqa: PLC0415
 
     if not isinstance(runtime_input, ChatRuntimeInput):
@@ -2228,7 +2274,7 @@ def build_chat_prompt_runtime_payload(
         runtime_payload["endocrine_state"] = dict(_full_emotion_ctx.get("endocrine_state") or {})
 
     if not isinstance(runtime_payload.get("endocrine_state"), Mapping):
-        try:
+        with soft_fail("chat_context.endocrine_state", fallback=None):
             from host_brain.app.dependencies import get_endocrine_state  # noqa: PLC0415
 
             runtime_payload["endocrine_state"] = dict(
@@ -2238,8 +2284,6 @@ def build_chat_prompt_runtime_payload(
                 )
                 or {}
             )
-        except Exception:
-            pass
 
     if isinstance(runtime_payload.get("endocrine_state"), Mapping):
         merged_emotion_context = dict(runtime_payload.get("emotion_context") or {})
@@ -2250,7 +2294,7 @@ def build_chat_prompt_runtime_payload(
     # 每次 normalize 都会追加，此时已经是最新状态）
     _tl_summary: dict[str, Any] = {}
     _tl_diary: dict[str, Any] = {}
-    try:
+    with soft_fail("chat_context.emotion_timeline_snapshot", fallback=None):
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         _tl_snapshot = get_limbic_agent().resolve_emotion_timeline_snapshot(
@@ -2261,8 +2305,6 @@ def build_chat_prompt_runtime_payload(
         _tl_diary = dict(_tl_snapshot.get("diary") or {})
         if _tl_summary and _tl_summary.get("entry_count", 0) > 0:
             runtime_payload["emotion_timeline"] = _tl_summary
-    except Exception:
-        pass  # 降级：不注入 timeline
 
     # ── P1-FIX：接入 PersonaExpressionAdapter ────────────────────────────
     # prompt_builder 通过 runtime_payload.get("persona_expression_hint") 读取
@@ -2422,12 +2464,10 @@ def build_chat_prompt_runtime_payload(
 
         # 获取 bond_stage
         _bond_stage = "STRANGER"
-        try:
+        with soft_fail("chat_context.bond_stage_lookup_for_persona", fallback=None):
             from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
             _user_id = get_canonical_bond_user_id()
             _bond_stage = get_social_brain_agent().resolve_bond_stage(person_id=_user_id, default="STRANGER")
-        except Exception:
-            pass
         _user_tag = str(_full_emotion_ctx.get("emotion_tag") or "NEUTRAL").strip().upper()
         # 获取当前用户消息（用于对话节奏推断）
         _user_msg_for_pace = str(generation_payload.get("user_message") or "").strip()
@@ -2497,38 +2537,34 @@ def build_chat_prompt_runtime_payload(
                 _sr_last_deep_talk_ts_ms = _sr_current_ts_ms - 8 * 24 * 3600 * 1000
             elif _emotion_reunion_type == "short_absence":
                 _sr_last_deep_talk_ts_ms = _sr_current_ts_ms - 4 * 24 * 3600 * 1000
-        try:
-            _sr_persona_changes = list(
+        with soft_fail("chat_context.persona_change_log", fallback=[]) as _pcl_box:
+            _pcl_box[0] = list(
                 _prefrontal_agent.resolve_persona_change_log(
                     persona_user_id=_sr_user_id,
                     limit=5,
                 )
                 or []
             )
-        except Exception:
-            _sr_persona_changes = []
-        try:
-            _sr_growth_awareness = dict(_prefrontal_agent.resolve_growth_awareness() or {})
-        except Exception:
-            _sr_growth_awareness = {}
-        try:
-            _sr_growth_summary = dict(
+        _sr_persona_changes = _pcl_box[0]
+        with soft_fail("chat_context.growth_awareness", fallback={}) as _ga_box:
+            _ga_box[0] = dict(_prefrontal_agent.resolve_growth_awareness() or {})
+        _sr_growth_awareness = _ga_box[0]
+        with soft_fail("chat_context.growth_summary", fallback={}) as _gs_box:
+            _gs_box[0] = dict(
                 _prefrontal_agent.resolve_growth_summary(
                     persona_user_id=_sr_user_id,
                     now_ts_ms=_sr_current_ts_ms,
                 )
                 or {}
             )
-        except Exception:
-            _sr_growth_summary = {}
+        _sr_growth_summary = _gs_box[0]
         _tl_summary_for_sr = dict(runtime_payload.get("emotion_timeline") or _tl_summary or {})
         _tl_diary_for_sr = dict(_tl_diary or {})
-        # ── 断链5修复（v1.12）：获取风格演变摘要，注入自省感知 ──────────
+        # ── 断链5修复（v1.12）：获取风格演变摘要，注入自省感知 ──────
         _sr_style_evolution: dict | None = None
-        try:
-            _sr_style_evolution = dict(_prefrontal_agent.resolve_style_evolution_summary() or {})
-        except Exception:
-            pass
+        with soft_fail("chat_context.style_evolution_summary", fallback=None) as _se_box:
+            _se_box[0] = dict(_prefrontal_agent.resolve_style_evolution_summary() or {})
+        _sr_style_evolution = _se_box[0]
         _sr_cycle_payload = _prefrontal_agent.run_self_reflection_cycle(
             turn_count=_turn,
             timeline_summary=_tl_summary_for_sr,
@@ -2560,13 +2596,12 @@ def build_chat_prompt_runtime_payload(
 
         _user_id_bn = get_canonical_bond_user_id()
         _bn_bond_stage = "STRANGER"
-        try:
-            _bn_bond_stage = get_social_brain_agent().resolve_bond_stage(
+        with soft_fail("chat_context.bond_stage_lookup_for_narrative", fallback="STRANGER") as _bnst_box:
+            _bnst_box[0] = get_social_brain_agent().resolve_bond_stage(
                 person_id=_user_id_bn,
                 default="STRANGER",
             )
-        except Exception:
-            pass
+        _bn_bond_stage = _bnst_box[0] or "STRANGER"
         # T-153: 通过族化接口获取 bond_narrative，内部封装 BondNarrativeLayer 构建逻辑
         _bn_result = get_social_brain_agent().resolve_bond_narrative(
             user_id=_user_id_bn,

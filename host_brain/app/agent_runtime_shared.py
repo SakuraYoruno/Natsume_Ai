@@ -47,6 +47,7 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _summarize_emotion_context_for_trace,
     _summarize_persona_resident_memory_for_trace,
 )
+from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch B：业务路径统一降级
 
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
 
@@ -1456,12 +1457,11 @@ def _extract_delegate_visible_text(text: str) -> str:
     normalized = str(text or "").strip()
     if not normalized:
         return ""
-    try:
+    with soft_fail("agent_runtime_shared.normalize_narrative_payload", fallback=normalized) as _box:
         from host_brain.app.intelligent_runtime import _normalize_narrative_payload  # noqa: PLC0415
 
-        normalized = _normalize_narrative_payload(normalized)
-    except Exception:
-        pass
+        _box[0] = _normalize_narrative_payload(normalized)
+    normalized = _box[0]
     return str(normalized or "").strip()
 
 
@@ -1596,16 +1596,15 @@ def _maybe_build_task_progress_fastpath(
     if not normalized or not (_task_progress_query_re.search(normalized) or _task_failure_query_re.search(normalized)):
         return None
 
-    try:
+    with soft_fail("agent_runtime_shared.task_progress_summarize", fallback=None) as _box:
         from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
 
-        summary = get_runtime_task_registry().summarize_for_chat(
+        _box[0] = get_runtime_task_registry().summarize_for_chat(
             person_id=person_id,
             session_id=session_id,
             exclude_request_id=request_id,
         )
-    except Exception:
-        summary = None
+    summary = _box[0]
     templates = _load_runtime_texts_section(
         "task_progress",
         render_target_lang=render_target_lang,
@@ -1854,7 +1853,16 @@ def _should_buffer_stream_output(
                 turn_count=int((emotion_context or {}).get("turn_count") or 1),
             )
         )
-    except Exception:
+    except Exception as _sr_exc:
+        _logger.debug(
+            "agent_runtime_shared.should_reflect soft fail: %s", _sr_exc, exc_info=True
+        )
+        from host_brain.core.soft_fail import _emit_metric  # noqa: PLC0415
+
+        _emit_metric(
+            stage="agent_runtime_shared.should_reflect",
+            exc_type=type(_sr_exc).__name__,
+        )
         return False
 
 
@@ -2058,7 +2066,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         return
 
     _pii_ingress_stats: dict[str, Any] = {}
-    try:
+    with soft_fail("agent_runtime_shared.pii_scrub_ingress", fallback=None):
         from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
 
         if _check_channel("INGRESS"):
@@ -2069,8 +2077,6 @@ async def _cortex_orchestrator_sse_generator_impl(
                     "detections": _pii_result.total_detections,
                     "rules": sorted({d["rule_id"] for d in _pii_result.detections}),
                 }
-    except Exception:
-        pass
 
     yield _emit_sse({"phase": "PRESENCE", "event": "THINKING", "request_id": request_id})
 
@@ -2090,7 +2096,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     recall_slot_text: dict[str, str] = {}
     bond_summary: dict[str, Any] = {}
 
-    try:
+    with soft_fail("agent_runtime_shared.cortex_conversation_started", fallback=None):
         from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
 
         get_cortex_agent().emit_conversation_started(
@@ -2098,8 +2104,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             session_id=str(session_id or ""),
             request_id=str(request_id or ""),
         )
-    except Exception:
-        pass
 
     _input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = _resolve_text_render_target_lang(
@@ -2702,14 +2706,12 @@ async def _async_post_process(
         if store is not None:
             mem_user = user_message
             mem_narrative = narrative
-            try:
+            with soft_fail("agent_runtime_shared.pii_scrub_memory_write", fallback=None):
                 from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled  # noqa: PLC0415
 
                 if _check_channel("MEMORY"):
                     mem_user = pii_scrub_if_enabled(user_message, context="memory_write_user")
                     mem_narrative = pii_scrub_if_enabled(narrative, context="memory_write_ai")
-            except Exception:
-                pass
 
             await _run_in_post_process_executor(
                 persist_chat_episodic_memory,
