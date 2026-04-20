@@ -66,6 +66,10 @@ temp/
 .env
 .env.*
 !.env.example
+# OPTIMIZATION-PLAN-20260420 / OPT-4：分层 .env 示例文件（模板文件，允许入库）
+!.env.core.example
+!.env.optional.example
+!.env.experimental.example
 
 # --- data/ runtime artifacts (never commit) ---
 # JDK / Neo4j 安装包及解压目录

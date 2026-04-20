@@ -2,8 +2,8 @@
 
 **文档编号**：OPTIMIZATION-PLAN-20260420
 **日期**：2026-04-20
-**版本**：v1.1
-**状态**：实施中（In Progress）
+**版本**：v1.2
+**状态**：实施中（In Progress · 批次 2 已合入）
 **受众**：核心开发团队、SRE、Prompt 作者
 **上游依赖**：[ARCH_FIX_PLAN.md](./ARCH_FIX_PLAN.md) v1.3（P2 未执行 12 项）
 
@@ -17,13 +17,13 @@
 |------|------|:------:|:------:|:----:|:--------:|
 | OPT-1 | `.gitignore` IDE 个人态防护（纵深防御） | S0 | 0d | ✅ 已生效 | 2026-04-20 |
 | OPT-2 | `pytest.ini` 规范化 + marker 分层 | S0 | 1d | ✅ 已完成 | 2026-04-20 |
-| OPT-3 | 统一 `SoftFailure` 降级 + 观测指标 | S1 | 3d | ✅ 已完成（基础设施） | 2026-04-20 |
-| OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | ✅ 已完成（基础设施） | 2026-04-20 |
+| OPT-3 | 统一 `SoftFailure` 降级 + 观测指标 | S1 | 3d | ✅ 已完成（基础设施 + 4 Batch 业务路径） | 2026-04-20 |
+| OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | ✅ 已完成（settings + 三层 `.env.*.example`） | 2026-04-20 |
 | OPT-5 | 拆分 God Function `build_chat_prompt_runtime_payload` | S2 | 3d | ✅ 已完成 | 2026-04-20 |
 | OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | ✅ 已完成（一期三规则） | 2026-04-20 |
-| OPT-7 | `prompt_builder.py` / `chat_agent.py` 按阶段拆分 | S2 | 4d | ⚠️ 部分完成 | — |
+| OPT-7 | `prompt_builder.py` / `chat_agent.py` 按阶段拆分 | S2 | 4d | ✅ 已完成（一期防膨胀契约） | 2026-04-20 |
 | OPT-8 | Edge `ChatChannel` Protocol 统一 | S3 | 5d | ✅ 已完成（Protocol 基建） | 2026-04-20 |
-| OPT-9 | `obs_routes_*` 二次规范化 + `ObsQueryBuilder` | S3 | 5d | ⏸ 待启动 | — |
+| OPT-9 | `obs_routes_*` 二次规范化 + `ObsQueryBuilder` | S3 | 5d | ✅ 已完成（一期骨架 + session_summary 示例） | 2026-04-20 |
 | OPT-10 | `agent_runtime_shared.py` 垃圾桶清理 + 命名 lint | S3 | 3d | ✅ 已完成（lint 硬规则） | 2026-04-20 |
 
 ### 已完成项汇总
@@ -82,6 +82,87 @@
 - 新增 [scripts/verify_optimization_20260420.sh](../../scripts/verify_optimization_20260420.sh)，一键串联 OPT-1 / OPT-2 / OPT-3 / OPT-5 / OPT-6 / OPT-8 / OPT-10 七项检查点
 - 运行结果：7 项全绿 + 冒烟测试 19/19 passed in 0.97s
 - 推荐接入 CI（或至少作为 PR 本地自检入口）
+
+---
+
+### 批次 2 实施补丁（2026-04-20）
+
+本批次在批次 1 的基础上继续推进 OPT-3 业务路径替换、OPT-7 / OPT-9 一期落地、
+OPT-4 `.env` 分层补齐。54 个 OPT 相关契约/单测全绿。
+
+**OPT-3 · Batch A：chat_context_builder.py 业务路径替换**
+
+- 全文 25 处 `except Exception:` 精确分类后，替换 **8 处**业务路径兜底为 `soft_fail`（stage 命名空间 `chat_context.*`）：
+  * `runtime_guidance_templates` / `template_text_format` / `offline_reconnect_profile`
+  * `style.legacy_store_init` / `style.legacy_store_get` / `style.social_agent_lookup` / `style.social_agent_resolve` / `style.v5_load`
+  * `endocrine_state` / `emotion_timeline_snapshot` / `bond_stage_lookup_for_persona` / `persona_change_log` / `growth_awareness` / `growth_summary` / `style_evolution_summary` / `bond_stage_lookup_for_narrative`
+- 明确保留 optional import fallback（行 40）与外层已有 `except Exception as _xx_exc: logger.debug(...)` 的兜底（避免双重日志）
+- 验证：`tests/contract/test_prompt_context_contract.py` + `test_prompt_payload_builder_contract.py` 11/11 通过
+
+**OPT-3 · Batch B：agent_runtime_shared.py 业务路径替换**
+
+- 9 处 `except Exception:` 精确分类后替换 **6 处**（另 3 处分别是：263 处 envelope fallback 已有精心构造的 dict 返回值；893 外层已有 fallback；2653 外层已有 `logger.debug`——均保留）
+- 替换 stage：`agent_runtime_shared.normalize_narrative_payload` / `task_progress_summarize` / `should_reflect` / `pii_scrub_ingress` / `cortex_conversation_started` / `pii_scrub_memory_write`
+- `should_reflect` 采用"直接 try/except + 手动 `_emit_metric`"模式，保持 `return False` 的原语义
+- 验证：`import host_brain.app.agent_runtime_shared` 通过
+
+**OPT-3 · Batch C：chat_agent.py 业务路径替换**
+
+- 全部 6 处 `except Exception:` → `soft_fail`，stage 命名空间 `chat_agent.*`：
+  * `template_format_map` / `capability_tip_build` / `should_reflect` / `response_intelligence_ms` / `pii_scrub_egress` / `commit_tts_broca_params`
+- 对 `capability_tip_build` / `should_reflect` 使用手动 `_emit_metric` 模式，保持原有 return 语义
+- 验证：`import host_brain.app.chat_agent` 通过
+
+**OPT-3 · Batch D：capability_forge.py 业务路径替换**
+
+- 8 处 `except Exception:` 精确分类后替换 **3 处**业务路径兜底：
+  * `capability_forge.audit_log_error` / `ledger_list_proposals` / `ledger_fetch_legacy`
+- 明确保留：88/99 行的 env 解析 fallback、191/208 行的 legacy 回退（控制流依赖）、252 行循环内 `continue`
+- 验证：`import host_brain.app.capability_forge` 通过
+
+**OPT-7 一期 · chat_agent / prompt_builder 防反复墨制**
+
+- 新增 [tests/contract/test_chat_agent_size_contract.py](../../tests/contract/test_chat_agent_size_contract.py)
+- 硬上限契约（SHARED_MODULE 模式复用）：
+  * `chat_agent.py` 当前 2386 → 上限 **2500**（最终目标 ≤400）
+  * `prompt_builder.py` 当前 696 → 上限 **800**（最终目标 ≤200）
+  * `chat_agent_preprocessor.py` 当前 982 → 上限 **1100**
+  * `chat_agent_postprocessor.py` 当前 315 → 上限 **500**
+- 配套单调下降元测试：禁止上调硬上限；上调需同时更新 `expected_final_targets`
+- 公开 API 稳定性测试：`chat_agent` / `prompt_builder` / `chat_agent_preprocessor` / `chat_agent_postprocessor` 必须可 import
+- 5/5 契约测试通过
+
+**OPT-9 一期 · ObsQueryBuilder 骨架**
+
+- 新增 [host_brain/observability/query_builder.py](../../host_brain/observability/query_builder.py)
+  * `NamedQuery` frozen dataclass（name / sql / params / description / source_path）
+  * `NamedQueryRegistry`：递归扫描 YAML 目录、`template_id` 重复时抛错、参数类型白名单（int/float/str/bool/datetime_ms）
+  * `ObsQueryBuilder.run_named(conn, name, **params)`：参数校验 + 类型强转 + `list[dict]` 输出
+- 新增 [host_brain/observability/queries/session_summary.yaml](../../host_brain/observability/queries/session_summary.yaml) 首个示例
+- 新增 [tests/unit/test_obs_query_builder.py](../../tests/unit/test_obs_query_builder.py) 7 个单测，全部通过
+- **后续**：二期会把 `obs_routes_core.py` 中的典型 SELECT 逐步迁到 queries/，通过 `NATSUME_OBS_USE_QUERY_BUILDER_*` 灰度开关
+
+**OPT-4 尾工 · `.env` 三层示例文件**
+
+- 新增 [.env.core.example](../../.env.core.example)：5 条核心字段（env / data_dir / log_level / host_app_host:port / monitor_proxy_*），对应 `CoreSettings`
+- 新增 [.env.optional.example](../../.env.optional.example)：13 条可选字段（LLM provider / base_url / model_id、Edge RPC、行为开关、SoftFailure 告警阈值）
+- 新增 [.env.experimental.example](../../.env.experimental.example)：12 条灰度开关（OPT-6 strict lint / OPT-7 v2 pipeline / OPT-8 每平台 Channel Protocol 开关 / OPT-9 query_builder per-route 开关 / OPT-10 v2 layout）
+- 同步扩展 [.gitignore](../../.gitignore) 白名单：`!.env.core.example` / `!.env.optional.example` / `!.env.experimental.example`；`git check-ignore` 确认三个模板被放行
+- **后续**：OPT-7 / OPT-10 深度拆分时，按需把散点 `os.getenv` 替换为 `get_core_settings()` / `get_llm_settings()` 等
+
+**批次 2 回归数据**
+
+- `scripts/verify_optimization_20260420.sh` 全量 7 项检查点 + 19 冒烟用例全绿
+- 扩展回归：`test_prompt_context_contract` + `test_prompt_payload_builder_contract` + `test_chat_agent_size_contract` + `test_obs_query_builder` + `test_prompt_lint_contract` + `test_ci_gate_contract` + `test_chat_channel_protocol` + `test_soft_fail_contract` = **54/54 passed in 1.15s**
+- OPT-3 四批替换后的 4 个业务模块（chat_context_builder / agent_runtime_shared / chat_agent / capability_forge）全部 import 通过
+
+**批次 2 剩余事项（进入批次 3 处理）**
+
+- OPT-7 深度拆分：把 `chat_agent.py` 从 2386 行降到 ≤400 行（需切更多 stage 子模块），对应硬上限同步下调
+- OPT-9 深度迁移：逐个把 `obs_routes_*.py` 中的 SELECT 迁入 queries/，route 层瘦身
+- OPT-10 本体：按职责拆分 `agent_runtime_shared.py`（2745 行）并从 `SHARED_MODULE_LEGACY_EXEMPT` 豁免名单中移除
+- OPT-4 散点 `os.getenv` 替换：按模块分批推进（host_brain/app/config.py → edge_client → tribe → observability）
+- OPT-6 二期：模板占位符 vs 调用方 `.format_map(...)` 传参交叉校验（已占位 `NATSUME_PROMPT_LINT_STRICT_CROSSCHECK`）
 
 ---
 
