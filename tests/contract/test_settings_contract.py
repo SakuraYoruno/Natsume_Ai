@@ -14,11 +14,13 @@ from __future__ import annotations
 import pytest
 
 from host_brain.app.settings import (
+    CapabilityForgeSettings,
     CoreSettings,
     LLMSettings,
     ObservabilitySettings,
     SettingsReadinessReport,
     TribeSettings,
+    get_capability_forge_settings,
     get_core_settings,
     get_llm_settings,
     get_observability_settings,
@@ -38,11 +40,13 @@ def _reset_settings_cache():
     get_llm_settings.cache_clear()
     get_tribe_settings.cache_clear()
     get_observability_settings.cache_clear()
+    get_capability_forge_settings.cache_clear()
     yield
     get_core_settings.cache_clear()
     get_llm_settings.cache_clear()
     get_tribe_settings.cache_clear()
     get_observability_settings.cache_clear()
+    get_capability_forge_settings.cache_clear()
 
 
 class TestCoreSettings:
@@ -63,6 +67,37 @@ class TestCoreSettings:
         monkeypatch.setenv("HOST_APP_PORT", "99999")
         with pytest.raises(Exception):
             CoreSettings()
+
+    # ─── OPT-4 第三批：新增字段（prefrontal_plan_enabled / skill_dag_parallel_window / sys_mode）───
+
+    def test_opt4_batch3_defaults_match_legacy(self):
+        """新增 3 个字段的默认值必须与迁移前 os.environ.get("...", "default") 一致。"""
+        s = CoreSettings()
+        assert s.prefrontal_plan_enabled is False  # 原：os.environ.get("PREFRONTAL_PLAN_ENABLED", "false") == "true"
+        assert s.skill_dag_parallel_window == 4    # 原：_safe_int(env_value, default=4, minimum=1, maximum=16)
+        assert s.sys_mode == "normal"              # 原：str(os.environ.get("HOST_SYS_MODE") or "normal")
+
+    def test_opt4_batch3_env_override(self, monkeypatch):
+        monkeypatch.setenv("PREFRONTAL_PLAN_ENABLED", "true")
+        monkeypatch.setenv("HOST_SKILL_DAG_PARALLEL_WINDOW", "8")
+        monkeypatch.setenv("HOST_SYS_MODE", "safe")
+        s = CoreSettings()
+        assert s.prefrontal_plan_enabled is True
+        assert s.skill_dag_parallel_window == 8
+        assert s.sys_mode == "safe"
+
+    def test_opt4_batch3_skill_dag_parallel_window_out_of_range(self, monkeypatch):
+        """skill_dag_parallel_window ≤ 16 的硬约束生效。"""
+        monkeypatch.setenv("HOST_SKILL_DAG_PARALLEL_WINDOW", "999")
+        with pytest.raises(Exception):
+            CoreSettings()
+
+    def test_opt4_batch3_readiness_fields_include_new_three(self):
+        fields = CoreSettings.readiness_fields()
+        names = {f.field_name for f in fields}
+        assert {"prefrontal_plan_enabled", "skill_dag_parallel_window", "sys_mode"}.issubset(names)
+        # 全部归属 core domain
+        assert all(f.domain == "core" for f in fields)
 
 
 class TestLLMSettings:
@@ -131,6 +166,127 @@ class TestSingletons:
         a = get_observability_settings()
         b = get_observability_settings()
         assert a is b
+
+    def test_get_capability_forge_settings_cached(self):
+        a = get_capability_forge_settings()
+        b = get_capability_forge_settings()
+        assert a is b
+
+
+class TestCapabilityForgeSettings:
+    """OPT-4 第二批：CapabilityForgeSettings 迁移回归保护。
+
+    验收点：
+    - 10 个字段默认值与原原始 `_parse_*_env` 调用精确一致（防回归）
+    - 字段边界约束（ge/le）有效（超范围应抛错）
+    - capability_forge.py 的 `_get_auto_plan_thresholds()` 返回形对外契约保持不变
+    - readiness_fields() 完整返回 10 个字段
+    - /health/env-readiness 聚合后 domain=capability_forge 的字段能被搜到
+    """
+
+    def test_defaults_match_legacy(self):
+        s = CapabilityForgeSettings()
+        # 与原 `_get_auto_plan_thresholds()` 的 default= 参数成对比对
+        assert s.auto_proposal_enabled is True
+        assert s.auto_min_detected == 3
+        assert s.auto_min_sessions == 2
+        assert s.auto_min_failure_rate == pytest.approx(0.35)
+        assert s.auto_min_failed == 2
+        assert s.auto_dedupe_cooldown_ms == 1_800_000
+        assert s.auto_canary_traffic_percent == 5
+        assert s.auto_approve_enabled is False
+        assert s.auto_approve_stage == "shadow"
+        assert s.auto_approver == "auto_forge"
+
+    def test_int_env_override(self, monkeypatch):
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_DETECTED", "7")
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_DEDUPE_COOLDOWN_MS", "120000")
+        s = CapabilityForgeSettings()
+        assert s.auto_min_detected == 7
+        assert s.auto_dedupe_cooldown_ms == 120_000
+
+    def test_float_env_override(self, monkeypatch):
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_FAILURE_RATE", "0.72")
+        s = CapabilityForgeSettings()
+        assert s.auto_min_failure_rate == pytest.approx(0.72)
+
+    def test_bool_env_override(self, monkeypatch):
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED", "false")
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED", "true")
+        s = CapabilityForgeSettings()
+        assert s.auto_proposal_enabled is False
+        assert s.auto_approve_enabled is True
+
+    def test_string_env_override(self, monkeypatch):
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE", "canary")
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVER", "ops_bot")
+        s = CapabilityForgeSettings()
+        assert s.auto_approve_stage == "canary"
+        assert s.auto_approver == "ops_bot"
+
+    def test_out_of_range_rejected(self, monkeypatch):
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_DETECTED", "9999")  # le=100
+        with pytest.raises(Exception):
+            CapabilityForgeSettings()
+
+    def test_failure_rate_out_of_range_rejected(self, monkeypatch):
+        monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_MIN_FAILURE_RATE", "1.5")  # le=1.0
+        with pytest.raises(Exception):
+            CapabilityForgeSettings()
+
+    def test_readiness_fields_complete(self):
+        fields = CapabilityForgeSettings.readiness_fields()
+        assert len(fields) == 10
+        all_keys = {f.env_key for f in fields}
+        assert all_keys == {
+            "HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED",
+            "HOST_CAPABILITY_FORGE_AUTO_MIN_DETECTED",
+            "HOST_CAPABILITY_FORGE_AUTO_MIN_SESSIONS",
+            "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILURE_RATE",
+            "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILED",
+            "HOST_CAPABILITY_FORGE_AUTO_DEDUPE_COOLDOWN_MS",
+            "HOST_CAPABILITY_FORGE_AUTO_CANARY_TRAFFIC_PERCENT",
+            "HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED",
+            "HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE",
+            "HOST_CAPABILITY_FORGE_AUTO_APPROVER",
+        }
+        assert all(f.domain == "capability_forge" for f in fields)
+
+    def test_readiness_aggregation_includes_capability_forge(self):
+        report = verify_readiness(
+            producers=[
+                CoreSettings.readiness_fields,
+                CapabilityForgeSettings.readiness_fields,
+            ]
+        )
+        domains = {f.domain for f in report.fields}
+        assert "capability_forge" in domains
+
+    def test_service_thresholds_backward_contract(self, monkeypatch):
+        """capability_forge.py 的 `_get_auto_plan_thresholds()` 返回结构契约不变。"""
+        from host_brain.app.capability_forge import CapabilityForgeService
+        from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
+
+        svc = CapabilityForgeService(telemetry=CapabilityGapTelemetry())
+        t = svc._get_auto_plan_thresholds()
+        # key 名称与原实现完全一致（新新增的调用点依赖这些 key）
+        assert set(t.keys()) == {
+            "enabled", "min_detected_count", "min_unique_sessions",
+            "min_failure_rate", "min_failed_count", "dedupe_cooldown_ms",
+            "canary_traffic_percent", "auto_approve_enabled",
+            "auto_approve_stage", "auto_approver",
+        }
+        # 默认值与迁移前完全一致
+        assert t["enabled"] is True
+        assert t["min_detected_count"] == 3
+        assert t["min_unique_sessions"] == 2
+        assert t["min_failure_rate"] == pytest.approx(0.35)
+        assert t["min_failed_count"] == 2
+        assert t["dedupe_cooldown_ms"] == 1_800_000
+        assert t["canary_traffic_percent"] == 5
+        assert t["auto_approve_enabled"] is False
+        assert t["auto_approve_stage"] == "SHADOW"  # _normalize_stage 大写化
+        assert t["auto_approver"] == "auto_forge"
 
 
 class TestInspectSetting:
@@ -216,3 +372,77 @@ class TestReadinessAggregation:
         )
         # core 的字段依然存在
         assert any(f.domain == "core" for f in report.fields)
+
+
+class TestOpt4BatchThreeCallsites:
+    """OPT-4 第三批：调用点迁移回归保护。
+
+    目标：3 处散点 env 读取（PREFRONTAL_PLAN_ENABLED / HOST_SKILL_DAG_PARALLEL_WINDOW /
+    HOST_SYS_MODE）已迁移到 CoreSettings，验证旧行为完全保持：
+    - skill_dag_planner._resolve_parallel_window() 仍然能响应 env 变化
+    - skill_dag_planner._resolve_parallel_window(value=N) 显式传值优先生效
+    - chat_context_builder._build_runtime_mode_flags() 的 sys_mode 跟随 CoreSettings
+    - health/env-readiness 聚合能看到新增 3 个字段
+    """
+
+    def test_skill_dag_parallel_window_follows_env(self, monkeypatch):
+        monkeypatch.setenv("HOST_SKILL_DAG_PARALLEL_WINDOW", "12")
+        get_core_settings.cache_clear()
+
+        from host_brain.app.skill_dag_planner import _resolve_parallel_window
+        assert _resolve_parallel_window() == 12
+
+    def test_skill_dag_explicit_value_wins_over_env(self, monkeypatch):
+        """显式传入 value 的路径不应受 env 影响。"""
+        monkeypatch.setenv("HOST_SKILL_DAG_PARALLEL_WINDOW", "12")
+        get_core_settings.cache_clear()
+
+        from host_brain.app.skill_dag_planner import _resolve_parallel_window
+        assert _resolve_parallel_window(value=3) == 3
+
+    def test_sys_mode_flows_through_build_runtime_mode_flags(self, monkeypatch):
+        monkeypatch.setenv("HOST_SYS_MODE", "safe")
+        get_core_settings.cache_clear()
+
+        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
+        flags = _build_runtime_mode_flags({})
+        assert flags["sys_mode"] == "safe"
+
+    def test_sys_mode_defaults_to_normal_without_env(self, monkeypatch):
+        monkeypatch.delenv("HOST_SYS_MODE", raising=False)
+        get_core_settings.cache_clear()
+
+        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
+        flags = _build_runtime_mode_flags({})
+        assert flags["sys_mode"] == "normal"
+
+    def test_sys_mode_hard_snapshot_overrides_env(self, monkeypatch):
+        """hard_snapshot 中已经有 sys_mode 时，应无视 env/CoreSettings。"""
+        monkeypatch.setenv("HOST_SYS_MODE", "safe")
+        get_core_settings.cache_clear()
+
+        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
+        flags = _build_runtime_mode_flags({"hard_snapshot": {"sys_mode": "emergency"}})
+        assert flags["sys_mode"] == "emergency"
+
+    def test_prefrontal_plan_enabled_env_flow(self, monkeypatch):
+        monkeypatch.setenv("PREFRONTAL_PLAN_ENABLED", "true")
+        get_core_settings.cache_clear()
+
+        # 直接读取 CoreSettings 验证（不触发 executive_runtime_core 整条链路）
+        assert get_core_settings().prefrontal_plan_enabled is True
+
+        monkeypatch.setenv("PREFRONTAL_PLAN_ENABLED", "false")
+        get_core_settings.cache_clear()
+        assert get_core_settings().prefrontal_plan_enabled is False
+
+    def test_health_readiness_contains_new_three_fields(self, monkeypatch):
+        monkeypatch.setenv("PREFRONTAL_PLAN_ENABLED", "true")
+        get_core_settings.cache_clear()
+
+        report = verify_readiness(producers=[CoreSettings.readiness_fields])
+        names = {f.field_name for f in report.fields}
+        assert {"prefrontal_plan_enabled", "skill_dag_parallel_window", "sys_mode"}.issubset(names)
+        # env 覆盖要正确识别为 source=env
+        pf_field = next(f for f in report.fields if f.field_name == "prefrontal_plan_enabled")
+        assert pf_field.source == "env"

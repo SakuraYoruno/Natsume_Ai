@@ -26,17 +26,20 @@
 from __future__ import annotations
 
 from .base import SettingsReadinessReport, verify_readiness
+from .capability_forge import CapabilityForgeSettings, get_capability_forge_settings
 from .core import CoreSettings, get_core_settings
 from .llm import LLMSettings, get_llm_settings
 from .observability import ObservabilitySettings, get_observability_settings
 from .tribe import TribeSettings, get_tribe_settings
 
 __all__ = [
+    "CapabilityForgeSettings",
     "CoreSettings",
     "LLMSettings",
     "ObservabilitySettings",
     "SettingsReadinessReport",
     "TribeSettings",
+    "get_capability_forge_settings",
     "get_core_settings",
     "get_llm_settings",
     "get_observability_settings",

@@ -335,53 +335,25 @@ class CapabilityForgeService:
         return latest
 
     def _get_auto_plan_thresholds(self) -> dict[str, Any]:
+        # OPT-4 第二批：原先散落的 10 个 HOST_CAPABILITY_FORGE_AUTO_* 环境变量
+        # 已统一迁移至 host_brain.app.settings.capability_forge.CapabilityForgeSettings；
+        # 本处保持对外契约不变（返回 dict，键名保持与历史调用点一致）。
+        from host_brain.app.settings import get_capability_forge_settings  # noqa: PLC0415
+
+        s = get_capability_forge_settings()
+        auto_approve_stage = _normalize_stage(s.auto_approve_stage)
+        auto_approver = (s.auto_approver or "").strip() or "auto_forge"
         return {
-            "enabled": _parse_bool_env("HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED", default=True),
-            "min_detected_count": _parse_int_env(
-                "HOST_CAPABILITY_FORGE_AUTO_MIN_DETECTED",
-                default=3,
-                minimum=1,
-                maximum=100,
-            ),
-            "min_unique_sessions": _parse_int_env(
-                "HOST_CAPABILITY_FORGE_AUTO_MIN_SESSIONS",
-                default=2,
-                minimum=1,
-                maximum=100,
-            ),
-            "min_failure_rate": _parse_float_env(
-                "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILURE_RATE",
-                default=0.35,
-                minimum=0.0,
-                maximum=1.0,
-            ),
-            "min_failed_count": _parse_int_env(
-                "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILED",
-                default=2,
-                minimum=0,
-                maximum=100,
-            ),
-            "dedupe_cooldown_ms": _parse_int_env(
-                "HOST_CAPABILITY_FORGE_AUTO_DEDUPE_COOLDOWN_MS",
-                default=1800000,
-                minimum=60000,
-                maximum=86400000,
-            ),
-            "canary_traffic_percent": _parse_int_env(
-                "HOST_CAPABILITY_FORGE_AUTO_CANARY_TRAFFIC_PERCENT",
-                default=5,
-                minimum=1,
-                maximum=100,
-            ),
-            "auto_approve_enabled": _parse_bool_env(
-                "HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED",
-                default=False,
-            ),
-            "auto_approve_stage": _normalize_stage(
-                str(os.getenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE") or "shadow").strip()
-            ),
-            "auto_approver": str(os.getenv("HOST_CAPABILITY_FORGE_AUTO_APPROVER") or "auto_forge").strip()
-            or "auto_forge",
+            "enabled": bool(s.auto_proposal_enabled),
+            "min_detected_count": int(s.auto_min_detected),
+            "min_unique_sessions": int(s.auto_min_sessions),
+            "min_failure_rate": float(s.auto_min_failure_rate),
+            "min_failed_count": int(s.auto_min_failed),
+            "dedupe_cooldown_ms": int(s.auto_dedupe_cooldown_ms),
+            "canary_traffic_percent": int(s.auto_canary_traffic_percent),
+            "auto_approve_enabled": bool(s.auto_approve_enabled),
+            "auto_approve_stage": auto_approve_stage,
+            "auto_approver": auto_approver,
         }
 
     def maybe_auto_plan_for_gap(

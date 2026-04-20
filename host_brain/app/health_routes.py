@@ -400,6 +400,7 @@ async def env_readiness_report() -> Dict[str, Any]:
     供运维/新同事定位"哪些环境变量已生效、哪些用默认、哪些缺失"。
     """
     from host_brain.app.settings import (
+        CapabilityForgeSettings,
         CoreSettings,
         LLMSettings,
         ObservabilitySettings,
@@ -414,6 +415,7 @@ async def env_readiness_report() -> Dict[str, Any]:
             LLMSettings.readiness_fields,
             TribeSettings.readiness_fields,
             ObservabilitySettings.readiness_fields,
+            CapabilityForgeSettings.readiness_fields,
         ]
     )
     return {

@@ -552,7 +552,16 @@ def build_chat_context_pack(
         "hard_snapshot": {
             "session_id": session_id,
             "thread_id": thread_id,
-            "sys_mode": str(os.environ.get("HOST_SYS_MODE") or "normal").strip() or "normal",
+            # OPT-4 第三批：env 统一走 CoreSettings
+            "sys_mode": (
+                str(
+                    __import__(
+                        "host_brain.app.settings", fromlist=["get_core_settings"]
+                    ).get_core_settings().sys_mode
+                    or "normal"
+                ).strip()
+                or "normal"
+            ),
             "mood_state": mood_state,
             "allowed_emotion_tags": allowed_emotion_tags,
             "emotion_range_hint": emotion_range_hint,
@@ -656,7 +665,10 @@ def _build_runtime_mode_flags(prompt_context: Mapping[str, Any] | None) -> dict[
 
     sys_mode = str(
         hard_snapshot.get("sys_mode")
-        or os.environ.get("HOST_SYS_MODE")
+        # OPT-4 第三批：env 统一走 CoreSettings
+        or __import__(
+            "host_brain.app.settings", fromlist=["get_core_settings"]
+        ).get_core_settings().sys_mode
         or "normal"
     ).strip().lower() or "normal"
 
