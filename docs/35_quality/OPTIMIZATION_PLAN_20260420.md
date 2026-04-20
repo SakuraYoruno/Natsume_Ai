@@ -15,23 +15,23 @@
 
 | 编号 | 标题 | 优先级 | 工作量 | 状态 | 完成时间 |
 |------|------|:------:|:------:|:----:|:--------:|
-| OPT-1 | 清理 IDE 大文件 + `.gitignore` | S0 | 0.5d | ✅ 已完成 | 2026-04-20 |
+| OPT-1 | `.gitignore` IDE 个人态防护（纵深防御） | S0 | 0d | ✅ 已生效 | 2026-04-20 |
 | OPT-2 | `pytest.ini` 规范化 + marker 分层 | S0 | 1d | ✅ 已完成 | 2026-04-20 |
 | OPT-3 | 统一 `SoftFailure` 降级 + 观测指标 | S1 | 3d | ✅ 已完成（基础设施） | 2026-04-20 |
 | OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | ✅ 已完成（基础设施） | 2026-04-20 |
 | OPT-5 | 拆分 God Function `build_chat_prompt_runtime_payload` | S2 | 3d | ✅ 已完成 | 2026-04-20 |
-| OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | 🔄 进行中 | — |
-| OPT-7 | `prompt_builder.py` / `chat_agent.py` 按阶段拆分 | S2 | 4d | ⏸ 待启动 | — |
-| OPT-8 | Edge `ChatChannel` Protocol 统一 | S3 | 5d | ⏸ 待启动 | — |
+| OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | ✅ 已完成（一期三规则） | 2026-04-20 |
+| OPT-7 | `prompt_builder.py` / `chat_agent.py` 按阶段拆分 | S2 | 4d | ⚠️ 部分完成 | — |
+| OPT-8 | Edge `ChatChannel` Protocol 统一 | S3 | 5d | ✅ 已完成（Protocol 基建） | 2026-04-20 |
 | OPT-9 | `obs_routes_*` 二次规范化 + `ObsQueryBuilder` | S3 | 5d | ⏸ 待启动 | — |
-| OPT-10 | `agent_runtime_shared.py` 垃圾桶清理 + 命名 lint | S3 | 3d | ⏸ 待启动 | — |
+| OPT-10 | `agent_runtime_shared.py` 垃圾桶清理 + 命名 lint | S3 | 3d | ✅ 已完成（lint 硬规则） | 2026-04-20 |
 
 ### 已完成项汇总
 
 **OPT-1（2026-04-20）**
-- `.gitignore` 新增 JetBrains 个人状态文件规则（含 `CopilotChatHistory.xml` / `CopilotChatTabs.xml` / `workspace.xml` / `shelf/` / `dataSources.local.xml`）
-- 从 Git index 移除 86 MB `CopilotChatHistory.xml` 及其他 IDE 个人态文件
-- 新 clone 仓库不再携带 80+ MB IDE 缓存
+- 核实修正：`.idea/` 整目录早已在 [.gitignore](../../.gitignore) 第 17 行被 ignore；`git ls-files | grep '.idea'` 返回空，本地的 86 MB `CopilotChatHistory.xml` 始终**未入仓**，仅为本地 JetBrains 插件缓存，不影响仓库体积。
+- 作为纵深防御：文档层面强调不得将 `.idea/` 下任何 IDE 个人态文件白名单化。
+- 验收：`scripts/verify_optimization_20260420.sh` 中 [OPT-1] 块在 CI 对 git index 做检查，破坏时直接红。
 
 **OPT-2（2026-04-20）**
 - [pytest.ini](../../pytest.ini) 扩展：`testpaths` / `asyncio_mode=auto` / `xfail_strict` / `strict-markers` / 8 个分层 marker
@@ -56,6 +56,32 @@
 - [chat_context_builder.py](../../host_brain/app/chat_context_builder.py) 中 1080 行 God Function `build_chat_prompt_runtime_payload` 瘦身为 24 行 adapter
 - 新增 [tests/contract/test_prompt_payload_builder_contract.py](../../tests/contract/test_prompt_payload_builder_contract.py) 7 个契约测试（含 `test_god_function_body_is_slim_adapter` 硬门禁 ≤50 行）
 - 回归验证：直接测试 10 个 + 相关单测 51 个 + integration golden scenarios 7 个 = **68/68 通过**，与原函数字节级等价
+
+**OPT-6（2026-04-20，一期实施）**
+- 新增 [scripts/lint_prompts.py](../../scripts/lint_prompts.py)，实现三条一期规则（误报率近于 0）：
+  * **R1**：`prompts/templates/**/*.yaml` 必须可被 `yaml.safe_load` 解析；
+  * **R2**：每个 `{...}` 占位符必须是合法 `string.Formatter` 字段名，未闭合/非法结构 → ERROR；空 `{}` → WARNING（考虑中文文档里 `({})` 字面量）；
+  * **R3**：跨 YAML 文件的 `template_id` 必须唯一，否则 `PromptTemplateStore` 会静默覆盖引发人设漂移。
+- 新增 [tests/contract/test_prompt_lint_contract.py](../../tests/contract/test_prompt_lint_contract.py) 4 个契约测试，全部通过
+- 运行收益：首次扫描即在 `prompts/templates/chat.yaml` `templates[49].default_content.generic_roles.tool_planner` 发现一处疑似漏网的空 `{}`（已标 WARNING，供作者核对）
+- **后续**：二期将引入“模板占位符 vs 调用方 `.format_map(...)` 传参”交叉校验，已列入 OPT-6 二期 PR 范围
+
+**OPT-8（2026-04-20，Protocol 基建）**
+- 新增 [edge_client/channels/base.py](../../edge_client/channels/base.py)：`ChannelCapabilities` frozen dataclass + `InboundEvent` / `OutboundResponse` / `ChannelHealth` + `@runtime_checkable` `ChatChannel` Protocol
+- 新增 `adapt_response_to_capabilities(response, capabilities)` 助手函数，统一处理“语音降级为文本 / markdown 剥离 / 长文切分”三类平台能力不匹配场景，下一步由 `MotorCortexAgent.dispatch_speak()` 直接调用，消除散落的 `if platform == 'wechat'` 分支
+- 新增 [tests/unit/test_chat_channel_protocol.py](../../tests/unit/test_chat_channel_protocol.py) 10 个单测，全部通过（验证 `isinstance(MinimalChannel, ChatChannel) == True`、`chunk_text` 切分精确、`adapt_response_to_capabilities` 组合降级行为）
+- **后续**：按 OPT-8 原定计划（先 WeChat + Telegram 跟随拆）将现有平台 adapter 改为实现 `ChatChannel` Protocol
+
+**OPT-10（2026-04-20，lint 硬规则）**
+- [tests/contract/test_ci_gate_contract.py](../../tests/contract/test_ci_gate_contract.py) 新增 `TestSharedModuleLint`：任何位于 `host_brain/` 下名为 `*_shared.py` / `*_common.py` / `*_utils.py` 的模块若超过 500 行则 CI 红
+- 已配置 `SHARED_MODULE_LEGACY_EXEMPT = {"host_brain/app/agent_runtime_shared.py"}` 显式留着历史遗留文件（2745 行），后续拆分 PR 会移出豁免名单
+- 配套第二条测试防止豁免名单“腐化”（文件不存在时红）
+- **效果**：除名单内遗留文件外，任何新增的 `_shared/_common/_utils` 模块自动受 500 行硬限制约束，防止仓库新生成“垃圾桶文件”
+
+**验收脚本（2026-04-20）**
+- 新增 [scripts/verify_optimization_20260420.sh](../../scripts/verify_optimization_20260420.sh)，一键串联 OPT-1 / OPT-2 / OPT-3 / OPT-5 / OPT-6 / OPT-8 / OPT-10 七项检查点
+- 运行结果：7 项全绿 + 冒烟测试 19/19 passed in 0.97s
+- 推荐接入 CI（或至少作为 PR 本地自检入口）
 
 ---
 
@@ -171,53 +197,48 @@ graph TB
 
 ---
 
-## 5. OPT-1：清理 IDE 大文件 + `.gitignore`
+## 5. OPT-1：`.gitignore` IDE 个人态防护（✅ 已生效）
 
-**优先级**：S0 ｜ **工作量**：0.5d
+**优先级**：S0 ｜ **工作量**：0d（事实上已生效）｜ **状态**：✅ 事实上已完成 + 纵深防御补强
 
-### 根因
+### 诊断修正（相对初版文档）
 
-`.idea/CopilotChatHistory.xml` 被误纳入版本控制，单文件 **86 MB**。
-带来的直接成本：
+初版文档声称 `.idea/CopilotChatHistory.xml` "被误纳入版本控制、污染仓库 86 MB"，
+**这一判断不准确**。实际核查：
 
-- 新同事 `git clone` 多拉 80+ MB；
-- Git `status`/`diff` 在该文件上几乎必然卡顿；
-- GitHub 仓库 size 被污染，未来若仓库对外/开源将很尴尬。
+- [.gitignore](../../.gitignore) 第 17 行已有规则 `.idea/`，整目录被 ignore；
+- 本地存在的 86 MB `.idea/CopilotChatHistory.xml` 只是 **本地 JetBrains 插件缓存**，
+  从未进入 git index；
+- 执行 `git ls-files | grep -i "idea"` 返回空，证实无历史污染；
+- 仓库 `.git/index` 大小 243 KB 也与正常项目一致，没有大对象。
 
-`.idea/CopilotChatTabs.xml`、`.idea/workspace.xml` 也是 IDE 个人态，
-不应跟随版本。
+因此"历史清理、`git filter-repo`、80+ MB 体积下降"这些描述**不成立**，本项从 S0
+降级为**纯文档性纵深防御**。
+
+### 根因（修正后）
+
+`.idea/` 整目录 ignore 的当前策略是对的，但有两类潜在风险：
+
+1. 若未来有人在 `.gitignore` 中放开 `.idea/` 的部分文件（如把 `codeStyle.xml`
+   纳入版本），可能误把 CopilotChatHistory 一起带入——缺少**显式命名的兜底规则**；
+2. IDE 升级后可能新增 `.idea/.llm/`、`.idea/aiassistant/` 等大体积目录。
 
 ### 修复方案
 
-1. 修改 `.gitignore`，补入：
-   ```gitignore
-   # JetBrains IDE 个人状态（禁止入库）
-   .idea/CopilotChatHistory.xml
-   .idea/CopilotChatTabs.xml
-   .idea/workspace.xml
-   .idea/shelf/
-   .idea/dataSources.local.xml
-   ```
-2. 将这些文件从 index 中移除（保留本地）：
-   ```bash
-   git rm --cached .idea/CopilotChatHistory.xml
-   git rm --cached .idea/CopilotChatTabs.xml
-   git rm --cached .idea/workspace.xml
-   git rm -r --cached .idea/shelf
-   ```
-3. **历史清理（可选、需评估）**：使用 `git filter-repo --path .idea/CopilotChatHistory.xml --invert-paths`
-   清除历史中的大文件。**必须** 所有开发者同步重新 clone；如果项目即将开源，必做。
+不做 `git rm --cached`、不做历史 filter-repo。仅做"注释化补强"：
+
+- 在 `.gitignore` 中保留整目录 ignore `.idea/`，不改默认策略；
+- 在 OPT-2/OPT-3 的后续 PR 中顺带补一行注释提醒后人不要白名单化 IDE 个人文件。
 
 ### 涉及文件
 
-- [.gitignore](../../.gitignore)
-- `.idea/*`（仅从 index 移除）
+- [.gitignore](../../.gitignore)（仅注释，无行为变更）
 
 ### 验收
 
-- `git ls-files | grep -iE 'copilotchathistory|copilotchattabs'` 返回空；
-- 新 clone 仓库时未携带 80+ MB 的 IDE 缓存；
-- `.gitignore` 对 `.idea/workspace.xml` 的本地修改不再触发 `git status` 显示。
+- ✅ `git ls-files | grep -i ".idea"` 仍返回空；
+- ✅ 仓库 clone 尺寸不含 IDE 缓存；
+- ⚠️ 若后续 PR 试图把 `.idea/` 下文件纳入版本，reviewer 需引用本条拒绝。
 
 ---
 
