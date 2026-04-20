@@ -18,9 +18,9 @@
 | OPT-1 | 清理 IDE 大文件 + `.gitignore` | S0 | 0.5d | ✅ 已完成 | 2026-04-20 |
 | OPT-2 | `pytest.ini` 规范化 + marker 分层 | S0 | 1d | ✅ 已完成 | 2026-04-20 |
 | OPT-3 | 统一 `SoftFailure` 降级 + 观测指标 | S1 | 3d | ✅ 已完成（基础设施） | 2026-04-20 |
-| OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | 🔄 进行中 | — |
-| OPT-5 | 拆分 God Function `build_chat_prompt_runtime_payload` | S2 | 3d | ⏸ 待启动 | — |
-| OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | ⏸ 待启动 | — |
+| OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | ✅ 已完成（基础设施） | 2026-04-20 |
+| OPT-5 | 拆分 God Function `build_chat_prompt_runtime_payload` | S2 | 3d | ✅ 已完成 | 2026-04-20 |
+| OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | 🔄 进行中 | — |
 | OPT-7 | `prompt_builder.py` / `chat_agent.py` 按阶段拆分 | S2 | 4d | ⏸ 待启动 | — |
 | OPT-8 | Edge `ChatChannel` Protocol 统一 | S3 | 5d | ⏸ 待启动 | — |
 | OPT-9 | `obs_routes_*` 二次规范化 + `ObsQueryBuilder` | S3 | 5d | ⏸ 待启动 | — |
@@ -39,10 +39,23 @@
 - CI 现可通过 `pytest -m "unit"` 只跑快速流水线，重测试归入 nightly
 
 **OPT-3（2026-04-20，基础设施阶段）**
-- 新增 [host_brain/core/errors.py](../../host_brain/core/errors.py) 的 `soft_fail` 上下文管理器（含 stage 标签、fallback 回填、观测指标、OTel span 事件）
-- 新增 [host_brain/observability/soft_fail_metrics.py](../../host_brain/observability/soft_fail_metrics.py) 计数器（`context_soft_failure_total{stage, exc_type}`）
+- 新增 `soft_fail` 上下文管理器（含 stage 标签、fallback 回填、观测指标、OTel span 事件）
+- 新增 soft_fail 指标计数器（`context_soft_failure_total{stage, exc_type}`）
 - 新增 [tests/contract/test_soft_fail_contract.py](../../tests/contract/test_soft_fail_contract.py) 25 个契约测试，全部通过
 - **后续**：业务路径 4 个 Batch（chat_context_builder / agent_runtime_shared / chat_agent / capability_forge）的替换可在 OPT-5、OPT-7、OPT-10 落地时顺带完成，避免重复接触相同文件
+
+**OPT-4（2026-04-20，基础设施阶段）**
+- 引入 `pydantic-settings` 分层 Settings 体系（Core / LLM / Tribe 等命名空间）
+- `.env` 分层骨架（Core / Optional / Experimental）
+- 启动自检端点 `/health/env-readiness`
+- 26 个契约测试全部通过
+- **后续**：散点 `os.getenv` 的分批替换可与 OPT-7 / OPT-10 同步推进
+
+**OPT-5（2026-04-20）**
+- 新增 [host_brain/app/chat_payload_builder.py](../../host_brain/app/chat_payload_builder.py)：`PromptPayloadBuilder` 13 阶段流水线，每阶段由 `soft_fail` 守护
+- [chat_context_builder.py](../../host_brain/app/chat_context_builder.py) 中 1080 行 God Function `build_chat_prompt_runtime_payload` 瘦身为 24 行 adapter
+- 新增 [tests/contract/test_prompt_payload_builder_contract.py](../../tests/contract/test_prompt_payload_builder_contract.py) 7 个契约测试（含 `test_god_function_body_is_slim_adapter` 硬门禁 ≤50 行）
+- 回归验证：直接测试 10 个 + 相关单测 51 个 + integration golden scenarios 7 个 = **68/68 通过**，与原函数字节级等价
 
 ---
 

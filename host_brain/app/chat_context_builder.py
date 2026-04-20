@@ -2000,6 +2000,34 @@ def build_chat_prompt_runtime_payload(
     style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
     cpb_slots: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Chat runtime payload 主入口（OPT-5 重构后为 adapter）。
+
+    实际实现已拆分到 host_brain.app.chat_payload_builder.PromptPayloadBuilder
+    流水线中，每个阶段由 soft_fail 守护。本函数仅作为向后兼容的薄 adapter，
+    同时保留 ``_emotion_persistence`` / ``_self_reflection`` /
+    ``_evolution_orchestrator`` / ``_turn_counter`` 等函数属性供测试 monkey-patch。
+    """
+    from host_brain.app.chat_payload_builder import (  # noqa: PLC0415
+        run_build_chat_prompt_runtime_payload,
+    )
+
+    return run_build_chat_prompt_runtime_payload(
+        runtime_input=runtime_input,
+        style_bindings=style_bindings,
+        cpb_slots=cpb_slots,
+    )
+
+
+def _legacy_build_chat_prompt_runtime_payload_body(  # noqa: D401  (kept for reference)
+    *,
+    runtime_input: Any,
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    cpb_slots: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """保留原 God Function 完整实现作为回滚参考。
+
+    ⚠️ 请勿直接调用：新路径走 PromptPayloadBuilder。本函数只作为诊断/回滚备份。
+    """
     from host_brain.app.chat_runtime_input import ChatRuntimeInput  # noqa: PLC0415
 
     if not isinstance(runtime_input, ChatRuntimeInput):

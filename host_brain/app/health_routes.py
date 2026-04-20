@@ -386,3 +386,37 @@ async def startup_report() -> Dict[str, Any]:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate startup report",
         )
+
+
+@router.get("/health/env-readiness")
+async def env_readiness_report() -> Dict[str, Any]:
+    """Settings 分层 readiness 报告（OPT-4）。
+
+    汇总 `host_brain/app/settings/` 下分层 Settings 的字段来源：
+    - env：显式通过环境变量设置
+    - default：使用代码默认值
+    - missing：必填但未设置
+
+    供运维/新同事定位"哪些环境变量已生效、哪些用默认、哪些缺失"。
+    """
+    from host_brain.app.settings import (
+        CoreSettings,
+        LLMSettings,
+        ObservabilitySettings,
+        TribeSettings,
+        verify_readiness,
+    )
+
+    ts_ms = int(time.time() * 1000)
+    report = verify_readiness(
+        producers=[
+            CoreSettings.readiness_fields,
+            LLMSettings.readiness_fields,
+            TribeSettings.readiness_fields,
+            ObservabilitySettings.readiness_fields,
+        ]
+    )
+    return {
+        "timestamp": ts_ms,
+        **report.to_dict(),
+    }
