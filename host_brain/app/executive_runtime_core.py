@@ -994,6 +994,8 @@ def _build_chat_input(
         intent_draft=dict(intent_draft or {}),
         trace_stage_meta=dict(trace_stage_meta or {}),
         llm_runtime=resolved_llm_runtime,
+        attachments=list(getattr(request_body, "attachments", []) or []),
+        multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
     )
 
 

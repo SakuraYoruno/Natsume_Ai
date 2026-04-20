@@ -100,6 +100,8 @@ class ChatAgentInput:
     trace_stage_meta: Dict[str, Any] = field(default_factory=dict)
     llm_runtime: Optional[Dict[str, Any]] = None
     response_policy: Dict[str, Any] = field(default_factory=dict)
+    attachments: List[Dict[str, Any]] = field(default_factory=list)
+    multimodal_observations: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

@@ -180,6 +180,8 @@ class ChatAgentInput:
 
     # ── 行为约束策略（可由上游直接传入，缺省时从 prompt runtime_payload 回填）──
     response_policy: Dict[str, Any] = field(default_factory=dict)
+    attachments: List[Dict[str, Any]] = field(default_factory=list)
+    multimodal_observations: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +237,8 @@ def _build_compact_chat_prompt(
     emotion_context: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
     speed_profile: str,
+    attachments: List[Dict[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
     from host_brain.app.prompt_builder import _build_current_local_time_context  # noqa: PLC0415
     from host_brain.app.prompt_builder_utils import _build_direct_response_priority  # noqa: PLC0415
@@ -245,6 +249,43 @@ def _build_compact_chat_prompt(
         render_target_lang=render_target_lang,
         line_kind="compact",
     )
+    multimodal_summary = str((multimodal_observations or {}).get("summary_for_chat") or "").strip()
+    if not multimodal_summary:
+        multimodal_summary = "; ".join(
+            str(item.get("transcript") or item.get("ocr_text") or item.get("caption") or item.get("file_name") or "").strip()
+            for item in list(attachments or [])
+            if isinstance(item, Mapping)
+            and str(item.get("transcript") or item.get("ocr_text") or item.get("caption") or item.get("file_name") or "").strip()
+        ).strip()
+    multimodal_observations_text = ""
+    if multimodal_observations:
+        try:
+            multimodal_observations_text = json.dumps(dict(multimodal_observations), ensure_ascii=False, sort_keys=True)
+        except Exception:
+            multimodal_observations_text = str(dict(multimodal_observations))
+    multimodal_block = ""
+    if multimodal_summary or multimodal_observations_text:
+        multimodal_block = (
+            _load_compact_prompt_block(
+                speed_profile=speed_profile,
+                block_name="multimodal_summary_line",
+                render_target_lang=render_target_lang,
+                summary=multimodal_summary or "NONE",
+            )
+            + ("\n" if multimodal_summary else "")
+            + _load_compact_prompt_block(
+                speed_profile=speed_profile,
+                block_name="multimodal_observations_line",
+                render_target_lang=render_target_lang,
+                observations=multimodal_observations_text or "NONE",
+            )
+            + "\n"
+            + _load_compact_prompt_block(
+                speed_profile=speed_profile,
+                block_name="multimodal_instruction_line",
+                render_target_lang=render_target_lang,
+            )
+        ).strip()
     if speed_profile == "context_fast":
         response_policy = {
             "should_be_brief": True,
@@ -286,6 +327,7 @@ def _build_compact_chat_prompt(
                 bond_stage=bond_stage,
             ).strip()
             + "\n"
+            + (multimodal_block + "\n" if multimodal_block else "")
             + final_instruction
         )
         return user_message, system_prompt, {}, {
@@ -325,6 +367,7 @@ def _build_compact_chat_prompt(
             bond_stage=bond_stage,
         ).strip()
         + "\n"
+        + (multimodal_block + "\n" if multimodal_block else "")
         + final_instruction
     )
     return user_message, system_prompt, {}, {}
@@ -336,6 +379,8 @@ def _build_direct_fast_prompt(
     render_target_lang: str,
     emotion_context: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
+    attachments: List[Dict[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
     return _build_compact_chat_prompt(
         user_message=user_message,
@@ -343,6 +388,8 @@ def _build_direct_fast_prompt(
         emotion_context=emotion_context,
         bond_summary=bond_summary,
         speed_profile="direct_fast",
+        attachments=attachments,
+        multimodal_observations=multimodal_observations,
     )
 
 
@@ -352,6 +399,8 @@ def _build_context_fast_prompt(
     render_target_lang: str,
     emotion_context: Mapping[str, Any] | None,
     bond_summary: Mapping[str, Any] | None,
+    attachments: List[Dict[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
     return _build_compact_chat_prompt(
         user_message=user_message,
@@ -359,6 +408,8 @@ def _build_context_fast_prompt(
         emotion_context=emotion_context,
         bond_summary=bond_summary,
         speed_profile="context_fast",
+        attachments=attachments,
+        multimodal_observations=multimodal_observations,
     )
 
 
@@ -1814,6 +1865,8 @@ async def chat_agent_sse_generator(
             render_target_lang=render_target_lang,
             emotion_context=emotion_context,
             bond_summary=bond_summary,
+            attachments=list(agent_input.attachments or []),
+            multimodal_observations=dict(agent_input.multimodal_observations or {}),
         )
         prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
     elif _compact_prompt_speed_profile == "context_fast":
@@ -1822,6 +1875,8 @@ async def chat_agent_sse_generator(
             render_target_lang=render_target_lang,
             emotion_context=emotion_context,
             bond_summary=bond_summary,
+            attachments=list(agent_input.attachments or []),
+            multimodal_observations=dict(agent_input.multimodal_observations or {}),
         )
         prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
     if not response_policy and prompt_runtime_payload:

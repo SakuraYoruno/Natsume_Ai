@@ -247,6 +247,51 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
     assert dispatched_payload["attachments"][0]["type"] == "image"
 
 
+def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_mm_voice_001",
+        content="",
+        msg_type="voice",
+        attachments=[
+            {
+                "attachment_id": "att_voice_1",
+                "type": "voice",
+                "transcript": "这段语音在说今天晚上八点开会",
+            }
+        ],
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    observer = SimpleNamespace(
+        observe=lambda **_: {
+            "mode": "sync",
+            "observations": {
+                "items": [{"type": "voice"}],
+                "observed_types": ["voice"],
+                "summary_for_chat": "收到一段语音。转写内容大致是：这段语音在说今天晚上八点开会。",
+            },
+            "summary_for_chat": "收到一段语音。转写内容大致是：这段语音在说今天晚上八点开会。",
+            "safety_flags": [],
+        }
+    )
+
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
+        new=AsyncMock(return_value=False),
+    ), patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer), patch(
+        "host_brain.app.dependencies.notify_user_interaction",
+        return_value=None,
+    ), patch("host_brain.app.input_routes._log_input_event"):
+        response = _run(receive_input(body, SimpleNamespace()))
+
+    assert response.status == "ACCEPTED"
+    dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert dispatched_payload["attachment_processing_mode"] == "sync"
+    assert dispatched_payload["attachment_summary"].startswith("收到一段语音。")
+    assert dispatched_payload["attachments"][0]["type"] == "voice"
+
+
 def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> None:
     body = InputPayload(
         source="GATEWAY",

@@ -225,6 +225,35 @@ def test_classify_and_compile_intent_draft_routes_open_app_from_polite_phrase() 
     assert compiled["args"]["query"] == "可以帮我打开本地的酷狗音乐吗"
 
 
+def test_classify_and_compile_intent_draft_prefers_multimodal_chat_when_attachments_exist() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-multimodal-file",
+            session_id="session-thalamus-multimodal-file",
+            user_message="帮我看看这个文件",
+            source="input_routes",
+            input_source="GATEWAY",
+            ts_ms=1776669900001,
+            attachments=[
+                {
+                    "attachment_id": "att_file_1",
+                    "type": "file",
+                    "file_name": "note.txt",
+                }
+            ],
+            multimodal_observations={"observed_types": ["file"]},
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_MULTIMODAL_CHAT"
+    assert compiled["chat_speed_profile"] == "context_fast"
+    assert compiled["route_source"] == "thalamus.rule"
+
+
 def test_classify_and_compile_intent_draft_prefers_context_fast_for_companion_open_chat() -> None:
     agent = ThalamusAgent()
 

@@ -2283,13 +2283,19 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    phatic_fastpath_reply = _phatic_fastpath(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
+    has_multimodal_input = bool(getattr(request_body, "attachments", None)) or bool(
+        getattr(request_body, "multimodal_observations", None)
     )
+
+    phatic_fastpath_reply = None
+    if not has_multimodal_input:
+        phatic_fastpath_reply = _phatic_fastpath(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            render_target_lang=render_target_lang,
+        )
     if phatic_fastpath_reply:
         from host_brain.app.chat_agent import (  # noqa: PLC0415
             ChatAgentInput,
@@ -2336,6 +2342,8 @@ async def _cortex_orchestrator_sse_generator_impl(
                 "chat_sub_agent_id": "phatic_fastpath",
                 "cortex_orchestrator_mode": "phatic_fastpath",
             },
+            attachments=list(getattr(request_body, "attachments", []) or []),
+            multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
         )
         async for event in chat_agent_sse_generator(chat_input):
             yield event

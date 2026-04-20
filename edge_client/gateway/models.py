@@ -88,6 +88,10 @@ class GatewayAttachment:
     caption: str | None = None
     ocr_text: str | None = None
     transcript: str | None = None
+    parsed_text: str | None = None
+    page_summaries: list[str] = field(default_factory=list)
+    audio_transcript: str | None = None
+    frame_paths: list[str] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
 
     def as_payload(self) -> dict[str, Any]:
@@ -119,6 +123,14 @@ class GatewayAttachment:
             payload["ocr_text"] = self.ocr_text
         if self.transcript:
             payload["transcript"] = self.transcript
+        if self.parsed_text:
+            payload["parsed_text"] = self.parsed_text
+        if self.page_summaries:
+            payload["page_summaries"] = list(self.page_summaries)
+        if self.audio_transcript:
+            payload["audio_transcript"] = self.audio_transcript
+        if self.frame_paths:
+            payload["frame_paths"] = list(self.frame_paths)
         if self.extra:
             payload["extra"] = dict(self.extra)
         return payload
@@ -140,6 +152,10 @@ class GatewayAttachment:
             caption=str(payload.get("caption") or "").strip() or None,
             ocr_text=str(payload.get("ocr_text") or "").strip() or None,
             transcript=str(payload.get("transcript") or "").strip() or None,
+            parsed_text=str(payload.get("parsed_text") or "").strip() or None,
+            page_summaries=[str(item).strip() for item in list(payload.get("page_summaries") or []) if str(item).strip()],
+            audio_transcript=str(payload.get("audio_transcript") or "").strip() or None,
+            frame_paths=[str(item).strip() for item in list(payload.get("frame_paths") or []) if str(item).strip()],
             extra=dict(payload.get("extra") or {}),
         )
 

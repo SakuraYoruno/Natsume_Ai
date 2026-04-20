@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
@@ -787,6 +787,37 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
     return None
 
 
+def _build_multimodal_route_seed(
+    text: str,
+    *,
+    attachments: Sequence[Mapping[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    attachment_items = [
+        dict(item)
+        for item in list(attachments or [])
+        if isinstance(item, Mapping) and _normalize_text(item.get("type"))
+    ]
+    observation_payload = dict(multimodal_observations or {})
+    if not attachment_items and not observation_payload:
+        return None
+    task_text = normalized or "帮我看看这个附件。"
+    return {
+        "route": "chat",
+        "target_id": "",
+        "task": task_text,
+        "reason_code": "THALAMUS_RULE_MULTIMODAL_CHAT",
+        "confidence": 0.97,
+        "route_source": "thalamus.rule",
+        "chat_speed_profile": "context_fast",
+        "multimodal_input": True,
+        "args": {
+            "text": task_text,
+        },
+    }
+
+
 def _should_prefer_context_fast_chat(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized:
@@ -935,10 +966,20 @@ async def classify_task_intent(
     session_id: str,
     text: str,
     tribe_context: Mapping[str, Any] | None = None,
+    attachments: Sequence[Mapping[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     import os as _os  # noqa: PLC0415
 
     normalized = _normalize_text(text)
+    multimodal_seed = _build_multimodal_route_seed(
+        normalized,
+        attachments=attachments,
+        multimodal_observations=multimodal_observations,
+    )
+    if multimodal_seed is not None:
+        return multimodal_seed
+
     prefrontal_enabled = _os.environ.get("PREFRONTAL_PLAN_ENABLED", "false").lower() == "true"
     if prefrontal_enabled:
         ctx = dict(tribe_context or {})
@@ -1247,6 +1288,8 @@ class ThalamusAgent:
         ts_ms: int | None = None,
         target: str = "host",
         tribe_context: Mapping[str, Any] | None = None,
+        attachments: Sequence[Mapping[str, Any]] | None = None,
+        multimodal_observations: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         route_seed = dict(raw_route_decision or {})
         incoming = dict(existing_intent_draft or {})
@@ -1258,6 +1301,8 @@ class ThalamusAgent:
                     session_id=session_id,
                     text=user_message,
                     tribe_context=tribe_context,
+                    attachments=attachments,
+                    multimodal_observations=multimodal_observations,
                 )
                 or {}
             )

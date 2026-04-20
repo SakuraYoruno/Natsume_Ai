@@ -74,3 +74,31 @@ def test_build_context_fast_prompt_keeps_persona_and_mid_chat_contract() -> None
     assert runtime_payload["response_policy"]["max_sentences"] == 3
     assert runtime_payload["response_policy"]["max_chars"] == 110
     assert runtime_payload["response_policy"]["allow_topic_shift"] is False
+
+
+def test_build_context_fast_prompt_includes_multimodal_grounding_when_observations_exist() -> None:
+    prompt_text, system_prompt, gen_params, runtime_payload = _build_context_fast_prompt(
+        user_message="这段语音在说什么？",
+        render_target_lang="zh",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        attachments=[
+            {
+                "attachment_id": "att_voice_1",
+                "type": "voice",
+                "transcript": "这段语音在说今天晚上八点开会",
+            }
+        ],
+        multimodal_observations={
+            "observed_types": ["voice"],
+            "summary_for_chat": "收到一段语音。转写内容大致是：这段语音在说今天晚上八点开会。",
+        },
+    )
+
+    assert prompt_text == "这段语音在说什么？"
+    assert "附件观察摘要：" in system_prompt
+    assert "今天晚上八点开会" in system_prompt
+    assert "附件结构化观察：" in system_prompt
+    assert "不要只用“我看看”“好的”之类空回复" in system_prompt
+    assert gen_params == {}
+    assert runtime_payload["compact_prompt_profile"] == "context_fast"

@@ -854,7 +854,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     elif source == "GATEWAY":
         initial_payload = body.model_dump(exclude_none=True)
         gateway_attachments = _normalize_gateway_attachments(initial_payload)
-        if ((not body.content and not gateway_attachments) or not body.conversation_id or not body.platform):
+        has_gateway_content = bool(str(body.content or "").strip())
+        if ((not has_gateway_content and not gateway_attachments) or not body.conversation_id or not body.platform):
             return InputResponse(
                 success=False,
                 request_id=request_id,
@@ -1008,7 +1009,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     if source == "GATEWAY" and list(payload.get("attachments") or []):
         from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
 
-        observer_result = get_multimodal_observer().observe(
+        observer_result = await asyncio.to_thread(
+            get_multimodal_observer().observe,
             request_id=request_id,
             platform=str(body.platform or "").strip(),
             conversation_id=session_id,
@@ -1020,6 +1022,9 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
         payload["attachment_processing_mode"] = str(observer_result.get("mode") or "sync")
         payload["multimodal_safety_flags"] = list(observer_result.get("safety_flags") or [])
+        payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
+        payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
+        payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
         if str(observer_result.get("mode") or "").strip().lower() == "async":
             job = _schedule_gateway_multimodal_async_job(
                 request_id=request_id,
@@ -1296,7 +1301,8 @@ async def _run_gateway_multimodal_async_job(
     )
 
     try:
-        observer_result = get_multimodal_observer().observe(
+        observer_result = await asyncio.to_thread(
+            get_multimodal_observer().observe,
             request_id=request_id,
             platform=platform,
             conversation_id=conversation_id,
@@ -1308,6 +1314,9 @@ async def _run_gateway_multimodal_async_job(
         payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
         payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
         payload["attachment_processing_mode"] = "async"
+        payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
+        payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
+        payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
         update_multimodal_job(
             job_id,
             status="OBSERVED",
@@ -1800,6 +1809,8 @@ async def _run_cortex_orchestrator_pipeline(
             source="input_routes",
             input_source=source,
             ts_ms=ts_ms,
+            attachments=attachments,
+            multimodal_observations=multimodal_observations,
         )
     governor_result: dict[str, Any] = {"decision": "APPROVE", "source": "input_routes"}
 
