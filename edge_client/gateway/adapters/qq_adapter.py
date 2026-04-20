@@ -521,6 +521,8 @@ class QQAdapter(AbstractPlatformAdapter):
             types = {seg.get("type") for seg in message_arr if isinstance(seg, dict)}
             if "image" in types:
                 return MsgType.IMAGE
+            if "mface" in types or "face" in types:
+                return MsgType.EMOJI
             if "record" in types:
                 return MsgType.VOICE
             if "video" in types:
@@ -532,6 +534,8 @@ class QQAdapter(AbstractPlatformAdapter):
             return MsgType.VOICE
         if "[cq:image" in raw_message:
             return MsgType.IMAGE
+        if "[cq:mface" in raw_message or "[cq:face" in raw_message:
+            return MsgType.EMOJI
         if "[cq:video" in raw_message:
             return MsgType.VIDEO
         if "[cq:file" in raw_message:
@@ -546,6 +550,7 @@ class QQAdapter(AbstractPlatformAdapter):
         target_types: dict[MsgType, set[str]] = {
             MsgType.VOICE: {"record", "voice"},
             MsgType.IMAGE: {"image"},
+            MsgType.EMOJI: {"mface", "face"},
             MsgType.VIDEO: {"video"},
             MsgType.FILE: {"file"},
         }
@@ -572,25 +577,27 @@ class QQAdapter(AbstractPlatformAdapter):
         raw_message = str(raw_payload.get("raw_message") or "").strip()
         if not raw_message:
             return None
-        cq_type_map: dict[MsgType, str] = {
-            MsgType.VOICE: "record",
-            MsgType.IMAGE: "image",
-            MsgType.VIDEO: "video",
-            MsgType.FILE: "file",
+        cq_type_map: dict[MsgType, tuple[str, ...]] = {
+            MsgType.VOICE: ("record", "voice"),
+            MsgType.IMAGE: ("image",),
+            MsgType.EMOJI: ("mface", "face", "image"),
+            MsgType.VIDEO: ("video",),
+            MsgType.FILE: ("file",),
         }
-        cq_type = cq_type_map.get(msg_type)
-        if not cq_type:
+        cq_types = cq_type_map.get(msg_type)
+        if not cq_types:
             return None
-        match = re.search(rf"\[CQ:{re.escape(cq_type)},([^\]]+)\]", raw_message, flags=re.IGNORECASE)
-        if not match:
-            return None
-        payload = str(match.group(1) or "")
-        for key in ("file", "url", "path"):
-            key_match = re.search(rf"(?:^|,){re.escape(key)}=([^,\]]+)", payload, flags=re.IGNORECASE)
-            if key_match:
-                value = str(key_match.group(1) or "").strip()
-                if value:
-                    return value
+        for cq_type in cq_types:
+            match = re.search(rf"\[CQ:{re.escape(cq_type)},([^\]]+)\]", raw_message, flags=re.IGNORECASE)
+            if not match:
+                continue
+            payload = str(match.group(1) or "")
+            for key in ("file", "url", "path"):
+                key_match = re.search(rf"(?:^|,){re.escape(key)}=([^,\]]+)", payload, flags=re.IGNORECASE)
+                if key_match:
+                    value = str(key_match.group(1) or "").strip()
+                    if value:
+                        return value
         return None
 
     @staticmethod
@@ -598,6 +605,7 @@ class QQAdapter(AbstractPlatformAdapter):
         mapping: dict[MsgType, tuple[str, str]] = {
             MsgType.VOICE: ("qq_adapter", "voice_content"),
             MsgType.IMAGE: ("qq_adapter", "image_content"),
+            MsgType.EMOJI: ("qq_adapter", "image_content"),
             MsgType.VIDEO: ("qq_adapter", "video_content"),
             MsgType.FILE: ("qq_adapter", "file_content"),
         }
