@@ -346,6 +346,29 @@ def _format_human(report: LintReport) -> str:
     return "\n".join(lines)
 
 
+def _promote_warnings_to_errors(report: LintReport) -> LintReport:
+    """返回新的 LintReport，所有 severity=='warning' 的 finding 被升级为 'error'.
+
+    OPT-6 二期前置：供 CI 灰度开关使用。一期我们对"空 ``{}``"等判定放宽为
+    warning 避免误伤文档式字面量，二期把 `--strict` 打开后与 CI 一起收严。
+    """
+    promoted = LintReport()
+    for f in report.findings:
+        if f.severity != "error":
+            promoted.add(
+                LintFinding(
+                    rule=f.rule,
+                    path=f.path,
+                    location=f.location,
+                    message=f.message + "（--strict 模式下升为 error）",
+                    severity="error",
+                )
+            )
+        else:
+            promoted.add(f)
+    return promoted
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
@@ -354,6 +377,14 @@ def main(argv: list[str] | None = None) -> int:
         help="要 lint 的路径；省略则默认扫描 prompts/ 目录",
     )
     parser.add_argument("--json", action="store_true", help="输出 JSON 报告")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "严格模式：将所有 warning 升级为 error，退出码反映升级结果。"
+            "OPT-6 二期 CI Gate 将默认启用；本地开发请先不加以观察 warning。"
+        ),
+    )
     args = parser.parse_args(argv)
 
     roots: list[Path]
@@ -363,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
         roots = [DEFAULT_SCAN_ROOT]
 
     report = lint_paths(roots)
+    if args.strict:
+        report = _promote_warnings_to_errors(report)
 
     if args.json:
         print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2))

@@ -11,20 +11,20 @@
 
 ## 实施进度（Implementation Progress）
 
-最后更新：2026-04-20
+最后更新：2026-04-20（批次 3 完成）
 
 | 编号 | 标题 | 优先级 | 工作量 | 状态 | 完成时间 |
 |------|------|:------:|:------:|:----:|:--------:|
 | OPT-1 | `.gitignore` IDE 个人态防护（纵深防御） | S0 | 0d | ✅ 已生效 | 2026-04-20 |
 | OPT-2 | `pytest.ini` 规范化 + marker 分层 | S0 | 1d | ✅ 已完成 | 2026-04-20 |
 | OPT-3 | 统一 `SoftFailure` 降级 + 观测指标 | S1 | 3d | ✅ 已完成（基础设施 + 4 Batch 业务路径） | 2026-04-20 |
-| OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | ✅ 已完成（settings + 三层 `.env.*.example`） | 2026-04-20 |
+| OPT-4 | `.env` 分层 + `pydantic-settings` 收敛 | S1 | 5d | ✅ 已完成（settings + 三层 `.env.*.example` + obs_routes 首批 5 处散点迁移） | 2026-04-20 |
 | OPT-5 | 拆分 God Function `build_chat_prompt_runtime_payload` | S2 | 3d | ✅ 已完成 | 2026-04-20 |
-| OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | ✅ 已完成（一期三规则） | 2026-04-20 |
+| OPT-6 | Prompts YAML 分片 + 变量 lint | S2 | 3d | ✅ 已完成（一期三规则 + `--strict` 模式） | 2026-04-20 |
 | OPT-7 | `prompt_builder.py` / `chat_agent.py` 按阶段拆分 | S2 | 4d | ✅ 已完成（一期防膨胀契约） | 2026-04-20 |
-| OPT-8 | Edge `ChatChannel` Protocol 统一 | S3 | 5d | ✅ 已完成（Protocol 基建） | 2026-04-20 |
-| OPT-9 | `obs_routes_*` 二次规范化 + `ObsQueryBuilder` | S3 | 5d | ✅ 已完成（一期骨架 + session_summary 示例） | 2026-04-20 |
-| OPT-10 | `agent_runtime_shared.py` 垃圾桶清理 + 命名 lint | S3 | 3d | ✅ 已完成（lint 硬规则） | 2026-04-20 |
+| OPT-8 | Edge `ChatChannel` Protocol 统一 | S3 | 5d | ✅ 已完成（Protocol 基建 + WeChat 首个平台 Capabilities 灰度） | 2026-04-20 |
+| OPT-9 | `obs_routes_*` 二次规范化 + `ObsQueryBuilder` | S3 | 5d | ✅ 已完成（骨架 + 4 条 named queries + 规范 README） | 2026-04-20 |
+| OPT-10 | `agent_runtime_shared.py` 垃圾桶清理 + 命名 lint | S3 | 3d | ✅ 已完成（lint 硬规则 + 拆分蓝图 [BREAKDOWN.md](./AGENT_RUNTIME_SHARED_BREAKDOWN.md)） | 2026-04-20 |
 
 ### 已完成项汇总
 
@@ -163,6 +163,77 @@ OPT-4 `.env` 分层补齐。54 个 OPT 相关契约/单测全绿。
 - OPT-10 本体：按职责拆分 `agent_runtime_shared.py`（2745 行）并从 `SHARED_MODULE_LEGACY_EXEMPT` 豁免名单中移除
 - OPT-4 散点 `os.getenv` 替换：按模块分批推进（host_brain/app/config.py → edge_client → tribe → observability）
 - OPT-6 二期：模板占位符 vs 调用方 `.format_map(...)` 传参交叉校验（已占位 `NATSUME_PROMPT_LINT_STRICT_CROSSCHECK`）
+
+---
+
+### 批次 3 实施补丁（2026-04-20）
+
+本批次在批次 2 的基础上继续推进：OPT-9 二期 named queries 扩展、OPT-6
+`--strict` 模式落地、OPT-8 首个平台（WeChat）Capabilities 灰度、OPT-10
+拆分蓝图、OPT-4 散点迁移首批 5 处。97 个 OPT 相关契约/单测全绿。
+
+**OPT-9 二期 · 新增 3 条 high-frequency named queries**
+
+- 新增 [host_brain/observability/queries/governor_decisions.yaml](../../host_brain/observability/queries/governor_decisions.yaml)：按 `decision × reason_code` 聚合 `governor_log`
+- 新增 [host_brain/observability/queries/skill_execution_stats.yaml](../../host_brain/observability/queries/skill_execution_stats.yaml)：按 `skill_name × result_status × result_code` 聚合 `skill_exec_log`
+- 新增 [host_brain/observability/queries/error_summary.yaml](../../host_brain/observability/queries/error_summary.yaml)：按 `stage × reason_code` 聚合 `error_log`，与 OPT-3 `soft_fail_metrics` 对照分析
+- 三个 YAML 的 SQL 所用列名均从 [ledger_schema.py](../../host_brain/audit/ledger_schema.py) `CREATE TABLE` 定义确认，杜绝经验猜测
+- 新增 [host_brain/observability/queries/README.md](../../host_brain/observability/queries/README.md)：写作 schema、类型白名单、checklist、写作规范
+- 新增 [tests/unit/test_obs_named_queries_phase2.py](../../tests/unit/test_obs_named_queries_phase2.py) 4 个单测：每条 query 在内存 sqlite 上构造 fixture 表、验证聚合/排序/LIMIT/窗口过滤——**4/4 通过**
+
+**OPT-6 二期前置 · `--strict` 模式与契约测试**
+
+- 扩展 [scripts/lint_prompts.py](../../scripts/lint_prompts.py)：新增 `--strict` 命令行标志 + `_promote_warnings_to_errors(report)` 辅助函数。CI 灰度接入路径：
+  * 默认模式：空 `{}` 等保持 warning（尊重中文描述里的 `({})` 字面量）
+  * `--strict` 模式：全部 warning 升为 error，消息追加 `（--strict 模式下升为 error）` 便于定位
+- [tests/contract/test_prompt_lint_contract.py](../../tests/contract/test_prompt_lint_contract.py) 扩展 3 条契约（T-OPT6-05/06/07）：
+  * 默认模式下空 `{}` 仅产生 warning、不阻塞 CI
+  * `--strict` 模式把 warning 升为 error、消息含 `--strict` 标志
+  * `--strict` 不丢失已有 error（保持严重级）
+- 7/7 契约测试通过
+
+**OPT-8 · 首个平台（WeChat）灰度接入**
+
+- 新增 [edge_client/channels/wechat_channel_capabilities.py](../../edge_client/channels/wechat_channel_capabilities.py)：
+  * `WECHAT_CHANNEL_CAPABILITIES`：基于官方规范的能力矩阵（支持 voice/image、不支持 markdown/file、`max_text_length=2048`、`max_voice_seconds=60`）
+  * `adapt_outbound_for_wechat(response)`：直接调用 `adapt_response_to_capabilities` 的便捷入口
+- 设计原则：**不修改** 32 KB 的 `wechat_adapter.py`；仅产出能力声明 + 适配器助手，供 adapter 下一步迁移到 `ChatChannel` Protocol 时调用
+- 新增 [tests/unit/test_wechat_channel_capabilities.py](../../tests/unit/test_wechat_channel_capabilities.py) 7 个单测：能力矩阵、短文本无降级、2048 切分、markdown 剥离、voice 受支持时保留、切分时每片去 voice、frozen 防篡改——**7/7 通过**
+
+**OPT-10 · `agent_runtime_shared.py` 拆分蓝图**
+
+- 新增 [docs/35_quality/AGENT_RUNTIME_SHARED_BREAKDOWN.md](./AGENT_RUNTIME_SHARED_BREAKDOWN.md)：
+  * 审计输出 34 个顶层符号，按 8 类职责分组
+  * 拆分蓝图：5 个新模块（`runtime_trace_audit` / `runtime_fast_paths` / `runtime_retrieval_helpers` / `runtime_llm_output_parse` / `runtime_sse_orchestrator`）各 ≤ 500 行
+  * 执行计划：OPT-10-A/B/C 三个 PR，每个都跑全量契约 + re-export 保 import 兼容
+  * 风险与缓解、完成定义 DoD、审计流水命令
+- 蓝图未改源码，供下一个批次的 OPT-10-A/B/C 执行 PR 复核
+
+**OPT-4 散点迁移首批 · `obs_routes_*` 共 5 处 `os.getenv`**
+
+- 在 [host_brain/app/settings/observability.py](../../host_brain/app/settings/observability.py) 追加 5 个字段：
+  * `obs_sessions_cache_ttl_ms` / `obs_insights_summary_warm_enabled` / `obs_digital_life_overview_warm_enabled` / `obs_runtime_snapshot_warm_enabled` / `obs_trace_feed_warm_enabled`
+- 同步扩展 `readiness_fields()` 报告，`/health/env-readiness` 会自动包含新字段
+- 替换 5 个 obs_routes 文件中的 `os.getenv` 为 `get_observability_settings()`：
+  * [obs_routes_sessions.py](../../host_brain/app/obs_routes_sessions.py) `_SESSIONS_CACHE_TTL_MS`
+  * [obs_routes_summary.py](../../host_brain/app/obs_routes_summary.py) `_INSIGHTS_SUMMARY_WARM_ENABLED` / `_DIGITAL_LIFE_OVERVIEW_WARM_ENABLED`
+  * [obs_routes_sysmode.py](../../host_brain/app/obs_routes_sysmode.py) `_RUNTIME_SNAPSHOT_WARM_ENABLED`
+  * [obs_routes_trace.py](../../host_brain/app/obs_routes_trace.py) `_TRACE_FEED_WARM_ENABLED`
+- 新增 [tests/unit/test_settings_observability_opt4_batch1.py](../../tests/unit/test_settings_observability_opt4_batch1.py) 5 测试 + 15 subTest：默认值一致性、readiness 报告包含、env 覆盖传导至 obs_routes 模块常量、布尔字面量解析（`false`/`0`/`off`/`no`/`False`）、默认 True——**5/5 + 15 subtests 通过**
+
+**批次 3 回归数据**
+
+- `scripts/verify_optimization_20260420.sh` 全量 7 项检查点 + **22** 冒烟用例全绿
+- 扩展回归：`test_prompt_lint_contract` + `test_chat_agent_size_contract` + `test_ci_gate_contract` + `test_chat_channel_protocol` + `test_wechat_channel_capabilities` + `test_obs_named_queries_phase2` + `test_settings_observability_opt4_batch1` = **43/43 + 15 subtests passed in 1.35s**
+- 5 处 obs_routes os.getenv 替换后 import 验证：`_SESSIONS_CACHE_TTL_MS=3000`、4 个 `*_WARM_ENABLED=True`，与默认值一致
+
+**批次 3 剩余事项（进入后续批次处理）**
+
+- OPT-7 深度拆分：`chat_agent.py` 进一步降到 ≤400 行（对应硬上限同步下调到 400）
+- OPT-9 深度迁移：逐个把 `obs_routes_core.py` / `obs_routes_sessions.py` 中的 SELECT 迁入 queries/，route 层瘦身
+- OPT-10 执行：按 `AGENT_RUNTIME_SHARED_BREAKDOWN.md` 蓝图依次推进 OPT-10-A/B/C 三个 PR
+- OPT-6 二期 · 交叉校验：扫描 `.format_map(...)` / `.format(...)` 调用点变量 vs 模板占位符交叉 diff
+- OPT-4 散点迁移第二批：`capability_forge.py` 5 处、`executive_runtime_core.py` 2 处、`skill_dag_planner.py` 1 处、`web_ui.py` 1 处、`glymphatic_agent.py` 1 处
 
 ---
 

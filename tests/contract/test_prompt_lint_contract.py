@@ -129,6 +129,90 @@ class TestPromptLintContract(unittest.TestCase):
         )
 
     # -----------------------------------------------------------------
+    # T-OPT6-05（OPT-6 二期前置）：空 `{}` 在默认模式下为 warning
+    # -----------------------------------------------------------------
+    def test_t_opt6_05_empty_placeholder_is_warning_by_default(self) -> None:
+        tmp_dir = self._make_tmp_dir("empty_ph_default")
+        (tmp_dir / "empty.yaml").write_text(
+            (
+                "templates:\n"
+                "- template_id: opt6_empty_placeholder_default\n"
+                "  default_content:\n"
+                "    text: '若无则返回 ({}) 空对象'\n"
+            ),
+            encoding="utf-8",
+        )
+        report = self.lint.lint_paths([tmp_dir])
+        # 默认模式：空 `{}` 只是 warning，不应阻塞 CI
+        self.assertTrue(
+            report.ok,
+            msg="空 `{}` 在默认模式下应该只生成 warning，不阻塞 CI",
+        )
+        warnings = [f for f in report.findings if f.severity == "warning"]
+        self.assertTrue(
+            any(f.rule == "R2" for f in warnings),
+            msg="空 `{}` 应生成 R2 warning，供作者核对",
+        )
+
+    # -----------------------------------------------------------------
+    # T-OPT6-06（OPT-6 二期前置）：--strict 模式下 warning 升级为 error
+    # -----------------------------------------------------------------
+    def test_t_opt6_06_strict_mode_promotes_warning_to_error(self) -> None:
+        tmp_dir = self._make_tmp_dir("empty_ph_strict")
+        (tmp_dir / "empty.yaml").write_text(
+            (
+                "templates:\n"
+                "- template_id: opt6_empty_placeholder_strict\n"
+                "  default_content:\n"
+                "    text: '结构 ({}) 为空'\n"
+            ),
+            encoding="utf-8",
+        )
+        report = self.lint.lint_paths([tmp_dir])
+        # 默认模式：仅 warning、report.ok=True
+        self.assertTrue(report.ok)
+        strict_report = self.lint._promote_warnings_to_errors(report)
+        # strict 模式：原 warning 应被升级为 error，整体不再 ok
+        self.assertFalse(
+            strict_report.ok,
+            msg="--strict 模式必须把空 `{}` 升级为 error，用作 CI 二期 Gate",
+        )
+        self.assertTrue(
+            all(f.severity == "error" for f in strict_report.findings),
+            msg="--strict 模式下所有 findings 应均为 error",
+        )
+        # 消息里应带有 --strict 提示，便于定位
+        promoted = [f for f in strict_report.findings if f.rule == "R2"]
+        self.assertTrue(promoted, "空 `{}` 应有 R2 findings")
+        self.assertTrue(
+            any("--strict" in f.message for f in promoted),
+            msg="升级后的 error message 应注明来自 --strict 模式",
+        )
+
+    # -----------------------------------------------------------------
+    # T-OPT6-07（OPT-6 二期前置）：--strict 不改变已有 error 严重级
+    # -----------------------------------------------------------------
+    def test_t_opt6_07_strict_mode_preserves_existing_errors(self) -> None:
+        tmp_dir = self._make_tmp_dir("strict_with_err")
+        (tmp_dir / "bad.yaml").write_text(
+            (
+                "templates:\n"
+                "- template_id: opt6_strict_preserve\n"
+                "  default_content:\n"
+                "    text: '未闭合 {user_name'\n"
+            ),
+            encoding="utf-8",
+        )
+        report = self.lint.lint_paths([tmp_dir])
+        self.assertFalse(report.ok)  # 已含 error
+        strict_report = self.lint._promote_warnings_to_errors(report)
+        # error 数量不减
+        original_errors = [f for f in report.findings if f.severity == "error"]
+        strict_errors = [f for f in strict_report.findings if f.severity == "error"]
+        self.assertGreaterEqual(len(strict_errors), len(original_errors))
+        self.assertFalse(strict_report.ok)
+
+    # -----------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------
     def _make_tmp_dir(self, tag: str) -> Path:

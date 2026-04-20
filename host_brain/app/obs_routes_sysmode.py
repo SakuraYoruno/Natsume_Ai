@@ -35,9 +35,12 @@ import threading  # noqa: E402 — sys-mode 区域需要 threading.Lock
 _mode_transition_service = None
 _mode_transition_lock = threading.Lock()
 _RUNTIME_SNAPSHOT_CACHE_TTL_MS = _env_int("OBS_RUNTIME_SNAPSHOT_CACHE_TTL_MS", 2500, minimum=0)
-_RUNTIME_SNAPSHOT_WARM_ENABLED = str(
-    os.getenv("HOST_OBS_RUNTIME_SNAPSHOT_WARM_ENABLED", "true")
-).strip().lower() not in {"0", "false", "no", "off"}
+_RUNTIME_SNAPSHOT_WARM_ENABLED = bool(
+    # OPT-4 首批迁移：从 settings.observability 读取
+    __import__("host_brain.app.settings.observability", fromlist=["get_observability_settings"])
+    .get_observability_settings()
+    .obs_runtime_snapshot_warm_enabled
+)
 _RUNTIME_SNAPSHOT_WARM_INTERVAL_MS = _env_int(
     "HOST_OBS_RUNTIME_SNAPSHOT_WARM_INTERVAL_MS",
     4000,
