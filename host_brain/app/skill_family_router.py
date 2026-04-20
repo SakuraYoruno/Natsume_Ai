@@ -17,6 +17,7 @@ _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
     "system_info": "system",
     "process_list": "system",
     "network_status": "system",
+    "open_app": "system",
     "memory_store": "memory",
     "memory_recall": "memory",
     "session_summary": "memory",

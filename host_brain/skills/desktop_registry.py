@@ -13,8 +13,6 @@ from host_brain.skills.registry import SkillRegistry
 
 _MOUSE_BUTTONS = frozenset({"left", "right", "middle"})
 _MOUSE_ACTIONS = frozenset({"click", "double_click", "right_click", "move", "scroll"})
-
-
 def _normalize_desktop_screenshot(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
     save_path = str((args or {}).get("save_path") or "").strip() or None
     region = (args or {}).get("region")

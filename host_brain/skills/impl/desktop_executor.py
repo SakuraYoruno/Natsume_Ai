@@ -88,8 +88,6 @@ def _get_desktop_controller(context: dict[str, Any] | None) -> Any:
         except ImportError as exc:
             _logger.debug("DesktopController 导入失败: %s", exc)
     return controller
-
-
 def _execute_screenshot(payload: dict[str, Any], context: dict[str, Any] | None) -> dict[str, Any]:
     """截取桌面截图，直接调用 DesktopController.capture_screenshot。"""
     save_path = payload.get("save_path")

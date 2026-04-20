@@ -639,6 +639,9 @@ templates:
     quick_ack_warm:
       zh: 嗯，我看到了，马上接你。
       ja: ええ、見えています。すぐ返します。
+    quick_ack_open_app:
+      zh: 好，我替你打开。
+      ja: はい、開いてみます。
     quick_ack_stranger:
       zh: 好，稍等一下，我先看一眼。
       ja: はい、少しだけ。まず見ます。
@@ -675,6 +678,25 @@ templates:
     quick_realign_fallback:
       zh: 我发现刚才方向有点偏，我先重新对齐一下你的意思再继续。
       ja: いま少し方向がずれたので、いったん合わせ直して続けます。
+- template_id: chat_agent.system_skill.reply_templates
+  category: render
+  scope: chat_agent
+  locale: '*'
+  content_type: json
+  description: system skill 确定性收口模板（JSON）
+  default_content:
+    default_app_name:
+      zh: 这个应用
+      ja: そのアプリ
+    open_app_success:
+      zh: 好，已经替你打开{name}了。
+      ja: はい、{name} はもう開いてあります。
+    open_app_failure:
+      zh: 我试了一下，不过这边没把{name}打开。
+      ja: 試してみましたが、こちらでは {name} を開けませんでした。
+    open_app_failure_reason:
+      zh: 卡住的是：{message}。
+      ja: 引っかかったのは {message} です。
 - template_id: chat_agent.compact_persona_templates
   category: prompt
   scope: chat_agent
@@ -699,6 +721,9 @@ templates:
       relation_line:
         zh: 当前关系阶段：{bond_stage}。当前情绪：{emotion_tag}。
         ja: 関係段階：{bond_stage}。感情タグ：{emotion_tag}。
+      time_context_line:
+        zh: 当前本地时间：{current_local_time}（{time_of_day_label}）。先以这个实际时间为准，不要把早晚说反。
+        ja: 現在の現地時刻：{current_local_time}（{time_of_day_label}）。返答ではまずこの実時間を基準にし、朝晩を取り違えないこと。
       brevity_line:
         zh: 这是短聊快路径：先把眼前这句接住，通常只说 1 到 3 句；不要把一句轻话说成小作文，也别说得太滑。
         ja: これは短い雑談の高速経路。今の一言をまず受け止め、通常は一〜三文で収めること。軽い話題を大げさに広げず、口当たりだけにしない。
@@ -709,6 +734,9 @@ templates:
       relation_line:
         zh: 当前关系阶段：{bond_stage}。当前情绪：{emotion_tag}。
         ja: 関係段階：{bond_stage}。感情タグ：{emotion_tag}。
+      time_context_line:
+        zh: 当前本地时间：{current_local_time}（{time_of_day_label}）。先以这个实际时间为准，不要把早晚说反。
+        ja: 現在の現地時刻：{current_local_time}（{time_of_day_label}）。返答ではまずこの実時間を基準にし、朝晩を取り違えないこと。
       brevity_line:
         zh: 这是日常聊天的中速快路径：先把用户此刻这句话接住，再自然陪着往下说；通常 1 到 3 句，只有对方明确想展开时才多说，不抢着替人下结论。
         ja: これは日常会話向けの中速ファストパス。今の一言をまず受け止め、そのうえで自然に寄り添うこと。通常は一〜三文で、相手が明確に望む時だけ少し広げ、勝手に結論づけない。
@@ -911,6 +939,13 @@ templates:
 
         '
       ja: '【話し方の条件（必ず守ること）】
+
+        '
+    current_time_title:
+      zh: '【当前本地时间】
+
+        '
+      ja: '【現在の現地時刻】
 
         '
     user_message_title:
@@ -1693,6 +1728,29 @@ templates:
         NOSTALGIC: 今日は昔のことを思い出しやすく、言い方に少しだけ余韻が残ります。
         PLAYFUL: 今日は少しだけ戯れたくなりますが、軽薄にはしません。
       title_fallback: 【今日の状態補い】
+- template_id: prompt_builder.current_time_context.templates
+  category: prompt
+  scope: prompt_builder
+  locale: '*'
+  content_type: json
+  description: 当前本地时间上下文模板（JSON，供快路与完整聊天统一注入）
+  default_content:
+    zh:
+      compact_line: 当前本地时间：{current_local_time}（{time_of_day_label}）。先以这个实际时间为准，不要把早晚说反。
+      full_line: '{current_local_time}（{time_of_day_label}）。回答时先以这个实际时间为准，不要顺着用户把早晚说反。'
+      daypart:
+        morning: 早晨
+        daytime: 白天
+        evening: 晚上
+        late_night: 深夜
+    ja:
+      compact_line: 現在の現地時刻：{current_local_time}（{time_of_day_label}）。返答ではまずこの実時間を基準にし、朝晩を取り違えないこと。
+      full_line: '{current_local_time}（{time_of_day_label}）。返答ではまずこの実時間を基準にし、相手の言い方に引きずられて朝晩を取り違えないこと。'
+      daypart:
+        morning: 朝
+        daytime: 昼
+        evening: 夜
+        late_night: 深夜
 - template_id: prompt_builder.direct_response.affection_rules
   category: prompt
   scope: prompt_builder

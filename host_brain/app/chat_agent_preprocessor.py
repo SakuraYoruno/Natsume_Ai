@@ -28,6 +28,11 @@ _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈
 _FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|惦记你)")
 _FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
+_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
+_OPEN_APP_HINT_RE = re.compile(
+    r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
+    re.IGNORECASE,
+)
 _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
 _ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
 _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
@@ -322,6 +327,17 @@ def _runtime_text(key: str, *, render_target_lang: str | None = None, **kwargs: 
 # ---------------------------------------------------------------------------
 # 快速 ACK / 进度 / 纠偏文本渲染
 # ---------------------------------------------------------------------------
+def _looks_like_open_app_request(user_message: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(user_message or "")).strip()
+    if not normalized:
+        return False
+    if _OPEN_APP_VERB_RE.search(normalized) and _OPEN_APP_HINT_RE.search(normalized):
+        return True
+    if normalized.startswith(("打开", "启动", "运行")) and not re.search(r"(网页|链接|网址|页面|文件|图片|文档)", normalized):
+        return True
+    return False
+
+
 def _format_elapsed_compact(elapsed_ms: int) -> str:
     total_seconds = max(0, int(elapsed_ms // 1000))
     if total_seconds < 60:
@@ -338,7 +354,9 @@ def render_quick_gateway_ack_text(*, user_message: str = "", bond_stage: str = "
     stage = str(bond_stage or "STRANGER").strip().upper() or "STRANGER"
     etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     clean_sender = str(sender_name or "").strip()
-    if etag in _ACK_LOW_ENERGY_TAGS:
+    if _looks_like_open_app_request(user_message):
+        text = _mapping_text(templates, "quick_ack_open_app", sender_name=clean_sender)
+    elif etag in _ACK_LOW_ENERGY_TAGS:
         text = _mapping_text(templates, "quick_ack_low_energy", sender_name=clean_sender)
     elif stage in _ACK_CLOSE_STAGES:
         text = _mapping_text(templates, "quick_ack_close", sender_name=clean_sender)
@@ -969,6 +987,65 @@ def _build_hub_skill_reply_cn(ctx: SubAgentContext, *, render_target_lang: str =
     return None
 
 
+def _infer_open_app_name(task_text: str, *, render_target_lang: str) -> str:
+    normalized = str(task_text or "").strip()
+    if not normalized:
+        return _mapping_text(
+            _load_template_mapping("chat_agent.system_skill.reply_templates"),
+            "default_app_name",
+            render_target_lang=render_target_lang,
+        )
+    normalized = re.sub(r"^(?:蓝蓝|夏目蓝|夏目藍|natsume ai|natsume)[，,\s:：]*", "", normalized, flags=re.IGNORECASE).strip()
+    normalized = re.sub(r"(可以|可不可以|能不能|能否|帮我|替我|把|一下|一下子|本地的|本地|应用程序|应用|软件|程序)", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"(打开|启动|运行|launch|open)", "", normalized, flags=re.IGNORECASE)
+    normalized = normalized.strip("，。；！？,.!? ：:　 ")
+    return normalized or _mapping_text(
+        _load_template_mapping("chat_agent.system_skill.reply_templates"),
+        "default_app_name",
+        render_target_lang=render_target_lang,
+    )
+
+
+def _build_system_skill_reply(ctx: SubAgentContext, *, render_target_lang: str = "zh") -> str | None:
+    agent_id = str(ctx.agent_id or "").strip()
+    if agent_id != "open_app":
+        return None
+    templates = _load_template_mapping("chat_agent.system_skill.reply_templates")
+    payload = dict(ctx.payload or {})
+    result = dict(payload.get("result") or {})
+    detail_source = result.get("detail") or payload.get("detail") or result
+    detail = dict(detail_source or {}) if isinstance(detail_source, Mapping) else {}
+    success = bool(detail.get("success", ctx.success))
+    app_name = str(
+        detail.get("app_name")
+        or payload.get("app_name")
+        or _infer_open_app_name(ctx.task, render_target_lang=render_target_lang)
+    ).strip() or _mapping_text(templates, "default_app_name", render_target_lang=render_target_lang)
+    message = str(
+        detail.get("detail")
+        or detail.get("message")
+        or result.get("error")
+        or ctx.error
+        or ctx.result_text
+        or ""
+    ).strip()
+    if success:
+        return _mapping_text(templates, "open_app_success", render_target_lang=render_target_lang, name=app_name)
+    reply = _mapping_text(templates, "open_app_failure", render_target_lang=render_target_lang, name=app_name)
+    generic_failure_messages = {
+        "抱歉，我这边没能把这个应用打开。",
+        "I couldn't open the app.",
+    }
+    if message and message not in generic_failure_messages:
+        reply += _mapping_text(
+            templates,
+            "open_app_failure_reason",
+            render_target_lang=render_target_lang,
+            message=str(message).rstrip("。.!！?？"),
+        )
+    return reply
+
+
 def _looks_like_internal_sub_agent_result(text: str) -> bool:
     normalized = str(text or "").strip()
     if not normalized:
@@ -988,6 +1065,8 @@ def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | Non
     if not bool(ctx.success) or str(ctx.error or "").strip():
         return None
     agent_id = str(ctx.agent_id or "").strip()
+    if agent_id == "open_app":
+        return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id.startswith("skill:hub_skill_"):
@@ -1005,6 +1084,8 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
         return None
     agent_id = str(ctx.agent_id or "").strip()
     result_text = str(ctx.result_text or "").strip()
+    if agent_id == "open_app":
+        return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id.startswith("skill:hub_skill_"):

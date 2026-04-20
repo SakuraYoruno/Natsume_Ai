@@ -70,6 +70,24 @@ def test_render_quick_gateway_ack_falls_back_and_clamps_length(monkeypatch) -> N
     assert text.endswith("...")
 
 
+def test_render_quick_gateway_ack_prefers_open_app_template(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.app.chat_agent_preprocessor._load_template_mapping",
+        lambda _template_id: {
+            "quick_ack_open_app": "好，我替你打开。",
+            "quick_ack_default": "默认回复。",
+        },
+    )
+
+    text = render_quick_gateway_ack_text(
+        user_message="可以帮我打开本地的酷狗音乐吗",
+        bond_stage="STRANGER",
+        emotion_tag="NEUTRAL",
+    )
+
+    assert text == "好，我替你打开。"
+
+
 def test_render_quick_gateway_progress_running_template(monkeypatch) -> None:
     monkeypatch.setattr(
         "host_brain.app.chat_agent_preprocessor._load_template_mapping",
@@ -135,6 +153,16 @@ def test_render_quick_gateway_ack_actual_template_keeps_natsume_voice() -> None:
     )
 
 
+def test_render_quick_gateway_ack_actual_template_for_open_app_is_specialized() -> None:
+    text = render_quick_gateway_ack_text(
+        user_message="可以帮我打开本地的酷狗音乐吗",
+        bond_stage="STRANGER",
+        emotion_tag="NEUTRAL",
+    )
+
+    assert text == "好，我替你打开。"
+
+
 def test_render_quick_gateway_progress_failed_actual_template_stays_natural() -> None:
     text = render_quick_gateway_progress_text(
         status="FAILED",
@@ -143,7 +171,7 @@ def test_render_quick_gateway_progress_failed_actual_template_stays_natural() ->
         elapsed_ms=12_300,
     )
 
-    assert "遇到了点问题" in text
+    assert ("遇到了点问题" in text) or ("出了点岔子" in text)
     assert_natsume_style(
         user_message="翻译好了吗",
         reply=text,

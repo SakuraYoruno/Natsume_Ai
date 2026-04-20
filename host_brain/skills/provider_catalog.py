@@ -40,7 +40,7 @@ BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
     SkillProviderSpec("HOST_SKILL_MEMORY_ENABLED", "host_brain.skills.memory_registry:MemorySkillProvider", "Memory Skills", "memory_search / memory_store / memory_forget"),
     SkillProviderSpec("HOST_SKILL_EMOTION_ENABLED", "host_brain.skills.emotion_registry:EmotionSkillProvider", "Emotion Skills", "emotion_update / bond_score_update / emotion_get / bond_score_get"),
     SkillProviderSpec("HOST_SKILL_SCHEDULER_ENABLED", "host_brain.skills.scheduler_registry:SchedulerSkillProvider", "Scheduler Skills", "scheduler_add / scheduler_cancel / scheduler_list"),
-    SkillProviderSpec("HOST_SKILL_SYSTEM_ENABLED", "host_brain.skills.system_registry:SystemSkillProvider", "System Skills", "system_info / process_list / process_kill / network_status"),
+    SkillProviderSpec("HOST_SKILL_SYSTEM_ENABLED", "host_brain.skills.system_registry:SystemSkillProvider", "System Skills", "system_info / process_list / process_kill / network_status / open_app"),
     SkillProviderSpec("HOST_SKILL_WEB_ENABLED", "host_brain.skills.web_registry:WebSkillProvider", "Web Skills", "web_search / http_request"),
     SkillProviderSpec("HOST_SKILL_HUB_ENABLED", "host_brain.skills.hub_skill_registry:HubSkillProvider", "Hub Skills", "hub_skill_install / hub_skill_search / hub_skill_list / hub_skill_remove"),
 )

@@ -174,6 +174,11 @@ _TASK_INTENT_PLANNING_RE = re.compile(
     r"|next steps?|what should i do (?:first|next)|three[- ]step (?:advice|plan)|action plan|plan this out)",
     re.IGNORECASE,
 )
+_TASK_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
+_TASK_OPEN_APP_HINT_RE = re.compile(
+    r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
+    re.IGNORECASE,
+)
 _PHATIC_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
 _PHATIC_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _PHATIC_ACK_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
@@ -394,6 +399,13 @@ def _looks_like_lightweight_codex_request(text: str) -> bool:
     return any(marker in normalized for marker in lightweight_markers)
 
 
+def _looks_like_open_app_request(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    return bool(_TASK_OPEN_APP_VERB_RE.search(normalized) and _TASK_OPEN_APP_HINT_RE.search(normalized))
+
+
 def _has_explicit_route_seed(payload: Mapping[str, Any] | None) -> bool:
     data = dict(payload or {})
     route = _normalize_text(data.get("route"), lower=True)
@@ -493,6 +505,21 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     cleaned = _strip_step_lead_in(text)
     if not cleaned:
         return None
+
+    if _looks_like_open_app_request(cleaned):
+        return {
+            "route": "skill",
+            "target_id": "open_app",
+            "task": cleaned,
+            "reason_code": "THALAMUS_RULE_OPEN_APP",
+            "confidence": 0.97,
+            "route_source": "thalamus.rule",
+            "args": {
+                "query": cleaned,
+                "text": cleaned,
+                "user_message": cleaned,
+            },
+        }
 
     if _looks_like_companion_open_chat(cleaned):
         return {

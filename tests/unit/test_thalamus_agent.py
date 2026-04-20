@@ -187,6 +187,44 @@ def test_classify_and_compile_intent_draft_routes_hub_skill_search_with_query() 
     assert compiled["route_reason"] == "THALAMUS_RULE_HUB_SKILL_SEARCH"
 
 
+def test_classify_and_compile_intent_draft_routes_open_app_from_imperative_phrase() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-open-app-short",
+            session_id="session-thalamus-open-app-short",
+            user_message="打开酷狗音乐",
+            source="chat_handler",
+            ts_ms=1776349003105,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "open_app"
+    assert compiled["route_reason"] == "THALAMUS_RULE_OPEN_APP"
+    assert compiled["args"]["query"] == "打开酷狗音乐"
+
+
+def test_classify_and_compile_intent_draft_routes_open_app_from_polite_phrase() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-open-app-polite",
+            session_id="session-thalamus-open-app-polite",
+            user_message="可以帮我打开本地的酷狗音乐吗",
+            source="chat_handler",
+            ts_ms=1776349003106,
+        )
+    )
+
+    assert compiled["route"] == "skill"
+    assert compiled["target_id"] == "open_app"
+    assert compiled["route_reason"] == "THALAMUS_RULE_OPEN_APP"
+    assert compiled["args"]["query"] == "可以帮我打开本地的酷狗音乐吗"
+
+
 def test_classify_and_compile_intent_draft_prefers_context_fast_for_companion_open_chat() -> None:
     agent = ThalamusAgent()
 
@@ -535,5 +573,6 @@ def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm(
         )
 
     assert compiled["route"] == "chat"
-    assert compiled["route_reason"] == "DEFAULT_CHAT"
-    assert compiled["route_source"] == "default"
+    assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
+    assert compiled["chat_speed_profile"] == "context_fast"
+    assert compiled["route_source"] == "thalamus.rule"

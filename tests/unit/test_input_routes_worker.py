@@ -1010,6 +1010,17 @@ def test_should_skip_gateway_immediate_ack_for_progress_query() -> None:
     assert reason == "ACK_PROGRESS_QUERY"
 
 
+def test_should_skip_gateway_immediate_ack_for_direct_open_app() -> None:
+    should_send, reason = _should_send_gateway_immediate_ack(
+        source="GATEWAY",
+        text="打开酷狗音乐",
+        payload={"msg_type": "text"},
+    )
+
+    assert should_send is False
+    assert reason == "ACK_DIRECT_OPEN_APP"
+
+
 def test_should_send_gateway_route_started_voice_ack_for_translate_delegate() -> None:
     should_send, reason = _should_send_gateway_route_started_voice_ack(
         source="GATEWAY",

@@ -11,9 +11,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any
 
@@ -70,6 +72,9 @@ _ASR_PLACEHOLDER_PATTERN = re.compile(r"^\[[A-Z0-9_:\-]{3,}\]$")
 _ASR_SPEECH_CHAR_PATTERN = re.compile(r"[A-Za-z0-9\u4e00-\u9fff]")
 _VOICE_JA_CHAR_PATTERN = re.compile(r"[\u3040-\u30ff]")
 _VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
+_GATEWAY_DIRECT_OPEN_APP_RE = re.compile(r"(打开|启动|运行).*(酷狗|kugou|qq音乐|网易云|spotify|应用|软件|程序|播放器)", re.IGNORECASE)
+_GATEWAY_DEDUPE_CACHE: dict[str, float] = {}
+_GATEWAY_DEDUPE_LOCK = threading.Lock()
 
 
 class InputPayload(BaseModel):
@@ -144,6 +149,55 @@ def _parse_int_env(name: str, *, default: int) -> int:
         return int(raw)
     except (TypeError, ValueError):
         return int(default)
+
+
+def _gateway_dedupe_ttl_s() -> float:
+    return max(30.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=180.0))
+
+
+def _build_gateway_dedupe_key(*, payload: InputPayload, text: str) -> str:
+    platform = str(payload.platform or "").strip().lower()
+    conversation_id = str(payload.conversation_id or "").strip()
+    msg_id = str(payload.msg_id or "").strip()
+    if platform and conversation_id and msg_id:
+        return f"{platform}|{conversation_id}|msg:{msg_id}"
+    digest_source = "|".join(
+        [
+            platform,
+            conversation_id,
+            str(payload.from_id or "").strip(),
+            str(payload.to_id or "").strip(),
+            str(payload.msg_type or "").strip().lower(),
+            str(payload.reply_to_msg_id or "").strip(),
+            str(text or "").strip(),
+        ]
+    )
+    digest = hashlib.sha1(digest_source.encode("utf-8")).hexdigest()
+    return f"{platform}|{conversation_id}|hash:{digest}"
+
+
+def _mark_gateway_dedupe(key: str) -> float:
+    now = time.time()
+    expires_at = now + _gateway_dedupe_ttl_s()
+    with _GATEWAY_DEDUPE_LOCK:
+        expired = [cache_key for cache_key, expiry in _GATEWAY_DEDUPE_CACHE.items() if expiry <= now]
+        for cache_key in expired:
+            _GATEWAY_DEDUPE_CACHE.pop(cache_key, None)
+        existing_expiry = _GATEWAY_DEDUPE_CACHE.get(key)
+        if existing_expiry and existing_expiry > now:
+            return float(existing_expiry)
+        _GATEWAY_DEDUPE_CACHE[key] = expires_at
+    return 0.0
+
+
+def _release_gateway_dedupe(key: str, *, expected_expiry: float | None = None) -> None:
+    with _GATEWAY_DEDUPE_LOCK:
+        current = _GATEWAY_DEDUPE_CACHE.get(key)
+        if current is None:
+            return
+        if expected_expiry is not None and float(current) != float(expected_expiry):
+            return
+        _GATEWAY_DEDUPE_CACHE.pop(key, None)
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -254,6 +308,9 @@ def _should_send_gateway_immediate_ack(
     payload: dict[str, Any],
 ) -> tuple[bool, str]:
     """包装 service 层函数，传入本文件的判断函数。"""
+    normalized = str(text or payload.get("content") or "").strip()
+    if _GATEWAY_DIRECT_OPEN_APP_RE.search(normalized):
+        return False, "ACK_DIRECT_OPEN_APP"
     return _should_send_gateway_immediate_ack_impl(
         source=source,
         text=text,
@@ -636,6 +693,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
     source = str(body.source or "").upper().strip()
+    gateway_dedupe_key: str | None = None
+    gateway_dedupe_expiry: float | None = None
 
     _logger.info("input_routes: received edge input source=%s request_id=%s", source, request_id)
 
@@ -692,6 +751,40 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         )
 
     payload = body.model_dump(exclude_none=True)
+    if source == "GATEWAY":
+        gateway_dedupe_key = _build_gateway_dedupe_key(payload=body, text=text)
+        gateway_dedupe_expiry = _mark_gateway_dedupe(gateway_dedupe_key)
+        if gateway_dedupe_expiry:
+            payload["gateway_dedupe"] = {
+                "decision": "DUPLICATE_IGNORED",
+                "key": gateway_dedupe_key,
+                "expires_at_ms": int(gateway_dedupe_expiry * 1000),
+            }
+            _log_input_event(
+                ledger=_get_ledger_safe(),
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=payload,
+                phase="DUPLICATE_IGNORED",
+                status="IGNORED",
+                reason_code="GATEWAY_DUPLICATE_INPUT",
+                detail="duplicate gateway input ignored",
+                ts_ms=ts_ms,
+            )
+            _logger.info(
+                "input_routes: duplicate gateway input ignored request_id=%s key=%s",
+                request_id,
+                gateway_dedupe_key,
+            )
+            return InputResponse(
+                success=True,
+                request_id=request_id,
+                source=source,
+                status="IGNORED",
+                detail="duplicate gateway input ignored",
+                ts_ms=ts_ms,
+            )
     if source == "ASR":
         allow_asr, reject_reason = _evaluate_asr_noise_gate(text=text, payload=payload)
         if not allow_asr:
@@ -809,6 +902,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
             ts_ms=ts_ms,
         )
     except Exception as exc:
+        if gateway_dedupe_key:
+            _release_gateway_dedupe(gateway_dedupe_key, expected_expiry=gateway_dedupe_expiry)
         _logger.error("input_routes: dispatch failed source=%s request_id=%s: %s", source, request_id, exc)
         return InputResponse(
             success=False,
@@ -1523,8 +1618,10 @@ async def _deliver_gateway_reply(
     emotion_tag: str = "NEUTRAL",
     bond_stage: str = "STRANGER",
     user_msg_type: str = "text",
-    # Phase XV P6：双轨语言，Gateway 文字永远中文（narrative 已是中文）
-    # tts_text_ja 为日语 TTS 文本（双语输出时使用，当前为占位）
+    # Gateway 双轨语言约定：
+    # - 文字回复：中文
+    # - 语音回复：日语（当前 TTS 模型是日语训练）
+    # tts_text_ja 为日语 TTS 文本（若存在则优先使用）
     tts_text_ja: str | None = None,
 ) -> dict[str, Any]:
     platform = str(payload.get("platform") or "").strip().lower()
@@ -1815,7 +1912,7 @@ async def _send_gateway_voice_reply(
         result = await post_speak(
             text=_tts_text_normalized,
             request_id=request_id,
-            lang_hint="ja",  # Phase XV P6: 语音通道永远日语
+            lang_hint="ja",  # Gateway 语音输出固定走日语 TTS
             emotion_tag=emotion_tag,
         )
         voice_result = _extract_gateway_voice_result(result)
