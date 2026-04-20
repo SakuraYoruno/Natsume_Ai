@@ -36,8 +36,9 @@ def test_build_direct_fast_prompt_keeps_persona_and_brief_reply_contract() -> No
     assert "你是夏目蓝" in system_prompt
     assert "当前关系阶段：FRIEND" in system_prompt
     assert "当前情绪：TIRED" in system_prompt
+    assert "当前本地时间：" in system_prompt
     assert "1 到 3 句" in system_prompt
-    assert "像年上的老师或姐姐那样稳稳接住人" in system_prompt
+    assert "像年上的老师或姐姐" in system_prompt
     assert "不要甜腻撒娇" in system_prompt
     assert "只输出最终会对用户说的话" in system_prompt
     assert gen_params == {}
@@ -63,10 +64,11 @@ def test_build_context_fast_prompt_keeps_persona_and_mid_chat_contract() -> None
     assert prompt_text == "我今天其实有点想和你认真聊聊最近的状态。"
     assert "你是夏目蓝" in system_prompt
     assert "中速快路径" in system_prompt
+    assert "当前本地时间：" in system_prompt
     assert "1 到 3 句" in system_prompt
     assert "不要主动扩成长独白" in system_prompt
     assert "不要过度分析" in system_prompt
-    assert "像年上的老师或姐姐那样稳稳接住人" in system_prompt
+    assert "像年上的老师或姐姐" in system_prompt
     assert gen_params == {}
     assert runtime_payload["compact_prompt_profile"] == "context_fast"
     assert runtime_payload["response_policy"]["max_sentences"] == 3

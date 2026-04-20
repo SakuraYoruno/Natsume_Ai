@@ -379,7 +379,7 @@ def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> 
         return "ja"
     if _contains_cjk_ideograph(combined):
         return "zh"
-    return "ja"
+    return "zh"
 
 
 def _contains_any_token(text: str, tokens: tuple[str, ...]) -> bool:

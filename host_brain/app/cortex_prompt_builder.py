@@ -552,7 +552,7 @@ def build_cortex_prompt(
     # ── 5. 拆分 system_prompt 和 prompt_text ─────────────────────────
     # Phase XV：角色人设 + 风格蒸馏必须在 system_prompt 中（LLM 最高优先级），
     # 不走检索，确保每次对话都能生效。
-    from host_brain.app.prompt_builder import _load_character_profile  # noqa: PLC0415
+    from host_brain.app.prompt_builder import _build_current_local_time_context, _load_character_profile  # noqa: PLC0415
     from pathlib import Path as _Path  # noqa: PLC0415
 
     _cp_text = _load_character_profile("zh")
@@ -586,6 +586,18 @@ def build_cortex_prompt(
                 _resolve_localized_template_value(_section_templates.get("style_title"), render_target_lang=render_target_lang) or "【说话风格（必须遵守）】\n"
             )
             + _style_text
+        )
+    _time_context_text = _build_current_local_time_context(
+        render_target_lang=render_target_lang,
+        line_kind="full",
+    )
+    if _time_context_text:
+        _parts.append(
+            _format_template_text(
+                _resolve_localized_template_value(_section_templates.get("current_time_title"), render_target_lang=render_target_lang)
+                or "【当前本地时间】\n"
+            )
+            + _time_context_text
         )
     _parts.append(_get_style_correction_block(render_target_lang))
     _parts.append(_node_role)

@@ -152,7 +152,10 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     ts_ms = int(time.time() * 1000)
     request_started_ms = int(getattr(request.state, "request_started_ms", ts_ms) or ts_ms)
     session_id = request_body.session_id or f"session::{request_id}"
+    input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
+    if input_source == "GATEWAY":
+        render_target_lang = "zh"
     request_body.person_id = resolve_person_id(
         getattr(request_body, "person_id", None),
         session_id=session_id,

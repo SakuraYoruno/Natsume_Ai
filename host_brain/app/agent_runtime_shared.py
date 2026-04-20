@@ -106,6 +106,33 @@ def _load_runtime_text_value(
     return _mapping_text(runtime_texts, key, default=default, **kwargs)
 
 
+def _resolve_text_render_target_lang(
+    *,
+    request_body: Any,
+    sanitized_message: str,
+) -> str:
+    """Resolve text output language for the active chat runtime.
+
+    Gateway text replies are always Chinese, regardless of user input language.
+    Voice output remains handled separately by the TTS path.
+    """
+    input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
+    if input_source == "GATEWAY":
+        return "zh"
+
+    injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
+    if injected_lang in {"zh", "ja"}:
+        return injected_lang
+
+    try:
+        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+
+        return infer_render_target_lang(user_message=sanitized_message)
+    except Exception as lang_exc:
+        _logger.debug("cortex_orchestrator infer_render_target_lang failed: %s", lang_exc)
+        return "zh"
+
+
 _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
 _RECENT_TURN_ASSISTANT_QUERY_RE = re.compile(r"(你刚才|你上一句|你上句|你前一句|你前面).*?(说了什么|回了什么|回复了什么|是什么)")
 _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才说的什么|刚刚说的什么).*?(是什么|是什么来着|说了什么)?")
@@ -123,6 +150,18 @@ _RIFT_REPAIR_FASTPATH_RE = re.compile(r"(在意之前.*争执|那次争执|之�
 _PLAYFUL_FASTPATH_RE = re.compile(r"(更会逗我开心|逗我开心|会逗我|会哄我开心|更会哄我|更会逗我|偷偷觉得我.*可爱|觉得我.*可爱|有点可爱|可愛いと思って|可愛いって|からかって|笑わせて)")
 _DEEP_COMPANIONSHIP_FASTPATH_RE = re.compile(
     r"(认真聊聊最近的状态|认真聊聊最近|慢慢陪我说下去|慢慢陪我聊|陪我说下去|慢慢聊聊最近|想认真聊聊|想和你认真聊聊|认真说一说最近|真面目に.*話|近頃のことを話|急がせずに|ゆっくり話|ちゃんと聞いて|付き合ってくれる)"
+)
+_TIME_REALITY_CHECK_FASTPATH_RE = re.compile(
+    r"(现在不是(晚上|中午|白天|早上)吗|都这么晚了|说什么早上好|说什么中午好|不是中午吗|不是晚上吗|不是早上吗|已经到晚上了|都半夜了|もう夜|もうこんな時間|朝じゃない|昼じゃない|夜なのに)"
+)
+_LOCAL_MEDIA_CONTROL_FASTPATH_RE = re.compile(
+    r"(播放.*(收藏|列表|歌|歌曲|音乐)|收藏里.*(音乐|歌)|列表播放|直接播放就行|你直接播放就行|直接列表播放|播放我的收藏|点开收藏.*播放|酷狗.*播放|qq音乐.*播放|网易云.*播放|spotify.*播放"
+    r"|再生.*(お気に入り|リスト|音楽)|お気に入り.*再生|リスト再生|そのまま再生して|直接再生して)",
+    re.IGNORECASE,
+)
+_LOCAL_MEDIA_CONTEXT_HINT_RE = re.compile(
+    r"(酷狗|kugou|qq音乐|网易云|spotify|收藏|列表|歌|歌曲|音乐|お気に入り|リスト|音楽|再生)",
+    re.IGNORECASE,
 )
 _PHATIC_FASTPATH_BLOCKING_TOKENS = (
     "翻译",
@@ -1254,6 +1293,20 @@ def _normalize_phatic_fastpath_text(text: str) -> str:
     return re.sub(r"[\s，。！？,.!?~～…]+", "", normalized)
 
 
+def _resolve_phatic_greeting_time_bucket(*, current_hour: int | None = None) -> str:
+    try:
+        hour = int(time.localtime().tm_hour if current_hour is None else current_hour) % 24
+    except Exception:
+        hour = 12
+    if 5 <= hour < 11:
+        return "morning"
+    if 11 <= hour < 18:
+        return "daytime"
+    if 18 <= hour < 24:
+        return "evening"
+    return "late_night"
+
+
 def _looks_like_comfort_fastpath_message(text: str) -> bool:
     normalized = _normalize_phatic_fastpath_text(text)
     if not normalized or len(normalized) > _PHATIC_FASTPATH_MAX_CHARS:
@@ -1263,11 +1316,25 @@ def _looks_like_comfort_fastpath_message(text: str) -> bool:
     return bool(_COMFORT_FASTPATH_RE.search(normalized))
 
 
+def _looks_like_local_media_control_fastpath_message(text: str, turns: list[dict[str, str]]) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if _LOCAL_MEDIA_CONTROL_FASTPATH_RE.search(normalized):
+        return True
+    compact = _normalize_phatic_fastpath_text(normalized)
+    if compact not in {"直接播放就行了", "你直接播放就行了", "直接列表播放就行了"}:
+        return False
+    recent_context = " ".join(str(turn.get("content") or "") for turn in turns[-6:])
+    return bool(_LOCAL_MEDIA_CONTEXT_HINT_RE.search(recent_context))
+
+
 def _resolve_phatic_fastpath_variants(
     *,
     category: str,
     render_target_lang: str,
     templates: Mapping[str, Any] | None = None,
+    current_hour: int | None = None,
 ) -> list[str]:
     variants_mapping = _mapping_section(dict(templates or {}), "deterministic_variants")
     language = str(render_target_lang or "zh").strip().lower()
@@ -1275,6 +1342,19 @@ def _resolve_phatic_fastpath_variants(
     raw_variants = localized_mapping.get(category)
     if not raw_variants:
         raw_variants = variants_mapping.get(category)
+    if category == "greeting" and isinstance(raw_variants, Mapping):
+        bucket = _resolve_phatic_greeting_time_bucket(current_hour=current_hour)
+        bucket_variants = raw_variants.get(bucket)
+        if isinstance(bucket_variants, list):
+            variants = [str(item).strip() for item in bucket_variants if str(item).strip()]
+            if variants:
+                return variants
+        flattened: list[str] = []
+        for value in raw_variants.values():
+            if isinstance(value, list):
+                flattened.extend(str(item).strip() for item in value if str(item).strip())
+        if flattened:
+            return flattened
     if isinstance(raw_variants, list):
         variants = [str(item).strip() for item in raw_variants if str(item).strip()]
         if variants:
@@ -1296,6 +1376,7 @@ def _maybe_build_phatic_fastpath_reply(
     presence_fastpath_re: Any | None = None,
     ack_fastpath_re: Any | None = None,
     looks_like_comfort_fastpath_message: Callable[[str], bool] | None = None,
+    current_hour: int | None = None,
 ) -> str | None:
 
     normalized = str(user_message or "").strip()
@@ -1334,6 +1415,10 @@ def _maybe_build_phatic_fastpath_reply(
         category = "rift_repair"
     elif _REUNION_FASTPATH_RE.search(normalized):
         category = "reunion"
+    elif _TIME_REALITY_CHECK_FASTPATH_RE.search(normalized) and not active_task:
+        category = "time_reality_check"
+    elif _looks_like_local_media_control_fastpath_message(normalized, turns) and not active_task:
+        category = "local_media_control"
     elif _DEEP_COMPANIONSHIP_FASTPATH_RE.search(normalized) and not active_task:
         category = "deep_companionship"
     elif _looks_like_comfort(normalized):
@@ -1358,6 +1443,7 @@ def _maybe_build_phatic_fastpath_reply(
         category=category,
         render_target_lang=render_target_lang,
         templates=templates,
+        current_hour=current_hour,
     )
     return _pick_non_repeating_variant(
         variants=variants,
@@ -2015,15 +2101,12 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception:
         pass
 
+    _input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
+    render_target_lang = _resolve_text_render_target_lang(
+        request_body=request_body,
+        sanitized_message=sanitized_message,
+    )
     _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
-    render_target_lang = _injected_lang if _injected_lang in ("zh", "ja") else "ja"
-    if not _injected_lang:
-        try:
-            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
-
-            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
-        except Exception as lang_exc:
-            _logger.debug("[%s] cortex_orchestrator infer_render_target_lang failed: %s", request_id, lang_exc)
 
     task_progress_answer = _task_progress_fastpath(
         request_id=request_id,
@@ -2340,7 +2423,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
             from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
 
-            if not _injected_lang:
+            if not _injected_lang and _input_source != "GATEWAY":
                 render_target_lang = infer_render_target_lang(user_message=sanitized_message)
             retrieval_task = asyncio.create_task(
                 _run_retrieval(

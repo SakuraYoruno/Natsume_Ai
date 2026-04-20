@@ -173,6 +173,59 @@ def test_maybe_build_phatic_fastpath_reply_handles_deep_companionship_opening() 
     )
 
 
+def test_maybe_build_phatic_fastpath_reply_handles_local_media_control_limit() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-media-001",
+        session_id="session-phatic-media-001",
+        person_id="person-phatic-media-001",
+        user_message="播放我的收藏里面的音乐",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert "播放器" in str(reply) or "酷狗" in str(reply)
+    assert "不能" in str(reply) or "没接上" in str(reply) or "没打通" in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_handles_local_media_followup_with_context() -> None:
+    turns = [
+        {"role": "user", "content": "播放我的收藏里面的音乐"},
+        {"role": "assistant", "content": "收藏里的音乐吗？你想听哪一首？"},
+    ]
+
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-media-002",
+        session_id="session-phatic-media-002",
+        person_id="person-phatic-media-002",
+        user_message="直接列表播放就行了",
+        render_target_lang="zh",
+        load_continuity_turns=lambda **_kwargs: turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert "播放器" in str(reply) or "列表播放" in str(reply)
+    assert "不能" in str(reply) or "没接上" in str(reply) or "没打通" in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_handles_local_media_control_limit_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-media-ja-001",
+        session_id="session-phatic-media-ja-001",
+        person_id="person-phatic-media-ja-001",
+        user_message="お気に入りをそのまま再生して",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert re.search(r"[ぁ-んァ-ン]", str(reply))
+    assert any(token in str(reply) for token in ("でき", "まだ", "プレーヤー", "再生"))
+
+
 def test_maybe_build_phatic_fastpath_reply_returns_greeting_line_in_japanese() -> None:
     reply = _maybe_build_phatic_fastpath_reply(
         request_id="req-phatic-ja-greeting-001",
@@ -188,6 +241,41 @@ def test_maybe_build_phatic_fastpath_reply_returns_greeting_line_in_japanese() -
     assert re.search(r"[ぁ-んァ-ン]", str(reply))
     assert "你好" not in str(reply)
     assert "AI" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_uses_evening_greeting_bucket_in_chinese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-zh-greeting-evening-001",
+        session_id="session-phatic-zh-greeting-evening-001",
+        person_id="person-phatic-zh-greeting-evening-001",
+        user_message="早上好",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+        current_hour=23,
+    )
+
+    assert reply
+    assert "早。" not in str(reply)
+    assert "昨晚睡得还好吗" not in str(reply)
+    assert any(token in str(reply) for token in ("晚上", "这么晚", "还没睡", "都这时候"))
+
+
+def test_maybe_build_phatic_fastpath_reply_uses_evening_greeting_bucket_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-greeting-evening-001",
+        session_id="session-phatic-ja-greeting-evening-001",
+        person_id="person-phatic-ja-greeting-evening-001",
+        user_message="おはよう",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+        current_hour=23,
+    )
+
+    assert reply
+    assert "おはよう" not in str(reply)
+    assert any(token in str(reply) for token in ("夜", "遅い", "まだ起き"))
 
 
 def test_maybe_build_phatic_fastpath_reply_returns_presence_line_in_japanese() -> None:
@@ -239,6 +327,40 @@ def test_maybe_build_phatic_fastpath_reply_returns_followup_line_in_japanese() -
     assert re.search(r"[ぁ-んァ-ン]", str(reply))
     assert any(token in str(reply) for token in ("それで", "続き", "どうな"))
     assert "怎么" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_handles_time_reality_check_in_chinese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-zh-timefix-001",
+        session_id="session-phatic-zh-timefix-001",
+        person_id="person-phatic-zh-timefix-001",
+        user_message="现在不是晚上吗，说什么早上好",
+        render_target_lang="zh",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert any(token in str(reply) for token in ("说岔了", "说错了", "嘴快了"))
+    assert any(token in str(reply) for token in ("晚上", "这么晚", "这个点"))
+    assert "记错了时间" not in str(reply)
+
+
+def test_maybe_build_phatic_fastpath_reply_handles_time_reality_check_in_japanese() -> None:
+    reply = _maybe_build_phatic_fastpath_reply(
+        request_id="req-phatic-ja-timefix-001",
+        session_id="session-phatic-ja-timefix-001",
+        person_id="person-phatic-ja-timefix-001",
+        user_message="もう夜でしょ、朝じゃないよ",
+        render_target_lang="ja",
+        load_continuity_turns=_no_turns,
+        looks_like_active_task_context=lambda _turns: False,
+    )
+
+    assert reply
+    assert any(token in str(reply) for token in ("言い間違", "ずれて", "口が先"))
+    assert any(token in str(reply) for token in ("夜", "こんな時間"))
+    assert "记错了时间" not in str(reply)
 
 
 def test_maybe_build_phatic_fastpath_reply_returns_comfort_line_in_japanese() -> None:

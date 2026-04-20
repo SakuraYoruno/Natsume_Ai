@@ -32,6 +32,9 @@ def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.Mo
     assert pb._get_prompt_evidence_limit(default=5) == 12
     monkeypatch.setenv("HOST_RETR_EVIDENCE_ITEMS_MAX", "oops")
     assert pb._get_prompt_evidence_limit(default=5) == 5
+    monkeypatch.delenv("HOST_RENDER_TARGET_LANG", raising=False)
+    assert pb.infer_render_target_lang(user_message="hello") == "zh"
+    assert pb.infer_render_target_lang(user_message="こんにちは") == "ja"
 
 
 def test_character_profile_loader_handles_short_invalid_and_cached_payload(

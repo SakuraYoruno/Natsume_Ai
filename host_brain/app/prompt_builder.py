@@ -154,6 +154,43 @@ def _build_character_dynamic_patch(
     return "\n\n" + str(templates.get("title") or "【今日状态补丁】") + "\n" + "\n".join(f"- {p}" for p in parts)
 
 
+def _build_current_local_time_context(
+    *,
+    render_target_lang: str = "zh",
+    line_kind: str = "full",
+) -> str:
+    import datetime as _dt
+
+    templates = _load_template_mapping("prompt_builder.current_time_context.templates")
+    lang_key = _normalize_template_lang(render_target_lang)
+    localized = templates.get(lang_key) if isinstance(templates.get(lang_key), Mapping) else {}
+    localized = dict(localized) if isinstance(localized, Mapping) else {}
+    daypart_mapping = localized.get("daypart") if isinstance(localized.get("daypart"), Mapping) else {}
+    daypart_mapping = dict(daypart_mapping) if isinstance(daypart_mapping, Mapping) else {}
+
+    now = _dt.datetime.now().astimezone()
+    hour = int(now.hour)
+    if 5 <= hour < 11:
+        bucket = "morning"
+    elif 11 <= hour < 18:
+        bucket = "daytime"
+    elif 18 <= hour < 24:
+        bucket = "evening"
+    else:
+        bucket = "late_night"
+
+    current_local_time = now.strftime("%Y-%m-%d %H:%M")
+    time_of_day_label = str(daypart_mapping.get(bucket) or bucket).strip()
+    template_text = str(localized.get(f"{line_kind}_line") or "").strip()
+    if not template_text:
+        return ""
+    return _format_template_text(
+        template_text,
+        current_local_time=current_local_time,
+        time_of_day_label=time_of_day_label,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ref #70: 线程局部变量 — 存储最近一次注入检测结果，供调用方读取并写入 audit_tags
 # ---------------------------------------------------------------------------
@@ -370,7 +407,7 @@ def infer_render_target_lang(*, user_message: str, core_narrative: str = "") -> 
         return "ja"
     if _contains_cjk_ideograph(combined):
         return "zh"
-    return "ja"
+    return "zh"
 
 
 def _contains_any_token(text: str, tokens: tuple[str, ...]) -> bool:

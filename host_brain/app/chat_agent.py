@@ -235,10 +235,15 @@ def _build_compact_chat_prompt(
     bond_summary: Mapping[str, Any] | None,
     speed_profile: str,
 ) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
+    from host_brain.app.prompt_builder import _build_current_local_time_context  # noqa: PLC0415
     from host_brain.app.prompt_builder_utils import _build_direct_response_priority  # noqa: PLC0415
 
     bond_stage = str((bond_summary or {}).get("stage") or "").strip()
     emotion_tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
+    current_time_line = _build_current_local_time_context(
+        render_target_lang=render_target_lang,
+        line_kind="compact",
+    )
     if speed_profile == "context_fast":
         response_policy = {
             "should_be_brief": True,
@@ -269,6 +274,8 @@ def _build_compact_chat_prompt(
             _load_compact_persona_text(speed_profile="context_fast", render_target_lang=render_target_lang)
             + "\n"
             + relation_line
+            + "\n"
+            + current_time_line
             + "\n"
             + brevity_line
             + "\n"
@@ -306,6 +313,8 @@ def _build_compact_chat_prompt(
         _load_compact_persona_text(speed_profile="direct_fast", render_target_lang=render_target_lang)
         + "\n"
         + relation_line
+        + "\n"
+        + current_time_line
         + "\n"
         + brevity_line
         + "\n"

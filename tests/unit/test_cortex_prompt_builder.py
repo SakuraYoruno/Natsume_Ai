@@ -51,6 +51,7 @@ class TestCortexPromptBuilder:
             )
 
         assert "SYSTEM_PROMPT" in system_prompt
+        assert "【現在の現地時刻】" in system_prompt
         assert gen_params == {"temperature": 0.42}
         assert prompt_text.startswith("PROMPT_BODY")
         assert "【使える能力" in prompt_text
@@ -102,6 +103,7 @@ class TestCortexPromptBuilder:
                 {
                     "profile_title": "【设定卡】\n",
                     "style_title": "【风格卡】\n",
+                    "current_time_title": "【现在时间】\n",
                     "user_message_title": "【本轮输入】\n",
                 },
                 ensure_ascii=False,
@@ -158,6 +160,7 @@ class TestCortexPromptBuilder:
 
         assert "【设定卡】" in system_prompt
         assert "【风格卡】" in system_prompt
+        assert "【现在时间】" in system_prompt
         assert "【本轮输入】\nhello world" in prompt_text
 
     def test_build_recent_session_context_block_formats_previous_turns(self) -> None:
