@@ -1,10 +1,15 @@
 # Natsume_Ai 最近对话上下文重构方案（一步到位版）
 
 **日期**：2026-04-21  
-**状态**：待评审  
+**状态**：已决策（2026-04-21 14:30 补丁 1 合入）  
 **作者**：七海（代哥哥撰写）  
 **目标分支**：codex  
 **适用范围**：host_brain 主对话链路
+
+**变更记录**：
+- 2026-04-21 11:35 初版
+- 2026-04-21 12:15 五项决策条款合入（§15）
+- 2026-04-21 14:30 补丁 1：新增 §17 情感层兼容条款，明确本次改动不影响情感注入路径
 
 ---
 
@@ -680,4 +685,137 @@ LLM 看到这个结构，天然知道：
 
 ---
 
+## 17. 情感层兼容条款（补丁 1，2026-04-21 14:30）
+
+本节回答"本次改动会不会影响情感层注入"，并固化三条强制规则供下游节点实现时遵守。
+
+### 17.1 结论
+
+**不影响**。本次改动只是把"最近几轮对话原文"从 `prompt_text` 字符串尾部，迁移到 LLM Chat API 原生的 `messages` 数组中部。情感层 100% 的注入通道仍然走 `system_prompt`（或等价的 current_turn_hint system message），位置不变、内容不变、生成路径不变。
+
+### 17.2 情感层注入路径清单（不动）
+
+下列路径**本次全部维持现状**，下游节点不得以"顺便优化"之名合并、删除或重排：
+
+| 情感组件 | 来源 | 进 prompt 的位置 |
+|---|---|---|
+| `emotion_context` / `emotion_snapshot` | resolve_chat_emotion_context / build_chat_emotion_snapshot | system_prompt 的 EMOTION_BINDING block |
+| `emotion_vector` (VAD valence/arousal/dominance) | build_prompt_intelligence | EMOTION_BINDING 内"emotion_vad_quality" |
+| `emotion_timeline` / `emotion_echo` | PromptPayloadBuilder.with_emotion_timeline | EMOTION_BINDING 内 trend / echo_tag |
+| `emotion_recall` | retrieval_evidence_items 中的情感召回 | 独立 EMOTION_RECALL block |
+| `memory_emotion_hint` / `memory_recall_summary` / `memory_persona_evidence` | PromptPayloadBuilder + chat_context_memory | MEMORY_RECALL_PERSONA + MEMORY_RECALL_EVIDENCE block |
+| `inner_monologue` | prompt_context_emotion | EMOTION_BINDING 内"inner_monologue"行 |
+| `persona_expression_hint` | chat_context_memory 注入 | 独立 PERSONA_EXPRESSION_HINT block |
+| `bond_aware_style` | build_prompt_intelligence | 独立 BOND_AWARE_STYLE block |
+| `self_reflection_pulse` | PromptPayloadBuilder.with_self_reflection | 独立 SELF_REFLECTION_PULSE block |
+| `bond_narrative` | build_prompt_intelligence + BondNarrativeLayer | 独立 BOND_NARRATIVE block |
+| `adjust_gen_params_for_emotion` | llm_helpers | gen_params（temperature / top_p 调制） |
+| `_infer_emotion_tag_for_tts` | chat_agent 内部 | 不进 prompt，仅供 TTS 侧，保持现状 |
+
+### 17.3 强制规则
+
+**规则 17-A：current_turn_hint 继承现有 system prompt 全部情感注入**
+
+`build_cortex_prompt(return_messages=True)` 内部构建 `current_turn_hint` 时，**必须继续调用** `render_node_generation_prompt(node_id=CORTEX_NODE_ID, runtime_payload=...)` 产出完整的情感/人格/记忆注入块，仅在此基础上**删除以下三段**：
+
+- `_build_recent_session_context_block` 的 "Recent continuity context" / "Earlier continuity summary" 文本
+- `DEFAULT_CONTINUITY_GUARD` 英文守则
+- `DEFAULT_CLARIFICATION_GUARD` 英文守则（仅追问式 query 时出现）
+
+**其余 20+ 个情感/人格/记忆槽位一字不改地保留。**
+
+实现伪代码：
+```python
+# cortex_prompt_builder.build_cortex_prompt(return_messages=True)
+full_prompt = render_node_generation_prompt(...)  # 含全部情感注入
+
+# 旧路径这里会追加 recent_session_context + DEFAULT_CONTINUITY_GUARD
+# 新路径：不再追加，因为历史对话改走 messages 数组
+# 情感层和其他槽位全部保留在 full_prompt 中
+
+current_turn_hint = full_prompt  # 作为独立 system message
+```
+
+**规则 17-B：historical turn 只带 role + content，不带任何情感元数据回放**
+
+`conversation_turn.metadata.emotion_tag` 等字段**只用于观测和溯源**，渲染到 messages 数组时**必须丢弃**，不得以任何形式注入到历史 turn 附近的 prompt 里。
+
+理由：
+- 历史情绪的时序信息已经由 `emotion_timeline.trend` 在当前轮的 EMOTION_BINDING 里完整表达
+- 在每条历史 turn 前后插入情绪标签会造成双重注入，污染 LLM 对"对话内容"本身的理解
+- messages 数组应保持"干净对话"结构，情感状态属于 system 层面
+
+禁止做法（不允许）：
+```python
+# ❌ 禁止
+messages.append({"role": "system", "content": "上一轮情绪=HAPPY"})
+messages.append({"role": "assistant", "content": "..."})
+```
+
+允许做法：
+```python
+# ✅ 允许
+messages.append({"role": "assistant", "content": turn.content})
+# emotion_tag 仅存于 DB metadata 和 observability 日志，不进 LLM
+```
+
+**规则 17-C：assistant turn 的 content 必须是净化终稿**
+
+写入 `conversation_turn.content` 的 assistant 文本**必须**是：
+- 经过 `reflection_chain` 反思链处理后的版本
+- 经过 `_airlock_sanitize_output` 出口净化后的版本
+- 实际发送给用户（或 Gateway）的那一份
+
+**不得**写入：
+- LLM 原始流式输出（可能含 `<thinking>`、未完成句）
+- 含有情感内心独白或内部标签的中间版本
+- 任何用户实际看不到的内容
+
+这保证"下次 LLM 重放时看到的她自己上一轮说了什么"和"用户实际看到的她上一轮说了什么"完全一致，不会出现"她觉得自己说过但用户没看过"或反之的分裂。
+
+写入点对齐：
+- 主路径：`_async_post_process` 里的 `narrative` 参数
+- 四条 Fastpath：各自 yield COMMIT 之后、`asyncio.create_task(_async_post_process(...))` 之前，用同一份 `narrative`
+
+### 17.4 观测补充
+
+`trace_stage_meta.conversation_history` 字段里额外记录情感快照的 hash（不是内容），供排查"为什么同一情绪下她回复差异大"：
+
+```json
+"conversation_history": {
+    "turns_injected": 6,
+    "oldest_ts_ms": 1734567890000,
+    "newest_ts_ms": 1734567999999,
+    "user_turn_recorded": true,
+    "assistant_turn_recorded": true,
+    "emotion_binding_hash": "a3f5c2..."  // 当前轮 EMOTION_BINDING 块的 sha256 前 16 位
+}
+```
+
+`emotion_binding_hash` 用于后续可观测分析：同样的历史对话 + 不同的情感 hash 产生不同回复，可以反向定位情感层对生成的实际影响。
+
+### 17.5 回归验证项
+
+下游实现完成后必须增加以下测试，保证情感层未被破坏：
+
+1. `test_emotion_binding_preserved_in_messages.py`  
+   构造一个带完整 emotion_context 的 ChatAgentInput，断言生成的 messages 数组第一条 system 里包含 `EMOTION_BINDING:` / `BOND_AWARE_STYLE:` / `PERSONA_EXPRESSION_HINT:` 三个关键字
+
+2. `test_historical_turn_has_no_emotion_metadata.py`  
+   构造 3 轮带 emotion_tag 的历史 turn，断言 `build_chat_messages` 输出中，历史 `{role, content}` 字典**只含这两个 key**，无其他字段
+
+3. `test_assistant_turn_content_equals_commit_narrative.py`  
+   模拟一次完整对话，断言 `conversation_turn.content` 与 COMMIT SSE 事件中的 `narrative` 字段**按字节相等**
+
+### 17.6 给下游编码节点的执行要点
+
+- **不要**"顺手优化"EMOTION_BINDING 结构（那是另一个重构）
+- **不要**把情感注入挪到 user message（永远在 system）
+- **不要**让 `current_turn_hint` 简化成"只有 user_message"
+- **保留**现有 `render_node_generation_prompt` 的 800+ 行大块渲染逻辑，本次只改它末尾"最近对话"那一小段的来源与格式
+- 情感层是独立并行改造的事，和本次"对话历史重构"互不耦合，**不合并提交**
+
+---
+
 _END OF PLAN_
+
