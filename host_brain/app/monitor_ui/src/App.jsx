@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react'
+﻿import React, { Suspense } from 'react'
 import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
@@ -24,7 +24,7 @@ import {
   PathologyDetailPage,
   PersonaPromptOps,
   PromptConfig,
-  ResponsePolicyDashboard,
+  RenderPolicyDashboard,
   RuntimeMode,
   SelfModelDashboard,
   Sessions,
@@ -99,7 +99,7 @@ export default function App() {
             <Route path="persona-config" element={withSuspense(<PersonaPromptOps />)} />
             <Route path="runtime-mode" element={withSuspense(<RuntimeMode />)} />
             <Route path="inner-world" element={withSuspense(<InnerWorldDashboard />)} />
-            <Route path="response-policy" element={withSuspense(<ResponsePolicyDashboard />)} />
+            <Route path="response-policy" element={withSuspense(<RenderPolicyDashboard />)} />
             <Route path="self-model" element={withSuspense(<SelfModelDashboard />)} />
             <Route path="canon" element={withSuspense(<Canon />)} />
             <Route path="bond" element={withSuspense(<Bond />)} />
@@ -116,3 +116,4 @@ export default function App() {
     </ErrorBoundary>
   )
 }
+

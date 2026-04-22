@@ -14,6 +14,7 @@ def test_obs_fastapi_app_health_ok():
     assert "trace_feed_warm_cache" in payload
     assert "insights_summary_warm_cache" in payload
     assert "digital_life_overview_warm_cache" in payload
+    assert "life_body_warm_cache" in payload
 
 
 def test_obs_fastapi_app_exposes_obs_and_ui_routes():

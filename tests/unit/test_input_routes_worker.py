@@ -124,6 +124,85 @@ def test_dispatch_worker_gateway_reply_failure_logs_completed_degraded() -> None
         ledger.close()
 
 
+def test_dispatch_worker_gateway_uses_realign_override_for_final_reply() -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        delivered_narratives: list[str] = []
+
+        async def _deliver_capture(**kwargs):
+            delivered_narratives.append(str(kwargs.get("narrative") or ""))
+            return {
+                "success": True,
+                "status": "SENT",
+                "latency_ms": 12,
+                "reply_text_len": len(str(kwargs.get("narrative") or "")),
+                "reply_preview": str(kwargs.get("narrative") or ""),
+                "reply_form": "text",
+                "reply_form_reason": "text_only",
+                "voice_sent": False,
+            }
+
+        with patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(
+                return_value={
+                    "decision": "APPROVE",
+                    "reason_code": None,
+                    "narrative": "我是夏目蓝，也是国语老师。有什么可以帮你的吗？",
+                    "route_decision": {"route": "chat", "target_id": "chat_agent"},
+                }
+            ),
+        ), patch(
+            "host_brain.app.input_routes._maybe_realign_gateway_pipeline",
+            new=AsyncMock(
+                return_value=(
+                    {
+                        "decision": "APPROVE",
+                        "reason_code": None,
+                        "narrative": "我是夏目蓝。你想问什么。",
+                        "route_decision": {"route": "chat", "target_id": "chat_agent"},
+                    },
+                    {
+                        "triggered": True,
+                        "retry_applied": True,
+                        "resolved_decision": "APPROVE",
+                        "resolved_reason_code": None,
+                        "resolved_narrative": "我是夏目蓝。你想问什么。",
+                        "resolved_route_decision": {"route": "chat", "target_id": "chat_agent"},
+                    },
+                )
+            ),
+        ), patch(
+            "host_brain.app.input_routes._deliver_gateway_reply",
+            new=AsyncMock(side_effect=_deliver_capture),
+        ):
+            _run(
+                _dispatch_to_graph_worker(
+                    request_id="req_worker_realign_override_001",
+                    session_id="qq_dm_realign_001",
+                    source="GATEWAY",
+                    text="你是谁",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_realign_001",
+                        "msg_id": "msg_realign_001",
+                    },
+                    ts_ms=123456,
+                    ledger=ledger,
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                )
+            )
+
+        assert delivered_narratives == ["我是夏目蓝。你想问什么。"]
+        completed = next(row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED")
+        payload = dict(completed.get("payload") or {})
+        assert payload.get("deviation_retry_applied") is True
+        assert payload.get("reply_preview") == "我是夏目蓝。你想问什么。"
+    finally:
+        ledger.close()
+
+
 def test_dispatch_worker_gateway_reply_failure_can_be_ignored_for_completion_status() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
@@ -993,10 +1072,22 @@ def test_should_send_gateway_immediate_ack_for_action_intent() -> None:
         source="GATEWAY",
         text="请帮我总结一下今天的执行结果",
         payload={"msg_type": "text"},
+        intent_draft={"route": "skill", "target_id": "session_summary"},
     )
 
     assert should_send is True
     assert reason == "ACK_ACTION_INTENT"
+
+
+def test_should_skip_gateway_immediate_ack_when_route_unresolved() -> None:
+    should_send, reason = _should_send_gateway_immediate_ack(
+        source="GATEWAY",
+        text="请帮我总结一下今天的执行结果",
+        payload={"msg_type": "text"},
+    )
+
+    assert should_send is False
+    assert reason == "ACK_ROUTE_UNRESOLVED"
 
 
 def test_should_skip_gateway_immediate_ack_for_progress_query() -> None:
@@ -1019,6 +1110,18 @@ def test_should_skip_gateway_immediate_ack_for_direct_open_app() -> None:
 
     assert should_send is False
     assert reason == "ACK_DIRECT_OPEN_APP"
+
+
+def test_should_skip_gateway_immediate_ack_for_chat_route_even_if_help_words_present() -> None:
+    should_send, reason = _should_send_gateway_immediate_ack(
+        source="GATEWAY",
+        text="你为什么要帮我，我们很熟吗",
+        payload={"msg_type": "text"},
+        intent_draft={"route": "chat"},
+    )
+
+    assert should_send is False
+    assert reason == "ACK_NON_EXECUTION_ROUTE"
 
 
 def test_should_send_gateway_route_started_voice_ack_for_translate_delegate() -> None:
@@ -1225,10 +1328,22 @@ def test_should_start_gateway_progress_push_for_gateway_action() -> None:
         source="GATEWAY",
         text="请帮我跑一下今天的全量测试并汇总结果",
         payload={"platform": "qq", "conversation_id": "qq_dm_4001"},
+        intent_draft={"route": "skill", "target_id": "codex_codegen"},
     )
 
     assert should_start is True
     assert reason == "PROGRESS_PUSH_ENABLED"
+
+
+def test_should_skip_gateway_progress_push_when_route_unresolved() -> None:
+    should_start, reason = _should_start_gateway_progress_push(
+        source="GATEWAY",
+        text="请帮我跑一下今天的全量测试并汇总结果",
+        payload={"platform": "qq", "conversation_id": "qq_dm_4005"},
+    )
+
+    assert should_start is False
+    assert reason == "PROGRESS_PUSH_ROUTE_UNRESOLVED"
 
 
 def test_should_skip_gateway_progress_push_for_progress_query() -> None:
@@ -1240,6 +1355,18 @@ def test_should_skip_gateway_progress_push_for_progress_query() -> None:
 
     assert should_start is False
     assert reason == "PROGRESS_PUSH_PROGRESS_QUERY"
+
+
+def test_should_skip_gateway_progress_push_for_chat_route_even_if_help_words_present() -> None:
+    should_start, reason = _should_start_gateway_progress_push(
+        source="GATEWAY",
+        text="你为什么要帮我，我们很熟吗",
+        payload={"platform": "qq", "conversation_id": "qq_dm_4004"},
+        intent_draft={"route": "chat"},
+    )
+
+    assert should_start is False
+    assert reason == "PROGRESS_PUSH_NON_EXECUTION_ROUTE"
 
 
 def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:
@@ -1365,6 +1492,8 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
         assert meta is not None
         assert meta["triggered"] is True
         assert meta["retry_applied"] is True
+        assert meta["resolved_decision"] == "APPROVE"
+        assert "卡顿原因" in str(meta.get("resolved_narrative") or "")
         assert "卡顿原因" in str(result.get("narrative") or "")
         assert_natsume_style(
             user_message="请帮我总结前端卡顿原因并给出修复方案",
@@ -1458,6 +1587,50 @@ def test_maybe_realign_gateway_pipeline_skips_for_translate_delegate(monkeypatch
         assert meta is not None
         assert meta["triggered"] is False
         assert meta["reason_code"] == "DEVIATION_SKIPPED_TRANSLATE_AGENT"
+        notice_mock.assert_not_awaited()
+        rerun_mock.assert_not_awaited()
+    finally:
+        ledger.close()
+
+
+def test_maybe_realign_gateway_pipeline_skips_for_chat_route(monkeypatch) -> None:
+    ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    try:
+        monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
+        with patch(
+            "host_brain.app.input_routes._maybe_send_gateway_realign_notice",
+            new=AsyncMock(return_value={"sent": True, "status": "SENT"}),
+        ) as notice_mock, patch(
+            "host_brain.app.input_routes._run_cortex_orchestrator_pipeline",
+            new=AsyncMock(),
+        ) as rerun_mock:
+            result, meta = _run(
+                _maybe_realign_gateway_pipeline(
+                    request_id="req_chat_skip_001",
+                    session_id="qq_dm_chat_skip",
+                    source="GATEWAY",
+                    user_text="你为什么要帮我，我们很熟吗",
+                    payload={
+                        "platform": "qq",
+                        "conversation_id": "qq_dm_chat_skip",
+                        "sender_name": "测试用户",
+                    },
+                    ts_ms=123456,
+                    pipeline_result={
+                        "decision": "APPROVE",
+                        "reason_code": None,
+                        "narrative": "因为你问了，我才回答。",
+                        "route_decision": {"route": "chat"},
+                        "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
+                    },
+                    ledger=ledger,
+                )
+            )
+
+        assert result["route_decision"]["route"] == "chat"
+        assert meta is not None
+        assert meta["triggered"] is False
+        assert meta["reason_code"] == "DEVIATION_NON_EXECUTION_ROUTE"
         notice_mock.assert_not_awaited()
         rerun_mock.assert_not_awaited()
     finally:

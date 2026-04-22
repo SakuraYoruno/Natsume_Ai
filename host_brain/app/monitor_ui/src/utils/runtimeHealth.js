@@ -1,4 +1,4 @@
-import {
+﻿import {
   compactText,
   DASH,
   formatAbsenceBand,
@@ -66,7 +66,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
   const sysModeStatus = snapshot.sys_mode_status || {}
   const reflectionGuard = snapshot.self_reflection_pulse?.narrative_guardrails || {}
   const silenceState = snapshot.silence_state || {}
-  const responsePolicy = snapshot.response_policy || {}
+  const renderPolicy = snapshot.render_policy || {}
   const runtimeSummary = snapshot.runtime_summary || {}
   const degradedReasons = snapshot.degraded_reasons || []
   const nonLiveSlots = getNonLiveSlots(snapshot)
@@ -139,11 +139,11 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'warning',
       source: 'runtime',
-      to: '/response-policy',
+      to: '/render-policy',
     })
   }
 
-  if (responsePolicy.should_be_withdrawn) {
+  if (renderPolicy.should_be_withdrawn) {
     alerts.push({
       reason_code: 'WITHDRAWN_REPLY_POLICY',
       title: formatAlertTitle('WITHDRAWN_REPLY_POLICY'),
@@ -151,7 +151,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
       ts_ms: tsMs,
       severity: 'info',
       source: 'runtime',
-      to: '/response-policy',
+      to: '/render-policy',
     })
   }
 
@@ -372,3 +372,4 @@ export function getDigitalLifeRuntimeSummary(snapshot) {
     notableSignals: (runtimeSummary.notable_signals || []).map(formatRuntimeSignal).filter(Boolean),
   }
 }
+

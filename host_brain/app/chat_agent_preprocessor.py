@@ -781,6 +781,8 @@ def _is_underanswered_meta_reply(text: str) -> bool:
         "对啊",
         "没错",
         "我们",
+        "因为",
+        "只是",
     } or len(bare) <= 1
 
 

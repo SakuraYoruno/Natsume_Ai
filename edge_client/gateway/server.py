@@ -84,6 +84,17 @@ def create_gateway_app(
                 detail=f"No adapter registered for platform: {platform}",
             )
 
+        if platform == Platform.QQ.value:
+            logger.info(
+                "Gateway webhook hit platform=%s post_type=%s message_type=%s self_id=%s user_id=%s message_id=%s",
+                platform,
+                raw_payload.get("post_type"),
+                raw_payload.get("message_type"),
+                raw_payload.get("self_id"),
+                raw_payload.get("user_id"),
+                raw_payload.get("message_id"),
+            )
+
         # 3. 适配器解析
         try:
             msg = adapter.parse_inbound(raw_payload)
@@ -98,10 +109,25 @@ def create_gateway_app(
         # 4. 标准化（去重 + 脱敏 + 校验）
         normalized = _normalizer.normalize(msg)
         if normalized is None:
+            if platform == Platform.QQ.value:
+                logger.info(
+                    "Gateway webhook filtered platform=%s msg_id=%s conversation=%s",
+                    platform,
+                    getattr(msg, "msg_id", None),
+                    getattr(msg, "conversation_id", None),
+                )
             return JSONResponse({"status": "filtered"})
 
         # 5. 路由到 Host Brain
         result = router.route(normalized)
+        if platform == Platform.QQ.value:
+            logger.info(
+                "Gateway webhook routed platform=%s msg_id=%s conversation=%s route_success=%s",
+                platform,
+                normalized.msg_id,
+                normalized.conversation_id,
+                result.success,
+            )
 
         return JSONResponse({
             "status": "accepted" if result.success else "cached",

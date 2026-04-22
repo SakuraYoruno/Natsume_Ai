@@ -33,6 +33,28 @@ _ACTION_INTENT_MARKERS = (
 
 _QUESTION_ONLY_PATTERN = re.compile(r"(是什么|为什么|是啥|啥意思|解释一下|讲讲|介绍下)")
 
+_RELATIONAL_NON_ACTION_MARKERS = (
+    "我们不熟",
+    "不熟吧",
+    "很熟吗",
+    "熟吗",
+    "为什么要帮我",
+    "为什么帮我",
+    "为什么要管我",
+    "为什么管我",
+    "还会帮我吗",
+    "还会理我吗",
+    "还会管我吗",
+    "我不喜欢这样",
+    "你是谁",
+)
+
+_GENERIC_HELP_MARKERS = ("帮我", "请你", "请帮")
+
+_CONCRETE_ACTION_MARKERS = tuple(
+    marker for marker in _ACTION_INTENT_MARKERS if marker not in _GENERIC_HELP_MARKERS
+)
+
 _CAPABILITY_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("coding", ("代码", "脚本", "函数", "报错", "bug", "debug", "重构", "编程")),
     ("translation", ("翻译", "日语", "英语", "韩语", "德语", "法语")),
@@ -81,9 +103,19 @@ def _looks_like_action_intent(user_message: str) -> bool:
     message = _normalize(user_message)
     if len(message) < 6:
         return False
+    lowered = _normalize(message, lower=True)
+    has_concrete_action = any(marker in message for marker in _CONCRETE_ACTION_MARKERS)
+    capability_tags = _extract_capability_tags(message)
+    has_capability_hint = any(tag != "reasoning" for tag in capability_tags)
+    if any(marker in lowered for marker in _RELATIONAL_NON_ACTION_MARKERS):
+        if not has_concrete_action and not has_capability_hint:
+            return False
     if _QUESTION_ONLY_PATTERN.search(message):
-        return False
+        if not has_concrete_action and not has_capability_hint:
+            return False
     if any(marker in message for marker in _ACTION_INTENT_MARKERS):
+        if any(marker in message for marker in _GENERIC_HELP_MARKERS):
+            return has_concrete_action or has_capability_hint
         return True
     if len(message) > 18 and ("然后" in message or "并且" in message or "同时" in message):
         return True
@@ -170,4 +202,3 @@ def detect_capability_gap(
 
 
 __all__ = ["CapabilityGapDecision", "detect_capability_gap"]
-

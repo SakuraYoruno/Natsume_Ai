@@ -5,7 +5,7 @@
   - obs_routes_stats_agent.py     : Agent Loop、Memory 子系统统计
   - obs_routes_stats_system.py    : VTS/蒸馏/WeChat/保留策略/QA/LLM/Checkpoint/限流/Vault 统计
   - obs_routes_stats_input.py     : Input Dispatch、Humanoid Loop 系列统计
-  - obs_routes_stats_capability.py: 召回包/失败/权限/调度器/链路/语义召回/免疫门/检索/能力缺口统计
+  - obs_routes_stats_capability.py: 失败/权限/调度器/链路/语义召回/免疫门/检索/能力缺口统计
 
 本文件保留为向后兼容的聚合入口，导入所有子模块以确保路由注册。
 """

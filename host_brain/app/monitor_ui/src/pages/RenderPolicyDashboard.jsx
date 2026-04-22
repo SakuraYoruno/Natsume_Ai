@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import {
   Brain,
   HeartPulse,
@@ -56,7 +56,7 @@ function TagList({ items, tone = 'gray', emptyTitle, emptyHint }) {
   )
 }
 
-export default function ResponsePolicyDashboard() {
+export default function RenderPolicyDashboard() {
   const pollingEnabled = useAppStore((state) => state.pollingEnabled)
   const pollingInterval = useAppStore((state) => state.pollingInterval)
   const { runtimeSnapshot, loading, error, reload } = useDigitalLifeRuntimeSignals({
@@ -68,12 +68,12 @@ export default function ResponsePolicyDashboard() {
   const silenceState = runtimeSnapshot?.silence_state || {}
   const bodySense = runtimeSnapshot?.body_sense || {}
   const motiveState = runtimeSnapshot?.motive_state || {}
-  const responsePolicy = runtimeSnapshot?.response_policy || {}
+  const renderPolicy = runtimeSnapshot?.render_policy || {}
   const runtimeSummary = runtimeSnapshot?.runtime_summary || {}
 
   const whyReply = asArray(runtimeSummary.why_reply)
   const decisionChain = asArray(runtimeSummary.decision_chain)
-  const policyReasonTags = asArray(responsePolicy.policy_reason_tags)
+  const policyReasonTags = asArray(renderPolicy.policy_reason_tags)
   const motiveReasonTags = asArray(motiveState.motive_reason_tags)
   const activeDrives = motiveState.active_drives || motiveState || {}
   const replyPostureLabel = formatReplyPosture(runtimeSummary.reply_posture?.style)
@@ -107,7 +107,7 @@ export default function ResponsePolicyDashboard() {
         gradientClass="from-primary-50 via-white to-pink-50"
         metaItems={[
           `意愿：${willingnessLabel}`,
-          `允许追问：${responsePolicy.allow_followup === false ? '否' : '是'}`,
+          `允许追问：${renderPolicy.allow_followup === false ? '否' : '是'}`,
           `主导动机：${dominantMotiveLabel}`,
         ]}
       />
@@ -134,7 +134,7 @@ export default function ResponsePolicyDashboard() {
         <MetricCard
           label="回复姿态"
           value={replyPostureLabel}
-          hint={`字数上限 ${responsePolicy.max_chars ?? '—'}`}
+          hint={`字数上限 ${renderPolicy.max_chars ?? '—'}`}
           tone="text-purple-600"
         />
         <MetricCard
@@ -191,22 +191,22 @@ export default function ResponsePolicyDashboard() {
             <h2 className="text-sm font-semibold text-gray-800">回复预算</h2>
           </div>
           <div className="mt-4 space-y-3">
-            <KeyValueRow label="字数预算" value={responsePolicy.max_chars != null ? `${responsePolicy.max_chars} 字` : '—'} />
+            <KeyValueRow label="字数预算" value={renderPolicy.max_chars != null ? `${renderPolicy.max_chars} 字` : '—'} />
             <KeyValueRow
               label="句数预算"
               value={
-                responsePolicy.min_sentences != null || responsePolicy.max_sentences != null
-                  ? `${responsePolicy.min_sentences ?? '—'} ~ ${responsePolicy.max_sentences ?? '—'}`
+                renderPolicy.min_sentences != null || renderPolicy.max_sentences != null
+                  ? `${renderPolicy.min_sentences ?? '—'} ~ ${renderPolicy.max_sentences ?? '—'}`
                   : '—'
               }
             />
-            <KeyValueRow label="允许追问" value={formatBoolean(responsePolicy.allow_followup)} />
-            <KeyValueRow label="允许换题" value={formatBoolean(responsePolicy.allow_topic_shift)} />
-            <KeyValueRow label="允许答后主动" value={formatBoolean(responsePolicy.allow_proactive_after_reply)} />
-            <KeyValueRow label="是否收敛" value={formatBoolean(responsePolicy.should_be_withdrawn)} />
-            <KeyValueRow label="温度下限" value={formatNumber(responsePolicy.warmth_floor, 2)} />
-            <KeyValueRow label="亲密上限" value={formatNumber(responsePolicy.intimacy_ceiling, 2)} />
-            <KeyValueRow label="幽默上限" value={formatNumber(responsePolicy.humor_ceiling, 2)} />
+            <KeyValueRow label="允许追问" value={formatBoolean(renderPolicy.allow_followup)} />
+            <KeyValueRow label="允许换题" value={formatBoolean(renderPolicy.allow_topic_shift)} />
+            <KeyValueRow label="允许答后主动" value={formatBoolean(renderPolicy.allow_proactive_after_reply)} />
+            <KeyValueRow label="是否收敛" value={formatBoolean(renderPolicy.should_be_withdrawn)} />
+            <KeyValueRow label="温度下限" value={formatNumber(renderPolicy.warmth_floor, 2)} />
+            <KeyValueRow label="亲密上限" value={formatNumber(renderPolicy.intimacy_ceiling, 2)} />
+            <KeyValueRow label="幽默上限" value={formatNumber(renderPolicy.humor_ceiling, 2)} />
           </div>
         </div>
 
@@ -292,3 +292,4 @@ export default function ResponsePolicyDashboard() {
     </div>
   )
 }
+

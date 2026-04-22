@@ -141,6 +141,7 @@ async def health() -> dict[str, Any]:
         "trace_feed_warm_cache": get_trace_feed_warm_status(),
         "insights_summary_warm_cache": get_insights_summary_warm_status(),
         "digital_life_overview_warm_cache": get_digital_life_overview_warm_status(),
+        "life_body_warm_cache": get_life_body_warm_status(),
         "timestamp": int(time.time() * 1000),
     }
 

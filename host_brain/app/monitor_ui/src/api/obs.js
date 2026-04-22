@@ -894,19 +894,6 @@ export function fetchInputHumanoidLoopSourceCorrelation(params = {}) {
   return request(`/obs/input/humanoid-loop-source-correlation${qs ? '?' + qs : ''}`)
 }
 
-// ===== Ref #49: RecallPack token budget stats =====
-
-/**
- * RecallPack token budget stats.
- * @param {object} params - { window_minutes }
- */
-export function fetchRecallPackStats(params = {}) {
-  const qs = new URLSearchParams(
-    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
-  ).toString()
-  return request(`/obs/recall-pack/stats${qs ? '?' + qs : ''}`)
-}
-
 // ===== Ref #50: UIAssertionGuard 统计 =====
 
 /**

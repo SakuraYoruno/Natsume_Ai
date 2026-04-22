@@ -1,4 +1,4 @@
-import { lazy } from 'react'
+﻿import { lazy } from 'react'
 
 export const PAGE_LOADERS = Object.freeze({
   '/digital-life': () => import('../pages/DigitalLifeOverview.jsx'),
@@ -20,7 +20,7 @@ export const PAGE_LOADERS = Object.freeze({
   '/persona-config': () => import('../pages/PersonaPromptOps.jsx'),
   '/runtime-mode': () => import('../pages/RuntimeMode.jsx'),
   '/inner-world': () => import('../pages/InnerWorldDashboard.jsx'),
-  '/response-policy': () => import('../pages/ResponsePolicyDashboard.jsx'),
+  '/render-policy': () => import('../pages/RenderPolicyDashboard.jsx'),
   '/self-model': () => import('../pages/SelfModelDashboard.jsx'),
   '/canon': () => import('../pages/Canon.jsx'),
   '/bond': () => import('../pages/Bond.jsx'),
@@ -54,7 +54,7 @@ export const PromptConfig = lazyPage('/prompt-config')
 export const PersonaPromptOps = lazyPage('/persona-config')
 export const RuntimeMode = lazyPage('/runtime-mode')
 export const InnerWorldDashboard = lazyPage('/inner-world')
-export const ResponsePolicyDashboard = lazyPage('/response-policy')
+export const RenderPolicyDashboard = lazyPage('/render-policy')
 export const SelfModelDashboard = lazyPage('/self-model')
 export const Canon = lazyPage('/canon')
 export const Bond = lazyPage('/bond')
@@ -72,3 +72,4 @@ export function preloadRoute(path) {
   }
   return loader().catch(() => null)
 }
+

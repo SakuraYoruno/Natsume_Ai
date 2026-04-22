@@ -119,7 +119,7 @@ def _build_host_mock_reply_text(node_id: str | None, runtime_payload: dict[str, 
     )
 
 _GEMINI_PRIMARY_RETRY_NODE_ID = "core_reasoner_primary"
-_GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro"})
+_GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro", "gemini-3.1-pro-preview"})
 _GEMINI_PRIMARY_FALLBACK_MODEL_ID = "gemini-2.5-flash-lite"
 _GEMINI_PRIMARY_RETRYABLE_MARKERS = (
     "503",

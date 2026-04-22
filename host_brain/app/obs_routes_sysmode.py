@@ -1,4 +1,4 @@
-"""obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
+﻿"""obs_routes_sysmode.py — 系统运行模式管理（从 obs_routes.py 拆分）。
 
 包含：GET/POST /obs/sys-mode / history / auto-rules / event
 """
@@ -249,7 +249,7 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     self_reflection_pulse: Dict[str, Any] = Field(default_factory=dict)
     bond_narrative: Dict[str, Any] = Field(default_factory=dict)
     motive_state: Dict[str, Any] = Field(default_factory=dict)
-    response_policy: Dict[str, Any] = Field(default_factory=dict)
+    render_policy: Dict[str, Any] = Field(default_factory=dict)
     somatic_state: Dict[str, Any] = Field(default_factory=dict)
     peripheral_state: Dict[str, Any] = Field(default_factory=dict)
     circadian_state: Dict[str, Any] = Field(default_factory=dict)
@@ -509,3 +509,4 @@ def post_sys_mode_event(
         "result": result,
         "timestamp": _now_ms(),
     }
+

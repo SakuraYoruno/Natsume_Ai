@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+﻿import { useCallback, useMemo } from 'react'
 import { buildLifeBodyModel } from '../models/lifeBodyModel.js'
 import { resolveLoadState } from '../models/loadState.js'
 import { useLifeBodyQuery } from '../queries/lifeBodyQueries.js'
@@ -89,7 +89,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const bondState = runtimeSnapshot?.bond_state || {}
   const emotionContext = runtimeSnapshot?.emotion_context || {}
   const motiveState = runtimeSnapshot?.motive_state || {}
-  const responsePolicy = runtimeSnapshot?.response_policy || {}
+  const renderPolicy = runtimeSnapshot?.render_policy || {}
   const silenceState = runtimeSnapshot?.silence_state || {}
   const offlineState = runtimeSnapshot?.offline_state || {}
   const selfModelSnapshot = runtimeSnapshot?.self_model_snapshot || {}
@@ -286,7 +286,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     bondState,
     emotionContext,
     motiveState,
-    responsePolicy,
+    renderPolicy,
     silenceState,
     offlineState,
     selfModelSnapshot,
@@ -302,3 +302,4 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     refreshAll,
   }
 }
+

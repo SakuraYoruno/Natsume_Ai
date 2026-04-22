@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Background,
@@ -87,7 +87,7 @@ const TRACE_STAGE_GROUPS = [
     label: '编排决策',
     description: '响应策略与 Cortex Orchestrator 的主链路判断、路由结果。',
     icon: Bot,
-    nodeIds: ['response_policy', 'cortex_orchestrator'],
+    nodeIds: ['render_policy', 'cortex_orchestrator'],
   },
   {
     id: 'agent',
@@ -448,7 +448,7 @@ function resolveTribeEventStageId(event) {
   if (merged.includes('immune')) return 'immune'
   if (merged.includes('query_planner') || merged.includes('agentic_rag') || merged.includes('retrieval') || merged.includes('recall')) return 'retrieval'
   if (merged.includes('emotion') || merged.includes('body_sense') || merged.includes('motive') || merged.includes('persona') || merged.includes('limbic')) return 'persona'
-  if (merged.includes('response_policy') || merged.includes('cortex_orchestrator') || merged.includes('cortex_agent')) return 'orchestration'
+  if (merged.includes('render_policy') || merged.includes('cortex_orchestrator') || merged.includes('cortex_agent')) return 'orchestration'
   if (merged.includes('executive_router') || merged.includes('sub_agent') || merged.includes('chat_agent') || merged.includes('ans_agent')) return 'agent'
   if (merged.includes('prompt') || merged.includes('llm')) return 'llm'
   if (merged.includes('egress') || merged.includes('pii') || merged.includes('episodic') || merged.includes('bond') || merged.includes('tts') || merged.includes('vts')) return 'postprocess'
@@ -1778,3 +1778,4 @@ export default function TraceRequestDetail() {
     </div>
   )
 }
+

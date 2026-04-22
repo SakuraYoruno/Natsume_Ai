@@ -29,7 +29,7 @@ const WINDOW_OPTIONS = [
 const INSIGHT_GROUPS = [
   { id: 'global', title: '全局与异常', icon: AlertTriangle, desc: '入口守护决策、全局异常追踪、热力图、请求链路统计、失败事件', color: 'text-red-600', bg: 'bg-gradient-to-br from-red-50 to-red-100 border border-red-100', iconBg: 'bg-red-100' },
   { id: 'memory', title: '器官与记忆', icon: Database, desc: '器官健康、记忆统计、情景写入、上下文压缩', color: 'text-teal-700', bg: 'bg-gradient-to-br from-teal-50 to-teal-100 border border-teal-100', iconBg: 'bg-teal-100' },
-  { id: 'llm', title: '执行与推理', icon: Bot, desc: '执行循环、模型成本、路由决策、提示构建、召回包', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
+  { id: 'llm', title: '执行与推理', icon: Bot, desc: '执行循环、模型成本、路由决策、提示构建、五路召回', color: 'text-indigo-700', bg: 'bg-gradient-to-br from-indigo-50 to-indigo-100 border border-indigo-100', iconBg: 'bg-indigo-100' },
   { id: 'safety', title: '安全与护栏', icon: ShieldCheck, desc: '质检违规、权限拒绝、规则校验、界面断言安全', color: 'text-emerald-700', bg: 'bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-100', iconBg: 'bg-emerald-100' },
   { id: 'state', title: '状态与规范', icon: GitMerge, desc: '关系查询统计、主设定提案', color: 'text-cyan-700', bg: 'bg-gradient-to-br from-cyan-50 to-cyan-100 border border-cyan-100', iconBg: 'bg-cyan-100' },
   { id: 'vts', title: '表情通道', icon: Tv, desc: '表情通道统计', color: 'text-pink-700', bg: 'bg-gradient-to-br from-pink-50 to-pink-100 border border-pink-100', iconBg: 'bg-pink-100' },

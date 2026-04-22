@@ -1,4 +1,4 @@
-import {
+﻿import {
   ArrowRightLeft,
   Bookmark,
   Brain,
@@ -73,8 +73,8 @@ export const GROUPS = [
     color: '#7C3AED',
     bg: '#F5F3FF',
     border: '#C4B5FD',
-    nodeIds: ['response_policy', 'cortex_orchestrator'],
-    traceNodeIds: ['response_policy', 'cortex_orchestrator'],
+    nodeIds: ['render_policy', 'cortex_orchestrator'],
+    traceNodeIds: ['render_policy', 'cortex_orchestrator'],
   },
   {
     id: 'agent',
@@ -126,7 +126,7 @@ export const FULL_CHAIN_SCHEMA = {
     { node_id: 'emotion_context', node_type: 'system', display_name: '情感上下文', layer: 'host' },
     { node_id: 'persona_resident_memory', node_type: 'memory', display_name: '人设常驻记忆', layer: 'host' },
     { node_id: 'motive_state', node_type: 'system', display_name: '动机状态', layer: 'host' },
-    { node_id: 'response_policy', node_type: 'system', display_name: '响应策略', layer: 'host' },
+    { node_id: 'render_policy', node_type: 'system', display_name: '响应策略', layer: 'host' },
     { node_id: 'cortex_orchestrator', node_type: 'system', display_name: 'Cortex Orchestrator', layer: 'host' },
     { node_id: 'executive_router', node_type: 'agent', display_name: 'Executive Router', layer: 'host' },
     { node_id: 'sub_agent_code', node_type: 'agent', display_name: '代码代理', layer: 'host' },
@@ -155,8 +155,8 @@ export const FULL_CHAIN_SCHEMA = {
     { source: 'recall_fusion', target: 'emotion_context' },
     { source: 'emotion_context', target: 'persona_resident_memory' },
     { source: 'persona_resident_memory', target: 'motive_state' },
-    { source: 'motive_state', target: 'response_policy' },
-    { source: 'response_policy', target: 'cortex_orchestrator' },
+    { source: 'motive_state', target: 'render_policy' },
+    { source: 'render_policy', target: 'cortex_orchestrator' },
     { source: 'cortex_orchestrator', target: 'executive_router' },
     { source: 'cortex_orchestrator', target: 'prompt_builder' },
     { source: 'executive_router', target: 'sub_agent_code' },
@@ -471,3 +471,4 @@ export function getLiveTraceFlow(traceData) {
       }
     })
 }
+

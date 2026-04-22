@@ -5,7 +5,6 @@ import {
   fetchDistillationStats,
   fetchEpisodicStoreStats,
   fetchMemoryStats,
-  fetchRecallPackStats,
   fetchResidentMemoryContext,
 } from '../api/memory.js'
 import { OBS_STALE_TIMES } from './freshness.js'
@@ -19,12 +18,11 @@ export function useMemoryOverviewQuery({
   pollingInterval = 30,
 } = {}) {
   const queryFn = useCallback(async () => {
-    const [memory, episodic, distill, canon, recall, compress, resident] = await Promise.all([
+    const [memory, episodic, distill, canon, compress, resident] = await Promise.all([
       fetchMemoryStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchEpisodicStoreStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchDistillationStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchCanonDocuments().catch(() => null),
-      fetchRecallPackStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchContextCompressorStats({ window_minutes: windowMinutes }).catch(() => null),
       fetchResidentMemoryContext().catch(() => null),
     ])
@@ -34,7 +32,6 @@ export function useMemoryOverviewQuery({
       episodicData: episodic,
       distillData: distill,
       canonDocs: canon,
-      recallData: recall,
       compressData: compress,
       residentContext: resident,
     }
@@ -56,7 +53,6 @@ export function useMemoryOverviewQuery({
     episodicData: query.data?.episodicData ?? null,
     distillData: query.data?.distillData ?? null,
     canonDocs: query.data?.canonDocs ?? null,
-    recallData: query.data?.recallData ?? null,
     compressData: query.data?.compressData ?? null,
     residentContext: query.data?.residentContext ?? null,
   }

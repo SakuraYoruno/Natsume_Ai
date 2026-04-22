@@ -1,4 +1,4 @@
-export const DASH = '—'
+﻿export const DASH = '—'
 
 export const MODE_META = {
   normal: {
@@ -130,7 +130,7 @@ export const SLOT_LABELS = {
   self_reflection_pulse: '自我反思',
   bond_narrative: '关系叙事',
   motive_state: '动机系统',
-  response_policy: '回复策略',
+  render_policy: '回复策略',
   somatic_state: '躯体状态',
   peripheral_state: '外周状态',
   circadian_state: '昼夜节律',
@@ -314,7 +314,7 @@ const TOKEN_LABELS = {
   emotion_context: 'Emotion Context',
   persona_resident_memory: 'Persona Resident Memory',
   motive_state: 'Motive State',
-  response_policy: 'Response Policy',
+  render_policy: 'Render Policy',
   prompt_builder: 'Prompt Builder',
   airlock_egress: 'Airlock Egress',
 }
@@ -547,3 +547,4 @@ export function formatNonLiveSlotList(nonLiveSlots) {
 
   return items.length > 0 ? items.join('、') : DASH
 }
+

@@ -140,15 +140,8 @@ def build_chat_episodic_text(*, user_message: str, assistant_reply: str, session
         repair_utf8_latin1_mojibake(str(user_message or "").strip()),
         limit=800,
     )
-    assistant_text = _truncate_for_prompt(
-        repair_utf8_latin1_mojibake(str(assistant_reply or "").strip()),
-        limit=1200,
-    )
-    return (
-        f"[session={session_id}]\n"
-        f"User: {user_text}\n"
-        f"Natsume: {assistant_text}"
-    ).strip()
+    _ = assistant_reply
+    return f"[session={session_id}]\nUser: {user_text}".strip()
 
 
 def persist_chat_episodic_memory(

@@ -1,4 +1,4 @@
-"""Life-body aggregate observability routes for monitor-side digital life views."""
+﻿"""Life-body aggregate observability routes for monitor-side digital life views."""
 
 from __future__ import annotations
 
@@ -1514,7 +1514,7 @@ def _build_runtime_alerts(
     sys_mode_status = _as_dict(snapshot.get("sys_mode_status"))
     reflection_guard = _as_dict(_as_dict(snapshot.get("self_reflection_pulse")).get("narrative_guardrails"))
     silence_state = _as_dict(snapshot.get("silence_state"))
-    response_policy = _as_dict(snapshot.get("response_policy"))
+    render_policy = _as_dict(snapshot.get("render_policy"))
     runtime_summary = _as_dict(snapshot.get("runtime_summary"))
     degraded_reasons = _as_list(snapshot.get("degraded_reasons"))
     non_live_slots = _get_non_live_slots(snapshot)
@@ -1562,11 +1562,11 @@ def _build_runtime_alerts(
 
     if bool(silence_state.get("topic_resistance_active")):
         resistant_topic = _as_text(silence_state.get("resistant_topic")) or "该话题"
-        push("TOPIC_RESISTANCE_ACTIVE", f"当前对“{resistant_topic}”存在明显抗拒，回复会更偏谨慎。", severity="warning", source="runtime", to="/response-policy")
+        push("TOPIC_RESISTANCE_ACTIVE", f"当前对“{resistant_topic}”存在明显抗拒，回复会更偏谨慎。", severity="warning", source="runtime", to="/render-policy")
 
-    if bool(response_policy.get("should_be_withdrawn")):
+    if bool(render_policy.get("should_be_withdrawn")):
         posture = _format_reply_posture(_as_dict(runtime_summary.get("reply_posture")).get("style"))
-        push("WITHDRAWN_REPLY_POLICY", f"当前策略更偏短答与收敛，回复姿态为{posture}。", severity="info", source="runtime", to="/response-policy")
+        push("WITHDRAWN_REPLY_POLICY", f"当前策略更偏短答与收敛，回复姿态为{posture}。", severity="info", source="runtime", to="/render-policy")
 
     injection_count = int((prompt_stats or {}).get("injection_detected_count") or 0)
     if injection_count > 0:
@@ -2221,3 +2221,4 @@ def get_pathologies(
     if focused_item:
         focused_organ = next((item for item in organ_systems if _as_text(item.get("id")) == _as_text(focused_item.get("organId"))), None)
     return PathologiesResponse(window_minutes=window_minutes, timestamp=_now_ms(), items=filtered, total=len(items), filtered_total=len(filtered), primaryPathology=_as_dict(model.get("primaryPathology")) or None, organSystems=organ_systems, focusedItem=focused_item, focusedOrgan=focused_organ, relatedEvents=related_events, filters={"organ": normalized_organ or None, "severity": normalized_severity or None, "pathology_id": normalized_pathology_id or None}, meta={"aggregateSource": "obs-sidecar-pathologies", "coverage": "derived pathology projection from runtime alerts, gateway hotspots, and forge runtime quality", "lifeBodyMeta": _as_dict(payload.get("meta"))})
+

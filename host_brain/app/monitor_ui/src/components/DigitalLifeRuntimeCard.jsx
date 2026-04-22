@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import { Link } from 'react-router-dom'
 import { Brain, Heart, Orbit, ShieldAlert, ShieldCheck, Sparkles } from 'lucide-react'
 import { buildDigitalLifeAlerts, getDigitalLifeRuntimeSummary, getNonLiveSlots } from '../utils/runtimeHealth.js'
@@ -62,7 +62,7 @@ export default function DigitalLifeRuntimeCard({
         {!compact ? (
           <div className="flex flex-wrap gap-2">
             <Link to="/digital-life" className="btn-secondary text-sm">数字生命体总览</Link>
-            <Link to="/response-policy" className="btn-secondary text-sm">回复策略</Link>
+            <Link to="/render-policy" className="btn-secondary text-sm">回复策略</Link>
             <Link to="/self-model" className="btn-secondary text-sm">自我模型</Link>
           </div>
         ) : null}
@@ -104,3 +104,4 @@ export default function DigitalLifeRuntimeCard({
     </div>
   )
 }
+

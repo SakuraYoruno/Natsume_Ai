@@ -373,9 +373,32 @@ class QQAdapter(AbstractPlatformAdapter):
     def health(self) -> dict[str, Any]:
         """返回适配器健康状态（调用 OneBot /get_status 接口）。"""
         try:
-            resp = httpx.get(f"{self._api_base}/get_status", timeout=3.0)
-            resp.raise_for_status()
-            ob_status = resp.json()
+            health_url = f"{self._api_base}/get_status"
+            ob_status: dict[str, Any] | None = None
+            last_error: Exception | None = None
+
+            # 和 runtime 管理脚本保持一致：优先 POST，再回退 GET。
+            # 对本地 OneBot 检查禁用代理环境，避免 localhost 被系统代理误拦。
+            for method in ("POST", "GET"):
+                try:
+                    with httpx.Client(timeout=3.0, trust_env=False) as client:
+                        if method == "POST":
+                            resp = client.post(health_url, json={})
+                        else:
+                            resp = client.get(health_url)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    if isinstance(payload, dict):
+                        ob_status = payload
+                        break
+                    ob_status = {"status": "error", "detail": "invalid onebot health payload"}
+                    break
+                except Exception as exc:
+                    last_error = exc
+
+            if ob_status is None:
+                raise last_error or RuntimeError("onebot health probe failed")
+
             onebot_data = ob_status.get("data")
             if not isinstance(onebot_data, dict):
                 onebot_data = {}

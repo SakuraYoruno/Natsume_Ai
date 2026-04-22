@@ -1,5 +1,5 @@
 import React from 'react'
-import { Bot, FileCode, GitBranch, Layers, Zap } from 'lucide-react'
+import { Bot, FileCode, GitBranch, Zap } from 'lucide-react'
 import LineChart from '../charts/LineChart.jsx'
 import BarChart from '../charts/BarChart.jsx'
 import EmptyStateCard from '../EmptyStateCard.jsx'
@@ -8,7 +8,6 @@ import InsightSection from './InsightSection.jsx'
 import {
   useLlmRouteStatsQuery,
   usePromptBuilderStatsQuery,
-  useRecallPackStatsQuery,
 } from '../../queries/diagnosticQueries.js'
 import {
   formatTime,
@@ -67,40 +66,6 @@ function RouteStatsSection({ windowMinutes, pollingEnabled = false, pollingInter
           )}
         </div>
       </div>
-    </InsightSection>
-  )
-}
-
-function RecallPackSection({ windowMinutes, pollingEnabled = false, pollingInterval = 30, pollingTick = 0 }) {
-  const queryState = useRecallPackStatsQuery({ windowMinutes, pollingEnabled, pollingInterval, pollingTick })
-  const { statsData: data } = queryState
-  return (
-    <InsightSection icon={Layers} title="召回包词元预算" color="text-cyan-600">
-      <SectionQueryMeta queryState={queryState} windowMinutes={windowMinutes} sampleKeys={['total_packs', 'slots']} />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
-        <StatCard label="召回包总数" value={data?.total_packs ?? '—'} color="text-cyan-600" />
-        <StatCard label="平均词元数" value={data?.avg_total_tokens != null ? Math.round(data.avg_total_tokens) : '—'} color="text-blue-600" />
-        <StatCard label="截断率" value={data?.truncation_rate != null ? `${data.truncation_rate}%` : '—'} color={data?.truncation_rate > 30 ? 'text-red-500' : 'text-green-600'} />
-        <StatCard label="冲突率" value={data?.conflict_rate != null ? `${data.conflict_rate}%` : '—'} color={data?.conflict_rate > 10 ? 'text-orange-500' : 'text-green-600'} />
-      </div>
-      {(data?.slots ?? []).length > 0 && (
-        <div className="card p-4">
-          <div className="text-xs font-semibold text-gray-600 mb-3">各槽位词元消耗</div>
-          <div className="space-y-2">
-            {(data?.slots ?? []).map((s) => (
-              <div key={s.slot} className="flex items-center gap-2">
-                <div className="text-xs text-gray-600 w-28 truncate font-mono" title={s.slot}>{s.slot}</div>
-                <div className="flex-1 bg-gray-100 rounded-full h-2">
-                  <div className="bg-cyan-400 h-2 rounded-full" style={{ width: `${data.avg_total_tokens > 0 ? Math.min(100, s.avg_tokens / data.avg_total_tokens * 100).toFixed(1) : 0}%` }} />
-                </div>
-                <div className="text-xs text-gray-500 w-12 text-right">{Math.round(s.avg_tokens)} tok</div>
-                {s.truncation_rate > 0 && <div className="text-xs text-orange-400">截断{s.truncation_rate}%</div>}
-                {s.conflict_suppressed_count > 0 && <div className="text-xs text-red-400">冲突{s.conflict_suppressed_count}</div>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </InsightSection>
   )
 }
@@ -289,7 +254,6 @@ export default function InsightsLlmGroup({
 
       <RouteStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
       <PromptBuilderStatsSection windowMinutes={windowMinutes} {...deepQueryProps} />
-      <RecallPackSection windowMinutes={windowMinutes} {...deepQueryProps} />
     </>
   )
 }
