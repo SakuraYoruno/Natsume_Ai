@@ -50,7 +50,6 @@ def test_silence_tick_skips_during_recent_foreground_chat(monkeypatch) -> None:
         lambda **_kwargs: {
             "active": True,
             "cooldown_remaining_ms": 31000,
-            "speed_profile": "context_fast",
         },
     )
 

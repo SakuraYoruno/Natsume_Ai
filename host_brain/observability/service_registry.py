@@ -47,7 +47,6 @@ HOST_SERVICES: List[Dict[str, str]] = [
     {"service_id": "reranker",            "name": "Reranker Service",       "side": "host"},
     {"service_id": "memory_guard",        "name": "Memory Guard",           "side": "host"},
     {"service_id": "state_arbiter",       "name": "State Arbiter",          "side": "host"},
-    {"service_id": "recall_pack_builder", "name": "Recall Pack Builder",    "side": "host"},
 ]
 
 HOST_SERVICE_IDS: List[str] = [s["service_id"] for s in HOST_SERVICES]

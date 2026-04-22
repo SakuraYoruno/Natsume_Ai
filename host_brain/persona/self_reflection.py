@@ -1,4 +1,4 @@
-"""SelfReflection：定期自省内容生成器——Phase III + 事件驱动增强。
+﻿"""SelfReflection：定期自省内容生成器——Phase III + 事件驱动增强。
 
 职责：
   1. 概率控制自省触发（每 5-10 轮触发一次）
@@ -590,7 +590,7 @@ def _build_narrative_guardrails(
     growth_awareness: dict[str, Any] | None = None,
     growth_summary: dict[str, Any] | None = None,
     style_evolution: dict[str, Any] | None = None,
-    response_policy: dict[str, Any] | None = None,
+    render_policy: dict[str, Any] | None = None,
     runtime_flags: dict[str, Any] | None = None,
     base_tags: list[str] | None = None,
     render_target_lang: str = "zh",
@@ -599,7 +599,7 @@ def _build_narrative_guardrails(
     growth_awareness = dict(growth_awareness or {})
     growth_summary = dict(growth_summary or {})
     style_evolution = dict(style_evolution or {})
-    response_policy = dict(response_policy or {})
+    render_policy = dict(render_policy or {})
     runtime_flags = dict(runtime_flags or {})
 
     tags: list[str] = [
@@ -683,9 +683,9 @@ def _build_narrative_guardrails(
 
     sys_mode = str(runtime_flags.get("sys_mode") or "").strip().lower()
     policy_guarded = bool(
-        response_policy.get("should_be_brief")
-        or response_policy.get("should_be_withdrawn")
-        or response_policy.get("withdrawal_guard")
+        render_policy.get("should_be_brief")
+        or render_policy.get("should_be_withdrawn")
+        or render_policy.get("withdrawal_guard")
         or sys_mode in {"sleep", "locked", "maintenance"}
     )
     if policy_guarded:
@@ -870,7 +870,7 @@ def align_self_reflection_pulse(
     offline_state: dict[str, Any] | None = None,
     bond_summary: dict[str, Any] | None = None,
     motive_state: dict[str, Any] | None = None,
-    response_policy: dict[str, Any] | None = None,
+    render_policy: dict[str, Any] | None = None,
     runtime_flags: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> dict[str, Any]:
@@ -883,7 +883,7 @@ def align_self_reflection_pulse(
         offline_state=dict(offline_state or {}),
         bond_summary=dict(bond_summary or {}),
         motive_state=dict(motive_state or {}),
-        response_policy=dict(response_policy or {}),
+        render_policy=dict(render_policy or {}),
         runtime_flags=dict(runtime_flags or {}),
         render_target_lang=render_target_lang,
     )
@@ -909,7 +909,7 @@ def align_self_reflection_pulse(
         time_context=str(result.get("time_context") or ""),
         growth_awareness=dict(result.get("growth_awareness") or {}),
         growth_summary=dict(result.get("growth_summary") or {}),
-        response_policy=response_policy,
+        render_policy=render_policy,
         runtime_flags=runtime_flags,
         base_tags=existing_tags,
         render_target_lang=render_target_lang,
@@ -1018,3 +1018,4 @@ def _build_style_trend_note(
         parts.append(tmpl.format(trait=cn))
 
     return "，".join(parts) if parts else ""
+

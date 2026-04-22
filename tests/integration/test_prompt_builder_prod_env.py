@@ -179,10 +179,10 @@ def test_prompt_builder_prod_self_reflection_and_bond_narrative_extended_blocks(
 
 
 
-def test_prompt_builder_prod_renders_response_policy_constraints() -> None:
+def test_prompt_builder_prod_renders_render_policy_constraints() -> None:
     assert str(os.environ.get('Natsume_ENV') or '').lower() == 'prod'
     runtime_payload = _base_runtime_payload()
-    runtime_payload['response_policy'] = {
+    runtime_payload['render_policy'] = {
         'max_chars': 120,
         'max_sentences': 2,
         'min_sentences': 1,
@@ -211,17 +211,17 @@ def test_prompt_builder_prod_renders_response_policy_constraints() -> None:
 
     prompt = render_node_generation_prompt(node_id='renderer_ja_c_style', runtime_payload=runtime_payload)
 
-    assert 'response_policy_max_chars: 120' in prompt
-    assert 'response_policy_allow_followup: false' in prompt
-    assert 'response_policy_allow_topic_shift: false' in prompt
-    assert 'response_policy_confession_guard: true' in prompt
-    assert 'response_policy_should_be_withdrawn: true' in prompt
-    assert 'response_policy_directive:' in prompt
+    assert 'render_policy_max_chars: 120' in prompt
+    assert 'render_policy_allow_followup: false' in prompt
+    assert 'render_policy_allow_topic_shift: false' in prompt
+    assert 'render_policy_confession_guard: true' in prompt
+    assert 'render_policy_should_be_withdrawn: true' in prompt
+    assert 'render_policy_directive:' in prompt
     assert '本轮不要主动追问。' in prompt
     assert '本轮不要擅自扩展或切换话题。' in prompt
     assert '避免表白式、依赖式或越界亲密表达。' in prompt
     assert '自我叙事约束：若时间线证据不足，只能说最近/这段时间，不要声称具体多久。' in prompt
-    assert 'response_policy_reasons: willingness:LOW, confession_guard:shallow_bond' in prompt
+    assert 'render_policy_reasons: willingness:LOW, confession_guard:shallow_bond' in prompt
 
 
 

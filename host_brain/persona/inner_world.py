@@ -908,8 +908,10 @@ def _generate_inner_stream_note_from_llm(
             model_id=model_id,
             api_key=api_key,
             timeout_ms=timeout_ms,
-            prompt_text=prompt_text,
-            system_prompt=system_prompt,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text},
+            ],
             gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.72, "top_p": 0.9}),
             base_url_override=base_url_override,
         ):

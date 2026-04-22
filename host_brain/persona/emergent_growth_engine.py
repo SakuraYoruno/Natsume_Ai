@@ -421,7 +421,7 @@ class EmergentGrowthEngine:
         )
 
     def get_growth_summary(self, user_id: str) -> dict[str, Any]:
-        """获取成长摘要（供 chat_context_builder 注入）。
+        """获取成长摘要（供上下文装配主链注入）。
 
         Returns:
             包含 total_growth_cycles / last_growth_ts / recent_themes /

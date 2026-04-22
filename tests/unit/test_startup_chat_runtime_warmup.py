@@ -82,9 +82,9 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "host_brain.app.graph_config_llm_runtime.resolve_chat_agent_llm_runtime",
-        lambda *, base_runtime, speed_profile=None: {
+        lambda *, base_runtime: {
             **base_runtime,
-            "model_id": f"chat::{speed_profile or 'default'}",
+            "model_id": "chat::default",
         },
     )
     monkeypatch.setattr(
@@ -100,8 +100,6 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
 
     assert status.startswith("OK")
     assert "base=gemini:gemini-2.5-flash-lite" in status
-    assert "direct=chat::direct_fast" in status
-    assert "context=chat::context_fast" in status
     assert "default=chat::default" in status
     assert "router=router::ready" in status
     assert "subagent=subagent::ready" in status

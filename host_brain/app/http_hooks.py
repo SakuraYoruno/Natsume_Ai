@@ -436,7 +436,6 @@ def runtime_lifespan(
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
             from host_brain.app.dependencies import (
-                get_recall_pack_builder,
                 get_memory_guard,
                 get_state_arbiter,
                 get_distillation_engine,
@@ -480,7 +479,6 @@ def runtime_lifespan(
                 logger=logger,
             )
             for name, factory in [
-                ("recall_pack_builder", get_recall_pack_builder),
                 ("memory_guard", get_memory_guard),
                 ("state_arbiter", get_state_arbiter),
             ]:

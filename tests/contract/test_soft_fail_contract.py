@@ -4,7 +4,7 @@
   1. soft_fail 可导入且行为符合契约（捕获 expected_exc、返回 fallback、致命不吞）
   2. 进程内 Counter 正确累加 stage × exc_type
   3. MetricsCollector.collect() 暴露 soft_failure_metrics 段落
-  4. chat_context_builder._build_runtime_mode_flags 的业务段降级纳入观测
+  4. build_runtime_mode_flags 的业务段降级纳入观测
 """
 
 from __future__ import annotations
@@ -139,7 +139,7 @@ class TestMetricsCollectorSoftFailureExposure:
 
 
 # ---------------------------------------------------------------------------
-# 契约 3：chat_context_builder 业务段改造生效
+# 契约 3：chat_generation_payload 业务段改造生效
 # ---------------------------------------------------------------------------
 
 
@@ -149,7 +149,7 @@ class TestChatContextBuilderSoftFailIntegration:
         仅含 sys_mode，且 SoftFailure 计数器记录 stage=chat.runtime_mode.activity_monitor。
         """
         from host_brain.app import dependencies as _deps
-        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
+        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
 
         class _BrokenMonitor:
             def get_status(self):  # noqa: D401, ANN001
@@ -158,7 +158,7 @@ class TestChatContextBuilderSoftFailIntegration:
         original = getattr(_deps, "_activity_monitor_ref", None)
         try:
             _deps._activity_monitor_ref = _BrokenMonitor()
-            flags = _build_runtime_mode_flags({})
+            flags = build_runtime_mode_flags({})
         finally:
             _deps._activity_monitor_ref = original
 
@@ -171,7 +171,7 @@ class TestChatContextBuilderSoftFailIntegration:
     def test_runtime_mode_flags_happy_path_no_soft_failure(self) -> None:
         """正常路径不应产生 SoftFailure。"""
         from host_brain.app import dependencies as _deps
-        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
+        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
 
         class _HealthyMonitor:
             def get_status(self):  # noqa: D401, ANN001
@@ -180,7 +180,7 @@ class TestChatContextBuilderSoftFailIntegration:
         original = getattr(_deps, "_activity_monitor_ref", None)
         try:
             _deps._activity_monitor_ref = _HealthyMonitor()
-            flags = _build_runtime_mode_flags({})
+            flags = build_runtime_mode_flags({})
         finally:
             _deps._activity_monitor_ref = original
 

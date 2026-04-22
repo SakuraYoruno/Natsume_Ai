@@ -60,6 +60,58 @@ EMOTION_FALLBACK_MAP: dict[str, list[str]] = {
     "TSUNDERE": ["tsundere", "daily"],
 }
 
+_PROMPT_SCENE_MARKERS: dict[str, tuple[str, ...]] = {
+    "identity": (
+        "你是谁",
+        "你叫什么",
+        "你叫什么名字",
+        "你的名字",
+    ),
+    "relationship_boundary": (
+        "我们不熟",
+        "不熟吧",
+        "很熟吗",
+        "熟吗",
+        "为什么要帮我",
+        "为什么帮我",
+        "为什么要管我",
+        "为什么管我",
+        "我问你就说吗",
+    ),
+    "tone_rejection": (
+        "我不喜欢这样",
+        "别这么热心",
+        "别这么说",
+        "太模板",
+        "不像她",
+        "不符人设",
+    ),
+    "help_continuity": (
+        "那你还会帮我吗",
+        "还会帮我吗",
+        "还会理我吗",
+        "还会管我吗",
+    ),
+}
+
+_PROMPT_SCENE_PLANS: dict[str, tuple[tuple[str, int], ...]] = {
+    "identity": (("daily", 5),),
+    "relationship_boundary": (("daily", 3), ("tsundere", 2)),
+    "tone_rejection": (("tsundere", 3), ("daily", 2)),
+    "help_continuity": (("daily", 3), ("tsundere", 2)),
+}
+
+
+def infer_prompt_scene(user_message: str) -> str | None:
+    text = str(user_message or "").strip()
+    if not text:
+        return None
+    for scene in ("identity", "relationship_boundary", "tone_rejection", "help_continuity"):
+        markers = _PROMPT_SCENE_MARKERS.get(scene, ())
+        if any(marker and marker in text for marker in markers):
+            return scene
+    return None
+
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged(template_id)
@@ -263,6 +315,99 @@ class EmotionTaggedUtteranceIndex:
             primary.samples.extend(daily.samples)
 
         return primary
+
+    def retrieve_scene_mix(
+        self,
+        scene_plan: list[tuple[str, int]] | tuple[tuple[str, int], ...],
+        *,
+        lang: str = "cn",
+        max_chars: int = DEFAULT_MAX_TOKEN_BUDGET,
+        query_emotion: str = "",
+    ) -> UtteranceRetrievalResult:
+        if not self._built:
+            return UtteranceRetrievalResult(query_emotion=query_emotion)
+
+        samples: list[UtteranceSample] = []
+        seen_texts: set[str] = set()
+        total_candidates = 0
+        remaining_chars = max_chars
+        matched_scene = ""
+
+        for scene, take_n in list(scene_plan):
+            if take_n <= 0 or remaining_chars <= 0:
+                continue
+            candidates = list(self._index.get(scene, []))
+            total_candidates += len(candidates)
+            if not matched_scene and candidates:
+                matched_scene = scene
+            if lang == "ja":
+                filtered = [line for line in candidates if line.jp_text]
+            else:
+                filtered = [line for line in candidates if line.cn_text]
+            if not filtered:
+                filtered = candidates
+            if not filtered:
+                continue
+            picked = random.sample(filtered, min(take_n, len(filtered)))
+            for line in picked:
+                text = line.jp_text if lang == "ja" else line.cn_text
+                if not text:
+                    text = line.cn_text or line.jp_text
+                normalized_text = str(text).strip()
+                if not normalized_text or normalized_text in seen_texts:
+                    continue
+                if remaining_chars <= 0 and samples:
+                    break
+                seen_texts.add(normalized_text)
+                remaining_chars -= len(normalized_text)
+                samples.append(
+                    UtteranceSample(
+                        cn_text=line.cn_text,
+                        jp_text=line.jp_text,
+                        emotion_tag=line.emotion_tag,
+                        speaker=line.speaker_cn or line.speaker_jp or "夏目藍",
+                    )
+                )
+
+        if samples:
+            return UtteranceRetrievalResult(
+                samples=samples,
+                query_emotion=str(query_emotion or "").strip().upper(),
+                matched_scene=matched_scene or "mixed",
+                total_in_scene=total_candidates,
+                fallback_used=False,
+            )
+
+        fallback_tag = str(query_emotion or "NEUTRAL").strip().upper() or "NEUTRAL"
+        return self.retrieve(fallback_tag, lang=lang, n=DEFAULT_SAMPLE_SIZE, max_chars=max_chars)
+
+    def retrieve_for_prompt(
+        self,
+        emotion_tag: str,
+        *,
+        user_message: str = "",
+        lang: str = "cn",
+        primary_n: int = 3,
+        daily_n: int = 2,
+        max_chars: int = DEFAULT_MAX_TOKEN_BUDGET,
+    ) -> UtteranceRetrievalResult:
+        scene_hint = infer_prompt_scene(user_message)
+        if scene_hint:
+            plan = _PROMPT_SCENE_PLANS.get(scene_hint, ())
+            if plan:
+                return self.retrieve_scene_mix(
+                    plan,
+                    lang=lang,
+                    max_chars=max_chars,
+                    query_emotion=scene_hint.upper(),
+                )
+        return self.retrieve_multi_scene(
+            emotion_tag,
+            lang=lang,
+            primary_n=primary_n,
+            daily_n=daily_n,
+            max_chars=max_chars,
+        )
 
     def render_for_prompt(
         self,

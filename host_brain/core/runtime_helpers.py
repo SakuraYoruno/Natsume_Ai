@@ -228,8 +228,8 @@ def _summarize_motive_state_for_trace(motive_state: Mapping[str, Any] | None) ->
     return summary
 
 
-def _summarize_response_policy_for_trace(response_policy: Mapping[str, Any] | None) -> dict[str, Any]:
-    raw = _coerce_trace_mapping(response_policy)
+def _summarize_render_policy_for_trace(render_policy: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(render_policy)
     if not raw:
         return {}
     summary: dict[str, Any] = {}
@@ -253,6 +253,105 @@ def _summarize_response_policy_for_trace(response_policy: Mapping[str, Any] | No
     reason_tags = [str(tag).strip() for tag in list(raw.get("policy_reason_tags") or []) if str(tag).strip()]
     if reason_tags:
         summary["reason_tags"] = reason_tags[:8]
+    for key in ("avoid_verbatim_repeat", "acknowledge_recent_answer", "react_to_user_stance", "prefer_meta_response_over_restating"):
+        value = _coerce_trace_bool(raw.get(key))
+        if value is not None:
+            summary[key] = value
+    for key in ("reply_mode", "control_line", "dialogue_summary", "topic_summary", "render_policy_summary"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+    return summary
+
+
+def _summarize_dialogue_state_for_trace(dialogue_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(dialogue_state)
+    if not raw:
+        return {}
+    summary: dict[str, Any] = {}
+    for key in ("last_user_act", "last_assistant_act", "current_user_act", "repeat_surface_group", "user_stance"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+    try:
+        summary["repeat_question_count"] = int(raw.get("repeat_question_count") or 0)
+    except (TypeError, ValueError):
+        pass
+    for key in ("recent_identity_answered", "recent_boundary_answered"):
+        value = _coerce_trace_bool(raw.get(key))
+        if value is not None:
+            summary[key] = value
+    answered_topics = [str(item).strip() for item in list(raw.get("answered_topics_recent") or []) if str(item).strip()]
+    if answered_topics:
+        summary["answered_topics_recent"] = answered_topics[:8]
+    reason_tags = [str(item).strip() for item in list(raw.get("dialogue_state_reason_tags") or []) if str(item).strip()]
+    if reason_tags:
+        summary["reason_tags"] = reason_tags[:8]
+    return summary
+
+
+def _summarize_topic_state_for_trace(topic_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(topic_state)
+    if not raw:
+        return {}
+    summary: dict[str, Any] = {}
+    active_topics = [str(item).strip() for item in list(raw.get("active_topics") or []) if str(item).strip()]
+    if active_topics:
+        summary["active_topics"] = active_topics[:8]
+    recent_topics = [str(item).strip() for item in list(raw.get("recently_answered_topics") or []) if str(item).strip()]
+    if recent_topics:
+        summary["recently_answered_topics"] = recent_topics[:8]
+    try:
+        summary["entry_count"] = len(list(raw.get("entries") or []))
+    except Exception:
+        pass
+    return summary
+
+
+def _summarize_affect_state_for_trace(affect_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(affect_state)
+    if not raw:
+        return {}
+    summary: dict[str, Any] = {}
+    for key in ("emotion_tag",):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+    for key in ("valence", "arousal", "stability", "social_energy", "warmth_bias", "withdraw_bias", "irritation_bias"):
+        value = _coerce_trace_score(raw.get(key))
+        if value is not None:
+            summary[key] = value
+    try:
+        summary["carryover_turns"] = int(raw.get("carryover_turns") or 0)
+    except (TypeError, ValueError):
+        pass
+    return summary
+
+
+def _summarize_relationship_state_for_trace(relationship_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(relationship_state)
+    if not raw:
+        return {}
+    summary: dict[str, Any] = {}
+    stage = str(raw.get("bond_stage") or "").strip()
+    if stage:
+        summary["bond_stage"] = stage
+    for key in ("familiarity", "trust", "comfort", "openness", "dependency_tolerance", "protectiveness", "boundary_softness", "affection_signal"):
+        value = _coerce_trace_score(raw.get(key))
+        if value is not None:
+            summary[key] = value
+    return summary
+
+
+def _summarize_drive_state_for_trace(drive_state: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(drive_state)
+    if not raw:
+        return {}
+    summary: dict[str, Any] = {}
+    for key in ("reach_out_drive", "withdraw_drive", "continuity_drive", "self_protection_drive", "care_drive", "repair_drive", "playfulness_drive"):
+        value = _coerce_trace_score(raw.get(key))
+        if value is not None:
+            summary[key] = value
     return summary
 
 
@@ -351,7 +450,12 @@ __all__ = [
     "_build_trace_output_digest",
     "_detect_trace_fallback_used",
     "_summarize_motive_state_for_trace",
-    "_summarize_response_policy_for_trace",
+    "_summarize_dialogue_state_for_trace",
+    "_summarize_render_policy_for_trace",
+    "_summarize_topic_state_for_trace",
+    "_summarize_affect_state_for_trace",
+    "_summarize_relationship_state_for_trace",
+    "_summarize_drive_state_for_trace",
     "_summarize_emotion_context_for_trace",
     "_summarize_persona_resident_memory_for_trace",
 ]

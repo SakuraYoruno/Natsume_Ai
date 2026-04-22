@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from host_brain.app import prompt_builder as pb
+from host_brain.app.context import identity_source
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.prompt_template_store import (
     PromptTemplateStore,
@@ -42,21 +43,21 @@ def test_character_profile_loader_handles_short_invalid_and_cached_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     profile_path = tmp_path / "character_profile.json"
-    pb._CHARACTER_PROFILE_CACHE.clear()
+    identity_source._CHARACTER_PROFILE_CACHE.clear()
 
     profile_path.write_text("{bad json", encoding="utf-8")
     monkeypatch.setenv("NATSUME_CHARACTER_PROFILE_PATH", str(profile_path))
-    assert pb._load_character_profile("ja") == ""
+    assert identity_source.load_character_profile("ja") == ""
 
     long_text = "你是测试版夏目蓝，请保持稳定和自然的语气。" * 8
     profile_path.write_text(
         json.dumps({"instruction_cn": long_text}, ensure_ascii=False),
         encoding="utf-8",
     )
-    pb._CHARACTER_PROFILE_CACHE.clear()
-    assert long_text in pb._load_character_profile("zh")
+    identity_source._CHARACTER_PROFILE_CACHE.clear()
+    assert long_text in identity_source.load_character_profile("zh")
     profile_path.write_text("{}", encoding="utf-8")
-    assert long_text in pb._load_character_profile("zh")
+    assert long_text in identity_source.load_character_profile("zh")
 
 
 def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
@@ -183,7 +184,6 @@ def test_builtin_prompt_builder_runtime_templates_are_clean() -> None:
     assert persona_expression_templates["zh"]["default_guidance"] == "保持真诚、克制和分寸。"
     assert persona_expression_templates["ja"]["default_guidance"] == "誠実に、静かに、分を越えずに。"
     assert runtime_section_templates["bond_aware_title"] == "BOND_AWARE_STYLE:\n"
-    assert runtime_section_templates["memory_recall_evidence_guidance"].startswith("- Use these tagged recall snippets")
     assert emotion_binding_templates["zh"]["echo_intensity"]["high"] == "明显被带动"
     assert emotion_binding_templates["ja"]["echo_intensity"]["high"] == "強く引かれている"
     assert emotion_binding_templates["zh"]["vad"]["default"] == "情绪平稳"
@@ -450,13 +450,13 @@ def test_render_node_generation_prompt_uses_render_contract_template_override(
     assert "- rc-empty" in prompt
 
 
-def test_render_node_generation_prompt_uses_response_policy_template_override(
+def test_render_node_generation_prompt_uses_render_policy_template_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
     store.upsert_template(
-        "prompt_builder.response_policy.directives",
+        "prompt_builder.render_policy.directives",
         content=json.dumps(
             {
                 "no_followup": "这一轮不要追问。",
@@ -487,7 +487,7 @@ def test_render_node_generation_prompt_uses_response_policy_template_override(
                 "observability": {},
             },
             "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "response_policy": {
+            "render_policy": {
                 "allow_followup": False,
                 "max_sentences": 2,
             },
@@ -550,63 +550,6 @@ def test_render_node_generation_prompt_uses_persona_expression_template_override
     assert "先轻轻接住对方，再慢慢回应。" in prompt
 
 
-def test_render_node_generation_prompt_includes_memory_recall_persona_block() -> None:
-    prompt = pb.render_node_generation_prompt(
-        node_id=pb.CHAT_DIRECT_NODE_ID,
-        runtime_payload={
-            "request": {
-                "request_id": "req-memory-recall-prompt",
-                "person_id": "person-memory-recall-prompt",
-                "session_id": "session-memory-recall-prompt",
-                "thread_id": None,
-                "user_message": "我突然想起以前一起散步的时候了",
-            },
-            "render": {"target_lang": "zh"},
-            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "emotion": {
-                "state": {"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.56},
-                "snapshot": {"emotion_context": {"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.56}},
-            },
-            "prompt_context": {
-                "payload": {
-                    "hard_snapshot": {"session_id": "session-memory-recall-prompt", "thread_id": None},
-                    "bond_summary": {},
-                    "authoritative": [],
-                    "retrieval": [],
-                    "style_pack": {},
-                    "constraints": {"strict_json_output": True},
-                    "tool_meta_pack": [],
-                    "emotion_pulse": {"emotion_tag": "HAPPY", "mood_state": "steady"},
-                    "emotion_recall": "Current affective layer: mood_state=steady; emotion_tag=HAPPY.",
-                    "memory_emotion_hint": {"recall_bias": "uncertain"},
-                    "memory_persona_evidence": [
-                        {
-                            "content": "shared walk by the river",
-                            "emotion_color_tag": "WARM",
-                            "suppression_flag": True,
-                            "distortion_level": 0.4,
-                        }
-                    ],
-                    "memory_recall_summary": "本次召回命中了 2 条带人格化标记的记忆；其中 1 条处于压制状态；处理建议：先轻触试探，不要把旧事说得过满",
-                    "bond_texture": {},
-                },
-                "validation": {"valid": True, "reason_code": None, "violation_count": 0},
-                "observability": {},
-            },
-            "core_reasoner_primary": {"payload": {"narrative": {"text": "core narrative"}, "intent_draft": {}}},
-            "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
-            "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
-        },
-    )
-
-    assert "MEMORY_RECALL_PERSONA" in prompt
-    assert "MEMORY_RECALL_EVIDENCE" in prompt
-    assert "filtered recollections" in prompt
-    assert "shared walk by the river" in prompt
-    assert "emotion=WARM" in prompt
-    assert "本次召回命中了 2 条带人格化标记的记忆" in prompt
-
-
 def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hint() -> None:
     prompt = pb.render_node_generation_prompt(
         node_id="cortex_orchestrator",
@@ -656,7 +599,7 @@ def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_direc
                 "observability": {},
             },
             "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "response_policy": {
+            "render_policy": {
                 "allow_followup": False,
                 "allow_topic_shift": False,
                 "allow_proactive_after_reply": False,
@@ -713,9 +656,6 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
                 "planning_execution_title": "PLAN_EXEC_BLOCK:\n",
                 "multimodal_input_title": "MULTI_INPUT_BLOCK:\n",
                 "emotion_recall_title": "EMOTION_RECALL_BLOCK:\n",
-                "memory_recall_persona_title": "MEMORY_PERSONA_BLOCK:\n",
-                "memory_recall_evidence_title": "MEMORY_EVIDENCE_BLOCK:\n",
-                "memory_recall_evidence_guidance": "- 把这些片段当作模糊记忆线索，不要当作硬证据。\n",
             },
             ensure_ascii=False,
         ),
@@ -739,15 +679,6 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
                     "style_pack": {},
                     "constraints": {},
                     "emotion_recall": "Current affective layer: mood_state=steady.",
-                    "memory_persona_evidence": [
-                        {
-                            "content": "shared walk by the river",
-                            "emotion_color_tag": "WARM",
-                            "suppression_flag": True,
-                            "distortion_level": 0.4,
-                        }
-                    ],
-                    "memory_recall_summary": "本次召回命中了带人格线索的记忆。",
                 },
                 "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
                 "observability": {},
@@ -776,9 +707,6 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
     assert "PLAN_EXEC_BLOCK" in prompt
     assert "MULTI_INPUT_BLOCK" in prompt
     assert "EMOTION_RECALL_BLOCK" in prompt
-    assert "MEMORY_PERSONA_BLOCK" in prompt
-    assert "MEMORY_EVIDENCE_BLOCK" in prompt
-    assert "模糊记忆线索" in prompt
 
 
 def test_render_node_generation_prompt_uses_self_reflection_template_override(
@@ -818,7 +746,7 @@ def test_render_node_generation_prompt_uses_self_reflection_template_override(
                 "observability": {},
             },
             "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "response_policy": {
+            "render_policy": {
                 "allow_followup": False,
                 "max_sentences": 2,
             },
@@ -832,3 +760,4 @@ def test_render_node_generation_prompt_uses_self_reflection_template_override(
     )
 
     assert "自我叙事提示：只能说最近，不要说具体时长。" in prompt
+

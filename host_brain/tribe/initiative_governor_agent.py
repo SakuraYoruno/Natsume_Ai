@@ -356,7 +356,7 @@ class InitiativeGovernorAgent:
     def export_runtime_state(self) -> dict[str, Any]:
         """T-272：导出 InitiativeGovernorAgent 当前运行时状态快照。
 
-        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        供 CortexAgent.collect_tribe_context() 和上下文装配主链使用，
         不触发任何副作用（不 emit 事件，不写 state_registry）。
 
         Returns:

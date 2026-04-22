@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -59,7 +59,7 @@ def test_prompt_config_routes_reject_invalid_json(monkeypatch) -> None:
     client = _build_client(monkeypatch)
 
     response = client.put(
-        "/prompt-config/templates/chat_agent.response_policy.withdrawn_replacements",
+        "/prompt-config/templates/chat_agent.render_policy.withdrawn_replacements",
         json={"content": "{bad json", "enabled": True},
     )
 
@@ -94,3 +94,4 @@ def test_prompt_config_routes_persona_first_batch_catalog(monkeypatch) -> None:
     first_entry = payload["bundles"][0]["entries"][0]
     assert "mood_text_pool" in first_entry["focus_keys"]
     assert first_entry["item"]["template_id"] == "self_model.narrative_text_pools"
+

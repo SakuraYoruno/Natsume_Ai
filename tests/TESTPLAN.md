@@ -128,7 +128,7 @@
 - T-54: Neo4j bond constraints/index assets must be loadable from migrations, and summarizer path must not perform SSOT writes.
 - T-Neo4j-01: Neo4j external deployment config/probe must be deterministic (`uri/database/auth_ref/pool/tls/enabled`), and auth/schema/leader failures must map to stable reason_code with migration-log audit linkage.
 - T-74: Bond summary must be derived-only and must not contain sensitive numeric values; only bucketed fields plus replay refs (`event_id/evidence_refs`) are allowed.
-- T-75: Bond summary must inject into `context_pack.bond_summary` slot without mixed-slot leakage and remain valid under `T-CP-01` isolation checks.
+- T-75: Bond summary must inject into `prompt_context.bond_summary` slot without mixed-slot leakage and remain valid under `T-CP-01` isolation checks.
 
 ## T-SSOT
 - T-SSOT-01: Static scan must detect and block non-single-writer Neo4j write paths (`write_bond_event` outside `bond_dynamics`) without relying on external services.

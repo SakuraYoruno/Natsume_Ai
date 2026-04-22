@@ -247,6 +247,21 @@ CREATE TABLE IF NOT EXISTS clawd_action_log (
     ts_ms INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS session_topic_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    person_id TEXT,
+    topic_key TEXT NOT NULL,
+    last_answer_turn_index INTEGER NOT NULL,
+    last_answer_request_id TEXT,
+    source_assistant_act TEXT,
+    confidence REAL NOT NULL DEFAULT 1.0,
+    stale_after_turn_index INTEGER NOT NULL DEFAULT 0,
+    metadata TEXT,
+    updated_at_ms INTEGER NOT NULL,
+    UNIQUE(session_id, topic_key)
+);
+
 CREATE TABLE IF NOT EXISTS service_health_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     request_id TEXT,
@@ -305,6 +320,54 @@ CREATE TABLE IF NOT EXISTS voice_event_log (
     detail TEXT,
     ts_ms INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS response_feedback_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_request_id TEXT,
+    session_id TEXT,
+    person_id TEXT,
+    thread_id TEXT,
+    target_text_hash TEXT,
+    feedback_score REAL NOT NULL,
+    feedback_tags TEXT,
+    feedback_source TEXT,
+    created_at_ms INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS conversation_turn (
+    turn_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    person_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    ts_ms INTEGER NOT NULL,
+    turn_index INTEGER NOT NULL,
+    lang TEXT NOT NULL DEFAULT 'zh',
+    token_count INTEGER,
+    corrupted INTEGER NOT NULL DEFAULT 0,
+    metadata TEXT,
+    created_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_turn_session_ts
+    ON conversation_turn(session_id, ts_ms);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_turn_session_turn_idx
+    ON conversation_turn(session_id, turn_index);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_turn_request
+    ON conversation_turn(request_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conversation_turn_session_request_role_unique
+    ON conversation_turn(session_id, request_id, role);
+CREATE INDEX IF NOT EXISTS idx_session_topic_state_session
+    ON session_topic_state(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_topic_state_updated
+    ON session_topic_state(updated_at_ms);
+CREATE INDEX IF NOT EXISTS idx_session_topic_state_request
+    ON session_topic_state(last_answer_request_id);
 
 CREATE TABLE IF NOT EXISTS retrieval_event_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -451,6 +514,11 @@ CREATE INDEX IF NOT EXISTS idx_voice_event_request ON voice_event_log(request_id
 CREATE INDEX IF NOT EXISTS idx_voice_event_session ON voice_event_log(session_id);
 CREATE INDEX IF NOT EXISTS idx_voice_event_type ON voice_event_log(event_type);
 CREATE INDEX IF NOT EXISTS idx_voice_event_ts ON voice_event_log(ts_ms);
+CREATE INDEX IF NOT EXISTS idx_response_feedback_request ON response_feedback_log(target_request_id);
+CREATE INDEX IF NOT EXISTS idx_response_feedback_session ON response_feedback_log(session_id);
+CREATE INDEX IF NOT EXISTS idx_response_feedback_person ON response_feedback_log(person_id);
+CREATE INDEX IF NOT EXISTS idx_response_feedback_hash ON response_feedback_log(target_text_hash);
+CREATE INDEX IF NOT EXISTS idx_response_feedback_created ON response_feedback_log(created_at_ms);
 CREATE INDEX IF NOT EXISTS idx_retrieval_event_request ON retrieval_event_log(request_id);
 CREATE INDEX IF NOT EXISTS idx_retrieval_event_op_kind ON retrieval_event_log(op_kind);
 CREATE INDEX IF NOT EXISTS idx_retrieval_event_ts ON retrieval_event_log(ts_ms);

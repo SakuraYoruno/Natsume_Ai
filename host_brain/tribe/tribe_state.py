@@ -537,7 +537,7 @@ class TribeStateRegistry:
 
         # ── T-59：bond_trend_hint（SocialBrainAgent 快照）────────────────────
         # 从 social_brain_agent 命名空间读取 bond_trend_hint，
-        # 供 chat_context_builder 在构建 prompt 时参考任务成功带来的关系倾向。
+        # 供上下文装配主链在构建 prompt 时参考任务成功带来的关系倾向。
         bond_trend_hint = ""
         social_ns2 = states.get("social_brain_agent") or states.get("social_brain")
         if social_ns2:
@@ -546,7 +546,7 @@ class TribeStateRegistry:
 
         # ── T-80：loneliness_level（PainRewardAgent 快照）────────────────────
         # 从 pain_reward_agent 命名空间读取最近一次孤独感强度，
-        # 供 chat_context_builder 在高孤独感时触发主动关怀策略。
+        # 供上下文装配主链在高孤独感时触发主动关怀策略。
         loneliness_level = 0.0
         pain_ns = states.get("pain_reward_agent") or states.get("pain_reward")
         if pain_ns:
@@ -555,7 +555,7 @@ class TribeStateRegistry:
 
         # ── T-90：high_loneliness_flag ────────────────────────────────────────
         # loneliness_level > 0.7 时标记为高孤独感，
-        # 供 chat_context_builder 快速判断是否需要触发主动关怀策略。
+        # 供上下文装配主链快速判断是否需要触发主动关怀策略。
         high_loneliness_flag = loneliness_level > 0.7
 
         # ── Circadian / Proprioception（系统层）──────────────────────────────

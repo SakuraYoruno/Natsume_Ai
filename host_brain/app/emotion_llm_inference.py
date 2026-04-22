@@ -312,8 +312,10 @@ def _sync_llm_emotion_call(
         model_id=model_id,
         api_key=api_key,
         timeout_ms=timeout_ms,
-        prompt_text=user_prompt,
-        system_prompt=system_prompt,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
         gen_params={"temperature": 0.1, "top_p": 0.8},  # 低温度确保结构化输出
         base_url_override=base_url_override,
     ):

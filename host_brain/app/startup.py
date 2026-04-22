@@ -464,22 +464,12 @@ def warmup_chat_llm_runtime_profiles() -> str:
             )
         )
 
-        direct_runtime = resolve_chat_agent_llm_runtime(
-            base_runtime=base_runtime,
-            speed_profile="direct_fast",
-        )
-        context_runtime = resolve_chat_agent_llm_runtime(
-            base_runtime=base_runtime,
-            speed_profile="context_fast",
-        )
         default_runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)
         router_runtime = resolve_executive_router_llm_runtime(base_runtime=base_runtime)
         subagent_runtime = resolve_subagent_llm_runtime(base_runtime=base_runtime)
 
         warmed_parts = [
             f"base={str(base_runtime.get('provider_name') or 'unknown')}:{str(base_runtime.get('model_id') or 'unknown')}",
-            f"direct={str(direct_runtime.get('model_id') or 'unknown')}",
-            f"context={str(context_runtime.get('model_id') or 'unknown')}",
             f"default={str(default_runtime.get('model_id') or 'unknown')}",
             f"router={str(router_runtime.get('model_id') or 'unknown')}",
             f"subagent={str(subagent_runtime.get('model_id') or 'unknown')}",

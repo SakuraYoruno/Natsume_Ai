@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime as _dt
 import logging
@@ -290,7 +290,7 @@ class PrefrontalAgent:
         offline_state: Mapping[str, Any] | None = None,
         bond_summary: Mapping[str, Any] | None = None,
         motive_state: Mapping[str, Any] | None = None,
-        response_policy: Mapping[str, Any] | None = None,
+        render_policy: Mapping[str, Any] | None = None,
         runtime_flags: Mapping[str, Any] | None = None,
         render_target_lang: str = "zh",
     ) -> dict[str, Any]:
@@ -302,7 +302,7 @@ class PrefrontalAgent:
             offline_state=dict(offline_state or {}),
             bond_summary=dict(bond_summary or {}),
             motive_state=dict(motive_state or {}),
-            response_policy=dict(response_policy or {}),
+            render_policy=dict(render_policy or {}),
             runtime_flags=dict(runtime_flags or {}),
             render_target_lang=str(render_target_lang or "zh"),
         )
@@ -1283,3 +1283,4 @@ from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401
 from host_brain.tribe.tribe_state import get_global_registry  # noqa: E402, F401
+

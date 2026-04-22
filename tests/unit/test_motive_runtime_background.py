@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app import chat_context_builder as ccb
+from host_brain.app.context.persona_expression import _apply_motive_state_to_persona_expression_hint
 from host_brain.persona.emotional_silence import EmotionalSilenceEngine
 from host_brain.persona.inner_world import InnerWorldState, OfflineInnerWorld
 from host_brain.persona.motive_runtime import build_offline_state_from_inner_state
@@ -305,8 +305,8 @@ def test_motive_behavior_matrix_changes_proactive_silence_and_expression_paths(m
         "follow_up_tendency": 0.0,
         "pace_hint": "steady",
     }
-    supportive_hint = ccb._apply_motive_state_to_persona_expression_hint(base_hint, supportive_motive)
-    retreat_hint = ccb._apply_motive_state_to_persona_expression_hint(base_hint, retreat_motive)
+    supportive_hint = _apply_motive_state_to_persona_expression_hint(base_hint, supportive_motive)
+    retreat_hint = _apply_motive_state_to_persona_expression_hint(base_hint, retreat_motive)
 
     assert supportive_hint["tone"] == "caring"
     assert supportive_hint["follow_up_tendency"] > retreat_hint["follow_up_tendency"]

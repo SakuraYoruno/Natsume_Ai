@@ -6,7 +6,7 @@ import json
 import os
 from queue import Empty, Queue
 from threading import Thread
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_CODEX = "codex"
@@ -162,8 +162,7 @@ def stream_llm_chunks(
     model_id: str,
     api_key: str,
     timeout_ms: int,
-    prompt_text: str,
-    system_prompt: str,
+    messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None = None,
     base_url_override: str | None = None,
 ) -> "Generator[str, None, None]":
@@ -174,14 +173,13 @@ def stream_llm_chunks(
         model_id: 模型 ID
         api_key: API Key
         timeout_ms: 超时毫秒
-        prompt_text: 用户侧 prompt 文本
-        system_prompt: system 角色提示词
+        messages: 原生 chat messages 数组
         gen_params: 可选生成参数（temperature/top_p）
 
     Yields:
         str: LLM 返回的文本片段（token chunk）
     """
-    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
 
     provider = str(provider_name or "").strip().lower()
@@ -233,11 +231,21 @@ def stream_llm_chunks(
         **llm_kwargs,
     )
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=prompt_text),
-    ]
-    for chunk in llm.stream(messages):
+    lc_messages = []
+    for item in list(messages or []):
+        if not isinstance(item, Mapping):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "")
+        if not content:
+            continue
+        if role == "system":
+            lc_messages.append(SystemMessage(content=content))
+        elif role == "assistant":
+            lc_messages.append(AIMessage(content=content))
+        else:
+            lc_messages.append(HumanMessage(content=content))
+    for chunk in llm.stream(lc_messages):
         text = getattr(chunk, "content", "") or ""
         if text:
             yield text
@@ -249,8 +257,7 @@ async def astream_llm_chunks(
     model_id: str,
     api_key: str,
     timeout_ms: int,
-    prompt_text: str,
-    system_prompt: str,
+    messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None = None,
     base_url_override: str | None = None,
 ) -> "AsyncGenerator[str, None]":
@@ -264,8 +271,7 @@ async def astream_llm_chunks(
         model_id: 模型 ID
         api_key: API Key
         timeout_ms: 超时毫秒
-        prompt_text: 用户侧 prompt 文本
-        system_prompt: system 角色提示词
+        messages: 原生 chat messages 数组
         gen_params: 可选生成参数（temperature/top_p）
 
     Yields:
@@ -288,8 +294,7 @@ async def astream_llm_chunks(
                 model_id=model_id,
                 api_key=api_key,
                 timeout_ms=timeout_ms,
-                prompt_text=prompt_text,
-                system_prompt=system_prompt,
+                messages=messages,
                 gen_params=gen_params,
                 base_url_override=base_url_override,
             ):

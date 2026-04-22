@@ -535,7 +535,7 @@ class SocialBrainAgent:
 
         T-48：任务成功时，将 bond_trend 偏置为 PROGRESS，
         并将 last_task_success 写入 social_brain_agent 快照，
-        供 aggregate_vital_signs() 和 chat_context_builder 参考。
+        供 aggregate_vital_signs() 和上下文装配主链参考。
         任务成功是关系进展的正向信号，但不直接触发 BOND_PROGRESS
         （避免与 _on_interaction_recorded 中的 bond_trend 逻辑重复）。
         """
@@ -771,7 +771,7 @@ class SocialBrainAgent:
         """T-140：获取风格 Canon 条目，将 StyleCanonStore 族化到 SocialBrainAgent。
 
         SocialBrainAgent 作为风格 Canon 的唯一访问入口，确保风格数据
-        不在 chat_context_builder 等模块中直接调用 StyleCanonStore。
+        不在上下文装配等模块中直接调用 StyleCanonStore。
 
         Args:
             canon_id: Canon ID，默认 "natsume_ai_cn"。
@@ -840,7 +840,7 @@ class SocialBrainAgent:
         """T-141：执行风格蒸馏，将 StyleDistiller 族化到 SocialBrainAgent。
 
         SocialBrainAgent 作为风格蒸馏的唯一调用入口，确保蒸馏逻辑
-        不在 chat_context_builder 等模块中直接调用 StyleDistiller。
+        不在上下文装配等模块中直接调用 StyleDistiller。
 
         Args:
             lang: 语言，"cn" 或 "ja"，默认 "cn"。
@@ -895,7 +895,7 @@ class SocialBrainAgent:
         """处理 HUMOR_LANDED 事件：幽默成功时 bond_trend_hint 设为 progress。
 
         T-91：幽默成功是关系升温的正向信号，
-        将 bond_trend_hint 设为 progress，供 chat_context_builder 参考。
+        将 bond_trend_hint 设为 progress，供上下文装配主链参考。
         """
         try:
             import logging  # noqa: PLC0415

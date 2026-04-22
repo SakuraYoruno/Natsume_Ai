@@ -1,4 +1,4 @@
-"""prompt_builder_node.py — 节点完整版 Prompt 构建（含所有上下文注入）。
+﻿"""prompt_builder_node.py — 节点完整版 Prompt 构建（含所有上下文注入）。
 
 拆分自 prompt_builder.py（P2-10）：
   - render_node_generation_prompt: 节点生成提示词（完整版，含 prompt_context）
@@ -19,16 +19,14 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_skill_manifest,
     get_chat_runtime_user_message,
 )
+from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
 from host_brain.app.prompt_builder_utils import (
-    CHAT_DIRECT_NODE_ID,
     CHAT_INTENT_SOURCE_NODE_ID,
     _build_character_dynamic_patch,
-    _build_direct_response_priority,
     _build_node_role_instruction,
     _contains_any_token,
     _format_template_text,
     _get_prompt_evidence_limit,
-    _load_character_profile,
     _load_template_mapping,
     _mapping_list,
     _mapping_section,
@@ -40,9 +38,16 @@ from host_brain.app.prompt_builder_utils import (
     extract_node_runtime_payload,
     repair_utf8_latin1_mojibake,
 )
-
-
-def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str, Any]) -> str:
+def render_node_generation_prompt(
+    *,
+    node_id: str,
+    runtime_payload: Mapping[str, Any],
+    include_character_profile: bool = True,
+    include_style_block: bool = True,
+    include_persona_examples: bool = True,
+    include_node_role: bool = True,
+    include_user_message: bool = True,
+) -> str:
     """节点生成提示词（完整版，含 prompt_context 所有上下文注入）。"""
     user_message = _truncate_for_prompt(get_chat_runtime_user_message(runtime_payload), limit=1000)
     render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
@@ -151,9 +156,14 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     planner_text = extract_node_narrative_text(runtime_payload, node_id="planner_constraints")
     verifier_text = extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
 
-    node_style = resolve_prompt_context_style_row(prompt_context, node_id=node_id)
-    style_instruction = _truncate_for_prompt(node_style.get("style_instruction") or node_style.get("instruction"), limit=1200)
-    style_block = f"【说话风格】\n{style_instruction}\n\n" if style_instruction else ""
+    context_plane = assemble_prompt_context_plane(node_id=node_id, runtime_payload=runtime_payload)
+    style_instruction = _truncate_for_prompt(context_plane.identity.style_instruction, limit=1200)
+    _style_disambiguation = _truncate_for_prompt(context_plane.identity.style_disambiguation, limit=220)
+    style_block = (
+        f"【说话风格】\n{_style_disambiguation}\n{style_instruction}\n\n"
+        if style_instruction and include_style_block
+        else ""
+    )
 
     # ── 各类上下文块构建（bond_aware/predictive/planning/skill/multimodal）──
     bond_aware_style_block = ""
@@ -330,9 +340,6 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     pulse_style_hint = _truncate_for_prompt(prompt_context_emotion.get("style_hint"), limit=160)
     memory_emotion_hint_raw = prompt_context.get("memory_emotion_hint")
     memory_emotion_hint = dict(memory_emotion_hint_raw) if isinstance(memory_emotion_hint_raw, Mapping) else {}
-    memory_recall_summary = _truncate_for_prompt(prompt_context.get("memory_recall_summary") or memory_emotion_hint.get("memory_recall_summary"), limit=360)
-    memory_persona_evidence_raw = prompt_context.get("memory_persona_evidence")
-    memory_persona_evidence = ([dict(item) for item in memory_persona_evidence_raw if isinstance(item, Mapping)] if isinstance(memory_persona_evidence_raw, list) else [])
     bond_texture_raw = prompt_context.get("bond_texture")
     bond_texture = dict(bond_texture_raw) if isinstance(bond_texture_raw, Mapping) else {}
     memory_emotion_hint_json = _truncate_for_prompt(json.dumps(memory_emotion_hint, ensure_ascii=False, sort_keys=True), limit=600)
@@ -396,49 +403,49 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _bs_hint = str(_body_sense.get("body_sense_hint") or "").strip()
     _bs_active = bool(_body_sense.get("is_active", False)) or bool(_bs_hint)
 
-    # ── ResponsePolicyLayer ──────────────────────────────────────────────
-    _response_policy_raw = runtime_payload.get("response_policy") or prompt_context.get("response_policy")
-    _response_policy: dict = dict(_response_policy_raw) if isinstance(_response_policy_raw, Mapping) else {}
-    _rp_max_chars = int(_response_policy.get("max_chars") or 0)
-    _rp_max_sentences = int(_response_policy.get("max_sentences") or 0)
-    _rp_min_sentences = int(_response_policy.get("min_sentences") or 0)
-    _rp_allow_followup = bool(_response_policy.get("allow_followup", True))
-    _rp_allow_topic_shift = bool(_response_policy.get("allow_topic_shift", True))
-    _rp_allow_proactive = bool(_response_policy.get("allow_proactive_after_reply", True))
-    _rp_warmth_floor = float(_response_policy.get("warmth_floor") or 0.0)
-    _rp_warmth_ceiling = float(_response_policy.get("warmth_ceiling") or 1.0)
-    _rp_intimacy_ceiling = float(_response_policy.get("intimacy_ceiling") or 0.75)
-    _rp_humor_ceiling = float(_response_policy.get("humor_ceiling") or 0.8)
-    _rp_confession_guard = bool(_response_policy.get("confession_guard", False))
-    _rp_withdrawal_guard = bool(_response_policy.get("withdrawal_guard", False))
-    _rp_should_be_brief = bool(_response_policy.get("should_be_brief", False))
-    _rp_should_be_withdrawn = bool(_response_policy.get("should_be_withdrawn", False))
-    _rp_reasons = [str(item).strip() for item in (_response_policy.get("policy_reason_tags") or []) if str(item).strip()]
-    _rp_active = bool(_response_policy)
+    # ── RenderPolicyLayer ────────────────────────────────────────────────
+    _render_policy_raw = runtime_payload.get("render_policy") or prompt_context.get("render_policy")
+    _render_policy: dict = dict(_render_policy_raw) if isinstance(_render_policy_raw, Mapping) else {}
+    _rp_max_chars = int(_render_policy.get("max_chars") or 0)
+    _rp_max_sentences = int(_render_policy.get("max_sentences") or 0)
+    _rp_min_sentences = int(_render_policy.get("min_sentences") or 0)
+    _rp_allow_followup = bool(_render_policy.get("allow_followup", True))
+    _rp_allow_topic_shift = bool(_render_policy.get("allow_topic_shift", True))
+    _rp_allow_proactive = bool(_render_policy.get("allow_proactive_after_reply", True))
+    _rp_warmth_floor = float(_render_policy.get("warmth_floor") or 0.0)
+    _rp_warmth_ceiling = float(_render_policy.get("warmth_ceiling") or 1.0)
+    _rp_intimacy_ceiling = float(_render_policy.get("intimacy_ceiling") or 0.75)
+    _rp_humor_ceiling = float(_render_policy.get("humor_ceiling") or 0.8)
+    _rp_confession_guard = bool(_render_policy.get("confession_guard", False))
+    _rp_withdrawal_guard = bool(_render_policy.get("withdrawal_guard", False))
+    _rp_should_be_brief = bool(_render_policy.get("should_be_brief", False))
+    _rp_should_be_withdrawn = bool(_render_policy.get("should_be_withdrawn", False))
+    _rp_reasons = [str(item).strip() for item in (_render_policy.get("policy_reason_tags") or []) if str(item).strip()]
+    _rp_active = bool(_render_policy)
     _rp_is_affection_turn = _contains_any_token(user_message, ("你喜欢我吗", "喜欢我吗", "我喜欢你", "喜欢你", "我爱你", "爱你", "好喜欢你", "想你", "抱抱", "亲亲", "陪陪我", "好き", "愛してる", "会いたい"))
-    _response_policy_templates = _load_template_mapping(
-        "prompt_builder.response_policy.directives",
+    _render_policy_templates = _load_template_mapping(
+        "prompt_builder.render_policy.directives",
         render_target_lang=render_target_lang,
     )
-    _response_policy_bond_stage = _mapping_section(_response_policy_templates, "bond_stage")
+    _render_policy_bond_stage = _mapping_section(_render_policy_templates, "bond_stage")
     _rp_directives: list[str] = []
     if _rp_should_be_brief or (_rp_max_sentences and _rp_max_sentences <= 3):
-        _rp_directives.append(_mapping_text(_response_policy_templates, "brief_with_limit", max_sentences=_rp_max_sentences) if _rp_max_sentences > 0 else _mapping_text(_response_policy_templates, "brief_generic"))
+        _rp_directives.append(_mapping_text(_render_policy_templates, "brief_with_limit", max_sentences=_rp_max_sentences) if _rp_max_sentences > 0 else _mapping_text(_render_policy_templates, "brief_generic"))
     if not _rp_allow_followup:
-        _rp_directives.append(_mapping_text(_response_policy_templates, "no_followup"))
+        _rp_directives.append(_mapping_text(_render_policy_templates, "no_followup"))
     if not _rp_allow_topic_shift:
-        _rp_directives.append(_mapping_text(_response_policy_templates, "no_topic_shift"))
+        _rp_directives.append(_mapping_text(_render_policy_templates, "no_topic_shift"))
     if not _rp_allow_proactive:
-        _rp_directives.append(_mapping_text(_response_policy_templates, "no_proactive"))
+        _rp_directives.append(_mapping_text(_render_policy_templates, "no_proactive"))
     if _rp_confession_guard:
-        _rp_directives.append(_mapping_text(_response_policy_templates, "confession_guard"))
+        _rp_directives.append(_mapping_text(_render_policy_templates, "confession_guard"))
         if _rp_is_affection_turn:
-            _rp_directives.append(_mapping_text(_response_policy_templates, "affection_turn_guard"))
+            _rp_directives.append(_mapping_text(_render_policy_templates, "affection_turn_guard"))
     if _rp_should_be_withdrawn or _rp_withdrawal_guard:
-        _rp_directives.append(_mapping_text(_response_policy_templates, "withdrawn"))
-    _bond_stage_instruction = _mapping_text(_response_policy_bond_stage, _bt_stage.upper()) if _bt_stage else ""
+        _rp_directives.append(_mapping_text(_render_policy_templates, "withdrawn"))
+    _bond_stage_instruction = _mapping_text(_render_policy_bond_stage, _bt_stage.upper()) if _bt_stage else ""
     if _bt_stage and not _bond_stage_instruction:
-        _bond_stage_instruction = str(_response_policy_bond_stage.get("__default") or "")
+        _bond_stage_instruction = str(_render_policy_bond_stage.get("__default") or "")
 
     # ── EmotionVector VAD / EmotionTimeline / 情感推理 / 用户画像 ────────
     emotion_vector_raw = runtime_payload.get("emotion_vector")
@@ -674,18 +681,18 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         + (lambda _ic=runtime_payload.get("immune_caution") or prompt_context.get("immune_caution"): (f"- immune_caution_risk: {str((_ic or {}).get('risk_level') or 'medium')}\n- immune_caution_directive: {str((_ic or {}).get('suggest') or '当前会话存在内容风险，回复需更加谨慎')}\n" if isinstance(_ic, dict) and bool(_ic) else ""))()
         + (f"- fatigue_level: {_bs_fatigue_level}\n- drowsiness_level: {_bs_drowsiness_level}\n- loneliness_level: {_bs_loneliness_level}\n" + (f"- body_sense_hint: {_bs_hint}\n" if _bs_hint else "") if _bs_active else "")
         + (
-            f"- response_policy_max_chars: {_rp_max_chars}\n- response_policy_max_sentences: {_rp_max_sentences}\n"
-            f"- response_policy_min_sentences: {_rp_min_sentences}\n- response_policy_allow_followup: {'true' if _rp_allow_followup else 'false'}\n"
-            f"- response_policy_allow_topic_shift: {'true' if _rp_allow_topic_shift else 'false'}\n"
-            f"- response_policy_allow_proactive_after_reply: {'true' if _rp_allow_proactive else 'false'}\n"
-            f"- response_policy_warmth_range: {_rp_warmth_floor:.2f}~{_rp_warmth_ceiling:.2f}\n"
-            f"- response_policy_intimacy_ceiling: {_rp_intimacy_ceiling:.2f}\n- response_policy_humor_ceiling: {_rp_humor_ceiling:.2f}\n"
-            f"- response_policy_confession_guard: {'true' if _rp_confession_guard else 'false'}\n"
-            f"- response_policy_withdrawal_guard: {'true' if _rp_withdrawal_guard else 'false'}\n"
-            f"- response_policy_should_be_brief: {'true' if _rp_should_be_brief else 'false'}\n"
-            f"- response_policy_should_be_withdrawn: {'true' if _rp_should_be_withdrawn else 'false'}\n"
-            + (f"- response_policy_directive: {' '.join(_rp_directives)}\n" if _rp_directives else "")
-            + (f"- response_policy_reasons: {', '.join(_rp_reasons)}\n" if _rp_reasons else "")
+            f"- render_policy_max_chars: {_rp_max_chars}\n- render_policy_max_sentences: {_rp_max_sentences}\n"
+            f"- render_policy_min_sentences: {_rp_min_sentences}\n- render_policy_allow_followup: {'true' if _rp_allow_followup else 'false'}\n"
+            f"- render_policy_allow_topic_shift: {'true' if _rp_allow_topic_shift else 'false'}\n"
+            f"- render_policy_allow_proactive_after_reply: {'true' if _rp_allow_proactive else 'false'}\n"
+            f"- render_policy_warmth_range: {_rp_warmth_floor:.2f}~{_rp_warmth_ceiling:.2f}\n"
+            f"- render_policy_intimacy_ceiling: {_rp_intimacy_ceiling:.2f}\n- render_policy_humor_ceiling: {_rp_humor_ceiling:.2f}\n"
+            f"- render_policy_confession_guard: {'true' if _rp_confession_guard else 'false'}\n"
+            f"- render_policy_withdrawal_guard: {'true' if _rp_withdrawal_guard else 'false'}\n"
+            f"- render_policy_should_be_brief: {'true' if _rp_should_be_brief else 'false'}\n"
+            f"- render_policy_should_be_withdrawn: {'true' if _rp_should_be_withdrawn else 'false'}\n"
+            + (f"- render_policy_directive: {' '.join(_rp_directives)}\n" if _rp_directives else "")
+            + (f"- render_policy_reasons: {', '.join(_rp_reasons)}\n" if _rp_reasons else "")
             if _rp_active else ""
         )
         + "\n"
@@ -696,63 +703,6 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     if emotion_recall_text:
         emotion_recall_block = _mapping_text(_runtime_section_templates, "emotion_recall_title") + _mapping_text(_runtime_section_templates, "emotion_recall_guidance") + f"- {emotion_recall_text}\n\n"
 
-    memory_recall_persona_block = ""
-    if memory_recall_summary:
-        memory_recall_persona_block = _mapping_text(_runtime_section_templates, "memory_recall_persona_title") + _mapping_text(_runtime_section_templates, "memory_recall_persona_guidance") + f"- {memory_recall_summary}\n\n"
-
-    memory_recall_evidence_block = ""
-    if memory_persona_evidence:
-        ev_lines: list[str] = []
-        for item in memory_persona_evidence[:3]:
-            tags: list[str] = []
-            emotion_color_tag = str(item.get("emotion_color_tag") or "").strip().upper()
-            if emotion_color_tag:
-                tags.append(f"emotion={emotion_color_tag}")
-            if bool(item.get("suppression_flag")):
-                tags.append("suppressed")
-            try:
-                distortion_level = float(item.get("distortion_level"))
-            except (TypeError, ValueError):
-                distortion_level = 0.0
-            if distortion_level > 0.0:
-                tags.append(f"distortion={distortion_level:.2f}")
-            content = _truncate_for_prompt(item.get("content"), limit=120) or "memory fragment"
-            prefix = f"[{' | '.join(tags)}] " if tags else ""
-            ev_lines.append(f"- {prefix}{content}")
-        if ev_lines:
-            memory_recall_evidence_block = _mapping_text(_runtime_section_templates, "memory_recall_evidence_title") + _mapping_text(_runtime_section_templates, "memory_recall_evidence_guidance") + "\n".join(ev_lines) + "\n\n"
-
-    # ── episodic_vector 槽位注入 ─────────────────────────────────────────
-    _episodic_vector_raw = prompt_context.get("episodic_vector") or runtime_payload.get("episodic_vector")
-    _episodic_vector_text = ""
-    if isinstance(_episodic_vector_raw, str):
-        _episodic_vector_text = _truncate_for_prompt(_episodic_vector_raw, limit=600)
-    elif isinstance(_episodic_vector_raw, list):
-        _ev_lines: list[str] = []
-        for _ev_item in _episodic_vector_raw[:_get_prompt_evidence_limit()]:
-            if isinstance(_ev_item, str):
-                _ev_lines.append(f"- {_truncate_for_prompt(_ev_item, limit=200)}")
-            elif isinstance(_ev_item, dict):
-                _ev_text = _truncate_for_prompt(_ev_item.get("text") or _ev_item.get("content") or "", limit=200)
-                _ev_score_raw = _ev_item.get("score") or _ev_item.get("similarity")
-                try:
-                    _ev_score = float(_ev_score_raw) if _ev_score_raw is not None else None
-                except (TypeError, ValueError):
-                    _ev_score = None
-                if _ev_text:
-                    _ev_lines.append(f"- [{_ev_score:.2f}] {_ev_text}" if _ev_score is not None else f"- {_ev_text}")
-        _episodic_vector_text = "\n".join(_ev_lines)
-
-    episodic_vector_block = ""
-    if _episodic_vector_text:
-        episodic_vector_block = "EPISODIC_VECTOR_RECALL:\n- These are semantically similar past memories retrieved by vector search.\n- Use as soft context only; do not quote verbatim.\n" + f"{_episodic_vector_text}\n\n"
-        try:
-            from host_brain.airlock.pii_filter import _check_channel, pii_scrub_if_enabled
-            if _check_channel("RETRIEVAL"):
-                episodic_vector_block = pii_scrub_if_enabled(episodic_vector_block, context="retrieval_episodic")
-        except Exception:
-            pass
-
     cn_style_boost_block = ""
 
     # ── 台词风格参考独立通道 ─────────────────────────────────────────────
@@ -762,8 +712,15 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
         _emotion_tag_for_style = str(merged_emotion_context.get("emotion_tag") or emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
         _style_lang = "ja" if render_target_lang == "ja" else "cn"
         _utt_index = get_utterance_index()
-        if _utt_index.is_built:
-            _utt_result = _utt_index.retrieve_multi_scene(_emotion_tag_for_style, lang=_style_lang, primary_n=3, daily_n=2, max_chars=400)
+        if _utt_index.is_built and include_persona_examples:
+            _utt_result = _utt_index.retrieve_for_prompt(
+                _emotion_tag_for_style,
+                user_message=user_message,
+                lang=_style_lang,
+                primary_n=3,
+                daily_n=2,
+                max_chars=400,
+            )
             persona_examples_block = _utt_index.render_for_prompt(_utt_result, lang=_style_lang)
             if persona_examples_block:
                 persona_examples_block += "\n"
@@ -785,29 +742,31 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
             evidence_block = "\n".join(evidence_lines) if evidence_lines else _render_contract_empty_placeholder
 
     role_instruction = _build_node_role_instruction(node_id, render_target_lang=render_target_lang, skill_manifest=get_chat_runtime_skill_manifest(runtime_payload) or None)
-    direct_response_block = ""
-    if str(node_id or "").strip() == CHAT_DIRECT_NODE_ID:
-        direct_response_block = _build_direct_response_priority(user_message=user_message, render_target_lang=render_target_lang, follow_up_hint=_follow_up_hint, bond_stage=_bond_stage_for_prompt)
-
     _render_contract_section_titles = _mapping_section(_render_contract_templates, "section_titles")
     _render_contract_labels = _mapping_section(_render_contract_templates, "labels")
     _render_contract_core_rules = _mapping_list(_render_contract_templates, "core_rules")
 
     # ── 常驻角色人设 ─────────────────────────────────────────────────────
     character_profile_block = ""
-    _cp_text = _load_character_profile(render_target_lang)
-    if _cp_text:
-        _cp_emotion_tag = str(merged_emotion_context.get("emotion_tag") or emotion_context.get("emotion_tag") or "").strip().upper()
-        _cp_is_holiday = bool(runtime_payload.get("is_holiday") or prompt_context.get("is_holiday"))
-        _cp_holiday_name = str(runtime_payload.get("holiday_name") or prompt_context.get("holiday_name") or "").strip()
-        _cp_patch = _build_character_dynamic_patch(
-            emotion_tag=_cp_emotion_tag,
-            is_holiday=_cp_is_holiday,
-            holiday_name=_cp_holiday_name,
-            render_target_lang=render_target_lang,
-        )
+    _cp_text = context_plane.identity.character_profile
+    if _cp_text and include_character_profile:
+        _cp_patch = context_plane.identity.character_dynamic_patch
+        _cp_disambiguation = _truncate_for_prompt(context_plane.identity.profile_disambiguation, limit=220)
         character_profile_title = str(_render_contract_section_titles.get("character_profile") or "【角色人设】")
-        character_profile_block = f"{character_profile_title}\n{_cp_text}{_cp_patch}\n\n"
+        character_profile_block = f"{character_profile_title}\n{_cp_disambiguation}\n{_cp_text}{_cp_patch}\n\n"
+
+    node_role_block = ""
+    if include_node_role:
+        node_role_block = (
+            f"{_mapping_text(_render_contract_templates, 'node_role_binding_title')}"
+            f"{role_instruction}\n\n"
+        )
+
+    user_message_block = ""
+    if include_user_message:
+        user_message_block = (
+            f"{str(_render_contract_section_titles.get('user_message') or '【用户消息】')}\n{user_message}\n\n"
+        )
 
     _context_valid_label = _mapping_text(_render_contract_labels, "context_valid", value=prompt_context_valid)
     _context_reason_label = _mapping_text(_render_contract_labels, "context_reason", value=prompt_context_reason)
@@ -816,50 +775,49 @@ def render_node_generation_prompt(*, node_id: str, runtime_payload: Mapping[str,
     _output_language_label = _mapping_text(_render_contract_labels, "output_language", render_target_lang=render_target_lang)
     _retrieval_status_label = _mapping_text(_render_contract_labels, "retrieval_status", retrieval_status=retrieval_status)
     _retrieval_reason_label = _mapping_text(_render_contract_labels, "retrieval_reason", retrieval_reason=retrieval_reason)
+    core_rules_block = "".join(f"{idx}) {rule}\n" for idx, rule in enumerate(_render_contract_core_rules, 1))
 
-    return (
-        f"{character_profile_block}"
-        f"{_mapping_text(_render_contract_templates, 'output_intro')}"
-        f"{_mapping_text(_render_contract_templates, 'output_schema')}"
-        f"{_mapping_text(_render_contract_templates, 'output_bilingual_hint')}"
-        f"{_mapping_text(_render_contract_templates, 'core_rules_title')}"
-        + "".join(f"{idx}) {rule}\n" for idx, rule in enumerate(_render_contract_core_rules, 1))
-        + f"{_mapping_text(_render_contract_templates, 'node_role_binding_title')}"
-        f"{role_instruction}\n\n"
-        f"{direct_response_block}"
-        f"{style_block}"
-        f"{persona_examples_block}"
-        f"{bond_aware_style_block}"
-        f"{predictive_state_block}"
-        f"{planning_block}"
-        f"{planning_execution_block}"
-        f"{skill_dag_block}"
-        f"{skill_execution_block}"
-        f"{multimodal_input_block}"
-        f"{cn_style_boost_block}"
-        f"{emotion_recall_block}"
-        f"{memory_recall_persona_block}"
-        f"{memory_recall_evidence_block}"
-        f"{_persona_expression_hint_block}"
-        f"{_self_reflection_block}"
-        f"{_bond_narrative_block}"
-        f"{_drift_correction_block}"
-        f"{emotion_binding_block}"
-        f"{str(_render_contract_section_titles.get('context_validation') or '【上下文校验】')}\n"
-        f"{_context_valid_label}"
-        f"{_context_reason_label}"
-        f"{_context_violation_count_label}"
-        f"{str(_render_contract_section_titles.get('worldview') or '【世界观设定】')}\n{world_block}\n\n"
-        f"{str(_render_contract_section_titles.get('constraints') or '【约束条件】')}\n{constraints_json}\n\n"
-        f"{_node_label}"
-        f"{_output_language_label}"
-        f"{str(_render_contract_section_titles.get('user_message') or '【用户消息】')}\n{user_message}\n\n"
-        f"{_retrieval_status_label}"
-        f"{_retrieval_reason_label}"
-        f"{str(_render_contract_section_titles.get('retrieval_evidence') or '【检索证据】')}\n{evidence_block}\n\n"
-        f"{episodic_vector_block}"
-        f"{str(_render_contract_section_titles.get('core_narrative') or '【核心语义草稿】')}\n{core_narrative}\n\n"
-        f"{str(_render_contract_section_titles.get('planner') or '【规划提示】')}\n{planner_text}\n\n"
-        f"{str(_render_contract_section_titles.get('safety') or '【安全提示】')}\n{verifier_text}\n\n"
-        f"{str(_render_contract_section_titles.get('intent_draft') or '【意图草稿】')}\n{core_intent_json}\n"
+    return "".join(
+        [
+            character_profile_block,
+            _mapping_text(_render_contract_templates, "output_intro"),
+            _mapping_text(_render_contract_templates, "output_schema"),
+            _mapping_text(_render_contract_templates, "output_bilingual_hint"),
+            _mapping_text(_render_contract_templates, "core_rules_title"),
+            core_rules_block,
+            node_role_block,
+            style_block,
+            persona_examples_block,
+            bond_aware_style_block,
+            predictive_state_block,
+            planning_block,
+            planning_execution_block,
+            skill_dag_block,
+            skill_execution_block,
+            multimodal_input_block,
+            cn_style_boost_block,
+            emotion_recall_block,
+            _persona_expression_hint_block,
+            _self_reflection_block,
+            _bond_narrative_block,
+            _drift_correction_block,
+            emotion_binding_block,
+            f"{str(_render_contract_section_titles.get('context_validation') or '【上下文校验】')}\n",
+            _context_valid_label,
+            _context_reason_label,
+            _context_violation_count_label,
+            f"{str(_render_contract_section_titles.get('worldview') or '【世界观设定】')}\n{world_block}\n\n",
+            f"{str(_render_contract_section_titles.get('constraints') or '【约束条件】')}\n{constraints_json}\n\n",
+            _node_label,
+            _output_language_label,
+            user_message_block,
+            _retrieval_status_label,
+            _retrieval_reason_label,
+            f"{str(_render_contract_section_titles.get('retrieval_evidence') or '【检索证据】')}\n{evidence_block}\n\n",
+            f"{str(_render_contract_section_titles.get('core_narrative') or '【核心语义草稿】')}\n{core_narrative}\n\n",
+            f"{str(_render_contract_section_titles.get('planner') or '【规划提示】')}\n{planner_text}\n\n",
+            f"{str(_render_contract_section_titles.get('safety') or '【安全提示】')}\n{verifier_text}\n\n",
+            f"{str(_render_contract_section_titles.get('intent_draft') or '【意图草稿】')}\n{core_intent_json}\n",
+        ]
     )
+

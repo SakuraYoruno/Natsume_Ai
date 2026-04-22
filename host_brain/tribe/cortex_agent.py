@@ -103,7 +103,7 @@ class CortexAgent:
         session_id: str | None = None,
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        """Supervisor 收口：从各族 Agent 收集运行时上下文，供 chat_context_builder 使用。
+        """Supervisor 收口：从各族 Agent 收集运行时上下文，供上下文装配主链使用。
 
         P3-1：委托给 cortex_context_collector.collect_tribe_context() 执行，
         CortexAgent 保留为协调器入口，保持向后兼容。
@@ -168,7 +168,6 @@ class CortexAgent:
         request_id: str | None = None,
         emotion_tag: str = "NEUTRAL",
         emotion_intensity: float = 0.5,
-        chat_speed_profile: str | None = None,
         skip_default_mode_inner_activity: bool = False,
         summary: dict[str, Any] | None = None,
     ) -> None:
@@ -186,8 +185,6 @@ class CortexAgent:
                 "emotion_tag": str(emotion_tag or "NEUTRAL").strip().upper(),
                 "emotion_intensity": float(emotion_intensity),
             }
-            if chat_speed_profile:
-                base_payload["chat_speed_profile"] = str(chat_speed_profile).strip().lower()
             if skip_default_mode_inner_activity:
                 base_payload["skip_default_mode_inner_activity"] = True
             emit_tribe_event(

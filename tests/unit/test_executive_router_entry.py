@@ -39,7 +39,6 @@ def test_executive_router_calls_canonical_runtime_entry(monkeypatch) -> None:
                 metrics=object(),
                 person_id="person-1",
                 sanitized_message="hello",
-                recall_slot_text={},
                 bond_summary={},
                 retrieval_evidence_items=[],
                 retrieval_summary={},

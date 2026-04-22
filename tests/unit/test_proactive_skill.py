@@ -1,4 +1,4 @@
-"""T-PROACT-01~06：ProactiveTalk Skill 单元测试。
+﻿"""T-PROACT-01~06：ProactiveTalk Skill 单元测试。
 
 覆盖：
   T-PROACT-01  空闲触发，用户端收到主动消息，审计链完整
@@ -327,8 +327,8 @@ class TestProactiveTalkMotiveState:
         assert pushed[0]["dominant_motive"] == "reach_out"
 
 
-class TestProactiveTalkResponsePolicy:
-    def test_response_policy_blocks_proactive_talk(self) -> None:
+class TestProactiveTalkRenderPolicy:
+    def test_render_policy_blocks_proactive_talk(self) -> None:
         pusher, pushed = _make_ui_pusher()
 
         result = execute_proactive_talk(
@@ -337,7 +337,7 @@ class TestProactiveTalkResponsePolicy:
                 last_interaction_ts=0,
                 llm_generator=_make_llm_generator("问候一下。"),
                 ui_pusher=pusher,
-                response_policy={
+                render_policy={
                     "allow_proactive_after_reply": False,
                     "should_be_withdrawn": True,
                     "policy_reason_tags": ["willingness:LOW"],
@@ -347,11 +347,11 @@ class TestProactiveTalkResponsePolicy:
 
         assert result["status"] == STATUS_REJECTED
         assert result["reason_code"] == SCHED_CONDITION_UNMET
-        assert "response_policy blocked proactive_talk" in result["detail"]
-        assert result["response_policy"]["allow_proactive_after_reply"] is False
+        assert "render_policy blocked proactive_talk" in result["detail"]
+        assert result["render_policy"]["allow_proactive_after_reply"] is False
         assert pushed == []
 
-    def test_response_policy_hard_guard_softens_proactive_message(self) -> None:
+    def test_render_policy_hard_guard_softens_proactive_message(self) -> None:
         pusher, pushed = _make_ui_pusher()
 
         result = execute_proactive_talk(
@@ -360,7 +360,7 @@ class TestProactiveTalkResponsePolicy:
                 last_interaction_ts=0,
                 llm_generator=_make_llm_generator("哈哈，亲爱的，抱抱你～"),
                 ui_pusher=pusher,
-                response_policy={
+                render_policy={
                     "allow_proactive_after_reply": True,
                     "intimacy_ceiling": 0.2,
                     "humor_ceiling": 0.1,
@@ -369,5 +369,6 @@ class TestProactiveTalkResponsePolicy:
         )
 
         assert result["status"] == STATUS_EXECUTED
-        assert result["response_policy"]["humor_ceiling"] == 0.1
+        assert result["render_policy"]["humor_ceiling"] == 0.1
         assert pushed[0]["content"] == "你先缓一缓。"
+

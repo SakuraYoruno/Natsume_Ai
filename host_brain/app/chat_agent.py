@@ -1,4 +1,4 @@
-"""chat_agent.py — ChatAgent 人格渲染管线（Phase XV）。
+﻿"""chat_agent.py — ChatAgent 人格渲染管线（Phase XV）。
 
 夏目蓝本人的"说话"模块。
 职责：拿到上下文→构建 prompt→流式生成→反思链→净化→COMMIT。
@@ -47,39 +47,6 @@ _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
 _ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
 _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
 _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
-def _load_compact_persona_text(*, speed_profile: str, render_target_lang: str) -> str:
-    templates = resolve_prompt_template_json_merged("chat_agent.compact_persona_templates")
-    if isinstance(templates, Mapping):
-        profile_templates = templates.get(str(speed_profile or "").strip())
-        if isinstance(profile_templates, Mapping):
-            lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
-            value = str(profile_templates.get(lang_key) or "").strip()
-            if value:
-                return value
-    return ""
-
-
-def _load_compact_prompt_block(
-    *,
-    speed_profile: str,
-    block_name: str,
-    render_target_lang: str,
-    **kwargs: Any,
-) -> str:
-    templates = resolve_prompt_template_json_merged("chat_agent.compact_prompt_blocks")
-    if isinstance(templates, Mapping):
-        profile_templates = templates.get(str(speed_profile or "").strip())
-        if isinstance(profile_templates, Mapping):
-            block = profile_templates.get(str(block_name or "").strip())
-            if isinstance(block, Mapping):
-                lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
-                value = str(block.get(lang_key) or "").strip()
-                if value:
-                    try:
-                        return value.format(**kwargs)
-                    except Exception:
-                        return value
-    return ""
 
 
 def _build_prefrontal_context_block(*, task: str, tone_hint: str) -> str:
@@ -155,7 +122,6 @@ class ChatAgentInput:
     bond_summary: Dict[str, Any] = field(default_factory=dict)
 
     # ── 检索结果（RecallFusion 输出）──
-    recall_slot_text: Dict[str, str] = field(default_factory=dict)
     retrieval_evidence_items: List[Dict[str, Any]] = field(default_factory=list)
     retrieval_summary: Dict[str, Any] = field(default_factory=lambda: {"status": "SKIPPED"})
 
@@ -179,7 +145,7 @@ class ChatAgentInput:
     llm_runtime: Optional[Dict[str, Any]] = None
 
     # ── 行为约束策略（可由上游直接传入，缺省时从 prompt runtime_payload 回填）──
-    response_policy: Dict[str, Any] = field(default_factory=dict)
+    render_policy: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
 
@@ -192,234 +158,13 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _resolve_compact_prompt_speed_profile(
-    *,
-    intent_draft: Mapping[str, Any] | None,
-    sub_agent_ctx: Any | None,
-    deterministic_reply: str,
-) -> str | None:
-    if sub_agent_ctx is not None or str(deterministic_reply or "").strip():
-        return None
-    speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
-    if speed_profile not in {"direct_fast", "context_fast"}:
-        return None
-    env_name = (
-        "HOST_DIRECT_CHAT_COMPACT_PROMPT_ENABLED"
-        if speed_profile == "direct_fast"
-        else "HOST_CONTEXT_CHAT_COMPACT_PROMPT_ENABLED"
-    )
-    enabled = str(os.environ.get(env_name) or "true").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
-    return speed_profile if enabled else None
-
-
-def _should_use_direct_fast_prompt_path(
-    *,
-    intent_draft: Mapping[str, Any] | None,
-    sub_agent_ctx: Any | None,
-    deterministic_reply: str,
-) -> bool:
-    return _resolve_compact_prompt_speed_profile(
-        intent_draft=intent_draft,
-        sub_agent_ctx=sub_agent_ctx,
-        deterministic_reply=deterministic_reply,
-    ) == "direct_fast"
-
-
-def _build_compact_chat_prompt(
-    *,
-    user_message: str,
-    render_target_lang: str,
-    emotion_context: Mapping[str, Any] | None,
-    bond_summary: Mapping[str, Any] | None,
-    speed_profile: str,
-    attachments: List[Dict[str, Any]] | None = None,
-    multimodal_observations: Mapping[str, Any] | None = None,
-) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
-    from host_brain.app.prompt_builder import _build_current_local_time_context  # noqa: PLC0415
-    from host_brain.app.prompt_builder_utils import _build_direct_response_priority  # noqa: PLC0415
-
-    bond_stage = str((bond_summary or {}).get("stage") or "").strip()
-    emotion_tag = str((emotion_context or {}).get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
-    current_time_line = _build_current_local_time_context(
-        render_target_lang=render_target_lang,
-        line_kind="compact",
-    )
-    multimodal_summary = str((multimodal_observations or {}).get("summary_for_chat") or "").strip()
-    if not multimodal_summary:
-        multimodal_summary = "; ".join(
-            str(item.get("transcript") or item.get("ocr_text") or item.get("caption") or item.get("file_name") or "").strip()
-            for item in list(attachments or [])
-            if isinstance(item, Mapping)
-            and str(item.get("transcript") or item.get("ocr_text") or item.get("caption") or item.get("file_name") or "").strip()
-        ).strip()
-    multimodal_observations_text = ""
-    if multimodal_observations:
-        try:
-            multimodal_observations_text = json.dumps(dict(multimodal_observations), ensure_ascii=False, sort_keys=True)
-        except Exception:
-            multimodal_observations_text = str(dict(multimodal_observations))
-    multimodal_block = ""
-    if multimodal_summary or multimodal_observations_text:
-        multimodal_block = (
-            _load_compact_prompt_block(
-                speed_profile=speed_profile,
-                block_name="multimodal_summary_line",
-                render_target_lang=render_target_lang,
-                summary=multimodal_summary or "NONE",
-            )
-            + ("\n" if multimodal_summary else "")
-            + _load_compact_prompt_block(
-                speed_profile=speed_profile,
-                block_name="multimodal_observations_line",
-                render_target_lang=render_target_lang,
-                observations=multimodal_observations_text or "NONE",
-            )
-            + "\n"
-            + _load_compact_prompt_block(
-                speed_profile=speed_profile,
-                block_name="multimodal_instruction_line",
-                render_target_lang=render_target_lang,
-            )
-        ).strip()
-    if speed_profile == "context_fast":
-        response_policy = {
-            "should_be_brief": True,
-            "max_sentences": 3,
-            "max_chars": 110,
-            "min_sentences": 1,
-            "allow_followup": True,
-            "allow_topic_shift": False,
-        }
-        relation_line = _load_compact_prompt_block(
-            speed_profile="context_fast",
-            block_name="relation_line",
-            render_target_lang=render_target_lang,
-            bond_stage=bond_stage or "UNKNOWN",
-            emotion_tag=emotion_tag,
-        )
-        brevity_line = _load_compact_prompt_block(
-            speed_profile="context_fast",
-            block_name="brevity_line",
-            render_target_lang=render_target_lang,
-        )
-        final_instruction = _load_compact_prompt_block(
-            speed_profile="context_fast",
-            block_name="final_instruction",
-            render_target_lang=render_target_lang,
-        )
-        system_prompt = (
-            _load_compact_persona_text(speed_profile="context_fast", render_target_lang=render_target_lang)
-            + "\n"
-            + relation_line
-            + "\n"
-            + current_time_line
-            + "\n"
-            + brevity_line
-            + "\n"
-            + _build_direct_response_priority(
-                user_message=user_message,
-                render_target_lang=render_target_lang,
-                bond_stage=bond_stage,
-            ).strip()
-            + "\n"
-            + (multimodal_block + "\n" if multimodal_block else "")
-            + final_instruction
-        )
-        return user_message, system_prompt, {}, {
-            "compact_prompt_profile": "context_fast",
-            "response_policy": response_policy,
-        }
-
-    relation_line = _load_compact_prompt_block(
-        speed_profile="direct_fast",
-        block_name="relation_line",
-        render_target_lang=render_target_lang,
-        bond_stage=bond_stage or "UNKNOWN",
-        emotion_tag=emotion_tag,
-    )
-    brevity_line = _load_compact_prompt_block(
-        speed_profile="direct_fast",
-        block_name="brevity_line",
-        render_target_lang=render_target_lang,
-    )
-    final_instruction = _load_compact_prompt_block(
-        speed_profile="direct_fast",
-        block_name="final_instruction",
-        render_target_lang=render_target_lang,
-    )
-    system_prompt = (
-        _load_compact_persona_text(speed_profile="direct_fast", render_target_lang=render_target_lang)
-        + "\n"
-        + relation_line
-        + "\n"
-        + current_time_line
-        + "\n"
-        + brevity_line
-        + "\n"
-        + _build_direct_response_priority(
-            user_message=user_message,
-            render_target_lang=render_target_lang,
-            bond_stage=bond_stage,
-        ).strip()
-        + "\n"
-        + (multimodal_block + "\n" if multimodal_block else "")
-        + final_instruction
-    )
-    return user_message, system_prompt, {}, {}
-
-
-def _build_direct_fast_prompt(
-    *,
-    user_message: str,
-    render_target_lang: str,
-    emotion_context: Mapping[str, Any] | None,
-    bond_summary: Mapping[str, Any] | None,
-    attachments: List[Dict[str, Any]] | None = None,
-    multimodal_observations: Mapping[str, Any] | None = None,
-) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
-    return _build_compact_chat_prompt(
-        user_message=user_message,
-        render_target_lang=render_target_lang,
-        emotion_context=emotion_context,
-        bond_summary=bond_summary,
-        speed_profile="direct_fast",
-        attachments=attachments,
-        multimodal_observations=multimodal_observations,
-    )
-
-
-def _build_context_fast_prompt(
-    *,
-    user_message: str,
-    render_target_lang: str,
-    emotion_context: Mapping[str, Any] | None,
-    bond_summary: Mapping[str, Any] | None,
-    attachments: List[Dict[str, Any]] | None = None,
-    multimodal_observations: Mapping[str, Any] | None = None,
-) -> tuple[str, str, Dict[str, Any], Dict[str, Any]]:
-    return _build_compact_chat_prompt(
-        user_message=user_message,
-        render_target_lang=render_target_lang,
-        emotion_context=emotion_context,
-        bond_summary=bond_summary,
-        speed_profile="context_fast",
-        attachments=attachments,
-        multimodal_observations=multimodal_observations,
-    )
-
-
 def _should_cut_stream_after_policy_cap(
     *,
-    response_policy: Any,
+    render_policy: Any,
     rendered_text: str,
     visible_text: str,
 ) -> bool:
-    policy, max_chars, max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+    policy, max_chars, max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not policy:
         return False
     if not rendered_text or not visible_text:
@@ -501,7 +246,7 @@ def _should_enable_edge_voice_outputs(*, reply_channel: str | None) -> bool:
     return enabled_raw in {"1", "true", "yes", "on"}
 
 
-def _coerce_response_policy(raw_policy: Any) -> Dict[str, Any]:
+def _coerce_render_policy(raw_policy: Any) -> Dict[str, Any]:
     if isinstance(raw_policy, Mapping):
         return dict(raw_policy)
     return {}
@@ -563,8 +308,8 @@ def _truncate_text_to_char_limit(text: str, *, max_chars: int) -> str:
     return candidate.rstrip("，,、；;：:-— ").strip()
 
 
-def _extract_response_policy_limits(response_policy: Any) -> tuple[Dict[str, Any], int, int, int]:
-    policy = _coerce_response_policy(response_policy)
+def _extract_render_policy_limits(render_policy: Any) -> tuple[Dict[str, Any], int, int, int]:
+    policy = _coerce_render_policy(render_policy)
     try:
         max_sentences = max(0, int(policy.get("max_sentences") or 0))
     except (TypeError, ValueError):
@@ -587,7 +332,7 @@ def _extract_response_policy_limits(response_policy: Any) -> tuple[Dict[str, Any
     return policy, max_chars, max_sentences, min_sentences
 
 
-def _coerce_response_policy_score(policy: Mapping[str, Any], key: str, *, default: float = 1.0) -> float:
+def _coerce_render_policy_score(policy: Mapping[str, Any], key: str, *, default: float = 1.0) -> float:
     try:
         value = float(policy.get(key, default))
     except (TypeError, ValueError):
@@ -932,7 +677,7 @@ def _soften_confession_sentence(sentence: str, *, render_target_lang: str = "zh"
     if not softened:
         return ""
     replacements = _load_template_replacement_pairs(
-        "chat_agent.response_policy.confession_replacements",
+        "chat_agent.render_policy.confession_replacements",
         render_target_lang=render_target_lang,
     )
     for source, target in replacements:
@@ -951,7 +696,7 @@ def _soften_intimacy_sentence(sentence: str, *, render_target_lang: str = "zh") 
     if _contains_confession_marker(softened):
         softened = _soften_confession_sentence(softened, render_target_lang=render_target_lang)
     replacements = _load_template_replacement_pairs(
-        "chat_agent.response_policy.intimacy_replacements",
+        "chat_agent.render_policy.intimacy_replacements",
         render_target_lang=render_target_lang,
     )
     for source, target in replacements:
@@ -983,7 +728,7 @@ def _soften_humor_tone(text: str, *, render_target_lang: str = "zh") -> str:
     normalized = normalized.rstrip("，,、；;：: ").strip()
     if not normalized:
         return _resolve_template_text_localized(
-            "chat_agent.response_policy.min_sentence_placeholder",
+            "chat_agent.render_policy.min_sentence_placeholder",
             render_target_lang=render_target_lang,
         )
     if normalized[-1] not in ".。！？!?":
@@ -999,7 +744,7 @@ def _soften_withdrawn_tone(text: str, *, render_target_lang: str = "zh") -> str:
     normalized = re.sub(r"(?:!|！){2,}", "。", normalized)
     normalized = re.sub(r"(?:\?|？){2,}", "？", normalized)
     for source, target in _load_template_replacement_pairs(
-        "chat_agent.response_policy.withdrawn_replacements",
+        "chat_agent.render_policy.withdrawn_replacements",
         render_target_lang=render_target_lang,
     ):
         normalized = normalized.replace(source, target)
@@ -1020,14 +765,14 @@ def _drop_trailing_policy_sentences(
     return guarded
 
 
-def _apply_response_policy_stream_guard(
+def _apply_render_policy_stream_guard(
     text: str,
-    response_policy: Any,
+    render_policy: Any,
     *,
     render_target_lang: str = "zh",
 ) -> str:
     normalized = str(text or "").strip()
-    policy, max_chars, max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+    policy, max_chars, max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not normalized or not policy:
         return normalized
     if max_sentences > 0:
@@ -1037,12 +782,12 @@ def _apply_response_policy_stream_guard(
     return normalized.strip()
 
 
-def _response_policy_requires_buffering(response_policy: Any) -> bool:
-    policy, _max_chars, _max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+def _render_policy_requires_buffering(render_policy: Any) -> bool:
+    policy, _max_chars, _max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not policy:
         return False
-    intimacy_ceiling = _coerce_response_policy_score(policy, "intimacy_ceiling")
-    humor_ceiling = _coerce_response_policy_score(policy, "humor_ceiling")
+    intimacy_ceiling = _coerce_render_policy_score(policy, "intimacy_ceiling")
+    humor_ceiling = _coerce_render_policy_score(policy, "humor_ceiling")
     return any([
         not bool(policy.get("allow_followup", True)),
         not bool(policy.get("allow_topic_shift", True)),
@@ -1054,20 +799,21 @@ def _response_policy_requires_buffering(response_policy: Any) -> bool:
     ])
 
 
-def _apply_response_policy_hard_guard(
+def _apply_render_policy_hard_guard(
     narrative: str,
-    response_policy: Any,
+    render_policy: Any,
     *,
     user_message: str = "",
     bond_stage: str = "",
+    render_target_lang: str = "zh",
 ) -> str:
     normalized = str(narrative or "").strip()
-    policy, max_chars, max_sentences, min_sentences = _extract_response_policy_limits(response_policy)
+    policy, max_chars, max_sentences, min_sentences = _extract_render_policy_limits(render_policy)
     if not normalized or not policy:
         return normalized
 
-    intimacy_ceiling = _coerce_response_policy_score(policy, "intimacy_ceiling")
-    humor_ceiling = _coerce_response_policy_score(policy, "humor_ceiling")
+    intimacy_ceiling = _coerce_render_policy_score(policy, "intimacy_ceiling")
+    humor_ceiling = _coerce_render_policy_score(policy, "humor_ceiling")
 
     sentences = _split_text_into_sentences(normalized)
     if sentences:
@@ -1091,7 +837,7 @@ def _apply_response_policy_hard_guard(
                     sentences.pop()
                 else:
                     sentences[-1] = _resolve_template_text_localized(
-                        "chat_agent.response_policy.min_sentence_placeholder",
+                        "chat_agent.render_policy.min_sentence_placeholder",
                         render_target_lang=render_target_lang,
                     )
 
@@ -1125,7 +871,7 @@ def _apply_response_policy_hard_guard(
                 if len(guarded_sentences) + remaining_after < floor:
                     guarded_sentences.append(
                         _resolve_template_text_localized(
-                            "chat_agent.response_policy.min_sentence_placeholder",
+                            "chat_agent.render_policy.min_sentence_placeholder",
                             render_target_lang=render_target_lang,
                         )
                     )
@@ -1149,7 +895,145 @@ def _apply_response_policy_hard_guard(
         normalized = _truncate_text_to_sentence_limit(normalized, max_sentences=max_sentences)
     if max_chars > 0:
         normalized = _truncate_text_to_char_limit(normalized, max_chars=max_chars)
+    normalized = _repair_underanswered_identity_reply(
+        normalized,
+        user_message=user_message,
+        render_policy=policy,
+        render_target_lang=render_target_lang,
+    )
     return normalized.strip()
+
+
+def _looks_like_full_identity_restate(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    markers = (
+        "我是夏目蓝",
+        "我是夏目藍",
+        "我的名字是夏目蓝",
+        "我的名字是夏目藍",
+        "我叫夏目蓝",
+        "我叫夏目藍",
+        "我？我的名字是夏目蓝",
+        "我？我的名字是夏目藍",
+    )
+    if any(marker in normalized for marker in markers):
+        return True
+    return "natsume ai" in lowered or "natsume" in lowered
+
+
+def _build_identity_repeat_meta_reply(*, user_message: str, render_target_lang: str = "zh") -> str:
+    lang = str(render_target_lang or "").strip().lower()
+    if lang == "ja":
+        return "さっき言ったでしょう。"
+    normalized = str(user_message or "").strip()
+    if "谁" in normalized:
+        return "刚才不是已经告诉你了么。"
+    return "刚才不是已经说过了么。"
+
+
+def _is_underanswered_meta_reply(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return True
+    bare = re.sub(r"[。！？?!～~…，,\s]", "", normalized)
+    if not bare:
+        return True
+    return bare in {
+        "嗯",
+        "哎",
+        "诶",
+        "啊",
+        "哦",
+        "唔",
+        "当然",
+        "是啊",
+        "对啊",
+        "没错",
+        "我们",
+    } or len(bare) <= 1
+
+
+def _build_boundary_repeat_meta_reply(*, render_target_lang: str = "zh") -> str:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return "さっき答えたでしょう。まだそこが気になるの。"
+    return "刚才不是已经说过了么。怎么，还要我再讲一遍？"
+
+
+def _build_help_repeat_meta_reply(*, render_target_lang: str = "zh") -> str:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return "さっき答えたでしょう。まだ不安なの。"
+    return "刚才不是已经回答你了么。你还在担心这个？"
+
+
+def _build_boundary_direct_reply(*, render_target_lang: str = "zh") -> str:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return "まだそこを気にするの。別に、見て見ぬふりをしなかっただけ。"
+    return "不熟。只是看见了，也没打算装作没看见。"
+
+
+def _build_help_direct_reply(*, render_target_lang: str = "zh") -> str:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return "状況次第。ちゃんと頼まれたら、知らないふりはしない。"
+    return "看情况。你真开口的话，我不会装作没听见。"
+
+
+def _repair_underanswered_identity_reply(
+    text: str,
+    *,
+    user_message: str,
+    render_policy: Mapping[str, Any] | None,
+    render_target_lang: str = "zh",
+) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return normalized
+    try:
+        from host_brain.app.context.dialogue_state import classify_user_act  # noqa: PLC0415
+    except Exception:
+        return normalized
+    user_act = str(classify_user_act(user_message) or "").strip()
+    policy = dict(render_policy or {}) if isinstance(render_policy, Mapping) else {}
+    topic_mode = str(policy.get("topic_reopen_mode") or "").strip().lower()
+    reply_mode = str(policy.get("reply_mode") or "").strip().lower()
+    if user_act not in {"identity_probe", "boundary_probe", "motivation_probe", "help_continuity_probe"} and reply_mode not in {
+        "identity_repeat_probe",
+        "boundary_repeat_probe",
+        "help_repeat_probe",
+    }:
+        return normalized
+    if reply_mode == "identity_repeat_probe" or topic_mode == "identity_meta":
+        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
+            return _build_identity_repeat_meta_reply(
+                user_message=user_message,
+                render_target_lang=render_target_lang,
+            )
+        return normalized
+    if reply_mode == "boundary_repeat_probe":
+        if _is_underanswered_meta_reply(normalized):
+            return _build_boundary_repeat_meta_reply(render_target_lang=render_target_lang)
+        return normalized
+    if reply_mode == "boundary_first_ask":
+        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
+            return _build_boundary_direct_reply(render_target_lang=render_target_lang)
+        return normalized
+    if reply_mode == "help_first_ask":
+        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
+            return _build_help_direct_reply(render_target_lang=render_target_lang)
+        return normalized
+    if reply_mode == "help_repeat_probe":
+        if _is_underanswered_meta_reply(normalized):
+            return _build_help_repeat_meta_reply(render_target_lang=render_target_lang)
+        return normalized
+    if "夏目蓝" in normalized or "夏目藍" in normalized or "natsume ai" in normalized.lower():
+        return normalized
+    if re.fullmatch(r"[我嗯啊哦欸诶唔…，,。！？?!～~\s]+", normalized):
+        if str(render_target_lang or "").strip().lower() == "ja":
+            return "私は夏目藍。"
+        return "我是夏目蓝。"
+    return normalized
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
@@ -1616,7 +1500,7 @@ def _build_chat_agent_quality_fallback_reply(
     bond_summary: Dict[str, Any] | None,
     emotion_context: Dict[str, Any] | None,
     render_target_lang: str,
-    response_policy: Any = None,
+    render_policy: Any = None,
     prompt_runtime_payload: Mapping[str, Any] | None = None,
 ) -> str:
     return _build_minimal_chat_fallback_reply(
@@ -1695,10 +1579,10 @@ def _should_buffer_stream_output(
     *,
     emotion_context: Any,
     bond_summary: Any,
-    response_policy: Any = None,
+    render_policy: Any = None,
 ) -> bool:
     """高风险对话缓冲判断。"""
-    if _response_policy_requires_buffering(response_policy):
+    if _render_policy_requires_buffering(render_policy):
         return True
     env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
     raw = str(os.environ.get(env_key, "")).strip().lower()
@@ -1820,7 +1704,6 @@ async def chat_agent_sse_generator(
     emotion_context = agent_input.emotion_context
     emotion_snapshot = agent_input.emotion_snapshot
     bond_summary = agent_input.bond_summary
-    recall_slot_text = agent_input.recall_slot_text
     retrieval_evidence_items = agent_input.retrieval_evidence_items
     retrieval_summary = agent_input.retrieval_summary
     render_target_lang = agent_input.render_target_lang  # Phase XV: 固定 "zh"
@@ -1828,7 +1711,7 @@ async def chat_agent_sse_generator(
     ts_ms = agent_input.ts_ms or int(time.time() * 1000)
     intent_draft = agent_input.intent_draft or {}
     trace_stage_meta = dict(agent_input.trace_stage_meta or {})
-    response_policy = _coerce_response_policy(agent_input.response_policy)
+    render_policy = _coerce_render_policy(agent_input.render_policy)
     sub_agent_ctx = agent_input.sub_agent_context
     if "chat_agent_used" not in trace_stage_meta:
         trace_stage_meta["chat_agent_used"] = True
@@ -1838,8 +1721,7 @@ async def chat_agent_sse_generator(
         trace_stage_meta["chat_sub_agent_id"] = sub_agent_ctx.agent_id
     deterministic_reply = _build_deterministic_sub_agent_reply(sub_agent_ctx, render_target_lang=render_target_lang)
 
-    prompt_text = ""
-    system_prompt = ""
+    prompt_messages: list[dict[str, str]] = []
     gen_params: Dict[str, Any] = {}
     prompt_runtime_payload: Dict[str, Any] = {}
     prompt_build_started_ms = int(time.time() * 1000)
@@ -1848,42 +1730,8 @@ async def chat_agent_sse_generator(
     response_intelligence_ms = 0
     sanitize_egress_ms = 0
     precommit_log_ms = 0
-    _compact_prompt_speed_profile = _resolve_compact_prompt_speed_profile(
-        intent_draft=intent_draft,
-        sub_agent_ctx=sub_agent_ctx,
-        deterministic_reply=deterministic_reply,
-    )
-    if _compact_prompt_speed_profile and not str(trace_stage_meta.get("chat_speed_profile") or "").strip():
-        trace_stage_meta["chat_speed_profile"] = _compact_prompt_speed_profile
-    if _compact_prompt_speed_profile in {"direct_fast", "context_fast"}:
-        trace_stage_meta.setdefault("skip_heavy_persona_postprocess", True)
-        trace_stage_meta.setdefault("skip_default_mode_on_conversation_end", True)
-    _use_direct_fast_prompt_path = _compact_prompt_speed_profile == "direct_fast"
-    if _compact_prompt_speed_profile == "direct_fast":
-        prompt_text, system_prompt, gen_params, prompt_runtime_payload = _build_direct_fast_prompt(
-            user_message=user_message,
-            render_target_lang=render_target_lang,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary,
-            attachments=list(agent_input.attachments or []),
-            multimodal_observations=dict(agent_input.multimodal_observations or {}),
-        )
-        prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
-    elif _compact_prompt_speed_profile == "context_fast":
-        prompt_text, system_prompt, gen_params, prompt_runtime_payload = _build_context_fast_prompt(
-            user_message=user_message,
-            render_target_lang=render_target_lang,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary,
-            attachments=list(agent_input.attachments or []),
-            multimodal_observations=dict(agent_input.multimodal_observations or {}),
-        )
-        prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
-    if not response_policy and prompt_runtime_payload:
-        response_policy = _coerce_response_policy(prompt_runtime_payload.get("response_policy"))
-
     # 确定性子结果渲染不依赖 LLM，也不需要构建完整 prompt。
-    if not deterministic_reply and _compact_prompt_speed_profile is None:
+    if not deterministic_reply:
         # ── 1. 构建 prompt（复用完整 cortex_prompt_builder 管线）──────────────
         from host_brain.app.cortex_prompt_builder import build_cortex_prompt  # noqa: PLC0415
 
@@ -1901,8 +1749,9 @@ async def chat_agent_sse_generator(
             }
 
         # Phase D: PrefrontalAgent 意图规划结果注入
-        # prefrontal_task 由 executive_runtime_core 在 plan_response 后写入 intent_draft
-        # 这里将其转换为 extra_context_prompt 的一部分，让 LLM 感知"我要说什么"的目标
+        # prefrontal_task 由 executive_runtime_core 在 plan_response 后写入 intent_draft。
+        # 这里收成受控的 turn_context_sections，由 cortex_prompt_builder 并入单一 system_prompt，
+        # 不再额外创建第二条 system/context 平面。
         _prefrontal_task = str(intent_draft.get("prefrontal_task") or "").strip()
         _prefrontal_tone_hint = str(intent_draft.get("prefrontal_tone_hint") or "").strip()
         _prefrontal_context_block = ""
@@ -1916,9 +1765,8 @@ async def chat_agent_sse_generator(
                 request_id, _prefrontal_task[:60], _prefrontal_tone_hint,
             )
 
-        # 合并 extra_context_prompt（子 Agent 结果 + prefrontal 规划）
-        _extra_parts = [p for p in [sub_agent_context_prompt, _prefrontal_context_block] if p]
-        _combined_extra_context = "\n\n".join(_extra_parts)
+        # 合并 turn-local context（子 Agent 结果 + prefrontal 规划）
+        _turn_context_sections = [p for p in [sub_agent_context_prompt, _prefrontal_context_block] if p]
 
         # 回复深度策略：Gateway 通道使用更短的回复
         reply_depth_hint = ""
@@ -1940,19 +1788,39 @@ async def chat_agent_sse_generator(
                 request_id=request_id,
                 thread_id=thread_id,
                 bond_summary=bond_summary,
-                recall_slot_text=recall_slot_text if recall_slot_text else None,
-                extra_context_prompt=_combined_extra_context,
+                turn_context_sections=_turn_context_sections,
                 include_runtime_payload=True,
             )
-            if isinstance(prompt_result, tuple) and len(prompt_result) >= 4:
-                prompt_text, system_prompt, gen_params, raw_prompt_runtime_payload = prompt_result[:4]
+            if isinstance(prompt_result, tuple) and len(prompt_result) >= 3:
+                prompt_messages, gen_params, raw_prompt_runtime_payload = prompt_result[:3]
                 prompt_runtime_payload = dict(raw_prompt_runtime_payload or {}) if isinstance(raw_prompt_runtime_payload, Mapping) else {}
             else:
-                prompt_text, system_prompt, gen_params = prompt_result
+                prompt_messages, gen_params = prompt_result
                 prompt_runtime_payload = {}
+            conversation_history_meta = dict(prompt_runtime_payload.get("conversation_history") or {})
+            if conversation_history_meta:
+                trace_stage_meta["conversation_history"] = conversation_history_meta
+            dialogue_state_meta = dict(prompt_runtime_payload.get("dialogue_state") or {})
+            if dialogue_state_meta:
+                trace_stage_meta["dialogue_state"] = dialogue_state_meta
+            topic_state_meta = dict(prompt_runtime_payload.get("topic_state") or {})
+            if topic_state_meta:
+                trace_stage_meta["topic_state"] = topic_state_meta
+            affect_state_meta = dict(prompt_runtime_payload.get("affect_state") or {})
+            if affect_state_meta:
+                trace_stage_meta["affect_state"] = affect_state_meta
+            relationship_state_meta = dict(prompt_runtime_payload.get("relationship_state") or {})
+            if relationship_state_meta:
+                trace_stage_meta["relationship_state"] = relationship_state_meta
+            drive_state_meta = dict(prompt_runtime_payload.get("drive_state") or {})
+            if drive_state_meta:
+                trace_stage_meta["drive_state"] = drive_state_meta
+            render_policy_meta = dict(prompt_runtime_payload.get("render_policy") or {})
+            if render_policy_meta:
+                trace_stage_meta["render_policy"] = render_policy_meta
             prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
-            if not response_policy:
-                response_policy = _coerce_response_policy(prompt_runtime_payload.get("response_policy"))
+            if not render_policy:
+                render_policy = _coerce_render_policy(prompt_runtime_payload.get("render_policy"))
         except Exception as _pb_exc:
             _logger.warning("[%s] ChatAgent prompt_builder failed: %s", request_id, _pb_exc)
             yield _sse({
@@ -1960,7 +1828,7 @@ async def chat_agent_sse_generator(
                 "reason_code": "PROMPT_BUILD_FAILED", "request_id": request_id,
                 "narrative": _resolve_minimal_fallback_text(
                     kind="prompt_build_failed",
-                    render_target_lang=chat_input.render_target_lang,
+                    render_target_lang=agent_input.render_target_lang,
                 ),
             })
             return
@@ -2016,7 +1884,7 @@ async def chat_agent_sse_generator(
                         pii_egress_stats={},
                         retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
                         motive_state=prompt_runtime_payload.get("motive_state"),
-                        response_policy=response_policy,
+                        render_policy=render_policy,
                         trace_stage_meta=trace_stage_meta,
                     )
                 )
@@ -2030,14 +1898,15 @@ async def chat_agent_sse_generator(
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
                 render_target_lang=render_target_lang,
-                response_policy=response_policy,
+                render_policy=render_policy,
                 prompt_runtime_payload=prompt_runtime_payload,
             )
-            return _apply_response_policy_hard_guard(
+            return _apply_render_policy_hard_guard(
                 fallback_narrative,
-                response_policy,
+                render_policy,
                 user_message=user_message,
                 bond_stage=str((bond_summary or {}).get("stage") or ""),
+                render_target_lang=render_target_lang,
             )
 
         if llm_runtime is None:
@@ -2046,22 +1915,13 @@ async def chat_agent_sse_generator(
                     resolve_host_llm_runtime_async,
                     resolve_chat_agent_llm_runtime,
                 )
-                chat_speed_profile = str(intent_draft.get("chat_speed_profile") or "").strip().lower() or None
                 base_runtime = await resolve_host_llm_runtime_async(
                     rollout_key=session_id,
                     scene_type="CHAT",
                 )
                 llm_runtime = resolve_chat_agent_llm_runtime(
                     base_runtime=base_runtime,
-                    speed_profile=chat_speed_profile,
                 )
-                if chat_speed_profile:
-                    _logger.info(
-                        "[%s] ChatAgent speed_profile=%s model=%s",
-                        request_id,
-                        chat_speed_profile,
-                        llm_runtime.get("model_id"),
-                    )
             except Exception as _rt_exc:
                 _logger.warning("[%s] ChatAgent llm_runtime resolve failed: %s", request_id, _rt_exc)
                 fallback_narrative = _build_llm_unavailable_fallback_narrative()
@@ -2111,7 +1971,12 @@ async def chat_agent_sse_generator(
     _logger.info(
         "[%s] ChatAgent system_prompt preview: %s",
         request_id,
-        (system_prompt or "")[:150].replace("\n", "↵"),
+        next((str(item.get("content") or "") for item in prompt_messages if str(item.get("role") or "").strip().lower() == "system"), "")[:150].replace("\n", "↵"),
+    )
+    _logger.info(
+        "[%s] ChatAgent direct_response_injected=%s",
+        request_id,
+        any("【回应原则】" in str(item.get("content") or "") for item in prompt_messages),
     )
 
     splitter = SentenceSplitter()
@@ -2124,11 +1989,8 @@ async def chat_agent_sse_generator(
     buffer_stream = _should_buffer_stream_output(
         emotion_context=emotion_context,
         bond_summary=bond_summary or None,
-        response_policy=response_policy,
+        render_policy=render_policy,
     )
-    _chat_speed_profile = str(intent_draft.get("chat_speed_profile") or "").strip().lower()
-    if _chat_speed_profile in {"direct_fast", "context_fast"} and sub_agent_ctx is None:
-        buffer_stream = False
     if deterministic_reply:
         buffer_stream = False
         provider_name = "host"
@@ -2158,9 +2020,9 @@ async def chat_agent_sse_generator(
     try:
         if deterministic_reply:
             full_text = str(deterministic_reply).strip()
-            visible = _apply_response_policy_stream_guard(
+            visible = _apply_render_policy_stream_guard(
                 full_text,
-                response_policy,
+                render_policy,
                 render_target_lang=render_target_lang,
             )
             rendered_text = visible
@@ -2182,26 +2044,24 @@ async def chat_agent_sse_generator(
                 model_id=model_id,
                 api_key=api_key,
                 timeout_ms=timeout_ms,
-                prompt_text=prompt_text,
-                system_prompt=system_prompt,
+                messages=prompt_messages,
                 gen_params=agent_gen_params,
                 base_url_override=base_url,
             ):
                 if first_token_ms is None:
                     first_token_ms = int(time.time() * 1000) - llm_started_ms
                     _logger.info(
-                        "[%s] ChatAgent first_token_ms=%s model=%s buffered=%s speed_profile=%s",
+                        "[%s] ChatAgent first_token_ms=%s model=%s buffered=%s",
                         request_id,
                         first_token_ms,
                         model_id,
                         buffer_stream,
-                        _chat_speed_profile or "default",
                     )
 
                 full_text += chunk
-                visible = _apply_response_policy_stream_guard(
+                visible = _apply_render_policy_stream_guard(
                     _extract_visible_text(full_text, render_target_lang=render_target_lang),
-                    response_policy,
+                    render_policy,
                     render_target_lang=render_target_lang,
                 )
                 if not visible:
@@ -2213,15 +2073,14 @@ async def chat_agent_sse_generator(
                     new_chunk = visible
                 if not new_chunk:
                     if _should_cut_stream_after_policy_cap(
-                        response_policy=response_policy,
+                        render_policy=render_policy,
                         rendered_text=rendered_text,
                         visible_text=visible,
                     ):
                         full_text = visible
                         _logger.info(
-                            "[%s] ChatAgent stream cut after response_policy cap speed_profile=%s",
+                            "[%s] ChatAgent stream cut after render_policy cap",
                             request_id,
-                            _chat_speed_profile or "default",
                         )
                         break
                     continue
@@ -2270,19 +2129,20 @@ async def chat_agent_sse_generator(
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
                 render_target_lang=render_target_lang,
-                response_policy=response_policy,
+                render_policy=render_policy,
                 prompt_runtime_payload=prompt_runtime_payload,
             )
-            full_text = _apply_response_policy_hard_guard(
+            full_text = _apply_render_policy_hard_guard(
                 full_text,
-                response_policy,
+                render_policy,
                 user_message=user_message,
                 bond_stage=str((bond_summary or {}).get("stage") or ""),
+                render_target_lang=render_target_lang,
             )
             if not buffer_stream:
-                visible_fallback = _apply_response_policy_stream_guard(
+                visible_fallback = _apply_render_policy_stream_guard(
                     full_text,
-                    response_policy,
+                    render_policy,
                     render_target_lang=render_target_lang,
                 )
                 yield _sse({"phase": "RENDER", "chunk": visible_fallback})
@@ -2322,60 +2182,54 @@ async def chat_agent_sse_generator(
     # ── 5. apply_response_intelligence（反思链 + 多模态后缀）─────────
     response_intelligence_meta: dict[str, Any] = {}
     _response_intelligence_started_ms = int(time.time() * 1000)
-    _skip_response_intelligence = _chat_speed_profile in {"direct_fast", "context_fast"} and sub_agent_ctx is None
-    if _skip_response_intelligence:
-        response_intelligence_meta = {
-            "reflection": {"status": "SKIPPED", "reason_code": "FAST_CHAT_RESPONSE_INTELLIGENCE_BYPASS"},
-            "multimodal_output": {"status": "SKIPPED", "reason_code": "FAST_CHAT_RESPONSE_INTELLIGENCE_BYPASS"},
-        }
-    else:
-        try:
-            from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
+    try:
+        from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
 
-            narrative, response_intelligence_meta = apply_response_intelligence(
-                request_id=request_id,
-                user_message=user_message,
-                narrative=narrative,
-                emotion_context=emotion_context,
-                bond_summary=bond_summary or None,
-                render_lang=render_target_lang,
-                allow_rewrite=buffer_stream,
-            )
-            narrative = _extract_visible_text(narrative, render_target_lang=render_target_lang) or narrative
-            narrative = _apply_response_policy_hard_guard(
-                narrative,
-                response_policy,
-                user_message=user_message,
-                bond_stage=str((bond_summary or {}).get("stage") or ""),
-            )
+        narrative, response_intelligence_meta = apply_response_intelligence(
+            request_id=request_id,
+            user_message=user_message,
+            narrative=narrative,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary or None,
+            render_lang=render_target_lang,
+            allow_rewrite=buffer_stream,
+        )
+        narrative = _extract_visible_text(narrative, render_target_lang=render_target_lang) or narrative
+        narrative = _apply_render_policy_hard_guard(
+            narrative,
+            render_policy,
+            user_message=user_message,
+            bond_stage=str((bond_summary or {}).get("stage") or ""),
+            render_target_lang=render_target_lang,
+        )
 
-            if buffer_stream and narrative:
+        if buffer_stream and narrative:
+            rendered_text = narrative
+            yield _sse({"phase": "RENDER", "chunk": narrative})
+            for sentence in splitter.feed(narrative):
+                yield _sse({
+                    "phase": "SENTENCE",
+                    "sentence": sentence,
+                    "sentence_index": sentence_index,
+                })
+                sentence_index += 1
+        elif narrative.startswith(rendered_text):
+            postprocess_chunk = narrative[len(rendered_text):]
+            if postprocess_chunk:
                 rendered_text = narrative
-                yield _sse({"phase": "RENDER", "chunk": narrative})
-                for sentence in splitter.feed(narrative):
+                yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
+                for sentence in splitter.feed(postprocess_chunk):
                     yield _sse({
                         "phase": "SENTENCE",
                         "sentence": sentence,
                         "sentence_index": sentence_index,
                     })
                     sentence_index += 1
-            elif narrative.startswith(rendered_text):
-                postprocess_chunk = narrative[len(rendered_text):]
-                if postprocess_chunk:
-                    rendered_text = narrative
-                    yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
-                    for sentence in splitter.feed(postprocess_chunk):
-                        yield _sse({
-                            "phase": "SENTENCE",
-                            "sentence": sentence,
-                            "sentence_index": sentence_index,
-                        })
-                        sentence_index += 1
-        except Exception as _ri_exc:
-            response_intelligence_meta = {
-                "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
-            }
-            _logger.debug("[%s] ChatAgent response_intelligence failed: %s", request_id, _ri_exc)
+    except Exception as _ri_exc:
+        response_intelligence_meta = {
+            "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
+        }
+        _logger.debug("[%s] ChatAgent response_intelligence failed: %s", request_id, _ri_exc)
     with soft_fail(
         "chat_agent.response_intelligence_ms",
         fallback=0,
@@ -2398,11 +2252,12 @@ async def chat_agent_sse_generator(
     _sanitize_started_ms = int(time.time() * 1000)
     narrative = _strip_internal_delegate_markers(narrative)
     narrative = _airlock_sanitize_output(narrative)
-    narrative = _apply_response_policy_hard_guard(
+    narrative = _apply_render_policy_hard_guard(
         narrative,
-        response_policy,
+        render_policy,
         user_message=user_message,
         bond_stage=str((bond_summary or {}).get("stage") or ""),
+        render_target_lang=render_target_lang,
     )
 
     # PII 出口检查
@@ -2412,11 +2267,12 @@ async def chat_agent_sse_generator(
         if _check_channel("EGRESS"):
             _pii_eg = pii_scrub_text(narrative, context="egress")
             narrative = _pii_eg.scrubbed_text
-            narrative = _apply_response_policy_hard_guard(
+            narrative = _apply_render_policy_hard_guard(
                 narrative,
-                response_policy,
+                render_policy,
                 user_message=user_message,
                 bond_stage=str((bond_summary or {}).get("stage") or ""),
+                render_target_lang=render_target_lang,
             )
             if _pii_eg.has_pii:
                 _pii_egress_stats = {
@@ -2576,10 +2432,10 @@ async def chat_agent_sse_generator(
                 pii_ingress_stats={},
                 pii_egress_stats=_pii_egress_stats,
                 # Phase XV trace 增强：传入 LLM 输入摘要和召回证据
-                llm_input_digest=(system_prompt or "")[:500] or None,
+                llm_input_digest=json.dumps(prompt_messages, ensure_ascii=False)[:500] or None,
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
                 motive_state=prompt_runtime_payload.get("motive_state"),
-                response_policy=response_policy,
+                render_policy=render_policy,
                 trace_stage_meta={
                     **dict(trace_stage_meta or {}),
                     "voice_outputs_enabled": _voice_outputs_enabled,
@@ -2601,15 +2457,15 @@ from host_brain.app.chat_agent_preprocessor import (  # noqa: F401, E402
     _airlock_sanitize_output,
     _strip_internal_delegate_markers,
     _build_reply_preview,
-    _coerce_response_policy,
+    _coerce_render_policy,
     _split_text_into_sentences,
     _truncate_text_to_sentence_limit,
     _truncate_text_to_char_limit,
-    _extract_response_policy_limits,
-    _coerce_response_policy_score,
-    _apply_response_policy_stream_guard,
-    _response_policy_requires_buffering,
-    _apply_response_policy_hard_guard,
+    _extract_render_policy_limits,
+    _coerce_render_policy_score,
+    _apply_render_policy_stream_guard,
+    _render_policy_requires_buffering,
+    _apply_render_policy_hard_guard,
     _build_minimal_chat_fallback_reply,
     _build_chat_agent_quality_fallback_reply,
     _build_chat_agent_fallback_reply,
@@ -2633,3 +2489,4 @@ from host_brain.app.chat_agent_postprocessor import (  # noqa: F401, E402
     log_input_completed,
     schedule_async_post_process,
 )
+

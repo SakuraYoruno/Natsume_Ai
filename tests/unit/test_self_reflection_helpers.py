@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from types import SimpleNamespace
@@ -329,7 +329,7 @@ def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() ->
             "withdraw_drive": 0.18,
             "self_protect_drive": 0.12,
         },
-        response_policy={"should_be_brief": True},
+        render_policy={"should_be_brief": True},
         runtime_flags={"sys_mode": "normal"},
     )
 
@@ -360,7 +360,7 @@ def test_align_self_reflection_pulse_prefers_guarded_tone_when_retreat_dominates
             "withdraw_drive": 0.72,
             "self_protect_drive": 0.78,
         },
-        response_policy={"should_be_withdrawn": True, "withdrawal_guard": True},
+        render_policy={"should_be_withdrawn": True, "withdrawal_guard": True},
         runtime_flags={"sys_mode": "focus"},
     )
 
@@ -534,3 +534,4 @@ def test_self_reflection_localized_ja_templates_override(monkeypatch) -> None:
             "具体的な日付や長さを断定しないこと。",
         )
     )
+

@@ -38,32 +38,26 @@ def _resolve_background_tick_foreground_cooldown_ms() -> int:
 _FOREGROUND_INTERACTION_LOCK = threading.Lock()
 _FOREGROUND_INTERACTION_CACHE: dict[str, Any] = {
     "ts_ms": 0,
-    "speed_profile": "",
 }
 
 
 def mark_recent_foreground_interaction(
     *,
     ts_ms: int | None = None,
-    speed_profile: str | None = None,
 ) -> None:
     with _FOREGROUND_INTERACTION_LOCK:
         _FOREGROUND_INTERACTION_CACHE["ts_ms"] = int(ts_ms or now_ms())
-        if speed_profile is not None:
-            _FOREGROUND_INTERACTION_CACHE["speed_profile"] = str(speed_profile or "").strip().lower()
 
 
 def _resolve_recent_foreground_interaction(*, current_ts_ms: int) -> dict[str, Any]:
     cooldown_ms = _resolve_foreground_chat_cooldown_ms()
     with _FOREGROUND_INTERACTION_LOCK:
         last_ts_ms = int(_FOREGROUND_INTERACTION_CACHE.get("ts_ms") or 0)
-        speed_profile = str(_FOREGROUND_INTERACTION_CACHE.get("speed_profile") or "").strip().lower()
     active = cooldown_ms > 0 and last_ts_ms > 0 and (int(current_ts_ms) - last_ts_ms) < cooldown_ms
     return {
         "active": bool(active),
         "cooldown_ms": cooldown_ms,
         "last_ts_ms": last_ts_ms,
-        "speed_profile": speed_profile,
     }
 
 
@@ -83,7 +77,6 @@ def resolve_background_tick_guard_state(*, current_ts_ms: int | None = None) -> 
         "cooldown_ms": cooldown_ms,
         "cooldown_remaining_ms": remaining_ms,
         "last_ts_ms": last_ts_ms,
-        "speed_profile": str(recent.get("speed_profile") or "").strip().lower(),
     }
 
 
@@ -177,7 +170,6 @@ class DefaultModeAgent:
             llm_meta = {
                 "suppressed": True,
                 "foreground_cooldown_ms": int(recent_foreground.get("cooldown_ms") or 0),
-                "foreground_speed_profile": str(recent_foreground.get("speed_profile") or ""),
             }
         else:
             try:
@@ -377,9 +369,6 @@ class DefaultModeAgent:
     async def _on_conversation_ended(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
         if bool(payload.get("skip_default_mode_inner_activity")):
-            return
-        speed_profile = str(payload.get("chat_speed_profile") or "").strip().lower()
-        if speed_profile in {"direct_fast", "context_fast"}:
             return
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(

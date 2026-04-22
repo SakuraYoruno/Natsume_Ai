@@ -1,18 +1,16 @@
-"""Chat Prompt Runtime Payload Builder（OPT-5 重构）。
+﻿"""Chat Prompt Runtime Payload Builder。
 
-把原先位于 ``chat_context_builder.build_chat_prompt_runtime_payload`` 的
-1080+ 行 God Function 拆成阶段化的流水线。每个 ``.with_*`` 阶段：
+将聊天运行时 payload 的组装收敛为单一流水线。每个 ``.with_*`` 阶段：
 
-    1. 行为与原函数 **字节级等价**（顺序、字段名、日志文案均保持不变）
-    2. 外层一律用 ``host_brain.core.errors.soft_fail`` 守护（OPT-3 基建）
-    3. 彼此之间只能通过 ``self._payload`` 传递中间结果，禁止跨阶段局部变量
+    1. 只读 ``PromptPayloadContext``，不跨阶段共享局部变量
+    2. 只通过 ``self._payload`` 传递中间结果
+    3. 外层统一由 ``soft_fail`` 守护
 
 使用方式::
 
     payload = (
         PromptPayloadBuilder(ctx)
         .with_core_payload()
-        .with_snapshot()
         .with_intelligence()
         .with_emotion_bridge()
         .with_emotion_timeline()
@@ -20,9 +18,8 @@
         .with_self_reflection()
         .with_bond_narrative()
         .with_bond_style()
-        .with_motive_and_policy()
+        .with_motive_state()
         .with_persona_expression_postprocess()
-        .with_context_pack()
         .with_cortex_supervisor()
         .build()
     )
@@ -36,10 +33,23 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.context.persona_expression import (
+    _apply_activity_monitor_to_persona_expression_hint,
+    _apply_motive_state_to_persona_expression_hint,
+    _apply_offline_state_to_persona_expression_hint,
+    _apply_runtime_mode_to_persona_expression_hint,
+    _apply_scene_awareness_to_persona_expression_hint,
+)
+from host_brain.app.chat_context_style import build_node_style_bindings, normalize_node_style_bindings
+from host_brain.app.chat_generation_payload import (
+    build_chat_generation_prompt_payload,
+    build_runtime_mode_flags,
+)
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 from host_brain.core.soft_fail import soft_fail
 
 logger = logging.getLogger(__name__)
+_SELF_REFLECTION_TURN_COUNTER = 0
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -51,17 +61,15 @@ logger = logging.getLogger(__name__)
 class PromptPayloadContext:
     """流水线只读输入上下文。
 
-    只承载 build_chat_prompt_runtime_payload 的外部入参及 generation_payload 的
+    只承载 chat runtime payload 的外部入参及 generation_payload 的
     预先计算结果，不包含任何可变中间状态。
     """
 
     runtime_input: Any
     style_bindings: Mapping[str, Mapping[str, Any]] | None
-    cpb_slots: Mapping[str, Any] | None
     # 以下字段由 _prepare_context 预计算（避免每个 stage 重复解析）
     render_target_lang: str = ""
     resolved_style_bindings: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
-    merged_slots: Mapping[str, Any] = field(default_factory=dict)
     generation_payload: Mapping[str, Any] = field(default_factory=dict)
     full_emotion_ctx: Mapping[str, Any] = field(default_factory=dict)
 
@@ -100,14 +108,7 @@ class PromptPayloadBuilder:
         self._trace.append("core_payload")
         return self
 
-    # ---- stage 2: prompt context snapshot 记录 ----
-    def with_snapshot(self) -> "PromptPayloadBuilder":
-        with soft_fail("prompt_context_snapshot", fallback=None):
-            _snapshot_stage(self._ctx, self._payload)
-        self._trace.append("snapshot")
-        return self
-
-    # ---- stage 3: intelligent_runtime 扩展 ----
+    # ---- stage 2: intelligent_runtime 扩展 ----
     def with_intelligence(self) -> "PromptPayloadBuilder":
         with soft_fail("prompt_intelligence", fallback=None):
             _intelligence_stage(self._ctx, self._payload)
@@ -168,16 +169,16 @@ class PromptPayloadBuilder:
         self._trace.append("bond_style")
         return self
 
-    # ---- stage 10: MotiveEngine + ResponsePolicy + SelfReflection 对齐 ----
-    def with_motive_and_policy(self) -> "PromptPayloadBuilder":
-        with soft_fail("motive_and_policy", fallback=None):
-            _motive_and_policy_stage(
+    # ---- stage 10: MotiveEngine + SelfReflection 对齐 ----
+    def with_motive_state(self) -> "PromptPayloadBuilder":
+        with soft_fail("motive_state", fallback=None):
+            _motive_state_stage(
                 ctx=self._ctx,
                 payload=self._payload,
                 sr_alignment_snapshot=self._sr_alignment_snapshot,
                 prefrontal_agent_for_sr=self._prefrontal_agent_for_sr,
             )
-        self._trace.append("motive_and_policy")
+        self._trace.append("motive_state")
         return self
 
     # ---- stage 11: persona_expression_hint 后处理链 ----
@@ -187,14 +188,7 @@ class PromptPayloadBuilder:
         self._trace.append("persona_expression_postprocess")
         return self
 
-    # ---- stage 12: multi-agent context pack ----
-    def with_context_pack(self) -> "PromptPayloadBuilder":
-        with soft_fail("multi_agent_context_pack", fallback=None):
-            _context_pack_stage(self._payload)
-        self._trace.append("context_pack")
-        return self
-
-    # ---- stage 13: CortexAgent Supervisor 收口 ----
+    # ---- stage 12: CortexAgent Supervisor 收口 ----
     def with_cortex_supervisor(self) -> "PromptPayloadBuilder":
         with soft_fail("cortex_supervisor", fallback=None):
             _cortex_supervisor_stage(self._ctx, self._payload)
@@ -217,15 +211,9 @@ def prepare_context(
     *,
     runtime_input: Any,
     style_bindings: Mapping[str, Mapping[str, Any]] | None,
-    cpb_slots: Mapping[str, Any] | None,
 ) -> PromptPayloadContext:
     """入口预处理：类型校验 + style bindings + slot 合并 + generation_payload。"""
     from host_brain.app.chat_runtime_input import ChatRuntimeInput  # noqa: PLC0415
-    from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        build_chat_generation_prompt_payload,
-        normalize_node_style_bindings,
-        build_node_style_bindings,
-    )
 
     if not isinstance(runtime_input, ChatRuntimeInput):
         raise TypeError("runtime_input must be ChatRuntimeInput")
@@ -236,13 +224,6 @@ def prepare_context(
         if style_bindings is not None
         else build_node_style_bindings(render_target_lang=render_target_lang)
     )
-
-    recall_slot_text = dict(runtime_input.recall_slot_text or {})
-    merged_slots = dict(cpb_slots or {})
-    for slot_name in ("style_canon", "world_canon", "emotion_recall"):
-        slot_text = str(recall_slot_text.get(slot_name) or "").strip()
-        if slot_text and not str(merged_slots.get(slot_name) or "").strip():
-            merged_slots[slot_name] = slot_text
 
     generation_payload = build_chat_generation_prompt_payload(
         request_id=str(runtime_input.request_id or "").strip(),
@@ -256,16 +237,13 @@ def prepare_context(
         emotion_context=dict(runtime_input.emotion_state or {}),
         emotion_snapshot=dict(runtime_input.emotion_snapshot or {}),
         render_target_lang=render_target_lang or None,
-        cpb_slots=(merged_slots or None),
     )
 
     return PromptPayloadContext(
         runtime_input=runtime_input,
         style_bindings=style_bindings,
-        cpb_slots=cpb_slots,
         render_target_lang=render_target_lang,
         resolved_style_bindings=resolved_style_bindings,
-        merged_slots=merged_slots,
         generation_payload=generation_payload,
         full_emotion_ctx=dict(generation_payload.get("emotion_context") or {}),
     )
@@ -273,19 +251,12 @@ def prepare_context(
 
 def _core_payload_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> None:
     """核心 runtime_payload 构造 + runtime_mode/memory_persona 注入。"""
-    from host_brain.app.chat_context_builder import _build_runtime_mode_flags  # noqa: PLC0415
-
     generation_payload = ctx.generation_payload
     runtime_input = ctx.runtime_input
 
     prompt_context = dict(generation_payload.get("prompt_context") or {})
     prompt_context_validation = dict(generation_payload.get("prompt_context_validation") or {})
     prompt_context_observability = dict(generation_payload.get("prompt_context_observability") or {})
-    recall_slot_text = dict(runtime_input.recall_slot_text or {})
-    episodic_vector_slot_text = str(recall_slot_text.get("episodic_vector") or "").strip()
-    if episodic_vector_slot_text and not str(prompt_context.get("episodic_vector") or "").strip():
-        prompt_context["episodic_vector"] = episodic_vector_slot_text
-
     runtime_payload = runtime_input.to_runtime_payload(
         prompt_context=prompt_context,
         prompt_context_validation=prompt_context_validation,
@@ -293,7 +264,7 @@ def _core_payload_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> N
     )
     runtime_payload["style_bindings"] = ctx.resolved_style_bindings
 
-    runtime_mode_flags = _build_runtime_mode_flags(prompt_context)
+    runtime_mode_flags = build_runtime_mode_flags(prompt_context)
     if runtime_mode_flags:
         runtime_payload["runtime_mode"] = runtime_mode_flags
         runtime_payload["sys_mode"] = (
@@ -311,69 +282,9 @@ def _core_payload_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> N
     if scene_awareness:
         runtime_payload["scene_awareness"] = scene_awareness
 
-    memory_persona_signal_raw = prompt_context.get("memory_emotion_hint")
-    memory_persona_signal = (
-        dict(memory_persona_signal_raw)
-        if isinstance(memory_persona_signal_raw, Mapping)
-        else {}
-    )
-    if memory_persona_signal:
-        runtime_payload["memory_persona_signal"] = memory_persona_signal
-
-    memory_persona_evidence_raw = prompt_context.get("memory_persona_evidence")
-    memory_persona_evidence = (
-        [dict(item) for item in memory_persona_evidence_raw if isinstance(item, Mapping)]
-        if isinstance(memory_persona_evidence_raw, list)
-        else []
-    )
-    if memory_persona_evidence:
-        runtime_payload["memory_persona_evidence"] = memory_persona_evidence
-
-    memory_recall_summary = str(
-        prompt_context.get("memory_recall_summary")
-        or memory_persona_signal.get("memory_recall_summary")
-        or ""
-    ).strip()
-    if memory_recall_summary:
-        runtime_payload["memory_recall_summary"] = memory_recall_summary
-
     # 合并进外层 payload，保持引用一致
     payload.clear()
     payload.update(runtime_payload)
-
-
-def _snapshot_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> None:
-    from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        _record_latest_prompt_context_snapshot,
-        normalize_node_style_bindings,
-    )
-
-    runtime_input = ctx.runtime_input
-    prompt_context = dict(ctx.generation_payload.get("prompt_context") or {})
-    prompt_context_observability = dict(
-        ctx.generation_payload.get("prompt_context_observability") or {}
-    )
-    _record_latest_prompt_context_snapshot(
-        {
-            "request_id": str(runtime_input.request_id or "").strip(),
-            "session_id": str(runtime_input.session_id or "").strip(),
-            "thread_id": str(runtime_input.thread_id or "").strip(),
-            "render_target_lang": ctx.render_target_lang or None,
-            "ts_ms": int(time.time() * 1000),
-            "style_bindings": normalize_node_style_bindings(ctx.resolved_style_bindings),
-            "style_pack": (
-                dict(prompt_context.get("style_pack") or {})
-                if isinstance(prompt_context.get("style_pack"), Mapping)
-                else {}
-            ),
-            "memory_persona_signal": dict(payload.get("memory_persona_signal") or {}),
-            "memory_persona_evidence": [
-                dict(item) for item in (payload.get("memory_persona_evidence") or [])
-            ],
-            "memory_recall_summary": str(payload.get("memory_recall_summary") or ""),
-            "prompt_context_observability": dict(prompt_context_observability or {}),
-        }
-    )
 
 
 def _intelligence_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> None:
@@ -454,10 +365,6 @@ def _persona_expression_stage(
 
     返回值：``_emotion_reunion_type``，供后续 SelfReflection stage 使用。
     """
-    from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        build_chat_prompt_runtime_payload,
-    )
-
     _full_emotion_ctx = ctx.full_emotion_ctx
     runtime_input = ctx.runtime_input
     generation_payload = ctx.generation_payload
@@ -471,14 +378,6 @@ def _persona_expression_stage(
 
         _prefrontal_agent = get_prefrontal_agent()
         _limbic_agent_for_ep = get_limbic_agent()
-        _injected_emotion_persistence = getattr(
-            build_chat_prompt_runtime_payload, "_emotion_persistence", None
-        )
-        if _injected_emotion_persistence is not None:
-            try:
-                _limbic_agent_for_ep._emotion_persistence = _injected_emotion_persistence
-            except Exception:
-                pass
         _persona_user_id = get_canonical_bond_user_id()
         _vad = _full_emotion_ctx.get("vad_vector") or {}
         _cur_valence = float(_vad.get("valence") or 0.0)
@@ -505,18 +404,30 @@ def _persona_expression_stage(
             logger.debug("EmotionPersistence 接入降级: %s", _ep_exc)
 
         try:
-            from host_brain.tribe.limbic_agent import get_limbic_agent as _get_limbic  # noqa: PLC0415
+            from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
 
-            _iw_snapshot = dict(_get_limbic().on_user_awaken(person_id=_persona_user_id) or {})
-            _iw_offline_hours = float(_iw_snapshot.get("offline_hours") or 0.0)
-            _iw_hint = str(_iw_snapshot.get("awakening_hint") or "")
-            if _iw_offline_hours >= 1.0 or _iw_hint:
-                payload["offline_state"] = _iw_snapshot
+            _recent_foreground = resolve_recent_foreground_interaction_state(current_ts_ms=int(time.time() * 1000))
+        except Exception:
+            _recent_foreground = {"active": False}
+
+        try:
+            if not bool(_recent_foreground.get("active")):
+                from host_brain.tribe.limbic_agent import get_limbic_agent as _get_limbic  # noqa: PLC0415
+
+                _iw_snapshot = dict(_get_limbic().on_user_awaken(person_id=_persona_user_id) or {})
+                _iw_offline_hours = float(_iw_snapshot.get("offline_hours") or 0.0)
+                _iw_hint = str(_iw_snapshot.get("awakening_hint") or "")
+                if _iw_offline_hours >= 1.0 or _iw_hint:
+                    payload["offline_state"] = _iw_snapshot
+                    logger.debug(
+                        "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
+                        _persona_user_id,
+                        _iw_offline_hours,
+                        _iw_hint[:30] if _iw_hint else "",
+                    )
+            else:
                 logger.debug(
-                    "OfflineInnerWorld 唤醒快照注入: user=%s offline_hours=%.1f hint=%s",
-                    _persona_user_id,
-                    _iw_offline_hours,
-                    _iw_hint[:30] if _iw_hint else "",
+                    "OfflineInnerWorld 唤醒快照跳过: recent foreground chat active",
                 )
         except Exception as _iw_exc:
             logger.debug("OfflineInnerWorld 接入降级: %s", _iw_exc)
@@ -638,10 +549,6 @@ def _self_reflection_stage(
     tl_summary: dict[str, Any],
     tl_diary: dict[str, Any],
 ) -> tuple[dict[str, Any], Any]:
-    from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        build_chat_prompt_runtime_payload,
-    )
-
     _sr_alignment_snapshot: dict[str, Any] = {}
     _prefrontal_agent_for_sr = None
     _full_emotion_ctx = ctx.full_emotion_ctx
@@ -650,26 +557,9 @@ def _self_reflection_stage(
 
         _prefrontal_agent = get_prefrontal_agent()
         _prefrontal_agent_for_sr = _prefrontal_agent
-        _injected_self_reflection = getattr(
-            build_chat_prompt_runtime_payload, "_self_reflection", None
-        )
-        if _injected_self_reflection is not None:
-            try:
-                _prefrontal_agent._self_reflection = _injected_self_reflection
-            except Exception:
-                pass
-        _injected_evolution_orchestrator = getattr(
-            build_chat_prompt_runtime_payload, "_evolution_orchestrator", None
-        )
-        if _injected_evolution_orchestrator is not None:
-            try:
-                _prefrontal_agent._evolution_orchestrator = _injected_evolution_orchestrator
-            except Exception:
-                pass
-        if not hasattr(build_chat_prompt_runtime_payload, "_turn_counter"):
-            build_chat_prompt_runtime_payload._turn_counter = 0
-        build_chat_prompt_runtime_payload._turn_counter += 1
-        _turn = build_chat_prompt_runtime_payload._turn_counter
+        global _SELF_REFLECTION_TURN_COUNTER
+        _SELF_REFLECTION_TURN_COUNTER += 1
+        _turn = _SELF_REFLECTION_TURN_COUNTER
 
         _sr_user_id = get_canonical_bond_user_id()
         _sr_bond_state = None
@@ -839,17 +729,13 @@ def _bond_style_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> Non
         logger.debug("BondAwareStyleEngine 接入降级: %s", _bas_exc)
 
 
-def _motive_and_policy_stage(
+def _motive_state_stage(
     *,
     ctx: PromptPayloadContext,
     payload: dict[str, Any],
     sr_alignment_snapshot: dict[str, Any],
     prefrontal_agent_for_sr: Any,
 ) -> None:
-    from host_brain.app.chat_context_memory import (  # noqa: PLC0415
-        _apply_motive_state_to_persona_expression_hint,
-    )
-
     runtime_input = ctx.runtime_input
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
@@ -874,18 +760,6 @@ def _motive_and_policy_stage(
             user_message=str(runtime_input.user_message or ""),
             runtime_flags=payload.get("runtime_mode"),
         )
-        payload["response_policy"] = _limbic_agent.decide_response_policy(
-            silence_state=payload.get("silence_state"),
-            body_sense=payload.get("body_sense"),
-            offline_state=payload.get("offline_state"),
-            bond_summary=payload.get("bond_summary"),
-            self_reflection_pulse=payload.get("self_reflection_pulse"),
-            emotion_context=payload.get("triggered_emotions"),
-            motive_state=payload.get("motive_state"),
-            memory_persona_signal=payload.get("memory_persona_signal"),
-            user_message=str(runtime_input.user_message or ""),
-            runtime_flags=payload.get("runtime_mode"),
-        )
         payload["persona_expression_hint"] = _apply_motive_state_to_persona_expression_hint(
             payload.get("persona_expression_hint"),
             payload.get("motive_state"),
@@ -902,35 +776,21 @@ def _motive_and_policy_stage(
                     offline_state=payload.get("offline_state"),
                     bond_summary=payload.get("bond_summary"),
                     motive_state=payload.get("motive_state"),
-                    response_policy=payload.get("response_policy"),
+                    render_policy={},
                     runtime_flags=payload.get("runtime_mode"),
                 )
             except Exception as _sr_align_exc:
                 logger.debug("SelfReflection narrative alignment degraded: %s", _sr_align_exc)
 
     except (ImportError, AttributeError, Exception) as _motive_exc:
-        logger.debug("MotiveEngine / ResponsePolicyLayer 接入降级: %s", _motive_exc)
+        logger.debug("MotiveEngine 接入降级: %s", _motive_exc)
 
 
 def _persona_expression_postprocess_stage(payload: dict[str, Any]) -> None:
-    from host_brain.app.chat_context_memory import (  # noqa: PLC0415
-        _apply_offline_state_to_persona_expression_hint,
-        _apply_memory_persona_signal_to_persona_expression_hint,
-        _apply_activity_monitor_to_persona_expression_hint,
-        _apply_scene_awareness_to_persona_expression_hint,
-        _apply_runtime_mode_to_persona_expression_hint,
-    )
-
     if payload.get("persona_expression_hint") and payload.get("offline_state"):
         payload["persona_expression_hint"] = _apply_offline_state_to_persona_expression_hint(
             payload.get("persona_expression_hint"),
             payload.get("offline_state"),
-        )
-
-    if payload.get("persona_expression_hint") and payload.get("memory_persona_signal"):
-        payload["persona_expression_hint"] = _apply_memory_persona_signal_to_persona_expression_hint(
-            payload.get("persona_expression_hint"),
-            payload.get("memory_persona_signal"),
         )
 
     if payload.get("persona_expression_hint") and payload.get("activity_monitor"):
@@ -950,19 +810,6 @@ def _persona_expression_postprocess_stage(payload: dict[str, Any]) -> None:
             payload.get("persona_expression_hint"),
             payload.get("runtime_mode"),
         )
-
-
-def _context_pack_stage(payload: dict[str, Any]) -> None:
-    from host_brain.app.chat_context_builder import (  # noqa: PLC0415
-        _build_multi_agent_context_pack,
-    )
-
-    try:
-        _agent_context_pack = _build_multi_agent_context_pack(runtime_payload=payload)
-        if _agent_context_pack:
-            payload["context_pack"] = _agent_context_pack
-    except Exception as _context_pack_exc:
-        logger.debug("build multi-agent context pack degraded: %s", _context_pack_exc)
 
 
 def _cortex_supervisor_stage(ctx: PromptPayloadContext, payload: dict[str, Any]) -> None:
@@ -1457,21 +1304,15 @@ def run_build_chat_prompt_runtime_payload(
     *,
     runtime_input: Any,
     style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
-    cpb_slots: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Adapter：将旧签名映射到 PromptPayloadBuilder 流水线。
-
-    行为与 ``chat_context_builder.build_chat_prompt_runtime_payload`` 字节级等价。
-    """
+    """Build chat runtime payload through the canonical staged pipeline."""
     ctx = prepare_context(
         runtime_input=runtime_input,
         style_bindings=style_bindings,
-        cpb_slots=cpb_slots,
     )
     result = (
         PromptPayloadBuilder(ctx)
         .with_core_payload()
-        .with_snapshot()
         .with_intelligence()
         .with_emotion_bridge()
         .with_emotion_timeline()
@@ -1479,9 +1320,8 @@ def run_build_chat_prompt_runtime_payload(
         .with_self_reflection()
         .with_bond_narrative()
         .with_bond_style()
-        .with_motive_and_policy()
+        .with_motive_state()
         .with_persona_expression_postprocess()
-        .with_context_pack()
         .with_cortex_supervisor()
         .build()
     )
@@ -1495,3 +1335,4 @@ __all__ = [
     "prepare_context",
     "run_build_chat_prompt_runtime_payload",
 ]
+

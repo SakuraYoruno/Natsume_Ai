@@ -32,6 +32,7 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from host_brain.conversation import build_chat_messages, conversation_max_turns
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.plan_graph")
@@ -317,14 +318,36 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                     )
 
                     if system_prompt and user_prompt:
+                        try:
+                            from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+                            history_window = get_conversation_history().fetch_window_for_messages(
+                                session_id=str(state.get("session_id") or "").strip(),
+                                max_turns=conversation_max_turns(),
+                                exclude_request_id=request_id,
+                                render_target_lang="zh",
+                            )
+                        except Exception:
+                            history_window = None
+
+                        synth_system_prompt = system_prompt
+                        if history_window and str(history_window.older_summary or "").strip():
+                            synth_system_prompt = (
+                                f"{system_prompt}\n\n【更早对话摘要】\n{str(history_window.older_summary).strip()}"
+                            )
+
+                        messages = build_chat_messages(
+                            system_prompt=synth_system_prompt,
+                            history_turns=list(getattr(history_window, "recent_turns", []) or []),
+                            user_message=user_prompt,
+                        )
                         chunks: list[str] = []
                         for chunk in stream_llm_chunks(
                             provider_name=provider_name,
                             model_id=model_id,
                             api_key=api_key,
                             timeout_ms=timeout_ms,
-                            prompt_text=user_prompt,
-                            system_prompt=system_prompt,
+                            messages=messages,
                             gen_params=gen_params,
                             base_url_override=base_url_override,
                         ):

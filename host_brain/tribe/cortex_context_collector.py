@@ -1,7 +1,7 @@
 """Cortex context collector: 从各族 Agent 收集运行时上下文。
 
 从 cortex_agent.py 拆分，负责聚合 TRIBE 族各 Agent 的状态快照，
-供 chat_context_builder 使用。
+供上下文装配主链使用。
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ def collect_tribe_context(
     session_id: str | None = None,
     user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Supervisor 收口：从各族 Agent 收集运行时上下文，供 chat_context_builder 使用。
+    """Supervisor 收口：从各族 Agent 收集运行时上下文，供上下文装配主链使用。
 
     T-11：CortexAgent 作为 Supervisor，统一聚合：
     - LimbicAgent：情绪上下文、沉默意愿、body_sense 快照

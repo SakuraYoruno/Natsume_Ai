@@ -39,7 +39,6 @@ def test_executive_runtime_bridges_runtime_core_impl(monkeypatch) -> None:
                 metrics=object(),
                 person_id="person-runtime-1",
                 sanitized_message="hello",
-                recall_slot_text={},
                 bond_summary={},
                 retrieval_evidence_items=[],
                 retrieval_summary={},

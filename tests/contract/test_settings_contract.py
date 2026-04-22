@@ -381,7 +381,7 @@ class TestOpt4BatchThreeCallsites:
     HOST_SYS_MODE）已迁移到 CoreSettings，验证旧行为完全保持：
     - skill_dag_planner._resolve_parallel_window() 仍然能响应 env 变化
     - skill_dag_planner._resolve_parallel_window(value=N) 显式传值优先生效
-    - chat_context_builder._build_runtime_mode_flags() 的 sys_mode 跟随 CoreSettings
+    - build_runtime_mode_flags() 的 sys_mode 跟随 CoreSettings
     - health/env-readiness 聚合能看到新增 3 个字段
     """
 
@@ -404,16 +404,16 @@ class TestOpt4BatchThreeCallsites:
         monkeypatch.setenv("HOST_SYS_MODE", "safe")
         get_core_settings.cache_clear()
 
-        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
-        flags = _build_runtime_mode_flags({})
+        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
+        flags = build_runtime_mode_flags({})
         assert flags["sys_mode"] == "safe"
 
     def test_sys_mode_defaults_to_normal_without_env(self, monkeypatch):
         monkeypatch.delenv("HOST_SYS_MODE", raising=False)
         get_core_settings.cache_clear()
 
-        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
-        flags = _build_runtime_mode_flags({})
+        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
+        flags = build_runtime_mode_flags({})
         assert flags["sys_mode"] == "normal"
 
     def test_sys_mode_hard_snapshot_overrides_env(self, monkeypatch):
@@ -421,8 +421,8 @@ class TestOpt4BatchThreeCallsites:
         monkeypatch.setenv("HOST_SYS_MODE", "safe")
         get_core_settings.cache_clear()
 
-        from host_brain.app.chat_context_builder import _build_runtime_mode_flags
-        flags = _build_runtime_mode_flags({"hard_snapshot": {"sys_mode": "emergency"}})
+        from host_brain.app.chat_generation_payload import build_runtime_mode_flags
+        flags = build_runtime_mode_flags({"hard_snapshot": {"sys_mode": "emergency"}})
         assert flags["sys_mode"] == "emergency"
 
     def test_prefrontal_plan_enabled_env_flow(self, monkeypatch):

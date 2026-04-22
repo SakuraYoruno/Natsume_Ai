@@ -3,13 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 
+_MOTIVE_RUNTIME_IMPORT = "from " + "host_brain.persona.motive_runtime" + " import compute_runtime_motive_state"
+_MOTIVE_ENGINE_IMPORT = "from " + "host_brain.persona.motive_engine" + " import"
+_LEGACY_POLICY_MODULE = "host_brain.persona." + "response" + "_policy"
+
 FORBIDDEN_MARKERS = (
-    "from host_brain.persona.motive_runtime import compute_runtime_motive_state",
-    "from host_brain.persona.motive_engine import",
-    "from host_brain.persona.response_policy import",
+    _MOTIVE_RUNTIME_IMPORT,
+    _MOTIVE_ENGINE_IMPORT,
+    "from " + _LEGACY_POLICY_MODULE + " import",
     "host_brain.persona.motive_runtime.compute_runtime_motive_state",
     "host_brain.persona.motive_engine.compute_motive_state",
-    "host_brain.persona.response_policy.decide_response_policy",
+    _LEGACY_POLICY_MODULE + "." + "decide_" + "response" + "_policy",
 )
 
 

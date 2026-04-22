@@ -4,7 +4,7 @@ T-Distill-01：distill_top_k 正常蒸馏 — 有情节记忆时应返回 semant
 T-Distill-02：幂等检查 — 相同 source_memory_ids 组合重复蒸馏应跳过（skipped=True）。
 T-Distill-03：无情节记忆 — 空 EpisodicStore 时 distill_top_k 应返回 success=False。
 T-Distill-04：list_semantic_memories 分页 — 写入多条后分页查询正确。
-T-Distill-05：context_pack semantic_slot 验证 — 合法 semantic_slot 通过验证，缺字段时报错。
+T-Distill-05：prompt_context semantic_slot 验证 — 合法 semantic_slot 通过验证，缺字段时报错。
 T-Distill-06：build_semantic_slot — 从 ledger 构建 semantic_slot 列表格式正确。
 """
 
@@ -148,11 +148,11 @@ def test_list_semantic_memories_pagination(engine, episodic, ledger):
 
 
 # ---------------------------------------------------------------------------
-# T-Distill-05：context_pack semantic_slot 验证
+# T-Distill-05：prompt_context semantic_slot 验证
 # ---------------------------------------------------------------------------
 
-def _make_valid_context_pack(**overrides) -> dict:
-    """构造最小合法 context_pack。"""
+def _make_valid_prompt_context(**overrides) -> dict:
+    """构造最小合法 prompt_context。"""
     base = {
         "hard_snapshot": {},
         "bond_summary": {},
@@ -166,9 +166,9 @@ def _make_valid_context_pack(**overrides) -> dict:
     return base
 
 
-def test_context_pack_semantic_slot_valid():
+def test_prompt_context_semantic_slot_valid():
     """合法 semantic_slot 应通过验证。"""
-    cp = _make_valid_context_pack(
+    cp = _make_valid_prompt_context(
         semantic_slot=[
             {
                 "slot": "semantic_slot",
@@ -185,9 +185,9 @@ def test_context_pack_semantic_slot_valid():
     assert result.valid, f"应通过验证，但有违规: {result.violations}"
 
 
-def test_context_pack_semantic_slot_missing_required_field():
+def test_prompt_context_semantic_slot_missing_required_field():
     """semantic_slot 条目缺少 semantic_id 或 summary 时应报错。"""
-    cp = _make_valid_context_pack(
+    cp = _make_valid_prompt_context(
         semantic_slot=[
             {"summary": "缺少 semantic_id 的条目"}  # 缺少 semantic_id
         ]
@@ -198,9 +198,9 @@ def test_context_pack_semantic_slot_missing_required_field():
     assert "PROMPT_CONTEXT_TYPE_INVALID" in codes
 
 
-def test_context_pack_without_semantic_slot_still_valid():
-    """不包含 semantic_slot 的 context_pack 应仍然通过验证（可选槽位）。"""
-    cp = _make_valid_context_pack()
+def test_prompt_context_without_semantic_slot_still_valid():
+    """不包含 semantic_slot 的 prompt_context 应仍然通过验证（可选槽位）。"""
+    cp = _make_valid_prompt_context()
     result = validate_prompt_context(cp)
     assert result.valid, f"不含 semantic_slot 应通过验证，但有违规: {result.violations}"
 

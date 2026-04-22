@@ -270,7 +270,6 @@ _TASK_EXEC_ACTION_MARKERS: tuple[str, ...] = (
     "deploy",
     "search",
 )
-_CONTEXT_CHAT_FAST_MAX_CHARS = 180
 _TASK_ENTERTAINMENT_RE = re.compile(
     r"(动漫|漫画|番剧|动画|电影|电视剧|剧集|综艺|音乐|歌曲|歌手|专辑|小说|读书|游戏|爱好|兴趣|趣味)",
     re.IGNORECASE,
@@ -529,7 +528,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "reason_code": "THALAMUS_RULE_CONTEXT_CHAT",
             "confidence": 0.9,
             "route_source": "thalamus.rule",
-            "chat_speed_profile": "context_fast",
             "args": {
                 "text": cleaned,
             },
@@ -569,7 +567,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "reason_code": phatic_reason,
             "confidence": 0.99,
             "route_source": "thalamus.rule",
-            "chat_speed_profile": "direct_fast",
             "args": {
                 "text": cleaned,
             },
@@ -810,56 +807,11 @@ def _build_multimodal_route_seed(
         "reason_code": "THALAMUS_RULE_MULTIMODAL_CHAT",
         "confidence": 0.97,
         "route_source": "thalamus.rule",
-        "chat_speed_profile": "context_fast",
         "multimodal_input": True,
         "args": {
             "text": task_text,
         },
     }
-
-
-def _should_prefer_context_fast_chat(text: str) -> bool:
-    normalized = _normalize_text(text)
-    if not normalized:
-        return False
-
-    if _looks_like_companion_open_chat(normalized):
-        return True
-
-    if "```" in normalized:
-        return False
-
-    lowered = normalized.lower()
-    if "http://" in lowered or "https://" in lowered:
-        return False
-
-    if len(normalized) > _CONTEXT_CHAT_FAST_MAX_CHARS:
-        return False
-
-    compact_lower = lowered.replace(" ", "")
-    if any(marker in compact_lower for marker in _TASK_EXEC_ACTION_MARKERS):
-        return False
-
-    if _TASK_PROGRESS_QUERY_RE.search(compact_lower):
-        return False
-    if _TASK_RECENT_TURN_RE.search(normalized):
-        return False
-    if _TASK_VISION_UI_RE.search(normalized):
-        return False
-    if _TASK_TRANSLATE_RE.search(normalized):
-        return False
-    if _TASK_INTENT_PLANNING_RE.search(normalized):
-        return False
-    if _TASK_MEMORY_RE.search(normalized):
-        return False
-    if _TASK_CODE_RE.search(normalized) and not _TASK_ENTERTAINMENT_RE.search(normalized):
-        return False
-    if len(_split_explicit_step_segments(normalized)) > 1:
-        return False
-    if normalized.startswith(("/", "!", "run ", "exec ")):
-        return False
-
-    return True
 
 
 async def classify_task_intent_by_llm(
@@ -920,8 +872,10 @@ async def classify_task_intent_by_llm(
             model_id=model_id,
             api_key=api_key,
             timeout_ms=timeout_ms,
-            prompt_text=user_prompt,
-            system_prompt=system_prompt,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
             gen_params=agent_gen_params,
             base_url_override=base_url_override,
         ):
@@ -1006,17 +960,6 @@ async def classify_task_intent(
     rule_result = classify_task_intent_by_rules(normalized)
     if rule_result is not None:
         return rule_result
-
-    if _should_prefer_context_fast_chat(normalized):
-        return {
-            "route": "chat",
-            "target_id": "",
-            "task": normalized,
-            "reason_code": "THALAMUS_RULE_CONTEXT_CHAT",
-            "confidence": 0.84,
-            "route_source": "thalamus.rule",
-            "chat_speed_profile": "context_fast",
-        }
 
     llm_result = await classify_task_intent_by_llm(
         request_id=request_id,

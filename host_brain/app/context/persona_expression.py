@@ -1,6 +1,6 @@
-"""chat_context_memory.py — 记忆/人格信号子模块。
+"""persona_expression.py — 人格表达上下文辅助。
 
-从 chat_context_builder.py 拆分，负责记忆召回信号的构建与人格表达提示的应用。
+负责运行时 guidance 模板解析与 persona_expression_hint 的状态化修饰。
 """
 
 from __future__ import annotations
@@ -54,19 +54,50 @@ def _coerce_optional_bool(value: Any) -> bool | None:
     return None
 
 
-def _load_runtime_guidance_templates() -> dict[str, Any]:
+def _normalize_template_lang(render_target_lang: str | None) -> str:
+    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+
+
+def _merge_localized_mapping(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    merged = {str(key): value for key, value in base.items()}
+    for key, value in overlay.items():
+        key_text = str(key)
+        if key_text in {"zh", "ja"}:
+            continue
+        current = merged.get(key_text)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[key_text] = _merge_localized_mapping(current, value)
+        else:
+            merged[key_text] = value
+    return merged
+
+
+def _resolve_localized_template_value(value: Any, *, render_target_lang: str | None = None) -> Any:
+    if isinstance(value, Mapping):
+        lang_key = _normalize_template_lang(render_target_lang)
+        localized = value.get(lang_key)
+        if localized is not None:
+            if isinstance(localized, Mapping):
+                return _merge_localized_mapping(localized, value)
+            return localized
+    return value
+
+
+def _load_runtime_guidance_templates(*, render_target_lang: str | None = None) -> dict[str, Any]:
     try:
         from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
-        raw = resolve_prompt_template_json_merged("chat_context_builder.runtime_guidance_texts")
+        raw = resolve_prompt_template_json_merged("chat_context.runtime_guidance_texts")
     except Exception:
         return {}
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    resolved = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
+    return dict(resolved) if isinstance(resolved, Mapping) else {}
 
 
 def _template_text(
     template_data: Mapping[str, Any] | None,
     *keys: str,
     default: str = "",
+    render_target_lang: str | None = None,
     **kwargs: Any,
 ) -> str:
     current: Any = template_data
@@ -75,11 +106,14 @@ def _template_text(
             current = None
             break
         current = current.get(key)
+    current = _resolve_localized_template_value(current, render_target_lang=render_target_lang)
     text = str(current or default)
     if not kwargs:
         return text
     try:
-        return text.format(**kwargs)
+        format_kwargs = dict(kwargs)
+        format_kwargs.pop("render_target_lang", None)
+        return text.format(**format_kwargs)
     except Exception:
         return text
 
@@ -203,77 +237,6 @@ def _build_memory_persona_signal(retrieval_evidence_items: list[dict[str, Any]])
         "protective_recoil_count": protective_recoil_count,
         "memory_persona_guidance": guidance_text or None,
     }
-
-
-def _build_memory_persona_evidence(retrieval_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    evidence_rows: list[dict[str, Any]] = []
-    for row in list(retrieval_rows or [])[:8]:
-        if not isinstance(row, Mapping):
-            continue
-        emotion_color_tag = str(row.get("emotion_color_tag") or "").strip().upper()
-        suppression_flag = _coerce_optional_bool(row.get("suppression_flag")) is True
-        distortion_level = _coerce_optional_float(row.get("distortion_level"))
-        if distortion_level is not None:
-            distortion_level = round(_clamp_float(float(distortion_level), minimum=0.0, maximum=1.0), 4)
-        if not emotion_color_tag and not suppression_flag and (distortion_level is None or distortion_level <= 0.0):
-            continue
-        content = _truncate_for_prompt(row.get("content"), limit=160)
-        if not content:
-            continue
-        evidence_rows.append({
-            "content": content,
-            "emotion_color_tag": emotion_color_tag or None,
-            "suppression_flag": suppression_flag,
-            "distortion_level": distortion_level,
-            "source_ref": str(row.get("source_ref") or "").strip() or None,
-            "evidence_ref": str(row.get("evidence_ref") or "").strip() or None,
-            "kind": str(row.get("kind") or "episodic").strip() or "episodic",
-        })
-        if len(evidence_rows) >= 4:
-            break
-    return evidence_rows
-
-
-def _build_memory_recall_summary(memory_signal_raw: Mapping[str, Any] | None) -> str:
-    memory_signal = dict(memory_signal_raw or {}) if isinstance(memory_signal_raw, Mapping) else {}
-    if not memory_signal:
-        return ""
-
-    humanized_count = _coerce_non_negative_int(memory_signal.get("humanized_memory_count"))
-    suppressed_count = _coerce_non_negative_int(memory_signal.get("suppressed_memory_count"))
-    distorted_count = _coerce_non_negative_int(memory_signal.get("distorted_memory_count"))
-    avg_distortion = float(_coerce_optional_float(memory_signal.get("avg_distortion_level")) or 0.0)
-    dominant_emotion = str(memory_signal.get("dominant_memory_emotion") or "").strip().upper()
-    recall_bias = str(memory_signal.get("recall_bias") or "").strip().lower()
-    shared_history_resonance_count = _coerce_non_negative_int(memory_signal.get("shared_history_resonance_count"))
-    protective_recoil_count = _coerce_non_negative_int(memory_signal.get("protective_recoil_count"))
-    guidance = str(memory_signal.get("memory_persona_guidance") or "").strip()
-
-    if humanized_count <= 0 and not guidance and not dominant_emotion:
-        return ""
-
-    bias_labels = {
-        "warm": "偏温暖承接", "guarded": "偏克制试探",
-        "uncertain": "偏留白保守", "fragile": "偏脆弱照看", "neutral": "偏中性回忆",
-    }
-    parts: list[str] = []
-    if humanized_count > 0:
-        parts.append(f"本次召回命中了 {humanized_count} 条带人格化标记的记忆")
-    if dominant_emotion:
-        parts.append(f"主导回忆情绪偏向 {dominant_emotion}")
-    if shared_history_resonance_count > 0:
-        parts.append(f"{shared_history_resonance_count} 条带共享记忆共振")
-    if protective_recoil_count > 0:
-        parts.append(f"{protective_recoil_count} 条带防御性回缩")
-    if suppressed_count > 0:
-        parts.append(f"其中 {suppressed_count} 条处于压制状态")
-    if distorted_count > 0:
-        parts.append(f"{distorted_count} 条带有细节失真，平均失真 {avg_distortion:.2f}")
-    if recall_bias:
-        parts.append(f"当前回忆倾向 {bias_labels.get(recall_bias, recall_bias)}")
-    if guidance:
-        parts.append(f"处理建议：{guidance}")
-    return "；".join(part for part in parts if part)
 
 
 # ---------------------------------------------------------------------------
@@ -699,8 +662,17 @@ def _apply_memory_persona_signal_to_persona_expression_hint(
     return hint
 
 
+load_runtime_guidance_templates = _load_runtime_guidance_templates
+template_text = _template_text
+apply_motive_state_to_persona_expression_hint = _apply_motive_state_to_persona_expression_hint
+apply_offline_state_to_persona_expression_hint = _apply_offline_state_to_persona_expression_hint
+apply_activity_monitor_to_persona_expression_hint = _apply_activity_monitor_to_persona_expression_hint
+apply_scene_awareness_to_persona_expression_hint = _apply_scene_awareness_to_persona_expression_hint
+apply_runtime_mode_to_persona_expression_hint = _apply_runtime_mode_to_persona_expression_hint
+
+
 __all__ = [
-    # 辅助函数（供 chat_context_retrieval.py 共享）
+    # 辅助函数（供 retrieval_context.py 共享）
     "_coerce_non_negative_int",
     "_coerce_optional_float",
     "_clamp_float",
@@ -710,8 +682,6 @@ __all__ = [
     "_resolve_offline_reconnect_profile",
     # 记忆信号
     "_build_memory_persona_signal",
-    "_build_memory_persona_evidence",
-    "_build_memory_recall_summary",
     # 人格表达提示
     "_apply_motive_state_to_persona_expression_hint",
     "_apply_offline_state_to_persona_expression_hint",
@@ -719,4 +689,11 @@ __all__ = [
     "_apply_scene_awareness_to_persona_expression_hint",
     "_apply_runtime_mode_to_persona_expression_hint",
     "_apply_memory_persona_signal_to_persona_expression_hint",
+    "apply_activity_monitor_to_persona_expression_hint",
+    "apply_motive_state_to_persona_expression_hint",
+    "apply_offline_state_to_persona_expression_hint",
+    "apply_runtime_mode_to_persona_expression_hint",
+    "apply_scene_awareness_to_persona_expression_hint",
+    "load_runtime_guidance_templates",
+    "template_text",
 ]

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from host_brain.app import chat_context_builder as ccb
+import host_brain.app.chat_generation_payload as cgp
 from host_brain.core import prompt_context as pc
 
 
-def test_chat_context_builder_uses_hippocampus_projection(monkeypatch) -> None:
+def test_prompt_context_uses_hippocampus_projection(monkeypatch) -> None:
     class _Hippocampus:
         def build_prompt_retrieval_rows(self, **kwargs):
             assert kwargs["retrieval_summary"]["status"] == "OK"
@@ -36,9 +36,9 @@ def test_chat_context_builder_uses_hippocampus_projection(monkeypatch) -> None:
         },
     )
     monkeypatch.setattr("host_brain.app.dependencies.get_bond_stage_engine", lambda: None)
-    monkeypatch.setattr(ccb, "validate_context_pack", lambda _pack: pc.PromptContextValidationResult())
+    monkeypatch.setattr(cgp, "validate_prompt_context", lambda _pack: pc.PromptContextValidationResult())
 
-    prompt_context, _ = ccb.build_chat_context_pack(
+    prompt_context, _ = cgp.build_prompt_context(
         request_id="req-ctx-hippo",
         session_id="sess-ctx-hippo",
         thread_id=None,
@@ -48,11 +48,6 @@ def test_chat_context_builder_uses_hippocampus_projection(monkeypatch) -> None:
         bond_summary={},
         emotion_context={},
         render_target_lang="zh",
-        cpb_slots={
-            "style_canon": "STYLE_SLOT",
-            "world_canon": "WORLD_SLOT",
-            "emotion_recall": "EMOTION_SLOT",
-        },
     )
 
     retrieval_rows = list(prompt_context.get("retrieval") or [])

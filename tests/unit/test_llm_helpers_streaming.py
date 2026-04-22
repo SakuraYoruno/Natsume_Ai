@@ -23,8 +23,10 @@ def test_stream_llm_chunks_passes_max_tokens_to_chat_openai(monkeypatch) -> None
             model_id="gemini-2.5-flash-lite",
             api_key="test-key",
             timeout_ms=5000,
-            prompt_text="今天有点累，抱抱我吧。",
-            system_prompt="你是夏目蓝。",
+            messages=[
+                {"role": "system", "content": "你是夏目蓝。"},
+                {"role": "user", "content": "今天有点累，抱抱我吧。"},
+            ],
             gen_params={"temperature": 0.7, "top_p": 0.9, "max_tokens": 96},
         )
     )
@@ -51,8 +53,10 @@ def test_stream_llm_chunks_accepts_max_output_tokens_alias(monkeypatch) -> None:
             model_id="gemini-2.5-flash-lite",
             api_key="test-key",
             timeout_ms=5000,
-            prompt_text="在吗",
-            system_prompt="你是夏目蓝。",
+            messages=[
+                {"role": "system", "content": "你是夏目蓝。"},
+                {"role": "user", "content": "在吗"},
+            ],
             gen_params={"max_output_tokens": 128},
         )
     )

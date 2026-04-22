@@ -1,4 +1,4 @@
-"""agent_runtime_shared.py — app 外壳之间的中性共享运行时 helper。
+﻿"""agent_runtime_shared.py — app 外壳之间的中性共享运行时 helper。
 
 这一层先承接旧统一入口中已经被多个入口直接复用的兼容能力，
 把旧调度入口 / `chat_agent.py` 对历史统一入口的硬耦合先切断，
@@ -43,7 +43,12 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _build_trace_output_digest,
     _detect_trace_fallback_used,
     _summarize_motive_state_for_trace,
-    _summarize_response_policy_for_trace,
+    _summarize_dialogue_state_for_trace,
+    _summarize_render_policy_for_trace,
+    _summarize_topic_state_for_trace,
+    _summarize_affect_state_for_trace,
+    _summarize_relationship_state_for_trace,
+    _summarize_drive_state_for_trace,
     _summarize_emotion_context_for_trace,
     _summarize_persona_resident_memory_for_trace,
 )
@@ -249,7 +254,7 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
 
 
 # _coerce_trace_mapping / _coerce_trace_score / _coerce_trace_bool /
-# _summarize_motive_state_for_trace / _summarize_response_policy_for_trace /
+# _summarize_motive_state_for_trace / _summarize_render_policy_for_trace /
 # _summarize_emotion_context_for_trace / _summarize_persona_resident_memory_for_trace /
 # _normalize_trace_stage_meta / _resolve_envelope_confidence /
 # _build_trace_output_digest / _detect_trace_fallback_used
@@ -406,7 +411,7 @@ async def _persist_post_process_audit(
     llm_input_digest: str | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     motive_state: Mapping[str, Any] | None = None,
-    response_policy: Mapping[str, Any] | None = None,
+    render_policy: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
     from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
@@ -561,12 +566,30 @@ async def _persist_post_process_audit(
         retrieval_evidence_items=_evidence_items,
     )
     _motive_trace = _summarize_motive_state_for_trace(motive_state)
-    _response_policy_trace = _summarize_response_policy_for_trace(response_policy)
+    _dialogue_state_trace = _summarize_dialogue_state_for_trace(_trace_stage_meta.get("dialogue_state"))
+    _topic_state_trace = _summarize_topic_state_for_trace(_trace_stage_meta.get("topic_state"))
+    _affect_state_trace = _summarize_affect_state_for_trace(_trace_stage_meta.get("affect_state"))
+    _relationship_state_trace = _summarize_relationship_state_for_trace(_trace_stage_meta.get("relationship_state"))
+    _drive_state_trace = _summarize_drive_state_for_trace(_trace_stage_meta.get("drive_state"))
+    _render_policy_trace = _summarize_render_policy_for_trace(_trace_stage_meta.get("render_policy"))
+    _conversation_history_trace = _coerce_trace_mapping(_trace_stage_meta.get("conversation_history"))
     _prompt_builder_output: dict[str, Any] = {}
     if _motive_trace:
         _prompt_builder_output["motive_state"] = _motive_trace
-    if _response_policy_trace:
-        _prompt_builder_output["response_policy"] = _response_policy_trace
+    if _dialogue_state_trace:
+        _prompt_builder_output["dialogue_state"] = _dialogue_state_trace
+    if _topic_state_trace:
+        _prompt_builder_output["topic_state"] = _topic_state_trace
+    if _affect_state_trace:
+        _prompt_builder_output["affect_state"] = _affect_state_trace
+    if _relationship_state_trace:
+        _prompt_builder_output["relationship_state"] = _relationship_state_trace
+    if _drive_state_trace:
+        _prompt_builder_output["drive_state"] = _drive_state_trace
+    if _render_policy_trace:
+        _prompt_builder_output["render_policy"] = _render_policy_trace
+    if _conversation_history_trace:
+        _prompt_builder_output["conversation_history"] = _conversation_history_trace
     _prompt_builder_status = "OK" if (llm_input_digest or _prompt_builder_output) else "SKIPPED"
     _prompt_builder_node = _build_trace_stage_node(
         node_id="prompt_builder",
@@ -682,12 +705,52 @@ async def _persist_post_process_audit(
             output_data=_motive_trace,
         ),
         _build_trace_stage_node(
-            node_id="response_policy",
+            node_id="dialogue_state",
             node_type="system",
-            display_name="Response Policy",
+            display_name="Dialogue State",
             ts_ms=ts_ms,
-            status="OK" if _response_policy_trace else "SKIPPED",
-            output_data=_response_policy_trace,
+            status="OK" if _dialogue_state_trace else "SKIPPED",
+            output_data=_dialogue_state_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="topic_state",
+            node_type="system",
+            display_name="Topic State",
+            ts_ms=ts_ms,
+            status="OK" if _topic_state_trace else "SKIPPED",
+            output_data=_topic_state_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="affect_state",
+            node_type="system",
+            display_name="Affect State",
+            ts_ms=ts_ms,
+            status="OK" if _affect_state_trace else "SKIPPED",
+            output_data=_affect_state_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="relationship_state",
+            node_type="system",
+            display_name="Relationship State",
+            ts_ms=ts_ms,
+            status="OK" if _relationship_state_trace else "SKIPPED",
+            output_data=_relationship_state_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="drive_state",
+            node_type="system",
+            display_name="Drive State",
+            ts_ms=ts_ms,
+            status="OK" if _drive_state_trace else "SKIPPED",
+            output_data=_drive_state_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="render_policy",
+            node_type="system",
+            display_name="Render Policy",
+            ts_ms=ts_ms,
+            status="OK" if _render_policy_trace else "SKIPPED",
+            output_data=_render_policy_trace,
         ),
         _build_trace_stage_node(
             node_id="cortex_orchestrator",
@@ -872,7 +935,7 @@ class _SubAgentGatewayAdapter:
             return []
         raw = str(os.environ.get("HOST_SUBAGENT_FALLBACK_MODEL_IDS") or "").strip()
         if not raw:
-            raw = "gemini-2.5-pro,gemini-2.5-flash-lite"
+            raw = "gemini-3.1-pro-preview,gemini-2.5-flash-lite"
         primary = str(primary_model_id or "").strip()
         rows: list[str] = []
         for chunk in raw.split(","):
@@ -1015,17 +1078,15 @@ def _load_continuity_turns(
     fetch_limit: int = 24,
 ) -> list[dict[str, str]]:
     try:
-        from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
-        from host_brain.app.cortex_prompt_builder import _fetch_continuity_rows, _voice_rows_to_turns  # noqa: PLC0415
+        from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
 
-        rows = _fetch_continuity_rows(
-            ledger=get_ledger(),
+        window = get_conversation_history().fetch_window_for_messages(
             session_id=session_id,
-            person_id=person_id,
-            request_id=request_id,
-            fetch_limit=fetch_limit,
+            max_turns=fetch_limit,
+            exclude_request_id=request_id,
+            render_target_lang="ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh",
         )
-        return _voice_rows_to_turns(rows=rows, render_target_lang=render_target_lang)
+        return [{"role": turn.role, "content": turn.content} for turn in window.recent_turns]
     except Exception as exc:
         _logger.debug("[%s] continuity lookup failed: %s", request_id, exc)
         return []
@@ -1505,76 +1566,6 @@ def _resolve_retrieval_timeout_seconds() -> float:
     except ValueError:
         timeout_ms = 20_000
     timeout_ms = max(500, min(timeout_ms, 60_000))
-    return timeout_ms / 1000.0
-
-
-def _should_use_direct_chat_fast_mode(
-    *,
-    intent_draft: Mapping[str, Any] | None,
-    user_message: str,
-) -> bool:
-    explicit_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
-    if explicit_speed_profile == "context_fast":
-        return False
-    if explicit_speed_profile == "direct_fast":
-        return True
-
-    route = str((dict(intent_draft or {})).get("route") or "").strip().lower()
-    if route and route != "chat":
-        return False
-
-    normalized = str(user_message or "").strip()
-    if not normalized or "\n" in normalized or "```" in normalized:
-        return False
-    if "http://" in normalized.lower() or "https://" in normalized.lower():
-        return False
-
-    raw_max_chars = str(os.environ.get("HOST_DIRECT_CHAT_FAST_MAX_CHARS") or "").strip()
-    try:
-        max_chars = int(raw_max_chars) if raw_max_chars else 72
-    except ValueError:
-        max_chars = 72
-    max_chars = max(12, min(max_chars, 240))
-    return len(normalized) <= max_chars
-
-
-def _should_use_context_chat_fast_mode(
-    *,
-    intent_draft: Mapping[str, Any] | None,
-    user_message: str,
-) -> bool:
-    explicit_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
-    if explicit_speed_profile == "direct_fast":
-        return False
-
-    route = str((dict(intent_draft or {})).get("route") or "").strip().lower()
-    if route and route != "chat":
-        return False
-
-    normalized = str(user_message or "").strip()
-    if not normalized or "```" in normalized:
-        return False
-    if "http://" in normalized.lower() or "https://" in normalized.lower():
-        return False
-    if explicit_speed_profile == "context_fast":
-        return True
-
-    raw_max_chars = str(os.environ.get("HOST_CONTEXT_CHAT_FAST_MAX_CHARS") or "").strip()
-    try:
-        max_chars = int(raw_max_chars) if raw_max_chars else 220
-    except ValueError:
-        max_chars = 220
-    max_chars = max(40, min(max_chars, 480))
-    return len(normalized) <= max_chars
-
-
-def _resolve_direct_chat_retrieval_timeout_seconds() -> float:
-    raw = str(os.environ.get("HOST_DIRECT_CHAT_RETRIEVAL_TIMEOUT_MS") or "").strip()
-    try:
-        timeout_ms = int(raw) if raw else 3_500
-    except ValueError:
-        timeout_ms = 3_500
-    timeout_ms = max(300, min(timeout_ms, 15_000))
     return timeout_ms / 1000.0
 
 
@@ -2093,7 +2084,6 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    recall_slot_text: dict[str, str] = {}
     bond_summary: dict[str, Any] = {}
 
     with soft_fail("agent_runtime_shared.cortex_conversation_started", fallback=None):
@@ -2318,7 +2308,6 @@ async def _cortex_orchestrator_sse_generator_impl(
             emotion_context=emotion_context,
             emotion_snapshot=emotion_snapshot,
             bond_summary=bond_summary,
-            recall_slot_text=recall_slot_text,
             retrieval_evidence_items=[],
             retrieval_summary={"status": "SKIPPED", "reason_code": "PHATIC_FASTPATH"},
             sub_agent_context=phatic_ctx,
@@ -2386,23 +2375,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     prefetch_persona_inputs_ms = 0
     retrieval_wait_ms = 0
     prompt_filter_ms = 0
-    recall_pack_ms = 0
     llm_runtime_resolve_ms = 0
-    direct_chat_fast_mode = _should_use_direct_chat_fast_mode(
-        intent_draft=intent_draft,
-        user_message=sanitized_message,
-    )
-    context_chat_fast_mode = (
-        not direct_chat_fast_mode
-        and _should_use_context_chat_fast_mode(
-            intent_draft=intent_draft,
-            user_message=sanitized_message,
-        )
-    )
-    if direct_chat_fast_mode:
-        intent_draft = {**dict(intent_draft or {}), "chat_speed_profile": "direct_fast"}
-    elif context_chat_fast_mode:
-        intent_draft = {**dict(intent_draft or {}), "chat_speed_profile": "context_fast"}
     _hard_state_summary = gov.get("hard_state_summary") if isinstance(gov.get("hard_state_summary"), Mapping) else {}
     retrieval_mood_state = (
         str(
@@ -2415,53 +2388,45 @@ async def _cortex_orchestrator_sse_generator_impl(
         or None
     )
 
-    if not context_chat_fast_mode:
-        prefetch_started_ms = int(time.time() * 1000)
-        bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            user_message=sanitized_message,
-            emotion_context=emotion_context,
-            mood_state=retrieval_mood_state,
-            governor_decision=gov,
-        )
-        prefetch_persona_inputs_ms = max(0, int(time.time() * 1000) - prefetch_started_ms)
-    else:
-        retrieval_summary = {"status": "SKIPPED", "reason_code": "CONTEXT_FAST"}
+    prefetch_started_ms = int(time.time() * 1000)
+    bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        emotion_context=emotion_context,
+        mood_state=retrieval_mood_state,
+        governor_decision=gov,
+    )
+    prefetch_persona_inputs_ms = max(0, int(time.time() * 1000) - prefetch_started_ms)
 
-    if not context_chat_fast_mode:
-        try:
-            from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
-            from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
+    try:
+        from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
+        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
 
-            if not _injected_lang and _input_source != "GATEWAY":
-                render_target_lang = infer_render_target_lang(user_message=sanitized_message)
-            retrieval_task = asyncio.create_task(
-                _run_retrieval(
-                    request_id=request_id,
-                    message=sanitized_message,
-                    person_id=person_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
-                    render_target_lang=render_target_lang,
-                    mood_state=retrieval_mood_state,
-                    bond_summary=bond_summary or None,
-                    motive_state=retrieval_motive_state or None,
-                )
+        if not _injected_lang and _input_source != "GATEWAY":
+            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
+        retrieval_task = asyncio.create_task(
+            _run_retrieval(
+                request_id=request_id,
+                message=sanitized_message,
+                person_id=person_id,
+                session_id=session_id,
+                ts_ms=ts_ms,
+                emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
+                render_target_lang=render_target_lang,
+                mood_state=retrieval_mood_state,
+                bond_summary=bond_summary or None,
+                motive_state=retrieval_motive_state or None,
             )
-        except Exception as retrieval_exc:
-            _logger.debug("[%s] cortex_orchestrator retrieval init failed: %s", request_id, retrieval_exc)
+        )
+    except Exception as retrieval_exc:
+        _logger.debug("[%s] cortex_orchestrator retrieval init failed: %s", request_id, retrieval_exc)
 
     if retrieval_task is not None:
         try:
             retrieval_wait_started_ms = int(time.time() * 1000)
-            retrieval_timeout_s = (
-                min(_resolve_timeout(), _resolve_direct_chat_retrieval_timeout_seconds())
-                if direct_chat_fast_mode
-                else _resolve_timeout()
-            )
+            retrieval_timeout_s = _resolve_timeout()
             retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
                 retrieval_task,
                 timeout=retrieval_timeout_s,
@@ -2482,6 +2447,9 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             retrieval_summary=retrieval_summary,
             retrieval_evidence_items=retrieval_evidence_items,
+            session_id=session_id,
+            person_id=person_id,
+            ledger=_get_ledger_safe(),
         )
         prompt_filter_ms = max(0, int(time.time() * 1000) - prompt_filter_started_ms)
         if prompt_filter_meta.get("applied"):
@@ -2491,41 +2459,18 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception as prompt_filter_exc:
         _logger.debug("[%s] cortex_orchestrator prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
 
-    recall_pack_started_ms = int(time.time() * 1000)
-    try:
-        from host_brain.app.chat_retrieval_helpers import _build_recall_pack_inputs  # noqa: PLC0415
-        from host_brain.app.dependencies import get_recall_pack_builder  # noqa: PLC0415
+    # 人格聊天链不再使用 slot 投影。
+    # 运行时只保留五路召回原始结果，由 prompt 直接消费检索证据；
+    # 最近上下文则继续由 continuity 链单独管理。
 
-        cpb = get_recall_pack_builder()
-        if retrieval_evidence_items:
-            recall_results = _build_recall_pack_inputs(retrieval_evidence_items)
-            if recall_results:
-                from host_brain.app.schemas.recall_pack import RECALL_SLOT_PRIORITY  # noqa: PLC0415
+    from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
 
-                try:
-                    pack = cpb.build(recall_results, task_type="chat", request_id=request_id)
-                except TypeError:
-                    pack = cpb.build(recall_results, task_type="chat")
-                for slot_name in RECALL_SLOT_PRIORITY:
-                    slot = pack.get_slot(slot_name)
-                    if slot and str(getattr(slot, "content", "") or "").strip():
-                        recall_slot_text[slot_name] = str(slot.content).strip()
-        recall_pack_ms = max(0, int(time.time() * 1000) - recall_pack_started_ms)
-    except Exception as cpb_exc:
-        recall_pack_ms = max(0, int(time.time() * 1000) - recall_pack_started_ms)
-        _logger.debug("[%s] cortex_orchestrator recall_pack failed: %s", request_id, cpb_exc)
-
-    if direct_chat_fast_mode or context_chat_fast_mode:
-        llm_runtime = None
-    else:
-        from host_brain.app.graph_config_builder import resolve_host_llm_runtime_async  # noqa: PLC0415
-
-        llm_runtime_started_ms = int(time.time() * 1000)
-        llm_runtime = await resolve_host_llm_runtime_async(
-            rollout_key=session_id,
-            scene_type="CHAT",
-        )
-        llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
+    llm_runtime_started_ms = int(time.time() * 1000)
+    llm_runtime = await resolve_host_llm_runtime_async(
+        rollout_key=session_id,
+        scene_type="CHAT",
+    )
+    llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
 
     if llm_runtime is not None and not llm_runtime.get("available"):
         fallback_narrative = _load_runtime_text_value(
@@ -2582,17 +2527,12 @@ async def _cortex_orchestrator_sse_generator_impl(
     from host_brain.app.executive_router import executive_router_sse_generator  # noqa: PLC0415
 
     _logger.info(
-        "[%s] cortex_orchestrator stage_summary speed_profile=%s direct_fast=%s context_fast=%s "
-        "prefetch_ms=%s retrieval_wait_ms=%s prompt_filter_ms=%s recall_pack_ms=%s "
+        "[%s] cortex_orchestrator stage_summary prefetch_ms=%s retrieval_wait_ms=%s prompt_filter_ms=%s "
         "llm_runtime_resolve_ms=%s request_to_executive_ms=%s",
         request_id,
-        str((dict(intent_draft or {})).get("chat_speed_profile") or "default"),
-        direct_chat_fast_mode,
-        context_chat_fast_mode,
         prefetch_persona_inputs_ms,
         retrieval_wait_ms,
         prompt_filter_ms,
-        recall_pack_ms,
         llm_runtime_resolve_ms,
         max(0, int(time.time() * 1000) - orchestrator_started_ms),
     )
@@ -2610,7 +2550,6 @@ async def _cortex_orchestrator_sse_generator_impl(
         metrics=metrics,
         person_id=person_id,
         sanitized_message=sanitized_message,
-        recall_slot_text=recall_slot_text,
         bond_summary=bond_summary,
         retrieval_evidence_items=retrieval_evidence_items,
         retrieval_summary=retrieval_summary,
@@ -2646,27 +2585,22 @@ async def _async_post_process(
     llm_input_digest: str | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     motive_state: Mapping[str, Any] | None = None,
-    response_policy: Mapping[str, Any] | None = None,
+    render_policy: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
     normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
-    chat_speed_profile = str(normalized_trace_stage_meta.get("chat_speed_profile") or "").strip().lower()
-    fast_chat_background = chat_speed_profile in {"direct_fast", "context_fast"}
     voice_outputs_enabled = bool(normalized_trace_stage_meta.get("voice_outputs_enabled"))
     skip_heavy_persona_postprocess = bool(
         normalized_trace_stage_meta.get("skip_heavy_persona_postprocess")
-    ) or fast_chat_background
+    )
     skip_default_mode_on_conversation_end = bool(
         normalized_trace_stage_meta.get("skip_default_mode_on_conversation_end")
-    ) or fast_chat_background
-    minimal_fast_postprocess = fast_chat_background and not voice_outputs_enabled and str(
-        os.environ.get("HOST_FAST_CHAT_MINIMAL_POSTPROCESS") or "true"
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    )
 
     try:
         from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction  # noqa: PLC0415
 
-        mark_recent_foreground_interaction(ts_ms=int(time.time() * 1000), speed_profile=chat_speed_profile)
+        mark_recent_foreground_interaction(ts_ms=int(time.time() * 1000))
     except Exception:
         pass
 
@@ -2693,11 +2627,35 @@ async def _async_post_process(
             llm_input_digest=llm_input_digest,
             retrieval_evidence_items=retrieval_evidence_items,
             motive_state=motive_state,
-            response_policy=response_policy,
+            render_policy=render_policy,
             trace_stage_meta=normalized_trace_stage_meta,
         )
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process audit persist failed: %s", request_id, exc)
+
+    try:
+        from host_brain.conversation.writer import record_assistant_turn  # noqa: PLC0415
+
+        fallback_used = bool(normalized_trace_stage_meta.get("fallback_used")) or _detect_trace_fallback_used(
+            reason_code=str((gov_decision or {}).get("reason_code") or ""),
+            degrade_code=str(normalized_trace_stage_meta.get("degrade_code") or ""),
+            output_data={"narrative": narrative, "provider_name": provider_name, "model_id": model_id},
+        )
+        record_assistant_turn(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            content=narrative,
+            ts_ms=int(time.time() * 1000),
+            lang=render_target_lang,
+            metadata={
+                "provider_name": provider_name,
+                "model_id": model_id,
+                "fallback": fallback_used,
+            },
+        )
+    except Exception as exc:
+        _logger.debug("[%s] cortex_orchestrator post_process conversation_turn failed: %s", request_id, exc)
 
     try:
         from host_brain.airlock.quarantine import classify_ingress  # noqa: PLC0415
@@ -2736,19 +2694,10 @@ async def _async_post_process(
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process episodic failed: %s", request_id, exc)
 
-    if minimal_fast_postprocess:
-        _logger.debug(
-            "[%s] cortex_orchestrator post_process minimal fast-chat mode speed_profile=%s",
-            request_id,
-            chat_speed_profile or "default",
-        )
-        return
-
     if skip_heavy_persona_postprocess:
         _logger.debug(
-            "[%s] cortex_orchestrator post_process skip persona session_end speed_profile=%s",
+            "[%s] cortex_orchestrator post_process skip persona session_end",
             request_id,
-            chat_speed_profile or "default",
         )
     else:
         try:
@@ -2785,7 +2734,6 @@ async def _async_post_process(
             request_id=str(request_id or ""),
             emotion_tag=str(ec.get("emotion_tag") or "NEUTRAL").strip().upper(),
             emotion_intensity=float(ec.get("emotion_intensity") or 0.5),
-            chat_speed_profile=chat_speed_profile or None,
             skip_default_mode_inner_activity=skip_default_mode_on_conversation_end,
             summary={
                 "user_message": str(user_message or ""),
@@ -2870,9 +2818,8 @@ async def _async_post_process(
 
     if skip_heavy_persona_postprocess:
         _logger.debug(
-            "[%s] cortex_orchestrator post_process skip drift/growth speed_profile=%s",
+            "[%s] cortex_orchestrator post_process skip drift/growth",
             request_id,
-            chat_speed_profile or "default",
         )
     else:
         try:
@@ -2938,7 +2885,7 @@ __all__ = [
     "_coerce_trace_score",
     "_coerce_trace_bool",
     "_summarize_motive_state_for_trace",
-    "_summarize_response_policy_for_trace",
+    "_summarize_render_policy_for_trace",
     "_summarize_emotion_context_for_trace",
     "_summarize_persona_resident_memory_for_trace",
     "_normalize_trace_stage_meta",
@@ -2963,3 +2910,4 @@ __all__ = [
     "_infer_emotion_tag_for_tts",
     "_async_post_process",
 ]
+

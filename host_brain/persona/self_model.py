@@ -1,4 +1,4 @@
-"""SelfModel：自我意识模型——Phase III 核心。
+﻿"""SelfModel：自我意识模型——Phase III 核心。
 
 职责：
   1. 从 EmotionTimeline 提取情感趋势、稳定性、主导情感
@@ -944,7 +944,7 @@ def build_state_aligned_self_awareness(
     offline_state: dict[str, Any] | None = None,
     bond_summary: dict[str, Any] | None = None,
     motive_state: dict[str, Any] | None = None,
-    response_policy: dict[str, Any] | None = None,
+    render_policy: dict[str, Any] | None = None,
     runtime_flags: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> dict[str, Any]:
@@ -952,7 +952,7 @@ def build_state_aligned_self_awareness(
     offline = dict(offline_state or {})
     bond = dict(bond_summary or {})
     motive = dict(motive_state or {})
-    policy = dict(response_policy or {})
+    policy = dict(render_policy or {})
     runtime = dict(runtime_flags or {})
 
     bond_stage = str(bond.get("stage") or "STRANGER").strip().upper()
@@ -1040,3 +1040,4 @@ def build_state_aligned_self_awareness(
         "alignment_mode": intent_key,
         "reason_tags": reason_tags,
     }
+

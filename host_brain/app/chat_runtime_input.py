@@ -4,25 +4,10 @@ from dataclasses import dataclass, field
 import os
 from typing import Any, Mapping
 
-from host_brain.app.emotion_context import (
-    build_chat_emotion_snapshot,
-    normalize_chat_emotion_context,
-)
+from host_brain.app.emotion_context import build_chat_emotion_snapshot, normalize_chat_emotion_context
 
 
 CHAT_RUNTIME_INPUT_VERSION = "chat_runtime_input.v2"
-
-
-def normalize_recall_slot_text(
-    recall_slot_text: Mapping[str, Any] | None,
-) -> dict[str, str]:
-    normalized: dict[str, str] = {}
-    for slot_name, raw_value in dict(recall_slot_text or {}).items():
-        text = str(raw_value or "").strip()
-        if not text:
-            continue
-        normalized[str(slot_name).strip()] = text
-    return normalized
 
 
 def build_emotion_recall_text(
@@ -128,7 +113,6 @@ class ChatRuntimeInput:
     retrieval_evidence_items: list[dict[str, Any]] = field(default_factory=list)
     emotion_state: dict[str, Any] = field(default_factory=dict)
     emotion_snapshot: dict[str, Any] = field(default_factory=dict)
-    recall_slot_text: dict[str, str] = field(default_factory=dict)
     bond_summary: dict[str, Any] = field(default_factory=dict)
     scene_type: str | None = None
     scene_type_source: str | None = None
@@ -199,7 +183,6 @@ def build_chat_runtime_input(
     emotion_state: Mapping[str, Any] | None = None,
     emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
-    recall_slot_text: Mapping[str, Any] | None = None,
     bond_summary: Mapping[str, Any] | None = None,
     scene_type: str | None = None,
     scene_type_source: str | None = None,
@@ -228,7 +211,6 @@ def build_chat_runtime_input(
         retrieval_evidence_items=_copy_rows(retrieval_evidence_items),
         emotion_state=normalized_emotion_state,
         emotion_snapshot=normalized_emotion_snapshot,
-        recall_slot_text=normalize_recall_slot_text(recall_slot_text),
         bond_summary=dict(bond_summary) if isinstance(bond_summary, Mapping) else {},
         scene_type=(str(scene_type).strip().upper() if scene_type else None),
         scene_type_source=(str(scene_type_source).strip() if scene_type_source else None),

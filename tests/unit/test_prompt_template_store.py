@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -37,12 +37,12 @@ def test_prompt_template_store_parses_json_override() -> None:
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
 
     store.upsert_template(
-        "chat_agent.response_policy.withdrawn_replacements",
+        "chat_agent.render_policy.withdrawn_replacements",
         content='[{"from":"我一直都在","to":"我会在"}]',
         enabled=True,
     )
 
-    resolved = store.resolve_json("chat_agent.response_policy.withdrawn_replacements")
+    resolved = store.resolve_json("chat_agent.render_policy.withdrawn_replacements")
     assert resolved == [{"from": "我一直都在", "to": "我会在"}]
 
 
@@ -119,3 +119,4 @@ def test_runtime_template_defaults_include_input_and_qa_fallbacks() -> None:
     assert input_routes_defaults["ja"]["approve_empty"] == "ええ、受け取りました。すぐ取りかかります。"
     assert qa_defaults["default"] == "嗯…脑子有点转不过来，等我缓一下再回你。"
     assert qa_defaults["angry_or_frustrated"] == "我需要冷静一下…等会儿再好好说。"
+

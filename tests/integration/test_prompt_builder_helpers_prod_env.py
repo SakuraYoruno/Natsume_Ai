@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import json
-import os
-
 import pytest
 
 from host_brain.app.prompt_builder import (
-    _CHARACTER_PROFILE_CACHE,
     _build_character_dynamic_patch,
     _build_node_role_instruction,
     get_last_injection_meta,
-    _load_character_profile,
     _set_injection_meta,
     extract_node_narrative_text,
     extract_node_runtime_payload,
 )
+from host_brain.app.context.identity_source import _CHARACTER_PROFILE_CACHE, load_character_profile
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +28,7 @@ def test_prompt_builder_helpers_prod_load_character_profile_from_env(tmp_path, m
     monkeypatch.setenv('NATSUME_CHARACTER_PROFILE_PATH', str(profile_path))
     _CHARACTER_PROFILE_CACHE.clear()
 
-    text = _load_character_profile('ja')
+    text = load_character_profile('ja')
 
     assert '测试版夏目蓝' in text
     assert '稳定语气' in text

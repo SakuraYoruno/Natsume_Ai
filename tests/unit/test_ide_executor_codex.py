@@ -26,7 +26,7 @@ def test_execute_codex_codegen_degrades_when_cli_missing(monkeypatch, tmp_path) 
     assert result["reason_code"] == CODEX_CLI_UNAVAILABLE
 
 
-def test_execute_codex_codegen_uses_direct_fast_path_for_temp_workspace_inspect(monkeypatch) -> None:
+def test_execute_codex_codegen_uses_direct_codegen_path_for_temp_workspace_inspect(monkeypatch) -> None:
     monkeypatch.setenv("HOST_CODEX_INSPECT_DIRECT_LLM_ENABLED", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setattr("host_brain.skills.impl.ide_executor.shutil.which", lambda _name: None)

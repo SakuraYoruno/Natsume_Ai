@@ -1,6 +1,7 @@
 """
-recall package: retrieval and RecallPack assembly.
+recall package: semantic retrieval primitives used by the five-route recall chain.
 """
-from .recall_pack_builder import RecallPackBuilder, estimate_token_count, truncate_to_token_limit
 
-__all__ = ["RecallPackBuilder", "estimate_token_count", "truncate_to_token_limit"]
+from .semantic_recall import SemanticHit, SemanticRecallResult, SemanticRecaller
+
+__all__ = ["SemanticHit", "SemanticRecallResult", "SemanticRecaller"]

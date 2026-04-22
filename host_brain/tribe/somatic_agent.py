@@ -13,7 +13,7 @@ class SomaticAgent:
 
     负责接收来自 edge_client 的躯体感知信号（BODY_SENSE_UPDATED），
     以及孤独感信号（LONELINESS_SIGNAL），将躯体状态写入快照，
-    供 chat_context_builder 在构建 prompt 时参考身体感知状态。
+    供上下文装配主链在构建 prompt 时参考身体感知状态。
 
     Phase 6（edge_client 接入）时将扩展为完整实现。
     """

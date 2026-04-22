@@ -10,7 +10,7 @@
 - T-319: HippocampusAgent 写入自传体记忆后联动 DefaultModeAgent.tick_idle_cycle()
 - T-320: EndocrineAgent 高 cortisol 时联动 InteroceptionAgent.inject_external_stress()
 - T-321: vital_signs 已包含 cognitive_load_index/readiness_hint 字段
-- T-322: chat_context_builder 已注入 proprioception_state
+- T-322: 上下文装配主链已注入 proprioception_state
 """
 from __future__ import annotations
 

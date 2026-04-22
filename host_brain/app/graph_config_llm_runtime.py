@@ -513,40 +513,8 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     return {**base_runtime, "model_id": model_id, "chat_model_id": model_id, "timeout_ms": timeout_ms, "chat_timeout_ms": timeout_ms, "llm_api_key": selected_api_key, "chat_llm_api_key": selected_api_key, "agent_gen_params": dict(gen_params), "agent_role": role, "agent_model_route": (model_route or None)}
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict, speed_profile: str | None = None) -> dict:
+def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
     """ChatAgent（夏目蓝本人）的 LLM 运行时配置。"""
-    normalized_speed_profile = str(speed_profile or "").strip().lower()
-    if normalized_speed_profile == "direct_fast":
-        return _resolve_agent_llm_runtime_v2(
-            base_runtime=base_runtime,
-            role="chat_agent_direct",
-            model_env_name="HOST_CHAT_AGENT_DIRECT_MODEL_ID",
-            timeout_env_name="HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
-            timeout_default_ms=12_000,
-            timeout_max_ms=60_000,
-            gen_params={"temperature": 0.74, "top_p": 0.88, "max_tokens": 96},
-            fallback_model_env_names=("HOST_GEMINI_MODEL_ID", "HOST_DISPATCH_AGENT_MODEL_ID"),
-            fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
-        )
-    if normalized_speed_profile == "context_fast":
-        return _resolve_agent_llm_runtime_v2(
-            base_runtime=base_runtime,
-            role="chat_agent_context",
-            model_env_name="HOST_CHAT_AGENT_CONTEXT_MODEL_ID",
-            timeout_env_name="HOST_CHAT_AGENT_CONTEXT_TIMEOUT_MS",
-            timeout_default_ms=18_000,
-            timeout_max_ms=90_000,
-            gen_params={"temperature": 0.7, "top_p": 0.86, "max_tokens": 96},
-            fallback_model_env_names=(
-                "HOST_CHAT_AGENT_DIRECT_MODEL_ID",
-                "HOST_GEMINI_MODEL_ID",
-                "HOST_CHAT_AGENT_MODEL_ID",
-            ),
-            fallback_timeout_env_names=(
-                "HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
-                "HOST_CHAT_AGENT_TIMEOUT_MS",
-            ),
-        )
     return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
 
 

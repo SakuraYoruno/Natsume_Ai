@@ -203,7 +203,7 @@ class CerebellumAgent:
         触发条件：evaluate_correction() 返回 RETRY/DEGRADE/SAFE_FALLBACK。
         调用：Flash 小模型。
         开关：CEREBELLUM_CORRECTION_NARRATIVE_ENABLED（默认 false）。
-        输出注入：ChatAgent 的 extra_context_prompt。
+        输出注入：ChatAgent 的 turn_context_sections（并入单一 system_prompt）。
 
         Returns:
             纠偏叙事字符串，或 None（未触发/失败）。

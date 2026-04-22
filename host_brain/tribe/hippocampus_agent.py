@@ -321,7 +321,7 @@ class HippocampusAgent:
 
         HippocampusAgent 作为 Bond 用户 ID 的唯一解析入口，封装
         `get_canonical_bond_user_id()` 调用，确保用户 ID 解析逻辑不散落在
-        chat_context_builder 等模块中。
+        上下文装配等模块中。
 
         Args:
             fallback: 解析失败时的降级值，默认 "user_1"。
@@ -638,7 +638,7 @@ class HippocampusAgent:
     def export_runtime_state(self) -> dict[str, Any]:
         """T-271：导出 HippocampusAgent 当前运行时状态快照。
 
-        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        供 CortexAgent.collect_tribe_context() 和上下文装配主链使用，
         不触发任何副作用（不 emit 事件，不写 state_registry）。
 
         Returns:

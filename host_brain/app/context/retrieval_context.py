@@ -1,6 +1,6 @@
-"""chat_context_retrieval.py — 检索路径与可观测性子模块。
+"""retrieval_context.py — 检索行构建与上下文可观测性辅助。
 
-从 chat_context_builder.py 拆分，负责检索行过滤、路径分类和上下文可观测性构建。
+负责检索行过滤、路径分类和上下文可观测性构建。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import logging
 from typing import Any, Mapping
 
 from host_brain.app.prompt_builder import _truncate_for_prompt
-from host_brain.app.chat_context_memory import (
+from host_brain.app.context.persona_expression import (
     _coerce_non_negative_int,
     _coerce_optional_float,
     _clamp_float,
@@ -240,12 +240,6 @@ def build_prompt_context_observability(
     node_bindings_raw = style_pack.get("node_bindings")
     node_bindings = dict(node_bindings_raw) if isinstance(node_bindings_raw, Mapping) else {}
     emotion_recall_text = str(prompt_context.get("emotion_recall") or "").strip()
-    memory_recall_summary_text = str(prompt_context.get("memory_recall_summary") or "").strip()
-    memory_persona_evidence_rows = (
-        list(prompt_context.get("memory_persona_evidence") or [])
-        if isinstance(prompt_context.get("memory_persona_evidence"), list)
-        else []
-    )
 
     slot_item_counts = {
         "authoritative": len(authoritative_rows),
@@ -254,8 +248,6 @@ def build_prompt_context_observability(
         "style_node_bindings": len(node_bindings),
         "tool_meta_pack": len(tool_meta_rows),
         "emotion_recall": (1 if emotion_recall_text else 0),
-        "memory_persona_evidence": len(memory_persona_evidence_rows),
-        "memory_recall_summary": (1 if memory_recall_summary_text else 0),
     }
 
     selected_tier, selected_reason = _select_context_degrade_tier(
@@ -276,8 +268,6 @@ def build_prompt_context_observability(
             "constraints": dict(prompt_context.get("constraints") or {}),
             "emotion_pulse": dict(prompt_context.get("emotion_pulse") or {}),
             "emotion_recall": emotion_recall_text,
-            "memory_persona_evidence": memory_persona_evidence_rows,
-            "memory_recall_summary": memory_recall_summary_text,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -320,10 +310,12 @@ def build_prompt_context_observability(
             "style_prompt_rows": len(style_rows),
             "style_binding_nodes": len(node_bindings),
             "emotion_recall_present": bool(emotion_recall_text),
-            "memory_recall_summary_present": bool(memory_recall_summary_text),
         },
         "context_size_chars": context_chars,
     }
+
+
+build_retrieval_rows = _build_retrieval_rows
 
 
 __all__ = [
@@ -338,4 +330,5 @@ __all__ = [
     "_classify_retrieval_path_for_obs",
     "_select_context_degrade_tier",
     "build_prompt_context_observability",
+    "build_retrieval_rows",
 ]

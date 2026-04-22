@@ -1,4 +1,4 @@
-"""MotiveEngine：统一动机中枢。
+﻿"""MotiveEngine：统一动机中枢。
 
 职责：
   把当前分散在多个模块中的驱动因子整合成
@@ -15,15 +15,15 @@
   - 纯规则层，第一版不做任何学习，不调用 LLM
   - 五个驱动力可同时高（允许张力共存，不强制互斥）
   - 每个驱动力来源可解释，reason_tags 记录因子链
-  - 与 ResponsePolicyLayer 是互补关系：
+  - 与 RenderPolicyLayer 是互补关系：
       Motive Engine 决定"更倾向于做什么"
-      ResponsePolicyLayer 决定"允许做到什么程度"
+      RenderPolicyLayer 决定"允许做到什么程度"
   - 输出注入 runtime_payload["motive_state"]
 
 与其他模块的关系：
   - proactive_voice：读 reach_out_drive / continuity_drive 决定是否主动
   - emotional_silence：withdraw_drive / self_protect_drive 可增强沉默权重
-  - response_policy：motive_state 可作为补充输入
+  - render_policy：motive_state 可作为补充输入
 """
 
 from __future__ import annotations
@@ -447,3 +447,4 @@ def compute_motive_state(inp: MotiveInput) -> MotiveState:
         ))
     """
     return get_motive_engine().compute(inp)
+

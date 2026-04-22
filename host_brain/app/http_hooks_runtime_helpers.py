@@ -359,12 +359,12 @@ def _resolve_absence_band(offline_state: dict[str, Any]) -> str:
     return absence_band
 
 
-def _derive_reply_posture(response_policy: dict[str, Any]) -> str:
-    should_be_withdrawn = bool(response_policy.get("should_be_withdrawn") or False)
-    allow_followup = bool(response_policy.get("allow_followup", True))
-    allow_topic_shift = bool(response_policy.get("allow_topic_shift", True))
-    max_chars = int(response_policy.get("max_chars") or 0)
-    warmth_floor = _coerce_float(response_policy.get("warmth_floor"), 0.0)
+def _derive_reply_posture(render_policy: dict[str, Any]) -> str:
+    should_be_withdrawn = bool(render_policy.get("should_be_withdrawn") or False)
+    allow_followup = bool(render_policy.get("allow_followup", True))
+    allow_topic_shift = bool(render_policy.get("allow_topic_shift", True))
+    max_chars = int(render_policy.get("max_chars") or 0)
+    warmth_floor = _coerce_float(render_policy.get("warmth_floor"), 0.0)
 
     if should_be_withdrawn:
         return "withdrawn"
@@ -390,7 +390,7 @@ def _build_runtime_summary(
     self_reflection_pulse: dict[str, Any],
     bond_narrative: dict[str, Any],
     motive_state: dict[str, Any],
-    response_policy: dict[str, Any],
+    render_policy: dict[str, Any],
     slot_status: dict[str, str],
     degraded_reasons: list[str],
 ) -> dict[str, Any]:
@@ -404,7 +404,7 @@ def _build_runtime_summary(
     fatigue_level = str(body_sense.get("fatigue_level") or "UNKNOWN").strip().upper() or "UNKNOWN"
     drowsiness_level = str(body_sense.get("drowsiness_level") or "UNKNOWN").strip().upper() or "UNKNOWN"
     dominant_motive = str(motive_state.get("dominant_motive") or "unknown").strip() or "unknown"
-    reply_posture = _derive_reply_posture(response_policy)
+    reply_posture = _derive_reply_posture(render_policy)
     activity_event = str(activity_monitor.get("recent_event_type") or "").strip()
     topic_resistance_active = bool(silence_state.get("topic_resistance_active") or False)
     guardrails = dict(self_reflection_pulse.get("narrative_guardrails") or {})
@@ -423,7 +423,7 @@ def _build_runtime_summary(
 
     why_reply: list[str] = []
     for source in (
-        list(response_policy.get("policy_reason_tags") or []),
+        list(render_policy.get("policy_reason_tags") or []),
         list(motive_state.get("motive_reason_tags") or []),
     ):
         for item in source:
@@ -434,9 +434,9 @@ def _build_runtime_summary(
         f"mode:{sys_mode}",
         f"offline:{absence_band}" if absence_band != "recent" else "",
         f"motive:{dominant_motive}" if dominant_motive and dominant_motive != "unknown" else "",
-        "policy:withdrawn" if bool(response_policy.get("should_be_withdrawn") or False) else "",
-        "policy:no_followup" if response_policy.get("allow_followup") is False else "",
-        "policy:no_topic_shift" if response_policy.get("allow_topic_shift") is False else "",
+        "policy:withdrawn" if bool(render_policy.get("should_be_withdrawn") or False) else "",
+        "policy:no_followup" if render_policy.get("allow_followup") is False else "",
+        "policy:no_topic_shift" if render_policy.get("allow_topic_shift") is False else "",
     ]
     for item in fallback_reasons:
         label = str(item or "").strip()
@@ -505,7 +505,7 @@ def _build_runtime_summary(
         else "",
         f"self_reflection_guard:{self_reflection_risk_level}" if self_reflection_risk_level else "",
         f"motive:{dominant_motive}" if dominant_motive != "unknown" else "",
-        f"response_policy:{reply_posture}",
+        f"render_policy:{reply_posture}",
     ):
         label = str(item or "").strip()
         if label and label not in decision_chain:
@@ -569,17 +569,17 @@ def _build_runtime_summary(
             ][:5],
             "active_drives": motive_active_drives,
         },
-        "response_policy": {
-            "status": str(slot_status.get("response_policy") or "unknown"),
+        "render_policy": {
+            "status": str(slot_status.get("render_policy") or "unknown"),
             "reply_posture": reply_posture,
-            "max_chars": int(response_policy.get("max_chars") or 0),
-            "max_sentences": int(response_policy.get("max_sentences") or 0),
-            "allow_followup": bool(response_policy.get("allow_followup", True)),
-            "allow_topic_shift": bool(response_policy.get("allow_topic_shift", True)),
-            "allow_proactive_after_reply": bool(response_policy.get("allow_proactive_after_reply", True)),
+            "max_chars": int(render_policy.get("max_chars") or 0),
+            "max_sentences": int(render_policy.get("max_sentences") or 0),
+            "allow_followup": bool(render_policy.get("allow_followup", True)),
+            "allow_topic_shift": bool(render_policy.get("allow_topic_shift", True)),
+            "allow_proactive_after_reply": bool(render_policy.get("allow_proactive_after_reply", True)),
             "reason_tags": [
                 str(item).strip()
-                for item in (response_policy.get("policy_reason_tags") or [])
+                for item in (render_policy.get("policy_reason_tags") or [])
                 if str(item).strip()
             ][:5],
         },
@@ -602,14 +602,14 @@ def _build_runtime_summary(
         },
         "reply_posture": {
             "style": reply_posture,
-            "max_chars": int(response_policy.get("max_chars") or 0),
-            "max_sentences": int(response_policy.get("max_sentences") or 0),
-            "allow_followup": bool(response_policy.get("allow_followup", True)),
-            "allow_topic_shift": bool(response_policy.get("allow_topic_shift", True)),
-            "allow_proactive_after_reply": bool(response_policy.get("allow_proactive_after_reply", True)),
-            "should_be_withdrawn": bool(response_policy.get("should_be_withdrawn") or False),
-            "warmth_floor": _coerce_float(response_policy.get("warmth_floor"), 0.0),
-            "intimacy_ceiling": _coerce_float(response_policy.get("intimacy_ceiling"), 0.0),
+            "max_chars": int(render_policy.get("max_chars") or 0),
+            "max_sentences": int(render_policy.get("max_sentences") or 0),
+            "allow_followup": bool(render_policy.get("allow_followup", True)),
+            "allow_topic_shift": bool(render_policy.get("allow_topic_shift", True)),
+            "allow_proactive_after_reply": bool(render_policy.get("allow_proactive_after_reply", True)),
+            "should_be_withdrawn": bool(render_policy.get("should_be_withdrawn") or False),
+            "warmth_floor": _coerce_float(render_policy.get("warmth_floor"), 0.0),
+            "intimacy_ceiling": _coerce_float(render_policy.get("intimacy_ceiling"), 0.0),
         },
         "decision_chain": decision_chain,
         "core_slots": core_slots,
@@ -980,31 +980,27 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
             detail=str(exc)[:120],
         )
 
-    response_policy: dict[str, Any] = {}
+    render_policy: dict[str, Any] = {}
     try:
-        from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+        from host_brain.persona.render_policy import build_render_policy_from_inputs  # noqa: PLC0415
 
-        response_policy = get_limbic_agent().decide_response_policy(
-            silence_state=silence_state or None,
-            body_sense=body_sense or None,
-            offline_state=offline_state or None,
-            bond_summary=bond_summary or None,
-            self_reflection_pulse=self_reflection_pulse or None,
-            emotion_context=emotion_context or None,
-            motive_state=motive_state or None,
-            user_message=normalized_topic,
-            runtime_flags={
-                "source": "obs_runtime_snapshot",
-                "sys_mode": sys_mode,
-                "activity_monitor": activity_monitor,
-            },
+        render_policy = dict(
+            build_render_policy_from_inputs(
+                emotion_context=emotion_context or None,
+                body_sense=body_sense or None,
+                offline_state=offline_state or None,
+                silence_state=silence_state or None,
+                bond_summary=bond_summary or None,
+                motive_state=motive_state or None,
+            ).as_dict()
+            or {}
         )
-        slot_status["response_policy"] = "live"
+        slot_status["render_policy"] = "live"
     except Exception as exc:
         _record_snapshot_status(
             slot_status,
             degraded_reasons,
-            slot="response_policy",
+            slot="render_policy",
             status="degraded",
             detail=str(exc)[:120],
         )
@@ -1286,7 +1282,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         self_reflection_pulse=self_reflection_pulse,
         bond_narrative=bond_narrative,
         motive_state=motive_state,
-        response_policy=response_policy,
+        render_policy=render_policy,
         slot_status=slot_status,
         degraded_reasons=degraded_reasons,
     )
@@ -1316,7 +1312,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         "self_reflection_pulse": self_reflection_pulse,
         "bond_narrative": bond_narrative,
         "motive_state": motive_state,
-        "response_policy": response_policy,
+        "render_policy": render_policy,
         "somatic_state": somatic_state,
         "peripheral_state": peripheral_state,
         "circadian_state": circadian_state,
@@ -1476,8 +1472,9 @@ def run_proactive_intent_dispatch(
     except Exception as motive_exc:
         logger.debug("proactive motive_state compute failed（忽略）: %s", motive_exc)
 
-    response_policy: dict[str, Any] = {}
+    render_policy: dict[str, Any] = {}
     try:
+        from host_brain.persona.render_policy import build_render_policy_from_inputs  # noqa: PLC0415
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         current_topic = recent_topics[0] if recent_topics else ""
@@ -1485,18 +1482,19 @@ def run_proactive_intent_dispatch(
         offline_state = limbic_agent.resolve_offline_state(person_id=persona_user_id or "user_1")
         silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
         body_sense = limbic_agent.resolve_body_sense_state()
-        response_policy = limbic_agent.decide_response_policy(
-            silence_state=silence_state,
-            body_sense=body_sense,
-            offline_state=offline_state,
-            bond_summary=bond_summary,
-            emotion_context=emotion_context,
-            motive_state=motive_state,
-            user_message=current_topic,
-            runtime_flags={"source": "proactive_talk", "sys_mode": resolved_sys_mode},
+        render_policy = dict(
+            build_render_policy_from_inputs(
+                silence_state=silence_state,
+                body_sense=body_sense,
+                offline_state=offline_state,
+                bond_summary=bond_summary,
+                emotion_context=emotion_context,
+                motive_state=motive_state,
+            ).as_dict()
+            or {}
         )
     except Exception as policy_exc:
-        logger.debug("proactive response_policy compute failed（忽略）: %s", policy_exc)
+        logger.debug("proactive render_policy compute failed（忽略）: %s", policy_exc)
 
     context = {
         "sys_mode": resolved_sys_mode,
@@ -1509,7 +1507,7 @@ def run_proactive_intent_dispatch(
         "user_name": "主人",
         "emotion_context": emotion_context,
         "motive_state": motive_state,
-        "response_policy": response_policy,
+        "render_policy": render_policy,
         "scene_awareness": system_intent.get("scene_awareness") or args.get("scene_awareness") or {},
     }
     return execute_proactive_talk(args=args, context=context)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -24,7 +25,10 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
     def _fake_response_intelligence(**kwargs):  # noqa: ANN003
         return kwargs["narrative"], {}
 
+    captured_post_process: dict[str, object] = {}
+
     async def _fake_post_process(**kwargs):  # noqa: ANN003
+        captured_post_process.update(kwargs)
         return None
 
     monkeypatch.setattr(
@@ -36,6 +40,26 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
         _fake_response_intelligence,
     )
     monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [{"role": "system", "content": "你是夏目蓝。"}, {"role": "user", "content": kwargs["user_message"]}],
+            {},
+            {
+                "conversation_history": {
+                    "turns_injected": 2,
+                    "fetched_turns": 2,
+                    "older_turn_count": 4,
+                    "summary_present": True,
+                    "oldest_ts_ms": 1000,
+                    "newest_ts_ms": 2000,
+                    "skipped_corrupted_count": 0,
+                    "skipped_empty_count": 0,
+                    "deduped_same_role_count": 0,
+                }
+            },
+        ),
+    )
+    monkeypatch.setattr(
         "host_brain.app.agent_runtime_shared._async_post_process",
         _fake_post_process,
     )
@@ -45,16 +69,16 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
     agent_input = ChatAgentInput(
         request_id="req-timing-breakdown",
         session_id="sess-timing-breakdown",
-        user_message="今天有点累，抱抱我吧。",
+        user_message="请你认真回答这一句，不要走快捷回复。",
         person_id="user_1",
         emotion_context={"emotion_tag": "NEUTRAL"},
         bond_summary={"stage": "FRIEND"},
-        intent_draft={"chat_speed_profile": "direct_fast"},
+        intent_draft={},
         suppress_edge_tts=True,
         llm_runtime={
             "available": True,
             "provider_name": "mock",
-            "model_id": "mock-direct-fast",
+            "model_id": "mock-chat",
             "timeout_ms": 5000,
             "llm_api_key": "",
             "base_url_override": "",
@@ -66,7 +90,6 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
         event = _parse_sse(chunk)
         if event.get("phase") == "COMMIT":
             commit_event = event
-            break
 
     assert commit_event["decision"] == "APPROVE"
     timings = dict(commit_event["audit_refs"]["timings_ms"])
@@ -79,122 +102,16 @@ async def test_chat_agent_commit_includes_timing_breakdown(monkeypatch) -> None:
         "precommit_log_ms",
     }.issubset(timings)
     assert all(int(value) >= 0 for value in timings.values())
-
-
-@pytest.mark.asyncio
-async def test_chat_agent_skips_response_intelligence_for_fast_chat(monkeypatch) -> None:
-    async def _fake_astream_llm_chunks(**kwargs):  # noqa: ANN003
-        yield "我在，抱一下。"
-
-    def _forbidden_response_intelligence(**kwargs):  # noqa: ANN003
-        raise AssertionError("response intelligence should be bypassed for fast chat")
-
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        return None
-
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.astream_llm_chunks",
-        _fake_astream_llm_chunks,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.intelligent_runtime.apply_response_intelligence",
-        _forbidden_response_intelligence,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared._async_post_process",
-        _fake_post_process,
-    )
-    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
-    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
-
-    agent_input = ChatAgentInput(
-        request_id="req-fast-ri-bypass",
-        session_id="sess-fast-ri-bypass",
-        user_message="抱抱我。",
-        person_id="user_1",
-        emotion_context={"emotion_tag": "NEUTRAL"},
-        bond_summary={"stage": "FRIEND"},
-        intent_draft={"chat_speed_profile": "direct_fast"},
-        suppress_edge_tts=True,
-        llm_runtime={
-            "available": True,
-            "provider_name": "mock",
-            "model_id": "mock-direct-fast",
-            "timeout_ms": 5000,
-            "llm_api_key": "",
-            "base_url_override": "",
-        },
-    )
-
-    commit_event = {}
-    async for chunk in chat_agent_sse_generator(agent_input):
-        event = _parse_sse(chunk)
-        if event.get("phase") == "COMMIT":
-            commit_event = event
-            break
-
-    assert commit_event["decision"] == "APPROVE"
-    meta = dict(commit_event.get("audit_refs", {}).get("response_intelligence") or {})
-    assert dict(meta.get("reflection") or {}).get("reason_code") == "FAST_CHAT_RESPONSE_INTELLIGENCE_BYPASS"
-
-
-@pytest.mark.asyncio
-async def test_chat_agent_context_fast_cuts_stream_after_policy_cap(monkeypatch) -> None:
-    emitted_chunks: list[str] = []
-
-    async def _fake_astream_llm_chunks(**kwargs):  # noqa: ANN003
-        for chunk in [
-            "我在。",
-            "今天辛苦了。",
-            "先靠过来一点。",
-            "如果你愿意，我还想继续多说很多很多。",
-            "这一段如果被消费，就说明没有及时截流。",
-        ]:
-            emitted_chunks.append(chunk)
-            yield chunk
-
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        return None
-
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.astream_llm_chunks",
-        _fake_astream_llm_chunks,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared._async_post_process",
-        _fake_post_process,
-    )
-    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
-    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
-
-    agent_input = ChatAgentInput(
-        request_id="req-context-fast-cut",
-        session_id="sess-context-fast-cut",
-        user_message="我今天有点累，想和你认真聊聊。",
-        person_id="user_1",
-        emotion_context={"emotion_tag": "TIRED"},
-        bond_summary={"stage": "FRIEND"},
-        intent_draft={"chat_speed_profile": "context_fast"},
-        suppress_edge_tts=True,
-        llm_runtime={
-            "available": True,
-            "provider_name": "mock",
-            "model_id": "mock-context-fast",
-            "timeout_ms": 5000,
-            "llm_api_key": "",
-            "base_url_override": "",
-            "agent_gen_params": {"max_tokens": 96},
-        },
-    )
-
-    commit_event = {}
-    async for chunk in chat_agent_sse_generator(agent_input):
-        event = _parse_sse(chunk)
-        if event.get("phase") == "COMMIT":
-            commit_event = event
-            break
-
-    assert commit_event["decision"] == "APPROVE"
-    assert commit_event["narrative"] == "我在。今天辛苦了。先靠过来一点。"
-    assert len(emitted_chunks) == 4
-    assert commit_event["audit_refs"]["timings_ms"]["stream_after_first_token_ms"] >= 0
+    await asyncio.sleep(0)
+    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
+    assert trace_stage_meta["conversation_history"] == {
+        "turns_injected": 2,
+        "fetched_turns": 2,
+        "older_turn_count": 4,
+        "summary_present": True,
+        "oldest_ts_ms": 1000,
+        "newest_ts_ms": 2000,
+        "skipped_corrupted_count": 0,
+        "skipped_empty_count": 0,
+        "deduped_same_role_count": 0,
+    }

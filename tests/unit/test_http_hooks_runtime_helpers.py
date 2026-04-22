@@ -92,7 +92,7 @@ def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week
                 "dominant_motive": "continuity",
                 "motive_reason_tags": [f"continuity:absence_band={absence_band}"],
             },
-            response_policy={
+            render_policy={
                 "max_chars": 220,
                 "max_sentences": 4,
                 "allow_followup": True,
@@ -103,7 +103,7 @@ def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week
                 "intimacy_ceiling": 0.5,
                 "policy_reason_tags": [f"offline:{absence_band}"],
             },
-            slot_status={"offline_state": "live", "response_policy": "live"},
+            slot_status={"offline_state": "live", "render_policy": "live"},
             degraded_reasons=[],
         )
         for absence_band, offline_hours, _style, _reply_posture, warmth_floor in cases
@@ -124,13 +124,13 @@ def test_runtime_summary_offline_continuity_matrix_surfaces_cross_day_cross_week
         assert f"offline:{absence_band}->{reconnect_style}" in summary["decision_chain"]
         assert summary["core_slots"]["offline_state"]["absence_band"] == absence_band
         assert summary["core_slots"]["offline_state"]["offline_reconnect_style"] == reconnect_style
-        assert summary["core_slots"]["response_policy"]["reply_posture"] == summary["reply_posture"]["style"]
+        assert summary["core_slots"]["render_policy"]["reply_posture"] == summary["reply_posture"]["style"]
         assert f"offline={absence_band}" in summary["headline"]
         assert f"offline:{absence_band}" in summary["why_reply"]
         assert "motive:continuity" in summary["why_reply"]
 
 
-def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypatch) -> None:
+def test_run_proactive_intent_dispatch_passes_render_policy_to_skill(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _fake_execute_proactive_talk(*, args, context):  # noqa: ANN001
@@ -231,21 +231,11 @@ def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypat
                 "drowsiness": 0.1,
                 "loneliness": 0.35,
             },
-            decide_response_policy=lambda **_kwargs: {
+            build_render_policy=lambda **_kwargs: {
                 "allow_proactive_after_reply": False,
                 "should_be_withdrawn": True,
                 "policy_reason_tags": ["willingness:LOW"],
             },
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.response_policy.decide_response_policy",
-        lambda _inp: _AsDictWrapper(
-            {
-                "allow_proactive_after_reply": False,
-                "should_be_withdrawn": True,
-                "policy_reason_tags": ["willingness:LOW"],
-            }
         ),
     )
 
@@ -266,8 +256,8 @@ def test_run_proactive_intent_dispatch_passes_response_policy_to_skill(monkeypat
     assert result["status"] == "EXECUTED"
     assert captured["args"] == {"idle_threshold_ms": 1000}
     assert captured["context"]["motive_state"]["dominant_motive"] == "reach_out"
-    assert captured["context"]["response_policy"]["allow_proactive_after_reply"] is False
-    assert captured["context"]["response_policy"]["should_be_withdrawn"] is True
+    assert captured["context"]["render_policy"]["allow_proactive_after_reply"] is False
+    assert captured["context"]["render_policy"]["should_be_withdrawn"] is True
 
 
 def test_run_proactive_intent_dispatch_routes_personality_tick(monkeypatch) -> None:
@@ -479,7 +469,7 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
                 "drowsiness": 0.12,
                 "drowsiness_level": "AWAKE",
             },
-            decide_response_policy=lambda **_kwargs: {
+            build_render_policy=lambda **_kwargs: {
                 "max_chars": 180,
                 "allow_followup": True,
                 "allow_topic_shift": False,
@@ -525,18 +515,6 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
                 "continuity_drive": 0.57,
                 "self_protect_drive": 0.09,
                 "dominant_motive": "continuity",
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.persona.response_policy.decide_response_policy",
-        lambda _inp: _AsDictWrapper(
-            {
-                "max_chars": 180,
-                "allow_followup": True,
-                "allow_topic_shift": False,
-                "allow_proactive_after_reply": True,
-                "should_be_withdrawn": False,
             }
         ),
     )
@@ -739,7 +717,7 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["self_reflection_pulse"]["growth_note"] == "最近更会接住对话了。"
     assert snapshot["bond_narrative"]["shared_memory_count"] == 2
     assert snapshot["motive_state"]["dominant_motive"] == "continuity"
-    assert snapshot["response_policy"]["allow_topic_shift"] is False
+    assert snapshot["render_policy"]["allow_topic_shift"] is False
     assert snapshot["runtime_summary"]["current_state"]["sys_mode"] == "focus"
     assert snapshot["runtime_summary"]["current_state"]["absence_band"] == "6h_plus"
     assert snapshot["runtime_summary"]["current_state"]["offline_reconnect_style"] == "soft_resume"
@@ -750,7 +728,7 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["runtime_summary"]["core_slots"]["offline_state"]["anticipation_topics"] == ["那个项目"]
     assert snapshot["runtime_summary"]["core_slots"]["bond_narrative"]["shared_memory_count"] == 2
     assert snapshot["runtime_summary"]["core_slots"]["motive_state"]["active_drives"]["continuity_drive"] == 0.57
-    assert snapshot["runtime_summary"]["core_slots"]["response_policy"]["reply_posture"] == "focused"
+    assert snapshot["runtime_summary"]["core_slots"]["render_policy"]["reply_posture"] == "focused"
     assert "mode:focus" in snapshot["runtime_summary"]["why_reply"]
     assert "motive:continuity" in snapshot["runtime_summary"]["why_reply"]
     assert snapshot["background_runtime"]["scheduler_status"] == "HEALTHY"
@@ -778,7 +756,7 @@ def test_build_digital_life_runtime_snapshot_collects_core_slots(monkeypatch) ->
     assert snapshot["glymphatic_state"]["executed"] is True
     assert snapshot["vestibular_state"]["stability_state"] == "stable"
     assert snapshot["slot_status"]["immune_state"] == "live"
-    assert snapshot["slot_status"]["response_policy"] == "live"
+    assert snapshot["slot_status"]["render_policy"] == "live"
     assert snapshot["slot_status"]["homeostasis_report"] == "live"
     assert snapshot["slot_status"]["interoception_state"] == "live"
     assert snapshot["slot_status"]["vestibular_state"] == "live"

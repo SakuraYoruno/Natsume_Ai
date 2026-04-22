@@ -65,7 +65,7 @@ def test_default_mode_agent_suppresses_inner_activity_during_recent_foreground_c
         "host_brain.persona.inner_activity_agent.generate_inner_activity_note",
         _forbidden_generate,
     )
-    mark_recent_foreground_interaction(ts_ms=123400, speed_profile="context_fast")
+    mark_recent_foreground_interaction(ts_ms=123400)
 
     agent = DefaultModeAgent(state_registry=TribeStateRegistry())
     tick = agent.tick_idle_cycle(
@@ -101,7 +101,7 @@ def test_default_mode_agent_suppresses_background_side_effects_during_recent_for
     mock_glymphatic = MagicMock()
     monkeypatch.setattr("host_brain.tribe.default_mode_agent.emit_tribe_event", mock_emit)
     monkeypatch.setattr("host_brain.tribe.default_mode_agent.get_glymphatic_agent", lambda: mock_glymphatic)
-    mark_recent_foreground_interaction(ts_ms=123400, speed_profile="context_fast")
+    mark_recent_foreground_interaction(ts_ms=123400)
 
     agent = DefaultModeAgent(state_registry=TribeStateRegistry())
     tick = agent.tick_idle_cycle(
