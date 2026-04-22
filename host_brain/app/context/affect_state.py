@@ -135,18 +135,16 @@ def resolve_affect_state(
 def build_affect_summary(*, affect: AffectStateBlock, render_target_lang: str = "zh") -> str:
     lang = str(render_target_lang or "").strip().lower()
     if lang == "ja":
-        tone = "やや柔らかい" if affect.warmth_bias >= 0.5 else "やや引き気味" if affect.withdraw_bias >= 0.45 else "落ち着いている"
-        return (
-            f"現在の内面状態は{tone}。"
-            f" 情動は{affect.emotion_tag.lower()}寄りで、"
-            f" 社交エネルギーは{affect.social_energy:.2f}、"
-            f" 防御寄りの引きは{affect.withdraw_bias:.2f}。"
-        )
-    tone = "偏柔和" if affect.warmth_bias >= 0.5 else "略收着" if affect.withdraw_bias >= 0.45 else "平稳"
-    return (
-        f"当前内在状态{tone}，情绪主色接近{affect.emotion_tag}，"
-        f"社交能量约{affect.social_energy:.2f}，收缩倾向约{affect.withdraw_bias:.2f}。"
-    )
+        if affect.withdraw_bias >= 0.45:
+            return "今は少し引き気味で、熱を上げすぎない。"
+        if affect.warmth_bias >= 0.5:
+            return "今はやや柔らかいが、踏み込みすぎない。"
+        return "今は落ち着いていて、静かに返す。"
+    if affect.withdraw_bias >= 0.45:
+        return "当前偏收着，别把语气抬得太热。"
+    if affect.warmth_bias >= 0.5:
+        return "当前略柔和，可以温一点，但别说近。"
+    return "当前情绪平稳，语气自然收着。"
 
 
 __all__ = ["AffectStateBlock", "build_affect_summary", "resolve_affect_state"]

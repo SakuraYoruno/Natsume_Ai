@@ -96,10 +96,14 @@ def test_prefrontal_resolve_self_reflection_context(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "host_brain.persona.self_reflection.build_self_reflection_pulse",
-        lambda snapshot, trigger_reason="runtime_snapshot": {
+        lambda snapshot, trigger_reason="runtime_snapshot", **kwargs: {
             "self_awareness": f"trend={snapshot.get('recent_mood_trend')}",
             "trigger_reason": trigger_reason,
         },
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.build_pool_prompt_llm_fn",
+        lambda **kwargs: (lambda prompt: "ok"),
     )
 
     result = PrefrontalAgent().resolve_self_reflection_context(
@@ -235,6 +239,8 @@ def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
 
 def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
     class _PatternResult:
+        analysis_method = "llm"
+
         def as_dict(self):
             return {"relationship_signal_density": 0.8}
 
@@ -245,8 +251,9 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
             return {"applied": True, "reason": "weekly"}
 
     class _Analyzer:
-        def __init__(self, llm_fn=None):  # noqa: ANN001
-            assert llm_fn is None
+        def __init__(self, llm_fn=None, strict_llm=False):  # noqa: ANN001
+            assert callable(llm_fn)
+            assert strict_llm is True
 
         def analyze(self, **kwargs):  # noqa: ANN003
             assert kwargs["user_id"] == "user-eg"
@@ -287,7 +294,7 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
         user_id="user-eg",
         lookback_days=7,
         episodic_store=object(),
-        llm_fn=None,
+        llm_fn=lambda prompt: "{}",
     )
     status = agent.resolve_emergent_growth_status(user_id="user-eg", recent_limit=5)
 
@@ -296,6 +303,18 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
     assert weekly["growth_result"]["applied"] is True
     assert status["growth_summary"]["weekly_cycles"] == 1
     assert status["recent_growth_log"][0]["cycle"] == 1
+
+
+def test_prefrontal_run_emergent_growth_weekly_skips_without_llm() -> None:
+    result = PrefrontalAgent().run_emergent_growth_weekly(
+        user_id="user-eg",
+        lookback_days=7,
+        episodic_store=object(),
+        llm_fn=None,
+    )
+
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "EMERGENT_GROWTH_LLM_REQUIRED"
 
 
 def test_prefrontal_resolve_persona_change_and_growth_payloads(monkeypatch) -> None:

@@ -17,13 +17,18 @@ DevSpec §26：长期记忆蒸馏强化。
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id, now_ms
-from host_brain.memory.distillation import MemoryDistillationEngine, LlmSummaryClient
+from host_brain.memory.distillation import (
+    MemoryDistillationEngine,
+    LlmSummaryClient,
+    build_default_llm_summary_client,
+)
 from host_brain.memory.canon_world_store import WorldCanonStore
 
 _logger = logging.getLogger("Natsume.long_term_distiller")
@@ -128,6 +133,8 @@ class LongTermMemoryDistiller:
         top_k: int = 5,
         max_proposals_per_cycle: int = MAX_PROPOSALS_PER_CYCLE,
         llm_client: LlmSummaryClient | None = None,
+        render_target_lang: str = "zh",
+        llm_timeout_ms: int = 2600,
         target_doc_id: str = DISTILL_TARGET_DOC_ID,
     ) -> None:
         self._engine = distillation_engine
@@ -136,7 +143,10 @@ class LongTermMemoryDistiller:
         self._topics = list(topics or DEFAULT_DISTILL_TOPICS)
         self._top_k = max(1, min(top_k, 20))
         self._max_proposals = max(1, min(max_proposals_per_cycle, MAX_PROPOSALS_PER_CYCLE))
-        self._llm_client = llm_client
+        self._llm_client = llm_client or self._build_default_llm_client(
+            render_target_lang=render_target_lang,
+            timeout_ms=llm_timeout_ms,
+        )
         self._target_doc_id = str(target_doc_id).strip() or DISTILL_TARGET_DOC_ID
 
     # ── 公开接口 ──────────────────────────────────────────────────────────────
@@ -147,6 +157,8 @@ class LongTermMemoryDistiller:
         request_id: str | None = None,
         ts_ms: int | None = None,
         topics: list[str] | None = None,
+        top_k: int | None = None,
+        max_proposals_per_cycle: int | None = None,
     ) -> DistillationCycleResult:
         """执行一次完整的蒸馏循环。
 
@@ -158,6 +170,8 @@ class LongTermMemoryDistiller:
             request_id: 关联请求 ID（可选）。
             ts_ms: 时间戳（毫秒，可选）。
             topics: 覆盖默认主题列表（可选）。
+            top_k: 覆盖默认 top-k（可选）。
+            max_proposals_per_cycle: 覆盖默认每轮提案上限（可选）。
 
         Returns:
             DistillationCycleResult 摘要。
@@ -166,10 +180,18 @@ class LongTermMemoryDistiller:
         ts = int(ts_ms if ts_ms is not None else now_ms())
         cycle_id = f"distill_cycle_{req_id}"
         active_topics = list(topics or self._topics)
+        active_top_k = max(1, min(int(top_k if top_k is not None else self._top_k), 20))
+        active_max_proposals = max(
+            1,
+            min(
+                int(max_proposals_per_cycle if max_proposals_per_cycle is not None else self._max_proposals),
+                MAX_PROPOSALS_PER_CYCLE,
+            ),
+        )
 
         _logger.info(
-            "Distillation cycle started: cycle_id=%s topics=%d",
-            cycle_id, len(active_topics),
+            "Distillation cycle started: cycle_id=%s topics=%d top_k=%d max_proposals=%d",
+            cycle_id, len(active_topics), active_top_k, active_max_proposals,
             extra={"request_id": req_id},
         )
 
@@ -181,10 +203,10 @@ class LongTermMemoryDistiller:
         proposal_records: list[ProposalRecord] = []
 
         for topic in active_topics:
-            if proposals_submitted >= self._max_proposals:
+            if proposals_submitted >= active_max_proposals:
                 _logger.info(
                     "Distillation cycle: max proposals reached (%d), stopping",
-                    self._max_proposals,
+                    active_max_proposals,
                     extra={"request_id": req_id},
                 )
                 break
@@ -192,7 +214,7 @@ class LongTermMemoryDistiller:
             try:
                 distill_result = self._engine.distill_top_k(
                     query_text=topic,
-                    top_k=self._top_k,
+                    top_k=active_top_k,
                     tags=["long_term_distill", topic[:20]],
                     operator_node_id="long_term_distiller",
                     ts_ms=ts,
@@ -267,6 +289,33 @@ class LongTermMemoryDistiller:
             extra={"request_id": req_id},
         )
         return result
+
+    @staticmethod
+    def _build_default_llm_client(
+        *,
+        render_target_lang: str,
+        timeout_ms: int,
+    ) -> LlmSummaryClient | None:
+        if not any(
+            str(os.environ.get(name) or "").strip()
+            for name in (
+                "HOST_GEMINI_API_KEY",
+                "GEMINI_API_KEY",
+                "HOST_MINIMAX_API_KEY",
+                "MINIMAX_API_KEY",
+                "OPENAI_API_KEY",
+                "HOST_OPENAI_API_KEY",
+            )
+        ):
+            return None
+        try:
+            return build_default_llm_summary_client(
+                render_target_lang=render_target_lang,
+                timeout_ms=timeout_ms,
+            )
+        except Exception as exc:
+            _logger.debug("default distillation llm client unavailable: %s", exc)
+            return None
 
     def get_pending_proposals(self) -> list[dict[str, Any]]:
         """获取所有 pending 状态的 Canon 提案（蒸馏生成）。"""
@@ -517,3 +566,6 @@ def make_distillation_task_config() -> "SchedulerTaskConfig":
         max_consecutive_failures=3,
         description="每日 03:00 执行长期记忆蒸馏，将 EpisodicMemory 蒸馏为 Canon 提案（M13-B）",
     )
+
+
+LongTermDistiller = LongTermMemoryDistiller

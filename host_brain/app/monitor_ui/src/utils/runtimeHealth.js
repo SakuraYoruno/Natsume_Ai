@@ -195,7 +195,7 @@ export function buildDigitalLifeAlerts(snapshot, options = {}) {
         reason_code: 'BACKGROUND_RUNTIME_NOT_ADVANCING',
         title: formatAlertTitle('BACKGROUND_RUNTIME_NOT_ADVANCING'),
         detail: compactText(
-          `后台推进未达预期：tick=${tickHealth || 'unknown'}，scheduler=${schedulerStatus}，inner_world_tick 距今 ${innerTickAgo ?? 'unknown'}s。`,
+          `后台推进未达预期：tick=${tickHealth || 'unknown'}，scheduler=${schedulerStatus}，inner_world_numeric_tick 距今 ${innerTickAgo ?? 'unknown'}s。`,
           180
         ),
         ts_ms: tsMs,
@@ -372,4 +372,3 @@ export function getDigitalLifeRuntimeSummary(snapshot) {
     notableSignals: (runtimeSummary.notable_signals || []).map(formatRuntimeSignal).filter(Boolean),
   }
 }
-

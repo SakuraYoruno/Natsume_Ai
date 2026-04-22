@@ -226,7 +226,7 @@ def _build_background_runtime_snapshot(
 
     scheduler_status = str(scheduler_snapshot.get("scheduler_status") or "UNAVAILABLE").strip().upper()
     scheduler_active = scheduler_status in {"HEALTHY", "DEGRADED", "RUNNING", "UP", "OK"}
-    core_tick_ids = ["inner_world_tick", "silence_tick", "body_sense_tick"]
+    core_tick_ids = ["inner_world_numeric_tick", "inner_world_monologue_tick", "silence_tick", "body_sense_tick"]
     proactive_task_id = "proactive_talk_periodic"
     tasks_by_id: dict[str, dict[str, Any]] = {}
     for item in list(scheduler_snapshot.get("tasks") or []):
@@ -298,7 +298,7 @@ def _build_background_runtime_snapshot(
     )
 
     inner_tick_expected_interval_s = int(
-        core_tick_tasks.get("inner_world_tick", {}).get("expected_interval_s") or 60
+        core_tick_tasks.get("inner_world_numeric_tick", {}).get("expected_interval_s") or 60
     )
     tick_health = _classify_tick_health(
         scheduler_status=scheduler_status,
@@ -313,7 +313,7 @@ def _build_background_runtime_snapshot(
         scheduler_active
         and core_ticks_registered
         and tick_health in {"fresh", "delayed"}
-        and core_tick_tasks.get("inner_world_tick", {}).get("enabled", False)
+        and core_tick_tasks.get("inner_world_numeric_tick", {}).get("enabled", False)
         and persona_user_alignment_ok
     )
 
@@ -919,6 +919,7 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
         narrative_layer = BondNarrativeLayer(
             memory_index=SharedMemoryIndex(store=get_episodic_store()),
             milestone_tracker=MilestoneTracker(),
+            use_llm=True,
         )
         narrative_result = narrative_layer.build_narrative(
             user_id=persona_user_id,
@@ -982,10 +983,10 @@ def build_digital_life_runtime_snapshot(*, current_topic: str = "") -> dict[str,
 
     render_policy: dict[str, Any] = {}
     try:
-        from host_brain.persona.render_policy import build_render_policy_from_inputs  # noqa: PLC0415
+        from host_brain.persona.reply_plan import build_reply_plan_from_inputs  # noqa: PLC0415
 
         render_policy = dict(
-            build_render_policy_from_inputs(
+            build_reply_plan_from_inputs(
                 emotion_context=emotion_context or None,
                 body_sense=body_sense or None,
                 offline_state=offline_state or None,
@@ -1474,7 +1475,7 @@ def run_proactive_intent_dispatch(
 
     render_policy: dict[str, Any] = {}
     try:
-        from host_brain.persona.render_policy import build_render_policy_from_inputs  # noqa: PLC0415
+        from host_brain.persona.reply_plan import build_reply_plan_from_inputs  # noqa: PLC0415
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         current_topic = recent_topics[0] if recent_topics else ""
@@ -1483,7 +1484,7 @@ def run_proactive_intent_dispatch(
         silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
         body_sense = limbic_agent.resolve_body_sense_state()
         render_policy = dict(
-            build_render_policy_from_inputs(
+            build_reply_plan_from_inputs(
                 silence_state=silence_state,
                 body_sense=body_sense,
                 offline_state=offline_state,
@@ -1608,20 +1609,34 @@ def _run_personality_scheduler_skill(
 
 def run_long_term_distillation_handler(args: dict[str, Any], _ctx: dict[str, Any]) -> dict[str, Any]:
     try:
+        import os  # noqa: PLC0415
+
         from host_brain.app.dependencies import get_episodic_store, get_ledger as _get_ledger  # noqa: PLC0415
-        from host_brain.memory.long_term_distiller import LongTermDistiller  # noqa: PLC0415
+        from host_brain.memory.canon_world_store import WorldCanonStore  # noqa: PLC0415
+        from host_brain.memory.distillation import MemoryDistillationEngine  # noqa: PLC0415
+        from host_brain.memory.long_term_distiller import LongTermMemoryDistiller  # noqa: PLC0415
 
         episodic_store = get_episodic_store()
         ledger = _get_ledger()
         top_k = int((args or {}).get("top_k") or 5)
         max_props = int((args or {}).get("max_proposals") or 5)
-        distiller = LongTermDistiller(
+        distillation_engine = MemoryDistillationEngine(
             episodic_store=episodic_store,
             ledger=ledger,
+        )
+        canon_store = WorldCanonStore(
+            world_root=str(os.environ.get("Natsume_WORLD_CANON_ROOT") or "host_brain/canon/world").strip(),
+            ledger=ledger,
+        )
+        distiller = LongTermMemoryDistiller(
+            distillation_engine=distillation_engine,
+            canon_store=canon_store,
+            ledger=ledger,
+            top_k=top_k,
             max_proposals_per_cycle=max_props,
         )
         result = distiller.run_distillation_cycle(top_k=top_k)
-        return {"status": result.get("status", "OK"), "result": result}
+        return {"status": "OK", "result": result.to_dict() if hasattr(result, "to_dict") else result}
     except Exception as exc:
         return {"status": "DEGRADED", "error": str(exc)[:200]}
 

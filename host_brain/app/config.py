@@ -32,6 +32,7 @@ PROVIDER_OPENAI = "openai"
 PROVIDER_CODEX = "codex"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_DEEPSEEK = "deepseek"
+PROVIDER_MINIMAX = "minimax"
 PROVIDER_MOCK = "mock"
 PROVIDER_DISABLED = "disabled"
 
@@ -40,6 +41,7 @@ ALLOWED_LLM_PROVIDERS = {
     PROVIDER_CODEX,
     PROVIDER_GEMINI,
     PROVIDER_DEEPSEEK,
+    PROVIDER_MINIMAX,
     PROVIDER_MOCK,
     PROVIDER_DISABLED,
 }
@@ -68,6 +70,9 @@ HOST_FIELD_TO_ENV_KEY = {
     "deepseek_api_key_set": "DEEPSEEK_API_KEY",
     "deepseek_api_key": "DEEPSEEK_API_KEY",
     "deepseek_api_key_ref": "DEEPSEEK_API_KEY_REF",
+    "minimax_api_key_set": "MINIMAX_API_KEY",
+    "minimax_api_key": "MINIMAX_API_KEY",
+    "minimax_api_key_ref": "MINIMAX_API_KEY_REF",
     "key_profile_status": "OPENAI_API_KEY_REF",
     "llm_timeout_ms": "HOST_LLM_TIMEOUT_MS",
     "llm_max_retries": "HOST_LLM_MAX_RETRIES",
@@ -79,7 +84,7 @@ HOST_FIELD_TO_ENV_KEY = {
     "rate_limit_window_ms": "HOST_RATE_LIMIT_WINDOW_MS",
     "rate_limit_max_requests": "HOST_RATE_LIMIT_MAX_REQUESTS",
 }
-HOST_SECRET_ENV_KEYS = {"OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"}
+HOST_SECRET_ENV_KEYS = {"OPENAI_API_KEY", "CODEX_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY", "MINIMAX_API_KEY"}
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,8 @@ class HostConfig:
     gemini_api_key_ref: str | None
     deepseek_api_key: str | None
     deepseek_api_key_ref: str | None
+    minimax_api_key: str | None
+    minimax_api_key_ref: str | None
     llm_api_key: str | None
     llm_api_key_ref: str | None
     key_profile_status: str | None
@@ -126,6 +133,8 @@ class HostConfig:
             "gemini_api_key_ref": self.gemini_api_key_ref,
             "deepseek_api_key_set": bool(self.deepseek_api_key),
             "deepseek_api_key_ref": self.deepseek_api_key_ref,
+            "minimax_api_key_set": bool(self.minimax_api_key),
+            "minimax_api_key_ref": self.minimax_api_key_ref,
             "llm_api_key_set": bool(self.llm_api_key),
             "llm_api_key_ref": self.llm_api_key_ref,
             "key_profile_status": self.key_profile_status,
@@ -299,6 +308,8 @@ def load_host_config(
     gemini_api_key_ref = _as_optional_text(merged.get("GEMINI_API_KEY_REF"))
     deepseek_api_key = _as_optional_text(merged.get("DEEPSEEK_API_KEY"))
     deepseek_api_key_ref = _as_optional_text(merged.get("DEEPSEEK_API_KEY_REF"))
+    minimax_api_key = _as_optional_text(merged.get("MINIMAX_API_KEY"))
+    minimax_api_key_ref = _as_optional_text(merged.get("MINIMAX_API_KEY_REF"))
     llm_api_key: str | None = None
     llm_api_key_ref: str | None = None
     key_profile_status: str | None = None
@@ -308,13 +319,14 @@ def load_host_config(
         PROVIDER_CODEX: (codex_api_key, codex_api_key_ref, "CODEX_API_KEY", "CODEX_API_KEY_REF"),
         PROVIDER_GEMINI: (gemini_api_key, gemini_api_key_ref, "GEMINI_API_KEY", "GEMINI_API_KEY_REF"),
         PROVIDER_DEEPSEEK: (deepseek_api_key, deepseek_api_key_ref, "DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY_REF"),
+        PROVIDER_MINIMAX: (minimax_api_key, minimax_api_key_ref, "MINIMAX_API_KEY", "MINIMAX_API_KEY_REF"),
     }
     if llm_provider in provider_to_runtime_keys:
         llm_api_key, llm_api_key_ref, llm_key_env_name, llm_ref_env_name = provider_to_runtime_keys[llm_provider]
     else:
         llm_api_key, llm_api_key_ref, llm_key_env_name, llm_ref_env_name = (None, None, "", "")
 
-    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and llm_api_key_ref:
+    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX} and not llm_api_key and llm_api_key_ref:
         resolved = resolve_secret_from_profiles(
             provider=llm_provider,
             node_id=resolved_node_id,
@@ -350,8 +362,11 @@ def load_host_config(
     elif llm_provider == PROVIDER_DEEPSEEK:
         deepseek_api_key = llm_api_key
         deepseek_api_key_ref = llm_api_key_ref
+    elif llm_provider == PROVIDER_MINIMAX:
+        minimax_api_key = llm_api_key
+        minimax_api_key_ref = llm_api_key_ref
 
-    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK} and not llm_api_key and not cold_start_allowed:
+    if llm_provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX} and not llm_api_key and not cold_start_allowed:
         missing_detail = f"{llm_key_env_name} is required when HOST_COLD_START_ALLOWED=false"
         issues.append(
             ConfigIssue(
@@ -381,6 +396,8 @@ def load_host_config(
         gemini_api_key_ref=gemini_api_key_ref,
         deepseek_api_key=deepseek_api_key,
         deepseek_api_key_ref=deepseek_api_key_ref,
+        minimax_api_key=minimax_api_key,
+        minimax_api_key_ref=minimax_api_key_ref,
         llm_api_key=llm_api_key,
         llm_api_key_ref=llm_api_key_ref,
         key_profile_status=key_profile_status,
@@ -438,6 +455,7 @@ def export_host_config_snapshot(
     values["codex_api_key"] = redact_secret(config.codex_api_key)
     values["gemini_api_key"] = redact_secret(config.gemini_api_key)
     values["deepseek_api_key"] = redact_secret(config.deepseek_api_key)
+    values["minimax_api_key"] = redact_secret(config.minimax_api_key)
     values["llm_api_key"] = redact_secret(config.llm_api_key)
 
     redacted_keys = collect_redacted_keys(
@@ -453,6 +471,8 @@ def export_host_config_snapshot(
         redacted_keys.append("GEMINI_API_KEY")
     if config.deepseek_api_key and "DEEPSEEK_API_KEY" not in redacted_keys:
         redacted_keys.append("DEEPSEEK_API_KEY")
+    if config.minimax_api_key and "MINIMAX_API_KEY" not in redacted_keys:
+        redacted_keys.append("MINIMAX_API_KEY")
     redacted_keys = sorted(redacted_keys)
 
     snapshot = build_config_snapshot(
@@ -528,6 +548,7 @@ def build_host_runtime_statuses(config: HostConfig) -> dict[str, dict[str, Any]]
         PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
     }
     if config.llm_provider in provider_to_env_key and not config.llm_api_key:
         missing_key_name = provider_to_env_key[config.llm_provider]
@@ -727,6 +748,7 @@ def _inject_resolved_llm_key(*, provider: str, api_key: str | None) -> None:
         PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
     }
     env_key = provider_to_env_key.get(str(provider or "").strip().lower())
     if not env_key:

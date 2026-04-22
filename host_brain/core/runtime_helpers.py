@@ -228,17 +228,17 @@ def _summarize_motive_state_for_trace(motive_state: Mapping[str, Any] | None) ->
     return summary
 
 
-def _summarize_render_policy_for_trace(render_policy: Mapping[str, Any] | None) -> dict[str, Any]:
-    raw = _coerce_trace_mapping(render_policy)
+def _summarize_reply_plan_for_trace(reply_plan: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(reply_plan)
     if not raw:
         return {}
     summary: dict[str, Any] = {}
-    for key in ("max_chars", "max_sentences", "min_sentences"):
+    for key in ("max_chars", "max_sentences"):
         try:
             summary[key] = int(raw.get(key))
         except (TypeError, ValueError):
             continue
-    for key in ("allow_followup", "allow_topic_shift", "allow_proactive_after_reply", "should_be_brief", "should_be_withdrawn"):
+    for key in ("allow_followup", "allow_proactive_after_reply", "should_be_brief", "should_be_withdrawn", "requires_validation", "force_buffering"):
         value = _coerce_trace_bool(raw.get(key))
         if value is not None:
             summary[key] = value
@@ -246,30 +246,54 @@ def _summarize_render_policy_for_trace(render_policy: Mapping[str, Any] | None) 
         value = _coerce_trace_score(raw.get(key))
         if value is not None:
             summary[key] = value
-    for key in ("confession_guard", "withdrawal_guard"):
-        value = str(raw.get(key) or "").strip()
-        if value:
-            summary[key] = value
-    reason_tags = [str(tag).strip() for tag in list(raw.get("policy_reason_tags") or []) if str(tag).strip()]
-    if reason_tags:
-        summary["reason_tags"] = reason_tags[:8]
-    for key in ("avoid_verbatim_repeat", "acknowledge_recent_answer", "react_to_user_stance", "prefer_meta_response_over_restating"):
+    for key in ("withdrawal_guard",):
         value = _coerce_trace_bool(raw.get(key))
         if value is not None:
             summary[key] = value
-    for key in ("reply_mode", "control_line", "dialogue_summary", "topic_summary", "render_policy_summary"):
+    reason_tags = [str(tag).strip() for tag in list(raw.get("reason_tags") or []) if str(tag).strip()]
+    if reason_tags:
+        summary["reason_tags"] = reason_tags[:8]
+    for key in (
+        "primary_topic",
+        "interaction_move",
+        "response_goal",
+        "tactic_family",
+        "tactic_variant",
+        "trajectory_stage",
+        "restate_level",
+        "tone_band",
+        "followup_kind",
+        "reply_contract",
+    ):
         value = str(raw.get(key) or "").strip()
         if value:
             summary[key] = value
+    used_tactics_recent = [str(item).strip() for item in list(raw.get("used_tactics_recent") or []) if str(item).strip()]
+    if used_tactics_recent:
+        summary["used_tactics_recent"] = used_tactics_recent[:8]
+    forbidden_tactics = [str(item).strip() for item in list(raw.get("forbidden_tactics") or []) if str(item).strip()]
+    if forbidden_tactics:
+        summary["forbidden_tactics"] = forbidden_tactics[:8]
+    forbidden_patterns = [str(item).strip() for item in list(raw.get("forbidden_patterns") or []) if str(item).strip()]
+    if forbidden_patterns:
+        summary["forbidden_patterns"] = forbidden_patterns[:8]
     return summary
 
 
-def _summarize_dialogue_state_for_trace(dialogue_state: Mapping[str, Any] | None) -> dict[str, Any]:
-    raw = _coerce_trace_mapping(dialogue_state)
+def _summarize_conversation_interpretation_for_trace(conversation_interpretation: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(conversation_interpretation)
     if not raw:
         return {}
     summary: dict[str, Any] = {}
-    for key in ("last_user_act", "last_assistant_act", "current_user_act", "repeat_surface_group", "user_stance"):
+    for key in (
+        "literal_topic",
+        "interaction_move",
+        "freshness",
+        "user_stance",
+        "repeat_surface_group",
+        "last_user_act",
+        "last_assistant_act",
+    ):
         value = str(raw.get(key) or "").strip()
         if value:
             summary[key] = value
@@ -284,14 +308,14 @@ def _summarize_dialogue_state_for_trace(dialogue_state: Mapping[str, Any] | None
     answered_topics = [str(item).strip() for item in list(raw.get("answered_topics_recent") or []) if str(item).strip()]
     if answered_topics:
         summary["answered_topics_recent"] = answered_topics[:8]
-    reason_tags = [str(item).strip() for item in list(raw.get("dialogue_state_reason_tags") or []) if str(item).strip()]
+    reason_tags = [str(item).strip() for item in list(raw.get("reason_tags") or []) if str(item).strip()]
     if reason_tags:
         summary["reason_tags"] = reason_tags[:8]
     return summary
 
 
-def _summarize_topic_state_for_trace(topic_state: Mapping[str, Any] | None) -> dict[str, Any]:
-    raw = _coerce_trace_mapping(topic_state)
+def _summarize_topic_ledger_for_trace(topic_ledger: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(topic_ledger)
     if not raw:
         return {}
     summary: dict[str, Any] = {}
@@ -305,6 +329,33 @@ def _summarize_topic_state_for_trace(topic_state: Mapping[str, Any] | None) -> d
         summary["entry_count"] = len(list(raw.get("entries") or []))
     except Exception:
         pass
+    return summary
+
+
+def _summarize_tactic_ledger_for_trace(tactic_ledger: Mapping[str, Any] | None) -> dict[str, Any]:
+    raw = _coerce_trace_mapping(tactic_ledger)
+    if not raw:
+        return {}
+    summary: dict[str, Any] = {}
+    recent_topics = [str(item).strip() for item in list(raw.get("recent_topics") or []) if str(item).strip()]
+    if recent_topics:
+        summary["recent_topics"] = recent_topics[:8]
+    entries = list(raw.get("entries") or [])
+    if entries:
+        summary["entry_count"] = len(entries)
+        sample = []
+        for item in entries[:5]:
+            if not isinstance(item, Mapping):
+                continue
+            sample.append(
+                {
+                    "topic_key": str(item.get("topic_key") or "").strip(),
+                    "tactic_family": str(item.get("tactic_family") or "").strip(),
+                    "trajectory_stage": str(item.get("trajectory_stage") or "").strip(),
+                }
+            )
+        if sample:
+            summary["recent_entries"] = sample
     return summary
 
 
@@ -450,9 +501,10 @@ __all__ = [
     "_build_trace_output_digest",
     "_detect_trace_fallback_used",
     "_summarize_motive_state_for_trace",
-    "_summarize_dialogue_state_for_trace",
-    "_summarize_render_policy_for_trace",
-    "_summarize_topic_state_for_trace",
+    "_summarize_conversation_interpretation_for_trace",
+    "_summarize_reply_plan_for_trace",
+    "_summarize_tactic_ledger_for_trace",
+    "_summarize_topic_ledger_for_trace",
     "_summarize_affect_state_for_trace",
     "_summarize_relationship_state_for_trace",
     "_summarize_drive_state_for_trace",

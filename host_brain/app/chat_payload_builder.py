@@ -1328,11 +1328,36 @@ def run_build_chat_prompt_runtime_payload(
     return result.data
 
 
+def run_build_chat_prompt_runtime_payload_lightweight(
+    *,
+    runtime_input: Any,
+    style_bindings: Mapping[str, Mapping[str, Any]] | None = None,
+    profile: str = "relational_chat",
+) -> dict[str, Any]:
+    """Build a minimal chat runtime payload for low-risk relational chat.
+
+    This intentionally skips the heavy persona/limbic/self-reflection stages and
+    preserves only the canonical core payload needed by the prompt builder.
+    """
+    ctx = prepare_context(
+        runtime_input=runtime_input,
+        style_bindings=style_bindings,
+    )
+    result = (
+        PromptPayloadBuilder(ctx)
+        .with_core_payload()
+        .build()
+    )
+    payload = dict(result.data)
+    payload["prompt_runtime_profile"] = str(profile or "relational_chat").strip() or "relational_chat"
+    return payload
+
+
 __all__ = [
     "PromptPayloadBuilder",
     "PromptPayloadContext",
     "PromptPayloadResult",
     "prepare_context",
     "run_build_chat_prompt_runtime_payload",
+    "run_build_chat_prompt_runtime_payload_lightweight",
 ]
-

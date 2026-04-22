@@ -155,7 +155,7 @@ def schedule_async_post_process(
     pii_egress_stats: dict,
     retrieval_evidence_items: list,
     motive_state: Any,
-    render_policy: Dict[str, Any],
+    reply_plan: Dict[str, Any],
     trace_stage_meta: Dict[str, Any],
     llm_input_digest: str | None = None,
 ) -> None:
@@ -187,7 +187,7 @@ def schedule_async_post_process(
                 llm_input_digest=llm_input_digest,
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
                 motive_state=motive_state,
-                render_policy=render_policy,
+                reply_plan=reply_plan,
                 trace_stage_meta=trace_stage_meta,
             )
         )
@@ -313,4 +313,3 @@ async def trigger_tts_after_commit(
                 )
     except Exception as exc:
         _logger.debug("[%s] trigger_tts_after_commit failed: %s", request_id, exc)
-

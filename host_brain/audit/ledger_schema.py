@@ -262,6 +262,18 @@ CREATE TABLE IF NOT EXISTS session_topic_state (
     UNIQUE(session_id, topic_key)
 );
 
+CREATE TABLE IF NOT EXISTS session_tactic_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    topic_key TEXT NOT NULL,
+    interaction_move TEXT,
+    tactic_family TEXT NOT NULL,
+    tactic_variant TEXT,
+    trajectory_stage TEXT,
+    ts_ms INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS service_health_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     request_id TEXT,
@@ -368,6 +380,12 @@ CREATE INDEX IF NOT EXISTS idx_session_topic_state_updated
     ON session_topic_state(updated_at_ms);
 CREATE INDEX IF NOT EXISTS idx_session_topic_state_request
     ON session_topic_state(last_answer_request_id);
+CREATE INDEX IF NOT EXISTS idx_session_tactic_ledger_session_ts
+    ON session_tactic_ledger(session_id, ts_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_session_tactic_ledger_topic
+    ON session_tactic_ledger(session_id, topic_key, ts_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_session_tactic_ledger_request
+    ON session_tactic_ledger(request_id);
 
 CREATE TABLE IF NOT EXISTS retrieval_event_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -627,6 +645,24 @@ CREATE TABLE IF NOT EXISTS llm_route_log (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_route_log_request_id ON llm_route_log (request_id);
 CREATE INDEX IF NOT EXISTS idx_llm_route_log_ts_ms ON llm_route_log (ts_ms);
+
+CREATE TABLE IF NOT EXISTS llm_pool_call_log (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id        TEXT    NOT NULL,
+    scene_type        TEXT    NOT NULL,
+    cognitive_tier    TEXT    NOT NULL,
+    attempts_json     TEXT    NOT NULL DEFAULT '[]',
+    attempt_count     INTEGER NOT NULL DEFAULT 0,
+    final_model       TEXT,
+    final_provider    TEXT,
+    pool_exhausted    INTEGER NOT NULL DEFAULT 0,
+    cached            INTEGER NOT NULL DEFAULT 0,
+    degraded_to_rule  INTEGER NOT NULL DEFAULT 0,
+    total_latency_ms  INTEGER NOT NULL DEFAULT 0,
+    ts_ms             INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_pool_call_log_request_id ON llm_pool_call_log (request_id);
+CREATE INDEX IF NOT EXISTS idx_llm_pool_call_log_ts_ms ON llm_pool_call_log (ts_ms);
 
 -- M26-C: LLM 路由配置热更新审计表
 CREATE TABLE IF NOT EXISTS llm_route_config_log (

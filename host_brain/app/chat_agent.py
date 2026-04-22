@@ -782,7 +782,24 @@ def _apply_render_policy_stream_guard(
     return normalized.strip()
 
 
+def _render_policy_explicit_buffering_decision(render_policy: Any) -> bool | None:
+    policy = _coerce_render_policy(render_policy)
+    if not policy:
+        return None
+    has_explicit = "force_buffering" in policy or "requires_validation" in policy
+    if not has_explicit:
+        return None
+    if bool(policy.get("force_buffering") or False):
+        return True
+    if bool(policy.get("requires_validation") or False):
+        return True
+    return False
+
+
 def _render_policy_requires_buffering(render_policy: Any) -> bool:
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
     policy, _max_chars, _max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not policy:
         return False
@@ -895,147 +912,7 @@ def _apply_render_policy_hard_guard(
         normalized = _truncate_text_to_sentence_limit(normalized, max_sentences=max_sentences)
     if max_chars > 0:
         normalized = _truncate_text_to_char_limit(normalized, max_chars=max_chars)
-    normalized = _repair_underanswered_identity_reply(
-        normalized,
-        user_message=user_message,
-        render_policy=policy,
-        render_target_lang=render_target_lang,
-    )
     return normalized.strip()
-
-
-def _looks_like_full_identity_restate(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return False
-    lowered = normalized.lower()
-    markers = (
-        "我是夏目蓝",
-        "我是夏目藍",
-        "我的名字是夏目蓝",
-        "我的名字是夏目藍",
-        "我叫夏目蓝",
-        "我叫夏目藍",
-        "我？我的名字是夏目蓝",
-        "我？我的名字是夏目藍",
-    )
-    if any(marker in normalized for marker in markers):
-        return True
-    return "natsume ai" in lowered or "natsume" in lowered
-
-
-def _build_identity_repeat_meta_reply(*, user_message: str, render_target_lang: str = "zh") -> str:
-    lang = str(render_target_lang or "").strip().lower()
-    if lang == "ja":
-        return "さっき言ったでしょう。"
-    normalized = str(user_message or "").strip()
-    if "谁" in normalized:
-        return "刚才不是已经告诉你了么。"
-    return "刚才不是已经说过了么。"
-
-
-def _is_underanswered_meta_reply(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return True
-    bare = re.sub(r"[。！？?!～~…，,\s]", "", normalized)
-    if not bare:
-        return True
-    return bare in {
-        "嗯",
-        "哎",
-        "诶",
-        "啊",
-        "哦",
-        "唔",
-        "当然",
-        "是啊",
-        "对啊",
-        "没错",
-        "我们",
-        "因为",
-        "只是",
-    } or len(bare) <= 1
-
-
-def _build_boundary_repeat_meta_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "さっき答えたでしょう。まだそこが気になるの。"
-    return "刚才不是已经说过了么。怎么，还要我再讲一遍？"
-
-
-def _build_help_repeat_meta_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "さっき答えたでしょう。まだ不安なの。"
-    return "刚才不是已经回答你了么。你还在担心这个？"
-
-
-def _build_boundary_direct_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "まだそこを気にするの。別に、見て見ぬふりをしなかっただけ。"
-    return "不熟。只是看见了，也没打算装作没看见。"
-
-
-def _build_help_direct_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "状況次第。ちゃんと頼まれたら、知らないふりはしない。"
-    return "看情况。你真开口的话，我不会装作没听见。"
-
-
-def _repair_underanswered_identity_reply(
-    text: str,
-    *,
-    user_message: str,
-    render_policy: Mapping[str, Any] | None,
-    render_target_lang: str = "zh",
-) -> str:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return normalized
-    try:
-        from host_brain.app.context.dialogue_state import classify_user_act  # noqa: PLC0415
-    except Exception:
-        return normalized
-    user_act = str(classify_user_act(user_message) or "").strip()
-    policy = dict(render_policy or {}) if isinstance(render_policy, Mapping) else {}
-    topic_mode = str(policy.get("topic_reopen_mode") or "").strip().lower()
-    reply_mode = str(policy.get("reply_mode") or "").strip().lower()
-    if user_act not in {"identity_probe", "boundary_probe", "motivation_probe", "help_continuity_probe"} and reply_mode not in {
-        "identity_repeat_probe",
-        "boundary_repeat_probe",
-        "help_repeat_probe",
-    }:
-        return normalized
-    if reply_mode == "identity_repeat_probe" or topic_mode == "identity_meta":
-        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
-            return _build_identity_repeat_meta_reply(
-                user_message=user_message,
-                render_target_lang=render_target_lang,
-            )
-        return normalized
-    if reply_mode == "boundary_repeat_probe":
-        if _is_underanswered_meta_reply(normalized):
-            return _build_boundary_repeat_meta_reply(render_target_lang=render_target_lang)
-        return normalized
-    if reply_mode == "boundary_first_ask":
-        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
-            return _build_boundary_direct_reply(render_target_lang=render_target_lang)
-        return normalized
-    if reply_mode == "help_first_ask":
-        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
-            return _build_help_direct_reply(render_target_lang=render_target_lang)
-        return normalized
-    if reply_mode == "help_repeat_probe":
-        if _is_underanswered_meta_reply(normalized):
-            return _build_help_repeat_meta_reply(render_target_lang=render_target_lang)
-        return normalized
-    if "夏目蓝" in normalized or "夏目藍" in normalized or "natsume ai" in normalized.lower():
-        return normalized
-    if re.fullmatch(r"[我嗯啊哦欸诶唔…，,。！？?!～~\s]+", normalized):
-        if str(render_target_lang or "").strip().lower() == "ja":
-            return "私は夏目藍。"
-        return "我是夏目蓝。"
-    return normalized
 
 
 def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
@@ -1584,6 +1461,9 @@ def _should_buffer_stream_output(
     render_policy: Any = None,
 ) -> bool:
     """高风险对话缓冲判断。"""
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
     if _render_policy_requires_buffering(render_policy):
         return True
     env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
@@ -1713,7 +1593,7 @@ async def chat_agent_sse_generator(
     ts_ms = agent_input.ts_ms or int(time.time() * 1000)
     intent_draft = agent_input.intent_draft or {}
     trace_stage_meta = dict(agent_input.trace_stage_meta or {})
-    render_policy = _coerce_render_policy(agent_input.render_policy)
+    reply_plan = _coerce_render_policy(getattr(agent_input, "reply_plan", None) or agent_input.render_policy)
     sub_agent_ctx = agent_input.sub_agent_context
     if "chat_agent_used" not in trace_stage_meta:
         trace_stage_meta["chat_agent_used"] = True
@@ -1721,7 +1601,17 @@ async def chat_agent_sse_generator(
         trace_stage_meta["chat_mode"] = "sub_agent" if sub_agent_ctx else "direct"
     if sub_agent_ctx and not str(trace_stage_meta.get("chat_sub_agent_id") or "").strip():
         trace_stage_meta["chat_sub_agent_id"] = sub_agent_ctx.agent_id
-    deterministic_reply = _build_deterministic_sub_agent_reply(sub_agent_ctx, render_target_lang=render_target_lang)
+    if sub_agent_ctx and not _should_preserve_sub_agent_result_for_user(
+        user_message=user_message,
+        agent_id=sub_agent_ctx.agent_id,
+    ):
+        trace_stage_meta["chat_sub_agent_suppressed"] = sub_agent_ctx.agent_id
+        sub_agent_ctx = None
+    deterministic_reply = _build_deterministic_sub_agent_reply(
+        sub_agent_ctx,
+        render_target_lang=render_target_lang,
+        user_message=user_message,
+    )
 
     prompt_messages: list[dict[str, str]] = []
     gen_params: Dict[str, Any] = {}
@@ -1802,12 +1692,15 @@ async def chat_agent_sse_generator(
             conversation_history_meta = dict(prompt_runtime_payload.get("conversation_history") or {})
             if conversation_history_meta:
                 trace_stage_meta["conversation_history"] = conversation_history_meta
-            dialogue_state_meta = dict(prompt_runtime_payload.get("dialogue_state") or {})
-            if dialogue_state_meta:
-                trace_stage_meta["dialogue_state"] = dialogue_state_meta
-            topic_state_meta = dict(prompt_runtime_payload.get("topic_state") or {})
-            if topic_state_meta:
-                trace_stage_meta["topic_state"] = topic_state_meta
+            conversation_interpretation_meta = dict(prompt_runtime_payload.get("conversation_interpretation") or {})
+            if conversation_interpretation_meta:
+                trace_stage_meta["conversation_interpretation"] = conversation_interpretation_meta
+            topic_ledger_meta = dict(prompt_runtime_payload.get("topic_ledger") or {})
+            if topic_ledger_meta:
+                trace_stage_meta["topic_ledger"] = topic_ledger_meta
+            tactic_ledger_meta = dict(prompt_runtime_payload.get("tactic_ledger") or {})
+            if tactic_ledger_meta:
+                trace_stage_meta["tactic_ledger"] = tactic_ledger_meta
             affect_state_meta = dict(prompt_runtime_payload.get("affect_state") or {})
             if affect_state_meta:
                 trace_stage_meta["affect_state"] = affect_state_meta
@@ -1817,12 +1710,12 @@ async def chat_agent_sse_generator(
             drive_state_meta = dict(prompt_runtime_payload.get("drive_state") or {})
             if drive_state_meta:
                 trace_stage_meta["drive_state"] = drive_state_meta
-            render_policy_meta = dict(prompt_runtime_payload.get("render_policy") or {})
-            if render_policy_meta:
-                trace_stage_meta["render_policy"] = render_policy_meta
+            reply_plan_meta = dict(prompt_runtime_payload.get("reply_plan") or {})
+            if reply_plan_meta:
+                trace_stage_meta["reply_plan"] = reply_plan_meta
             prompt_build_ms = max(0, int(time.time() * 1000) - prompt_build_started_ms)
-            if not render_policy:
-                render_policy = _coerce_render_policy(prompt_runtime_payload.get("render_policy"))
+            if not reply_plan:
+                reply_plan = _coerce_render_policy(prompt_runtime_payload.get("reply_plan"))
         except Exception as _pb_exc:
             _logger.warning("[%s] ChatAgent prompt_builder failed: %s", request_id, _pb_exc)
             yield _sse({
@@ -1886,7 +1779,7 @@ async def chat_agent_sse_generator(
                         pii_egress_stats={},
                         retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
                         motive_state=prompt_runtime_payload.get("motive_state"),
-                        render_policy=render_policy,
+                        reply_plan=reply_plan,
                         trace_stage_meta=trace_stage_meta,
                     )
                 )
@@ -1900,12 +1793,12 @@ async def chat_agent_sse_generator(
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
                 render_target_lang=render_target_lang,
-                render_policy=render_policy,
+                render_policy=reply_plan,
                 prompt_runtime_payload=prompt_runtime_payload,
             )
             return _apply_render_policy_hard_guard(
                 fallback_narrative,
-                render_policy,
+                reply_plan,
                 user_message=user_message,
                 bond_stage=str((bond_summary or {}).get("stage") or ""),
                 render_target_lang=render_target_lang,
@@ -1965,9 +1858,18 @@ async def chat_agent_sse_generator(
     })
 
     # ── 3. 流式生成 + SentenceSplitter ──────────────────────────────
-    from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
+    from host_brain.integrations.llm_helpers import astream_llm_chunks_with_pool  # noqa: PLC0415
     from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake  # noqa: PLC0415
     from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
+    from host_brain.persona.reply_plan import (  # noqa: PLC0415
+        coerce_reply_plan,
+    )
+    from host_brain.persona.reply_validator import (  # noqa: PLC0415
+        build_correction_prompt,
+        build_deterministic_reply_fallback,
+        infer_reply_tactic_shape,
+        validate_reply,
+    )
 
     # 诊断日志：确认 system_prompt 是否包含人设（前 150 字）
     _logger.info(
@@ -1982,6 +1884,19 @@ async def chat_agent_sse_generator(
     )
 
     splitter = SentenceSplitter()
+    reply_plan_decision = coerce_reply_plan(reply_plan)
+    executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip()
+    executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip()
+    executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip()
+    reply_used_fallback = False
+    previous_assistant_text = next(
+        (
+            str(item.get("content") or "").strip()
+            for item in reversed(prompt_messages)
+            if str(item.get("role") or "").strip().lower() == "assistant" and str(item.get("content") or "").strip()
+        ),
+        "",
+    )
     full_text = ""
     rendered_text = ""
     first_token_ms: int | None = None
@@ -1991,8 +1906,10 @@ async def chat_agent_sse_generator(
     buffer_stream = _should_buffer_stream_output(
         emotion_context=emotion_context,
         bond_summary=bond_summary or None,
-        render_policy=render_policy,
+        render_policy=reply_plan,
     )
+    if bool(reply_plan.get("force_buffering")):
+        buffer_stream = True
     if deterministic_reply:
         buffer_stream = False
         provider_name = "host"
@@ -2019,12 +1936,95 @@ async def chat_agent_sse_generator(
     # 追踪已渲染的 text_ja（用于增量提取）
     _tts_rendered_text = ""
 
+    async def _collect_buffered_generation(messages_for_call: list[dict[str, str]]) -> tuple[str, int | None]:
+        buffered_text = ""
+        buffered_first_token_ms: int | None = None
+        _started_ms = int(time.time() * 1000)
+        async for _chunk in astream_llm_chunks_with_pool(
+            request_id=request_id,
+            scene_type="CHAT",
+            cognitive_tier="A",
+            provider_name=provider_name,
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            messages=messages_for_call,
+            gen_params=agent_gen_params,
+            base_url_override=base_url,
+        ):
+            if buffered_first_token_ms is None:
+                buffered_first_token_ms = int(time.time() * 1000) - _started_ms
+            buffered_text += _chunk
+        return buffered_text, buffered_first_token_ms
+
+    def _build_retry_messages(correction_prompt: str) -> list[dict[str, str]]:
+        correction_block = f"【重试纠偏】\n{str(correction_prompt or '').strip()}".strip()
+        retry_messages: list[dict[str, str]] = [{"role": "system", "content": correction_block}]
+        for item in prompt_messages:
+            role = str(item.get("role") or "").strip().lower() or "user"
+            retry_messages.append({"role": role, "content": str(item.get("content") or "")})
+        return retry_messages
+
+    def _finalize_candidate_text(
+        raw_text: str,
+        *,
+        allow_rewrite: bool,
+    ) -> tuple[str, dict[str, Any], dict[str, Any]]:
+        candidate = repair_utf8_latin1_mojibake(raw_text) or raw_text
+        candidate = _extract_visible_text(candidate, render_target_lang=render_target_lang) or candidate
+        candidate, _ri_meta = apply_response_intelligence_safe(
+            request_id=request_id,
+            user_message=user_message,
+            narrative=candidate,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary or None,
+            render_target_lang=render_target_lang,
+            allow_rewrite=allow_rewrite,
+        )
+        candidate = _extract_visible_text(candidate, render_target_lang=render_target_lang) or candidate
+        candidate = _apply_render_policy_hard_guard(
+            candidate,
+            reply_plan,
+            user_message=user_message,
+            bond_stage=str((bond_summary or {}).get("stage") or ""),
+            render_target_lang=render_target_lang,
+        )
+        candidate = _strip_internal_delegate_markers(candidate)
+        candidate = _airlock_sanitize_output(candidate)
+        candidate, _pii_stats = scrub_pii_egress(candidate)
+        candidate = _apply_render_policy_hard_guard(
+            candidate,
+            reply_plan,
+            user_message=user_message,
+            bond_stage=str((bond_summary or {}).get("stage") or ""),
+            render_target_lang=render_target_lang,
+        )
+        return candidate, _ri_meta, _pii_stats
+
+    def _is_validation_acceptable(validation_candidate: Any) -> bool:
+        if validation_candidate is None:
+            return False
+        if not bool(getattr(validation_candidate, "safe_to_emit", False)):
+            return False
+        if bool(getattr(validation_candidate, "missing_actions", ())):
+            return False
+        if bool(getattr(validation_candidate, "is_valid", False)):
+            return True
+        reason_codes = {
+            str(item or "").strip()
+            for item in list(getattr(validation_candidate, "reason_codes", ()) or ())
+            if str(item or "").strip()
+        }
+        if reason_codes == {"meta_contract_echo"}:
+            return float(getattr(validation_candidate, "quality_score", 0.0) or 0.0) >= 0.9
+        return False
+
     try:
         if deterministic_reply:
             full_text = str(deterministic_reply).strip()
             visible = _apply_render_policy_stream_guard(
                 full_text,
-                render_policy,
+                reply_plan,
                 render_target_lang=render_target_lang,
             )
             rendered_text = visible
@@ -2041,7 +2041,10 @@ async def chat_agent_sse_generator(
                     sentence_index += 1
                 await asyncio.sleep(0)
         else:
-            async for chunk in astream_llm_chunks(
+            async for chunk in astream_llm_chunks_with_pool(
+                request_id=request_id,
+                scene_type="CHAT",
+                cognitive_tier="A",
                 provider_name=provider_name,
                 model_id=model_id,
                 api_key=api_key,
@@ -2063,7 +2066,7 @@ async def chat_agent_sse_generator(
                 full_text += chunk
                 visible = _apply_render_policy_stream_guard(
                     _extract_visible_text(full_text, render_target_lang=render_target_lang),
-                    render_policy,
+                    reply_plan,
                     render_target_lang=render_target_lang,
                 )
                 if not visible:
@@ -2075,7 +2078,7 @@ async def chat_agent_sse_generator(
                     new_chunk = visible
                 if not new_chunk:
                     if _should_cut_stream_after_policy_cap(
-                        render_policy=render_policy,
+                        render_policy=reply_plan,
                         rendered_text=rendered_text,
                         visible_text=visible,
                     ):
@@ -2131,12 +2134,12 @@ async def chat_agent_sse_generator(
                 bond_summary=bond_summary,
                 emotion_context=emotion_context,
                 render_target_lang=render_target_lang,
-                render_policy=render_policy,
+                render_policy=reply_plan,
                 prompt_runtime_payload=prompt_runtime_payload,
             )
             full_text = _apply_render_policy_hard_guard(
                 full_text,
-                render_policy,
+                reply_plan,
                 user_message=user_message,
                 bond_stage=str((bond_summary or {}).get("stage") or ""),
                 render_target_lang=render_target_lang,
@@ -2144,7 +2147,7 @@ async def chat_agent_sse_generator(
             if not buffer_stream:
                 visible_fallback = _apply_render_policy_stream_guard(
                     full_text,
-                    render_policy,
+                    reply_plan,
                     render_target_lang=render_target_lang,
                 )
                 yield _sse({"phase": "RENDER", "chunk": visible_fallback})
@@ -2156,12 +2159,142 @@ async def chat_agent_sse_generator(
                     })
                     sentence_index += 1
 
-    # ── 4. 组装 narrative ────────────────────────────────────────────
-    narrative = repair_utf8_latin1_mojibake(full_text) or full_text
-    narrative = _extract_visible_text(narrative, render_target_lang=render_target_lang) or narrative
-
-    # 提取 TTS 文本（Phase XV 双轨语言：text_ja 走语音通道）
+    # ── 4. 组装 narrative + ReplyPlan 校验/纠偏 ─────────────────────
+    response_intelligence_meta: dict[str, Any] = {}
+    _pii_egress_stats: dict[str, Any] = {}
+    _response_intelligence_started_ms = int(time.time() * 1000)
+    narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
+        full_text,
+        allow_rewrite=buffer_stream,
+    )
     tts_text = _extract_tts_text(full_text)
+    if not deterministic_reply and reply_plan_decision.requires_validation:
+        _validation = validate_reply(
+            text=narrative,
+            plan=reply_plan_decision,
+            user_message=user_message,
+            previous_assistant_text=previous_assistant_text,
+        )
+        trace_stage_meta["reply_validation"] = {
+            "initial": _validation.as_dict(),
+        }
+        if _is_validation_acceptable(_validation):
+            trace_stage_meta["reply_validation"]["accepted_initial"] = True
+        elif _validation.should_retry:
+            _correction_prompt = build_correction_prompt(
+                plan=reply_plan_decision,
+                validation=_validation,
+                previous_assistant_text=previous_assistant_text,
+            )
+            try:
+                _retry_raw_text, _retry_first_token_ms = await _collect_buffered_generation(
+                    _build_retry_messages(_correction_prompt)
+                )
+                if first_token_ms is None and _retry_first_token_ms is not None:
+                    first_token_ms = _retry_first_token_ms
+            except Exception as _retry_exc:
+                _logger.warning("[%s] ChatAgent correction retry failed: %s", request_id, _retry_exc)
+                _retry_raw_text = ""
+            if _retry_raw_text.strip():
+                _retry_narrative, _retry_ri_meta, _retry_pii = _finalize_candidate_text(
+                    _retry_raw_text,
+                    allow_rewrite=True,
+                )
+                _retry_validation = validate_reply(
+                    text=_retry_narrative,
+                    plan=reply_plan_decision,
+                    user_message=user_message,
+                    previous_assistant_text=previous_assistant_text,
+                )
+                trace_stage_meta["reply_validation"]["retry"] = _retry_validation.as_dict()
+                if _is_validation_acceptable(_retry_validation):
+                    executed_tactic_family = str(
+                        _retry_validation.actual_tactic_family
+                        or reply_plan_decision.tactic_family
+                        or ""
+                    ).strip()
+                    executed_tactic_variant = str(
+                        _retry_validation.actual_tactic_variant
+                        or reply_plan_decision.tactic_variant
+                        or ""
+                    ).strip()
+                    executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip()
+                    full_text = _retry_narrative
+                    narrative = _retry_narrative
+                    response_intelligence_meta = _retry_ri_meta
+                    _pii_egress_stats = _retry_pii
+                    tts_text = _extract_tts_text(full_text)
+                    if not _retry_validation.is_valid:
+                        trace_stage_meta["reply_validation"]["accepted_with_warnings"] = {
+                            "quality_score": float(getattr(_retry_validation, "quality_score", 0.0) or 0.0),
+                            "reason_codes": list(getattr(_retry_validation, "reason_codes", ()) or ()),
+                        }
+                else:
+                    reply_used_fallback = True
+                    executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
+                    executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
+                    executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
+                    full_text = build_deterministic_reply_fallback(
+                        plan=reply_plan_decision,
+                        render_target_lang=render_target_lang,
+                    )
+                    narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
+                        full_text,
+                        allow_rewrite=False,
+                    )
+                    tts_text = _extract_tts_text(full_text)
+                    trace_stage_meta["reply_validation"]["fallback"] = {
+                        "used": True,
+                        "reason_codes": list(getattr(_retry_validation, "reason_codes", ()) or ()),
+                    }
+                    trace_stage_meta["fallback_used"] = True
+            else:
+                reply_used_fallback = True
+                executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
+                executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
+                executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
+                full_text = build_deterministic_reply_fallback(
+                    plan=reply_plan_decision,
+                    render_target_lang=render_target_lang,
+                )
+                narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
+                    full_text,
+                    allow_rewrite=False,
+                )
+                tts_text = _extract_tts_text(full_text)
+                trace_stage_meta["reply_validation"]["fallback"] = {
+                    "used": True,
+                    "reason_codes": list(getattr(_validation, "reason_codes", ()) or ()),
+                }
+                trace_stage_meta["fallback_used"] = True
+        else:
+            reply_used_fallback = True
+            executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
+            executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
+            executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
+            full_text = build_deterministic_reply_fallback(
+                plan=reply_plan_decision,
+                render_target_lang=render_target_lang,
+            )
+            narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
+                full_text,
+                allow_rewrite=False,
+            )
+            tts_text = _extract_tts_text(full_text)
+            trace_stage_meta["reply_validation"]["fallback"] = {
+                "used": True,
+                "reason_codes": list(getattr(_validation, "reason_codes", ()) or ()),
+            }
+            trace_stage_meta["fallback_used"] = True
+    with soft_fail(
+        "chat_agent.response_intelligence_ms",
+        fallback=0,
+        expected_exc=(TypeError, ValueError, OverflowError),
+    ) as _rims_box:
+        _rims_box[0] = max(0, int(time.time() * 1000) - _response_intelligence_started_ms)
+    response_intelligence_ms = _rims_box[0]
+    sanitize_egress_ms = response_intelligence_ms
+
     if _tts_sentence_stream_enabled and tts_text and tts_sentence_index == 0:
         tts_fallback_splitter = SentenceSplitter()
         for _tts_sentence in tts_fallback_splitter.feed(tts_text):
@@ -2181,66 +2314,29 @@ async def chat_agent_sse_generator(
     if _tts_sentence_stream_enabled and tts_sentence_index > 0:
         await asyncio.sleep(0)
 
-    # ── 5. apply_response_intelligence（反思链 + 多模态后缀）─────────
-    response_intelligence_meta: dict[str, Any] = {}
-    _response_intelligence_started_ms = int(time.time() * 1000)
-    try:
-        from host_brain.app.intelligent_runtime import apply_response_intelligence  # noqa: PLC0415
-
-        narrative, response_intelligence_meta = apply_response_intelligence(
-            request_id=request_id,
-            user_message=user_message,
-            narrative=narrative,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary or None,
-            render_lang=render_target_lang,
-            allow_rewrite=buffer_stream,
-        )
-        narrative = _extract_visible_text(narrative, render_target_lang=render_target_lang) or narrative
-        narrative = _apply_render_policy_hard_guard(
-            narrative,
-            render_policy,
-            user_message=user_message,
-            bond_stage=str((bond_summary or {}).get("stage") or ""),
-            render_target_lang=render_target_lang,
-        )
-
-        if buffer_stream and narrative:
+    if buffer_stream and narrative:
+        rendered_text = narrative
+        yield _sse({"phase": "RENDER", "chunk": narrative})
+        for sentence in splitter.feed(narrative):
+            yield _sse({
+                "phase": "SENTENCE",
+                "sentence": sentence,
+                "sentence_index": sentence_index,
+            })
+            sentence_index += 1
+    elif narrative.startswith(rendered_text):
+        postprocess_chunk = narrative[len(rendered_text):]
+        if postprocess_chunk:
             rendered_text = narrative
-            yield _sse({"phase": "RENDER", "chunk": narrative})
-            for sentence in splitter.feed(narrative):
+            yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
+            for sentence in splitter.feed(postprocess_chunk):
                 yield _sse({
                     "phase": "SENTENCE",
                     "sentence": sentence,
                     "sentence_index": sentence_index,
                 })
                 sentence_index += 1
-        elif narrative.startswith(rendered_text):
-            postprocess_chunk = narrative[len(rendered_text):]
-            if postprocess_chunk:
-                rendered_text = narrative
-                yield _sse({"phase": "RENDER", "chunk": postprocess_chunk})
-                for sentence in splitter.feed(postprocess_chunk):
-                    yield _sse({
-                        "phase": "SENTENCE",
-                        "sentence": sentence,
-                        "sentence_index": sentence_index,
-                    })
-                    sentence_index += 1
-    except Exception as _ri_exc:
-        response_intelligence_meta = {
-            "reflection": {"status": "DEGRADED", "reason_code": str(_ri_exc)[:100]},
-        }
-        _logger.debug("[%s] ChatAgent response_intelligence failed: %s", request_id, _ri_exc)
-    with soft_fail(
-        "chat_agent.response_intelligence_ms",
-        fallback=0,
-        expected_exc=(TypeError, ValueError, OverflowError),
-    ) as _rims_box:
-        _rims_box[0] = max(0, int(time.time() * 1000) - _response_intelligence_started_ms)
-    response_intelligence_ms = _rims_box[0]
 
-    # flush 剩余
     remainder = splitter.flush()
     if remainder:
         yield _sse({
@@ -2249,39 +2345,6 @@ async def chat_agent_sse_generator(
             "sentence_index": sentence_index,
         })
         sentence_index += 1
-
-    # ── 6. 出口净化 ──────────────────────────────────────────────────
-    _sanitize_started_ms = int(time.time() * 1000)
-    narrative = _strip_internal_delegate_markers(narrative)
-    narrative = _airlock_sanitize_output(narrative)
-    narrative = _apply_render_policy_hard_guard(
-        narrative,
-        render_policy,
-        user_message=user_message,
-        bond_stage=str((bond_summary or {}).get("stage") or ""),
-        render_target_lang=render_target_lang,
-    )
-
-    # PII 出口检查
-    _pii_egress_stats: dict[str, Any] = {}
-    with soft_fail("chat_agent.pii_scrub_egress", fallback=None):
-        from host_brain.airlock.pii_filter import _check_channel, pii_scrub_text  # noqa: PLC0415
-        if _check_channel("EGRESS"):
-            _pii_eg = pii_scrub_text(narrative, context="egress")
-            narrative = _pii_eg.scrubbed_text
-            narrative = _apply_render_policy_hard_guard(
-                narrative,
-                render_policy,
-                user_message=user_message,
-                bond_stage=str((bond_summary or {}).get("stage") or ""),
-                render_target_lang=render_target_lang,
-            )
-            if _pii_eg.has_pii:
-                _pii_egress_stats = {
-                    "detections": _pii_eg.total_detections,
-                    "rules": sorted({d["rule_id"] for d in _pii_eg.detections}),
-                }
-    sanitize_egress_ms = max(0, int(time.time() * 1000) - _sanitize_started_ms)
 
     # ── 7. INPUT_COMPLETED 同步写入 ──────────────────────────────────
     total_latency_ms = int(time.time() * 1000) - ts_ms
@@ -2397,6 +2460,28 @@ async def chat_agent_sse_generator(
     # ── 9. 异步后处理（fire-and-forget）─────────────────────────────
     # 先走中性共享模块，保持 cortex_orchestrator 链路上的后处理收口一致
     try:
+        _actual_tactic_signature = ""
+        if narrative.strip() and str(reply_plan_decision.primary_topic or "").strip():
+            _actual_tactic = infer_reply_tactic_shape(
+                text=narrative,
+                topic=str(reply_plan_decision.primary_topic or "").strip(),
+            )
+            _actual_family = str(_actual_tactic.get("family") or "").strip()
+            _actual_variant = str(_actual_tactic.get("variant") or "").strip()
+            _actual_tactic_signature = str(_actual_tactic.get("signature") or "").strip()
+            if _actual_family:
+                executed_tactic_family = _actual_family
+            if _actual_variant:
+                executed_tactic_variant = _actual_variant
+        reply_plan_for_commit = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
+        if executed_tactic_family:
+            reply_plan_for_commit["tactic_family"] = executed_tactic_family
+        if executed_tactic_variant:
+            reply_plan_for_commit["tactic_variant"] = executed_tactic_variant
+        if executed_trajectory_stage:
+            reply_plan_for_commit["trajectory_stage"] = executed_trajectory_stage
+        if reply_used_fallback:
+            reply_plan_for_commit["fallback_used"] = True
         from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
         asyncio.create_task(
             _async_post_process(
@@ -2437,9 +2522,13 @@ async def chat_agent_sse_generator(
                 llm_input_digest=json.dumps(prompt_messages, ensure_ascii=False)[:500] or None,
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
                 motive_state=prompt_runtime_payload.get("motive_state"),
-                render_policy=render_policy,
+                reply_plan=reply_plan_for_commit,
                 trace_stage_meta={
                     **dict(trace_stage_meta or {}),
+                    "executed_tactic_family": executed_tactic_family,
+                    "executed_tactic_variant": executed_tactic_variant,
+                    "executed_tactic_signature": _actual_tactic_signature or None,
+                    "reply_used_fallback": reply_used_fallback,
                     "voice_outputs_enabled": _voice_outputs_enabled,
                 },
             )
@@ -2473,6 +2562,7 @@ from host_brain.app.chat_agent_preprocessor import (  # noqa: F401, E402
     _build_chat_agent_fallback_reply,
     _build_installed_capabilities_reply,
     _should_buffer_stream_output,
+    _should_preserve_sub_agent_result_for_user,
     _build_deterministic_sub_agent_reply,
     _build_sub_agent_context_prompt,
     _extract_visible_text,
@@ -2491,4 +2581,3 @@ from host_brain.app.chat_agent_postprocessor import (  # noqa: F401, E402
     log_input_completed,
     schedule_async_post_process,
 )
-

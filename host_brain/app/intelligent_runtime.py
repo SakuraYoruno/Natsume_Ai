@@ -214,7 +214,7 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
         except (ImportError, AttributeError):
             pass
         if _smi is not None:
-            _bnl = BondNarrativeLayer(memory_index=_smi, milestone_tracker=_mt)
+            _bnl = BondNarrativeLayer(memory_index=_smi, milestone_tracker=_mt, use_llm=True)
             _uid = str(getattr(runtime_input, "user_id", "") or "default")
             _bn_result = _bnl.build_narrative(user_id=_uid, bond_stage=bond_stage)
             _shared_memory_hints = [

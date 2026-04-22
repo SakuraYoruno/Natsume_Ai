@@ -101,7 +101,7 @@ def generate_inner_activity_note(
         "bond_summary",
         "emotion_timeline",
         "motive_state",
-        "render_policy",
+        "reply_plan",
         "self_model_snapshot",
         "self_reflection_pulse",
         "recent_inner_events",
@@ -226,7 +226,7 @@ def _build_inner_activity_context(
         _logger.debug("inner_activity motive_state degraded: %s", exc)
         motive_state = {}
 
-    render_policy = _build_render_policy(
+    reply_plan = _build_reply_plan(
         silence_state=silence_state,
         body_sense=body_sense,
         offline_state=offline_state,
@@ -327,20 +327,19 @@ def _build_inner_activity_context(
                 "motive_reason_tags",
             ],
         ),
-        "render_policy": _project_mapping(
-            render_policy,
+        "reply_plan": _project_mapping(
+            reply_plan,
             [
                 "max_chars",
                 "max_sentences",
                 "allow_followup",
-                "allow_topic_shift",
                 "allow_proactive_after_reply",
-                "warmth_floor",
-                "warmth_ceiling",
-                "intimacy_ceiling",
-                "should_be_brief",
+                "restate_level",
+                "tone_band",
+                "followup_kind",
+                "reply_contract",
+                "reason_tags",
                 "should_be_withdrawn",
-                "policy_reason_tags",
             ],
         ),
         "self_model_snapshot": _project_mapping(
@@ -495,7 +494,7 @@ def _collect_self_reflection_pulse(
         return {}
 
 
-def _build_render_policy(
+def _build_reply_plan(
     *,
     silence_state: dict[str, Any],
     body_sense: dict[str, Any],
@@ -504,9 +503,9 @@ def _build_render_policy(
     motive_state: dict[str, Any],
 ) -> dict[str, Any]:
     try:
-        from host_brain.persona.render_policy import build_render_policy_from_inputs  # noqa: PLC0415
+        from host_brain.persona.reply_plan import build_reply_plan_from_inputs  # noqa: PLC0415
 
-        decision = build_render_policy_from_inputs(
+        decision = build_reply_plan_from_inputs(
             silence_state=silence_state,
             body_sense=body_sense,
             offline_state=offline_state,
@@ -516,7 +515,7 @@ def _build_render_policy(
         )
         return dict(decision.as_dict())
     except Exception as exc:
-        _logger.debug("inner_activity render_policy degraded: %s", exc)
+        _logger.debug("inner_activity reply_plan degraded: %s", exc)
         return {}
 
 
@@ -561,22 +560,27 @@ def _run_inner_activity_llm(
     gen_params: dict[str, Any],
     base_url_override: str | None,
 ) -> str:
-    chunks: list[str] = []
-    for chunk in _stream_inner_activity_llm_chunks(
+    from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+
+    result = complete_llm_with_pool_sync(
+        request_id=f"inner_activity::{int(time.time() * 1000)}",
+        scene_type="INNER_ACTIVITY",
+        cognitive_tier="B",
         provider_name=provider_name,
         model_id=model_id,
         api_key=api_key,
         timeout_ms=timeout_ms,
-        prompt_text=prompt_text,
-        system_prompt=system_prompt,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_text},
+        ],
         gen_params=gen_params,
+        response_format="json_object",
         base_url_override=base_url_override,
-    ):
-        if chunk:
-            chunks.append(str(chunk))
-        if len("".join(chunks)) > 2048:
-            break
-    return "".join(chunks).strip()
+    )
+    if result.pool_exhausted:
+        raise RuntimeError("inner activity llm pool exhausted")
+    return str(result.content or "").strip()
 
 
 def _stream_inner_activity_llm_chunks(
@@ -648,14 +652,14 @@ def _resolve_inner_activity_llm_runtime(*, now_ms: int) -> dict[str, Any] | None
 def _build_context_digest(context: Mapping[str, Any]) -> dict[str, Any]:
     offline_state = _coerce_mapping(context.get("offline_state"))
     motive_state = _coerce_mapping(context.get("motive_state"))
-    render_policy = _coerce_mapping(context.get("render_policy"))
+    reply_plan = _coerce_mapping(context.get("reply_plan"))
     return {
         "absence_band": str(offline_state.get("absence_band") or "recent"),
         "offline_hours": float(offline_state.get("offline_hours") or 0.0),
         "loneliness": float(offline_state.get("loneliness_level") or 0.0),
         "anticipation": float(offline_state.get("anticipation_level") or 0.0),
         "dominant_motive": str(motive_state.get("dominant_motive") or ""),
-        "policy_withdrawn": bool(render_policy.get("should_be_withdrawn") or False),
+        "policy_withdrawn": bool(reply_plan.get("should_be_withdrawn") or False),
         "recent_inner_events": len(list(context.get("recent_inner_events") or [])),
     }
 

@@ -259,21 +259,39 @@ def _bootstrap_personality_scheduler(
     )
     _register_task(
         config=SchedulerTaskConfig(
-            task_id="inner_world_tick",
+            task_id="inner_world_numeric_tick",
             trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 60},
+            trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60)},
             intent_template={
-                "skill_name": "inner_world_tick",
+                "skill_name": "inner_world_numeric_tick",
                 "args": {"user_id": "user_1"},
                 "proposer_node_id": "scheduler",
             },
             priority=TaskPriority.LOW,
             mode_allowlist=["normal", "focus", "gaming", "sleep"],
             enabled=True,
-            description="离线内心世界时钟：每分钟推进孤独感、期待值与情绪漂移",
+            description="离线内心世界数值 tick：推进孤独感、期待值与情绪漂移，不写 inner_stream",
         ),
-        success_message="离线内心世界时钟任务已注册: task_id=%s, interval=60s",
-        failure_message="离线内心世界时钟任务注册失败（降级）: %s",
+        success_message="离线内心世界数值任务已注册: task_id=%s, interval=60s",
+        failure_message="离线内心世界数值任务注册失败（降级）: %s",
+    )
+    _register_task(
+        config=SchedulerTaskConfig(
+            task_id="inner_world_monologue_tick",
+            trigger_mode=TriggerMode.INTERVAL,
+            trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300)},
+            intent_template={
+                "skill_name": "inner_world_monologue_tick",
+                "args": {"user_id": "user_1"},
+                "proposer_node_id": "scheduler",
+            },
+            priority=TaskPriority.LOW,
+            mode_allowlist=["normal", "focus", "gaming", "sleep"],
+            enabled=True,
+            description="离线内心世界独白 tick：按较慢节奏生成 inner_stream 独白",
+        ),
+        success_message="离线内心世界独白任务已注册: task_id=%s, interval=300s",
+        failure_message="离线内心世界独白任务注册失败（降级）: %s",
     )
     _register_task(
         config=SchedulerTaskConfig(
@@ -342,7 +360,6 @@ def _bootstrap_personality_scheduler(
                 "args": {
                     "user_id": "user_1",
                     "lookback_days": 7,
-                    "use_llm": False,
                 },
                 "proposer_node_id": "scheduler",
             },
@@ -359,7 +376,8 @@ def _bootstrap_personality_scheduler(
 
     tracked_task_ids = [
         "proactive_talk_periodic",
-        "inner_world_tick",
+        "inner_world_numeric_tick",
+        "inner_world_monologue_tick",
         "silence_tick",
         "body_sense_tick",
     ]
@@ -374,7 +392,7 @@ def _bootstrap_personality_scheduler(
         "proactive_talk_scheduler": (
             "OK "
             f"(started; proactive_push={'ready' if proactive_push_ready else 'skip'}; "
-            f"background_ticks=3)"
+            f"background_ticks=4)"
         ),
         "proactive_push_client": proactive_push_status,
         "personality_tick_registry": _build_personality_tick_status(
@@ -907,27 +925,48 @@ def runtime_lifespan(
                 except Exception as _evo_task_exc:
                     logger.warning("进化周期任务注册失败（降级）: %s", _evo_task_exc)
 
-                # [Phase XVI] 注册 inner_world_tick 任务（每分钟驱动离线内心世界时钟）
+                # [Phase XVI] 注册 inner_world_numeric_tick / inner_world_monologue_tick
                 try:
                     _inner_world_task = SchedulerTaskConfig(
-                        task_id="inner_world_tick",
+                        task_id="inner_world_numeric_tick",
                         trigger_mode=TriggerMode.INTERVAL,
-                        trigger_config={"seconds": 60},  # 每分钟 tick 一次
+                        trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS") or 60)},
                         intent_template={
-                            "skill_name": "inner_world_tick",
+                            "skill_name": "inner_world_numeric_tick",
                             "args": {},
                             "proposer_node_id": "scheduler",
                         },
                         priority=TaskPriority.LOW,
                         mode_allowlist=["normal", "focus", "gaming", "sleep"],  # 所有非锁定模式均运行
                         enabled=True,
-                        description="Phase XVI 离线内心世界时钟：每分钟驱动孤独感/期待值/情绪漂移积累",
+                        description="Phase XVI 离线内心世界数值 tick：推进孤独感/期待值/情绪漂移积累",
                     )
-                    if _proactive_registry.get("inner_world_tick") is None:
+                    if _proactive_registry.get("inner_world_numeric_tick") is None:
                         _proactive_registry.register(_inner_world_task)
-                        logger.info("离线内心世界时钟任务已注册: task_id=inner_world_tick, interval=60s")
+                        logger.info("离线内心世界数值任务已注册: task_id=inner_world_numeric_tick, interval=60s")
                 except Exception as _inner_world_exc:
-                    logger.warning("离线内心世界时钟任务注册失败（降级）: %s", _inner_world_exc)
+                    logger.warning("离线内心世界数值任务注册失败（降级）: %s", _inner_world_exc)
+
+                try:
+                    _inner_world_monologue_task = SchedulerTaskConfig(
+                        task_id="inner_world_monologue_tick",
+                        trigger_mode=TriggerMode.INTERVAL,
+                        trigger_config={"seconds": int(os.environ.get("HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS") or 300)},
+                        intent_template={
+                            "skill_name": "inner_world_monologue_tick",
+                            "args": {},
+                            "proposer_node_id": "scheduler",
+                        },
+                        priority=TaskPriority.LOW,
+                        mode_allowlist=["normal", "focus", "gaming", "sleep"],
+                        enabled=True,
+                        description="Phase XVI 离线内心世界独白 tick：按较慢节奏写入 inner_stream",
+                    )
+                    if _proactive_registry.get("inner_world_monologue_tick") is None:
+                        _proactive_registry.register(_inner_world_monologue_task)
+                        logger.info("离线内心世界独白任务已注册: task_id=inner_world_monologue_tick, interval=300s")
+                except Exception as _inner_world_monologue_exc:
+                    logger.warning("离线内心世界独白任务注册失败（降级）: %s", _inner_world_monologue_exc)
 
                 # [Phase XVIII] 注册 silence_tick 任务（每分钟驱动沉默引擎意愿恢复）
                 try:
@@ -1007,7 +1046,6 @@ def runtime_lifespan(
                             "skill_name": "emergent_growth_weekly",
                             "args": {
                                 "lookback_days": 7,
-                                "use_llm": False,
                             },
                             "proposer_node_id": "scheduler",
                         },
@@ -1049,7 +1087,8 @@ def runtime_lifespan(
                 _natsume_scheduler.start()
                 _core_personality_task_ids = [
                     "proactive_talk_periodic",
-                    "inner_world_tick",
+                    "inner_world_numeric_tick",
+                    "inner_world_monologue_tick",
                     "silence_tick",
                     "body_sense_tick",
                 ]

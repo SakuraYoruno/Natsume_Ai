@@ -172,6 +172,8 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
     因为这些 skill 不走 tool 路由，直接调用 inner_world 状态机。
     """
     from host_brain.skills.impl.inner_world_skill import (  # noqa: PLC0415
+        execute_inner_world_monologue_tick,
+        execute_inner_world_numeric_tick,
         execute_inner_world_tick,
         execute_inner_world_awaken,
         execute_inner_world_session_end,
@@ -186,6 +188,26 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             reversible=False,
             handler=execute_inner_world_tick,
             description="离线内心世界时钟 tick：每分钟由调度器调用，驱动孤独感/期待值/情绪漂移积累。",
+            scheduler_allowed=True,
+        ),
+        SkillMeta(
+            skill_name="inner_world_numeric_tick",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=False,
+            handler=execute_inner_world_numeric_tick,
+            description="离线内心世界数值 tick：推进数值状态，不写 inner_stream。",
+            scheduler_allowed=True,
+        ),
+        SkillMeta(
+            skill_name="inner_world_monologue_tick",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=False,
+            handler=execute_inner_world_monologue_tick,
+            description="离线内心世界独白 tick：按较慢节奏生成 inner_stream 独白。",
             scheduler_allowed=True,
         ),
         SkillMeta(

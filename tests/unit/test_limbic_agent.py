@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.persona.render_policy import build_render_policy_from_inputs
+from host_brain.persona.reply_plan import build_reply_plan_from_inputs
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.limbic_agent import LimbicAgent
 
@@ -680,17 +680,23 @@ def test_limbic_agent_compute_motive_and_decide_policy(monkeypatch) -> None:
         user_message="hello",
         runtime_flags={"source": "test"},
     )
-    policy = build_render_policy_from_inputs(
+    plan = build_reply_plan_from_inputs(
         silence_state={"willingness_level": "NORMAL"},
         body_sense={"fatigue_level": "FRESH"},
         offline_state={"offline_hours": 2.0},
         motive_state=motive_state,
-        dialogue_state={"current_user_act": "identity_probe"},
+        conversation_interpretation={
+            "literal_topic": "identity",
+            "interaction_move": "first_ask",
+            "freshness": "new",
+            "user_stance": "probing",
+        },
     ).as_dict()
 
     assert motive_state["dominant_motive"] == "continuity"
-    assert policy["allow_topic_shift"] is True
-    assert policy["topic_reopen_mode"] == "identity_direct"
+    assert plan["primary_topic"] == "identity"
+    assert plan["response_goal"] == "identify"
+    assert plan["tactic_family"] == "brief_name_only"
     registry = agent.state_registry.get_state("limbic") or {}
     state_payload = dict(registry.get("state") or {})
     assert dict(state_payload.get("last_motive_state") or {})["dominant_motive"] == "continuity"

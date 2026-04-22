@@ -396,6 +396,15 @@ def test_classify_task_intent_by_rules_routes_planning_advice_to_intent_agent() 
     assert decision is not None
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "intent_agent"
+
+
+def test_classify_task_intent_by_rules_routes_relational_followup_to_chat() -> None:
+    decision = classify_task_intent_by_rules("那你还会帮我吗")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert str(decision["reason_code"]).startswith("RELATIONAL_CHAT:")
 def test_classify_and_compile_intent_draft_does_not_misroute_task_like_message_as_phatic_chat() -> None:
     agent = ThalamusAgent()
 

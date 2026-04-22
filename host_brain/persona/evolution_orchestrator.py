@@ -429,6 +429,7 @@ class EvolutionOrchestrator:
                 emotion_trend=emotion_trend,
                 bond_stage=bond_stage,
                 llm_fn=llm_fn,
+                strict_llm=True,
             )
             return desire or ""
         except Exception as exc:

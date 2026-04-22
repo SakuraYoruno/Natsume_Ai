@@ -6,6 +6,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
+from host_brain.app.relational_chat_detector import (
+    build_relational_chat_reason_code,
+    detect_relational_chat_topic,
+)
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
@@ -310,6 +314,10 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
     cleaned = _strip_step_lead_in(text)
     if not cleaned:
         return None
+
+    relational_reason = build_relational_chat_reason_code(cleaned)
+    if relational_reason:
+        return relational_reason
 
     compact = _normalize_phatic_match_text(cleaned)
     if not compact or len(compact) > _PHATIC_FASTPATH_MAX_CHARS:
@@ -728,6 +736,19 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
             "route_source": "rule",
         }
 
+    if detect_relational_chat_topic(normalized):
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": build_relational_chat_reason_code(normalized) or "RELATIONAL_CHAT",
+            "confidence": 0.98,
+            "route_source": "rule",
+            "args": {
+                "text": normalized,
+            },
+        }
+
     if _TASK_TRANSLATE_RE.search(normalized):
         return {
             "route": "delegate",
@@ -784,6 +805,62 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
     return None
 
 
+def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    relational_reason = build_relational_chat_reason_code(normalized)
+    if relational_reason:
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": relational_reason,
+            "confidence": 0.99,
+            "route_source": "rule.fastpath",
+            "args": {
+                "text": normalized,
+            },
+        }
+
+    phatic_reason = _detect_short_companion_chat_reason(normalized)
+    if phatic_reason:
+        return {
+            "route": "chat",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": phatic_reason,
+            "confidence": 0.99,
+            "route_source": "rule.fastpath",
+            "args": {
+                "text": normalized,
+            },
+        }
+
+    compact = re.sub(r"\s+", "", normalized).lower()
+    if _TASK_PROGRESS_QUERY_RE.search(compact):
+        return {
+            "route": "task_progress",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "RULE_TASK_PROGRESS",
+            "confidence": 0.98,
+            "route_source": "rule.fastpath",
+        }
+
+    if _TASK_RECENT_TURN_RE.search(normalized):
+        return {
+            "route": "recent_turn",
+            "target_id": "",
+            "task": normalized,
+            "reason_code": "RULE_RECENT_TURN",
+            "confidence": 0.95,
+            "route_source": "rule.fastpath",
+        }
+    return None
+
+
 def _build_multimodal_route_seed(
     text: str,
     *,
@@ -835,7 +912,7 @@ async def classify_task_intent_by_llm(
         )
         from host_brain.app.input_service_gateway import extract_first_json_object  # noqa: PLC0415
         from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
-        from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
+        from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
 
         llm_runtime = await resolve_host_llm_runtime_async(rollout_key=session_id, scene_type="EXEC_INTENT")
         router_runtime = resolve_executive_router_llm_runtime(base_runtime=llm_runtime)
@@ -845,7 +922,7 @@ async def classify_task_intent_by_llm(
         provider_name = str(router_runtime.get("provider_name") or "").strip()
         model_id = str(router_runtime.get("model_id") or "").strip()
         api_key = str(router_runtime.get("llm_api_key") or "").strip()
-        if not provider_name or not model_id or not api_key:
+        if not provider_name or not model_id:
             return None
 
         ctx = dict(tribe_context or {})
@@ -866,8 +943,10 @@ async def classify_task_intent_by_llm(
         base_url_override = str(router_runtime.get("base_url_override") or "").strip() or None
         agent_gen_params = dict(router_runtime.get("agent_gen_params") or {"temperature": 0.1, "top_p": 0.8})
 
-        raw_chunks: list[str] = []
-        async for chunk in astream_llm_chunks(
+        result = await acomplete_llm_with_pool(
+            request_id=request_id,
+            scene_type="EXEC_INTENT",
+            cognitive_tier="C",
             provider_name=provider_name,
             model_id=model_id,
             api_key=api_key,
@@ -877,13 +956,12 @@ async def classify_task_intent_by_llm(
                 {"role": "user", "content": user_prompt},
             ],
             gen_params=agent_gen_params,
+            response_format="json_object",
             base_url_override=base_url_override,
-        ):
-            raw_chunks.append(str(chunk or ""))
-            if sum(len(item) for item in raw_chunks) >= 4000:
-                break
-
-        raw_text = "".join(raw_chunks).strip()
+        )
+        if result.pool_exhausted:
+            return None
+        raw_text = str(result.content or "").strip()
         parsed = extract_first_json_object(raw_text)
         if not isinstance(parsed, dict):
             _logger.warning("[%s] thalamus_intent_llm_parse_failed output=%.180s", request_id, raw_text)
@@ -957,9 +1035,16 @@ async def classify_task_intent(
                 "prefrontal_action": prefrontal_plan.get("action"),
             }
 
+    fastpath_result = classify_task_intent_fastpath(normalized)
+    if fastpath_result is not None:
+        return fastpath_result
+
     rule_result = classify_task_intent_by_rules(normalized)
     if rule_result is not None:
-        return rule_result
+        if str(rule_result.get("route") or "").strip().lower() in {"task_progress", "recent_turn"}:
+            return rule_result
+        if str(rule_result.get("reason_code") or "").strip().upper().startswith("THALAMUS_RULE_SHORT_COMPANION_CHAT"):
+            return rule_result
 
     llm_result = await classify_task_intent_by_llm(
         request_id=request_id,
@@ -968,7 +1053,15 @@ async def classify_task_intent(
         tribe_context=tribe_context,
     )
     if llm_result is not None:
+        if _should_prefer_rule_seed(rule_result):
+            merged = dict(rule_result or {})
+            merged["llm_route_used"] = True
+            merged["llm_route_candidate"] = dict(llm_result)
+            return merged
         return llm_result
+
+    if rule_result is not None:
+        return rule_result
 
     return {
         "route": "chat",
@@ -978,6 +1071,22 @@ async def classify_task_intent(
         "confidence": 0.7,
         "route_source": "default",
     }
+
+
+def _should_prefer_rule_seed(rule_result: Mapping[str, Any] | None) -> bool:
+    if not isinstance(rule_result, Mapping):
+        return False
+    reason_code = _normalize_text(rule_result.get("reason_code"))
+    route_source = _normalize_text(rule_result.get("route_source"))
+    if route_source.startswith("thalamus.rule"):
+        return True
+    if route_source.startswith("rule"):
+        return True
+    if reason_code.startswith("THALAMUS_RULE_"):
+        return True
+    if reason_code.startswith("RULE_FORCE_"):
+        return True
+    return False
 
 
 def _resolve_target_id(payload: Mapping[str, Any]) -> str:

@@ -35,3 +35,29 @@ class LLMRouteResult:
     latency_ms: int
     fallback_used: bool
     detail: str
+
+
+@dataclass(frozen=True)
+class ModelAttempt:
+    """单次池化模型尝试记录。"""
+
+    model: str
+    provider: str
+    status: str
+    latency_ms: int
+    reason_code: str | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class PoolCompleteResult:
+    """共享模型池完成结果。"""
+
+    content: str
+    final_model: str
+    final_provider: str
+    attempts: list[ModelAttempt]
+    pool_exhausted: bool
+    total_latency_ms: int
+    cached: bool
+    cognitive_tier: str

@@ -75,7 +75,8 @@ from host_brain.app.memory.state_write_arbiter import StateWriteArbiter
 from host_brain.app.memory.distillation_engine import DistillationEngine
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 from host_brain.app.prompt_template_store import PromptTemplateStore
-from host_brain.app.context.topic_state import SessionTopicStateStore
+from host_brain.app.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.app.context.topic_ledger import SessionTopicLedgerStore
 from host_brain.conversation.history import ConversationHistory
 from host_brain.conversation.store import TurnStore
 
@@ -142,7 +143,8 @@ _shared_memory_index: Optional[SharedMemoryIndex] = None
 _milestone_tracker: Optional[MilestoneTracker] = None
 _conversation_turn_store: Optional[TurnStore] = None
 _conversation_history: Optional[ConversationHistory] = None
-_session_topic_state_store: Optional[SessionTopicStateStore] = None
+_session_topic_ledger_store: Optional[SessionTopicLedgerStore] = None
+_session_tactic_ledger_store: Optional[SessionTacticLedgerStore] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -263,11 +265,18 @@ def get_conversation_history() -> ConversationHistory:
     return _conversation_history
 
 
-def get_session_topic_state_store() -> SessionTopicStateStore:
-    global _session_topic_state_store
-    if _session_topic_state_store is None:
-        _session_topic_state_store = SessionTopicStateStore(get_ledger())
-    return _session_topic_state_store
+def get_session_topic_ledger_store() -> SessionTopicLedgerStore:
+    global _session_topic_ledger_store
+    if _session_topic_ledger_store is None:
+        _session_topic_ledger_store = SessionTopicLedgerStore(get_ledger())
+    return _session_topic_ledger_store
+
+
+def get_session_tactic_ledger_store() -> SessionTacticLedgerStore:
+    global _session_tactic_ledger_store
+    if _session_tactic_ledger_store is None:
+        _session_tactic_ledger_store = SessionTacticLedgerStore(get_ledger())
+    return _session_tactic_ledger_store
 
 
 def _resolve_episodic_embedding_binding() -> tuple[Any, str, str]:
@@ -902,7 +911,7 @@ def get_bond_aware_style_engine() -> Any:
 def get_reflection_chain() -> ReflectionChain:
     global _reflection_chain
     if _reflection_chain is None:
-        _reflection_chain = ReflectionChain()
+        _reflection_chain = ReflectionChain(use_llm=True)
     return _reflection_chain
 
 

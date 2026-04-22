@@ -217,6 +217,10 @@ class SQLiteLedger(
     def capability_forge_proposal_log(self) -> list[dict[str, Any]]:
         return self._fetch_all("capability_forge_proposal_log")
 
+    @property
+    def llm_pool_call_log(self) -> list[dict[str, Any]]:
+        return self._fetch_all("llm_pool_call_log")
+
     # -------------------------------------------------------------------
     # 写入方法（业务 log_* 方法）
     # -------------------------------------------------------------------

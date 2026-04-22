@@ -169,6 +169,38 @@ def test_deterministic_reply_returns_intent_agent_steps_directly() -> None:
     assert reply == "1. 先确认现状。\n2. 再拆成今天能做的两步。\n3. 最后留一个复盘点。"
 
 
+def test_deterministic_reply_hides_intent_agent_result_for_relational_followup() -> None:
+    reply = _build_deterministic_sub_agent_reply(
+        SubAgentContext(
+            agent_id="intent_agent",
+            task="判断是否还会继续帮忙",
+            result_text='{"thought":"用户在确认帮助意愿","action_type":"final_answer","final_answer":"当然会继续帮你的。"}',
+            success=True,
+        ),
+        render_target_lang="zh",
+        user_message="那你还会帮我吗",
+    )
+
+    assert reply is None
+
+
+def test_quality_fallback_does_not_surface_intent_agent_result_for_relational_followup() -> None:
+    reply = _build_chat_agent_quality_fallback_reply(
+        user_message="那你还会帮我吗",
+        sub_agent_ctx=SubAgentContext(
+            agent_id="intent_agent",
+            task="判断是否还会继续帮忙",
+            result_text='{"thought":"用户在确认帮助意愿","action_type":"final_answer","final_answer":"当然会继续帮你的。"}',
+            success=True,
+        ),
+        bond_summary={},
+        emotion_context={},
+        render_target_lang="zh",
+    )
+
+    assert "当然会继续帮你" not in reply
+
+
 def test_deterministic_reply_renders_open_app_success_cn() -> None:
     reply = _build_deterministic_sub_agent_reply(
         SubAgentContext(
@@ -216,4 +248,3 @@ def test_deterministic_reply_renders_open_app_failure_cn() -> None:
     )
 
     assert reply == "我试了一下，不过这边没把不存在应用打开。卡住的是：unable to resolve local app target。"
-

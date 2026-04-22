@@ -98,7 +98,7 @@ function Write-RuntimeEnvFile {
   $snapshot = @{}
   foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
     $name = [string]$entry.Key
-    if ($name -match '^(HOST_|EDGE_|Natsume_|OPENAI_|GEMINI_|DEEPSEEK_|GOOGLE_)') {
+    if ($name -match '^(HOST_|EDGE_|Natsume_|OPENAI_|GEMINI_|DEEPSEEK_|MINIMAX_|GOOGLE_)') {
       $snapshot[$name] = [string]$entry.Value
     }
   }

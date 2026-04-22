@@ -263,14 +263,20 @@ class QQAdapter(AbstractPlatformAdapter):
 
         if send_result.success:
             logger.info(
-                "QQAdapter: humanized send OK segments=%d delay=%dms",
-                send_result.sent_segments, send_result.total_delay_ms,
+                "QQAdapter: humanized send OK segments=%d total=%dms sleep=%dms send=%dms",
+                send_result.sent_segments,
+                send_result.total_delay_ms,
+                send_result.sleep_delay_ms,
+                send_result.send_elapsed_ms,
             )
         else:
             logger.warning(
-                "QQAdapter: humanized send failed at segment %d/%d: %s",
+                "QQAdapter: humanized send failed at segment %d/%d total=%dms sleep=%dms send=%dms err=%s",
                 send_result.failed_segment_index + 1,
                 send_result.total_segments,
+                send_result.total_delay_ms,
+                send_result.sleep_delay_ms,
+                send_result.send_elapsed_ms,
                 send_result.error[:100],
             )
         return send_result.success

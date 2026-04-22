@@ -43,9 +43,10 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _build_trace_output_digest,
     _detect_trace_fallback_used,
     _summarize_motive_state_for_trace,
-    _summarize_dialogue_state_for_trace,
-    _summarize_render_policy_for_trace,
-    _summarize_topic_state_for_trace,
+    _summarize_conversation_interpretation_for_trace,
+    _summarize_reply_plan_for_trace,
+    _summarize_tactic_ledger_for_trace,
+    _summarize_topic_ledger_for_trace,
     _summarize_affect_state_for_trace,
     _summarize_relationship_state_for_trace,
     _summarize_drive_state_for_trace,
@@ -254,7 +255,7 @@ def _normalize_retrieval_summary_for_audit(summary: Mapping[str, Any] | None) ->
 
 
 # _coerce_trace_mapping / _coerce_trace_score / _coerce_trace_bool /
-# _summarize_motive_state_for_trace / _summarize_render_policy_for_trace /
+# _summarize_motive_state_for_trace / _summarize_reply_plan_for_trace /
 # _summarize_emotion_context_for_trace / _summarize_persona_resident_memory_for_trace /
 # _normalize_trace_stage_meta / _resolve_envelope_confidence /
 # _build_trace_output_digest / _detect_trace_fallback_used
@@ -411,7 +412,7 @@ async def _persist_post_process_audit(
     llm_input_digest: str | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     motive_state: Mapping[str, Any] | None = None,
-    render_policy: Mapping[str, Any] | None = None,
+    reply_plan: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
     from host_brain.app.dependencies import get_ledger  # noqa: PLC0415
@@ -566,28 +567,33 @@ async def _persist_post_process_audit(
         retrieval_evidence_items=_evidence_items,
     )
     _motive_trace = _summarize_motive_state_for_trace(motive_state)
-    _dialogue_state_trace = _summarize_dialogue_state_for_trace(_trace_stage_meta.get("dialogue_state"))
-    _topic_state_trace = _summarize_topic_state_for_trace(_trace_stage_meta.get("topic_state"))
+    _conversation_interpretation_trace = _summarize_conversation_interpretation_for_trace(
+        _trace_stage_meta.get("conversation_interpretation")
+    )
+    _topic_ledger_trace = _summarize_topic_ledger_for_trace(_trace_stage_meta.get("topic_ledger"))
+    _tactic_ledger_trace = _summarize_tactic_ledger_for_trace(_trace_stage_meta.get("tactic_ledger"))
     _affect_state_trace = _summarize_affect_state_for_trace(_trace_stage_meta.get("affect_state"))
     _relationship_state_trace = _summarize_relationship_state_for_trace(_trace_stage_meta.get("relationship_state"))
     _drive_state_trace = _summarize_drive_state_for_trace(_trace_stage_meta.get("drive_state"))
-    _render_policy_trace = _summarize_render_policy_for_trace(_trace_stage_meta.get("render_policy"))
+    _reply_plan_trace = _summarize_reply_plan_for_trace(_trace_stage_meta.get("reply_plan"))
     _conversation_history_trace = _coerce_trace_mapping(_trace_stage_meta.get("conversation_history"))
     _prompt_builder_output: dict[str, Any] = {}
     if _motive_trace:
         _prompt_builder_output["motive_state"] = _motive_trace
-    if _dialogue_state_trace:
-        _prompt_builder_output["dialogue_state"] = _dialogue_state_trace
-    if _topic_state_trace:
-        _prompt_builder_output["topic_state"] = _topic_state_trace
+    if _conversation_interpretation_trace:
+        _prompt_builder_output["conversation_interpretation"] = _conversation_interpretation_trace
+    if _topic_ledger_trace:
+        _prompt_builder_output["topic_ledger"] = _topic_ledger_trace
+    if _tactic_ledger_trace:
+        _prompt_builder_output["tactic_ledger"] = _tactic_ledger_trace
     if _affect_state_trace:
         _prompt_builder_output["affect_state"] = _affect_state_trace
     if _relationship_state_trace:
         _prompt_builder_output["relationship_state"] = _relationship_state_trace
     if _drive_state_trace:
         _prompt_builder_output["drive_state"] = _drive_state_trace
-    if _render_policy_trace:
-        _prompt_builder_output["render_policy"] = _render_policy_trace
+    if _reply_plan_trace:
+        _prompt_builder_output["reply_plan"] = _reply_plan_trace
     if _conversation_history_trace:
         _prompt_builder_output["conversation_history"] = _conversation_history_trace
     _prompt_builder_status = "OK" if (llm_input_digest or _prompt_builder_output) else "SKIPPED"
@@ -705,20 +711,28 @@ async def _persist_post_process_audit(
             output_data=_motive_trace,
         ),
         _build_trace_stage_node(
-            node_id="dialogue_state",
+            node_id="conversation_interpretation",
             node_type="system",
-            display_name="Dialogue State",
+            display_name="Conversation Interpretation",
             ts_ms=ts_ms,
-            status="OK" if _dialogue_state_trace else "SKIPPED",
-            output_data=_dialogue_state_trace,
+            status="OK" if _conversation_interpretation_trace else "SKIPPED",
+            output_data=_conversation_interpretation_trace,
         ),
         _build_trace_stage_node(
-            node_id="topic_state",
+            node_id="topic_ledger",
             node_type="system",
-            display_name="Topic State",
+            display_name="Topic Ledger",
             ts_ms=ts_ms,
-            status="OK" if _topic_state_trace else "SKIPPED",
-            output_data=_topic_state_trace,
+            status="OK" if _topic_ledger_trace else "SKIPPED",
+            output_data=_topic_ledger_trace,
+        ),
+        _build_trace_stage_node(
+            node_id="tactic_ledger",
+            node_type="system",
+            display_name="Tactic Ledger",
+            ts_ms=ts_ms,
+            status="OK" if _tactic_ledger_trace else "SKIPPED",
+            output_data=_tactic_ledger_trace,
         ),
         _build_trace_stage_node(
             node_id="affect_state",
@@ -745,12 +759,12 @@ async def _persist_post_process_audit(
             output_data=_drive_state_trace,
         ),
         _build_trace_stage_node(
-            node_id="render_policy",
+            node_id="reply_plan",
             node_type="system",
-            display_name="Render Policy",
+            display_name="Reply Plan",
             ts_ms=ts_ms,
-            status="OK" if _render_policy_trace else "SKIPPED",
-            output_data=_render_policy_trace,
+            status="OK" if _reply_plan_trace else "SKIPPED",
+            output_data=_reply_plan_trace,
         ),
         _build_trace_stage_node(
             node_id="cortex_orchestrator",
@@ -2276,6 +2290,21 @@ async def _cortex_orchestrator_sse_generator_impl(
     has_multimodal_input = bool(getattr(request_body, "attachments", None)) or bool(
         getattr(request_body, "multimodal_observations", None)
     )
+    route_reason = str(
+        (intent_draft or {}).get("route_reason")
+        or (intent_draft or {}).get("reason_code")
+        or ""
+    ).strip()
+    relational_fastlane = False
+    relational_topic = ""
+    if not has_multimodal_input:
+        try:
+            from host_brain.app.relational_chat_detector import detect_relational_chat_topic  # noqa: PLC0415
+
+            relational_topic = str(detect_relational_chat_topic(sanitized_message) or "").strip()
+        except Exception as relational_detector_exc:
+            _logger.debug("[%s] cortex_orchestrator relational detector degraded: %s", request_id, relational_detector_exc)
+        relational_fastlane = bool(route_reason.startswith("RELATIONAL_CHAT:") or relational_topic)
 
     phatic_fastpath_reply = None
     if not has_multimodal_input:
@@ -2389,15 +2418,39 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
 
     prefetch_started_ms = int(time.time() * 1000)
-    bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        emotion_context=emotion_context,
-        mood_state=retrieval_mood_state,
-        governor_decision=gov,
-    )
+    try:
+        if relational_fastlane:
+            bond_summary, bond_evidence, retrieval_motive_state = await asyncio.wait_for(
+                _prefetch_persona_inputs(
+                    request_id=request_id,
+                    session_id=session_id,
+                    person_id=person_id,
+                    user_message=sanitized_message,
+                    emotion_context=emotion_context,
+                    mood_state=retrieval_mood_state,
+                    governor_decision=gov,
+                ),
+                timeout=0.35,
+            )
+        else:
+            bond_summary, bond_evidence, retrieval_motive_state = await _prefetch_persona_inputs(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                user_message=sanitized_message,
+                emotion_context=emotion_context,
+                mood_state=retrieval_mood_state,
+                governor_decision=gov,
+            )
+    except asyncio.TimeoutError:
+        bond_summary, bond_evidence, retrieval_motive_state = {}, None, {}
+        _logger.info(
+            "[%s] cortex_orchestrator relational prefetch skipped timeout_ms=%s topic=%s route_reason=%s",
+            request_id,
+            350,
+            relational_topic or "",
+            route_reason or "",
+        )
     prefetch_persona_inputs_ms = max(0, int(time.time() * 1000) - prefetch_started_ms)
 
     try:
@@ -2426,13 +2479,27 @@ async def _cortex_orchestrator_sse_generator_impl(
     if retrieval_task is not None:
         try:
             retrieval_wait_started_ms = int(time.time() * 1000)
-            retrieval_timeout_s = _resolve_timeout()
+            retrieval_timeout_s = 0.45 if relational_fastlane else _resolve_timeout()
             retrieval_summary, retrieval_evidence_items = await asyncio.wait_for(
                 retrieval_task,
                 timeout=retrieval_timeout_s,
             )
             retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
-        except (asyncio.TimeoutError, Exception) as retrieval_exc:
+        except asyncio.TimeoutError:
+            retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
+            retrieval_summary = (
+                {"status": "SKIPPED", "reason_code": "RELATIONAL_CHAT_RETRIEVAL_SKIPPED"}
+                if relational_fastlane
+                else {"status": "DEGRADED", "reason_code": "RETRIEVAL_TIMEOUT"}
+            )
+            _logger.info(
+                "[%s] cortex_orchestrator retrieval skipped timeout_ms=%s topic=%s route_reason=%s",
+                request_id,
+                int(retrieval_timeout_s * 1000),
+                relational_topic or "",
+                route_reason or "",
+            )
+        except Exception as retrieval_exc:
             retrieval_summary = {"status": "DEGRADED", "error": str(retrieval_exc)[:100]}
             retrieval_wait_ms = max(0, int(time.time() * 1000) - retrieval_wait_started_ms)
             _logger.debug("[%s] cortex_orchestrator retrieval failed/timeout: %s", request_id, retrieval_exc)
@@ -2585,7 +2652,7 @@ async def _async_post_process(
     llm_input_digest: str | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     motive_state: Mapping[str, Any] | None = None,
-    render_policy: Mapping[str, Any] | None = None,
+    reply_plan: Mapping[str, Any] | None = None,
     trace_stage_meta: Mapping[str, Any] | None = None,
 ) -> None:
     normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
@@ -2627,7 +2694,7 @@ async def _async_post_process(
             llm_input_digest=llm_input_digest,
             retrieval_evidence_items=retrieval_evidence_items,
             motive_state=motive_state,
-            render_policy=render_policy,
+            reply_plan=reply_plan,
             trace_stage_meta=normalized_trace_stage_meta,
         )
     except Exception as exc:
@@ -2648,6 +2715,7 @@ async def _async_post_process(
             content=narrative,
             ts_ms=int(time.time() * 1000),
             lang=render_target_lang,
+            reply_plan=reply_plan,
             metadata={
                 "provider_name": provider_name,
                 "model_id": model_id,
@@ -2885,7 +2953,7 @@ __all__ = [
     "_coerce_trace_score",
     "_coerce_trace_bool",
     "_summarize_motive_state_for_trace",
-    "_summarize_render_policy_for_trace",
+    "_summarize_reply_plan_for_trace",
     "_summarize_emotion_context_for_trace",
     "_summarize_persona_resident_memory_for_trace",
     "_normalize_trace_stage_meta",
@@ -2910,4 +2978,3 @@ __all__ = [
     "_infer_emotion_tag_for_tts",
     "_async_post_process",
 ]
-

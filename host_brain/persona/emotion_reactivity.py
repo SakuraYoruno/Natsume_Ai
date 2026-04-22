@@ -11,9 +11,14 @@ Phase II 核心模块——根据 PersonalityTraits 和情感场景，
 
 from __future__ import annotations
 
+import json
+import os
+import time
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.persona.personality_traits import PersonalityTraits
 
 
@@ -56,6 +61,25 @@ _POSITIVE_TO_NEGATIVE_ALERT = "sudden_drop"
 _NEGATIVE_TO_POSITIVE_RELIEF = "recovery"
 # 持续负面：需要深度陪伴（"我一直在这里"）
 _SUSTAINED_NEGATIVE_COMPANION = "sustained_negative"
+
+
+def _load_reactivity_llm_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("emotion_reactivity.llm_hint.prompt")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _pool_credentials_available() -> bool:
+    for key in (
+        "HOST_GEMINI_API_KEY",
+        "GEMINI_API_KEY",
+        "HOST_MINIMAX_API_KEY",
+        "MINIMAX_API_KEY",
+        "OPENAI_API_KEY",
+        "HOST_OPENAI_API_KEY",
+    ):
+        if str(os.environ.get(key) or "").strip():
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -281,3 +305,82 @@ class EmotionReactivityProfile:
         """
         adjusted = float(base_echo_weight) + modifiers.echo_weight_delta
         return max(0.1, min(0.8, adjusted))
+
+
+def render_reactivity_hint_with_pool(
+    *,
+    user_emotion_tag: str,
+    bond_stage: str,
+    modifiers: ReactivityModifiers,
+    render_target_lang: str = "zh",
+    timeout_ms: int = 1800,
+) -> str:
+    if not _pool_credentials_available():
+        return ""
+    templates = _load_reactivity_llm_templates()
+    if not templates:
+        return ""
+    try:
+        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+    except Exception:
+        return ""
+
+    lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+    system_prompt_raw = templates.get("system_prompt")
+    user_prompt_raw = templates.get("user_prompt")
+    if isinstance(system_prompt_raw, Mapping):
+        system_prompt = str(system_prompt_raw.get(lang) or system_prompt_raw.get("zh") or "").strip()
+    else:
+        system_prompt = str(system_prompt_raw or "").strip()
+    if isinstance(user_prompt_raw, Mapping):
+        user_prompt = str(user_prompt_raw.get(lang) or user_prompt_raw.get("zh") or "").strip()
+    else:
+        user_prompt = str(user_prompt_raw or "").strip()
+    if not system_prompt:
+        system_prompt = "你负责把情感反应调制系数转成一句可执行的情绪回应策略，只输出 JSON。"
+    if not user_prompt:
+        user_prompt = (
+            "user_emotion_tag={user_emotion_tag}\n"
+            "bond_stage={bond_stage}\n"
+            "echo_weight_delta={echo_weight_delta:.3f}\n"
+            "empathy_boost={empathy_boost:.3f}\n"
+            "humor_deflection={humor_deflection:.3f}\n"
+            "curiosity_follow_up={curiosity_follow_up:.3f}\n"
+            "transition_alert={transition_alert}\n"
+            "transition_intensity={transition_intensity:.3f}\n\n"
+            "请输出 JSON：{{\"reactivity_hint\":\"...\"}}"
+        )
+    try:
+        result = complete_llm_with_pool_sync(
+            request_id=f"reactivity::{int(time.time() * 1000)}",
+            scene_type="EMOTION_REACTIVITY",
+            cognitive_tier="C",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": user_prompt.format(
+                        user_emotion_tag=str(user_emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
+                        bond_stage=str(bond_stage or "").strip().upper() or "STRANGER",
+                        echo_weight_delta=float(modifiers.echo_weight_delta),
+                        empathy_boost=float(modifiers.empathy_boost),
+                        humor_deflection=float(modifiers.humor_deflection),
+                        curiosity_follow_up=float(modifiers.curiosity_follow_up),
+                        transition_alert=str(modifiers.transition_alert or "").strip() or "none",
+                        transition_intensity=float(modifiers.transition_intensity),
+                    ),
+                },
+            ],
+            timeout_ms=max(800, int(timeout_ms)),
+            gen_params={"temperature": 0.4},
+            response_format="json_object",
+        )
+    except Exception:
+        return ""
+    if result.pool_exhausted:
+        return ""
+    try:
+        parsed = json.loads(result.content)
+    except Exception:
+        return ""
+    return str(parsed.get("reactivity_hint") or "").strip()

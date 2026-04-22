@@ -205,6 +205,7 @@ class EvolutionDesireEngine:
         is_weekend: bool = False,
         user_preference_hints: dict[str, float] | None = None,
         llm_fn: Any | None = None,
+        strict_llm: bool = False,
     ) -> str:
         """生成进化意愿文本。
 
@@ -249,10 +250,28 @@ class EvolutionDesireEngine:
         if pref_text:
             return pref_text
 
+        resolved_llm_fn = llm_fn
+        if resolved_llm_fn is None:
+            try:
+                from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
+
+                resolved_llm_fn = build_pool_prompt_llm_fn(
+                    request_id=f"evolution_desire::{int(ts)}",
+                    scene_type="EVOLUTION_DESIRE",
+                    cognitive_tier="B",
+                    timeout_ms=4000,
+                    gen_params={"temperature": 0.65, "top_p": 0.9},
+                )
+            except Exception:
+                resolved_llm_fn = None
+
+        if strict_llm and resolved_llm_fn is None:
+            return ""
+
         # ── LLM 动态生成路径（技术债务 10.2 修复）──────────────────────────
-        if llm_fn is not None:
+        if resolved_llm_fn is not None:
             llm_desire = self._try_llm_desire(
-                llm_fn=llm_fn,
+                llm_fn=resolved_llm_fn,
                 traits=traits,
                 emotion_trend=emotion_trend,
                 bond_stage=bond_stage,
@@ -262,6 +281,8 @@ class EvolutionDesireEngine:
             if llm_desire:
                 self._used_ts[llm_desire] = ts
                 return llm_desire
+            if strict_llm:
+                return ""
 
         candidates: list[str] = []
         template_data = _load_desire_template_data()

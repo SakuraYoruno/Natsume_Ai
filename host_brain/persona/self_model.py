@@ -567,6 +567,7 @@ def build_self_awareness_text(
     *,
     time_context: str = "",
     llm_fn: Any | None = None,
+    strict_llm: bool = False,
     style_evolution: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> str:
@@ -646,7 +647,12 @@ def build_self_awareness_text(
             if result and isinstance(result, str) and len(result.strip()) >= 5:
                 return result.strip()
         except Exception as _llm_exc:
-            _logger.debug("LLM 自省生成失败，降级到模板池: %s", _llm_exc)
+            _logger.debug("LLM 自省生成失败: %s", _llm_exc)
+            if strict_llm:
+                return ""
+
+    if strict_llm:
+        return ""
 
     # ── 降级：模板池路径（向后兼容）────────────────────────────────────
     # 从多模板池随机选取情感感知
@@ -687,6 +693,7 @@ def build_mood_awareness_text(
     snapshot: dict[str, Any],
     *,
     llm_fn: Any | None = None,
+    strict_llm: bool = False,
     render_target_lang: str = "zh",
 ) -> str:
     """将快照转化为情绪感知描述。
@@ -720,7 +727,12 @@ def build_mood_awareness_text(
             if result and isinstance(result, str) and len(result.strip()) >= 5:
                 return result.strip()
         except Exception as _llm_exc:
-            _logger.debug("LLM 情绪感知生成失败，降级到模板池: %s", _llm_exc)
+            _logger.debug("LLM 情绪感知生成失败: %s", _llm_exc)
+            if strict_llm:
+                return ""
+
+    if strict_llm:
+        return ""
 
     # ── 降级：模板池路径 ────────────────────────────────────────────────
     if stability >= 0.7:
@@ -749,6 +761,7 @@ def build_growth_note_text(
     snapshot: dict[str, Any],
     *,
     llm_fn: Any | None = None,
+    strict_llm: bool = False,
     style_evolution: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> str:
@@ -798,7 +811,12 @@ def build_growth_note_text(
             if result and isinstance(result, str) and len(result.strip()) >= 5:
                 return result.strip()
         except Exception as _llm_exc:
-            _logger.debug("LLM 成长感知生成失败，降级到模板包装: %s", _llm_exc)
+            _logger.debug("LLM 成长感知生成失败: %s", _llm_exc)
+            if strict_llm:
+                return ""
+
+    if strict_llm:
+        return ""
 
     # ── 降级：模板包装路径 ──────────────────────────────────────────────
     # 优先使用风格演变趋势（更真实），其次使用特质变化记录
@@ -1040,4 +1058,3 @@ def build_state_aligned_self_awareness(
         "alignment_mode": intent_key,
         "reason_tags": reason_tags,
     }
-

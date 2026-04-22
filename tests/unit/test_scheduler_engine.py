@@ -27,7 +27,7 @@ from host_brain.scheduler.health import (
     STATUS_OK,
     STATUS_SUSPENDED,
 )
-from host_brain.core.errors import SYSMODE_FORBIDDEN, SCHED_TASK_SUSPENDED
+from host_brain.core.errors import LLM_POOL_EXHAUSTED, SYSMODE_FORBIDDEN, SCHED_TASK_SUSPENDED
 
 
 # ── 辅助工厂 ──
@@ -165,6 +165,46 @@ class TestSchedSleepAllowsHigh:
 
         assert result["status"] == "REJECTED"
         assert result["reason_code"] == SYSMODE_FORBIDDEN
+
+
+class TestBackgroundLlmModeGate:
+    def test_sleep_blocks_background_llm_task_even_if_priority_matrix_allows(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("inner_world_monologue_tick", priority=TaskPriority.MEDIUM)
+        registry.register(task)
+        sched = _make_scheduler(registry, health, sys_mode="sleep")
+
+        result = sched.trigger_task_by_id("inner_world_monologue_tick")
+
+        assert result["status"] == "SKIPPED"
+        assert result["reason_code"] == "BACKGROUND_LLM_MODE_BLOCKED"
+        assert len(sched._dispatched) == 0
+
+    def test_gaming_keeps_gaming_companion_background_llm_task(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("gaming_companion_tick", priority=TaskPriority.HIGH)
+        registry.register(task)
+        sched = _make_scheduler(registry, health, sys_mode="gaming")
+
+        result = sched.trigger_task_by_id("gaming_companion_tick")
+
+        assert result["status"] == "OK"
+        assert len(sched._dispatched) == 1
+
+    def test_background_llm_pool_exhausted_is_recorded_as_skip(self) -> None:
+        registry, health = _make_registry_and_health()
+        task = _make_interval_task("inner_world_monologue_tick", priority=TaskPriority.HIGH)
+        registry.register(task)
+        sched = _make_scheduler(
+            registry,
+            health,
+            dispatcher_result={"status": "DEGRADED", "reason_code": LLM_POOL_EXHAUSTED},
+        )
+
+        result = sched.trigger_task_by_id("inner_world_monologue_tick")
+
+        assert result["status"] == "SKIPPED"
+        assert result["reason_code"] == LLM_POOL_EXHAUSTED
 
 
 # ── T-SCHED-04 ──

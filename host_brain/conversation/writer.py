@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.dependencies import get_conversation_turn_store, get_session_topic_state_store
+from host_brain.app.dependencies import (
+    get_conversation_turn_store,
+    get_session_tactic_ledger_store,
+    get_session_topic_ledger_store,
+)
 from host_brain.core.soft_fail import soft_fail
 
 _logger = logging.getLogger("Natsume.conversation.writer")
@@ -52,6 +57,7 @@ def record_assistant_turn(
     ts_ms: int,
     lang: str,
     metadata: dict[str, Any] | None = None,
+    reply_plan: Mapping[str, Any] | None = None,
 ) -> None:
     if not str(session_id or "").strip() or not str(content or "").strip():
         return
@@ -75,20 +81,41 @@ def record_assistant_turn(
             len(normalized_content),
         )
         try:
-            tracked_topics = get_session_topic_state_store().upsert_answered_topics(
+            plan_payload = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
+            tracked_topics = get_session_topic_ledger_store().record_reply_plan(
                 session_id=session_id,
                 person_id=person_id,
                 request_id=request_id,
                 turn_index=int(turn.turn_index),
-                assistant_text=normalized_content,
-                metadata=metadata,
+                primary_topic=str(plan_payload.get("primary_topic") or "").strip(),
+                answer_style=str(plan_payload.get("response_goal") or plan_payload.get("tactic_family") or "").strip(),
+                confidence=float(plan_payload.get("plan_confidence") or 0.0),
+                metadata={
+                    **dict(metadata or {}),
+                    "interaction_move": str(plan_payload.get("interaction_move") or "").strip(),
+                    "followup_kind": str(plan_payload.get("followup_kind") or "").strip(),
+                    "restate_level": str(plan_payload.get("restate_level") or "").strip(),
+                    "tactic_family": str(plan_payload.get("tactic_family") or "").strip(),
+                    "tactic_variant": str(plan_payload.get("tactic_variant") or "").strip(),
+                    "trajectory_stage": str(plan_payload.get("trajectory_stage") or "").strip(),
+                },
             )
             if tracked_topics:
                 _logger.info(
-                    "[%s] conversation_topic_state session_id=%s topics=%s",
+                    "[%s] conversation_topic_ledger session_id=%s topics=%s",
                     request_id,
                     str(session_id or "").strip(),
                     ",".join(tracked_topics),
                 )
+            get_session_tactic_ledger_store().record_reply_plan(
+                session_id=session_id,
+                request_id=request_id,
+                topic_key=str(plan_payload.get("primary_topic") or "").strip(),
+                interaction_move=str(plan_payload.get("interaction_move") or "").strip(),
+                tactic_family=str(plan_payload.get("tactic_family") or "").strip(),
+                tactic_variant=str(plan_payload.get("tactic_variant") or "").strip(),
+                trajectory_stage=str(plan_payload.get("trajectory_stage") or "").strip(),
+                ts_ms=int(ts_ms or int(time.time() * 1000)),
+            )
         except Exception as exc:
-            _logger.debug("[%s] conversation_topic_state upsert failed: %s", request_id, exc)
+            _logger.debug("[%s] conversation_topic_ledger record failed: %s", request_id, exc)

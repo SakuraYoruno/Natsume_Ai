@@ -22,12 +22,18 @@ from host_brain.airlock.quarantine import IngressQuarantineResult, quarantine_in
 from host_brain.airlock.sanitizer import EgressGateResult, sanitize_and_gate_egress
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.integrations.llm_helpers import (  # re-export for backward compat
+    acomplete_llm_with_pool,
     adjust_gen_params_for_emotion,
+    astream_llm_chunks_with_pool,
+    build_pool_prompt_llm_fn,
+    complete_llm_with_pool_sync,
+    complete_prompt_with_pool_sync,
     stream_llm_chunks,
 )
 from host_brain.core.errors import (
     AIRLOCK_BLOCKED_EGRESS,
     LLM_HEALTH_PROBE_FAILED,
+    LLM_POOL_EXHAUSTED,
     LLM_ROUTE_ALL_FAILED,
     LLM_ROUTE_FALLBACK,
     LLM_UNAVAILABLE,
@@ -40,6 +46,7 @@ from host_brain.integrations.llm_gateway_schemas import (
     GatewayResult,
     LLMHealthProbeResult,
     LLMRouteResult,
+    PoolCompleteResult,
 )
 
 
@@ -55,6 +62,7 @@ PROVIDER_OPENAI = "openai"
 PROVIDER_CODEX = "codex"
 PROVIDER_GEMINI = "gemini"
 PROVIDER_DEEPSEEK = "deepseek"
+PROVIDER_MINIMAX = "minimax"
 PROVIDER_MOCK = "mock"
 PROVIDER_DISABLED = "disabled"
 
@@ -683,6 +691,7 @@ def _load_api_key_from_env(provider_name: str) -> str | None:
         "gemini": "GEMINI_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
     }
     env_key = provider_to_env.get(str(provider_name or "").strip().lower())
@@ -753,4 +762,36 @@ def _inject_emotion_gen_params(
         "emotion_adjusted": True,
         "emotion_tag": emotion_tag,
     }
+    return result
+
+
+async def complete_with_pool(
+    *,
+    request_id: str,
+    scene_type: str,
+    cognitive_tier: str,
+    messages: list[dict[str, Any]],
+    timeout_ms: int,
+    gen_params: dict[str, Any] | None = None,
+    response_format: Any = None,
+    provider_name: str | None = None,
+    model_id: str | None = None,
+    api_key: str | None = None,
+    base_url_override: str | None = None,
+) -> PoolCompleteResult:
+    result = await acomplete_llm_with_pool(
+        request_id=request_id,
+        scene_type=scene_type,
+        cognitive_tier=cognitive_tier,
+        messages=messages,
+        timeout_ms=timeout_ms,
+        gen_params=gen_params,
+        response_format=response_format,
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=api_key,
+        base_url_override=base_url_override,
+    )
+    if result.pool_exhausted:
+        raise RuntimeError(LLM_POOL_EXHAUSTED)
     return result

@@ -21,6 +21,7 @@ from host_brain.app.prompt_template_store import (
     resolve_prompt_template_json_merged,
     resolve_prompt_template_text,
 )
+from host_brain.app.relational_chat_detector import is_relational_chat_message
 
 _logger = logging.getLogger("Natsume.chat_agent")
 
@@ -578,7 +579,24 @@ def _apply_render_policy_stream_guard(
     return normalized.strip()
 
 
+def _render_policy_explicit_buffering_decision(render_policy: Any) -> bool | None:
+    policy = _coerce_render_policy(render_policy)
+    if not policy:
+        return None
+    has_explicit = "force_buffering" in policy or "requires_validation" in policy
+    if not has_explicit:
+        return None
+    if bool(policy.get("force_buffering") or False):
+        return True
+    if bool(policy.get("requires_validation") or False):
+        return True
+    return False
+
+
 def _render_policy_requires_buffering(render_policy: Any) -> bool:
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
     policy, _max_chars, _max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not policy:
         return False
@@ -667,148 +685,7 @@ def _apply_render_policy_hard_guard(
         normalized = _truncate_text_to_sentence_limit(normalized, max_sentences=max_sentences)
     if max_chars > 0:
         normalized = _truncate_text_to_char_limit(normalized, max_chars=max_chars)
-    normalized = _repair_underanswered_identity_reply(
-        normalized,
-        user_message=user_message,
-        render_policy=policy,
-        render_target_lang=render_target_lang,
-    )
     return normalized.strip()
-
-
-def _repair_underanswered_identity_reply(
-    text: str,
-    *,
-    user_message: str,
-    render_policy: Mapping[str, Any] | None,
-    render_target_lang: str = "zh",
-) -> str:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return normalized
-    try:
-        from host_brain.app.context.dialogue_state import classify_user_act  # noqa: PLC0415
-    except Exception:
-        return normalized
-    user_act = str(classify_user_act(user_message) or "").strip()
-    policy = dict(render_policy or {}) if isinstance(render_policy, Mapping) else {}
-    topic_mode = str(policy.get("topic_reopen_mode") or "").strip().lower()
-    reply_mode = str(policy.get("reply_mode") or "").strip().lower()
-    if user_act not in {"identity_probe", "boundary_probe", "motivation_probe", "help_continuity_probe"} and reply_mode not in {
-        "identity_repeat_probe",
-        "boundary_repeat_probe",
-        "help_repeat_probe",
-    }:
-        return normalized
-    if reply_mode == "identity_repeat_probe" or topic_mode == "identity_meta":
-        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
-            return _build_identity_repeat_meta_reply(
-                user_message=user_message,
-                render_target_lang=render_target_lang,
-            )
-        return normalized
-    if reply_mode == "boundary_repeat_probe":
-        if _is_underanswered_meta_reply(normalized):
-            return _build_boundary_repeat_meta_reply(render_target_lang=render_target_lang)
-        return normalized
-    if reply_mode == "boundary_first_ask":
-        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
-            return _build_boundary_direct_reply(render_target_lang=render_target_lang)
-        return normalized
-    if reply_mode == "help_first_ask":
-        if _looks_like_full_identity_restate(normalized) or _is_underanswered_meta_reply(normalized):
-            return _build_help_direct_reply(render_target_lang=render_target_lang)
-        return normalized
-    if reply_mode == "help_repeat_probe":
-        if _is_underanswered_meta_reply(normalized):
-            return _build_help_repeat_meta_reply(render_target_lang=render_target_lang)
-        return normalized
-    if "夏目蓝" in normalized or "夏目藍" in normalized or "natsume ai" in normalized.lower():
-        return normalized
-    if re.fullmatch(r"[我嗯啊哦欸诶唔…，,。！？?!～~\s]+", normalized):
-        if str(render_target_lang or "").strip().lower() == "ja":
-            return "私は夏目藍。"
-        return "我是夏目蓝。"
-    return normalized
-
-
-def _looks_like_full_identity_restate(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return False
-    lowered = normalized.lower()
-    markers = (
-        "我是夏目蓝",
-        "我是夏目藍",
-        "我的名字是夏目蓝",
-        "我的名字是夏目藍",
-        "我叫夏目蓝",
-        "我叫夏目藍",
-        "我？我的名字是夏目蓝",
-        "我？我的名字是夏目藍",
-    )
-    if any(marker in normalized for marker in markers):
-        return True
-    return "natsume ai" in lowered or "natsume" in lowered
-
-
-def _build_identity_repeat_meta_reply(*, user_message: str, render_target_lang: str = "zh") -> str:
-    lang = str(render_target_lang or "").strip().lower()
-    if lang == "ja":
-        return "さっき言ったでしょう。"
-    normalized = str(user_message or "").strip()
-    if "谁" in normalized:
-        return "刚才不是已经告诉你了么。"
-    return "刚才不是已经说过了么。"
-
-
-def _is_underanswered_meta_reply(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return True
-    bare = re.sub(r"[。！？?!～~…，,\s]", "", normalized)
-    if not bare:
-        return True
-    return bare in {
-        "嗯",
-        "哎",
-        "诶",
-        "啊",
-        "哦",
-        "唔",
-        "当然",
-        "是啊",
-        "对啊",
-        "没错",
-        "我们",
-        "因为",
-        "只是",
-    } or len(bare) <= 1
-
-
-def _build_boundary_repeat_meta_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "さっき答えたでしょう。まだそこが気になるの。"
-    return "刚才不是已经说过了么。怎么，还要我再讲一遍？"
-
-
-def _build_help_repeat_meta_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "さっき答えたでしょう。まだ不安なの。"
-    return "刚才不是已经回答你了么。你还在担心这个？"
-
-
-def _build_boundary_direct_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "まだそこを気にするの。別に、見て見ぬふりをしなかっただけ。"
-    return "不熟。只是看见了，也没打算装作没看见。"
-
-
-def _build_help_direct_reply(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "状況次第。ちゃんと頼まれたら、知らないふりはしない。"
-    return "看情况。你真开口的话，我不会装作没听见。"
-
 
 # ---------------------------------------------------------------------------
 # 降级回复构建
@@ -836,6 +713,7 @@ def _build_chat_agent_quality_fallback_reply(*, user_message: str, sub_agent_ctx
     delegated_fallback = _build_sub_agent_result_preserving_fallback_reply(
         sub_agent_ctx,
         render_target_lang=render_target_lang,
+        user_message=user_message,
     )
     if delegated_fallback:
         return delegated_fallback
@@ -888,6 +766,9 @@ def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
 
 
 def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, render_policy: Any = None) -> bool:
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
     if _render_policy_requires_buffering(render_policy):
         return True
     env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
@@ -1207,12 +1088,21 @@ def _looks_like_internal_sub_agent_result(text: str) -> bool:
     return any(marker in normalized for marker in ("stopped_reason=", "agent_id=", "repair_agent_trace"))
 
 
-def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | None, *, render_target_lang: str) -> str | None:
+def _should_preserve_sub_agent_result_for_user(*, user_message: str, agent_id: str) -> bool:
+    normalized_agent_id = str(agent_id or "").strip()
+    if normalized_agent_id != "intent_agent":
+        return True
+    return not is_relational_chat_message(user_message)
+
+
+def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | None, *, render_target_lang: str, user_message: str = "") -> str | None:
     if ctx is None:
         return None
     if not bool(ctx.success) or str(ctx.error or "").strip():
         return None
     agent_id = str(ctx.agent_id or "").strip()
+    if not _should_preserve_sub_agent_result_for_user(user_message=user_message, agent_id=agent_id):
+        return None
     if agent_id == "open_app":
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
@@ -1227,7 +1117,7 @@ def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | Non
     return result_text
 
 
-def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_target_lang: str) -> str | None:
+def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_target_lang: str, user_message: str = "") -> str | None:
     if ctx is None:
         return None
     agent_id = str(ctx.agent_id or "").strip()
@@ -1239,7 +1129,7 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id in {"codex_codegen", "translate_agent", "intent_agent"}:
-        return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang)
+        return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang, user_message=user_message)
     if agent_id in {"phatic_fastpath", "recent_turn_direct", "task_progress_direct"}:
         return result_text or None
     return None
@@ -1333,4 +1223,3 @@ def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
         if _re.search(pattern, text, _re.IGNORECASE):
             return tag
     return "NEUTRAL"
-

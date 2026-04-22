@@ -2,11 +2,17 @@
 标题：模型平面（Model Plane）规格说明（9 云节点配置、路由、审计与降级）
 
 # 模型平面（Model Plane）规格说明
-版本：v1.3
-日期：2026-03-27
+版本：v1.4
+日期：2026-04-22
 
 定位：本文件属于 DevSpec 子规格，只写"怎么做 + 如何验证（测试点/日志点/契约点）"。
 目标：把"9 云节点 + Host 本地 14B 怎么分工、怎么路由、怎么降级、怎么最小化出网、怎么审计回放"写成稳定契约，允许你以后换模型但不换治理。
+
+当前代码校准说明（2026-04-22）：
+- 当前运行时已经不是“每个场景显式点一个固定云节点”的早期骨架，而是以 `host_brain/integrations/llm_helpers.py` 的共享池和 `llm_gateway.py::complete_with_pool()` 为统一入口。
+- 当前池化运行面是 tier A/B/C/D 四档，Gemini 与 MiniMax 共同组成主备候选；`configs/model_plane/node_registry.yaml` 仍是模型平面资产真相源之一，但运行时选路已收敛到共享池辅助层。
+- 审计字段方面，除既有 `model_control_log` 外，当前代码还写 `llm_pool_call_log`，记录 `scene_type / cognitive_tier / attempts / final_provider / final_model / pool_exhausted / degraded_to_rule`。
+- 调度面当前还额外约束了后台 LLM 任务的 `sys_mode` allowlist；因此阅读本文件时，应把“9 云节点固定分工”理解为治理角色与能力分层，而不是唯一运行时调用形态。
 
 ---
 

@@ -338,6 +338,20 @@ class SelfReflection:
             time_context=time_context,
             render_target_lang=render_target_lang,
         )
+        resolved_llm_fn = llm_fn
+        if resolved_llm_fn is None:
+            try:
+                from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
+
+                resolved_llm_fn = build_pool_prompt_llm_fn(
+                    request_id=f"self_reflection::{int(current_ts_ms or turn_count)}",
+                    scene_type="SELF_REFLECTION",
+                    cognitive_tier="B",
+                    timeout_ms=4000,
+                    gen_params={"temperature": 0.55, "top_p": 0.9},
+                )
+            except Exception:
+                resolved_llm_fn = None
 
         try:
             snapshot = self._model.build_snapshot(
@@ -359,10 +373,17 @@ class SelfReflection:
                 growth_summary=growth_summary,
                 trigger_reason=trigger_reason,
                 time_context=time_context,
-                llm_fn=llm_fn,
+                llm_fn=resolved_llm_fn,
+                strict_llm=True,
                 style_evolution=style_evolution,
                 render_target_lang=render_target_lang,
             )
+            if not any(
+                str(pulse.get(key) or "").strip()
+                for key in ("self_awareness", "mood_awareness", "growth_note", "style_trend_note")
+            ):
+                _logger.info("自省触发已跳过：共享池不可用或未返回有效文本")
+                return None
             _logger.info(
                 "自省触发 (turn=%d, event=%s emotion=%s): self_awareness='%s'%s",
                 turn_count,
@@ -738,6 +759,7 @@ def build_self_reflection_pulse(
     trigger_reason: str = "",
     time_context: str = "",
     llm_fn: Any | None = None,
+    strict_llm: bool = False,
     style_evolution: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> dict[str, Any]:
@@ -769,6 +791,7 @@ def build_self_reflection_pulse(
         render_target_lang=render_target_lang,
         time_context=time_context,
         llm_fn=llm_fn,
+        strict_llm=strict_llm,
         style_evolution=style_evolution,
     )
     mood_awareness = _call_with_optional_render_target_lang(
@@ -776,12 +799,14 @@ def build_self_reflection_pulse(
         snapshot,
         render_target_lang=render_target_lang,
         llm_fn=llm_fn,
+        strict_llm=strict_llm,
     )
     growth_note = _call_with_optional_render_target_lang(
         build_growth_note_text,
         snapshot,
         render_target_lang=render_target_lang,
         llm_fn=llm_fn,
+        strict_llm=strict_llm,
         style_evolution=style_evolution,
     )
 
@@ -844,6 +869,7 @@ def build_self_reflection_pulse(
             style_trend_note = _build_style_trend_note(
                 trend,
                 llm_fn=llm_fn,
+                strict_llm=strict_llm,
                 render_target_lang=render_target_lang,
             )
             if style_trend_note:
@@ -951,6 +977,7 @@ def _build_style_trend_note(
     trend: dict[str, str],
     *,
     llm_fn: Any | None = None,
+    strict_llm: bool = False,
     render_target_lang: str = "zh",
 ) -> str:
     """将风格演变趋势字典转化为第一人称自然语言描述（v1.11 新增）。
@@ -1000,7 +1027,11 @@ def _build_style_trend_note(
             if result and isinstance(result, str) and len(result.strip()) >= 5:
                 return result.strip()
         except Exception:
-            pass
+            if strict_llm:
+                return ""
+
+    if strict_llm:
+        return ""
 
     # ── 降级：模板池路径 ────────────────────────────────────────────────
     parts: list[str] = []
@@ -1018,4 +1049,3 @@ def _build_style_trend_note(
         parts.append(tmpl.format(trait=cn))
 
     return "，".join(parts) if parts else ""
-

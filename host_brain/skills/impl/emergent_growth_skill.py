@@ -9,13 +9,22 @@ def _resolve_user_id(args: dict[str, Any], context: dict[str, Any] | None) -> st
 
 
 def _resolve_llm_fn(args: dict[str, Any], context: dict[str, Any] | None) -> Callable[[str], str] | None:
-    use_llm = bool((args or {}).get("use_llm"))
-    if not use_llm:
-        return None
     candidate = (context or {}).get("emergent_growth_llm_fn")
     if callable(candidate):
         return candidate
-    return None
+    try:
+        from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
+
+        user_id = _resolve_user_id(args, context)
+        return build_pool_prompt_llm_fn(
+            request_id=str((context or {}).get("request_id") or f"emergent_growth::{user_id}"),
+            scene_type="EMERGENT_GROWTH",
+            cognitive_tier="B",
+            timeout_ms=5000,
+            gen_params={"temperature": 0.55, "top_p": 0.9},
+        )
+    except Exception:
+        return None
 
 
 def execute_emergent_growth_weekly(
@@ -30,13 +39,23 @@ def execute_emergent_growth_weekly(
         lookback_days = max(1, int((args or {}).get("lookback_days") or 7))
     except (TypeError, ValueError):
         lookback_days = 7
+    llm_fn = _resolve_llm_fn(args, context)
+    if llm_fn is None:
+        return {
+            "status": "SKIPPED",
+            "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
+            "user_id": user_id,
+            "lookback_days": lookback_days,
+            "pattern_result": {},
+            "growth_result": {},
+        }
 
     return dict(
         get_prefrontal_agent().run_emergent_growth_weekly(
             user_id=user_id,
             lookback_days=lookback_days,
             episodic_store=get_episodic_store(),
-            llm_fn=_resolve_llm_fn(args, context),
+            llm_fn=llm_fn,
         )
         or {
             "status": "SKIPPED",

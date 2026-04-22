@@ -1,8 +1,8 @@
 受众：MASTER
 标题：文档地图（唯一入口）
 
-版本：v3.5
-日期：2026-04-19
+版本：v3.6
+日期：2026-04-22
 
 本仓库所有"应该读什么、从哪里开工、哪些文档禁止当任务来源"，以本文件为准。
 
@@ -154,8 +154,8 @@
   读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
 - docs/50_project/arch/NATSUME_AI_FULL_LLM_CAPABILITY_RESTORATION_PLAN_20260422.md
-  用途：Natsume_Ai 全认知能力 LLM 恢复方案（2026-04-22）。一次 PR 全改的蓝图与实施计划，核心是把当前"架构壳完整、LLM 实现缺失"的局面修正为真正多 LLM 认知系统。覆盖 9 层认知架构全面恢复、多模型池设计（MiniMax 全系 + Gemini 2.5 Pro / Flash-Lite 互为主备）、禁止规则降级原则、sys_mode 分级限频、LLM Gateway `complete_with_pool` API、40 项改动清单与环境变量新增。含 CI 降级检测、验收标准、回滚方案。
-  读者：MASTER、实现层（可作为任务来源）、Project（文档代理）。
+  用途：Natsume_Ai 全认知能力 LLM 恢复蓝图与实施记录（2026-04-22，已按多批次落地）。当前应结合文首“代码校准说明”阅读：共享池、MiniMax、`llm_pool_call`、内心世界双 tick、记忆蒸馏与后台 LLM 调度门控均已落库；正文后半保留原始计划项与运行节点验收清单。
+  读者：MASTER、实现层（查阅现状与后续验收）、Project（文档代理）。
 
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。

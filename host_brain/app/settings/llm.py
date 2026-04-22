@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .base import SettingsFieldReport, inspect_setting
 
-LLMProvider = Literal["openai", "codex", "gemini", "deepseek", "mock", "disabled"]
+LLMProvider = Literal["openai", "codex", "gemini", "deepseek", "minimax", "mock", "disabled"]
 
 
 class LLMSettings(BaseSettings):
@@ -40,6 +40,7 @@ class LLMSettings(BaseSettings):
     codex_base_url: str | None = Field(default=None, alias="HOST_CODEX_BASE_URL")
     gemini_base_url: str | None = Field(default=None, alias="HOST_GEMINI_BASE_URL")
     deepseek_base_url: str | None = Field(default=None, alias="HOST_DEEPSEEK_BASE_URL")
+    minimax_base_url: str | None = Field(default=None, alias="HOST_MINIMAX_BASE_URL")
 
     # 模型 ID 覆盖
     model_id: str | None = Field(default=None, alias="HOST_LLM_MODEL_ID")
@@ -47,6 +48,7 @@ class LLMSettings(BaseSettings):
     codex_model_id: str | None = Field(default=None, alias="HOST_CODEX_MODEL_ID")
     gemini_model_id: str | None = Field(default=None, alias="HOST_GEMINI_MODEL_ID")
     deepseek_model_id: str | None = Field(default=None, alias="HOST_DEEPSEEK_MODEL_ID")
+    minimax_model_id: str | None = Field(default=None, alias="HOST_MINIMAX_MODEL_ID")
 
     @classmethod
     def readiness_fields(cls) -> list[SettingsFieldReport]:
@@ -61,11 +63,13 @@ class LLMSettings(BaseSettings):
             ("codex_base_url", "HOST_CODEX_BASE_URL", None, s.codex_base_url, False),
             ("gemini_base_url", "HOST_GEMINI_BASE_URL", None, s.gemini_base_url, False),
             ("deepseek_base_url", "HOST_DEEPSEEK_BASE_URL", None, s.deepseek_base_url, False),
+            ("minimax_base_url", "HOST_MINIMAX_BASE_URL", None, s.minimax_base_url, False),
             ("model_id", "HOST_LLM_MODEL_ID", None, s.model_id, False),
             ("openai_model_id", "HOST_OPENAI_MODEL_ID", None, s.openai_model_id, False),
             ("codex_model_id", "HOST_CODEX_MODEL_ID", None, s.codex_model_id, False),
             ("gemini_model_id", "HOST_GEMINI_MODEL_ID", None, s.gemini_model_id, False),
             ("deepseek_model_id", "HOST_DEEPSEEK_MODEL_ID", None, s.deepseek_model_id, False),
+            ("minimax_model_id", "HOST_MINIMAX_MODEL_ID", None, s.minimax_model_id, False),
         ]
         return [
             inspect_setting(

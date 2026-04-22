@@ -28,6 +28,14 @@ nodes:
     max_output_tokens: 360
     node_allowlist_envs: [dev, staging, prod]
 
+  core_reasoner_pool_b:
+    description: "主推理共享池 B 档（MiniMax fallback）"
+    provider: minimax
+    model_id: MiniMax-M2-her
+    temperature: 0.30
+    max_output_tokens: 420
+    node_allowlist_envs: [dev, staging, prod]
+
   planner_constraints:
     description: "复杂任务约束拆解（CoreDraft.v1）"
     provider: gemini
@@ -94,6 +102,14 @@ nodes:
     max_output_tokens: 1500
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_CHAT_AGENT_MODEL_ID / HOST_CHAT_AGENT_TIMEOUT_MS
+
+  chat_agent_node_pool_b:
+    description: "ChatAgent 共享池 B 档（MiniMax fallback）"
+    provider: minimax
+    model_id: MiniMax-M2-her
+    temperature: 0.78
+    max_output_tokens: 1500
+    node_allowlist_envs: [dev, staging, prod]
 
   # DispatchAgent（调度器）—— 轻量快速，JSON 输出，低延迟
   dispatch_agent_node:

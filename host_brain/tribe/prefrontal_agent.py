@@ -48,6 +48,7 @@ class PrefrontalAgent:
     ) -> dict[str, Any]:
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
         from host_brain.persona.self_reflection import build_self_reflection_pulse  # noqa: PLC0415
+        from host_brain.integrations.llm_helpers import build_pool_prompt_llm_fn  # noqa: PLC0415
 
         persona_engine = PersonaEngine.get_instance()
         snapshot_obj = persona_engine.get_self_model_snapshot(
@@ -65,14 +66,38 @@ class PrefrontalAgent:
             snapshot = dict(snapshot_obj)
         else:
             snapshot = {}
-        pulse = dict(
-            build_self_reflection_pulse(
-                snapshot,
-                trigger_reason=str(trigger_reason or "runtime_snapshot"),
-                render_target_lang=str(render_target_lang or "zh"),
-            )
-            or {}
-        ) if snapshot else {}
+        if snapshot:
+            try:
+                llm_fn = build_pool_prompt_llm_fn(
+                    request_id=f"self_reflection_context::{int(now_ms)}",
+                    scene_type="SELF_REFLECTION",
+                    cognitive_tier="B",
+                    timeout_ms=4000,
+                    gen_params={"temperature": 0.55, "top_p": 0.9},
+                )
+            except Exception:
+                llm_fn = None
+            try:
+                pulse = dict(
+                    build_self_reflection_pulse(
+                        snapshot,
+                        trigger_reason=str(trigger_reason or "runtime_snapshot"),
+                        llm_fn=llm_fn,
+                        strict_llm=True,
+                        render_target_lang=str(render_target_lang or "zh"),
+                    )
+                    or {}
+                )
+            except TypeError:
+                pulse = dict(
+                    build_self_reflection_pulse(
+                        snapshot,
+                        trigger_reason=str(trigger_reason or "runtime_snapshot"),
+                    )
+                    or {}
+                )
+        else:
+            pulse = {}
         return {
             "self_model_snapshot": snapshot,
             "self_reflection_pulse": pulse,
@@ -119,14 +144,23 @@ class PrefrontalAgent:
             dominance=float(dominance),
             ts_ms=int(ts_ms),
         )
-        hint = adapter.adapt(
-            traits,
-            emotion_vector,
-            str(bond_stage or "STRANGER"),
-            user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
-            user_message=str(user_message or ""),
-            render_target_lang=str(render_target_lang or "zh"),
-        )
+        try:
+            hint = adapter.adapt(
+                traits,
+                emotion_vector,
+                str(bond_stage or "STRANGER"),
+                user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
+                user_message=str(user_message or ""),
+                render_target_lang=str(render_target_lang or "zh"),
+            )
+        except TypeError:
+            hint = adapter.adapt(
+                traits,
+                emotion_vector,
+                str(bond_stage or "STRANGER"),
+                user_emotion_tag=str(user_emotion_tag or "NEUTRAL"),
+                user_message=str(user_message or ""),
+            )
         follow_up_tendency = getattr(
             hint,
             "follow_up_tendency",
@@ -399,7 +433,7 @@ class PrefrontalAgent:
         # ── LLM 推理路径（小模型，<500ms）────────────────────────────────
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
             # 从 executive.yaml 加载 prefrontal_plan prompt 模板
             _tpl = resolve_prompt_template_json("prefrontal_agent.plan_response.prompt") or {}
@@ -429,19 +463,23 @@ class PrefrontalAgent:
             )
 
             # 调用专用小模型（Flash，低延迟）
-            _provider = build_llm_provider(
+            _pool_result = complete_llm_with_pool_sync(
+                request_id=str(request_id or f"prefrontal::{now_ms()}"),
+                scene_type="PREFRONTAL_PLAN",
+                cognitive_tier="B",
+                timeout_ms=int(timeout_ms),
+                messages=[
+                    {"role": "system", "content": _system_tpl},
+                    {"role": "user", "content": _user_prompt},
+                ],
+                gen_params={"temperature": 0.1, "max_tokens": 128},
                 provider_name="gemini",
                 model_id="gemini-2.0-flash",
-                timeout_ms=int(timeout_ms),
-                agent_role="prefrontal_planner",
+                response_format="json_object",
             )
-            _raw = _provider.complete_sync(
-                system_prompt=_system_tpl,
-                user_prompt=_user_prompt,
-                max_tokens=128,
-                temperature=0.1,
-            )
-            _raw_text = str(_raw or "").strip()
+            if _pool_result.pool_exhausted:
+                raise RuntimeError("prefrontal llm pool exhausted")
+            _raw_text = str(_pool_result.content or "").strip()
 
             # 解析 JSON 输出
             import json as _json  # noqa: PLC0415
@@ -838,14 +876,33 @@ class PrefrontalAgent:
         from host_brain.persona.interaction_pattern_analyzer import InteractionPatternAnalyzer  # noqa: PLC0415
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
+        if llm_fn is None:
+            return {
+                "status": "SKIPPED",
+                "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
+                "user_id": str(user_id or "user_1"),
+                "lookback_days": max(1, int(lookback_days or 7)),
+                "pattern_result": {},
+                "growth_result": {},
+            }
+
         persona_engine = PersonaEngine.get_instance()
-        analyzer = InteractionPatternAnalyzer(llm_fn=llm_fn)
+        analyzer = InteractionPatternAnalyzer(llm_fn=llm_fn, strict_llm=True)
         pattern_result = analyzer.analyze(
             user_id=str(user_id or "user_1"),
             episodic_store=episodic_store,
             current_traits=persona_engine.get_traits(str(user_id or "user_1")),
             lookback_days=max(1, int(lookback_days or 7)),
         )
+        if str(getattr(pattern_result, "analysis_method", "") or "").strip().lower() != "llm":
+            return {
+                "status": "SKIPPED",
+                "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
+                "user_id": str(user_id or "user_1"),
+                "lookback_days": max(1, int(lookback_days or 7)),
+                "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
+                "growth_result": {},
+            }
         growth_result = self._get_emergent_growth_engine().apply(
             user_id=str(user_id or "user_1"),
             pattern_result=pattern_result,
@@ -1283,4 +1340,3 @@ from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401
 from host_brain.tribe.tribe_state import get_global_registry  # noqa: E402, F401
-

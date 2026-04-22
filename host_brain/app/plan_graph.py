@@ -289,7 +289,7 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                 resolve_executive_router_llm_runtime,
                 resolve_host_llm_runtime_async,
             )
-            from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
             # synthesize_node 是同步函数（运行在 asyncio.to_thread 的线程池中），
             # 用 asyncio.run() 在独立事件循环中获取 LLM 运行时配置
@@ -341,8 +341,10 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                             history_turns=list(getattr(history_window, "recent_turns", []) or []),
                             user_message=user_prompt,
                         )
-                        chunks: list[str] = []
-                        for chunk in stream_llm_chunks(
+                        pool_result = complete_llm_with_pool_sync(
+                            request_id=request_id,
+                            scene_type="PLAN_SYNTHESIZE",
+                            cognitive_tier="B",
                             provider_name=provider_name,
                             model_id=model_id,
                             api_key=api_key,
@@ -350,12 +352,9 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                             messages=messages,
                             gen_params=gen_params,
                             base_url_override=base_url_override,
-                        ):
-                            chunks.append(str(chunk or ""))
-                            if sum(len(c) for c in chunks) >= 4000:
-                                break
+                        )
 
-                        llm_text = "".join(chunks).strip()
+                        llm_text = str(pool_result.content or "").strip() if not pool_result.pool_exhausted else ""
                         if llm_text:
                             final_answer = llm_text
                             llm_used = True

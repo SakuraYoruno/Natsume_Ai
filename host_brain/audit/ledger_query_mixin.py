@@ -68,6 +68,38 @@ class LedgerQueryMixin:
             result.append(d)
         return result
 
+    def query_llm_pool_call_log(
+        self,
+        *,
+        start_ms: int | None = None,
+        end_ms: int | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """按时间窗口查询 llm_pool_call_log。"""
+        limit = max(1, min(int(limit), 10_000))
+        conditions: list[str] = []
+        params: list[Any] = []
+        if start_ms is not None:
+            conditions.append("ts_ms >= ?")
+            params.append(int(start_ms))
+        if end_ms is not None:
+            conditions.append("ts_ms <= ?")
+            params.append(int(end_ms))
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM llm_pool_call_log {where} ORDER BY ts_ms ASC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["pool_exhausted"] = bool(item.get("pool_exhausted"))
+            item["cached"] = bool(item.get("cached"))
+            item["degraded_to_rule"] = bool(item.get("degraded_to_rule"))
+            item.pop("id", None)
+            result.append(item)
+        return result
+
     def get_vault_manifest(self, manifest_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
             """

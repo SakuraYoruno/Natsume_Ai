@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.app.relational_chat_detector import is_relational_chat_message
+
 
 _ACTION_INTENT_MARKERS = (
     "帮我",
@@ -102,6 +104,8 @@ def _normalize(value: Any, *, lower: bool = False) -> str:
 def _looks_like_action_intent(user_message: str) -> bool:
     message = _normalize(user_message)
     if len(message) < 6:
+        return False
+    if is_relational_chat_message(message):
         return False
     lowered = _normalize(message, lower=True)
     has_concrete_action = any(marker in message for marker in _CONCRETE_ACTION_MARKERS)

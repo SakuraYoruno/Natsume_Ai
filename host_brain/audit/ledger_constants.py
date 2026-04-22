@@ -437,6 +437,7 @@ JSON_FIELDS_BY_TABLE: dict[str, set[str]] = {
     "scheduler_event_log": set(),
     "capability_forge_proposal_log": {"payload"},
     "llm_route_log": set(),
+    "llm_pool_call_log": {"attempts_json"},
     "llm_node_call_log": set(),
     "graph_run_trace": {"nodes_json", "edges_json"},
 }
@@ -473,6 +474,7 @@ _ALLOWED_TABLES: frozenset[str] = frozenset({
     "replay_guard",
     "session_seq_guard",
     "llm_route_log",
+    "llm_pool_call_log",
     "llm_node_call_log",
     "graph_run_trace",
     "supervisor_decision_log",

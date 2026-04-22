@@ -1,32 +1,34 @@
 from __future__ import annotations
 
 from host_brain.app.context.affect_state import build_affect_summary, resolve_affect_state
-from host_brain.app.context.dialogue_state import DialogueStateBlock
 from host_brain.app.context.drive_state import resolve_drive_state
 from host_brain.app.context.relationship_state import build_relationship_summary, resolve_relationship_state
-from host_brain.app.context.topic_state import SessionTopicStateStore
+from host_brain.app.context.topic_ledger import SessionTopicLedgerStore
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 
 
-def test_topic_state_store_persists_answered_topics_beyond_short_window() -> None:
+def test_topic_ledger_persists_answered_topics_beyond_short_window() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = SessionTopicStateStore(ledger)
+    store = SessionTopicLedgerStore(ledger)
 
-    tracked = store.upsert_answered_topics(
+    tracked = store.record_reply_plan(
         session_id="sess-topic",
         person_id="p1",
         request_id="req-1",
         turn_index=3,
-        assistant_text="我是夏目蓝。我们并不熟，只是你既然问了，我就答。",
+        primary_topic="identity",
+        answer_style="identify",
+        confidence=0.92,
+        metadata={"interaction_move": "first_ask"},
     )
 
-    assert "identity" in tracked
+    assert tracked == ("identity",)
     block = store.fetch_block(session_id="sess-topic", current_turn_index=20)
     assert "identity" in block.active_topics
-    assert "relationship_boundary" in block.active_topics
+    assert block.get("identity") is not None
 
 
-def test_affect_state_resolver_outputs_explicit_affect_vector() -> None:
+def test_affect_state_resolver_outputs_qualitative_affect_summary() -> None:
     affect = resolve_affect_state(
         emotion_context={
             "emotion_tag": "CALM",
@@ -39,10 +41,12 @@ def test_affect_state_resolver_outputs_explicit_affect_vector() -> None:
         silence_state={"response_willingness": 0.86},
     )
 
+    summary = build_affect_summary(affect=affect, render_target_lang="zh")
     assert affect.emotion_tag == "CALM"
     assert 0.0 <= affect.social_energy <= 1.0
     assert affect.carryover_turns == 2
-    assert "当前内在状态" in build_affect_summary(affect=affect, render_target_lang="zh")
+    assert "当前" in summary
+    assert "0." not in summary
 
 
 def test_relationship_and_drive_state_resolvers_produce_structured_vectors() -> None:
@@ -60,11 +64,12 @@ def test_relationship_and_drive_state_resolvers_produce_structured_vectors() -> 
         },
         affect_state=resolve_affect_state(emotion_context={"emotion_tag": "CALM"}),
         relationship_state=relationship,
-        dialogue_state=DialogueStateBlock(current_user_act="help_continuity_probe"),
+        dialogue_state={"current_user_act": "help_commitment", "repeat_question_count": 1},
     )
 
+    summary = build_relationship_summary(relationship=relationship, render_target_lang="zh")
     assert relationship.bond_stage == "FRIEND"
     assert relationship.trust >= 0.4
-    assert "信任约" in build_relationship_summary(relationship=relationship, render_target_lang="zh")
+    assert "0." not in summary
     assert drive.continuity_drive >= 0.48
     assert drive.care_drive >= 0.20

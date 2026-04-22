@@ -213,8 +213,12 @@ class LimbicAgent:
         user_emotion_tag: str,
         bond_stage: str,
         echo_weight: float,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
-        from host_brain.persona.emotion_reactivity import EmotionReactivityProfile  # noqa: PLC0415
+        from host_brain.persona.emotion_reactivity import (  # noqa: PLC0415
+            EmotionReactivityProfile,
+            render_reactivity_hint_with_pool,
+        )
 
         modifiers = EmotionReactivityProfile.compute_modifiers(
             personality_traits,
@@ -229,6 +233,17 @@ class LimbicAgent:
             "effective_echo_weight": float(effective_echo_weight),
             "persona_modifiers": dict(modifiers.as_dict() if hasattr(modifiers, "as_dict") else {}),
         }
+        try:
+            reactivity_hint = render_reactivity_hint_with_pool(
+                user_emotion_tag=str(user_emotion_tag or ""),
+                bond_stage=str(bond_stage or ""),
+                modifiers=modifiers,
+                render_target_lang=render_target_lang,
+            )
+        except Exception:
+            reactivity_hint = ""
+        if reactivity_hint:
+            payload["reactivity_hint"] = reactivity_hint
         self._touch_state(
             key="last_emotion_reactivity_profile",
             value={
@@ -462,11 +477,11 @@ class LimbicAgent:
         )
         return payload
 
-    def tick_inner_world(self, *, person_id: str | None) -> dict[str, Any]:
+    def tick_inner_world(self, *, person_id: str | None, emit_inner_stream: bool = True) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
         user_id = str(person_id or "user_1").strip() or "user_1"
-        payload = dict(get_inner_world().tick(user_id=user_id) or {})
+        payload = dict(get_inner_world().tick(user_id=user_id, emit_inner_stream=emit_inner_stream) or {})
         payload.setdefault("status", "OK")
         payload.setdefault("user_id", user_id)
         self._touch_state(

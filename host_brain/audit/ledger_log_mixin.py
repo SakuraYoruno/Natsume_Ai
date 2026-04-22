@@ -72,6 +72,24 @@ class LedgerLogMixin:
         }
         self._insert("llm_route_log", payload)  # type: ignore[attr-defined]
 
+    def log_llm_pool_call(self, row: dict[str, Any]) -> None:
+        """记录共享模型池调用尝试与最终落点。"""
+        payload = {
+            "request_id": str(row.get("request_id") or ""),
+            "scene_type": str(row.get("scene_type") or ""),
+            "cognitive_tier": str(row.get("cognitive_tier") or ""),
+            "attempts_json": str(row.get("attempts_json") or "[]"),
+            "attempt_count": int(row.get("attempt_count") or 0),
+            "final_model": str(row.get("final_model") or ""),
+            "final_provider": str(row.get("final_provider") or ""),
+            "pool_exhausted": 1 if row.get("pool_exhausted") else 0,
+            "cached": 1 if row.get("cached") else 0,
+            "degraded_to_rule": 1 if row.get("degraded_to_rule") else 0,
+            "total_latency_ms": int(row.get("total_latency_ms") or 0),
+            "ts_ms": int(row.get("ts_ms") or 0),
+        }
+        self._insert("llm_pool_call_log", payload)  # type: ignore[attr-defined]
+
     def log_llm_route_config_change(self, row: dict[str, Any]) -> None:
         """记录 LLM 路由配置热更新变更（M26-C）。
         必填字段：request_id / before_hash / after_hash / changed_fields / ts_ms

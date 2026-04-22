@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Any, AsyncGenerator
 
 from host_brain.app.capability_gap_detector import detect_capability_gap
+from host_brain.app.relational_chat_detector import build_relational_chat_reason_code
 from host_brain.app.runtime_capability_synthesizer import synthesize_runtime_capability
 from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan, build_skill_dag_plan
 from host_brain.app.skill_family_router import build_skill_route_decision
@@ -328,6 +329,11 @@ def _hard_rule_route(
     target_hint = _normalize_text(intent_draft.get("target_id"))
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
+
+    relational_reason = build_relational_chat_reason_code(sanitized_message)
+    if relational_reason:
+        return _RouteSelection("chat", "", relational_reason)
+
     if route_hint == "plan":
         return _RouteSelection("plan", target_hint or "skill_dag", "intent_draft:plan")
     if route_hint == "skill" and target_hint:
@@ -1808,6 +1814,7 @@ async def _executive_runtime_core_impl(
     )
 
     runtime_capability_payload = None
+    relational_reason = build_relational_chat_reason_code(sanitized_message)
     if route.route_type == "chat":
         # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
         _skip_capability_synthesis = (
@@ -1829,7 +1836,7 @@ async def _executive_runtime_core_impl(
                 "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
                 request_id, _prefrontal_plan.get("action"),
             )
-        if runtime_capability_payload is not None:
+        if runtime_capability_payload is not None and not relational_reason:
             route = _RouteSelection(
                 route_type=_normalize_text(runtime_capability_payload.get("executor_route"), lower=True) or "delegate",
                 target_id=_normalize_text(runtime_capability_payload.get("executor_target")) or "intent_agent",
@@ -1846,6 +1853,8 @@ async def _executive_runtime_core_impl(
                     "runtime_capability_payload": runtime_capability_payload,
                 },
             )
+        elif relational_reason:
+            route = _RouteSelection("chat", "", relational_reason)
 
     plan = None
     if route.route_type == "plan":

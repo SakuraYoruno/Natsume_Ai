@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -288,7 +289,7 @@ class MirrorNeuronAgent:
         _log = _logging.getLogger("Natsume.tribe.mirror_neuron_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("mirror_neuron_agent.empathy_response_hint") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -301,18 +302,23 @@ class MirrorNeuronAgent:
                 user_emotion_tag=str(user_emotion_tag or "NEUTRAL").upper(),
                 bond_stage=str(bond_stage or "stranger"),
             )
-            _provider = build_llm_provider(
+            _pool_result = complete_llm_with_pool_sync(
+                request_id=f"mirror-empathy::{int(time.time() * 1000)}",
+                scene_type="MIRROR_EMPATHY",
+                cognitive_tier="C",
+                timeout_ms=1500,
+                messages=[
+                    {"role": "system", "content": _system_prompt},
+                    {"role": "user", "content": _user_prompt},
+                ],
+                gen_params={"temperature": 0.2, "max_tokens": 64},
                 provider_name="gemini",
                 model_id="gemini-2.0-flash",
-                timeout_ms=1500,
-                agent_role="mirror_empathy",
+                response_format="json_object",
             )
-            _raw = _provider.complete_sync(
-                system_prompt=_system_prompt,
-                user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.2,
-            )
+            if _pool_result.pool_exhausted:
+                raise RuntimeError("mirror empathy llm pool exhausted")
+            _raw = _pool_result.content
             import json as _json, re as _re  # noqa: PLC0415, E401
             _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
             _parsed = _json.loads(_match.group()) if _match else {}

@@ -110,16 +110,18 @@ def resolve_relationship_state(
 def build_relationship_summary(*, relationship: RelationshipStateBlock, render_target_lang: str = "zh") -> str:
     lang = str(render_target_lang or "").strip().lower()
     if lang == "ja":
-        return (
-            f"相手との関係段階は{relationship.bond_stage.lower()}寄り。"
-            f" 信頼は{relationship.trust:.2f}、開示許容量は{relationship.openness:.2f}、"
-            f" 距離の柔らかさは{relationship.boundary_softness:.2f}。"
-        )
-    return (
-        f"你和对方当前仍偏{relationship.bond_stage}阶段，"
-        f"信任约{relationship.trust:.2f}，开放度约{relationship.openness:.2f}，"
-        f"边界松软度约{relationship.boundary_softness:.2f}。"
-    )
+        stage = str(relationship.bond_stage or "STRANGER").strip().upper() or "STRANGER"
+        if stage in {"STRANGER", "ACQUAINTANCE"}:
+            return "相手との距離はまだ遠めで、馴れ馴れしくしない。"
+        if relationship.boundary_softness >= 0.5:
+            return "関係はやや柔らかいが、言い過ぎない。"
+        return "距離は保ちつつ、自然に受ける。"
+    stage = str(relationship.bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    if stage in {"STRANGER", "ACQUAINTANCE"}:
+        return "你和对方还不熟，不要过度亲近。"
+    if relationship.boundary_softness >= 0.5:
+        return "关系稍微软一点，但别说得太近。"
+    return "保持分寸，顺着对方自然回应。"
 
 
 __all__ = ["RelationshipStateBlock", "build_relationship_summary", "resolve_relationship_state"]

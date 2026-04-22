@@ -2312,14 +2312,16 @@ async def _deliver_gateway_reply(
     primary_content = reply_text
     primary_msg_type = form_decision.primary.value
 
+    wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_REPLY_WAIT_RESULT", default=False)
+    timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
     result = await post_gateway_reply(
         platform=platform,
         conversation_id=conversation_id,
         content=primary_content,
         msg_type=primary_msg_type,
         request_id=request_id,
-        wait_result=True,
-        timeout_ms=12000,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
     )
     if not bool(getattr(result, "success", False)):
         status = str(getattr(result, "status", "FAILED"))

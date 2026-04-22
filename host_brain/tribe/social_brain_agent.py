@@ -859,7 +859,7 @@ class SocialBrainAgent:
                 kwargs["cn_lines_path"] = cn_lines_path
             if ja_lines_path is not None:
                 kwargs["ja_lines_path"] = ja_lines_path
-            distiller = StyleDistiller(**kwargs)
+            distiller = StyleDistiller(use_llm=True, **kwargs)
 
             resolved_lang = str(lang or "cn").strip().lower()
             if resolved_lang == "ja":
@@ -868,6 +868,7 @@ class SocialBrainAgent:
                 profile = distiller.distill_cn(top_n=int(top_n))
 
             result = profile.to_dict() if hasattr(profile, "to_dict") else {}
+            result["rendered_instruction"] = distiller.render_instruction(profile, lang=resolved_lang)
             result["status"] = "OK"
             result["lang"] = resolved_lang
             self._touch_state(
@@ -962,6 +963,7 @@ class SocialBrainAgent:
             layer = BondNarrativeLayer(
                 memory_index=memory_index,
                 milestone_tracker=milestone_tracker,
+                use_llm=True,
             )
             result = layer.build_narrative(
                 user_id=str(user_id or "user_1").strip() or "user_1",

@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -21,6 +22,7 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
+    PROVIDER_MINIMAX,
     PROVIDER_OPENAI,
 )
 
@@ -234,6 +236,7 @@ def _resolve_provider_api_key(provider_name: str) -> str | None:
         PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
     }
     env_name = mapping.get(provider)
     if not env_name:
@@ -253,6 +256,7 @@ def _resolve_provider_api_key(provider_name: str) -> str | None:
             PROVIDER_CODEX: "codex_api_key",
             PROVIDER_GEMINI: "gemini_api_key",
             PROVIDER_DEEPSEEK: "deepseek_api_key",
+            PROVIDER_MINIMAX: "minimax_api_key",
         }
         attr_name = provider_to_attr.get(provider)
         resolved = str(getattr(config, attr_name, "") or "").strip() if attr_name else ""
@@ -274,6 +278,10 @@ def _resolve_provider_base_url(provider_name: str) -> str | None:
     if provider == PROVIDER_CODEX:
         return _normalize_openai_compat_base_url(
             str(os.environ.get("HOST_CODEX_BASE_URL") or os.environ.get("HOST_OPENAI_BASE_URL") or "").strip()
+        )
+    if provider == PROVIDER_MINIMAX:
+        return _normalize_openai_compat_base_url(
+            str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimax.chat/v1").strip()
         )
     return _normalize_openai_compat_base_url(str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip())
 
@@ -603,7 +611,7 @@ class OpenAICompatMultimodalBackend:
 
     @property
     def available(self) -> bool:
-        return bool(self._api_key and (self._sync_model_id or self._async_model_id))
+        return bool(self._sync_model_id or self._async_model_id)
 
     def supports(self, payload: MultimodalObserverInput) -> bool:
         if not self.available:
@@ -842,27 +850,24 @@ class OpenAICompatMultimodalBackend:
         }
 
     def _invoke_model(self, *, messages: list[dict[str, Any]], model_id: str) -> str:
-        from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
-        from langchain_openai import ChatOpenAI  # noqa: PLC0415
+        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
-        llm = ChatOpenAI(
-            model=str(model_id or "").strip() or self._sync_model_id,
+        result = complete_llm_with_pool_sync(
+            request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
+            scene_type="MULTIMODAL",
+            cognitive_tier="B",
+            provider_name=self._provider_name,
+            model_id=str(model_id or "").strip() or self._sync_model_id,
             api_key=self._api_key,
-            base_url=self._base_url,
-            timeout=max(5.0, float(self._timeout_ms) / 1000.0),
-            max_retries=1,
-            temperature=0.1,
+            timeout_ms=self._timeout_ms,
+            messages=messages,
+            gen_params={"temperature": 0.1, "top_p": 0.8},
+            response_format="json_object",
+            base_url_override=self._base_url,
         )
-        lc_messages = []
-        for message in messages:
-            role = str(message.get("role") or "user").strip().lower()
-            content = message.get("content")
-            if role == "system":
-                lc_messages.append(SystemMessage(content=content))
-            else:
-                lc_messages.append(HumanMessage(content=content))
-        response = llm.invoke(lc_messages)
-        return str(extract_langchain_content_text(getattr(response, "content", "")) or "").strip()
+        if result.pool_exhausted:
+            raise RuntimeError("multimodal llm pool exhausted")
+        return str(extract_langchain_content_text(result.content) or "").strip()
 
     def _build_image_content_parts(self, attachment: Mapping[str, Any]) -> list[dict[str, Any]]:
         local_path = str(attachment.get("local_path") or "").strip()
