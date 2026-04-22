@@ -290,9 +290,9 @@ def test_render_node_prompt_keeps_persona_assets_without_direct_response_rules()
 
     assert "【回应原则】" not in prompt
     assert "Avoid generic acknowledgement formulas" not in prompt
-    assert "【角色人设】" in prompt
+    assert "【人格核心】" in prompt
     assert "【说话风格】" in prompt
-    assert "PERSONA_STYLE_EXAMPLES:" in prompt
+    assert "PERSONA_STYLE_EXAMPLES:" not in prompt
 
 
 def test_prompt_context_observability_marks_bare_llm_when_minimal_fallback() -> None:

@@ -11,26 +11,12 @@ from host_brain.app.chat_runtime_input import (
 from host_brain.conversation import conversation_max_turns
 
 from .affect_state import AffectStateBlock, resolve_affect_state
-from .dialogue_state import DialogueStateBlock, analyze_dialogue_state
+from .conversation_interpretation import ConversationInterpretation, interpret_conversation
 from .drive_state import DriveStateBlock, resolve_drive_state
-from .identity_source import (
-    build_character_profile_disambiguation,
-    build_style_usage_disambiguation,
-    load_character_profile,
-)
 from .relationship_state import RelationshipStateBlock, resolve_relationship_state
-from .topic_state import TopicStateBlock
-
-
-@dataclass(frozen=True)
-class IdentityBlock:
-    render_target_lang: str = "zh"
-    profile_disambiguation: str = ""
-    character_profile: str = ""
-    character_dynamic_patch: str = ""
-    style_disambiguation: str = ""
-    style_instruction: str = ""
-    style_citation: str = ""
+from .soul_spec import SoulSpec, build_soul_spec
+from .tactic_ledger import TacticLedgerBlock
+from .topic_ledger import TopicLedgerBlock
 
 
 @dataclass(frozen=True)
@@ -48,13 +34,18 @@ class ContinuityBlock:
 
 
 @dataclass(frozen=True)
-class DialogueBlock:
-    state: DialogueStateBlock = field(default_factory=DialogueStateBlock)
+class TopicLedgerBlockWrapper:
+    state: TopicLedgerBlock = field(default_factory=TopicLedgerBlock)
 
 
 @dataclass(frozen=True)
-class TopicBlock:
-    state: TopicStateBlock = field(default_factory=TopicStateBlock)
+class TacticLedgerBlockWrapper:
+    state: TacticLedgerBlock = field(default_factory=TacticLedgerBlock)
+
+
+@dataclass(frozen=True)
+class ConversationInterpretationBlock:
+    state: ConversationInterpretation = field(default_factory=ConversationInterpretation)
 
 
 @dataclass(frozen=True)
@@ -91,7 +82,7 @@ class IntentBlock:
 
 
 @dataclass(frozen=True)
-class RenderPolicyBlock:
+class ReplyPlanBlock:
     state: dict[str, Any] = field(default_factory=dict)
 
 
@@ -103,22 +94,23 @@ class BudgetTrace:
 
 
 @dataclass(frozen=True)
-class PromptContextPlaneV2:
-    identity: IdentityBlock = field(default_factory=IdentityBlock)
+class PromptContextPlaneV4:
+    soul: SoulSpec = field(default_factory=SoulSpec)
     continuity: ContinuityBlock = field(default_factory=ContinuityBlock)
-    dialogue: DialogueBlock = field(default_factory=DialogueBlock)
-    topic: TopicBlock = field(default_factory=TopicBlock)
+    topic_ledger: TopicLedgerBlockWrapper = field(default_factory=TopicLedgerBlockWrapper)
+    tactic_ledger: TacticLedgerBlockWrapper = field(default_factory=TacticLedgerBlockWrapper)
+    conversation_interpretation: ConversationInterpretationBlock = field(default_factory=ConversationInterpretationBlock)
     affect: AffectBlock = field(default_factory=AffectBlock)
     relationship: RelationshipBlock = field(default_factory=RelationshipBlock)
     drive: DriveBlock = field(default_factory=DriveBlock)
     memory: MemoryBlock = field(default_factory=MemoryBlock)
     intent: IntentBlock = field(default_factory=IntentBlock)
-    render_policy: RenderPolicyBlock = field(default_factory=RenderPolicyBlock)
+    reply_plan: ReplyPlanBlock = field(default_factory=ReplyPlanBlock)
     budget_trace: BudgetTrace = field(default_factory=BudgetTrace)
 
 
 class ContextAssembler:
-    """Assemble the normal-chat prompt context from one canonical source of truth."""
+    """Assemble canonical prompt context for normal chat from one V4 fact plane."""
 
     def assemble(
         self,
@@ -126,14 +118,17 @@ class ContextAssembler:
         node_id: str,
         runtime_payload: Mapping[str, Any],
         turn_context_sections: list[str] | tuple[str, ...] | None = None,
-    ) -> PromptContextPlaneV2:
+        history_max_turns: int | None = None,
+        allow_older_summary: bool = True,
+    ) -> PromptContextPlaneV4:
         from host_brain.app.dependencies import (  # noqa: PLC0415
             get_conversation_history,
+            get_session_tactic_ledger_store,
             get_conversation_turn_store,
-            get_session_topic_state_store,
+            get_session_topic_ledger_store,
         )
         from host_brain.app.prompt_builder_utils import _build_character_dynamic_patch  # noqa: PLC0415
-        from host_brain.persona.render_policy import build_render_policy  # noqa: PLC0415
+        from host_brain.persona.reply_plan import build_reply_plan  # noqa: PLC0415
 
         prompt_context = get_chat_runtime_prompt_context(runtime_payload)
         render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
@@ -150,29 +145,31 @@ class ContextAssembler:
         is_holiday = bool(runtime_payload.get("is_holiday") or prompt_context.get("is_holiday"))
         holiday_name = str(runtime_payload.get("holiday_name") or prompt_context.get("holiday_name") or "").strip()
 
-        identity = IdentityBlock(
+        soul = build_soul_spec(
             render_target_lang=render_target_lang,
-            profile_disambiguation=build_character_profile_disambiguation(render_target_lang),
-            character_profile=load_character_profile(render_target_lang),
+            style_instruction=str(node_style.get("style_instruction") or node_style.get("instruction") or "").strip(),
+            style_citation=str(node_style.get("citation") or "").strip(),
             character_dynamic_patch=_build_character_dynamic_patch(
                 emotion_tag=emotion_tag,
                 is_holiday=is_holiday,
                 holiday_name=holiday_name,
                 render_target_lang=render_target_lang,
             ),
-            style_disambiguation=build_style_usage_disambiguation(render_target_lang),
-            style_instruction=str(node_style.get("style_instruction") or node_style.get("instruction") or "").strip(),
-            style_citation=str(node_style.get("citation") or "").strip(),
         )
 
         continuity = ContinuityBlock()
         current_turn_index: int | None = None
         if request_id and session_id:
+            resolved_history_max_turns = max(
+                1,
+                int(history_max_turns if history_max_turns is not None else conversation_max_turns()),
+            )
             history_window = get_conversation_history().fetch_window_for_messages(
                 session_id=session_id,
-                max_turns=conversation_max_turns(),
+                max_turns=resolved_history_max_turns,
                 exclude_request_id=request_id,
                 render_target_lang="ja" if render_target_lang == "ja" else "zh",
+                summary_threshold=(0 if not allow_older_summary else None),
             )
             continuity = ContinuityBlock(
                 recent_turns=[
@@ -212,17 +209,28 @@ class ContextAssembler:
             ),
         )
 
-        dialogue_state = analyze_dialogue_state(
+        topic_ledger_state = (
+            get_session_topic_ledger_store().fetch_block(
+                session_id=session_id,
+                current_turn_index=current_turn_index,
+            )
+            if session_id
+            else TopicLedgerBlock()
+        )
+        topic_ledger = TopicLedgerBlockWrapper(state=topic_ledger_state)
+        tactic_ledger_state = (
+            get_session_tactic_ledger_store().fetch_block(session_id=session_id)
+            if session_id
+            else TacticLedgerBlock()
+        )
+        tactic_ledger = TacticLedgerBlockWrapper(state=tactic_ledger_state)
+
+        interpretation_state = interpret_conversation(
             recent_turns=continuity.recent_turns[-6:],
             user_message=intent.user_message,
+            topic_ledger=topic_ledger_state,
         )
-        dialogue = DialogueBlock(state=dialogue_state)
-
-        topic_state = get_session_topic_state_store().fetch_block(
-            session_id=session_id,
-            current_turn_index=current_turn_index,
-        ) if session_id else TopicStateBlock()
-        topic = TopicBlock(state=topic_state)
+        conversation_interpretation = ConversationInterpretationBlock(state=interpretation_state)
 
         affect_state = resolve_affect_state(
             emotion_context=effective_emotion_context,
@@ -250,7 +258,11 @@ class ContextAssembler:
             motive_state=motive_state,
             affect_state=affect_state,
             relationship_state=relationship_state,
-            dialogue_state=dialogue_state,
+            dialogue_state={
+                "current_user_act": interpretation_state.literal_topic,
+                "repeat_question_count": interpretation_state.repeat_question_count,
+                "user_stance": interpretation_state.user_stance,
+            },
         )
         drive = DriveBlock(state=drive_state)
 
@@ -259,28 +271,30 @@ class ContextAssembler:
             retrieval_evidence_items=list(dict(runtime_payload.get("retrieval") or {}).get("evidence_items") or []),
         )
 
-        render_policy = RenderPolicyBlock(
-            state=build_render_policy(
+        reply_plan = ReplyPlanBlock(
+            state=build_reply_plan(
                 affect_state=affect_state,
                 relationship_state=relationship_state,
                 drive_state=drive_state,
-                dialogue_state=dialogue_state,
-                topic_state=topic_state,
+                interpretation=interpretation_state,
+                topic_ledger=topic_ledger_state,
+                tactic_ledger=tactic_ledger_state,
                 render_target_lang=render_target_lang,
             ).as_dict()
         )
 
-        return PromptContextPlaneV2(
-            identity=identity,
+        return PromptContextPlaneV4(
+            soul=soul,
             continuity=continuity,
-            dialogue=dialogue,
-            topic=topic,
+            topic_ledger=topic_ledger,
+            tactic_ledger=tactic_ledger,
+            conversation_interpretation=conversation_interpretation,
             affect=affect,
             relationship=relationship,
             drive=drive,
             memory=memory,
             intent=intent,
-            render_policy=render_policy,
+            reply_plan=reply_plan,
         )
 
 
@@ -289,11 +303,15 @@ def assemble_prompt_context_plane(
     node_id: str,
     runtime_payload: Mapping[str, Any],
     turn_context_sections: list[str] | tuple[str, ...] | None = None,
-) -> PromptContextPlaneV2:
+    history_max_turns: int | None = None,
+    allow_older_summary: bool = True,
+) -> PromptContextPlaneV4:
     return ContextAssembler().assemble(
         node_id=node_id,
         runtime_payload=runtime_payload,
         turn_context_sections=turn_context_sections,
+        history_max_turns=history_max_turns,
+        allow_older_summary=allow_older_summary,
     )
 
 
@@ -302,14 +320,15 @@ __all__ = [
     "BudgetTrace",
     "ContextAssembler",
     "ContinuityBlock",
-    "DialogueBlock",
+    "ConversationInterpretationBlock",
     "DriveBlock",
-    "IdentityBlock",
     "IntentBlock",
     "MemoryBlock",
-    "PromptContextPlaneV2",
+    "PromptContextPlaneV4",
     "RelationshipBlock",
-    "RenderPolicyBlock",
-    "TopicBlock",
+    "ReplyPlanBlock",
+    "SoulSpec",
+    "TacticLedgerBlockWrapper",
+    "TopicLedgerBlockWrapper",
     "assemble_prompt_context_plane",
 ]

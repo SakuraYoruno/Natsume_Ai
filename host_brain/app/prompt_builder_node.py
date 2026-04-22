@@ -157,11 +157,10 @@ def render_node_generation_prompt(
     verifier_text = extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
 
     context_plane = assemble_prompt_context_plane(node_id=node_id, runtime_payload=runtime_payload)
-    style_instruction = _truncate_for_prompt(context_plane.identity.style_instruction, limit=1200)
-    _style_disambiguation = _truncate_for_prompt(context_plane.identity.style_disambiguation, limit=220)
-    style_block = (
-        f"【说话风格】\n{_style_disambiguation}\n{style_instruction}\n\n"
-        if style_instruction and include_style_block
+    soul_text = _truncate_for_prompt(getattr(context_plane, "soul", None).full_text if getattr(context_plane, "soul", None) else "", limit=2600)
+    soul_block = (
+        f"【人格核心】\n{soul_text}\n\n"
+        if soul_text and (include_character_profile or include_style_block)
         else ""
     )
 
@@ -705,28 +704,6 @@ def render_node_generation_prompt(
 
     cn_style_boost_block = ""
 
-    # ── 台词风格参考独立通道 ─────────────────────────────────────────────
-    persona_examples_block = ""
-    try:
-        from host_brain.retrieval.emotion_utterance_index import get_utterance_index
-        _emotion_tag_for_style = str(merged_emotion_context.get("emotion_tag") or emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
-        _style_lang = "ja" if render_target_lang == "ja" else "cn"
-        _utt_index = get_utterance_index()
-        if _utt_index.is_built and include_persona_examples:
-            _utt_result = _utt_index.retrieve_for_prompt(
-                _emotion_tag_for_style,
-                user_message=user_message,
-                lang=_style_lang,
-                primary_n=3,
-                daily_n=2,
-                max_chars=400,
-            )
-            persona_examples_block = _utt_index.render_for_prompt(_utt_result, lang=_style_lang)
-            if persona_examples_block:
-                persona_examples_block += "\n"
-    except Exception:
-        pass
-
     if rows:
         _filtered_evidence_rows: list[Mapping[str, Any]] = [row for row in rows if isinstance(row, Mapping) and str(row.get("kind") or "").strip().lower() != "persona_utterance"]
         if _filtered_evidence_rows:
@@ -746,15 +723,6 @@ def render_node_generation_prompt(
     _render_contract_labels = _mapping_section(_render_contract_templates, "labels")
     _render_contract_core_rules = _mapping_list(_render_contract_templates, "core_rules")
 
-    # ── 常驻角色人设 ─────────────────────────────────────────────────────
-    character_profile_block = ""
-    _cp_text = context_plane.identity.character_profile
-    if _cp_text and include_character_profile:
-        _cp_patch = context_plane.identity.character_dynamic_patch
-        _cp_disambiguation = _truncate_for_prompt(context_plane.identity.profile_disambiguation, limit=220)
-        character_profile_title = str(_render_contract_section_titles.get("character_profile") or "【角色人设】")
-        character_profile_block = f"{character_profile_title}\n{_cp_disambiguation}\n{_cp_text}{_cp_patch}\n\n"
-
     node_role_block = ""
     if include_node_role:
         node_role_block = (
@@ -773,21 +741,21 @@ def render_node_generation_prompt(
     _context_violation_count_label = _mapping_text(_render_contract_labels, "context_violation_count", value=prompt_context_violation_count)
     _node_label = _mapping_text(_render_contract_labels, "node", node_id=node_id)
     _output_language_label = _mapping_text(_render_contract_labels, "output_language", render_target_lang=render_target_lang)
+    if "{render_target_lang}" in _output_language_label:
+        _output_language_label = _output_language_label.replace("{render_target_lang}", str(render_target_lang or "zh"))
     _retrieval_status_label = _mapping_text(_render_contract_labels, "retrieval_status", retrieval_status=retrieval_status)
     _retrieval_reason_label = _mapping_text(_render_contract_labels, "retrieval_reason", retrieval_reason=retrieval_reason)
     core_rules_block = "".join(f"{idx}) {rule}\n" for idx, rule in enumerate(_render_contract_core_rules, 1))
 
     return "".join(
         [
-            character_profile_block,
+            soul_block,
             _mapping_text(_render_contract_templates, "output_intro"),
             _mapping_text(_render_contract_templates, "output_schema"),
             _mapping_text(_render_contract_templates, "output_bilingual_hint"),
             _mapping_text(_render_contract_templates, "core_rules_title"),
             core_rules_block,
             node_role_block,
-            style_block,
-            persona_examples_block,
             bond_aware_style_block,
             predictive_state_block,
             planning_block,
@@ -820,4 +788,3 @@ def render_node_generation_prompt(
             f"{str(_render_contract_section_titles.get('intent_draft') or '【意图草稿】')}\n{core_intent_json}\n",
         ]
     )
-

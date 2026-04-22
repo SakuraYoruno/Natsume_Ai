@@ -14,6 +14,7 @@ from host_brain.app.context.identity_source import (
     load_v5_style_instruction,
 )
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
+from host_brain.app.context.soul_spec import SoulSpec
 
 
 def test_identity_source_loaders_read_canonical_assets(
@@ -52,8 +53,13 @@ def test_context_assembler_builds_identity_block_from_runtime_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "host_brain.app.context.prompt_context_plane.load_character_profile",
-        lambda render_lang: "角色卡",
+        "host_brain.app.context.prompt_context_plane.build_soul_spec",
+        lambda **kwargs: SoulSpec(
+            render_target_lang="zh",
+            full_text="不是 AI 助手。\n角色卡\n【今日状态补丁】\n- calm\n说话方式资料\n风格手册",
+            compact_text="紧凑人格",
+            citation="style://canon",
+        ),
     )
     monkeypatch.setattr(
         "host_brain.app.context.prompt_context_plane.resolve_prompt_context_style_row",
@@ -118,15 +124,14 @@ def test_context_assembler_builds_identity_block_from_runtime_payload(
         turn_context_sections=["【当前轮上下文】\n子 Agent 结果"],
     )
 
-    assert plane.identity.render_target_lang == "zh"
-    assert plane.identity.character_profile == "角色卡"
-    assert "不是 AI" in plane.identity.profile_disambiguation
-    assert plane.identity.style_instruction == "风格手册"
-    assert "说话方式资料" in plane.identity.style_disambiguation
-    assert plane.identity.style_citation == "style://canon"
-    assert "今日状态补丁" in plane.identity.character_dynamic_patch
+    assert plane.soul.render_target_lang == "zh"
+    assert "角色卡" in plane.soul.full_text
+    assert "不是 AI" in plane.soul.full_text
+    assert "风格手册" in plane.soul.full_text
+    assert "今日状态补丁" in plane.soul.full_text
+    assert plane.soul.citation == "style://canon"
     assert plane.continuity.summary == "更早些时候，对方提到过天气。"
     assert plane.continuity.turns_injected == 1
     assert plane.continuity.recent_turns[0]["content"] == "前一轮"
-    assert plane.dialogue.state.current_user_act == "neutral_short_query"
+    assert plane.conversation_interpretation.state.user_stance == "neutral"
     assert plane.intent.turn_context_sections == ("【当前轮上下文】\n子 Agent 结果",)

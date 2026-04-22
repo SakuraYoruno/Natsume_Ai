@@ -217,8 +217,8 @@ def test_prompt_builder_prod_renders_render_policy_constraints() -> None:
     assert 'render_policy_confession_guard: true' in prompt
     assert 'render_policy_should_be_withdrawn: true' in prompt
     assert 'render_policy_directive:' in prompt
-    assert '本轮不要主动追问。' in prompt
-    assert '本轮不要擅自扩展或切换话题。' in prompt
+    assert '这轮先别追问，把这一句接稳就好。' in prompt
+    assert '不要擅自换题，把眼前这句说完。' in prompt
     assert '避免表白式、依赖式或越界亲密表达。' in prompt
     assert '自我叙事约束：若时间线证据不足，只能说最近/这段时间，不要声称具体多久。' in prompt
     assert 'render_policy_reasons: willingness:LOW, confession_guard:shallow_bond' in prompt

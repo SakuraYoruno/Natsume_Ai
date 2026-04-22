@@ -8,13 +8,10 @@ from host_brain.app.cortex_prompt_builder import build_cortex_prompt
 
 def _plane() -> SimpleNamespace:
     return SimpleNamespace(
-        identity=SimpleNamespace(
-            profile_disambiguation="不是 AI 助手。",
-            character_profile="角色卡",
-            character_dynamic_patch="",
-            style_disambiguation="不是客服腔。",
-            style_instruction="风格手册",
-            style_citation="",
+        soul=SimpleNamespace(
+            full_text="不是 AI 助手。\n角色卡\n不是客服腔。\n风格手册",
+            compact_text="你是夏目蓝。24岁，弓张学园的国语教师兼美术部顾问。你不是 AI、助手或系统。\n说话温和克制、自然口语，像年轻但成熟的老师。不要客服腔、系统腔，也不要机械复读。",
+            citation="",
         ),
         continuity=SimpleNamespace(
             recent_turns=[
@@ -31,20 +28,37 @@ def _plane() -> SimpleNamespace:
             skipped_empty_count=0,
             deduped_same_role_count=0,
         ),
-        dialogue=SimpleNamespace(
+        conversation_interpretation=SimpleNamespace(
             state=SimpleNamespace(
                 as_dict=lambda: {
-                    "current_user_act": "identity_probe",
+                    "literal_topic": "identity",
+                    "interaction_move": "reconfirm",
+                    "freshness": "recent_repeat",
+                    "user_stance": "probing",
                     "repeat_question_count": 1,
                 }
             )
         ),
-        topic=SimpleNamespace(
+        topic_ledger=SimpleNamespace(
             state=SimpleNamespace(
                 as_dict=lambda: {
                     "active_topics": ["identity"],
                     "recently_answered_topics": ["identity"],
                     "entries": [],
+                }
+            )
+        ),
+        tactic_ledger=SimpleNamespace(
+            state=SimpleNamespace(
+                as_dict=lambda: {
+                    "recent_topics": ["identity"],
+                    "entries": [
+                        {
+                            "topic_key": "identity",
+                            "tactic_family": "ack_name_then_wait",
+                            "trajectory_stage": "early_repeat",
+                        }
+                    ],
                 }
             )
         ),
@@ -76,19 +90,17 @@ def _plane() -> SimpleNamespace:
             )
         ),
         intent=SimpleNamespace(turn_context_sections=()),
-        render_policy=SimpleNamespace(state={}),
+        reply_plan=SimpleNamespace(
+            state={
+                "affect_summary": "当前情绪平稳，语气自然收着。",
+                "relationship_summary": "你和对方还不熟，不要过度亲近。",
+                "reply_contract": "这轮不是第一次问身份，用短确认回应，不要完整自报。",
+                "response_goal": "identify",
+                "tactic_family": "ack_repeat_then_light_probe",
+                "primary_topic": "identity",
+            }
+        ),
     )
-
-
-class _FakeUtteranceIndex:
-    is_built = True
-
-    def retrieve_for_prompt(self, *args, **kwargs):  # noqa: ANN002, ANN003
-        return {"samples": ["dummy"]}
-
-    def render_for_prompt(self, result, *, lang: str = "cn") -> str:  # noqa: ANN001
-        _ = (result, lang)
-        return "【台词风格参考】\n- 示例台词"
 
 
 def test_build_cortex_prompt_returns_messages() -> None:
@@ -99,6 +111,9 @@ def test_build_cortex_prompt_returns_messages() -> None:
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
+        return_value={"gen_params": {"temperature": 0.2}},
+    ), patch(
         "host_brain.app.prompt_builder._build_node_role_instruction",
         return_value="节点指令",
     ), patch(
@@ -107,9 +122,6 @@ def test_build_cortex_prompt_returns_messages() -> None:
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
-    ), patch(
-        "host_brain.retrieval.emotion_utterance_index.get_utterance_index",
-        return_value=_FakeUtteranceIndex(),
     ):
         messages, gen_params, _runtime_payload = build_cortex_prompt(
             user_message="你是谁",
@@ -122,12 +134,13 @@ def test_build_cortex_prompt_returns_messages() -> None:
 
     assert gen_params == {"temperature": 0.2}
     assert messages[0]["role"] == "system"
-    assert "不是 AI 助手。" in messages[0]["content"]
-    assert "角色卡" in messages[0]["content"]
-    assert "不是客服腔。" in messages[0]["content"]
-    assert "【台词风格参考】" in messages[0]["content"]
-    assert "【更早对话摘要】" in messages[0]["content"]
-    assert "更早些时候，对方提到过昨天的事。" in messages[0]["content"]
+    assert "你是夏目蓝。24岁，弓张学园的国语教师兼美术部顾问。" in messages[0]["content"]
+    assert "你不是 AI、助手或系统。" in messages[0]["content"]
+    assert "说话温和克制、自然口语" in messages[0]["content"]
+    assert "角色卡" not in messages[0]["content"]
+    assert "风格手册" not in messages[0]["content"]
+    assert "【更早对话摘要】" not in messages[0]["content"]
+    assert "更早些时候，对方提到过昨天的事。" not in messages[0]["content"]
     assert messages[1:3] == [
         {"role": "user", "content": "前一轮"},
         {"role": "assistant", "content": "前一轮回复"},
@@ -145,6 +158,9 @@ def test_build_cortex_prompt_merges_turn_context_into_single_system_prompt() -> 
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
+        return_value={"gen_params": {"temperature": 0.2}},
+    ), patch(
         "host_brain.app.prompt_builder._build_node_role_instruction",
         return_value="节点指令",
     ), patch(
@@ -153,9 +169,6 @@ def test_build_cortex_prompt_merges_turn_context_into_single_system_prompt() -> 
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=plane,
-    ), patch(
-        "host_brain.retrieval.emotion_utterance_index.get_utterance_index",
-        return_value=_FakeUtteranceIndex(),
     ):
         messages, _gen_params, _runtime_payload = build_cortex_prompt(
             user_message="你是谁",
@@ -173,12 +186,15 @@ def test_build_cortex_prompt_merges_turn_context_into_single_system_prompt() -> 
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
 
 
-def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
+def test_build_cortex_prompt_keeps_full_assets_for_non_relational_chat() -> None:
     with patch(
         "host_brain.app.chat_runtime_input.build_chat_runtime_input",
         return_value={"runtime": "input"},
     ), patch(
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
+        return_value={"gen_params": {"temperature": 0.2}},
+    ), patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
         "host_brain.app.prompt_builder._build_node_role_instruction",
@@ -189,9 +205,40 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
+    ):
+        messages, _gen_params, _runtime_payload = build_cortex_prompt(
+            user_message="今天有点累",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "角色卡" in messages[0]["content"]
+    assert "风格手册" in messages[0]["content"]
+    assert "【更早对话摘要】" in messages[0]["content"]
+
+
+def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
+    with patch(
+        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
+        return_value={"runtime": "input"},
     ), patch(
-        "host_brain.retrieval.emotion_utterance_index.get_utterance_index",
-        return_value=_FakeUtteranceIndex(),
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
+        return_value={"gen_params": {"temperature": 0.2}},
+    ), patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
+        return_value={"gen_params": {"temperature": 0.2}},
+    ), patch(
+        "host_brain.app.prompt_builder._build_node_role_instruction",
+        return_value="节点指令",
+    ), patch(
+        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
+        side_effect=lambda payload, emotion_context: payload,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=_plane(),
     ):
         _messages, _gen_params, runtime_payload = build_cortex_prompt(
             user_message="你是谁",
@@ -206,33 +253,74 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
         "turns_injected": 2,
         "fetched_turns": 2,
         "older_turn_count": 3,
-        "summary_present": True,
+        "summary_present": False,
         "oldest_ts_ms": 111,
         "newest_ts_ms": 222,
         "skipped_corrupted_count": 0,
         "skipped_empty_count": 0,
         "deduped_same_role_count": 0,
     }
-    assert runtime_payload["dialogue_state"] == {
-        "current_user_act": "identity_probe",
+    assert runtime_payload["conversation_interpretation"] == {
+        "literal_topic": "identity",
+        "interaction_move": "reconfirm",
+        "freshness": "recent_repeat",
+        "user_stance": "probing",
         "repeat_question_count": 1,
     }
-    assert runtime_payload["topic_state"]["active_topics"] == ["identity"]
+    assert runtime_payload["topic_ledger"]["active_topics"] == ["identity"]
+    assert "tactic_ledger" in runtime_payload
     assert runtime_payload["affect_state"]["emotion_tag"] == "CALM"
     assert runtime_payload["relationship_state"]["bond_stage"] == "STRANGER"
     assert runtime_payload["drive_state"]["continuity_drive"] == 0.42
 
 
-def test_build_cortex_prompt_appends_control_line_once() -> None:
+def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> None:
+    with patch(
+        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
+        return_value={"runtime": "input"},
+    ), patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
+    ) as full_builder, patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
+        return_value={"gen_params": {"temperature": 0.2}, "prompt_runtime_profile": "relational_chat:identity"},
+    ) as light_builder, patch(
+        "host_brain.app.prompt_builder._build_node_role_instruction",
+        return_value="节点指令",
+    ), patch(
+        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
+        side_effect=lambda payload, emotion_context: payload,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=_plane(),
+    ) as assemble_plane:
+        messages, _gen_params, runtime_payload = build_cortex_prompt(
+            user_message="你是",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    full_builder.assert_not_called()
+    light_builder.assert_called_once()
+    assemble_plane.assert_called_once()
+    _, kwargs = assemble_plane.call_args
+    assert messages[-1] == {"role": "user", "content": "你是"}
+    assert runtime_payload["prompt_runtime_profile"] == "relational_chat:identity"
+    assert "【更早对话摘要】" not in messages[0]["content"]
+    assert "角色：以夏目蓝本人身份直接短答当前关系闲聊" in messages[0]["content"]
+    assert kwargs["history_max_turns"] == 6
+    assert kwargs["allow_older_summary"] is False
+
+
+def test_build_cortex_prompt_uses_reply_contract_once_without_old_summaries() -> None:
     plane = _plane()
-    plane.render_policy = SimpleNamespace(
+    plane.reply_plan = SimpleNamespace(
         state={
-            "affect_summary": "当前内在状态平稳。",
-            "relationship_summary": "当前关系仍偏陌生。",
-            "dialogue_summary": "旧的抽象说明",
-            "topic_summary": "旧的topic说明",
-            "render_policy_summary": "旧的策略说明",
-            "control_line": "这句不是第一次问身份。先接住对方的重复确认，不要重说名字。"
+            "affect_summary": "当前情绪平稳，语气自然收着。",
+            "relationship_summary": "你和对方还不熟，不要过度亲近。",
+            "reply_contract": "这轮不是第一次问身份，用短确认回应，不要完整自报。",
         }
     )
     with patch(
@@ -240,6 +328,9 @@ def test_build_cortex_prompt_appends_control_line_once() -> None:
         return_value={"runtime": "input"},
     ), patch(
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
+        return_value={"gen_params": {"temperature": 0.2}},
+    ), patch(
+        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
         "host_brain.app.prompt_builder._build_node_role_instruction",
@@ -250,9 +341,6 @@ def test_build_cortex_prompt_appends_control_line_once() -> None:
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=plane,
-    ), patch(
-        "host_brain.retrieval.emotion_utterance_index.get_utterance_index",
-        return_value=_FakeUtteranceIndex(),
     ):
         messages, _gen_params, _runtime_payload = build_cortex_prompt(
             user_message="你谁",
@@ -264,9 +352,10 @@ def test_build_cortex_prompt_appends_control_line_once() -> None:
         )
 
     assert messages[0]["role"] == "system"
-    assert messages[0]["content"].count("这句不是第一次问身份。先接住对方的重复确认，不要重说名字。") == 1
-    assert "当前内在状态平稳。" not in messages[0]["content"]
-    assert "当前关系仍偏陌生。" not in messages[0]["content"]
+    assert messages[0]["content"].count("这轮不是第一次问身份，用短确认回应，不要完整自报。") == 1
+    assert "【本轮回应动作】" in messages[0]["content"]
+    assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
+    assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
     assert "旧的抽象说明" not in messages[0]["content"]
     assert "旧的topic说明" not in messages[0]["content"]
     assert "旧的策略说明" not in messages[0]["content"]

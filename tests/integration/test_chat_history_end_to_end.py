@@ -16,13 +16,10 @@ def _plane_with_real_history(history: ConversationHistory, *, session_id: str, r
         render_target_lang="zh",
     )
     return SimpleNamespace(
-        identity=SimpleNamespace(
-            profile_disambiguation="不是 AI 助手。",
-            character_profile="角色卡",
-            character_dynamic_patch="",
-            style_disambiguation="不是客服腔。",
-            style_instruction="风格手册",
-            style_citation="",
+        soul=SimpleNamespace(
+            full_text="不是 AI 助手。\n角色卡\n不是客服腔。\n风格手册",
+            compact_text="紧凑人格",
+            citation="",
         ),
         continuity=SimpleNamespace(
             recent_turns=[
@@ -48,17 +45,6 @@ def _plane_with_real_history(history: ConversationHistory, *, session_id: str, r
         ),
         intent=SimpleNamespace(turn_context_sections=()),
     )
-
-
-class _FakeUtteranceIndex:
-    is_built = False
-
-    def retrieve_for_prompt(self, *args, **kwargs):  # pragma: no cover - defensive
-        raise AssertionError("retrieve_for_prompt should not be called when is_built=False")
-
-    def render_for_prompt(self, result, *, lang: str = "cn") -> str:  # pragma: no cover - defensive
-        _ = (result, lang)
-        return ""
 
 
 def test_chat_history_end_to_end_recent_messages_and_session_isolation() -> None:
@@ -116,9 +102,6 @@ def test_chat_history_end_to_end_recent_messages_and_session_isolation() -> None
             session_id=str(kwargs.get("runtime_payload", {}).get("request", {}).get("session_id") or "sess-a"),
             request_id=str(kwargs.get("runtime_payload", {}).get("request", {}).get("request_id") or "req-7"),
         ),
-    ), patch(
-        "host_brain.retrieval.emotion_utterance_index.get_utterance_index",
-        return_value=_FakeUtteranceIndex(),
     ):
         messages, _gen_params, runtime_payload = build_cortex_prompt(
             user_message="那你昨天晚饭吃什么了",
