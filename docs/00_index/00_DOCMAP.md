@@ -153,6 +153,10 @@
   用途：TRIBE 多智能体族重构蓝图与实施记录留痕（2026-04-08，2026-04-19 已加校准说明）。混合记录目标态分族图与 T-xx 级落库记录；正文含 `top_agent` 等阶段入口，应按迁移轨迹/历史参考理解，不作为当前运行时事实或实现层任务来源。
   读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
+- docs/50_project/arch/NATSUME_AI_FULL_LLM_CAPABILITY_RESTORATION_PLAN_20260422.md
+  用途：Natsume_Ai 全认知能力 LLM 恢复方案（2026-04-22）。一次 PR 全改的蓝图与实施计划，核心是把当前"架构壳完整、LLM 实现缺失"的局面修正为真正多 LLM 认知系统。覆盖 9 层认知架构全面恢复、多模型池设计（MiniMax 全系 + Gemini 2.5 Pro / Flash-Lite 互为主备）、禁止规则降级原则、sys_mode 分级限频、LLM Gateway `complete_with_pool` API、40 项改动清单与环境变量新增。含 CI 降级检测、验收标准、回滚方案。
+  读者：MASTER、实现层（可作为任务来源）、Project（文档代理）。
+
 - docs/50_project/arch/dataflow_report.md
   用途：系统数据流全景报告（请求流、回流、模块间数据交换）；与架构文档互补，负责“流向”视角。
   读者：MASTER、Project（文档代理）、实现层（查阅对齐）。
