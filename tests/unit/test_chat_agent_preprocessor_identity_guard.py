@@ -113,6 +113,21 @@ def test_identity_guard_repairs_underanswered_repeat_boundary_reply() -> None:
     assert repaired == "刚才不是已经说过了么。怎么，还要我再讲一遍？"
 
 
+def test_identity_guard_repairs_half_reason_repeat_boundary_reply() -> None:
+    repaired = _apply_render_policy_hard_guard(
+        "因为。",
+        {
+            "max_chars": 320,
+            "max_sentences": 4,
+            "reply_mode": "boundary_repeat_probe",
+        },
+        user_message="你为什么要帮我，我们很熟吗",
+        render_target_lang="zh",
+    )
+
+    assert repaired == "刚才不是已经说过了么。怎么，还要我再讲一遍？"
+
+
 def test_runtime_identity_guard_repairs_underanswered_repeat_help_reply() -> None:
     repaired = _apply_runtime_render_policy_hard_guard(
         "当然。",
