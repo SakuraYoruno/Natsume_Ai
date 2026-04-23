@@ -4,19 +4,23 @@ from dataclasses import dataclass, field
 import re
 from typing import Any
 
+from host_brain.app.context.soul_runtime import get_compiled_soul
+from host_brain.persona.soul_reply_surface import (
+    build_identity_fallback_text,
+    build_identity_naturalization_hint,
+)
 from .reply_plan import ReplyPlan
 from .reply_tactics import canonical_tactic_signature, describe_tactic_signature, tactic_key
 
 
 _GENERIC_ASSISTANT_RE = re.compile(r"(AI助手|人工智能|很高兴和你交流|请告诉我你需要什么帮助)")
 _HALF_SENTENCE_RE = re.compile(r"^(?:嗯|哎|诶|啊|哦|唔|当然|因为|只是|也不是|看情况)[。！？?!～~…，,\s]*$")
-_FULL_IDENTITY_RESTATE_RE = re.compile(r"(我是夏目蓝|我叫夏目蓝|我的名字是夏目蓝|我？我的名字是夏目蓝)")
 _PROMISE_RESTATE_RE = re.compile(r"(我会帮你|我会继续帮你|我当然会继续帮你|我会一直帮你)")
-_OPEN_FLOOR_RE = re.compile(r"(直接问|直接说|想问别的|还有别的|真正想问的|那就说吧|就说吧|往下问什么|还想往下问什么|还想问什么|想问什么)")
-_LIGHT_PROBE_RE = re.compile(r"(还在确认|还是想确认|又来确认|还想再问|还想听|是在确认|为什么还在问|哪一部分|哪部分|确认的是哪|想问我的名字吧|不是名字吧|其实想问)")
+_OPEN_FLOOR_RE = re.compile(r"(直接问|直接说|想问别的|还有别的|真正想问的|那就说吧|就说吧|往下问什么|还想往下问什么|还想问什么|想问什么|是不是想问别的|你其实想问什么|你要问别的就直说|还想问我什么)")
+_LIGHT_PROBE_RE = re.compile(r"(还在确认|还是想确认|又来确认|还想再问|还想听|是在确认|为什么还在问|哪一部分|哪部分|确认的是哪|想问我的名字吧|不是名字吧|其实想问|怎么又问起这个|怎么又问这个|连我都认不出来)")
 _ANXIETY_RE = re.compile(r"(不安|担心|还是担心|还是不安|还在担心)")
-_REPEAT_ACK_RE = re.compile(r"(刚才|已经|之前|前面|不是第一次|已经说过|已经告诉过|前面说过|早就说过|问过了)")
-_SOFT_CLOSE_RE = re.compile(r"(来回问|问过几次|一直问这个|总问这个|翻来覆去|来来回回)")
+_REPEAT_ACK_RE = re.compile(r"(刚才|已经|之前|前面|不是第一次|已经说过|已经告诉过|前面说过|早就说过|问过了|又问起这个|又问这个|怎么又问|都问我好几次|问我好几次)")
+_SOFT_CLOSE_RE = re.compile(r"(来回问|问过几次|一直问这个|总问这个|翻来覆去|来来回回|都问我好几次|问我好几次)")
 _CARE_ACK_RE = re.compile(r"(还在意|还是在意|还记着|还惦记|还放不下)")
 _BOUNDARY_REASON_RE = re.compile(r"(不熟|不是很熟|不算熟).*(只是|看见了|装作没看见|不会装作没看见)")
 _SUPPORT_RE = re.compile(r"(不会装作没听见|会回应|会理|会回|真开口的话)")
@@ -29,6 +33,61 @@ _PROMPT_LEAK_RE = re.compile(
 _META_OVEREXPLICIT_RE = re.compile(
     r"^(前面|刚才|已经|之前|这件事|这个已经|你还是在意这个|你还是不安|你还是不太放心|这个已经来回问过几次了)"
 )
+_GENERIC_IDENTITY_TEMPLATE_RE = re.compile(
+    r"(你真正想问的是什么|别的想问什么，就直接说|你想确认的是哪一部分|你是不是想问别的|你还想问我什么呀)"
+)
+
+
+def _current_display_name() -> str:
+    try:
+        soul = get_compiled_soul()
+        return str(getattr(soul, "display_name", "") or "").strip() or "她"
+    except Exception:
+        return "她"
+
+
+def _current_identity_aliases() -> tuple[str, ...]:
+    try:
+        soul = get_compiled_soul()
+        aliases = tuple(str(item).strip() for item in getattr(soul, "identity_aliases", ()) if str(item).strip())
+        if aliases:
+            return aliases
+    except Exception:
+        pass
+    display_name = _current_display_name()
+    candidates = [display_name, display_name.replace(" ", "")]
+    return tuple(dict.fromkeys(item for item in candidates if item))
+
+
+def _identity_aliases_for_detection() -> tuple[str, ...]:
+    aliases = list(_current_identity_aliases())
+    aliases.extend(["夏目蓝", "夏目藍"])
+    return tuple(dict.fromkeys(item for item in aliases if item))
+
+
+def _contains_identity_name(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    return any(alias and alias in normalized for alias in _identity_aliases_for_detection())
+
+
+def _looks_like_name_only_reply(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    aliases = [re.escape(alias) for alias in _identity_aliases_for_detection() if alias]
+    if not aliases:
+        return False
+    pattern = r"(?:[\u4e00-\u9fa5]{0,4}[，,\s]*)?(?:我[？?]?[，,\s]*)?(?:我是|我叫|我的名字是)?(?:" + "|".join(aliases) + r")(?:呀|啦|嘛|呢|啊|哦)?[。！？?!、，,\s]*"
+    return bool(re.fullmatch(pattern, normalized))
+
+
+def _full_identity_restate_re() -> re.Pattern[str]:
+    aliases = [re.escape(alias) for alias in _identity_aliases_for_detection() if alias]
+    if not aliases:
+        aliases = [re.escape(_current_display_name())]
+    return re.compile(r"(?:我是|我叫|我的名字是|我？我的名字是)(?:" + "|".join(aliases) + r")")
 
 
 def _normalize_compare_text(raw: str) -> str:
@@ -46,14 +105,14 @@ def _infer_identity_tactic(text: str) -> str:
         return ""
     if _LIGHT_PROBE_RE.search(normalized):
         return "ack_repeat_then_light_probe"
-    if _OPEN_FLOOR_RE.search(normalized) and ("夏目蓝" in normalized or _REPEAT_ACK_RE.search(normalized)):
+    if _OPEN_FLOOR_RE.search(normalized) and (_contains_identity_name(normalized) or _REPEAT_ACK_RE.search(normalized)):
         return "hold_name_then_open_floor"
     if _OPEN_FLOOR_RE.search(normalized):
         return "soft_close_then_open_floor"
-    if _REPEAT_ACK_RE.search(normalized) and "夏目蓝" in normalized:
+    if _REPEAT_ACK_RE.search(normalized) and _contains_identity_name(normalized):
         return "ack_name_then_wait"
-    if "夏目蓝" in normalized:
-        if re.fullmatch(r"(?:我[？?]?[，,\s]*)?(?:我是|我叫|我的名字是)?夏目蓝[。！？?!、，,\s]*", normalized):
+    if _contains_identity_name(normalized):
+        if _looks_like_name_only_reply(normalized):
             return "brief_name_only"
         return "name_only_then_pause"
     return ""
@@ -271,6 +330,7 @@ _REASON_PENALTIES: dict[str, float] = {
     "repeat_not_acknowledged": 0.8,
     "meta_contract_echo": 0.45,
     "late_repeat_too_short": 0.75,
+    "generic_identity_template": 0.45,
 }
 
 
@@ -285,7 +345,7 @@ def _has_required_action(action: str, text: str) -> bool:
     if action == "open_floor":
         return bool(_OPEN_FLOOR_RE.search(normalized))
     if action == "name_only":
-        return bool("夏目蓝" in normalized)
+        return _contains_identity_name(normalized)
     if action == "soft_close":
         return bool(_SOFT_CLOSE_RE.search(normalized) or (_REPEAT_ACK_RE.search(normalized) and _OPEN_FLOOR_RE.search(normalized)))
     if action == "boundary_anchor":
@@ -349,6 +409,8 @@ def validate_reply(
         reason_codes.append("prompt_leak")
     if _GENERIC_ASSISTANT_RE.search(normalized):
         reason_codes.append("generic_assistant_phrasing")
+    if plan.primary_topic == "identity" and _GENERIC_IDENTITY_TEMPLATE_RE.search(normalized):
+        reason_codes.append("generic_identity_template")
     if _HALF_SENTENCE_RE.match(normalized):
         reason_codes.append("underanswered")
 
@@ -357,9 +419,14 @@ def validate_reply(
     if previous_normalized and current_normalized == previous_normalized:
         reason_codes.append("same_as_previous_reply")
 
-    if "full_identity_restate" in plan.forbidden_patterns and _FULL_IDENTITY_RESTATE_RE.search(normalized) and plan.restate_level == "none":
+    if (
+        "full_identity_restate" in plan.forbidden_patterns
+        and _full_identity_restate_re().search(normalized)
+        and not _looks_like_name_only_reply(normalized)
+        and plan.restate_level == "none"
+    ):
         reason_codes.append("full_identity_restate")
-    if "identity_name_restate" in plan.forbidden_patterns and "夏目蓝" in normalized and plan.restate_level == "none":
+    if "identity_name_restate" in plan.forbidden_patterns and _contains_identity_name(normalized) and plan.restate_level == "none":
         reason_codes.append("identity_name_restate")
     if "promise_restate" in plan.forbidden_patterns and _PROMISE_RESTATE_RE.search(normalized):
         reason_codes.append("promise_restate")
@@ -433,12 +500,12 @@ def validate_reply(
 
     family = plan.tactic_family
     if family == "brief_name_only":
-        if "夏目蓝" not in normalized:
+        if not _contains_identity_name(normalized):
             reason_codes.append("identity_name_missing")
         if len(normalized) > 18:
             reason_codes.append("identity_overexplained")
     elif family == "ack_name_then_wait":
-        if "夏目蓝" not in normalized:
+        if not _contains_identity_name(normalized):
             reason_codes.append("identity_name_missing")
         if _OPEN_FLOOR_RE.search(normalized) or _LIGHT_PROBE_RE.search(normalized):
             reason_codes.append("wrong_tactic_shape")
@@ -447,13 +514,13 @@ def validate_reply(
     elif family == "ack_repeat_then_light_probe":
         if not _LIGHT_PROBE_RE.search(normalized):
             reason_codes.append("light_probe_missing")
-        if "夏目蓝" in normalized and plan.restate_level == "none":
+        if _contains_identity_name(normalized) and plan.restate_level == "none":
             reason_codes.append("identity_restate_not_allowed")
     elif family == "hold_name_then_open_floor":
         if not _OPEN_FLOOR_RE.search(normalized):
             reason_codes.append("open_floor_missing")
     elif family == "name_only_then_pause":
-        if "夏目蓝" not in normalized:
+        if not _contains_identity_name(normalized):
             reason_codes.append("identity_name_missing")
         if len(normalized) > 10:
             reason_codes.append("name_only_missing")
@@ -462,7 +529,7 @@ def validate_reply(
     elif family == "soft_close_then_open_floor":
         if not _OPEN_FLOOR_RE.search(normalized):
             reason_codes.append("soft_close_missing")
-        if "夏目蓝" in normalized:
+        if _contains_identity_name(normalized) and plan.restate_level == "none":
             reason_codes.append("identity_restate_not_allowed")
     elif family == "short_boundary_then_reason":
         if not _BOUNDARY_REASON_RE.search(normalized):
@@ -555,6 +622,8 @@ def build_correction_prompt(
         extra = "不要只给一个主题骨架句。"
     elif "meta_contract_echo" in validation.reason_codes:
         extra = "不要把内部动作要求直接翻成‘前面答过了’、‘你还是在意这个’、‘你还是不安’这类元话。"
+    elif "generic_identity_template" in validation.reason_codes:
+        extra = "不要再用‘你真正想问什么 / 别的想问什么 / 你想确认哪一部分’这类固定问句，换成更自然的熟人口吻。"
     elif "late_repeat_too_short" in validation.reason_codes:
         extra = "这已经不是前几次的短确认场景了，这次必须继续推进对话，不能退回只报名字或只放一句态度。"
     required = f"必须同时做到：{missing_actions_text}。" if missing_actions_text else ""
@@ -570,9 +639,17 @@ def build_correction_prompt(
     recent_note = ""
     if recent_signatures:
         recent_note = f"最近已经用过的承接：{'；'.join(recent_signatures[:3])}。这次避开它们。"
+    soul_hint = ""
+    if plan.primary_topic == "identity":
+        hint = build_identity_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
     return (
         f"{plan.correction_directive} 当前问题：{reasons}。"
-        f"{extra}{required}{steps}{forbidden}{recent_note}{previous_note}严格遵守：{plan.reply_contract}"
+        f"{extra}{required}{steps}{forbidden}{recent_note}{previous_note}{soul_hint}严格遵守：{plan.reply_contract}"
     ).strip()
 
 
@@ -591,11 +668,21 @@ def build_naturalization_prompt(
     recent_note = ""
     if recent_signatures:
         recent_note = f"别复用最近几轮已经用过的承接：{'；'.join(recent_signatures[:3])}。"
+    soul_hint = ""
+    if plan.primary_topic == "identity":
+        hint = build_identity_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
     return (
         "保持同样内容目标，但把回应说得更像自然对话。"
         "不要把内部动作要求直接说出来，不要用“前面答过了 / 这件事已经问过 / 你还是在意这个 / 你还是不安”这类元话带头。"
+        "也不要落成“你真正想问什么 / 别的想问什么 / 你想确认哪一部分”这类固定问句。"
         f"{previous_note}"
         f"{recent_note}"
+        f"{soul_hint}"
         f"严格遵守：{plan.reply_contract}"
     ).strip()
 
@@ -603,13 +690,14 @@ def build_naturalization_prompt(
 def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: str = "zh") -> str:
     lang = str(render_target_lang or "").strip().lower()
     family = str(plan.tactic_family or "").strip()
+    display_name = _current_display_name() or "她"
     if lang == "ja":
         ja_family_map = {
-            "brief_name_only": "夏目藍。",
+            "brief_name_only": f"{display_name}。",
             "ack_name_then_wait": "さっきもう名乗った。",
             "ack_repeat_then_light_probe": "さっき答えたけど、まだ何を確かめたいの？",
             "hold_name_then_open_floor": "名前はもう分かっているはず。ほかに聞きたいことがあるなら言って。",
-            "name_only_then_pause": "夏目藍。",
+            "name_only_then_pause": f"{display_name}。",
             "soft_close_then_open_floor": "その確認は何度か来てる。ほんとうに聞きたいことは何？",
             "short_boundary_then_reason": "親しくはない。ただ見て見ぬふりはしない。",
             "ack_still_care_then_new_reason": "まだそこが気になる？ 親しくはないけど、見て見ぬふりはしない。",
@@ -626,7 +714,7 @@ def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: s
         if family in ja_family_map:
             return ja_family_map[family]
         if plan.response_goal == "identify":
-            return "夏目藍。"
+            return f"{display_name}。"
         if plan.response_goal == "boundary_reason":
             return "親しくはない。ただ見て見ぬふりはしない。"
         if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:
@@ -634,18 +722,26 @@ def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: s
         if plan.response_goal == "repair_space":
             return "……分かった。少し引く。"
         return "分かった。短く返す。"
+    if plan.response_goal == "identify":
+        soul_text = build_identity_fallback_text(
+            family=family,
+            variant=str(plan.tactic_variant or "").strip(),
+            render_target_lang=render_target_lang,
+        )
+        if soul_text:
+            return soul_text
     zh_variant_map = {
-        ("brief_name_only", "plain_name"): "夏目蓝。",
-        ("ack_name_then_wait", "quiet_confirm"): "夏目蓝。",
-        ("ack_repeat_then_light_probe", "confirm_part"): "夏目蓝。你想确认的是哪一部分？",
-        ("ack_repeat_then_light_probe", "confirm_real_question"): "夏目蓝。你真正想问的是什么？",
-        ("ack_repeat_then_light_probe", "confirm_motive"): "夏目蓝。你其实想确认的不是名字吧？",
-        ("hold_name_then_open_floor", "open_other_topic"): "夏目蓝。别的想问什么，就直接说。",
-        ("hold_name_then_open_floor", "open_real_question"): "夏目蓝。你真正想问的是什么？",
-        ("soft_close_then_open_floor", "settle_real_question"): "夏目蓝。你真正想问的是什么？",
-        ("soft_close_then_open_floor", "settle_other_topic"): "夏目蓝。别的想问什么，就直接说。",
-        ("soft_close_then_open_floor", "settle_then_open"): "夏目蓝。你还想往下问什么？",
-        ("name_only_then_pause", "quiet_pause"): "夏目蓝。",
+        ("brief_name_only", "plain_name"): f"{display_name}。",
+        ("ack_name_then_wait", "quiet_confirm"): f"{display_name}。",
+        ("ack_repeat_then_light_probe", "confirm_part"): f"{display_name}。你想确认的是哪一部分？",
+        ("ack_repeat_then_light_probe", "confirm_real_question"): f"{display_name}。你真正想问的是什么？",
+        ("ack_repeat_then_light_probe", "confirm_motive"): f"{display_name}。你其实想确认的不是名字吧？",
+        ("hold_name_then_open_floor", "open_other_topic"): f"{display_name}。别的想问什么，就直接说。",
+        ("hold_name_then_open_floor", "open_real_question"): f"{display_name}。你真正想问的是什么？",
+        ("soft_close_then_open_floor", "settle_real_question"): f"{display_name}。你真正想问的是什么？",
+        ("soft_close_then_open_floor", "settle_other_topic"): f"{display_name}。别的想问什么，就直接说。",
+        ("soft_close_then_open_floor", "settle_then_open"): f"{display_name}。你还想往下问什么？",
+        ("name_only_then_pause", "quiet_pause"): f"{display_name}。",
         ("short_boundary_then_reason", "plain_reason"): "不熟。只是看见了，也没打算装作没看见。",
         ("ack_still_care_then_new_reason", "still_care_reason"): "不熟。但也没想装作没看见。",
         ("hold_boundary_then_shift_floor", "shift_real_question"): "不熟。这点已经说明过了。你真正想问的是什么？",
@@ -665,12 +761,12 @@ def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: s
     if variant_key in zh_variant_map:
         return zh_variant_map[variant_key]
     zh_family_map = {
-        "brief_name_only": "夏目蓝。",
-        "ack_name_then_wait": "夏目蓝。",
-        "ack_repeat_then_light_probe": "夏目蓝。你想确认的是哪一部分？",
-        "hold_name_then_open_floor": "夏目蓝。别的想问什么，就直接说。",
-        "name_only_then_pause": "夏目蓝。",
-        "soft_close_then_open_floor": "夏目蓝。你真正想问的是什么？",
+        "brief_name_only": f"{display_name}。",
+        "ack_name_then_wait": f"{display_name}。",
+        "ack_repeat_then_light_probe": f"{display_name}。你想确认的是哪一部分？",
+        "hold_name_then_open_floor": f"{display_name}。别的想问什么，就直接说。",
+        "name_only_then_pause": f"{display_name}。",
+        "soft_close_then_open_floor": f"{display_name}。你真正想问的是什么？",
         "short_boundary_then_reason": "不熟。只是看见了，也没打算装作没看见。",
         "ack_still_care_then_new_reason": "不熟。但也没想装作没看见。",
         "hold_boundary_then_shift_floor": "不熟。这点已经说明过了。你真正想问的是什么？",
@@ -686,7 +782,7 @@ def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: s
     if family in zh_family_map:
         return zh_family_map[family]
     if plan.response_goal == "identify":
-        return "夏目蓝。"
+        return f"{display_name}。"
     if plan.response_goal == "boundary_reason":
         return "不熟。只是看见了，也没打算装作没看见。"
     if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:

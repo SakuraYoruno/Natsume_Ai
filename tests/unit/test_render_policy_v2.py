@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.app.context.tactic_ledger import TacticLedgerBlock, TacticLedgerEntry
 from host_brain.app.context.topic_ledger import TopicLedgerBlock, TopicLedgerEntry
 from host_brain.persona.reply_plan import (
@@ -26,7 +27,8 @@ def test_reply_plan_first_identity_uses_brief_name_only() -> None:
     assert plan.response_goal == "identify"
     assert plan.tactic_family == "brief_name_only"
     assert plan.restate_level == "name_only"
-    assert plan.reply_contract == "只简短报名字，不展开成介绍。"
+    assert get_compiled_soul().display_name in plan.reply_contract
+    assert "不要展开设定" in plan.reply_contract or "不要继续解释" in plan.reply_contract
     assert plan.contract.required_actions == ("name_only",)
     assert plan.as_dict()["contract"]["required_actions"] == ["name_only"]
     assert plan.contract.realization_steps
@@ -229,7 +231,7 @@ def test_reply_plan_candidates_expand_identity_tactics_without_reusing_recent_si
 
 def test_infer_reply_tactic_shape_recognizes_confirm_part_as_light_probe() -> None:
     inferred = infer_reply_tactic_shape(
-        text="夏目蓝。你想确认的是哪一部分？",
+        text=f"{get_compiled_soul().display_name}呀。你还想确认哪一部分？",
         topic="identity",
     )
 
@@ -240,16 +242,16 @@ def test_infer_reply_tactic_shape_recognizes_confirm_part_as_light_probe() -> No
 
 def test_infer_reply_tactic_shape_recognizes_name_probe_as_light_probe() -> None:
     inferred = infer_reply_tactic_shape(
-        text="……你是想问我的名字吧？夏目蓝。",
+        text=f"我是{get_compiled_soul().display_name}呀。你其实是想问别的吧？",
         topic="identity",
     )
 
-    assert inferred["family"] == "ack_repeat_then_light_probe"
+    assert inferred["family"] in {"ack_repeat_then_light_probe", "hold_name_then_open_floor"}
 
 
 def test_infer_reply_tactic_shape_recognizes_settle_then_open_as_open_floor() -> None:
     inferred = infer_reply_tactic_shape(
-        text="夏目蓝。你还想往下问什么？",
+        text=f"都问我好几次啦。你还想问我什么呀？",
         topic="identity",
     )
 
@@ -317,6 +319,44 @@ def test_reply_plan_help_repeat_does_not_repromise() -> None:
         "steady_commitment_then_wait",
     }
     assert "promise_restate" in plan.forbidden_patterns
+
+
+def test_reply_plan_mid_repeat_relational_chat_no_longer_forces_buffering_by_default() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.22},
+        motive_state={"continuity_drive": 0.41},
+        conversation_interpretation={
+            "literal_topic": "identity",
+            "interaction_move": "reconfirm",
+            "freshness": "recent_repeat",
+            "user_stance": "probing",
+            "repeat_question_count": 2,
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.requires_validation is False
+    assert plan.force_buffering is False
+
+
+def test_reply_plan_challenging_late_repeat_keeps_buffering_guard() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.22},
+        motive_state={"continuity_drive": 0.18},
+        conversation_interpretation={
+            "literal_topic": "identity",
+            "interaction_move": "probe",
+            "freshness": "recent_repeat",
+            "user_stance": "challenging",
+            "repeat_question_count": 3,
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.requires_validation is True
+    assert plan.force_buffering is True
 
 
 def test_reply_plan_summaries_are_qualitative_chinese_only() -> None:

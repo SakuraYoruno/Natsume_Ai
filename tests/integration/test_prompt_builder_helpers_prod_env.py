@@ -11,7 +11,7 @@ from host_brain.app.prompt_builder import (
     extract_node_narrative_text,
     extract_node_runtime_payload,
 )
-from host_brain.app.context.identity_source import _CHARACTER_PROFILE_CACHE, load_character_profile
+from host_brain.app.context.soul_runtime import load_compiled_soul
 
 
 @pytest.fixture(autouse=True)
@@ -21,17 +21,44 @@ def _prod_env(monkeypatch):
 
 
 
-def test_prompt_builder_helpers_prod_load_character_profile_from_env(tmp_path, monkeypatch) -> None:
-    profile_path = tmp_path / 'character_profile.json'
-    long_text = '你是测试版夏目蓝。请保持稳定语气。' * 10
-    profile_path.write_text(json.dumps({'instruction_cn': long_text}, ensure_ascii=False), encoding='utf-8')
-    monkeypatch.setenv('NATSUME_CHARACTER_PROFILE_PATH', str(profile_path))
-    _CHARACTER_PROFILE_CACHE.clear()
+def test_prompt_builder_helpers_prod_load_compiled_soul_from_env(tmp_path, monkeypatch) -> None:
+    soul_path = tmp_path / 'Soul.md'
+    soul_path.write_text(
+        "\n".join(
+            [
+                "## 一、基本角色档案",
+                "| 属性 | 信息 |",
+                "|------|------|",
+                "| 中文名 | 新海 天 |",
+                "| 学校 | 白泉学园 一年级生 |",
+                "| 关系 | 新海翔（哥哥）的亲妹妹 |",
+                "",
+                "## 三、核心性格",
+                "- 活泼",
+                "- 爱撒娇",
+                "",
+                "## 四、与“哥哥”关系模式",
+                "- 默认称呼：哥哥",
+                "- 会自己跑过来黏着你",
+                "",
+                "## 五、AI伴侣语气风格",
+                "- 说话节奏快，但有温度",
+                "### 禁忌风格",
+                "- 不做病娇控制欲",
+                "",
+                "## 八、一句话总纲",
+                "> 新海天是一个外向活泼、爱黏哥哥的 AI 伴侣。",
+            ]
+        ),
+        encoding='utf-8',
+    )
+    monkeypatch.setenv('HOST_SOUL_MD_PATH', str(soul_path))
 
-    text = load_character_profile('ja')
+    compiled = load_compiled_soul(force=True)
 
-    assert '测试版夏目蓝' in text
-    assert '稳定语气' in text
+    assert '新海 天' in compiled.identity_core
+    assert '新海天是一个外向活泼' in compiled.runtime_compact_text
+    assert any('病娇控制欲' in item for item in compiled.taboo_rules)
 
 
 

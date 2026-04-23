@@ -10,6 +10,7 @@ from host_brain.app.dependencies import (
     get_session_tactic_ledger_store,
     get_session_topic_ledger_store,
 )
+from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.core.soft_fail import soft_fail
 
 _logger = logging.getLogger("Natsume.conversation.writer")
@@ -28,6 +29,9 @@ def record_user_turn(
     if not str(session_id or "").strip() or not str(content or "").strip():
         return
     normalized_content = str(content)
+    merged_metadata = dict(metadata or {})
+    with soft_fail("conversation.record_user_turn.soul_metadata", fallback=None):
+        merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
     with soft_fail("conversation.record_user_turn", fallback=None):
         turn = get_conversation_turn_store().append_generated(
             session_id=session_id,
@@ -37,7 +41,7 @@ def record_user_turn(
             content=normalized_content,
             ts_ms=int(ts_ms or int(time.time() * 1000)),
             lang=lang,
-            metadata=metadata,
+            metadata=merged_metadata or None,
         )
         _logger.info(
             "[%s] conversation_record role=user turn_index=%s session_id=%s content_chars=%s",
@@ -62,6 +66,9 @@ def record_assistant_turn(
     if not str(session_id or "").strip() or not str(content or "").strip():
         return
     normalized_content = str(content)
+    merged_metadata = dict(metadata or {})
+    with soft_fail("conversation.record_assistant_turn.soul_metadata", fallback=None):
+        merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
     with soft_fail("conversation.record_assistant_turn", fallback=None):
         turn = get_conversation_turn_store().append_generated(
             session_id=session_id,
@@ -71,7 +78,7 @@ def record_assistant_turn(
             content=normalized_content,
             ts_ms=int(ts_ms or int(time.time() * 1000)),
             lang=lang,
-            metadata=metadata,
+            metadata=merged_metadata or None,
         )
         _logger.info(
             "[%s] conversation_record role=assistant turn_index=%s session_id=%s content_chars=%s",
@@ -91,7 +98,7 @@ def record_assistant_turn(
                 answer_style=str(plan_payload.get("response_goal") or plan_payload.get("tactic_family") or "").strip(),
                 confidence=float(plan_payload.get("plan_confidence") or 0.0),
                 metadata={
-                    **dict(metadata or {}),
+                    **merged_metadata,
                     "interaction_move": str(plan_payload.get("interaction_move") or "").strip(),
                     "followup_kind": str(plan_payload.get("followup_kind") or "").strip(),
                     "restate_level": str(plan_payload.get("restate_level") or "").strip(),

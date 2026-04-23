@@ -40,7 +40,7 @@ from host_brain.app.context.persona_expression import (
     _apply_runtime_mode_to_persona_expression_hint,
     _apply_scene_awareness_to_persona_expression_hint,
 )
-from host_brain.app.chat_context_style import build_node_style_bindings, normalize_node_style_bindings
+from host_brain.app.chat_context_style import normalize_node_style_bindings
 from host_brain.app.chat_generation_payload import (
     build_chat_generation_prompt_payload,
     build_runtime_mode_flags,
@@ -222,7 +222,7 @@ def prepare_context(
     resolved_style_bindings = (
         normalize_node_style_bindings(style_bindings)
         if style_bindings is not None
-        else build_node_style_bindings(render_target_lang=render_target_lang)
+        else {}
     )
 
     generation_payload = build_chat_generation_prompt_payload(

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -394,6 +395,27 @@ class TestQQAdapterOutbound(unittest.TestCase):
         call_args = mock_post.call_args
         self.assertIn("send_group_msg", call_args[0][0])
         self.assertEqual(call_args[1]["json"]["group_id"], 111222)
+
+    @patch.dict(os.environ, {"EDGE_QQ_SHORT_TEXT_DIRECT_BYPASS_LEN": "32"}, clear=False)
+    @patch("edge_client.gateway.humanize_sender.humanize_send_sync", side_effect=AssertionError("humanize should be bypassed"))
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
+    def test_send_short_text_bypasses_humanize(
+        self,
+        mock_post: MagicMock,
+        _mock_humanize: MagicMock,
+    ) -> None:
+        """短文本主回复优先直发，不走拟人化分段。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"status": "ok", "retcode": 0}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        adapter = _adapter()
+        reply = self._make_reply(content="你是")
+        result = adapter.send_reply(reply)
+
+        self.assertTrue(result)
+        mock_post.assert_called_once()
 
     @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
     def test_send_image_file(self, mock_post: MagicMock) -> None:

@@ -6,7 +6,6 @@ from typing import Any, Mapping
 from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context,
     get_chat_runtime_render_target_lang,
-    resolve_prompt_context_style_row,
 )
 from host_brain.conversation import conversation_max_turns
 
@@ -14,7 +13,6 @@ from .affect_state import AffectStateBlock, resolve_affect_state
 from .conversation_interpretation import ConversationInterpretation, interpret_conversation
 from .drive_state import DriveStateBlock, resolve_drive_state
 from .relationship_state import RelationshipStateBlock, resolve_relationship_state
-from .soul_spec import SoulSpec, build_soul_spec
 from .tactic_ledger import TacticLedgerBlock
 from .topic_ledger import TopicLedgerBlock
 
@@ -95,7 +93,6 @@ class BudgetTrace:
 
 @dataclass(frozen=True)
 class PromptContextPlaneV4:
-    soul: SoulSpec = field(default_factory=SoulSpec)
     continuity: ContinuityBlock = field(default_factory=ContinuityBlock)
     topic_ledger: TopicLedgerBlockWrapper = field(default_factory=TopicLedgerBlockWrapper)
     tactic_ledger: TacticLedgerBlockWrapper = field(default_factory=TacticLedgerBlockWrapper)
@@ -127,12 +124,10 @@ class ContextAssembler:
             get_conversation_turn_store,
             get_session_topic_ledger_store,
         )
-        from host_brain.app.prompt_builder_utils import _build_character_dynamic_patch  # noqa: PLC0415
         from host_brain.persona.reply_plan import build_reply_plan  # noqa: PLC0415
 
         prompt_context = get_chat_runtime_prompt_context(runtime_payload)
         render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
-        node_style = resolve_prompt_context_style_row(prompt_context, node_id=node_id)
         request_payload = dict(runtime_payload.get("request") or {})
         request_id = str(request_payload.get("request_id") or "").strip()
         session_id = str(request_payload.get("session_id") or "").strip()
@@ -141,21 +136,6 @@ class ContextAssembler:
         merged_emotion_context = dict(runtime_payload.get("emotion_context") or {})
         emotion_context = dict(dict(runtime_payload.get("emotion") or {}).get("state") or {})
         effective_emotion_context = merged_emotion_context or emotion_context
-        emotion_tag = str(effective_emotion_context.get("emotion_tag") or "").strip().upper()
-        is_holiday = bool(runtime_payload.get("is_holiday") or prompt_context.get("is_holiday"))
-        holiday_name = str(runtime_payload.get("holiday_name") or prompt_context.get("holiday_name") or "").strip()
-
-        soul = build_soul_spec(
-            render_target_lang=render_target_lang,
-            style_instruction=str(node_style.get("style_instruction") or node_style.get("instruction") or "").strip(),
-            style_citation=str(node_style.get("citation") or "").strip(),
-            character_dynamic_patch=_build_character_dynamic_patch(
-                emotion_tag=emotion_tag,
-                is_holiday=is_holiday,
-                holiday_name=holiday_name,
-                render_target_lang=render_target_lang,
-            ),
-        )
 
         continuity = ContinuityBlock()
         current_turn_index: int | None = None
@@ -284,7 +264,6 @@ class ContextAssembler:
         )
 
         return PromptContextPlaneV4(
-            soul=soul,
             continuity=continuity,
             topic_ledger=topic_ledger,
             tactic_ledger=tactic_ledger,
@@ -327,7 +306,6 @@ __all__ = [
     "PromptContextPlaneV4",
     "RelationshipBlock",
     "ReplyPlanBlock",
-    "SoulSpec",
     "TacticLedgerBlockWrapper",
     "TopicLedgerBlockWrapper",
     "assemble_prompt_context_plane",

@@ -6,59 +6,12 @@ import logging
 from typing import Any, Mapping
 
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
+from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.conversation.render import build_chat_messages
-from host_brain.app.prompt_template_store import (
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
-)
 
 _logger = logging.getLogger("Natsume.cortex_prompt_builder")
 
 CORTEX_NODE_ID = "cortex_orchestrator"
-
-
-def _get_style_correction_block(render_target_lang: str) -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return resolve_prompt_template_text("cortex_prompt_builder.style_correction.ja")
-    return resolve_prompt_template_text("cortex_prompt_builder.style_correction.cn")
-
-
-def _format_template_text(template_text: Any, **kwargs: Any) -> str:
-    text = str(template_text or "")
-    if not kwargs:
-        return text
-    try:
-        return text.format_map({str(key): "" if value is None else str(value) for key, value in kwargs.items()})
-    except Exception:
-        return text
-
-
-def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _normalize_template_lang(render_target_lang: str | None) -> str:
-    return "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
-
-
-def _resolve_localized_template_value(value: Any, *, render_target_lang: str | None = None) -> Any:
-    if not isinstance(value, Mapping):
-        return value
-    lang_key = _normalize_template_lang(render_target_lang)
-    if lang_key in value:
-        return value.get(lang_key)
-    if "zh" in value:
-        return value.get("zh")
-    if "ja" in value:
-        return value.get("ja")
-    return value
-
-
-def _build_relational_chat_node_role(*, render_target_lang: str) -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return "役割：夏目藍本人として、短い関係会話に自然な口語でそのまま返す。説明を広げすぎず、客服口調にもならない。"
-    return "角色：以夏目蓝本人身份直接短答当前关系闲聊，自然口语、少解释、不客服腔。"
 
 
 def _build_soul_section_title(*, render_target_lang: str) -> str:
@@ -90,10 +43,6 @@ def build_cortex_prompt(
     )
     from host_brain.app.relational_chat_detector import detect_relational_chat_topic  # noqa: PLC0415
     from host_brain.app.chat_runtime_input import build_chat_runtime_input  # noqa: PLC0415
-    from host_brain.app.prompt_builder import (  # noqa: PLC0415
-        _build_current_local_time_context,
-        _build_node_role_instruction,
-    )
     from host_brain.integrations.llm_helpers import adjust_gen_params_for_emotion  # noqa: PLC0415
 
     emotion_context = emotion_context or {}
@@ -134,54 +83,16 @@ def build_cortex_prompt(
         history_max_turns=(6 if is_relational_chat else None),
         allow_older_summary=(not is_relational_chat),
     )
-
+    compiled_soul = get_compiled_soul()
     _soul_text = str(
-        context_plane.soul.compact_text if is_relational_chat else context_plane.soul.full_text
+        compiled_soul.runtime_compact_text if is_relational_chat else compiled_soul.runtime_full_text
     ).strip()
-
-    _node_role = (
-        _build_relational_chat_node_role(render_target_lang=render_target_lang)
-        if is_relational_chat
-        else _build_node_role_instruction(
-            CORTEX_NODE_ID,
-            render_target_lang=render_target_lang,
-        )
-    )
-    _section_templates = _load_template_mapping("cortex_prompt_builder.sections")
 
     _parts = []
     if _soul_text:
         _parts.append(
             _build_soul_section_title(render_target_lang=render_target_lang) + _soul_text
         )
-    if not is_relational_chat:
-        _time_context_text = _build_current_local_time_context(
-            render_target_lang=render_target_lang,
-            line_kind="full",
-        )
-        if _time_context_text:
-            _parts.append(
-                _format_template_text(
-                    _resolve_localized_template_value(
-                        _section_templates.get("current_time_title"),
-                        render_target_lang=render_target_lang,
-                    )
-                    or "【当前本地时间】\n"
-                )
-                + _time_context_text
-            )
-        _parts.append(_get_style_correction_block(render_target_lang))
-    _parts.append(_node_role)
-    continuity_summary = "" if is_relational_chat else str(context_plane.continuity.summary or "").strip()
-    if continuity_summary:
-        continuity_title = _format_template_text(
-            _resolve_localized_template_value(
-                _section_templates.get("continuity_summary_title"),
-                render_target_lang=render_target_lang,
-            )
-            or "【更早对话摘要】\n"
-        )
-        _parts.append(continuity_title + continuity_summary)
     _reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
     _affect_summary = str(_reply_plan.get("affect_summary") or "").strip()
     if _affect_summary:
@@ -192,23 +103,13 @@ def build_cortex_prompt(
     _reply_contract = str(_reply_plan.get("reply_contract") or "").strip()
     if _reply_contract:
         _parts.append("【本轮回应动作】\n" + _reply_contract)
-    turn_contexts = [str(section or "").strip() for section in list(context_plane.intent.turn_context_sections or ()) if str(section or "").strip()]
-    if turn_contexts:
-        turn_context_title = _format_template_text(
-            _resolve_localized_template_value(
-                _section_templates.get("current_turn_context_title"),
-                render_target_lang=render_target_lang,
-            )
-            or "【当前轮上下文】\n"
-        )
-        _parts.append(turn_context_title + "\n\n".join(turn_contexts))
     system_prompt = "\n\n".join(_parts)
 
     conversation_history_meta = {
         "turns_injected": int(context_plane.continuity.turns_injected or 0),
         "fetched_turns": int(context_plane.continuity.fetched_turns or 0),
         "older_turn_count": int(context_plane.continuity.older_turn_count or 0),
-        "summary_present": bool(continuity_summary),
+        "summary_present": bool(context_plane.continuity.summary),
         "oldest_ts_ms": context_plane.continuity.oldest_ts_ms,
         "newest_ts_ms": context_plane.continuity.newest_ts_ms,
         "skipped_corrupted_count": int(context_plane.continuity.skipped_corrupted_count or 0),

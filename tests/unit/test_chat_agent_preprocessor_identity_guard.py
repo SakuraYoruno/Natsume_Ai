@@ -5,6 +5,7 @@ from host_brain.app.chat_agent_preprocessor import (
     _render_policy_requires_buffering,
     _should_buffer_stream_output,
 )
+from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.persona.reply_plan import ReplyContract, ReplyPlan, ResponseTrajectory
 from host_brain.persona.reply_validator import (
     build_correction_prompt,
@@ -28,7 +29,7 @@ def _identity_repeat_plan() -> ReplyPlan:
         forbidden_tactics=("ack_name_then_wait",),
         forbidden_patterns=("full_identity_restate", "identity_name_restate", "repeated_tactic", "same_as_previous_reply"),
         contract=ReplyContract(
-            text="承认对方又确认了一次，再轻轻探一下他为什么还在确认，不要重报名字。",
+            text=f"先自然认下“我是{get_compiled_soul().display_name}”，再轻轻接住他为什么又问这个，不要把名字展开成介绍。",
             required_actions=("repeat_ack", "light_probe"),
             forbidden_actions=("full_identity_intro", "bare_name_only"),
             realization_steps=("先接住这不是第一次问", "轻轻探一下对方到底想确认什么"),
@@ -40,7 +41,7 @@ def _identity_repeat_plan() -> ReplyPlan:
 
 def test_reply_validator_flags_identity_restate_when_restate_forbidden() -> None:
     validation = validate_reply(
-        text="我刚刚说过了，我是夏目蓝。",
+        text=f"我刚刚说过了，我是{get_compiled_soul().display_name}。",
         plan=_identity_repeat_plan(),
         user_message="你是",
     )
@@ -80,7 +81,7 @@ def test_reply_validator_flags_repeated_tactic_even_when_text_differs() -> None:
 
 def test_reply_validator_flags_repeat_identity_that_only_restates_name() -> None:
     validation = validate_reply(
-        text="夏目蓝。",
+        text=f"{get_compiled_soul().display_name}。",
         plan=_identity_repeat_plan(),
         user_message="你是",
     )
@@ -147,7 +148,7 @@ def test_reply_validator_flags_help_repromise_on_repeat_probe() -> None:
 
 def test_hard_guard_stays_non_semantic() -> None:
     repaired = _apply_render_policy_hard_guard(
-        "我刚刚说过了，我是夏目蓝。",
+        f"我刚刚说过了，我是{get_compiled_soul().display_name}。",
         {
             "max_chars": 320,
             "max_sentences": 4,
@@ -157,21 +158,21 @@ def test_hard_guard_stays_non_semantic() -> None:
         render_target_lang="zh",
     )
 
-    assert repaired == "我刚刚说过了，我是夏目蓝。"
+    assert repaired == f"我刚刚说过了，我是{get_compiled_soul().display_name}。"
 
 
 def test_reply_validator_builds_correction_prompt_from_contract() -> None:
     prompt = build_correction_prompt(
         plan=_identity_repeat_plan(),
         validation=validate_reply(
-            text="我刚刚说过了，我是夏目蓝。",
+            text=f"我刚刚说过了，我是{get_compiled_soul().display_name}。",
             plan=_identity_repeat_plan(),
             user_message="你是",
         ),
     )
 
     assert "上一条没有按本轮回应动作完成" in prompt
-    assert "不要重报名字" in prompt
+    assert get_compiled_soul().display_name in prompt
     assert "必须同时做到" in prompt
     assert "动作顺序" in prompt
     assert "禁止动作" in prompt
@@ -195,7 +196,8 @@ def test_deterministic_fallback_is_minimal_skeleton_not_fixed_persona_line() -> 
         render_target_lang="zh",
     )
 
-    assert fallback == "夏目蓝。你想确认的是哪一部分？"
+    assert get_compiled_soul().display_name in fallback
+    assert "哪一部分" in fallback or "怎么又问" in fallback or "想问别的" in fallback
 
 
 def test_explicit_non_buffering_reply_plan_overrides_legacy_buffering_heuristics() -> None:

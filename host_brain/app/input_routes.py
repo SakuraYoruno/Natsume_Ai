@@ -2313,6 +2313,9 @@ async def _deliver_gateway_reply(
     primary_msg_type = form_decision.primary.value
 
     wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_REPLY_WAIT_RESULT", default=False)
+    text_reply_async = _parse_bool_env("HOST_INPUT_GATEWAY_TEXT_REPLY_ASYNC", default=True)
+    if primary_msg_type == MsgType.TEXT.value and text_reply_async:
+        wait_result = False
     timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
     result = await post_gateway_reply(
         platform=platform,

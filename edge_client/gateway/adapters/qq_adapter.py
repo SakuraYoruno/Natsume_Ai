@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
+import os
 import re
 import time
 from pathlib import Path
@@ -44,6 +45,13 @@ _OB_MSG_TYPE_GROUP = "group"
 
 # 支持发送的消息类型
 _SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE})
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name) or str(default)).strip())
+    except (TypeError, ValueError):
+        return int(default)
 
 
 class QQAdapter(AbstractPlatformAdapter):
@@ -253,6 +261,35 @@ class QQAdapter(AbstractPlatformAdapter):
             except httpx.HTTPError as exc:
                 logger.error("QQAdapter: HTTP 请求失败: %s", exc)
                 return False
+
+        direct_bypass_len = max(
+            0,
+            _env_int("EDGE_QQ_SHORT_TEXT_DIRECT_BYPASS_LEN", 32),
+        )
+        normalized_text = str(reply.content or "").strip()
+        if (
+            direct_bypass_len > 0
+            and normalized_text
+            and "\n" not in normalized_text
+            and "\r" not in normalized_text
+            and len(normalized_text) <= direct_bypass_len
+        ):
+            started = time.monotonic()
+            ok = _send_one_segment(normalized_text)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            if ok:
+                logger.info(
+                    "QQAdapter: short text direct bypass len=%d elapsed=%dms",
+                    len(normalized_text),
+                    elapsed_ms,
+                )
+            else:
+                logger.warning(
+                    "QQAdapter: short text direct bypass failed len=%d elapsed=%dms",
+                    len(normalized_text),
+                    elapsed_ms,
+                )
+            return ok
 
         config = HumanizeSendConfig.from_env()
         send_result = humanize_send_sync(

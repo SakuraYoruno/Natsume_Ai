@@ -13,16 +13,15 @@ from host_brain.app.chat_runtime_input import (
     get_chat_runtime_prompt_context_validation,
     get_chat_runtime_emotion_snapshot,
     get_chat_runtime_emotion_state,
-    resolve_prompt_context_style_row,
     get_chat_runtime_render_target_lang,
     get_chat_runtime_retrieval,
     get_chat_runtime_skill_manifest,
     get_chat_runtime_user_message,
 )
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
+from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.app.prompt_builder_utils import (
     CHAT_INTENT_SOURCE_NODE_ID,
-    _build_character_dynamic_patch,
     _build_node_role_instruction,
     _contains_any_token,
     _format_template_text,
@@ -157,7 +156,8 @@ def render_node_generation_prompt(
     verifier_text = extract_node_narrative_text(runtime_payload, node_id="safety_verifier")
 
     context_plane = assemble_prompt_context_plane(node_id=node_id, runtime_payload=runtime_payload)
-    soul_text = _truncate_for_prompt(getattr(context_plane, "soul", None).full_text if getattr(context_plane, "soul", None) else "", limit=2600)
+    compiled_soul = get_compiled_soul()
+    soul_text = _truncate_for_prompt(compiled_soul.runtime_full_text, limit=2600)
     soul_block = (
         f"【人格核心】\n{soul_text}\n\n"
         if soul_text and (include_character_profile or include_style_block)

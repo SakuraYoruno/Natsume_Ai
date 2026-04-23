@@ -8,7 +8,6 @@ from .conversation_interpretation import (
     normalize_surface_group,
 )
 from .drive_state import DriveStateBlock, resolve_drive_state
-from .identity_source import load_character_profile, load_v5_style_instruction
 from .prompt_context_plane import (
     AffectBlock,
     BudgetTrace,
@@ -26,7 +25,7 @@ from .prompt_context_plane import (
     assemble_prompt_context_plane,
 )
 from .relationship_state import RelationshipStateBlock, build_relationship_summary, resolve_relationship_state
-from .soul_spec import SoulSpec, build_soul_spec
+from .soul_runtime import CompiledSoul, SoulCompiler, get_compiled_soul, load_compiled_soul
 from .tactic_ledger import SessionTacticLedgerStore, TacticLedgerBlock, TacticLedgerEntry, coerce_tactic_ledger_block
 from .topic_ledger import SessionTopicLedgerStore, TopicLedgerBlock, TopicLedgerEntry, coerce_topic_ledger_block
 
@@ -48,7 +47,8 @@ __all__ = [
     "ReplyPlanBlock",
     "SessionTacticLedgerStore",
     "SessionTopicLedgerStore",
-    "SoulSpec",
+    "CompiledSoul",
+    "SoulCompiler",
     "TacticLedgerBlock",
     "TacticLedgerBlockWrapper",
     "TacticLedgerEntry",
@@ -57,16 +57,15 @@ __all__ = [
     "TopicLedgerEntry",
     "assemble_prompt_context_plane",
     "build_affect_summary",
-    "build_soul_spec",
     "build_relationship_summary",
     "classify_assistant_answer_style",
     "classify_literal_topic",
     "coerce_conversation_interpretation",
     "coerce_tactic_ledger_block",
     "coerce_topic_ledger_block",
+    "get_compiled_soul",
     "interpret_conversation",
-    "load_character_profile",
-    "load_v5_style_instruction",
+    "load_compiled_soul",
     "normalize_surface_group",
     "resolve_affect_state",
     "resolve_drive_state",

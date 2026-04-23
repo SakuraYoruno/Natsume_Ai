@@ -13,13 +13,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+from pathlib import Path
 import threading
 from typing import Any, Awaitable, Callable, Mapping, TypeVar
 
 _logger = logging.getLogger("Natsume.startup")
 _AsyncT = TypeVar("_AsyncT")
+_SOUL_RUNTIME_STATE_PATH = Path(__file__).resolve().parents[1] / "data" / "runtime_soul_state.json"
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +402,80 @@ def warmup_graph_runtime() -> str:
         return f"DEGRADED: {exc}"
 
 
+def _load_runtime_soul_state() -> dict[str, Any]:
+    try:
+        if _SOUL_RUNTIME_STATE_PATH.exists():
+            return json.loads(_SOUL_RUNTIME_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _logger.warning("读取 runtime_soul_state 失败（忽略）: %s", exc)
+    return {}
+
+
+def _persist_runtime_soul_state(*, soul_id: str, source_path: str) -> None:
+    try:
+        _SOUL_RUNTIME_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _SOUL_RUNTIME_STATE_PATH.write_text(
+            json.dumps(
+                {
+                    "soul_id": str(soul_id or "").strip(),
+                    "source_path": str(source_path or "").strip(),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        _logger.warning("写入 runtime_soul_state 失败（忽略）: %s", exc)
+
+
+def _reset_short_term_continuity_for_soul_change(*, previous_soul_id: str, current_soul_id: str) -> str:
+    try:
+        from host_brain.app.dependencies import (  # noqa: PLC0415
+            get_ledger,
+        )
+
+        ledger = get_ledger()
+        with ledger._write_lock:
+            turn_deleted = int(ledger._conn.execute("DELETE FROM conversation_turn").rowcount or 0)
+            topic_deleted = int(ledger._conn.execute("DELETE FROM session_topic_state").rowcount or 0)
+            tactic_deleted = int(ledger._conn.execute("DELETE FROM session_tactic_ledger").rowcount or 0)
+            ledger._conn.commit()
+        detail = (
+            f"continuity reset for soul change "
+            f"{str(previous_soul_id or '').strip() or '-'} -> {str(current_soul_id or '').strip() or '-'} "
+            f"(turns={turn_deleted}, topics={topic_deleted}, tactics={tactic_deleted})"
+        )
+        _logger.warning(detail)
+        return detail
+    except Exception as exc:
+        _logger.warning("Soul 切换后的 continuity 重置失败（降级）: %s", exc)
+        return f"DEGRADED: {exc}"
+
+
+def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
+    normalized_current = str(soul_id or "").strip()
+    previous = _load_runtime_soul_state()
+    normalized_previous = str(previous.get("soul_id") or "").strip()
+    if normalized_current and not normalized_previous:
+        reset_detail = _reset_short_term_continuity_for_soul_change(
+            previous_soul_id="BOOTSTRAP",
+            current_soul_id=normalized_current,
+        )
+        _persist_runtime_soul_state(soul_id=normalized_current, source_path=source_path)
+        return reset_detail
+    if normalized_current and normalized_previous and normalized_current != normalized_previous:
+        reset_detail = _reset_short_term_continuity_for_soul_change(
+            previous_soul_id=normalized_previous,
+            current_soul_id=normalized_current,
+        )
+        _persist_runtime_soul_state(soul_id=normalized_current, source_path=source_path)
+        return reset_detail
+    _persist_runtime_soul_state(soul_id=normalized_current, source_path=source_path)
+    return "UNCHANGED"
+
+
 def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
     """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
     try:
@@ -409,6 +486,7 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
             get_routing_matrix,
             get_state_write_arbiter,
         )
+        from host_brain.app.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
         from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
 
         template_count = len(list_prompt_template_definitions())
@@ -417,6 +495,11 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
         get_intent_engine()
         get_state_write_arbiter()
         get_thalamus_agent()
+        compiled_soul = load_compiled_soul()
+        soul_runtime_state = _reconcile_runtime_soul_state(
+            soul_id=str(getattr(compiled_soul, "soul_id", "") or "").strip(),
+            source_path=str(getattr(compiled_soul, "source_path", "") or "").strip(),
+        )
 
         warmed_parts = [
             f"templates={template_count}",
@@ -425,6 +508,8 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
             "intent_engine=ready",
             "state_write_arbiter=ready",
             "thalamus=ready",
+            f"soul={compiled_soul.source_path}",
+            f"soul_state={soul_runtime_state}",
         ]
 
         if eager_persona:

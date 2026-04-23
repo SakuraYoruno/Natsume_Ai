@@ -8,11 +8,6 @@ from host_brain.app.cortex_prompt_builder import build_cortex_prompt
 
 def _plane() -> SimpleNamespace:
     return SimpleNamespace(
-        soul=SimpleNamespace(
-            full_text="不是 AI 助手。\n角色卡\n不是客服腔。\n风格手册",
-            compact_text="你是夏目蓝。24岁，弓张学园的国语教师兼美术部顾问。你不是 AI、助手或系统。\n说话温和克制、自然口语，像年轻但成熟的老师。不要客服腔、系统腔，也不要机械复读。",
-            citation="",
-        ),
         continuity=SimpleNamespace(
             recent_turns=[
                 {"role": "user", "content": "前一轮"},
@@ -103,6 +98,15 @@ def _plane() -> SimpleNamespace:
     )
 
 
+def _compiled_soul(*, compact: str | None = None, full: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        runtime_compact_text=compact
+        or "你是新海天。白泉学园一年级生，也是哥哥身边那个活泼黏人的妹妹。说话自然、热闹、会撒娇，但不要模板化甜言蜜语，也不要系统腔。",
+        runtime_full_text=full
+        or "【身份核心】\n你是新海天。白泉学园一年级生，哥哥的新海翔是你最重要的人。\n\n【语言风格】\n说话活泼、爱撒娇、嘴甜，但不用模板化甜言蜜语。",
+    )
+
+
 def test_build_cortex_prompt_returns_messages() -> None:
     with patch(
         "host_brain.app.chat_runtime_input.build_chat_runtime_input",
@@ -114,14 +118,14 @@ def test_build_cortex_prompt_returns_messages() -> None:
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
-        "host_brain.app.prompt_builder._build_node_role_instruction",
-        return_value="节点指令",
-    ), patch(
         "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
         side_effect=lambda payload, emotion_context: payload,
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
     ):
         messages, gen_params, _runtime_payload = build_cortex_prompt(
             user_message="你是谁",
@@ -134,13 +138,14 @@ def test_build_cortex_prompt_returns_messages() -> None:
 
     assert gen_params == {"temperature": 0.2}
     assert messages[0]["role"] == "system"
-    assert "你是夏目蓝。24岁，弓张学园的国语教师兼美术部顾问。" in messages[0]["content"]
-    assert "你不是 AI、助手或系统。" in messages[0]["content"]
-    assert "说话温和克制、自然口语" in messages[0]["content"]
+    assert "你是新海天。" in messages[0]["content"]
+    assert "【人格核心】" in messages[0]["content"]
+    assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
+    assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
+    assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" in messages[0]["content"]
+    assert "【更早对话摘要】" not in messages[0]["content"]
     assert "角色卡" not in messages[0]["content"]
     assert "风格手册" not in messages[0]["content"]
-    assert "【更早对话摘要】" not in messages[0]["content"]
-    assert "更早些时候，对方提到过昨天的事。" not in messages[0]["content"]
     assert messages[1:3] == [
         {"role": "user", "content": "前一轮"},
         {"role": "assistant", "content": "前一轮回复"},
@@ -148,9 +153,7 @@ def test_build_cortex_prompt_returns_messages() -> None:
     assert messages[3] == {"role": "user", "content": "你是谁"}
 
 
-def test_build_cortex_prompt_merges_turn_context_into_single_system_prompt() -> None:
-    plane = _plane()
-    plane.intent = SimpleNamespace(turn_context_sections=("【当前轮上下文】\n子 Agent 提示", "【计划】\n先接住对方。"))
+def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
     with patch(
         "host_brain.app.chat_runtime_input.build_chat_runtime_input",
         return_value={"runtime": "input"},
@@ -160,51 +163,15 @@ def test_build_cortex_prompt_merges_turn_context_into_single_system_prompt() -> 
     ), patch(
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.prompt_builder._build_node_role_instruction",
-        return_value="节点指令",
-    ), patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
-    ), patch(
-        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
-        return_value=plane,
-    ):
-        messages, _gen_params, _runtime_payload = build_cortex_prompt(
-            user_message="你是谁",
-            render_target_lang="zh",
-            person_id="p1",
-            session_id="sess",
-            request_id="req",
-            include_runtime_payload=True,
-        )
-
-    assert messages[0]["role"] == "system"
-    assert "【当前轮上下文】" in messages[0]["content"]
-    assert "子 Agent 提示" in messages[0]["content"]
-    assert "先接住对方。" in messages[0]["content"]
-    assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
-
-
-def test_build_cortex_prompt_keeps_full_assets_for_non_relational_chat() -> None:
-    with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.prompt_builder._build_node_role_instruction",
-        return_value="节点指令",
     ), patch(
         "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
         side_effect=lambda payload, emotion_context: payload,
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
     ):
         messages, _gen_params, _runtime_payload = build_cortex_prompt(
             user_message="今天有点累",
@@ -215,9 +182,9 @@ def test_build_cortex_prompt_keeps_full_assets_for_non_relational_chat() -> None
             include_runtime_payload=True,
         )
 
-    assert "角色卡" in messages[0]["content"]
-    assert "风格手册" in messages[0]["content"]
-    assert "【更早对话摘要】" in messages[0]["content"]
+    assert "【身份核心】" in messages[0]["content"]
+    assert "【语言风格】" in messages[0]["content"]
+    assert "【更早对话摘要】" not in messages[0]["content"]
 
 
 def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
@@ -231,14 +198,14 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
-        "host_brain.app.prompt_builder._build_node_role_instruction",
-        return_value="节点指令",
-    ), patch(
         "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
         side_effect=lambda payload, emotion_context: payload,
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
     ):
         _messages, _gen_params, runtime_payload = build_cortex_prompt(
             user_message="你是谁",
@@ -253,7 +220,7 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
         "turns_injected": 2,
         "fetched_turns": 2,
         "older_turn_count": 3,
-        "summary_present": False,
+        "summary_present": True,
         "oldest_ts_ms": 111,
         "newest_ts_ms": 222,
         "skipped_corrupted_count": 0,
@@ -284,15 +251,15 @@ def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> N
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}, "prompt_runtime_profile": "relational_chat:identity"},
     ) as light_builder, patch(
-        "host_brain.app.prompt_builder._build_node_role_instruction",
-        return_value="节点指令",
-    ), patch(
         "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
         side_effect=lambda payload, emotion_context: payload,
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
-    ) as assemble_plane:
+    ) as assemble_plane, patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
         messages, _gen_params, runtime_payload = build_cortex_prompt(
             user_message="你是",
             render_target_lang="zh",
@@ -309,12 +276,12 @@ def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> N
     assert messages[-1] == {"role": "user", "content": "你是"}
     assert runtime_payload["prompt_runtime_profile"] == "relational_chat:identity"
     assert "【更早对话摘要】" not in messages[0]["content"]
-    assert "角色：以夏目蓝本人身份直接短答当前关系闲聊" in messages[0]["content"]
+    assert "你是新海天。白泉学园一年级生" in messages[0]["content"]
     assert kwargs["history_max_turns"] == 6
     assert kwargs["allow_older_summary"] is False
 
 
-def test_build_cortex_prompt_uses_reply_contract_once_without_old_summaries() -> None:
+def test_build_cortex_prompt_uses_reply_contract_once() -> None:
     plane = _plane()
     plane.reply_plan = SimpleNamespace(
         state={
@@ -333,14 +300,14 @@ def test_build_cortex_prompt_uses_reply_contract_once_without_old_summaries() ->
         "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
         return_value={"gen_params": {"temperature": 0.2}},
     ), patch(
-        "host_brain.app.prompt_builder._build_node_role_instruction",
-        return_value="节点指令",
-    ), patch(
         "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
         side_effect=lambda payload, emotion_context: payload,
     ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=plane,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
     ):
         messages, _gen_params, _runtime_payload = build_cortex_prompt(
             user_message="你谁",
@@ -356,7 +323,4 @@ def test_build_cortex_prompt_uses_reply_contract_once_without_old_summaries() ->
     assert "【本轮回应动作】" in messages[0]["content"]
     assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
     assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
-    assert "旧的抽象说明" not in messages[0]["content"]
-    assert "旧的topic说明" not in messages[0]["content"]
-    assert "旧的策略说明" not in messages[0]["content"]
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]

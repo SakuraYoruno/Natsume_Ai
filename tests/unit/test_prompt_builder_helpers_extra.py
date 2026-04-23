@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from host_brain.app import prompt_builder as pb
-from host_brain.app.context import identity_source
+from host_brain.app.context.soul_runtime import load_compiled_soul
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.prompt_template_store import (
     PromptTemplateStore,
@@ -38,26 +38,52 @@ def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.Mo
     assert pb.infer_render_target_lang(user_message="こんにちは") == "ja"
 
 
-def test_character_profile_loader_handles_short_invalid_and_cached_payload(
+def test_compiled_soul_loader_handles_short_invalid_and_cached_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    profile_path = tmp_path / "character_profile.json"
-    identity_source._CHARACTER_PROFILE_CACHE.clear()
-
-    profile_path.write_text("{bad json", encoding="utf-8")
-    monkeypatch.setenv("NATSUME_CHARACTER_PROFILE_PATH", str(profile_path))
-    assert identity_source.load_character_profile("ja") == ""
-
-    long_text = "你是测试版夏目蓝，请保持稳定和自然的语气。" * 8
-    profile_path.write_text(
-        json.dumps({"instruction_cn": long_text}, ensure_ascii=False),
+    soul_path = tmp_path / "Soul.md"
+    soul_path.write_text(
+        "\n".join(
+            [
+                "## 一、基本角色档案",
+                "| 属性 | 信息 |",
+                "|------|------|",
+                "| 中文名 | 新海 天 |",
+                "| 学校 | 白泉学园 一年级生 |",
+                "| 关系 | 新海翔（哥哥）的亲妹妹 |",
+                "",
+                "## 三、核心性格",
+                "- 天然活泼",
+                "- 嘴甜爱撒娇",
+                "",
+                "## 四、与“哥哥”关系模式",
+                "- 默认称呼：哥哥",
+                "- 用调侃和热闹掩盖真正的依赖感",
+                "",
+                "## 五、AI伴侣语气风格",
+                "- 说话节奏快，但有温度",
+                "### 禁忌风格",
+                "- 不做病娇控制欲",
+                "",
+                "## 八、一句话总纲",
+                "> 新海天是一个外向活泼、爱黏哥哥的 AI 伴侣。",
+            ]
+        ),
         encoding="utf-8",
     )
-    identity_source._CHARACTER_PROFILE_CACHE.clear()
-    assert long_text in identity_source.load_character_profile("zh")
-    profile_path.write_text("{}", encoding="utf-8")
-    assert long_text in identity_source.load_character_profile("zh")
+    monkeypatch.setenv("HOST_SOUL_MD_PATH", str(soul_path))
+
+    compiled = load_compiled_soul(force=True)
+    assert "新海 天" in compiled.identity_core
+    assert "新海天是一个外向活泼" in compiled.runtime_compact_text
+
+    cached = load_compiled_soul()
+    assert cached is compiled
+
+    soul_path.write_text("## 一、基本角色档案\n| 属性 | 信息 |\n|------|------|\n| 中文名 | 改写版 新海 天 |\n", encoding="utf-8")
+    refreshed = load_compiled_soul(force=True)
+    assert "改写版 新海 天" in refreshed.identity_core
 
 
 def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
@@ -760,4 +786,3 @@ def test_render_node_generation_prompt_uses_self_reflection_template_override(
     )
 
     assert "自我叙事提示：只能说最近，不要说具体时长。" in prompt
-

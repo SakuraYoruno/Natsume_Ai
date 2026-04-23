@@ -681,8 +681,8 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # 聚合导入（P2-10 拆分后向后兼容）
 # ---------------------------------------------------------------------------
-# render_node_generation_prompt 已移至 prompt_builder_node.py
-from host_brain.app.prompt_builder_node import render_node_generation_prompt  # noqa: F401, E402
+# render_node_generation_prompt 已移至 node_generation_prompt.py
+from host_brain.app.node_generation_prompt import render_node_generation_prompt  # noqa: F401, E402
 
 # 工具函数已移至 prompt_builder_utils.py，此处重新导出以保持向后兼容
 from host_brain.app.prompt_builder_utils import (  # noqa: F401, E402

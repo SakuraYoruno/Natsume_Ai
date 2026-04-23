@@ -19,6 +19,7 @@ from host_brain.persona.reply_tactics import (
     realization_steps,
     tactic_key,
 )
+from host_brain.persona.soul_reply_surface import build_identity_reply_contract
 
 
 def _join_nonempty(parts: list[str]) -> str:
@@ -296,11 +297,45 @@ def _should_require_strict_validation(
 
     if user_stance in {"challenging", "rejecting"}:
         return True
-    if interaction_move in {"probe", "repair_needed", "long_repeat"}:
+    if interaction_move in {"repair_needed"}:
         return True
     if freshness == "long_gap_reopen":
         return True
-    if repeat_count >= 2:
+    if repeat_count >= 3:
+        return True
+    return False
+
+
+def _should_force_buffering(
+    *,
+    topic: str,
+    interpretation: ConversationInterpretation,
+    trajectory: ResponseTrajectory,
+    requires_validation: bool,
+) -> bool:
+    if not requires_validation:
+        return False
+
+    normalized_topic = str(topic or "").strip()
+    if normalized_topic not in _LOW_RISK_RELATIONAL_TOPICS:
+        return True
+
+    user_stance = str(interpretation.user_stance or "").strip().lower()
+    interaction_move = str(interpretation.interaction_move or "").strip().lower()
+    freshness = str(interpretation.freshness or "").strip().lower()
+    repeat_count = int(interpretation.repeat_question_count or 0)
+    trajectory_stage = str(trajectory.trajectory_stage or "").strip().lower()
+
+    # 低风险关系闲聊默认允许流式，只有真正容易跑偏的情况才强制缓冲。
+    if normalized_topic == "rejection":
+        return True
+    if user_stance in {"challenging", "rejecting"} and repeat_count >= 2:
+        return True
+    if interaction_move in {"repair_needed"}:
+        return True
+    if freshness == "long_gap_reopen" and repeat_count >= 1:
+        return True
+    if trajectory_stage == "late_repeat" and repeat_count >= 4:
         return True
     return False
 
@@ -385,6 +420,17 @@ def _build_reply_contract(
     variant = str(trajectory.tactic_variant or "").strip()
     required_actions, forbidden_actions = contract_action_sets(family=family)
     steps = realization_steps(family=family, variant=variant, render_target_lang=render_target_lang)
+    if trajectory.response_goal == "identify" and str(render_target_lang or "").strip().lower() != "ja":
+        return ReplyContract(
+            text=build_identity_reply_contract(
+                family=family,
+                variant=variant,
+                render_target_lang=render_target_lang,
+            ),
+            required_actions=required_actions,
+            forbidden_actions=forbidden_actions,
+            realization_steps=steps,
+        )
     if str(render_target_lang or "").strip().lower() == "ja":
         mapping = {
             "brief_name_only": "名前だけを短く返し、紹介文には広げない。",
@@ -525,7 +571,7 @@ def _build_identity_trajectory(
     followup_kind = "none"
     if family in {"ack_repeat_then_light_probe", "hold_name_then_open_floor", "soft_close_then_open_floor"}:
         followup_kind = "light_probe"
-    restate_level = "none" if family not in {"brief_name_only", "ack_name_then_wait", "name_only_then_pause"} else "name_only"
+    restate_level = "name_only"
     return family, variant, trajectory, restate_level, followup_kind
 
 
@@ -706,7 +752,7 @@ def _build_topic_trajectory_options(
         options: list[tuple[str, str, ResponseTrajectory, str, str]] = []
         for family, variant in ranked:
             followup_kind = "light_probe" if family in {"ack_repeat_then_light_probe", "hold_name_then_open_floor", "soft_close_then_open_floor"} else "none"
-            restate_level = "none" if family not in {"brief_name_only", "ack_name_then_wait", "name_only_then_pause"} else "name_only"
+            restate_level = "name_only"
             options.append((
                 family,
                 variant,
@@ -904,6 +950,12 @@ def _assemble_reply_plan(
         interpretation=interpretation,
         trajectory=trajectory,
     )
+    force_buffering = _should_force_buffering(
+        topic=topic,
+        interpretation=interpretation,
+        trajectory=trajectory,
+        requires_validation=requires_validation,
+    )
 
     return ReplyPlan(
         primary_topic=topic,
@@ -937,7 +989,7 @@ def _assemble_reply_plan(
         ),
         contract=contract,
         requires_validation=requires_validation,
-        force_buffering=requires_validation,
+        force_buffering=force_buffering,
         correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
         plan_confidence=plan_confidence,
         reason_tags=tuple(dict.fromkeys(reason_tags)),

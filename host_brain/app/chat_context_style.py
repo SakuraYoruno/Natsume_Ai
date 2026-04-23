@@ -6,10 +6,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any, Mapping
 
-from host_brain.app.context.identity_source import load_v5_style_instruction
 from host_brain.app.dependencies import get_ledger
 from host_brain.app.graph_config_builder import CHAT_DIRECT_NODE_ID
 
@@ -39,26 +37,6 @@ def normalize_node_style_bindings(
 
 def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[str, dict[str, Any]]:
     resolved_render_lang = str(render_target_lang or "").strip().lower()
-
-    # ── Phase XIII v5 优先：从蒸馏产物直接读取风格指导文本 ──
-    v5_instruction = load_v5_style_instruction(resolved_render_lang)
-    if v5_instruction:
-        v5_entry = {
-            "canon_id": f"natsume_ai_{'ja' if resolved_render_lang == 'ja' else 'cn'}_v5",
-            "version": 5,
-            "hash": "",
-            "tone_only": True,
-            "unsafe_as_fact": True,
-            "style_instruction": v5_instruction,
-            "citation": f"style_canon:v5_distilled:{'ja' if resolved_render_lang == 'ja' else 'cn'}",
-        }
-        return {
-            "cortex_orchestrator": v5_entry,
-            "core_reasoner_primary": v5_entry,
-            "core_reasoner_secondary": v5_entry,
-            CHAT_DIRECT_NODE_ID: v5_entry,
-            "renderer_ja_c_style": v5_entry,
-        }
 
     # ── Canonical v5 source ──
     style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
