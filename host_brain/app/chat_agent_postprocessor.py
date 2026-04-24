@@ -42,32 +42,6 @@ async def _post_speak_sentence(
         _logger.debug("[%s] P7 sentence TTS failed (non-critical): %s", request_id, exc)
 
 
-def apply_response_intelligence_safe(
-    *,
-    request_id: str,
-    user_message: str,
-    narrative: str,
-    emotion_context: Dict[str, Any],
-    bond_summary: Dict[str, Any] | None,
-    render_target_lang: str,
-    allow_rewrite: bool,
-) -> tuple[str, dict[str, Any]]:
-    """安全调用 apply_response_intelligence，降级时返回原始 narrative。"""
-    try:
-        from host_brain.app.intelligent_runtime import apply_response_intelligence
-        return apply_response_intelligence(
-            request_id=request_id,
-            user_message=user_message,
-            narrative=narrative,
-            emotion_context=emotion_context,
-            bond_summary=bond_summary,
-            render_lang=render_target_lang,
-            allow_rewrite=allow_rewrite,
-        )
-    except Exception as exc:
-        return narrative, {"reflection": {"status": "DEGRADED", "reason_code": str(exc)[:100]}}
-
-
 def scrub_pii_egress(narrative: str) -> tuple[str, dict[str, Any]]:
     """PII 出口检查，返回（净化后文本, pii_egress_stats）。"""
     pii_egress_stats: dict[str, Any] = {}

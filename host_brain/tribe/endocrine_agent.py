@@ -92,7 +92,7 @@ class EndocrineAgent:
             try:
                 _limbic = get_limbic_agent()
                 if hasattr(_limbic, "drive_emotion_metabolism"):
-                    _stress_intensity = (_cortisol - 0.65) * 1.43  # 0.65→0, 0.95→0.43
+                    _stress_intensity = max(0.01, (_cortisol - 0.65) * 1.43)
                     _limbic.drive_emotion_metabolism(
                         valence=round(-_stress_intensity * 0.45, 4),
                         arousal=round(_stress_intensity * 0.30, 4),

@@ -112,7 +112,7 @@ def test_chat_immune_gate_writes_audit_log(monkeypatch) -> None:
     assert latest["request_body"].message == "hello"
 
 
-def test_chat_phatic_fastpath_returns_immediate_sse_and_skips_handle_chat(monkeypatch) -> None:
+def test_chat_phatic_requests_now_delegate_to_handle_chat(monkeypatch) -> None:
     called = {"value": False}
 
     async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
@@ -134,18 +134,12 @@ def test_chat_phatic_fastpath_returns_immediate_sse_and_skips_handle_chat(monkey
     commit = _extract_commit_event(response.text)
 
     assert response.status_code == 200
-    assert called["value"] is False
+    assert called["value"] is True
     assert commit["decision"] == "APPROVE"
-    assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
-    assert_natsume_style(
-        user_message="在吗，过来抱抱我。",
-        reply=str(commit.get("narrative") or ""),
-        emotion_tag="EXHAUSTED",
-        bond_stage="FRIEND",
-    )
+    assert commit["request_id"] == "req-test"
 
 
-def test_chat_deep_companionship_fastpath_skips_handle_chat(monkeypatch) -> None:
+def test_chat_deep_companionship_requests_now_delegate_to_handle_chat(monkeypatch) -> None:
     called = {"value": False}
 
     async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
@@ -170,16 +164,17 @@ def test_chat_deep_companionship_fastpath_skips_handle_chat(monkeypatch) -> None
     commit = _extract_commit_event(response.text)
 
     assert response.status_code == 200
-    assert called["value"] is False
-    assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
-    assert "慢慢" in str(commit.get("narrative") or "") or "认真" in str(commit.get("narrative") or "")
+    assert called["value"] is True
+    assert commit["request_id"] == "req-test"
 
 
 def test_chat_gateway_fastpath_forces_chinese_render_target(monkeypatch) -> None:
     called = {"value": False}
+    captured: dict = {}
 
-    async def _fake_handle_chat(**_kwargs):  # noqa: ANN003
+    async def _fake_handle_chat(**kwargs):  # noqa: ANN003
         called["value"] = True
+        captured.update(kwargs)
 
         async def _events():
             yield 'data: {"phase":"COMMIT","decision":"APPROVE","request_id":"req-test"}\n\n'
@@ -200,7 +195,7 @@ def test_chat_gateway_fastpath_forces_chinese_render_target(monkeypatch) -> None
     commit = _extract_commit_event(response.text)
 
     assert response.status_code == 200
-    assert called["value"] is False
+    assert called["value"] is True
     assert commit["decision"] == "APPROVE"
-    assert commit["audit_refs"]["path"] == "chat_agent:sub=phatic_fastpath"
-    assert commit["audit_refs"]["render_target_lang"] == "zh"
+    assert str(captured["request_body"].input_source or "").upper() == "GATEWAY"
+    assert str(captured["request_body"].reply_channel or "").lower() == "qq"

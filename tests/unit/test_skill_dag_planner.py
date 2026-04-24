@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from host_brain.app.skill_dag_planner import build_skill_dag_plan, merge_plan_steps_with_dag
 
@@ -85,7 +85,7 @@ def test_build_skill_dag_plan_preserves_step_args_payload() -> None:
         {
             "step_index": 1,
             "route": "skill",
-            "target_id": "codex_codegen",
+            "target_id": "codex_worker",
             "description": "fix test",
             "task_description": "fix failing test",
             "allow_parallel": True,
@@ -110,3 +110,4 @@ def test_build_skill_dag_plan_preserves_step_args_payload() -> None:
     assert dag.nodes[0].args_payload["workspace_strategy"] == "runtime_repo"
     assert dag.nodes[0].args_payload["task"] == "fix failing test"
     assert merged_steps[0]["args_payload"]["workspace_strategy"] == "runtime_repo"
+

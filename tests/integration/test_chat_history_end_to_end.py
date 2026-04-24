@@ -81,17 +81,8 @@ def test_chat_history_end_to_end_recent_messages_and_session_isolation() -> None
     )
 
     with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
         "host_brain.app.prompt_builder._build_node_role_instruction",
         return_value="节点指令",
-    ), patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
     ), patch(
         "host_brain.app.dependencies._conversation_history",
         history,

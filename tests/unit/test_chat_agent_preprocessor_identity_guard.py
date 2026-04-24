@@ -9,6 +9,7 @@ from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.persona.reply_plan import ReplyContract, ReplyPlan, ResponseTrajectory
 from host_brain.persona.reply_validator import (
     build_correction_prompt,
+    build_semantic_rescue_seed,
     build_deterministic_reply_fallback,
     validate_reply,
 )
@@ -119,6 +120,116 @@ def test_reply_validator_flags_underanswered_first_boundary_reason() -> None:
     assert "boundary_reason_missing" in validation.reason_codes
 
 
+def test_reply_validator_accepts_natural_boundary_reason_surface() -> None:
+    plan = ReplyPlan(
+        primary_topic="motivation",
+        interaction_move="first_ask",
+        trajectory=ResponseTrajectory(
+            response_goal="boundary_reason",
+            tactic_family="short_boundary_then_reason",
+            tactic_variant="plain_reason",
+            trajectory_stage="first_turn",
+        ),
+        restate_level="brief_reason",
+        forbidden_patterns=("generic_assistant_phrasing",),
+        contract=ReplyContract(
+            text="像新海天顺嘴解释那样，先轻轻把“不算熟”说清，再给一句很日常的理由。"
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+    validation = validate_reply(
+        text="哥哥，也没熟到那种地步啦，不过看见了我也不会装作没看到。",
+        plan=plan,
+        user_message="你为什么要帮我，我们很熟吗",
+    )
+
+    assert "boundary_reason_missing" not in validation.reason_codes
+    assert "contract_actions_missing" not in validation.reason_codes
+
+
+def test_reply_validator_accepts_daily_reason_boundary_surface() -> None:
+    plan = ReplyPlan(
+        primary_topic="motivation",
+        interaction_move="first_ask",
+        trajectory=ResponseTrajectory(
+            response_goal="boundary_reason",
+            tactic_family="short_boundary_then_reason",
+            tactic_variant="plain_reason",
+            trajectory_stage="first_turn",
+        ),
+        restate_level="brief_reason",
+        forbidden_patterns=("generic_assistant_phrasing",),
+        contract=ReplyContract(
+            text="像新海天顺嘴解释那样，先轻轻把“不算熟”说清，再给一句很日常的理由。"
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+    validation = validate_reply(
+        text="嗯……虽然不算熟，但是顺路嘛。",
+        plan=plan,
+        user_message="你为什么要帮我，我们很熟吗",
+    )
+
+    assert validation.is_valid is True
+    assert validation.actual_tactic_family == "short_boundary_then_reason"
+
+
+def test_semantic_rescue_seed_for_boundary_uses_goal_not_fixed_sentence() -> None:
+    plan = ReplyPlan(
+        primary_topic="motivation",
+        interaction_move="first_ask",
+        trajectory=ResponseTrajectory(
+            response_goal="boundary_reason",
+            tactic_family="short_boundary_then_reason",
+            tactic_variant="plain_reason",
+            trajectory_stage="first_turn",
+        ),
+    )
+
+    seed = build_semantic_rescue_seed(plan=plan)
+
+    assert "不会装作没看到" not in seed
+    assert "关系还没那么近" in seed or "不算熟" in seed
+
+
+def test_semantic_rescue_seed_for_image_social_followup_deny_is_thread_specific() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_followup",
+        interaction_move="repair_needed",
+        trajectory=ResponseTrajectory(
+            response_goal="gentle_followup_reply",
+            tactic_family="soft_emotion_ack",
+            tactic_variant="backoff_hold",
+            trajectory_stage="followup",
+        ),
+    )
+
+    seed = build_semantic_rescue_seed(plan=plan)
+
+    assert "嘴硬否认" in seed
+    assert "台阶" in seed
+
+
+def test_semantic_rescue_seed_for_image_social_followup_why_is_thread_specific() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_followup",
+        interaction_move="reconfirm",
+        trajectory=ResponseTrajectory(
+            response_goal="gentle_followup_reply",
+            tactic_family="soft_emotion_ack",
+            tactic_variant="explain_read",
+            trajectory_stage="followup",
+        ),
+    )
+
+    seed = build_semantic_rescue_seed(plan=plan)
+
+    assert "很生活的话解释" in seed
+    assert "不要重讲图片内容" in seed
+
+
 def test_reply_validator_flags_help_repromise_on_repeat_probe() -> None:
     plan = ReplyPlan(
         primary_topic="help_commitment",
@@ -190,6 +301,178 @@ def test_reply_validator_marks_prompt_leak_as_unsafe() -> None:
     assert validation.safe_to_emit is False
 
 
+def test_reply_validator_marks_symbol_only_reply_as_unsafe() -> None:
+    validation = validate_reply(
+        text="（。",
+        plan=_identity_repeat_plan(),
+        user_message="hello",
+    )
+
+    assert validation.is_valid is False
+    assert "symbol_only_reply" in validation.reason_codes
+    assert validation.safe_to_emit is False
+
+
+def test_reply_validator_rejects_underanswered_phatic_wave() -> None:
+    plan = ReplyPlan(
+        primary_topic="greeting",
+        interaction_move="light_ack",
+        trajectory=ResponseTrajectory(
+            response_goal="phatic_reply",
+            tactic_family="phatic_wave",
+            tactic_variant="greeting",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text_plus_emoji",
+        secondary_response_form="emoji",
+        contract=ReplyContract(
+            text="先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+
+    validation = validate_reply(
+        text="（。",
+        plan=plan,
+        user_message="hello",
+    )
+
+    assert validation.is_valid is False
+    assert "symbol_only_reply" in validation.reason_codes or "underanswered" in validation.reason_codes
+
+
+def test_reply_validator_rejects_single_particle_phatic_wave() -> None:
+    plan = ReplyPlan(
+        primary_topic="greeting",
+        interaction_move="light_ack",
+        trajectory=ResponseTrajectory(
+            response_goal="phatic_reply",
+            tactic_family="phatic_wave",
+            tactic_variant="greeting",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text_plus_emoji",
+        secondary_response_form="emoji",
+        contract=ReplyContract(
+            text="先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+
+    validation = validate_reply(
+        text="呀。",
+        plan=plan,
+        user_message="hello",
+    )
+
+    assert validation.is_valid is False
+    assert "underanswered" in validation.reason_codes
+
+
+def test_reply_validator_rejects_underanswered_multimodal_answer() -> None:
+    plan = ReplyPlan(
+        primary_topic="screenshot_analysis",
+        interaction_move="probe",
+        trajectory=ResponseTrajectory(
+            response_goal="multimodal_answer",
+            tactic_family="observe_then_answer",
+            tactic_variant="screenshot_analysis",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        contract=ReplyContract(
+            text="先点到截图里的提示/界面，再给一句简短说明，不要只回“嗯”。",
+            required_actions=("visual_reference", "content_clause"),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+
+    validation = validate_reply(
+        text="嗯。",
+        plan=plan,
+        user_message="这是什么",
+    )
+
+    assert validation.is_valid is False
+    assert "underanswered" in validation.reason_codes
+    assert "multimodal_reference_missing" in validation.reason_codes or "contract_actions_missing" in validation.reason_codes
+
+
+def test_reply_validator_rejects_generic_multimodal_followup_when_core_observation_exists() -> None:
+    plan = ReplyPlan(
+        primary_topic="literal_description",
+        interaction_move="first_ask",
+        trajectory=ResponseTrajectory(
+            response_goal="multimodal_answer",
+            tactic_family="observe_then_answer",
+            tactic_variant="literal_description",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        multimodal={
+            "core_observation": "一张花的照片；花瓣颜色偏橙红",
+            "summary_for_chat": "用户当前更像是在让你先看看图里有什么。当前能确认到的核心内容是：一张花的照片；花瓣颜色偏橙红。",
+        },
+        contract=ReplyContract(
+            text="先点到图里看到的对象，再给一句简短说明，不要只回空壳句。",
+            required_actions=("visual_reference", "content_clause"),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+
+    validation = validate_reply(
+        text="我看到了这张图。你想让我先说图里有什么吗？",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert validation.is_valid is False
+    assert "multimodal_content_missing" in validation.reason_codes
+    assert "multimodal_generic_followup" in validation.reason_codes
+
+
+def test_deterministic_fallback_uses_multimodal_core_observation() -> None:
+    plan = ReplyPlan(
+        primary_topic="literal_description",
+        interaction_move="first_ask",
+        trajectory=ResponseTrajectory(
+            response_goal="multimodal_answer",
+            tactic_family="observe_then_answer",
+            tactic_variant="literal_description",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        multimodal={
+            "core_observation": "一张花的照片；花瓣颜色偏橙红",
+        },
+        contract=ReplyContract(
+            text="先点到图里看到的对象，再给一句简短说明，不要只回空壳句。",
+            required_actions=("visual_reference", "content_clause"),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+    )
+
+    fallback = build_deterministic_reply_fallback(
+        plan=plan,
+        render_target_lang="zh",
+    )
+
+    assert "花" in fallback
+    assert "你想让我先说图里有什么吗" not in fallback
+
+
 def test_deterministic_fallback_is_minimal_skeleton_not_fixed_persona_line() -> None:
     fallback = build_deterministic_reply_fallback(
         plan=_identity_repeat_plan(),
@@ -198,6 +481,232 @@ def test_deterministic_fallback_is_minimal_skeleton_not_fixed_persona_line() -> 
 
     assert get_compiled_soul().display_name in fallback
     assert "哪一部分" in fallback or "怎么又问" in fallback or "想问别的" in fallback
+
+
+def test_image_social_reply_requires_validation_and_blocks_underanswered_stub() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_reply",
+        interaction_move="first_ask",
+        trajectory=ResponseTrajectory(
+            response_goal="phatic_reply",
+            tactic_family="playful_wave",
+            tactic_variant="image_social",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        response_form_reason="image_social_reply",
+        multimodal={
+            "primary_modality": "image",
+            "core_observation": "委屈；一个动漫女孩正在哭，表情很委屈。",
+        },
+        contract=ReplyContract(
+            text="先接住这张图里的情绪，再顺着这个情绪回一句，不要解说画面，也不要挂固定开放问句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    validation = validate_reply(
+        text="唔。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert validation.is_valid is False
+    assert "underanswered" in validation.reason_codes
+    assert "phatic_ack_missing" in validation.reason_codes
+
+    fallback = build_deterministic_reply_fallback(
+        plan=plan,
+        render_target_lang="zh",
+    )
+
+    assert "唔" not in fallback
+    assert "委屈" in fallback or "怎么啦" in fallback
+
+
+def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
+    plan = ReplyPlan(
+        primary_topic="assistant_reply_followup",
+        interaction_move="clarify_reference",
+        trajectory=ResponseTrajectory(
+            response_goal="clarify_previous_reply",
+            tactic_family="explain_previous_reply",
+            tactic_variant="clarify_object",
+            trajectory_stage="followup",
+        ),
+        response_form="text",
+        interaction_thread={
+            "thread_kind": "assistant_reply_followup",
+            "source_topic": "assistant_reply",
+            "source_excerpt": "知道。",
+            "source_context_excerpt": "你知道吗",
+            "open": True,
+            "last_user_reaction": "ask_object",
+        },
+        contract=ReplyContract(
+            text="上一条助手回复前接的用户话是“你知道吗”。上一条助手回复是“知道。”。先接住对方是在追问上一句，再把上一句具体指代或意思补清楚。",
+            required_actions=("previous_reference", "content_clause"),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    validation = validate_reply(
+        text="唔。",
+        plan=plan,
+        user_message="知道什么",
+        previous_assistant_text="知道。",
+    )
+
+    assert validation.is_valid is False
+    assert validation.should_retry is False
+    assert "previous_reply_underanswered" in validation.reason_codes
+    assert "previous_reference_missing" in validation.reason_codes
+
+    fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
+    assert fallback != "我知道了。"
+    assert "刚才" in fallback
+    assert "你知道吗" in fallback
+    assert "知道" in fallback
+
+    rescue_seed = build_semantic_rescue_seed(plan=plan)
+    assert "你知道吗" in rescue_seed
+    assert "知道。" in rescue_seed
+
+
+def test_image_social_cute_fallback_uses_cute_branch_instead_of_generic_attachment_line() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_reply",
+        interaction_move="playful_ping",
+        trajectory=ResponseTrajectory(
+            response_goal="cute_image_reply",
+            tactic_family="cute_image_ack",
+            tactic_variant="cute_ping",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        response_form_reason="image_social_reply",
+        multimodal={
+            "primary_modality": "image",
+            "emotion_signals": ["可爱、卖萌"],
+            "core_observation": "可爱、卖萌；一张猫耳女孩的可爱表情图。",
+        },
+        contract=ReplyContract(
+            text="先接住这张图里的可爱和卖萌感，再顺着这个感觉回一句，不要解说画面。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    fallback = build_deterministic_reply_fallback(
+        plan=plan,
+        render_target_lang="zh",
+    )
+
+    assert "突然发这么一张图" not in fallback
+    assert any(token in fallback for token in ("可爱", "哄你", "撒娇"))
+
+
+def test_image_social_followup_deny_fallback_no_longer_collapses_to_hum_or_nothing() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_followup",
+        interaction_move="repair_needed",
+        trajectory=ResponseTrajectory(
+            response_goal="gentle_followup_reply",
+            tactic_family="soft_emotion_ack",
+            tactic_variant="backoff_hold",
+            trajectory_stage="followup",
+        ),
+        response_form="text",
+        response_form_reason="image_social_followup",
+        contract=ReplyContract(
+            text="先接住这是上一张图后的跟话，再顺着刚才那层情绪回一句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
+
+    assert fallback not in {"哼。", "没什么。", "唔。"}
+    assert any(token in fallback for token in ("多想", "当你只是", "刚才那张图"))
+
+
+def test_image_social_followup_why_fallback_explains_previous_read_instead_of_plain_hold() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_followup",
+        interaction_move="reconfirm",
+        trajectory=ResponseTrajectory(
+            response_goal="gentle_followup_reply",
+            tactic_family="soft_emotion_ack",
+            tactic_variant="explain_read",
+            trajectory_stage="followup",
+        ),
+        response_form="text",
+        response_form_reason="image_social_followup",
+        contract=ReplyContract(
+            text="先接住这是上一张图后的跟话，再顺着刚才那层情绪解释一句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
+
+    assert fallback not in {"哼。", "没什么。", "唔。"}
+    assert any(token in fallback for token in ("刚才那张图", "往那边想"))
+
+
+def test_deterministic_reply_fallback_prefers_cached_surface_text(monkeypatch) -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_followup",
+        interaction_move="repair_needed",
+        trajectory=ResponseTrajectory(
+            response_goal="gentle_followup_reply",
+            tactic_family="soft_emotion_ack",
+            tactic_variant="backoff_hold",
+            trajectory_stage="followup",
+        ),
+        response_form="text",
+        response_form_reason="image_social_followup",
+        contract=ReplyContract(
+            text="先接住这是上一张图后的跟话，再顺着刚才那层情绪回一句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=("generic_companioning",),
+        ),
+        correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    class _MemoryStoreStub:
+        def sample(self, *, key: str, exclude=None) -> str:  # noqa: ANN001
+            _ = key, exclude
+            return "哥哥，好嘛，那我就当自己刚才多想了一点。"
+
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_reply_surface_memory_store",
+        lambda: _MemoryStoreStub(),
+    )
+
+    fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
+
+    assert fallback == "哥哥，好嘛，那我就当自己刚才多想了一点。"
 
 
 def test_explicit_non_buffering_reply_plan_overrides_legacy_buffering_heuristics() -> None:

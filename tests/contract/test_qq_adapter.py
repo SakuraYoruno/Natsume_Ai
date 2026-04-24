@@ -500,6 +500,26 @@ class TestQQAdapterOutbound(unittest.TestCase):
         self.assertEqual(payload["message"][0]["type"], "record")
         self.assertTrue(payload["message"][0]["data"]["file"].startswith("file:///"))
 
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
+    def test_send_emoji_as_primary_reply(self, mock_post: MagicMock) -> None:
+        """EMOJI 主回复应作为正式可发送类型处理。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"status": "ok", "retcode": 0}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        adapter = _adapter()
+        reply = self._make_reply(
+            msg_type=MsgType.EMOJI,
+            content="😊",
+        )
+        result = adapter.send_reply(reply)
+
+        self.assertTrue(result)
+        payload = mock_post.call_args[1]["json"]
+        self.assertEqual(payload["message"][0]["type"], "text")
+        self.assertEqual(payload["message"][0]["data"]["text"], "😊")
+
     def test_unsupported_msg_type(self) -> None:
         """T-QQ-OUTBOUND-07: 不支持的消息类型返回 False。"""
         adapter = _adapter()

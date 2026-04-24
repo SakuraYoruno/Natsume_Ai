@@ -1,4 +1,4 @@
-"""任务规划代理（Phase XI 方案 4）。
+﻿"""任务规划代理（Phase XI 方案 4）。
 
 职责：对复杂请求做 ReAct 式任务分解——Reasoning + Acting 交替。
 设计：先规划步骤，再逐步执行，中间可追问用户。
@@ -183,17 +183,17 @@ RULE_ROUTE_MAP: dict[str, tuple[str, str]] = {
     "用中文说": ("delegate", "translate_agent"),
     "translate to": ("delegate", "translate_agent"),
     "how do you say": ("delegate", "translate_agent"),
-    # ── 代码 → codex_codegen skill ───────────────────────────────────────────
-    "帮我写代码": ("skill", "codex_codegen"),
-    "帮我写一段": ("skill", "codex_codegen"),
-    "帮我实现": ("skill", "codex_codegen"),
-    "写个函数": ("skill", "codex_codegen"),
-    "写个脚本": ("skill", "codex_codegen"),
-    "debug": ("skill", "codex_codegen"),
-    "报错": ("skill", "codex_codegen"),
-    "代码报错": ("skill", "codex_codegen"),
-    "怎么修复这个": ("skill", "codex_codegen"),
-    "语法错误": ("skill", "codex_codegen"),
+    # ── 代码 → codex_worker skill ───────────────────────────────────────────
+    "帮我写代码": ("skill", "codex_worker"),
+    "帮我写一段": ("skill", "codex_worker"),
+    "帮我实现": ("skill", "codex_worker"),
+    "写个函数": ("skill", "codex_worker"),
+    "写个脚本": ("skill", "codex_worker"),
+    "debug": ("skill", "codex_worker"),
+    "报错": ("skill", "codex_worker"),
+    "代码报错": ("skill", "codex_worker"),
+    "怎么修复这个": ("skill", "codex_worker"),
+    "语法错误": ("skill", "codex_worker"),
     # ── 任务进度查询 → task_progress（内置路由，无需 target_id）─────────────
     "任务进度": ("task_progress", ""),
     "执行进度": ("task_progress", ""),
@@ -523,3 +523,4 @@ class PlanningAgent:
             final_response="execute_plan_deprecated",
             elapsed_ms=0.0,
         )
+

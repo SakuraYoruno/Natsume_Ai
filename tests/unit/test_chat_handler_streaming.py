@@ -42,9 +42,11 @@ class _FakeIntentEngine:
 class _FakeThalamusAgent:
     def __init__(self) -> None:
         self.calls = 0
+        self.last_kwargs: dict[str, Any] = {}
 
     async def classify_and_compile_intent_draft(self, **kwargs) -> dict[str, Any]:  # noqa: ANN003
         self.calls += 1
+        self.last_kwargs = dict(kwargs)
         request_id = str(kwargs.get("request_id") or "req-test")
         user_message = str(kwargs.get("user_message") or "")
         session_id = str(kwargs.get("session_id") or f"session::{request_id}")
@@ -126,6 +128,44 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         remaining.append(_parse_sse_chunk(chunk))
 
     assert any(event.get("phase") == "COMMIT" for event in remaining)
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_forwards_multimodal_fields_to_thalamus(monkeypatch) -> None:
+    fake_thalamus = _FakeThalamusAgent()
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        request_id = str(kwargs.get("request_id") or "req-test")
+        yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": request_id}, ensure_ascii=False)}\n\n'
+
+    monkeypatch.setattr("host_brain.app.chat_handler.get_thalamus_agent", lambda: fake_thalamus)
+    monkeypatch.setattr("host_brain.app.chat_handler.get_intent_engine", lambda: _FakeIntentEngine())
+    monkeypatch.setattr(
+        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
+        _fake_cortex_orchestrator_sse_generator,
+    )
+
+    response = await handle_chat(
+        request_body=ChatRequest(
+            message="这是什么",
+            attachments=[{"type": "image", "remote_url": "https://example.com/screen.png"}],
+            multimodal_observations={
+                "summary_for_chat": "用户发来一张截图，更像是在问界面上这段提示是什么意思。",
+                "artifact_type": "screenshot",
+                "visible_text": "错误提示",
+            },
+        ),
+        request=_build_request(),
+        metrics=_DummyMetrics(),
+    )
+
+    body_iter = response.body_iterator
+    await body_iter.__anext__()
+    await body_iter.__anext__()
+
+    assert fake_thalamus.calls == 1
+    assert fake_thalamus.last_kwargs["attachments"][0]["type"] == "image"
+    assert fake_thalamus.last_kwargs["multimodal_observations"]["artifact_type"] == "screenshot"
 
 
 def test_resolve_governor_executor_workers_defaults_to_four(monkeypatch) -> None:

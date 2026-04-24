@@ -183,7 +183,7 @@
       shared_memories_line: '- shared_memories: {memory_lines}'
       memory_style_line: '- memory_style_guide: {shared_memory_hint}'
       forbidden_line: '- forbidden_expressions: {forbidden_patterns}'
-- template_id: chat_agent.minimal_fallback.codex_codegen
+- template_id: chat_agent.minimal_fallback.codex_worker
   category: fallback
   scope: chat_agent
   locale: '*'
@@ -278,7 +278,7 @@
     recent_turn_direct:
       zh: 我在。刚才那句，我换个更准一点的说法。
       ja: ええ、います。さっきの言い方を、もう少しだけ言い直します。
-    codex_codegen:
+    codex_worker:
       zh: 代码这一步我先替你收住，再把能直接看的部分交给你。
       ja: コードのこの段は、いったんこちらで収めてから、そのまま見られる形で返します。
 - template_id: chat_agent.render_policy.min_sentence_placeholder
@@ -413,7 +413,7 @@
     failure:
       zh: "[子 Agent 执行结果]\n  执行状态：失败\n  Agent：{agent_id}\n  任务：{task}\n  错误：{error_text}\n{recovery_hint}  说明：请用夏目蓝自然、贴近人的语气告诉用户这次处理没有顺利完成。如果有补充信息，就把它整理成真正有帮助的下一步建议。不要提内部模块、Agent、JSON、草稿、降级这些系统词。\n"
       ja: "[子 Agent 実行結果]\n  実行状態：失敗\n  Agent：{agent_id}\n  タスク：{task}\n  エラー：{error_text}\n{recovery_hint}  説明：今回はうまく通らなかったことを、夏目藍らしい自然な言い方で相手に伝えてください。補足があるなら、次にどうすればいいかの助けになる形に整えること。内部モジュール、Agent、JSON、草稿、フォールバックといったシステム語は出さないでください。\n"
-    codex_codegen:
+    codex_worker:
       zh: "[子 Agent 执行结果]\n  Agent：{agent_id}\n  任务：{task}\n  结果：{result_text}\n  说明：这是技术处理中间结果。请整理成夏目蓝会直接对用户说的话，先给用户一个简洁结论，再自然展开。不要提 Agent、工具、草稿、JSON、ReAct、网关这些内部词，也不要复读内部术语。\n"
       ja: "[子 Agent 実行結果]\n  Agent：{agent_id}\n  タスク：{task}\n  結果：{result_text}\n  説明：これは技術処理の途中結果です。夏目藍がそのまま相手に話すような言い方へ整え、まず短く結論を伝え、そのあと自然に補ってください。Agent、ツール、草稿、JSON、ReAct、ゲートウェイなどの内部語は出さず、専門語のなぞり直しもしないでください。\n"
     recent_turn_direct:
@@ -548,7 +548,7 @@
         file_read: 第{step_index}步，文件内容我已经看过了。
         file_write: 第{step_index}步，文件我已经写好了。
         file_list: 第{step_index}步，目录内容我已经看过了。
-        codex_codegen: 第{step_index}步，代码这部分我已经替你理好了。
+        codex_worker: 第{step_index}步，代码这部分我已经替你理好了。
         intent_agent: 第{step_index}步，接下来怎么做我已经替你确认过了。
         __with_result: 第{step_index}步，{description_or_target} 这部分我已经处理好了。
         __default: 第{step_index}步，{description_or_target} 这部分我已经处理好了。
@@ -566,7 +566,7 @@
         file_read: 第{step_index}段階で、ファイルの中身は見てあります。
         file_write: 第{step_index}段階で、ファイルは書いてあります。
         file_list: 第{step_index}段階で、ディレクトリの中は見てあります。
-        codex_codegen: 第{step_index}段階で、コードまわりは整理してあります。
+        codex_worker: 第{step_index}段階で、コードまわりは整理してあります。
         intent_agent: 第{step_index}段階で、進め方は見てあります。
         __with_result: 第{step_index}段階で、{description_or_target} は片づいています。
         __default: 第{step_index}段階で、{description_or_target} は片づいています。

@@ -137,14 +137,14 @@
     delegated_result:
       zh:
         empty_visible_result:
-          codex_codegen: 我先把这一步收一收，再把能直接接住的结果给你。
+          codex_worker: 我先把这一步收一收，再把能直接接住的结果给你。
           default: 刚才那一下有点散，我先替你理一理，再接回来。
-        codex_codegen_prefix_template: 我替你顺一下：{agent_result}
+        codex_worker_prefix_template: 我替你顺一下：{agent_result}
       ja:
         empty_visible_result:
-          codex_codegen: いったんここを収めて、そのまま受け取れる形に直します。
+          codex_worker: いったんここを収めて、そのまま受け取れる形に直します。
           default: さっきの返しが少し散っていたので、いったん整えて返します。
-        codex_codegen_prefix_template: こちらで言い直すと、{agent_result}
+        codex_worker_prefix_template: こちらで言い直すと、{agent_result}
     task_progress:
       zh:
         no_summary: 现在还没有新进展值得我特地告诉你。
@@ -503,7 +503,7 @@
       route_started_voice_ack:
         translate_agent: 我先替你译一下。整理好就马上带回来。
         intent_agent: 我先把这件事理顺，稍等我一下。
-        codex_codegen: 我先去看代码，弄好就回来和你说。
+        codex_worker: 我先去看代码，弄好就回来和你说。
         plan: 我先把顺序拆开，马上接着往下做。
         default: 我已经在处理了，稍等我一下，弄好就回来。
       voice_summary:
@@ -515,7 +515,7 @@
       route_started_voice_ack:
         translate_agent: いま訳しています。まとまったらすぐ返しますね。
         intent_agent: いま筋道を立て直しています。少しだけ待っていてください。
-        codex_codegen: いまコードを見ています。まとまったらすぐ持ってきます。
+        codex_worker: いまコードを見ています。まとまったらすぐ持ってきます。
         plan: まず順番を整えています。少しだけ待っていてください。
         default: いま進めています。終わったらすぐ返します。
       voice_summary:
@@ -584,7 +584,7 @@
   default_content:
     system_prompt: "你是意图路由分类器。根据用户消息判断意图类型，输出单个 JSON 对象。\nroute 只能是以下之一：chat\
       \ / delegate / skill / task_progress / recent_turn\ndelegate 时 target_id 只能是：intent_agent\
-      \ / translate_agent / vision_agent\nskill 时 target_id 填技能名称（如 memory_store / codex_codegen）\n\
+      \ / translate_agent / vision_agent\nskill 时 target_id 填技能名称（如 memory_store / codex_worker）\n\
       严格要求：仅输出 JSON，不要 markdown。\n字段：{\"route\",\"target_id\",\"task\",\"confidence\"\
       ,\"reason\"}\nconfidence 为 0~1 的数字。"
     user_prompt_template: "族状态：{tribe_summary}\n用户消息：{text}\n输出 JSON："

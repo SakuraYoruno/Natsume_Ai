@@ -65,6 +65,7 @@ def test_load_compiled_soul_reads_markdown_and_derives_runtime_texts(
     assert any("病娇控制欲" in item for item in compiled.taboo_rules)
     assert any("哥哥！我来了" in item for item in compiled.signature_lines)
     assert "新海天是一个外向活泼" in compiled.runtime_compact_text
+    assert "AI 伴侣" not in compiled.runtime_compact_text
     assert "【身份核心】" in compiled.runtime_full_text
 
 
@@ -88,3 +89,39 @@ def test_context_assembler_keeps_state_blocks_without_soul() -> None:
     assert hasattr(plane, "reply_plan")
     assert not hasattr(plane, "soul")
     assert plane.intent.turn_context_sections == ("【当前轮上下文】\n子 Agent 结果",)
+
+
+def test_context_assembler_preserves_multimodal_observations() -> None:
+    runtime_payload = {
+        "request": {
+            "user_message": "这是什么意思",
+            "request_id": "req-mm",
+            "session_id": "sess-mm",
+            "person_id": "p1",
+            "attachment_summary": "用户发来一张截图，更像是在问界面上这段提示是什么意思。",
+        },
+        "render": {"target_lang": "zh"},
+        "prompt_context": {"payload": {"bond_summary": {"stage": "STRANGER"}}},
+        "emotion_context": {"emotion_tag": "CALM"},
+        "retrieval": {"status": "OK", "evidence_items": []},
+        "multimodal_input": {
+            "observations": {
+                "observed_types": ["image"],
+                "summary_for_chat": "截图里能看到一段界面提示文字。",
+                "core_observation": "界面提示：权限不足，请重试。",
+                "visible_text": "权限不足，请重试",
+                "artifact_type": "screenshot",
+                "primary_modality": "image",
+                "followup_required": False,
+            }
+        },
+    }
+
+    plane = assemble_prompt_context_plane(
+        node_id="cortex_orchestrator",
+        runtime_payload=runtime_payload,
+    )
+
+    assert plane.multimodal.state.summary_for_chat.startswith("截图里能看到")
+    assert plane.multimodal.state.artifact_type == "screenshot"
+    assert plane.reply_plan.state["response_form"] == "text"

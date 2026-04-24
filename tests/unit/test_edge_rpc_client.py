@@ -131,7 +131,10 @@ class TestPostVts(unittest.TestCase):
         return asyncio.run(coro)
 
     def test_post_vts_success(self):
+        import host_brain.channels.edge_rpc_client as edge_rpc
         from host_brain.channels.edge_rpc_client import post_vts
+
+        edge_rpc._EDGE_FAILURE_COOLDOWN_CACHE.clear()
 
         mock_response = MagicMock()
         mock_response.status_code = 200

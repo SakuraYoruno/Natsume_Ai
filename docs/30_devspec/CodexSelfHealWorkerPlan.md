@@ -1,5 +1,7 @@
 # Codex Self-Heal and Self-Evolve Plan
 
+> SUPERSEDED, 2026-04-24: historical design only. Runtime code has hard-cut to Codex Runtime v2 (`WorkOrder -> CodexRuntimeExecutor -> Studio/Plane -> ResultContract`) with `codex_self_heal` and `/internal/codex/immune/*`; legacy `codex_codegen`, `execute_codex_codegen`, `HOST_CODEX_SELF_HEAL_*`, and `/internal/codex/self_heal/*` paths are intentionally removed.
+
 ## Overview
 
 This document defines how `codex_codegen` evolves from a read-only answer generator into a durable worker that helps Natsume recover from failures and implement controlled improvements.

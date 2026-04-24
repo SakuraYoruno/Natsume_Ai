@@ -114,7 +114,7 @@ def test_judge_prompt_templates_override(monkeypatch) -> None:
 
     user_input = _build_judge_user_input(
         {
-            "codex_codegen": {
+            "codex_worker": {
                 "confidence": 0.9,
                 "summary": "code summary",
                 "risk_flags": [],
@@ -123,7 +123,7 @@ def test_judge_prompt_templates_override(monkeypatch) -> None:
     )
 
     assert _resolve_judge_system_prompt() == "custom judge prompt"
-    assert user_input.startswith("ARTS=1|DESC=- codex_codegen:")
+    assert user_input.startswith("ARTS=1|DESC=- codex_worker:")
     assert "|JSON={" in user_input
 
 
@@ -156,3 +156,4 @@ def test_builtin_handler_runtime_templates_are_clean() -> None:
     assert translate_templates["handler_error_summary"].startswith("翻译这边出了点问题")
     assert judge_templates["system_prompt_extra"].startswith("你是裁判专家")
     assert supervisor_templates["user_prompt_template"] == "场景类型：{scene_type}\n用户输入：{user_input}"
+

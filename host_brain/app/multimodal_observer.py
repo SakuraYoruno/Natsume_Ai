@@ -12,10 +12,8 @@ from host_brain.app.multimodal_observer_backends import (
     _attachment_kind_from_type,
     _coerce_int,
     _default_attachment_id,
-    build_image_conversation_hint,
     _guess_file_name,
     _guess_mime_type,
-    infer_image_reply_focus,
 )
 
 
@@ -226,27 +224,19 @@ class MultimodalObserver:
 
         observed_types = [item["type"] for item in normalized_attachments]
         primary_item = item_observations[0] if item_observations else {}
-        reply_focus = str(primary_item.get("reply_focus") or "").strip()
-        conversation_hint = str(primary_item.get("conversation_hint") or "").strip()
-        if not reply_focus and observed_types and observed_types[0] in {"image", "emoji"}:
-            reply_focus = infer_image_reply_focus(
-                user_text=user_text,
-                is_emoji=observed_types[0] == "emoji",
-                is_screenshot="screenshot" in list(primary_item.get("scene_tags") or []),
-            )
-            conversation_hint = build_image_conversation_hint(
-                reply_focus=reply_focus,
-                is_emoji=observed_types[0] == "emoji",
-                is_screenshot="screenshot" in list(primary_item.get("scene_tags") or []),
-            )
         summary_for_chat = self._compose_summary_for_chat(
             user_text=user_text,
             observed_types=observed_types,
             summary_parts=summary_parts,
             primary_item=primary_item,
-            reply_focus=reply_focus,
-            conversation_hint=conversation_hint,
         )
+        core_observation = self._derive_core_observation(
+            observed_types=observed_types,
+            primary_item=primary_item,
+            fallback_summary=summary_for_chat,
+        )
+        scene_tags = [str(tag).strip().lower() for tag in list(primary_item.get("scene_tags") or []) if str(tag).strip()]
+        artifact_type = "screenshot" if "screenshot" in scene_tags else str(primary_item.get("artifact_type") or "").strip().lower()
         overall_confidence = round(sum(confidence_values) / len(confidence_values), 4) if confidence_values else 0.0
         observations = {
             "request_id": request_id,
@@ -263,8 +253,9 @@ class MultimodalObserver:
             "primary_modality": observed_types[0] if observed_types else "text",
             "modalities": observed_types or ["text"],
             "emotion_signals": list(dict.fromkeys(emotion_signals)),
-            "reply_focus": reply_focus or None,
-            "conversation_hint": conversation_hint or None,
+            "core_observation": core_observation or None,
+            "visible_text": str(primary_item.get("visible_text") or primary_item.get("ocr_text") or "").strip() or None,
+            "artifact_type": artifact_type or None,
         }
         return {
             "mode": "sync",
@@ -284,62 +275,38 @@ class MultimodalObserver:
         observed_types: list[str],
         summary_parts: list[str],
         primary_item: dict[str, Any],
-        reply_focus: str,
-        conversation_hint: str,
     ) -> str:
         base_summary = "；".join(part for part in summary_parts if part)
         if not observed_types:
             return base_summary
-        primary_type = str(observed_types[0] or "").strip().lower()
         visual_summary = str(primary_item.get("visual_summary") or "").strip()
         visible_text = str(primary_item.get("visible_text") or primary_item.get("ocr_text") or "").strip()
         meme_intent = str(primary_item.get("meme_intent") or primary_item.get("tone_hint") or "").strip()
         summary_bits = [bit for bit in [meme_intent, visual_summary, visible_text] if bit]
         concise_observation = "；".join(summary_bits[:2]).strip() or base_summary
-        normalized_hint = conversation_hint.strip()
-        if primary_type in {"image", "emoji"}:
-            if reply_focus == "emoji_social_reply":
-                prefix = "用户只是发来一个表情包/贴图，没有明确提问。"
-                if normalized_hint.startswith(prefix):
-                    prefix = ""
-                return (
-                    prefix
-                    + normalized_hint
-                    + (
-                        f" 当前更稳的接法是先顺着它的语气回应；这张表情包更像是在表达：{meme_intent or concise_observation}。"
-                        if (meme_intent or concise_observation)
-                        else ""
-                    )
-                ).strip()
-            if reply_focus == "attachment_only_no_question":
-                prefix = "用户只是发来一张图片，没有明确提问。"
-                if normalized_hint.startswith(prefix):
-                    prefix = ""
-                return (
-                    prefix
-                    + normalized_hint
-                    + (
-                        f" 如果要点核心，也只用一句话提到：{concise_observation}。"
-                        if concise_observation
-                        else ""
-                    )
-                ).strip()
-            if reply_focus == "capability_check":
-                prefix = "用户当前是在确认我能不能看懂这张附件。"
-                if normalized_hint.startswith(prefix):
-                    prefix = ""
-                return (prefix + normalized_hint + (f" 可确认到的核心内容是：{concise_observation}。" if concise_observation else "")).strip()
-            if reply_focus == "meme_meaning":
-                prefix = "用户当前更像是在问这个表情包/图片想表达什么。"
-                if normalized_hint.startswith(prefix):
-                    prefix = ""
-                return (prefix + normalized_hint + (f" 目前更稳的理解是：{meme_intent or concise_observation}。" if (meme_intent or concise_observation) else "")).strip()
-            if reply_focus == "screenshot_analysis":
-                prefix = "用户当前更像是在让你根据截图解释界面或问题点。"
-                if normalized_hint.startswith(prefix):
-                    prefix = ""
-                return (prefix + normalized_hint + (f" 当前能确认到的关键内容是：{concise_observation}。" if concise_observation else "")).strip()
-        return base_summary
+        return concise_observation or base_summary
+
+    def _derive_core_observation(
+        self,
+        *,
+        observed_types: list[str],
+        primary_item: dict[str, Any],
+        fallback_summary: str,
+    ) -> str:
+        if not observed_types:
+            return ""
+        primary_type = str(observed_types[0] or "").strip().lower()
+        if primary_type not in {"image", "emoji"}:
+            return ""
+        bits = [
+            str(primary_item.get("meme_intent") or primary_item.get("tone_hint") or "").strip(),
+            str(primary_item.get("visual_summary") or "").strip(),
+            str(primary_item.get("visible_text") or primary_item.get("ocr_text") or "").strip(),
+        ]
+        concise = "；".join(bit for bit in bits if bit).strip()
+        if concise:
+            return concise
+        return str(fallback_summary or "").strip()
 
     def _normalize_attachments(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         normalized: list[dict[str, Any]] = []

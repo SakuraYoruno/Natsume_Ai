@@ -34,6 +34,40 @@ def _plane() -> SimpleNamespace:
                 }
             )
         ),
+        interaction_thread=SimpleNamespace(
+            state=SimpleNamespace(
+                as_dict=lambda: {
+                    "thread_kind": "identity_loop",
+                    "source_topic": "identity",
+                    "source_modality": "",
+                    "emotion_anchor": "",
+                    "open": True,
+                    "source_turn_index": 0,
+                    "last_assistant_move": "",
+                    "last_user_reaction": "",
+                    "turn_count": 2,
+                    "reason_tags": ["recent_identity_loop"],
+                }
+            )
+        ),
+        interaction_state=SimpleNamespace(
+            state=SimpleNamespace(
+                as_dict=lambda: {
+                    "current_topic": "identity",
+                    "interaction_move": "reconfirm",
+                    "user_stance": "probing",
+                    "followup_target": "identity",
+                    "ongoing_thread": "identity_loop",
+                    "affect": {"emotion_tag": "CALM"},
+                    "relationship": {"bond_stage": "STRANGER"},
+                    "drive": {"continuity_drive": 0.42},
+                    "topic_ledger": {"active_topics": ["identity"]},
+                    "tactic_ledger": {"recent_topics": ["identity"]},
+                    "perception_summary": "",
+                    "reason_tags": ["recent_identity_loop"],
+                }
+            )
+        ),
         topic_ledger=SimpleNamespace(
             state=SimpleNamespace(
                 as_dict=lambda: {
@@ -84,6 +118,21 @@ def _plane() -> SimpleNamespace:
                 }
             )
         ),
+        multimodal=SimpleNamespace(
+            state=SimpleNamespace(
+                summary_for_chat="",
+                as_dict=lambda: {
+                    "observed_types": [],
+                    "summary_for_chat": "",
+                    "visible_text": "",
+                    "artifact_type": "",
+                    "primary_modality": "",
+                    "emotion_signals": [],
+                    "confidence": 0.0,
+                    "followup_required": False,
+                },
+            )
+        ),
         intent=SimpleNamespace(turn_context_sections=()),
         reply_plan=SimpleNamespace(
             state={
@@ -109,18 +158,6 @@ def _compiled_soul(*, compact: str | None = None, full: str | None = None) -> Si
 
 def test_build_cortex_prompt_returns_messages() -> None:
     with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
-    ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
     ), patch(
@@ -136,12 +173,13 @@ def test_build_cortex_prompt_returns_messages() -> None:
             include_runtime_payload=True,
         )
 
-    assert gen_params == {"temperature": 0.2}
+    assert gen_params == {}
     assert messages[0]["role"] == "system"
     assert "你是新海天。" in messages[0]["content"]
     assert "【人格核心】" in messages[0]["content"]
     assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
     assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
+    assert "这轮是在接连续身份追问" in messages[0]["content"]
     assert "这轮不是第一次问身份，用短确认回应，不要完整自报。" in messages[0]["content"]
     assert "【更早对话摘要】" not in messages[0]["content"]
     assert "角色卡" not in messages[0]["content"]
@@ -154,21 +192,65 @@ def test_build_cortex_prompt_returns_messages() -> None:
 
 
 def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
+    plane = _plane()
+    plane.conversation_interpretation = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "literal_topic": "mood_reflection",
+                "interaction_move": "share_state",
+                "freshness": "new",
+                "user_stance": "open",
+                "repeat_question_count": 0,
+            }
+        )
+    )
+    plane.interaction_thread = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "thread_kind": "",
+                "source_topic": "",
+                "source_modality": "",
+                "emotion_anchor": "",
+                "open": False,
+                "source_turn_index": 0,
+                "last_assistant_move": "",
+                "last_user_reaction": "",
+                "turn_count": 0,
+                "reason_tags": [],
+            }
+        )
+    )
+    plane.interaction_state = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "current_topic": "mood_reflection",
+                "interaction_move": "share_state",
+                "user_stance": "open",
+                "followup_target": "",
+                "ongoing_thread": "",
+                "affect": {"emotion_tag": "CALM"},
+                "relationship": {"bond_stage": "STRANGER"},
+                "drive": {"continuity_drive": 0.42},
+                "topic_ledger": {"active_topics": ["mood_reflection"]},
+                "tactic_ledger": {"recent_topics": ["mood_reflection"]},
+                "perception_summary": "",
+                "reason_tags": [],
+            }
+        )
+    )
+    plane.reply_plan = SimpleNamespace(
+        state={
+            "affect_summary": "当前情绪平稳，语气自然收着。",
+            "relationship_summary": "你和对方还不熟，不要过度亲近。",
+            "reply_contract": "先接住对方在说自己有点累，再自然回应。",
+            "response_goal": "mood_reflection",
+            "tactic_family": "plain_hold",
+            "primary_topic": "mood_reflection",
+        }
+    )
     with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
-    ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
-        return_value=_plane(),
+        return_value=plane,
     ), patch(
         "host_brain.app.cortex_prompt_builder.get_compiled_soul",
         return_value=_compiled_soul(),
@@ -189,18 +271,6 @@ def test_build_cortex_prompt_uses_full_soul_for_non_relational_chat() -> None:
 
 def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
     with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
-    ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
     ), patch(
@@ -234,6 +304,8 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
         "user_stance": "probing",
         "repeat_question_count": 1,
     }
+    assert runtime_payload["interaction_thread"]["thread_kind"] == "identity_loop"
+    assert runtime_payload["interaction_state"]["ongoing_thread"] == "identity_loop"
     assert runtime_payload["topic_ledger"]["active_topics"] == ["identity"]
     assert "tactic_ledger" in runtime_payload
     assert runtime_payload["affect_state"]["emotion_tag"] == "CALM"
@@ -241,19 +313,190 @@ def test_build_cortex_prompt_exposes_conversation_history_meta() -> None:
     assert runtime_payload["drive_state"]["continuity_drive"] == 0.42
 
 
+def test_build_cortex_prompt_injects_image_social_thread_summary() -> None:
+    plane = _plane()
+    plane.conversation_interpretation = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "literal_topic": "emoji_social_followup",
+                "interaction_move": "repair_needed",
+                "freshness": "new",
+                "user_stance": "challenging",
+                "repeat_question_count": 0,
+            }
+        )
+    )
+    plane.interaction_thread = SimpleNamespace(
+        state=SimpleNamespace(
+            emotion_anchor="distress",
+            as_dict=lambda: {
+                "thread_kind": "image_social",
+                "source_topic": "emoji_social_reply",
+                "source_modality": "image",
+                "emotion_anchor": "distress",
+                "open": True,
+                "source_turn_index": 0,
+                "last_assistant_move": "image_social_ack",
+                "last_user_reaction": "deny",
+                "turn_count": 3,
+                "reason_tags": ["recent_image_social_assistant"],
+            },
+        )
+    )
+    plane.interaction_state = SimpleNamespace(
+        state=SimpleNamespace(
+            current_topic="emoji_social_followup",
+            interaction_move="repair_needed",
+            user_stance="challenging",
+            followup_target="emoji_social_reply",
+            ongoing_thread="image_social",
+            perception_summary="用户发来的是一张委屈风格的社交图片。",
+            as_dict=lambda: {
+                "current_topic": "emoji_social_followup",
+                "interaction_move": "repair_needed",
+                "user_stance": "challenging",
+                "followup_target": "emoji_social_reply",
+                "ongoing_thread": "image_social",
+                "affect": {"emotion_tag": "CALM"},
+                "relationship": {"bond_stage": "STRANGER"},
+                "drive": {"continuity_drive": 0.42},
+                "topic_ledger": {"active_topics": ["emoji_social_reply"]},
+                "tactic_ledger": {"recent_topics": ["emoji_social_reply"]},
+                "perception_summary": "用户发来的是一张委屈风格的社交图片。",
+                "reason_tags": ["ongoing_thread:image_social"],
+            },
+        )
+    )
+    plane.reply_plan = SimpleNamespace(
+        state={
+            "affect_summary": "当前情绪平稳，语气自然收着。",
+            "relationship_summary": "你和对方还不熟，不要过度亲近。",
+            "reply_contract": "先接住对方是在回刚才那张图，再顺着这层情绪接一句。",
+            "response_goal": "gentle_followup_reply",
+            "tactic_family": "soft_emotion_ack",
+            "primary_topic": "emoji_social_followup",
+        }
+    )
+
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=plane,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, _runtime_payload = build_cortex_prompt(
+            user_message="没有闹别扭啊",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "这句话是在接上一张社交图片" in messages[0]["content"]
+    assert "不要装作第一次听见" in messages[0]["content"]
+
+
+def test_build_cortex_prompt_uses_compact_lane_for_image_social_followup() -> None:
+    plane = _plane()
+    plane.conversation_interpretation = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "literal_topic": "emoji_social_followup",
+                "interaction_move": "repair_needed",
+                "freshness": "recent_repeat",
+                "user_stance": "challenging",
+                "repeat_question_count": 0,
+            }
+        )
+    )
+    plane.interaction_thread = SimpleNamespace(
+        state=SimpleNamespace(
+            as_dict=lambda: {
+                "thread_kind": "image_social",
+                "source_topic": "emoji_social_reply",
+                "source_modality": "image",
+                "emotion_anchor": "distress",
+                "open": True,
+                "source_turn_index": 0,
+                "last_assistant_move": "image_social_ack",
+                "last_user_reaction": "deny",
+                "turn_count": 3,
+                "reason_tags": ["recent_image_social_assistant"],
+            },
+        )
+    )
+    plane.interaction_state = SimpleNamespace(
+        state=SimpleNamespace(
+            current_topic="emoji_social_followup",
+            interaction_move="repair_needed",
+            user_stance="challenging",
+            followup_target="emoji_social_reply",
+            ongoing_thread="image_social",
+            perception_summary="用户发来的是一张委屈风格的社交图片。",
+            as_dict=lambda: {
+                "current_topic": "emoji_social_followup",
+                "interaction_move": "repair_needed",
+                "user_stance": "challenging",
+                "followup_target": "emoji_social_reply",
+                "ongoing_thread": "image_social",
+                "affect": {"emotion_tag": "CALM"},
+                "relationship": {"bond_stage": "STRANGER"},
+                "drive": {"continuity_drive": 0.42},
+                "topic_ledger": {"active_topics": ["emoji_social_reply"]},
+                "tactic_ledger": {"recent_topics": ["emoji_social_reply"]},
+                "perception_summary": "用户发来的是一张委屈风格的社交图片。",
+                "reason_tags": ["ongoing_thread:image_social"],
+            },
+        )
+    )
+    plane.reply_plan = SimpleNamespace(
+        state={
+            "affect_summary": "当前情绪平稳，语气自然收着。",
+            "relationship_summary": "保持自然分寸，但不用刻意拉开，顺着眼前这点情绪接住就好。",
+            "reply_contract": "先接住对方是在回刚才那张图，再顺着这层情绪接一句。",
+            "response_goal": "gentle_followup_reply",
+            "tactic_family": "soft_emotion_ack",
+            "primary_topic": "emoji_social_followup",
+        }
+    )
+    assemble_calls: list[dict[str, object]] = []
+
+    def _assemble(*args, **kwargs):
+        assemble_calls.append(dict(kwargs))
+        return plane
+
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        side_effect=_assemble,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(
+            compact="你是新海天。说话活泼自然，会顺着眼前的小情绪接住人。",
+            full="【身份核心】\n你是新海天。\n\n【语言风格】\n说话活泼、爱撒娇。",
+        ),
+    ):
+        messages, _gen_params, _runtime_payload = build_cortex_prompt(
+            user_message="没有闹别扭啊",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert len(assemble_calls) == 2
+    assert assemble_calls[0]["history_max_turns"] is None
+    assert assemble_calls[0]["allow_older_summary"] is True
+    assert assemble_calls[1]["history_max_turns"] == 6
+    assert assemble_calls[1]["allow_older_summary"] is False
+    assert "你是新海天。说话活泼自然，会顺着眼前的小情绪接住人。" in messages[0]["content"]
+    assert "【身份核心】" not in messages[0]["content"]
+
+
 def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> None:
     with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-    ) as full_builder, patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
-        return_value={"gen_params": {"temperature": 0.2}, "prompt_runtime_profile": "relational_chat:identity"},
-    ) as light_builder, patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
-    ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=_plane(),
     ) as assemble_plane, patch(
@@ -269,12 +512,10 @@ def test_build_cortex_prompt_uses_lightweight_payload_for_relational_chat() -> N
             include_runtime_payload=True,
         )
 
-    full_builder.assert_not_called()
-    light_builder.assert_called_once()
     assemble_plane.assert_called_once()
     _, kwargs = assemble_plane.call_args
     assert messages[-1] == {"role": "user", "content": "你是"}
-    assert runtime_payload["prompt_runtime_profile"] == "relational_chat:identity"
+    assert runtime_payload["request"]["user_message"] == "你是"
     assert "【更早对话摘要】" not in messages[0]["content"]
     assert "你是新海天。白泉学园一年级生" in messages[0]["content"]
     assert kwargs["history_max_turns"] == 6
@@ -291,18 +532,6 @@ def test_build_cortex_prompt_uses_reply_contract_once() -> None:
         }
     )
     with patch(
-        "host_brain.app.chat_runtime_input.build_chat_runtime_input",
-        return_value={"runtime": "input"},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.app.chat_payload_builder.run_build_chat_prompt_runtime_payload_lightweight",
-        return_value={"gen_params": {"temperature": 0.2}},
-    ), patch(
-        "host_brain.integrations.llm_helpers.adjust_gen_params_for_emotion",
-        side_effect=lambda payload, emotion_context: payload,
-    ), patch(
         "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
         return_value=plane,
     ), patch(
@@ -324,3 +553,41 @@ def test_build_cortex_prompt_uses_reply_contract_once() -> None:
     assert "当前情绪平稳，语气自然收着。" in messages[0]["content"]
     assert "你和对方还不熟，不要过度亲近。" in messages[0]["content"]
     assert [message["role"] for message in messages] == ["system", "user", "assistant", "user"]
+
+
+def test_build_cortex_prompt_injects_multimodal_summary_when_present() -> None:
+    plane = _plane()
+    plane.multimodal = SimpleNamespace(
+        state=SimpleNamespace(
+            summary_for_chat="截图里能看到一段界面提示文字。",
+            as_dict=lambda: {
+                "observed_types": ["image"],
+                "summary_for_chat": "截图里能看到一段界面提示文字。",
+                "visible_text": "权限不足，请重试",
+                "artifact_type": "screenshot",
+                "primary_modality": "image",
+                "emotion_signals": [],
+                "confidence": 0.8,
+                "followup_required": False,
+            },
+        )
+    )
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=plane,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, runtime_payload = build_cortex_prompt(
+            user_message="这是什么意思",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    assert "【附件观察】" in messages[0]["content"]
+    assert "截图里能看到一段界面提示文字。" in messages[0]["content"]
+    assert runtime_payload["multimodal"]["artifact_type"] == "screenshot"

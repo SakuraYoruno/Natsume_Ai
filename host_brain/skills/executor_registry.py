@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from host_brain.skills.impl.browser_executor import execute_browser_skill
+from host_brain.codex_runtime import execute_codex_runtime_payload
 from host_brain.skills.impl.desktop_executor import execute_desktop_skill
 from host_brain.skills.impl.desktop_note import execute_desktop_note
 from host_brain.skills.impl.diary_writer import execute_diary_writer
@@ -89,7 +90,7 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("browser", execute_browser_skill),
         ToolExecutorSpec("cursor", execute_ide_skill),
         ToolExecutorSpec("pycharm", execute_ide_skill),
-        ToolExecutorSpec("codex", execute_ide_skill),
+        ToolExecutorSpec("codex_runtime", execute_codex_runtime_payload),
         ToolExecutorSpec("open_file_in_editor", execute_ide_skill),
         ToolExecutorSpec("diary_writer", _with_context(execute_diary_writer)),
         ToolExecutorSpec("dream_generator", _with_context(execute_dream_generator)),

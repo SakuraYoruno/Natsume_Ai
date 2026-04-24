@@ -99,7 +99,7 @@ def test_chat_agent_minimal_fallback_defaults_are_not_internal_draft_style() -> 
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
 
     default_text = str(store.get_template("chat_agent.minimal_fallback.default")["resolved_content"] or "")
-    code_fallback_text = str(store.get_template("chat_agent.minimal_fallback.codex_codegen")["resolved_content"] or "")
+    code_fallback_text = str(store.get_template("chat_agent.minimal_fallback.codex_worker")["resolved_content"] or "")
 
     assert "内部草稿" not in default_text
     assert "整理成更清楚一点的说法" not in default_text
@@ -119,4 +119,5 @@ def test_runtime_template_defaults_include_input_and_qa_fallbacks() -> None:
     assert input_routes_defaults["ja"]["approve_empty"] == "ええ、受け取りました。すぐ取りかかります。"
     assert qa_defaults["default"] == "嗯…脑子有点转不过来，等我缓一下再回你。"
     assert qa_defaults["angry_or_frustrated"] == "我需要冷静一下…等会儿再好好说。"
+
 

@@ -6,8 +6,17 @@ from typing import Any
 
 from host_brain.app.context.soul_runtime import get_compiled_soul
 from host_brain.persona.soul_reply_surface import (
+    build_boundary_naturalization_hint,
+    build_boundary_fallback_text,
+    build_deterministic_primary_reply_text,
+    build_help_fallback_text,
+    build_help_naturalization_hint,
+    build_image_social_fallback_text,
+    build_image_social_naturalization_hint,
     build_identity_fallback_text,
     build_identity_naturalization_hint,
+    build_phatic_fallback_text,
+    build_repair_fallback_text,
 )
 from .reply_plan import ReplyPlan
 from .reply_tactics import canonical_tactic_signature, describe_tactic_signature, tactic_key
@@ -22,10 +31,27 @@ _ANXIETY_RE = re.compile(r"(不安|担心|还是担心|还是不安|还在担心
 _REPEAT_ACK_RE = re.compile(r"(刚才|已经|之前|前面|不是第一次|已经说过|已经告诉过|前面说过|早就说过|问过了|又问起这个|又问这个|怎么又问|都问我好几次|问我好几次)")
 _SOFT_CLOSE_RE = re.compile(r"(来回问|问过几次|一直问这个|总问这个|翻来覆去|来来回回|都问我好几次|问我好几次)")
 _CARE_ACK_RE = re.compile(r"(还在意|还是在意|还记着|还惦记|还放不下)")
-_BOUNDARY_REASON_RE = re.compile(r"(不熟|不是很熟|不算熟).*(只是|看见了|装作没看见|不会装作没看见)")
+_BOUNDARY_DISTANCE_RE = re.compile(r"(不熟|不是很熟|不算熟|没熟到那种地步|熟到那种地步)")
+_BOUNDARY_REASON_TAIL_RE = re.compile(r"(只是|看见了|看到了|装作没看见|装作没看到|不会装作没看见|不会装作没看到|没法装作没看见|没法装作没看到|当没看见|当没看到)")
+_MOTIVATION_REASON_TAIL_RE = re.compile(
+    r"(顺路|路过|碰上了|正好碰上|既然都碰上了|既然都看到了|总不能当没看见|总不能当没看到|总不能装作没看见|总不能装作没看到|也不能当没看见|也不能当没看到)"
+)
+_BOUNDARY_REASON_RE = re.compile(
+    r"(不熟|不是很熟|不算熟|没熟到那种地步|熟到那种地步).*(只是|看见了|看到了|装作没看见|装作没看到|不会装作没看见|不会装作没看到|没法装作没看见|没法装作没看到|当没看见|当没看到|顺路|路过|碰上了|正好碰上|既然都碰上了|既然都看到了|总不能当没看见|总不能当没看到|总不能装作没看见|总不能装作没看到|也不能当没看见|也不能当没看到)"
+)
 _SUPPORT_RE = re.compile(r"(不会装作没听见|会回应|会理|会回|真开口的话)")
 _CONDITIONAL_SUPPORT_RE = re.compile(r"(看情况|真开口的话|你真开口|你要是真开口)")
 _REPAIR_ACK_RE = re.compile(r"(好|知道了|明白了|我收一点|我会收一点|我往后一点)")
+_PHATIC_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么啦|怎么了|哥哥|呀|啦)")
+_VISUAL_REFERENCE_RE = re.compile(r"(图里|截图|画面|这张|上面|这里|这句|提示|意思|看起来|像是|看到|看见|应该是)")
+_ATTACHMENT_ACK_RE = re.compile(r"(看到了|我看到了|看见了|我看见了|这张图|这个附件|这个表情)")
+_MULTIMODAL_GENERIC_FOLLOWUP_RE = re.compile(r"(你想让我先说|你想让我先看|先帮你解释|还是先判断能不能帮你|你想让我先从哪)")
+_PREVIOUS_REPLY_REFERENCE_RE = re.compile(
+    r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
+)
+_FOLLOWUP_CONTEXT_RE = re.compile(r"上一条助手回复前接的用户话是“([^”]{1,160})”")
+_FOLLOWUP_SOURCE_RE = re.compile(r"上一条助手回复是“([^”]{1,160})”")
+_FILLER_SOURCE_RE = re.compile(r"^(?:嗯+|唔+|咦+|哼+|啊+|哦+|噢+|诶+|哈+)$")
 _PROMPT_LEAK_RE = re.compile(
     r"(Conversation State Directive|reply_contract|render_policy_summary|topic_summary|dialogue_summary|control_line|tactic_family|trajectory_stage|trust\s*0\.\d+)",
     re.IGNORECASE,
@@ -36,6 +62,7 @@ _META_OVEREXPLICIT_RE = re.compile(
 _GENERIC_IDENTITY_TEMPLATE_RE = re.compile(
     r"(你真正想问的是什么|别的想问什么，就直接说|你想确认的是哪一部分|你是不是想问别的|你还想问我什么呀)"
 )
+_SUBSTANTIVE_CONTENT_RE = re.compile(r"[A-Za-z0-9\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF]")
 
 
 def _current_display_name() -> str:
@@ -61,7 +88,6 @@ def _current_identity_aliases() -> tuple[str, ...]:
 
 def _identity_aliases_for_detection() -> tuple[str, ...]:
     aliases = list(_current_identity_aliases())
-    aliases.extend(["夏目蓝", "夏目藍"])
     return tuple(dict.fromkeys(item for item in aliases if item))
 
 
@@ -157,7 +183,7 @@ def _infer_boundary_tactic(text: str) -> str:
         return "soft_close_boundary"
     if _OPEN_FLOOR_RE.search(normalized) and "不熟" in normalized:
         return "hold_boundary_then_shift_floor"
-    if _BOUNDARY_REASON_RE.search(normalized):
+    if _BOUNDARY_REASON_RE.search(normalized) or (_BOUNDARY_DISTANCE_RE.search(normalized) and _MOTIVATION_REASON_TAIL_RE.search(normalized)):
         return "short_boundary_then_reason"
     return ""
 
@@ -299,6 +325,11 @@ _ACTION_LABELS: dict[str, str] = {
     "anxiety_ack": "先接住对方的不安",
     "repeat_ack_or_anxiety": "先接住这不是第一次问，或接住对方的不安",
     "repair_ack": "先收住并接住对方的拒绝感",
+    "phatic_ack": "先把这句招呼接住",
+    "visual_reference": "点到附件或画面里的对象",
+    "content_clause": "补一句简短说明",
+    "attachment_ack": "先承认已经看到了附件",
+    "previous_reference": "先接住对方在追问上一句",
 }
 
 _FORBIDDEN_LABELS: dict[str, str] = {
@@ -314,11 +345,13 @@ _FORBIDDEN_LABELS: dict[str, str] = {
 _UNSAFE_REASON_CODES = {
     "empty_reply",
     "prompt_leak",
+    "symbol_only_reply",
 }
 
 _REASON_PENALTIES: dict[str, float] = {
     "empty_reply": 1.0,
     "prompt_leak": 1.0,
+    "symbol_only_reply": 1.0,
     "generic_assistant_phrasing": 0.7,
     "underanswered": 0.45,
     "same_as_previous_reply": 0.85,
@@ -331,6 +364,10 @@ _REASON_PENALTIES: dict[str, float] = {
     "meta_contract_echo": 0.45,
     "late_repeat_too_short": 0.75,
     "generic_identity_template": 0.45,
+    "multimodal_content_missing": 0.65,
+    "multimodal_generic_followup": 0.55,
+    "previous_reply_underanswered": 0.75,
+    "previous_reference_missing": 0.55,
 }
 
 
@@ -349,9 +386,13 @@ def _has_required_action(action: str, text: str) -> bool:
     if action == "soft_close":
         return bool(_SOFT_CLOSE_RE.search(normalized) or (_REPEAT_ACK_RE.search(normalized) and _OPEN_FLOOR_RE.search(normalized)))
     if action == "boundary_anchor":
-        return "不熟" in normalized or "不是很熟" in normalized or "不算熟" in normalized
+        return bool(_BOUNDARY_DISTANCE_RE.search(normalized))
     if action == "reason_clause":
-        return bool(_BOUNDARY_REASON_RE.search(normalized) or re.search(r"(只是|看见了|没打算装作没看见|不会装作没看见)", normalized))
+        return bool(
+            _BOUNDARY_REASON_RE.search(normalized)
+            or _BOUNDARY_REASON_TAIL_RE.search(normalized)
+            or _MOTIVATION_REASON_TAIL_RE.search(normalized)
+        )
     if action == "care_ack":
         return bool(_CARE_ACK_RE.search(normalized))
     if action == "support_stance":
@@ -364,7 +405,89 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_REPEAT_ACK_RE.search(normalized) or _ANXIETY_RE.search(normalized))
     if action == "repair_ack":
         return bool(_REPAIR_ACK_RE.search(normalized))
+    if action == "phatic_ack":
+        return bool(_PHATIC_ACK_RE.search(normalized))
+    if action == "visual_reference":
+        return bool(_VISUAL_REFERENCE_RE.search(normalized))
+    if action == "content_clause":
+        return len(_normalize_compare_text(normalized)) >= 4
+    if action == "attachment_ack":
+        return bool(_ATTACHMENT_ACK_RE.search(normalized) or _VISUAL_REFERENCE_RE.search(normalized))
+    if action == "previous_reference":
+        return bool(_PREVIOUS_REPLY_REFERENCE_RE.search(normalized))
     return False
+
+
+def _multimodal_core_observation(plan: ReplyPlan) -> str:
+    payload = dict(getattr(plan, "multimodal", {}) or {})
+    core = str(payload.get("core_observation") or "").strip()
+    if core:
+        return core
+    summary = str(payload.get("summary_for_chat") or "").strip()
+    if not summary:
+        return ""
+    for marker in ("当前能确认到的关键内容是：", "当前能确认到的核心内容是：", "可确认到的核心内容是：", "目前更稳的理解是："):
+        if marker in summary:
+            return summary.split(marker, 1)[1].rstrip("。")
+    return ""
+
+
+def _multimodal_core_tokens(core_observation: str) -> tuple[str, ...]:
+    tokens: list[str] = []
+    for chunk in re.split(r"[；;，,。！？\s]+", str(core_observation or "").strip()):
+        token = str(chunk).strip()
+        if len(token) >= 2:
+            tokens.append(token)
+    return tuple(dict.fromkeys(tokens[:6]))
+
+
+def _multimodal_emotion_signals(plan: ReplyPlan) -> tuple[str, ...]:
+    payload = dict(getattr(plan, "multimodal", {}) or {})
+    return tuple(
+        str(item).strip()
+        for item in list(payload.get("emotion_signals") or [])
+        if str(item).strip()
+    )
+
+
+def _assistant_followup_context(plan: ReplyPlan) -> tuple[str, str]:
+    contract_text = str(getattr(plan, "reply_contract", "") or "").strip()
+    context_match = _FOLLOWUP_CONTEXT_RE.search(contract_text)
+    source_match = _FOLLOWUP_SOURCE_RE.search(contract_text)
+    context = str(context_match.group(1) if context_match else "").strip()
+    source = str(source_match.group(1) if source_match else "").strip()
+    return context, source
+
+
+def _build_assistant_followup_fallback(plan: ReplyPlan) -> str:
+    context, source = _assistant_followup_context(plan)
+    source_clean = source.rstrip("。！？?!，,、 ").strip()
+    context_clean = context.rstrip("。！？?!，,、 ").strip()
+    source_compact = re.sub(r"[\s\u3000。！？?!，,、~～…]+", "", source_clean)
+    if source_clean and context_clean:
+        if _FILLER_SOURCE_RE.match(source_compact):
+            return f"我刚才那句“{source_clean}”没接好，不是想敷衍你。你是在追问前面那句“{context_clean}”吧？"
+        return f"刚才那个“{source_clean}”，是在接你前面那句“{context_clean}”。我回得太省了。"
+    if source_clean:
+        return f"刚才那个“{source_clean}”说得太省了，我是在接上一句，不是另起一个话题。"
+    return "刚才那句我回得太省了，我是在接上一句，不是另起一个话题。"
+
+
+def _build_image_social_fallback(plan: ReplyPlan) -> str:
+    signals = " ".join(_multimodal_emotion_signals(plan))
+    core = _multimodal_core_observation(plan)
+    haystack = f"{signals} {core}".strip()
+    if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "呜", "泪", "可怜")):
+        return "怎么啦，委屈成这样呀？"
+    if any(token in haystack for token in ("可爱", "卖萌", "猫耳", "装乖", "软萌", "萌", "乖")):
+        return "怎么突然丢个这么可爱的表情过来呀？"
+    if any(token in haystack for token in ("生气", "怒", "炸毛", "不爽", "火大", "服了")):
+        return "喂喂，怎么一上来就这个表情呀。"
+    if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "沉默")):
+        return "怎么啦，这表情看着就很无语诶。"
+    if any(token in haystack for token in ("笑", "开心", "乐", "打趣", "逗")):
+        return "怎么突然丢这么个表情过来呀。"
+    return "怎么啦，突然发这么一张图过来呀。"
 
 
 def _validation_quality_score(reason_codes: tuple[str, ...], missing_actions: tuple[str, ...]) -> float:
@@ -373,6 +496,10 @@ def _validation_quality_score(reason_codes: tuple[str, ...], missing_actions: tu
         score -= _REASON_PENALTIES.get(code, 0.18)
     score -= min(len(missing_actions), 4) * 0.12
     return max(0.0, round(score, 4))
+
+
+def _has_substantive_content(text: str) -> bool:
+    return bool(_SUBSTANTIVE_CONTENT_RE.search(str(text or "").strip()))
 
 
 def _missing_actions_to_text(actions: tuple[str, ...]) -> str:
@@ -403,10 +530,18 @@ def validate_reply(
     normalized = str(text or "").strip()
     reason_codes: list[str] = []
     missing_actions: list[str] = []
+    response_form = str(plan.response_form or "text").strip().lower()
+    allow_form_only = bool(plan.allow_form_only_reply) and response_form in {"emoji", "sticker", "image"}
     if not normalized:
-        reason_codes.append("empty_reply")
+        if not allow_form_only:
+            reason_codes.append("empty_reply")
+    elif not _has_substantive_content(normalized):
+        if response_form not in {"emoji", "sticker"}:
+            reason_codes.append("symbol_only_reply")
     if _PROMPT_LEAK_RE.search(normalized):
         reason_codes.append("prompt_leak")
+    if not normalized and allow_form_only:
+        normalized = ""
     if _GENERIC_ASSISTANT_RE.search(normalized):
         reason_codes.append("generic_assistant_phrasing")
     if plan.primary_topic == "identity" and _GENERIC_IDENTITY_TEMPLATE_RE.search(normalized):
@@ -488,7 +623,10 @@ def validate_reply(
             reason_codes.append("repeat_not_acknowledged")
         elif plan.primary_topic == "help_commitment" and actual_tactic_family in {"short_conditional_commitment"}:
             reason_codes.append("repeat_not_acknowledged")
-        if _META_OVEREXPLICIT_RE.search(normalized):
+        if (
+            _META_OVEREXPLICIT_RE.search(normalized)
+            and str(getattr(plan, "tactic_family", "") or "").strip() != "explain_previous_reply"
+        ):
             reason_codes.append("meta_contract_echo")
     if plan.trajectory_stage == "late_repeat":
         if plan.primary_topic == "identity" and actual_tactic_family in {"brief_name_only", "ack_name_then_wait", "name_only_then_pause"}:
@@ -499,7 +637,44 @@ def validate_reply(
             reason_codes.append("late_repeat_too_short")
 
     family = plan.tactic_family
-    if family == "brief_name_only":
+    if family == "phatic_wave":
+        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 2:
+            reason_codes.append("underanswered")
+        if not _PHATIC_ACK_RE.search(normalized):
+            reason_codes.append("phatic_ack_missing")
+    elif family == "playful_wave":
+        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 2:
+            reason_codes.append("underanswered")
+        if not _PHATIC_ACK_RE.search(normalized):
+            reason_codes.append("phatic_ack_missing")
+    elif family in {"soft_emotion_ack", "cute_image_ack", "tease_image_ack"}:
+        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
+            reason_codes.append("underanswered")
+        if not _PHATIC_ACK_RE.search(normalized):
+            reason_codes.append("phatic_ack_missing")
+    elif family == "observe_then_answer":
+        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
+            reason_codes.append("underanswered")
+        if not _VISUAL_REFERENCE_RE.search(normalized):
+            reason_codes.append("multimodal_reference_missing")
+        core_observation = _multimodal_core_observation(plan)
+        if core_observation:
+            tokens = _multimodal_core_tokens(core_observation)
+            if tokens and not any(token in normalized for token in tokens):
+                reason_codes.append("multimodal_content_missing")
+            if _MULTIMODAL_GENERIC_FOLLOWUP_RE.search(normalized):
+                reason_codes.append("multimodal_generic_followup")
+    elif family == "attachment_ack_then_wait":
+        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
+            reason_codes.append("underanswered")
+        if not (_ATTACHMENT_ACK_RE.search(normalized) or _VISUAL_REFERENCE_RE.search(normalized)):
+            reason_codes.append("attachment_ack_missing")
+    elif family == "explain_previous_reply":
+        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 6:
+            reason_codes.append("previous_reply_underanswered")
+        if not _PREVIOUS_REPLY_REFERENCE_RE.search(normalized):
+            reason_codes.append("previous_reference_missing")
+    elif family == "brief_name_only":
         if not _contains_identity_name(normalized):
             reason_codes.append("identity_name_missing")
         if len(normalized) > 18:
@@ -532,23 +707,33 @@ def validate_reply(
         if _contains_identity_name(normalized) and plan.restate_level == "none":
             reason_codes.append("identity_restate_not_allowed")
     elif family == "short_boundary_then_reason":
-        if not _BOUNDARY_REASON_RE.search(normalized):
+        if not (
+            _BOUNDARY_REASON_RE.search(normalized)
+            or (_BOUNDARY_DISTANCE_RE.search(normalized) and _MOTIVATION_REASON_TAIL_RE.search(normalized))
+        ):
             reason_codes.append("boundary_reason_missing")
     elif family == "ack_still_care_then_new_reason":
-        if not _BOUNDARY_REASON_RE.search(normalized) and not re.search(r"(只是|看见了|装作没看见)", normalized):
+        if not (
+            _BOUNDARY_REASON_RE.search(normalized)
+            or _BOUNDARY_REASON_TAIL_RE.search(normalized)
+            or _MOTIVATION_REASON_TAIL_RE.search(normalized)
+        ):
             reason_codes.append("new_reason_missing")
     elif family == "hold_boundary_then_shift_floor":
-        if "不熟" not in normalized:
+        if not _BOUNDARY_DISTANCE_RE.search(normalized):
             reason_codes.append("boundary_hold_missing")
         if not _OPEN_FLOOR_RE.search(normalized):
             reason_codes.append("open_floor_missing")
     elif family == "brief_reason_then_wait":
-        if not _BOUNDARY_REASON_RE.search(normalized):
+        if not (
+            _BOUNDARY_REASON_RE.search(normalized)
+            or (_BOUNDARY_DISTANCE_RE.search(normalized) and _MOTIVATION_REASON_TAIL_RE.search(normalized))
+        ):
             reason_codes.append("brief_reason_missing")
         if _OPEN_FLOOR_RE.search(normalized):
             reason_codes.append("wrong_tactic_shape")
     elif family == "soft_close_boundary":
-        if "不熟" not in normalized:
+        if not _BOUNDARY_DISTANCE_RE.search(normalized):
             reason_codes.append("soft_close_missing")
     elif family == "short_conditional_commitment":
         if not _SUPPORT_RE.search(normalized):
@@ -579,9 +764,10 @@ def validate_reply(
     quality_score = _validation_quality_score(deduped_reasons, deduped_missing_actions)
     safe_to_emit = not any(code in _UNSAFE_REASON_CODES for code in deduped_reasons)
     is_valid = not deduped_reasons
+    retry_allowed = str(getattr(plan, "primary_topic", "") or "").strip() != "assistant_reply_followup"
     return ReplyValidatorResultV2(
         is_valid=is_valid,
-        should_retry=bool(deduped_reasons),
+        should_retry=bool(deduped_reasons) and retry_allowed,
         reason_codes=deduped_reasons,
         missing_actions=deduped_missing_actions,
         actual_tactic_family=actual_tactic_family,
@@ -624,6 +810,11 @@ def build_correction_prompt(
         extra = "不要把内部动作要求直接翻成‘前面答过了’、‘你还是在意这个’、‘你还是不安’这类元话。"
     elif "generic_identity_template" in validation.reason_codes:
         extra = "不要再用‘你真正想问什么 / 别的想问什么 / 你想确认哪一部分’这类固定问句，换成更自然的熟人口吻。"
+    elif (
+        "previous_reply_underanswered" in validation.reason_codes
+        or "previous_reference_missing" in validation.reason_codes
+    ):
+        extra = "这轮是在追问上一句，必须明确接住“刚才那句/上一句”，再补清它接的是哪句话或是什么意思。"
     elif "late_repeat_too_short" in validation.reason_codes:
         extra = "这已经不是前几次的短确认场景了，这次必须继续推进对话，不能退回只报名字或只放一句态度。"
     required = f"必须同时做到：{missing_actions_text}。" if missing_actions_text else ""
@@ -647,6 +838,32 @@ def build_correction_prompt(
         )
         if hint:
             soul_hint = hint
+    elif plan.primary_topic in {"relationship_boundary", "motivation"}:
+        hint = build_boundary_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
+    elif plan.primary_topic == "help_commitment":
+        hint = build_help_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
+    elif (
+        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
+        and str(plan.response_form_reason or "").strip() in {"image_social_reply", "image_social_followup"}
+    ):
+        hint = build_image_social_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
+    elif plan.primary_topic == "assistant_reply_followup":
+        soul_hint = "语气像发现自己上一句说得太省后顺手补一句，不要变成道歉小作文，也不要重新开话题。"
     return (
         f"{plan.correction_directive} 当前问题：{reasons}。"
         f"{extra}{required}{steps}{forbidden}{recent_note}{previous_note}{soul_hint}严格遵守：{plan.reply_contract}"
@@ -676,6 +893,30 @@ def build_naturalization_prompt(
         )
         if hint:
             soul_hint = hint
+    elif plan.primary_topic in {"relationship_boundary", "motivation"}:
+        hint = build_boundary_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
+    elif plan.primary_topic == "help_commitment":
+        hint = build_help_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
+    elif (
+        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
+        and str(plan.response_form_reason or "").strip() in {"image_social_reply", "image_social_followup"}
+    ):
+        hint = build_image_social_naturalization_hint(
+            family=str(plan.tactic_family or "").strip(),
+            render_target_lang="zh",
+        )
+        if hint:
+            soul_hint = hint
     return (
         "保持同样内容目标，但把回应说得更像自然对话。"
         "不要把内部动作要求直接说出来，不要用“前面答过了 / 这件事已经问过 / 你还是在意这个 / 你还是不安”这类元话带头。"
@@ -687,12 +928,89 @@ def build_naturalization_prompt(
     ).strip()
 
 
+def build_semantic_rescue_seed(*, plan: ReplyPlan) -> str:
+    topic = str(getattr(plan, "primary_topic", "") or "").strip()
+    family = str(getattr(plan, "tactic_family", "") or "").strip()
+    variant = str(getattr(plan, "tactic_variant", "") or "").strip()
+    if topic == "identity":
+        return f"只保留这个内容目标：自然认下自己是{_current_display_name()}，像熟人被叫住时顺手接话，不要展开介绍。"
+    if topic in {"relationship_boundary", "motivation"}:
+        if family in {"hold_boundary_then_shift_floor", "soft_close_boundary"}:
+            return "只保留这个内容目标：把关系还没近到那一步放稳，用一句更生活化的理由带过，然后把话头自然往下接。"
+        return "只保留这个内容目标：轻轻说清关系还没那么近，再给一个像顺手解释的日常理由，不要用固定句。"
+    if topic == "help_commitment":
+        return "只保留这个内容目标：把“真有事我会回应”放稳，但更像顺手应下来，不要郑重承诺。"
+    if topic == "rejection":
+        return "只保留这个内容目标：先收一点，轻轻接住对方的不喜欢，不要解释。"
+    if topic == "assistant_reply_followup":
+        context, source = _assistant_followup_context(plan)
+        if context and source:
+            return f"只保留这个内容目标：说明上一句“{source}”是在接对方前一句“{context}”，承认刚才说得太省，再补清楚这不是新话题。"
+        if source:
+            return f"只保留这个内容目标：说明上一句“{source}”说得太省了，补清它的意思或指代，不要复读原句。"
+        return "只保留这个内容目标：承认上一句说得太省，再补清它的意思或指代，不要复读原句。"
+    if topic == "emoji_social_reply":
+        if family == "soft_emotion_ack":
+            return "只保留这个内容目标：像看见对方委屈/蔫下来时顺手哄一句，短一点，但别只剩语气词，也别解说画面。"
+        if family == "cute_image_ack":
+            return "只保留这个内容目标：像被对方拿可爱表情轻轻蹭了一下，顺手回一句带点撒娇感的话，不要卖力演。"
+        if family == "tease_image_ack":
+            return "只保留这个内容目标：像看见对方拿小别扭表情来逗你，轻轻逗回去一句，不要盘问。"
+    if topic == "emoji_social_followup":
+        if family == "soft_emotion_ack" and variant == "backoff_hold":
+            return "只保留这个内容目标：对方在嘴硬否认，就顺手给个台阶，像熟人间往后收一点，不要硬顶。"
+        if family == "soft_emotion_ack" and variant == "explain_read":
+            return "只保留这个内容目标：用一句很生活的话解释你为什么会那样读到，不要重讲图片内容。"
+        if family == "soft_emotion_ack" and variant == "let_it_pass":
+            return "只保留这个内容目标：把上一张图带出的那层情绪轻轻放过去，像熟人间顺手收住，不要追问。"
+        if family == "tease_image_ack" and variant == "deny_nudge":
+            return "只保留这个内容目标：对方嘴硬否认时，轻一点打趣一句，别像顶嘴。"
+        if family == "tease_image_ack" and variant == "light_explain":
+            return "只保留这个内容目标：轻一点解释你为什么会往那边想，像熟人口吻，不要重新分析画面。"
+        if family == "tease_image_ack" and variant == "soft_slide":
+            return "只保留这个内容目标：顺着上一张图的语气轻轻带过去，像熟人间收一下这阵小情绪。"
+    return ""
+
+
+def build_soul_rescue_prompt(
+    *,
+    plan: ReplyPlan,
+    semantic_seed_text: str,
+    previous_candidate_text: str = "",
+) -> str:
+    seed = str(semantic_seed_text or "").strip() or build_semantic_rescue_seed(plan=plan)
+    previous = str(previous_candidate_text or "").strip()
+    base = build_naturalization_prompt(
+        plan=plan,
+        previous_candidate_text=previous,
+    )
+    if not seed:
+        return base
+    return (
+        f"{base}"
+        f" 下面这句只保留内容目标，不要照抄措辞或句子结构：{seed}"
+    ).strip()
+
+
 def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: str = "zh") -> str:
     lang = str(render_target_lang or "").strip().lower()
     family = str(plan.tactic_family or "").strip()
     display_name = _current_display_name() or "她"
+    multimodal_focus = str(getattr(plan, "primary_topic", "") or "").strip()
+    core_observation = _multimodal_core_observation(plan)
+    cached_text = build_deterministic_primary_reply_text(
+        plan=plan,
+        render_target_lang=render_target_lang,
+        allow_semantic_fallback=(str(getattr(plan, "primary_topic", "") or "").strip() != "assistant_reply_followup"),
+    )
+    if cached_text:
+        return cached_text
     if lang == "ja":
         ja_family_map = {
+            "phatic_wave": "うん、いるよ。どうしたの？",
+            "playful_wave": "ふふ、どうしたの？",
+            "observe_then_answer": "画像は見えてる。気になるところを言ってくれたら先にそこを見る。",
+            "attachment_ack_then_wait": "添付は見えたよ。どこから見ればいい？",
             "brief_name_only": f"{display_name}。",
             "ack_name_then_wait": "さっきもう名乗った。",
             "ack_repeat_then_light_probe": "さっき答えたけど、まだ何を確かめたいの？",
@@ -730,65 +1048,82 @@ def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: s
         )
         if soul_text:
             return soul_text
+    if (
+        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
+        and str(plan.response_form_reason or "").strip() in {"image_social_reply", "image_social_followup"}
+    ):
+        soul_text = build_image_social_fallback_text(
+            family=family,
+            variant=str(plan.tactic_variant or "").strip(),
+            render_target_lang=render_target_lang,
+        )
+        if soul_text:
+            return soul_text
+        return _build_image_social_fallback(plan)
+    if family in {"phatic_wave", "playful_wave"}:
+        soul_text = build_phatic_fallback_text(
+            family=family,
+            variant=str(plan.tactic_variant or "").strip(),
+            render_target_lang=render_target_lang,
+        )
+        if soul_text:
+            return soul_text
+    if plan.response_goal == "boundary_reason":
+        soul_text = build_boundary_fallback_text(
+            family=family,
+            variant=str(plan.tactic_variant or "").strip(),
+            render_target_lang=render_target_lang,
+        )
+        if soul_text:
+            return soul_text
+    if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:
+        soul_text = build_help_fallback_text(
+            family=family,
+            variant=str(plan.tactic_variant or "").strip(),
+            render_target_lang=render_target_lang,
+        )
+        if soul_text:
+            return soul_text
+    if plan.response_goal == "repair_space":
+        soul_text = build_repair_fallback_text(render_target_lang=render_target_lang)
+        if soul_text:
+            return soul_text
+    if plan.response_goal == "clarify_previous_reply" or family == "explain_previous_reply":
+        return _build_assistant_followup_fallback(plan)
+    if family == "observe_then_answer" and core_observation:
+        if multimodal_focus == "screenshot_analysis":
+            return f"我看到是一张截图，核心内容大概是：{core_observation}。"
+        if multimodal_focus == "meme_meaning":
+            return f"这张图更像是在传一种情绪，核心意思大概是：{core_observation}。"
+        if multimodal_focus == "capability_check":
+            return f"这张图我能看懂一些，先能确认到的内容是：{core_observation}。"
+        return f"我先看到的内容大概是：{core_observation}。"
+    if family == "attachment_ack_then_wait" and core_observation:
+        return f"我先看到的内容大概是：{core_observation}。你想让我先看哪一部分？"
     zh_variant_map = {
-        ("brief_name_only", "plain_name"): f"{display_name}。",
-        ("ack_name_then_wait", "quiet_confirm"): f"{display_name}。",
-        ("ack_repeat_then_light_probe", "confirm_part"): f"{display_name}。你想确认的是哪一部分？",
-        ("ack_repeat_then_light_probe", "confirm_real_question"): f"{display_name}。你真正想问的是什么？",
-        ("ack_repeat_then_light_probe", "confirm_motive"): f"{display_name}。你其实想确认的不是名字吧？",
-        ("hold_name_then_open_floor", "open_other_topic"): f"{display_name}。别的想问什么，就直接说。",
-        ("hold_name_then_open_floor", "open_real_question"): f"{display_name}。你真正想问的是什么？",
-        ("soft_close_then_open_floor", "settle_real_question"): f"{display_name}。你真正想问的是什么？",
-        ("soft_close_then_open_floor", "settle_other_topic"): f"{display_name}。别的想问什么，就直接说。",
-        ("soft_close_then_open_floor", "settle_then_open"): f"{display_name}。你还想往下问什么？",
-        ("name_only_then_pause", "quiet_pause"): f"{display_name}。",
-        ("short_boundary_then_reason", "plain_reason"): "不熟。只是看见了，也没打算装作没看见。",
-        ("ack_still_care_then_new_reason", "still_care_reason"): "不熟。但也没想装作没看见。",
-        ("hold_boundary_then_shift_floor", "shift_real_question"): "不熟。这点已经说明过了。你真正想问的是什么？",
-        ("hold_boundary_then_shift_floor", "shift_other_question"): "不熟。这点已经说明过了。要问别的就直接问。",
-        ("brief_reason_then_wait", "fresh_reason"): "不熟。只是没打算装作没看见。",
-        ("soft_close_boundary", "settle_repeat"): "不熟。理由还是那样，先放在这吧。",
-        ("soft_close_boundary", "settle_hold"): "不熟。先放在这吧。",
-        ("short_conditional_commitment", "plain_conditional"): "看情况。你真需要的话，我不会装作没听见。",
-        ("ack_anxiety_without_repromise", "soothe_hold"): "真需要的话，我会回应。",
-        ("ack_anxiety_without_repromise", "steady_reassure"): "真有事的话，我会回应。",
-        ("soft_reassure_then_open_floor", "soothe_then_open"): "真有事就直说。",
-        ("hold_support_without_repromise", "steady_open_floor"): "我会回应。别的想问什么，就继续说。",
-        ("steady_commitment_then_wait", "quiet_hold"): "态度不会变。你要是真想说，就说。",
-        ("hold_repair_space", "repair_hold"): "好，我收一点。你要是不想听这个，我们就停在这。",
+        ("observe_then_answer", "screenshot_analysis"): "我看到是一张截图。你要是想问上面的提示，我先帮你解释。",
+        ("observe_then_answer", "literal_description"): "我看到了这张图。你想让我先说图里有什么吗？",
+        ("observe_then_answer", "meme_meaning"): "这张图像是在传情绪。你是想让我猜你现在的意思吗？",
+        ("observe_then_answer", "capability_check"): "这张图我能先看看。你想让我先说内容，还是先判断能不能帮你？",
+        ("attachment_ack_then_wait", "attachment_ping"): "我看到了这个附件。你想让我先看哪一部分？",
     }
     variant_key = (family, str(plan.tactic_variant or "").strip())
     if variant_key in zh_variant_map:
         return zh_variant_map[variant_key]
     zh_family_map = {
-        "brief_name_only": f"{display_name}。",
-        "ack_name_then_wait": f"{display_name}。",
-        "ack_repeat_then_light_probe": f"{display_name}。你想确认的是哪一部分？",
-        "hold_name_then_open_floor": f"{display_name}。别的想问什么，就直接说。",
-        "name_only_then_pause": f"{display_name}。",
-        "soft_close_then_open_floor": f"{display_name}。你真正想问的是什么？",
-        "short_boundary_then_reason": "不熟。只是看见了，也没打算装作没看见。",
-        "ack_still_care_then_new_reason": "不熟。但也没想装作没看见。",
-        "hold_boundary_then_shift_floor": "不熟。这点已经说明过了。你真正想问的是什么？",
-        "brief_reason_then_wait": "不熟。只是没打算装作没看见。",
-        "soft_close_boundary": "不熟。理由还是那样，先放在这吧。",
-        "short_conditional_commitment": "看情况。你真需要的话，我不会装作没听见。",
-        "ack_anxiety_without_repromise": "真需要的话，我会回应。",
-        "steady_commitment_then_wait": "态度不会变。你要是真想说，就说。",
-        "soft_reassure_then_open_floor": "真有事就直说。",
-        "hold_support_without_repromise": "我会回应。别的想问什么，就继续说。",
-        "hold_repair_space": "好，我收一点。你要是不想听这个，我们就停在这。",
+        "observe_then_answer": "我看到了你发来的内容。你想让我先说我看见了什么吗？",
+        "attachment_ack_then_wait": "我看到了这个附件。你想让我先看哪一部分？",
     }
     if family in zh_family_map:
         return zh_family_map[family]
     if plan.response_goal == "identify":
-        return f"{display_name}。"
+        return build_identity_fallback_text(family="brief_name_only", variant="plain_name", render_target_lang=render_target_lang)
     if plan.response_goal == "boundary_reason":
-        return "不熟。只是看见了，也没打算装作没看见。"
+        return build_boundary_fallback_text(family=family or "short_boundary_then_reason", variant=str(plan.tactic_variant or "").strip(), render_target_lang=render_target_lang)
     if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:
-        return "会回应。"
+        return build_help_fallback_text(family=family or "short_conditional_commitment", variant=str(plan.tactic_variant or "").strip(), render_target_lang=render_target_lang)
     if plan.response_goal == "repair_space":
-        return "好，我收一点。"
+        return build_repair_fallback_text(render_target_lang=render_target_lang)
     return "我知道了。"
 
 
@@ -797,6 +1132,8 @@ __all__ = [
     "build_correction_prompt",
     "build_deterministic_reply_fallback",
     "build_naturalization_prompt",
+    "build_semantic_rescue_seed",
+    "build_soul_rescue_prompt",
     "infer_reply_tactic_shape",
     "validate_reply",
 ]

@@ -59,32 +59,33 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
     monkeypatch.setattr("host_brain.app.dependencies.get_ledger", lambda: ledger)
     monkeypatch.setattr("host_brain.app.dependencies.get_skill_registry", lambda: registry)
 
+    planned_steps = [
+        {
+            "step_index": 1,
+            "route": "skill",
+            "target_id": "session_summary",
+            "description": "总结会话",
+            "task_description": "总结当前会话信息",
+            "route_reason": "manual_smoke:session_summary",
+            "allow_parallel": True,
+            "skill_family": "social",
+            "risk_level": 1,
+        },
+        {
+            "step_index": 2,
+            "route": "skill",
+            "target_id": "emotion_query",
+            "description": "读取情绪快照",
+            "task_description": "读取当前情绪状态",
+            "route_reason": "manual_smoke:emotion_query",
+            "allow_parallel": True,
+            "skill_family": "social",
+            "risk_level": 1,
+        },
+    ]
     plan = build_skill_dag_plan(
         plan_id="plan::exec_skill_smoke_001",
-        steps=[
-            {
-                "step_index": 1,
-                "route": "skill",
-                "target_id": "session_summary",
-                "description": "总结会话",
-                "task_description": "总结当前会话信息",
-                "route_reason": "manual_smoke:session_summary",
-                "allow_parallel": True,
-                "skill_family": "social",
-                "risk_level": 1,
-            },
-            {
-                "step_index": 2,
-                "route": "skill",
-                "target_id": "emotion_query",
-                "description": "读取情绪快照",
-                "task_description": "读取当前情绪状态",
-                "route_reason": "manual_smoke:emotion_query",
-                "allow_parallel": True,
-                "skill_family": "social",
-                "risk_level": 1,
-            },
-        ],
+        steps=planned_steps,
         parallel_window=4,
     )
 
@@ -100,7 +101,7 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
                 "decision": "APPROVE",
                 "tokens": {"approval_token_ref": "approval::exec_plan_smoke_001"},
             },
-            intent_draft={},
+            intent_draft={"planned_steps": planned_steps},
             emotion_context={
                 "mood_state": "CALM",
                 "emotion_tag": "FOCUSED",

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -21,14 +21,14 @@ def _build_service() -> CapabilityForgeService:
             missing_capability_tags=["coding"],
             confidence=0.9,
             executor_route="delegate",
-            executor_target="codex_codegen",
+            executor_target="codex_worker",
         )
         telemetry.record_execution(
             runtime_capability_id=cap_id,
             request_id=f"req-obs-forge-{index}",
             success=False,
             executor_route="delegate",
-            executor_target="codex_codegen",
+            executor_target="codex_worker",
             latency_ms=200 + index,
             error_code="FAILED",
         )
@@ -131,3 +131,4 @@ def test_obs_capability_forge_proposal_endpoints(monkeypatch) -> None:
     quality_payload = quality_stats_resp.json()
     assert "summary" in quality_payload
     assert isinstance(quality_payload["items"], list)
+

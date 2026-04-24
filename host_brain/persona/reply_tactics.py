@@ -78,6 +78,12 @@ def canonical_tactic_signature(*, topic: str, family: str, variant: str = "") ->
             return "help_quiet_hold"
     if normalized_topic == "rejection" and normalized_family == "hold_repair_space":
         return "repair_hold"
+    if normalized_topic == "assistant_reply_followup" and normalized_family == "explain_previous_reply":
+        if normalized_variant == "clarify_object":
+            return "assistant_followup_clarify_object"
+        if normalized_variant == "repair_too_short":
+            return "assistant_followup_repair_too_short"
+        return "assistant_followup_clarify_meaning"
     return normalized_family
 
 
@@ -112,6 +118,9 @@ def describe_tactic_signature(signature: str, *, render_target_lang: str = "zh")
             "help_support_open_floor": "応じる姿勢を置いて続きを促す形",
             "help_quiet_hold": "態度だけ短く保つ形",
             "repair_hold": "一歩引いて拒否感を受ける形",
+            "assistant_followup_clarify_object": "前の返答の指す対象を補う形",
+            "assistant_followup_clarify_meaning": "前の返答の意味を補う形",
+            "assistant_followup_repair_too_short": "短すぎた前の返答を補い直す形",
         }
         return ja_map.get(normalized, normalized)
     zh_map = {
@@ -140,12 +149,25 @@ def describe_tactic_signature(signature: str, *, render_target_lang: str = "zh")
         "help_support_open_floor": "放稳态度后把话口让回去的承接",
         "help_quiet_hold": "只把态度放住的承接",
         "repair_hold": "收一步接住拒绝感的承接",
+        "assistant_followup_clarify_object": "补清上一句具体指代的承接",
+        "assistant_followup_clarify_meaning": "解释上一句意思的承接",
+        "assistant_followup_repair_too_short": "承认上一句太省并补上的承接",
+        "soft_emotion_ack": "先顺着图里的情绪轻轻接住的承接",
+        "cute_image_ack": "先顺着卖萌/可爱感接住的承接",
+        "tease_image_ack": "先顺着小别扭/吐槽感接住的承接",
     }
     return zh_map.get(normalized, normalized)
 
 
 def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     required_map: dict[str, tuple[str, ...]] = {
+        "phatic_wave": ("phatic_ack",),
+        "playful_wave": ("phatic_ack",),
+        "soft_emotion_ack": ("phatic_ack",),
+        "cute_image_ack": ("phatic_ack",),
+        "tease_image_ack": ("phatic_ack",),
+        "observe_then_answer": ("visual_reference", "content_clause"),
+        "attachment_ack_then_wait": ("attachment_ack",),
         "brief_name_only": ("name_only",),
         "ack_name_then_wait": ("name_only",),
         "ack_repeat_then_light_probe": ("light_probe",),
@@ -163,8 +185,16 @@ def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ..
         "soft_reassure_then_open_floor": ("open_floor",),
         "hold_support_without_repromise": ("support_stance", "open_floor"),
         "hold_repair_space": ("repair_ack",),
+        "explain_previous_reply": ("previous_reference", "content_clause"),
     }
     forbidden_map: dict[str, tuple[str, ...]] = {
+        "phatic_wave": ("generic_companioning",),
+        "playful_wave": ("generic_companioning",),
+        "soft_emotion_ack": ("generic_companioning",),
+        "cute_image_ack": ("generic_companioning",),
+        "tease_image_ack": ("generic_companioning",),
+        "observe_then_answer": ("generic_companioning",),
+        "attachment_ack_then_wait": ("generic_companioning",),
         "brief_name_only": ("full_identity_intro",),
         "ack_name_then_wait": ("full_identity_intro", "probe_repeat"),
         "ack_repeat_then_light_probe": ("full_identity_intro", "bare_name_only"),
@@ -182,6 +212,7 @@ def contract_action_sets(*, family: str) -> tuple[tuple[str, ...], tuple[str, ..
         "soft_reassure_then_open_floor": ("promise_restate",),
         "hold_support_without_repromise": ("promise_restate",),
         "hold_repair_space": ("defensive_explanation",),
+        "explain_previous_reply": ("generic_companioning",),
     }
     return required_map.get(family, ()), forbidden_map.get(family, ())
 
@@ -190,6 +221,13 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
     lang = str(render_target_lang or "").strip().lower()
     if lang == "ja":
         mapping = {
+            "phatic_wave": ("短く挨拶を返す", "空疎な一言で終わらせない"),
+            "playful_wave": ("軽く明るく受ける", "一言の殻だけにしない"),
+            "soft_emotion_ack": ("見えている感情を受ける", "短く中身のある一言で返す"),
+            "cute_image_ack": ("かわいい/甘える調子を受ける", "軽く柔らかく返す"),
+            "tease_image_ack": ("小さなツッコミや拗ねた調子を受ける", "殻だけの一言にしない"),
+            "observe_then_answer": ("見えている対象を一度つかむ", "その内容を短く言葉にする"),
+            "attachment_ack_then_wait": ("添付が来たことを受ける", "次に何を見ればいいか返す"),
             "brief_name_only": ("名前だけ短く返す", "ここで止まる"),
             "ack_name_then_wait": ("前に答えたことだけ短く受ける", "名前は広げず止まる"),
             "ack_repeat_then_light_probe": ("また確認していることを受ける", "何を確かめたいのか軽く返す"),
@@ -207,9 +245,17 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
             "soft_reassure_then_open_floor": ("不安を和らげる", "話の口を返す"),
             "hold_support_without_repromise": ("応じる姿勢だけ置く", "約束文を繰り返さない"),
             "hold_repair_space": ("一歩引く", "拒否感を短く受ける"),
+            "explain_previous_reply": ("前の返答を受け直す", "何を指していたか短く補う"),
         }
         return mapping.get(family, ("先接住相手的动作", "再短短回应",))
     mapping = {
+        "phatic_wave": ("先把招呼接住", "给一句有实质内容的短回应"),
+        "playful_wave": ("先把轻松的招呼接住", "回一句自然的短接话"),
+        "soft_emotion_ack": ("先把图里的情绪接住", "顺着这个情绪回一句"),
+        "cute_image_ack": ("先把图里的可爱/卖萌感接住", "顺着这股语气回一句"),
+        "tease_image_ack": ("先把图里的小别扭/吐槽感接住", "用轻一点的方式顺手回一句"),
+        "observe_then_answer": ("先点到附件/画面内容", "再给一句简短说明"),
+        "attachment_ack_then_wait": ("先承认已经看到附件", "再把下一步口子让回去"),
         "brief_name_only": ("只短短报名字", "立刻停住，不展开介绍"),
         "ack_name_then_wait": ("只把名字轻轻放住", "不把话题再解释开"),
         "ack_repeat_then_light_probe": ("把名字这件事轻轻放住", "顺手把真正想问的口子引出来"),
@@ -227,6 +273,7 @@ def realization_steps(*, family: str, variant: str = "", render_target_lang: str
         "soft_reassure_then_open_floor": ("先把态度放稳", "再把话口让回去"),
         "hold_support_without_repromise": ("把会回应这件事放稳", "不要把承诺整句重说"),
         "hold_repair_space": ("先收住", "轻轻接住对方的不喜欢"),
+        "explain_previous_reply": ("先接住对方在追问上一句", "把上一句具体指代或意思补清楚"),
     }
     return mapping.get(family, ("先接住对方动作", "再短短回应",))
 

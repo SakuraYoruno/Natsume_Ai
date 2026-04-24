@@ -42,7 +42,7 @@
 ### prompts/templates/chat.yaml
 
 - `bond_aware_style.style_templates`：BondAwareStyle 关系风格模板（JSON）
-- `chat_agent.minimal_fallback.codex_codegen`：ChatAgent 最小兜底：Codex 代码技能结果未顺好
+- `chat_agent.minimal_fallback.codex_worker`：ChatAgent 最小兜底：Codex Runtime 代码技能结果未顺好
 - `chat_agent.minimal_fallback.default`：ChatAgent 最小兜底：通用
 - `chat_agent.minimal_fallback.greeting`：ChatAgent 最小兜底：问候
 - `chat_agent.minimal_fallback.ja_default`：ChatAgent 最小兜底：日语默认回复

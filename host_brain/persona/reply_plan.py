@@ -9,6 +9,10 @@ from host_brain.app.context.conversation_interpretation import (
     coerce_conversation_interpretation,
 )
 from host_brain.app.context.drive_state import DriveStateBlock, resolve_drive_state
+from host_brain.app.context.interaction_thread import (
+    InteractionThreadState,
+    coerce_interaction_thread_state,
+)
 from host_brain.app.context.relationship_state import RelationshipStateBlock, resolve_relationship_state
 from host_brain.app.context.tactic_ledger import TacticLedgerBlock, coerce_tactic_ledger_block
 from host_brain.app.context.topic_ledger import TopicLedgerBlock, coerce_topic_ledger_block
@@ -19,11 +23,56 @@ from host_brain.persona.reply_tactics import (
     realization_steps,
     tactic_key,
 )
-from host_brain.persona.soul_reply_surface import build_identity_reply_contract
+from host_brain.persona.soul_reply_surface import (
+    build_boundary_reply_contract,
+    build_help_reply_contract,
+    build_identity_reply_contract,
+)
 
 
 def _join_nonempty(parts: list[str]) -> str:
     return " ".join(part for part in parts if str(part or "").strip()).strip()
+
+
+def _multimodal_signal_haystack(multimodal: dict[str, Any] | None) -> str:
+    payload = dict(multimodal or {})
+    parts: list[str] = []
+    for key in ("core_observation", "summary_for_chat", "visible_text", "artifact_type", "caption"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            parts.append(value)
+    for item in list(payload.get("emotion_signals") or ()):
+        value = str(item or "").strip()
+        if value:
+            parts.append(value)
+    return " ".join(parts)
+
+
+def _image_social_candidates(multimodal: dict[str, Any] | None) -> list[tuple[str, str]]:
+    haystack = _multimodal_signal_haystack(multimodal)
+    if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "泪", "可怜", "呜")):
+        return [
+            ("soft_emotion_ack", "distress_image"),
+            ("cute_image_ack", "soft_hold"),
+            ("tease_image_ack", "light_nudge"),
+        ]
+    if any(token in haystack for token in ("可爱", "卖萌", "猫耳", "装乖", "软萌", "乖", "萌")):
+        return [
+            ("cute_image_ack", "cute_ping"),
+            ("soft_emotion_ack", "soft_hold"),
+            ("tease_image_ack", "light_nudge"),
+        ]
+    if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "别扭", "小脾气", "鼓脸", "气鼓鼓", "不爽", "服了")):
+        return [
+            ("tease_image_ack", "light_nudge"),
+            ("soft_emotion_ack", "steady_hold"),
+            ("cute_image_ack", "cute_ping"),
+        ]
+    return [
+        ("soft_emotion_ack", "image_social"),
+        ("cute_image_ack", "cute_ping"),
+        ("tease_image_ack", "light_nudge"),
+    ]
 
 
 _LOW_RISK_RELATIONAL_TOPICS = {
@@ -32,6 +81,8 @@ _LOW_RISK_RELATIONAL_TOPICS = {
     "motivation",
     "help_commitment",
     "rejection",
+    "emoji_social_followup",
+    "assistant_reply_followup",
 }
 
 
@@ -82,6 +133,10 @@ class ReplyPlan:
     forbidden_tactic_keys: tuple[str, ...] = ()
     forbidden_tactic_signatures: tuple[str, ...] = ()
     forbidden_patterns: tuple[str, ...] = ()
+    response_form: str = "text"
+    secondary_response_form: str = ""
+    response_form_reason: str = ""
+    allow_form_only_reply: bool = False
     max_chars: int = 320
     max_sentences: int = 4
     warmth_floor: float = 0.0
@@ -95,6 +150,8 @@ class ReplyPlan:
     should_be_withdrawn: bool = False
     affect_summary: str = ""
     relationship_summary: str = ""
+    interaction_thread: dict[str, Any] = field(default_factory=dict)
+    multimodal: dict[str, Any] = field(default_factory=dict)
     contract: ReplyContract = field(default_factory=ReplyContract)
     requires_validation: bool = False
     force_buffering: bool = False
@@ -140,6 +197,10 @@ class ReplyPlan:
             "forbidden_tactic_keys": list(self.forbidden_tactic_keys),
             "forbidden_tactic_signatures": list(self.forbidden_tactic_signatures),
             "forbidden_patterns": list(self.forbidden_patterns),
+            "response_form": self.response_form,
+            "secondary_response_form": self.secondary_response_form,
+            "response_form_reason": self.response_form_reason,
+            "allow_form_only_reply": bool(self.allow_form_only_reply),
             "max_chars": int(self.max_chars),
             "max_sentences": int(self.max_sentences),
             "warmth_floor": round(float(self.warmth_floor or 0.0), 4),
@@ -153,6 +214,8 @@ class ReplyPlan:
             "should_be_withdrawn": bool(self.should_be_withdrawn),
             "affect_summary": self.affect_summary,
             "relationship_summary": self.relationship_summary,
+            "interaction_thread": dict(self.interaction_thread or {}),
+            "multimodal": dict(self.multimodal or {}),
             "contract": self.contract.as_dict(),
             "reply_contract": self.reply_contract,
             "requires_validation": bool(self.requires_validation),
@@ -225,6 +288,10 @@ def coerce_reply_plan(raw: Any) -> ReplyPlan:
         forbidden_tactic_keys=tuple(str(item).strip() for item in list(payload.get("forbidden_tactic_keys") or []) if str(item).strip()),
         forbidden_tactic_signatures=tuple(str(item).strip() for item in list(payload.get("forbidden_tactic_signatures") or []) if str(item).strip()),
         forbidden_patterns=tuple(str(item).strip() for item in list(payload.get("forbidden_patterns") or []) if str(item).strip()),
+        response_form=str(payload.get("response_form") or "text").strip() or "text",
+        secondary_response_form=str(payload.get("secondary_response_form") or "").strip(),
+        response_form_reason=str(payload.get("response_form_reason") or "").strip(),
+        allow_form_only_reply=bool(payload.get("allow_form_only_reply") or False),
         max_chars=int(payload.get("max_chars") or 320),
         max_sentences=int(payload.get("max_sentences") or 4),
         warmth_floor=float(payload.get("warmth_floor") or 0.0),
@@ -238,6 +305,8 @@ def coerce_reply_plan(raw: Any) -> ReplyPlan:
         should_be_withdrawn=bool(payload.get("should_be_withdrawn") or False),
         affect_summary=str(payload.get("affect_summary") or "").strip(),
         relationship_summary=str(payload.get("relationship_summary") or "").strip(),
+        interaction_thread=dict(payload.get("interaction_thread") or {}),
+        multimodal=dict(payload.get("multimodal") or {}),
         contract=contract,
         requires_validation=bool(payload.get("requires_validation") or False),
         force_buffering=bool(payload.get("force_buffering") or False),
@@ -261,19 +330,67 @@ def _qualitative_affect_summary(*, affect: AffectStateBlock, render_target_lang:
     return "当前情绪平稳，语气自然收着。"
 
 
-def _qualitative_relationship_summary(*, relationship: RelationshipStateBlock, render_target_lang: str) -> str:
+def _qualitative_relationship_summary(
+    *,
+    relationship: RelationshipStateBlock,
+    interpretation: ConversationInterpretation,
+    interaction_thread: InteractionThreadState,
+    render_target_lang: str,
+) -> str:
     stage = str(relationship.bond_stage or "STRANGER").strip().upper() or "STRANGER"
+    topic = str(interpretation.literal_topic or "").strip().lower()
+    thread_kind = str(interaction_thread.thread_kind or "").strip().lower()
+    micro_social_topic = topic in {
+        "greeting",
+        "presence_ping",
+        "light_ack",
+        "phatic_punct",
+        "playful_ping",
+        "emoji_social_reply",
+        "emoji_social_followup",
+    }
+    micro_social_thread = thread_kind in {"image_social", "phatic"}
     if str(render_target_lang or "").strip().lower() == "ja":
+        if stage in {"STRANGER", "ACQUAINTANCE"} and (micro_social_topic or micro_social_thread):
+            return "距離感は保ちつつ、わざとよそよそしくしない。目の前の小さな感情を自然に受ける。"
         if stage in {"STRANGER", "ACQUAINTANCE"}:
             return "相手との距離はまだ遠めで、馴れ馴れしくしない。"
         if relationship.boundary_softness >= 0.5:
             return "関係はやや柔らかいが、言い過ぎない。"
         return "距離は保ちつつ、自然に受ける。"
+    if stage in {"STRANGER", "ACQUAINTANCE"} and (micro_social_topic or micro_social_thread):
+        return "保持自然分寸，但不用刻意拉开，顺着眼前这点情绪接住就好。"
     if stage in {"STRANGER", "ACQUAINTANCE"}:
         return "你和对方还不熟，不要过度亲近。"
     if relationship.boundary_softness >= 0.5:
         return "关系稍微软一点，但别说得太近。"
     return "保持分寸，顺着对方自然回应。"
+
+
+def _decide_response_form(
+    *,
+    interpretation: ConversationInterpretation,
+    relationship_state: RelationshipStateBlock,
+    multimodal: dict[str, Any] | None,
+) -> tuple[str, str, str, bool]:
+    payload = dict(multimodal or {})
+    primary_modality = str(payload.get("primary_modality") or "").strip().lower()
+    literal_topic = str(interpretation.literal_topic or "").strip().lower()
+    bond_stage = str(relationship_state.bond_stage or "STRANGER").strip().upper()
+
+    if literal_topic == "emoji_social_followup":
+        return "text", "", "image_social_followup", False
+    if literal_topic == "emoji_social_reply":
+        if primary_modality == "image":
+            return "text", "", "image_social_reply", False
+        return "text_plus_emoji", "emoji", "emoji_social_reply", False
+    if literal_topic in {"greeting", "presence_ping"}:
+        return "text_plus_emoji", "emoji", "phatic_greeting", False
+    if literal_topic in {"light_ack", "phatic_punct", "playful_ping"}:
+        return "text_plus_emoji", "emoji", "light_social_ping", False
+    if literal_topic == "attachment_only_no_question" and primary_modality == "emoji":
+        return "text_plus_emoji", "emoji", "emoji_attachment_no_question", False
+    return "text", "", "default_text", False
 
 
 def _should_require_strict_validation(
@@ -287,6 +404,29 @@ def _should_require_strict_validation(
         return False
 
     normalized_topic = str(topic or "").strip()
+    if normalized_topic in {
+        "identity",
+        "relationship_boundary",
+        "motivation",
+        "help_commitment",
+        "rejection",
+        "attachment_only_no_question",
+        "meme_meaning",
+        "literal_description",
+        "screenshot_analysis",
+        "capability_check",
+    }:
+        return True
+    if normalized_topic in {
+        "greeting",
+        "presence_ping",
+        "light_ack",
+        "phatic_punct",
+        "playful_ping",
+    }:
+        return True
+    if normalized_topic == "emoji_social_reply":
+        return False
     if normalized_topic not in _LOW_RISK_RELATIONAL_TOPICS:
         return True
 
@@ -317,6 +457,28 @@ def _should_force_buffering(
         return False
 
     normalized_topic = str(topic or "").strip()
+    if normalized_topic in {
+        "identity",
+        "relationship_boundary",
+        "motivation",
+        "help_commitment",
+        "rejection",
+        "attachment_only_no_question",
+        "meme_meaning",
+        "literal_description",
+        "screenshot_analysis",
+        "capability_check",
+    }:
+        return True
+    if normalized_topic in {
+        "greeting",
+        "presence_ping",
+        "light_ack",
+        "phatic_punct",
+        "playful_ping",
+        "emoji_social_reply",
+    }:
+        return False
     if normalized_topic not in _LOW_RISK_RELATIONAL_TOPICS:
         return True
 
@@ -431,8 +593,38 @@ def _build_reply_contract(
             forbidden_actions=forbidden_actions,
             realization_steps=steps,
         )
+    if trajectory.response_goal == "boundary_reason" and str(render_target_lang or "").strip().lower() != "ja":
+        return ReplyContract(
+            text=build_boundary_reply_contract(
+                family=family,
+                variant=variant,
+                render_target_lang=render_target_lang,
+            ),
+            required_actions=required_actions,
+            forbidden_actions=forbidden_actions,
+            realization_steps=steps,
+        )
+    if trajectory.response_goal in {"commitment_shape", "soothe_anxiety"} and str(render_target_lang or "").strip().lower() != "ja":
+        return ReplyContract(
+            text=build_help_reply_contract(
+                family=family,
+                variant=variant,
+                render_target_lang=render_target_lang,
+            ),
+            required_actions=required_actions,
+            forbidden_actions=forbidden_actions,
+            realization_steps=steps,
+        )
     if str(render_target_lang or "").strip().lower() == "ja":
         mapping = {
+            "phatic_wave": "挨拶を自然に受けて、短い実質的な一言を返す。",
+            "playful_wave": "軽い呼びかけを受けて、短く明るく返す。",
+            "soft_emotion_ack": "画像から伝わる感情を受けて、短い実質的な一言を返す。",
+            "cute_image_ack": "かわいい雰囲気を受けて、軽く柔らかく返す。",
+            "tease_image_ack": "軽いツッコミの雰囲気で受けて、殻だけの一言にしない。",
+            "observe_then_answer": "見えている対象に一度触れて、その内容を短く説明する。",
+            "attachment_ack_then_wait": "添付を見たことを示して、次に何を見ればいいか返す。",
+            "explain_previous_reply": "前の返答を受け直して、何を指していたか短く補う。",
             "brief_name_only": "名前だけを短く返し、紹介文には広げない。",
             "ack_name_then_wait": "短く受けてから止まり、名前を改めて広げない。",
             "ack_repeat_then_light_probe": "また確認していることだけ受けて、軽く探りを返し、名乗り直しすぎない。",
@@ -458,6 +650,14 @@ def _build_reply_contract(
             realization_steps=steps,
         )
     mapping = {
+        "phatic_wave": "先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
+        "playful_wave": "先把这句轻松招呼接住，再回一句自然短接话，不要只剩感叹词。",
+        "soft_emotion_ack": "先把图里的情绪接住，再顺着这个情绪回一句，不要只剩语气词。",
+        "cute_image_ack": "先把图里的可爱/卖萌感接住，再顺着这股语气回一句，不要只剩语气词。",
+        "tease_image_ack": "先把图里的小别扭/吐槽感接住，再轻轻回一句，不要只剩语气词。",
+        "observe_then_answer": "先点到附件/画面里的对象，再给一句简短说明，不要只回“嗯”。",
+        "attachment_ack_then_wait": "先承认你已经看到了这个附件，再把话口轻轻让回去，不要只用感叹词。",
+        "explain_previous_reply": "先接住对方是在追问上一句，再把上一句具体指代或意思补清楚，不要只剩语气词。",
         "brief_name_only": "只简短报名字，不展开成介绍。",
         "ack_name_then_wait": "这轮不是第一次问身份：短短承认前面已经回答过，然后停住，不要重新展开名字，也不要只剩一个名字。",
         "ack_repeat_then_light_probe": "把名字这件事轻轻放住，再顺着把真正想问的东西引出来，不要把名字展开成介绍。",
@@ -477,6 +677,31 @@ def _build_reply_contract(
         "hold_repair_space": "先收住，轻轻接住对方的不喜欢，不解释。",
     }
     variant_overrides = {
+        ("phatic_wave", "greeting"): "把招呼自然接住，再回一句短短的在场回应，不要只剩感叹词或符号。",
+        ("phatic_wave", "presence"): "先让对方知道你在，再短短接一句，不要只剩空壳句。",
+        ("phatic_wave", "light_ack"): "先接住这句轻招呼，再给一句短回应，不要只剩单个语气词。",
+        ("playful_wave", "playful_ping"): "把这句轻松招呼接住，再自然回一句俏皮短接话，不要只剩语气词。",
+        ("soft_emotion_ack", "distress_image"): "先接住图里的委屈/难过，再顺着这个情绪回一句，不要解释画面。",
+        ("soft_emotion_ack", "soft_hold"): "先把图里的软软情绪接住，再轻轻回一句，不要解释画面。",
+        ("soft_emotion_ack", "steady_hold"): "先把图里的情绪稳稳接住，再顺着回一句，不要解释画面。",
+        ("soft_emotion_ack", "image_social"): "先把这张图里的情绪接住，再顺着回一句，不要解说画面。",
+        ("soft_emotion_ack", "backoff_hold"): "先接住对方是在回前一张图，再轻轻往后收一点，不要装作没接上上下文。",
+        ("soft_emotion_ack", "explain_read"): "先承认自己是顺着刚才那张图理解到的，再用一句很自然的话把这个理解说清，不要重新解说画面。",
+        ("soft_emotion_ack", "let_it_pass"): "先承认自己接住了上一张图的语气，再轻轻把这件事放过去，不要重新追问。",
+        ("cute_image_ack", "cute_ping"): "先把这张图的可爱/卖萌感接住，再顺着这股语气回一句，不要解释画面。",
+        ("cute_image_ack", "soft_hold"): "先把这张图里的软萌感觉接住，再轻轻回一句，不要解释画面。",
+        ("tease_image_ack", "light_nudge"): "先把这张图里的小别扭/小吐槽感接住，再轻一点顺手回一句，不要解释画面。",
+        ("tease_image_ack", "deny_nudge"): "先接住对方在嘴硬/否认，再顺着上一张图轻轻打趣一句，不要突然装作没上下文。",
+        ("tease_image_ack", "light_explain"): "先顺着上一张图轻轻解释你为什么会那么说，再带一点熟人口吻，不要重新解说画面。",
+        ("tease_image_ack", "soft_slide"): "先顺着上一张图轻轻带过去，像熟人间收一收这个小情绪，不要重新追问。",
+        ("observe_then_answer", "screenshot_analysis"): "先点到截图里的提示/界面，再给一句简短说明，不要只回“嗯”。",
+        ("observe_then_answer", "literal_description"): "先点到图里看到的对象，再给一句简短说明，不要只回空壳句。",
+        ("observe_then_answer", "meme_meaning"): "先接住这是张带情绪的图，再用一句短话说明你的理解，不要只回感叹词。",
+        ("observe_then_answer", "capability_check"): "先说明你能看这张图，再短短说你先能帮到哪一步，不要只回“嗯”。",
+        ("attachment_ack_then_wait", "attachment_ping"): "先承认已经看到了这个附件，再把下一步口子让回去，不要只剩单个语气词。",
+        ("explain_previous_reply", "clarify_object"): "先承认上一句说得太省，再补清楚上一句具体指的是什么；不要只回语气词，也不要装作新话题。",
+        ("explain_previous_reply", "clarify_meaning"): "先接住对方在问上一句是什么意思，再用一两句把上一句的意思补清楚；不要只回语气词。",
+        ("explain_previous_reply", "repair_too_short"): "先承认刚才那句接得太短，再顺着上下文把该补的意思补上；不要复读上一句。",
         ("ack_repeat_then_light_probe", "confirm_motive"): "把名字这件事轻轻放住，再顺着探一下他真正想确认的是什么，不要重报名字。",
         ("ack_repeat_then_light_probe", "confirm_part"): "把名字这件事轻轻放住，再问他还想确认哪一部分，不要重报名字。",
         ("ack_repeat_then_light_probe", "confirm_real_question"): "把名字这件事轻轻放住，再把真正想问的是什么引出来，不要重报名字。",
@@ -501,6 +726,115 @@ def _build_reply_contract(
         required_actions=required_actions,
         forbidden_actions=forbidden_actions,
         realization_steps=steps,
+    )
+
+
+def _refine_multimodal_contract(
+    *,
+    contract: ReplyContract,
+    topic: str,
+    multimodal: dict[str, Any] | None,
+    trajectory: ResponseTrajectory | None,
+    render_target_lang: str,
+) -> ReplyContract:
+    if str(render_target_lang or "").strip().lower() == "ja":
+        return contract
+    payload = dict(multimodal or {})
+    primary_modality = str(payload.get("primary_modality") or "").strip().lower()
+    family = str(getattr(trajectory, "tactic_family", "") or "").strip()
+    variant = str(getattr(trajectory, "tactic_variant", "") or "").strip()
+    base_text = str(getattr(contract, "text", "") or "").strip()
+    base_steps = tuple(
+        str(item).strip()
+        for item in getattr(contract, "realization_steps", ()) or ()
+        if str(item).strip()
+    )
+    if topic == "emoji_social_reply" and primary_modality == "image":
+        extra_by_variant = {
+            ("soft_emotion_ack", "distress_image"): "把委屈/难过那层先接住，像顺手哄一句，不要只剩感叹词。",
+            ("soft_emotion_ack", "soft_hold"): "把软下来的感觉先接住，像顺手放轻一点，不要只剩语气词。",
+            ("soft_emotion_ack", "steady_hold"): "把低落/别扭那层先接住，像顺手问一句，不要说成看图报告。",
+            ("cute_image_ack", "cute_ping"): "把卖萌/可爱感接住，像被蹭了一下时顺手接话，不要过度卖萌。",
+            ("cute_image_ack", "soft_hold"): "把软萌感接住，顺手轻轻回一句，不要解说画面。",
+            ("tease_image_ack", "light_nudge"): "把小别扭/小吐槽接住，轻轻逗一下，不要上纲上线。",
+        }
+        extra_text = extra_by_variant.get((family, variant), "先把图里的情绪接住，再顺着这层语气自然接一句。")
+        return ReplyContract(
+            text=" ".join(
+                part for part in (
+                    base_text,
+                    extra_text,
+                    "不要解说画面，也不要挂固定开放问句。",
+                )
+                if str(part).strip()
+            ),
+            required_actions=contract.required_actions,
+            forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
+            realization_steps=base_steps or ("先看出图里的情绪", "顺着这个情绪接一句"),
+        )
+    if topic == "emoji_social_followup":
+        extra_by_variant = {
+            ("soft_emotion_ack", "backoff_hold"): "这轮更像是在嘴硬否认，给对方一个台阶，轻轻退一步，不要硬顶。",
+            ("soft_emotion_ack", "explain_read"): "这轮是在反问你为什么会那样理解，用一句很生活的话解释你的读法，不要重新讲图片内容。",
+            ("soft_emotion_ack", "let_it_pass"): "这轮是在想把那层情绪轻轻带过去，你顺着放过就好，不要继续追着问。",
+            ("tease_image_ack", "deny_nudge"): "这轮是在嘴硬否认，可以轻一点打趣，但不要顶嘴上头。",
+            ("tease_image_ack", "light_explain"): "这轮是在追问你为什么会那样想，轻一点解释就够，不要重新分析画面。",
+            ("tease_image_ack", "soft_slide"): "这轮是在把那层情绪轻轻滑过去，顺手收住就好，不要重新追问。",
+        }
+        extra_text = extra_by_variant.get((family, variant), "先接住这句是在回上一张图，再顺着那层情绪自然接一句。")
+        return ReplyContract(
+            text=" ".join(
+                part for part in (
+                    base_text,
+                    extra_text,
+                    "不要突然装作没上下文，也不要重新解说画面。",
+                )
+                if str(part).strip()
+            ),
+            required_actions=contract.required_actions,
+            forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
+            realization_steps=base_steps or ("先接住这是上一张图后的跟话", "顺着刚才那层情绪自然接一句"),
+        )
+    if topic == "attachment_only_no_question" and primary_modality == "image":
+        return ReplyContract(
+            text=" ".join(
+                part for part in (
+                    base_text,
+                    "先承认已经看到了这张图，再轻轻接住，不要主动开始描述画面，也不要立刻追问。",
+                )
+                if str(part).strip()
+            ),
+            required_actions=contract.required_actions,
+            forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
+            realization_steps=base_steps or ("先承认看到了图片", "轻轻接住，不主动解说"),
+        )
+    return contract
+
+
+def _refine_assistant_followup_contract(
+    *,
+    contract: ReplyContract,
+    topic: str,
+    interaction_thread: InteractionThreadState,
+    render_target_lang: str,
+) -> ReplyContract:
+    if topic != "assistant_reply_followup":
+        return contract
+    source_excerpt = str(getattr(interaction_thread, "source_excerpt", "") or "").strip()
+    source_context_excerpt = str(getattr(interaction_thread, "source_context_excerpt", "") or "").strip()
+    if not source_excerpt:
+        return contract
+    if str(render_target_lang or "").strip().lower() == "ja":
+        context = f"その直前の相手の発話は「{source_context_excerpt}」。" if source_context_excerpt else ""
+        extra = f"{context}前の返答は「{source_excerpt}」。この流れを中心に補足し、新しい話題にしない。"
+    else:
+        context = f"上一条助手回复前接的用户话是“{source_context_excerpt}”。" if source_context_excerpt else ""
+        extra = f"{context}上一条助手回复是“{source_excerpt}”。本轮必须围绕这段上下文补清楚，不要当成新话题。"
+    return ReplyContract(
+        text=" ".join(part for part in (contract.text, extra) if str(part).strip()),
+        required_actions=contract.required_actions,
+        forbidden_actions=contract.forbidden_actions,
+        realization_steps=contract.realization_steps,
     )
 
 
@@ -689,6 +1023,8 @@ def _build_topic_trajectory_options(
     *,
     topic: str,
     interpretation: ConversationInterpretation,
+    interaction_thread: InteractionThreadState,
+    multimodal: dict[str, Any] | None,
     used_recent_families: tuple[str, ...],
     used_recent_keys: tuple[str, ...],
     used_recent_signatures: tuple[str, ...],
@@ -766,6 +1102,172 @@ def _build_topic_trajectory_options(
                 followup_kind,
             ))
         return options
+    if topic in {"greeting", "presence_ping", "light_ack", "phatic_punct"}:
+        variant = "greeting"
+        if topic == "presence_ping":
+            variant = "presence"
+        elif topic in {"light_ack", "phatic_punct"}:
+            variant = "light_ack"
+        return [(
+            "phatic_wave",
+            variant,
+            ResponseTrajectory(
+                response_goal="phatic_reply",
+                tactic_family="phatic_wave",
+                tactic_variant=variant,
+                trajectory_stage="first_turn",
+            ),
+            "none",
+            "none",
+        )]
+    if topic == "playful_ping":
+        return [(
+            "playful_wave",
+            "playful_ping",
+            ResponseTrajectory(
+                response_goal="playful_reply",
+                tactic_family="playful_wave",
+                tactic_variant="playful_ping",
+                trajectory_stage="first_turn",
+            ),
+            "none",
+            "none",
+        )]
+    if topic == "emoji_social_reply":
+        primary_modality = str((multimodal or {}).get("primary_modality") or "").strip().lower()
+        if primary_modality == "image":
+            ranked = _prioritize_trajectory_options(
+                topic=topic,
+                candidates=_image_social_candidates(multimodal),
+                used_recent_families=used_recent_families,
+                used_recent_keys=used_recent_keys,
+                used_recent_signatures=used_recent_signatures,
+            )
+            response_goal_map = {
+                "soft_emotion_ack": "gentle_image_reply",
+                "cute_image_ack": "cute_image_reply",
+                "tease_image_ack": "playful_image_reply",
+            }
+            return [
+                (
+                    family,
+                    variant,
+                    ResponseTrajectory(
+                        response_goal=response_goal_map.get(family, "playful_reply"),
+                        tactic_family=family,
+                        tactic_variant=variant,
+                        trajectory_stage="first_turn",
+                    ),
+                    "none",
+                    "none",
+                )
+                for family, variant in ranked
+            ]
+        return [(
+            "playful_wave",
+            "playful_ping",
+            ResponseTrajectory(
+                response_goal="playful_reply",
+                tactic_family="playful_wave",
+                tactic_variant="playful_ping",
+                trajectory_stage="first_turn",
+            ),
+            "none",
+            "none",
+        )]
+    if topic == "emoji_social_followup":
+        tags = {str(item).strip() for item in interpretation.reason_tags or () if str(item).strip()}
+        reaction = str(interaction_thread.last_user_reaction or "").strip().lower()
+        if reaction == "deny" or "image_social_followup:deny" in tags:
+            candidates = [
+                ("soft_emotion_ack", "backoff_hold"),
+                ("tease_image_ack", "deny_nudge"),
+                ("soft_emotion_ack", "let_it_pass"),
+            ]
+        elif reaction == "why" or "image_social_followup:why" in tags:
+            candidates = [
+                ("soft_emotion_ack", "explain_read"),
+                ("tease_image_ack", "light_explain"),
+                ("soft_emotion_ack", "backoff_hold"),
+            ]
+        else:
+            candidates = [
+                ("soft_emotion_ack", "let_it_pass"),
+                ("tease_image_ack", "soft_slide"),
+                ("soft_emotion_ack", "backoff_hold"),
+            ]
+        ranked = _prioritize_trajectory_options(
+            topic=topic,
+            candidates=candidates,
+            used_recent_families=used_recent_families,
+            used_recent_keys=used_recent_keys,
+            used_recent_signatures=used_recent_signatures,
+        )
+        response_goal_map = {
+            "soft_emotion_ack": "gentle_followup_reply",
+            "tease_image_ack": "playful_followup_reply",
+        }
+        return [
+            (
+                family,
+                variant,
+                ResponseTrajectory(
+                    response_goal=response_goal_map.get(family, "gentle_followup_reply"),
+                    tactic_family=family,
+                    tactic_variant=variant,
+                    trajectory_stage="followup",
+                ),
+                "none",
+                "none",
+            )
+            for family, variant in ranked
+        ]
+    if topic == "assistant_reply_followup":
+        reaction = str(interaction_thread.last_user_reaction or "").strip().lower()
+        if reaction == "ask_object":
+            variant = "clarify_object"
+        elif reaction == "surprise":
+            variant = "repair_too_short"
+        else:
+            variant = "clarify_meaning"
+        return [(
+            "explain_previous_reply",
+            variant,
+            ResponseTrajectory(
+                response_goal="clarify_previous_reply",
+                tactic_family="explain_previous_reply",
+                tactic_variant=variant,
+                trajectory_stage="followup",
+            ),
+            "brief_reason",
+            "none",
+        )]
+    if topic in {"meme_meaning", "literal_description", "screenshot_analysis", "capability_check"}:
+        return [(
+            "observe_then_answer",
+            topic,
+            ResponseTrajectory(
+                response_goal="multimodal_answer",
+                tactic_family="observe_then_answer",
+                tactic_variant=topic,
+                trajectory_stage="first_turn",
+            ),
+            "brief_reason",
+            "none",
+        )]
+    if topic == "attachment_only_no_question":
+        return [(
+            "attachment_ack_then_wait",
+            "attachment_ping",
+            ResponseTrajectory(
+                response_goal="multimodal_ack",
+                tactic_family="attachment_ack_then_wait",
+                tactic_variant="attachment_ping",
+                trajectory_stage="first_turn",
+            ),
+            "none",
+            "light_probe",
+        )]
     if topic in {"relationship_boundary", "motivation"}:
         if interpretation.freshness == "new":
             family = "short_boundary_then_reason"
@@ -888,13 +1390,122 @@ def _build_topic_trajectory_options(
     return []
 
 
+def _build_thread_fallback_plan_components(
+    *,
+    interpretation: ConversationInterpretation,
+    interaction_thread: InteractionThreadState,
+) -> tuple[str, ResponseTrajectory, str, str] | None:
+    if not interaction_thread.open:
+        return None
+
+    thread_kind = str(interaction_thread.thread_kind or "").strip().lower()
+    last_reaction = str(interaction_thread.last_user_reaction or "").strip().lower()
+    stage = _trajectory_stage(
+        freshness=interpretation.freshness,
+        repeat_question_count=interpretation.repeat_question_count,
+    )
+
+    if thread_kind == "image_social":
+        variant = "steady_hold"
+        followup_kind = "soft_reassure"
+        if last_reaction == "why":
+            variant = "explain_read"
+            followup_kind = "soft_confirm"
+        elif last_reaction == "nothing":
+            variant = "let_it_pass"
+        elif last_reaction == "deny":
+            variant = "backoff_hold"
+        return (
+            "emoji_social_followup",
+            ResponseTrajectory(
+                response_goal="gentle_followup_reply",
+                tactic_family="soft_emotion_ack",
+                tactic_variant=variant,
+                trajectory_stage=stage or "thread_followup",
+            ),
+            "none",
+            followup_kind,
+        )
+
+    if thread_kind == "identity_loop":
+        return (
+            "identity",
+            ResponseTrajectory(
+                response_goal="identity_confirm",
+                tactic_family="ack_repeat_then_light_probe",
+                tactic_variant="short_confirm",
+                trajectory_stage=stage or "thread_followup",
+            ),
+            "none",
+            "light_probe",
+        )
+
+    if thread_kind == "boundary_probe":
+        return (
+            "motivation",
+            ResponseTrajectory(
+                response_goal="boundary_reason",
+                tactic_family="ack_still_care_then_new_reason",
+                tactic_variant="soft_confirm",
+                trajectory_stage=stage or "thread_followup",
+            ),
+            "brief_reason",
+            "soft_confirm",
+        )
+
+    if thread_kind == "help_reassurance":
+        return (
+            "help_commitment",
+            ResponseTrajectory(
+                response_goal="soothe_anxiety",
+                tactic_family="ack_anxiety_without_repromise",
+                tactic_variant="steady_reassure",
+                trajectory_stage=stage or "thread_followup",
+            ),
+            "none",
+            "soft_reassure",
+        )
+
+    if thread_kind == "phatic":
+        return (
+            str(interaction_thread.source_topic or interpretation.literal_topic or "greeting").strip() or "greeting",
+            ResponseTrajectory(
+                response_goal="phatic_response",
+                tactic_family="phatic_wave",
+                tactic_variant="light_return",
+                trajectory_stage=stage or "thread_followup",
+            ),
+            "none",
+            "none",
+        )
+    if thread_kind == "assistant_reply_followup":
+        reaction = str(interaction_thread.last_user_reaction or "").strip().lower()
+        variant = "clarify_object" if reaction == "ask_object" else "clarify_meaning"
+        if reaction == "surprise":
+            variant = "repair_too_short"
+        return (
+            "assistant_reply_followup",
+            ResponseTrajectory(
+                response_goal="clarify_previous_reply",
+                tactic_family="explain_previous_reply",
+                tactic_variant=variant,
+                trajectory_stage=stage or "thread_followup",
+            ),
+            "brief_reason",
+            "none",
+        )
+    return None
+
+
 def _assemble_reply_plan(
     *,
     affect_policy: Any,
     affect_state: AffectStateBlock,
     relationship_state: RelationshipStateBlock,
     interpretation: ConversationInterpretation,
+    interaction_thread: InteractionThreadState,
     topic: str,
+    multimodal: dict[str, Any] | None,
     used_recent: tuple[str, ...],
     used_recent_keys: tuple[str, ...],
     used_recent_signatures: tuple[str, ...],
@@ -921,6 +1532,15 @@ def _assemble_reply_plan(
             forbidden_patterns.append("identity_name_restate")
         if trajectory.trajectory_stage != "first_turn":
             plan_confidence = 0.83
+    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping", "emoji_social_reply", "emoji_social_followup"}:
+        forbidden_patterns.extend(["same_as_previous_reply", "repeated_tactic"])
+        plan_confidence = 0.8
+    elif topic in {"attachment_only_no_question", "meme_meaning", "literal_description", "screenshot_analysis", "capability_check"}:
+        forbidden_patterns.extend(["same_as_previous_reply"])
+        plan_confidence = 0.81
+    elif topic == "assistant_reply_followup":
+        forbidden_patterns.extend(["same_as_previous_reply", "previous_reply_underanswered"])
+        plan_confidence = 0.84
     elif topic in {"relationship_boundary", "motivation"}:
         forbidden_patterns.extend(["full_reason_restate", "same_as_previous_reply", "repeated_tactic"])
         if trajectory.trajectory_stage != "first_turn":
@@ -940,22 +1560,56 @@ def _assemble_reply_plan(
         reason_tags.append("tactic_history_present")
     if interpretation.repeat_question_count:
         reason_tags.append(f"repeat_count:{interpretation.repeat_question_count}")
+    if interaction_thread.thread_kind:
+        reason_tags.append(f"interaction_thread:{interaction_thread.thread_kind}")
+    if interaction_thread.source_topic:
+        reason_tags.append(f"interaction_thread_source:{interaction_thread.source_topic}")
 
     contract = _build_reply_contract(
         trajectory=trajectory,
         render_target_lang=render_target_lang,
+    )
+    contract = _refine_multimodal_contract(
+        contract=contract,
+        topic=topic,
+        multimodal=multimodal,
+        trajectory=trajectory,
+        render_target_lang=render_target_lang,
+    )
+    contract = _refine_assistant_followup_contract(
+        contract=contract,
+        topic=topic,
+        interaction_thread=interaction_thread,
+        render_target_lang=render_target_lang,
+    )
+    response_form, secondary_response_form, response_form_reason, allow_form_only_reply = _decide_response_form(
+        interpretation=interpretation,
+        relationship_state=relationship_state,
+        multimodal=multimodal,
     )
     requires_validation = _should_require_strict_validation(
         topic=topic,
         interpretation=interpretation,
         trajectory=trajectory,
     )
+    if topic == "emoji_social_reply" and response_form_reason == "image_social_reply":
+        requires_validation = True
+    if topic == "emoji_social_followup":
+        requires_validation = True
+    if topic == "assistant_reply_followup":
+        requires_validation = True
     force_buffering = _should_force_buffering(
         topic=topic,
         interpretation=interpretation,
         trajectory=trajectory,
         requires_validation=requires_validation,
     )
+    if topic == "emoji_social_reply" and response_form_reason == "image_social_reply":
+        force_buffering = True
+    if topic == "emoji_social_followup":
+        force_buffering = True
+    if topic == "assistant_reply_followup":
+        force_buffering = True
 
     return ReplyPlan(
         primary_topic=topic,
@@ -971,6 +1625,10 @@ def _assemble_reply_plan(
         forbidden_tactic_keys=forbidden_tactic_keys,
         forbidden_tactic_signatures=forbidden_tactic_signatures,
         forbidden_patterns=tuple(dict.fromkeys(forbidden_patterns)),
+        response_form=response_form,
+        secondary_response_form=secondary_response_form,
+        response_form_reason=response_form_reason,
+        allow_form_only_reply=allow_form_only_reply,
         max_chars=affect_policy.max_chars,
         max_sentences=affect_policy.max_sentences,
         warmth_floor=affect_policy.warmth_floor,
@@ -985,8 +1643,12 @@ def _assemble_reply_plan(
         affect_summary=_qualitative_affect_summary(affect=affect_state, render_target_lang=render_target_lang),
         relationship_summary=_qualitative_relationship_summary(
             relationship=relationship_state,
+            interpretation=interpretation,
+            interaction_thread=interaction_thread,
             render_target_lang=render_target_lang,
         ),
+        interaction_thread=interaction_thread.as_dict(),
+        multimodal=dict(multimodal or {}),
         contract=contract,
         requires_validation=requires_validation,
         force_buffering=force_buffering,
@@ -1002,8 +1664,10 @@ def build_reply_plan(
     relationship_state: RelationshipStateBlock,
     drive_state: DriveStateBlock,
     interpretation: ConversationInterpretation,
+    interaction_thread: InteractionThreadState = InteractionThreadState(),
     topic_ledger: TopicLedgerBlock,
     tactic_ledger: TacticLedgerBlock,
+    multimodal: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> ReplyPlan:
     affect_policy = build_affect_policy(
@@ -1022,6 +1686,8 @@ def build_reply_plan(
     options = _build_topic_trajectory_options(
         topic=topic,
         interpretation=interpretation,
+        interaction_thread=interaction_thread,
+        multimodal=multimodal,
         used_recent_families=used_recent,
         used_recent_keys=used_recent_keys,
         used_recent_signatures=used_recent_signatures,
@@ -1033,7 +1699,31 @@ def build_reply_plan(
             affect_state=affect_state,
             relationship_state=relationship_state,
             interpretation=interpretation,
+            interaction_thread=interaction_thread,
             topic=topic,
+            multimodal=multimodal,
+            used_recent=used_recent,
+            used_recent_keys=used_recent_keys,
+            used_recent_signatures=used_recent_signatures,
+            trajectory=trajectory,
+            restate_level=restate_level,
+            followup_kind=followup_kind,
+            render_target_lang=render_target_lang,
+        )
+    thread_fallback = _build_thread_fallback_plan_components(
+        interpretation=interpretation,
+        interaction_thread=interaction_thread,
+    )
+    if thread_fallback is not None:
+        topic, trajectory, restate_level, followup_kind = thread_fallback
+        return _assemble_reply_plan(
+            affect_policy=affect_policy,
+            affect_state=affect_state,
+            relationship_state=relationship_state,
+            interpretation=interpretation,
+            interaction_thread=interaction_thread,
+            topic=topic,
+            multimodal=multimodal,
             used_recent=used_recent,
             used_recent_keys=used_recent_keys,
             used_recent_signatures=used_recent_signatures,
@@ -1056,7 +1746,9 @@ def build_reply_plan(
         affect_state=affect_state,
         relationship_state=relationship_state,
         interpretation=interpretation,
+        interaction_thread=interaction_thread,
         topic=topic,
+        multimodal=multimodal,
         used_recent=used_recent,
         used_recent_keys=used_recent_keys,
         used_recent_signatures=used_recent_signatures,
@@ -1073,8 +1765,10 @@ def build_reply_plan_candidates(
     relationship_state: RelationshipStateBlock,
     drive_state: DriveStateBlock,
     interpretation: ConversationInterpretation,
+    interaction_thread: InteractionThreadState = InteractionThreadState(),
     topic_ledger: TopicLedgerBlock,
     tactic_ledger: TacticLedgerBlock,
+    multimodal: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
     limit: int = 3,
 ) -> list[ReplyPlan]:
@@ -1090,19 +1784,47 @@ def build_reply_plan_candidates(
     options = _build_topic_trajectory_options(
         topic=topic,
         interpretation=interpretation,
+        interaction_thread=interaction_thread,
+        multimodal=multimodal,
         used_recent_families=used_recent,
         used_recent_keys=used_recent_keys,
         used_recent_signatures=used_recent_signatures,
     )
     if not options:
+        thread_fallback = _build_thread_fallback_plan_components(
+            interpretation=interpretation,
+            interaction_thread=interaction_thread,
+        )
+        if thread_fallback is not None:
+            topic, trajectory, restate_level, followup_kind = thread_fallback
+            return [
+                _assemble_reply_plan(
+                    affect_policy=affect_policy,
+                    affect_state=affect_state,
+                    relationship_state=relationship_state,
+                    interpretation=interpretation,
+                    interaction_thread=interaction_thread,
+                    topic=topic,
+                    multimodal=multimodal,
+                    used_recent=used_recent,
+                    used_recent_keys=used_recent_keys,
+                    used_recent_signatures=used_recent_signatures,
+                    trajectory=trajectory,
+                    restate_level=restate_level,
+                    followup_kind=followup_kind,
+                    render_target_lang=render_target_lang,
+                )
+            ]
         return [
             build_reply_plan(
                 affect_state=affect_state,
                 relationship_state=relationship_state,
                 drive_state=drive_state,
                 interpretation=interpretation,
+                interaction_thread=interaction_thread,
                 topic_ledger=topic_ledger,
                 tactic_ledger=tactic_ledger,
+                multimodal=multimodal,
                 render_target_lang=render_target_lang,
             )
         ]
@@ -1114,7 +1836,9 @@ def build_reply_plan_candidates(
                 affect_state=affect_state,
                 relationship_state=relationship_state,
                 interpretation=interpretation,
+                interaction_thread=interaction_thread,
                 topic=topic,
+                multimodal=multimodal,
                 used_recent=used_recent,
                 used_recent_keys=used_recent_keys,
                 used_recent_signatures=used_recent_signatures,
@@ -1135,6 +1859,8 @@ class ResponseTrajectoryPlanner:
     interpretation: ConversationInterpretation
     topic_ledger: TopicLedgerBlock
     tactic_ledger: TacticLedgerBlock
+    interaction_thread: InteractionThreadState = field(default_factory=InteractionThreadState)
+    multimodal: dict[str, Any] = field(default_factory=dict)
     render_target_lang: str = "zh"
 
     def build(self) -> ReplyPlan:
@@ -1143,8 +1869,10 @@ class ResponseTrajectoryPlanner:
             relationship_state=self.relationship_state,
             drive_state=self.drive_state,
             interpretation=self.interpretation,
+            interaction_thread=self.interaction_thread,
             topic_ledger=self.topic_ledger,
             tactic_ledger=self.tactic_ledger,
+            multimodal=self.multimodal,
             render_target_lang=self.render_target_lang,
         )
 
@@ -1159,8 +1887,10 @@ def build_reply_plan_from_inputs(
     silence_state: dict[str, Any] | None = None,
     social_brain_state: dict[str, Any] | None = None,
     conversation_interpretation: dict[str, Any] | ConversationInterpretation | None = None,
+    interaction_thread: dict[str, Any] | InteractionThreadState | None = None,
     topic_ledger: dict[str, Any] | TopicLedgerBlock | None = None,
     tactic_ledger: dict[str, Any] | TacticLedgerBlock | None = None,
+    multimodal: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
 ) -> ReplyPlan:
     affect_state = resolve_affect_state(
@@ -1177,6 +1907,11 @@ def build_reply_plan_from_inputs(
         conversation_interpretation
         if isinstance(conversation_interpretation, ConversationInterpretation)
         else coerce_conversation_interpretation(conversation_interpretation)
+    )
+    thread_state = (
+        interaction_thread
+        if isinstance(interaction_thread, InteractionThreadState)
+        else coerce_interaction_thread_state(interaction_thread)
     )
     ledger = topic_ledger if isinstance(topic_ledger, TopicLedgerBlock) else coerce_topic_ledger_block(topic_ledger)
     tactics = tactic_ledger if isinstance(tactic_ledger, TacticLedgerBlock) else coerce_tactic_ledger_block(tactic_ledger)
@@ -1195,8 +1930,10 @@ def build_reply_plan_from_inputs(
         relationship_state=relationship_state,
         drive_state=drive_state,
         interpretation=interpretation,
+        interaction_thread=thread_state,
         topic_ledger=ledger,
         tactic_ledger=tactics,
+        multimodal=dict(multimodal or {}),
         render_target_lang=render_target_lang,
     ).build()
 
@@ -1211,8 +1948,10 @@ def build_reply_plan_candidates_from_inputs(
     silence_state: dict[str, Any] | None = None,
     social_brain_state: dict[str, Any] | None = None,
     conversation_interpretation: dict[str, Any] | ConversationInterpretation | None = None,
+    interaction_thread: dict[str, Any] | InteractionThreadState | None = None,
     topic_ledger: dict[str, Any] | TopicLedgerBlock | None = None,
     tactic_ledger: dict[str, Any] | TacticLedgerBlock | None = None,
+    multimodal: dict[str, Any] | None = None,
     render_target_lang: str = "zh",
     limit: int = 3,
 ) -> list[ReplyPlan]:
@@ -1231,6 +1970,11 @@ def build_reply_plan_candidates_from_inputs(
         if isinstance(conversation_interpretation, ConversationInterpretation)
         else coerce_conversation_interpretation(conversation_interpretation)
     )
+    thread_state = (
+        interaction_thread
+        if isinstance(interaction_thread, InteractionThreadState)
+        else coerce_interaction_thread_state(interaction_thread)
+    )
     ledger = topic_ledger if isinstance(topic_ledger, TopicLedgerBlock) else coerce_topic_ledger_block(topic_ledger)
     tactics = tactic_ledger if isinstance(tactic_ledger, TacticLedgerBlock) else coerce_tactic_ledger_block(tactic_ledger)
     drive_state = resolve_drive_state(
@@ -1248,8 +1992,10 @@ def build_reply_plan_candidates_from_inputs(
         relationship_state=relationship_state,
         drive_state=drive_state,
         interpretation=interpretation,
+        interaction_thread=thread_state,
         topic_ledger=ledger,
         tactic_ledger=tactics,
+        multimodal=dict(multimodal or {}),
         render_target_lang=render_target_lang,
         limit=limit,
     )

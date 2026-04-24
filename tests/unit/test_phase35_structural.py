@@ -1,4 +1,4 @@
-"""P3.5/P16 结构性断言：executor agent_dispatch_node 分派逻辑统一到 graph_executor，不再经过 agent_dispatch_handler。"""
+﻿"""P3.5/P16 结构性断言：executor agent_dispatch_node 分派逻辑统一到 graph_executor，不再经过 agent_dispatch_handler。"""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_graph_runtime_does_not_register_codegen_skill_as_handler() -> None:
 
     deps._graph_runtime = None
     runtime = deps.get_graph_runtime()
-    assert "codex_codegen" not in getattr(runtime, "_handlers", {})
+    assert "codex_worker" not in getattr(runtime, "_handlers", {})
 
 
 def test_chat_graph_work_code_uses_short_sequence() -> None:
@@ -118,3 +118,4 @@ def test_chat_graph_work_code_uses_short_sequence() -> None:
     active = chat_config.get("graph_meta", {}).get("active_nodes") or []
     assert CHAT_DIRECT_NODE_ID in active and CHAT_RENDER_NODE_ID in active
     assert "workbench_code_assist" not in active and "core_reasoner_primary" not in active
+

@@ -12,6 +12,9 @@ from host_brain.conversation import conversation_max_turns
 from .affect_state import AffectStateBlock, resolve_affect_state
 from .conversation_interpretation import ConversationInterpretation, interpret_conversation
 from .drive_state import DriveStateBlock, resolve_drive_state
+from .interaction_state import InteractionState, build_interaction_state
+from .interaction_thread import InteractionThreadState, resolve_interaction_thread
+from .perception_packet import PerceptionPacket, build_perception_packet
 from .relationship_state import RelationshipStateBlock, resolve_relationship_state
 from .tactic_ledger import TacticLedgerBlock
 from .topic_ledger import TopicLedgerBlock
@@ -47,6 +50,16 @@ class ConversationInterpretationBlock:
 
 
 @dataclass(frozen=True)
+class InteractionThreadBlock:
+    state: InteractionThreadState = field(default_factory=InteractionThreadState)
+
+
+@dataclass(frozen=True)
+class InteractionStateBlock:
+    state: InteractionState = field(default_factory=InteractionState)
+
+
+@dataclass(frozen=True)
 class AffectBlock:
     state: AffectStateBlock = field(default_factory=AffectStateBlock)
 
@@ -71,6 +84,11 @@ class MemoryBlock:
 
 
 @dataclass(frozen=True)
+class MultimodalBlock:
+    state: PerceptionPacket = field(default_factory=PerceptionPacket)
+
+
+@dataclass(frozen=True)
 class IntentBlock:
     user_message: str = ""
     intent_draft: dict[str, Any] = field(default_factory=dict)
@@ -92,15 +110,18 @@ class BudgetTrace:
 
 
 @dataclass(frozen=True)
-class PromptContextPlaneV4:
+class PromptContextPlaneV5:
     continuity: ContinuityBlock = field(default_factory=ContinuityBlock)
     topic_ledger: TopicLedgerBlockWrapper = field(default_factory=TopicLedgerBlockWrapper)
     tactic_ledger: TacticLedgerBlockWrapper = field(default_factory=TacticLedgerBlockWrapper)
     conversation_interpretation: ConversationInterpretationBlock = field(default_factory=ConversationInterpretationBlock)
+    interaction_thread: InteractionThreadBlock = field(default_factory=InteractionThreadBlock)
+    interaction_state: InteractionStateBlock = field(default_factory=InteractionStateBlock)
     affect: AffectBlock = field(default_factory=AffectBlock)
     relationship: RelationshipBlock = field(default_factory=RelationshipBlock)
     drive: DriveBlock = field(default_factory=DriveBlock)
     memory: MemoryBlock = field(default_factory=MemoryBlock)
+    multimodal: MultimodalBlock = field(default_factory=MultimodalBlock)
     intent: IntentBlock = field(default_factory=IntentBlock)
     reply_plan: ReplyPlanBlock = field(default_factory=ReplyPlanBlock)
     budget_trace: BudgetTrace = field(default_factory=BudgetTrace)
@@ -117,7 +138,7 @@ class ContextAssembler:
         turn_context_sections: list[str] | tuple[str, ...] | None = None,
         history_max_turns: int | None = None,
         allow_older_summary: bool = True,
-    ) -> PromptContextPlaneV4:
+    ) -> PromptContextPlaneV5:
         from host_brain.app.dependencies import (  # noqa: PLC0415
             get_conversation_history,
             get_session_tactic_ledger_store,
@@ -129,6 +150,8 @@ class ContextAssembler:
         prompt_context = get_chat_runtime_prompt_context(runtime_payload)
         render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
         request_payload = dict(runtime_payload.get("request") or {})
+        multimodal_payload = dict(runtime_payload.get("multimodal_input") or {})
+        multimodal_observations = dict(multimodal_payload.get("observations") or request_payload.get("multimodal_observations") or {})
         request_id = str(request_payload.get("request_id") or "").strip()
         session_id = str(request_payload.get("session_id") or "").strip()
         person_id = str(request_payload.get("person_id") or "").strip()
@@ -205,10 +228,35 @@ class ContextAssembler:
         )
         tactic_ledger = TacticLedgerBlockWrapper(state=tactic_ledger_state)
 
+        factual_perception = build_perception_packet(
+            multimodal_observations=multimodal_observations,
+            multimodal_payload=multimodal_payload,
+            attachment_summary=str(request_payload.get("attachment_summary") or "").strip(),
+        )
+        multimodal = MultimodalBlock(
+            state=factual_perception,
+        )
+
+        preliminary_interpretation_state = interpret_conversation(
+            recent_turns=continuity.recent_turns[-6:],
+            user_message=intent.user_message,
+            topic_ledger=topic_ledger_state,
+            multimodal_observations=multimodal.state.as_dict(),
+        )
+        interaction_thread_state = resolve_interaction_thread(
+            recent_turns=continuity.recent_turns[-8:],
+            current_literal_topic=preliminary_interpretation_state.literal_topic,
+            current_user_message=intent.user_message,
+            multimodal_observations=multimodal.state.as_dict(),
+        )
+        interaction_thread = InteractionThreadBlock(state=interaction_thread_state)
+
         interpretation_state = interpret_conversation(
             recent_turns=continuity.recent_turns[-6:],
             user_message=intent.user_message,
             topic_ledger=topic_ledger_state,
+            multimodal_observations=multimodal.state.as_dict(),
+            interaction_thread=interaction_thread_state,
         )
         conversation_interpretation = ConversationInterpretationBlock(state=interpretation_state)
 
@@ -251,27 +299,45 @@ class ContextAssembler:
             retrieval_evidence_items=list(dict(runtime_payload.get("retrieval") or {}).get("evidence_items") or []),
         )
 
+        interaction_state = InteractionStateBlock(
+            state=build_interaction_state(
+                interpretation=interpretation_state.as_dict(),
+                interaction_thread=interaction_thread_state.as_dict(),
+                affect_state=affect_state.as_dict(),
+                relationship_state=relationship_state.as_dict(),
+                drive_state=drive_state.as_dict(),
+                topic_ledger=topic_ledger_state.as_dict(),
+                tactic_ledger=tactic_ledger_state.as_dict(),
+                perception_summary=factual_perception.summary_for_chat,
+            )
+        )
+
         reply_plan = ReplyPlanBlock(
             state=build_reply_plan(
                 affect_state=affect_state,
                 relationship_state=relationship_state,
                 drive_state=drive_state,
                 interpretation=interpretation_state,
+                interaction_thread=interaction_thread_state,
                 topic_ledger=topic_ledger_state,
                 tactic_ledger=tactic_ledger_state,
+                multimodal=multimodal.state.as_dict(),
                 render_target_lang=render_target_lang,
             ).as_dict()
         )
 
-        return PromptContextPlaneV4(
+        return PromptContextPlaneV5(
             continuity=continuity,
             topic_ledger=topic_ledger,
             tactic_ledger=tactic_ledger,
             conversation_interpretation=conversation_interpretation,
+            interaction_thread=interaction_thread,
+            interaction_state=interaction_state,
             affect=affect,
             relationship=relationship,
             drive=drive,
             memory=memory,
+            multimodal=multimodal,
             intent=intent,
             reply_plan=reply_plan,
         )
@@ -294,6 +360,27 @@ def assemble_prompt_context_plane(
     )
 
 
+PromptContextPlaneV4 = PromptContextPlaneV5
+MultimodalStateBlock = PerceptionPacket
+
+
+def assemble_prompt_context_plane_v5(
+    *,
+    node_id: str,
+    runtime_payload: Mapping[str, Any],
+    turn_context_sections: list[str] | tuple[str, ...] | None = None,
+    history_max_turns: int | None = None,
+    allow_older_summary: bool = True,
+) -> PromptContextPlaneV5:
+    return ContextAssembler().assemble(
+        node_id=node_id,
+        runtime_payload=runtime_payload,
+        turn_context_sections=turn_context_sections,
+        history_max_turns=history_max_turns,
+        allow_older_summary=allow_older_summary,
+    )
+
+
 __all__ = [
     "AffectBlock",
     "BudgetTrace",
@@ -302,11 +389,17 @@ __all__ = [
     "ConversationInterpretationBlock",
     "DriveBlock",
     "IntentBlock",
+    "InteractionStateBlock",
+    "InteractionThreadBlock",
     "MemoryBlock",
+    "MultimodalBlock",
+    "MultimodalStateBlock",
     "PromptContextPlaneV4",
+    "PromptContextPlaneV5",
     "RelationshipBlock",
     "ReplyPlanBlock",
     "TacticLedgerBlockWrapper",
     "TopicLedgerBlockWrapper",
     "assemble_prompt_context_plane",
+    "assemble_prompt_context_plane_v5",
 ]

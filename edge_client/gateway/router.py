@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 import logging
+import time
 from typing import Any
 
 from edge_client.channels.input_reporter import EdgeInputReporter, InputReportResult
@@ -33,6 +34,7 @@ class GatewayRouter:
             "failed": 0,
             "cached": 0,
         }
+        self._last_route: dict[str, Any] | None = None
 
     def set_tribe_bridge(self, bridge: Any | None) -> None:
         self._tribe_bridge = bridge
@@ -52,6 +54,19 @@ class GatewayRouter:
             self._stats["cached"] += 1
         else:
             self._stats["failed"] += 1
+        self._last_route = {
+            "platform": routed_msg.platform.value,
+            "conversation_id": routed_msg.conversation_id,
+            "msg_id": routed_msg.msg_id,
+            "msg_type": routed_msg.msg_type.value,
+            "content_len": len(str(routed_msg.content or "")),
+            "content_preview": str(routed_msg.content or "")[:80],
+            "success": bool(result.success),
+            "cached": bool(result.cached),
+            "reason_code": result.reason_code,
+            "detail": str(result.detail or "")[:240],
+            "ts_ms": int(time.time() * 1000),
+        }
 
         logger.debug(
             "GatewayRouter: platform=%s msg_id=%s -> %s",
@@ -151,4 +166,15 @@ class GatewayRouter:
         return replace(msg, content=text, raw_extra=raw_extra, attachments=attachments)
 
     def stats(self) -> dict[str, Any]:
-        return dict(self._stats)
+        reporter_stats: dict[str, Any] = {}
+        stats_fn = getattr(self._reporter, "stats", None)
+        if callable(stats_fn):
+            try:
+                reporter_stats = dict(stats_fn() or {})
+            except Exception as exc:  # pragma: no cover - observability only
+                reporter_stats = {"error": str(exc)}
+        return {
+            **self._stats,
+            "last_route": dict(self._last_route or {}),
+            "reporter": reporter_stats,
+        }

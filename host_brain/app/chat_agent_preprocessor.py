@@ -22,6 +22,7 @@ from host_brain.app.prompt_template_store import (
     resolve_prompt_template_text,
 )
 from host_brain.app.relational_chat_detector import is_relational_chat_message
+from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS, is_codex_runtime_skill
 
 _logger = logging.getLogger("Natsume.chat_agent")
 
@@ -42,23 +43,16 @@ _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
 
 def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str:
     lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
-    templates = resolve_prompt_template_json_merged("chat_agent.minimal_fallback.localized_texts")
-    if isinstance(templates, Mapping):
-        entry = templates.get(str(kind or "").strip())
-        if isinstance(entry, Mapping):
-            localized = str(entry.get(lang_key) or entry.get("zh") or "").strip()
-            if localized:
-                return localized
-    legacy_template_id = {
-        "codex_codegen": "chat_agent.minimal_fallback.codex_codegen",
-        "default": "chat_agent.minimal_fallback.default",
-        "greeting": "chat_agent.minimal_fallback.greeting",
-        "phatic_fastpath": "chat_agent.minimal_fallback.phatic_fastpath",
-        "presence": "chat_agent.minimal_fallback.presence",
-        "prompt_build_failed": "chat_agent.minimal_fallback.prompt_build_failed",
-        "recent_turn_direct": "chat_agent.minimal_fallback.recent_turn_direct",
-    }.get(str(kind or "").strip(), "chat_agent.minimal_fallback.default")
-    return _resolve_template_text_localized(legacy_template_id, render_target_lang=render_target_lang)
+    static_texts: dict[str, dict[str, str]] = {
+        "codex_worker": {"zh": "我先记下了，等会儿给你一个更稳的结果。", "ja": "いったん受け取ったよ。少し待って。"},
+        "default": {"zh": "我在。你继续说。", "ja": "ここにいるよ。続けて。"},
+        "greeting": {"zh": "你好呀。", "ja": "やあ。"},
+        "presence": {"zh": "在。", "ja": "いるよ。"},
+        "prompt_build_failed": {"zh": "我先接住了，你再说一句。", "ja": "ひとまず受け取ったよ。もう一度だけ言って。"},
+        "recent_turn_direct": {"zh": "我记得刚才那句。", "ja": "さっきの話は覚えてるよ。"},
+    }
+    entry = static_texts.get(str(kind or "").strip(), static_texts["default"])
+    return str(entry.get(lang_key) or entry.get("zh") or "").strip() or static_texts["default"]["zh"]
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +96,7 @@ class ChatAgentInput:
     render_policy: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
+    attachment_summary: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -694,12 +689,10 @@ def _build_minimal_chat_fallback_reply(*, user_message: str, sub_agent_ctx: SubA
     text = str(user_message or "").strip()
     if sub_agent_ctx is not None:
         agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if agent_id == "codex_codegen":
-            return _resolve_minimal_fallback_text(kind="codex_codegen", render_target_lang=render_target_lang)
+        if is_codex_runtime_skill(agent_id):
+            return _resolve_minimal_fallback_text(kind="codex_worker", render_target_lang=render_target_lang)
         if agent_id == "recent_turn_direct":
             return _resolve_minimal_fallback_text(kind="recent_turn_direct", render_target_lang=render_target_lang)
-        if agent_id == "phatic_fastpath":
-            return _resolve_minimal_fallback_text(kind="phatic_fastpath", render_target_lang=render_target_lang)
     if _FALLBACK_STRENGTH_RE.search(text):
         return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
     if _FALLBACK_PRESENCE_RE.match(text):
@@ -812,7 +805,7 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
     result_text = str(step.get("result_text") or "").strip()
     description_or_target = description or target_id
     # 特殊 target_id 处理
-    special_targets = {"web_search", "memory_store", "system_info", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", "codex_codegen", "intent_agent"}
+    special_targets = {"web_search", "memory_store", "system_info", "process_list", "network_status", "hub_skill_search", "hub_skill_list", "hub_skill_install", "hub_skill_remove", "file_read", "file_write", "file_list", *CODEX_RUNTIME_SKILL_IDS, "intent_agent"}
     if target_id in special_targets:
         if target_id == "web_search":
             topic = description or _runtime_text("default_topic", render_target_lang=render_target_lang)
@@ -830,6 +823,8 @@ def _render_plan_step_success_cn(step: Dict[str, Any], *, render_target_lang: st
                         remembered = "你" + remembered[1:]
                     return _mapping_text(success_templates, "memory_store.remembered", render_target_lang=render_target_lang, step_index=step_index, remembered=remembered)
             return _mapping_text(success_templates, "memory_store.default", render_target_lang=render_target_lang, step_index=step_index)
+        if is_codex_runtime_skill(target_id):
+            return _mapping_text(success_templates, "codex_worker", render_target_lang=render_target_lang, step_index=step_index)
         return _mapping_text(success_templates, target_id, render_target_lang=render_target_lang, step_index=step_index)
     if result_text:
         return _mapping_text(success_templates, "__with_result", render_target_lang=render_target_lang, step_index=step_index, description_or_target=description_or_target)
@@ -1128,9 +1123,9 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
         return _build_plan_execution_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
-    if agent_id in {"codex_codegen", "translate_agent", "intent_agent"}:
+    if is_codex_runtime_skill(agent_id) or agent_id in {"translate_agent", "intent_agent"}:
         return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang, user_message=user_message)
-    if agent_id in {"phatic_fastpath", "recent_turn_direct", "task_progress_direct"}:
+    if agent_id in {"recent_turn_direct", "task_progress_direct"}:
         return result_text or None
     return None
 
@@ -1148,12 +1143,10 @@ def _build_sub_agent_context_prompt(ctx: SubAgentContext, *, render_target_lang:
         return _mapping_text(templates, "failure", render_target_lang=render_target_lang, agent_id=agent_id, task=task, error_text=(ctx.error or _runtime_text("unknown_error", render_target_lang=render_target_lang)), recovery_hint=recovery_hint)
     if not result_text:
         return ""
-    if agent_id == "codex_codegen":
-        return _mapping_text(templates, "codex_codegen", render_target_lang=render_target_lang, agent_id=agent_id, task=task, result_text=result_text)
+    if is_codex_runtime_skill(agent_id):
+        return _mapping_text(templates, "codex_worker", render_target_lang=render_target_lang, agent_id=agent_id, task=task, result_text=result_text)
     if agent_id == "recent_turn_direct":
         return _mapping_text(templates, "recent_turn_direct", render_target_lang=render_target_lang, result_text=result_text)
-    if agent_id == "phatic_fastpath":
-        return _mapping_text(templates, "phatic_fastpath", render_target_lang=render_target_lang, result_text=result_text)
     if agent_id == "task_progress_direct":
         return _mapping_text(templates, "task_progress_direct", render_target_lang=render_target_lang, result_text=result_text)
     if agent_id == "plan_execution":
@@ -1223,3 +1216,4 @@ def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
         if _re.search(pattern, text, _re.IGNORECASE):
             return tag
     return "NEUTRAL"
+

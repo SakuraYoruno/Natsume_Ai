@@ -8,6 +8,13 @@ from .conversation_interpretation import (
     normalize_surface_group,
 )
 from .drive_state import DriveStateBlock, resolve_drive_state
+from .interaction_state import InteractionState, build_interaction_state, coerce_interaction_state
+from .interaction_thread import (
+    InteractionThreadState,
+    coerce_interaction_thread_state,
+    resolve_interaction_thread,
+)
+from .perception_packet import PerceptionPacket, build_perception_packet, coerce_perception_packet
 from .prompt_context_plane import (
     AffectBlock,
     BudgetTrace,
@@ -16,13 +23,17 @@ from .prompt_context_plane import (
     ConversationInterpretationBlock,
     DriveBlock,
     IntentBlock,
+    InteractionStateBlock,
+    InteractionThreadBlock,
     MemoryBlock,
     PromptContextPlaneV4,
+    PromptContextPlaneV5,
     RelationshipBlock,
     ReplyPlanBlock,
     TacticLedgerBlockWrapper,
     TopicLedgerBlockWrapper,
     assemble_prompt_context_plane,
+    assemble_prompt_context_plane_v5,
 )
 from .relationship_state import RelationshipStateBlock, build_relationship_summary, resolve_relationship_state
 from .soul_runtime import CompiledSoul, SoulCompiler, get_compiled_soul, load_compiled_soul
@@ -40,8 +51,14 @@ __all__ = [
     "DriveBlock",
     "DriveStateBlock",
     "IntentBlock",
+    "InteractionState",
+    "InteractionStateBlock",
+    "InteractionThreadBlock",
+    "InteractionThreadState",
     "MemoryBlock",
+    "PerceptionPacket",
     "PromptContextPlaneV4",
+    "PromptContextPlaneV5",
     "RelationshipBlock",
     "RelationshipStateBlock",
     "ReplyPlanBlock",
@@ -56,17 +73,24 @@ __all__ = [
     "TopicLedgerBlockWrapper",
     "TopicLedgerEntry",
     "assemble_prompt_context_plane",
+    "assemble_prompt_context_plane_v5",
     "build_affect_summary",
+    "build_interaction_state",
+    "build_perception_packet",
     "build_relationship_summary",
     "classify_assistant_answer_style",
     "classify_literal_topic",
     "coerce_conversation_interpretation",
+    "coerce_interaction_state",
+    "coerce_interaction_thread_state",
+    "coerce_perception_packet",
     "coerce_tactic_ledger_block",
     "coerce_topic_ledger_block",
     "get_compiled_soul",
     "interpret_conversation",
     "load_compiled_soul",
     "normalize_surface_group",
+    "resolve_interaction_thread",
     "resolve_affect_state",
     "resolve_drive_state",
     "resolve_relationship_state",

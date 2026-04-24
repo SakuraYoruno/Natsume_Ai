@@ -903,6 +903,8 @@ async def post_gateway_reply(
     conversation_id: str | None,
     content: str,
     msg_type: str = "text",
+    media_path: str | None = None,
+    raw_extra: Mapping[str, Any] | None = None,
     request_id: str | None = None,
     wait_result: bool = True,
     timeout_ms: int = 12000,
@@ -934,6 +936,10 @@ async def post_gateway_reply(
         "wait_result": bool(wait_result),
         "timeout_ms": int(timeout_ms),
     }
+    if str(media_path or "").strip():
+        payload["media_path"] = str(media_path).strip()
+    if isinstance(raw_extra, Mapping) and raw_extra:
+        payload["raw_extra"] = dict(raw_extra)
     gateway_timeout_ms = max(_resolve_timeout_ms(), 12_000)
     if bool(wait_result):
         gateway_timeout_ms = max(int(gateway_timeout_ms), int(timeout_ms) + 3_000)

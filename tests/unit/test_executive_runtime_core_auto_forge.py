@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from host_brain.app.capability_gap_detector import CapabilityGapDecision
 from host_brain.app.executive_runtime_core import _maybe_synthesize_runtime_capability
@@ -63,7 +63,8 @@ def test_runtime_synthesis_attaches_auto_plan_result(monkeypatch) -> None:
 
     assert payload is not None
     assert payload["executor_route"] == "skill"
-    assert payload["executor_target"] == "codex_codegen"
+    assert payload["executor_target"] == "codex_worker"
     assert payload["capability_forge"]["auto_plan"]["triggered"] is True
     assert payload["capability_forge"]["auto_plan"]["proposal_id"] == "forge_prop_unit"
     assert len(telemetry.calls) == 1
+

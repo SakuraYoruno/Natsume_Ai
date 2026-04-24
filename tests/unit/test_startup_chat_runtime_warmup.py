@@ -29,6 +29,10 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
         lambda: object(),
     )
     monkeypatch.setattr(
+        "host_brain.app.dependencies.prewarm_reply_surface_memory_store",
+        lambda **kwargs: 7,
+    )
+    monkeypatch.setattr(
         "host_brain.tribe.thalamus_agent.get_thalamus_agent",
         lambda: object(),
     )
@@ -54,6 +58,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     assert "intent_engine=ready" in status
     assert "state_write_arbiter=ready" in status
     assert "thalamus=ready" in status
+    assert "reply_surface_memory=ready:7" in status
     assert "persona_runtime=ready" in status
 
 

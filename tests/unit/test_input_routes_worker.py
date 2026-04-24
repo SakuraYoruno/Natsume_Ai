@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -376,9 +376,9 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
                     "narrative": "已完成",
                     "route_decision": {
                         "route": "skill",
-                        "target_id": "codex_codegen",
+                        "target_id": "codex_worker",
                         "task": "修复测试",
-                        "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
+                        "reason_code": "LLM_ROUTE_codex_worker",
                         "source": "llm",
                         "confidence": 0.91,
                         "override_reason": None,
@@ -413,7 +413,7 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
         route_payload = dict(route_row.get("payload") or {})
         assert route_row["status"] == "OK"
         assert route_payload["route_type"] == "skill"
-        assert route_payload["route_target"] == "codex_codegen"
+        assert route_payload["route_target"] == "codex_worker"
         assert route_payload["route_source"] == "llm"
         assert float(route_payload["route_confidence"]) == 0.91
         assert route_payload["llm_route_used"] is True
@@ -438,9 +438,9 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
                     "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
                     "route_decision": {
                         "route": "skill",
-                        "target_id": "codex_codegen",
+                        "target_id": "codex_worker",
                         "task": "fix code",
-                        "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
+                        "reason_code": "LLM_ROUTE_codex_worker",
                         "source": "llm",
                         "confidence": 0.95,
                         "llm_route_used": True,
@@ -581,9 +581,9 @@ def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
         new=AsyncMock(
             return_value={
                 "route": "skill",
-                "target_id": "codex_codegen",
+                "target_id": "codex_worker",
                 "task": "请修复这个报错",
-                "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
+                "reason_code": "LLM_ROUTE_codex_worker",
                 "confidence": 0.93,
                 "route_source": "llm",
             }
@@ -598,7 +598,7 @@ def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
         )
 
     assert decision["route"] == "skill"
-    assert decision["target_id"] == "codex_codegen"
+    assert decision["target_id"] == "codex_worker"
     assert decision["route_source"] == "llm"
     assert float(decision["confidence"]) == 0.93
 
@@ -614,7 +614,7 @@ def test_classify_task_intent_uses_rule_for_action_prefix() -> None:
 
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "intent_agent"
-    assert decision["route_source"] == "rule"
+    assert decision["route_source"] in {"rule", "rule.fastpath"}
     assert decision["reason_code"] == "RULE_ACTION_PREFIX"
 
 
@@ -629,7 +629,7 @@ def test_classify_task_intent_routes_translate_requests() -> None:
 
     assert decision["route"] == "delegate"
     assert decision["target_id"] == "translate_agent"
-    assert decision["route_source"] == "rule"
+    assert decision["route_source"] in {"rule", "rule.fastpath"}
     assert decision["reason_code"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
@@ -658,7 +658,7 @@ def test_classify_task_intent_routes_recent_turn_query() -> None:
 
     assert decision["route"] == "recent_turn"
     assert decision["target_id"] == ""
-    assert decision["route_source"] == "rule"
+    assert decision["route_source"] in {"rule", "rule.fastpath"}
     assert decision["reason_code"] == "RULE_RECENT_TURN"
 
 
@@ -673,7 +673,7 @@ def test_classify_task_intent_routes_task_progress_query() -> None:
 
     assert decision["route"] == "task_progress"
     assert decision["target_id"] == ""
-    assert decision["route_source"] == "rule"
+    assert decision["route_source"] in {"rule", "rule.fastpath"}
     assert decision["reason_code"] == "RULE_TASK_PROGRESS"
 
 
@@ -761,7 +761,7 @@ def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_overrid
                 "route_started_voice_ack": {
                     "translate_agent": "自定义翻译等待中。",
                     "intent_agent": "自定义整理等待中。",
-                    "codex_codegen": "自定义代码处理中。",
+                    "codex_worker": "自定义代码处理中。",
                     "plan": "自定义计划处理中。",
                     "default": "自定义默认等待中。",
                 }
@@ -778,7 +778,7 @@ def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_overrid
 
     assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == "自定义翻译等待中。"
     assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == "自定义整理等待中。"
-    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="codex_codegen") == "自定义代码处理中。"
+    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="codex_worker") == "自定义代码处理中。"
     assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == "自定义计划处理中。"
     assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == "自定义默认等待中。"
 
@@ -1023,6 +1023,155 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
     assert result["voice_success"] is True
     assert result["voice_started"] is True
     assert result["voice_vts_started"] is True
+
+
+def test_deliver_gateway_reply_collapses_qq_text_plus_emoji_into_single_text_send(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="ok",
+            latency_ms=12,
+        )
+    )
+    fake_mm = SimpleNamespace(
+        enhance_output=lambda **_: SimpleNamespace(
+            suggested_emoji="👋",
+            suggested_sticker="",
+        )
+    )
+
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ), patch(
+        "host_brain.app.dependencies.get_multimodal_processor",
+        return_value=fake_mm,
+    ):
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_qq_emoji_text_001",
+                payload={
+                    "platform": "qq",
+                    "conversation_id": "qq_dm_emoji_text_001",
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="你好呀！有什么事吗？",
+                user_msg_type="text",
+                response_form="text_plus_emoji",
+                response_form_reason="phatic_greeting",
+            )
+        )
+
+    assert result["success"] is True
+    assert post_gateway_reply_mock.await_count == 1
+    primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
+    assert primary_call["msg_type"] == "text"
+    assert primary_call["content"].endswith("👋")
+
+
+def test_deliver_gateway_reply_qq_text_plus_emoji_uses_default_emoji_when_processor_has_no_suggestion(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="ok",
+            latency_ms=12,
+        )
+    )
+    fake_mm = SimpleNamespace(
+        enhance_output=lambda **_: SimpleNamespace(
+            suggested_emoji="",
+            suggested_sticker="",
+        )
+    )
+
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ), patch(
+        "host_brain.app.dependencies.get_multimodal_processor",
+        return_value=fake_mm,
+    ):
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_qq_emoji_text_002",
+                payload={
+                    "platform": "qq",
+                    "conversation_id": "qq_dm_emoji_text_002",
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="我在呀。你想跟我说什么？",
+                user_msg_type="text",
+                response_form="text_plus_emoji",
+                response_form_reason="phatic_greeting",
+            )
+        )
+
+    assert result["success"] is True
+    assert post_gateway_reply_mock.await_count == 1
+    primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
+    assert primary_call["msg_type"] == "text"
+    assert primary_call["content"].endswith("👋")
+
+
+def test_deliver_gateway_reply_non_qq_text_plus_emoji_keeps_secondary_send(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="ok",
+            latency_ms=12,
+        )
+    )
+    fake_mm = SimpleNamespace(
+        enhance_output=lambda **_: SimpleNamespace(
+            suggested_emoji="👋",
+            suggested_sticker="",
+        )
+    )
+
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ), patch(
+        "host_brain.app.dependencies.get_multimodal_processor",
+        return_value=fake_mm,
+    ):
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_wechat_emoji_text_001",
+                payload={
+                    "platform": "wechat",
+                    "conversation_id": "wx_dm_emoji_text_001",
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="你好呀！有什么事吗？",
+                user_msg_type="text",
+                response_form="text_plus_emoji",
+                response_form_reason="phatic_greeting",
+            )
+        )
+
+    assert result["success"] is True
+    assert post_gateway_reply_mock.await_count == 2
+    primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
+    secondary_call = post_gateway_reply_mock.await_args_list[1].kwargs
+    assert primary_call["msg_type"] == "text"
+    assert primary_call["content"] == "你好呀！有什么事吗？"
+    assert secondary_call["msg_type"] == "emoji"
+    assert secondary_call["content"] == "👋"
+    assert secondary_call["request_id"].endswith("::secondary::emoji")
+    assert secondary_call["wait_result"] is True
 
 
 def test_dispatch_worker_gateway_auto_reply_disabled_still_completes_ok(monkeypatch) -> None:
@@ -1328,7 +1477,7 @@ def test_should_start_gateway_progress_push_for_gateway_action() -> None:
         source="GATEWAY",
         text="请帮我跑一下今天的全量测试并汇总结果",
         payload={"platform": "qq", "conversation_id": "qq_dm_4001"},
-        intent_draft={"route": "skill", "target_id": "codex_codegen"},
+        intent_draft={"route": "skill", "target_id": "codex_worker"},
     )
 
     assert should_start is True
@@ -1505,7 +1654,7 @@ def test_maybe_realign_gateway_pipeline_retries_when_deviation(monkeypatch) -> N
         ledger.close()
 
 
-def test_maybe_realign_gateway_pipeline_skips_for_codex_codegen_skill(monkeypatch) -> None:
+def test_maybe_realign_gateway_pipeline_skips_for_codex_worker_skill(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         monkeypatch.setenv("HOST_GATEWAY_DEVIATION_GUARD_ENABLED", "true")
@@ -1532,17 +1681,17 @@ def test_maybe_realign_gateway_pipeline_skips_for_codex_codegen_skill(monkeypatc
                         "decision": "APPROVE",
                         "reason_code": None,
                         "narrative": "from collections import Counter\n\ndef sort_by_frequency(arr):\n    return []",
-                        "route_decision": {"route": "skill", "target_id": "codex_codegen"},
+                        "route_decision": {"route": "skill", "target_id": "codex_worker"},
                         "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
                     },
                     ledger=ledger,
                 )
             )
 
-        assert result["route_decision"]["target_id"] == "codex_codegen"
+        assert result["route_decision"]["target_id"] == "codex_worker"
         assert meta is not None
         assert meta["triggered"] is False
-        assert meta["reason_code"] == "DEVIATION_SKIPPED_CODEX_CODEGEN"
+        assert meta["reason_code"] == "DEVIATION_SKIPPED_codex_runtime"
         notice_mock.assert_not_awaited()
         rerun_mock.assert_not_awaited()
     finally:
@@ -1635,3 +1784,4 @@ def test_maybe_realign_gateway_pipeline_skips_for_chat_route(monkeypatch) -> Non
         rerun_mock.assert_not_awaited()
     finally:
         ledger.close()
+

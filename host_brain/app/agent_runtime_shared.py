@@ -21,6 +21,7 @@ from typing import Any, Callable
 from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
 from host_brain.bond.user_identity import resolve_person_id
+from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 
 # ---------------------------------------------------------------------------
 # 纯工具函数从 core/runtime_helpers.py 导入（向后兼容重新导出）
@@ -146,7 +147,10 @@ _RECENT_TURN_GENERIC_QUERY_RE = re.compile(r"(上一句|上句|前一句|刚才�
 _DELEGATE_RE = re.compile(r"\[DELEGATE:(\w+?)(?::(.+?))?\]", re.DOTALL)
 _DELEGATE_INTERNAL_MARKER_RE = re.compile(r"draft_only|intent_draft|ReAct|LLM gateway|agent_id=", re.IGNORECASE)
 _CONTINUATION_QUERY_RE = re.compile(r"^(然后|然后呢|继续|接着|接着呢|后面呢|再然后呢|展开说说|具体一点|继续说|接着来|那后面呢|それで|それでね|それから|続き|続けて)[!！。…~？?]*$")
-_GREETING_FASTPATH_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好|おはよう|こんにちは|こんばんは|やあ)[!！。…~]*$")
+_GREETING_FASTPATH_RE = re.compile(
+    r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好|おはよう|こんにちは|こんばんは|やあ|hello|hi|hey)[!！。…~]*$",
+    re.IGNORECASE,
+)
 _PRESENCE_FASTPATH_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛|いる|いるの|いるかな|まだいる|まだいるの?)[?？!！。…~]*$")
 _ACK_FASTPATH_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行|うん|はい|そう|そうか|わかった|分かった|了解|なるほど)[!！。…~]*$")
 _COMFORT_FASTPATH_RE = re.compile(
@@ -207,7 +211,7 @@ _CLARIFICATION_DIRECT_QUERY_RE = re.compile(
 _TASK_CONTEXT_KEYWORDS = (
     "思路", "方案", "步骤", "实现", "代码", "函数", "模块", "接口", "逻辑", "架构", "设计",
     "分析", "整理", "计划", "从哪里开始", "下一步", "接下来", "具体", "展开", "继续写",
-    "贪吃蛇", "codex", "codex_codegen", "agent", "work", "tool", "翻译", "实现思路",
+    "贪吃蛇", "codex", "codex_worker", "agent", "work", "tool", "翻译", "实现思路",
 )
 
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
@@ -386,6 +390,101 @@ def _build_trace_stage_node(
         ts_ms=ts_ms,
     )
     return node
+
+
+def _load_request_aux_llm_trace_nodes(
+    *,
+    ledger: Any,
+    request_id: str,
+) -> list[dict[str, Any]]:
+    try:
+        rows = list(ledger.fetch_by_request_id("llm_node_call_log", request_id) or [])
+    except Exception:
+        return []
+
+    rows.sort(
+        key=lambda row: (
+            int(row.get("ts_ms") or 0),
+            str(row.get("node_id") or "").strip(),
+        )
+    )
+
+    nodes: list[dict[str, Any]] = []
+    for row in rows:
+        node_id = str(row.get("node_id") or "").strip()
+        if not node_id or node_id == "cortex_orchestrator_llm_stream":
+            continue
+        provider = str(row.get("provider") or "").strip().lower() or None
+        model_id = str(row.get("model_id") or "").strip() or None
+        status = str(row.get("status") or "OK").strip().upper() or "OK"
+        reason_code = str(row.get("reason_code") or "").strip() or None
+        latency_ms = row.get("latency_ms")
+        try:
+            latency_value = int(latency_ms) if latency_ms is not None else None
+        except (TypeError, ValueError):
+            latency_value = None
+        display_name = "LLM Pool"
+        if node_id.startswith("llm_pool:"):
+            scene_name = node_id.split(":", 1)[1].strip().upper() or "CHAT"
+            display_name = f"LLM Pool ({scene_name})"
+        output_digest = str(row.get("output_digest") or "").strip()
+        output_data: dict[str, Any] | None = None
+        if output_digest:
+            try:
+                attempts_payload = json.loads(output_digest)
+            except Exception:
+                attempts_payload = None
+            output_data = {"attempts": attempts_payload} if isinstance(attempts_payload, list) else {"output_digest": output_digest[:400]}
+        input_digest = str(row.get("input_digest") or "").strip()
+        input_data = {"input_digest": input_digest[:300]} if input_digest else None
+        nodes.append(
+            _build_trace_stage_node(
+                node_id=node_id,
+                node_type="llm",
+                display_name=display_name,
+                ts_ms=int(row.get("ts_ms") or 0),
+                status=status,
+                reason_code=reason_code,
+                latency_ms=latency_value,
+                provider=provider,
+                model_id=model_id,
+                input_data=input_data,
+                output_data=output_data,
+            )
+        )
+    return nodes
+
+
+def _trace_node_sort_key(node: Mapping[str, Any]) -> tuple[int, int, str]:
+    node_id = str(node.get("node_id") or "").strip()
+    ts_ms = int(node.get("ts_ms") or 0)
+    priority = {
+        "airlock_ingress": 0,
+        "governor": 1,
+        "emotion_context": 10,
+        "persona_resident_memory": 11,
+        "motive_state": 12,
+        "conversation_interpretation": 13,
+        "topic_ledger": 14,
+        "tactic_ledger": 15,
+        "affect_state": 16,
+        "relationship_state": 17,
+        "drive_state": 18,
+        "reply_plan": 19,
+        "cortex_orchestrator": 20,
+        "query_planner": 30,
+        "agentic_rag": 31,
+        "recall_fusion": 32,
+        "executive_router": 40,
+        "chat_agent": 50,
+        "prompt_builder": 60,
+        "llm_stream": 70,
+        "pii_filter": 80,
+        "airlock_egress": 90,
+    }.get(node_id)
+    if priority is None:
+        priority = 55
+    return (priority, ts_ms, node_id)
 
 
 
@@ -660,33 +759,6 @@ async def _persist_post_process_audit(
             output_data={"rule_trace": gov_decision.get("rule_trace")} if gov_decision else None,
         ),
         _build_trace_stage_node(
-            node_id="query_planner",
-            node_type="retrieval",
-            display_name="Query Planner",
-            ts_ms=ts_ms,
-            status=_retrieval_status if (_query_plan_output or _retrieval_status != "SKIPPED") else "SKIPPED",
-            reason_code=_retrieval_reason,
-            output_data=_query_plan_output,
-        ),
-        _build_trace_stage_node(
-            node_id="agentic_rag",
-            node_type="retrieval",
-            display_name="Agentic RAG",
-            ts_ms=ts_ms,
-            status=_retrieval_status if (_agentic_rag_output or _retrieval_status != "SKIPPED") else "SKIPPED",
-            reason_code=_retrieval_reason,
-            output_data=_agentic_rag_output,
-        ),
-        _build_trace_stage_node(
-            node_id="recall_fusion",
-            node_type="recall",
-            display_name="Recall Fusion",
-            ts_ms=ts_ms,
-            status=_retrieval_status,
-            reason_code=_retrieval_reason,
-            output_data=_retrieval_output,
-        ),
-        _build_trace_stage_node(
             node_id="emotion_context",
             node_type="system",
             display_name="Emotion Context",
@@ -775,6 +847,42 @@ async def _persist_post_process_audit(
             output_data=_cortex_output,
         ),
     ]
+    if _retrieval_status != "SKIPPED" and _query_plan_output:
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="query_planner",
+                node_type="retrieval",
+                display_name="Query Planner",
+                ts_ms=ts_ms,
+                status=_retrieval_status,
+                reason_code=_retrieval_reason,
+                output_data=_query_plan_output,
+            )
+        )
+    if _retrieval_status != "SKIPPED" and _agentic_rag_output:
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="agentic_rag",
+                node_type="retrieval",
+                display_name="Agentic RAG",
+                ts_ms=ts_ms,
+                status=_retrieval_status,
+                reason_code=_retrieval_reason,
+                output_data=_agentic_rag_output,
+            )
+        )
+    if _retrieval_status != "SKIPPED" or _retrieval_count or _retrieval_output.get("degraded"):
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id="recall_fusion",
+                node_type="recall",
+                display_name="Recall Fusion",
+                ts_ms=ts_ms,
+                status=_retrieval_status,
+                reason_code=_retrieval_reason,
+                output_data=_retrieval_output,
+            )
+        )
     if _dispatch_used:
         _trace_nodes_v2.append(
             _build_trace_stage_node(
@@ -815,13 +923,19 @@ async def _persist_post_process_audit(
                 output_data=_chat_output,
             )
         )
+    _trace_nodes_v2.extend(
+        _load_request_aux_llm_trace_nodes(
+            ledger=ledger,
+            request_id=request_id,
+        )
+    )
     _trace_nodes_v2.append(_prompt_builder_node)
     _trace_nodes_v2.append(
         _build_trace_stage_node(
             node_id="llm_stream",
             node_type="llm",
             display_name="LLM Stream",
-            ts_ms=ts_ms,
+            ts_ms=_now,
             status="OK" if narrative.strip() else "DEGRADED",
             latency_ms=llm_latency_ms,
             provider=provider_name,
@@ -864,6 +978,7 @@ async def _persist_post_process_audit(
                 "ts_ms": _now,
             }
         )
+    trace_nodes = sorted(trace_nodes, key=_trace_node_sort_key)
 
     _prev_node_id: str | None = None
     for _node in trace_nodes:
@@ -1080,6 +1195,15 @@ def _detect_recent_turn_query_role(
     if _generic_query_re.search(normalized):
         return "both"
     return None
+
+
+def _is_short_assistant_reply_followup(user_message: str) -> bool:
+    try:
+        from host_brain.app.context.interaction_thread import detect_assistant_reply_followup_kind  # noqa: PLC0415
+
+        return bool(detect_assistant_reply_followup_kind(str(user_message or "").strip()))
+    except Exception:
+        return False
 
 
 
@@ -1349,185 +1473,6 @@ def _looks_like_active_task_context(turns: list[dict[str, str]]) -> bool:
     return False
 
 
-def _pick_non_repeating_variant(*, variants: list[str], last_reply: str, request_id: str) -> str:
-    if not variants:
-        templates = _mapping_section(_load_runtime_texts(), "variant_selection")
-        return _mapping_text(templates, "empty_variants_fallback")
-    normalized_last = str(last_reply or "").strip()
-    start = sum(ord(ch) for ch in str(request_id or "")) % len(variants)
-    ordered = variants[start:] + variants[:start]
-    for variant in ordered:
-        if str(variant).strip() != normalized_last:
-            return variant
-    return ordered[0]
-
-
-def _normalize_phatic_fastpath_text(text: str) -> str:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return ""
-    return re.sub(r"[\s，。！？,.!?~～…]+", "", normalized)
-
-
-def _resolve_phatic_greeting_time_bucket(*, current_hour: int | None = None) -> str:
-    try:
-        hour = int(time.localtime().tm_hour if current_hour is None else current_hour) % 24
-    except Exception:
-        hour = 12
-    if 5 <= hour < 11:
-        return "morning"
-    if 11 <= hour < 18:
-        return "daytime"
-    if 18 <= hour < 24:
-        return "evening"
-    return "late_night"
-
-
-def _looks_like_comfort_fastpath_message(text: str) -> bool:
-    normalized = _normalize_phatic_fastpath_text(text)
-    if not normalized or len(normalized) > _PHATIC_FASTPATH_MAX_CHARS:
-        return False
-    if any(token in normalized for token in _PHATIC_FASTPATH_BLOCKING_TOKENS):
-        return False
-    return bool(_COMFORT_FASTPATH_RE.search(normalized))
-
-
-def _looks_like_local_media_control_fastpath_message(text: str, turns: list[dict[str, str]]) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return False
-    if _LOCAL_MEDIA_CONTROL_FASTPATH_RE.search(normalized):
-        return True
-    compact = _normalize_phatic_fastpath_text(normalized)
-    if compact not in {"直接播放就行了", "你直接播放就行了", "直接列表播放就行了"}:
-        return False
-    recent_context = " ".join(str(turn.get("content") or "") for turn in turns[-6:])
-    return bool(_LOCAL_MEDIA_CONTEXT_HINT_RE.search(recent_context))
-
-
-def _resolve_phatic_fastpath_variants(
-    *,
-    category: str,
-    render_target_lang: str,
-    templates: Mapping[str, Any] | None = None,
-    current_hour: int | None = None,
-) -> list[str]:
-    variants_mapping = _mapping_section(dict(templates or {}), "deterministic_variants")
-    language = str(render_target_lang or "zh").strip().lower()
-    localized_mapping = _mapping_section(variants_mapping, language)
-    raw_variants = localized_mapping.get(category)
-    if not raw_variants:
-        raw_variants = variants_mapping.get(category)
-    if category == "greeting" and isinstance(raw_variants, Mapping):
-        bucket = _resolve_phatic_greeting_time_bucket(current_hour=current_hour)
-        bucket_variants = raw_variants.get(bucket)
-        if isinstance(bucket_variants, list):
-            variants = [str(item).strip() for item in bucket_variants if str(item).strip()]
-            if variants:
-                return variants
-        flattened: list[str] = []
-        for value in raw_variants.values():
-            if isinstance(value, list):
-                flattened.extend(str(item).strip() for item in value if str(item).strip())
-        if flattened:
-            return flattened
-    if isinstance(raw_variants, list):
-        variants = [str(item).strip() for item in raw_variants if str(item).strip()]
-        if variants:
-            return variants
-    return []
-
-
-def _maybe_build_phatic_fastpath_reply(
-    *,
-    request_id: str,
-    session_id: str,
-    person_id: str,
-    user_message: str,
-    render_target_lang: str,
-    load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
-    looks_like_active_task_context: Callable[[list[dict[str, str]]], bool] | None = None,
-    continuation_query_re: Any | None = None,
-    greeting_fastpath_re: Any | None = None,
-    presence_fastpath_re: Any | None = None,
-    ack_fastpath_re: Any | None = None,
-    looks_like_comfort_fastpath_message: Callable[[str], bool] | None = None,
-    current_hour: int | None = None,
-) -> str | None:
-
-    normalized = str(user_message or "").strip()
-    if not normalized:
-        return None
-
-    _load_turns = load_continuity_turns or _load_continuity_turns
-    _looks_active = looks_like_active_task_context or _looks_like_active_task_context
-    _continuation_query_re = continuation_query_re or _CONTINUATION_QUERY_RE
-    _greeting_fastpath_re = greeting_fastpath_re or _GREETING_FASTPATH_RE
-    _presence_fastpath_re = presence_fastpath_re or _PRESENCE_FASTPATH_RE
-    _ack_fastpath_re = ack_fastpath_re or _ACK_FASTPATH_RE
-    _looks_like_comfort = looks_like_comfort_fastpath_message or _looks_like_comfort_fastpath_message
-    turns = _load_turns(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        render_target_lang=render_target_lang,
-        fetch_limit=24,
-    )
-    active_task = _looks_active(turns)
-
-    if _continuation_query_re.match(normalized):
-        if active_task:
-            return None
-        category = "followup"
-    elif _greeting_fastpath_re.match(normalized):
-        category = "greeting"
-    elif _presence_fastpath_re.match(normalized):
-        category = "presence"
-    elif _ack_fastpath_re.match(normalized):
-        if active_task:
-            return None
-        category = "ack"
-    elif _RIFT_REPAIR_FASTPATH_RE.search(normalized):
-        category = "rift_repair"
-    elif _REUNION_FASTPATH_RE.search(normalized):
-        category = "reunion"
-    elif _TIME_REALITY_CHECK_FASTPATH_RE.search(normalized) and not active_task:
-        category = "time_reality_check"
-    elif _looks_like_local_media_control_fastpath_message(normalized, turns) and not active_task:
-        category = "local_media_control"
-    elif _DEEP_COMPANIONSHIP_FASTPATH_RE.search(normalized) and not active_task:
-        category = "deep_companionship"
-    elif _looks_like_comfort(normalized):
-        category = "comfort"
-    elif _PLAYFUL_FASTPATH_RE.search(normalized):
-        category = "playful"
-    else:
-        return None
-
-
-    last_assistant = next(
-        (
-            str(turn.get("content") or "").strip()
-            for turn in reversed(turns)
-            if str(turn.get("role") or "").strip().lower() == "assistant"
-        ),
-        "",
-    )
-
-    templates = _mapping_section(_load_runtime_texts(), "phatic_fastpath")
-    variants = _resolve_phatic_fastpath_variants(
-        category=category,
-        render_target_lang=render_target_lang,
-        templates=templates,
-        current_hour=current_hour,
-    )
-    return _pick_non_repeating_variant(
-        variants=variants,
-        last_reply=last_assistant,
-        request_id=request_id,
-    )
-
-
 def _extract_delegate_visible_text(text: str) -> str:
     normalized = str(text or "").strip()
     if not normalized:
@@ -1556,18 +1501,18 @@ def _render_delegated_result_naturally(
     )
     empty_visible_templates = _mapping_section(templates, "empty_visible_result")
     if not visible or _DELEGATE_INTERNAL_MARKER_RE.search(visible):
-        if agent_id == "codex_codegen":
-            return _mapping_text(empty_visible_templates, "codex_codegen")
+        if is_codex_runtime_skill(agent_id):
+            return _mapping_text(empty_visible_templates, "codex_worker")
         return _mapping_text(empty_visible_templates, "default")
 
     if reply_template and "{agent_result}" in reply_template:
         rendered = reply_template.replace("{agent_result}", visible).strip()
         if rendered:
             return rendered
-    if agent_id == "codex_codegen":
+    if is_codex_runtime_skill(agent_id):
         return _mapping_text(
             templates,
-            "codex_codegen_prefix_template",
+            "codex_worker_prefix_template",
             agent_result=visible,
         ).strip()
     return visible
@@ -2027,7 +1972,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     maybe_build_task_progress_fastpath_fn: Callable[..., str | None] | None = None,
     maybe_build_recent_turn_answer_fn: Callable[..., str | None] | None = None,
     maybe_build_previous_meaning_answer_fn: Callable[..., str | None] | None = None,
-    maybe_build_phatic_fastpath_reply_fn: Callable[..., str | None] | None = None,
     async_post_process_fn: Callable[..., Any] | None = None,
     resolve_retrieval_timeout_seconds_fn: Callable[[], float] | None = None,
     prefetch_retrieval_persona_inputs_fn: Callable[..., Any] | None = None,
@@ -2041,7 +1985,6 @@ async def _cortex_orchestrator_sse_generator_impl(
     _task_progress_fastpath = maybe_build_task_progress_fastpath_fn or _maybe_build_task_progress_fastpath
     _recent_turn_answer = maybe_build_recent_turn_answer_fn or _maybe_build_recent_turn_answer
     _previous_meaning_answer = maybe_build_previous_meaning_answer_fn or _maybe_build_previous_meaning_answer
-    _phatic_fastpath = maybe_build_phatic_fastpath_reply_fn or _maybe_build_phatic_fastpath_reply
     _post_process = async_post_process_fn or _async_post_process
     _resolve_timeout = resolve_retrieval_timeout_seconds_fn or _resolve_retrieval_timeout_seconds
     _prefetch_persona_inputs = prefetch_retrieval_persona_inputs_fn or _prefetch_retrieval_persona_inputs
@@ -2230,12 +2173,16 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    clarification_direct_answer = _previous_meaning_answer(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
+    clarification_direct_answer = (
+        _previous_meaning_answer(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            render_target_lang=render_target_lang,
+        )
+        if _parse_bool_env("HOST_CLARIFICATION_DIRECT_ENABLED", default=False)
+        else None
     )
     if clarification_direct_answer:
         narrative = _sanitize_output(str(clarification_direct_answer).strip())
@@ -2290,6 +2237,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     has_multimodal_input = bool(getattr(request_body, "attachments", None)) or bool(
         getattr(request_body, "multimodal_observations", None)
     )
+    assistant_followup_fastlane = (not has_multimodal_input) and _is_short_assistant_reply_followup(sanitized_message)
     route_reason = str(
         (intent_draft or {}).get("route_reason")
         or (intent_draft or {}).get("reason_code")
@@ -2297,6 +2245,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     ).strip()
     relational_fastlane = False
     relational_topic = ""
+    phatic_fastlane = False
     if not has_multimodal_input:
         try:
             from host_brain.app.relational_chat_detector import detect_relational_chat_topic  # noqa: PLC0415
@@ -2304,68 +2253,14 @@ async def _cortex_orchestrator_sse_generator_impl(
             relational_topic = str(detect_relational_chat_topic(sanitized_message) or "").strip()
         except Exception as relational_detector_exc:
             _logger.debug("[%s] cortex_orchestrator relational detector degraded: %s", request_id, relational_detector_exc)
-        relational_fastlane = bool(route_reason.startswith("RELATIONAL_CHAT:") or relational_topic)
-
-    phatic_fastpath_reply = None
-    if not has_multimodal_input:
-        phatic_fastpath_reply = _phatic_fastpath(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            user_message=sanitized_message,
-            render_target_lang=render_target_lang,
+        relational_fastlane = bool(
+            route_reason.startswith("RELATIONAL_CHAT:")
+            or route_reason == "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP"
+            or relational_topic
+            or assistant_followup_fastlane
+            or route_reason.startswith("THALAMUS_RULE_PHATIC")
         )
-    if phatic_fastpath_reply:
-        from host_brain.app.chat_agent import (  # noqa: PLC0415
-            ChatAgentInput,
-            SubAgentContext,
-            chat_agent_sse_generator,
-        )
-
-        phatic_ctx = SubAgentContext(
-            agent_id="phatic_fastpath",
-            task="根据当前寒暄语境生成简短自然回复",
-            result_text=str(phatic_fastpath_reply).strip(),
-            success=True,
-            latency_ms=0,
-        )
-        chat_input = ChatAgentInput(
-            request_id=request_id,
-            session_id=session_id,
-            user_message=sanitized_message,
-            person_id=person_id,
-            emotion_context=emotion_context,
-            emotion_snapshot=emotion_snapshot,
-            bond_summary=bond_summary,
-            retrieval_evidence_items=[],
-            retrieval_summary={"status": "SKIPPED", "reason_code": "PHATIC_FASTPATH"},
-            sub_agent_context=phatic_ctx,
-            render_target_lang=render_target_lang,
-            reply_channel=getattr(request_body, "reply_channel", None),
-            suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
-            suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),
-            reply_depth_policy=(
-                "gateway" if str(getattr(request_body, "reply_channel", "") or "").upper() == "GATEWAY"
-                else "normal"
-            ),
-            thread_id=thread_id,
-            ts_ms=ts_ms,
-            intent_draft={**intent_draft, "fastpath_type": "phatic"},
-            llm_runtime=None,
-            trace_stage_meta={
-                "cortex_orchestrator_used": True,
-                "executive_router_used": False,
-                "chat_agent_used": True,
-                "chat_mode": "sub_agent",
-                "chat_sub_agent_id": "phatic_fastpath",
-                "cortex_orchestrator_mode": "phatic_fastpath",
-            },
-            attachments=list(getattr(request_body, "attachments", []) or []),
-            multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
-        )
-        async for event in chat_agent_sse_generator(chat_input):
-            yield event
-        return
+        phatic_fastlane = bool(route_reason.startswith("THALAMUS_RULE_PHATIC"))
 
     try:
         from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415
@@ -2459,20 +2354,31 @@ async def _cortex_orchestrator_sse_generator_impl(
 
         if not _injected_lang and _input_source != "GATEWAY":
             render_target_lang = infer_render_target_lang(user_message=sanitized_message)
-        retrieval_task = asyncio.create_task(
-            _run_retrieval(
-                request_id=request_id,
-                message=sanitized_message,
-                person_id=person_id,
-                session_id=session_id,
-                ts_ms=ts_ms,
-                emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
-                render_target_lang=render_target_lang,
-                mood_state=retrieval_mood_state,
-                bond_summary=bond_summary or None,
-                motive_state=retrieval_motive_state or None,
+        if assistant_followup_fastlane:
+            retrieval_summary = {
+                "status": "SKIPPED",
+                "reason_code": "ASSISTANT_REPLY_FOLLOWUP_RETRIEVAL_SKIPPED",
+            }
+        elif phatic_fastlane:
+            retrieval_summary = {
+                "status": "SKIPPED",
+                "reason_code": "PHATIC_RETRIEVAL_SKIPPED",
+            }
+        else:
+            retrieval_task = asyncio.create_task(
+                _run_retrieval(
+                    request_id=request_id,
+                    message=sanitized_message,
+                    person_id=person_id,
+                    session_id=session_id,
+                    ts_ms=ts_ms,
+                    emotion_tag=str(emotion_context.get("emotion_tag") or "") or None,
+                    render_target_lang=render_target_lang,
+                    mood_state=retrieval_mood_state,
+                    bond_summary=bond_summary or None,
+                    motive_state=retrieval_motive_state or None,
+                )
             )
-        )
     except Exception as retrieval_exc:
         _logger.debug("[%s] cortex_orchestrator retrieval init failed: %s", request_id, retrieval_exc)
 
@@ -2703,10 +2609,12 @@ async def _async_post_process(
     try:
         from host_brain.conversation.writer import record_assistant_turn  # noqa: PLC0415
 
-        fallback_used = bool(normalized_trace_stage_meta.get("fallback_used")) or _detect_trace_fallback_used(
-            reason_code=str((gov_decision or {}).get("reason_code") or ""),
-            degrade_code=str(normalized_trace_stage_meta.get("degrade_code") or ""),
-            output_data={"narrative": narrative, "provider_name": provider_name, "model_id": model_id},
+        fallback_used = _resolve_persisted_fallback_flag(
+            trace_stage_meta=normalized_trace_stage_meta,
+            gov_decision=gov_decision,
+            narrative=narrative,
+            provider_name=provider_name,
+            model_id=model_id,
         )
         record_assistant_turn(
             request_id=request_id,
@@ -2943,8 +2851,6 @@ __all__ = [
     "_load_continuity_turns",
     "_detect_recent_turn_query_role",
     "_looks_like_active_task_context",
-    "_pick_non_repeating_variant",
-    "_maybe_build_phatic_fastpath_reply",
     "_extract_delegate_visible_text",
     "_render_delegated_result_naturally",
     "_resolve_retrieval_timeout_seconds",
@@ -2976,5 +2882,31 @@ __all__ = [
     "_resolve_persona_session_emotion",
     "_run_persona_session_end_hooks",
     "_infer_emotion_tag_for_tts",
+    "_resolve_persisted_fallback_flag",
     "_async_post_process",
 ]
+
+
+def _resolve_persisted_fallback_flag(
+    *,
+    trace_stage_meta: Mapping[str, Any] | None,
+    gov_decision: Mapping[str, Any] | None,
+    narrative: str,
+    provider_name: str,
+    model_id: str,
+) -> bool:
+    normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
+    explicit_reply_fallback = _coerce_trace_bool(normalized_trace_stage_meta.get("reply_used_fallback"))
+    if explicit_reply_fallback is not None:
+        return bool(explicit_reply_fallback)
+
+    explicit_trace_fallback = _coerce_trace_bool(normalized_trace_stage_meta.get("fallback_used"))
+    if explicit_trace_fallback is not None:
+        return bool(explicit_trace_fallback)
+
+    return _detect_trace_fallback_used(
+        reason_code=str((gov_decision or {}).get("reason_code") or ""),
+        degrade_code=str(normalized_trace_stage_meta.get("degrade_code") or ""),
+        output_data={"narrative": narrative, "provider_name": provider_name, "model_id": model_id},
+    )
+

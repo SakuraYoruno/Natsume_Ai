@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 
@@ -76,7 +76,7 @@ def test_run_react_loop_uses_prompt_template_overrides(monkeypatch) -> None:
 
     gateway = _Gateway()
     result = run_react_loop(
-        agent_id="codex_codegen",
+        agent_id="codex_worker",
         user_input="hello",
         tools=[tool],
         gateway=gateway,
@@ -132,3 +132,4 @@ def test_builtin_react_prompt_templates_are_clean() -> None:
     assert templates.get("no_llm_final_answer")
     assert templates.get("tool_result_message") == "工具执行结果：{obs_text}\n\n请继续。"
     assert templates.get("abnormal_stop_final_answer")
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from host_brain.app.capability_gap_detector import CapabilityGapDecision
 from host_brain.app.runtime_capability_synthesizer import (
@@ -29,7 +29,7 @@ def test_synthesize_runtime_capability_picks_code_executor() -> None:
     )
 
     assert spec.route_type == "skill"
-    assert spec.target_id == "codex_codegen"
+    assert spec.target_id == "codex_worker"
     assert spec.skill_family == "code"
     assert "RuntimeCapability" in spec.task
     assert registry.get(spec.runtime_capability_id) is not None
@@ -64,3 +64,4 @@ def test_runtime_capability_registry_drops_expired_items() -> None:
     # Simulate expiration by direct remove to keep test deterministic.
     registry.remove(spec.runtime_capability_id)
     assert registry.get(spec.runtime_capability_id) is None
+

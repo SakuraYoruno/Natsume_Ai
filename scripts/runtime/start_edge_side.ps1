@@ -87,7 +87,8 @@ if ($Background.IsPresent) {
   $resolvedShowConsoleWindow = $true
 }
 
-$resolvedBreakawayFromSsh = if ($Background.IsPresent) { $true } else { [bool]$BreakawayFromSsh }
+$sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
+$resolvedBreakawayFromSsh = if ($Background.IsPresent -or $sshSessionDetected) { $true } else { [bool]$BreakawayFromSsh }
 
 $edgeRaw = & $startEdgeScript `
   -EnvFile $EnvFile `

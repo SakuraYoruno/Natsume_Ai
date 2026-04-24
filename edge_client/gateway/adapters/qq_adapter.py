@@ -19,6 +19,7 @@ OneBot v11 文档：https://11.onebot.dev/
 from __future__ import annotations
 
 import base64
+from dataclasses import replace
 import logging
 import mimetypes
 import os
@@ -44,7 +45,7 @@ _OB_MSG_TYPE_PRIVATE = "private"
 _OB_MSG_TYPE_GROUP = "group"
 
 # 支持发送的消息类型
-_SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE})
+_SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE, MsgType.EMOJI})
 
 
 def _env_int(name: str, default: int) -> int:
@@ -81,6 +82,8 @@ class QQAdapter(AbstractPlatformAdapter):
             "outbound_sent": 0,
             "outbound_failed": 0,
         }
+        self._last_inbound: dict[str, Any] | None = None
+        self._last_outbound: dict[str, Any] | None = None
 
     @property
     def platform_id(self) -> Platform:
@@ -111,6 +114,7 @@ class QQAdapter(AbstractPlatformAdapter):
         # ── 非 message 事件直接跳过 ──
         if post_type != _OB_POST_TYPE_MESSAGE:
             self._stats["inbound_skipped"] += 1
+            self._record_inbound(raw_payload, status="skipped", detail="non_message_post_type")
             return None
 
         message_type = str(raw_payload.get("message_type") or "")
@@ -125,9 +129,11 @@ class QQAdapter(AbstractPlatformAdapter):
         self_id_raw = str(raw_payload.get("self_id") or "")
         if self._self_id and user_id == self._self_id:
             self._stats["inbound_skipped"] += 1
+            self._record_inbound(raw_payload, status="skipped", detail="self_message")
             return None
         if self_id_raw and user_id == self_id_raw:
             self._stats["inbound_skipped"] += 1
+            self._record_inbound(raw_payload, status="skipped", detail="self_message")
             return None
 
         # 会话 ID：群消息用 qq_group_{group_id}，私聊用 qq_dm_{user_id}
@@ -164,6 +170,14 @@ class QQAdapter(AbstractPlatformAdapter):
             enriched_extra["_at_self"] = True
 
         self._stats["inbound_parsed"] += 1
+        self._record_inbound(
+            raw_payload,
+            status="parsed",
+            detail="",
+            conversation_id=conversation_id,
+            msg_type=msg_type.value,
+            content=content,
+        )
         attachments = self._build_attachments(
             msg_id=message_id,
             msg_type=msg_type,
@@ -194,7 +208,7 @@ class QQAdapter(AbstractPlatformAdapter):
     def send_reply(self, reply: UnifiedReply) -> bool:
         """通过 OneBot v11 HTTP API 发送回复。
 
-        支持的消息类型：TEXT / IMAGE / VOICE。
+        支持的消息类型：TEXT / IMAGE / VOICE / EMOJI。
         TEXT 类型自动接入拟人化分段发送（模拟打字延迟 + 分段），
         IMAGE 支持三种来源：本地文件（media_path）、URL（content 中的 http 链接）、
         二进制数据（media_data → base64 编码）。
@@ -205,6 +219,9 @@ class QQAdapter(AbstractPlatformAdapter):
         Returns:
             True 表示发送成功
         """
+        if reply.msg_type == MsgType.EMOJI and not self._resolve_media_uri(reply, fallback_type="image"):
+            reply = replace(reply, msg_type=MsgType.TEXT, content=str(reply.content or "").strip())
+
         if reply.msg_type not in _SENDABLE_MSG_TYPES:
             logger.warning("QQAdapter: 暂不支持发送 %s 类型消息", reply.msg_type.value)
             return False
@@ -219,10 +236,12 @@ class QQAdapter(AbstractPlatformAdapter):
                 self._stats["outbound_sent"] += 1
             else:
                 self._stats["outbound_failed"] += 1
+            self._record_outbound(reply, success=bool(success), detail="")
             return success
         except Exception as exc:
             logger.error("QQAdapter: 发送失败 conversation=%s: %s", reply.conversation_id, exc)
             self._stats["outbound_failed"] += 1
+            self._record_outbound(reply, success=False, detail=str(exc))
             return False
 
     def _send_text_humanized(self, reply: UnifiedReply) -> bool:
@@ -379,6 +398,14 @@ class QQAdapter(AbstractPlatformAdapter):
             if file_uri:
                 segments.append({"type": "record", "data": {"file": file_uri}})
 
+        # ── EMOJI（优先图片式贴图，否则退化为 Unicode emoji 文本）──
+        elif reply.msg_type == MsgType.EMOJI:
+            file_uri = self._resolve_media_uri(reply, fallback_type="image")
+            if file_uri:
+                segments.append({"type": "image", "data": {"file": file_uri}})
+            elif reply.content:
+                segments.append({"type": "text", "data": {"text": reply.content}})
+
         return segments
 
     @staticmethod
@@ -408,6 +435,46 @@ class QQAdapter(AbstractPlatformAdapter):
             return f"base64://{b64}"
 
         return None
+
+    def _record_inbound(
+        self,
+        raw_payload: dict[str, Any],
+        *,
+        status: str,
+        detail: str = "",
+        conversation_id: str = "",
+        msg_type: str = "",
+        content: str = "",
+    ) -> None:
+        raw_message = str(raw_payload.get("raw_message") or content or "")
+        self._last_inbound = {
+            "status": status,
+            "detail": detail,
+            "post_type": str(raw_payload.get("post_type") or ""),
+            "message_type": str(raw_payload.get("message_type") or ""),
+            "self_id": str(raw_payload.get("self_id") or ""),
+            "user_id": str(raw_payload.get("user_id") or ""),
+            "group_id": str(raw_payload.get("group_id") or ""),
+            "message_id": str(raw_payload.get("message_id") or ""),
+            "conversation_id": conversation_id,
+            "msg_type": msg_type,
+            "content_len": len(raw_message),
+            "content_preview": raw_message[:80],
+            "ts_ms": int(time.time() * 1000),
+        }
+
+    def _record_outbound(self, reply: UnifiedReply, *, success: bool, detail: str = "") -> None:
+        content = str(reply.content or "")
+        self._last_outbound = {
+            "success": bool(success),
+            "detail": str(detail or "")[:240],
+            "conversation_id": reply.conversation_id,
+            "msg_type": reply.msg_type.value,
+            "content_len": len(content),
+            "content_preview": content[:80],
+            "reply_to_msg_id": reply.reply_to_msg_id,
+            "ts_ms": int(time.time() * 1000),
+        }
 
     # ------------------------------------------------------------------
     # Health
@@ -463,6 +530,8 @@ class QQAdapter(AbstractPlatformAdapter):
                 "onebot_api_base": self._api_base,
                 "onebot_status": ob_status,
                 "stats": dict(self._stats),
+                "last_inbound": dict(self._last_inbound or {}),
+                "last_outbound": dict(self._last_outbound or {}),
             }
         except Exception as exc:
             return {
@@ -472,6 +541,8 @@ class QQAdapter(AbstractPlatformAdapter):
                 "onebot_api_base": self._api_base,
                 "detail": str(exc),
                 "stats": dict(self._stats),
+                "last_inbound": dict(self._last_inbound or {}),
+                "last_outbound": dict(self._last_outbound or {}),
             }
 
     # ------------------------------------------------------------------
@@ -484,6 +555,7 @@ class QQAdapter(AbstractPlatformAdapter):
         当前仅记录到日志供上层参考，未来可扩展为生成系统消息。
         """
         self._stats["inbound_notice"] += 1
+        self._record_inbound(raw_payload, status="notice", detail=str(raw_payload.get("notice_type") or "notice"))
         notice_type = raw_payload.get("notice_type", "unknown")
         sub_type = raw_payload.get("sub_type", "")
         user_id = raw_payload.get("user_id", "")
@@ -527,6 +599,7 @@ class QQAdapter(AbstractPlatformAdapter):
         当前仅记录到日志；自动处理需要上层策略控制。
         """
         self._stats["inbound_request"] += 1
+        self._record_inbound(raw_payload, status="request", detail=str(raw_payload.get("request_type") or "request"))
         request_type = raw_payload.get("request_type", "unknown")
         user_id = raw_payload.get("user_id", "")
         comment = raw_payload.get("comment", "")

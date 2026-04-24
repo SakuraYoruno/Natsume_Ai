@@ -1,4 +1,4 @@
-"""Capability Forge service for promoting gap hotspots into governed proposals."""
+﻿"""Capability Forge service for promoting gap hotspots into governed proposals."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _FORGE_EVENT_RUNTIME = "CAPABILITY_FORGE_EVENT_RUNTIME_RESULT"
 _FORGE_REASON_AUTO_ROLLBACK = "CAPABILITY_FORGE_AUTO_ROLLBACK"
 
 _DEFAULT_EXECUTOR_BY_FAMILY = {
-    "code": "codex_codegen",
+    "code": "codex_worker",
     "translation": "translate_agent",
     "perception": "vision_agent",
     "vision": "vision_agent",
@@ -1440,3 +1440,4 @@ class CapabilityForgeService:
 
 
 __all__ = ["CapabilityForgeService"]
+

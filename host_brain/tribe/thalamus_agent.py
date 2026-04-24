@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -183,12 +183,19 @@ _TASK_OPEN_APP_HINT_RE = re.compile(
     r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
     re.IGNORECASE,
 )
-_PHATIC_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
+_PHATIC_GREETING_RE = re.compile(
+    r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好|hello|hi|hey|yo)[!！。…~]*$",
+    re.IGNORECASE,
+)
 _PHATIC_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _PHATIC_ACK_RE = re.compile(r"^(嗯|嗯嗯|哦|噢|好的|好呀|好啊|可以|可以啊|可以呀|收到|对|对啊|是的|行)[!！。…~]*$")
+_PHATIC_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
 _PHATIC_COMFORT_RE = re.compile(
     r"(抱抱我|抱抱|安慰我|哄哄我|陪陪我|想被抱抱|想要抱抱|我好累|好累啊|有点累|有点困|有点难过|有点委屈|想哭|心情不好|不太开心|不开心|累死了)",
     re.IGNORECASE,
+)
+_PHATIC_SOCIAL_FOLLOWUP_RE = re.compile(
+    r"(我不委屈|不委屈|我没委屈|我不难过|我没难过|才没有|哪有|(?:没有|没|不是|不).{0,4}(?:闹别扭|委屈|难过|生气|不高兴|撒娇|伤心|emo|哭)|怎么了啊|怎么啦啊|怎么了呀|怎么啦呀|怎么了嘛|怎么啦嘛|没什么是怎么了|没什么啦|没什么呀|没什么啊|没事啊|没事啦)"
 )
 _PHATIC_FASTPATH_MAX_CHARS = 24
 _PHATIC_COMFORT_BLOCKING_TOKENS: tuple[str, ...] = (
@@ -319,6 +326,9 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
     if relational_reason:
         return relational_reason
 
+    if _PHATIC_PUNCT_RE.match(cleaned):
+        return "THALAMUS_RULE_PHATIC_PUNCT"
+
     compact = _normalize_phatic_match_text(cleaned)
     if not compact or len(compact) > _PHATIC_FASTPATH_MAX_CHARS:
         return None
@@ -333,6 +343,15 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
         if any(token in compact for token in _PHATIC_COMFORT_BLOCKING_TOKENS):
             return None
         return "THALAMUS_RULE_PHATIC_COMFORT"
+    if _PHATIC_SOCIAL_FOLLOWUP_RE.search(cleaned):
+        return "THALAMUS_RULE_PHATIC_SOCIAL_FOLLOWUP"
+    try:
+        from host_brain.app.context.interaction_thread import detect_assistant_reply_followup_kind  # noqa: PLC0415
+
+        if detect_assistant_reply_followup_kind(cleaned):
+            return "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP"
+    except Exception:
+        pass
     return None
 
 
@@ -548,9 +567,10 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             if codex_runtime_mode == "self_evolve"
             else "THALAMUS_RULE_CODEX_SELF_HEAL"
         )
+        codex_target = "codex_self_evolve" if codex_runtime_mode == "self_evolve" else "codex_self_heal"
         return {
             "route": "skill",
-            "target_id": "codex_codegen",
+            "target_id": codex_target,
             "task": cleaned,
             "reason_code": reason_code,
             "confidence": 0.98,
@@ -780,11 +800,12 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
         }
 
     if _TASK_CODE_RE.search(normalized) and not _TASK_ENTERTAINMENT_RE.search(normalized):
+        codex_target = "codex_inspect" if _looks_like_lightweight_codex_request(normalized) else "codex_worker"
         return {
             "route": "skill",
-            "target_id": "codex_codegen",
+            "target_id": codex_target,
             "task": normalized,
-            "reason_code": "RULE_FORCE_CODEX_CODEGEN",
+            "reason_code": f"RULE_FORCE_{codex_target}",
             "confidence": 0.93,
             "route_source": "rule",
         }
@@ -826,6 +847,19 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
 
     phatic_reason = _detect_short_companion_chat_reason(normalized)
     if phatic_reason:
+        bio_ops_reflex = None
+        try:
+            from host_brain.bio_ops.capabilities import classify_reflex_stimulus  # noqa: PLC0415
+
+            candidate = classify_reflex_stimulus(normalized)
+            if bool(candidate.get("matched")):
+                bio_ops_reflex = {
+                    **candidate,
+                    "path": "bio_ops_reflex",
+                    "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"],
+                }
+        except Exception:
+            bio_ops_reflex = None
         return {
             "route": "chat",
             "target_id": "",
@@ -833,6 +867,7 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
             "reason_code": phatic_reason,
             "confidence": 0.99,
             "route_source": "rule.fastpath",
+            "bio_ops_reflex": bio_ops_reflex,
             "args": {
                 "text": normalized,
             },
@@ -850,6 +885,19 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
         }
 
     if _TASK_RECENT_TURN_RE.search(normalized):
+        bio_ops_reflex = None
+        try:
+            from host_brain.bio_ops.capabilities import classify_reflex_stimulus  # noqa: PLC0415
+
+            candidate = classify_reflex_stimulus(normalized)
+            if bool(candidate.get("matched")):
+                bio_ops_reflex = {
+                    **candidate,
+                    "path": "bio_ops_reflex",
+                    "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"],
+                }
+        except Exception:
+            bio_ops_reflex = None
         return {
             "route": "recent_turn",
             "target_id": "",
@@ -857,6 +905,7 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
             "reason_code": "RULE_RECENT_TURN",
             "confidence": 0.95,
             "route_source": "rule.fastpath",
+            "bio_ops_reflex": bio_ops_reflex,
         }
     return None
 
@@ -1095,7 +1144,7 @@ def _resolve_target_id(payload: Mapping[str, Any]) -> str:
         return candidate
     action = _normalize_text(payload.get("action"), lower=True)
     if action == "work_code":
-        return "codex_codegen"
+        return "codex_worker"
     if action == "work_translate":
         return "translate_agent"
     if action.endswith("_agent"):
@@ -1195,7 +1244,19 @@ def _backfill_canonical_args(
             merged["user_message"] = fallback_text
         if normalized_target == "memory_store" and not _normalize_text(merged.get("content")):
             merged["content"] = fallback_text
-        if normalized_target == "codex_codegen":
+        if normalized_target in {
+            "codex_inspect",
+            "codex_worker",
+            "codex_self_heal",
+            "codex_self_evolve",
+            "codex_sql_audit",
+            "codex_translate_project",
+            "codex_skill_forge",
+            "codex_research",
+            "codex_organ_scan",
+            "codex_persona_drift_audit",
+            "codex_dream_compile",
+        }:
             if not _normalize_text(merged.get("task")):
                 merged["task"] = _normalize_text(merged.get("problem_statement")) or fallback_text
             if not _normalize_text(merged.get("problem_statement")):
@@ -1209,7 +1270,19 @@ def _backfill_canonical_args(
                 or merged.get("allow_temp_workspace")
             )
             if not _normalize_text(merged.get("run_mode"), lower=True):
-                if _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
+                if normalized_target == "codex_self_heal":
+                    merged["run_mode"] = "self_heal"
+                elif normalized_target == "codex_self_evolve":
+                    merged["run_mode"] = "self_evolve"
+                elif normalized_target == "codex_inspect":
+                    merged["run_mode"] = "inspect"
+                elif normalized_target == "codex_research":
+                    merged["run_mode"] = "research"
+                elif normalized_target == "codex_translate_project":
+                    merged["run_mode"] = "translate"
+                elif normalized_target == "codex_sql_audit":
+                    merged["run_mode"] = "audit"
+                elif _looks_like_lightweight_codex_request(_normalize_text(merged.get("task")) or fallback_text):
                     merged["run_mode"] = "inspect"
                 else:
                     merged["run_mode"] = "worker"
@@ -1413,24 +1486,6 @@ class ThalamusAgent:
             text=task or user_message,
             args_payload=args_payload,
         )
-        if (
-            _normalize_text(route, lower=True) == "skill"
-            and _normalize_text(target_id, lower=True) == "codex_codegen"
-            and _normalize_text(args_payload.get("run_mode"), lower=True) in {"self_heal", "self_evolve"}
-        ):
-            try:
-                from host_brain.skills.codex_task_builder import build_codex_runtime_task_args  # noqa: PLC0415
-
-                args_payload = build_codex_runtime_task_args(
-                    request_id=request_id,
-                    user_message=user_message,
-                    run_mode=_normalize_text(args_payload.get("run_mode"), lower=True),
-                    existing_args=args_payload,
-                    include_dependency_probes=bool(args_payload.get("include_dependency_probes", True)),
-                )
-            except Exception as exc:
-                _logger.debug("thalamus codex runtime task build degraded: %s", exc)
-
         compiled = dict(draft)
         compiled.update(
             {
@@ -1571,3 +1626,4 @@ __all__ = [
     "get_thalamus_agent",
     "set_thalamus_agent",
 ]
+

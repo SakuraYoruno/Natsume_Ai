@@ -1,4 +1,4 @@
-"""Unified Host input route for ASR / Gateway events.
+﻿"""Unified Host input route for ASR / Gateway events.
 
 路由层（薄层）：只负责参数解析和响应格式化。
 业务逻辑已拆分到以下 service 模块：
@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 
 # ── service 层 import ──────────────────────────────────────────────────────
 from host_brain.app.input_service_log import (
@@ -111,6 +112,8 @@ class InputPayload(BaseModel):
     sender_name: str | None = Field(None, description="[GATEWAY] Sender display name")
     media_url: str | None = Field(None, description="[GATEWAY] Media URL")
     attachments: list[dict[str, Any]] | None = Field(None, description="[GATEWAY] Structured attachments")
+    multimodal_observations: dict[str, Any] | None = Field(None, description="[GATEWAY] Multimodal observer output")
+    attachment_summary: str | None = Field(None, description="[GATEWAY] Multimodal summary for chat")
     reply_to_msg_id: str | None = Field(None, description="[GATEWAY] Reply-to message ID")
     raw_extra: dict[str, Any] | None = Field(None, description="[GATEWAY] Extra fields")
 
@@ -418,8 +421,8 @@ def _should_send_gateway_route_started_voice_ack(
         return True, "ROUTE_ACK_PLAN"
     if normalized_route == "delegate" and normalized_target in {"translate_agent", "intent_agent"}:
         return True, f"ROUTE_ACK_{normalized_target.upper()}"
-    if normalized_route == "skill" and normalized_target == "codex_codegen":
-        return True, "ROUTE_ACK_CODEX_CODEGEN"
+    if normalized_route == "skill" and is_codex_runtime_skill(normalized_target):
+        return True, "ROUTE_ACK_codex_runtime"
     return False, "ROUTE_ACK_FAST_ROUTE"
 
 
@@ -581,8 +584,8 @@ def _build_gateway_route_started_voice_ack_text(
         return str(route_templates.get("translate_agent") or "")
     if normalized_route == "delegate" and normalized_target == "intent_agent":
         return str(route_templates.get("intent_agent") or "")
-    if normalized_route == "skill" and normalized_target == "codex_codegen":
-        return str(route_templates.get("codex_codegen") or "")
+    if normalized_route == "skill" and is_codex_runtime_skill(normalized_target):
+        return str(route_templates.get("codex_worker") or "")
     if normalized_route == "plan":
         return str(route_templates.get("plan") or "")
     return str(route_templates.get("default") or "")
@@ -2006,12 +2009,12 @@ async def _maybe_realign_gateway_pipeline(
             "route_type": route_type,
             "route_target": route_target,
         }
-    if (route_type == "skill" and route_target == "codex_codegen") or (
+    if (route_type == "skill" and is_codex_runtime_skill(route_target)) or (
         route_type == "delegate" and route_target == "translate_agent"
     ):
         reason_code = (
-            "DEVIATION_SKIPPED_CODEX_CODEGEN"
-            if route_target == "codex_codegen"
+            "DEVIATION_SKIPPED_codex_runtime"
+            if is_codex_runtime_skill(route_target)
             else "DEVIATION_SKIPPED_TRANSLATE_AGENT"
         )
         return pipeline_result, {
@@ -2131,6 +2134,8 @@ async def _deliver_gateway_reply(
     emotion_tag: str = "NEUTRAL",
     bond_stage: str = "STRANGER",
     user_msg_type: str = "text",
+    response_form: str | None = None,
+    response_form_reason: str | None = None,
     # Gateway 双轨语言约定：
     # - 文字回复：中文
     # - 语音回复：日语（当前 TTS 模型是日语训练）
@@ -2243,6 +2248,51 @@ async def _deliver_gateway_reply(
         get_reply_form_decider,
         MsgType,
     )
+    from host_brain.app.dependencies import get_multimodal_processor  # noqa: PLC0415
+
+    mm_output = get_multimodal_processor().enhance_output(
+        text=reply_text,
+        emotion_tag=emotion_tag,
+        bond_stage=bond_stage,
+        render_lang="zh",
+    )
+    suggested_emoji = str(getattr(mm_output, "suggested_emoji", "") or "").strip()
+    suggested_sticker = str(getattr(mm_output, "suggested_sticker", "") or "").strip()
+    normalized_platform = str(platform or "").strip().lower()
+
+    def _normalize_form_for_platform(msg_type: MsgType, content: str) -> tuple[MsgType, str]:
+        normalized_content = str(content or "").strip()
+        if normalized_platform == "qq" and msg_type == MsgType.EMOJI:
+            return MsgType.TEXT, normalized_content
+        return msg_type, normalized_content
+
+    normalized_response_form = str(response_form or "").strip().lower()
+    planned_primary: MsgType | None = None
+    planned_secondary: MsgType | None = None
+    planned_reason = str(response_form_reason or "").strip()
+    if not suggested_emoji:
+        emoji_defaults = {
+            "phatic_greeting": "👋",
+            "light_social_ping": "😊",
+            "emoji_social_reply": "😄",
+            "emoji_attachment_no_question": "😊",
+        }
+        suggested_emoji = str(emoji_defaults.get(planned_reason) or "").strip()
+    if normalized_response_form in {"emoji", "text_plus_emoji"} and not suggested_emoji:
+        suggested_emoji = "😊"
+    if normalized_response_form == "emoji" and suggested_emoji:
+        planned_primary = MsgType.EMOJI
+    elif normalized_response_form == "text_plus_emoji":
+        planned_primary = MsgType.TEXT
+        planned_secondary = MsgType.EMOJI
+    elif normalized_response_form == "sticker" and suggested_sticker:
+        planned_primary = MsgType.IMAGE
+    elif normalized_response_form == "text_plus_sticker" and suggested_sticker:
+        planned_primary = MsgType.TEXT
+        planned_secondary = MsgType.IMAGE
+    elif normalized_response_form == "image" and suggested_sticker:
+        planned_primary = MsgType.IMAGE
+
     # ── Phase XV P4：ReplyFormDecider ──────────────────────────────────
     # 将用户消息类型字符串转换为 MsgType
     try:
@@ -2259,10 +2309,57 @@ async def _deliver_gateway_reply(
             narrative_zh=reply_text,
             emotion_tag=emotion_tag,
             bond_stage=bond_stage,
+            planned_primary=planned_primary,
+            planned_secondary=planned_secondary,
+            planned_reason=planned_reason,
         )
+    _logger.info(
+        "gateway reply form request_id=%s normalized=%s planned_reason=%s primary=%s secondary=%s suggested_emoji=%s suggested_sticker=%s",
+        request_id,
+        normalized_response_form or "-",
+        planned_reason or "-",
+        getattr(form_decision.primary, "value", str(form_decision.primary)),
+        getattr(form_decision.secondary, "value", "") or "-",
+        suggested_emoji or "-",
+        suggested_sticker or "-",
+    )
 
-    async def _trigger_voice_reply() -> dict[str, Any]:
+    async def _send_secondary_form(*, msg_type: MsgType, content: str) -> None:
+        if not content:
+            return
+        effective_msg_type, effective_content = _normalize_form_for_platform(msg_type, content)
+        secondary_request_id = f"{request_id}::secondary::{effective_msg_type.value}"
+        secondary_timeout_ms = min(max(1000, int(timeout_ms)), 4000)
+        try:
+            _logger.info(
+                "gateway secondary reply request_id=%s effective_request_id=%s msg_type=%s content=%s",
+                request_id,
+                secondary_request_id,
+                effective_msg_type.value,
+                effective_content[:40],
+            )
+            await post_gateway_reply(
+                platform=platform,
+                conversation_id=conversation_id,
+                content=effective_content,
+                msg_type=effective_msg_type.value,
+                request_id=secondary_request_id,
+                wait_result=True,
+                timeout_ms=secondary_timeout_ms,
+            )
+        except Exception as exc:  # pragma: no cover - defensive async send
+            _logger.debug("gateway secondary reply failed request_id=%s msg_type=%s err=%s", request_id, effective_msg_type.value, exc)
+
+    async def _trigger_secondary_reply() -> dict[str, Any]:
         nonlocal voice_result
+        if form_decision.secondary is None:
+            return dict(voice_result)
+        if form_decision.secondary == MsgType.EMOJI:
+            await _send_secondary_form(msg_type=MsgType.EMOJI, content=suggested_emoji)
+            return dict(voice_result)
+        if form_decision.secondary == MsgType.IMAGE:
+            await _send_secondary_form(msg_type=MsgType.IMAGE, content=suggested_sticker)
+            return dict(voice_result)
         if not voice_text or form_decision.secondary != MsgType.VOICE:
             return dict(voice_result)
 
@@ -2309,8 +2406,25 @@ async def _deliver_gateway_reply(
         return dict(voice_result)
 
     # ── 主回复（文字/语音）─────────────────────────────────────────────
-    primary_content = reply_text
-    primary_msg_type = form_decision.primary.value
+    collapse_secondary_into_primary = False
+    if form_decision.primary == MsgType.EMOJI:
+        primary_content = suggested_emoji or reply_text
+    elif form_decision.primary == MsgType.IMAGE:
+        primary_content = suggested_sticker or reply_text
+    else:
+        primary_content = reply_text
+    if (
+        normalized_platform == "qq"
+        and form_decision.primary == MsgType.TEXT
+        and form_decision.secondary == MsgType.EMOJI
+        and suggested_emoji
+    ):
+        suffix = f" {suggested_emoji}".rstrip()
+        if suggested_emoji not in str(primary_content or ""):
+            primary_content = f"{str(primary_content or '').rstrip()}{suffix}"
+        collapse_secondary_into_primary = True
+    primary_msg_type_enum, primary_content = _normalize_form_for_platform(form_decision.primary, primary_content)
+    primary_msg_type = primary_msg_type_enum.value
 
     wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_REPLY_WAIT_RESULT", default=False)
     text_reply_async = _parse_bool_env("HOST_INPUT_GATEWAY_TEXT_REPLY_ASYNC", default=True)
@@ -2334,7 +2448,7 @@ async def _deliver_gateway_reply(
             form_decision.secondary == MsgType.VOICE
             and voice_options["allow_voice_reply_on_primary_failure"]
         ):
-            voice_result = await _trigger_voice_reply()
+            voice_result = await _trigger_secondary_reply()
         return {
             "success": False,
             "status": status,
@@ -2369,8 +2483,8 @@ async def _deliver_gateway_reply(
             except Exception:
                 pass  # 语音发送失败不影响主回复
 
-    if form_decision.is_dual:
-        voice_result = await _trigger_voice_reply()
+    if form_decision.is_dual and not collapse_secondary_into_primary:
+        voice_result = await _trigger_secondary_reply()
 
     return {
         "success": True,
@@ -2738,6 +2852,8 @@ async def _dispatch_to_graph_worker(
             audit_refs = commit_event.get("audit_refs") or {}
             _emotion_tag = str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper()
             _tts_text_ja = str(audit_refs.get("tts_text_ja") or "").strip() or None
+            _response_form = str(audit_refs.get("response_form") or "").strip() or None
+            _response_form_reason = str(audit_refs.get("response_form_reason") or "").strip() or None
             # bond_stage 从 payload 的 bond_summary 取（若存在），否则用 STRANGER
             _bond_stage = str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper()
             _user_msg_type = str(payload.get("msg_type") or "text").strip().lower()
@@ -2753,6 +2869,8 @@ async def _dispatch_to_graph_worker(
                     emotion_tag=_emotion_tag,
                     bond_stage=_bond_stage,
                     user_msg_type=_user_msg_type,
+                    response_form=_response_form,
+                    response_form_reason=_response_form_reason,
                 )
             except Exception as exc:
                 gateway_delivery = {
@@ -2975,3 +3093,4 @@ async def _dispatch_to_graph_worker(
             ts_ms=fail_ts,
         )
         _logger.error("input_routes: dispatch failed request_id=%s: %s", request_id, exc)
+

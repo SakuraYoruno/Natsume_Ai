@@ -1377,6 +1377,22 @@ def run_proactive_intent_dispatch(
     if skill_name == "long_term_memory_distillation":
         return run_long_term_distillation_handler(args, {})
 
+    if skill_name == "reply_surface_cache_prewarm":
+        try:
+            from host_brain.persona.reply_surface_prewarm import run_reply_surface_cache_prewarm  # noqa: PLC0415
+
+            return run_reply_surface_cache_prewarm(
+                limit=args.get("limit"),
+                force=bool(args.get("force", True)),
+            )
+        except Exception as prewarm_exc:
+            logger.warning("reply_surface_cache_prewarm 调度执行失败: %s", prewarm_exc)
+            return {
+                "status": "FAILED",
+                "reason_code": "REPLY_SURFACE_PREWARM_FAILED",
+                "detail": str(prewarm_exc),
+            }
+
     if skill_name == "evolution_cycle":
         return _run_evolution_cycle(system_intent=system_intent, logger=logger)
 

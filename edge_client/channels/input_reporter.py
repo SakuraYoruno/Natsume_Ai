@@ -101,6 +101,10 @@ class EdgeInputReporter:
         self._lock = threading.Lock()
         self._retry_thread: threading.Thread | None = None
         self._shutdown = threading.Event()
+        self._total_sent = 0
+        self._total_failed = 0
+        self._last_result: dict[str, Any] | None = None
+        self._last_payload_summary: dict[str, Any] | None = None
 
     # ------------------------------------------------------------------
     # 公开 API
@@ -235,14 +239,39 @@ class EdgeInputReporter:
         with self._lock:
             return len(self._cache)
 
+    def stats(self) -> dict[str, Any]:
+        """Return a small observability snapshot for gateway health checks."""
+        with self._lock:
+            return {
+                "host_url": self._host_url,
+                "input_endpoint": self.INPUT_ENDPOINT,
+                "timeout_s": self._timeout_s,
+                "cache_size": len(self._cache),
+                "total_sent": self._total_sent,
+                "total_failed": self._total_failed,
+                "last_result": dict(self._last_result or {}),
+                "last_payload": dict(self._last_payload_summary or {}),
+            }
+
     # ------------------------------------------------------------------
     # 内部实现
     # ------------------------------------------------------------------
 
     def _send(self, payload: dict[str, Any], source: InputSourceType) -> InputReportResult:
         """发送 HTTP POST，失败时写入缓存。"""
+        started = time.monotonic()
         try:
             self._do_http_post(payload)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            self._record_result(
+                payload,
+                source,
+                success=True,
+                cached=False,
+                reason_code=None,
+                detail="",
+                elapsed_ms=elapsed_ms,
+            )
             return InputReportResult(
                 success=True,
                 source=source,
@@ -254,11 +283,21 @@ class EdgeInputReporter:
                 ),
             )
         except Exception as exc:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
             logger.warning(
                 "EdgeInputReporter: 上报失败（source=%s），写入缓存: %s",
                 source.value, exc,
             )
             self._cache_report(payload, source)
+            self._record_result(
+                payload,
+                source,
+                success=False,
+                cached=True,
+                reason_code="INPUT_REPORT_FAILED",
+                detail=str(exc),
+                elapsed_ms=elapsed_ms,
+            )
             return InputReportResult(
                 success=False,
                 source=source,
@@ -266,6 +305,50 @@ class EdgeInputReporter:
                 detail=str(exc),
                 cached=True,
             )
+
+    def _record_result(
+        self,
+        payload: dict[str, Any],
+        source: InputSourceType,
+        *,
+        success: bool,
+        cached: bool,
+        reason_code: str | None,
+        detail: str,
+        elapsed_ms: int,
+    ) -> None:
+        now_ms = int(time.time() * 1000)
+        with self._lock:
+            if success:
+                self._total_sent += 1
+            else:
+                self._total_failed += 1
+            self._last_payload_summary = self._summarize_payload(payload)
+            self._last_result = {
+                "success": bool(success),
+                "cached": bool(cached),
+                "source": source.value,
+                "reason_code": reason_code,
+                "detail": str(detail or "")[:240],
+                "elapsed_ms": int(elapsed_ms),
+                "ts_ms": now_ms,
+            }
+
+    @staticmethod
+    def _summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        content = str(payload.get("content") or payload.get("text") or "")
+        summary = {
+            "source": str(payload.get("source") or ""),
+            "platform": str(payload.get("platform") or ""),
+            "conversation_id": str(payload.get("conversation_id") or payload.get("session_id") or ""),
+            "msg_id": str(payload.get("msg_id") or ""),
+            "msg_type": str(payload.get("msg_type") or ""),
+            "from_id": str(payload.get("from_id") or payload.get("from_wxid") or ""),
+            "to_id": str(payload.get("to_id") or payload.get("to_wxid") or ""),
+            "content_len": len(content),
+            "content_preview": content[:80],
+        }
+        return {k: v for k, v in summary.items() if v not in ("", 0)}
 
     def _do_http_post(self, payload: dict[str, Any]) -> None:
         """执行 HTTP POST，带 HMAC 签名。"""

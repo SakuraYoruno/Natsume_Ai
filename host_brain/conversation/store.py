@@ -201,6 +201,32 @@ class TurnStore:
         with self._write_lock:
             return self._next_turn_index_locked(session_id=str(session_id or "").strip())
 
+    def query_recent_assistant(
+        self,
+        *,
+        limit: int,
+        lang: str | None = None,
+    ) -> list[Turn]:
+        clauses = ["role = ?"]
+        params: list[Any] = ["assistant"]
+        normalized_lang = str(lang or "").strip().lower()
+        if normalized_lang:
+            clauses.append("LOWER(lang) = ?")
+            params.append(normalized_lang)
+        params.append(max(1, int(limit)))
+        rows = self._conn.execute(
+            f"""
+            SELECT turn_id, session_id, person_id, request_id, role, content,
+                   ts_ms, turn_index, lang, token_count, corrupted, metadata
+            FROM conversation_turn
+            WHERE {" AND ".join(clauses)}
+            ORDER BY ts_ms DESC, turn_index DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [self._row_to_turn(row) for row in rows]
+
     def delete_by_session(self, *, session_id: str) -> int:
         with self._write_lock:
             cursor = self._conn.execute(

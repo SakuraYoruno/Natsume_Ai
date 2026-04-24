@@ -6,6 +6,7 @@ from host_brain.app.context.topic_ledger import TopicLedgerBlock, TopicLedgerEnt
 from host_brain.persona.reply_plan import (
     build_reply_plan_candidates_from_inputs,
     build_reply_plan_from_inputs,
+    coerce_reply_plan,
 )
 from host_brain.persona.reply_validator import infer_reply_tactic_shape
 
@@ -32,8 +33,8 @@ def test_reply_plan_first_identity_uses_brief_name_only() -> None:
     assert plan.contract.required_actions == ("name_only",)
     assert plan.as_dict()["contract"]["required_actions"] == ["name_only"]
     assert plan.contract.realization_steps
-    assert plan.requires_validation is False
-    assert plan.force_buffering is False
+    assert plan.requires_validation is True
+    assert plan.force_buffering is True
 
 
 def test_reply_plan_rotates_identity_tactic_on_third_repeat() -> None:
@@ -321,7 +322,7 @@ def test_reply_plan_help_repeat_does_not_repromise() -> None:
     assert "promise_restate" in plan.forbidden_patterns
 
 
-def test_reply_plan_mid_repeat_relational_chat_no_longer_forces_buffering_by_default() -> None:
+def test_reply_plan_mid_repeat_identity_now_keeps_quality_gate_enabled() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},
         bond_summary={"stage": "STRANGER", "score": 0.22},
@@ -336,8 +337,8 @@ def test_reply_plan_mid_repeat_relational_chat_no_longer_forces_buffering_by_def
         render_target_lang="zh",
     )
 
-    assert plan.requires_validation is False
-    assert plan.force_buffering is False
+    assert plan.requires_validation is True
+    assert plan.force_buffering is True
 
 
 def test_reply_plan_challenging_late_repeat_keeps_buffering_guard() -> None:
@@ -357,6 +358,47 @@ def test_reply_plan_challenging_late_repeat_keeps_buffering_guard() -> None:
 
     assert plan.requires_validation is True
     assert plan.force_buffering is True
+
+
+def test_reply_plan_phatic_wave_stays_unbuffered() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "FRIEND", "score": 0.28},
+        motive_state={"continuity_drive": 0.18},
+        conversation_interpretation={
+            "literal_topic": "greeting",
+            "interaction_move": "light_ack",
+            "freshness": "new",
+            "user_stance": "neutral",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.requires_validation is True
+    assert plan.force_buffering is False
+
+
+def test_reply_plan_phatic_punct_stays_unbuffered_and_not_plain_hold() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "FRIEND", "score": 0.28},
+        motive_state={"continuity_drive": 0.18},
+        conversation_interpretation={
+            "literal_topic": "phatic_punct",
+            "interaction_move": "light_ack",
+            "freshness": "new",
+            "user_stance": "neutral",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.primary_topic == "phatic_punct"
+    assert plan.tactic_family == "phatic_wave"
+    assert plan.tactic_variant == "light_ack"
+    assert plan.tactic_family != "plain_hold"
+    assert plan.response_form == "text_plus_emoji"
+    assert plan.requires_validation is True
+    assert plan.force_buffering is False
 
 
 def test_reply_plan_summaries_are_qualitative_chinese_only() -> None:
@@ -383,3 +425,389 @@ def test_reply_plan_summaries_are_qualitative_chinese_only() -> None:
     assert "0." not in plan.affect_summary
     assert "trust" not in plan.relationship_summary.lower()
     assert "0." not in plan.relationship_summary
+
+
+def test_reply_plan_emoji_social_reply_prefers_text_plus_emoji() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "PLAYFUL"},
+        bond_summary={"stage": "FRIEND", "score": 0.48},
+        motive_state={"continuity_drive": 0.38},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "emoji",
+            "observed_types": ["emoji"],
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form == "text_plus_emoji"
+    assert plan.secondary_response_form == "emoji"
+    assert plan.response_form_reason == "emoji_social_reply"
+
+
+def test_reply_plan_social_image_prefers_text_only() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "PLAYFUL"},
+        bond_summary={"stage": "FRIEND", "score": 0.48},
+        motive_state={"continuity_drive": 0.38},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form == "text"
+    assert plan.secondary_response_form == ""
+    assert plan.response_form_reason == "image_social_reply"
+    assert "图里的情绪" in plan.reply_contract
+    assert "不要解说画面" in plan.reply_contract
+    assert plan.requires_validation is True
+    assert plan.force_buffering is True
+
+
+def test_reply_plan_social_image_rotates_tactic_family_when_recent_family_was_used() -> None:
+    tactic_ledger = TacticLedgerBlock(
+        entries=(
+            TacticLedgerEntry(
+                session_id="sess",
+                request_id="req-img-1",
+                topic_key="emoji_social_reply",
+                interaction_move="playful_ping",
+                tactic_family="cute_image_ack",
+                tactic_variant="cute_ping",
+                trajectory_stage="first_turn",
+                ts_ms=1000,
+            ),
+        )
+    )
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "PLAYFUL"},
+        bond_summary={"stage": "FRIEND", "score": 0.48},
+        motive_state={"continuity_drive": 0.38},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "emotion_signals": ["可爱、卖萌"],
+            "core_observation": "可爱、卖萌；一张动漫风格的猫耳女孩表情图。",
+        },
+        tactic_ledger=tactic_ledger.as_dict(),
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form_reason == "image_social_reply"
+    assert plan.tactic_family != "cute_image_ack"
+    assert plan.tactic_family in {"soft_emotion_ack", "tease_image_ack"}
+
+
+def test_reply_plan_presence_ping_uses_phatic_form() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "FRIEND", "score": 0.31},
+        motive_state={"continuity_drive": 0.21},
+        conversation_interpretation={
+            "literal_topic": "presence_ping",
+            "interaction_move": "light_ack",
+            "freshness": "new",
+            "user_stance": "neutral",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form == "text_plus_emoji"
+    assert plan.secondary_response_form == "emoji"
+    assert plan.tactic_family == "phatic_wave"
+
+
+def test_reply_plan_screenshot_analysis_uses_multimodal_tactic() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.05},
+        motive_state={"continuity_drive": 0.22},
+        conversation_interpretation={
+            "literal_topic": "screenshot_analysis",
+            "interaction_move": "probe",
+            "freshness": "new",
+            "user_stance": "neutral",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "artifact_type": "screenshot",
+            "summary_for_chat": "用户发来一张截图，更像是在问界面上的提示是什么意思。",
+            "observed_types": ["image"],
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.tactic_family == "observe_then_answer"
+    assert plan.tactic_variant == "screenshot_analysis"
+    assert plan.response_form == "text"
+
+
+def test_reply_plan_preserves_multimodal_payload_for_runtime_and_coercion() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.12},
+        motive_state={"continuity_drive": 0.42},
+        conversation_interpretation={
+            "literal_topic": "literal_description",
+            "interaction_move": "probe",
+            "freshness": "new",
+            "user_stance": "probing",
+        },
+        multimodal={
+            "core_observation": "一朵粉色花",
+            "summary_for_chat": "用户发来一张图片，当前能确认到的核心内容是：一朵粉色花。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.multimodal["core_observation"] == "一朵粉色花"
+    restored = coerce_reply_plan(plan.as_dict())
+    assert restored.multimodal["core_observation"] == "一朵粉色花"
+
+
+def test_reply_plan_image_social_followup_deny_uses_followup_contract() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "PLAYFUL"},
+        bond_summary={"stage": "FRIEND", "score": 0.52},
+        motive_state={"continuity_drive": 0.35},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_followup",
+            "interaction_move": "repair_needed",
+            "freshness": "recent_repeat",
+            "user_stance": "challenging",
+            "reason_tags": ["image_social_followup:deny", "recent_image_social_context"],
+        },
+        interaction_thread={
+            "thread_kind": "image_social",
+            "source_topic": "emoji_social_reply",
+            "source_modality": "image",
+            "open": True,
+            "last_assistant_move": "image_social_ack",
+            "last_user_reaction": "deny",
+        },
+        multimodal={
+            "primary_modality": "text",
+            "core_observation": "委屈；一个哭哭的表情图。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form == "text"
+    assert plan.response_form_reason == "image_social_followup"
+    assert plan.requires_validation is True
+    assert plan.force_buffering is True
+    assert plan.tactic_family in {"soft_emotion_ack", "tease_image_ack"}
+    assert any(token in plan.reply_contract for token in ("刚才那张图", "顺着刚才那层情绪", "嘴硬否认", "给对方一个台阶"))
+
+
+def test_reply_plan_image_social_followup_why_prefers_explain_variant() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "FRIEND", "score": 0.52},
+        motive_state={"continuity_drive": 0.35},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_followup",
+            "interaction_move": "reconfirm",
+            "freshness": "recent_repeat",
+            "user_stance": "probing",
+            "reason_tags": ["image_social_followup:why", "recent_image_social_context"],
+        },
+        interaction_thread={
+            "thread_kind": "image_social",
+            "source_topic": "emoji_social_reply",
+            "source_modality": "image",
+            "open": True,
+            "last_assistant_move": "image_social_ack",
+            "last_user_reaction": "why",
+        },
+        multimodal={
+            "primary_modality": "text",
+            "core_observation": "委屈；一个哭哭的表情图。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form_reason == "image_social_followup"
+    assert plan.tactic_variant in {"explain_read", "light_explain", "backoff_hold"}
+    if plan.tactic_variant == "explain_read":
+        assert "很生活的话解释你的读法" in plan.reply_contract
+
+
+def test_reply_plan_image_social_reply_keeps_variant_specific_contract_after_multimodal_refine() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "SAD"},
+        bond_summary={"stage": "FRIEND", "score": 0.52},
+        motive_state={"continuity_drive": 0.2},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "probing",
+        },
+        interaction_thread={
+            "thread_kind": "image_social",
+            "source_topic": "emoji_social_reply",
+            "source_modality": "image",
+            "open": True,
+        },
+        multimodal={
+            "primary_modality": "image",
+            "emotion_signals": ["委屈", "哭", "难过"],
+            "core_observation": "一个哭哭的表情图。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.primary_topic == "emoji_social_reply"
+    assert plan.response_form_reason == "image_social_reply"
+    assert any(
+        token in plan.reply_contract
+        for token in ("委屈/难过", "只剩感叹词", "不要解说画面")
+    )
+
+
+def test_reply_plan_open_image_social_thread_never_falls_back_to_plain_hold() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "FRIEND", "score": 0.52},
+        motive_state={"continuity_drive": 0.35},
+        conversation_interpretation={
+            "literal_topic": "",
+            "interaction_move": "",
+            "freshness": "recent_repeat",
+            "user_stance": "challenging",
+        },
+        interaction_thread={
+            "thread_kind": "image_social",
+            "source_topic": "emoji_social_reply",
+            "source_modality": "image",
+            "open": True,
+            "last_assistant_move": "image_social_ack",
+            "last_user_reaction": "deny",
+        },
+        multimodal={
+            "primary_modality": "text",
+            "core_observation": "委屈；一个哭哭的表情图。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.tactic_family != "plain_hold"
+    assert plan.primary_topic == "emoji_social_followup"
+    assert plan.response_goal == "gentle_followup_reply"
+
+
+def test_reply_plan_assistant_reply_followup_never_falls_back_to_plain_hold() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.08},
+        motive_state={"continuity_drive": 0.35},
+        conversation_interpretation={
+            "literal_topic": "assistant_reply_followup",
+            "interaction_move": "clarify_reference",
+            "freshness": "new",
+            "user_stance": "probing",
+            "reason_tags": ["assistant_reply_followup:ask_object"],
+        },
+        interaction_thread={
+            "thread_kind": "assistant_reply_followup",
+            "source_topic": "assistant_reply",
+            "source_excerpt": "知道。",
+            "source_context_excerpt": "你知道吗",
+            "source_modality": "text",
+            "open": True,
+            "last_assistant_move": "previous_reply",
+            "last_user_reaction": "ask_object",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.tactic_family == "explain_previous_reply"
+    assert plan.tactic_variant == "clarify_object"
+    assert plan.primary_topic == "assistant_reply_followup"
+    assert plan.force_buffering is True
+    assert "你知道吗" in plan.reply_contract
+    assert "知道。" in plan.reply_contract
+    assert "语气词" in plan.reply_contract
+
+
+def test_reply_plan_assistant_filler_followup_keeps_source_context() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.08},
+        motive_state={"continuity_drive": 0.35},
+        conversation_interpretation={
+            "literal_topic": "assistant_reply_followup",
+            "interaction_move": "clarify_reference",
+            "freshness": "recent_repeat",
+            "user_stance": "probing",
+            "reason_tags": ["assistant_reply_followup:clarify_meaning"],
+        },
+        interaction_thread={
+            "thread_kind": "assistant_reply_followup",
+            "source_topic": "assistant_reply",
+            "source_excerpt": "唔。",
+            "source_context_excerpt": "知道什么",
+            "source_modality": "text",
+            "open": True,
+            "last_assistant_move": "previous_reply",
+            "last_user_reaction": "clarify_meaning",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.tactic_family == "explain_previous_reply"
+    assert plan.tactic_variant == "clarify_meaning"
+    assert plan.primary_topic == "assistant_reply_followup"
+    assert "知道什么" in plan.reply_contract
+    assert "唔。" in plan.reply_contract
+    assert "语气词" in plan.reply_contract
+
+
+def test_reply_plan_image_social_followup_softens_stranger_relationship_summary() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.08},
+        motive_state={"continuity_drive": 0.35},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_followup",
+            "interaction_move": "repair_needed",
+            "freshness": "recent_repeat",
+            "user_stance": "challenging",
+            "reason_tags": ["image_social_followup:deny", "recent_image_social_context"],
+        },
+        interaction_thread={
+            "thread_kind": "image_social",
+            "source_topic": "emoji_social_reply",
+            "source_modality": "image",
+            "open": True,
+            "last_assistant_move": "image_social_ack",
+            "last_user_reaction": "deny",
+        },
+        multimodal={
+            "primary_modality": "text",
+            "core_observation": "委屈；一个哭哭的表情图。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.relationship_summary == "保持自然分寸，但不用刻意拉开，顺着眼前这点情绪接住就好。"

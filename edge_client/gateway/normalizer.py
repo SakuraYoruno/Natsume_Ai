@@ -143,6 +143,7 @@ class MessageNormalizer:
             "desensitized": 0,
             "passed": 0,
         }
+        self._last_message: dict[str, Any] | None = None
 
     def normalize(self, msg: UnifiedMessage) -> UnifiedMessage | None:
         """标准化消息。
@@ -151,6 +152,7 @@ class MessageNormalizer:
             标准化后的 UnifiedMessage，或 None（表示消息应被丢弃）。
         """
         self._stats["received"] += 1
+        self._last_message = self._summarize_message(msg, status="received")
 
         # ── 基础校验 ──
         if not msg.from_id or not msg.conversation_id:
@@ -181,6 +183,7 @@ class MessageNormalizer:
         # ── 去重 ──
         if self._dedup.is_duplicate(msg.dedup_key()):
             self._stats["deduplicated"] += 1
+            self._last_message = self._summarize_message(msg, status="deduplicated")
             logger.debug(
                 "Normalizer: 重复消息已跳过 %s", msg.dedup_key()
             )
@@ -195,6 +198,7 @@ class MessageNormalizer:
                 msg.content = desensitized
 
         self._stats["passed"] += 1
+        self._last_message = self._summarize_message(msg, status="passed")
         return msg
 
     def stats(self) -> dict[str, Any]:
@@ -202,6 +206,24 @@ class MessageNormalizer:
         return {
             **self._stats,
             "dedup_cache_size": self._dedup.size(),
+            "last_message": dict(self._last_message or {}),
+        }
+
+    @staticmethod
+    def _summarize_message(msg: UnifiedMessage, *, status: str) -> dict[str, Any]:
+        content = str(getattr(msg, "content", "") or "")
+        return {
+            "status": status,
+            "platform": msg.platform.value,
+            "conversation_id": msg.conversation_id,
+            "msg_id": msg.msg_id,
+            "msg_type": msg.msg_type.value,
+            "from_id": msg.from_id,
+            "to_id": msg.to_id,
+            "content_len": len(content),
+            "content_preview": content[:80],
+            "is_group": bool(msg.is_group),
+            "ts_ms": int(time.time() * 1000),
         }
 
     @staticmethod

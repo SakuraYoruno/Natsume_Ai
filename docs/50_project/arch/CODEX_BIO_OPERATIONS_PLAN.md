@@ -1,8 +1,12 @@
 # Natsume AI — Codex Bio-Operations Layer 实施总方案
 
+> SUPERSEDED, 2026-04-24: this is the upstream phased proposal. The implemented migration is the hard-cut variant: no legacy `codex_codegen` compatibility, no old self-heal routes/env vars/tests, and only Codex Runtime v2 WorkOrders are executable.
+
 > 目标：将 Codex 从“代码生成工具”升级为 Natsume AI 的复杂任务执行内核、免疫修复工兵、自进化实验室、器官运维系统与数字生命体自我维护层。
 >
 > 本文档面向 Codex 实现，不是概念讨论。请按阶段落地，保持最小可验证改动，优先补协议、边界、审计和测试。
+>
+> Advanced roadmap: see `CODEX_DIGITAL_LIFE_ADVANCED_IDEAS.md` for the adopted BioOps extension plan covering reflexes, habits, scars, internal weather, truthfulness, body map, inner parliament, and related proposal-only digital-life mechanisms.
 
 ---
 

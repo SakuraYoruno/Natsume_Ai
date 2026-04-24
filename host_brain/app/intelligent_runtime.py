@@ -162,10 +162,14 @@ def build_prompt_intelligence(*, request_id: str, runtime_input: Any) -> dict[st
     meta_learning = get_meta_learning_loop()
     safe_skill_runners, safe_skill_names = _build_safe_skill_runners(runtime_input=runtime_input)
 
-    multimodal = get_multimodal_processor().process_input(
-        text=user_message,
-        attachments=list(getattr(runtime_input, "attachments", []) or []),
-    )
+    _multimodal_processor = get_multimodal_processor()
+    try:
+        multimodal = _multimodal_processor.process_input(
+            text=user_message,
+            attachments=list(getattr(runtime_input, "attachments", []) or []),
+        )
+    except TypeError:
+        multimodal = _multimodal_processor.process_input(text=user_message)
     multimodal_payload = multimodal.as_dict()
     multimodal_payload["items"] = [
         {

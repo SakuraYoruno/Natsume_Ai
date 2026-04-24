@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock, patch
@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 from host_brain.tribe.thalamus_agent import (
     ThalamusAgent,
     _resolve_intent_classification_prompt_templates,
+    classify_task_intent_fastpath,
     classify_task_intent_by_rules,
 )
 
@@ -251,6 +252,33 @@ def test_classify_and_compile_intent_draft_prefers_multimodal_chat_when_attachme
     assert compiled["target_id"] == ""
     assert compiled["route_reason"] == "THALAMUS_RULE_MULTIMODAL_CHAT"
     assert compiled["route_source"] == "thalamus.rule"
+
+
+def test_classify_and_compile_intent_draft_prefers_multimodal_chat_when_observations_exist() -> None:
+    agent = ThalamusAgent()
+
+    compiled = _run(
+        agent.classify_and_compile_intent_draft(
+            request_id="req-thalamus-multimodal-observation",
+            session_id="session-thalamus-multimodal-observation",
+            user_message="这是什么",
+            source="chat_handler",
+            input_source="WEB",
+            ts_ms=1776669900002,
+            multimodal_observations={
+                "observed_types": ["image"],
+                "summary_for_chat": "用户发来一张截图，更像是在问界面上的提示是什么意思。",
+                "artifact_type": "screenshot",
+            },
+        )
+    )
+
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_MULTIMODAL_CHAT"
+    assert compiled["route_source"] == "thalamus.rule"
+
+
 def test_classify_and_compile_intent_draft_backfills_memory_store_content() -> None:
     agent = ThalamusAgent()
 
@@ -356,9 +384,9 @@ def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_
         new=AsyncMock(
             return_value={
                 "route": "skill",
-                "target_id": "codex_codegen",
+                "target_id": "codex_worker",
                 "task": "please fix the failing test",
-                "reason_code": "LLM_ROUTE_CODEX_CODEGEN",
+                "reason_code": "LLM_ROUTE_codex_worker",
                 "confidence": 0.93,
                 "route_source": "llm",
             }
@@ -376,7 +404,7 @@ def test_classify_and_compile_intent_draft_falls_back_to_cortex_classifier_when_
 
     classify_mock.assert_awaited_once()
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_codegen"
+    assert compiled["target_id"] == "codex_worker"
     assert compiled["route_source"] == "llm"
 
 
@@ -405,6 +433,54 @@ def test_classify_task_intent_by_rules_routes_relational_followup_to_chat() -> N
     assert decision["route"] == "chat"
     assert decision["target_id"] == ""
     assert str(decision["reason_code"]).startswith("RELATIONAL_CHAT:")
+
+
+def test_classify_task_intent_fastpath_routes_english_greeting_to_chat() -> None:
+    decision = classify_task_intent_fastpath("hello")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_PHATIC_GREETING"
+
+
+def test_classify_task_intent_fastpath_routes_image_social_followup_to_chat() -> None:
+    decision = classify_task_intent_fastpath("我不委屈")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_PHATIC_SOCIAL_FOLLOWUP"
+
+
+def test_classify_task_intent_fastpath_routes_generic_image_social_negation_to_chat() -> None:
+    decision = classify_task_intent_fastpath("没有闹别扭啊")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_PHATIC_SOCIAL_FOLLOWUP"
+
+
+def test_classify_task_intent_fastpath_routes_assistant_reply_followup_to_chat() -> None:
+    decision = classify_task_intent_fastpath("知道什么")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP"
+
+
+def test_classify_task_intent_fastpath_routes_punctuation_to_chat_without_llm() -> None:
+    decision = classify_task_intent_fastpath("？")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_PHATIC_PUNCT"
+
+
 def test_classify_and_compile_intent_draft_does_not_misroute_task_like_message_as_phatic_chat() -> None:
     agent = ThalamusAgent()
 
@@ -447,18 +523,8 @@ def test_classify_and_compile_intent_draft_keeps_long_support_chat_out_of_emotio
     assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
 
 
-def test_classify_and_compile_intent_draft_routes_self_heal_to_codex(monkeypatch) -> None:
+def test_classify_and_compile_intent_draft_routes_self_heal_to_codex() -> None:
     agent = ThalamusAgent()
-    monkeypatch.setattr(
-        "host_brain.skills.codex_task_builder._safe_build_runtime_health_snapshot",
-        lambda request_id, include_dependency_probes: {
-            "runtime_repo_root": "D:/Natsume_Ai",
-            "health_status": "DEGRADED",
-            "health_reason_code": "EDGE_RPC_DOWN",
-            "health_report": {"status": "DEGRADED", "reason_code": "EDGE_RPC_DOWN"},
-            "dependency_probe_error": None,
-        },
-    )
 
     compiled = _run(
         agent.classify_and_compile_intent_draft(
@@ -471,12 +537,11 @@ def test_classify_and_compile_intent_draft_routes_self_heal_to_codex(monkeypatch
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_codegen"
+    assert compiled["target_id"] == "codex_self_heal"
     assert compiled["route_reason"] == "THALAMUS_RULE_CODEX_SELF_HEAL"
     assert compiled["args"]["run_mode"] == "self_heal"
     assert compiled["args"]["workspace_strategy"] == "runtime_repo"
-    assert "runtime:service_health" in compiled["args"]["evidence_refs"]
-    assert "EDGE_RPC_DOWN" in compiled["args"]["context"]
+    assert compiled["args"]["include_dependency_probes"] is True
 
 
 def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_requests() -> None:
@@ -493,7 +558,7 @@ def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_codegen"
+    assert compiled["target_id"] == "codex_worker"
     assert compiled["args"]["workspace_strategy"] == "runtime_repo"
     assert compiled["args"]["run_mode"] == "worker"
     assert compiled["args"]["task"] == "please fix the failing test and show me the code"
@@ -513,7 +578,7 @@ def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_light
     )
 
     assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "codex_codegen"
+    assert compiled["target_id"] == "codex_inspect"
     assert compiled["args"]["run_mode"] == "inspect"
     assert compiled["args"]["allow_temp_workspace"] is True
     assert "workspace_strategy" not in compiled["args"]
@@ -548,3 +613,4 @@ def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm(
     assert compiled["route"] == "chat"
     assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
     assert compiled["route_source"] == "thalamus.rule"
+

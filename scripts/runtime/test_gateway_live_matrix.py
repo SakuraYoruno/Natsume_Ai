@@ -114,7 +114,7 @@ def build_default_cases() -> list[LiveCase]:
         LiveCase(
             case_id="code_generation",
             prompt="写一个 Python 函数，输入数组后去重并按出现频次降序返回。",
-            expected_targets=("codex_codegen",),
+            expected_targets=("codex_worker",),
             required_patterns=("def ",),
             require_local_voice=True,
             force_dual_voice_reply=True,

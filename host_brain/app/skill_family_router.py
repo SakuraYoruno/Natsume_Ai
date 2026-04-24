@@ -1,13 +1,15 @@
-"""Skill-First routing helpers used by executive router / dispatch layer."""
+﻿"""Skill-First routing helpers used by executive router / dispatch layer."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
+from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS
+
 
 _DEFAULT_SKILL_FAMILY_BY_SKILL_ID: dict[str, str] = {
-    "codex_codegen": "code",
+    **{skill_id: "code" for skill_id in CODEX_RUNTIME_SKILL_IDS},
     "web_search": "browser",
     "browser_navigate": "browser",
     "browser_screenshot": "browser",
@@ -219,3 +221,4 @@ def build_skill_route_decision(
 
 
 __all__ = ["SkillRouteDecision", "build_skill_route_decision"]
+

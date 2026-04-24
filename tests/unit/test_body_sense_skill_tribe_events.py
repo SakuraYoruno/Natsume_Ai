@@ -53,6 +53,13 @@ class _FakeLimbicAgent:
 def test_body_sense_tick_emits_updated_signal(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.resolve_background_tick_guard_state",
+        lambda **_kwargs: {
+            "active": False,
+            "cooldown_remaining_ms": 0,
+        },
+    )
 
     result = execute_body_sense_tick(args={"current_hour": 2})
 

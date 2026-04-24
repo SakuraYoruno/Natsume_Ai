@@ -114,6 +114,9 @@ class ChatRuntimeInput:
     emotion_state: dict[str, Any] = field(default_factory=dict)
     emotion_snapshot: dict[str, Any] = field(default_factory=dict)
     bond_summary: dict[str, Any] = field(default_factory=dict)
+    attachments: list[dict[str, Any]] = field(default_factory=list)
+    multimodal_observations: dict[str, Any] = field(default_factory=dict)
+    attachment_summary: str = ""
     scene_type: str | None = None
     scene_type_source: str | None = None
     committed_route_token: str | None = None
@@ -150,6 +153,9 @@ class ChatRuntimeInput:
                 "session_id": self.session_id,
                 "thread_id": self.thread_id,
                 "user_message": self.user_message,
+                "attachments": _copy_rows(self.attachments),
+                "multimodal_observations": dict(self.multimodal_observations),
+                "attachment_summary": self.attachment_summary,
             },
             "render": {
                 "target_lang": self.render_target_lang,
@@ -184,6 +190,9 @@ def build_chat_runtime_input(
     emotion_snapshot: Mapping[str, Any] | None = None,
     render_target_lang: str | None = None,
     bond_summary: Mapping[str, Any] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    multimodal_observations: Mapping[str, Any] | None = None,
+    attachment_summary: str | None = None,
     scene_type: str | None = None,
     scene_type_source: str | None = None,
     committed_route_token: str | None = None,
@@ -212,6 +221,9 @@ def build_chat_runtime_input(
         emotion_state=normalized_emotion_state,
         emotion_snapshot=normalized_emotion_snapshot,
         bond_summary=dict(bond_summary) if isinstance(bond_summary, Mapping) else {},
+        attachments=_copy_rows(attachments),
+        multimodal_observations=_copy_mapping(multimodal_observations),
+        attachment_summary=str(attachment_summary or "").strip(),
         scene_type=(str(scene_type).strip().upper() if scene_type else None),
         scene_type_source=(str(scene_type_source).strip() if scene_type_source else None),
         committed_route_token=(str(committed_route_token).strip() if committed_route_token else None),

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -7,6 +7,8 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
+
+from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS
 
 
 _NEGATIVE_TOKEN_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...]], ...] = (
@@ -28,7 +30,7 @@ _NON_PERSONA_SUB_AGENTS: frozenset[str] = frozenset(
         "intent_agent",
         "retrieval_agent",
         "judge_agent",
-        "codex_codegen",
+        *CODEX_RUNTIME_SKILL_IDS,
     }
 )
 
@@ -720,3 +722,4 @@ def filter_badcase_text_lines(
         "recent_reply_feedback_score": recent_score,
         "recent_reply_feedback_tags": list(recent_summary.get("feedback_tags") or []) if recent_summary else [],
     }
+

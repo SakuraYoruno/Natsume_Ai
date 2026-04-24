@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -117,10 +117,11 @@ def test_builtin_sub_agent_templates_are_clean() -> None:
     runtime_texts = resolve_prompt_template_json_merged("sub_agent_protocol.runtime_texts")
 
     assert isinstance(capabilities, dict)
-    assert "codex_codegen" not in capabilities
+    assert "codex_worker" not in capabilities
     assert capabilities.get("translate_agent") == "翻译专家：处理中日英多语翻译，包含校对和润色"
     assert capabilities.get("repair_agent") == "环境修复专家：当浏览器、依赖或运行环境缺失时，尝试自动安装并恢复执行能力"
 
     assert isinstance(runtime_texts, dict)
     assert runtime_texts.get("unknown_agent") == "unknown agent_id: {agent_id}"
     assert runtime_texts.get("timeout_after") == "timeout after {timeout_ms}ms"
+

@@ -34,7 +34,7 @@ def test_full_run_report_marks_all_pass_when_all_sections_are_healthy(tmp_path, 
     )
     monkeypatch.setattr(
         module,
-        "collect_codex_self_heal_scheduler_probe",
+        "collect_codex_immune_scheduler_probe",
         lambda: {"ok": True, "data": {"overall": {"passed": True}}},
     )
     monkeypatch.setattr(
@@ -58,7 +58,7 @@ def test_full_run_report_marks_all_pass_when_all_sections_are_healthy(tmp_path, 
         "docker_services": "PASS",
         "env_readiness": "PASS",
         "host_brain_up": "PASS",
-        "codex_self_heal_scheduler": "PASS",
+        "codex_immune_scheduler": "PASS",
         "unit_tests": "PASS",
         "integration_tests": "PASS",
         "all_pass": True,
@@ -91,7 +91,7 @@ def test_full_run_report_fault_injection_surfaces_failures_in_overall_summary(tm
     )
     monkeypatch.setattr(
         module,
-        "collect_codex_self_heal_scheduler_probe",
+        "collect_codex_immune_scheduler_probe",
         lambda: {"ok": False, "error": "scheduler trigger rejected"},
     )
     monkeypatch.setattr(
@@ -115,7 +115,7 @@ def test_full_run_report_fault_injection_surfaces_failures_in_overall_summary(tm
         "docker_services": "FAIL",
         "env_readiness": "FAIL",
         "host_brain_up": "FAIL",
-        "codex_self_heal_scheduler": "FAIL",
+        "codex_immune_scheduler": "FAIL",
         "unit_tests": "FAIL",
         "integration_tests": "FAIL",
         "all_pass": False,

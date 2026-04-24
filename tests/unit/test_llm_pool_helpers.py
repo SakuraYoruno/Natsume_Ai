@@ -51,10 +51,12 @@ def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.Mo
             provider_name="gemini",
             model_id="gemini-pro",
             scene_type="CHAT",
-        )
+    )
         > 0
     )
     assert ledger.llm_pool_call_log[-1]["final_provider"] == "minimax"
+    llm_node_rows = ledger.fetch_by_request_id("llm_node_call_log", "req-pool-1")
+    assert any(str(row.get("node_id")) == "llm_pool:chat" for row in llm_node_rows)
 
     monkeypatch.setattr(
         helpers,
@@ -108,6 +110,8 @@ async def test_astream_llm_chunks_with_pool_switches_before_first_chunk(monkeypa
 
     assert "".join(chunks) == "hello"
     assert ledger.llm_pool_call_log[-1]["final_provider"] == "minimax"
+    llm_node_rows = ledger.fetch_by_request_id("llm_node_call_log", "req-stream-1")
+    assert any(str(row.get("node_id")) == "llm_pool:chat" for row in llm_node_rows)
 
 
 def test_pool_cooldown_is_scoped_per_scene_type() -> None:

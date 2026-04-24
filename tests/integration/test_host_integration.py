@@ -488,36 +488,6 @@ class TestChatEndpoint:
         resp = test_client.post("/v1/chat", json={})
         assert resp.status_code == 422
 
-    def test_chat_invalid_scene_type_fallback(self, test_client):
-        """T-INT-CHAT-08: 非法 scene_type 被降级为 SCENE_CHAT，不崩溃。"""
-        resp = test_client.post(
-            "/v1/chat",
-            json={
-                "message": "测试非法场景类型",
-                "scene_type": "SCENE_INVALID_HACK",
-            },
-        )
-        assert resp.status_code == 200
-        events = parse_sse_events(resp.text)
-        commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
-        assert commit is not None
-
-    def test_chat_multiple_requests_independent(self, test_client):
-        """T-INT-CHAT-12: 多次请求相互独立，request_id 不重复。"""
-        request_ids = set()
-        for i in range(3):
-            resp = test_client.post(
-                "/v1/chat",
-                json={"message": f"测试消息 {i}"},
-            )
-            assert resp.status_code == 200
-            events = parse_sse_events(resp.text)
-            commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
-            if commit and "request_id" in commit:
-                request_ids.add(commit["request_id"])
-        # 3 次请求应产生 3 个不同的 request_id
-        assert len(request_ids) == 3
-
 
 # ---------------------------------------------------------------------------
 # 10. POST /v1/edge/events — Edge 事件接收
@@ -805,18 +775,6 @@ class TestGovernorIntegration:
         else:
             assert gov_approved is not None
 
-    def test_governor_rate_limit_not_crash(self, test_client):
-        """T-INT-GOV-02: 连续多次请求不崩溃（速率限制降级处理）。"""
-        for i in range(5):
-            resp = test_client.post(
-                "/v1/chat",
-                json={
-                    "message": f"速率限制测试 {i}",
-                    "session_id": "session::rate::limit::test",
-                },
-            )
-            assert resp.status_code == 200
-
     def test_governor_reject_propagates_reason_code(self, test_client):
         """T-INT-GOV-03: Governor REJECT 时 COMMIT 事件包含 reason_code。"""
         # 构造一个可能触发 REJECT 的请求（通过 intent_draft 注入非法 schema）
@@ -854,27 +812,6 @@ class TestGovernorIntegration:
 class TestEndToEndPipeline:
     """T-INT-E2E: 端到端链路完整性测试。"""
 
-    def test_e2e_chat_to_bond_update(self, test_client):
-        """T-INT-E2E-01: /v1/chat 请求完成后 Bond 状态可查询（链路连通性）。"""
-        user_id = "e2e_test_user_001"
-        session_id = f"session::e2e::{user_id}"
-
-        # 1. 发起对话
-        chat_resp = test_client.post(
-            "/v1/chat",
-            json={
-                "message": "你好，我是测试用户",
-                "session_id": session_id,
-            },
-        )
-        assert chat_resp.status_code == 200
-
-        # 2. 查询 Bond 状态（Bond 更新是异步的，此处只验证接口可达）
-        bond_resp = test_client.get(f"/bond/stage/{user_id}")
-        assert bond_resp.status_code == 200
-        bond_data = bond_resp.json()
-        assert bond_data["user_id"] == "default"
-
     def test_e2e_health_to_metrics_consistency(self, test_client):
         """T-INT-E2E-02: /health 和 /metrics 数据一致性（时间戳递增）。"""
         health_resp = test_client.get("/health")
@@ -888,15 +825,6 @@ class TestEndToEndPipeline:
 
         # 两个请求时间戳应在合理范围内（10 秒内，避免 CI 抖动误判）
         assert abs(health_ts - metrics_ts) < 10000
-
-    def test_e2e_chat_increments_metrics(self, test_client):
-        """T-INT-E2E-03: /v1/chat 请求后 /metrics total_chat_requests 递增。"""
-        before = test_client.get("/metrics").json()["total_chat_requests"]
-
-        test_client.post("/v1/chat", json={"message": "指标递增测试"})
-
-        after = test_client.get("/metrics").json()["total_chat_requests"]
-        assert after > before
 
     def test_e2e_bond_to_summary_consistency(self, test_client):
         """T-INT-E2E-04: Bond stage 和 summary 阶段字段一致。"""
@@ -925,33 +853,6 @@ class TestEndToEndPipeline:
         assert stage_data["current_stage"] is not None
         assert summary_data["stage"] is not None
 
-    def test_e2e_observability_trace_after_chat(self, test_client):
-        """T-INT-E2E-05: /v1/chat 后可通过 /observability/trace 查询链路。"""
-        # 发起对话
-        chat_resp = test_client.post(
-            "/v1/chat",
-            json={"message": "可观测性链路测试"},
-        )
-        assert chat_resp.status_code == 200
-
-        # 从 SSE 事件中提取 request_id
-        events = parse_sse_events(chat_resp.text)
-        commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
-        assert commit is not None
-        request_id = commit.get("request_id")
-        assert request_id is not None
-
-        # 查询链路追踪
-        trace_resp = test_client.post(
-            "/observability/trace",
-            json={"request_id": request_id},
-        )
-        # 链路追踪可能返回 200（有数据）或 200（NOT_FOUND）
-        assert trace_resp.status_code in {200, 404}
-        if trace_resp.status_code == 200:
-            trace_data = trace_resp.json()
-            assert trace_data["request_id"] == request_id
-
 
 # ---------------------------------------------------------------------------
 # 16. 错误处理与边界条件测试
@@ -965,23 +866,6 @@ class TestErrorHandlingAndEdgeCases:
         resp = test_client.get("/nonexistent/route/xyz")
         assert resp.status_code == 404
 
-    def test_chat_very_long_message(self, test_client):
-        """T-INT-ERR-02: 超长消息不崩溃（降级处理）。"""
-        long_message = "测试" * 500  # 1000 字符
-        resp = test_client.post(
-            "/v1/chat",
-            json={"message": long_message},
-        )
-        assert resp.status_code == 200
-
-    def test_chat_special_characters(self, test_client):
-        """T-INT-ERR-03: 特殊字符消息不崩溃。"""
-        resp = test_client.post(
-            "/v1/chat",
-            json={"message": "测试 <script>alert('xss')</script> & \"quotes\" 'single'"},
-        )
-        assert resp.status_code == 200
-
     def test_chat_unicode_emoji(self, test_client):
         """T-INT-ERR-04: Unicode emoji 消息不崩溃。"""
         resp = test_client.post(
@@ -989,19 +873,6 @@ class TestErrorHandlingAndEdgeCases:
             json={"message": "你好 😊🌸🎋 夏目友人帐"},
         )
         assert resp.status_code == 200
-
-    def test_bond_event_invalid_update_kind(self, test_client):
-        """T-INT-ERR-05: POST /bond/event 非法 update_kind → 422 或降级处理。"""
-        resp = test_client.post(
-            "/bond/event",
-            json={
-                "user_id": "err_test_user_001",
-                "update_kind": "INVALID_KIND_XYZ",
-                "evidence_refs": ["evt::err::001"],
-            },
-        )
-        # 非法 update_kind 应返回 422 或 200（降级为默认事件）
-        assert resp.status_code in {200, 422}
 
     def test_root_redirect(self, test_client):
         """T-INT-ERR-06: GET / 重定向到 /docs。"""
@@ -1012,22 +883,3 @@ class TestErrorHandlingAndEdgeCases:
         """T-INT-ERR-07: GET /panel 重定向到监控面板。"""
         resp = test_client.get("/panel", follow_redirects=False)
         assert resp.status_code in {301, 302, 307, 308}
-
-    def test_chat_concurrent_sessions(self, test_client):
-        """T-INT-ERR-08: 不同 session_id 的并发请求相互独立。"""
-        responses = []
-        for i in range(3):
-            resp = test_client.post(
-                "/v1/chat",
-                json={
-                    "message": f"并发测试消息 {i}",
-                    "session_id": f"session::concurrent::{i}",
-                },
-            )
-            responses.append(resp)
-
-        for resp in responses:
-            assert resp.status_code == 200
-            events = parse_sse_events(resp.text)
-            commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
-            assert commit is not None

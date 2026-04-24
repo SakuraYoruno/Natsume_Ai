@@ -66,6 +66,11 @@ from host_brain.skills.provider_catalog import register_configured_skill_provide
 from host_brain.skills.registry import SkillRegistry
 from host_brain.tools.broker import ToolBroker
 from host_brain.tools.catalog import ToolCatalog
+from host_brain.persona.reply_surface_memory import (
+    ReplySurfaceMemoryStore,
+    create_reply_surface_memory_store,
+    prime_reply_surface_memory_from_turn_history,
+)
 
 # 新模块导入（优化计划新增模块）
 from host_brain.app.llm.routing_matrix import RoutingMatrix
@@ -145,6 +150,8 @@ _conversation_turn_store: Optional[TurnStore] = None
 _conversation_history: Optional[ConversationHistory] = None
 _session_topic_ledger_store: Optional[SessionTopicLedgerStore] = None
 _session_tactic_ledger_store: Optional[SessionTacticLedgerStore] = None
+_reply_surface_memory_store: Optional[ReplySurfaceMemoryStore] = None
+_reply_surface_memory_primed: bool = False
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -256,6 +263,38 @@ def get_conversation_turn_store() -> TurnStore:
     if _conversation_turn_store is None:
         _conversation_turn_store = TurnStore(get_ledger())
     return _conversation_turn_store
+
+
+def get_reply_surface_memory_store() -> ReplySurfaceMemoryStore:
+    global _reply_surface_memory_store
+    if _reply_surface_memory_store is None:
+        _reply_surface_memory_store = create_reply_surface_memory_store()
+    if not _reply_surface_memory_primed:
+        prewarm_reply_surface_memory_store(force=False)
+    return _reply_surface_memory_store
+
+
+def prewarm_reply_surface_memory_store(*, force: bool = False, limit: int = 512) -> int:
+    """Prime the reply-surface memory singleton from real assistant turn history."""
+    global _reply_surface_memory_store, _reply_surface_memory_primed
+    if _reply_surface_memory_store is None:
+        _reply_surface_memory_store = create_reply_surface_memory_store()
+    if _reply_surface_memory_primed and not force:
+        return 0
+    remembered = 0
+    try:
+        remembered = int(
+            prime_reply_surface_memory_from_turn_history(
+                memory_store=_reply_surface_memory_store,
+                turn_store=get_conversation_turn_store(),
+                limit=max(1, int(limit)),
+            )
+            or 0
+        )
+    except Exception as exc:
+        _logger.debug("reply surface memory prewarm failed: %s", exc)
+    _reply_surface_memory_primed = True
+    return remembered
 
 
 def get_conversation_history() -> ConversationHistory:

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from host_brain.app.chat_agent import (
     SubAgentContext,
@@ -49,7 +49,7 @@ def test_quality_fallback_extracts_react_final_answer_from_json() -> None:
     reply = _build_chat_agent_quality_fallback_reply(
         user_message="给我代码",
         sub_agent_ctx=SubAgentContext(
-            agent_id="codex_codegen",
+            agent_id="codex_worker",
             task="write fibonacci helper",
             result_text='{"thought":"先写代码","action_type":"final_answer","final_answer":"好的，这是可直接运行的 Python 代码。"}',
             success=True,
@@ -66,7 +66,7 @@ def test_quality_fallback_preserves_code_block_newlines() -> None:
     reply = _build_chat_agent_quality_fallback_reply(
         user_message="给我代码",
         sub_agent_ctx=SubAgentContext(
-            agent_id="codex_codegen",
+            agent_id="codex_worker",
             task="write fibonacci helper",
             result_text='{"thought":"先写代码","action_type":"final_answer","final_answer":"```python\\nprint(1)\\n```"}',
             success=True,
@@ -141,10 +141,10 @@ def test_quality_fallback_greeting_reply_stays_in_natsume_voice() -> None:
     )
 
 
-def test_deterministic_reply_returns_codex_codegen_result_directly() -> None:
+def test_deterministic_reply_returns_codex_worker_result_directly() -> None:
     reply = _build_deterministic_sub_agent_reply(
         SubAgentContext(
-            agent_id="codex_codegen",
+            agent_id="codex_worker",
             task="fix crash",
             result_text="先把空值判断补上，再把异常分支提前 return。",
             success=True,
@@ -248,3 +248,4 @@ def test_deterministic_reply_renders_open_app_failure_cn() -> None:
     )
 
     assert reply == "我试了一下，不过这边没把不存在应用打开。卡住的是：unable to resolve local app target。"
+

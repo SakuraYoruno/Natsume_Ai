@@ -191,8 +191,9 @@ def test_multimodal_observer_capability_check_guides_summary() -> None:
         render_target_lang="zh",
     )
 
-    assert result["observations"]["reply_focus"] == "capability_check"
-    assert "确认我能不能看懂" in str(result["summary_for_chat"])
+    assert result["observations"]["artifact_type"] in {None, "", "screenshot"}
+    summary_text = str(result["summary_for_chat"])
+    assert "一张聊天截图" in summary_text or "你好，夏目蓝" in summary_text
 
 
 def test_multimodal_observer_emoji_meaning_prefers_social_intent() -> None:
@@ -217,12 +218,30 @@ def test_multimodal_observer_emoji_meaning_prefers_social_intent() -> None:
         render_target_lang="zh",
     )
 
-    assert result["observations"]["reply_focus"] == "meme_meaning"
-    assert "表情包/图片想表达什么" in str(result["summary_for_chat"])
+    assert result["observations"]["primary_modality"] == "emoji"
+    assert "轻松打趣" in str(result["summary_for_chat"])
 
 
 def test_multimodal_observer_image_only_without_question_does_not_default_to_literal_description() -> None:
-    model_backend = _StaticBackend(supported_types={"image"}, result_factory=_model_result)
+    def _neutral_image_result(payload: MultimodalObserverInput) -> dict[str, object]:
+        attachment = dict(payload.attachment or {})
+        return {
+            "attachment_id": attachment.get("attachment_id"),
+            "type": "image",
+            "backend": "multimodal_model",
+            "model_provider": "gemini",
+            "model_id": "gemini-sync",
+            "visual_summary": "一只放在桌上的白色马克杯",
+            "visible_text": "",
+            "scene_tags": [],
+            "summary": "收到一张图片。画面里主要是：一只放在桌上的白色马克杯",
+            "confidence": 0.73,
+            "safety_flags": [],
+            "followup_required": False,
+            "artifacts": {},
+        }
+
+    model_backend = _StaticBackend(supported_types={"image"}, result_factory=_neutral_image_result)
     fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video"}, result_factory=_fallback_result)
     observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
 
@@ -243,8 +262,9 @@ def test_multimodal_observer_image_only_without_question_does_not_default_to_lit
         render_target_lang="zh",
     )
 
-    assert result["observations"]["reply_focus"] == "attachment_only_no_question"
-    assert "不要自顾自描述画面" in str(result["summary_for_chat"])
+    assert result["observations"]["primary_modality"] == "image"
+    assert "白色马克杯" in str(result["summary_for_chat"])
+    assert result["observations"]["core_observation"]
 
 
 def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() -> None:
@@ -269,8 +289,51 @@ def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() 
         render_target_lang="zh",
     )
 
-    assert result["observations"]["reply_focus"] == "emoji_social_reply"
-    assert "表情包/贴图" in str(result["summary_for_chat"])
+    assert result["observations"]["primary_modality"] == "emoji"
+    assert "轻松打趣" in str(result["summary_for_chat"])
+
+
+def test_multimodal_observer_emotive_image_without_question_prefers_social_reply() -> None:
+    def _emotive_image_result(payload: MultimodalObserverInput) -> dict[str, object]:
+        attachment = dict(payload.attachment or {})
+        return {
+            "attachment_id": attachment.get("attachment_id"),
+            "type": "image",
+            "backend": "multimodal_model",
+            "model_provider": "gemini",
+            "model_id": "gemini-sync",
+            "visual_summary": "一个动漫女孩哭得很委屈，眼角挂着眼泪",
+            "visible_text": "",
+            "scene_tags": [],
+            "summary": "收到一张图片。画面里主要是：一个动漫女孩哭得很委屈，眼角挂着眼泪",
+            "confidence": 0.78,
+            "safety_flags": [],
+            "followup_required": False,
+            "artifacts": {},
+        }
+
+    model_backend = _StaticBackend(supported_types={"image"}, result_factory=_emotive_image_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_emotive_image_only",
+        platform="qq",
+        conversation_id="qq_dm_mm_emotive_image_only",
+        user_text="[图片消息]",
+        attachments=[
+            {
+                "attachment_id": "att_img_emotive_only",
+                "type": "image",
+                "local_path": str(Path(__file__)),
+                "caption": "委屈地哭哭脸",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["primary_modality"] == "image"
+    assert "委屈" in str(result["summary_for_chat"])
 
 
 def test_multimodal_observer_sync_text_file_extracts_excerpt(tmp_path: Path) -> None:

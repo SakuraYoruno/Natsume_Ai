@@ -85,6 +85,112 @@ def _build_audit_retention_task_config() -> Any:
     )
 
 
+def _parse_int_env(name: str, *, default: int, minimum: int, maximum: int) -> int:
+    raw = str(os.environ.get(name) or "").strip()
+    try:
+        value = int(raw) if raw else int(default)
+    except ValueError:
+        value = int(default)
+    return max(int(minimum), min(int(maximum), value))
+
+
+def _build_reply_surface_cache_prewarm_task_config() -> Any:
+    from host_brain.scheduler.task_registry import (  # noqa: PLC0415
+        SchedulerTaskConfig,
+        TaskPriority,
+        TriggerMode,
+    )
+
+    hour = _parse_int_env(
+        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR",
+        default=3,
+        minimum=0,
+        maximum=23,
+    )
+    minute = _parse_int_env(
+        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE",
+        default=10,
+        minimum=0,
+        maximum=59,
+    )
+    limit = _parse_int_env(
+        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_LIMIT",
+        default=2048,
+        minimum=1,
+        maximum=20_000,
+    )
+
+    return SchedulerTaskConfig(
+        task_id="reply_surface_cache_prewarm_daily",
+        trigger_mode=TriggerMode.CRON,
+        trigger_config={"hour": hour, "minute": minute},
+        intent_template={
+            "skill_name": "reply_surface_cache_prewarm",
+            "args": {"limit": limit, "force": True},
+            "proposer_node_id": "scheduler",
+        },
+        priority=TaskPriority.LOW,
+        mode_allowlist=["normal", "sleep"],
+        enabled=_parse_bool_env("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_ENABLED", default=True),
+        description="Reply surface cache prewarm: daily refresh from real assistant turn history",
+    )
+
+
+def _seconds_until_daily_time(*, hour: int, minute: int, now_ts: float | None = None) -> float:
+    now_value = float(now_ts if now_ts is not None else time.time())
+    now_local = time.localtime(now_value)
+    target_tuple = (
+        now_local.tm_year,
+        now_local.tm_mon,
+        now_local.tm_mday,
+        max(0, min(int(hour), 23)),
+        max(0, min(int(minute), 59)),
+        0,
+        now_local.tm_wday,
+        now_local.tm_yday,
+        now_local.tm_isdst,
+    )
+    target_ts = time.mktime(target_tuple)
+    if target_ts <= now_value:
+        target_ts += 24 * 60 * 60
+    return max(1.0, float(target_ts - now_value))
+
+
+async def _reply_surface_cache_prewarm_daily_loop(*, logger: Any) -> None:
+    from host_brain.persona.reply_surface_prewarm import run_reply_surface_cache_prewarm  # noqa: PLC0415
+
+    while True:
+        hour = _parse_int_env(
+            "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR",
+            default=3,
+            minimum=0,
+            maximum=23,
+        )
+        minute = _parse_int_env(
+            "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE",
+            default=10,
+            minimum=0,
+            maximum=59,
+        )
+        sleep_s = _seconds_until_daily_time(hour=hour, minute=minute)
+        await asyncio.sleep(sleep_s)
+        limit = _parse_int_env(
+            "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_LIMIT",
+            default=2048,
+            minimum=1,
+            maximum=20_000,
+        )
+        result = await asyncio.to_thread(
+            run_reply_surface_cache_prewarm,
+            limit=limit,
+            force=True,
+        )
+        if str(result.get("status") or "").upper() == "OK":
+            logger.info("ReplySurface fallback daily prewarm completed: %s", result)
+        else:
+            logger.warning("ReplySurface fallback daily prewarm failed: %s", result)
+
+
 def _build_personality_tick_status(*, registry: Any, task_ids: list[str]) -> str:
     # P3-2：委托给 http_hooks_middleware.build_personality_tick_status
     return _middleware_build_personality_tick_status(registry=registry, task_ids=task_ids)
@@ -109,17 +215,17 @@ def _init_edge_command_pusher_status(*, logger: Any) -> str:
         return f"DEGRADED: {exc}"
 
 
-def _build_codex_self_heal_scheduler_task(*, interval_s: float) -> Any:
+def _build_codex_immune_scheduler_task(*, interval_s: float) -> Any:
     from host_brain.app.automation.task_scheduler import ScheduledTask, TaskPriority  # noqa: PLC0415
-    from host_brain.app.internal_codex_routes import run_scheduled_self_heal_auto_dispatch_cycle  # noqa: PLC0415
+    from host_brain.app.internal_codex_routes import run_scheduled_immune_auto_dispatch_cycle  # noqa: PLC0415
 
-    async def _run_codex_self_heal_scheduler_task() -> None:
-        await run_scheduled_self_heal_auto_dispatch_cycle()
+    async def _run_codex_immune_scheduler_task() -> None:
+        await run_scheduled_immune_auto_dispatch_cycle()
 
     return ScheduledTask(
-        task_id="codex_self_heal_auto_dispatch_tick",
-        name="Codex self-heal auto-dispatch tick",
-        fn=_run_codex_self_heal_scheduler_task,
+        task_id="codex_immune_auto_dispatch_tick",
+        name="Codex immune auto-dispatch tick",
+        fn=_run_codex_immune_scheduler_task,
         interval_s=float(interval_s),
         max_retries=1,
         retry_delay_s=15.0,
@@ -371,6 +477,11 @@ def _bootstrap_personality_scheduler(
         success_message="涌现式成长任务已注册: task_id=%s, cron=周日03:00",
         failure_message="涌现式成长任务注册失败（降级）: %s",
     )
+    _register_task(
+        config=_build_reply_surface_cache_prewarm_task_config(),
+        success_message="回复表层缓存预热任务已注册: task_id=%s",
+        failure_message="回复表层缓存预热任务注册失败（降级）: %s",
+    )
 
     scheduler.start()
 
@@ -450,6 +561,7 @@ def runtime_lifespan(
     async def _lifespan() -> AsyncGenerator[None, None]:
         logger.info("Natsume AI Host Brain starting up ...")
         ledger = get_ledger()
+        _reply_surface_prewarm_task: asyncio.Task | None = None
         try:
             # 预初始化新模块，确保启动时即可感知降级状态
             # Phase XIV v4：移除 main_chain 和 routing_matrix（已被 cortex_orchestrator 架构取代）
@@ -476,22 +588,22 @@ def runtime_lifespan(
                 new_module_statuses["proactive_push_client"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
             try:
                 from host_brain.app.internal_codex_routes import (  # noqa: PLC0415
-                    start_self_heal_auto_dispatch_monitor,
+                    start_immune_auto_dispatch_monitor,
                 )
 
                 if not _background_tasks_enabled:
-                    new_module_statuses["codex_self_heal_monitor"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
+                    new_module_statuses["codex_immune_monitor"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
                 else:
-                    _codex_monitor_state = start_self_heal_auto_dispatch_monitor(logger=logger)
+                    _codex_monitor_state = start_immune_auto_dispatch_monitor(logger=logger)
                     if bool(_codex_monitor_state.get("scheduler_managed")):
-                        new_module_statuses["codex_self_heal_monitor"] = "OK (scheduler-managed auto-dispatch)"
+                        new_module_statuses["codex_immune_monitor"] = "OK (scheduler-managed auto-dispatch)"
                     elif bool(_codex_monitor_state.get("enabled")):
-                        new_module_statuses["codex_self_heal_monitor"] = "OK (auto-dispatch monitor enabled)"
+                        new_module_statuses["codex_immune_monitor"] = "OK (auto-dispatch monitor enabled)"
                     else:
-                        new_module_statuses["codex_self_heal_monitor"] = "SKIPPED: HOST_CODEX_SELF_HEAL_AUTODISPATCH_ENABLED=false"
+                        new_module_statuses["codex_immune_monitor"] = "SKIPPED: HOST_CODEX_IMMUNE_AUTODISPATCH_ENABLED=false"
             except Exception as _codex_monitor_exc:
-                new_module_statuses["codex_self_heal_monitor"] = f"DEGRADED: {_codex_monitor_exc}"
-                logger.warning("Codex self-heal auto-dispatch monitor startup degraded: %s", _codex_monitor_exc)
+                new_module_statuses["codex_immune_monitor"] = f"DEGRADED: {_codex_monitor_exc}"
+                logger.warning("Codex immune auto-dispatch monitor startup degraded: %s", _codex_monitor_exc)
             new_module_statuses["world_canon_sync"] = _sync_world_canon_index_on_startup(
                 ledger=ledger,
                 logger=logger,
@@ -698,17 +810,17 @@ def runtime_lifespan(
                 logger.warning("DistillationEngine 调度任务注册失败（降级）: %s", _distill_exc)
 
             # [Ref #31] LongTermDistiller 蒸馏任务注册到调度器
-            # Codex self-heal auto-dispatch task registration for HostTaskScheduler.
+            # Codex immune auto-dispatch task registration for HostTaskScheduler.
             try:
                 if not _background_tasks_enabled:
                     raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
                 _codex_scheduler_enabled = _parse_bool_env(
-                    "HOST_CODEX_SELF_HEAL_SCHEDULER_ENABLED",
+                    "HOST_CODEX_IMMUNE_SCHEDULER_ENABLED",
                     default=False,
                 )
                 if not _codex_scheduler_enabled:
-                    new_module_statuses["codex_self_heal_scheduler"] = (
-                        "SKIPPED: HOST_CODEX_SELF_HEAL_SCHEDULER_ENABLED=false"
+                    new_module_statuses["codex_immune_scheduler"] = (
+                        "SKIPPED: HOST_CODEX_IMMUNE_SCHEDULER_ENABLED=false"
                     )
                 else:
                     from host_brain.app.automation.task_scheduler import get_scheduler  # noqa: PLC0415
@@ -722,7 +834,7 @@ def runtime_lifespan(
                                 int(
                                     str(
                                         os.environ.get(
-                                            "HOST_CODEX_SELF_HEAL_SCHEDULER_INTERVAL_SECONDS"
+                                            "HOST_CODEX_IMMUNE_SCHEDULER_INTERVAL_SECONDS"
                                         )
                                         or "300"
                                     ).strip()
@@ -731,7 +843,7 @@ def runtime_lifespan(
                             ),
                         )
                     )
-                    _codex_task = _build_codex_self_heal_scheduler_task(
+                    _codex_task = _build_codex_immune_scheduler_task(
                         interval_s=_codex_interval_s
                     )
                     if not any(
@@ -739,25 +851,25 @@ def runtime_lifespan(
                         for task in _codex_scheduler.get_all_tasks_status()
                     ):
                         _codex_scheduler.register(_codex_task)
-                    new_module_statuses["codex_self_heal_scheduler"] = (
+                    new_module_statuses["codex_immune_scheduler"] = (
                         f"OK (task_id={_codex_task.task_id}, interval={int(_codex_interval_s)}s)"
                     )
                     logger.info(
-                        "Codex self-heal scheduler task registered: task_id=%s interval=%ss",
+                        "Codex immune scheduler task registered: task_id=%s interval=%ss",
                         _codex_task.task_id,
                         int(_codex_interval_s),
                     )
             except Exception as _codex_scheduler_exc:
                 if not _background_tasks_enabled:
-                    new_module_statuses["codex_self_heal_scheduler"] = (
+                    new_module_statuses["codex_immune_scheduler"] = (
                         "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false"
                     )
                 else:
-                    new_module_statuses["codex_self_heal_scheduler"] = (
+                    new_module_statuses["codex_immune_scheduler"] = (
                         f"DEGRADED: {_codex_scheduler_exc}"
                     )
                 logger.warning(
-                    "Codex self-heal scheduler task registration degraded: %s",
+                    "Codex immune scheduler task registration degraded: %s",
                     _codex_scheduler_exc,
                 )
 
@@ -811,6 +923,34 @@ def runtime_lifespan(
                 else:
                     new_module_statuses["audit_retention_scheduler"] = f"DEGRADED: {_ret_exc}"
                 logger.warning("AuditRetention 调度任务注册失败（降级）: %s", _ret_exc)
+
+            try:
+                if not _background_tasks_enabled:
+                    raise RuntimeError("HOST_BACKGROUND_TASKS_ENABLED=false")
+                from host_brain.scheduler.task_registry import SchedulerTaskRegistry  # noqa: PLC0415
+
+                _reply_surface_registry = SchedulerTaskRegistry.get_instance()
+                _reply_surface_task = _build_reply_surface_cache_prewarm_task_config()
+                if _reply_surface_registry.get(_reply_surface_task.task_id) is None:
+                    _reply_surface_registry.register(_reply_surface_task)
+                new_module_statuses["reply_surface_cache_prewarm_scheduler"] = (
+                    f"OK (task_id={_reply_surface_task.task_id}, "
+                    f"cron={_reply_surface_task.trigger_config.get('hour')}:"
+                    f"{int(_reply_surface_task.trigger_config.get('minute') or 0):02d}, "
+                    f"enabled={_reply_surface_task.enabled})"
+                )
+                logger.info(
+                    "ReplySurface cache prewarm task registered: task_id=%s trigger=%s config=%s",
+                    _reply_surface_task.task_id,
+                    _reply_surface_task.trigger_mode,
+                    _reply_surface_task.trigger_config,
+                )
+            except Exception as _reply_surface_exc:
+                if not _background_tasks_enabled:
+                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = "SKIPPED: HOST_BACKGROUND_TASKS_ENABLED=false; fallback loop pending"
+                else:
+                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = f"DEGRADED: {_reply_surface_exc}"
+                logger.warning("ReplySurface cache prewarm task registration degraded: %s", _reply_surface_exc)
 
             # [proactive_talk] 主动对话任务注册 + NatsumeScheduler 启动
             try:
@@ -1286,6 +1426,44 @@ def runtime_lifespan(
                     "HostTaskScheduler startup degraded: %s",
                     _host_task_scheduler_exc,
                 )
+            if (
+                not _background_tasks_enabled
+                and _parse_bool_env("HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_ENABLED", default=True)
+            ):
+                try:
+                    _reply_surface_prewarm_task = asyncio.create_task(
+                        _reply_surface_cache_prewarm_daily_loop(logger=logger),
+                        name="reply-surface-cache-prewarm-daily",
+                    )
+                    _reply_surface_hour = _parse_int_env(
+                        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_HOUR",
+                        default=3,
+                        minimum=0,
+                        maximum=23,
+                    )
+                    _reply_surface_minute = _parse_int_env(
+                        "HOST_REPLY_SURFACE_MEMORY_DAILY_PREWARM_MINUTE",
+                        default=10,
+                        minimum=0,
+                        maximum=59,
+                    )
+                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = (
+                        f"OK (fallback_loop=true, cron={_reply_surface_hour}:"
+                        f"{_reply_surface_minute:02d})"
+                    )
+                    logger.info(
+                        "ReplySurface fallback daily prewarm loop started: cron=%s:%02d",
+                        _reply_surface_hour,
+                        _reply_surface_minute,
+                    )
+                except Exception as _reply_surface_loop_exc:
+                    new_module_statuses["reply_surface_cache_prewarm_scheduler"] = (
+                        f"DEGRADED: {_reply_surface_loop_exc}"
+                    )
+                    logger.warning(
+                        "ReplySurface fallback daily prewarm loop startup degraded: %s",
+                        _reply_surface_loop_exc,
+                    )
             report = build_startup_report(
                 runtime_statuses=new_module_statuses,
                 dependency_probes=build_edge_dependency_probe_statuses(dependency_probes),
@@ -1507,6 +1685,14 @@ def runtime_lifespan(
             logger.warning("Startup probe degraded: %s", exc, exc_info=True)
         yield
         # ── Shutdown 阶段 ──
+        if _reply_surface_prewarm_task is not None:
+            _reply_surface_prewarm_task.cancel()
+            try:
+                await _reply_surface_prewarm_task
+            except asyncio.CancelledError:
+                logger.info("ReplySurface fallback daily prewarm loop stopped")
+            except Exception as _reply_surface_stop_exc:
+                logger.debug("ReplySurface fallback daily prewarm loop stop degraded: %s", _reply_surface_stop_exc)
         # 停止 ActivityMonitor
         try:
             if _activity_monitor is not None:
@@ -1553,11 +1739,11 @@ def runtime_lifespan(
         except Exception as _host_task_scheduler_stop_exc:
             logger.debug("HostTaskScheduler stop degraded: %s", _host_task_scheduler_stop_exc)
         try:
-            from host_brain.app.internal_codex_routes import stop_self_heal_auto_dispatch_monitor  # noqa: PLC0415
+            from host_brain.app.internal_codex_routes import stop_immune_auto_dispatch_monitor  # noqa: PLC0415
 
-            stop_self_heal_auto_dispatch_monitor(logger=logger)
+            stop_immune_auto_dispatch_monitor(logger=logger)
         except Exception as _codex_monitor_stop_exc:
-            logger.debug("Codex self-heal auto-dispatch monitor stop degraded: %s", _codex_monitor_stop_exc)
+            logger.debug("Codex immune auto-dispatch monitor stop degraded: %s", _codex_monitor_stop_exc)
         logger.info("Natsume AI Host Brain shutting down ...")
 
     return _lifespan()

@@ -361,12 +361,13 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
         observe=lambda **_: {
             "mode": "sync",
             "observations": {
-                "items": [{"type": "emoji", "reply_focus": "meme_meaning"}],
+                "items": [{"type": "emoji", "meme_intent": "轻松打趣"}],
                 "observed_types": ["emoji"],
-                "summary_for_chat": "用户当前更像是在问这个表情包/图片想表达什么。 目前更稳的理解是：像是在打招呼，语气轻松友好。",
-                "reply_focus": "meme_meaning",
+                "summary_for_chat": "一张轻松打趣的表情图。",
+                "primary_modality": "emoji",
+                "core_observation": "像是在打招呼，语气轻松友好。",
             },
-            "summary_for_chat": "用户当前更像是在问这个表情包/图片想表达什么。 目前更稳的理解是：像是在打招呼，语气轻松友好。",
+            "summary_for_chat": "一张轻松打趣的表情图。",
             "safety_flags": [],
         }
     )
@@ -387,8 +388,8 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
     assert dispatch_mock.await_count == 2
     second_payload = dispatch_mock.await_args_list[1].kwargs["payload"]
     assert second_payload["multimodal_context_restored"] is True
-    assert second_payload["multimodal_observations"]["reply_focus"] == "meme_meaning"
-    assert second_payload["attachment_summary"].startswith("用户当前更像是在问这个表情包")
+    assert second_payload["multimodal_observations"]["primary_modality"] == "emoji"
+    assert second_payload["attachment_summary"] == "一张轻松打趣的表情图。"
     input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
 
 

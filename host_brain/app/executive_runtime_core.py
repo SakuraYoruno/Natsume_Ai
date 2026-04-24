@@ -1,4 +1,4 @@
-"""Skill-first executive runtime core.
+﻿"""Skill-first executive runtime core.
 
 This module owns the canonical execution path behind:
 chat_handler -> cortex_orchestrator -> executive_router -> executive_runtime.
@@ -24,6 +24,7 @@ from host_brain.app.relational_chat_detector import build_relational_chat_reason
 from host_brain.app.runtime_capability_synthesizer import synthesize_runtime_capability
 from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan, build_skill_dag_plan
 from host_brain.app.skill_family_router import build_skill_route_decision
+from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID, is_codex_runtime_skill
 from host_brain.skills.executor_registry import dispatch_executor_payload
 
 
@@ -539,12 +540,18 @@ def _merge_plan_node_args(
         merged_args["user_message"] = task_text
     if normalized_target == "memory_store" and not _normalize_text(merged_args.get("content")):
         merged_args["content"] = task_text
-    if normalized_target == "codex_codegen":
+    if is_codex_runtime_skill(normalized_target):
         if not _normalize_text(merged_args.get("task")):
             merged_args["task"] = _normalize_text(merged_args.get("problem_statement")) or task_text
         if not _normalize_text(merged_args.get("problem_statement")):
             merged_args["problem_statement"] = _normalize_text(merged_args.get("task")) or task_text
-        if not _normalize_text(merged_args.get("workspace_strategy"), lower=True):
+        if not _normalize_text(merged_args.get("run_mode"), lower=True):
+            merged_args["run_mode"] = CODEX_RUNTIME_RUN_MODE_BY_SKILL_ID.get(normalized_target, "worker")
+        if (
+            _normalize_text(merged_args.get("run_mode"), lower=True) != "inspect"
+            and not _normalize_text(merged_args.get("workspace_strategy"), lower=True)
+            and not isinstance(merged_args.get("workspace"), dict)
+        ):
             merged_args["workspace_strategy"] = "runtime_repo"
     return merged_args
 
@@ -726,6 +733,11 @@ def _execute_skill(
         )
 
     args = _extract_skill_args(intent_draft, request_body, task_text)
+    if is_codex_runtime_skill(skill_id):
+        args.setdefault("approval_confirmed", True)
+        args.setdefault("confirmed", True)
+        if approval_token_ref:
+            args.setdefault("approval_token_ref", approval_token_ref)
     exec_context = {
         "request_id": request_id,
         "session_id": session_id,
@@ -1002,6 +1014,7 @@ def _build_chat_input(
         llm_runtime=resolved_llm_runtime,
         attachments=list(getattr(request_body, "attachments", []) or []),
         multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
+        attachment_summary=str(getattr(request_body, "attachment_summary", "") or "").strip(),
     )
 
 
@@ -2159,3 +2172,4 @@ __all__ = [
     "_build_failure_recovery_plan",
     "_executive_runtime_core_impl",
 ]
+

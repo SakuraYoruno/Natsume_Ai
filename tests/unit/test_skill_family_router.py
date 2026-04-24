@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from types import SimpleNamespace
 
@@ -35,15 +35,15 @@ def test_build_skill_route_decision_for_skill_uses_registry_meta() -> None:
 def test_build_skill_route_decision_for_codex_skill_maps_code_family() -> None:
     decision = build_skill_route_decision(
         route_type="skill",
-        target_id="codex_codegen",
+        target_id="codex_worker",
         reason_code="keyword:debug",
         skill_registry=None,
     )
 
     assert decision.route_type == "skill"
     assert decision.skill_family == "code"
-    assert decision.executor_target == "codex_codegen"
-    assert decision.skill_id == "codex_codegen"
+    assert decision.executor_target == "codex_worker"
+    assert decision.skill_id == "codex_worker"
     assert decision.requires_model_profile is True
 
 
@@ -83,3 +83,4 @@ def test_build_skill_route_decision_for_gap_defaults_executive() -> None:
     assert decision.route_type == "gap"
     assert decision.skill_family == "executive"
     assert decision.requires_model_profile is True
+

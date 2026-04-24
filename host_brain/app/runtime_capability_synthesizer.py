@@ -1,4 +1,4 @@
-"""Runtime capability synthesizer (temporary capability path)."""
+﻿"""Runtime capability synthesizer (temporary capability path)."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def _choose_executor(missing_capability_tags: tuple[str, ...], suggested_family:
     family = str(suggested_family or "").strip().lower()
 
     if "coding" in tags or family == "code":
-        return "skill", "codex_codegen"
+        return "skill", "codex_worker"
     if "translation" in tags or family == "translation":
         return "delegate", "translate_agent"
     if "vision" in tags or family in {"vision", "perception"}:
@@ -161,3 +161,4 @@ def synthesize_runtime_capability(
 
 
 __all__ = ["RuntimeCapabilitySpec", "RuntimeCapabilityRegistry", "synthesize_runtime_capability"]
+

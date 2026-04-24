@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pytest
 
@@ -20,14 +20,14 @@ def _build_seeded_telemetry() -> CapabilityGapTelemetry:
             missing_capability_tags=["coding"],
             confidence=0.9,
             executor_route="skill",
-            executor_target="codex_codegen",
+            executor_target="codex_worker",
         )
         telemetry.record_execution(
             runtime_capability_id=cap_id,
             request_id=f"req-forge-{index}",
             success=index == 3,
             executor_route="skill",
-            executor_target="codex_codegen",
+            executor_target="codex_worker",
             latency_ms=120 + index,
             error_code=None if index == 3 else "FAILED",
         )
@@ -119,7 +119,7 @@ def test_capability_forge_replay_and_runtime_override() -> None:
     )
     assert decision["apply"] is True
     assert decision["stage"] in {"CANARY", "FULL"}
-    assert decision["executor_target"] == "codex_codegen"
+    assert decision["executor_target"] == "codex_worker"
 
     stats = restored_service.runtime_match_stats()
     assert stats["counters"]["total"] >= 1
@@ -301,12 +301,15 @@ def test_capability_forge_auto_plan_creates_proposal(monkeypatch) -> None:
 
 
 def test_capability_forge_auto_plan_auto_approve(monkeypatch) -> None:
+    from host_brain.app.settings import get_capability_forge_settings
+
     telemetry = _build_seeded_telemetry()
     service = CapabilityForgeService(telemetry=telemetry)
     monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_PROPOSAL_ENABLED", "true")
     monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED", "true")
     monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE", "canary")
     monkeypatch.setenv("HOST_CAPABILITY_FORGE_AUTO_APPROVER", "auto-pilot")
+    get_capability_forge_settings.cache_clear()
 
     decision = service.maybe_auto_plan_for_gap(
         request_id="req-auto-approve-1",
@@ -321,3 +324,5 @@ def test_capability_forge_auto_plan_auto_approve(monkeypatch) -> None:
     assert decision["reason"] == "PROPOSAL_CREATED_AND_APPROVED"
     assert decision["status"] == "APPROVED"
     assert decision["stage"] == "CANARY"
+    get_capability_forge_settings.cache_clear()
+

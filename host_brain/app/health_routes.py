@@ -14,10 +14,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from host_brain.app.codex_self_heal import (
-    build_codex_self_heal_proposal_from_health_report,
-    build_codex_self_heal_proposal_from_readiness_report,
-)
+from host_brain.codex_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.dependencies import collect_dependency_probes, get_ledger, get_obs_metrics_collector
 from host_brain.app.main import (
     build_env_readiness_report,
@@ -163,9 +160,9 @@ async def health_check(
         False,
         description="Skip external dependency probes and return a lightweight host-only health snapshot.",
     ),
-    include_self_heal_proposal: bool = Query(
+    include_immune_proposal: bool = Query(
         False,
-        description="Attach a Codex self-heal proposal when the health report is not healthy.",
+        description="Attach a Codex immune proposal when the health report is not healthy.",
     ),
 ) -> HealthResponse:
     """Health endpoint."""
@@ -178,13 +175,10 @@ async def health_check(
             request_id=request_id,
             ts_ms=ts_ms,
         )
-        if include_self_heal_proposal:
-            proposal = build_codex_self_heal_proposal_from_health_report(
-                health_report,
-                include_dependency_probes=not skip_dependency_probes,
-            )
+        if include_immune_proposal:
+            proposal = build_immune_proposal_from_report(health_report, source="health")
             if proposal.get("triggered"):
-                health_report["self_heal_proposal"] = proposal
+                health_report["immune_proposal"] = proposal
 
         return HealthResponse(
             status=health_report.get("status", "OK"),
@@ -202,9 +196,9 @@ async def health_check(
 
 @router.get("/ready", response_model=ReadinessResponse)
 async def environment_readiness(
-    include_self_heal_proposal: bool = Query(
+    include_immune_proposal: bool = Query(
         False,
-        description="Attach a Codex self-heal proposal when the readiness report is degraded or failed.",
+        description="Attach a Codex immune proposal when the readiness report is degraded or failed.",
     ),
 ) -> ReadinessResponse:
     """Readiness endpoint."""
@@ -216,13 +210,10 @@ async def environment_readiness(
             request_id=request_id,
             ts_ms=ts_ms,
         )
-        if include_self_heal_proposal:
-            proposal = build_codex_self_heal_proposal_from_readiness_report(
-                readiness_report,
-                include_dependency_probes=True,
-            )
+        if include_immune_proposal:
+            proposal = build_immune_proposal_from_report(readiness_report, source="readiness")
             if proposal.get("triggered"):
-                readiness_report["self_heal_proposal"] = proposal
+                readiness_report["immune_proposal"] = proposal
 
         readiness_status = readiness_report.get("readiness_status", "FAILED")
 

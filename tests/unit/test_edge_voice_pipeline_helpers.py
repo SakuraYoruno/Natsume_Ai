@@ -90,7 +90,14 @@ class _MockVtsDriver:
     def health(self) -> dict[str, object]:
         return {"mouth_parameters": {"ParamMouthOpenY": 0.0}}
 
-    def set_mouth_open_level(self, value: float) -> VtsDriverResult:
+    def set_mouth_open_level(
+        self,
+        value: float,
+        *,
+        _retry_on_reconnect: bool = True,
+        _include_companions: bool = True,
+    ) -> VtsDriverResult:
+        _ = (_retry_on_reconnect, _include_companions)
         self.mouth_values.append(float(value))
         if self.fail_probe and len(self.mouth_values) == 1:
             return VtsDriverResult(

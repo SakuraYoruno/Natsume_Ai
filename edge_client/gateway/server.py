@@ -168,6 +168,7 @@ def create_gateway_app(
             content=str(payload.get("content", "")),
             media_path=payload.get("media_path"),
             reply_to_msg_id=payload.get("reply_to_msg_id"),
+            raw_extra=dict(payload.get("raw_extra") or {}),
         )
 
         wait_result = bool(payload.get("wait_result", True))
@@ -253,9 +254,23 @@ def create_gateway_app(
     @app.get("/v1/gateway/stats")
     async def stats() -> JSONResponse:
         """Gateway 统计信息。"""
+        adapter_stats: dict[str, Any] = {}
+        for platform_val, adapter in _adapters.items():
+            try:
+                adapter_stats[platform_val] = adapter.health()
+            except Exception as exc:
+                adapter_stats[platform_val] = {"status": "error", "detail": str(exc)}
+        outbound_stats: dict[str, Any] = {}
+        if _outbound is not None:
+            try:
+                outbound_stats = dict(_outbound.stats() or {})
+            except Exception as exc:  # pragma: no cover - observability only
+                outbound_stats = {"error": str(exc)}
         return JSONResponse({
             "normalizer": _normalizer.stats(),
             "router": router.stats(),
+            "adapters": adapter_stats,
+            "outbound": outbound_stats,
         })
 
     return app

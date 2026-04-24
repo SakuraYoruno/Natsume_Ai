@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
+from host_brain.tribe.edge_command_pusher import get_edge_command_pusher
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 

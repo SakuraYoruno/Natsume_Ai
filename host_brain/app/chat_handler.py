@@ -258,6 +258,8 @@ async def _unified_chat_sse_generator(
                 source="chat_handler",
                 input_source=getattr(request_body, "input_source", None),
                 ts_ms=ts_ms,
+                attachments=list(getattr(request_body, "attachments", []) or []),
+                multimodal_observations=dict(getattr(request_body, "multimodal_observations", {}) or {}),
             )
             classify_latency_ms = int(time.time() * 1000) - classify_started_ms
             _logger.info(
