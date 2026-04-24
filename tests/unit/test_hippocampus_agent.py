@@ -87,6 +87,48 @@ def test_hippocampus_agent_build_prompt_retrieval_rows() -> None:
     assert rows[0]["distortion_level"] == 0.1234
 
 
+def test_hippocampus_agent_recall_adds_association_summary(monkeypatch) -> None:
+    class _Orchestrator:
+        async def arun(self, request):
+            return SimpleNamespace(
+                retrieval_summary={"status": "OK", "reason_code": None},
+                retrieval_evidence_items=[
+                    {"snippet": "用户之前提过会先列清单再推进任务。", "store_id": "episodic_vector"},
+                ],
+            )
+
+    async def _fake_pool(**_kwargs):
+        return SimpleNamespace(
+            content='{"association_summary":"这些记忆说明她会把当前问题自然地往执行清单和步骤拆分上联想。","recall_focus":"清单化推进"}',
+            pool_exhausted=False,
+            final_model="MiniMax-M2-her",
+            final_provider="minimax",
+        )
+
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_retrieval_orchestrator",
+        lambda: _Orchestrator(),
+    )
+    monkeypatch.setattr("host_brain.tribe.hippocampus_agent._pool_credentials_available", lambda: True)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_pool)
+
+    summary, _evidence = _run(
+        HippocampusAgent().recall(
+            request_id="req-hippo-assoc",
+            message="那现在该怎么继续？",
+            person_id="person-a",
+            session_id="session-a",
+            ts_ms=1234,
+            emotion_tag="NEUTRAL",
+            render_target_lang="zh",
+        )
+    )
+
+    assert summary["association_generated"] is True
+    assert "执行清单" in summary["association_summary"]
+    assert summary["association_provider"] == "minimax"
+
+
 def test_hippocampus_agent_memory_layers_write_paths(monkeypatch) -> None:
     class _Result:
         status = "OK"

@@ -1,4 +1,4 @@
-const TRACE_NODE_NAME_BY_ID = {
+﻿const TRACE_NODE_NAME_BY_ID = {
   host_input: '输入解析',
   asr: '语音识别',
   gateway_webhook: '网关回调',
@@ -16,7 +16,7 @@ const TRACE_NODE_NAME_BY_ID = {
   emotion_context: '情感上下文',
   persona_resident_memory: '人设常驻记忆',
   motive_state: '动机状态',
-  response_policy: '响应策略',
+  render_policy: '响应策略',
   cortex_orchestrator: 'Cortex Orchestrator',
   executive_router: 'Executive Router',
   chat_agent: 'Chat Agent',
@@ -52,7 +52,7 @@ const TRACE_DISPLAY_NAME_ALIASES = {
   'Emotion Context': '情感上下文',
   'Persona Resident Memory': '人设常驻记忆',
   'Motive State': '动机状态',
-  'Response Policy': '响应策略',
+  'Render Policy': '响应策略',
   'Cortex Orchestrator': 'Cortex Orchestrator',
   'Executive Router': 'Executive Router',
   'Chat Agent': 'Chat Agent',
@@ -171,3 +171,4 @@ export function getTraceLayerLabel(layer = '') {
   const raw = String(layer || '').trim().toLowerCase()
   return TRACE_LAYER_LABELS[raw] || layer || ''
 }
+

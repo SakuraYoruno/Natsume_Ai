@@ -1,11 +1,47 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
+
+
+def _load_recall_association_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("hippocampus.recall_association.prompt")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _pool_credentials_available() -> bool:
+    for key in (
+        "HOST_GEMINI_API_KEY",
+        "GEMINI_API_KEY",
+        "HOST_MINIMAX_API_KEY",
+        "MINIMAX_API_KEY",
+        "OPENAI_API_KEY",
+        "HOST_OPENAI_API_KEY",
+    ):
+        if str(os.environ.get(key) or "").strip():
+            return True
+    return False
+
+
+def _resolve_template_text(value: Any, *, render_target_lang: str) -> str:
+    if isinstance(value, Mapping):
+        lang = "ja" if str(render_target_lang or "").strip().lower() == "ja" else "zh"
+        localized = value.get(lang) or value.get("zh") or value.get("ja")
+        return str(localized or "").strip()
+    return str(value or "").strip()
+
+
+def _truncate_text(text: Any, *, limit: int) -> str:
+    normalized = str(text or "").strip()
+    if len(normalized) <= max(1, int(limit)):
+        return normalized
+    return normalized[: max(1, int(limit)) - 1].rstrip() + "…"
 
 
 @dataclass(slots=True)
@@ -91,10 +127,108 @@ class HippocampusAgent:
                 render_target_lang=render_target_lang,
             )
         )
-        return (
-            dict(result.retrieval_summary),
-            list(result.retrieval_evidence_items),
+        retrieval_summary = dict(result.retrieval_summary)
+        retrieval_evidence_items = list(result.retrieval_evidence_items)
+        association_payload = await self._maybe_generate_association_summary(
+            request_id=request_id,
+            message=message,
+            person_id=person_id,
+            render_target_lang=render_target_lang,
+            retrieval_summary=retrieval_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
         )
+        if association_payload:
+            retrieval_summary.update(association_payload)
+        return (
+            retrieval_summary,
+            retrieval_evidence_items,
+        )
+
+    async def _maybe_generate_association_summary(
+        self,
+        *,
+        request_id: str,
+        message: str,
+        person_id: str,
+        render_target_lang: str,
+        retrieval_summary: Mapping[str, Any],
+        retrieval_evidence_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not _pool_credentials_available():
+            return {}
+        if str(retrieval_summary.get("status") or "").strip().upper() not in {"OK", "APPLIED"}:
+            return {}
+
+        snippets: list[str] = []
+        for index, item in enumerate(list(retrieval_evidence_items or [])[:4]):
+            if not isinstance(item, Mapping):
+                continue
+            snippet = _truncate_text(item.get("snippet"), limit=220)
+            if not snippet:
+                continue
+            store_id = str(item.get("store_id") or "").strip().lower()
+            snippets.append(f"{index + 1}. [{store_id or 'memory'}] {snippet}")
+        if not snippets:
+            return {}
+
+        try:
+            from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
+        except Exception:
+            return {}
+
+        templates = _load_recall_association_templates()
+        system_prompt = _resolve_template_text(
+            templates.get("system_prompt"),
+            render_target_lang=render_target_lang,
+        ) or "你负责做记忆联想摘要，只输出简洁、自然、可直接注入上下文的结论。"
+        user_template = _resolve_template_text(
+            templates.get("user_prompt"),
+            render_target_lang=render_target_lang,
+        ) or (
+            "用户消息：{message}\n"
+            "persona_user_id：{person_id}\n"
+            "检索证据：\n{snippets}\n\n"
+            "请输出 JSON：{{\"association_summary\":\"...\",\"recall_focus\":\"...\"}}"
+        )
+        user_prompt = user_template.format(
+            message=_truncate_text(message, limit=180),
+            person_id=str(person_id or "").strip() or "user_1",
+            snippets="\n".join(snippets),
+        )
+        try:
+            result = await acomplete_llm_with_pool(
+                request_id=request_id,
+                scene_type="HIPPOCAMPUS_RECALL",
+                cognitive_tier="B",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                timeout_ms=2400,
+                gen_params={"temperature": 0.35},
+                response_format="json_object",
+            )
+        except Exception:
+            return {}
+        if result.pool_exhausted:
+            return {}
+        try:
+            parsed = json.loads(result.content)
+        except Exception:
+            return {}
+        association_summary = _truncate_text(parsed.get("association_summary"), limit=240)
+        recall_focus = _truncate_text(parsed.get("recall_focus"), limit=120)
+        if not association_summary:
+            return {}
+        payload = {
+            "association_summary": association_summary,
+            "association_provider": result.final_provider,
+            "association_model_id": result.final_model,
+            "association_generated": True,
+        }
+        if recall_focus:
+            payload["association_focus"] = recall_focus
+        return payload
 
     def build_prompt_retrieval_rows(
         self,
@@ -321,7 +455,7 @@ class HippocampusAgent:
 
         HippocampusAgent 作为 Bond 用户 ID 的唯一解析入口，封装
         `get_canonical_bond_user_id()` 调用，确保用户 ID 解析逻辑不散落在
-        chat_context_builder 等模块中。
+        上下文装配等模块中。
 
         Args:
             fallback: 解析失败时的降级值，默认 "user_1"。
@@ -638,7 +772,7 @@ class HippocampusAgent:
     def export_runtime_state(self) -> dict[str, Any]:
         """T-271：导出 HippocampusAgent 当前运行时状态快照。
 
-        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        供 CortexAgent.collect_tribe_context() 和上下文装配主链使用，
         不触发任何副作用（不 emit 事件，不写 state_registry）。
 
         Returns:

@@ -1,4 +1,4 @@
-templates:
+﻿templates:
 - template_id: fastapi_app.runtime_texts
   category: render
   scope: fastapi_app

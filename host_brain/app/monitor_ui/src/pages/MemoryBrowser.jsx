@@ -37,7 +37,6 @@ export default function MemoryBrowser() {
     episodicData,
     distillData,
     canonDocs,
-    recallData,
     compressData,
     residentContext,
     loading,
@@ -54,18 +53,13 @@ export default function MemoryBrowser() {
 
   const subsystems = memoryData?.subsystems || []
   const docs = canonDocs?.documents || canonDocs?.items || []
-  const slots = recallData?.slots || []
   const worldDocs = residentContext?.world_canon_documents || docs
   const personaDocs = residentContext?.persona_resident_documents || []
   const styleDocs = residentContext?.style_canon_documents || []
   const activeStyleBindings = residentContext?.active_style_bindings || []
-  const latestStylePackRows = residentContext?.latest_style_pack_rows || []
-  const latestMemoryPersonaEvidence = residentContext?.latest_memory_persona_evidence || []
-  const latestMemoryRecallSummary = residentContext?.latest_memory_recall_summary || ''
-  const promptContextAvailable = Boolean(residentContext?.prompt_context_available)
   const residentDocCount = worldDocs.length + personaDocs.length + styleDocs.length
   const hasMemoryObservabilityData = Boolean(
-    memoryData || episodicData || distillData || canonDocs || recallData || compressData || residentContext
+    memoryData || episodicData || distillData || canonDocs || compressData || residentContext
   )
   const subsystemOperationCount = subsystems.reduce((sum, item) => sum + Number(item?.total || 0), 0)
   const {
@@ -80,9 +74,7 @@ export default function MemoryBrowser() {
     || worldDocs.length > 0
     || personaDocs.length > 0
     || styleDocs.length > 0
-    || slots.length > 0
     || activeStyleBindings.length > 0
-    || latestMemoryPersonaEvidence.length > 0
     || (episodicData?.total_writes ?? 0) > 0
     || (distillData?.total_cycles ?? 0) > 0
     || (compressData?.total_compressions ?? 0) > 0
@@ -102,9 +94,7 @@ export default function MemoryBrowser() {
     averageSuccessRate: avgSuccessRate,
     sampledSubsystemCount,
     configuredSubsystemCount,
-    recallPackCount: recallData?.total_packs,
     residentDocCount,
-    promptContextAvailable,
     distillCycles: distillData?.total_cycles,
     episodicWrites: episodicData?.total_writes,
   }), [
@@ -116,8 +106,6 @@ export default function MemoryBrowser() {
     hasMemoryTraffic,
     lastUpdatedAt,
     memoryLoadState,
-    promptContextAvailable,
-    recallData?.total_packs,
     residentDocCount,
     sampledSubsystemCount,
   ])
@@ -127,7 +115,7 @@ export default function MemoryBrowser() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">海马体记忆库</h1>
-          <p className="text-sm text-gray-500">情景记忆、蒸馏历史、主设定文档与召回包预算。</p>
+          <p className="text-sm text-gray-500">情景记忆、蒸馏历史与主设定文档。</p>
         </div>
         <div className="flex items-center gap-2">
           <TimeWindowSelect value={windowMinutes} onChange={setWindowMinutes} options={WINDOW_OPTIONS} />
@@ -150,7 +138,6 @@ export default function MemoryBrowser() {
         gradientClass="from-primary-50 via-white to-cyan-50"
         metaItems={[
           `窗口：${windowMinutes} 分钟`,
-          `召回包：${recallData?.total_packs ?? 0}`,
           `风格常驻：${activeStyleBindings.length}`,
           `情景写入：${episodicData?.total_writes ?? 0}`,
         ]}
@@ -163,7 +150,7 @@ export default function MemoryBrowser() {
             sampleLabel="记忆操作"
             updatedAt={lastUpdatedAt}
             source="memory / recall / distill"
-            definition="记忆页把子系统读写、召回包、蒸馏和常驻设定放在同一观察面；无样本与暂不可用会明确区分。"
+            definition="记忆页把子系统读写、蒸馏和常驻设定放在同一观察面；无样本与暂不可用会明确区分。"
           />
         )}
       />
@@ -206,40 +193,6 @@ export default function MemoryBrowser() {
       )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="card p-4">
-          <SectionHeading icon={Database} title="召回包预算" />
-          {slots.length > 0 ? (
-            <>
-              <div className="space-y-2">
-                {slots.map((slot) => (
-                  <div key={slot.slot} className="flex items-center gap-2">
-                    <span className="w-32 shrink-0 truncate text-xs text-gray-600">{slot.slot}</span>
-                    <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${Math.min(100, (slot.avg_tokens ?? 0) / 8)}%` }}
-                      />
-                    </div>
-                    <span className="w-16 text-right text-xs text-gray-500">
-                      {slot.avg_tokens != null ? Number(slot.avg_tokens).toFixed(0) : '—'} 词元
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {recallData ? (
-                <div className="mt-3 flex gap-4 border-t pt-3 text-xs text-gray-500">
-                  <span>总召回包：{recallData.total_packs ?? 0}</span>
-                  <span>截断率：{recallData.truncation_rate ?? '—'}%</span>
-                  <span>冲突率：{recallData.conflict_rate ?? '—'}%</span>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <EmptyStateCard title="暂无召回包预算样本" hint="当前窗口还没有预算统计数据。" className="p-4" />
-          )}
-        </div>
-
         <div className="card p-4">
           <SectionHeading icon={BookOpen} title="常驻设定文件" />
           {(worldDocs.length > 0 || personaDocs.length > 0 || styleDocs.length > 0) ? (
@@ -311,20 +264,12 @@ export default function MemoryBrowser() {
 
         <div className="card p-4">
           <SectionHeading icon={Brain} title="人格 / 风格常驻注入" />
-          {(activeStyleBindings.length > 0 || latestStylePackRows.length > 0 || latestMemoryPersonaEvidence.length > 0 || latestMemoryRecallSummary) ? (
+          {activeStyleBindings.length > 0 ? (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3 text-center text-xs">
+              <div className="grid grid-cols-1 gap-3 text-center text-xs">
                 <div>
                   <div className="text-lg font-bold text-indigo-600">{activeStyleBindings.length}</div>
                   <div className="text-gray-500">活跃绑定节点</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-blue-600">{latestStylePackRows.length}</div>
-                  <div className="text-gray-500">最近 Style 行</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-purple-600">{latestMemoryPersonaEvidence.length}</div>
-                  <div className="text-gray-500">人格证据</div>
                 </div>
               </div>
 
@@ -345,54 +290,11 @@ export default function MemoryBrowser() {
                 </div>
               ) : null}
 
-              {latestStylePackRows.length > 0 ? (
-                <div className="border-t pt-3">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">最近一次 Prompt Style Pack</div>
-                  <div className="max-h-28 space-y-1 overflow-y-auto">
-                    {latestStylePackRows.map((row, index) => (
-                      <div key={`${row.node_id}-${index}`} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-mono text-gray-700">{row.node_id}</span>
-                          <span className="shrink-0 text-gray-400">{row.citation || row.canon_id || 'style_pack'}</span>
-                        </div>
-                        {row.preview ? <div className="mt-1 text-gray-500">{row.preview}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {latestMemoryRecallSummary ? (
-                <NoticeBanner variant="info">{latestMemoryRecallSummary}</NoticeBanner>
-              ) : null}
-
-              {latestMemoryPersonaEvidence.length > 0 ? (
-                <div className="border-t pt-3">
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">最近一次人格证据</div>
-                  <div className="max-h-32 space-y-1 overflow-y-auto">
-                    {latestMemoryPersonaEvidence.map((row, index) => (
-                      <div key={`${row.evidence_ref || row.source_ref || 'evidence'}-${index}`} className="rounded bg-gray-50 px-3 py-2 text-xs">
-                        <div className="flex items-center justify-between gap-2 text-gray-500">
-                          <span>{row.kind || 'episodic'}</span>
-                          <span>{row.emotion_color_tag || (row.suppression_flag ? 'suppressed' : 'persona')}</span>
-                        </div>
-                        {row.content ? <div className="mt-1 text-gray-700">{row.content}</div> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {!promptContextAvailable ? (
-                <NoticeBanner variant="info">
-                  静态常驻配置已展示；最近一次对话样本尚未进入 prompt context，所以这里还没有动态人格证据。
-                </NoticeBanner>
-              ) : null}
             </div>
           ) : (
             <EmptyStateCard
-              title="暂无人格 / 风格注入快照"
-              hint="当常驻风格绑定或最近一次对话样本产生后，这里会展示 style pack 与人格证据。"
+              title="暂无人格 / 风格注入绑定"
+              hint="当风格绑定生效后，这里会展示当前节点与 canon 的对应关系。"
               className="p-4"
             />
           )}

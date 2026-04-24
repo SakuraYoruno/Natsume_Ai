@@ -1,6 +1,6 @@
 """CortexIntentAnalyzer：TRIBE 族上下文聚合模块。
 
-负责从各族 Agent 收集运行时上下文，供 chat_context_builder 使用。
+负责从各族 Agent 收集运行时上下文，供上下文装配主链使用。
 原属 CortexAgent.collect_tribe_context()，拆分后由 CortexAgent 委托调用。
 """
 
@@ -33,7 +33,7 @@ class CortexIntentAnalyzer:
         session_id: str | None = None,
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        """从各族 Agent 收集运行时上下文，供 chat_context_builder 使用。
+        """从各族 Agent 收集运行时上下文，供上下文装配主链使用。
 
         返回字段：
             vital_signs (dict): 统一生命体征聚合

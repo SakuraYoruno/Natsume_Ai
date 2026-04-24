@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DOC_LINT_SCRIPT = ROOT / "tools" / "doc_lint" / "doc_audience_lint.py"
 DELIVERY_GATE_SCRIPT = ROOT / "tools" / "doc_lint" / "delivery_gate.py"
+NO_RULE_DEGRADE_SCRIPT = ROOT / "scripts" / "ci" / "check_no_rule_degrade.py"
 
 CI_FIXTURES = ROOT / "tests" / "fixtures" / "ci"
 DOC_BAD = CI_FIXTURES / "doc_gate" / "bad"
@@ -42,6 +43,7 @@ class TestCIGateContract(unittest.TestCase):
     def setUp(self) -> None:
         self.doc_lint = _load_module(DOC_LINT_SCRIPT, "doc_audience_lint")
         self.delivery_gate = _load_module(DELIVERY_GATE_SCRIPT, "delivery_gate")
+        self.no_rule_degrade = _load_module(NO_RULE_DEGRADE_SCRIPT, "check_no_rule_degrade")
 
     def test_t_ci_01_doc_gate_rejects_missing_headers(self) -> None:
         failures = self.doc_lint.scan_markdown_files(
@@ -81,6 +83,15 @@ class TestCIGateContract(unittest.TestCase):
             self.assertIsInstance(row["failed_artifact"], str)
         self.assertTrue(any(row["check_id"] == "doc_gate" for row in report["failures"]))
         self.assertTrue(any(row["check_id"] == "static_scan" for row in report["failures"]))
+
+    def test_t_ci_01_no_rule_degrade_scan_rejects_hard_disable(self) -> None:
+        failures = self.no_rule_degrade.scan_file(STATIC_BAD_ROOT / "no_rule_degrade_ci_example.py")
+        self.assertTrue(any(row["reason_code"] == "USE_LLM_DISABLED" for row in failures))
+        self.assertTrue(any(str(row["path"]).endswith("no_rule_degrade_ci_example.py") for row in failures))
+
+    def test_t_ci_01_no_rule_degrade_scan_current_repo_clean(self) -> None:
+        failures = self.no_rule_degrade.scan_repo(ROOT)
+        self.assertEqual([], failures)
 
 
 class TestSharedModuleLint(unittest.TestCase):

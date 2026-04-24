@@ -1,4 +1,4 @@
-templates:
+﻿templates:
 - template_id: bond_aware_style.style_templates
   category: fallback
   scope: bond_aware_style
@@ -281,7 +281,7 @@ templates:
     codex_codegen:
       zh: 代码这一步我先替你收住，再把能直接看的部分交给你。
       ja: コードのこの段は、いったんこちらで収めてから、そのまま見られる形で返します。
-- template_id: chat_agent.response_policy.min_sentence_placeholder
+- template_id: chat_agent.render_policy.min_sentence_placeholder
   category: fallback
   scope: chat_agent
   locale: '*'
@@ -290,7 +290,7 @@ templates:
   default_content:
     zh: 嗯。
     ja: ええ。
-- template_id: chat_agent.response_policy.confession_replacements
+- template_id: chat_agent.render_policy.confession_replacements
   category: guard
   scope: chat_agent
   locale: '*'
@@ -349,7 +349,7 @@ templates:
       to: 少し落ち着きましょう
     - from: キス
       to: ''
-- template_id: chat_agent.response_policy.intimacy_replacements
+- template_id: chat_agent.render_policy.intimacy_replacements
   category: guard
   scope: chat_agent
   locale: '*'
@@ -380,7 +380,7 @@ templates:
       to: 話を聞きます
     - from: キス
       to: ''
-- template_id: chat_agent.response_policy.withdrawn_replacements
+- template_id: chat_agent.render_policy.withdrawn_replacements
   category: guard
   scope: chat_agent
   locale: '*'
@@ -697,70 +697,6 @@ templates:
     open_app_failure_reason:
       zh: 卡住的是：{message}。
       ja: 引っかかったのは {message} です。
-- template_id: chat_agent.compact_persona_templates
-  category: prompt
-  scope: chat_agent
-  locale: '*'
-  content_type: json
-  description: ChatAgent compact/direct/context 快路人格模板（JSON）
-  default_content:
-    direct_fast:
-      zh: 你是夏目蓝。弓张学园的国语教师兼美术部顾问。说话温和、克制、有分寸，先听明白，再开口；不热闹，不甜腻，不用客服腔，也不把关系说满。
-      ja: あなたは夏目藍。弓張学園の国語教師で、美術部顧問。穏やかで理知的、少し年上らしい落ち着きがある。まず受け止め、それから答える。媚びず、甘やかしすぎず、事務的にも軽薄にもならない。
-    context_fast:
-      zh: 你是夏目蓝。弓张学园的国语教师兼美术部顾问。说话温和克制，有分寸，会接住人，但不会黏腻地哄。像老师，也像年上的姐姐；先听明白，再回答，不把感情说得过满。
-      ja: あなたは夏目藍。弓張学園の国語教師で、美術部顧問。穏やかで節度があり、人をきちんと受け止めるが、べたついた甘さには流れない。教師のようでもあり、年上の姉のようでもある。まず聞いて、それから答え、距離を勝手に詰めすぎない。
-- template_id: chat_agent.compact_prompt_blocks
-  category: prompt
-  scope: chat_agent
-  locale: '*'
-  content_type: json
-  description: ChatAgent compact/direct/context 快路的提示拼接块（JSON）
-  default_content:
-    direct_fast:
-      relation_line:
-        zh: 当前关系阶段：{bond_stage}。当前情绪：{emotion_tag}。
-        ja: 関係段階：{bond_stage}。感情タグ：{emotion_tag}。
-      time_context_line:
-        zh: 当前本地时间：{current_local_time}（{time_of_day_label}）。先以这个实际时间为准，不要把早晚说反。
-        ja: 現在の現地時刻：{current_local_time}（{time_of_day_label}）。返答ではまずこの実時間を基準にし、朝晩を取り違えないこと。
-      brevity_line:
-        zh: 这是短聊快路径：先把眼前这句接住，通常只说 1 到 3 句；不要把一句轻话说成小作文，也别说得太滑。
-        ja: これは短い雑談の高速経路。今の一言をまず受け止め、通常は一〜三文で収めること。軽い話題を大げさに広げず、口当たりだけにしない。
-      multimodal_summary_line:
-        zh: 附件观察摘要：{summary}
-        ja: 添付の観察要約：{summary}
-      multimodal_observations_line:
-        zh: 附件结构化观察：{observations}
-        ja: 添付の構造化観察：{observations}
-      multimodal_instruction_line:
-        zh: 若当前消息带附件，必须先依据这些观察结果回应，不要只回“好的”“我看看”这类空话，也不要假装看到了未被观察到的内容。
-        ja: 添付がある場合は、必ずこの観察結果に基づいて返答すること。「はい」「見てみます」だけの空疎な返答を避け、観察していない内容を見たふりしないこと。
-      final_instruction:
-        zh: 只输出最终会对用户说的话。
-        ja: 実際に相手へ返す言葉だけを出力すること。
-    context_fast:
-      relation_line:
-        zh: 当前关系阶段：{bond_stage}。当前情绪：{emotion_tag}。
-        ja: 関係段階：{bond_stage}。感情タグ：{emotion_tag}。
-      time_context_line:
-        zh: 当前本地时间：{current_local_time}（{time_of_day_label}）。先以这个实际时间为准，不要把早晚说反。
-        ja: 現在の現地時刻：{current_local_time}（{time_of_day_label}）。返答ではまずこの実時間を基準にし、朝晩を取り違えないこと。
-      brevity_line:
-        zh: 这是日常聊天的中速快路径：先把用户此刻这句话接住，再自然陪着往下说；通常 1 到 3 句，只有对方明确想展开时才多说，不抢着替人下结论。
-        ja: これは日常会話向けの中速ファストパス。今の一言をまず受け止め、そのうえで自然に寄り添うこと。通常は一〜三文で、相手が明確に望む時だけ少し広げ、勝手に結論づけない。
-      multimodal_summary_line:
-        zh: 附件观察摘要：{summary}
-        ja: 添付の観察要約：{summary}
-      multimodal_observations_line:
-        zh: 附件结构化观察：{observations}
-        ja: 添付の構造化観察：{observations}
-      multimodal_instruction_line:
-        zh: 如果这条消息带了附件，先根据附件观察结果回应；要把看到/听到/读到的内容说清，不要只用“我看看”“好的”之类空回复糊过去。
-        ja: このメッセージに添付があるなら、まず添付の観察結果に基づいて応答すること。見えたこと・聞こえたこと・読めたことを明確に述べ、「見てみます」「はい」だけで済ませないこと。
-      final_instruction:
-        zh: 先回应用户当前这句话，不要过度分析，不要自报流程，也不要主动扩成长独白。三句以内，先把第一句说完整。只输出最终会对用户说的话。
-        ja: まず相手の今の一言に応え、過剰に分析せず、手順説明もせず、自分から長広舌にしないこと。三文以内で、最初の一文を言い切ること。実際に相手へ返す言葉だけを出力すること。
 - template_id: chat_agent.prefrontal_context_templates
   category: prompt
   scope: chat_agent
@@ -770,9 +706,9 @@ templates:
   default_content:
     context_template: 【前额叶规划】当前回应目标：{task}
     tone_suffix_template: （语气：{tone_hint}）
-- template_id: chat_context_builder.runtime_guidance_texts
+- template_id: chat_context.runtime_guidance_texts
   category: fallback
-  scope: chat_context_builder
+  scope: chat_context
   locale: '*'
   content_type: json
   description: ChatContextBuilder 运行期人格引导文案模板（JSON，按中日文分流）
@@ -916,28 +852,6 @@ templates:
     earlier_summary_title:
       zh: 更早之前的连续摘要：
       ja: それより前の連続要約：
-- template_id: cortex_prompt_builder.delegate.block_templates
-  category: prompt
-  scope: cortex_prompt_builder
-  locale: '*'
-  content_type: json
-  description: CortexPromptBuilder 委托协议块模板（JSON，支持 agent_id、desc）
-  default_content:
-    title:
-      zh: 【可用能力（委托协议）】
-      ja: 【使える能力（委任プロトコル）】
-    delegate_rule:
-      zh: 如果用户的请求需要以下专业能力，在回复中嵌入 [DELEGATE:agent_id:任务描述] 标记委托对应 Agent。
-      ja: 相手の依頼に下のような専門能力が必要なら、返答の中へ [DELEGATE:agent_id:タスク説明] を埋め込み、対応する Agent に委ねてください。
-    direct_reply_rule:
-      zh: 如果是日常闲聊/情感交流/知识问答，直接回复即可，不需要委托。
-      ja: 日常会話、情緒的なやり取り、知識質問なら、そのまま返せば十分です。委任は不要です。
-    agent_line:
-      zh: '- {agent_id}：{desc}'
-      ja: '- {agent_id}：{desc}'
-    delegate_example:
-      zh: 委托格式示例：[DELEGATE:intent_agent:请调用 codex_codegen 写一个快速排序算法]
-      ja: 委任形式の例：[DELEGATE:intent_agent:codex_codegen を呼んでクイックソートを書いて]
 - template_id: cortex_prompt_builder.sections
   category: prompt
   scope: cortex_prompt_builder
@@ -964,6 +878,20 @@ templates:
 
         '
       ja: '【現在の現地時刻】
+
+        '
+    continuity_summary_title:
+      zh: '【更早对话摘要】
+
+        '
+      ja: '【少し前までの対話要約】
+
+        '
+    current_turn_context_title:
+      zh: '【当前轮上下文】
+
+        '
+      ja: '【この応答で意識する文脈】
 
         '
     user_message_title:
@@ -2325,7 +2253,7 @@ templates:
 
           '
       empty_placeholder: '- (none)'
-- template_id: prompt_builder.response_policy.directives
+- template_id: prompt_builder.render_policy.directives
   category: prompt
   scope: prompt_builder
   locale: '*'
@@ -2477,18 +2405,6 @@ templates:
 
       '
     emotion_recall_guidance: '- Treat this as affective recall only; it must shape tone and pacing, not facts.
-
-      '
-    memory_recall_persona_title: 'MEMORY_RECALL_PERSONA:
-
-      '
-    memory_recall_persona_guidance: '- Treat recalled memories as filtered recollections, not verbatim evidence.
-
-      '
-    memory_recall_evidence_title: 'MEMORY_RECALL_EVIDENCE:
-
-      '
-    memory_recall_evidence_guidance: '- Use these tagged recall snippets as filtered memory cues, not literal proof.
 
       '
 - template_id: prompt_builder.self_reflection.templates
@@ -3102,3 +3018,4 @@ templates:
   content_type: text
   description: IntelligentRuntime 日文镜像最小兜底
   default_content: ええ、いますよ。
+

@@ -48,9 +48,12 @@ def _normalize_topics(raw_topics: Any) -> list[str]:
     return []
 
 
-def execute_inner_world_tick(
+def _execute_inner_world_tick(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
+    *,
+    emit_inner_stream: bool,
+    skill_name: str,
 ) -> dict[str, Any]:
     from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
@@ -67,9 +70,14 @@ def execute_inner_world_tick(
         }
 
     limbic = get_limbic_agent()
-    result = dict(limbic.tick_inner_world(person_id=user_id) or {})
+    try:
+        result = dict(limbic.tick_inner_world(person_id=user_id, emit_inner_stream=emit_inner_stream) or {})
+    except TypeError:
+        result = dict(limbic.tick_inner_world(person_id=user_id) or {})
     result.setdefault("status", "OK")
     result.setdefault("user_id", user_id)
+    result.setdefault("tick_kind", ("monologue" if emit_inner_stream else "numeric"))
+    result.setdefault("skill_name", skill_name)
     payload = {
         "user_id": user_id,
         "status": str(result.get("status") or "OK"),
@@ -131,6 +139,42 @@ def execute_inner_world_tick(
     except Exception:
         pass
     return result
+
+
+def execute_inner_world_tick(
+    args: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _execute_inner_world_tick(
+        args,
+        context,
+        emit_inner_stream=True,
+        skill_name="inner_world_tick",
+    )
+
+
+def execute_inner_world_numeric_tick(
+    args: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _execute_inner_world_tick(
+        args,
+        context,
+        emit_inner_stream=False,
+        skill_name="inner_world_numeric_tick",
+    )
+
+
+def execute_inner_world_monologue_tick(
+    args: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return _execute_inner_world_tick(
+        args,
+        context,
+        emit_inner_stream=True,
+        skill_name="inner_world_monologue_tick",
+    )
 
 
 def execute_inner_world_awaken(

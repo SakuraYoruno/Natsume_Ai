@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -21,6 +22,7 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
+    PROVIDER_MINIMAX,
     PROVIDER_OPENAI,
 )
 
@@ -60,6 +62,27 @@ _EMOJI_TONE_HINTS: dict[str, str] = {
     "怒": "语气可能带一点不满或吐槽",
     "哈": "更像在打趣或吐槽",
 }
+_GREETING_HINTS = ("hello", "hi", "你好", "您好", "早上好", "晚上好", "挥手", "招手", "打招呼")
+_CAPABILITY_CHECK_RE = re.compile(
+    r"(能|可以|可不可以|是否).{0,8}(看到|看见|看清|看懂|识别)|你.{0,4}(看到|看见|看懂)|看得到",
+    re.IGNORECASE,
+)
+_MEANING_QUERY_RE = re.compile(
+    r"(什么意思|啥意思|什么梗|表达什么|想表达什么|在说什么|什么语气|什么感觉)",
+    re.IGNORECASE,
+)
+_SCREENSHOT_QUERY_RE = re.compile(
+    r"(报错|错误|怎么|哪里|哪儿|按钮|界面|问题|啥情况|什么意思|怎么操作|点哪里)",
+    re.IGNORECASE,
+)
+_LITERAL_QUERY_RE = re.compile(
+    r"(图里有什么|图片里有什么|画的什么|是什么|写了什么|看到什么|内容是什么)",
+    re.IGNORECASE,
+)
+_MEDIA_ONLY_PLACEHOLDER_RE = re.compile(
+    r"^\[(图片|图片消息|表情包|贴图|截图|文件|语音|视频)消息?\]$|^\[(图片|表情包|贴图|截图)\]$",
+    re.IGNORECASE,
+)
 _TESSERACT_LANG = "chi_sim+jpn+eng"
 _IMAGE_FILE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 
@@ -87,6 +110,65 @@ def _shorten(value: str, *, limit: int = 180) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _normalize_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _derive_meme_intent(*, visual_summary: str, visible_text: str, fallback_hint: str = "") -> str:
+    haystack = _normalize_whitespace(" ".join([visual_summary, visible_text, fallback_hint])).lower()
+    if any(token in haystack for token in _GREETING_HINTS):
+        return "像是在打招呼，语气轻松友好"
+    if "笑" in haystack or "哈哈" in haystack:
+        return "更像是在轻松打趣，带一点逗人的意思"
+    if "哭" in haystack or "委屈" in haystack:
+        return "更像是在委屈、撒娇，想让人哄一下"
+    if "怒" in haystack or "气" in haystack or "服了" in haystack:
+        return "更像是在吐槽或表达一点不满，但不算特别凶"
+    return ""
+
+
+def _is_media_only_placeholder(text: str) -> bool:
+    normalized = _normalize_whitespace(text)
+    if not normalized:
+        return True
+    return bool(_MEDIA_ONLY_PLACEHOLDER_RE.match(normalized))
+
+
+def infer_image_reply_focus(*, user_text: str, is_emoji: bool, is_screenshot: bool) -> str:
+    text = _normalize_whitespace(user_text).lower()
+    if _is_media_only_placeholder(text):
+        return "emoji_social_reply" if is_emoji else "attachment_only_no_question"
+    if text and _CAPABILITY_CHECK_RE.search(text):
+        return "capability_check"
+    if text and _MEANING_QUERY_RE.search(text):
+        return "meme_meaning" if is_emoji else "literal_description"
+    if is_screenshot and text and _SCREENSHOT_QUERY_RE.search(text):
+        return "screenshot_analysis"
+    if text and _LITERAL_QUERY_RE.search(text):
+        return "literal_description"
+    if is_emoji:
+        return "meme_meaning"
+    if is_screenshot:
+        return "screenshot_analysis"
+    return "literal_description"
+
+
+def build_image_conversation_hint(*, reply_focus: str, is_emoji: bool, is_screenshot: bool) -> str:
+    if reply_focus == "emoji_social_reply":
+        return "用户只是发来一个表情包/贴图，没有明确提问。先把它当作一种社交表达来接，不要上来解说画面；如果能看出明显语气，就顺着这个语气回应。"
+    if reply_focus == "attachment_only_no_question":
+        return "用户只是发来一张图片，没有明确提问。不要自顾自描述画面；先轻轻接住，必要时再问他想让我看哪一部分。"
+    if reply_focus == "capability_check":
+        return "先直接回答能看到/能读到，再用一句话点出核心，不要改成完整画面描述。"
+    if reply_focus == "meme_meaning":
+        return "优先解释语气、社交含义或梗意图，不要只是复述画面元素。"
+    if reply_focus == "screenshot_analysis" or is_screenshot:
+        return "优先围绕界面、按钮、错误点回答，不要泛泛描述整个画面。"
+    if is_emoji:
+        return "如果这是一个表情包，优先把它当作一种表达方式，而不只是图片描述。"
+    return "如果用户是在问图里有什么，可以简短描述可见内容，但不要凭空补充未观察到的事实。"
 
 
 def _safe_read_bytes(path: Path, *, limit: int) -> bytes:
@@ -154,6 +236,7 @@ def _resolve_provider_api_key(provider_name: str) -> str | None:
         PROVIDER_CODEX: "CODEX_API_KEY",
         PROVIDER_GEMINI: "GEMINI_API_KEY",
         PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY",
+        PROVIDER_MINIMAX: "MINIMAX_API_KEY",
     }
     env_name = mapping.get(provider)
     if not env_name:
@@ -173,6 +256,7 @@ def _resolve_provider_api_key(provider_name: str) -> str | None:
             PROVIDER_CODEX: "codex_api_key",
             PROVIDER_GEMINI: "gemini_api_key",
             PROVIDER_DEEPSEEK: "deepseek_api_key",
+            PROVIDER_MINIMAX: "minimax_api_key",
         }
         attr_name = provider_to_attr.get(provider)
         resolved = str(getattr(config, attr_name, "") or "").strip() if attr_name else ""
@@ -194,6 +278,10 @@ def _resolve_provider_base_url(provider_name: str) -> str | None:
     if provider == PROVIDER_CODEX:
         return _normalize_openai_compat_base_url(
             str(os.environ.get("HOST_CODEX_BASE_URL") or os.environ.get("HOST_OPENAI_BASE_URL") or "").strip()
+        )
+    if provider == PROVIDER_MINIMAX:
+        return _normalize_openai_compat_base_url(
+            str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimax.chat/v1").strip()
         )
     return _normalize_openai_compat_base_url(str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip())
 
@@ -291,12 +379,19 @@ class RuleBasedMultimodalObserverBackend:
             ocr_text = self._ocr_image(str(item["local_path"]))
         text_hint = _shorten(ocr_text, limit=160)
         is_screenshot = any(token in (file_name + " " + str(user_text or "")).lower() for token in _SCREENSHOT_HINTS)
+        reply_focus = infer_image_reply_focus(
+            user_text=str(user_text or ""),
+            is_emoji=item["type"] == "emoji",
+            is_screenshot=bool(is_screenshot),
+        )
         tone_hint = ""
         if item["type"] == "emoji":
             for keyword, hint in _EMOJI_TONE_HINTS.items():
                 if keyword in text_hint:
                     tone_hint = hint
                     break
+        if item["type"] == "emoji" and not tone_hint:
+            tone_hint = _derive_meme_intent(visual_summary="", visible_text=text_hint)
         summary = "收到一张图片。"
         if item["type"] == "emoji":
             summary = "收到一个表情包。"
@@ -318,6 +413,12 @@ class RuleBasedMultimodalObserverBackend:
             "scene_tags": (["screenshot"] if is_screenshot else []),
             "meme_intent": tone_hint or None,
             "tone_hint": tone_hint or None,
+            "reply_focus": reply_focus,
+            "conversation_hint": build_image_conversation_hint(
+                reply_focus=reply_focus,
+                is_emoji=item["type"] == "emoji",
+                is_screenshot=bool(is_screenshot),
+            ),
             "confidence": 0.42 if text_hint or tone_hint else 0.2,
             "summary": summary,
             "safety_flags": [],
@@ -510,7 +611,7 @@ class OpenAICompatMultimodalBackend:
 
     @property
     def available(self) -> bool:
-        return bool(self._api_key and (self._sync_model_id or self._async_model_id))
+        return bool(self._sync_model_id or self._async_model_id)
 
     def supports(self, payload: MultimodalObserverInput) -> bool:
         if not self.available:
@@ -568,6 +669,17 @@ class OpenAICompatMultimodalBackend:
         visual_summary = _shorten(str(parsed.get("visual_summary") or "").strip(), limit=180)
         visible_text = _shorten(str(parsed.get("visible_text") or "").strip(), limit=200)
         meme_intent = _shorten(str(parsed.get("meme_intent") or "").strip(), limit=120)
+        if is_emoji and not meme_intent:
+            meme_intent = _derive_meme_intent(
+                visual_summary=visual_summary,
+                visible_text=visible_text,
+                fallback_hint=str(attachment.get("caption") or ""),
+            )
+        reply_focus = infer_image_reply_focus(
+            user_text=str(payload.user_text or ""),
+            is_emoji=is_emoji,
+            is_screenshot=bool(is_screenshot),
+        )
         scene_tags = [str(item).strip() for item in list(parsed.get("scene_tags") or []) if str(item).strip()]
         confidence = max(0.0, min(1.0, _coerce_float(parsed.get("confidence"), default=0.72)))
 
@@ -595,6 +707,12 @@ class OpenAICompatMultimodalBackend:
             "meme_intent": meme_intent or None,
             "scene_tags": scene_tags,
             "is_screenshot": bool(is_screenshot),
+            "reply_focus": reply_focus,
+            "conversation_hint": build_image_conversation_hint(
+                reply_focus=reply_focus,
+                is_emoji=is_emoji,
+                is_screenshot=bool(is_screenshot),
+            ),
             "confidence": confidence,
             "summary": summary,
             "safety_flags": [str(flag).strip() for flag in list(parsed.get("safety_flags") or []) if str(flag).strip()],
@@ -732,27 +850,24 @@ class OpenAICompatMultimodalBackend:
         }
 
     def _invoke_model(self, *, messages: list[dict[str, Any]], model_id: str) -> str:
-        from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
-        from langchain_openai import ChatOpenAI  # noqa: PLC0415
+        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
-        llm = ChatOpenAI(
-            model=str(model_id or "").strip() or self._sync_model_id,
+        result = complete_llm_with_pool_sync(
+            request_id=f"multimodal::{self.backend_name}::{int(time.time() * 1000)}",
+            scene_type="MULTIMODAL",
+            cognitive_tier="B",
+            provider_name=self._provider_name,
+            model_id=str(model_id or "").strip() or self._sync_model_id,
             api_key=self._api_key,
-            base_url=self._base_url,
-            timeout=max(5.0, float(self._timeout_ms) / 1000.0),
-            max_retries=1,
-            temperature=0.1,
+            timeout_ms=self._timeout_ms,
+            messages=messages,
+            gen_params={"temperature": 0.1, "top_p": 0.8},
+            response_format="json_object",
+            base_url_override=self._base_url,
         )
-        lc_messages = []
-        for message in messages:
-            role = str(message.get("role") or "user").strip().lower()
-            content = message.get("content")
-            if role == "system":
-                lc_messages.append(SystemMessage(content=content))
-            else:
-                lc_messages.append(HumanMessage(content=content))
-        response = llm.invoke(lc_messages)
-        return str(extract_langchain_content_text(getattr(response, "content", "")) or "").strip()
+        if result.pool_exhausted:
+            raise RuntimeError("multimodal llm pool exhausted")
+        return str(extract_langchain_content_text(result.content) or "").strip()
 
     def _build_image_content_parts(self, attachment: Mapping[str, Any]) -> list[dict[str, Any]]:
         local_path = str(attachment.get("local_path") or "").strip()

@@ -282,7 +282,7 @@ class OfflineInnerWorld:
 
     # ── 核心 tick ──────────────────────────────────────────────────────────
 
-    def tick(self, user_id: str) -> dict[str, Any]:
+    def tick(self, user_id: str, *, emit_inner_stream: bool = True) -> dict[str, Any]:
         """内在时钟 tick——由 NatsumeScheduler 每分钟调用。
 
         执行：
@@ -413,12 +413,13 @@ class OfflineInnerWorld:
                     elapsed_since_interaction_hours,
                 )
                 absence_band = _classify_absence_band(offline_hours)
-                _append_inner_stream_event(
-                    state=state,
-                    now_ms=now_ms,
-                    absence_band=absence_band,
-                    offline_hours=offline_hours,
-                )
+                if emit_inner_stream:
+                    _append_inner_stream_event(
+                        state=state,
+                        now_ms=now_ms,
+                        absence_band=absence_band,
+                        offline_hours=offline_hours,
+                    )
             else:
                 state.loneliness = max(
                     0.0,
@@ -816,6 +817,7 @@ def _generate_inner_stream_note_from_llm(
     offline_hours: float,
     now_ms: int,
 ) -> tuple[str, str, str]:
+    agent_reason_code = ""
     try:
         from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
 
@@ -840,7 +842,7 @@ def _generate_inner_stream_note_from_llm(
         )
         return str(note or ""), str(focus or ""), str(reason or "")
     except Exception as agent_exc:
-        return "", "", f"INNER_ACTIVITY_AGENT_ERROR:{str(agent_exc)[:96]}"
+        agent_reason_code = f"INNER_ACTIVITY_AGENT_ERROR:{str(agent_exc)[:96]}"
 
     if not _INNER_WORLD_LLM_ENABLED:
         return "", "", "INNER_WORLD_LLM_DISABLED"
@@ -853,13 +855,10 @@ def _generate_inner_stream_note_from_llm(
 
     provider_name = str(runtime.get("provider_name") or "").strip()
     model_id = str(runtime.get("model_id") or "").strip()
-    api_key = str(runtime.get("llm_api_key") or "").strip()
     base_url_override = str(runtime.get("base_url_override") or "").strip() or None
     timeout_ms = max(800, min(int(runtime.get("timeout_ms") or _INNER_WORLD_LLM_TIMEOUT_MS), _INNER_WORLD_LLM_TIMEOUT_MS))
     if not provider_name or not model_id:
-        return "", "", "INNER_WORLD_LLM_RUNTIME_INVALID"
-    if not api_key:
-        return "", "", "INNER_WORLD_LLM_KEY_MISSING"
+        return "", "", (agent_reason_code or "INNER_WORLD_LLM_RUNTIME_INVALID")
 
     topic = _pick_inner_stream_topic(state.anticipation_topics)
     topic_phrase = _topic_to_inner_phrase(topic)
@@ -900,24 +899,26 @@ def _generate_inner_stream_note_from_llm(
     prompt_text = prompt_text_template.format(payload_json=json.dumps(prompt_payload, ensure_ascii=False))
 
     try:
-        from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
+        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
-        chunks: list[str] = []
-        for chunk in stream_llm_chunks(
+        result = complete_llm_with_pool_sync(
+            request_id=f"inner-world::{now_ms}",
+            scene_type="INNER_WORLD",
+            cognitive_tier="B",
             provider_name=provider_name,
             model_id=model_id,
-            api_key=api_key,
             timeout_ms=timeout_ms,
-            prompt_text=prompt_text,
-            system_prompt=system_prompt,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text},
+            ],
             gen_params=dict(runtime.get("agent_gen_params") or {"temperature": 0.72, "top_p": 0.9}),
+            response_format="json_object",
             base_url_override=base_url_override,
-        ):
-            if chunk:
-                chunks.append(str(chunk))
-            if len("".join(chunks)) > 1024:
-                break
-        raw_text = "".join(chunks).strip()
+        )
+        if result.pool_exhausted:
+            return "", "", (agent_reason_code or "INNER_WORLD_LLM_POOL_EXHAUSTED")
+        raw_text = str(result.content or "").strip()
         if not raw_text:
             return "", "", "INNER_WORLD_LLM_EMPTY"
         parsed = _extract_llm_json_payload(raw_text)
@@ -929,6 +930,8 @@ def _generate_inner_stream_note_from_llm(
             return "", "", "INNER_WORLD_LLM_NOTE_EMPTY"
         return note, focus, ""
     except Exception as llm_exc:
+        if agent_reason_code:
+            return "", "", f"{agent_reason_code}|INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
         return "", "", f"INNER_WORLD_LLM_ERROR:{str(llm_exc)[:96]}"
 
 
@@ -970,7 +973,7 @@ def _resolve_inner_world_llm_runtime(*, now_ms: int) -> dict[str, Any] | None:
         )
 
         base_runtime = resolve_host_llm_runtime(
-            rollout_key="inner_world_tick",
+            rollout_key="inner_world_monologue_tick",
             scene_type="CHAT",
         )
         runtime = resolve_chat_agent_llm_runtime(base_runtime=base_runtime)

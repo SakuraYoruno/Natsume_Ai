@@ -1,4 +1,4 @@
-"""Proactive Talk Skill——主动对话。
+﻿"""Proactive Talk Skill——主动对话。
 
 由调度器在空闲/Normal 时触发；根据时段 + 上次对话间隔
 → LLM 生成主动问候/关心 → 推送到 UI 队列。
@@ -104,14 +104,14 @@ def _build_motive_hint_for_proactive(
     return "；".join(hints) + "。" if hints else ""
 
 
-def _coerce_response_policy(raw_policy: Any) -> dict[str, Any]:
+def _coerce_render_policy(raw_policy: Any) -> dict[str, Any]:
     if isinstance(raw_policy, Mapping):
         return dict(raw_policy)
     return {}
 
 
-def _response_policy_blocks_proactive(response_policy: Mapping[str, Any] | None) -> bool:
-    policy = _coerce_response_policy(response_policy)
+def _render_policy_blocks_proactive(render_policy: Mapping[str, Any] | None) -> bool:
+    policy = _coerce_render_policy(render_policy)
     if not policy:
         return False
     return (
@@ -120,18 +120,18 @@ def _response_policy_blocks_proactive(response_policy: Mapping[str, Any] | None)
     )
 
 
-def _apply_response_policy_to_proactive_text(text: str, response_policy: Mapping[str, Any] | None) -> str:
+def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str, Any] | None) -> str:
     normalized = str(text or "").strip()
-    policy = _coerce_response_policy(response_policy)
+    policy = _coerce_render_policy(render_policy)
     if not normalized or not policy:
         return normalized
     try:
-        from host_brain.app.chat_agent import _apply_response_policy_hard_guard  # noqa: PLC0415
+        from host_brain.app.chat_agent import _apply_render_policy_hard_guard  # noqa: PLC0415
 
-        guarded = _apply_response_policy_hard_guard(normalized, policy)
+        guarded = _apply_render_policy_hard_guard(normalized, policy)
         return str(guarded or "").strip()
     except Exception as exc:
-        logger.debug("proactive response_policy hard guard failed: %s", exc)
+        logger.debug("proactive render_policy hard guard failed: %s", exc)
         return normalized
 
 # Skill 元数据常量
@@ -379,24 +379,24 @@ def execute_proactive_talk(
     emotion_hint = _build_emotion_hint_for_proactive(emotion_context)
     motive_state: dict[str, Any] = dict(ctx.get("motive_state") or {})
     motive_hint = _build_motive_hint_for_proactive(motive_state)
-    response_policy: dict[str, Any] = _coerce_response_policy(ctx.get("response_policy"))
+    render_policy: dict[str, Any] = _coerce_render_policy(ctx.get("render_policy"))
     scene_awareness: dict[str, Any] = _coerce_scene_awareness(ctx.get("scene_awareness"))
     scene_hint = _build_scene_hint_for_proactive(scene_awareness)
 
-    if _response_policy_blocks_proactive(response_policy):
+    if _render_policy_blocks_proactive(render_policy):
         return {
             "status": STATUS_REJECTED,
             "event_id": event_id,
             "reason_code": SCHED_CONDITION_UNMET,
             "detail": (
-                "response_policy blocked proactive_talk: "
-                f"allow_proactive_after_reply={bool(response_policy.get('allow_proactive_after_reply', True))} "
-                f"should_be_withdrawn={bool(response_policy.get('should_be_withdrawn', False))}"
+                "render_policy blocked proactive_talk: "
+                f"allow_proactive_after_reply={bool(render_policy.get('allow_proactive_after_reply', True))} "
+                f"should_be_withdrawn={bool(render_policy.get('should_be_withdrawn', False))}"
             ),
             "request_id": request_id,
             "ts_ms": ts,
             "motive_state": motive_state,
-            "response_policy": response_policy,
+            "render_policy": render_policy,
         }
 
     if motive_state:
@@ -431,7 +431,7 @@ def execute_proactive_talk(
             "request_id": request_id,
             "ts_ms": ts,
             "motive_state": motive_state,
-            "response_policy": response_policy,
+            "render_policy": render_policy,
             "scene_awareness": scene_awareness,
         }
 
@@ -454,7 +454,7 @@ def execute_proactive_talk(
                 "emotion_context": emotion_context or {},
                 "motive_state": motive_state,
                 "motive_hint": motive_hint,
-                "response_policy": response_policy,
+                "render_policy": render_policy,
                 "scene_awareness": scene_awareness,
                 "scene_hint": scene_hint,
             }
@@ -478,7 +478,7 @@ def execute_proactive_talk(
             scene_awareness=scene_awareness,
         )
 
-    greeting = _apply_response_policy_to_proactive_text(greeting, response_policy)
+    greeting = _apply_render_policy_to_proactive_text(greeting, render_policy)
 
     if not greeting.strip():
         return {
@@ -528,8 +528,9 @@ def execute_proactive_talk(
         "emotion_tag": (emotion_context or {}).get("emotion_tag", "NEUTRAL"),
         "motive_driven": bool(motive_hint),
         "motive_state": motive_state,
-        "response_policy": response_policy,
+        "render_policy": render_policy,
         "scene_driven": bool(scene_hint),
         "scene_awareness": scene_awareness,
         "template_fallback_used": fallback_to_template,
     }
+

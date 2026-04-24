@@ -44,3 +44,28 @@ def test_detect_capability_gap_ignores_question_only_turn() -> None:
     assert decision.detected is False
     assert decision.reason_code == "NO_ACTION_INTENT"
 
+
+def test_detect_capability_gap_ignores_relational_help_question() -> None:
+    decision = detect_capability_gap(
+        user_message="那你还会帮我吗",
+        route_type="chat",
+        target_id="",
+        reason_code="intent_draft:chat",
+        llm_route_used=False,
+    )
+
+    assert decision.detected is False
+    assert decision.reason_code == "NO_ACTION_INTENT"
+
+
+def test_detect_capability_gap_keeps_concrete_help_question() -> None:
+    decision = detect_capability_gap(
+        user_message="你能帮我翻译这段日语吗",
+        route_type="chat",
+        target_id="",
+        reason_code="default_chat",
+        llm_route_used=False,
+    )
+
+    assert decision.detected is True
+    assert "translation" in decision.missing_capability_tags

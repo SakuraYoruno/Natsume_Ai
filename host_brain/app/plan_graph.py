@@ -32,6 +32,7 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
+from host_brain.conversation import build_chat_messages, conversation_max_turns
 from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 
 _logger = logging.getLogger("Natsume.plan_graph")
@@ -288,7 +289,7 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                 resolve_executive_router_llm_runtime,
                 resolve_host_llm_runtime_async,
             )
-            from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
             # synthesize_node 是同步函数（运行在 asyncio.to_thread 的线程池中），
             # 用 asyncio.run() 在独立事件循环中获取 LLM 运行时配置
@@ -317,22 +318,43 @@ def _synthesize_node(state: PlanGraphState) -> dict[str, Any]:
                     )
 
                     if system_prompt and user_prompt:
-                        chunks: list[str] = []
-                        for chunk in stream_llm_chunks(
+                        try:
+                            from host_brain.app.dependencies import get_conversation_history  # noqa: PLC0415
+
+                            history_window = get_conversation_history().fetch_window_for_messages(
+                                session_id=str(state.get("session_id") or "").strip(),
+                                max_turns=conversation_max_turns(),
+                                exclude_request_id=request_id,
+                                render_target_lang="zh",
+                            )
+                        except Exception:
+                            history_window = None
+
+                        synth_system_prompt = system_prompt
+                        if history_window and str(history_window.older_summary or "").strip():
+                            synth_system_prompt = (
+                                f"{system_prompt}\n\n【更早对话摘要】\n{str(history_window.older_summary).strip()}"
+                            )
+
+                        messages = build_chat_messages(
+                            system_prompt=synth_system_prompt,
+                            history_turns=list(getattr(history_window, "recent_turns", []) or []),
+                            user_message=user_prompt,
+                        )
+                        pool_result = complete_llm_with_pool_sync(
+                            request_id=request_id,
+                            scene_type="PLAN_SYNTHESIZE",
+                            cognitive_tier="B",
                             provider_name=provider_name,
                             model_id=model_id,
                             api_key=api_key,
                             timeout_ms=timeout_ms,
-                            prompt_text=user_prompt,
-                            system_prompt=system_prompt,
+                            messages=messages,
                             gen_params=gen_params,
                             base_url_override=base_url_override,
-                        ):
-                            chunks.append(str(chunk or ""))
-                            if sum(len(c) for c in chunks) >= 4000:
-                                break
+                        )
 
-                        llm_text = "".join(chunks).strip()
+                        llm_text = str(pool_result.content or "").strip() if not pool_result.pool_exhausted else ""
                         if llm_text:
                             final_answer = llm_text
                             llm_used = True

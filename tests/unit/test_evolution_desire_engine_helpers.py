@@ -31,6 +31,25 @@ def test_generate_desire_returns_empty_when_all_candidate_sources_empty(
     assert desire == ""
 
 
+def test_generate_desire_strict_llm_disables_template_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = EvolutionDesireEngine(seed=0)
+    monkeypatch.setattr(engine, "_try_fulfilled_text", lambda recent_trait_deltas, ts: "")
+    monkeypatch.setattr(engine, "_try_user_preference_desire", lambda hints, ts: "")
+
+    desire = engine.generate_desire(
+        traits=PersonalityTraits.from_baseline(),
+        emotion_trend="平稳",
+        bond_stage="FRIEND",
+        current_ts_ms=1,
+        llm_fn=lambda prompt: (_ for _ in ()).throw(RuntimeError("boom")),
+        strict_llm=True,
+    )
+
+    assert desire == ""
+
+
 def test_generate_desire_uses_preference_branch_and_cooldown_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

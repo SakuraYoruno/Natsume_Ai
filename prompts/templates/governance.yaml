@@ -1,4 +1,4 @@
-templates:
+﻿templates:
 - template_id: core.qa.fallback_texts
   category: fallback
   scope: core.qa

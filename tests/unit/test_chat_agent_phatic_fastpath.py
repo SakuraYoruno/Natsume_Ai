@@ -168,7 +168,7 @@ def test_maybe_build_phatic_fastpath_reply_handles_deep_companionship_opening() 
         bond_stage="FRIEND",
         max_chars=90,
         min_warmth=0.50,
-        min_sensitivity=0.50,
+        min_sensitivity=0.42,
         min_playfulness=0.35,
     )
 

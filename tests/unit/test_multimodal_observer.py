@@ -169,6 +169,110 @@ def test_multimodal_observer_sync_image_prefers_model_backend_when_available() -
     assert len(fallback_backend.calls) == 0
 
 
+def test_multimodal_observer_capability_check_guides_summary() -> None:
+    model_backend = _StaticBackend(supported_types={"image"}, result_factory=_model_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_img_capability",
+        platform="qq",
+        conversation_id="qq_dm_mm_img_capability",
+        user_text="你能看到图片中的内容吗",
+        attachments=[
+            {
+                "attachment_id": "att_img_capability",
+                "type": "image",
+                "local_path": str(Path(__file__)),
+                "ocr_text": "hello",
+                "caption": "动漫女孩在挥手",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["reply_focus"] == "capability_check"
+    assert "确认我能不能看懂" in str(result["summary_for_chat"])
+
+
+def test_multimodal_observer_emoji_meaning_prefers_social_intent() -> None:
+    model_backend = _StaticBackend(supported_types={"emoji"}, result_factory=_model_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video", "emoji"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_emoji_meaning",
+        platform="qq",
+        conversation_id="qq_dm_mm_emoji_meaning",
+        user_text="这个表情包什么意思",
+        attachments=[
+            {
+                "attachment_id": "att_emoji_meaning",
+                "type": "emoji",
+                "local_path": str(Path(__file__)),
+                "ocr_text": "hello",
+                "caption": "动漫女孩在挥手",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["reply_focus"] == "meme_meaning"
+    assert "表情包/图片想表达什么" in str(result["summary_for_chat"])
+
+
+def test_multimodal_observer_image_only_without_question_does_not_default_to_literal_description() -> None:
+    model_backend = _StaticBackend(supported_types={"image"}, result_factory=_model_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_image_only",
+        platform="qq",
+        conversation_id="qq_dm_mm_image_only",
+        user_text="[图片消息]",
+        attachments=[
+            {
+                "attachment_id": "att_img_only",
+                "type": "image",
+                "local_path": str(Path(__file__)),
+                "ocr_text": "hello",
+                "caption": "动漫女孩在挥手",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["reply_focus"] == "attachment_only_no_question"
+    assert "不要自顾自描述画面" in str(result["summary_for_chat"])
+
+
+def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() -> None:
+    model_backend = _StaticBackend(supported_types={"emoji"}, result_factory=_model_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video", "emoji"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_emoji_only",
+        platform="qq",
+        conversation_id="qq_dm_mm_emoji_only",
+        user_text="[图片消息]",
+        attachments=[
+            {
+                "attachment_id": "att_emoji_only",
+                "type": "emoji",
+                "local_path": str(Path(__file__)),
+                "ocr_text": "hello",
+                "caption": "动漫女孩在挥手",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["reply_focus"] == "emoji_social_reply"
+    assert "表情包/贴图" in str(result["summary_for_chat"])
+
+
 def test_multimodal_observer_sync_text_file_extracts_excerpt(tmp_path: Path) -> None:
     path = tmp_path / "sample.txt"
     path.write_text("第一行\n第二行\n第三行", encoding="utf-8")

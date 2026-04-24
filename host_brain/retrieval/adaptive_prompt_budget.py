@@ -1,8 +1,8 @@
-"""自适应 Prompt 预算分配器（Phase X 方案 2 + Phase XIII 预算双路由）。
+"""自适应检索预算分配器（五路检索预算双路由）。
 
 职责：
   1. 根据 LLM 路由目标（本地 14B / 云端 Gemini）选择基础预算档位
-  2. 根据意图动态调整 RecallPack 各槽位的 token 预算
+  2. 根据意图动态调整五路检索各槽位的 token 预算
 """
 
 from __future__ import annotations
@@ -11,13 +11,13 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from host_brain.app.schemas.recall_pack import (
-    RECALL_BUDGET_CLOUD,
-    RECALL_BUDGET_LOCAL,
-    RECALL_PACK_TOKEN_BUDGET,
-    RECALL_SLOT_BUDGET_CLOUD,
-    RECALL_SLOT_BUDGET_LOCAL,
-    RECALL_SLOT_TOKEN_BUDGET,
+from host_brain.retrieval.budget_config import (
+    RETRIEVAL_BUDGET_CLOUD,
+    RETRIEVAL_BUDGET_LOCAL,
+    RETRIEVAL_TOKEN_BUDGET,
+    RETRIEVAL_SLOT_BUDGET_CLOUD,
+    RETRIEVAL_SLOT_BUDGET_LOCAL,
+    RETRIEVAL_SLOT_TOKEN_BUDGET,
     get_budget_for_route,
 )
 
@@ -105,7 +105,7 @@ class AdaptiveBudget:
 # AdaptivePromptBudget
 # ---------------------------------------------------------------------------
 class AdaptivePromptBudget:
-    """根据 LLM 路由 + 意图动态调整 RecallPack 各槽位 token 预算。
+    """根据 LLM 路由 + 意图动态调整五路检索各槽位 token 预算。
 
     使用方式::
 

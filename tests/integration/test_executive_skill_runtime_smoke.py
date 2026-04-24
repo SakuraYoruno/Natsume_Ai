@@ -37,7 +37,6 @@ def test_execute_skill_builtin_writes_skill_exec_audit(monkeypatch) -> None:
             }
         },
         emotion_context={"mood_state": "CALM", "emotion_tag": "FOCUSED"},
-        recall_slot_text={"episodic": "none"},
         render_target_lang="zh-CN",
     )
 
@@ -107,7 +106,6 @@ def test_execute_skill_dag_parallel_builtin_skills_write_audit(monkeypatch) -> N
                 "emotion_tag": "FOCUSED",
                 "emotion_intensity": 0.88,
             },
-            recall_slot_text={"episodic": "none"},
             render_target_lang="zh-CN",
         )
 
@@ -180,7 +178,6 @@ def test_execute_skill_memory_store_injects_runtime_memory_dependencies(monkeypa
             }
         },
         emotion_context={"mood_state": "CALM", "emotion_tag": "FOCUSED"},
-        recall_slot_text={"episodic": "none"},
         render_target_lang="zh-CN",
     )
 

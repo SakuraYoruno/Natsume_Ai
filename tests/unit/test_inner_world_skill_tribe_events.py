@@ -76,7 +76,6 @@ def test_inner_world_tick_skips_during_recent_foreground_chat(monkeypatch) -> No
         lambda **_kwargs: {
             "active": True,
             "cooldown_remaining_ms": 42000,
-            "speed_profile": "context_fast",
         },
     )
 

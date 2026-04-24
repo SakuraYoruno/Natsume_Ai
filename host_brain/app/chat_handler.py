@@ -73,8 +73,7 @@ _GOVERNOR_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
 
 
 def _should_use_inline_governor(intent_draft: Dict[str, Any] | None) -> bool:
-    speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
-    return speed_profile in {"direct_fast", "context_fast"}
+    return False
 
 
 async def _evaluate_governor_with_timing(
@@ -226,6 +225,11 @@ async def _unified_chat_sse_generator(
     """
     def _sse(data: dict) -> str:
         return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
+    render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
+    if input_source == "GATEWAY":
+        render_target_lang = "zh"
 
     first_presence_delay_ms = max(0, int(time.time() * 1000) - int(request_started_ms or ts_ms))
     _logger.info(

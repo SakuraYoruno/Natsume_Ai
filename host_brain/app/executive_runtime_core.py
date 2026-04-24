@@ -20,6 +20,7 @@ from types import SimpleNamespace
 from typing import Any, AsyncGenerator
 
 from host_brain.app.capability_gap_detector import detect_capability_gap
+from host_brain.app.relational_chat_detector import build_relational_chat_reason_code
 from host_brain.app.runtime_capability_synthesizer import synthesize_runtime_capability
 from host_brain.app.skill_dag_planner import SkillDagNode, SkillDagPlan, build_skill_dag_plan
 from host_brain.app.skill_family_router import build_skill_route_decision
@@ -328,6 +329,11 @@ def _hard_rule_route(
     target_hint = _normalize_text(intent_draft.get("target_id"))
     if route_hint in {"recent_turn", "task_progress", "chat"}:
         return _RouteSelection(route_hint, target_hint, f"intent_draft:{route_hint}")
+
+    relational_reason = build_relational_chat_reason_code(sanitized_message)
+    if relational_reason:
+        return _RouteSelection("chat", "", relational_reason)
+
     if route_hint == "plan":
         return _RouteSelection("plan", target_hint or "skill_dag", "intent_draft:plan")
     if route_hint == "skill" and target_hint:
@@ -685,7 +691,6 @@ def _execute_skill(
     governor_result: dict[str, Any],
     intent_draft: dict[str, Any],
     emotion_context: dict[str, Any],
-    recall_slot_text: dict[str, Any],
     render_target_lang: str,
 ) -> _ExecutionOutcome:
     from host_brain.app.dependencies import get_skill_registry  # noqa: PLC0415
@@ -731,7 +736,6 @@ def _execute_skill(
         "mood_state": _normalize_text(dict(emotion_context or {}).get("mood_state")) or "NEUTRAL",
         "emotion_tag": _normalize_text(dict(emotion_context or {}).get("emotion_tag")).upper() or "NEUTRAL",
         "emotion_context": dict(emotion_context or {}),
-        "recall_slot_text": dict(recall_slot_text or {}),
         "skill_family": str(skill_meta.family or "general"),
     }
     if skill_id.startswith("memory_"):
@@ -957,7 +961,6 @@ def _build_chat_input(
     emotion_context: dict[str, Any],
     emotion_snapshot: dict[str, Any],
     bond_summary: dict[str, Any],
-    recall_slot_text: dict[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
     retrieval_summary: dict[str, Any],
     render_target_lang: str,
@@ -968,11 +971,15 @@ def _build_chat_input(
     sub_agent_context,
 ):
     from host_brain.app.chat_agent import ChatAgentInput  # noqa: PLC0415
+    from host_brain.app.graph_config_builder import resolve_chat_agent_llm_runtime  # noqa: PLC0415
 
-    normalized_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
     resolved_llm_runtime = dict(llm_runtime or {}) if isinstance(llm_runtime, dict) else llm_runtime
-    if normalized_speed_profile in {"direct_fast", "context_fast"} and sub_agent_context is None:
-        resolved_llm_runtime = None
+    if isinstance(resolved_llm_runtime, dict) and resolved_llm_runtime:
+        agent_role = _normalize_text(resolved_llm_runtime.get("agent_role"), lower=True)
+        if agent_role != "chat_agent":
+            resolved_llm_runtime = resolve_chat_agent_llm_runtime(
+                base_runtime=resolved_llm_runtime,
+            )
 
     return ChatAgentInput(
         request_id=request_id,
@@ -982,7 +989,6 @@ def _build_chat_input(
         emotion_context=dict(emotion_context or {}),
         emotion_snapshot=dict(emotion_snapshot or {}),
         bond_summary=dict(bond_summary or {}),
-        recall_slot_text=dict(recall_slot_text or {}),
         retrieval_evidence_items=list(retrieval_evidence_items or []),
         retrieval_summary=dict(retrieval_summary or {}),
         sub_agent_context=sub_agent_context,
@@ -1082,7 +1088,6 @@ async def _execute_plan_node(
     governor_result: dict[str, Any],
     intent_draft: dict[str, Any],
     emotion_context: dict[str, Any],
-    recall_slot_text: dict[str, Any],
     render_target_lang: str,
     node_results: dict[str, _ExecutionOutcome],
 ) -> _ExecutionOutcome:
@@ -1115,7 +1120,6 @@ async def _execute_plan_node(
             governor_result=governor_result,
             intent_draft=plan_intent_draft,
             emotion_context=emotion_context,
-            recall_slot_text=recall_slot_text,
             render_target_lang=render_target_lang,
         )
     return await _dispatch_to_sub_agent(
@@ -1144,7 +1148,6 @@ async def _execute_skill_dag(
     governor_result: dict[str, Any],
     intent_draft: dict[str, Any],
     emotion_context: dict[str, Any],
-    recall_slot_text: dict[str, Any],
     render_target_lang: str,
 ) -> tuple[_ExecutionOutcome, dict[str, Any]]:
     explicit_steps = dict(intent_draft or {}).get("planned_steps")
@@ -1161,7 +1164,6 @@ async def _execute_skill_dag(
             governor_result=governor_result,
             intent_draft=intent_draft,
             emotion_context=emotion_context,
-            recall_slot_text=recall_slot_text,
             render_target_lang=render_target_lang,
         )
 
@@ -1275,7 +1277,6 @@ async def _execute_skill_dag(
                 governor_result=governor_result,
                 intent_draft=intent_draft,
                 emotion_context=emotion_context,
-                recall_slot_text=recall_slot_text,
                 render_target_lang=render_target_lang,
                 node_results=node_results,
             )
@@ -1354,7 +1355,6 @@ async def _execute_explicit_skill_dag(
     governor_result: dict[str, Any],
     intent_draft: dict[str, Any],
     emotion_context: dict[str, Any],
-    recall_slot_text: dict[str, Any],
     render_target_lang: str,
 ) -> tuple[_ExecutionOutcome, dict[str, Any]]:
     node_results: dict[str, _ExecutionOutcome] = {}
@@ -1381,7 +1381,6 @@ async def _execute_explicit_skill_dag(
                 governor_result=governor_result,
                 intent_draft=intent_draft,
                 emotion_context=emotion_context,
-                recall_slot_text=recall_slot_text,
                 render_target_lang=render_target_lang,
                 node_results=node_results,
             )
@@ -1459,7 +1458,6 @@ async def _stream_chat_with_context(
     emotion_context: dict[str, Any],
     emotion_snapshot: dict[str, Any],
     bond_summary: dict[str, Any],
-    recall_slot_text: dict[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
     retrieval_summary: dict[str, Any],
     render_target_lang: str,
@@ -1486,7 +1484,6 @@ async def _stream_chat_with_context(
         emotion_context=emotion_context,
         emotion_snapshot=emotion_snapshot,
         bond_summary=bond_summary,
-        recall_slot_text=recall_slot_text,
         retrieval_evidence_items=retrieval_evidence_items,
         retrieval_summary=retrieval_summary,
         render_target_lang=render_target_lang,
@@ -1527,7 +1524,6 @@ async def _executive_runtime_core_impl(
     metrics: Any,
     person_id: str,
     sanitized_message: str,
-    recall_slot_text: dict[str, Any],
     bond_summary: dict[str, Any],
     retrieval_evidence_items: list[dict[str, Any]],
     retrieval_summary: dict[str, Any],
@@ -1818,15 +1814,13 @@ async def _executive_runtime_core_impl(
     )
 
     runtime_capability_payload = None
+    relational_reason = build_relational_chat_reason_code(sanitized_message)
     if route.route_type == "chat":
-        _chat_speed_profile = str((dict(intent_draft or {})).get("chat_speed_profile") or "").strip().lower()
         # Phase D: PREFRONTAL_PLAN_ENABLED 时，前额叶已规划，跳过 runtime_capability 合成
         _skip_capability_synthesis = (
             _prefrontal_plan_enabled
             and bool(_prefrontal_plan.get("action"))
         )
-        if _chat_speed_profile in {"direct_fast", "context_fast"}:
-            _skip_capability_synthesis = True
         if not _skip_capability_synthesis:
             runtime_capability_payload = _maybe_synthesize_runtime_capability(
                 request_id=request_id,
@@ -1842,7 +1836,7 @@ async def _executive_runtime_core_impl(
                 "[%s] Phase D: prefrontal_plan 已存在，跳过 runtime_capability 合成 action=%s",
                 request_id, _prefrontal_plan.get("action"),
             )
-        if runtime_capability_payload is not None:
+        if runtime_capability_payload is not None and not relational_reason:
             route = _RouteSelection(
                 route_type=_normalize_text(runtime_capability_payload.get("executor_route"), lower=True) or "delegate",
                 target_id=_normalize_text(runtime_capability_payload.get("executor_target")) or "intent_agent",
@@ -1859,6 +1853,8 @@ async def _executive_runtime_core_impl(
                     "runtime_capability_payload": runtime_capability_payload,
                 },
             )
+        elif relational_reason:
+            route = _RouteSelection("chat", "", relational_reason)
 
     plan = None
     if route.route_type == "plan":
@@ -1895,7 +1891,6 @@ async def _executive_runtime_core_impl(
             emotion_context=emotion_context,
             emotion_snapshot=emotion_snapshot,
             bond_summary=bond_summary,
-            recall_slot_text=recall_slot_text,
             retrieval_evidence_items=retrieval_evidence_items,
             retrieval_summary=retrieval_summary,
             render_target_lang=render_target_lang,
@@ -1940,7 +1935,6 @@ async def _executive_runtime_core_impl(
             governor_result=governor_result,
             intent_draft=intent_draft,
             emotion_context=emotion_context,
-            recall_slot_text=recall_slot_text,
             render_target_lang=render_target_lang,
         )
         plan_chat_outcome = _build_plan_chat_outcome(
@@ -1986,7 +1980,6 @@ async def _executive_runtime_core_impl(
             emotion_context=emotion_context,
             emotion_snapshot=emotion_snapshot,
             bond_summary=bond_summary,
-            recall_slot_text=recall_slot_text,
             retrieval_evidence_items=retrieval_evidence_items,
             retrieval_summary=retrieval_summary,
             render_target_lang=render_target_lang,
@@ -2037,7 +2030,6 @@ async def _executive_runtime_core_impl(
             governor_result=governor_result,
             intent_draft=intent_draft,
             emotion_context=emotion_context,
-            recall_slot_text=recall_slot_text,
             render_target_lang=render_target_lang,
         )
     else:
@@ -2139,7 +2131,6 @@ async def _executive_runtime_core_impl(
         emotion_context=emotion_context,
         emotion_snapshot=emotion_snapshot,
         bond_summary=bond_summary,
-        recall_slot_text=recall_slot_text,
         retrieval_evidence_items=retrieval_evidence_items,
         retrieval_summary=retrieval_summary,
         render_target_lang=render_target_lang,

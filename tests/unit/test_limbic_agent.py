@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from host_brain.persona.reply_plan import build_reply_plan_from_inputs
 from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.limbic_agent import LimbicAgent
 
@@ -670,14 +671,6 @@ def test_limbic_agent_compute_motive_and_decide_policy(monkeypatch) -> None:
             {"as_dict": lambda self: {"dominant_motive": "continuity", "reach_out_drive": 0.4}},
         )(),
     )
-    monkeypatch.setattr(
-        "host_brain.persona.response_policy.decide_response_policy",
-        lambda _inp: type(
-            "_Policy",
-            (),
-            {"as_dict": lambda self: {"allow_topic_shift": False, "should_be_withdrawn": False}},
-        )(),
-    )
     agent = LimbicAgent()
 
     motive_state = agent.compute_motive_state(
@@ -687,18 +680,24 @@ def test_limbic_agent_compute_motive_and_decide_policy(monkeypatch) -> None:
         user_message="hello",
         runtime_flags={"source": "test"},
     )
-    policy = agent.decide_response_policy(
+    plan = build_reply_plan_from_inputs(
         silence_state={"willingness_level": "NORMAL"},
         body_sense={"fatigue_level": "FRESH"},
         offline_state={"offline_hours": 2.0},
         motive_state=motive_state,
-        user_message="hello",
-        runtime_flags={"source": "test"},
-    )
+        conversation_interpretation={
+            "literal_topic": "identity",
+            "interaction_move": "first_ask",
+            "freshness": "new",
+            "user_stance": "probing",
+        },
+    ).as_dict()
 
     assert motive_state["dominant_motive"] == "continuity"
-    assert policy["allow_topic_shift"] is False
+    assert plan["primary_topic"] == "identity"
+    assert plan["response_goal"] == "identify"
+    assert plan["tactic_family"] == "brief_name_only"
     registry = agent.state_registry.get_state("limbic") or {}
     state_payload = dict(registry.get("state") or {})
     assert dict(state_payload.get("last_motive_state") or {})["dominant_motive"] == "continuity"
-    assert dict(state_payload.get("last_response_policy") or {})["should_be_withdrawn"] is False
+    assert "last_render_policy" not in state_payload

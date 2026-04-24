@@ -159,7 +159,7 @@ async def test_evaluate_governor_with_timing_inline_mode_skips_queue_wait() -> N
 
     result, timing = await chat_handler_module._evaluate_governor_with_timing(
         engine=engine,
-        intent_draft={"route": "chat", "chat_speed_profile": "context_fast"},
+        intent_draft={"route": "chat"},
         request_id="req-governor-inline",
         thread_id="thread-1",
         governance_snapshot={},
@@ -172,7 +172,7 @@ async def test_evaluate_governor_with_timing_inline_mode_skips_queue_wait() -> N
 
 
 def test_should_use_inline_governor_only_for_fast_chat_profiles() -> None:
-    assert chat_handler_module._should_use_inline_governor({"chat_speed_profile": "direct_fast"}) is True
-    assert chat_handler_module._should_use_inline_governor({"chat_speed_profile": "context_fast"}) is True
-    assert chat_handler_module._should_use_inline_governor({"chat_speed_profile": "normal"}) is False
+    assert chat_handler_module._should_use_inline_governor({"route": "chat"}) is False
+    assert chat_handler_module._should_use_inline_governor({"route": "skill"}) is False
+    assert chat_handler_module._should_use_inline_governor({}) is False
     assert chat_handler_module._should_use_inline_governor({"route": "chat"}) is False

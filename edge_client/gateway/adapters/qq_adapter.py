@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
+import os
 import re
 import time
 from pathlib import Path
@@ -44,6 +45,13 @@ _OB_MSG_TYPE_GROUP = "group"
 
 # 支持发送的消息类型
 _SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE})
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(str(os.environ.get(name) or str(default)).strip())
+    except (TypeError, ValueError):
+        return int(default)
 
 
 class QQAdapter(AbstractPlatformAdapter):
@@ -254,6 +262,35 @@ class QQAdapter(AbstractPlatformAdapter):
                 logger.error("QQAdapter: HTTP 请求失败: %s", exc)
                 return False
 
+        direct_bypass_len = max(
+            0,
+            _env_int("EDGE_QQ_SHORT_TEXT_DIRECT_BYPASS_LEN", 32),
+        )
+        normalized_text = str(reply.content or "").strip()
+        if (
+            direct_bypass_len > 0
+            and normalized_text
+            and "\n" not in normalized_text
+            and "\r" not in normalized_text
+            and len(normalized_text) <= direct_bypass_len
+        ):
+            started = time.monotonic()
+            ok = _send_one_segment(normalized_text)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            if ok:
+                logger.info(
+                    "QQAdapter: short text direct bypass len=%d elapsed=%dms",
+                    len(normalized_text),
+                    elapsed_ms,
+                )
+            else:
+                logger.warning(
+                    "QQAdapter: short text direct bypass failed len=%d elapsed=%dms",
+                    len(normalized_text),
+                    elapsed_ms,
+                )
+            return ok
+
         config = HumanizeSendConfig.from_env()
         send_result = humanize_send_sync(
             text=reply.content,
@@ -263,14 +300,20 @@ class QQAdapter(AbstractPlatformAdapter):
 
         if send_result.success:
             logger.info(
-                "QQAdapter: humanized send OK segments=%d delay=%dms",
-                send_result.sent_segments, send_result.total_delay_ms,
+                "QQAdapter: humanized send OK segments=%d total=%dms sleep=%dms send=%dms",
+                send_result.sent_segments,
+                send_result.total_delay_ms,
+                send_result.sleep_delay_ms,
+                send_result.send_elapsed_ms,
             )
         else:
             logger.warning(
-                "QQAdapter: humanized send failed at segment %d/%d: %s",
+                "QQAdapter: humanized send failed at segment %d/%d total=%dms sleep=%dms send=%dms err=%s",
                 send_result.failed_segment_index + 1,
                 send_result.total_segments,
+                send_result.total_delay_ms,
+                send_result.sleep_delay_ms,
+                send_result.send_elapsed_ms,
                 send_result.error[:100],
             )
         return send_result.success
@@ -373,9 +416,32 @@ class QQAdapter(AbstractPlatformAdapter):
     def health(self) -> dict[str, Any]:
         """返回适配器健康状态（调用 OneBot /get_status 接口）。"""
         try:
-            resp = httpx.get(f"{self._api_base}/get_status", timeout=3.0)
-            resp.raise_for_status()
-            ob_status = resp.json()
+            health_url = f"{self._api_base}/get_status"
+            ob_status: dict[str, Any] | None = None
+            last_error: Exception | None = None
+
+            # 和 runtime 管理脚本保持一致：优先 POST，再回退 GET。
+            # 对本地 OneBot 检查禁用代理环境，避免 localhost 被系统代理误拦。
+            for method in ("POST", "GET"):
+                try:
+                    with httpx.Client(timeout=3.0, trust_env=False) as client:
+                        if method == "POST":
+                            resp = client.post(health_url, json={})
+                        else:
+                            resp = client.get(health_url)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                    if isinstance(payload, dict):
+                        ob_status = payload
+                        break
+                    ob_status = {"status": "error", "detail": "invalid onebot health payload"}
+                    break
+                except Exception as exc:
+                    last_error = exc
+
+            if ob_status is None:
+                raise last_error or RuntimeError("onebot health probe failed")
+
             onebot_data = ob_status.get("data")
             if not isinstance(onebot_data, dict):
                 onebot_data = {}

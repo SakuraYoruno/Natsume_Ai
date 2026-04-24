@@ -69,7 +69,6 @@ def test_body_sense_tick_skips_during_recent_foreground_chat(monkeypatch) -> Non
         lambda **_kwargs: {
             "active": True,
             "cooldown_remaining_ms": 19000,
-            "speed_profile": "context_fast",
         },
     )
 

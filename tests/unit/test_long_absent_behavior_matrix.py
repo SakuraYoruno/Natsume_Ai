@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.app import chat_context_builder as ccb
+from host_brain.app.context.persona_expression import _apply_offline_state_to_persona_expression_hint
 from host_brain.persona.proactive_voice import PersonaProactiveVoice, SCENE_LONG_ABSENT
 
 
@@ -114,7 +114,7 @@ def test_offline_hint_marks_reconnect_style() -> None:
         "pace_hint": "steady",
     }
 
-    short = ccb._apply_offline_state_to_persona_expression_hint(
+    short = _apply_offline_state_to_persona_expression_hint(
         base_hint,
         {
             "offline_hours": 8.0,
@@ -123,7 +123,7 @@ def test_offline_hint_marks_reconnect_style() -> None:
             "anticipation_level": 0.24,
         },
     )
-    light = ccb._apply_offline_state_to_persona_expression_hint(
+    light = _apply_offline_state_to_persona_expression_hint(
         base_hint,
         {
             "offline_hours": 26.0,
@@ -132,7 +132,7 @@ def test_offline_hint_marks_reconnect_style() -> None:
             "anticipation_level": 0.32,
         },
     )
-    reunion = ccb._apply_offline_state_to_persona_expression_hint(
+    reunion = _apply_offline_state_to_persona_expression_hint(
         base_hint,
         {
             "offline_hours": 80.0,
@@ -141,7 +141,7 @@ def test_offline_hint_marks_reconnect_style() -> None:
             "anticipation_level": 0.46,
         },
     )
-    deep_reunion = ccb._apply_offline_state_to_persona_expression_hint(
+    deep_reunion = _apply_offline_state_to_persona_expression_hint(
         base_hint,
         {
             "offline_hours": 8 * 24.0,

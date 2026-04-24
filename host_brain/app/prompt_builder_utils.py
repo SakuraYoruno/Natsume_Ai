@@ -51,35 +51,6 @@ def is_dual_lang_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 常驻角色人设缓存
-# ---------------------------------------------------------------------------
-_CHARACTER_PROFILE_CACHE: dict[str, str] = {}
-
-
-def _load_character_profile(render_lang: str) -> str:
-    """加载常驻角色人设文本（固定中文版）。"""
-    cache_key = "zh"
-    if cache_key in _CHARACTER_PROFILE_CACHE:
-        return _CHARACTER_PROFILE_CACHE[cache_key]
-
-    profile_path = Path(
-        os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
-        or str(Path(__file__).resolve().parent.parent / "canon" / "character" / "character_profile.json")
-    )
-    try:
-        if profile_path.exists():
-            data = json.loads(profile_path.read_text(encoding="utf-8"))
-            text = str(data.get("instruction_cn") or "").strip()
-            if len(text) > 100:
-                _CHARACTER_PROFILE_CACHE[cache_key] = text
-                return text
-    except Exception:
-        pass
-    _CHARACTER_PROFILE_CACHE[cache_key] = ""
-    return ""
-
-
-# ---------------------------------------------------------------------------
 # 动态人设补丁
 # ---------------------------------------------------------------------------
 def _build_character_dynamic_patch(

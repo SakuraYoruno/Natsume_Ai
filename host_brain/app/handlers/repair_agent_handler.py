@@ -235,8 +235,10 @@ def _call_repair_planner_llm(task_text: str, previous_error: str) -> dict[str, A
             model_id=model_id,
             api_key=api_key,
             timeout_ms=_REPAIR_PLANNER_TIMEOUT_MS,
-            prompt_text=user_prompt,
-            system_prompt=_resolve_repair_planner_system_prompt(),
+            messages=[
+                {"role": "system", "content": _resolve_repair_planner_system_prompt()},
+                {"role": "user", "content": user_prompt},
+            ],
             gen_params={"temperature": 0.1, "top_p": 0.8},
         ):
             chunks.append(chunk)

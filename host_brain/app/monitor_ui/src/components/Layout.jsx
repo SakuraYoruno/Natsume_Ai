@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+﻿import React, { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   BarChart2,
@@ -50,7 +50,7 @@ const NAV_SECTIONS = [
       { to: '/memory', icon: Database, label: '记忆' },
       { to: '/runtime-mode', icon: Zap, label: '存在态' },
       { to: '/inner-world', icon: MoonStar, label: '内在世界' },
-      { to: '/response-policy', icon: Sparkles, label: '回复策略' },
+      { to: '/render-policy', icon: Sparkles, label: '回复策略' },
       { to: '/self-model', icon: Brain, label: '自我模型' },
     ],
   },
@@ -348,3 +348,4 @@ export default function Layout() {
     </div>
   )
 }
+

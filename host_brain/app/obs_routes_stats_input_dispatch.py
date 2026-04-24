@@ -1,12 +1,6 @@
-"""obs_routes_stats_input_dispatch.py — InputDispatch 生命周期统计端点。
-
-拆分自 obs_routes_stats_input.py（P2-8）：
-  GET /obs/input/dispatch-stats  — InputDispatch 生命周期统计
-  GET /obs/recall-pack/stats     — RecallPack token 预算统计
-"""
+"""obs_routes_stats_input_dispatch.py — InputDispatch 生命周期统计端点。"""
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
@@ -51,23 +45,6 @@ class InputDispatchStatsResponse(BaseModel):
     timeseries_labels: List[str]
     timeseries_accepted: List[int]
     timeseries_completed: List[int]
-    timestamp: int
-
-
-class RecallPackSlotItem(BaseModel):
-    slot: str
-    avg_tokens: float
-    truncation_rate: Optional[float]
-    conflict_suppressed_count: int
-
-
-class RecallPackStatsResponse(BaseModel):
-    window_minutes: int
-    total_packs: int
-    avg_total_tokens: Optional[float]
-    truncation_rate: Optional[float]
-    conflict_rate: Optional[float]
-    slots: List[RecallPackSlotItem]
     timestamp: int
 
 
@@ -164,91 +141,3 @@ def get_input_dispatch_stats(
         timeseries_completed=ts_completed, timestamp=now,
     )
 
-
-# ---------------------------------------------------------------------------
-# GET /obs/recall-pack/stats
-# ---------------------------------------------------------------------------
-@router.get("/recall-pack/stats", response_model=RecallPackStatsResponse)
-def get_recall_pack_stats(
-    window_minutes: int = Query(60, ge=1, le=10080, description="统计窗口（分钟）"),
-):
-    """Ref #49: RecallPack token 预算统计 — 各槽位平均 token 消耗/截断率/冲突抑制率。"""
-    ledger = _get_ledger()
-    now = _now_ms()
-    since_ms = now - window_minutes * 60 * 1000
-
-    try:
-        rows = ledger.fetch_by_time_range("error_log", start_ms=since_ms, end_ms=now)
-        pack_rows = [
-            r for r in rows
-            if str(r.get("stage") or "").upper() in ("RECALL_PACK_TRACE", "RECALL_FUSION")
-            and r.get("detail")
-        ]
-    except Exception:
-        pack_rows = []
-
-    if not pack_rows:
-        try:
-            pack_rows = ledger.fetch_by_time_range("recall_pack_log", start_ms=since_ms, end_ms=now)
-        except Exception:
-            pack_rows = []
-
-    total_packs = len(pack_rows)
-    if total_packs == 0:
-        return RecallPackStatsResponse(
-            window_minutes=window_minutes, total_packs=0,
-            avg_total_tokens=None, truncation_rate=None, conflict_rate=None,
-            slots=[], timestamp=now,
-        )
-
-    slot_tokens: dict = defaultdict(list)
-    slot_truncated: dict = defaultdict(int)
-    slot_conflict: dict = defaultdict(int)
-    total_tokens_list: list = []
-    conflict_pack_count = 0
-
-    for r in pack_rows:
-        try:
-            detail_raw = r.get("detail") or "{}"
-            detail = json.loads(detail_raw) if isinstance(detail_raw, str) else {}
-            trace = detail.get("trace") or []
-            total_tokens = int(detail.get("total_tokens") or 0)
-            if total_tokens > 0:
-                total_tokens_list.append(total_tokens)
-            conflict_events = int(detail.get("conflict_events") or 0)
-            if conflict_events > 0:
-                conflict_pack_count += 1
-            for slot_info in trace:
-                slot_name = str(slot_info.get("slot") or "unknown")
-                actual_tokens = int(slot_info.get("actual_tokens") or 0)
-                slot_tokens[slot_name].append(actual_tokens)
-                if slot_info.get("truncated"):
-                    slot_truncated[slot_name] += 1
-                if slot_info.get("conflict_suppressed"):
-                    slot_conflict[slot_name] += 1
-        except Exception:
-            continue
-
-    avg_total_tokens = round(sum(total_tokens_list) / len(total_tokens_list), 1) if total_tokens_list else None
-    truncation_rate = None
-    if slot_tokens:
-        total_slots = sum(len(v) for v in slot_tokens.values())
-        total_truncated = sum(slot_truncated.values())
-        truncation_rate = round(total_truncated / total_slots * 100, 1) if total_slots > 0 else None
-    conflict_rate = round(conflict_pack_count / total_packs * 100, 1) if total_packs > 0 else None
-
-    slots = [
-        RecallPackSlotItem(
-            slot=slot_name,
-            avg_tokens=round(sum(tokens) / len(tokens), 1) if tokens else 0.0,
-            truncation_rate=round(slot_truncated.get(slot_name, 0) / len(tokens) * 100, 1) if tokens else None,
-            conflict_suppressed_count=slot_conflict.get(slot_name, 0),
-        )
-        for slot_name, tokens in sorted(slot_tokens.items())
-    ]
-
-    return RecallPackStatsResponse(
-        window_minutes=window_minutes, total_packs=total_packs,
-        avg_total_tokens=avg_total_tokens, truncation_rate=truncation_rate,
-        conflict_rate=conflict_rate, slots=slots, timestamp=now,
-    )

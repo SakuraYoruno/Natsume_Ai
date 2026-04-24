@@ -6,7 +6,7 @@
 2. `llm/`：good/bad LLM 输出样例。
 3. `replay_logs/`：回放日志样例。
 4. `cold_start/`：无 API key/外部依赖不可用样例。
-5. `context_pack/`：分槽隔离与 Canon 引用口径样例。
+5. `prompt_context/`：分槽隔离与 Canon 引用口径样例。
 6. `governor_output/`：GovernorOutput 契约正反例（reason_code/token/rule_trace）。
 7. `tokens/`：approval/confirm/undo 绑定、过期、伪造样例。
 8. `governor_rules/`：R1~R7 gate 快照样例（命中/未命中）。

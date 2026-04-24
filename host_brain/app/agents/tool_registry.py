@@ -689,7 +689,6 @@ def _tool_run_skill(args: dict[str, Any]) -> dict[str, Any]:
             governor_result=governor_result,
             intent_draft=dict(ctx.get("intent_draft") or {}),
             emotion_context=dict(ctx.get("emotion_context") or {}),
-            recall_slot_text=dict(ctx.get("recall_slot_text") or {}),
             render_target_lang=str(
                 payload.get("render_target_lang")
                 or ctx.get("render_target_lang")

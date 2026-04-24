@@ -293,11 +293,7 @@ def _sync_llm_emotion_call(
     provider_name = str(os.environ.get("HOST_EMOTION_LLM_PROVIDER") or "gemini").strip().lower()
     api_key = _load_api_key_from_env(provider_name)
 
-    if not api_key:
-        raise RuntimeError(f"情感 LLM 推理缺少 API Key（provider={provider_name}）")
-
-    # 复用 llm_helpers 的流式接口，但收集所有 chunk 为完整文本
-    from host_brain.integrations.llm_helpers import stream_llm_chunks  # noqa: PLC0415
+    from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
     base_url_override: str | None = None
     if provider_name == "gemini":
@@ -306,20 +302,25 @@ def _sync_llm_emotion_call(
             or "https://generativelanguage.googleapis.com/v1beta/openai"
         ).strip()
 
-    chunks: list[str] = []
-    for chunk in stream_llm_chunks(
+    result = complete_llm_with_pool_sync(
+        request_id=f"emotion_inference::{int(time.time() * 1000)}",
+        scene_type="EMOTION",
+        cognitive_tier="C",
         provider_name=provider_name,
         model_id=model_id,
         api_key=api_key,
         timeout_ms=timeout_ms,
-        prompt_text=user_prompt,
-        system_prompt=system_prompt,
-        gen_params={"temperature": 0.1, "top_p": 0.8},  # 低温度确保结构化输出
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        gen_params={"temperature": 0.1, "top_p": 0.8},
+        response_format="json_object",
         base_url_override=base_url_override,
-    ):
-        chunks.append(chunk)
-
-    return "".join(chunks).strip()
+    )
+    if result.pool_exhausted:
+        raise RuntimeError("emotion llm pool exhausted")
+    return str(result.content or "").strip()
 
 
 def _parse_llm_emotion_json(raw_text: str) -> dict[str, Any] | None:

@@ -53,7 +53,8 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
   if (!background) return null
 
   const tasks = background.core_tick_tasks || {}
-  const innerTick = tasks.inner_world_tick || null
+  const innerNumericTick = tasks.inner_world_numeric_tick || null
+  const innerMonologueTick = tasks.inner_world_monologue_tick || null
   const silenceTick = tasks.silence_tick || null
   const bodySenseTick = tasks.body_sense_tick || null
 
@@ -121,8 +122,10 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
         <div className="rounded-2xl border border-white/75 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
           <div className="text-xs text-gray-500">核心节律</div>
           <div className="mt-3 space-y-2">
-            <KeyValueRow label="inner_world_tick" value={formatTaskStatus(innerTick)} />
-            <KeyValueRow label="内在世界原因" value={formatReasonCode(innerTick)} />
+            <KeyValueRow label="inner_world_numeric_tick" value={formatTaskStatus(innerNumericTick)} />
+            <KeyValueRow label="数值推进原因" value={formatReasonCode(innerNumericTick)} />
+            <KeyValueRow label="inner_world_monologue_tick" value={formatTaskStatus(innerMonologueTick)} />
+            <KeyValueRow label="独白推进原因" value={formatReasonCode(innerMonologueTick)} />
             <KeyValueRow label="silence_tick" value={formatTaskStatus(silenceTick)} />
             <KeyValueRow label="沉默原因" value={formatReasonCode(silenceTick)} />
             <KeyValueRow label="body_sense_tick" value={formatTaskStatus(bodySenseTick)} />
@@ -133,7 +136,8 @@ export default function BackgroundRuntimeCard({ runtimeSnapshot }) {
         <div className="rounded-2xl border border-white/75 bg-white/75 p-3 shadow-sm backdrop-blur-sm">
           <div className="text-xs text-gray-500">最近运行间隔</div>
           <div className="mt-3 space-y-2">
-            <KeyValueRow label="inner_world_tick" value={formatDuration(innerTick?.seconds_since_last_run)} />
+            <KeyValueRow label="inner_world_numeric_tick" value={formatDuration(innerNumericTick?.seconds_since_last_run)} />
+            <KeyValueRow label="inner_world_monologue_tick" value={formatDuration(innerMonologueTick?.seconds_since_last_run)} />
             <KeyValueRow label="silence_tick" value={formatDuration(silenceTick?.seconds_since_last_run)} />
             <KeyValueRow label="body_sense_tick" value={formatDuration(bodySenseTick?.seconds_since_last_run)} />
           </div>

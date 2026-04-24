@@ -5,6 +5,7 @@ This module is the canonical runtime entry for the Cortex family.
 
 from __future__ import annotations
 
+import time
 from typing import Any, AsyncGenerator
 
 
@@ -22,6 +23,20 @@ async def cortex_orchestrator_sse_generator(
     metrics: Any,
 ) -> AsyncGenerator[str, None]:
     from host_brain.app.agent_runtime_shared import _cortex_orchestrator_sse_generator_impl  # noqa: PLC0415
+    from host_brain.conversation.writer import record_user_turn  # noqa: PLC0415
+
+    record_user_turn(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=getattr(request_body, "person_id", None),
+        content=str(getattr(request_body, "message", "") or ""),
+        ts_ms=int(time.time() * 1000),
+        lang=str(getattr(request_body, "render_target_lang", None) or "zh").strip().lower() or "zh",
+        metadata={
+            "input_source": str(getattr(request_body, "input_source", None) or "").strip(),
+            "reply_channel": str(getattr(request_body, "reply_channel", None) or "").strip(),
+        },
+    )
 
     async for event in _cortex_orchestrator_sse_generator_impl(
         request_body=request_body,

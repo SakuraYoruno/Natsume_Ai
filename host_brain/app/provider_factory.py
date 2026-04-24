@@ -10,6 +10,8 @@ import inspect
 import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from typing import Any, Callable, Mapping
 
 from host_brain.app.model_router import resolve_gemini_key_pool
@@ -25,6 +27,7 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
     PROVIDER_GEMINI,
+    PROVIDER_MINIMAX,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
 )
@@ -40,6 +43,8 @@ from host_brain.app.prompt_builder import (
 )
 
 _logger = logging.getLogger("Natsume.provider_factory")
+_MINIMAX_OPENAI_COMPAT_DEFAULT_BASE_URL = "https://api.minimaxi.com/v1"
+_MINIMAX_STANDARD_CHAT_ENDPOINT = "https://api.minimaxi.com/v1/text/chatcompletion_v2"
 
 
 def _load_template_mapping(template_id: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
@@ -84,6 +89,107 @@ def _build_host_openai_system_prompt(node_id: str | None) -> str:
     )
 
 
+def _normalize_openai_compat_base_url(value: str | None) -> str | None:
+    base_url = str(value or "").strip().rstrip("/")
+    if not base_url:
+        return None
+    if base_url.lower().endswith("/v1"):
+        return base_url
+    return f"{base_url}/v1"
+
+
+def _is_minimax_standard_model(model_id: str | None) -> bool:
+    normalized = str(model_id or "").strip().lower()
+    return normalized == "m2-her"
+
+
+def _resolve_minimax_base_url(base_url_override: str | None = None) -> str:
+    raw = str(base_url_override or os.environ.get("HOST_MINIMAX_BASE_URL") or _MINIMAX_OPENAI_COMPAT_DEFAULT_BASE_URL).strip()
+    return raw or _MINIMAX_OPENAI_COMPAT_DEFAULT_BASE_URL
+
+
+def _resolve_minimax_standard_endpoint(base_url_override: str | None = None) -> str:
+    raw = _resolve_minimax_base_url(base_url_override).rstrip("/")
+    if raw.lower().endswith("/v1/text/chatcompletion_v2"):
+        return raw
+    if raw.lower().endswith("/v1"):
+        return f"{raw}/text/chatcompletion_v2"
+    return _MINIMAX_STANDARD_CHAT_ENDPOINT
+
+
+def _build_minimax_standard_provider_fn(
+    *,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    node_id: str | None = None,
+    base_url_override: str | None = None,
+) -> Callable[[dict[str, Any]], Any]:
+    resolved_node_id = str(node_id or "").strip()
+    system_prompt = _build_host_openai_system_prompt(resolved_node_id)
+    endpoint = _resolve_minimax_standard_endpoint(base_url_override)
+
+    def _provider(prompt_payload: dict[str, Any]) -> str:
+        runtime_payload = prompt_payload.get("input") if isinstance(prompt_payload, dict) else None
+        if not isinstance(runtime_payload, dict):
+            runtime_payload = dict(prompt_payload or {}) if isinstance(prompt_payload, dict) else {}
+        if resolved_node_id:
+            prompt_text = render_node_generation_prompt(node_id=resolved_node_id, runtime_payload=runtime_payload)
+        else:
+            prompt_text = render_host_generation_prompt(runtime_payload)
+
+        payload = {
+            "model": str(model_id or "").strip() or "M2-her",
+            "messages": [
+                {"role": "system", "name": "NatsumeHost", "content": system_prompt},
+                {"role": "user", "name": "User", "content": prompt_text},
+            ],
+            "stream": False,
+            "temperature": 0.4,
+            "top_p": 0.9,
+            "max_completion_tokens": 1024,
+        }
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "NatsumeHost/1.0",
+            },
+            method="POST",
+        )
+        timeout_s = max(1.0, float(timeout_ms) / 1000.0)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:
+                raw_text = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                detail = ""
+            raise RuntimeError(f"MiniMax standard API error {exc.code}: {detail or exc.reason}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"MiniMax standard API request failed: {exc}") from exc
+
+        try:
+            parsed = json.loads(raw_text)
+        except Exception as exc:
+            raise RuntimeError(f"MiniMax standard API returned non-JSON payload: {raw_text[:400]}") from exc
+        choices = parsed.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError(f"MiniMax standard API returned no choices: {raw_text[:400]}")
+        message = choices[0].get("message") if isinstance(choices[0], Mapping) else None
+        content = str((message or {}).get("content") or "").strip()
+        if not content:
+            raise RuntimeError(f"MiniMax standard API returned empty content: {raw_text[:400]}")
+        return coerce_gateway_payload_json_text(content)
+
+    return _provider
+
+
 def _build_host_mock_reply_text(node_id: str | None, runtime_payload: dict[str, Any]) -> str:
     render_target_lang = get_chat_runtime_render_target_lang(runtime_payload)
     templates = _load_template_mapping(
@@ -119,7 +225,7 @@ def _build_host_mock_reply_text(node_id: str | None, runtime_payload: dict[str, 
     )
 
 _GEMINI_PRIMARY_RETRY_NODE_ID = "core_reasoner_primary"
-_GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro"})
+_GEMINI_PRIMARY_RETRY_MODEL_IDS = frozenset({"gemini-2.5-pro", "gemini-3.1-pro-preview"})
 _GEMINI_PRIMARY_FALLBACK_MODEL_ID = "gemini-2.5-flash-lite"
 _GEMINI_PRIMARY_RETRYABLE_MARKERS = (
     "503",
@@ -237,6 +343,8 @@ def resolve_host_llm_model_id(provider_name: str) -> str:
         return str(os.environ.get("HOST_OPENAI_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if provider == PROVIDER_DEEPSEEK:
         return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+    if provider == PROVIDER_MINIMAX:
+        return str(os.environ.get("HOST_MINIMAX_MODEL_ID") or "M2-her").strip() or "M2-her"
     return "mock-default"
 
 
@@ -387,6 +495,15 @@ def build_langchain_chat_provider_fn(
 
     provider = str(provider_name or "").strip().lower()
     model_name = str(model_id or "").strip() or "default"
+    if provider == PROVIDER_MINIMAX and _is_minimax_standard_model(model_name):
+        return _build_minimax_standard_provider_fn(
+            model_id=model_name,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            node_id=node_id,
+            base_url_override=base_url_override,
+        )
+
     base_url: str | None = str(base_url_override or "").strip() or None
     if not base_url:
         if provider == PROVIDER_DEEPSEEK:
@@ -401,6 +518,8 @@ def build_langchain_chat_provider_fn(
                 or os.environ.get("HOST_OPENAI_BASE_URL")
                 or ""
             ).strip() or None
+        elif provider == PROVIDER_MINIMAX:
+            base_url = _normalize_openai_compat_base_url(_resolve_minimax_base_url()) or _MINIMAX_OPENAI_COMPAT_DEFAULT_BASE_URL
         else:
             base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
 
@@ -486,7 +605,7 @@ def build_host_provider_fn(
 ) -> Callable[[dict[str, Any]], Any]:
     provider = str(provider_name or "").strip().lower()
     key_value = str(api_key or "").strip()
-    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI} and key_value:
+    if provider in {PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_DEEPSEEK, PROVIDER_GEMINI, PROVIDER_MINIMAX} and key_value:
         return build_langchain_chat_provider_fn(
             provider_name=provider,
             model_id=model_id,

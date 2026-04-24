@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import os
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -29,6 +31,7 @@ from edge_client.tribe.registry import build_edge_tribe_bridge, get_edge_tribe_r
 
 
 LOGGER = logging.getLogger("Natsume.edge.runtime.bootstrap")
+_BACKGROUND_STARTUP_COMPONENTS = frozenset({"tts", "vts", "asr"})
 
 
 @dataclass
@@ -47,6 +50,7 @@ class EdgeRuntime:
     tts_playback_device: AudioPlaybackDevice | None
     vts_driver: VTubeStudioDriver | None
     tribe_bridge: Any | None
+    startup_threads: list[threading.Thread] = field(default_factory=list, repr=False)
 
     @property
     def asr(self) -> AsrService | None:
@@ -610,14 +614,46 @@ def bootstrap(config: EdgeConfig) -> EdgeRuntime:
 
 
 async def startup(runtime: EdgeRuntime) -> None:
-    """Best-effort runtime startup; component failures are logged and skipped."""
+    """Best-effort runtime startup.
 
+    Heavy edge peripherals such as TTS / VTS / ASR can take several seconds to
+    load models, connect devices, or probe local drivers.  If we await them
+    inline inside FastAPI lifespan, the RPC health endpoint never starts
+    listening until all of them finish.  That makes the edge service look dead
+    even though the gateway thread has already started.
+
+    To keep RPC responsive, schedule those heavy startups in background daemon
+    threads and let the health endpoint reflect their eventual readiness.
+    """
+
+    runtime.startup_threads.clear()
     for name, component in _iter_lifecycle_components(runtime):
+        if name in _BACKGROUND_STARTUP_COMPONENTS:
+            thread = threading.Thread(
+                target=_invoke_lifecycle_sync,
+                args=(component, "startup"),
+                kwargs={"name": name},
+                name=f"edge-{name}-startup",
+                daemon=True,
+            )
+            runtime.startup_threads.append(thread)
+            thread.start()
+            LOGGER.info(
+                "edge lifecycle startup scheduled in background for component=%s thread=%s",
+                name,
+                thread.name,
+            )
+            continue
         await _invoke_lifecycle(component, "startup", name=name)
 
 
 async def shutdown(runtime: EdgeRuntime) -> None:
     """Best-effort runtime shutdown; component failures are logged and skipped."""
+
+    for thread in list(getattr(runtime, "startup_threads", []) or []):
+        if thread.is_alive():
+            thread.join(timeout=0.5)
+    runtime.startup_threads.clear()
 
     components = _iter_lifecycle_components(runtime)
     for name, component in reversed(components):
@@ -655,6 +691,23 @@ async def _invoke_lifecycle(component: Any, method_name: str, *, name: str) -> N
         outcome = method()
         if inspect.isawaitable(outcome):
             await outcome
+    except Exception as exc:  # pragma: no cover - defensive lifecycle guard
+        LOGGER.exception(
+            "edge lifecycle %s failed for component=%s: %s",
+            method_name,
+            name,
+            exc,
+        )
+
+
+def _invoke_lifecycle_sync(component: Any, method_name: str, *, name: str) -> None:
+    method = getattr(component, method_name, None)
+    if not callable(method):
+        return
+    try:
+        outcome = method()
+        if inspect.isawaitable(outcome):
+            asyncio.run(outcome)
     except Exception as exc:  # pragma: no cover - defensive lifecycle guard
         LOGGER.exception(
             "edge lifecycle %s failed for component=%s: %s",

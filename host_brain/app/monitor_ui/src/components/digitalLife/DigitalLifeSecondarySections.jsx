@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import { Orbit, ShieldAlert } from 'lucide-react'
 import DrilldownLink from '../obs/DrilldownLink.jsx'
 import SampleMeta from '../obs/SampleMeta.jsx'
@@ -36,7 +36,7 @@ export default function DigitalLifeSecondarySections({ model }) {
     wiredDomains,
     modeMeta,
     absenceBand,
-    responsePolicy,
+    renderPolicy,
     hasMemoryData,
     hasMemorySamples,
     avgMemorySuccessRate,
@@ -161,9 +161,9 @@ export default function DigitalLifeSecondarySections({ model }) {
             <div className="space-y-3">
               <KeyValueRow label="当前模式" value={modeMeta.label} />
               <KeyValueRow label="离线分层" value={absenceBand} />
-              <KeyValueRow label="回复上限" value={responsePolicy.max_chars != null ? `${responsePolicy.max_chars} 字` : '--'} />
-              <KeyValueRow label="允许追问" value={responsePolicy.allow_followup == null ? '--' : responsePolicy.allow_followup ? '是' : '否'} />
-              <KeyValueRow label="允许换题" value={responsePolicy.allow_topic_shift == null ? '--' : responsePolicy.allow_topic_shift ? '是' : '否'} />
+              <KeyValueRow label="回复上限" value={renderPolicy.max_chars != null ? `${renderPolicy.max_chars} 字` : '--'} />
+              <KeyValueRow label="允许追问" value={renderPolicy.allow_followup == null ? '--' : renderPolicy.allow_followup ? '是' : '否'} />
+              <KeyValueRow label="允许换题" value={renderPolicy.allow_topic_shift == null ? '--' : renderPolicy.allow_topic_shift ? '是' : '否'} />
               <KeyValueRow label="平均记忆成功率" value={!hasMemoryData ? '--' : hasMemorySamples ? `${avgMemorySuccessRate}%` : '无样本'} />
             </div>
           </div>
@@ -209,10 +209,11 @@ export default function DigitalLifeSecondarySections({ model }) {
           <DrilldownLink
             to="/memory"
             label="查看记忆详情"
-            hint="从这里继续下钻到子系统成功率、召回包预算、蒸馏与常驻设定。"
+            hint="从这里继续下钻到子系统成功率、蒸馏与常驻设定。"
           />
         </div>
       </LifeSection>
     </>
   )
 }
+

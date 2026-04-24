@@ -1,4 +1,4 @@
-"""State write arbiter with per-scope writer authorization."""
+﻿"""State write arbiter with per-scope writer authorization."""
 from __future__ import annotations
 
 import threading
@@ -24,7 +24,7 @@ _DEFAULT_SCOPE_WRITERS: dict[StateScope, set[str]] = {
     StateScope.RUNTIME_STATE: {
         "persona_core",
         "motive_agent",
-        "response_policy_agent",
+        "render_policy_agent",
         "silence_agent",
         "body_sense_agent",
         "inner_activity_agent",
@@ -234,3 +234,4 @@ __all__ = [
     "StateWriteDecision",
     "StateWriteResult",
 ]
+

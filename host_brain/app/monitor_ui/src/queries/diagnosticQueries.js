@@ -12,7 +12,6 @@ import {
   fetchMemoryGuardStats,
   fetchPermissionStats,
   fetchPromptBuilderStats,
-  fetchRecallPackStats,
   fetchSchedulerHistory,
   fetchSemanticRecallStats,
   fetchStateArbiterStats,
@@ -191,12 +190,6 @@ export const useLlmRouteStatsQuery = createWindowedStatsHook({
   keyBuilder: OBS_QUERY_KEYS.llmRouteStats,
   fetcher: fetchLlmRouteStats,
   errorMessage: '模型路由统计加载失败',
-})
-
-export const useRecallPackStatsQuery = createWindowedStatsHook({
-  keyBuilder: OBS_QUERY_KEYS.recallPackStats,
-  fetcher: fetchRecallPackStats,
-  errorMessage: '召回包统计加载失败',
 })
 
 export const useFailureStatsQuery = createWindowedStatsHook({

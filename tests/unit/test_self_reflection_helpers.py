@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from types import SimpleNamespace
@@ -189,13 +189,17 @@ def test_build_self_reflection_pulse_injects_optional_fields(monkeypatch) -> Non
     monkeypatch.setattr(
         sr_mod,
         "build_self_awareness_text",
-        lambda snapshot, time_context="", llm_fn=None, style_evolution=None: "aware",
+        lambda snapshot, time_context="", llm_fn=None, style_evolution=None, strict_llm=False: "aware",
     )
-    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot, llm_fn=None: "mood")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_mood_awareness_text",
+        lambda snapshot, llm_fn=None, strict_llm=False: "mood",
+    )
     monkeypatch.setattr(
         sr_mod,
         "build_growth_note_text",
-        lambda snapshot, llm_fn=None, style_evolution=None: "grow",
+        lambda snapshot, llm_fn=None, style_evolution=None, strict_llm=False: "grow",
     )
     monkeypatch.setattr(
         sr_mod,
@@ -245,13 +249,17 @@ def test_build_self_reflection_pulse_adds_narrative_guardrails_when_evidence_is_
     monkeypatch.setattr(
         sr_mod,
         "build_self_awareness_text",
-        lambda snapshot, time_context="", llm_fn=None, style_evolution=None: "aware",
+        lambda snapshot, time_context="", llm_fn=None, style_evolution=None, strict_llm=False: "aware",
     )
-    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot, llm_fn=None: "mood")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_mood_awareness_text",
+        lambda snapshot, llm_fn=None, strict_llm=False: "mood",
+    )
     monkeypatch.setattr(
         sr_mod,
         "build_growth_note_text",
-        lambda snapshot, llm_fn=None, style_evolution=None: "",
+        lambda snapshot, llm_fn=None, style_evolution=None, strict_llm=False: "",
     )
     monkeypatch.setattr(sr_mod, "detect_contradictions", lambda snapshot: [])
     monkeypatch.setattr(sr_mod, "build_contradiction_awareness_text", lambda contradictions: "")
@@ -297,13 +305,17 @@ def test_build_self_reflection_pulse_uses_guardrail_template_override(monkeypatc
     monkeypatch.setattr(
         sr_mod,
         "build_self_awareness_text",
-        lambda snapshot, time_context="", llm_fn=None, style_evolution=None: "aware",
+        lambda snapshot, time_context="", llm_fn=None, style_evolution=None, strict_llm=False: "aware",
     )
-    monkeypatch.setattr(sr_mod, "build_mood_awareness_text", lambda snapshot, llm_fn=None: "mood")
+    monkeypatch.setattr(
+        sr_mod,
+        "build_mood_awareness_text",
+        lambda snapshot, llm_fn=None, strict_llm=False: "mood",
+    )
     monkeypatch.setattr(
         sr_mod,
         "build_growth_note_text",
-        lambda snapshot, llm_fn=None, style_evolution=None: "",
+        lambda snapshot, llm_fn=None, style_evolution=None, strict_llm=False: "",
     )
     monkeypatch.setattr(sr_mod, "detect_contradictions", lambda snapshot: [])
     monkeypatch.setattr(sr_mod, "build_contradiction_awareness_text", lambda contradictions: "")
@@ -329,7 +341,7 @@ def test_align_self_reflection_pulse_reconciles_reconnect_with_brief_policy() ->
             "withdraw_drive": 0.18,
             "self_protect_drive": 0.12,
         },
-        response_policy={"should_be_brief": True},
+        render_policy={"should_be_brief": True},
         runtime_flags={"sys_mode": "normal"},
     )
 
@@ -360,7 +372,7 @@ def test_align_self_reflection_pulse_prefers_guarded_tone_when_retreat_dominates
             "withdraw_drive": 0.72,
             "self_protect_drive": 0.78,
         },
-        response_policy={"should_be_withdrawn": True, "withdrawal_guard": True},
+        render_policy={"should_be_withdrawn": True, "withdrawal_guard": True},
         runtime_flags={"sys_mode": "focus"},
     )
 
@@ -432,6 +444,46 @@ def test_build_style_trend_note_uses_prompt_template_override(monkeypatch) -> No
 
     assert text == "风格在变化"
     assert captured["prompt"].startswith("自定义风格趋势：")
+
+
+def test_build_self_reflection_pulse_strict_llm_disables_template_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(
+        sr_mod,
+        "build_self_awareness_text",
+        lambda snapshot, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        sr_mod,
+        "build_mood_awareness_text",
+        lambda snapshot, **kwargs: "",
+    )
+    monkeypatch.setattr(
+        sr_mod,
+        "build_growth_note_text",
+        lambda snapshot, **kwargs: "",
+    )
+    monkeypatch.setattr(sr_mod, "detect_contradictions", lambda snapshot: [])
+    monkeypatch.setattr(sr_mod, "build_contradiction_awareness_text", lambda contradictions: "")
+
+    pulse = sr_mod.build_self_reflection_pulse(
+        {"bond_growth_perception": "稳定"},
+        llm_fn=lambda prompt: (_ for _ in ()).throw(RuntimeError("boom")),
+        strict_llm=True,
+    )
+
+    assert pulse["self_awareness"] == ""
+    assert pulse["mood_awareness"] == ""
+    assert pulse["growth_note"] == ""
+
+
+def test_build_style_trend_note_strict_llm_returns_empty_on_failure() -> None:
+    text = sr_mod._build_style_trend_note(
+        {"warmth": "rising"},
+        llm_fn=lambda prompt: (_ for _ in ()).throw(RuntimeError("boom")),
+        strict_llm=True,
+    )
+
+    assert text == ""
 
 
 def test_self_reflection_localized_ja_templates_override(monkeypatch) -> None:

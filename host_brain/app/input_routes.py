@@ -57,6 +57,9 @@ from host_brain.app.input_service_quality import (
     maybe_send_gateway_realign_notice as _maybe_send_gateway_realign_notice_impl,
     compute_keyword_overlap as _compute_keyword_overlap,
 )
+from host_brain.app.response_feedback_store import (
+    record_feedback_for_latest_persona_reply as _record_feedback_for_latest_persona_reply,
+)
 
 _logger = logging.getLogger("Natsume.input_routes")
 
@@ -75,6 +78,12 @@ _VOICE_LATIN_PATTERN = re.compile(r"[A-Za-z]")
 _GATEWAY_DIRECT_OPEN_APP_RE = re.compile(r"(打开|启动|运行).*(酷狗|kugou|qq音乐|网易云|spotify|应用|软件|程序|播放器)", re.IGNORECASE)
 _GATEWAY_DEDUPE_CACHE: dict[str, float] = {}
 _GATEWAY_DEDUPE_LOCK = threading.Lock()
+_GATEWAY_RECENT_MULTIMODAL_CACHE: dict[str, dict[str, Any]] = {}
+_GATEWAY_RECENT_MULTIMODAL_LOCK = threading.Lock()
+_GATEWAY_MULTIMODAL_FOLLOWUP_RE = re.compile(
+    r"(这(张)?图|图片|这不是|表情包|贴图|梗图|截图|那个图|刚才那张|什么意思|啥意思|看得到|看得见|看懂|能看到|能看见|画的什么|内容)",
+    re.IGNORECASE,
+)
 
 
 class InputPayload(BaseModel):
@@ -156,6 +165,10 @@ def _gateway_dedupe_ttl_s() -> float:
     return max(30.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=180.0))
 
 
+def _gateway_recent_multimodal_ttl_s() -> float:
+    return max(60.0, _parse_float_env("HOST_GATEWAY_MULTIMODAL_RECENT_TTL_S", default=600.0))
+
+
 def _build_gateway_dedupe_key(*, payload: InputPayload, text: str) -> str:
     platform = str(payload.platform or "").strip().lower()
     conversation_id = str(payload.conversation_id or "").strip()
@@ -199,6 +212,53 @@ def _release_gateway_dedupe(key: str, *, expected_expiry: float | None = None) -
         if expected_expiry is not None and float(current) != float(expected_expiry):
             return
         _GATEWAY_DEDUPE_CACHE.pop(key, None)
+
+
+def _remember_recent_gateway_multimodal(*, session_id: str, payload: dict[str, Any]) -> None:
+    cache_key = str(session_id or "").strip()
+    if not cache_key:
+        return
+    attachments = list(payload.get("attachments") or [])
+    observations = dict(payload.get("multimodal_observations") or {})
+    summary = str(payload.get("attachment_summary") or "").strip()
+    if not attachments or not observations or not summary:
+        return
+    expires_at = time.time() + _gateway_recent_multimodal_ttl_s()
+    snapshot = {
+        "attachments": attachments,
+        "multimodal_observations": observations,
+        "attachment_summary": summary,
+        "attachment_processing_mode": str(payload.get("attachment_processing_mode") or "sync"),
+        "expires_at": expires_at,
+    }
+    with _GATEWAY_RECENT_MULTIMODAL_LOCK:
+        expired = [k for k, v in _GATEWAY_RECENT_MULTIMODAL_CACHE.items() if float(v.get("expires_at") or 0.0) <= time.time()]
+        for expired_key in expired:
+            _GATEWAY_RECENT_MULTIMODAL_CACHE.pop(expired_key, None)
+        _GATEWAY_RECENT_MULTIMODAL_CACHE[cache_key] = snapshot
+
+
+def _maybe_restore_recent_gateway_multimodal(*, session_id: str, text: str, payload: dict[str, Any]) -> bool:
+    cache_key = str(session_id or "").strip()
+    if not cache_key:
+        return False
+    if list(payload.get("attachments") or []) or dict(payload.get("multimodal_observations") or {}):
+        return False
+    normalized_text = str(text or "").strip()
+    if not normalized_text or not _GATEWAY_MULTIMODAL_FOLLOWUP_RE.search(normalized_text):
+        return False
+    now = time.time()
+    with _GATEWAY_RECENT_MULTIMODAL_LOCK:
+        cached = dict(_GATEWAY_RECENT_MULTIMODAL_CACHE.get(cache_key) or {})
+        if float(cached.get("expires_at") or 0.0) <= now:
+            _GATEWAY_RECENT_MULTIMODAL_CACHE.pop(cache_key, None)
+            return False
+    payload["attachments"] = list(cached.get("attachments") or [])
+    payload["multimodal_observations"] = dict(cached.get("multimodal_observations") or {})
+    payload["attachment_summary"] = str(cached.get("attachment_summary") or "").strip()
+    payload["attachment_processing_mode"] = str(cached.get("attachment_processing_mode") or "sync")
+    payload["multimodal_context_restored"] = True
+    return True
 
 
 def _coerce_float(value: Any) -> float | None:
@@ -316,11 +376,19 @@ def _should_send_gateway_immediate_ack(
     source: str,
     text: str,
     payload: dict[str, Any],
+    intent_draft: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
     """包装 service 层函数，传入本文件的判断函数。"""
     normalized = str(text or payload.get("content") or "").strip()
     if _GATEWAY_DIRECT_OPEN_APP_RE.search(normalized):
         return False, "ACK_DIRECT_OPEN_APP"
+    if _looks_like_progress_query_for_ack_skip(normalized):
+        return False, "ACK_PROGRESS_QUERY"
+    route_type = str((dict(intent_draft or {})).get("route") or "").strip().lower()
+    if not route_type:
+        return False, "ACK_ROUTE_UNRESOLVED"
+    if route_type not in {"skill", "delegate", "plan", "task_progress"}:
+        return False, "ACK_NON_EXECUTION_ROUTE"
     return _should_send_gateway_immediate_ack_impl(
         source=source,
         text=text,
@@ -1006,6 +1074,35 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     except Exception:
         pass
 
+    feedback_record = None
+    try:
+        feedback_record = _record_feedback_for_latest_persona_reply(
+            session_id=session_id,
+            person_id=str(payload.get("person_id") or "").strip() or None,
+            user_message=text,
+            ledger=_get_ledger_safe(),
+            ts_ms=ts_ms,
+        )
+        if feedback_record:
+            _log_input_event(
+                ledger=_get_ledger_safe(),
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=payload,
+                phase="INPUT_FEEDBACK_SHADOW_LOGGED",
+                status="LOGGED",
+                reason_code="EXPLICIT_RESPONSE_FEEDBACK_SHADOW",
+                detail=(
+                    "response feedback shadow logged for latest persona reply "
+                    f"target_request_id={str(feedback_record.get('target_request_id') or '').strip()} "
+                    f"score={float(feedback_record.get('feedback_score') or 0.0):.2f}"
+                ),
+                ts_ms=ts_ms,
+            )
+    except Exception as feedback_exc:
+        _logger.debug("input_routes: response feedback record degraded request_id=%s: %s", request_id, feedback_exc)
+
     if source == "GATEWAY" and list(payload.get("attachments") or []):
         from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
 
@@ -1025,6 +1122,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
         payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
         payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
+        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
         if str(observer_result.get("mode") or "").strip().lower() == "async":
             job = _schedule_gateway_multimodal_async_job(
                 request_id=request_id,
@@ -1044,6 +1142,8 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 detail="gateway multimodal accepted for async processing",
                 ts_ms=ts_ms,
             )
+    elif source == "GATEWAY":
+        _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)
 
     if source == "GATEWAY":
         handled_by_progress_fastpath = await _try_handle_gateway_progress_fastpath(
@@ -1317,6 +1417,7 @@ async def _run_gateway_multimodal_async_job(
         payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
         payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
         payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
+        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
         update_multimodal_job(
             job_id,
             status="OBSERVED",
@@ -1397,6 +1498,7 @@ def _should_start_gateway_progress_push(
     source: str,
     text: str,
     payload: dict[str, Any],
+    intent_draft: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
     if not _gateway_auto_reply_enabled():
         return False, "PROGRESS_PUSH_AUTO_REPLY_DISABLED"
@@ -1408,6 +1510,11 @@ def _should_start_gateway_progress_push(
         return False, "PROGRESS_PUSH_PROGRESS_QUERY"
     if not _looks_like_execution_intent_for_ack(text):
         return False, "PROGRESS_PUSH_NON_ACTION_INTENT"
+    route_type = str((dict(intent_draft or {})).get("route") or "").strip().lower()
+    if not route_type:
+        return False, "PROGRESS_PUSH_ROUTE_UNRESOLVED"
+    if route_type not in {"skill", "delegate", "plan", "task_progress"}:
+        return False, "PROGRESS_PUSH_NON_EXECUTION_ROUTE"
     platform = str(payload.get("platform") or "").strip().lower()
     conversation_id = str(payload.get("conversation_id") or "").strip()
     if not platform or not conversation_id:
@@ -1661,9 +1768,15 @@ def _maybe_schedule_gateway_immediate_ack(
     source: str,
     text: str,
     payload: dict[str, Any],
+    intent_draft: dict[str, Any] | None = None,
     ledger: Any,
 ) -> None:
-    should_send, reason = _should_send_gateway_immediate_ack(source=source, text=text, payload=payload)
+    should_send, reason = _should_send_gateway_immediate_ack(
+        source=source,
+        text=text,
+        payload=payload,
+        intent_draft=intent_draft,
+    )
     now_ms = int(time.time() * 1000)
     if not should_send:
         _log_input_event(
@@ -1886,6 +1999,13 @@ async def _maybe_realign_gateway_pipeline(
     route_decision = dict(pipeline_result.get("route_decision") or {})
     route_type = str(route_decision.get("route") or "").strip().lower()
     route_target = str(route_decision.get("target_id") or "").strip().lower()
+    if route_type in {"chat", "recent_turn"}:
+        return pipeline_result, {
+            "triggered": False,
+            "reason_code": "DEVIATION_NON_EXECUTION_ROUTE",
+            "route_type": route_type,
+            "route_target": route_target,
+        }
     if (route_type == "skill" and route_target == "codex_codegen") or (
         route_type == "delegate" and route_target == "translate_agent"
     ):
@@ -1979,6 +2099,11 @@ async def _maybe_realign_gateway_pipeline(
     detection["retry_hit_count"] = retry_hit_count
 
     if retry_ok:
+        detection["resolved_decision"] = retry_decision
+        detection["resolved_reason_code"] = str(retry_result.get("reason_code") or "").strip() or None
+        detection["resolved_narrative"] = retry_narrative
+        if isinstance(retry_result.get("route_decision"), dict):
+            detection["resolved_route_decision"] = dict(retry_result.get("route_decision") or {})
         _log_input_event(
             ledger=ledger,
             request_id=request_id,
@@ -2187,14 +2312,19 @@ async def _deliver_gateway_reply(
     primary_content = reply_text
     primary_msg_type = form_decision.primary.value
 
+    wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_REPLY_WAIT_RESULT", default=False)
+    text_reply_async = _parse_bool_env("HOST_INPUT_GATEWAY_TEXT_REPLY_ASYNC", default=True)
+    if primary_msg_type == MsgType.TEXT.value and text_reply_async:
+        wait_result = False
+    timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
     result = await post_gateway_reply(
         platform=platform,
         conversation_id=conversation_id,
         content=primary_content,
         msg_type=primary_msg_type,
         request_id=request_id,
-        wait_result=True,
-        timeout_ms=12000,
+        wait_result=wait_result,
+        timeout_ms=timeout_ms,
     )
     if not bool(getattr(result, "success", False)):
         status = str(getattr(result, "status", "FAILED"))
@@ -2366,6 +2496,14 @@ async def _dispatch_to_graph(
 
     run_in_thread = _parse_bool_env("HOST_INPUT_DISPATCH_IN_THREAD", default=True)
     dispatch_mode = "fire_and_forget.threaded" if run_in_thread else "fire_and_forget.inline"
+    preclassified_intent_draft: dict[str, Any] | None = None
+    if source_upper == "GATEWAY":
+        try:
+            from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
+
+            preclassified_intent_draft = classify_task_intent_by_rules(text)
+        except Exception as route_preclass_exc:
+            _logger.debug("[%s] gateway preclassify before ack failed: %s", request_id, route_preclass_exc)
 
     _log_input_event(
         ledger=ledger,
@@ -2385,6 +2523,7 @@ async def _dispatch_to_graph(
             source=source_upper,
             text=text,
             payload=payload,
+            intent_draft=preclassified_intent_draft,
             ledger=ledger,
         )
 
@@ -2397,6 +2536,7 @@ async def _dispatch_to_graph(
                 text=text,
                 payload=payload,
                 ts_ms=ts_ms,
+                preclassified_intent_draft=preclassified_intent_draft,
                 ledger=ledger,
                 dispatch_mode=dispatch_mode,
                 run_in_thread=run_in_thread,
@@ -2411,6 +2551,7 @@ async def _dispatch_to_graph(
         text=text,
         payload=payload,
         ts_ms=ts_ms,
+        preclassified_intent_draft=preclassified_intent_draft,
         ledger=ledger,
         dispatch_mode=dispatch_mode,
         run_in_thread=run_in_thread,
@@ -2425,6 +2566,7 @@ async def _dispatch_to_graph_worker(
     text: str,
     payload: dict[str, Any],
     ts_ms: int,
+    preclassified_intent_draft: dict[str, Any] | None = None,
     ledger: Any,
     dispatch_mode: str,
     run_in_thread: bool,
@@ -2449,9 +2591,10 @@ async def _dispatch_to_graph_worker(
     )
     if source_upper == "GATEWAY":
         try:
-            from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
+            if preclassified_intent_draft is None:
+                from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules  # noqa: PLC0415
 
-            preclassified_intent_draft = classify_task_intent_by_rules(text)
+                preclassified_intent_draft = classify_task_intent_by_rules(text)
             _maybe_schedule_gateway_route_started_voice_ack(
                 request_id=request_id,
                 session_id=session_id,
@@ -2468,6 +2611,7 @@ async def _dispatch_to_graph_worker(
             source=source_upper,
             text=text,
             payload=payload,
+            intent_draft=preclassified_intent_draft,
         )
         if should_push:
             _log_input_event(
@@ -2533,6 +2677,18 @@ async def _dispatch_to_graph_worker(
         reason_code = str(pipeline_result.get("reason_code") or "").strip() or None
         narrative = str(pipeline_result.get("narrative") or "").strip()
         route_decision = dict(pipeline_result.get("route_decision") or {})
+        if isinstance(deviation_meta, dict) and bool(deviation_meta.get("retry_applied")):
+            override_decision = str(deviation_meta.get("resolved_decision") or "").strip().upper()
+            if override_decision:
+                decision = override_decision
+            if "resolved_reason_code" in deviation_meta:
+                reason_code = str(deviation_meta.get("resolved_reason_code") or "").strip() or None
+            override_narrative = str(deviation_meta.get("resolved_narrative") or "").strip()
+            if override_narrative:
+                narrative = override_narrative
+            override_route_decision = deviation_meta.get("resolved_route_decision")
+            if isinstance(override_route_decision, dict):
+                route_decision = dict(override_route_decision)
         route_type = str(route_decision.get("route") or "chat").strip().lower() or "chat"
         route_target = str(route_decision.get("target_id") or "").strip()
         route_task = str(route_decision.get("task") or "").strip()

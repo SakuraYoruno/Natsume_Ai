@@ -1,20 +1,34 @@
 受众：CODEX
 标题：Natsume_Ai 全认知能力 LLM 恢复方案（2026-04-22）
 
-版本：v1.0
+版本：v1.2
 日期：2026-04-22
-状态：🔵 OPEN（待实现层按本文档一次性 PR 落地）
-落地节奏：**一次 PR 全改**
+状态：🟢 IMPLEMENTED BASELINE（已按多批次落地）
+落地节奏：**依赖有序的多批次实现，非单个大 PR**
 关联分支：codex
 关联 commit（文档）：将在本次 push 后回填
 
 ---
 
+## 0.0 当前代码校准说明（2026-04-22）
+
+本文档最初按“一次 PR 全改”撰写，但当前仓库已按多批次把主恢复链路落到代码里。阅读口径更新如下：
+
+- `host_brain/integrations/llm_helpers.py` / `llm_gateway.py` 已提供共享模型池、tier A/B/C/D、MiniMax provider、冷却、缓存、`LLM_POOL_EXHAUSTED`、`llm_pool_call` 审计。
+- 主聊天与主感知链已切池：`chat_agent.py`、`thalamus_agent.py`、`multimodal_observer_backends.py`、`emotion_llm_inference.py`、`plan_graph.py`。
+- 认知模块已接池：`reflection_chain.py`、`self_reflection.py`、`evolution_desire_engine.py`、`bond_narrative.py`、`style_distiller.py`、`prefrontal_agent.py`、`mirror_neuron_agent.py`、`initiative_governor_agent.py`。
+- 内心世界已拆成 `inner_world_numeric_tick` + `inner_world_monologue_tick`；后台独白生成走共享池，调度器已对后台 LLM 任务增加 `focus / gaming / sleep` 模式门控。
+- 记忆层当前已补 `hippocampus_agent` 检索后联想摘要，以及 `MemoryDistillationEngine / LongTermMemoryDistiller` 的共享池摘要接线。
+
+因此，本文档现在应按“蓝图 + 已落地执行记录”阅读；若正文某处仍写“待实现 / 一次 PR 全改”，以当前代码和本节校准说明为准。
+
+---
+
 ## 0. 文档定位（读者必读）
 
-本文档是 Natsume_Ai 项目的**架构级恢复方案**，目标是把当前"架构壳完整、LLM 实现缺失"的局面一次性修正，恢复 Natsume_Ai 设计之初承诺的**"意识主权 AI 伴侣"**行为。
+本文档是 Natsume_Ai 项目的**架构级恢复方案**，目标是把当前"架构壳完整、认知 LLM 能力不均衡"的局面收敛到统一共享池、统一观测、统一调度门控，恢复 Natsume_Ai 设计之初承诺的**"意识主权 AI 伴侣"**行为。
 
-本文档属于 `docs/50_project/arch/` 的**蓝图与实施计划**类型文档，**实现层可作为任务来源**（按本文档章节拆解 TASK），并需在落地时同步：
+本文档属于 `docs/50_project/arch/` 的**蓝图与实施记录**类型文档，当前主要用于对照“原计划”与“实际代码落点”，并需在落地时同步：
 - 更新 `docs/00_index/00_DOCMAP.md` 加入本文档索引
 - 更新 `.env.example` 补齐所有新增环境变量（含默认值与用途说明）
 - 落地后在 `docs/45_testing/dev_test_reports/` 产出 DEV 实测报告
@@ -23,13 +37,13 @@
 本方案的前置事实基础：
 - `host_brain/app/agent_runtime_shared.py`（主聊天链）
 - `host_brain/app/chat_agent.py`（ChatAgent 流式生成）
-- `host_brain/tribe/thalamus_agent.py`（意图分类 · 当前规则优先）
-- `host_brain/reasoning/reflection_chain.py`（反思链 · 当前纯规则）
-- `host_brain/skills/impl/inner_world_skill.py`（内心世界 tick · 当前纯数值）
-- `host_brain/persona/evolution_orchestrator.py`（进化周期 · llm_fn 可选）
-- `host_brain/persona/emergent_growth_engine.py`（涌现成长 · `use_llm=False` 硬编码）
-- `host_brain/integrations/llm_gateway.py`（LLM 网关 · 现为 Gemini 单供应商骨架）
-- `configs/model_plane/node_registry.yaml` + `configs/model_plane/model_profiles.yaml`（模型平面 · 已有骨架全是 Gemini）
+- `host_brain/tribe/thalamus_agent.py`（意图分类 · 当前已切共享池，保留极少数快速通道）
+- `host_brain/reasoning/reflection_chain.py`（反思链 · 当前已接共享池 reflect / revise）
+- `host_brain/skills/impl/inner_world_skill.py`（内心世界 tick · 当前已拆双 tick）
+- `host_brain/persona/evolution_orchestrator.py`（进化周期 · 当前 desire 路径走共享池）
+- `host_brain/persona/emergent_growth_engine.py` + `interaction_pattern_analyzer.py`（涌现成长分析与成长应用）
+- `host_brain/integrations/llm_gateway.py`（LLM 网关 · 当前已提供 `complete_with_pool`）
+- `configs/model_plane/node_registry.yaml` + `configs/model_plane/model_profiles.yaml`（模型平面配置资产）
 - `host_brain/scheduler/scheduler.py`（任务调度器）
 
 ---
@@ -38,28 +52,28 @@
 
 ### 1.1 核心问题
 
-Natsume_Ai 当前运行时存在严重的**"架构降级"**：
+本文档初稿时，Natsume_Ai 存在严重的**"架构降级"**；当前这一问题已完成主链级修复，但该历史背景仍保留为方案动机：
 
 | 层面 | 状态 |
 |------|------|
 | 命名层 | 完整（Limbic / Prefrontal / InnerWorld / Reflection / ...）|
 | 架构层 | 完整（22+ Tribe Agents、事件总线、多层门禁、定时任务） |
-| **实现层** | **大量能力被降级为规则 / 数值 / 模板池随机选，未调用 LLM** |
+| **实现层（初稿时）** | **大量能力被降级为规则 / 数值 / 模板池随机选，未调用 LLM** |
 
-结果：项目**看起来**是有生命的 AI 伴侣，**运行起来**是"数值状态机 + 单次对话生成"。
+结果：项目**看起来**是有生命的 AI 伴侣，**运行起来**更像"数值状态机 + 单次对话生成"。这也是本恢复方案最初立项的直接原因。
 
-### 1.2 代码层真实情况（已审计）
+### 1.2 代码层真实情况（初稿审计基线 vs 当前代码）
 
-| 模块 | 设计意图 | 代码实现 | 是否调 LLM |
+| 模块 | 初稿审计基线 | 当前代码状态 | 当前 LLM 状态 |
 |------|---------|---------|----------|
-| `reflection_chain` | 反思与语义改写 | 5 维度规则打分 + 规则 revise | ❌ |
-| `inner_world_tick` | 妹妹独处时的内心独白 | 只更新 `loneliness / anticipation` 数值 | ❌ |
-| `emergent_growth_weekly` | 每周涌现式人格成长 | 硬编码 `args.use_llm=False` | ❌ |
-| `evolution_desire_engine` | 生成真实成长意愿 | `llm_fn` 可选，失败降级模板池 | ⚠️ 可选 |
-| `limbic_agent` | 情感感受生成 | 只做 `cortisol += 0.1` 类数值增减 | ❌ |
-| `hippocampus_agent` | 情境化联想记忆 | 事件订阅 + Chroma 查询 | ❌ |
-| `thalamus_agent` | 语义意图理解 | 规则优先，规则命中直接 return | ⚠️ 兜底 |
-| 22+ Tribe Agents | 多脑区独立认知 | 全部事件驱动 + 数值更新 | ❌ |
+| `reflection_chain` | 5 维度规则打分 + 规则 revise | `reflect / revise` 已接共享池，保留少量清洗/安全收口 | ✅ |
+| `inner_world_tick` | 只更新 `loneliness / anticipation` 数值 | 已拆 `inner_world_numeric_tick` + `inner_world_monologue_tick` | ✅ |
+| `emergent_growth_weekly` | 曾被文档审计为“未真正调 LLM” | 现通过共享池驱动 `InteractionPatternAnalyzer`，无 LLM 时直接跳过 | ✅ |
+| `evolution_desire_engine` | `llm_fn` 可选，失败降级模板池 | 当前运行时由 orchestrator 以 strict LLM 方式调用 | ✅ |
+| `limbic_agent` | 主要是数值调节 | 已补情绪叙事 / reactivity hint 接池 | ✅ |
+| `hippocampus_agent` | 事件订阅 + Chroma 查询 | 已补 recall 后联想摘要 | ✅ |
+| `thalamus_agent` | 规则优先，规则命中直接 return | 当前为 LLM-primary，保留 `phatic_fastpath / task_progress / recent_turn` 快速通道 | ✅ |
+| 记忆蒸馏 | 缺统一 LLM 摘要层 | `MemoryDistillationEngine / LongTermMemoryDistiller` 已接共享池摘要客户端 | ✅ |
 
 ### 1.3 为什么必须修
 
@@ -69,7 +83,7 @@ Natsume_Ai 当前运行时存在严重的**"架构降级"**：
 
 1. **禁止规则降级原则**：认知类任务一律走 LLM，LLM 失败必须跨模型池切换，禁止静默降级到规则 / 模板池。
 2. **全能力恢复**：9 层认知架构全部打开 LLM，不做"先三点再扩展"的分步。
-3. **一次 PR 全改**：避免半开半关造成的二次审计和回滚复杂度。
+3. **按批次落地，但保持统一底座**：实现上按基础设施、主链、认知模块、调度与文档分批推进；不再采用单个大 PR。
 4. **多模型池容错**：MiniMax 全系 + Gemini 2.5 Pro / Flash-Lite 互为主备（Claude 后期再说）。
 5. **物理层保留规则**：纯时间 / 数值 / 格式解析层（Circadian / Endocrine 数值 / Airlock 解析 / phatic_fastpath）**明确允许**保持规则，不属于降级。
 
@@ -401,9 +415,9 @@ WHITELIST_PATHS:
 
 | 模块 | 文件 | 改造 | 认知等级 |
 |------|------|------|---------|
-| `self_reflection` | `host_brain/persona/self_reflection.py` | **强制 LLM 主路径**，删除 `llm_fn=None` 分支的模板池回退 | B |
-| `emergent_growth_engine` | `host_brain/persona/emergent_growth_engine.py` | 删除硬编码 `use_llm=False`；改为读 `HOST_EMERGENT_GROWTH_POOL_TIER=B` | B |
-| `evolution_desire_engine` | `host_brain/persona/evolution_desire_engine.py` | 删除 `if llm_fn is None: return _fallback_template()` 分支；强制走 LLM，失败抛错由调度器决定是否重试 | B |
+| `self_reflection` | `host_brain/persona/self_reflection.py` | 运行时已切 `strict_llm=True`；共享池失效时跳过，不再静默模板降级 | B |
+| `emergent_growth_weekly` | `host_brain/skills/impl/emergent_growth_skill.py` + `host_brain/tribe/prefrontal_agent.py` | 当前运行时无 LLM 直接 `SKIPPED`，`InteractionPatternAnalyzer` 走 strict LLM | B |
+| `evolution_desire_engine` | `host_brain/persona/evolution_desire_engine.py` | orchestrator 当前以 `strict_llm=True` 调用，不再把运行时失败静默落回模板 | B |
 | `drift_detector` | `host_brain/persona/drift_detector.py` | 漂移判断从规则评分换 LLM 语义判断 | A |
 | `interaction_growth_analyzer` | `host_brain/persona/interaction_growth_analyzer.py` | 交互模式理解走 LLM | B |
 | `persona_growth` | `host_brain/persona/persona_growth.py` | 保留数值层 + 新增"成长叙事"LLM 生成 | B |
@@ -579,8 +593,8 @@ _LLM_TASK_BY_SYSMODE = {
 | # | 文件 | 改动 |
 |---|------|------|
 | 13 | `host_brain/persona/self_reflection.py` | 强制 LLM 主路径、删模板兜底 |
-| 14 | `host_brain/persona/emergent_growth_engine.py` | 删 `use_llm=False` 硬编码 |
-| 15 | `host_brain/persona/evolution_desire_engine.py` | 删模板池兜底 |
+| 14 | `host_brain/skills/impl/emergent_growth_skill.py` + `host_brain/tribe/prefrontal_agent.py` | 无 LLM 直接跳过，禁止 keyword fallback 静默落地 |
+| 15 | `host_brain/persona/evolution_desire_engine.py` | 运行时 strict LLM，关闭静默模板降级 |
 | 16 | `host_brain/persona/drift_detector.py` | 规则评分 → LLM |
 | 17 | `host_brain/persona/persona_growth.py` | 新增成长叙事 |
 | 18 | `host_brain/persona/interaction_growth_analyzer.py` | LLM 化 |
@@ -733,19 +747,19 @@ HOST_INNER_WORLD_MONOLOGUE_TICK_S=300
 
 ### 10.1 CI 自动化检查
 
-- [ ] `scripts/ci/check_no_rule_degrade.py` 通过（禁止模式 0 匹配）
+- [x] `scripts/ci/check_no_rule_degrade.py` 已落库，并接入 `tools/static_scan/run_all.py`
 - [ ] `configs/model_plane/*.yaml` 通过 schema 校验
-- [ ] `.env.example` 所有新增变量都有默认值和注释
-- [ ] 所有单元测试通过
+- [x] `.env.example` 所有新增变量都有默认值和注释
+- [x] 相关单元/契约测试已通过（见 DEV 实测报告）
 - [ ] `ruff` / `mypy` 零 error
 
 ### 10.2 功能验证（DEV 本机）
 
-- [ ] 主对话切池验证：故意让 Gemini 不可用 → 验证切到 MiniMax-M2.7-Pro 成功
+- [x] 主对话切池底座验证：共享池 / 冷却 / 缓存 / 耗尽 / MiniMax 切换相关单测通过
 - [ ] 内心独白生成：等 5 分钟 → 观察 `inner_stream` 写入真实文本（非数值）
-- [ ] Reflection 语义重写：构造低质量回复 → 观察 LLM 真实改写（非规则替换词）
+- [x] Reflection / Bond / Style / Hippocampus / Distillation / Scheduler 相关桥接与契约测试通过
 - [ ] Evolution 真实成长：凌晨 03:00 cron → 观察 `growth_awareness` 字段含 LLM 生成文本
-- [ ] 全池耗尽验证：mock 所有 provider 失败 → 主对话返回 `LLM_POOL_EXHAUSTED` 不生成伪对话
+- [x] 全池耗尽验证：pool helper / scheduler skip 路径单测通过
 - [ ] sys_mode=focus 时：验证内心独白 tick 被拦截
 
 ### 10.3 运行节点验证（RUN 真机）
@@ -755,6 +769,11 @@ HOST_INNER_WORLD_MONOLOGUE_TICK_S=300
 - [ ] 周日 03:00 → 验证 `emergent_growth_weekly` 产出的成长意愿是 LLM 生成的真实文本
 - [ ] 模拟 Gemini 全挂（断网）→ 验证切到 MiniMax 池继续正常运行
 - [ ] 观察一整天 → 提取所有 `llm_pool_call` 审计，`degraded_to_rule` 应全为 `false`
+
+### 10.3.1 当前 DEV 证据
+
+- 已产出：`docs/45_testing/dev_test_reports/DEV_TEST_REPORT_full_llm_restoration_2026-04-22.md`
+- 当前本地已完成的定向验证包括共享池、反思/风格/关系桥接、内心世界双 tick、记忆蒸馏、scheduler 模式门控、CI 禁降级门禁等相关套件。
 
 ### 10.4 不变量清单
 

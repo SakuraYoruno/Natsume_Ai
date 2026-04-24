@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from host_brain.persona import inner_activity_agent as agent
 
@@ -35,7 +35,7 @@ def test_generate_inner_activity_note_success(monkeypatch) -> None:
             "bond_summary": {},
             "emotion_timeline": {},
             "motive_state": {},
-            "response_policy": {},
+            "render_policy": {},
             "self_model_snapshot": {},
             "self_reflection_pulse": {},
             "recent_inner_events": [],
@@ -84,7 +84,7 @@ def test_generate_inner_activity_note_rejects_duplicate(monkeypatch) -> None:
             "bond_summary": {},
             "emotion_timeline": {},
             "motive_state": {},
-            "response_policy": {},
+            "render_policy": {},
             "self_model_snapshot": {},
             "self_reflection_pulse": {},
             "recent_inner_events": [{"note": "我先把节奏放慢一点。"}],
@@ -150,7 +150,7 @@ def test_build_inner_activity_context_contains_required_soul_layers(monkeypatch)
     )
     monkeypatch.setattr(
         agent,
-        "_decide_response_policy",
+        "_build_render_policy",
         lambda **_kwargs: {"max_chars": 140, "allow_followup": True},
     )
     monkeypatch.setattr(
@@ -184,7 +184,7 @@ def test_build_inner_activity_context_contains_required_soul_layers(monkeypatch)
         "bond_summary",
         "emotion_timeline",
         "motive_state",
-        "response_policy",
+        "render_policy",
         "self_model_snapshot",
         "self_reflection_pulse",
         "recent_inner_events",
@@ -192,3 +192,4 @@ def test_build_inner_activity_context_contains_required_soul_layers(monkeypatch)
     assert context["offline_state"]["absence_band"] == "24h_plus"
     assert context["motive_state"]["dominant_motive"] == "continuity"
     assert context["self_reflection_pulse"]["self_awareness"] == "我在逐步稳定自己的表达"
+

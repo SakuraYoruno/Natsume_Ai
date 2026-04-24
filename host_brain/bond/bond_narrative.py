@@ -24,9 +24,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -83,6 +85,16 @@ _DURATION_THRESHOLDS: list[tuple[int, str]] = [
     (365, "认识一年了"),
 ]
 _DURATION_DEFAULT = "认识很久了"
+
+
+def _load_bond_narrative_llm_templates() -> dict[str, Any]:
+    try:
+        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
+
+        raw = resolve_prompt_template_json_merged("bond_narrative.llm_rewrite.prompt")
+        return dict(raw) if isinstance(raw, Mapping) else {}
+    except Exception:
+        return {}
 
 # ---------------------------------------------------------------------------
 # 叙事包装模板（按 bond_stage 分层）
@@ -323,10 +335,14 @@ class BondNarrativeLayer:
         memory_index: SharedMemoryIndex | None = None,
         milestone_tracker: MilestoneTracker | None = None,
         max_items: int = MAX_NARRATIVE_ITEMS,
+        use_llm: bool = False,
+        llm_timeout_ms: int = 2500,
     ) -> None:
         self._memory_index = memory_index
         self._milestone_tracker = milestone_tracker
         self._max_items = int(max_items)
+        self._use_llm = bool(use_llm)
+        self._llm_timeout_ms = max(800, int(llm_timeout_ms))
 
     def build_narrative(
         self,
@@ -418,6 +434,11 @@ class BondNarrativeLayer:
         # 按权重降序排序，取 top N
         items.sort(key=lambda x: x.weight, reverse=True)
         selected = items[:self._max_items]
+        selected = self._maybe_rewrite_narrative_items(
+            selected,
+            bond_stage=stage,
+            relationship_duration=relationship_duration,
+        )
 
         result = BondNarrativeResult(
             items=selected,
@@ -434,6 +455,86 @@ class BondNarrativeLayer:
         )
 
         return result
+
+    def _maybe_rewrite_narrative_items(
+        self,
+        selected: list[NarrativeItem],
+        *,
+        bond_stage: str,
+        relationship_duration: str,
+    ) -> list[NarrativeItem]:
+        if not self._use_llm or not selected:
+            return selected
+        try:
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+
+            templates = _load_bond_narrative_llm_templates()
+            system_prompt = str(templates.get("system_prompt") or "").strip()
+            user_tpl = str(templates.get("user_prompt_template") or "").strip()
+            if not system_prompt or not user_tpl:
+                return selected
+            payload = [
+                {
+                    "index": index,
+                    "source": item.source,
+                    "text": item.text,
+                    "emotion": item.emotion,
+                    "age_label": item.age_label,
+                }
+                for index, item in enumerate(selected)
+            ]
+            prompt = user_tpl.format(
+                bond_stage=str(bond_stage or "STRANGER"),
+                relationship_duration=str(relationship_duration or ""),
+                items_json=json.dumps(payload, ensure_ascii=False),
+            )
+            result = complete_llm_with_pool_sync(
+                request_id=f"bond-narrative::{_now_ms()}",
+                scene_type="BOND_NARRATIVE",
+                cognitive_tier="B",
+                timeout_ms=self._llm_timeout_ms,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format="json_object",
+                gen_params={"temperature": 0.25, "top_p": 0.9},
+            )
+            if result.pool_exhausted or not str(result.content or "").strip():
+                return selected
+            parsed = json.loads(str(result.content or "{}"))
+            if not isinstance(parsed, Mapping):
+                return selected
+            rewritten_items = list(parsed.get("items") or [])
+            rewritten_map: dict[int, str] = {}
+            for row in rewritten_items:
+                if not isinstance(row, Mapping):
+                    continue
+                try:
+                    idx = int(row.get("index"))
+                except Exception:
+                    continue
+                text = str(row.get("text") or "").strip()
+                if not text:
+                    continue
+                rewritten_map[idx] = text[:96]
+            if not rewritten_map:
+                return selected
+            merged: list[NarrativeItem] = []
+            for index, item in enumerate(selected):
+                merged.append(
+                    NarrativeItem(
+                        source=item.source,
+                        text=rewritten_map.get(index, item.text),
+                        emotion=item.emotion,
+                        weight=item.weight,
+                        age_label=item.age_label,
+                    )
+                )
+            return merged
+        except Exception as exc:
+            _logger.debug("Bond narrative llm rewrite skipped: %s", exc)
+            return selected
 
 
 # ---------------------------------------------------------------------------

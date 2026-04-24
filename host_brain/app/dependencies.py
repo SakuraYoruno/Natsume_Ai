@@ -69,13 +69,16 @@ from host_brain.tools.catalog import ToolCatalog
 
 # 新模块导入（优化计划新增模块）
 from host_brain.app.llm.routing_matrix import RoutingMatrix
-from host_brain.app.recall.recall_pack_builder import RecallPackBuilder
 from host_brain.app.memory.memory_guard import MemoryGuard
 from host_brain.app.memory.state_arbiter import StateArbiter
 from host_brain.app.memory.state_write_arbiter import StateWriteArbiter
 from host_brain.app.memory.distillation_engine import DistillationEngine
 from host_brain.app.recall.semantic_recall import SemanticRecaller
 from host_brain.app.prompt_template_store import PromptTemplateStore
+from host_brain.app.context.tactic_ledger import SessionTacticLedgerStore
+from host_brain.app.context.topic_ledger import SessionTopicLedgerStore
+from host_brain.conversation.history import ConversationHistory
+from host_brain.conversation.store import TurnStore
 
 _logger = logging.getLogger("Natsume.dependencies")
 _EDGE_RPC_DEPENDENCY_SERVICE_IDS = (
@@ -111,7 +114,6 @@ _graph_runtime: Optional[GraphRuntimeContract] = None
 
 # 新模块单例
 _routing_matrix: Optional[RoutingMatrix] = None
-_recall_pack_builder: Optional[RecallPackBuilder] = None
 _memory_guard: Optional[MemoryGuard] = None
 _state_arbiter: Optional[StateArbiter] = None
 _state_write_arbiter: Optional[StateWriteArbiter] = None
@@ -139,6 +141,10 @@ _capability_forge_token_service: Optional[TokenService] = None
 _runtime_capability_registry: Optional[RuntimeCapabilityRegistry] = None
 _shared_memory_index: Optional[SharedMemoryIndex] = None
 _milestone_tracker: Optional[MilestoneTracker] = None
+_conversation_turn_store: Optional[TurnStore] = None
+_conversation_history: Optional[ConversationHistory] = None
+_session_topic_ledger_store: Optional[SessionTopicLedgerStore] = None
+_session_tactic_ledger_store: Optional[SessionTacticLedgerStore] = None
 
 # ── 进程级 HardState 存储（ModeTransitionService 依赖） ──
 _hard_state_lock = __import__("threading").Lock()
@@ -243,6 +249,34 @@ def get_prompt_template_store() -> PromptTemplateStore:
     if _prompt_template_store is None or getattr(_prompt_template_store, "_ledger", None) is not ledger:
         _prompt_template_store = PromptTemplateStore(ledger=ledger)
     return _prompt_template_store
+
+
+def get_conversation_turn_store() -> TurnStore:
+    global _conversation_turn_store
+    if _conversation_turn_store is None:
+        _conversation_turn_store = TurnStore(get_ledger())
+    return _conversation_turn_store
+
+
+def get_conversation_history() -> ConversationHistory:
+    global _conversation_history
+    if _conversation_history is None:
+        _conversation_history = ConversationHistory(get_conversation_turn_store())
+    return _conversation_history
+
+
+def get_session_topic_ledger_store() -> SessionTopicLedgerStore:
+    global _session_topic_ledger_store
+    if _session_topic_ledger_store is None:
+        _session_topic_ledger_store = SessionTopicLedgerStore(get_ledger())
+    return _session_topic_ledger_store
+
+
+def get_session_tactic_ledger_store() -> SessionTacticLedgerStore:
+    global _session_tactic_ledger_store
+    if _session_tactic_ledger_store is None:
+        _session_tactic_ledger_store = SessionTacticLedgerStore(get_ledger())
+    return _session_tactic_ledger_store
 
 
 def _resolve_episodic_embedding_binding() -> tuple[Any, str, str]:
@@ -697,28 +731,6 @@ def get_routing_matrix() -> RoutingMatrix:
     return _routing_matrix
 
 
-def get_recall_pack_builder() -> RecallPackBuilder:
-    """获取 RecallPack 组装器单例（延迟初始化）。"""
-    global _recall_pack_builder
-    if _recall_pack_builder is None:
-        ledger = get_ledger()
-
-        def _audit_writer(event: str, detail: dict) -> None:
-            try:
-                ledger.log_error(
-                    request_id=str(detail.get("request_id") or "recall_pack_builder"),
-                    stage=event,
-                    reason_code=event,
-                    detail=json.dumps(detail, ensure_ascii=False, default=str),
-                )
-            except Exception as exc:
-                _logger.warning("RecallPackBuilder 审计写入失败: %s", exc)
-
-        _recall_pack_builder = RecallPackBuilder(audit_writer=_audit_writer)
-        _logger.info("RecallPackBuilder 已初始化")
-    return _recall_pack_builder
-
-
 def get_memory_guard() -> MemoryGuard:
     """获取记忆守卫单例（延迟初始化）。"""
     global _memory_guard
@@ -899,7 +911,7 @@ def get_bond_aware_style_engine() -> Any:
 def get_reflection_chain() -> ReflectionChain:
     global _reflection_chain
     if _reflection_chain is None:
-        _reflection_chain = ReflectionChain()
+        _reflection_chain = ReflectionChain(use_llm=True)
     return _reflection_chain
 
 

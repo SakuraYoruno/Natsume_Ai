@@ -44,45 +44,6 @@ SCENE_VISION_UI = "VISION_UI"
 SCENE_GATEWAY = "GATEWAY"
 
 # ---------------------------------------------------------------------------
-# 常驻角色人设（不走检索，每次对话注入 prompt 最前位置）
-# ---------------------------------------------------------------------------
-_CHARACTER_PROFILE_CACHE: dict[str, str] = {}
-
-
-def _load_character_profile(render_lang: str) -> str:
-    """加载常驻角色人设文本（固定中文版）。
-
-    Phase XV 架构决定：
-    - 文字通道永远中文 → 人设永远加载 instruction_cn
-    - TTS 语音通道永远日语 → 语气/风格由台词库控制，不靠人设
-    - instruction_ja 已废弃，不再读取
-    - render_lang 参数保留但忽略（向后兼容，不会报错）
-
-    Returns:
-        中文版角色人设文本（空字符串表示不可用，降级跳过）
-    """
-    cache_key = "zh"
-    if cache_key in _CHARACTER_PROFILE_CACHE:
-        return _CHARACTER_PROFILE_CACHE[cache_key]
-
-    profile_path = Path(
-        os.environ.get("NATSUME_CHARACTER_PROFILE_PATH")
-        or str(Path(__file__).resolve().parent.parent / "canon" / "character" / "character_profile.json")
-    )
-    try:
-        if profile_path.exists():
-            data = json.loads(profile_path.read_text(encoding="utf-8"))
-            text = str(data.get("instruction_cn") or "").strip()
-            if len(text) > 100:
-                _CHARACTER_PROFILE_CACHE[cache_key] = text
-                return text
-    except Exception:
-        pass
-    _CHARACTER_PROFILE_CACHE[cache_key] = ""
-    return ""
-
-
-# ---------------------------------------------------------------------------
 # 动态人设补丁（季节 / 节日 / 当日情绪）
 # ---------------------------------------------------------------------------
 
@@ -720,8 +681,8 @@ def render_host_generation_prompt(prompt_payload: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # 聚合导入（P2-10 拆分后向后兼容）
 # ---------------------------------------------------------------------------
-# render_node_generation_prompt 已移至 prompt_builder_node.py
-from host_brain.app.prompt_builder_node import render_node_generation_prompt  # noqa: F401, E402
+# render_node_generation_prompt 已移至 node_generation_prompt.py
+from host_brain.app.node_generation_prompt import render_node_generation_prompt  # noqa: F401, E402
 
 # 工具函数已移至 prompt_builder_utils.py，此处重新导出以保持向后兼容
 from host_brain.app.prompt_builder_utils import (  # noqa: F401, E402

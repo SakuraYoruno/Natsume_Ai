@@ -741,7 +741,7 @@ class ANSAgent:
     def export_runtime_state(self) -> dict[str, Any]:
         """T-254/T-289：导出 ANSAgent 当前运行时状态快照，并写入 state_registry。
 
-        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用。
+        供 CortexAgent.collect_tribe_context() 和上下文装配主链使用。
         T-289：同时将快照写入 state_registry["ans_agent"]，
         使 vital_signs.aggregate_vital_signs() 能读取 ans_recovery_mode/ans_proactive_multiplier。
 

@@ -30,7 +30,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -173,6 +175,11 @@ def _load_runtime_hints() -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 
+def _load_llm_hint_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("emotional_silence.llm_hints")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
 def _mapping_section(mapping: Mapping[str, Any], key: str) -> dict[str, str]:
     raw = mapping.get(key)
     if isinstance(raw, Mapping):
@@ -184,6 +191,20 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
     text = str(template_text or "")
     if not kwargs:
         return text
+
+
+def _pool_credentials_available() -> bool:
+    for key in (
+        "HOST_GEMINI_API_KEY",
+        "GEMINI_API_KEY",
+        "HOST_MINIMAX_API_KEY",
+        "MINIMAX_API_KEY",
+        "OPENAI_API_KEY",
+        "HOST_OPENAI_API_KEY",
+    ):
+        if str(os.environ.get(key) or "").strip():
+            return True
+    return False
     try:
         return text.format_map({str(k): "" if v is None else str(v) for k, v in kwargs.items()})
     except Exception:
@@ -510,6 +531,22 @@ class EmotionalSilenceEngine:
         else:
             self._active_resistant_topic = ""
 
+        llm_hints = self._maybe_render_llm_hints(
+            current_topic=current_topic,
+            willingness=willingness,
+            level=level,
+            is_resistant=is_resistant,
+            resistant_topic=resistant_topic,
+            silence_hint=silence_hint,
+            topic_resistance_hint=topic_resistance_hint,
+            trigger_reason=self._last_trigger_reason,
+        )
+        if llm_hints:
+            silence_hint = str(llm_hints.get("silence_hint") or silence_hint).strip()
+            topic_resistance_hint = str(
+                llm_hints.get("topic_resistance_hint") or topic_resistance_hint
+            ).strip()
+
         return SilenceState(
             response_willingness=round(willingness, 4),
             willingness_level=level,
@@ -519,6 +556,84 @@ class EmotionalSilenceEngine:
             topic_resistance_hint=topic_resistance_hint,
             trigger_reason=self._last_trigger_reason,
         )
+
+    def _maybe_render_llm_hints(
+        self,
+        *,
+        current_topic: str,
+        willingness: float,
+        level: str,
+        is_resistant: bool,
+        resistant_topic: str,
+        silence_hint: str,
+        topic_resistance_hint: str,
+        trigger_reason: str,
+    ) -> dict[str, Any]:
+        if not _pool_credentials_available():
+            return {}
+        templates = _load_llm_hint_templates()
+        if not templates:
+            return {}
+        try:
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+        except Exception:
+            return {}
+
+        system_prompt = str(templates.get("system_prompt") or "").strip() or (
+            "你负责根据沉默状态生成更自然的提示语，只输出 JSON。"
+        )
+        user_template = str(templates.get("user_prompt") or "").strip() or (
+            "response_willingness={willingness:.2f}\n"
+            "willingness_level={level}\n"
+            "emotion_tag={emotion_tag}\n"
+            "mood_state={mood_state}\n"
+            "current_topic={current_topic}\n"
+            "topic_resistance_active={topic_resistance_active}\n"
+            "resistant_topic={resistant_topic}\n"
+            "trigger_reason={trigger_reason}\n"
+            "rule_silence_hint={silence_hint}\n"
+            "rule_topic_resistance_hint={topic_resistance_hint}\n\n"
+            "请输出 JSON：{{\"silence_hint\":\"...\",\"topic_resistance_hint\":\"...\"}}"
+        )
+        try:
+            result = complete_llm_with_pool_sync(
+                request_id=f"silence_hint::{int(time.time() * 1000)}",
+                scene_type="SILENCE_STATE",
+                cognitive_tier="C",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": user_template.format(
+                            willingness=max(0.0, min(1.0, float(willingness))),
+                            level=str(level or "NORMAL").upper(),
+                            emotion_tag=self._current_emotion_tag,
+                            mood_state=self._current_mood_state,
+                            current_topic=str(current_topic or "").strip() or "无",
+                            topic_resistance_active="true" if is_resistant else "false",
+                            resistant_topic=str(resistant_topic or "").strip() or "无",
+                            trigger_reason=str(trigger_reason or "").strip() or "none",
+                            silence_hint=str(silence_hint or "").strip() or "无",
+                            topic_resistance_hint=str(topic_resistance_hint or "").strip() or "无",
+                        ),
+                    },
+                ],
+                timeout_ms=1800,
+                gen_params={"temperature": 0.35},
+                response_format="json_object",
+            )
+        except Exception:
+            return {}
+        if result.pool_exhausted:
+            return {}
+        try:
+            parsed = json.loads(result.content)
+        except Exception:
+            return {}
+        return {
+            "silence_hint": str(parsed.get("silence_hint") or "").strip(),
+            "topic_resistance_hint": str(parsed.get("topic_resistance_hint") or "").strip(),
+        }
 
     # ── 查询 ──────────────────────────────────────────────────────────────
 

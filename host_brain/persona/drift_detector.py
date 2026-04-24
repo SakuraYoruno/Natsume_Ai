@@ -666,7 +666,7 @@ def _now_ms() -> int:
 
 
 # ---------------------------------------------------------------------------
-# 全局单例（v1.12 新增，供 chat_context_builder 获取风格演变摘要）
+# 全局单例（v1.12 新增，供上下文装配主链获取风格演变摘要）
 # ---------------------------------------------------------------------------
 
 _GLOBAL_DRIFT_DETECTOR: PersonaDriftDetector | None = None
@@ -676,7 +676,7 @@ def get_drift_detector() -> PersonaDriftDetector:
     """获取全局 PersonaDriftDetector 单例（懒加载）。
 
     注意：cortex_orchestrator 链路中的 _drift_detector 是独立实例，用于每轮漂移检测。
-    此全局单例专供 chat_context_builder 读取 get_style_evolution_summary()，
+    此全局单例专供上下文装配主链读取 get_style_evolution_summary()，
     两者共享同一个 _fingerprint_history，通过 cortex_orchestrator 的 on_turn() 驱动写入。
     """
     global _GLOBAL_DRIFT_DETECTOR

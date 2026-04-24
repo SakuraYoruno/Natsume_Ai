@@ -336,6 +336,62 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
     assert schedule_mock.call_count == 1
 
 
+def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> None:
+    first_body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_mm_followup_001",
+        msg_type="emoji",
+        attachments=[
+            {
+                "attachment_id": "att_emoji_followup",
+                "type": "emoji",
+                "ocr_text": "hello",
+            }
+        ],
+    )
+    second_body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_dm_mm_followup_001",
+        content="这个表情包什么意思",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    observer = SimpleNamespace(
+        observe=lambda **_: {
+            "mode": "sync",
+            "observations": {
+                "items": [{"type": "emoji", "reply_focus": "meme_meaning"}],
+                "observed_types": ["emoji"],
+                "summary_for_chat": "用户当前更像是在问这个表情包/图片想表达什么。 目前更稳的理解是：像是在打招呼，语气轻松友好。",
+                "reply_focus": "meme_meaning",
+            },
+            "summary_for_chat": "用户当前更像是在问这个表情包/图片想表达什么。 目前更稳的理解是：像是在打招呼，语气轻松友好。",
+            "safety_flags": [],
+        }
+    )
+
+    input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
+    with patch("host_brain.app.input_routes._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.app.input_routes._try_handle_gateway_progress_fastpath",
+        new=AsyncMock(return_value=False),
+    ), patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer), patch(
+        "host_brain.app.dependencies.notify_user_interaction",
+        return_value=None,
+    ), patch("host_brain.app.input_routes._log_input_event"):
+        first_response = _run(receive_input(first_body, SimpleNamespace()))
+        second_response = _run(receive_input(second_body, SimpleNamespace()))
+
+    assert first_response.status == "ACCEPTED"
+    assert second_response.status == "ACCEPTED"
+    assert dispatch_mock.await_count == 2
+    second_payload = dispatch_mock.await_args_list[1].kwargs["payload"]
+    assert second_payload["multimodal_context_restored"] is True
+    assert second_payload["multimodal_observations"]["reply_focus"] == "meme_meaning"
+    assert second_payload["attachment_summary"].startswith("用户当前更像是在问这个表情包")
+    input_routes_module._GATEWAY_RECENT_MULTIMODAL_CACHE.clear()
+
+
 def test_gateway_reply_text_uses_chinese_while_voice_summary_uses_japanese() -> None:
     reply_text = _build_gateway_reply_text(
         decision="APPROVE",

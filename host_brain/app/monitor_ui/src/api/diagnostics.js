@@ -11,7 +11,6 @@ export {
   fetchMemoryGuardStats,
   fetchPermissionStats,
   fetchPromptBuilderStats,
-  fetchRecallPackStats,
   fetchSchedulerHistory,
   fetchSemanticRecallStats,
   fetchStateArbiterStats,

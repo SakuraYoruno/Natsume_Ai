@@ -91,7 +91,12 @@ def ledger():
         "status": "OK",
         "reason_code": None,
         "stage": "INPUT",
-        "payload": {"phase": "COMPLETED", "source": "GATEWAY", "latency_ms": 2600},
+        "payload": {
+            "phase": "COMPLETED",
+            "source": "GATEWAY",
+            "latency_ms": 2600,
+            "reply_preview": "fallback reply",
+        },
         "detail": "main_chain completed",
         "ts_ms": now - 200,
     })
@@ -249,7 +254,7 @@ def ledger():
         "evidence_refs": ["chat://request/req-int-002"],
         "status": "SUCCESS",
         "reason_code": None,
-        "detail": "memory written: [session=sess-002] User: fallback hello Natsume: fallback reply",
+        "detail": "memory written: [session=sess-002] User: fallback hello",
         "decay_profile_id": None,
         "visibility": "private",
         "ts_ms": now - 120,
@@ -385,7 +390,7 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
             "self_reflection_pulse": {"growth_note": "最近更稳了。"},
             "bond_narrative": {"narratives": ["我还记得你说过那件事。"]},
             "motive_state": {"dominant_motive": "continuity"},
-            "response_policy": {"allow_topic_shift": False},
+            "render_policy": {"allow_topic_shift": False},
             "runtime_summary": {
                 "headline": "mode=focus | offline=6h_plus | motive=continuity | reply=focused",
                 "current_state": {
@@ -401,17 +406,17 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
                     "activity:wakeup",
                     "offline:6h_plus->soft_resume",
                     "motive:continuity",
-                    "response_policy:focused",
+                    "render_policy:focused",
                 ],
                 "core_slots": {
                     "sys_mode": {"value": "focus", "activity_event": "wakeup", "idle_minutes": 3.5},
                     "offline_state": {"absence_band": "6h_plus", "offline_reconnect_style": "soft_resume"},
                     "motive_state": {"dominant_motive": "continuity"},
-                    "response_policy": {"reply_posture": "focused"},
+                    "render_policy": {"reply_posture": "focused"},
                 },
                 "why_reply": ["mode:focus", "motive:continuity"],
             },
-            "slot_status": {"response_policy": "live"},
+            "slot_status": {"render_policy": "live"},
             "degraded": False,
             "degraded_reasons": [],
             "timestamp": 1700000000000,
@@ -455,7 +460,7 @@ def test_runtime_snapshot_returns_unified_state(client, monkeypatch):
     assert data["runtime_summary"]["current_state"]["activity_event"] == "wakeup"
     assert "offline:6h_plus->soft_resume" in data["runtime_summary"]["decision_chain"]
     assert data["runtime_summary"]["core_slots"]["sys_mode"]["activity_event"] == "wakeup"
-    assert data["runtime_summary"]["core_slots"]["response_policy"]["reply_posture"] == "focused"
+    assert data["runtime_summary"]["core_slots"]["render_policy"]["reply_posture"] == "focused"
     assert data["runtime_summary"]["why_reply"][0] == "mode:focus"
     assert data["slot_status"]["sys_mode_status"] == "live"
     assert "interoception_state" in data
@@ -494,7 +499,7 @@ def test_runtime_snapshot_uses_short_ttl_cache(client, monkeypatch):
             "self_reflection_pulse": {},
             "bond_narrative": {},
             "motive_state": {},
-            "response_policy": {},
+            "render_policy": {},
             "somatic_state": {},
             "peripheral_state": {},
             "circadian_state": {},

@@ -28,7 +28,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         dep._graph_runtime = None
         dep._main_chain = None
         dep._routing_matrix = None
-        dep._recall_pack_builder = None
         dep._memory_guard = None
         dep._state_arbiter = None
         dep._state_write_arbiter = None
@@ -120,10 +119,6 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
         inner_world = sys.modules.get("host_brain.persona.inner_world")
         if inner_world is not None:
             inner_world._global_inner_world = None
-
-        response_policy = sys.modules.get("host_brain.persona.response_policy")
-        if response_policy is not None:
-            response_policy._layer = None
 
         drift_detector = sys.modules.get("host_brain.persona.drift_detector")
         if drift_detector is not None:

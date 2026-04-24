@@ -19,8 +19,13 @@ def run_static_scans(
     include_tests: bool = False,
 ) -> dict[str, Any]:
     repo_root = Path(root).resolve()
-    scanner = _load_bond_scan_module()
-    raw_violations = scanner.scan_repo(repo_root, include_tests=include_tests)
+    scanners = (
+        lambda: _load_bond_scan_module().scan_repo(repo_root, include_tests=include_tests),
+        lambda: _load_no_rule_degrade_module().scan_repo(repo_root),
+    )
+    raw_violations: list[dict[str, Any]] = []
+    for loader in scanners:
+        raw_violations.extend(loader())
     failures: list[dict[str, Any]] = []
 
     for row in raw_violations:
@@ -69,6 +74,17 @@ def main(argv: list[str] | None = None) -> int:
 def _load_bond_scan_module():
     script_path = Path(__file__).resolve().parent / "bond_ssot_scan.py"
     spec = importlib.util.spec_from_file_location("bond_ssot_scan", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load static scan script: {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_no_rule_degrade_module():
+    script_path = Path(__file__).resolve().parents[1] / ".." / "scripts" / "ci" / "check_no_rule_degrade.py"
+    script_path = script_path.resolve()
+    spec = importlib.util.spec_from_file_location("check_no_rule_degrade", script_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load static scan script: {script_path}")
     module = importlib.util.module_from_spec(spec)

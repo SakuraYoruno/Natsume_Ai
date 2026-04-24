@@ -4,9 +4,10 @@ from edge_client.gateway.bootstrap import GatewayConfig, _wechat_bridge_backend,
 
 
 class _FakeReporter:
-    def __init__(self, host_url: str, hmac_key: str | None) -> None:
+    def __init__(self, host_url: str, hmac_key: str | None, timeout_s: float | None = None) -> None:
         self.host_url = host_url
         self.hmac_key = hmac_key
+        self.timeout_s = timeout_s
 
     def start_retry_loop(self) -> None:
         return None

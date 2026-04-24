@@ -6,8 +6,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -227,6 +230,31 @@ def _build_revision_empathy_prefix(*, render_target_lang: str = "zh") -> str:
     )
 
 
+def _load_reflection_llm_templates() -> dict[str, Any]:
+    raw = resolve_prompt_template_json_merged("reflection_chain.llm_templates")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _coerce_score(value: Any, default: float) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except Exception:
+        return float(default)
+
+
+def _merge_issue_lists(*lists: list[str]) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for items in lists:
+        for item in list(items or []):
+            normalized = str(item or "").strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(normalized)
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # 数据类
 # ---------------------------------------------------------------------------
@@ -310,6 +338,8 @@ class ReflectionChain:
         *,
         pass_threshold: float = 0.75,
         weights: dict[str, float] | None = None,
+        use_llm: bool = False,
+        llm_timeout_ms: int = 2800,
     ) -> None:
         self._threshold = float(pass_threshold)
         self._weights = dict(weights or {
@@ -319,6 +349,8 @@ class ReflectionChain:
             DIMENSION_INFO_ACCURACY: 0.15,
             DIMENSION_LENGTH_APPROPRIATE: 0.10,
         })
+        self._use_llm = bool(use_llm)
+        self._llm_timeout_ms = max(800, int(llm_timeout_ms))
 
     def should_reflect(
         self,
@@ -414,7 +446,7 @@ class ReflectionChain:
             {d.dimension: f"{d.score:.2f}" for d in dimensions},
         )
 
-        return ReflectionResult(
+        result = ReflectionResult(
             overall_score=overall,
             passed=passed,
             dimension_scores=dimensions,
@@ -422,6 +454,16 @@ class ReflectionChain:
             revision_hints=revision_hints[:3],
             should_revise=should_revise,
         )
+        llm_payload = self._maybe_llm_reflect(
+            user_message=user_msg,
+            ai_response=ai_resp,
+            emotion_tag=emotion_tag,
+            bond_stage=bond_stage,
+            deterministic_result=result,
+        )
+        if llm_payload is not None:
+            return self._merge_llm_reflection(result, llm_payload)
+        return result
 
     def revise(
         self,
@@ -444,8 +486,55 @@ class ReflectionChain:
         original = str(ai_response or "").strip()
         revised = original
         operations: list[str] = []
+        llm_revised = ""
 
-        if not original:
+        if before.should_revise:
+            llm_revised = self._maybe_llm_revise(
+                user_message=user_message,
+                ai_response=original,
+                emotion_tag=emotion_tag,
+                bond_stage=bond_stage,
+                reflection=before,
+                render_target_lang=render_target_lang,
+            )
+
+        if llm_revised:
+            revised = llm_revised
+            operations.append("llm_revise")
+            if _AI_SELF_REF_PATTERN.search(revised):
+                revised = _AI_SELF_REF_PATTERN.sub("", revised)
+                operations.append("llm_strip_ai_self_reference")
+            if _CUSTOMER_SERVICE_PATTERN.search(revised):
+                revised = _CUSTOMER_SERVICE_PATTERN.sub("", revised)
+                operations.append("llm_strip_customer_service_tone")
+            if _SYSTEM_STATUS_PATTERN.search(revised):
+                revised = _SYSTEM_STATUS_PATTERN.sub("", revised)
+                operations.append("llm_strip_system_status_language")
+            revised = re.sub(r"\s+", " ", revised).strip(" ，,。.!！？")
+            if not revised:
+                revised = _build_contextual_revision_fallback(
+                    user_message=user_message,
+                    bond_stage=bond_stage,
+                    render_target_lang=render_target_lang,
+                )
+                operations.append("fallback_after_llm_cleanup")
+            elif len(revised) < 6 and str(user_message or "").strip():
+                revised = _build_contextual_revision_fallback(
+                    user_message=user_message,
+                    bond_stage=bond_stage,
+                    render_target_lang=render_target_lang,
+                )
+                operations.append("replace_too_short_llm_reply")
+
+            user_len = len(str(user_message or "").strip())
+            if user_len < 16 and len(revised) > 120:
+                sentence_break = max(revised.find("。"), revised.find("！"), revised.find("？"))
+                if 0 < sentence_break < 118:
+                    revised = revised[: sentence_break + 1]
+                else:
+                    revised = revised[:117].rstrip() + "。"
+                operations.append("trim_llm_overlong_reply")
+        elif not original:
             revised = _build_contextual_revision_fallback(
                 user_message=user_message,
                 bond_stage=bond_stage,
@@ -548,6 +637,164 @@ class ReflectionChain:
             reflection_before=before,
             reflection_after=after,
         )
+
+    def _maybe_llm_reflect(
+        self,
+        *,
+        user_message: str,
+        ai_response: str,
+        emotion_tag: str,
+        bond_stage: str,
+        deterministic_result: ReflectionResult,
+    ) -> dict[str, Any] | None:
+        if not self._use_llm:
+            return None
+        try:
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+
+            templates = _load_reflection_llm_templates()
+            reflect_tpl = dict(templates.get("reflect") or {})
+            system_prompt = str(reflect_tpl.get("system_prompt") or "").strip()
+            user_tpl = str(reflect_tpl.get("user_prompt_template") or "").strip()
+            if not system_prompt or not user_tpl:
+                return None
+            prompt = user_tpl.format(
+                user_message=user_message,
+                ai_response=ai_response,
+                emotion_tag=str(emotion_tag or "neutral"),
+                bond_stage=str(bond_stage or "STRANGER"),
+                deterministic_result_json=json.dumps(deterministic_result.as_dict(), ensure_ascii=False),
+                dimensions_json=json.dumps(
+                    {
+                        item.dimension: {
+                            "score": round(item.score, 3),
+                            "issues": list(item.issues or []),
+                        }
+                        for item in deterministic_result.dimension_scores
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            result = complete_llm_with_pool_sync(
+                request_id=f"reflection::{int(time.time() * 1000)}",
+                scene_type="REFLECTION",
+                cognitive_tier="B",
+                timeout_ms=self._llm_timeout_ms,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format="json_object",
+                gen_params={"temperature": 0.1, "top_p": 0.9},
+            )
+            if result.pool_exhausted or not str(result.content or "").strip():
+                return None
+            parsed = json.loads(str(result.content or "{}"))
+            return dict(parsed) if isinstance(parsed, Mapping) else None
+        except Exception as exc:
+            _logger.debug("Reflection llm reflect skipped: %s", exc)
+            return None
+
+    def _merge_llm_reflection(
+        self,
+        deterministic_result: ReflectionResult,
+        llm_payload: Mapping[str, Any],
+    ) -> ReflectionResult:
+        raw_dimensions = llm_payload.get("dimensions")
+        dimension_map = dict(raw_dimensions) if isinstance(raw_dimensions, Mapping) else {}
+        merged_dimensions: list[DimensionScore] = []
+        for item in deterministic_result.dimension_scores:
+            llm_dimension = dimension_map.get(item.dimension)
+            llm_score = item.score
+            llm_issues: list[str] = []
+            if isinstance(llm_dimension, Mapping):
+                llm_score = _coerce_score(llm_dimension.get("score"), item.score)
+                raw_issues = llm_dimension.get("issues")
+                if isinstance(raw_issues, list):
+                    llm_issues = [str(entry).strip() for entry in raw_issues if str(entry or "").strip()]
+            merged_dimensions.append(
+                DimensionScore(
+                    dimension=item.dimension,
+                    score=(item.score + llm_score) / 2.0,
+                    issues=_merge_issue_lists(item.issues, llm_issues),
+                )
+            )
+        llm_overall = llm_payload.get("overall_score")
+        overall_score = deterministic_result.overall_score
+        if llm_overall is not None:
+            overall_score = (overall_score + _coerce_score(llm_overall, overall_score)) / 2.0
+        issues = _merge_issue_lists(
+            deterministic_result.issues,
+            [str(item).strip() for item in list(llm_payload.get("issues") or []) if str(item or "").strip()],
+        )
+        hints = _merge_issue_lists(
+            deterministic_result.revision_hints,
+            [str(item).strip() for item in list(llm_payload.get("revision_hints") or []) if str(item or "").strip()],
+        )[:3]
+        should_revise = bool(llm_payload.get("should_revise", deterministic_result.should_revise))
+        passed = bool(llm_payload.get("passed", overall_score >= self._threshold))
+        if should_revise:
+            passed = False
+        return ReflectionResult(
+            overall_score=overall_score,
+            passed=passed,
+            dimension_scores=merged_dimensions,
+            issues=issues,
+            revision_hints=hints,
+            should_revise=should_revise,
+        )
+
+    def _maybe_llm_revise(
+        self,
+        *,
+        user_message: str,
+        ai_response: str,
+        emotion_tag: str,
+        bond_stage: str,
+        reflection: ReflectionResult,
+        render_target_lang: str,
+    ) -> str:
+        if not self._use_llm:
+            return ""
+        try:
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+
+            templates = _load_reflection_llm_templates()
+            revise_tpl = dict(templates.get("revise") or {})
+            system_prompt = str(revise_tpl.get("system_prompt") or "").strip()
+            user_tpl = str(revise_tpl.get("user_prompt_template") or "").strip()
+            if not system_prompt or not user_tpl:
+                return ""
+            prompt = user_tpl.format(
+                user_message=str(user_message or ""),
+                ai_response=str(ai_response or ""),
+                emotion_tag=str(emotion_tag or "neutral"),
+                bond_stage=str(bond_stage or "STRANGER"),
+                render_target_lang=str(render_target_lang or "zh"),
+                revision_hints_json=json.dumps(list(reflection.revision_hints or []), ensure_ascii=False),
+                issues_json=json.dumps(list(reflection.issues or []), ensure_ascii=False),
+            )
+            result = complete_llm_with_pool_sync(
+                request_id=f"reflection-revise::{int(time.time() * 1000)}",
+                scene_type="REFLECTION_REVISE",
+                cognitive_tier="B",
+                timeout_ms=self._llm_timeout_ms,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format="json_object",
+                gen_params={"temperature": 0.18, "top_p": 0.92},
+            )
+            if result.pool_exhausted or not str(result.content or "").strip():
+                return ""
+            parsed = json.loads(str(result.content or "{}"))
+            if not isinstance(parsed, Mapping):
+                return ""
+            return str(parsed.get("revised_text") or "").strip()
+        except Exception as exc:
+            _logger.debug("Reflection llm revise skipped: %s", exc)
+            return ""
 
     # ── 各维度评估 ────────────────────────────────────────────────────────
 

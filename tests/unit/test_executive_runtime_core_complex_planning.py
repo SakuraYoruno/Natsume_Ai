@@ -131,6 +131,21 @@ def test_hard_rule_route_respects_explicit_plan_before_keyword_rule() -> None:
     assert route.reason_code == "intent_draft:plan"
 
 
+def test_hard_rule_route_forces_relational_followup_back_to_chat() -> None:
+    route = _hard_rule_route(
+        intent_draft={
+            "route": "delegate",
+            "target_id": "intent_agent",
+        },
+        sanitized_message="那你还会帮我吗",
+        skill_registry=_StubSkillRegistry(),
+    )
+
+    assert route.route_type == "chat"
+    assert route.target_id == ""
+    assert route.reason_code == "RELATIONAL_CHAT:help_commitment"
+
+
 def test_build_plan_chat_outcome_preserves_structured_steps() -> None:
     plan = SkillDagPlan(
         plan_id="plan::req-structured",

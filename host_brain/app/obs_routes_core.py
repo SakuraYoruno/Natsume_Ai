@@ -313,7 +313,7 @@ def _infer_trace_group_id(
     if normalized_id in {"emotion_context", "persona_resident_memory", "motive_state"}:
         return "persona"
 
-    if normalized_id in _CORTEX_ORCHESTRATOR_NODE_IDS or normalized_id == "response_policy":
+    if normalized_id in _CORTEX_ORCHESTRATOR_NODE_IDS or normalized_id == "render_policy":
         return "orchestration"
 
     if normalized_id in _EXECUTIVE_ROUTER_NODE_IDS or normalized_id in {"chat_agent"} or normalized_id.startswith("sub_agent"):
@@ -890,7 +890,7 @@ def _is_placeholder_preview(value: str) -> bool:
 def _extract_dialogue_pair(memory_rows: List[Dict[str, Any]]) -> tuple[Optional[str], Optional[str]]:
     for row in reversed(memory_rows):
         detail = str(row.get("detail") or "").strip()
-        if "User:" not in detail or "Natsume:" not in detail:
+        if "User:" not in detail:
             continue
         user_part = detail.split("User:", 1)[1]
         user_text, _, reply_text = user_part.partition("Natsume:")
@@ -1348,19 +1348,19 @@ def _build_orchestration_trace_nodes(
     node_timings_ms = dict(summary.get("node_timings_ms") or {})
     ts_ms = audit_snapshot.get("ts_ms") or _now_ms()
     failure_event = summary.get("failure_event")
-    response_policy = audit_snapshot.get("response_policy")
+    render_policy = audit_snapshot.get("render_policy")
 
     nodes: List[TraceNode] = []
-    if isinstance(response_policy, dict) and response_policy:
+    if isinstance(render_policy, dict) and render_policy:
         nodes.append(
             TraceNode(
-                node_id="response_policy",
+                node_id="render_policy",
                 node_type="system",
-                display_name="Response Policy",
+                display_name="Render Policy",
                 side="host",
                 status="OK",
-                latency_ms=node_timings_ms.get("response_policy"),
-                output_data=response_policy,
+                latency_ms=node_timings_ms.get("render_policy"),
+                output_data=render_policy,
                 ts_ms=ts_ms,
             )
         )
@@ -1670,7 +1670,7 @@ def _trace_node_order_rank(node: TraceNode) -> int:
         return 36
     if node_id == "motive_state":
         return 37
-    if node_id == "response_policy":
+    if node_id == "render_policy":
         return 38
     if node_id == "cortex_orchestrator":
         return 39

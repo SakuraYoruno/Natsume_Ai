@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
+import host_brain.integrations.llm_helpers as llm_helpers
 from host_brain.integrations.llm_helpers import stream_llm_chunks
 
 
@@ -23,8 +25,10 @@ def test_stream_llm_chunks_passes_max_tokens_to_chat_openai(monkeypatch) -> None
             model_id="gemini-2.5-flash-lite",
             api_key="test-key",
             timeout_ms=5000,
-            prompt_text="今天有点累，抱抱我吧。",
-            system_prompt="你是夏目蓝。",
+            messages=[
+                {"role": "system", "content": "你是夏目蓝。"},
+                {"role": "user", "content": "今天有点累，抱抱我吧。"},
+            ],
             gen_params={"temperature": 0.7, "top_p": 0.9, "max_tokens": 96},
         )
     )
@@ -51,11 +55,107 @@ def test_stream_llm_chunks_accepts_max_output_tokens_alias(monkeypatch) -> None:
             model_id="gemini-2.5-flash-lite",
             api_key="test-key",
             timeout_ms=5000,
-            prompt_text="在吗",
-            system_prompt="你是夏目蓝。",
+            messages=[
+                {"role": "system", "content": "你是夏目蓝。"},
+                {"role": "user", "content": "在吗"},
+            ],
             gen_params={"max_output_tokens": 128},
         )
     )
 
     assert chunks == ["在。"]
     assert captured["max_tokens"] == 128
+
+
+class _FakeStreamingHTTPResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = [line.encode("utf-8") for line in lines]
+        self._index = 0
+
+    def readline(self) -> bytes:
+        if self._index >= len(self._lines):
+            return b""
+        value = self._lines[self._index]
+        self._index += 1
+        return value
+
+    def __enter__(self) -> "_FakeStreamingHTTPResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:  # noqa: ANN001
+        return False
+
+
+def test_stream_llm_chunks_uses_minimax_standard_sse_for_m2_her(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request, timeout=0):  # noqa: ANN001, ANN202
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeStreamingHTTPResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"夏目"}}]}\n',
+                "\n",
+                'data: {"choices":[{"delta":{"content":"蓝。"}}]}\n',
+                "\n",
+                'data: {"choices":[{"message":{"content":"夏目蓝。"}}]}\n',
+                "\n",
+            ]
+        )
+
+    monkeypatch.setattr(llm_helpers.urllib.request, "urlopen", _fake_urlopen)
+
+    chunks = list(
+        stream_llm_chunks(
+            provider_name="minimax",
+            model_id="M2-her",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[
+                {"role": "system", "content": "你是夏目蓝。"},
+                {"role": "user", "content": "你是"},
+            ],
+        )
+    )
+
+    assert chunks == ["夏目", "蓝。"]
+    assert captured["url"] == "https://api.minimaxi.com/v1/text/chatcompletion_v2"
+    assert captured["timeout"] == 5.0
+    assert captured["body"] == {
+        "model": "M2-her",
+        "messages": [
+            {"role": "system", "content": "你是夏目蓝。"},
+            {"role": "user", "content": "你是"},
+        ],
+        "stream": True,
+        "temperature": 0.4,
+        "top_p": 0.9,
+        "max_completion_tokens": 1024,
+    }
+
+
+def test_stream_llm_chunks_minimax_standard_falls_back_to_final_message_when_no_delta(monkeypatch) -> None:
+    def _fake_urlopen(_request, timeout=0):  # noqa: ANN001, ANN202
+        return _FakeStreamingHTTPResponse(
+            [
+                'data: {"choices":[{"message":{"content":"夏目蓝。"}}]}\n',
+                "\n",
+            ]
+        )
+
+    monkeypatch.setattr(llm_helpers.urllib.request, "urlopen", _fake_urlopen)
+
+    chunks = list(
+        stream_llm_chunks(
+            provider_name="minimax",
+            model_id="M2-her",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[
+                {"role": "user", "content": "你是"},
+            ],
+        )
+    )
+
+    assert chunks == ["夏目蓝。"]

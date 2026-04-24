@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from host_brain.app import prompt_builder as pb
+from host_brain.app.context.soul_runtime import load_compiled_soul
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.app.prompt_template_store import (
     PromptTemplateStore,
@@ -37,26 +38,52 @@ def test_script_detection_text_helpers_and_evidence_limit(monkeypatch: pytest.Mo
     assert pb.infer_render_target_lang(user_message="こんにちは") == "ja"
 
 
-def test_character_profile_loader_handles_short_invalid_and_cached_payload(
+def test_compiled_soul_loader_handles_short_invalid_and_cached_payload(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    profile_path = tmp_path / "character_profile.json"
-    pb._CHARACTER_PROFILE_CACHE.clear()
-
-    profile_path.write_text("{bad json", encoding="utf-8")
-    monkeypatch.setenv("NATSUME_CHARACTER_PROFILE_PATH", str(profile_path))
-    assert pb._load_character_profile("ja") == ""
-
-    long_text = "你是测试版夏目蓝，请保持稳定和自然的语气。" * 8
-    profile_path.write_text(
-        json.dumps({"instruction_cn": long_text}, ensure_ascii=False),
+    soul_path = tmp_path / "Soul.md"
+    soul_path.write_text(
+        "\n".join(
+            [
+                "## 一、基本角色档案",
+                "| 属性 | 信息 |",
+                "|------|------|",
+                "| 中文名 | 新海 天 |",
+                "| 学校 | 白泉学园 一年级生 |",
+                "| 关系 | 新海翔（哥哥）的亲妹妹 |",
+                "",
+                "## 三、核心性格",
+                "- 天然活泼",
+                "- 嘴甜爱撒娇",
+                "",
+                "## 四、与“哥哥”关系模式",
+                "- 默认称呼：哥哥",
+                "- 用调侃和热闹掩盖真正的依赖感",
+                "",
+                "## 五、AI伴侣语气风格",
+                "- 说话节奏快，但有温度",
+                "### 禁忌风格",
+                "- 不做病娇控制欲",
+                "",
+                "## 八、一句话总纲",
+                "> 新海天是一个外向活泼、爱黏哥哥的 AI 伴侣。",
+            ]
+        ),
         encoding="utf-8",
     )
-    pb._CHARACTER_PROFILE_CACHE.clear()
-    assert long_text in pb._load_character_profile("zh")
-    profile_path.write_text("{}", encoding="utf-8")
-    assert long_text in pb._load_character_profile("zh")
+    monkeypatch.setenv("HOST_SOUL_MD_PATH", str(soul_path))
+
+    compiled = load_compiled_soul(force=True)
+    assert "新海 天" in compiled.identity_core
+    assert "新海天是一个外向活泼" in compiled.runtime_compact_text
+
+    cached = load_compiled_soul()
+    assert cached is compiled
+
+    soul_path.write_text("## 一、基本角色档案\n| 属性 | 信息 |\n|------|------|\n| 中文名 | 改写版 新海 天 |\n", encoding="utf-8")
+    refreshed = load_compiled_soul(force=True)
+    assert "改写版 新海 天" in refreshed.identity_core
 
 
 def test_build_character_dynamic_patch_and_direct_response_priority() -> None:
@@ -183,7 +210,6 @@ def test_builtin_prompt_builder_runtime_templates_are_clean() -> None:
     assert persona_expression_templates["zh"]["default_guidance"] == "保持真诚、克制和分寸。"
     assert persona_expression_templates["ja"]["default_guidance"] == "誠実に、静かに、分を越えずに。"
     assert runtime_section_templates["bond_aware_title"] == "BOND_AWARE_STYLE:\n"
-    assert runtime_section_templates["memory_recall_evidence_guidance"].startswith("- Use these tagged recall snippets")
     assert emotion_binding_templates["zh"]["echo_intensity"]["high"] == "明显被带动"
     assert emotion_binding_templates["ja"]["echo_intensity"]["high"] == "強く引かれている"
     assert emotion_binding_templates["zh"]["vad"]["default"] == "情绪平稳"
@@ -450,13 +476,13 @@ def test_render_node_generation_prompt_uses_render_contract_template_override(
     assert "- rc-empty" in prompt
 
 
-def test_render_node_generation_prompt_uses_response_policy_template_override(
+def test_render_node_generation_prompt_uses_render_policy_template_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
     store.upsert_template(
-        "prompt_builder.response_policy.directives",
+        "prompt_builder.render_policy.directives",
         content=json.dumps(
             {
                 "no_followup": "这一轮不要追问。",
@@ -487,7 +513,7 @@ def test_render_node_generation_prompt_uses_response_policy_template_override(
                 "observability": {},
             },
             "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "response_policy": {
+            "render_policy": {
                 "allow_followup": False,
                 "max_sentences": 2,
             },
@@ -550,63 +576,6 @@ def test_render_node_generation_prompt_uses_persona_expression_template_override
     assert "先轻轻接住对方，再慢慢回应。" in prompt
 
 
-def test_render_node_generation_prompt_includes_memory_recall_persona_block() -> None:
-    prompt = pb.render_node_generation_prompt(
-        node_id=pb.CHAT_DIRECT_NODE_ID,
-        runtime_payload={
-            "request": {
-                "request_id": "req-memory-recall-prompt",
-                "person_id": "person-memory-recall-prompt",
-                "session_id": "session-memory-recall-prompt",
-                "thread_id": None,
-                "user_message": "我突然想起以前一起散步的时候了",
-            },
-            "render": {"target_lang": "zh"},
-            "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "emotion": {
-                "state": {"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.56},
-                "snapshot": {"emotion_context": {"mood_state": "steady", "emotion_tag": "HAPPY", "emotion_intensity": 0.56}},
-            },
-            "prompt_context": {
-                "payload": {
-                    "hard_snapshot": {"session_id": "session-memory-recall-prompt", "thread_id": None},
-                    "bond_summary": {},
-                    "authoritative": [],
-                    "retrieval": [],
-                    "style_pack": {},
-                    "constraints": {"strict_json_output": True},
-                    "tool_meta_pack": [],
-                    "emotion_pulse": {"emotion_tag": "HAPPY", "mood_state": "steady"},
-                    "emotion_recall": "Current affective layer: mood_state=steady; emotion_tag=HAPPY.",
-                    "memory_emotion_hint": {"recall_bias": "uncertain"},
-                    "memory_persona_evidence": [
-                        {
-                            "content": "shared walk by the river",
-                            "emotion_color_tag": "WARM",
-                            "suppression_flag": True,
-                            "distortion_level": 0.4,
-                        }
-                    ],
-                    "memory_recall_summary": "本次召回命中了 2 条带人格化标记的记忆；其中 1 条处于压制状态；处理建议：先轻触试探，不要把旧事说得过满",
-                    "bond_texture": {},
-                },
-                "validation": {"valid": True, "reason_code": None, "violation_count": 0},
-                "observability": {},
-            },
-            "core_reasoner_primary": {"payload": {"narrative": {"text": "core narrative"}, "intent_draft": {}}},
-            "planner_constraints": {"payload": {"narrative": {"text": "planner"}}},
-            "safety_verifier": {"payload": {"narrative": {"text": "safe"}}},
-        },
-    )
-
-    assert "MEMORY_RECALL_PERSONA" in prompt
-    assert "MEMORY_RECALL_EVIDENCE" in prompt
-    assert "filtered recollections" in prompt
-    assert "shared walk by the river" in prompt
-    assert "emotion=WARM" in prompt
-    assert "本次召回命中了 2 条带人格化标记的记忆" in prompt
-
-
 def test_render_node_generation_prompt_includes_motive_guidance_in_expression_hint() -> None:
     prompt = pb.render_node_generation_prompt(
         node_id="cortex_orchestrator",
@@ -656,7 +625,7 @@ def test_render_node_generation_prompt_includes_narrative_guardrail_prompt_direc
                 "observability": {},
             },
             "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "response_policy": {
+            "render_policy": {
                 "allow_followup": False,
                 "allow_topic_shift": False,
                 "allow_proactive_after_reply": False,
@@ -713,9 +682,6 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
                 "planning_execution_title": "PLAN_EXEC_BLOCK:\n",
                 "multimodal_input_title": "MULTI_INPUT_BLOCK:\n",
                 "emotion_recall_title": "EMOTION_RECALL_BLOCK:\n",
-                "memory_recall_persona_title": "MEMORY_PERSONA_BLOCK:\n",
-                "memory_recall_evidence_title": "MEMORY_EVIDENCE_BLOCK:\n",
-                "memory_recall_evidence_guidance": "- 把这些片段当作模糊记忆线索，不要当作硬证据。\n",
             },
             ensure_ascii=False,
         ),
@@ -739,15 +705,6 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
                     "style_pack": {},
                     "constraints": {},
                     "emotion_recall": "Current affective layer: mood_state=steady.",
-                    "memory_persona_evidence": [
-                        {
-                            "content": "shared walk by the river",
-                            "emotion_color_tag": "WARM",
-                            "suppression_flag": True,
-                            "distortion_level": 0.4,
-                        }
-                    ],
-                    "memory_recall_summary": "本次召回命中了带人格线索的记忆。",
                 },
                 "validation": {"valid": True, "reason_code": "NONE", "violation_count": 0},
                 "observability": {},
@@ -776,9 +733,6 @@ def test_render_node_generation_prompt_uses_runtime_sections_template_override(
     assert "PLAN_EXEC_BLOCK" in prompt
     assert "MULTI_INPUT_BLOCK" in prompt
     assert "EMOTION_RECALL_BLOCK" in prompt
-    assert "MEMORY_PERSONA_BLOCK" in prompt
-    assert "MEMORY_EVIDENCE_BLOCK" in prompt
-    assert "模糊记忆线索" in prompt
 
 
 def test_render_node_generation_prompt_uses_self_reflection_template_override(
@@ -818,7 +772,7 @@ def test_render_node_generation_prompt_uses_self_reflection_template_override(
                 "observability": {},
             },
             "retrieval": {"status": "OK", "reason_code": "NONE", "evidence_items": []},
-            "response_policy": {
+            "render_policy": {
                 "allow_followup": False,
                 "max_sentences": 2,
             },

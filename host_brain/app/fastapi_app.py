@@ -658,6 +658,45 @@ async def chat(request_body: ChatRequest, request: Request) -> StreamingResponse
         request_body=request_body,
     )
     if fastpath_payload is not None:
+        try:
+            from host_brain.conversation.writer import record_assistant_turn, record_user_turn  # noqa: PLC0415
+
+            session_id = str(fastpath_payload.get("session_id") or request_body.session_id or f"session::{request_id}").strip()
+            person_id = str(getattr(request_body, "person_id", None) or "").strip() or "default"
+            input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
+            reply_channel = str(getattr(request_body, "reply_channel", None) or "").strip()
+            render_target_lang = str(fastpath_payload.get("render_target_lang") or "zh").strip().lower() or "zh"
+            now_ms = int(time.time() * 1000)
+            record_user_turn(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=str(request_body.message or ""),
+                ts_ms=now_ms,
+                lang=render_target_lang,
+                metadata={
+                    "input_source": input_source,
+                    "reply_channel": reply_channel,
+                    "fastpath": "phatic_fastpath",
+                },
+            )
+            record_assistant_turn(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=str(fastpath_payload.get("reply") or ""),
+                ts_ms=now_ms + 1,
+                lang=render_target_lang,
+                metadata={
+                    "provider_name": "host",
+                    "model_id": "deterministic-plan-renderer",
+                    "fallback": False,
+                    "fastpath": "phatic_fastpath",
+                },
+            )
+        except Exception as exc:
+            _logger.warning("chat http fastpath conversation_turn write degraded: %s", exc)
+
         _metrics.inc_chat()
         latency_ms = max(0, int(time.time() * 1000) - fastpath_started_ms)
         reply = str(fastpath_payload.get("reply") or "").strip()

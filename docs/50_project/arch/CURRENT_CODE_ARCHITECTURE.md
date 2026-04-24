@@ -1,11 +1,11 @@
 受众：MASTER
-标题：当前代码架构总览（2026-04-19）
+标题：当前代码架构总览（2026-04-22）
 
-版本：v2.1
-日期：2026-04-19
+版本：v2.2
+日期：2026-04-22
 定位：以当前仓库代码为准，说明运行面、入口、主链、目录和监控前端结构。若历史方案文档与本文冲突，以本文和代码为准。
 
-# 当前代码架构总览（2026-04-19）
+# 当前代码架构总览（2026-04-22）
 
 ## 0. 快速导航
 
@@ -149,6 +149,18 @@ Natsume_Ai/
 - ECharts
 - XYFlow
 - Zustand
+
+### 5.3 当前 LLM 恢复落点
+
+截至 2026-04-22，当前代码已经把“全认知能力 LLM 恢复”中的共享底座落到运行面：
+
+- 共享池入口：`host_brain/integrations/llm_helpers.py` + `host_brain/integrations/llm_gateway.py::complete_with_pool()`
+- 当前 tier：A/B/C/D 四档，Gemini 与 MiniMax 组成主备候选池
+- 审计面：`llm_pool_call_log` + `LLM_POOL_EXHAUSTED` 已落库到 ledger
+- 主链接池：`chat_agent.py`、`thalamus_agent.py`、`multimodal_observer_backends.py`、`emotion_llm_inference.py`
+- 认知接池：`reflection_chain.py`、`self_reflection.py`、`evolution_desire_engine.py`、`bond_narrative.py`、`style_distiller.py`
+- 记忆层补点：`hippocampus_agent.py` recall 后联想摘要、`memory/distillation.py`、`long_term_distiller.py`
+- 调度治理：`scheduler.py` 已对后台 LLM 任务增加 `focus / gaming / sleep` 模式 allowlist 和 `LLM_POOL_EXHAUSTED -> SKIPPED` 收口
 
 ## 6. 聊天主链
 

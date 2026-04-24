@@ -119,58 +119,6 @@ def test_record_executive_handoff_records_and_emits(monkeypatch) -> None:
     assert emitted_events[0]["payload"]["route"] == "skill"
 
 
-def test_build_chat_input_drops_pre_resolved_runtime_for_direct_fast_chat() -> None:
-    request_body = SimpleNamespace(reply_channel=None, suppress_edge_tts=None, suppress_edge_vts=None)
-
-    chat_input = _build_chat_input(
-        request_body=request_body,
-        request_id="req-chat-fast-001",
-        session_id="sess-chat-fast-001",
-        person_id="person-chat-fast-001",
-        sanitized_message="今天有点累，抱抱我吧。",
-        emotion_context={},
-        emotion_snapshot={},
-        bond_summary={},
-        recall_slot_text={},
-        retrieval_evidence_items=[],
-        retrieval_summary={},
-        render_target_lang="zh",
-        llm_runtime={"provider_name": "gemini", "model_id": "gemini-2.5-pro"},
-        ts_ms=123456,
-        intent_draft={"route": "chat", "chat_speed_profile": "direct_fast"},
-        trace_stage_meta={},
-        sub_agent_context=None,
-    )
-
-    assert chat_input.llm_runtime is None
-
-
-def test_build_chat_input_drops_pre_resolved_runtime_for_context_fast_chat() -> None:
-    request_body = SimpleNamespace(reply_channel=None, suppress_edge_tts=None, suppress_edge_vts=None)
-
-    chat_input = _build_chat_input(
-        request_body=request_body,
-        request_id="req-chat-context-001",
-        session_id="sess-chat-context-001",
-        person_id="person-chat-context-001",
-        sanitized_message="我今天其实有点想和你认真聊聊最近的状态。",
-        emotion_context={},
-        emotion_snapshot={},
-        bond_summary={},
-        recall_slot_text={},
-        retrieval_evidence_items=[],
-        retrieval_summary={},
-        render_target_lang="zh",
-        llm_runtime={"provider_name": "gemini", "model_id": "gemini-2.5-pro"},
-        ts_ms=123456,
-        intent_draft={"route": "chat", "chat_speed_profile": "context_fast"},
-        trace_stage_meta={},
-        sub_agent_context=None,
-    )
-
-    assert chat_input.llm_runtime is None
-
-
 def _run(coro):
     return asyncio.run(coro)
 

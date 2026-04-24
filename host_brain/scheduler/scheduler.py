@@ -17,6 +17,7 @@ import uuid
 from typing import Any, Callable
 
 from host_brain.core.errors import (
+    LLM_POOL_EXHAUSTED,
     SCHED_CONDITION_UNMET,
     SCHED_NO_CONTENT,
     SCHED_TASK_SUSPENDED,
@@ -70,9 +71,28 @@ IntentDispatcher = Callable[[dict[str, Any]], dict[str, Any]]
 ConditionChecker = Callable[[SchedulerTaskConfig, str], tuple[bool, str | None]]
 
 _DEFAULT_ENDOCRINE_LOW_RISK_ALLOWLIST = {
-    "inner_world_tick",
+    "inner_world_numeric_tick",
+    "inner_world_monologue_tick",
     "silence_tick",
     "body_sense_tick",
+}
+_DEFAULT_BACKGROUND_LLM_TASK_IDS = {
+    "proactive_talk_periodic",
+    "evolution_cycle_daily",
+    "inner_world_monologue_tick",
+    "gaming_companion_tick",
+    "emergent_growth_weekly",
+    "long_term_memory_distillation",
+}
+_DEFAULT_FOCUS_BACKGROUND_LLM_ALLOWLIST = {
+    "agent_health_check",
+}
+_DEFAULT_GAMING_BACKGROUND_LLM_ALLOWLIST = {
+    "agent_health_check",
+    "gaming_companion_tick",
+}
+_DEFAULT_SLEEP_BACKGROUND_LLM_ALLOWLIST = {
+    "agent_health_check",
 }
 _DEFAULT_ENDOCRINE_PROACTIVE_TASKS = {
     "proactive_talk_periodic",
@@ -149,6 +169,12 @@ def _task_id_key(task_id: str | None) -> str:
     return str(task_id or "").strip().lower()
 
 
+def _resolve_background_llm_mode_allowlist(*, mode: str, env_name: str, default_values: set[str]) -> set[str]:
+    if str(mode or "").strip().lower() == "normal":
+        return set()
+    return _parse_task_id_set(os.environ.get(env_name), default_values=default_values)
+
+
 def _load_runtime_immune_gate_state() -> dict[str, Any]:
     try:
         from host_brain.tribe.immune_agent import get_immune_agent  # noqa: PLC0415
@@ -192,6 +218,27 @@ class NatsumeScheduler:
             os.environ.get("HOST_ENDOCRINE_LOW_RISK_TASK_ALLOWLIST"),
             default_values=_DEFAULT_ENDOCRINE_LOW_RISK_ALLOWLIST,
         )
+        self._background_llm_task_ids = _parse_task_id_set(
+            os.environ.get("HOST_SCHEDULER_BACKGROUND_LLM_TASK_IDS"),
+            default_values=_DEFAULT_BACKGROUND_LLM_TASK_IDS,
+        )
+        self._background_llm_mode_allowlists = {
+            "focus": _resolve_background_llm_mode_allowlist(
+                mode="focus",
+                env_name="HOST_SCHEDULER_FOCUS_LLM_TASK_ALLOWLIST",
+                default_values=_DEFAULT_FOCUS_BACKGROUND_LLM_ALLOWLIST,
+            ),
+            "gaming": _resolve_background_llm_mode_allowlist(
+                mode="gaming",
+                env_name="HOST_SCHEDULER_GAMING_LLM_TASK_ALLOWLIST",
+                default_values=_DEFAULT_GAMING_BACKGROUND_LLM_ALLOWLIST,
+            ),
+            "sleep": _resolve_background_llm_mode_allowlist(
+                mode="sleep",
+                env_name="HOST_SCHEDULER_SLEEP_LLM_TASK_ALLOWLIST",
+                default_values=_DEFAULT_SLEEP_BACKGROUND_LLM_ALLOWLIST,
+            ),
+        }
         self._endocrine_proactive_tasks = _parse_task_id_set(
             os.environ.get("HOST_ENDOCRINE_PROACTIVE_TASK_IDS"),
             default_values=_DEFAULT_ENDOCRINE_PROACTIVE_TASKS,
@@ -342,6 +389,18 @@ class NatsumeScheduler:
         """外部手动触发某个任务（用于测试或 API 调用）。"""
         return self._trigger_task(task_id)
 
+    def _is_background_llm_task(self, task_id: str) -> bool:
+        return _task_id_key(task_id) in self._background_llm_task_ids
+
+    def _is_background_llm_allowed_in_mode(self, *, task_id: str, sys_mode: str) -> bool:
+        mode = str(sys_mode or "").strip().lower() or "normal"
+        if mode == "normal":
+            return True
+        allowlist = self._background_llm_mode_allowlists.get(mode, set())
+        if not allowlist:
+            return False
+        return _task_id_key(task_id) in allowlist
+
     def _trigger_task(self, task_id: str) -> dict[str, Any]:
         """触发单个调度任务：门控检查 → 生成 Intent → 分发执行 → 审计记录。"""
         trigger_ts = now_ms()
@@ -394,6 +453,39 @@ class NatsumeScheduler:
                 last_gate_state="sys_mode",
             )
             return {"status": "REJECTED", "reason_code": reason, "task_id": task_id, "sys_mode": current_mode}
+
+        if self._is_background_llm_task(task.task_id) and not self._is_background_llm_allowed_in_mode(
+            task_id=task.task_id,
+            sys_mode=current_mode,
+        ):
+            reason = "BACKGROUND_LLM_MODE_BLOCKED"
+            detail = (
+                f"background llm task skipped in sys_mode={current_mode}; "
+                f"allowlist={sorted(self._background_llm_mode_allowlists.get(current_mode, set()))}"
+            )
+            self._log_scheduler_event(
+                task_id=task_id,
+                trigger_ts=trigger_ts,
+                status="SKIPPED",
+                reason_code=reason,
+                mode_at_trigger=current_mode,
+                error_detail=detail,
+            )
+            self._health.update_task_state(
+                task_id,
+                status=STATUS_OK,
+                last_run_ts=trigger_ts,
+                error_count=error_count,
+                last_reason_code=reason,
+                last_gate_state=f"llm_mode:{current_mode}",
+            )
+            return {
+                "status": "SKIPPED",
+                "reason_code": reason,
+                "task_id": task_id,
+                "sys_mode": current_mode,
+                "scheduler_decision": "skip",
+            }
 
         # M29-N（OPT-?）：情感状态感知门控
         # - 主动任务：优先按 endocrine gate_state 判定（cautious/protective 均收敛）
@@ -619,6 +711,15 @@ class NatsumeScheduler:
             exec_reason = None
             result = {"status": "OK", "reason_code": None, "intent": system_intent}
 
+        if self._is_background_llm_task(task.task_id):
+            nested_error = str(result.get("error") or "").strip()
+            if str(exec_reason or "").strip() == LLM_POOL_EXHAUSTED or LLM_POOL_EXHAUSTED in nested_error:
+                exec_status = "SKIPPED"
+                exec_reason = LLM_POOL_EXHAUSTED
+                result["status"] = "SKIPPED"
+                result["reason_code"] = LLM_POOL_EXHAUSTED
+                result.setdefault("scheduler_decision", "skip")
+
         # 更新错误计数
         if exec_status in ("ERROR", "FAILED"):
             self._error_counts[task_id] = error_count + 1
@@ -654,6 +755,9 @@ class NatsumeScheduler:
         )
 
         # 审计日志
+        event_detail = None
+        if exec_reason == LLM_POOL_EXHAUSTED:
+            event_detail = "decision=skip reason=LLM_POOL_EXHAUSTED"
         self._log_scheduler_event(
             task_id=task_id,
             trigger_ts=trigger_ts,
@@ -661,6 +765,7 @@ class NatsumeScheduler:
             status=exec_status,
             reason_code=exec_reason,
             mode_at_trigger=current_mode,
+            error_detail=event_detail,
         )
 
         return {

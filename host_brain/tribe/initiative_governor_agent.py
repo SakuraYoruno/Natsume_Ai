@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -302,7 +303,7 @@ class InitiativeGovernorAgent:
         _log = _logging.getLogger("Natsume.tribe.initiative_governor_agent")
         try:
             from host_brain.app.prompt_template_store import resolve_prompt_template_json  # noqa: PLC0415
-            from host_brain.app.provider_factory import build_llm_provider  # noqa: PLC0415
+            from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
 
             _tpl = resolve_prompt_template_json("initiative_governor_agent.proactive_topic") or {}
             _system_prompt = str(_tpl.get("system_prompt") or "")
@@ -317,18 +318,23 @@ class InitiativeGovernorAgent:
                 bond_stage=str(bond_stage or "stranger"),
                 recent_topics=str(recent_topics or "")[:100],
             )
-            _provider = build_llm_provider(
+            _pool_result = complete_llm_with_pool_sync(
+                request_id=f"initiative-topic::{int(time.time() * 1000)}",
+                scene_type="INITIATIVE_TOPIC",
+                cognitive_tier="C",
+                timeout_ms=2000,
+                messages=[
+                    {"role": "system", "content": _system_prompt},
+                    {"role": "user", "content": _user_prompt},
+                ],
+                gen_params={"temperature": 0.4, "max_tokens": 64},
                 provider_name="gemini",
                 model_id="gemini-2.0-flash",
-                timeout_ms=2000,
-                agent_role="proactive_topic_planner",
+                response_format="json_object",
             )
-            _raw = _provider.complete_sync(
-                system_prompt=_system_prompt,
-                user_prompt=_user_prompt,
-                max_tokens=64,
-                temperature=0.4,
-            )
+            if _pool_result.pool_exhausted:
+                raise RuntimeError("initiative topic llm pool exhausted")
+            _raw = _pool_result.content
             import json as _json, re as _re  # noqa: PLC0415, E401
             _match = _re.search(r"\{.*\}", str(_raw or ""), _re.DOTALL)
             _parsed = _json.loads(_match.group()) if _match else {}
@@ -356,7 +362,7 @@ class InitiativeGovernorAgent:
     def export_runtime_state(self) -> dict[str, Any]:
         """T-272：导出 InitiativeGovernorAgent 当前运行时状态快照。
 
-        供 CortexAgent.collect_tribe_context() 和 chat_context_builder 使用，
+        供 CortexAgent.collect_tribe_context() 和上下文装配主链使用，
         不触发任何副作用（不 emit 事件，不写 state_registry）。
 
         Returns:

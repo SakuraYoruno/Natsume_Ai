@@ -22,6 +22,7 @@ from host_brain.integrations.llm_gateway import (
     PROVIDER_DEEPSEEK,
     PROVIDER_DISABLED,
     PROVIDER_GEMINI,
+    PROVIDER_MINIMAX,
     PROVIDER_MOCK,
     PROVIDER_OPENAI,
 )
@@ -43,7 +44,7 @@ _HOST_CHAT_14B_DEFAULT_MODEL_ID = "qwen3:14b"
 _HOST_CHAT_14B_FALLBACK_API_KEY = "host-local-placeholder-key"
 _HOST_CHAT_14B_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 _HOST_CHAT_CLOUD_DEFAULT_PROVIDER = PROVIDER_GEMINI
-_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK})
+_PROVIDERS_REQUIRING_API_KEY = frozenset({PROVIDER_OPENAI, PROVIDER_CODEX, PROVIDER_GEMINI, PROVIDER_DEEPSEEK, PROVIDER_MINIMAX})
 
 
 def _parse_bool(value: Any, default: bool = False) -> bool:
@@ -91,7 +92,7 @@ def _provider_requires_api_key(provider_name: str) -> bool:
 
 def _provider_api_key_env_name(provider_name: str) -> str | None:
     provider = str(provider_name or "").strip().lower()
-    mapping = {PROVIDER_OPENAI: "OPENAI_API_KEY", PROVIDER_CODEX: "CODEX_API_KEY", PROVIDER_GEMINI: "GEMINI_API_KEY", PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY"}
+    mapping = {PROVIDER_OPENAI: "OPENAI_API_KEY", PROVIDER_CODEX: "CODEX_API_KEY", PROVIDER_GEMINI: "GEMINI_API_KEY", PROVIDER_DEEPSEEK: "DEEPSEEK_API_KEY", PROVIDER_MINIMAX: "MINIMAX_API_KEY"}
     return mapping.get(provider)
 
 
@@ -134,6 +135,8 @@ def _resolve_cloud_provider_model_id(*, chain_name: str) -> str:
         return str(os.environ.get("HOST_CODEX_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if normalized_chain == "deepseek":
         return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+    if normalized_chain == "minimax":
+        return str(os.environ.get("HOST_MINIMAX_MODEL_ID") or "M2-her").strip() or "M2-her"
     return "mock-default"
 
 
@@ -272,25 +275,41 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
     gemini_api_key: str | None = None
     codex_api_key: str | None = None
     deepseek_api_key: str | None = None
+    minimax_api_key: str | None = None
+    configured_cloud_provider = str(os.environ.get("HOST_LLM_PROVIDER") or "").strip().lower() or None
     if config_result.success and config_result.config is not None:
         cloud_timeout_ms = int(getattr(config_result.config, "llm_timeout_ms", cloud_timeout_ms))
+        configured_cloud_provider = str(getattr(config_result.config, "llm_provider", "") or configured_cloud_provider or "").strip().lower() or configured_cloud_provider
         gemini_api_key = str(getattr(config_result.config, "gemini_api_key", "") or "").strip() or None
         codex_api_key = str(getattr(config_result.config, "codex_api_key", "") or "").strip() or None
         deepseek_api_key = str(getattr(config_result.config, "deepseek_api_key", "") or "").strip() or None
+        minimax_api_key = str(getattr(config_result.config, "minimax_api_key", "") or "").strip() or None
     else:
         gemini_api_key = _resolve_provider_api_key(provider_name=PROVIDER_GEMINI)
         codex_api_key = _resolve_provider_api_key(provider_name=PROVIDER_CODEX)
         deepseek_api_key = _resolve_provider_api_key(provider_name=PROVIDER_DEEPSEEK)
+        minimax_api_key = _resolve_provider_api_key(provider_name=PROVIDER_MINIMAX)
 
     gemini_cloud_route = resolve_gemini_model_route(role="cloud_primary", preferred_api_key=gemini_api_key, route_key=(str(rollout_key or "").strip() or str(scene_type or "").strip() or None))
     gemini_cloud_model_id = str(gemini_cloud_route.get("model_id") or _resolve_cloud_provider_model_id(chain_name="gemini")).strip() or _resolve_cloud_provider_model_id(chain_name="gemini")
     gemini_cloud_api_key = str(gemini_cloud_route.get("api_key") or "").strip() or None
 
-    remote_cloud_candidates: list[dict[str, Any]] = [
-        {"chain_name": "gemini", "provider_name": PROVIDER_GEMINI, "model_id": gemini_cloud_model_id, "api_key": gemini_cloud_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_GEMINI", "route_detail": "selected Gemini as primary remote provider", "route_meta": dict(gemini_cloud_route)},
-        {"chain_name": "codex", "provider_name": PROVIDER_CODEX, "model_id": _resolve_cloud_provider_model_id(chain_name="codex"), "api_key": codex_api_key, "base_url_override": _resolve_codex_base_url(), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_CODEX", "route_detail": "Gemini unavailable; using Codex relay as remote fallback"},
-        {"chain_name": "deepseek", "provider_name": PROVIDER_DEEPSEEK, "model_id": _resolve_cloud_provider_model_id(chain_name="deepseek"), "api_key": deepseek_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK", "route_detail": "Gemini/Codex unavailable; using DeepSeek as remote fallback"},
-    ]
+    minimax_cloud_model_id = _resolve_cloud_provider_model_id(chain_name="minimax")
+    raw_minimax_base = str(os.environ.get("HOST_MINIMAX_BASE_URL") or "https://api.minimaxi.com/v1").strip() or "https://api.minimaxi.com/v1"
+    candidate_map: dict[str, dict[str, Any]] = {
+        "gemini": {"chain_name": "gemini", "provider_name": PROVIDER_GEMINI, "model_id": gemini_cloud_model_id, "api_key": gemini_cloud_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_GEMINI", "route_detail": "selected Gemini as primary remote provider", "route_meta": dict(gemini_cloud_route)},
+        "codex": {"chain_name": "codex", "provider_name": PROVIDER_CODEX, "model_id": _resolve_cloud_provider_model_id(chain_name="codex"), "api_key": codex_api_key, "base_url_override": _resolve_codex_base_url(), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_CODEX", "route_detail": "Gemini unavailable; using Codex relay as remote fallback"},
+        "deepseek": {"chain_name": "deepseek", "provider_name": PROVIDER_DEEPSEEK, "model_id": _resolve_cloud_provider_model_id(chain_name="deepseek"), "api_key": deepseek_api_key, "base_url_override": _normalize_openai_compat_base_url(str(os.environ.get("HOST_DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1").strip()), "route_reason_code": "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK", "route_detail": "Gemini/Codex unavailable; using DeepSeek as remote fallback"},
+        "minimax": {"chain_name": "minimax", "provider_name": PROVIDER_MINIMAX, "model_id": minimax_cloud_model_id, "api_key": minimax_api_key, "base_url_override": raw_minimax_base, "route_reason_code": "HOST_CLOUD_CHAIN_PRIMARY_MINIMAX", "route_detail": "selected MiniMax as primary remote provider"},
+    }
+    preferred_chain_order: list[str] = []
+    normalized_preferred_provider = str(configured_cloud_provider or "").strip().lower()
+    if normalized_preferred_provider in candidate_map:
+        preferred_chain_order.append(normalized_preferred_provider)
+    for chain_name in ("gemini", "codex", "deepseek", "minimax"):
+        if chain_name not in preferred_chain_order:
+            preferred_chain_order.append(chain_name)
+    remote_cloud_candidates: list[dict[str, Any]] = [dict(candidate_map[name]) for name in preferred_chain_order if name in candidate_map]
     remote_chain_status: list[dict[str, Any]] = []
     selected_remote_candidate: dict[str, Any] | None = None
     for candidate in remote_cloud_candidates:
@@ -316,11 +335,13 @@ async def _resolve_host_llm_runtime_core(*, rollout_key: str | None = None, scen
         route_reason_code = str(selected_remote_candidate.get("route_reason_code") or route_reason_code)
         route_detail = str(selected_remote_candidate.get("route_detail") or route_detail)
     else:
-        cloud_provider_name = PROVIDER_GEMINI
+        cloud_provider_name = PROVIDER_GEMINI if normalized_preferred_provider != PROVIDER_MINIMAX else PROVIDER_MINIMAX
         cloud_model_id = gemini_cloud_model_id
-        cloud_llm_api_key = gemini_cloud_api_key
-        cloud_base_url_override = _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip())
-        cloud_model_route = dict(gemini_cloud_route)
+        cloud_llm_api_key = gemini_cloud_api_key if cloud_provider_name == PROVIDER_GEMINI else minimax_api_key
+        cloud_base_url_override = _normalize_openai_compat_base_url(str(os.environ.get("HOST_GEMINI_BASE_URL") or "https://generativelanguage.googleapis.com/v1beta/openai").strip()) if cloud_provider_name == PROVIDER_GEMINI else raw_minimax_base
+        cloud_model_route = dict(gemini_cloud_route) if cloud_provider_name == PROVIDER_GEMINI else {}
+        if cloud_provider_name == PROVIDER_MINIMAX:
+            cloud_model_id = minimax_cloud_model_id
         cloud_available = False
 
     cloud_provider_fn = build_host_provider_fn(provider_name=cloud_provider_name, model_id=cloud_model_id, api_key=cloud_llm_api_key, timeout_ms=cloud_timeout_ms, base_url_override=cloud_base_url_override)
@@ -513,40 +534,8 @@ def _resolve_agent_llm_runtime_v2(*, base_runtime: dict[str, Any], role: str, mo
     return {**base_runtime, "model_id": model_id, "chat_model_id": model_id, "timeout_ms": timeout_ms, "chat_timeout_ms": timeout_ms, "llm_api_key": selected_api_key, "chat_llm_api_key": selected_api_key, "agent_gen_params": dict(gen_params), "agent_role": role, "agent_model_route": (model_route or None)}
 
 
-def resolve_chat_agent_llm_runtime(*, base_runtime: dict, speed_profile: str | None = None) -> dict:
+def resolve_chat_agent_llm_runtime(*, base_runtime: dict) -> dict:
     """ChatAgent（夏目蓝本人）的 LLM 运行时配置。"""
-    normalized_speed_profile = str(speed_profile or "").strip().lower()
-    if normalized_speed_profile == "direct_fast":
-        return _resolve_agent_llm_runtime_v2(
-            base_runtime=base_runtime,
-            role="chat_agent_direct",
-            model_env_name="HOST_CHAT_AGENT_DIRECT_MODEL_ID",
-            timeout_env_name="HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
-            timeout_default_ms=12_000,
-            timeout_max_ms=60_000,
-            gen_params={"temperature": 0.74, "top_p": 0.88, "max_tokens": 96},
-            fallback_model_env_names=("HOST_GEMINI_MODEL_ID", "HOST_DISPATCH_AGENT_MODEL_ID"),
-            fallback_timeout_env_names=("HOST_CHAT_AGENT_TIMEOUT_MS",),
-        )
-    if normalized_speed_profile == "context_fast":
-        return _resolve_agent_llm_runtime_v2(
-            base_runtime=base_runtime,
-            role="chat_agent_context",
-            model_env_name="HOST_CHAT_AGENT_CONTEXT_MODEL_ID",
-            timeout_env_name="HOST_CHAT_AGENT_CONTEXT_TIMEOUT_MS",
-            timeout_default_ms=18_000,
-            timeout_max_ms=90_000,
-            gen_params={"temperature": 0.7, "top_p": 0.86, "max_tokens": 96},
-            fallback_model_env_names=(
-                "HOST_CHAT_AGENT_DIRECT_MODEL_ID",
-                "HOST_GEMINI_MODEL_ID",
-                "HOST_CHAT_AGENT_MODEL_ID",
-            ),
-            fallback_timeout_env_names=(
-                "HOST_CHAT_AGENT_DIRECT_TIMEOUT_MS",
-                "HOST_CHAT_AGENT_TIMEOUT_MS",
-            ),
-        )
     return _resolve_agent_llm_runtime_v2(base_runtime=base_runtime, role="chat_agent", model_env_name="HOST_CHAT_AGENT_MODEL_ID", timeout_env_name="HOST_CHAT_AGENT_TIMEOUT_MS", timeout_default_ms=30_000, timeout_max_ms=120_000, gen_params={"temperature": 0.78, "top_p": 0.9, "max_tokens": 220})
 
 

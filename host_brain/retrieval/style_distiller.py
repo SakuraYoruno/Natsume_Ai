@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1217,6 +1218,119 @@ def render_style_instruction_v5_ja(profile: StyleProfile) -> str:
     )
 
     return "\n".join(parts)
+
+
+def render_style_instruction_with_pool(
+    profile: StyleProfile,
+    *,
+    lang: str = "cn",
+    timeout_ms: int = 2500,
+) -> str:
+    base_instruction = (
+        render_style_instruction_v5_ja(profile)
+        if str(lang or "cn").strip().lower() == "ja"
+        else render_style_instruction_v5(profile)
+    )
+    try:
+        from host_brain.integrations.llm_helpers import complete_llm_with_pool_sync  # noqa: PLC0415
+
+        raw_templates = resolve_prompt_template_json_merged("style_distiller.llm_render.prompt")
+        templates = dict(raw_templates) if isinstance(raw_templates, Mapping) else {}
+        system_prompt = str(templates.get("system_prompt") or "").strip()
+        user_tpl = str(templates.get("user_prompt_template") or "").strip()
+        if not system_prompt or not user_tpl:
+            return base_instruction
+        prompt = user_tpl.format(
+            lang=str(lang or "cn").strip().lower(),
+            instruction_text=base_instruction,
+            profile_json=json.dumps(profile.to_dict(), ensure_ascii=False),
+        )
+        result = complete_llm_with_pool_sync(
+            request_id=f"style-distiller::{int(time.time() * 1000)}",
+            scene_type="STYLE_DISTILLER",
+            cognitive_tier="B",
+            timeout_ms=max(800, int(timeout_ms)),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            response_format="json_object",
+            gen_params={"temperature": 0.15, "top_p": 0.9},
+        )
+        if result.pool_exhausted or not str(result.content or "").strip():
+            return base_instruction
+        parsed = json.loads(str(result.content or "{}"))
+        if not isinstance(parsed, Mapping):
+            return base_instruction
+        rendered = str(parsed.get("instruction") or "").strip()
+        return rendered or base_instruction
+    except Exception:
+        return base_instruction
+
+
+class StyleDistiller:
+    def __init__(
+        self,
+        *,
+        cn_lines_path: str | Path | None = None,
+        ja_lines_path: str | Path | None = None,
+        use_llm: bool = False,
+        llm_timeout_ms: int = 2500,
+    ) -> None:
+        self._cn_lines_path = cn_lines_path or DEFAULT_CN_LINES_PATH
+        self._ja_lines_path = ja_lines_path or DEFAULT_JA_LINES_PATH
+        self._use_llm = bool(use_llm)
+        self._llm_timeout_ms = max(800, int(llm_timeout_ms))
+
+    def distill_cn(self, *, top_n: int = 20) -> StyleProfile:
+        return self._trim_profile(
+            distill_style_profile(self._cn_lines_path, self._ja_lines_path),
+            top_n=top_n,
+        )
+
+    def distill_ja(self, *, top_n: int = 20) -> StyleProfile:
+        return self._trim_profile(
+            distill_style_profile(self._cn_lines_path, self._ja_lines_path),
+            top_n=top_n,
+        )
+
+    def render_instruction(self, profile: StyleProfile, *, lang: str = "cn") -> str:
+        if self._use_llm:
+            return render_style_instruction_with_pool(
+                profile,
+                lang=lang,
+                timeout_ms=self._llm_timeout_ms,
+            )
+        if str(lang or "cn").strip().lower() == "ja":
+            return render_style_instruction_v5_ja(profile)
+        return render_style_instruction_v5(profile)
+
+    @staticmethod
+    def _trim_profile(profile: StyleProfile, *, top_n: int) -> StyleProfile:
+        limit = max(1, int(top_n))
+        return StyleProfile(
+            total_cn=profile.total_cn,
+            total_ja=profile.total_ja,
+            sentence_patterns=list(profile.sentence_patterns[:limit]),
+            emotion_patterns=list(profile.emotion_patterns[:limit]),
+            high_freq_words_cn=list(profile.high_freq_words_cn[:limit]),
+            high_freq_words_ja=list(profile.high_freq_words_ja[:limit]),
+            signature_phrases_cn=list(profile.signature_phrases_cn[:limit]),
+            signature_phrases_ja=list(profile.signature_phrases_ja[:limit]),
+            rhythm_description=profile.rhythm_description,
+            avg_sentence_length_cn=profile.avg_sentence_length_cn,
+            avg_sentence_length_ja=profile.avg_sentence_length_ja,
+            short_ratio=profile.short_ratio,
+            medium_ratio=profile.medium_ratio,
+            long_ratio=profile.long_ratio,
+            particle_freq_cn=dict(list(profile.particle_freq_cn.items())[:limit]),
+            particle_freq_ja=dict(list(profile.particle_freq_ja.items())[:limit]),
+            question_ratio=profile.question_ratio,
+            exclaim_ratio=profile.exclaim_ratio,
+            ellipsis_ratio=profile.ellipsis_ratio,
+            opening_patterns=list(profile.opening_patterns[:limit]),
+            closing_patterns=list(profile.closing_patterns[:limit]),
+        )
 
 
 # 日语蒸馏用的缓存（在 distill_style_profile 调用后设置）

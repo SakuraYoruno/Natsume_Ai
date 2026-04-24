@@ -285,7 +285,6 @@ def build_chat_messages(
     *,
     system_prompt: str,
     history_turns: list[Turn],
-    current_turn_hint: str,   # 可空，装当前轮的 situation/memory/intent
     user_message: str,
 ) -> list[dict[str, str]]:
     """组装最终 messages 数组。"""
@@ -293,24 +292,19 @@ def build_chat_messages(
         {"role": "system", "content": system_prompt},
     ]
     messages.extend(turns_to_messages(history_turns))
-    if current_turn_hint.strip():
-        messages.append({
-            "role": "system",
-            "content": current_turn_hint,
-        })
     messages.append({"role": "user", "content": user_message})
     return messages
 ```
 
 **实现要点**：
-- `current_turn_hint` 装当前轮一次性的上下文（emotion/bond/memory/intent 摘要），独立成一条 system message，避免和历史 turn 混
+- 最近对话历史只存在于 `history_turns`，当前轮补充说明若需要，必须并入唯一的 `system_prompt`，禁止再额外创建第二条 system/context 平面
 - 不允许任何"英文标签模板"插入历史 turn
 
 ---
 
 ## 5. 接口层升级
 
-### 5.1 `llm_helpers.stream_llm_chunks` 新签名
+### 5.1 `llm_helpers.stream_llm_chunks` 最终签名
 
 ```python
 def stream_llm_chunks(
@@ -319,27 +313,15 @@ def stream_llm_chunks(
     model_id: str,
     api_key: str,
     timeout_ms: int,
-    # 新参数（互斥于 prompt_text + system_prompt）
-    messages: list[dict[str, str]] | None = None,
-    # 老参数（兼容期保留）
-    prompt_text: str = "",
-    system_prompt: str = "",
+    messages: list[dict[str, str]],
     gen_params: dict[str, Any] | None = None,
     base_url_override: str | None = None,
 ) -> Generator[str, None, None]:
-    """
-    优先级：
-      - 若 messages 非空：走 messages 数组路径（新）
-      - 否则：走 prompt_text + system_prompt 路径（旧，兼容）
-    
-    LangChain 底层 llm.stream() 本身支持 messages 数组，
-    只需在入口分支，不改各 provider adapter。
-    """
+    """只接受原生 messages 数组；旧字符串 prompt 接口在同 PR 中删除。"""
 ```
 
 **实现要点**：
 - 内部将 `messages` 列表直接映射为 LangChain 的 `SystemMessage/HumanMessage/AIMessage`
-- 兼容期一旦 `messages` 和老参数同时传，以 `messages` 为准，打 warning log
 - 异步版本 `astream_llm_chunks` 同步升级
 
 ### 5.2 `chat_agent_sse_generator` 改造
@@ -352,11 +334,8 @@ prompt_result = build_cortex_prompt(
     user_message=effective_user_message + reply_depth_hint,
     ...,
     include_runtime_payload=True,
-    # 新增：直接返回 messages，而不是拼字符串
-    return_messages=True,
 )
 
-# prompt_result: (messages, gen_params, runtime_payload)
 messages, gen_params, runtime_payload = prompt_result
 
 # 调用 LLM
@@ -380,17 +359,10 @@ for chunk in stream_llm_chunks(
 def build_cortex_prompt(
     *,
     ...,
-    return_messages: bool = False,
-) -> tuple[str, str, dict] | tuple[list[dict], dict, dict]:
-    """
-    return_messages=True 时返回 (messages, gen_params, runtime_payload)
-    return_messages=False 时返回旧签名 (prompt_text, system_prompt, gen_params[, runtime_payload])
-    """
+) -> tuple[list[dict], dict, dict]:
+    """直接返回 (messages, gen_params, runtime_payload)。旧字符串签名在同 PR 删除。"""
     # 构建完整的 system_prompt（人设 + 风格 + 时间 + style_correction + node_role）
     system_prompt = _build_system_prompt(...)
-    
-    # 构建当前轮的上下文 hint（原 render_node_generation_prompt 产物去掉 user_message 和历史 turn 的部分）
-    current_turn_hint = _build_current_turn_hint(...)
     
     # 取最近对话 turns（从新的 ConversationHistory）
     history_turns = get_conversation_history().fetch_for_messages(
@@ -398,34 +370,13 @@ def build_cortex_prompt(
         max_turns=_resolve_max_history_turns(),
         exclude_request_id=request_id,
     )
-    
-    if return_messages:
-        messages = build_chat_messages(
-            system_prompt=system_prompt,
-            history_turns=history_turns,
-            current_turn_hint=current_turn_hint,
-            user_message=user_message,
-        )
-        return messages, gen_params, runtime_payload
-    
-    # 老路径保留（逐步下线）
-    ...
-```
 
-### 5.4 compact path 同步升级
-
-**位置**：`host_brain/app/chat_agent._build_compact_chat_prompt`
-
-```python
-def _build_compact_chat_prompt(
-    *,
-    ...,
-    return_messages: bool = False,
-) -> tuple[str, str, dict, dict] | tuple[list[dict], dict, dict, dict]:
-    """direct_fast / context_fast 也同步支持 messages 数组。
-    
-    compact path 的 history_turns 取 max_turns=2（只要最近 1 轮）。
-    """
+    messages = build_chat_messages(
+        system_prompt=system_prompt,
+        history_turns=history_turns,
+        user_message=user_message,
+    )
+    return messages, gen_params, runtime_payload
 ```
 
 ### 5.5 plan_graph synthesize 同步升级
@@ -495,12 +446,10 @@ Task progress / recent_turn / clarification_direct / phatic_fastpath 这四条 d
 
 | 环境变量 | 默认值 | 含义 |
 |---|---|---|
-| `HOST_CONVERSATION_HISTORY_ENABLED` | `true` | 新链路总开关 |
 | `HOST_CONVERSATION_MAX_TURNS` | `10` | 注入 messages 的最近对话数（含 user + assistant） |
-| `HOST_CONVERSATION_COMPACT_MAX_TURNS` | `2` | compact path 的最近对话数 |
 | `HOST_CONVERSATION_SUMMARY_THRESHOLD` | `20` | 超过多少轮触发摘要（P2 阶段生效） |
 
-**重要**：**不做灰度 flag**。上线即切换，老代码路径在同 PR 内删除。理由见第 9 节。
+**重要**：不做灰度、不留旧入口。上线即切换，老代码路径在同 PR 内删除。理由见第 9 节。
 
 ---
 
@@ -556,7 +505,7 @@ Task progress / recent_turn / clarification_direct / phatic_fastpath 这四条 d
 
 4. `test_conversation_render.py`
    - turns_to_messages 跳过 corrupted
-   - build_chat_messages 结构正确（system / history / hint / user）
+   - build_chat_messages 结构正确（system / history / user）
 
 ### 10.2 集成测（`tests/integration/`）
 
@@ -620,13 +569,7 @@ Task progress / recent_turn / clarification_direct / phatic_fastpath 这四条 d
 **回滚策略**：如果上线后发现问题，**不回滚**，而是前滚修复。理由：
 - 新代码路径有完整单测
 - 旧代码同 PR 已删除，回滚成本高于修复
-- 问题若出现，大概率是"写入时机"或"turn_index 并发"级别的小 bug，直接补丁
-
-**极端情况回滚办法**：
-- 临时把 `HOST_CONVERSATION_HISTORY_ENABLED=false`
-- 此时 `build_chat_messages` 内 `history_turns` 返回空列表
-- LLM 看不到历史，但系统不崩，用户感知"她又失忆了"
-- 立即修复前滚
+- 问题若出现，大概率是"写入时机"、"turn_index 并发"或"历史摘要质量"级别的小 bug，直接修复前滚
 
 ---
 
@@ -650,7 +593,7 @@ Task progress / recent_turn / clarification_direct / phatic_fastpath 这四条 d
 以下五项已于 2026-04-21 最终拍板，下游实现节点请严格遵守：
 
 1. **turn_index 分配策略**：**单调递增**（session 内），role 由独立字段区分，禁止偶奇区分
-2. **max_turns 默认值**：**10**（含 user + assistant，共 ~5 对），compact path 默认 `HOST_CONVERSATION_COMPACT_MAX_TURNS=2`
+2. **max_turns 默认值**：**10**（含 user + assistant，共 ~5 对）
 3. **corrupted turn 渲染策略**：**直接跳过**，不向 LLM 暴露任何损坏提示
 4. **assistant fallback 写入**：**仍然写入**，`content` 为 fallback 文本，`metadata.fallback=true`，供观测追踪
 5. **Gateway 通道（微信/QQ）记录策略**：**记录完整原文**。消毒/截断只发生在"发送给用户"那一侧，不污染 conversation_turn 表
@@ -664,13 +607,10 @@ Task progress / recent_turn / clarification_direct / phatic_fastpath 这四条 d
 ```python
 [
     {"role": "system", "content": "【角色人设】...【说话风格】...【当前本地时间】..."},
-    {"role": "user", "content": "今天在公司被老板夸了！"},
-    {"role": "assistant", "content": "哼，这种程度的事情——哥哥超棒的啊。"},
-    {"role": "user", "content": "哈哈，七海你嘴上不说，脸上都笑开花了"},
-    {"role": "assistant", "content": "哪、哪有嘛，七海才没有呢。"},
+    {"role": "user", "content": "今天在公司被老板夸了。"},
+    {"role": "assistant", "content": "这样啊。看来你今天心情还不错。"},
     {"role": "user", "content": "饿了，我们点外卖吧"},
-    {"role": "assistant", "content": "嗯！哥哥想吃什么？七海给你看几家评价好的。"},
-    {"role": "system", "content": "【当前 situation】emotion_tag=HAPPY, bond_stage=CLOSE\n【memory】（无相关长期记忆）"},
+    {"role": "assistant", "content": "嗯。你想吃什么？"},
     {"role": "user", "content": "那你昨天晚饭吃什么了"},
 ]
 ```

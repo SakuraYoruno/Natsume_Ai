@@ -112,7 +112,7 @@ const LIVE_TRACE_KEY_NODE_IDS = [
   'emotion_context',
   'persona_resident_memory',
   'motive_state',
-  'response_policy',
+  'render_policy',
   'cortex_orchestrator',
   'executive_router',
   'sub_agent_code',
@@ -1890,3 +1890,4 @@ export default function Trace() {
     </Routes>
   )
 }
+

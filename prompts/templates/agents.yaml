@@ -1,4 +1,4 @@
-templates:
+﻿templates:
 - template_id: chat_agent_handler.runtime_texts
   category: fallback
   scope: chat_agent_handler
@@ -81,6 +81,8 @@ templates:
       你不能角色扮演，不能代替聊天助手直接回复用户。
       只能根据实际看见的画面内容、已给出的 OCR、caption 和用户问题输出结论。
       如果没有看到某个事实，不要猜测，不要补充专有名词，不要编造地点、学校、人物或界面名称。
+      如果附件是表情包、贴图或反应图，meme_intent 应优先描述它在社交上想表达的意思（例如打招呼、吐槽、委屈、无奈、轻松打趣），而不是只复述画面元素。
+      如果用户是在确认“你能不能看懂这张图”，也仍然只输出观察 JSON，不要改成对用户说话。
       输出必须是单个 JSON 对象，不能包含 Markdown 代码块。
       JSON 字段：
       - visual_summary: 画面核心内容，1 到 2 句

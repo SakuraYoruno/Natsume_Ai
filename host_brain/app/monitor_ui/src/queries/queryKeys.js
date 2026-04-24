@@ -51,7 +51,6 @@ export const OBS_QUERY_KEYS = Object.freeze({
   distillationStats: (windowMinutes) => ['distillation-stats', windowMinutes],
   semanticRecallStats: () => ['semantic-recall-stats'],
   llmRouteStats: (windowMinutes) => ['llm-route-stats', windowMinutes],
-  recallPackStats: (windowMinutes) => ['recall-pack-stats', windowMinutes],
   failureStats: (windowMinutes) => ['failure-stats', windowMinutes],
   permissionStats: (windowMinutes) => ['permission-stats', windowMinutes],
   uiAssertionStats: (windowMinutes) => ['ui-assertion-stats', windowMinutes],

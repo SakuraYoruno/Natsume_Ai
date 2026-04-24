@@ -20,16 +20,19 @@ def _mock_config_result(
     gemini_api_key: str | None = "sk-gemini",
     codex_api_key: str | None = "sk-codex",
     deepseek_api_key: str | None = "sk-deepseek",
+    minimax_api_key: str | None = None,
+    llm_provider: str = "gemini",
 ):
     return SimpleNamespace(
         success=True,
         config=SimpleNamespace(
-            llm_provider="gemini",
+            llm_provider=llm_provider,
             llm_timeout_ms=timeout_ms,
             llm_api_key=gemini_api_key,
             gemini_api_key=gemini_api_key,
             codex_api_key=codex_api_key,
             deepseek_api_key=deepseek_api_key,
+            minimax_api_key=minimax_api_key,
         ),
     )
 
@@ -41,6 +44,8 @@ def _patch_runtime_dependencies(
     gemini_api_key: str | None = "sk-gemini",
     codex_api_key: str | None = "sk-codex",
     deepseek_api_key: str | None = "sk-deepseek",
+    minimax_api_key: str | None = None,
+    llm_provider: str = "gemini",
 ) -> None:
     monkeypatch.setenv("HOST_GEMINI_KEY_POOL_DISABLE_RUNTIME_FILES", "true")
     monkeypatch.setattr(
@@ -51,6 +56,8 @@ def _patch_runtime_dependencies(
             gemini_api_key=gemini_api_key,
             codex_api_key=codex_api_key,
             deepseek_api_key=deepseek_api_key,
+            minimax_api_key=minimax_api_key,
+            llm_provider=llm_provider,
         ),
     )
     monkeypatch.setattr(
@@ -122,6 +129,29 @@ def test_resolve_host_llm_runtime_falls_back_to_deepseek(monkeypatch) -> None:
     assert runtime["remote_chain_status"][0]["available"] is False
     assert runtime["remote_chain_status"][1]["available"] is False
     assert runtime["remote_chain_status"][2]["available"] is True
+
+
+def test_resolve_host_llm_runtime_can_select_minimax_as_primary(monkeypatch) -> None:
+    _patch_runtime_dependencies(
+        monkeypatch,
+        gemini_api_key=None,
+        codex_api_key=None,
+        deepseek_api_key=None,
+        minimax_api_key="sk-minimax",
+        llm_provider="minimax",
+    )
+    monkeypatch.setenv("HOST_MINIMAX_MODEL_ID", "M2-her")
+    monkeypatch.setenv("HOST_MINIMAX_BASE_URL", "https://api.minimaxi.com/v1")
+
+    runtime = graph_builder.resolve_host_llm_runtime()
+
+    assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
+    assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_PRIMARY_MINIMAX"
+    assert runtime["provider_name"] == "minimax"
+    assert runtime["model_id"] == "M2-her"
+    assert runtime["base_url_override"] == "https://api.minimaxi.com/v1"
+    assert runtime["remote_chain_status"][0]["chain_name"] == "minimax"
+    assert runtime["remote_chain_status"][0]["available"] is True
 
 
 def test_resolve_host_llm_runtime_uses_local_as_final_fallback(monkeypatch) -> None:

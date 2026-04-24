@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+﻿import React, { useMemo, useState } from 'react'
 import {
   Brain,
   Database,
@@ -86,7 +86,7 @@ export default function DigitalLifeOverview() {
     bondState,
     emotionContext,
     motiveState,
-    responsePolicy,
+    renderPolicy,
     silenceState,
     offlineState,
     selfModelSnapshot,
@@ -169,7 +169,7 @@ export default function DigitalLifeOverview() {
           ? `意愿 ${silenceState.willingness_level} · 姿态 ${replyPosture}`
           : '策略系统已接入，但当前窗口缺少稳定快照。',
         status: !hasRuntimeSnapshot ? 'pending' : silenceState.willingness_level ? 'wired' : 'degraded',
-        actionTo: '/response-policy',
+        actionTo: '/render-policy',
         actionLabel: '查看策略',
       },
       {
@@ -259,7 +259,7 @@ export default function DigitalLifeOverview() {
     wiredDomains,
     modeMeta,
     absenceBand,
-    responsePolicy,
+    renderPolicy,
     hasMemoryData,
     hasMemorySamples,
     avgMemorySuccessRate,
@@ -483,3 +483,4 @@ export default function DigitalLifeOverview() {
     </div>
   )
 }
+

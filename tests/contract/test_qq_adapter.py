@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -395,6 +396,27 @@ class TestQQAdapterOutbound(unittest.TestCase):
         self.assertIn("send_group_msg", call_args[0][0])
         self.assertEqual(call_args[1]["json"]["group_id"], 111222)
 
+    @patch.dict(os.environ, {"EDGE_QQ_SHORT_TEXT_DIRECT_BYPASS_LEN": "32"}, clear=False)
+    @patch("edge_client.gateway.humanize_sender.humanize_send_sync", side_effect=AssertionError("humanize should be bypassed"))
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
+    def test_send_short_text_bypasses_humanize(
+        self,
+        mock_post: MagicMock,
+        _mock_humanize: MagicMock,
+    ) -> None:
+        """短文本主回复优先直发，不走拟人化分段。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"status": "ok", "retcode": 0}
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        adapter = _adapter()
+        reply = self._make_reply(content="你是")
+        result = adapter.send_reply(reply)
+
+        self.assertTrue(result)
+        mock_post.assert_called_once()
+
     @patch("edge_client.gateway.adapters.qq_adapter.httpx.post")
     def test_send_image_file(self, mock_post: MagicMock) -> None:
         """T-QQ-OUTBOUND-03: 发送本地文件图片。"""
@@ -515,13 +537,15 @@ class TestQQAdapterOutbound(unittest.TestCase):
 class TestQQAdapterHealth(unittest.TestCase):
     """health 方法测试。"""
 
-    @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
-    def test_health_ok(self, mock_get: MagicMock) -> None:
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.Client")
+    def test_health_ok(self, mock_client_cls: MagicMock) -> None:
         """T-QQ-HEALTH-01: OneBot 状态正常。"""
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"good": True, "online": True}
         mock_resp.raise_for_status = MagicMock()
-        mock_get.return_value = mock_resp
+        mock_client.post.return_value = mock_resp
 
         adapter = _adapter()
         status = adapter.health()
@@ -530,9 +554,11 @@ class TestQQAdapterHealth(unittest.TestCase):
         self.assertEqual(status["status"], "ok")
         self.assertEqual(status["self_id"], "123456")
 
-    @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
-    def test_health_ok_nested_data_good(self, mock_get: MagicMock) -> None:
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.Client")
+    def test_health_ok_nested_data_good(self, mock_client_cls: MagicMock) -> None:
         """T-QQ-HEALTH-01b: OneBot v11 get_status(data.good=true) 判定为 ok。"""
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
             "status": "ok",
@@ -540,7 +566,7 @@ class TestQQAdapterHealth(unittest.TestCase):
             "data": {"online": True, "good": True, "stat": {}},
         }
         mock_resp.raise_for_status = MagicMock()
-        mock_get.return_value = mock_resp
+        mock_client.post.return_value = mock_resp
 
         adapter = _adapter()
         status = adapter.health()
@@ -549,10 +575,13 @@ class TestQQAdapterHealth(unittest.TestCase):
         self.assertEqual(status["status"], "ok")
         self.assertEqual(status["self_id"], "123456")
 
-    @patch("edge_client.gateway.adapters.qq_adapter.httpx.get")
-    def test_health_error(self, mock_get: MagicMock) -> None:
+    @patch("edge_client.gateway.adapters.qq_adapter.httpx.Client")
+    def test_health_error(self, mock_client_cls: MagicMock) -> None:
         """T-QQ-HEALTH-02: OneBot 连接失败。"""
-        mock_get.side_effect = Exception("Connection refused")
+        mock_client = MagicMock()
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.side_effect = Exception("Connection refused")
+        mock_client.get.side_effect = Exception("Connection refused")
 
         adapter = _adapter()
         status = adapter.health()

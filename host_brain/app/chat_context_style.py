@@ -1,12 +1,11 @@
 """chat_context_style.py — 风格绑定子模块。
 
-从 chat_context_builder.py 拆分，负责节点风格绑定的构建与归一化。
+负责节点风格绑定的构建与归一化。
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.app.dependencies import get_ledger
@@ -36,58 +35,8 @@ def normalize_node_style_bindings(
         }
     return normalized
 
-
-def _load_v5_style_instruction(render_lang: str) -> str:
-    """从 style_profile_v5.json 加载对应语言的渲染文本。
-
-    返回空字符串表示 v5 不可用，应走旧版 fallback。
-    """
-    import json as _json
-
-    raw_v5_path = str(
-        os.environ.get("NATSUME_STYLE_V5_PATH")
-        or os.environ.get("STYLE_V5_PATH")
-        or os.environ.get("STYLE_V5_ROOT")
-        or "host_brain/canon/style/style_profile_v5.json"
-    ).strip()
-    v5_path = Path(raw_v5_path)
-    if v5_path.suffix.lower() != ".json":
-        v5_path = v5_path / "style_profile_v5.json"
-
-    if not v5_path.exists():
-        return ""
-
-    try:
-        data = _json.loads(v5_path.read_text(encoding="utf-8"))
-        key = "instruction_ja" if render_lang == "ja" else "instruction_cn"
-        text = str(data.get(key) or "").strip()
-        return text if len(text) > 100 else ""
-    except Exception:
-        return ""
-
-
 def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[str, dict[str, Any]]:
     resolved_render_lang = str(render_target_lang or "").strip().lower()
-
-    # ── Phase XIII v5 优先：从蒸馏产物直接读取风格指导文本 ──
-    v5_instruction = _load_v5_style_instruction(resolved_render_lang)
-    if v5_instruction:
-        v5_entry = {
-            "canon_id": f"natsume_ai_{'ja' if resolved_render_lang == 'ja' else 'cn'}_v5",
-            "version": 5,
-            "hash": "",
-            "tone_only": True,
-            "unsafe_as_fact": True,
-            "style_instruction": v5_instruction,
-            "citation": f"style_canon:v5_distilled:{'ja' if resolved_render_lang == 'ja' else 'cn'}",
-        }
-        return {
-            "cortex_orchestrator": v5_entry,
-            "core_reasoner_primary": v5_entry,
-            "core_reasoner_secondary": v5_entry,
-            CHAT_DIRECT_NODE_ID: v5_entry,
-            "renderer_ja_c_style": v5_entry,
-        }
 
     # ── Canonical v5 source ──
     style_root = str(os.environ.get("Natsume_STYLE_CANON_ROOT") or "host_brain/canon/style").strip()
@@ -105,7 +54,6 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
         render_canon_id = str(os.environ.get("HOST_STYLE_RENDER_JA_CANON_ID") or "natsume_ai_ja").strip()
     secondary_canon_id = str(os.environ.get("HOST_STYLE_SECONDARY_CANON_ID") or core_canon_id).strip()
 
-    # 兼容路径：允许通过 StyleCanonStore seam 覆写
     legacy_store = None
     if callable(StyleCanonStore):
         try:
@@ -175,5 +123,4 @@ def build_node_style_bindings(*, render_target_lang: str | None = None) -> dict[
 __all__ = [
     "normalize_node_style_bindings",
     "build_node_style_bindings",
-    "_load_v5_style_instruction",
 ]

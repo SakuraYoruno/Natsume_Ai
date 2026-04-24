@@ -1,4 +1,4 @@
-"""chat_agent_postprocessor.py — ChatAgent 后处理（反思链、净化、PII、COMMIT、异步后处理）。
+﻿"""chat_agent_postprocessor.py — ChatAgent 后处理（反思链、净化、PII、COMMIT、异步后处理）。
 
 拆分自 chat_agent.py（P2-12）：
   - apply_response_intelligence 调用封装
@@ -155,7 +155,7 @@ def schedule_async_post_process(
     pii_egress_stats: dict,
     retrieval_evidence_items: list,
     motive_state: Any,
-    response_policy: Dict[str, Any],
+    reply_plan: Dict[str, Any],
     trace_stage_meta: Dict[str, Any],
     llm_input_digest: str | None = None,
 ) -> None:
@@ -187,7 +187,7 @@ def schedule_async_post_process(
                 llm_input_digest=llm_input_digest,
                 retrieval_evidence_items=list(retrieval_evidence_items or []),
                 motive_state=motive_state,
-                response_policy=response_policy,
+                reply_plan=reply_plan,
                 trace_stage_meta=trace_stage_meta,
             )
         )

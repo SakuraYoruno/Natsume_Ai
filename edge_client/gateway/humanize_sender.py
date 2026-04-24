@@ -88,6 +88,7 @@ class HumanizeSendConfig:
     max_segments: int = 5                # 最大分段数
     segment_max_len: int = 200           # 单段最大字符数
     jitter: float = 0.2                  # 延迟随机抖动幅度（±jitter）
+    short_text_bypass_len: int = 12      # 短文本直接发送，不模拟打字
 
     @classmethod
     def from_env(cls) -> HumanizeSendConfig:
@@ -102,6 +103,7 @@ class HumanizeSendConfig:
             max_segments=max(1, _env_int("EDGE_HUMANIZE_MAX_SEGMENTS", 5)),
             segment_max_len=max(50, _env_int("EDGE_HUMANIZE_SEGMENT_MAX_LEN", 200)),
             jitter=max(0.0, min(1.0, _env_float("EDGE_HUMANIZE_JITTER", 0.2))),
+            short_text_bypass_len=max(0, _env_int("EDGE_HUMANIZE_SHORT_TEXT_BYPASS_LEN", 12)),
         )
 
 
@@ -268,6 +270,8 @@ class HumanizeSendResult:
     total_segments: int = 0
     sent_segments: int = 0
     total_delay_ms: int = 0
+    sleep_delay_ms: int = 0
+    send_elapsed_ms: int = 0
     failed_segment_index: int = -1
     error: str = ""
 
@@ -277,6 +281,8 @@ class HumanizeSendResult:
             "total_segments": self.total_segments,
             "sent_segments": self.sent_segments,
             "total_delay_ms": self.total_delay_ms,
+            "sleep_delay_ms": self.sleep_delay_ms,
+            "send_elapsed_ms": self.send_elapsed_ms,
             "failed_segment_index": self.failed_segment_index,
             "error": self.error[:200] if self.error else "",
         }
@@ -342,6 +348,22 @@ async def humanize_send_async(
             result.error = str(exc)
         return result
 
+    if cfg.short_text_bypass_len > 0 and len(text) <= int(cfg.short_text_bypass_len):
+        try:
+            send_started = time.monotonic()
+            send_result = send_fn(text)
+            if asyncio.iscoroutine(send_result) or asyncio.isfuture(send_result):
+                send_result = await send_result
+            result.total_segments = 1
+            result.sent_segments = 1 if send_result else 0
+            result.success = bool(send_result)
+            result.total_delay_ms = int((time.monotonic() - send_started) * 1000)
+            result.send_elapsed_ms = result.total_delay_ms
+        except Exception as exc:
+            result.success = False
+            result.error = str(exc)
+        return result
+
     # 分段
     segments = split_message_humanize(
         text,
@@ -353,8 +375,9 @@ async def humanize_send_async(
         segments = [text]
 
     result.total_segments = len(segments)
-    total_delay_ms = 0
     start_ts = time.monotonic()
+    sleep_delay_ms = 0
+    send_elapsed_ms = 0
 
     for idx, segment in enumerate(segments):
         if not segment.strip():
@@ -367,13 +390,15 @@ async def humanize_send_async(
             is_first_segment=(idx == 0),
         )
         await asyncio.sleep(delay)
-        total_delay_ms += int(delay * 1000)
+        sleep_delay_ms += int(delay * 1000)
 
         # 发送
         try:
+            send_started = time.monotonic()
             send_result = send_fn(segment)
             if asyncio.iscoroutine(send_result) or asyncio.isfuture(send_result):
                 send_result = await send_result
+            send_elapsed_ms += int((time.monotonic() - send_started) * 1000)
             if not send_result:
                 result.success = False
                 result.failed_segment_index = idx
@@ -394,14 +419,19 @@ async def humanize_send_async(
         if idx < len(segments) - 1:
             gap = compute_segment_gap(cfg)
             await asyncio.sleep(gap)
-            total_delay_ms += int(gap * 1000)
+            sleep_delay_ms += int(gap * 1000)
 
     result.total_delay_ms = int((time.monotonic() - start_ts) * 1000)
+    result.sleep_delay_ms = sleep_delay_ms
+    result.send_elapsed_ms = send_elapsed_ms
 
     if result.success:
         logger.info(
-            "humanize_send: %d段 total_delay=%dms",
-            result.sent_segments, result.total_delay_ms,
+            "humanize_send: segments=%d total=%dms sleep=%dms send=%dms",
+            result.sent_segments,
+            result.total_delay_ms,
+            result.sleep_delay_ms,
+            result.send_elapsed_ms,
         )
     return result
 
@@ -444,6 +474,20 @@ def humanize_send_sync(
             result.error = str(exc)
         return result
 
+    if cfg.short_text_bypass_len > 0 and len(text) <= int(cfg.short_text_bypass_len):
+        try:
+            send_started = time.monotonic()
+            ok = send_fn(text)
+            result.total_segments = 1
+            result.sent_segments = 1 if ok else 0
+            result.success = bool(ok)
+            result.total_delay_ms = int((time.monotonic() - send_started) * 1000)
+            result.send_elapsed_ms = result.total_delay_ms
+        except Exception as exc:
+            result.success = False
+            result.error = str(exc)
+        return result
+
     segments = split_message_humanize(
         text,
         max_length=cfg.segment_max_len,
@@ -454,6 +498,8 @@ def humanize_send_sync(
 
     result.total_segments = len(segments)
     start_ts = time.monotonic()
+    sleep_delay_ms = 0
+    send_elapsed_ms = 0
 
     for idx, segment in enumerate(segments):
         if not segment.strip():
@@ -461,9 +507,12 @@ def humanize_send_sync(
 
         delay = compute_typing_delay(segment, config=cfg, is_first_segment=(idx == 0))
         time.sleep(delay)
+        sleep_delay_ms += int(delay * 1000)
 
         try:
+            send_started = time.monotonic()
             ok = send_fn(segment)
+            send_elapsed_ms += int((time.monotonic() - send_started) * 1000)
             if not ok:
                 result.success = False
                 result.failed_segment_index = idx
@@ -479,6 +528,9 @@ def humanize_send_sync(
         if idx < len(segments) - 1:
             gap = compute_segment_gap(cfg)
             time.sleep(gap)
+            sleep_delay_ms += int(gap * 1000)
 
     result.total_delay_ms = int((time.monotonic() - start_ts) * 1000)
+    result.sleep_delay_ms = sleep_delay_ms
+    result.send_elapsed_ms = send_elapsed_ms
     return result

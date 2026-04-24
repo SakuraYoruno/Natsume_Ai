@@ -213,8 +213,12 @@ class LimbicAgent:
         user_emotion_tag: str,
         bond_stage: str,
         echo_weight: float,
+        render_target_lang: str = "zh",
     ) -> dict[str, Any]:
-        from host_brain.persona.emotion_reactivity import EmotionReactivityProfile  # noqa: PLC0415
+        from host_brain.persona.emotion_reactivity import (  # noqa: PLC0415
+            EmotionReactivityProfile,
+            render_reactivity_hint_with_pool,
+        )
 
         modifiers = EmotionReactivityProfile.compute_modifiers(
             personality_traits,
@@ -229,6 +233,17 @@ class LimbicAgent:
             "effective_echo_weight": float(effective_echo_weight),
             "persona_modifiers": dict(modifiers.as_dict() if hasattr(modifiers, "as_dict") else {}),
         }
+        try:
+            reactivity_hint = render_reactivity_hint_with_pool(
+                user_emotion_tag=str(user_emotion_tag or ""),
+                bond_stage=str(bond_stage or ""),
+                modifiers=modifiers,
+                render_target_lang=render_target_lang,
+            )
+        except Exception:
+            reactivity_hint = ""
+        if reactivity_hint:
+            payload["reactivity_hint"] = reactivity_hint
         self._touch_state(
             key="last_emotion_reactivity_profile",
             value={
@@ -462,11 +477,11 @@ class LimbicAgent:
         )
         return payload
 
-    def tick_inner_world(self, *, person_id: str | None) -> dict[str, Any]:
+    def tick_inner_world(self, *, person_id: str | None, emit_inner_stream: bool = True) -> dict[str, Any]:
         from host_brain.persona.inner_world import get_inner_world  # noqa: PLC0415
 
         user_id = str(person_id or "user_1").strip() or "user_1"
-        payload = dict(get_inner_world().tick(user_id=user_id) or {})
+        payload = dict(get_inner_world().tick(user_id=user_id, emit_inner_stream=emit_inner_stream) or {})
         payload.setdefault("status", "OK")
         payload.setdefault("user_id", user_id)
         self._touch_state(
@@ -689,56 +704,6 @@ class LimbicAgent:
                 "dominant_motive": str(payload.get("dominant_motive") or "steady"),
                 "reach_out_drive": float(payload.get("reach_out_drive") or 0.0),
                 "withdraw_drive": float(payload.get("withdraw_drive") or 0.0),
-            },
-        )
-        return payload
-
-    def decide_response_policy(
-        self,
-        *,
-        silence_state: Mapping[str, Any] | None = None,
-        body_sense: Mapping[str, Any] | None = None,
-        offline_state: Mapping[str, Any] | None = None,
-        bond_summary: Mapping[str, Any] | None = None,
-        self_reflection_pulse: Mapping[str, Any] | None = None,
-        emotion_context: Mapping[str, Any] | None = None,
-        motive_state: Mapping[str, Any] | None = None,
-        memory_persona_signal: Mapping[str, Any] | None = None,
-        user_message: str = "",
-        runtime_flags: Mapping[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        from host_brain.persona.response_policy import ResponsePolicyInput, decide_response_policy  # noqa: PLC0415
-
-        payload = dict(
-            decide_response_policy(
-                ResponsePolicyInput(
-                    silence_state=dict(silence_state) if isinstance(silence_state, Mapping) else None,
-                    body_sense=dict(body_sense) if isinstance(body_sense, Mapping) else None,
-                    offline_state=dict(offline_state) if isinstance(offline_state, Mapping) else None,
-                    bond_summary=dict(bond_summary) if isinstance(bond_summary, Mapping) else None,
-                    self_reflection_pulse=(
-                        dict(self_reflection_pulse)
-                        if isinstance(self_reflection_pulse, Mapping)
-                        else None
-                    ),
-                    emotion_context=dict(emotion_context) if isinstance(emotion_context, Mapping) else None,
-                    motive_state=dict(motive_state) if isinstance(motive_state, Mapping) else None,
-                    memory_persona_signal=(
-                        dict(memory_persona_signal)
-                        if isinstance(memory_persona_signal, Mapping)
-                        else None
-                    ),
-                    user_message=str(user_message or ""),
-                    runtime_flags=dict(runtime_flags) if isinstance(runtime_flags, Mapping) else None,
-                )
-            ).as_dict()
-            or {}
-        )
-        self._touch_state(
-            key="last_response_policy",
-            value={
-                "should_be_withdrawn": bool(payload.get("should_be_withdrawn")),
-                "allow_proactive_after_reply": bool(payload.get("allow_proactive_after_reply", True)),
             },
         )
         return payload
@@ -1255,7 +1220,7 @@ class LimbicAgent:
                 "LimbicAgent 收到 EMOTION_INFERENCE_UPDATED: emotion_tag=%s intensity=%s source=%s session=%s",
                 emotion_tag, emotion_intensity, emotion_source, session_id,
             )
-            # 将语音情绪推断结果写入 TribeStateRegistry，供 chat_context_builder 读取
+            # 将语音情绪推断结果写入 TribeStateRegistry，供上下文装配主链读取
             self._touch_state(
                 key="last_voice_emotion_inference",
                 value={

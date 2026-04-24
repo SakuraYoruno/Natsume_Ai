@@ -1,4 +1,4 @@
-templates:
+﻿templates:
 - template_id: body_sense.style_hints
   category: fallback
   scope: body_sense

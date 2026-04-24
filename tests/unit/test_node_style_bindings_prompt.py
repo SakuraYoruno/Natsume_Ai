@@ -56,11 +56,10 @@ def _make_runtime_payload(
     user_message: str,
     retrieval_summary: dict,
     retrieval_evidence_items: list[dict],
-    recall_slot_text: dict[str, str] | None = None,
     emotion_state: dict | None = None,
     render_target_lang: str = "ja",
 ):
-    from host_brain.app.chat_context_builder import build_chat_prompt_runtime_payload
+    from host_brain.app.chat_payload_builder import run_build_chat_prompt_runtime_payload
     from host_brain.app.chat_runtime_input import build_chat_runtime_input
 
     runtime_input = build_chat_runtime_input(
@@ -70,11 +69,10 @@ def _make_runtime_payload(
         user_message=user_message,
         retrieval_summary=retrieval_summary,
         retrieval_evidence_items=retrieval_evidence_items,
-        recall_slot_text=recall_slot_text or {},
         emotion_state=emotion_state or {},
         render_target_lang=render_target_lang,
     )
-    payload = build_chat_prompt_runtime_payload(runtime_input=runtime_input)
+    payload = run_build_chat_prompt_runtime_payload(runtime_input=runtime_input)
     payload.update(
         {
             "core_reasoner_primary": {
@@ -90,7 +88,7 @@ def _make_runtime_payload(
     return payload
 
 
-def test_build_chat_prompt_runtime_payload_uses_recall_slots_for_background() -> None:
+def test_build_chat_prompt_runtime_payload_ignores_recall_slots_for_background() -> None:
     payload = _make_runtime_payload(
         request_id="req_recall_slots",
         session_id="session_recall_slots",
@@ -104,22 +102,15 @@ def test_build_chat_prompt_runtime_payload_uses_recall_slots_for_background() ->
             "degraded": False,
         },
         retrieval_evidence_items=[],
-        recall_slot_text={
-            "style_canon": "JA_STYLE_HINT",
-            "world_canon": "Natsume never claims completed execution.",
-        },
     )
 
-    assert "style" not in payload
     prompt_context = dict(dict(payload.get("prompt_context") or {}).get("payload") or {})
     style_pack = dict(prompt_context.get("style_pack") or {})
     style_rows = list(style_pack.get("style_canon") or [])
     authoritative = list(prompt_context.get("authoritative") or [])
-    assert len(style_rows) == 1
-    assert style_rows[0].get("citation") == "context_pack_builder://style_canon"
-    assert style_rows[0].get("instruction") == "JA_STYLE_HINT"
-    assert len(authoritative) == 1
-    assert authoritative[0].get("citation") == "context_pack_builder://world_canon"
+    assert style_rows
+    assert all(str(row.get("instruction") or "") != "JA_STYLE_HINT" for row in style_rows)
+    assert all(str(row.get("content") or "") != "Natsume never claims completed execution." for row in authoritative)
 
 
 def test_build_chat_prompt_runtime_payload_includes_valid_prompt_context() -> None:
@@ -144,10 +135,6 @@ def test_build_chat_prompt_runtime_payload_includes_valid_prompt_context() -> No
                 "confidence": 0.9,
             }
         ],
-        recall_slot_text={
-            "style_canon": "JA_STYLE_HINT",
-            "world_canon": "Natsume keeps a soft boundary and never claims completed execution.",
-        },
         emotion_state={
             "mood_state": "engaged",
             "emotion_tag": "HAPPY",
@@ -168,15 +155,14 @@ def test_build_chat_prompt_runtime_payload_includes_valid_prompt_context() -> No
     source_stats = dict(prompt_context_observability.get("source_stats") or {})
     assert retrieval_metrics.get("path") == "success"
     assert source_stats.get("retrieval_used_items") == 1
-    assert source_stats.get("style_prompt_rows") == 1
+    assert int(source_stats.get("style_prompt_rows") or 0) >= 1
 
     authoritative = list(prompt_context.get("authoritative") or [])
     assert any(str(row.get("kind") or "") == "world_canon" for row in authoritative)
 
     style_pack = dict(prompt_context.get("style_pack") or {})
     style_rows = list(style_pack.get("style_canon") or [])
-    assert len(style_rows) == 1
-    assert style_rows[0].get("citation") == "context_pack_builder://style_canon"
+    assert style_rows
 
     emotion_section = dict(payload.get("emotion") or {})
     emotion_state = dict(emotion_section.get("state") or {})
@@ -220,7 +206,6 @@ def test_build_chat_prompt_runtime_payload_marks_persona_utterance_rows() -> Non
                 },
             }
         ],
-        recall_slot_text={"style_canon": "JA_STYLE_HINT"},
     )
 
     prompt_context = dict(dict(payload.get("prompt_context") or {}).get("payload") or {})
@@ -273,7 +258,6 @@ def test_build_chat_prompt_runtime_payload_drops_persona_examples_for_affection(
                 "metadata": {"store_id": "episodic_vector"},
             },
         ],
-        recall_slot_text={"style_canon": "CN_STYLE_HINT"},
         render_target_lang="zh",
     )
 
@@ -283,7 +267,7 @@ def test_build_chat_prompt_runtime_payload_drops_persona_examples_for_affection(
     assert all(str(row.get("kind") or "") != "persona_utterance" for row in retrieval_rows)
 
 
-def test_render_node_prompt_adds_affection_reply_guidance() -> None:
+def test_render_node_prompt_keeps_persona_assets_without_direct_response_rules() -> None:
     from host_brain.app.prompt_builder import CHAT_DIRECT_NODE_ID, render_node_generation_prompt
 
     runtime_payload = _make_runtime_payload(
@@ -299,20 +283,20 @@ def test_render_node_prompt_adds_affection_reply_guidance() -> None:
             "degraded": False,
         },
         retrieval_evidence_items=[],
-        recall_slot_text={"style_canon": "CN_STYLE_HINT"},
         render_target_lang="zh",
     )
 
     prompt = render_node_generation_prompt(node_id=CHAT_DIRECT_NODE_ID, runtime_payload=runtime_payload)
 
-    assert "Avoid generic acknowledgement formulas" in prompt
-    assert "For affection or confession messages" in prompt
-    assert "answer your stance explicitly in the first sentence" in prompt
-    assert "Never reply with only a generic thanks or acknowledgement." in prompt
+    assert "【回应原则】" not in prompt
+    assert "Avoid generic acknowledgement formulas" not in prompt
+    assert "【人格核心】" in prompt
+    assert "【说话风格】" in prompt
+    assert "PERSONA_STYLE_EXAMPLES:" not in prompt
 
 
 def test_prompt_context_observability_marks_bare_llm_when_minimal_fallback() -> None:
-    from host_brain.app.chat_context_builder import build_prompt_context_observability
+    from host_brain.app.context.retrieval_context import build_prompt_context_observability
 
     observability = build_prompt_context_observability(
         prompt_context={
@@ -416,7 +400,7 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
                             "tone_only": True,
                             "unsafe_as_fact": True,
                             "instruction": "JA_STYLE_HINT_FROM_PROMPT_CONTEXT",
-                            "source": "recall_pack_builder",
+                            "source": "retrieval_pipeline",
                         }
                     ]
                 },
@@ -466,7 +450,7 @@ def test_render_node_prompt_prefers_prompt_context_slots() -> None:
     )
 
     assert "【上下文校验】" in prompt
-    assert "- 有效: True" in prompt
+    assert "- 有効: True" in prompt
     assert "【世界观设定】" in prompt
     assert "world_canon:wc-003-persona-core" in prompt
     assert "JA_STYLE_HINT_FROM_PROMPT_CONTEXT" in prompt

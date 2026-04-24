@@ -1,4 +1,4 @@
-"""chat_agent_preprocessor.py — ChatAgent 消息预处理与工具函数。
+﻿"""chat_agent_preprocessor.py — ChatAgent 消息预处理与工具函数。
 
 拆分自 chat_agent.py（P2-12）：
   - 输入/输出结构体（SubAgentContext、ChatAgentInput）
@@ -21,6 +21,7 @@ from host_brain.app.prompt_template_store import (
     resolve_prompt_template_json_merged,
     resolve_prompt_template_text,
 )
+from host_brain.app.relational_chat_detector import is_relational_chat_message
 
 _logger = logging.getLogger("Natsume.chat_agent")
 
@@ -85,7 +86,6 @@ class ChatAgentInput:
     emotion_context: Dict[str, Any] = field(default_factory=dict)
     emotion_snapshot: Dict[str, Any] = field(default_factory=dict)
     bond_summary: Dict[str, Any] = field(default_factory=dict)
-    recall_slot_text: Dict[str, str] = field(default_factory=dict)
     retrieval_evidence_items: List[Dict[str, Any]] = field(default_factory=list)
     retrieval_summary: Dict[str, Any] = field(default_factory=lambda: {"status": "SKIPPED"})
     sub_agent_context: Optional[SubAgentContext] = None
@@ -99,7 +99,7 @@ class ChatAgentInput:
     intent_draft: Dict[str, Any] = field(default_factory=dict)
     trace_stage_meta: Dict[str, Any] = field(default_factory=dict)
     llm_runtime: Optional[Dict[str, Any]] = None
-    response_policy: Dict[str, Any] = field(default_factory=dict)
+    render_policy: Dict[str, Any] = field(default_factory=dict)
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
 
@@ -142,7 +142,7 @@ def _build_reply_preview(text: str, *, limit: int = 120) -> str:
     return normalized[: max(1, int(limit) - 3)].rstrip() + "..."
 
 
-def _coerce_response_policy(raw_policy: Any) -> Dict[str, Any]:
+def _coerce_render_policy(raw_policy: Any) -> Dict[str, Any]:
     if isinstance(raw_policy, Mapping):
         return dict(raw_policy)
     return {}
@@ -199,8 +199,8 @@ def _truncate_text_to_char_limit(text: str, *, max_chars: int) -> str:
     return candidate.rstrip("，,、；;：:-— ").strip()
 
 
-def _extract_response_policy_limits(response_policy: Any) -> tuple[Dict[str, Any], int, int, int]:
-    policy = _coerce_response_policy(response_policy)
+def _extract_render_policy_limits(render_policy: Any) -> tuple[Dict[str, Any], int, int, int]:
+    policy = _coerce_render_policy(render_policy)
     try:
         max_sentences = max(0, int(policy.get("max_sentences") or 0))
     except (TypeError, ValueError):
@@ -221,7 +221,7 @@ def _extract_response_policy_limits(response_policy: Any) -> tuple[Dict[str, Any
     return policy, max_chars, max_sentences, min_sentences
 
 
-def _coerce_response_policy_score(policy: Mapping[str, Any], key: str, *, default: float = 1.0) -> float:
+def _coerce_render_policy_score(policy: Mapping[str, Any], key: str, *, default: float = 1.0) -> float:
     try:
         value = float(policy.get(key, default))
     except (TypeError, ValueError):
@@ -479,7 +479,7 @@ def _soften_confession_sentence(sentence: str, *, render_target_lang: str = "zh"
     if not softened:
         return ""
     replacements = _load_template_replacement_pairs(
-        "chat_agent.response_policy.confession_replacements",
+        "chat_agent.render_policy.confession_replacements",
         render_target_lang=render_target_lang,
     )
     for source, target in replacements:
@@ -498,7 +498,7 @@ def _soften_intimacy_sentence(sentence: str, *, render_target_lang: str = "zh") 
     if _contains_confession_marker(softened):
         softened = _soften_confession_sentence(softened, render_target_lang=render_target_lang)
     replacements = _load_template_replacement_pairs(
-        "chat_agent.response_policy.intimacy_replacements",
+        "chat_agent.render_policy.intimacy_replacements",
         render_target_lang=render_target_lang,
     )
     for source, target in replacements:
@@ -530,7 +530,7 @@ def _soften_humor_tone(text: str, *, render_target_lang: str = "zh") -> str:
     normalized = normalized.rstrip("，,、；;：: ").strip()
     if not normalized:
         return _resolve_template_text_localized(
-            "chat_agent.response_policy.min_sentence_placeholder",
+            "chat_agent.render_policy.min_sentence_placeholder",
             render_target_lang=render_target_lang,
         )
     if normalized[-1] not in ".。！？!?":
@@ -546,7 +546,7 @@ def _soften_withdrawn_tone(text: str, *, render_target_lang: str = "zh") -> str:
     normalized = re.sub(r"(?:!|！){2,}", "。", normalized)
     normalized = re.sub(r"(?:\?|？){2,}", "？", normalized)
     for source, target in _load_template_replacement_pairs(
-        "chat_agent.response_policy.withdrawn_replacements",
+        "chat_agent.render_policy.withdrawn_replacements",
         render_target_lang=render_target_lang,
     ):
         normalized = normalized.replace(source, target)
@@ -562,14 +562,14 @@ def _drop_trailing_policy_sentences(sentences: list[str], *, min_sentences: int,
     return guarded
 
 
-def _apply_response_policy_stream_guard(
+def _apply_render_policy_stream_guard(
     text: str,
-    response_policy: Any,
+    render_policy: Any,
     *,
     render_target_lang: str = "zh",
 ) -> str:
     normalized = str(text or "").strip()
-    policy, max_chars, max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+    policy, max_chars, max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not normalized or not policy:
         return normalized
     if max_sentences > 0:
@@ -579,22 +579,46 @@ def _apply_response_policy_stream_guard(
     return normalized.strip()
 
 
-def _response_policy_requires_buffering(response_policy: Any) -> bool:
-    policy, _max_chars, _max_sentences, _min_sentences = _extract_response_policy_limits(response_policy)
+def _render_policy_explicit_buffering_decision(render_policy: Any) -> bool | None:
+    policy = _coerce_render_policy(render_policy)
+    if not policy:
+        return None
+    has_explicit = "force_buffering" in policy or "requires_validation" in policy
+    if not has_explicit:
+        return None
+    if bool(policy.get("force_buffering") or False):
+        return True
+    if bool(policy.get("requires_validation") or False):
+        return True
+    return False
+
+
+def _render_policy_requires_buffering(render_policy: Any) -> bool:
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
+    policy, _max_chars, _max_sentences, _min_sentences = _extract_render_policy_limits(render_policy)
     if not policy:
         return False
-    intimacy_ceiling = _coerce_response_policy_score(policy, "intimacy_ceiling")
-    humor_ceiling = _coerce_response_policy_score(policy, "humor_ceiling")
+    intimacy_ceiling = _coerce_render_policy_score(policy, "intimacy_ceiling")
+    humor_ceiling = _coerce_render_policy_score(policy, "humor_ceiling")
     return any([not bool(policy.get("allow_followup", True)), not bool(policy.get("allow_topic_shift", True)), bool(policy.get("confession_guard", False)), bool(policy.get("withdrawal_guard", False)), bool(policy.get("should_be_withdrawn", False)), intimacy_ceiling <= 0.55, humor_ceiling <= 0.35])
 
 
-def _apply_response_policy_hard_guard(narrative: str, response_policy: Any, *, user_message: str = "", bond_stage: str = "") -> str:
+def _apply_render_policy_hard_guard(
+    narrative: str,
+    render_policy: Any,
+    *,
+    user_message: str = "",
+    bond_stage: str = "",
+    render_target_lang: str = "zh",
+) -> str:
     normalized = str(narrative or "").strip()
-    policy, max_chars, max_sentences, min_sentences = _extract_response_policy_limits(response_policy)
+    policy, max_chars, max_sentences, min_sentences = _extract_render_policy_limits(render_policy)
     if not normalized or not policy:
         return normalized
-    intimacy_ceiling = _coerce_response_policy_score(policy, "intimacy_ceiling")
-    humor_ceiling = _coerce_response_policy_score(policy, "humor_ceiling")
+    intimacy_ceiling = _coerce_render_policy_score(policy, "intimacy_ceiling")
+    humor_ceiling = _coerce_render_policy_score(policy, "humor_ceiling")
     sentences = _split_text_into_sentences(normalized)
     if sentences:
         if not bool(policy.get("allow_topic_shift", True)):
@@ -609,7 +633,7 @@ def _apply_response_policy_hard_guard(narrative: str, response_policy: Any, *, u
                     sentences.pop()
                 else:
                     sentences[-1] = _resolve_template_text_localized(
-                        "chat_agent.response_policy.min_sentence_placeholder",
+                        "chat_agent.render_policy.min_sentence_placeholder",
                         render_target_lang=render_target_lang,
                     )
         confession_guard = bool(policy.get("confession_guard", False)) or intimacy_ceiling <= 0.35
@@ -641,7 +665,7 @@ def _apply_response_policy_hard_guard(narrative: str, response_policy: Any, *, u
                 if len(guarded_sentences) + remaining_after < floor:
                     guarded_sentences.append(
                         _resolve_template_text_localized(
-                            "chat_agent.response_policy.min_sentence_placeholder",
+                            "chat_agent.render_policy.min_sentence_placeholder",
                             render_target_lang=render_target_lang,
                         )
                     )
@@ -662,7 +686,6 @@ def _apply_response_policy_hard_guard(narrative: str, response_policy: Any, *, u
     if max_chars > 0:
         normalized = _truncate_text_to_char_limit(normalized, max_chars=max_chars)
     return normalized.strip()
-
 
 # ---------------------------------------------------------------------------
 # 降级回复构建
@@ -686,10 +709,11 @@ def _build_minimal_chat_fallback_reply(*, user_message: str, sub_agent_ctx: SubA
     return _resolve_minimal_fallback_text(kind="default", render_target_lang=render_target_lang)
 
 
-def _build_chat_agent_quality_fallback_reply(*, user_message: str, sub_agent_ctx: SubAgentContext | None, bond_summary: Dict[str, Any] | None, emotion_context: Dict[str, Any] | None, render_target_lang: str, response_policy: Any = None, prompt_runtime_payload: Mapping[str, Any] | None = None) -> str:
+def _build_chat_agent_quality_fallback_reply(*, user_message: str, sub_agent_ctx: SubAgentContext | None, bond_summary: Dict[str, Any] | None, emotion_context: Dict[str, Any] | None, render_target_lang: str, render_policy: Any = None, prompt_runtime_payload: Mapping[str, Any] | None = None) -> str:
     delegated_fallback = _build_sub_agent_result_preserving_fallback_reply(
         sub_agent_ctx,
         render_target_lang=render_target_lang,
+        user_message=user_message,
     )
     if delegated_fallback:
         return delegated_fallback
@@ -741,8 +765,11 @@ def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
         return _mapping_text(templates, "fallback", render_target_lang=render_target_lang)
 
 
-def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, response_policy: Any = None) -> bool:
-    if _response_policy_requires_buffering(response_policy):
+def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, render_policy: Any = None) -> bool:
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
+    if _render_policy_requires_buffering(render_policy):
         return True
     env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"
     raw = str(os.environ.get(env_key, "")).strip().lower()
@@ -1061,12 +1088,21 @@ def _looks_like_internal_sub_agent_result(text: str) -> bool:
     return any(marker in normalized for marker in ("stopped_reason=", "agent_id=", "repair_agent_trace"))
 
 
-def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | None, *, render_target_lang: str) -> str | None:
+def _should_preserve_sub_agent_result_for_user(*, user_message: str, agent_id: str) -> bool:
+    normalized_agent_id = str(agent_id or "").strip()
+    if normalized_agent_id != "intent_agent":
+        return True
+    return not is_relational_chat_message(user_message)
+
+
+def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | None, *, render_target_lang: str, user_message: str = "") -> str | None:
     if ctx is None:
         return None
     if not bool(ctx.success) or str(ctx.error or "").strip():
         return None
     agent_id = str(ctx.agent_id or "").strip()
+    if not _should_preserve_sub_agent_result_for_user(user_message=user_message, agent_id=agent_id):
+        return None
     if agent_id == "open_app":
         return _build_system_skill_reply(ctx, render_target_lang=render_target_lang)
     if agent_id == "plan_execution":
@@ -1081,7 +1117,7 @@ def _build_sub_agent_result_preserving_fallback_reply(ctx: SubAgentContext | Non
     return result_text
 
 
-def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_target_lang: str) -> str | None:
+def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_target_lang: str, user_message: str = "") -> str | None:
     if ctx is None:
         return None
     agent_id = str(ctx.agent_id or "").strip()
@@ -1093,7 +1129,7 @@ def _build_deterministic_sub_agent_reply(ctx: SubAgentContext | None, *, render_
     if agent_id.startswith("skill:hub_skill_"):
         return _build_hub_skill_reply_cn(ctx, render_target_lang=render_target_lang)
     if agent_id in {"codex_codegen", "translate_agent", "intent_agent"}:
-        return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang)
+        return _build_sub_agent_result_preserving_fallback_reply(ctx, render_target_lang=render_target_lang, user_message=user_message)
     if agent_id in {"phatic_fastpath", "recent_turn_direct", "task_progress_direct"}:
         return result_text or None
     return None

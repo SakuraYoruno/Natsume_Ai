@@ -157,6 +157,7 @@ class InteractionPatternAnalyzer:
         self,
         *,
         llm_fn: Any | None = None,
+        strict_llm: bool = False,
         max_memories: int = MAX_MEMORIES_PER_ANALYSIS,
         min_confidence_threshold: float = 0.3,
     ) -> None:
@@ -168,6 +169,7 @@ class InteractionPatternAnalyzer:
             min_confidence_threshold: 最低置信度阈值，低于此值的建议被忽略
         """
         self._llm_fn = llm_fn
+        self._strict_llm = bool(strict_llm)
         self._max_memories = int(max_memories)
         self._min_confidence = float(min_confidence_threshold)
 
@@ -219,6 +221,13 @@ class InteractionPatternAnalyzer:
                 memory_count=len(memories),
                 ts_ms=ts_ms,
                 digest=digest,
+            )
+        elif self._strict_llm:
+            result = self._llm_required_result(
+                memory_count=len(memories),
+                ts_ms=ts_ms,
+                digest=digest,
+                reason="llm_fn_missing",
             )
         else:
             result = self._analyze_with_keywords(
@@ -340,9 +349,14 @@ class InteractionPatternAnalyzer:
             )
 
         except Exception as exc:
-            _logger.warning(
-                "LLM 分析失败，降级到关键词规则: %s", exc
-            )
+            _logger.warning("LLM 分析失败: %s", exc)
+            if self._strict_llm:
+                return self._llm_required_result(
+                    memory_count=memory_count,
+                    ts_ms=ts_ms,
+                    digest=digest,
+                    reason=str(exc),
+                )
             return self._analyze_with_keywords(
                 memories_text=memories_text,
                 memory_count=memory_count,
@@ -514,4 +528,31 @@ class InteractionPatternAnalyzer:
             memory_count=0,
             analysis_method="empty",
             ts_ms=ts_ms,
+        )
+
+    def _llm_required_result(
+        self,
+        *,
+        memory_count: int,
+        ts_ms: int,
+        digest: str,
+        reason: str,
+    ) -> PatternAnalysisResult:
+        runtime_texts = _get_runtime_texts()
+        return PatternAnalysisResult(
+            pattern_summary=_mapping_text(
+                runtime_texts,
+                "llm_pattern_summary_default",
+            )[:50],
+            dominant_theme=_mapping_text(
+                runtime_texts,
+                "llm_dominant_theme_default",
+            )[:20],
+            trait_suggestions={},
+            suggestion_reason=str(reason or "llm_required")[:100],
+            confidence=0.0,
+            memory_count=int(memory_count or 0),
+            analysis_method="llm_required",
+            ts_ms=int(ts_ms or 0),
+            raw_memories_digest=digest,
         )

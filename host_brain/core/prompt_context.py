@@ -36,8 +36,6 @@ OPTIONAL_SLOTS: dict[str, type] = {
     "emotion_recall": str,
     "bond_texture": dict,
     "memory_emotion_hint": dict,
-    "memory_persona_evidence": list,
-    "memory_recall_summary": str,
     "self_reflection_pulse": dict,  # Phase III：自省脉冲
     "bond_narrative": dict,         # Phase V：关系叙事
 }

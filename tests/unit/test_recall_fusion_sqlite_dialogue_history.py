@@ -27,8 +27,7 @@ def test_sqlite_ledger_route_recalls_dialogue_history_from_memory_ops() -> None:
                 "status": "SUCCESS",
                 "reason_code": None,
                 "detail": (
-                    "memory written: User: I miss madara today. "
-                    "Natsume: We can revisit those warm memories together."
+                    "memory written: [session=sess-001] User: I miss madara today."
                 ),
                 "decay_profile_id": "SLOW",
                 "visibility": "internal",
