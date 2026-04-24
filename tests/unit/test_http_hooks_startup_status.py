@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import datetime
 
 from host_brain.app.automation.task_scheduler import TaskPriority as AutomationTaskPriority
 from host_brain.app.http_hooks import _build_codex_immune_scheduler_task
@@ -55,11 +56,11 @@ def test_build_reply_surface_cache_prewarm_task_config_uses_daily_cron(monkeypat
 
 def test_seconds_until_daily_time_rolls_to_next_day() -> None:
     # 2026-04-24 03:09:30 local time.
-    before_target = 1776971370.0
+    before_target = datetime.datetime(2026, 4, 24, 3, 9, 30).timestamp()
     assert _seconds_until_daily_time(hour=3, minute=10, now_ts=before_target) == 30.0
 
     # 2026-04-24 03:10:00 local time should schedule tomorrow's run.
-    at_target = 1776971400.0
+    at_target = datetime.datetime(2026, 4, 24, 3, 10, 0).timestamp()
     assert _seconds_until_daily_time(hour=3, minute=10, now_ts=at_target) == 24 * 60 * 60
 
 

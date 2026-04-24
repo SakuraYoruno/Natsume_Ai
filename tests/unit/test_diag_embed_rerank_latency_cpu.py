@@ -6,7 +6,7 @@ import sys
 
 
 def _load_diag_module():
-    file_path = Path("D:/Natsume_Ai/tools/diag_embed_rerank_latency_cpu.py")
+    file_path = Path(__file__).resolve().parents[2] / "tools" / "diag_embed_rerank_latency_cpu.py"
     spec = importlib.util.spec_from_file_location("diag_embed_rerank_latency_cpu", file_path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

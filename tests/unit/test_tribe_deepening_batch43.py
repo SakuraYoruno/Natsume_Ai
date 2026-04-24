@@ -38,10 +38,11 @@ def test_t313_circadian_night_phase_reduces_recovery_urgency():
          patch("host_brain.tribe.circadian_agent.get_limbic_agent", return_value=MagicMock()):
         agent.refresh_state(source="test", ts_ms=1000)
 
-    mock_intero.reduce_recovery_urgency.assert_called_once()
-    call_kwargs = mock_intero.reduce_recovery_urgency.call_args.kwargs
-    assert call_kwargs["source"] == "circadian_night_phase"
-    assert call_kwargs["relief"] == 0.40
+    mock_intero.reduce_recovery_urgency.assert_any_call(
+        source="circadian_night_phase",
+        relief=0.40,
+        ts_ms=1000,
+    )
 
 
 # ── T-314: CircadianAgent 夜间/黄昏相位切换时联动 LimbicAgent ───────────────

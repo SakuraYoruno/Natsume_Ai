@@ -3,7 +3,7 @@ import unittest
 
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.errors import RETR_RECALL_UNAVAILABLE, RETR_RERANK_UNAVAILABLE
-from host_brain.memory.chroma_client import embed_text
+from host_brain.memory.chroma_client import hash_embed_text
 from host_brain.retrieval.embedding import EmbeddingServiceContract, load_embedding_runtime_config
 from host_brain.retrieval.evidence_pack import EvidencePackServiceContract
 from host_brain.retrieval.pipeline import (
@@ -19,7 +19,7 @@ from tests.fakes.chroma_client import FakeChromaClient
 
 
 def _embed_for_dim(text: str, dim: int) -> list[float]:
-    values, _ = embed_text(text)
+    values, _ = hash_embed_text(text, dim=dim)
     normalized = list(values[:dim])
     if len(normalized) < dim:
         normalized.extend([0.0] * (dim - len(normalized)))

@@ -354,7 +354,6 @@ def embed_text(text: str, *, dim: int | None = None) -> tuple[list[float], str]:
     normalized = str(text).strip()
     # 尝试使用真实语义嵌入模型
     try:
-        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
         model = _get_sentence_transformer_model()
         embedding = model.encode(normalized, normalize_embeddings=True)
         values = [round(float(v), 6) for v in embedding]
