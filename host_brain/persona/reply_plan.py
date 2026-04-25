@@ -37,7 +37,7 @@ def _join_nonempty(parts: list[str]) -> str:
 def _multimodal_signal_haystack(multimodal: dict[str, Any] | None) -> str:
     payload = dict(multimodal or {})
     parts: list[str] = []
-    for key in ("core_observation", "summary_for_chat", "visible_text", "artifact_type", "caption"):
+    for key in ("social_signal", "core_observation", "summary_for_chat"):
         value = str(payload.get(key) or "").strip()
         if value:
             parts.append(value)
@@ -660,7 +660,7 @@ def _build_reply_contract(
         "explain_previous_reply": "先接住对方是在追问上一句，再把上一句具体指代或意思补清楚，不要只剩语气词。",
         "brief_name_only": "只简短报名字，不展开成介绍。",
         "ack_name_then_wait": "这轮不是第一次问身份：短短承认前面已经回答过，然后停住，不要重新展开名字，也不要只剩一个名字。",
-        "ack_repeat_then_light_probe": "把名字这件事轻轻放住，再顺着把真正想问的东西引出来，不要把名字展开成介绍。",
+        "ack_repeat_then_light_probe": "把名字这件事轻轻放住，再顺着把后面的话头接出来，不要把名字展开成介绍。",
         "hold_name_then_open_floor": "把名字放成已知事实，再把话口让回去，不要复用上一轮动作。",
         "name_only_then_pause": "只在对方已经连问很多次时，用极短确认收住，不补解释，也不要和上一轮同一种动作。",
         "soft_close_then_open_floor": "把这件事轻轻收稳，再把话口让回去，不要再报名字。",
@@ -702,23 +702,23 @@ def _build_reply_contract(
         ("explain_previous_reply", "clarify_object"): "先承认上一句说得太省，再补清楚上一句具体指的是什么；不要只回语气词，也不要装作新话题。",
         ("explain_previous_reply", "clarify_meaning"): "先接住对方在问上一句是什么意思，再用一两句把上一句的意思补清楚；不要只回语气词。",
         ("explain_previous_reply", "repair_too_short"): "先承认刚才那句接得太短，再顺着上下文把该补的意思补上；不要复读上一句。",
-        ("ack_repeat_then_light_probe", "confirm_motive"): "把名字这件事轻轻放住，再顺着探一下他真正想确认的是什么，不要重报名字。",
+        ("ack_repeat_then_light_probe", "confirm_motive"): "把名字这件事轻轻放住，再顺着探一下他后面想确认的点，不要重报名字。",
         ("ack_repeat_then_light_probe", "confirm_part"): "把名字这件事轻轻放住，再问他还想确认哪一部分，不要重报名字。",
-        ("ack_repeat_then_light_probe", "confirm_real_question"): "把名字这件事轻轻放住，再把真正想问的是什么引出来，不要重报名字。",
-        ("hold_name_then_open_floor", "open_real_question"): "把名字放成已知事实，然后把真正想问的机会让回去，不要再把名字展开成介绍。",
+        ("ack_repeat_then_light_probe", "confirm_real_question"): "把名字这件事轻轻放住，再把后面的话头接出来，不要重报名字。",
+        ("hold_name_then_open_floor", "open_real_question"): "把名字放成已知事实，然后把后续问题的话口让回去，不要再把名字展开成介绍。",
         ("hold_name_then_open_floor", "open_other_topic"): "把名字放成已知事实，然后把别的想问的口子让回去，不要再把名字展开成介绍。",
-        ("soft_close_then_open_floor", "settle_then_open"): "把这件事轻轻收稳，再把真正想问的口子让回去，不要再报名字。",
-        ("soft_close_then_open_floor", "settle_real_question"): "把这件事轻轻收稳，再把真正想问的是什么让对方说出来，不要再报名字。",
+        ("soft_close_then_open_floor", "settle_then_open"): "把这件事轻轻收稳，再把后面的话口让回去，不要再报名字。",
+        ("soft_close_then_open_floor", "settle_real_question"): "把这件事轻轻收稳，再让对方把后续问题说出来，不要再报名字。",
         ("soft_close_then_open_floor", "settle_other_topic"): "把这件事轻轻收稳，再把别的想问的口子让回去，不要再报名字。",
         ("ack_name_then_wait", "quiet_confirm"): "这轮不是第一次问身份：只短短承认前面已经回答过，然后停住，不要再展开名字。",
         ("ack_still_care_then_new_reason", "still_care_reason"): "把距离先放稳，再换一句新的短理由，不要重复上一轮承接方式。",
-        ("hold_boundary_then_shift_floor", "shift_real_question"): "这轮不是第一次问原因：把距离放稳，再把真正想问的是什么让对方说出来，不要整段重讲理由。",
+        ("hold_boundary_then_shift_floor", "shift_real_question"): "这轮不是第一次问原因：把距离放稳，再让对方把后续问题说出来，不要整段重讲理由。",
         ("hold_boundary_then_shift_floor", "shift_other_question"): "这轮不是第一次问原因：把距离放稳，再把别的想问的口子让回去，不要整段重讲理由。",
         ("soft_close_boundary", "settle_repeat"): "这轮原因已经来回问过几次：轻轻收住重复追问，不要再整句重复上一轮理由。",
         ("soft_close_boundary", "settle_hold"): "这轮原因已经来回问过几次：轻轻收住重复追问，把理由停在这，不要再整段重讲。",
         ("ack_anxiety_without_repromise", "soothe_hold"): "先把会回应的态度放稳，不要重新许诺整句。",
         ("ack_anxiety_without_repromise", "steady_reassure"): "先把态度放稳一点，不要重新许诺整句。",
-        ("soft_reassure_then_open_floor", "soothe_then_open"): "先把态度放稳，再把真正想问的口子让回去，不要重复承诺本身。",
+        ("soft_reassure_then_open_floor", "soothe_then_open"): "先把态度放稳，再把后面的话口让回去，不要重复承诺本身。",
         ("hold_support_without_repromise", "steady_open_floor"): "把会回应这件事放稳，再把别的想问的口子让回去，不要沿用上一轮承接结构。",
     }
     return ReplyContract(

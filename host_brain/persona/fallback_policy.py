@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
-SURFACE_CACHE_POLICY_VERSION = "surface-v5-sticker-emotion-20260425"
+SURFACE_CACHE_POLICY_VERSION = "surface-v6-envelope-only-20260425"
 
 _COMPACT_RE = re.compile(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+")
 _HOST_MODEL_MARKERS = ("fallback", "emergency", "deterministic", "placeholder", "ack")
@@ -82,12 +82,17 @@ class FallbackRequest:
 
 
 @dataclass(frozen=True)
-class FallbackResult:
+class FallbackDecision:
     text: str
     reason_code: str
     degraded: bool = True
     cacheable: bool = False
     source: str = "fallback_policy"
+    sendable: bool = False
+    persistable: bool = False
+
+
+FallbackResult = FallbackDecision
 
 
 def compact_forbidden_text(text: str) -> str:
@@ -155,41 +160,24 @@ def is_surface_cacheable_reply(
     return kind in {"", "final_reply"}
 
 
-def build_fallback_reply(request: FallbackRequest) -> FallbackResult:
-    """Return a small, explicitly degraded fallback.
-
-    This is not a persona writer. It exists only when both the surface renderer
-    and the full model path fail, so the text must stay neutral and non-cacheable.
-    """
-    lang = str(request.render_target_lang or "").strip().lower()
-    topic = str(request.primary_topic or "").strip()
+def build_fallback_reply(request: FallbackRequest) -> FallbackDecision:
+    """Return a degraded decision without user-visible persona text."""
+    _ = request
     reason = str(request.reason_code or "fallback").strip() or "fallback"
-    if lang == "ja":
-        if topic in {"emoji_social_reply", "emoji_social_followup"}:
-            text = "画像は見えてるけど、今の返しはうまく接げなかった。"
-        elif topic == "assistant_reply_followup":
-            text = "さっきの返し、短すぎてうまく接げなかった。"
-        else:
-            text = "今の返し、うまく接げなかった。"
-    elif topic in {"emoji_social_reply", "emoji_social_followup"}:
-        text = "这下我没接稳，先别按刚才那句算。"
-    elif topic == "assistant_reply_followup":
-        text = "刚才那句太短了，这次没接稳。"
-    elif topic in {"identity", "relationship_boundary", "motivation", "help_commitment"}:
-        text = "这句我没接稳，先别按刚才那版算。"
-    else:
-        text = "这条我没接稳，先别按刚才那版算。"
-    return FallbackResult(
-        text=text,
+    return FallbackDecision(
+        text="",
         reason_code=reason,
         degraded=True,
         cacheable=False,
         source="fallback_policy",
+        sendable=False,
+        persistable=False,
     )
 
 
 __all__ = [
     "FallbackRequest",
+    "FallbackDecision",
     "FallbackResult",
     "SURFACE_CACHE_POLICY_VERSION",
     "build_fallback_reply",

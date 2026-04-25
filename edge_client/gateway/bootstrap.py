@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import platform
 import subprocess
 import sys
 import threading
@@ -13,6 +15,21 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger("Natsume.edge.gateway.bootstrap")
+
+
+def _configure_windows_event_loop_policy() -> None:
+    if platform.system().lower() != "windows":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    try:
+        asyncio.set_event_loop_policy(selector_policy())
+    except Exception:
+        logger.warning("Gateway: failed to set Windows selector event loop policy", exc_info=True)
+
+
+_configure_windows_event_loop_policy()
 
 
 def _resolve_input_report_timeout_s() -> float:
@@ -579,9 +596,16 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
 
     def _run_server() -> None:
         try:
+            _configure_windows_event_loop_policy()
             import uvicorn
 
-            uvicorn.run(app, host="0.0.0.0", port=config.gateway_port, log_level="info")
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=config.gateway_port,
+                log_level="info",
+                loop="asyncio",
+            )
         except Exception as exc:
             logger.error("Gateway: server 启动失败: %s", exc)
 

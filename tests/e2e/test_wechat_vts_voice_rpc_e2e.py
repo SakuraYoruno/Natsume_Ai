@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from edge_client.rpc.event_reporter import BatchReportResult, EdgeEventReporter
-from host_brain.app import fastapi_app as host_api
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.channels.wechat import receive_wechat_event
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
 from host_brain.skills.loader import SkillLoader
 from host_brain.skills.registry import SkillMeta, SkillRegistry
+from tests.fakes.host_app import build_host_test_app
 
 try:
     from fastapi.testclient import TestClient
@@ -69,16 +69,10 @@ class TestWeChatVtsVoiceRpcE2E(unittest.TestCase):
             ledger=self.ledger,
         )
 
-        self._orig_ledger = host_api._ledger
-        self._orig_intent_engine = host_api._intent_engine
-        host_api._ledger = self.ledger
-        host_api._intent_engine = None
-        self.client = TestClient(host_api.app)
+        self.client = TestClient(build_host_test_app(get_ledger=lambda: self.ledger))
 
     def tearDown(self) -> None:
         self.client.close()
-        host_api._ledger = self._orig_ledger
-        host_api._intent_engine = self._orig_intent_engine
         self.ledger.close()
 
     def _make_intent(self, overrides: dict[str, Any]) -> dict[str, Any]:

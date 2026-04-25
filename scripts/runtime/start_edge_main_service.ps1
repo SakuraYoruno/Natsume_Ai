@@ -44,6 +44,24 @@ function Read-EnvFile {
   return $values
 }
 
+function Write-EnvFile {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [hashtable]$Values
+  )
+
+  $lines = @()
+  foreach ($key in ($Values.Keys | Sort-Object)) {
+    if ([string]::IsNullOrWhiteSpace([string]$key)) {
+      continue
+    }
+    $lines += ("{0}={1}" -f [string]$key, [string]$Values[$key])
+  }
+  Set-Content -Path $Path -Value $lines -Encoding UTF8
+}
+
 function Resolve-RepoRoot {
   param([string]$Preferred)
   if (-not [string]::IsNullOrWhiteSpace($Preferred)) {
@@ -78,6 +96,45 @@ function Get-ListeningPid {
     return $null
   }
   return [int]$conn.OwningProcess
+}
+
+function Is-EdgeMainProcess {
+  param([int]$ProcessId)
+  $procInfo = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  if ($null -eq $procInfo) {
+    return $false
+  }
+  $cmd = [string]$procInfo.CommandLine
+  if (-not $cmd) {
+    return $false
+  }
+  return ($cmd -like "*-m edge_client*")
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+  }
+}
+
+function Stop-ResidualEdgeMainProcesses {
+  $processes = Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue
+  foreach ($procInfo in @($processes)) {
+    $procId = [int]$procInfo.ProcessId
+    if ($procId -le 0) {
+      continue
+    }
+    $cmd = [string]$procInfo.CommandLine
+    if ($cmd -and $cmd -like "*-m edge_client*") {
+      Stop-ProcessTree -ProcessId $procId
+    }
+  }
 }
 
 function Read-TrimmedFileText {
@@ -131,7 +188,7 @@ function Stop-EdgeMainOnly {
       if ([int]::TryParse($pidText, [ref]$parsedPid)) {
         $proc = Get-Process -Id $parsedPid -ErrorAction SilentlyContinue
         if ($null -ne $proc) {
-          Stop-Process -Id $parsedPid -Force -ErrorAction SilentlyContinue
+          Stop-ProcessTree -ProcessId $parsedPid
           $stoppedPid = $parsedPid
           $detail = "stopped_by_pid_file"
         }
@@ -143,11 +200,13 @@ function Stop-EdgeMainOnly {
   if ($null -eq $stoppedPid -and $RpcPort -gt 0) {
     $listeningPid = Get-ListeningPid -ProbePort $RpcPort
     if ($null -ne $listeningPid) {
-      Stop-Process -Id $listeningPid -Force -ErrorAction SilentlyContinue
+      Stop-ProcessTree -ProcessId $listeningPid
       $stoppedPid = $listeningPid
       $detail = "stopped_by_port_probe"
     }
   }
+
+  Stop-ResidualEdgeMainProcesses
 
   return [ordered]@{
     pid = $stoppedPid
@@ -213,6 +272,8 @@ $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
 $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
 $envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
 $envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = 'true'
+$effectiveEnvFile = Join-Path $runtimeRoot 'edge.runtime.env'
+Write-EnvFile -Path $effectiveEnvFile -Values $envValues
 if ($Port -le 0) {
   $portRaw = [string]$envValues['EDGE_RPC_PORT']
   if ($portRaw) {
@@ -264,7 +325,8 @@ if ($null -ne $existingPid -and -not $ForceRestart.IsPresent) {
       pid = $existingPid
       pid_file = $pidFile
       port = $Port
-      env_file = $EnvFile
+      env_file = $effectiveEnvFile
+      source_env_file = $EnvFile
       stdout_log = $stdoutLog
       stderr_log = $stderrLog
       startup_mode = 'main_service_breakaway'
@@ -287,7 +349,7 @@ if ($ForceRestart.IsPresent) {
 $stdoutEscaped = ([string]$stdoutLog).Replace('"', '""')
 $stderrEscaped = ([string]$stderrLog).Replace('"', '""')
 $repoEscaped = ([string]$RepoRoot).Replace('"', '""')
-$envEscaped = ([string]$EnvFile).Replace('"', '""')
+$envEscaped = ([string]$effectiveEnvFile).Replace('"', '""')
 $pythonEscaped = ([string]$PythonPath).Replace('"', '""')
 $bindEscaped = ([string]$BindHost).Replace('"', '""')
 $runnerEscaped = ([string]$runnerScript).Replace('"', '""')
@@ -297,7 +359,7 @@ $launcherLines = @(
   '@echo off',
   "cd /d `"$repoEscaped`"",
   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
-  'if errorlevel 1 echo [warn] ensure_qq_onebot failed; continuing edge startup anyway 1>> "' + $stdoutEscaped + '" 2>> "' + $stderrEscaped + '"',
+  "if errorlevel 1 echo [warn] ensure_qq_onebot failed; continuing edge startup anyway 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
 )
 Set-Content -Path $launcherScript -Value $launcherLines -Encoding ascii
@@ -328,7 +390,8 @@ $result = [ordered]@{
     pid = $edgePid
     pid_file = $pidFile
     port = $Port
-    env_file = $EnvFile
+    env_file = $effectiveEnvFile
+    source_env_file = $EnvFile
     stdout_log = $stdoutLog
     stderr_log = $stderrLog
     startup_mode = 'main_service_breakaway'

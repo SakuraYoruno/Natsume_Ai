@@ -64,6 +64,49 @@ def _turn_content(turn: Any) -> str:
     return ""
 
 
+def _turn_metadata(turn: Any) -> dict[str, Any]:
+    if isinstance(turn, Mapping):
+        raw = turn.get("metadata")
+        return dict(raw) if isinstance(raw, Mapping) else {}
+    return {}
+
+
+def _turn_multimodal_observations(turn: Any) -> dict[str, Any]:
+    metadata = _turn_metadata(turn)
+    raw = metadata.get("multimodal_observations")
+    return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _turn_has_image_social_metadata(turn: Any) -> bool:
+    metadata = _turn_metadata(turn)
+    observations = _turn_multimodal_observations(turn)
+    attachments = list(metadata.get("attachments") or [])
+    primary_modality = _normalize_text(observations.get("primary_modality")).lower()
+    observed_types = {
+        _normalize_text(item).lower()
+        for item in list(observations.get("observed_types") or observations.get("modalities") or [])
+        if _normalize_text(item)
+    }
+    has_image_attachment = any(
+        _normalize_text(item.get("type")).lower() in {"image", "emoji", "sticker"}
+        for item in attachments
+        if isinstance(item, Mapping)
+    )
+    social_signal = _normalize_text(observations.get("social_signal"))
+    emotion_signals = [
+        _normalize_text(item)
+        for item in list(observations.get("emotion_signals") or [])
+        if _normalize_text(item)
+    ]
+    return bool(
+        primary_modality in {"image", "emoji", "sticker"}
+        or observed_types.intersection({"image", "emoji", "sticker"})
+        or has_image_attachment
+        or social_signal
+        or emotion_signals
+    )
+
+
 def _classify_user_topic(text: str) -> str:
     if not text:
         return ""
@@ -260,9 +303,24 @@ def resolve_interaction_thread(
     for idx, turn in enumerate(turns):
         role = _turn_role(turn)
         content = _turn_content(turn)
-        if role == "user" and _IMAGE_MESSAGE_RE.match(content):
+        if role == "user" and (_IMAGE_MESSAGE_RE.match(content) or _turn_has_image_social_metadata(turn)):
             image_source_index = idx
             reason_tags.append("recent_image_message")
+            observations = _turn_multimodal_observations(turn)
+            metadata_emotion = " ".join(
+                [
+                    _normalize_text(observations.get("social_signal")),
+                    _normalize_text(observations.get("core_observation")),
+                    _normalize_text(observations.get("summary_for_chat")),
+                    " ".join(
+                        _normalize_text(item)
+                        for item in list(observations.get("emotion_signals") or [])
+                        if _normalize_text(item)
+                    ),
+                ]
+            )
+            if metadata_emotion and not image_emotion_anchor:
+                image_emotion_anchor = _derive_emotion_anchor(metadata_emotion)
         if role == "user":
             last_user_turn_index = idx
             if content:
@@ -295,6 +353,20 @@ def resolve_interaction_thread(
             last_user_reaction=last_user_reaction,
             turn_count=max(1, len(turns) - image_source_index),
             reason_tags=tuple(dict.fromkeys(reason_tags)),
+        )
+
+    if image_source_index is not None and detect_image_social_followup_kind(current_user_message):
+        return InteractionThreadState(
+            thread_kind="image_social",
+            source_topic="emoji_social_reply",
+            source_modality="image",
+            emotion_anchor=image_emotion_anchor,
+            open=True,
+            source_turn_index=image_source_index,
+            last_assistant_move="image_social_ack",
+            last_user_reaction=detect_image_social_followup_kind(current_user_message),
+            turn_count=max(1, len(turns) - image_source_index),
+            reason_tags=tuple(dict.fromkeys([*reason_tags, "recent_image_social_metadata"])),
         )
 
     assistant_followup_kind = detect_assistant_reply_followup_kind(

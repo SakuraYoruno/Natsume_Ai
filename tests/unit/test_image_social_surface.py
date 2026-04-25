@@ -40,7 +40,9 @@ def test_image_social_surface_requires_emotion_response_not_image_commentary() -
         "emotion_signals": ["可爱", "卖萌"],
     }
 
-    assert "猫耳" in image_social_anchor_terms(multimodal)
+    anchors = image_social_anchor_terms(multimodal)
+    assert "猫耳" not in anchors
+    assert {"可爱", "卖萌"}.issubset(set(anchors))
     assert candidate_responds_to_image_social_emotion("好啦好啦，别拿这种眼神晃我，我会心软的。")
     assert candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住还不行嘛。")
     assert candidate_responds_to_image_social_emotion("被你这么一晃，我有点招架不住。")
@@ -68,6 +70,6 @@ def test_image_social_emergency_reply_stays_neutral_degraded() -> None:
         {"summary_for_chat": "一张普通图片。"},
     ):
         reply = build_emergency_image_social_reply(payload)
-        assert "没接稳" in reply
+        assert reply == ""
         assert "故意拿来晃" not in reply
         assert "先不乱猜" not in reply

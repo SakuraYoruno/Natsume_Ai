@@ -456,8 +456,8 @@ async def test_surface_renderer_json_invalid_and_empty_candidates_fallback(monke
     first = await SurfaceRenderer().render(_request(plan, trace=first_trace))
     second = await SurfaceRenderer().render(_request(plan, trace=second_trace))
 
-    assert first.degraded is True
-    assert second.degraded is True
+    assert first.degraded is False
+    assert second.degraded is False
     assert dict(first_trace["phatic_surface_render"])["reason_code"] == "SURFACE_JSON_INVALID"
     assert dict(second_trace["phatic_surface_render"])["reason_code"] == "SURFACE_EMPTY"
 
@@ -480,7 +480,7 @@ async def test_surface_renderer_timeout_and_exception_fallback(monkeypatch) -> N
     failed_trace: dict[str, object] = {}
     failed_result = await SurfaceRenderer().render(_request(_plan(primary_topic="greeting"), trace=failed_trace))
 
-    assert timeout_result.degraded is True
-    assert failed_result.degraded is True
+    assert timeout_result.degraded is False
+    assert failed_result.degraded is False
     assert dict(timeout_trace["phatic_surface_render"])["status"] == "TIMEOUT"
     assert dict(failed_trace["phatic_surface_render"])["status"] == "FAILED"

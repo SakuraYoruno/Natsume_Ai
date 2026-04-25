@@ -1,6 +1,6 @@
 """可观测性和记忆持久化模块。
 
-从 fastapi_app.py 拆分，负责 chat 请求的可观测性数据和情节记忆写入。
+负责 chat 请求的可观测性数据和情节记忆写入。
 """
 
 from __future__ import annotations

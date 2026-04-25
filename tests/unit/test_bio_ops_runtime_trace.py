@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace
+from host_brain.app.chat_routes import build_chat_bio_ops_preflight_trace
+from host_brain.app.schemas import ChatRequest
 from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules, classify_task_intent_fastpath
 
 
@@ -57,3 +59,12 @@ def test_bio_ops_runtime_trace_marks_execution_routes_as_explicit_help() -> None
     assert trace["reflex"]["matched"] is False
     assert trace["active_silence"]["silence_policy"] == "normal_presence"
     assert trace["response_breathing"]["reply_density"] == "compact_status"
+
+
+def test_chat_preflight_trace_records_reflex_without_execution_actions() -> None:
+    trace = build_chat_bio_ops_preflight_trace(ChatRequest(message="好的", emotion_context={"stress_level": "low"}))
+
+    assert trace["proposal_only"] is True
+    assert trace["reflex"]["matched"] is True
+    assert "codex_worker" in trace["forbidden_actions"]
+    assert trace["response_breathing"]["reply_density"] in {"normal", "soft_brief", "grounded_brief"}

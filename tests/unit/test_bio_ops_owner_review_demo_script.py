@@ -17,12 +17,26 @@ def test_generate_bio_ops_owner_review_demo_run(tmp_path) -> None:
 
     owner_import = run_dir / "owner_inbox" / "social_brain_agent" / "demo_habit_candidate" / "owner_import_candidate.json"
     owner_packet = run_dir / "owner_inbox" / "social_brain_agent" / "owner_intake_packet.json"
+    owner_queue_item = (
+        run_dir
+        / "owner_queues"
+        / "social_brain_agent"
+        / "social_brain_candidate_queue"
+        / "demo_habit_candidate"
+        / "queue_item.json"
+    )
     assert owner_import.exists()
     assert owner_packet.exists()
+    assert owner_queue_item.exists()
 
     packet = json.loads(owner_packet.read_text(encoding="utf-8"))
     assert packet["write_policy"] == "owner_intake_packet_only"
     assert packet["direct_long_term_write"] is False
     assert packet["import_candidates"][0]["owner_channel"]["channel_id"] == "social_brain_candidate_queue"
+    queue_item = json.loads(owner_queue_item.read_text(encoding="utf-8"))
+    assert queue_item["write_policy"] == "owner_queue_candidate_only"
+    assert queue_item["durable_write_performed"] is False
     assert manifest["owner_inbox"]["materialized_count"] == 1
     assert manifest["intake_packets"]["packet_count"] == 1
+    assert manifest["owner_consumer"]["queued_count"] == 1
+    assert manifest["owner_queues"]["status_counts"]["QUEUED_FOR_OWNER"] == 1

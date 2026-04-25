@@ -54,11 +54,11 @@ from host_brain.observability.routes import build_obs_metrics_response
 _logger = logging.getLogger("Natsume.obs_app")
 
 
-def _get_ledger_compat():
+def _get_obs_ledger():
     return _get_ledger_dep()
 
 
-_set_obs_ledger_provider(_get_ledger_compat)
+_set_obs_ledger_provider(_get_obs_ledger)
 
 
 @asynccontextmanager
@@ -135,7 +135,7 @@ async def global_exception_handler(_request: Request, exc: Exception) -> JSONRes
 
 @app.get("/health")
 async def health() -> dict[str, Any]:
-    ledger = _get_ledger_compat()
+    ledger = _get_obs_ledger()
     return {
         "status": "OK",
         "service": "obs",
@@ -167,7 +167,7 @@ async def request_trace(request_body: ObservabilityRequest) -> ObservabilityResp
     try:
         trace_report = build_request_observability_report(
             request_id=request_body.request_id,
-            ledger=_get_ledger_compat(),
+            ledger=_get_obs_ledger(),
         )
     except ValueError as exc:
         raise HTTPException(

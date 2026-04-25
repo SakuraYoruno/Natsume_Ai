@@ -1,6 +1,6 @@
 """Graph 配置构建模块。
 
-从 fastapi_app.py 拆分，负责 Chat 图的配置构建和场景路由。
+负责 Chat 图的配置构建和场景路由。
 """
 
 from __future__ import annotations

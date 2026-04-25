@@ -8,7 +8,7 @@
 设计要点：
 - 不依赖具体域（core/llm/tribe/observability），通过回调解耦。
 - 每个域 Settings 必须提供 `required_fields()` 类方法声明"必填字段"。
-- 未设置的必填字段走 fail-fast——由调用方（通常是 fastapi_app 启动钩子）决定是抛错还是仅告警。
+- 未设置的必填字段走 fail-fast——由调用方（通常是 ASGI lifespan 启动钩子）决定是抛错还是仅告警。
 """
 
 from __future__ import annotations

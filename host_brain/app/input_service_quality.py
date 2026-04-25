@@ -303,6 +303,7 @@ async def maybe_send_gateway_realign_notice(
     resolve_emotion_tag_fn: Any,
 ) -> dict[str, Any]:
     """发送偏航通知给用户（非阻塞，失败静默）。"""
+    return {"sent": False, "reason_code": "DEVIATION_NOTICE_RETIRED_REPLY_ENVELOPE_ONLY"}
     if not _parse_bool_env("HOST_GATEWAY_DEVIATION_NOTICE_ENABLED", default=True):
         return {"sent": False, "reason_code": "DEVIATION_NOTICE_DISABLED"}
     platform = str(payload.get("platform") or "").strip().lower()

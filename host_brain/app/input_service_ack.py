@@ -89,6 +89,7 @@ def should_send_gateway_immediate_ack(
     looks_like_execution_intent_fn: Any,
 ) -> tuple[bool, str]:
     """判断是否需要发送即时 ACK。"""
+    return False, "ACK_RETIRED_REPLY_ENVELOPE_ONLY"
     if not _gateway_auto_reply_enabled():
         return False, "ACK_AUTO_REPLY_DISABLED"
     if not _parse_bool_env("HOST_GATEWAY_IMMEDIATE_ACK_ENABLED", default=True):
@@ -112,6 +113,13 @@ async def deliver_gateway_immediate_ack(
     text: str,
 ) -> dict[str, Any]:
     """发送即时 ACK 回复（非阻塞，失败静默）。"""
+    return {
+        "success": False,
+        "status": "SKIPPED",
+        "reason_code": "ACK_RETIRED_REPLY_ENVELOPE_ONLY",
+        "latency_ms": 0,
+        "ack_preview": "",
+    }
     from host_brain.app.chat_agent import render_quick_gateway_ack_text  # noqa: PLC0415
     from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
 

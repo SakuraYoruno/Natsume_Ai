@@ -1920,6 +1920,7 @@ async def _executive_runtime_core_impl(
             "reason_code": route.reason_code,
             "runtime_task_id": runtime_task.task_id,
             "runtime_capability_id": dict(runtime_capability_payload or {}).get("runtime_capability", {}).get("runtime_capability_id"),
+            "bio_ops_runtime_trace": _bio_ops_runtime_trace,
         }
     )
 

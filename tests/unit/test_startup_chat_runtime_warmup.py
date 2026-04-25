@@ -9,14 +9,6 @@ from host_brain.app.startup import (
 
 def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     monkeypatch.setattr(
-        "host_brain.app.prompt_template_defs.list_prompt_template_definitions",
-        lambda: [object(), object(), object()],
-    )
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_prompt_template_store",
-        lambda: object(),
-    )
-    monkeypatch.setattr(
         "host_brain.app.dependencies.get_routing_matrix",
         lambda: object(),
     )
@@ -52,8 +44,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     status = warmup_chat_runtime_basics(eager_persona=True)
 
     assert status.startswith("OK")
-    assert "templates=3" in status
-    assert "prompt_store=ready" in status
+    assert "prompt_templates=retired" in status
     assert "routing_matrix=ready" in status
     assert "intent_engine=ready" in status
     assert "state_write_arbiter=ready" in status

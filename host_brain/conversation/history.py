@@ -184,7 +184,12 @@ class ConversationHistory:
             if turn.corrupted:
                 skipped_corrupted += 1
                 continue
-            if not str(turn.content or "").strip():
+            has_multimodal_metadata = bool(
+                (turn.metadata or {}).get("attachments")
+                or (turn.metadata or {}).get("multimodal_observations")
+                or (turn.metadata or {}).get("attachment_summary")
+            )
+            if not str(turn.content or "").strip() and not has_multimodal_metadata:
                 skipped_empty += 1
                 continue
             if filtered and filtered[-1].role == turn.role:

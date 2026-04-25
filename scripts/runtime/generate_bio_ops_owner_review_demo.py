@@ -19,6 +19,7 @@ if str(SCRIPT_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_REPO_ROOT))
 
 from host_brain.bio_ops.adoption import ADOPTION_DECISION_ACCEPTED
+from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.codex_runtime.artifact_store import REPO_ROOT
 from host_brain.core.ids import now_ms
@@ -120,6 +121,9 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
     materialized = inbox.materialize_ready()
     packets = inbox.materialize_intake_packets()
     imports = inbox.scan_import_candidates()
+    consumer = BioOpsOwnerIntakeConsumer(inbox_root=run_dir / "owner_inbox", queue_root=run_dir / "owner_queues")
+    consumed = consumer.consume_all()
+    queues = consumer.scan_queue()
 
     manifest = {
         "ok": True,
@@ -130,11 +134,14 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
         "owner_inbox": materialized,
         "import_candidates": imports,
         "intake_packets": packets,
+        "owner_consumer": consumed,
+        "owner_queues": queues,
         "webui_routes": [
             f"/obs/codex-bio-ops?run_id={run_id}",
             f"/obs/codex-bio-ops/adoptions?run_id={run_id}&status=decided",
             f"/obs/codex-bio-ops/owner-inbox?run_id={run_id}",
             f"/obs/codex-bio-ops/owner-inbox/import-candidates?run_id={run_id}",
+            f"/obs/codex-bio-ops/owner-queues?run_id={run_id}",
         ],
     }
     _write_json(run_dir / "owner_review_demo_manifest.json", manifest)

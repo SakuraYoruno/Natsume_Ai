@@ -16,11 +16,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from host_brain.app.prompt_template_store import (
-    resolve_prompt_template_json,
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
-)
 from host_brain.app.relational_chat_detector import is_relational_chat_message
 from host_brain.codex_runtime.skill_ids import CODEX_RUNTIME_SKILL_IDS, is_codex_runtime_skill
 
@@ -42,17 +37,8 @@ _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
 
 
 def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str:
-    lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
-    static_texts: dict[str, dict[str, str]] = {
-        "codex_worker": {"zh": "我先记下了，等会儿给你一个更稳的结果。", "ja": "いったん受け取ったよ。少し待って。"},
-        "default": {"zh": "我在。你继续说。", "ja": "ここにいるよ。続けて。"},
-        "greeting": {"zh": "你好呀。", "ja": "やあ。"},
-        "presence": {"zh": "在。", "ja": "いるよ。"},
-        "prompt_build_failed": {"zh": "我先接住了，你再说一句。", "ja": "ひとまず受け取ったよ。もう一度だけ言って。"},
-        "recent_turn_direct": {"zh": "我记得刚才那句。", "ja": "さっきの話は覚えてるよ。"},
-    }
-    entry = static_texts.get(str(kind or "").strip(), static_texts["default"])
-    return str(entry.get(lang_key) or entry.get("zh") or "").strip() or static_texts["default"]["zh"]
+    _ = kind, render_target_lang
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -229,19 +215,8 @@ def _load_template_replacement_pairs(
     *,
     render_target_lang: str = "zh",
 ) -> list[tuple[str, str]]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    raw = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
-    pairs: list[tuple[str, str]] = []
-    if not isinstance(raw, list):
-        return pairs
-    for item in raw:
-        if not isinstance(item, Mapping):
-            continue
-        source = str(item.get("from") or "")
-        target = str(item.get("to") or "")
-        if source:
-            pairs.append((source, target))
-    return pairs
+    _ = template_id, render_target_lang
+    return []
 
 
 class _SafeTemplateDict(dict[str, str]):
@@ -261,8 +236,8 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    _ = template_id
+    return {}
 
 
 def _normalize_template_lang(render_target_lang: str | None) -> str:
@@ -279,11 +254,8 @@ def _resolve_localized_template_value(value: Any, *, render_target_lang: str | N
 
 
 def _resolve_template_text_localized(template_id: str, *, render_target_lang: str | None = None) -> str:
-    raw = resolve_prompt_template_json_merged(template_id)
-    value = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
-    if isinstance(value, str):
-        return value.strip()
-    return str(resolve_prompt_template_text(template_id) or "").strip()
+    _ = template_id, render_target_lang
+    return ""
 
 
 def _normalize_template_lang(render_target_lang: str | None) -> str:

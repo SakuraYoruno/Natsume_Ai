@@ -71,7 +71,7 @@ def set_tool_providers(
     catalog_provider: Callable[[], ToolCatalog],
     ledger_provider: Callable[[], SQLiteLedger],
 ) -> None:
-    """由 fastapi_app.py 在注册路由后调用，注入依赖获取回调。"""
+    """由 router registry 在注册路由后调用，注入依赖获取回调。"""
     global _broker_provider, _catalog_provider, _ledger_provider
     _broker_provider = broker_provider
     _catalog_provider = catalog_provider
@@ -80,14 +80,30 @@ def set_tool_providers(
 
 def _get_broker() -> ToolBroker:
     if _broker_provider is not None:
-        return _broker_provider()
-    raise RuntimeError("ToolBroker provider not configured")
+        broker = _broker_provider()
+        if broker is not None:
+            return broker
+        _logger.debug("ToolBroker provider returned None; falling back to app dependencies")
+    try:
+        from host_brain.app.dependencies import get_tool_broker  # noqa: PLC0415
+
+        return get_tool_broker()
+    except Exception as exc:
+        raise RuntimeError("ToolBroker provider not configured") from exc
 
 
 def _get_catalog() -> ToolCatalog:
     if _catalog_provider is not None:
-        return _catalog_provider()
-    raise RuntimeError("ToolCatalog provider not configured")
+        catalog = _catalog_provider()
+        if catalog is not None:
+            return catalog
+        _logger.debug("ToolCatalog provider returned None; falling back to app dependencies")
+    try:
+        from host_brain.app.dependencies import get_tool_catalog  # noqa: PLC0415
+
+        return get_tool_catalog()
+    except Exception as exc:
+        raise RuntimeError("ToolCatalog provider not configured") from exc
 
 
 def _empty_schema_hash() -> str:

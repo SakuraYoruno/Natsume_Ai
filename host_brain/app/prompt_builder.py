@@ -1,6 +1,6 @@
 """提示词构建模块。
 
-从 fastapi_app.py 拆分，负责所有 LLM 提示词的渲染逻辑。
+负责非主 chat 路径的 LLM 提示词渲染逻辑。
 """
 
 from __future__ import annotations

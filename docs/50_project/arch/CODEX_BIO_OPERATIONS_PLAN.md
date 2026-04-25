@@ -11,6 +11,8 @@
 > Inner mechanisms roadmap: see `CODEX_DIGITAL_LIFE_INNER_MECHANISMS.md` for the adopted third-stage plan covering promise ledger, consent/ability boundaries, shadow persona tests, idea fermentation, inner/outer world boundary, and long-term self-continuity mechanisms.
 >
 > Closure report: see `CODEX_PRODUCTION_CLOSURE_VALIDATION_20260424.md` for the productionization pass that split CI planes and added owner-gated BioOps adoption.
+>
+> Production closure matrix: see `CODEX_DIGITAL_LIFE_PRODUCTION_CLOSURE_MATRIX_20260425.md` for the final cross-document implementation, observability, and verification map.
 
 ---
 

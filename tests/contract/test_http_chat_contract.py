@@ -21,7 +21,7 @@ import pytest
 # 检测 httpx / starlette testclient 是否可用
 try:
     from fastapi.testclient import TestClient
-    from host_brain.app.fastapi_app import app
+    from host_brain.app.asgi import app
 
     _HAS_TEST_CLIENT = True
 except Exception:

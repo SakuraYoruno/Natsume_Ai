@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from host_brain.app.fastapi_app import app as host_app
+from host_brain.app.asgi import app as host_app
 from host_brain.app.obs_fastapi_app import app as obs_app
 
 

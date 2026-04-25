@@ -1,6 +1,6 @@
 """LLM Provider 工厂模块。
 
-从 fastapi_app.py 拆分，负责构建 LangChain provider 函数及 Gemini 重试逻辑。
+负责构建 LangChain provider 函数及 Gemini 重试逻辑。
 """
 
 from __future__ import annotations

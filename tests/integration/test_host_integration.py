@@ -110,7 +110,7 @@ def test_client(mem_ledger):
         patch("host_brain.integrations.llm_helpers.astream_llm_chunks",
               new=_mock_astream),
     ):
-        from host_brain.app.fastapi_app import app
+        from host_brain.app.asgi import app
         client = TestClient(app, raise_server_exceptions=False)
         yield client
 

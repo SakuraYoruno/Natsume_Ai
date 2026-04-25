@@ -960,7 +960,6 @@ async def classify_task_intent_by_llm(
             resolve_host_llm_runtime_async,
         )
         from host_brain.app.input_service_gateway import extract_first_json_object  # noqa: PLC0415
-        from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged  # noqa: PLC0415
         from host_brain.integrations.llm_helpers import acomplete_llm_with_pool  # noqa: PLC0415
 
         llm_runtime = await resolve_host_llm_runtime_async(rollout_key=session_id, scene_type="EXEC_INTENT")
@@ -1093,6 +1092,8 @@ async def classify_task_intent(
         if str(rule_result.get("route") or "").strip().lower() in {"task_progress", "recent_turn"}:
             return rule_result
         if str(rule_result.get("reason_code") or "").strip().upper().startswith("THALAMUS_RULE_SHORT_COMPANION_CHAT"):
+            return rule_result
+        if _should_prefer_rule_seed(rule_result):
             return rule_result
 
     llm_result = await classify_task_intent_by_llm(
@@ -1343,31 +1344,16 @@ def _deep_merge_json(base_value: Any, overlay_value: Any) -> Any:
 
 def _load_template_json_parts(template_id: str) -> dict[str, Any] | None:
     try:
-        from host_brain.app.prompt_template_defs import get_prompt_template_definition  # noqa: PLC0415
+        from host_brain.app.prompt_specs import resolve_prompt_spec_json  # noqa: PLC0415
 
-        definition = get_prompt_template_definition(template_id)
+        default_value = resolve_prompt_spec_json(template_id)
     except Exception:
         return None
-
-    default_raw = str(definition.default_content or "").strip()
-    default_value = json.loads(default_raw) if default_raw else None
-    override_value = None
-
-    try:
-        from host_brain.app.dependencies import get_prompt_template_store  # noqa: PLC0415
-
-        template = get_prompt_template_store().get_template(template_id)
-        if bool(template.get("has_override")) and bool(template.get("enabled")):
-            override_raw = str(template.get("override_content") or "").strip()
-            if override_raw:
-                override_value = json.loads(override_raw)
-    except Exception as exc:
-        _logger.debug("thalamus prompt template override unavailable for %s: %s", template_id, exc)
 
     return {
         "template_id": template_id,
         "default": default_value,
-        "override": override_value,
+        "override": None,
     }
 
 

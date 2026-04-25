@@ -1,4 +1,4 @@
-"""System route handlers extracted from fastapi_app."""
+"""System route handlers for host and edge-facing HTTP APIs."""
 
 from __future__ import annotations
 

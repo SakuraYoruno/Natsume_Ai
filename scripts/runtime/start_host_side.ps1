@@ -142,7 +142,7 @@ function Is-HostProcess {
   if ($cmd -like "*-m host_brain --host*") {
     return $true
   }
-  if ($cmd -like "*host_brain.app.fastapi_app*") {
+  if ($cmd -like "*host_brain.app.asgi*") {
     return $true
   }
   return $false

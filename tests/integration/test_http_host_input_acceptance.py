@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-import host_brain.app.fastapi_app as fastapi_app
+from host_brain.app.asgi import app as host_app
 
 
 def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
@@ -21,7 +21,7 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
         "host_brain.app.input_routes._evaluate_immune_gate_for_input",
         _allow_input_immune_gate,
     )
-    return TestClient(fastapi_app.app, raise_server_exceptions=False)
+    return TestClient(host_app, raise_server_exceptions=False)
 
 
 def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
@@ -128,7 +128,7 @@ def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None
         lambda **_kwargs: {"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     )
 
-    client = TestClient(fastapi_app.app, raise_server_exceptions=False)
+    client = TestClient(host_app, raise_server_exceptions=False)
     try:
         response = client.post(
             "/v1/host/input",

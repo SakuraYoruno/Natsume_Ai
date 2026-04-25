@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
-import host_brain.app.fastapi_app as fastapi_app
+from tests.fakes.host_app import build_host_test_app
 
 
 class _LedgerStub:
@@ -18,8 +18,7 @@ class _LedgerStub:
 
 def _build_client(monkeypatch, *, ledger: _LedgerStub | None = None) -> TestClient:
     stub = ledger or _LedgerStub()
-    monkeypatch.setattr("host_brain.app.fastapi_app._get_ledger_compat", lambda: stub)
-    return TestClient(fastapi_app.app, raise_server_exceptions=False)
+    return TestClient(build_host_test_app(get_ledger=lambda: stub), raise_server_exceptions=False)
 
 
 def test_v1_edge_events_http_accepts_valid_batch(monkeypatch) -> None:

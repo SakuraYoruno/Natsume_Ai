@@ -23,7 +23,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.reply_envelope import can_send, envelope_from_commit
 from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 
 # ── service 层 import ──────────────────────────────────────────────────────
@@ -427,8 +427,10 @@ def _should_send_gateway_route_started_voice_ack(
 
 
 def _load_gateway_fallback_texts() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("input_routes.fallback_texts")
-    return dict(raw) if isinstance(raw, dict) else {}
+    return {
+        "route_started_voice_ack": {},
+        "voice_summary": {},
+    }
 
 
 def _normalize_gateway_template_lang(render_target_lang: str | None) -> str:
@@ -449,8 +451,7 @@ def _load_gateway_fallback_texts_localized(*, render_target_lang: str) -> dict[s
 
 
 def _load_gateway_multimodal_runtime_texts() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("input_routes.multimodal_runtime_texts")
-    return dict(raw) if isinstance(raw, dict) else {}
+    return {}
 
 
 def _load_gateway_multimodal_runtime_texts_localized(*, render_target_lang: str) -> dict[str, Any]:
@@ -766,14 +767,11 @@ def _build_gateway_reply_text(
     render_target_lang: str = "zh",
 ) -> str:
     """构建 gateway 最终回复文本。"""
-    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
     reply_text = str(narrative or "").strip()
     if reply_text:
         return reply_text
-    if str(decision or "").upper() != "APPROVE":
-        return str(templates.get("reject_default") or "")
     _ = reason_code
-    return str(templates.get("approve_empty") or "")
+    return ""
 
 
 def _build_gateway_voice_text(
@@ -946,10 +944,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
                 detail=f"invalid gateway conversation_id: {body.conversation_id}",
                 ts_ms=ts_ms,
             )
-        text = _build_gateway_multimodal_placeholder_text(
-            content=str(body.content or ""),
-            attachments=gateway_attachments,
-        )
+        text = str(body.content or "").strip()
         session_id = str(body.conversation_id).strip()
     else:
         return InputResponse(
@@ -1211,6 +1206,7 @@ async def _try_handle_gateway_progress_fastpath(
     ledger: Any,
     ts_ms: int,
 ) -> bool:
+    return False
     if not _gateway_auto_reply_enabled():
         return False
     if str(source or "").strip().upper() != "GATEWAY":
@@ -1375,10 +1371,7 @@ async def _run_gateway_multimodal_async_job(
     platform = str(payload.get("platform") or "").strip().lower()
     conversation_id = str(payload.get("conversation_id") or "").strip()
     attachments = list(payload.get("attachments") or [])
-    ack_text = _build_gateway_multimodal_async_ack_text(
-        attachments=attachments,
-        render_target_lang="zh",
-    )
+    ack_text = ""
     if _gateway_auto_reply_enabled() and platform and conversation_id and ack_text:
         try:
             await post_gateway_reply(
@@ -1507,6 +1500,7 @@ def _should_start_gateway_progress_push(
     payload: dict[str, Any],
     intent_draft: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
+    return False, "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
     if not _gateway_auto_reply_enabled():
         return False, "PROGRESS_PUSH_AUTO_REPLY_DISABLED"
     if not _parse_bool_env("HOST_GATEWAY_PROGRESS_PUSH_ENABLED", default=True):
@@ -1885,11 +1879,7 @@ async def _run_cortex_orchestrator_pipeline(
     reply_target = str(payload.get("conversation_id") or "").strip() or None
     attachments = list(payload.get("attachments") or [])
     multimodal_observations = dict(payload.get("multimodal_observations") or {})
-    message_text = (
-        str(text or "").strip()
-        or str(payload.get("attachment_summary") or "").strip()
-        or _build_gateway_multimodal_placeholder_text(content="", attachments=attachments)
-    )
+    message_text = str(text or "").strip()
     person_id = resolve_person_id(
         str(payload.get("person_id") or "").strip() or None,
         session_id=session_id,
@@ -1904,8 +1894,6 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        attachments=(attachments or None),
-        multimodal_observations=(multimodal_observations or None),
         # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 ChatAgent 在 COMMIT 后重复补播。
         suppress_edge_tts=(source == "GATEWAY"),
         suppress_edge_vts=(source == "GATEWAY"),
@@ -1913,6 +1901,9 @@ async def _run_cortex_orchestrator_pipeline(
         # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
         render_target_lang=("zh" if source == "GATEWAY" else None),
     )
+    setattr(request_body, "attachments", list(attachments or []))
+    setattr(request_body, "multimodal_observations", dict(multimodal_observations or {}))
+    setattr(request_body, "attachment_summary", str(payload.get("attachment_summary") or "").strip())
     emotion_context = resolve_chat_emotion_context(request_body=request_body)
     emotion_snapshot = build_chat_emotion_snapshot(
         emotion_context=emotion_context,
@@ -2150,20 +2141,27 @@ async def _deliver_gateway_reply(
     conversation_id = str(payload.get("conversation_id") or "").strip()
     normalized_decision = str(decision or "").strip().upper()
     normalized_reason = str(reason_code or "").strip().upper()
-    if (
-        normalized_decision in {"NO_REPLY", "SKIP_REPLY"}
-        or (normalized_reason == "IMAGE_SOCIAL_NO_SAFE_REPLY" and not str(narrative or "").strip())
-    ):
+    reply_envelope = envelope_from_commit(
+        decision=decision,
+        narrative=narrative,
+        reason_code=reason_code,
+        response_form=str(response_form or "text").strip() or "text",
+        source="gateway_primary_reply",
+        degraded=(normalized_decision in {"NO_REPLY", "SKIP_REPLY"} or not str(narrative or "").strip()),
+        cacheable=False,
+    )
+    if not can_send(reply_envelope):
         return {
             "success": True,
             "status": "SKIPPED",
-            "reason_code": normalized_reason or "NO_REPLY",
+            "reason_code": str(reply_envelope.reason_code or normalized_reason or "NO_REPLY").strip() or "NO_REPLY",
             "detail": "gateway final reply suppressed: no safe final reply",
             "latency_ms": 0,
             "reply_text_len": 0,
             "reply_preview": "",
             "reply_form": str(response_form or "text").strip() or "text",
             "reply_form_reason": str(response_form_reason or "suppressed_no_reply").strip() or "suppressed_no_reply",
+            "reply_envelope": reply_envelope.as_dict(),
             "voice_sent": False,
             "voice_waited": False,
             "voice_success": None,
@@ -2177,7 +2175,7 @@ async def _deliver_gateway_reply(
             "voice_event": None,
         }
 
-    reply_text = _build_gateway_reply_text(
+    reply_text = reply_envelope.text or _build_gateway_reply_text(
         decision=decision,
         narrative=narrative,
         reason_code=reason_code,
@@ -2376,7 +2374,11 @@ async def _deliver_gateway_reply(
                 content=effective_content,
                 msg_type=effective_msg_type.value,
                 request_id=secondary_request_id,
-                raw_extra={"message_kind": "final_reply", "reply_source": "gateway_secondary_form"},
+                raw_extra={
+                    "message_kind": "final_reply",
+                    "reply_source": "gateway_secondary_form",
+                    "reply_envelope": reply_envelope.as_dict(),
+                },
                 wait_result=True,
                 timeout_ms=secondary_timeout_ms,
             )
@@ -2470,7 +2472,11 @@ async def _deliver_gateway_reply(
         content=primary_content,
         msg_type=primary_msg_type,
         request_id=request_id,
-        raw_extra={"message_kind": "final_reply", "reply_source": "gateway_primary_reply"},
+        raw_extra={
+            "message_kind": "final_reply",
+            "reply_source": "gateway_primary_reply",
+            "reply_envelope": reply_envelope.as_dict(),
+        },
         wait_result=wait_result,
         timeout_ms=timeout_ms,
     )
@@ -2493,6 +2499,7 @@ async def _deliver_gateway_reply(
             "reply_preview": preview,
             "reply_form": form_decision.primary.value,
             "reply_form_reason": form_decision.reason,
+            "reply_envelope": reply_envelope.as_dict(),
             **voice_result,
         }
 
@@ -2531,6 +2538,7 @@ async def _deliver_gateway_reply(
         "reply_form": form_decision.primary.value,
         "reply_form_reason": form_decision.reason,
         "message_kind": "final_reply",
+        "reply_envelope": reply_envelope.as_dict(),
         **voice_result,
     }
 

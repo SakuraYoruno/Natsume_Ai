@@ -29,11 +29,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from host_brain.app.prompt_template_store import (
-    resolve_prompt_template_json,
-    resolve_prompt_template_json_merged,
-    resolve_prompt_template_text,
-)
 from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch C：业务路径统一降级
 _logger = logging.getLogger("Natsume.chat_agent")
@@ -54,44 +49,33 @@ _ACK_WARM_STAGES = {"ALLY", "TRUSTED", "FRIEND"}
 _ACK_LOW_ENERGY_TAGS = {"SAD", "HURT", "ANGRY", "FEAR", "EXHAUSTED", "NUMB"}
 
 
-def _build_prefrontal_context_block(*, task: str, tone_hint: str) -> str:
-    templates = resolve_prompt_template_json_merged("chat_agent.prefrontal_context_templates")
-    if not isinstance(templates, Mapping):
-        return ""
-    base = str(templates.get("context_template") or "").strip()
-    if not base:
-        return ""
+def _contains_cjk_or_kana(text: str) -> bool:
+    return any(
+        ("\u4e00" <= ch <= "\u9fff")
+        or ("\u3040" <= ch <= "\u30ff")
+        for ch in str(text or "")
+    )
+
+
+def repair_utf8_latin1_mojibake(text: str) -> str:
+    raw = str(text or "")
+    if not raw or _contains_cjk_or_kana(raw):
+        return raw
     try:
-        rendered = base.format(task=task)
-    except Exception:
-        rendered = base
-    tone_suffix_template = str(templates.get("tone_suffix_template") or "").strip()
-    if tone_hint and tone_suffix_template:
-        try:
-            rendered += tone_suffix_template.format(tone_hint=tone_hint)
-        except Exception:
-            rendered += tone_suffix_template
-    return rendered
+        repaired = raw.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        return raw
+    return repaired if _contains_cjk_or_kana(repaired) else raw
+
+
+def _build_prefrontal_context_block(*, task: str, tone_hint: str) -> str:
+    _ = task, tone_hint
+    return ""
 
 
 def _resolve_minimal_fallback_text(*, kind: str, render_target_lang: str) -> str:
-    lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
-    templates = resolve_prompt_template_json_merged("chat_agent.minimal_fallback.localized_texts")
-    if isinstance(templates, Mapping):
-        entry = templates.get(str(kind or "").strip())
-        if isinstance(entry, Mapping):
-            localized = str(entry.get(lang_key) or entry.get("zh") or "").strip()
-            if localized:
-                return localized
-    legacy_template_id = {
-        "codex_worker": "chat_agent.minimal_fallback.codex_worker",
-        "default": "chat_agent.minimal_fallback.default",
-        "greeting": "chat_agent.minimal_fallback.greeting",
-        "presence": "chat_agent.minimal_fallback.presence",
-        "prompt_build_failed": "chat_agent.minimal_fallback.prompt_build_failed",
-        "recent_turn_direct": "chat_agent.minimal_fallback.recent_turn_direct",
-    }.get(str(kind or "").strip(), "chat_agent.minimal_fallback.default")
-    return _resolve_template_text_localized(legacy_template_id, render_target_lang=render_target_lang)
+    _ = kind, render_target_lang
+    return ""
 
 
 
@@ -351,29 +335,8 @@ def _build_minimal_chat_fallback_reply(
     sub_agent_ctx: SubAgentContext | None,
     render_target_lang: str,
 ) -> str:
-    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
-        FallbackRequest,
-        build_fallback_reply,
-    )
-
-    text = str(user_message or "").strip()
-
-    if sub_agent_ctx is not None:
-        agent_id = str(sub_agent_ctx.agent_id or "").strip()
-        if is_codex_runtime_skill(agent_id):
-            return _resolve_minimal_fallback_text(kind="codex_worker", render_target_lang=render_target_lang)
-        if agent_id == "recent_turn_direct":
-            return _resolve_minimal_fallback_text(kind="recent_turn_direct", render_target_lang=render_target_lang)
-
-    if _FALLBACK_STRENGTH_RE.search(text):
-        return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-    return build_fallback_reply(
-        FallbackRequest(
-            reason_code="chat_agent_minimal_degraded_fallback",
-            render_target_lang=render_target_lang,
-            user_message=text,
-        )
-    ).text
+    _ = user_message, sub_agent_ctx, render_target_lang
+    return ""
 
 
 def _load_template_replacement_pairs(
@@ -381,19 +344,8 @@ def _load_template_replacement_pairs(
     *,
     render_target_lang: str = "zh",
 ) -> list[tuple[str, str]]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    raw = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
-    pairs: list[tuple[str, str]] = []
-    if not isinstance(raw, list):
-        return pairs
-    for item in raw:
-        if not isinstance(item, Mapping):
-            continue
-        source = str(item.get("from") or "")
-        target = str(item.get("to") or "")
-        if source:
-            pairs.append((source, target))
-    return pairs
+    _ = template_id, render_target_lang
+    return []
 
 
 class _SafeTemplateDict(dict[str, str]):
@@ -421,8 +373,8 @@ def _format_template_text(template_text: Any, **kwargs: Any) -> str:
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
-    return dict(raw) if isinstance(raw, Mapping) else {}
+    _ = template_id
+    return {}
 
 
 def _normalize_template_lang(render_target_lang: str | None) -> str:
@@ -439,11 +391,8 @@ def _resolve_localized_template_value(value: Any, *, render_target_lang: str | N
 
 
 def _resolve_template_text_localized(template_id: str, *, render_target_lang: str | None = None) -> str:
-    raw = resolve_prompt_template_json_merged(template_id)
-    value = _resolve_localized_template_value(raw, render_target_lang=render_target_lang)
-    if isinstance(value, str):
-        return value.strip()
-    return str(resolve_prompt_template_text(template_id) or "").strip()
+    _ = template_id, render_target_lang
+    return ""
 
 
 def _mapping_section(mapping: Mapping[str, Any], key: str, *, render_target_lang: str | None = None) -> dict[str, Any]:
@@ -1405,11 +1354,6 @@ def _build_chat_agent_quality_fallback_reply(
     render_policy: Any = None,
     prompt_runtime_payload: Mapping[str, Any] | None = None,
 ) -> str:
-    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
-        FallbackRequest,
-        build_fallback_reply,
-    )
-
     _ = bond_summary, emotion_context, render_policy, prompt_runtime_payload
     if sub_agent_ctx is not None:
         delegated_fallback = _build_sub_agent_result_preserving_fallback_reply(
@@ -1419,13 +1363,8 @@ def _build_chat_agent_quality_fallback_reply(
         )
         if delegated_fallback:
             return delegated_fallback
-    return build_fallback_reply(
-        FallbackRequest(
-            reason_code="chat_agent_generation_failed",
-            render_target_lang=render_target_lang,
-            user_message=user_message,
-        )
-    ).text
+    _ = user_message, render_target_lang
+    return ""
 
 
 def _build_chat_agent_fallback_reply(
@@ -1775,12 +1714,17 @@ async def chat_agent_sse_generator(
         except Exception as _pb_exc:
             _logger.warning("[%s] ChatAgent prompt_builder failed: %s", request_id, _pb_exc)
             yield _sse({
-                "phase": "COMMIT", "done": True, "decision": "REJECT",
+                "phase": "COMMIT", "done": True, "decision": "NO_REPLY",
                 "reason_code": "PROMPT_BUILD_FAILED", "request_id": request_id,
-                "narrative": _resolve_minimal_fallback_text(
-                    kind="prompt_build_failed",
-                    render_target_lang=agent_input.render_target_lang,
-                ),
+                "narrative": "",
+                "reply_envelope": {
+                    "kind": "no_reply",
+                    "sendable": False,
+                    "persistable": False,
+                    "cacheable": False,
+                    "degraded": True,
+                    "reason_code": "PROMPT_BUILD_FAILED",
+                },
             })
             return
     reply_plan_decision = coerce_reply_plan(reply_plan)
@@ -1816,43 +1760,12 @@ async def chat_agent_sse_generator(
             provider_name: str = "fallback",
             model_id: str = "llm-unavailable-fallback",
         ) -> None:
-            try:
-                from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
-
-                total_latency_ms = int(time.time() * 1000) - ts_ms
-                asyncio.create_task(
-                    _async_post_process(
-                        request_id=request_id,
-                        person_id=person_id,
-                        session_id=session_id,
-                        user_message=user_message,
-                        narrative=fallback_narrative,
-                        emotion_context=emotion_context,
-                        bond_summary=bond_summary,
-                        ts_ms=ts_ms,
-                        render_target_lang=render_target_lang,
-                        total_latency_ms=total_latency_ms,
-                        llm_latency_ms=0,
-                        first_token_ms=None,
-                        provider_name=provider_name,
-                        model_id=model_id,
-                        buffer_stream=False,
-                        delegated_agents=[],
-                        retrieval_summary=(
-                            agent_input.retrieval_summary
-                            or {"status": "SKIPPED", "reason_code": "LLM_UNAVAILABLE"}
-                        ),
-                        gov_decision={"decision": "APPROVE"},
-                        pii_ingress_stats={},
-                        pii_egress_stats={},
-                        retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
-                        motive_state=prompt_runtime_payload.get("motive_state"),
-                        reply_plan=reply_plan,
-                        trace_stage_meta=trace_stage_meta,
-                    )
-                )
-            except Exception as _pp_exc:
-                _logger.debug("[%s] ChatAgent llm unavailable post_process failed: %s", request_id, _pp_exc)
+            _ = fallback_narrative, provider_name, model_id
+            trace_stage_meta["llm_unavailable_no_reply"] = {
+                "kind": "no_reply",
+                "reason_code": "LLM_UNAVAILABLE",
+                "affected_output": False,
+            }
 
         def _build_llm_unavailable_fallback_narrative() -> str:
             fallback_narrative = _build_chat_agent_quality_fallback_reply(
@@ -1890,9 +1803,17 @@ async def chat_agent_sse_generator(
                 fallback_narrative = _build_llm_unavailable_fallback_narrative()
                 _schedule_llm_unavailable_post_process(fallback_narrative)
                 yield _sse({
-                    "phase": "COMMIT", "done": True, "decision": "REJECT",
+                    "phase": "COMMIT", "done": True, "decision": "NO_REPLY",
                     "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-                    "narrative": fallback_narrative,
+                    "narrative": "",
+                    "reply_envelope": {
+                        "kind": "no_reply",
+                        "sendable": False,
+                        "persistable": False,
+                        "cacheable": False,
+                        "degraded": True,
+                        "reason_code": "LLM_UNAVAILABLE",
+                    },
                 })
                 return
         llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_resolve_started_ms)
@@ -1905,9 +1826,17 @@ async def chat_agent_sse_generator(
                 model_id=str(llm_runtime.get("model_id") or "llm-unavailable-fallback"),
             )
             yield _sse({
-                "phase": "COMMIT", "done": True, "decision": "REJECT",
+                "phase": "COMMIT", "done": True, "decision": "NO_REPLY",
                 "reason_code": "LLM_UNAVAILABLE", "request_id": request_id,
-                "narrative": fallback_narrative,
+                "narrative": "",
+                "reply_envelope": {
+                    "kind": "no_reply",
+                    "sendable": False,
+                    "persistable": False,
+                    "cacheable": False,
+                    "degraded": True,
+                    "reason_code": "LLM_UNAVAILABLE",
+                },
             })
             return
 
@@ -1930,11 +1859,9 @@ async def chat_agent_sse_generator(
         acomplete_llm_with_pool,
         astream_llm_chunks_with_pool,
     )
-    from host_brain.app.prompt_builder import repair_utf8_latin1_mojibake  # noqa: PLC0415
     from host_brain.app.sentence_splitter import SentenceSplitter  # noqa: PLC0415
     from host_brain.persona.reply_validator import (  # noqa: PLC0415
         build_correction_prompt,
-        build_deterministic_reply_fallback,
         build_semantic_rescue_seed,
         build_soul_rescue_prompt,
         infer_reply_tactic_shape,
@@ -2181,65 +2108,46 @@ async def chat_agent_sse_generator(
             if str(item or "").strip()
         ]
         trace_stage_meta.setdefault("reply_validation", {})
+        suppress_final_reply = True
         if _is_image_social_reply_plan(reply_plan_decision):
-            suppress_final_reply = True
             suppress_final_reply_reason_code = "IMAGE_SOCIAL_NO_SAFE_REPLY"
-            reply_used_fallback = False
-            executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_suppressed"
-            executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "suppressed"
-            executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback_suppressed"
-            full_text = ""
-            narrative = ""
-            response_intelligence_meta = {
-                "reflection": {
-                    "status": "BYPASSED",
-                    "reason_code": "image_social_no_safe_reply",
-                    "allow_rewrite": False,
-                },
-                "suppressed_final_reply": {
-                    "reason_code": suppress_final_reply_reason_code,
-                    "source": source,
-                    "validation_reason_codes": list(normalized_reasons),
-                },
-            }
-            _pii_egress_stats = {}
-            tts_text = ""
-            trace_stage_meta["reply_validation"]["fallback"] = {
-                "used": False,
-                "suppressed": True,
+        else:
+            suppress_final_reply_reason_code = "VALIDATION_NO_SAFE_REPLY"
+        reply_used_fallback = False
+        executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "no_reply"
+        executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "validation_suppressed"
+        executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "validation_suppressed"
+        full_text = ""
+        narrative = ""
+        response_intelligence_meta = {
+            "reflection": {
+                "status": "BYPASSED",
+                "reason_code": suppress_final_reply_reason_code,
+                "allow_rewrite": False,
+            },
+            "suppressed_final_reply": {
                 "reason_code": suppress_final_reply_reason_code,
                 "source": source,
-                "reason_codes": list(normalized_reasons),
-            }
-            trace_stage_meta["fallback_suppressed"] = {
-                "reason_code": suppress_final_reply_reason_code,
-                "source": source,
-                "primary_topic": str(getattr(reply_plan_decision, "primary_topic", "") or "").strip(),
-                "response_form_reason": str(getattr(reply_plan_decision, "response_form_reason", "") or "").strip(),
-            }
-            trace_stage_meta["fallback_used"] = False
-            trace_stage_meta["reply_source"] = "suppressed_no_reply"
-            return
-
-        reply_used_fallback = True
-        executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-        executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-        executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-        full_text = build_deterministic_reply_fallback(
-            plan=reply_plan_decision,
-            render_target_lang=render_target_lang,
-        )
-        narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-            full_text,
-            allow_rewrite=False,
-        )
-        tts_text = _extract_tts_text(full_text)
+                "validation_reason_codes": list(normalized_reasons),
+            },
+        }
+        _pii_egress_stats = {}
+        tts_text = ""
         trace_stage_meta["reply_validation"]["fallback"] = {
-            "used": True,
+            "used": False,
+            "suppressed": True,
+            "reason_code": suppress_final_reply_reason_code,
             "source": source,
             "reason_codes": list(normalized_reasons),
         }
-        trace_stage_meta["fallback_used"] = True
+        trace_stage_meta["fallback_suppressed"] = {
+            "reason_code": suppress_final_reply_reason_code,
+            "source": source,
+            "primary_topic": str(getattr(reply_plan_decision, "primary_topic", "") or "").strip(),
+            "response_form_reason": str(getattr(reply_plan_decision, "response_form_reason", "") or "").strip(),
+        }
+        trace_stage_meta["fallback_used"] = False
+        trace_stage_meta["reply_source"] = "suppressed_no_reply"
 
     if not deterministic_reply:
         from host_brain.persona.surface_renderer import (  # noqa: PLC0415
@@ -2306,6 +2214,17 @@ async def chat_agent_sse_generator(
             trace_stage_meta["fallback_used"] = bool(surface_result.degraded)
             trace_stage_meta["reply_source"] = str(surface_result.source or "surface").strip()
             trace_stage_meta["reply_cacheable"] = bool(surface_result.cacheable)
+        elif _is_image_social_reply_plan(reply_plan_decision):
+            suppress_final_reply = True
+            suppress_final_reply_reason_code = str(
+                getattr(surface_result, "skipped_reason", "") if surface_result is not None else ""
+            ).strip() or "IMAGE_SOCIAL_NO_SAFE_REPLY"
+            buffer_stream = False
+            first_token_ms = 0
+            trace_stage_meta["deterministic_primary_used"] = False
+            trace_stage_meta["deterministic_primary_reason"] = "image_social_surface_no_safe_reply"
+            trace_stage_meta["reply_source"] = "suppressed_no_reply"
+            trace_stage_meta["fallback_used"] = False
 
     try:
         if deterministic_reply:
@@ -2328,6 +2247,10 @@ async def chat_agent_sse_generator(
                     })
                     sentence_index += 1
                 await asyncio.sleep(0)
+        elif suppress_final_reply:
+            full_text = ""
+            rendered_text = ""
+            first_token_ms = 0 if first_token_ms is None else first_token_ms
         else:
             async for chunk in astream_llm_chunks_with_pool(
                 request_id=request_id,
@@ -2672,6 +2595,17 @@ async def chat_agent_sse_generator(
                     reason_codes=getattr(_validation, "reason_codes", ()) or (),
                     source="initial_rescue_empty",
                 )
+    if not str(narrative or "").strip() and not suppress_final_reply:
+        suppress_final_reply = True
+        suppress_final_reply_reason_code = "EMPTY_REPLY"
+        trace_stage_meta.setdefault("reply_validation", {})
+        trace_stage_meta["reply_validation"]["empty_reply_suppressed"] = {
+            "used": False,
+            "suppressed": True,
+            "reason_code": suppress_final_reply_reason_code,
+        }
+        trace_stage_meta["fallback_used"] = False
+        trace_stage_meta["reply_source"] = "suppressed_no_reply"
     with soft_fail(
         "chat_agent.response_intelligence_ms",
         fallback=0,
@@ -2782,6 +2716,22 @@ async def chat_agent_sse_generator(
 
     # ── 8. COMMIT ────────────────────────────────────────────────────
     commit_decision = "NO_REPLY" if suppress_final_reply else "APPROVE"
+    from host_brain.app.reply_envelope import envelope_from_commit  # noqa: PLC0415
+
+    reply_envelope = envelope_from_commit(
+        decision=commit_decision,
+        narrative=narrative,
+        reason_code=suppress_final_reply_reason_code,
+        response_form=str(reply_plan_decision.response_form or "text").strip() or "text",
+        source=str(trace_stage_meta.get("reply_source") or ("surface" if deterministic_reply else "full_model")).strip(),
+        degraded=bool(reply_used_fallback or suppress_final_reply),
+        cacheable=bool(trace_stage_meta.get("reply_cacheable", True)),
+        audit={
+            "request_id": request_id,
+            "suppress_final_reply": bool(suppress_final_reply),
+            "reason_code": suppress_final_reply_reason_code,
+        },
+    )
     yield _sse({
         "phase": "COMMIT",
         "done": True,
@@ -2789,6 +2739,7 @@ async def chat_agent_sse_generator(
         "reason_code": suppress_final_reply_reason_code,
         "narrative": narrative,
         "request_id": request_id,
+        "reply_envelope": reply_envelope.as_dict(),
         "audit_refs": {
             "request_id": request_id,
             "path": f"chat_agent:sub={sub_agent_ctx.agent_id}" if sub_agent_ctx else "chat_agent:direct",
@@ -2807,6 +2758,7 @@ async def chat_agent_sse_generator(
             "pii_stats": {"egress": _pii_egress_stats} if _pii_egress_stats else {},
             "suppress_final_reply": bool(suppress_final_reply),
             "suppress_final_reply_reason_code": suppress_final_reply_reason_code,
+            "reply_envelope": reply_envelope.as_dict(),
         },
     })
 
@@ -2910,7 +2862,7 @@ async def chat_agent_sse_generator(
                     if sub_agent_ctx else []
                 ),
                 retrieval_summary=retrieval_summary,
-                gov_decision={"decision": "APPROVE"},
+                gov_decision={"decision": commit_decision},
                 pii_ingress_stats={},
                 pii_egress_stats=_pii_egress_stats,
                 # Phase XV trace 增强：传入 LLM 输入摘要和召回证据
@@ -2926,6 +2878,7 @@ async def chat_agent_sse_generator(
                     "reply_used_fallback": reply_used_fallback,
                     "suppress_final_reply": bool(suppress_final_reply),
                     "suppress_final_reply_reason_code": suppress_final_reply_reason_code,
+                    "reply_envelope": reply_envelope.as_dict(),
                     "voice_outputs_enabled": _voice_outputs_enabled,
                 },
             )

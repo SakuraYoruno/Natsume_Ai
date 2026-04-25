@@ -243,7 +243,7 @@ class GraphRuntimeContract:
             "mood_state": mood_state,
             "emotion_range_hint": emotion_range_hint,
             # M35-B：从 payload 提取 Governor 已编译的 committed_route_token
-            # 由 fastapi_app.py 在 Governor 裁决后、调用 run_graph 前注入
+            # 由 chat runtime 在 Governor 裁决后、调用 run_graph 前注入
             "committed_route_token": str(
                 graph_section.get("committed_route_token") or payload_dict.get("committed_route_token") or ""
             ).strip() or None,

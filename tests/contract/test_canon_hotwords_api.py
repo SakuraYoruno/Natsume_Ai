@@ -56,7 +56,7 @@ def client(tmp_path, monkeypatch):
     cr._canon_store = store
     cr.set_ledger_provider(lambda: ledger)
 
-    from host_brain.app.fastapi_app import app
+    from host_brain.app.asgi import app
     return TestClient(app)
 
 

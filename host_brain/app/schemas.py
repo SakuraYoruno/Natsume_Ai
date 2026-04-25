@@ -1,6 +1,6 @@
 """HTTP 请求/响应 Pydantic 模型。
 
-从 fastapi_app.py 迁出，集中管理所有 HTTP 契约模型。
+集中管理所有 HTTP 契约模型。
 """
 
 from __future__ import annotations

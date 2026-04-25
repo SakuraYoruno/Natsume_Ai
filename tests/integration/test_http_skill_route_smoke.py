@@ -9,7 +9,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 import host_brain.app.dependencies as deps
-import host_brain.app.fastapi_app as fastapi_app
+import host_brain.app.asgi as host_api
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.skills.codex_runtime_registry import CodexRuntimeSkillProvider
@@ -83,12 +83,11 @@ def _build_client(monkeypatch, *, use_real_governor: bool = False) -> tuple[Test
     monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
     monkeypatch.setattr(deps, "_skill_registry", registry, raising=False)
     monkeypatch.setattr(deps, "_intent_engine", None, raising=False)
-    monkeypatch.setattr(fastapi_app, "_ledger", ledger, raising=False)
 
     stack = ExitStack()
     stack.enter_context(
         patch(
-            "host_brain.app.fastapi_app._evaluate_immune_gate_for_chat",
+            "host_brain.app.asgi.evaluate_immune_gate_for_chat",
             lambda request_body: {"decision": "ALLOW", "reason_codes": []},
         )
     )
@@ -115,7 +114,7 @@ def _build_client(monkeypatch, *, use_real_governor: bool = False) -> tuple[Test
         patch("host_brain.app.agent_runtime_shared._async_post_process", _fake_async_post_process)
     )
 
-    client = TestClient(fastapi_app.app, raise_server_exceptions=False)
+    client = TestClient(host_api.app, raise_server_exceptions=False)
     client.__dict__["_skill_smoke_stack"] = stack
     client.__dict__["_skill_smoke_ledger"] = ledger
     return client, ledger

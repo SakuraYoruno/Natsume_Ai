@@ -479,10 +479,8 @@ def _reconcile_runtime_soul_state(*, soul_id: str, source_path: str) -> str:
 def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
     """预热聊天主链常用的轻量运行时单例，降低首轮聊天冷启动抖动。"""
     try:
-        from host_brain.app.prompt_template_defs import list_prompt_template_definitions  # noqa: PLC0415
         from host_brain.app.dependencies import (  # noqa: PLC0415
             get_intent_engine,
-            get_prompt_template_store,
             get_routing_matrix,
             prewarm_reply_surface_memory_store,
             get_state_write_arbiter,
@@ -490,8 +488,6 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
         from host_brain.app.context.soul_runtime import load_compiled_soul  # noqa: PLC0415
         from host_brain.tribe.thalamus_agent import get_thalamus_agent  # noqa: PLC0415
 
-        template_count = len(list_prompt_template_definitions())
-        get_prompt_template_store()
         get_routing_matrix()
         get_intent_engine()
         get_state_write_arbiter()
@@ -513,8 +509,7 @@ def warmup_chat_runtime_basics(*, eager_persona: bool = True) -> str:
         )
 
         warmed_parts = [
-            f"templates={template_count}",
-            "prompt_store=ready",
+            "prompt_templates=retired",
             "routing_matrix=ready",
             "intent_engine=ready",
             "state_write_arbiter=ready",

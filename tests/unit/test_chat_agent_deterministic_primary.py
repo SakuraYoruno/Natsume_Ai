@@ -1327,10 +1327,12 @@ async def test_chat_agent_image_social_validation_failure_suppresses_fallback_te
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert stream_calls == 2
+    assert stream_calls == 1
     assert commit_event["decision"] == "NO_REPLY"
     assert commit_event["reason_code"] == "IMAGE_SOCIAL_NO_SAFE_REPLY"
     assert str(commit_event.get("narrative") or "") == ""
+    assert commit_event["reply_envelope"]["kind"] == "no_reply"
+    assert commit_event["reply_envelope"]["sendable"] is False
     assert "没接稳" not in json.dumps(commit_event, ensure_ascii=False)
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})

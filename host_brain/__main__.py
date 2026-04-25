@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
+import platform
 import sys
 from pathlib import Path
+
+
+def _configure_windows_event_loop_policy() -> None:
+    if platform.system().lower() != "windows":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    try:
+        asyncio.set_event_loop_policy(selector_policy())
+    except Exception:
+        logging.getLogger("Natsume.main").warning(
+            "Failed to set Windows selector event loop policy",
+            exc_info=True,
+        )
+
+
+_configure_windows_event_loop_policy()
 
 # 在所有模块导入之前加载 .env 文件（不覆盖已有的系统环境变量）
 def _load_env_file(env_path: Path, *, override: bool = False) -> None:
@@ -42,7 +62,6 @@ def _load_dotenv_file() -> None:
 
 _load_dotenv_file()
 
-from host_brain.app.fastapi_app import app
 from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -186,6 +205,7 @@ def _env_int(value: object, *, default: int, min_value: int, max_value: int) -> 
 
 def main() -> int:
     """主函数入口"""
+    _configure_windows_event_loop_policy()
     args = parse_args()
 
     # 配置日志
@@ -222,11 +242,12 @@ def main() -> int:
 
     try:
         uvicorn.run(
-            "host_brain.app.fastapi_app:app",
+            "host_brain.app.asgi:app",
             host=args.host,
             port=args.port,
             reload=args.reload,
             log_level=args.log_level.lower(),
+            loop="asyncio",
             access_log=_resolve_uvicorn_access_log_enabled(),
         )
         return 0
