@@ -323,7 +323,8 @@ class TestT364ANSRecoveryExitEmotionMetabolism:
 class TestT365DefaultModeHighContinuityEmotion:
     """DefaultModeAgent 高连续性时联动 LimbicAgent.drive_emotion_metabolism()"""
 
-    def test_high_continuity_triggers_emotion(self):
+    def test_high_continuity_triggers_emotion(self, monkeypatch):
+        monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
         from host_brain.tribe.default_mode_agent import DefaultModeAgent
         agent = DefaultModeAgent.__new__(DefaultModeAgent)
         agent.state_registry = MagicMock()
