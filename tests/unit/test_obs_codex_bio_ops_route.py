@@ -224,6 +224,15 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "dignity_guard",
         "identity_fork_guard",
     }
+    assert payload["bio_ops"]["growth_closure"]["capability_count"] == 5
+    assert payload["bio_ops"]["growth_closure"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["growth_closure"]["capabilities"]} == {
+        "idea_fermentation_pool",
+        "growth_stage_system",
+        "existential_load",
+        "open_loop_manager",
+        "cognitive_load_shedding",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

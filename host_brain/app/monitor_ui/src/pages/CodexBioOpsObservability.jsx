@@ -89,6 +89,10 @@ const EFFECT_LABELS = {
   dignity_guard_risk: '尊严守护',
   identity_fork_channel: '身份分叉',
   inner_parliament_dissent: '内在议会',
+  growth_stage_locked: '成长阶段',
+  existential_load_high: '存在负载',
+  open_loop_triage: '未闭环管理',
+  cognitive_load_shedding: '认知卸载',
 }
 
 const TRACE_LABELS = {
@@ -150,6 +154,14 @@ const SELF_GOVERNANCE_LABELS = {
   self_boundary_membrane: '自我边界膜',
   dignity_guard: '尊严守护',
   identity_fork_guard: '身份分叉守护',
+}
+
+const GROWTH_CLOSURE_LABELS = {
+  idea_fermentation_pool: '想法发酵池',
+  growth_stage_system: '成长阶段',
+  existential_load: '存在负载',
+  open_loop_manager: '未闭环管理',
+  cognitive_load_shedding: '认知卸载',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -547,6 +559,17 @@ function SelfGovernancePanel({ summary }) {
   )
 }
 
+function GrowthClosurePanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={GROWTH_CLOSURE_LABELS}
+      emptyTitle="暂无 Growth Closure 数据"
+      note="成长与收束层只做阶段、负载、未闭环和降载建议；不直接删除记忆或开启新执行链。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -625,6 +648,7 @@ export default function CodexBioOpsObservability() {
   const relationshipLayer = bioOps.relationship_layer || {}
   const innerLife = bioOps.inner_life || {}
   const selfGovernance = bioOps.self_governance || {}
+  const growthClosure = bioOps.growth_closure || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -690,7 +714,7 @@ export default function CodexBioOpsObservability() {
 
       {data?.artifact_available ? (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-11">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-12">
             <MetricTile
               icon={GitBranch}
               tone="green"
@@ -764,6 +788,14 @@ export default function CodexBioOpsObservability() {
               hint={`${selfGovernance.status_counts?.PROPOSED || 0} gates · ${selfGovernance.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
+              icon={Activity}
+              tone="green"
+              label="成长收束"
+              value={growthClosure.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${growthClosure.status_counts?.PROPOSED || 0} closures · ${growthClosure.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
               icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
@@ -828,6 +860,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Self Governance" subtitle="自我治理层：价值层级、伦理复盘、边界膜、尊严守护、身份连续性和内在议会保持可观测。">
             <SelfGovernancePanel summary={selfGovernance} />
+          </Section>
+
+          <Section title="Growth Closure" subtitle="成长与收束层：想法池、阶段门、存在负载、未闭环和认知卸载让项目能继续收尾。">
+            <GrowthClosurePanel summary={growthClosure} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

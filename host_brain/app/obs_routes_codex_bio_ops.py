@@ -11,6 +11,7 @@ from fastapi import Query
 
 from host_brain.app.obs_routes_core import router
 from host_brain.bio_ops.capabilities import (
+    GROWTH_CLOSURE_CAPABILITIES,
     INNER_LIFE_CAPABILITIES,
     INNER_MECHANISM_CAPABILITIES,
     NATURAL_INTERACTION_CAPABILITIES,
@@ -312,6 +313,14 @@ def _self_governance_summary(capabilities: list[dict[str, Any]]) -> dict[str, An
     )
 
 
+def _growth_closure_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        GROWTH_CLOSURE_CAPABILITIES,
+        activation_rule="report_only_growth_closure",
+    )
+
+
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for payload in payloads:
@@ -453,6 +462,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 "relationship_layer": _relationship_layer_summary(catalog["capabilities"]),
                 "inner_life": _inner_life_summary(catalog["capabilities"]),
                 "self_governance": _self_governance_summary(catalog["capabilities"]),
+                "growth_closure": _growth_closure_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -526,6 +536,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "relationship_layer": _relationship_layer_summary(catalog["capabilities"]),
             "inner_life": _inner_life_summary(catalog["capabilities"]),
             "self_governance": _self_governance_summary(catalog["capabilities"]),
+            "growth_closure": _growth_closure_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

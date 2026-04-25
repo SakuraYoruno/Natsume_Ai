@@ -138,6 +138,14 @@ SELF_GOVERNANCE_CAPABILITIES = (
     "identity_fork_guard",
 )
 
+GROWTH_CLOSURE_CAPABILITIES = (
+    "idea_fermentation_pool",
+    "growth_stage_system",
+    "existential_load",
+    "open_loop_manager",
+    "cognitive_load_shedding",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -198,6 +206,19 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "channel_outputs",
         "prompt_versions",
         "case_id",
+        "current_stage",
+        "unlocked",
+        "locked",
+        "milestones",
+        "open_loops",
+        "failed_self_heal_jobs",
+        "persona_drift_risk",
+        "unfinished_codex_docs",
+        "too_many_design_ideas",
+        "overdue_promises",
+        "unresolved_user_feedback",
+        "active_tasks",
+        "load_signals",
     ):
         value = task.inputs.get(key)
         if value:
@@ -1210,6 +1231,136 @@ def guard_identity_fork(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def evaluate_growth_stage(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_stage = str(inputs.get("current_stage") or inputs.get("stage") or "Stage 3").strip()
+    match = re.search(r"(\d+)", raw_stage)
+    stage_index = int(match.group(1)) if match else 3
+    unlocked = _list_text(inputs.get("unlocked") or inputs.get("current_capabilities"))
+    locked = _list_text(inputs.get("locked"))
+    if not unlocked:
+        unlocked = ["chat_response", "codex_inspect", "bio_ops_report"]
+    if stage_index < 4:
+        locked.extend(["autonomous_self_heal", "full_worker_write"])
+    if stage_index < 5:
+        locked.append("autonomous_self_evolve")
+    if stage_index < 6:
+        locked.append("bio_ops_direct_state_write")
+    locked = list(dict.fromkeys(locked))
+    milestone_by_stage = {
+        0: "TruthfulnessCortex",
+        1: "MemoryEthicsAuditor",
+        2: "CapabilitySelfAwareness",
+        3: "OrganWiringAudit",
+        4: "ImmuneMemoryBuilder",
+        5: "EvolutionLabOwnerGate",
+        6: "BioOpsOwnerAdoption",
+    }
+    return {
+        "current_stage": f"Stage {stage_index}",
+        "unlocked": unlocked,
+        "locked": locked,
+        "next_milestone": str(inputs.get("next_milestone") or milestone_by_stage.get(min(stage_index + 1, 6))),
+        "direct_write_allowed": False,
+        "issue": "growth_stage_has_locked_capabilities" if locked else "growth_stage_unlocked",
+    }
+
+
+def measure_existential_load(inputs: dict[str, Any]) -> dict[str, Any]:
+    sources: list[str] = []
+    open_loops = inputs.get("open_loops")
+    open_loop_count = len(open_loops) if isinstance(open_loops, list) else int(inputs.get("open_loop_count") or 0)
+    failed_jobs = len(_list_text(inputs.get("failed_self_heal_jobs"))) or int(inputs.get("failed_self_heal_job_count") or 0)
+    overdue_promises = len(_list_text(inputs.get("overdue_promises"))) or int(inputs.get("overdue_promise_count") or 0)
+    feedback = len(_list_text(inputs.get("unresolved_user_feedback"))) or int(inputs.get("unresolved_feedback_count") or 0)
+    unfinished_docs = len(_list_text(inputs.get("unfinished_codex_docs"))) or int(inputs.get("unfinished_codex_doc_count") or 0)
+    design_ideas = int(inputs.get("too_many_design_ideas") or inputs.get("design_idea_count") or 0)
+    persona_risk = float(inputs.get("persona_drift_risk") or 0)
+    if open_loop_count >= 5:
+        sources.append("many_open_loops")
+    if failed_jobs:
+        sources.append("failed_self_heal_jobs")
+    if persona_risk >= 0.5:
+        sources.append("persona_drift_risk")
+    if unfinished_docs:
+        sources.append("unfinished_codex_docs")
+    if design_ideas >= 8:
+        sources.append("too_many_design_ideas")
+    if overdue_promises:
+        sources.append("overdue_promises")
+    if feedback:
+        sources.append("unresolved_user_feedback")
+    score = min(1.0, open_loop_count * 0.06 + failed_jobs * 0.14 + overdue_promises * 0.12 + feedback * 0.08 + unfinished_docs * 0.08 + design_ideas * 0.025 + persona_risk * 0.25)
+    policy = "reduce_new_initiatives_until_closure" if score >= 0.65 else "normal_growth_allowed"
+    return {
+        "score": round(score, 2),
+        "sources": sources,
+        "policy": policy,
+        "direct_write_allowed": False,
+        "issue": "existential_load_high" if policy != "normal_growth_allowed" else "existential_load_normal",
+    }
+
+
+def manage_open_loops(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_loops = inputs.get("open_loops")
+    if not isinstance(raw_loops, list):
+        raw_loops = []
+    loops: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_loops):
+        payload = dict(raw) if isinstance(raw, dict) else {"id": str(raw or f"loop_{index}")}
+        loop_id = str(payload.get("id") or payload.get("title") or f"loop_{index}").strip()
+        importance = float(payload.get("importance") or payload.get("score") or 0.5)
+        status = str(payload.get("status") or "pending").strip()
+        if status in {"done", "closed"}:
+            action = "archive"
+        elif importance >= 0.72:
+            action = "turn_into_task"
+        elif importance >= 0.45:
+            action = "keep_context"
+        else:
+            action = "quiet_archive_candidate"
+        loops.append(
+            {
+                "id": loop_id,
+                "status": status,
+                "importance": round(importance, 2),
+                "next_action": str(payload.get("next_action") or action),
+                "review_action": action,
+            }
+        )
+    return {
+        "open_loops": loops[:8],
+        "task_candidate_count": sum(1 for loop in loops if loop["review_action"] == "turn_into_task"),
+        "quiet_archive_count": sum(1 for loop in loops if loop["review_action"] in {"archive", "quiet_archive_candidate"}),
+        "user_disturbance_allowed": False,
+        "issue": "open_loops_need_triage" if loops else "no_open_loops",
+    }
+
+
+def shed_cognitive_load(inputs: dict[str, Any]) -> dict[str, Any]:
+    active_tasks = _list_text(inputs.get("active_tasks"))
+    codex_active = bool(inputs.get("codex_worker_active")) or int(inputs.get("codex_queue_size") or 0) > 0
+    queue_size = int(inputs.get("codex_queue_size") or len(active_tasks))
+    if queue_size >= 5 or len(active_tasks) >= 6:
+        level = "high"
+    elif queue_size >= 2 or codex_active:
+        level = "moderate"
+    else:
+        level = "low"
+    optional = ["dream_compile", "weekly_evolution_scan", "idea_expansion", "nonurgent_report"]
+    paused = optional[:3] if level == "high" else optional[:2] if level == "moderate" else []
+    kept = ["chat_response", "immune_monitor"]
+    if "codex_worker" in active_tasks or codex_active:
+        kept.append("codex_workorder_trace")
+    return {
+        "level": level,
+        "paused": paused,
+        "kept": kept,
+        "reason": "codex_worker_active" if codex_active else "task_queue_pressure" if queue_size else "normal_load",
+        "direct_write_allowed": False,
+        "issue": "cognitive_load_shedding_needed" if paused else "cognitive_load_normal",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -1779,6 +1930,70 @@ def _identity_fork_guard(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _growth_stage_system(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="GrowthStageSystem")
+    analysis = evaluate_growth_stage(task.inputs)
+    return _result(
+        task,
+        name="GrowthStageSystem",
+        status="PROPOSED" if analysis["locked"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Represent capability growth as staged unlocks; keep risky autonomy locked until owner-gated milestones are met.",
+        owner_organ="prefrontal_agent",
+        output_kind="growth_report",
+        extra=analysis,
+    )
+
+
+def _existential_load(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ExistentialLoad")
+    analysis = measure_existential_load(task.inputs)
+    return _result(
+        task,
+        name="ExistentialLoad",
+        status="PROPOSED" if analysis["policy"] != "normal_growth_allowed" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Reduce new initiatives when open loops, failed jobs, drift risk, overdue promises, or unresolved feedback accumulate.",
+        owner_organ="prefrontal_agent",
+        output_kind="existential_load_report",
+        extra=analysis,
+    )
+
+
+def _open_loop_manager(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="OpenLoopManager")
+    analysis = manage_open_loops(task.inputs)
+    return _result(
+        task,
+        name="OpenLoopManager",
+        status="PROPOSED" if analysis["open_loops"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Triage open loops into task candidates, context-only items, or quiet archive candidates without proactively disturbing the user.",
+        owner_organ="prefrontal_agent",
+        output_kind="open_loop_report",
+        extra=analysis,
+    )
+
+
+def _cognitive_load_shedding(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="CognitiveLoadShedding")
+    analysis = shed_cognitive_load(task.inputs)
+    return _result(
+        task,
+        name="CognitiveLoadShedding",
+        status="PROPOSED" if analysis["paused"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Pause low-priority background growth work under load while keeping chat response, immune monitor, and WorkOrder trace alive.",
+        owner_organ="prefrontal_agent",
+        output_kind="load_shedding_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -1808,7 +2023,7 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("habit_compiler", "memory_growth", "social_brain_agent", "habit_candidate", _generic_handler(name="HabitCompiler", owner_organ="social_brain_agent", output_kind="habit_candidate", issue="repeated_success_pattern_candidate", proposal="Emit a reversible habit candidate with confidence and rollout window.", status="CANDIDATE")),
     BioOpsCapabilitySpec("emotional_scar_memory", "memory_growth", "immune_agent", "scar_candidate", _generic_handler(name="EmotionalScarMemory", owner_organ="immune_agent", output_kind="scar_candidate", issue="negative_interaction_lesson_candidate", proposal="Store cautious lesson candidates with decay policy, not permanent identity facts.", status="CANDIDATE")),
     BioOpsCapabilitySpec("forgetting_designer", "memory_growth", "glymphatic_agent", "forget_candidate", _generic_handler(name="ForgettingDesigner", owner_organ="glymphatic_agent", output_kind="forget_candidate", issue="low_value_or_expired_memory_candidate", proposal="Prefer downweighting over deletion and require confirmation for identity or relationship memory.", status="CANDIDATE")),
-    BioOpsCapabilitySpec("growth_stage_system", "memory_growth", "prefrontal_agent", "growth_report", _generic_handler(name="GrowthStageSystem", owner_organ="prefrontal_agent", output_kind="growth_report", issue="capability_stage_needs_milestone_gate", proposal="Report unlocked and locked BioOps capabilities by stage.")),
+    BioOpsCapabilitySpec("growth_stage_system", "growth_closure", "prefrontal_agent", "growth_report", _growth_stage_system),
     BioOpsCapabilitySpec("dream_rehearsal", "memory_growth", "default_mode_agent", "dream_rehearsal_report", _dream_rehearsal),
     BioOpsCapabilitySpec("autobiography_compiler", "memory_growth", "hippocampus_agent", "autobiography_report", _generic_handler(name="AutobiographyCompiler", owner_organ="hippocampus_agent", output_kind="autobiography_report", issue="growth_record_candidate", proposal="Summarize growth events as reviewable autobiography fragments.", status="CANDIDATE")),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
@@ -1842,8 +2057,11 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("embodiment_director", "state_body", "somatic_agent", "embodiment_report", _generic_handler(name="EmbodimentDirector", owner_organ="somatic_agent", output_kind="embodiment_report", issue="voice_expression_alignment", proposal="Align text, TTS, VTS, and channel status through body-map compensation.")),
     BioOpsCapabilitySpec("promise_ledger", "inner_mechanisms", "prefrontal_agent", "promise_candidate", _promise_ledger),
     BioOpsCapabilitySpec("shadow_persona_test", "inner_mechanisms", "chat_agent", "persona_regression_report", _shadow_persona_test),
-    BioOpsCapabilitySpec("idea_fermentation_pool", "inner_mechanisms", "default_mode_agent", "idea_pool_recommendation", _idea_fermentation_pool),
+    BioOpsCapabilitySpec("idea_fermentation_pool", "growth_closure", "default_mode_agent", "idea_pool_recommendation", _idea_fermentation_pool),
     BioOpsCapabilitySpec("inner_outer_world_boundary", "inner_mechanisms", "default_mode_agent", "inner_outer_boundary_audit", _inner_outer_world_boundary),
+    BioOpsCapabilitySpec("existential_load", "growth_closure", "prefrontal_agent", "existential_load_report", _existential_load),
+    BioOpsCapabilitySpec("open_loop_manager", "growth_closure", "prefrontal_agent", "open_loop_report", _open_loop_manager),
+    BioOpsCapabilitySpec("cognitive_load_shedding", "growth_closure", "prefrontal_agent", "load_shedding_report", _cognitive_load_shedding),
     BioOpsCapabilitySpec("skill_microbiome", "ecosystem_advanced", "immune_agent", "skill_ecology_report", _generic_handler(name="SkillMicrobiome", owner_organ="immune_agent", output_kind="skill_ecology_report", issue="external_skill_ecology_classification", proposal="Classify external skills as beneficial, conditional, harmful, dormant, or unknown.")),
     BioOpsCapabilitySpec("inner_parliament", "self_governance", "prefrontal_agent", "parliament_decision", _inner_parliament),
     BioOpsCapabilitySpec("subconscious_bias_sampler", "ecosystem_advanced", "default_mode_agent", "subconscious_bias_report", _generic_handler(name="SubconsciousBiasSampler", owner_organ="default_mode_agent", output_kind="subconscious_bias_report", issue="subconscious_bias_candidate", proposal="Audit dreams and inner monologues for over-service, boundary loss, or tool-like drift.")),
@@ -1860,6 +2078,7 @@ def list_capability_specs() -> tuple[BioOpsCapabilitySpec, ...]:
 __all__ = [
     "BioOpsCapabilitySpec",
     "CAPABILITY_SPECS",
+    "GROWTH_CLOSURE_CAPABILITIES",
     "INNER_MECHANISM_CAPABILITIES",
     "INNER_LIFE_CAPABILITIES",
     "NATURAL_INTERACTION_CAPABILITIES",
@@ -1890,16 +2109,20 @@ __all__ = [
     "detect_promise_language",
     "evaluate_consent_gradient",
     "evaluate_context_gravity",
+    "evaluate_growth_stage",
     "evaluate_mood_inertia",
     "evaluate_self_interrupt",
     "evaluate_active_silence",
     "detect_relationship_friction",
     "guard_identity_fork",
     "list_capability_specs",
+    "manage_open_loops",
+    "measure_existential_load",
     "plan_dream_rehearsal",
     "plan_repair_curve",
     "resolve_value_hierarchy",
     "resolve_internal_weather",
     "review_inner_ethics",
     "run_shadow_persona_test",
+    "shed_cognitive_load",
 ]

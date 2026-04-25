@@ -76,6 +76,16 @@ The self-governance batch is implemented as report-only value and boundary arbit
 
 These are observable through the Codex / BioOps WebUI `Self Governance` panel. They only produce reports and proposals; any execution still requires WorkOrder and owner review.
 
+The growth-closure batch is implemented as report-only project and cognition load control:
+
+- `IdeaFermentationPool` -> `idea_fermentation_pool`, idea triage states and promotion readiness.
+- `GrowthStageSystem` -> `growth_stage_system`, staged unlocks, locked autonomy, and next milestone report.
+- `ExistentialLoad` -> `existential_load`, open-loop, failed-job, drift-risk, overdue-promise, and feedback load report.
+- `OpenLoopManager` -> `open_loop_manager`, task/context/archive triage for open loops.
+- `CognitiveLoadShedding` -> `cognitive_load_shedding`, pause/keep policy for low-priority background work under load.
+
+These are observable through the Codex / BioOps WebUI `Growth Closure` panel. They do not delete memory, start new Codex workers, or increase autonomy by themselves.
+
 ---
 
 ## 0. 总目标
