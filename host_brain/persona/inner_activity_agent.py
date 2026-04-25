@@ -9,7 +9,6 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.persona.motive_runtime import (
     build_offline_state_from_inner_state,
     compute_runtime_motive_state,
@@ -21,9 +20,11 @@ _ALLOWED_FOCUS = {"self", "state", "plan", "topic"}
 _TEXT_WHITESPACE_RE = re.compile(r"\s+")
 _TEXT_QUESTION_RE = re.compile(r"[?？]+")
 
-_INNER_ACTIVITY_LLM_ENABLED = (
-    str(os.environ.get("NATSUME_INNER_WORLD_LLM_ENABLED", "true")).strip().lower()
-    not in {"0", "false", "no", "off"}
+_INNER_ACTIVITY_SYSTEM_PROMPT = (
+    "You are an internal state summarizer. Output a single JSON object only. "
+    "Do not roleplay and do not write user-visible chat text. "
+    "Fields: note, focus. note is an internal short self-state note, focus is one of "
+    "self, state, plan, topic."
 )
 _INNER_ACTIVITY_LLM_TIMEOUT_MS = max(
     800,
@@ -45,9 +46,33 @@ _INNER_ACTIVITY_SELF_MODEL_LOCK = threading.Lock()
 _INNER_ACTIVITY_SELF_MODEL: Any | None = None
 
 
-def _load_prompt_templates() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("inner_activity_agent.prompt_templates")
-    return dict(raw) if isinstance(raw, Mapping) else {}
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _inner_activity_llm_disabled_reason() -> str:
+    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True):
+        return "INNER_ACTIVITY_BACKGROUND_TASKS_DISABLED"
+    if os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED") is not None:
+        return "INNER_ACTIVITY_LLM_DISABLED"
+    return "INNER_ACTIVITY_LLM_DISABLED"
+
+
+def _inner_activity_llm_enabled() -> bool:
+    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True):
+        return False
+    explicit = os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED")
+    if explicit is not None:
+        return _env_bool("HOST_INNER_ACTIVITY_LLM_ENABLED", default=False)
+    return _env_bool("NATSUME_INNER_WORLD_LLM_ENABLED", default=True)
 
 
 def generate_inner_activity_note(
@@ -64,8 +89,8 @@ def generate_inner_activity_note(
     Returns:
         (note, focus, reason, meta)
     """
-    if not _INNER_ACTIVITY_LLM_ENABLED:
-        return "", "", "INNER_ACTIVITY_LLM_DISABLED", {}
+    if not _inner_activity_llm_enabled():
+        return "", "", _inner_activity_llm_disabled_reason(), {}
 
     runtime = _resolve_inner_activity_llm_runtime(now_ms=now_ms)
     if not isinstance(runtime, Mapping):
@@ -108,8 +133,7 @@ def generate_inner_activity_note(
     ]
     context_digest = _build_context_digest(context)
 
-    prompt_templates = _load_prompt_templates()
-    system_prompt = str(prompt_templates.get("system_prompt") or "").strip()
+    system_prompt = _INNER_ACTIVITY_SYSTEM_PROMPT
     prompt_payload = {
         "goal": "generate_inner_activity_note",
         "absence_band": absence_band,
