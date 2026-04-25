@@ -118,6 +118,12 @@ const EFFECT_LABELS = {
   drive_conflict_risk: '驱动力冲突',
   desire_lattice_blocked: '愿望格',
   need_want_impulse_proactive: 'Need/Want/Impulse',
+  user_mirror_candidate: '用户镜像',
+  body_plasticity_live2d: '身体可塑',
+  social_recovery_persona: '关系修复',
+  narrative_debugger_formal: '叙事调试',
+  latent_preference_markdown: '隐性偏好',
+  self_repair_story_tts: '自愈故事',
 }
 
 const TRACE_LABELS = {
@@ -224,6 +230,15 @@ const DRIVE_TRUST_LABELS = {
   drive_conflict_layer: '驱动力冲突',
   desire_lattice: '愿望格',
   need_want_impulse: 'Need / Want / Impulse',
+}
+
+const ADAPTIVE_REPAIR_LABELS = {
+  user_mirror_model: '用户镜像',
+  body_plasticity: '身体可塑',
+  social_recovery: '关系修复',
+  narrative_debugger: '叙事调试',
+  latent_preference_miner: '隐性偏好',
+  self_repair_story: '自愈故事',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -676,6 +691,17 @@ function DriveTrustPanel({ summary }) {
   )
 }
 
+function AdaptiveRepairPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={ADAPTIVE_REPAIR_LABELS}
+      emptyTitle="暂无 Adaptive Repair 数据"
+      note="适应与修复层只做用户镜像、身体校准、关系修复、叙事调试报告；偏好和自愈故事进入 owner-gated candidate。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -759,6 +785,7 @@ export default function CodexBioOpsObservability() {
   const affectLearning = bioOps.affect_learning || {}
   const presenceChannel = bioOps.presence_channel || {}
   const driveTrust = bioOps.drive_trust || {}
+  const adaptiveRepair = bioOps.adaptive_repair || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -938,6 +965,14 @@ export default function CodexBioOpsObservability() {
               hint={`${driveTrust.status_counts?.PROPOSED || 0} gates · ${driveTrust.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
+              icon={Activity}
+              tone="green"
+              label="适应修复"
+              value={adaptiveRepair.capability_count ?? '—'}
+              status="OWNER_GATED"
+              hint={`${adaptiveRepair.status_counts?.CANDIDATE || 0} candidates · ${adaptiveRepair.status_counts?.PROPOSED || 0} reports`}
+            />
+            <MetricTile
               icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
@@ -1022,6 +1057,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Drive & Trust" subtitle="驱动力与信任层：信任梯度、信任恒温器、意图代谢、驱动力冲突、愿望格和 Need/Want/Impulse 保持报告模式。">
             <DriveTrustPanel summary={driveTrust} />
+          </Section>
+
+          <Section title="Adaptive Repair" subtitle="适应与修复层：用户镜像、身体可塑、关系修复、叙事调试、隐性偏好和自愈故事保持可审计。">
+            <AdaptiveRepairPanel summary={adaptiveRepair} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

@@ -11,6 +11,7 @@ from fastapi import Query
 
 from host_brain.app.obs_routes_core import router
 from host_brain.bio_ops.capabilities import (
+    ADAPTIVE_REPAIR_CAPABILITIES,
     AFFECT_LEARNING_CAPABILITIES,
     DRIVE_TRUST_CAPABILITIES,
     GROWTH_CLOSURE_CAPABILITIES,
@@ -357,6 +358,14 @@ def _drive_trust_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
+def _adaptive_repair_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        ADAPTIVE_REPAIR_CAPABILITIES,
+        activation_rule="report_or_owner_candidate_adaptive_repair",
+    )
+
+
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for payload in payloads:
@@ -503,6 +512,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 "affect_learning": _affect_learning_summary(catalog["capabilities"]),
                 "presence_channel": _presence_channel_summary(catalog["capabilities"]),
                 "drive_trust": _drive_trust_summary(catalog["capabilities"]),
+                "adaptive_repair": _adaptive_repair_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -581,6 +591,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "affect_learning": _affect_learning_summary(catalog["capabilities"]),
             "presence_channel": _presence_channel_summary(catalog["capabilities"]),
             "drive_trust": _drive_trust_summary(catalog["capabilities"]),
+            "adaptive_repair": _adaptive_repair_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

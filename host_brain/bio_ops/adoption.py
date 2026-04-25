@@ -18,7 +18,9 @@ BIO_OPS_CANDIDATE_CAPABILITIES: dict[str, str] = {
     "forgetting_designer": "glymphatic_agent",
     "autobiography_compiler": "hippocampus_agent",
     "immune_memory_builder": "immune_agent",
+    "latent_preference_miner": "social_brain_agent",
     "promise_ledger": "prefrontal_agent",
+    "self_repair_story": "immune_agent",
 }
 
 BIO_OPS_TRACE_ONLY_CAPABILITIES: frozenset[str] = frozenset(
@@ -36,6 +38,7 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "affective_temperature",
         "aesthetic_consistency_auditor",
         "attention_topography",
+        "body_plasticity",
         "body_map_system",
         "capability_self_awareness",
         "channel_soul",
@@ -68,6 +71,7 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "memory_texture",
         "mood_inertia",
         "narrative_identity",
+        "narrative_debugger",
         "organ_ct_scan",
         "organ_wiring_audit",
         "open_loop_manager",
@@ -85,6 +89,7 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "self_continuity_checksum",
         "silence_memory",
         "skill_microbiome",
+        "social_recovery",
         "social_contract",
         "symbolic_memory",
         "personal_mythology",
@@ -95,6 +100,7 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "trust_gradient",
         "trust_thermostat",
         "uncertainty_ritual",
+        "user_mirror_model",
         "value_hierarchy",
         "intention_metabolism",
         "need_want_impulse",

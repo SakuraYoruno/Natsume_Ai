@@ -131,6 +131,17 @@ The drive-trust batch is implemented as report-only intention and trust regulati
 
 These are observable through the Codex / BioOps WebUI `Drive & Trust` panel. They do not raise autonomy, dispatch Codex workers, schedule proactive actions, or write long-term state.
 
+The adaptive-repair batch is implemented as report-only plus owner-gated candidates:
+
+- `UserMirrorModel` -> `user_mirror_model`, bounded user preference mirror for MemoryEthics review.
+- `BodyPlasticity` -> `body_plasticity`, body component calibration plan.
+- `SocialRecovery` -> `social_recovery`, relationship repair flow after friction.
+- `NarrativeDebugger` -> `narrative_debugger`, narrative-bug report for technically correct but unnatural behavior.
+- `LatentPreferenceMiner` -> `latent_preference_miner`, owner-gated soft preference candidate.
+- `SelfRepairStory` -> `self_repair_story`, owner-gated immune/autobiography repair-story candidate.
+
+These are observable through the Codex / BioOps WebUI `Adaptive Repair` panel. The two candidate outputs require owner adoption before any long-term memory, immune memory, autobiography, or policy write.
+
 ---
 
 ## 0. 总目标

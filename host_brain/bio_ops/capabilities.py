@@ -183,6 +183,15 @@ DRIVE_TRUST_CAPABILITIES = (
     "need_want_impulse",
 )
 
+ADAPTIVE_REPAIR_CAPABILITIES = (
+    "user_mirror_model",
+    "body_plasticity",
+    "social_recovery",
+    "narrative_debugger",
+    "latent_preference_miner",
+    "self_repair_story",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -306,6 +315,22 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "desire",
         "desires",
         "sleep_pressure",
+        "user_mirror",
+        "prefers",
+        "dislikes",
+        "current_project_focus",
+        "new_component",
+        "body_adaptation",
+        "needs_calibration",
+        "recovery_event",
+        "mistake_type",
+        "narrative_bug",
+        "preference_candidate",
+        "preference_events",
+        "repair_story",
+        "repair_event",
+        "diagnosis",
+        "repair",
     ):
         value = task.inputs.get(key)
         if value:
@@ -2227,6 +2252,182 @@ def separate_need_want_impulse(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_user_mirror_model(inputs: dict[str, Any]) -> dict[str, Any]:
+    mirror = inputs.get("user_mirror")
+    mirror_payload = dict(mirror) if isinstance(mirror, dict) else {}
+    prefers = _list_text(mirror_payload.get("prefers") or inputs.get("prefers"))
+    dislikes = _list_text(mirror_payload.get("dislikes") or inputs.get("dislikes"))
+    text = " ".join(
+        [
+            str(inputs.get("feedback") or ""),
+            str(inputs.get("message") or inputs.get("text") or ""),
+            " ".join(_list_text(inputs.get("events"))),
+        ]
+    )
+    if any(token in text.lower() for token in ("markdown", "md", "artifact")) and "structured markdown artifacts" not in prefers:
+        prefers.append("structured markdown artifacts")
+    if any(token in text for token in ("直接", "开始做", "实施", "继续")) and "direct implementation plans" not in prefers:
+        prefers.append("direct implementation plans")
+    if any(token in text for token in ("客服", "出戏", "别解释", "太长")):
+        dislikes.extend(token for token in ("service tone", "immersion-breaking meta explanation") if token not in dislikes)
+    if not prefers:
+        prefers = ["structured markdown", "direct implementation plans", "minimal irrelevant noise"]
+    return {
+        "user_mirror": {
+            "prefers": list(dict.fromkeys(prefers))[:8],
+            "dislikes": list(dict.fromkeys(dislikes))[:8],
+            "current_project_focus": str(mirror_payload.get("current_project_focus") or inputs.get("current_project_focus") or "Natsume Codex BioOps"),
+        },
+        "memory_ethics_review_required": True,
+        "direct_write_allowed": False,
+        "issue": "user_mirror_candidate_ready",
+    }
+
+
+def plan_body_plasticity(inputs: dict[str, Any]) -> dict[str, Any]:
+    adaptation = inputs.get("body_adaptation")
+    payload = dict(adaptation) if isinstance(adaptation, dict) else {}
+    component = str(payload.get("new_component") or inputs.get("new_component") or inputs.get("component") or "unknown_component").strip()
+    needs = _list_text(payload.get("needs_calibration") or inputs.get("needs_calibration"))
+    lower = component.lower()
+    if not needs:
+        if "live2d" in lower:
+            needs = ["mouth_open_range", "sad_expression", "blink_frequency"]
+        elif "tts" in lower or "voice" in lower:
+            needs = ["tts_latency", "fallback_voice_policy", "emotion_to_voice_mapping"]
+        elif "vision" in lower or "camera" in lower:
+            needs = ["frame_rate", "privacy_boundary", "attention_trigger_threshold"]
+        else:
+            needs = ["component_health_trace", "fallback_policy"]
+    return {
+        "body_adaptation": {
+            "new_component": component,
+            "needs_calibration": needs[:8],
+            "calibration_plan": [f"measure_{item}" for item in needs[:5]],
+            "owner_required": "somatic_agent",
+        },
+        "direct_write_allowed": False,
+        "issue": "body_plasticity_calibration_needed",
+    }
+
+
+def plan_social_recovery(inputs: dict[str, Any]) -> dict[str, Any]:
+    event = inputs.get("recovery_event")
+    payload = dict(event) if isinstance(event, dict) else {}
+    text = " ".join(
+        [
+            str(payload.get("trigger") or inputs.get("trigger") or ""),
+            str(inputs.get("feedback") or ""),
+            str(inputs.get("message") or inputs.get("text") or ""),
+        ]
+    )
+    mistake = str(payload.get("mistake_type") or inputs.get("mistake_type") or "").strip()
+    if not mistake:
+        if any(token in text for token in ("出戏", "客服", "不像你")):
+            mistake = "persona_break"
+        elif any(token in text for token in ("没做", "骗", "没有执行")):
+            mistake = "trust_break"
+        elif any(token in text for token in ("太长", "别解释")):
+            mistake = "over_explaining"
+        else:
+            mistake = "generic_friction"
+    strategy = {
+        "persona_break": "acknowledge_and_adjust_style",
+        "trust_break": "state_evidence_and_repair_execution_path",
+        "over_explaining": "shorten_and_return_to_action",
+        "generic_friction": "acknowledge_specific_issue",
+    }[mistake]
+    return {
+        "recovery_event": {
+            "trigger": text or "user_feedback",
+            "mistake_type": mistake,
+            "repair_strategy": strategy,
+            "followup_policy": "lower_meta_explanation_and_keep_changes_observable",
+        },
+        "direct_write_allowed": False,
+        "issue": "social_recovery_plan_ready",
+    }
+
+
+def debug_narrative(inputs: dict[str, Any]) -> dict[str, Any]:
+    bug = inputs.get("narrative_bug")
+    payload = dict(bug) if isinstance(bug, dict) else {}
+    reply = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    evidence = str(payload.get("evidence") or inputs.get("evidence") or inputs.get("feedback") or "").strip()
+    combined = f"{reply} {evidence}"
+    if payload.get("type"):
+        bug_type = str(payload["type"])
+    elif any(token in combined for token in ("太正式", "客服", "尊敬的用户")):
+        bug_type = "correct_action_wrong_expression"
+    elif any(token in combined for token in ("解释太多", "太长", "啰嗦")):
+        bug_type = "over_explained_after_emotional_input"
+    else:
+        bug_type = "narrative_snapshot"
+    fix = str(payload.get("fix") or "")
+    if not fix:
+        fix = "render technical result through relationship tone layer" if bug_type != "narrative_snapshot" else "keep current narrative path"
+    return {
+        "narrative_bug": {
+            "type": bug_type,
+            "evidence": evidence or reply[:160],
+            "fix": fix,
+        },
+        "direct_write_allowed": False,
+        "issue": "narrative_bug_detected" if bug_type != "narrative_snapshot" else "narrative_debug_snapshot",
+    }
+
+
+def mine_latent_preference(inputs: dict[str, Any]) -> dict[str, Any]:
+    candidate = inputs.get("preference_candidate")
+    payload = dict(candidate) if isinstance(candidate, dict) else {}
+    events = _list_text(payload.get("evidence") or inputs.get("preference_events") or inputs.get("events"))
+    text = " ".join(events + [str(inputs.get("feedback") or inputs.get("message") or inputs.get("text") or "")])
+    if payload.get("preference"):
+        preference = str(payload["preference"])
+    elif any(token in text.lower() for token in ("markdown", "md", "artifact")):
+        preference = "prefers_markdown_artifacts_for_plans"
+    elif any(token in text for token in ("直接实施", "开始做", "继续做")):
+        preference = "prefers_direct_implementation_over_discussion"
+    elif any(token in text for token in ("客服", "出戏")):
+        preference = "dislikes_service_tone"
+    else:
+        preference = "preference_needs_more_evidence"
+    confidence = float(payload.get("confidence") or (0.82 if len(events) >= 2 else 0.58 if events else 0.35))
+    return {
+        "preference_candidate": {
+            "preference": preference,
+            "evidence": events[:8],
+            "confidence": round(min(confidence, 1.0), 2),
+            "write_policy": "soft_memory_candidate",
+            "owner_required": "social_brain_agent",
+        },
+        "direct_write_allowed": False,
+        "issue": "latent_preference_candidate_ready" if preference != "preference_needs_more_evidence" else "latent_preference_needs_more_evidence",
+    }
+
+
+def narrate_self_repair_story(inputs: dict[str, Any]) -> dict[str, Any]:
+    story = inputs.get("repair_story")
+    payload = dict(story) if isinstance(story, dict) else {}
+    problem = str(payload.get("problem") or inputs.get("problem") or inputs.get("repair_event") or inputs.get("message") or "unknown_problem").strip()
+    diagnosis = str(payload.get("diagnosis") or inputs.get("diagnosis") or "diagnosis_requires_evidence").strip()
+    repair = str(payload.get("repair") or inputs.get("repair") or inputs.get("fix") or "repair_requires_evidence").strip()
+    lesson = str(payload.get("lesson") or inputs.get("lesson") or "body faults need sustainable fallback and evidence-backed recovery").strip()
+    guard = str(payload.get("future_guard") or inputs.get("future_guard") or "check backend mode and fallback path before claiming recovery").strip()
+    return {
+        "repair_story": {
+            "problem": problem,
+            "diagnosis": diagnosis,
+            "repair": repair,
+            "lesson": lesson,
+            "future_guard": guard,
+            "uses": ["ImmuneMemory", "Autobiography", "DreamCompiler", "SelfModel"],
+        },
+        "direct_write_allowed": False,
+        "issue": "self_repair_story_candidate_ready",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -3260,6 +3461,102 @@ def _need_want_impulse(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _user_mirror_model(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="UserMirrorModel")
+    analysis = build_user_mirror_model(task.inputs)
+    return _result(
+        task,
+        name="UserMirrorModel",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Build a bounded user preference mirror for MemoryEthics review; never perform invasive profiling or direct memory writes.",
+        owner_organ="social_brain_agent",
+        output_kind="user_mirror_report",
+        extra=analysis,
+    )
+
+
+def _body_plasticity(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="BodyPlasticity")
+    analysis = plan_body_plasticity(task.inputs)
+    return _result(
+        task,
+        name="BodyPlasticity",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Generate calibration plans for changed body components without mutating runtime device configuration directly.",
+        owner_organ="somatic_agent",
+        output_kind="body_plasticity_report",
+        extra=analysis,
+    )
+
+
+def _social_recovery(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SocialRecovery")
+    analysis = plan_social_recovery(task.inputs)
+    return _result(
+        task,
+        name="SocialRecovery",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Turn relationship friction into a concrete repair path, not vague apology or hidden long-term memory writes.",
+        owner_organ="social_brain_agent",
+        output_kind="social_recovery_report",
+        extra=analysis,
+    )
+
+
+def _narrative_debugger(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="NarrativeDebugger")
+    analysis = debug_narrative(task.inputs)
+    return _result(
+        task,
+        name="NarrativeDebugger",
+        status="PROPOSED" if analysis["issue"] == "narrative_bug_detected" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Find technically correct but experientially unnatural behavior and route it through a relationship-aware render fix.",
+        owner_organ="chat_agent",
+        output_kind="narrative_debug_report",
+        extra=analysis,
+    )
+
+
+def _latent_preference_miner(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="LatentPreferenceMiner")
+    analysis = mine_latent_preference(task.inputs)
+    return _result(
+        task,
+        name="LatentPreferenceMiner",
+        status="CANDIDATE",
+        issue=str(analysis["issue"]),
+        proposal="Stage latent preferences as soft memory candidates requiring social brain and memory ethics review.",
+        owner_organ="social_brain_agent",
+        output_kind="preference_candidate",
+        extra=analysis,
+    )
+
+
+def _self_repair_story(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SelfRepairStory")
+    analysis = narrate_self_repair_story(task.inputs)
+    return _result(
+        task,
+        name="SelfRepairStory",
+        status="CANDIDATE",
+        issue=str(analysis["issue"]),
+        proposal="Stage repair stories for immune memory, autobiography, dream compiler, and self-model owner review.",
+        owner_organ="immune_agent",
+        output_kind="repair_story_candidate",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -3317,6 +3614,12 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("drive_conflict_layer", "drive_trust", "prefrontal_agent", "drive_conflict_report", _drive_conflict_layer),
     BioOpsCapabilitySpec("desire_lattice", "drive_trust", "default_mode_agent", "desire_lattice_report", _desire_lattice),
     BioOpsCapabilitySpec("need_want_impulse", "drive_trust", "prefrontal_agent", "need_want_impulse_report", _need_want_impulse),
+    BioOpsCapabilitySpec("user_mirror_model", "adaptive_repair", "social_brain_agent", "user_mirror_report", _user_mirror_model),
+    BioOpsCapabilitySpec("body_plasticity", "adaptive_repair", "somatic_agent", "body_plasticity_report", _body_plasticity),
+    BioOpsCapabilitySpec("social_recovery", "adaptive_repair", "social_brain_agent", "social_recovery_report", _social_recovery),
+    BioOpsCapabilitySpec("narrative_debugger", "adaptive_repair", "chat_agent", "narrative_debug_report", _narrative_debugger),
+    BioOpsCapabilitySpec("latent_preference_miner", "adaptive_repair", "social_brain_agent", "preference_candidate", _latent_preference_miner),
+    BioOpsCapabilitySpec("self_repair_story", "adaptive_repair", "immune_agent", "repair_story_candidate", _self_repair_story),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
     BioOpsCapabilitySpec("truthfulness_cortex", "safety_truth", "prefrontal_agent", "truthfulness_patch", _truthfulness_cortex),
@@ -3368,6 +3671,7 @@ def list_capability_specs() -> tuple[BioOpsCapabilitySpec, ...]:
 
 __all__ = [
     "BioOpsCapabilitySpec",
+    "ADAPTIVE_REPAIR_CAPABILITIES",
     "AFFECT_LEARNING_CAPABILITIES",
     "CAPABILITY_SPECS",
     "DRIVE_TRUST_CAPABILITIES",
@@ -3395,6 +3699,7 @@ __all__ = [
     "build_inner_library",
     "build_joy_reinforcement",
     "build_regret_signal",
+    "build_user_mirror_model",
     "calibrate_attachment_style",
     "classify_idea_fermentation",
     "classify_attention_budget",
@@ -3408,6 +3713,7 @@ __all__ = [
     "compute_life_pulse",
     "detect_promise_language",
     "design_gentle_degradation",
+    "debug_narrative",
     "distill_memory_dream",
     "evaluate_consent_gradient",
     "evaluate_context_gravity",
@@ -3440,9 +3746,13 @@ __all__ = [
     "evaluate_trust_gradient",
     "maintain_desire_lattice",
     "metabolize_intention",
+    "mine_latent_preference",
+    "narrate_self_repair_story",
     "quarantine_failure",
+    "plan_body_plasticity",
     "regulate_trust_thermostat",
     "resolve_drive_conflict_layer",
+    "plan_social_recovery",
     "select_social_mask",
     "separate_need_want_impulse",
 ]

@@ -274,6 +274,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "desire_lattice",
         "need_want_impulse",
     }
+    assert payload["bio_ops"]["adaptive_repair"]["capability_count"] == 6
+    assert payload["bio_ops"]["adaptive_repair"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["adaptive_repair"]["capabilities"]} == {
+        "user_mirror_model",
+        "body_plasticity",
+        "social_recovery",
+        "narrative_debugger",
+        "latent_preference_miner",
+        "self_repair_story",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",
