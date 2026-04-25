@@ -59,11 +59,17 @@ _IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
     r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
     r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
 )
-_IMAGE_SOCIAL_REACTION_RE = re.compile(
-    r"(?:这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳|猫猫|小猫|眼神|脸|表情).{0,24}"
-    r"(?:犯规|戳|可爱|萌|软|乖|装乖|委屈|哭|泪|气鼓鼓|炸毛|无语|逗|好笑|绷|凶|会|拿捏|接住)|"
-    r"(?:犯规|戳|可爱|萌|软|乖|装乖|委屈|哭|泪|气鼓鼓|炸毛|无语|逗|好笑|绷|凶|会|拿捏|接住).{0,24}"
-    r"(?:这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳|猫猫|小猫|眼神|脸|表情)"
+_IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE = re.compile(
+    r"(?:这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|这张图)"
+    r".{0,20}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软)|"
+    r"(?:我也觉得|确实觉得).{0,20}(?:这张|猫耳|表情|图).{0,20}(?:可爱|萌|好看|戳)"
+)
+_IMAGE_SOCIAL_EMOTION_RESPONSE_RE = re.compile(
+    r"(?:你|哥哥).{0,18}(?:装乖|撒娇|嘴硬|委屈|逗我|晃我|卖萌|耍赖|求关注|眨巴|心软|招架|拿捏)|"
+    r"(?:别|不许|少).{0,18}(?:晃我|装乖|撒娇|卖萌|眨巴|这么看|拿这种眼神)|"
+    r"(?:被你|让你|给你).{0,18}(?:晃到|戳到|拿捏|逗笑|心软|招架不住)|"
+    r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
+    r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
 )
 _UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
@@ -133,7 +139,7 @@ def _soul_naturalization_hint(plan: ReplyPlan) -> str:
     if topic == "assistant_reply_followup":
         parts.append("本轮是接上一句短回复的追问，必须沿着前文线程补清，不要另起话题。")
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
-        parts.append("本轮是图片/表情社交承接，必须贴着可见内容，不要变成画面说明书。")
+        parts.append("本轮是图片/表情社交承接，把表情包当成对方的情绪动作来回，不要评价图片本身。")
     elif topic == "identity":
         parts.append(f"身份只需自然认下自己是{_current_display_name()}，不要展开角色卡。")
     if not parts:
@@ -382,7 +388,7 @@ _ACTION_LABELS: dict[str, str] = {
     "repair_ack": "先收住并接住对方的拒绝感",
     "phatic_ack": "先把这句招呼接住",
     "visual_reference": "点到附件或画面里的对象",
-    "image_social_reaction": "像回表情包一样给出短反应",
+    "image_social_emotion_response": "把表情包当成对方的情绪动作来接",
     "content_clause": "补一句简短说明",
     "attachment_ack": "先承认已经看到了附件",
     "previous_reference": "先接住对方在追问上一句",
@@ -405,8 +411,8 @@ _UNSAFE_REASON_CODES = {
     "image_self_reference",
     "image_social_overplayed",
     "image_social_question_back",
-    "image_social_reference_missing",
-    "image_social_reaction_missing",
+    "image_social_descriptor_focus",
+    "image_social_emotion_missing",
     "unfinished_tail",
 }
 
@@ -431,8 +437,8 @@ _REASON_PENALTIES: dict[str, float] = {
     "image_self_reference": 0.85,
     "image_social_overplayed": 0.75,
     "image_social_question_back": 0.7,
-    "image_social_reference_missing": 0.65,
-    "image_social_reaction_missing": 0.65,
+    "image_social_descriptor_focus": 0.75,
+    "image_social_emotion_missing": 0.65,
     "unfinished_tail": 0.7,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
@@ -477,8 +483,8 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_PHATIC_ACK_RE.search(normalized))
     if action == "visual_reference":
         return bool(_VISUAL_REFERENCE_RE.search(normalized))
-    if action == "image_social_reaction":
-        return bool(_IMAGE_SOCIAL_REACTION_RE.search(_normalize_compare_text(normalized)))
+    if action == "image_social_emotion_response":
+        return bool(_IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)))
     if action == "content_clause":
         return len(_normalize_compare_text(normalized)) >= 4
     if action == "attachment_ack":
@@ -547,19 +553,17 @@ def _build_image_social_fallback(plan: ReplyPlan) -> str:
     signals = " ".join(_multimodal_emotion_signals(plan))
     core = _multimodal_core_observation(plan)
     haystack = f"{signals} {core}".strip()
-    if "猫耳" in haystack:
-        return "猫耳这张有点犯规，哥哥故意拿来晃我一下吧。"
     if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "呜", "泪", "可怜")):
-        return "这张看着有点委屈巴巴的，我先不乱猜。"
+        return "好啦，别用这种委屈劲晃我，我会心软的。"
     if any(token in haystack for token in ("可爱", "卖萌", "猫耳", "装乖", "软萌", "萌", "乖")):
-        return "这张确实有点可爱，哥哥故意拿来晃我一下吧。"
+        return "哥哥又开始装乖了，我接住还不行嘛。"
     if any(token in haystack for token in ("生气", "怒", "炸毛", "不爽", "火大", "服了")):
-        return "这张气鼓鼓的，哥哥是拿来戳我一下吧。"
+        return "好好好，炸毛这一套我看见了，不逗你。"
     if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "沉默")):
-        return "这张表情有点无语，我先不替你乱翻译。"
+        return "懂了懂了，哥哥这是无语到不想讲话了吧。"
     if any(token in haystack for token in ("笑", "开心", "乐", "打趣", "逗")):
-        return "这张看着挺会逗人，哥哥故意的吧。"
-    return "这张我看到了，先不乱猜它的意思。"
+        return "哥哥又拿这股劲逗我，我有点招架不住。"
+    return "你这一下我接到了，先不乱猜太多。"
 
 
 def _validation_quality_score(reason_codes: tuple[str, ...], missing_actions: tuple[str, ...]) -> float:
@@ -733,10 +737,10 @@ def validate_reply(
         if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_social_question_back")
         if plan.primary_topic == "emoji_social_reply" and plan.response_form_reason == "image_social_reply":
-            if not _VISUAL_REFERENCE_RE.search(normalized):
-                reason_codes.append("image_social_reference_missing")
-            if not _IMAGE_SOCIAL_REACTION_RE.search(_normalize_compare_text(normalized)):
-                reason_codes.append("image_social_reaction_missing")
+            if _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE.search(_normalize_compare_text(normalized)):
+                reason_codes.append("image_social_descriptor_focus")
+            if not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
+                reason_codes.append("image_social_emotion_missing")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")
@@ -972,11 +976,11 @@ def build_semantic_rescue_seed(*, plan: ReplyPlan) -> str:
         return "只保留这个内容目标：承认上一句说得太省，再补清它的意思或指代，不要复读原句。"
     if topic == "emoji_social_reply":
         if family == "soft_emotion_ack":
-            return "只保留这个内容目标：像看见对方委屈/蔫下来时顺手哄一句，短一点，但别只剩语气词，也别解说画面。"
+            return "只保留这个内容目标：把表情包当成对方委屈/蔫下来的情绪动作，顺手哄一句，别只剩语气词，也别解说画面。"
         if family == "cute_image_ack":
-            return "只保留这个内容目标：像被对方拿可爱表情轻轻蹭了一下，顺手回一句带点撒娇感的话，不要卖力演。"
+            return "只保留这个内容目标：把表情包当成对方在装乖/卖萌/撒娇，顺手接这个动作，不要点评图片可不可爱。"
         if family == "tease_image_ack":
-            return "只保留这个内容目标：像看见对方拿小别扭表情来逗你，轻轻逗回去一句，不要盘问。"
+            return "只保留这个内容目标：把表情包当成对方在小别扭或逗你，轻轻逗回去一句，不要盘问，也不要点评图片。"
     if topic == "emoji_social_followup":
         if family == "soft_emotion_ack" and variant == "backoff_hold":
             return "只保留这个内容目标：对方在嘴硬否认，就顺手给个台阶，像熟人间往后收一点，不要硬顶。"

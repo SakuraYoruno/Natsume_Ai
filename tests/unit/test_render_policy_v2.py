@@ -682,14 +682,15 @@ def test_reply_plan_image_social_reply_keeps_variant_specific_contract_after_mul
     assert plan.max_sentences == 1
     assert plan.max_chars <= 52
     assert plan.should_be_brief is True
-    assert "visual_reference" in plan.contract.required_actions
-    assert "image_social_reaction" in plan.contract.required_actions
+    assert "visual_reference" not in plan.contract.required_actions
+    assert "image_social_emotion_response" in plan.contract.required_actions
     assert any(
         token in plan.reply_contract
         for token in ("委屈/难过", "只剩感叹词", "不要解说画面")
     )
     assert "只回一句短接话" in plan.reply_contract
-    assert "必须像回复表情包" in plan.reply_contract
+    assert "表情包表达的情绪" in plan.reply_contract
+    assert "不要评价这张图" in plan.reply_contract
     assert "不要把自己写成图片主体" in plan.reply_contract
     assert "不要把问题抛回给对方" in plan.reply_contract
 

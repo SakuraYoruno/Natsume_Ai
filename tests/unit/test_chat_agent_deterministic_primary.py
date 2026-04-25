@@ -1033,7 +1033,7 @@ async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_fu
                 {
                     "candidates": [
                         "哥哥，突然这么可爱，是想让我哄你吗？",
-                        "猫耳这张有点犯规，哥哥故意的吧。",
+                        "好啦好啦，别拿这种眼神晃我，我会心软的。",
                     ]
                 },
                 ensure_ascii=False,
@@ -1082,12 +1082,12 @@ async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_fu
                     "trajectory_stage": "first_turn",
                     "response_form": "text",
                     "response_form_reason": "image_social_reply",
-                    "reply_contract": "先把这张图的可爱/卖萌感接住，再顺着这股语气回一句，不要解释画面。",
+                    "reply_contract": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
                     "contract": {
-                        "text": "先把这张图的可爱/卖萌感接住，再顺着这股语气回一句，不要解释画面。",
-                        "required_actions": ["phatic_ack"],
+                        "text": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
+                        "required_actions": ["phatic_ack", "image_social_emotion_response"],
                         "forbidden_actions": ["multimodal_generic_followup"],
-                        "realization_steps": ["接住图里的可爱感"],
+                        "realization_steps": ["接住对方的装乖或撒娇感"],
                     },
                     "multimodal": multimodal,
                     "requires_validation": True,
@@ -1131,7 +1131,7 @@ async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_fu
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert str(commit_event.get("narrative") or "") == "猫耳这张有点犯规，哥哥故意的吧。"
+    assert str(commit_event.get("narrative") or "") == "好啦好啦，别拿这种眼神晃我，我会心软的。"
     assert commit_event["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
@@ -1181,8 +1181,8 @@ async def test_chat_agent_image_social_surface_hard_timeout_uses_local_emergency
                     "trajectory_stage": "first_turn",
                     "response_form": "text",
                     "response_form_reason": "image_social_reply",
-                    "reply_contract": "先把这张图的可爱/卖萌感接住。",
-                    "contract": {"text": "先把这张图的可爱/卖萌感接住。", "required_actions": ["phatic_ack"]},
+                    "reply_contract": "把表情包当成对方在装乖或卖萌，回这个情绪动作。",
+                    "contract": {"text": "把表情包当成对方在装乖或卖萌，回这个情绪动作。", "required_actions": ["phatic_ack", "image_social_emotion_response"]},
                     "multimodal": multimodal,
                     "requires_validation": True,
                     "force_buffering": True,

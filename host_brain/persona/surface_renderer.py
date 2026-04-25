@@ -23,7 +23,7 @@ from host_brain.persona.fallback_policy import (
     is_forbidden_surface_text,
 )
 from host_brain.persona.image_social_surface import (
-    candidate_uses_image_observation,
+    candidate_responds_to_image_social_emotion,
     image_social_observation_text,
     is_image_social_surface_sample_disallowed,
 )
@@ -372,18 +372,20 @@ class SurfaceRenderer:
         system_prompt = (
             "你只负责把用户发来的图片/表情包接成一句自然聊天。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
-            "像聊天窗口里收到表情包一样回复：抓一个可见点，再给一句直接反应。"
+            "把表情包当成对方发来的情绪动作，不要当图片鉴赏。"
+            "回复对方正在表达的情绪：撒娇、装乖、委屈、嘴硬、逗你、求关注等。"
             "不要解释规则，不要写画面说明书，不要客服腔，不要只回语气词。"
             "禁止使用旧模板：突然这么可爱、想让我哄你吗、想跟我撒娇吗、怎么啦、闹别扭、会错意。"
             "用户发来的图不是你本人，不要说“我今天可爱吗/我可爱吗/看我可爱吗”。"
+            "不要评价“这张图/图里/猫耳/这个表情”怎么样。"
             "不要把问题抛回给对方，不要问“你是不是觉得这张图可爱”。"
             f"\n\n{_compiled_soul_text()}"
         ).strip()
         user_prompt = (
-            f"图片观察：{observation_text}\n"
+            f"表情包观察（只用于判断情绪，不要复述）：{observation_text}\n"
             f"回应动作：{action_hint}\n"
             f"回复契约：{str(getattr(plan, 'reply_contract', '') or '').strip()}\n"
-            "改写要求：12-34个中文字符；最多一句；句中必须有“这张/这个表情/猫耳/图里”等可见锚点；不要照抄图片观察；给4个不同候选，只输出 JSON。"
+            "改写要求：12-34个中文字符；最多一句；必须回对方的情绪动作；不要描述图片本身；给4个不同候选，只输出 JSON。"
         )
         return await self._render_candidates(
             request,
@@ -457,8 +459,8 @@ class SurfaceRenderer:
     ) -> tuple[bool, str]:
         if is_image_social_surface_sample_disallowed(candidate) or is_forbidden_surface_text(candidate):
             return False, "IMAGE_SURFACE_TEMPLATE_SHAPE"
-        if not candidate_uses_image_observation(candidate, multimodal):
-            return False, "IMAGE_SURFACE_OBSERVATION_NOT_USED"
+        if not candidate_responds_to_image_social_emotion(candidate):
+            return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
         if not _validation_is_acceptable(validation):
             return False, "IMAGE_SURFACE_VALIDATION_FAILED"
         return True, ""

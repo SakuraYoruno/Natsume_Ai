@@ -751,30 +751,30 @@ def _refine_multimodal_contract(
     )
     if topic == "emoji_social_reply" and primary_modality == "image":
         extra_by_variant = {
-            ("soft_emotion_ack", "distress_image"): "按表情包来接：点到图里委屈/哭/低落的可见点，再顺手放轻一句。",
-            ("soft_emotion_ack", "soft_hold"): "按表情包来接：点到图里的软萌或表情，再顺手轻轻回一句。",
-            ("soft_emotion_ack", "steady_hold"): "按表情包来接：点到图里的情绪或表情，再稳稳接一句。",
-            ("cute_image_ack", "cute_ping"): "按表情包来接：点到这张图里的猫耳/表情/卖萌感，再直接给一句短反应。",
-            ("cute_image_ack", "soft_hold"): "按表情包来接：点到图里的软萌点，再顺手轻轻回一句。",
-            ("tease_image_ack", "light_nudge"): "按表情包来接：点到图里的小别扭/小吐槽点，再轻轻逗一句。",
+            ("soft_emotion_ack", "distress_image"): "按表情包表达的情绪来接：像对方在委屈/蔫下来时顺手放轻一句。",
+            ("soft_emotion_ack", "soft_hold"): "按表情包表达的情绪来接：像对方在软软地撒娇或求关注，轻轻接住。",
+            ("soft_emotion_ack", "steady_hold"): "按表情包表达的情绪来接：先接住那层情绪，再稳稳回一句。",
+            ("cute_image_ack", "cute_ping"): "按表情包表达的动作来接：像对方在装乖/卖萌/晃你，直接回这个动作。",
+            ("cute_image_ack", "soft_hold"): "按表情包表达的动作来接：像对方在轻轻撒娇，顺手接住。",
+            ("tease_image_ack", "light_nudge"): "按表情包表达的动作来接：像对方在小别扭或逗你，轻一点逗回去。",
         }
-        extra_text = extra_by_variant.get((family, variant), "按表情包来接：点到图里一个可见点，再顺着这层语气自然接一句。")
+        extra_text = extra_by_variant.get((family, variant), "按表情包表达的情绪动作来接，不要把它当成图片点评。")
         return ReplyContract(
             text=" ".join(
                 part for part in (
                     base_text,
                     extra_text,
                     "只回一句短接话，别写成小剧场。",
-                    "必须像回复表情包：抓一个可见点，加一句直接反应。",
-                    "不要解说画面，也不要挂固定开放问句。",
+                    "必须先判断它像是在撒娇、装乖、委屈、嘴硬、逗你还是求关注，再对这个动作回一句。",
+                    "不要评价这张图/图里/猫耳/这个表情怎么样，也不要解说画面。",
                     "不要把问题抛回给对方，不要问“是不是觉得这张图可爱”。",
                     "不要把自己写成图片主体，不要写我的猫耳/我比猫猫可爱/变成猫这类展开。",
                 )
                 if str(part).strip()
             ),
-            required_actions=tuple(dict.fromkeys([*contract.required_actions, "visual_reference", "image_social_reaction"])),
+            required_actions=tuple(dict.fromkeys([*contract.required_actions, "image_social_emotion_response"])),
             forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
-            realization_steps=base_steps or ("点到图/表情包里的一个可见点", "像回表情包一样给一句短反应"),
+            realization_steps=base_steps or ("识别表情包表达的情绪动作", "对这个情绪动作回一句"),
         )
     if topic == "emoji_social_followup":
         extra_by_variant = {

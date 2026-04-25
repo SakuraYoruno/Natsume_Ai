@@ -547,7 +547,7 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
             "core_observation": "可爱、卖萌；猫耳女孩特写，蓝色眼睛。",
         },
         contract=ReplyContract(
-            text="先把这张图的可爱/卖萌感接住，再顺着这股语气回一句。",
+            text="把表情包当成对方在装乖或卖萌，回这个情绪动作。",
             required_actions=("phatic_ack",),
             forbidden_actions=(),
         ),
@@ -620,7 +620,7 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     )
 
     assert generic_validation.is_valid is False
-    assert "image_social_reference_missing" in generic_validation.reason_codes
+    assert "image_social_emotion_missing" in generic_validation.reason_codes
 
     seen_only_validation = validate_reply(
         text="哥哥，这张我看到了。",
@@ -629,7 +629,7 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     )
 
     assert seen_only_validation.is_valid is False
-    assert "image_social_reaction_missing" in seen_only_validation.reason_codes
+    assert "image_social_emotion_missing" in seen_only_validation.reason_codes
 
     descriptive_suffix_validation = validate_reply(
         text="这张看我可爱的样子，猫耳都竖起来了。",
@@ -660,7 +660,7 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert "image_self_reference" in degree_suffix_validation.reason_codes
 
 
-def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
+def test_image_social_reply_allows_emotion_response_not_image_opinion() -> None:
     plan = ReplyPlan(
         primary_topic="emoji_social_reply",
         interaction_move="playful_ping",
@@ -677,21 +677,23 @@ def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
             "core_observation": "可爱、卖萌；猫耳女孩特写，蓝色眼睛。",
         },
         contract=ReplyContract(
-            text="先把这张图的可爱/卖萌感接住，再顺着这股语气回一句。",
-            required_actions=("phatic_ack",),
+            text="把表情包当成对方在装乖或卖萌，回这个情绪动作。",
+            required_actions=("phatic_ack", "image_social_emotion_response"),
             forbidden_actions=(),
         ),
         requires_validation=True,
         force_buffering=True,
     )
 
-    validation = validate_reply(
+    image_opinion_validation = validate_reply(
         text="哥哥，我也觉得这张猫耳很可爱，轻轻戳到了。",
         plan=plan,
         user_message="[图片消息]",
     )
 
-    assert "image_self_reference" not in validation.reason_codes
+    assert image_opinion_validation.is_valid is False
+    assert image_opinion_validation.safe_to_emit is False
+    assert "image_social_descriptor_focus" in image_opinion_validation.reason_codes
 
     pun_validation = validate_reply(
         text="哥哥，我也萌生了想捏这张猫耳的冲动。",
@@ -699,8 +701,17 @@ def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
         user_message="[图片消息]",
     )
 
-    assert "image_self_reference" not in pun_validation.reason_codes
-    assert pun_validation.is_valid is True
+    assert pun_validation.is_valid is False
+    assert "image_social_emotion_missing" in pun_validation.reason_codes
+
+    emotion_validation = validate_reply(
+        text="哥哥又开始装乖了，我接住还不行嘛。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert emotion_validation.reason_codes == ()
+    assert emotion_validation.is_valid is True
 
 
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
