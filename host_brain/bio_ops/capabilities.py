@@ -110,6 +110,15 @@ NATURAL_INTERACTION_CAPABILITIES = (
     "self_interrupt",
 )
 
+RELATIONSHIP_LAYER_CAPABILITIES = (
+    "social_contract",
+    "relationship_friction",
+    "repair_curve",
+    "attachment_style_calibrator",
+    "silence_memory",
+    "relationship_boundary_guardian",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -141,6 +150,11 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "open_threads",
         "since_last_user_turn_ms",
         "codex_job_elapsed_ms",
+        "obligations",
+        "boundaries",
+        "feedback",
+        "friction_event",
+        "silence_reason",
     ):
         value = task.inputs.get(key)
         if value:
@@ -605,6 +619,165 @@ def evaluate_self_interrupt(inputs: dict[str, Any], *, evidence_refs: list[str] 
     }
 
 
+def audit_social_contract(inputs: dict[str, Any]) -> dict[str, Any]:
+    obligations = _list_text(inputs.get("obligations")) or [
+        "技术问题要给可落地方案",
+        "需要文件时优先生成 artifact",
+        "不要用客服式语气破坏沉浸感",
+        "不要假装已经执行了没有证据的动作",
+    ]
+    boundaries = _list_text(inputs.get("boundaries")) or [
+        "不直接越权修改主分支",
+        "不把外部 prompt 写入核心人格",
+        "不在没有证据时声称已执行",
+    ]
+    text = " ".join(
+        [
+            str(inputs.get("message") or ""),
+            str(inputs.get("reply") or ""),
+            str(inputs.get("feedback") or ""),
+            " ".join(_list_text(inputs.get("events"))),
+        ]
+    )
+    violations: list[str] = []
+    if any(token in text for token in ("尊敬的用户", "很抱歉给您带来不便", "客服")):
+        violations.append("service_tone_breaks_immersion")
+    if audit_truthfulness_claims(text, evidence_refs=_list_text(inputs.get("evidence_refs"))).get("issue"):
+        violations.append("unsupported_execution_claim")
+    if any(token in text.lower() for token in ("force push main", "直接覆盖 main", "修改核心人格", "写入 canon", "写入 bond")):
+        violations.append("boundary_overreach")
+    return {
+        "contract_id": str(inputs.get("contract_id") or "trusted_engineering_companion"),
+        "obligations": obligations,
+        "boundaries": boundaries,
+        "repair_policy": "违约时承认并修正，不长篇辩解",
+        "violations": violations,
+        "issue": "contract_violation_detected" if violations else "contract_holds",
+    }
+
+
+def calibrate_attachment_style(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    evidence: list[str] = []
+    current = "secure_supportive"
+    if any(token in text for token in ("我替你决定", "你不用管", "全部交给我", "我会一直盯着你", "离不开你")):
+        current = "slightly_over_service"
+        evidence.append("over_service_or_clingy_language")
+    if any(token in text for token in ("随便", "不知道", "自己看")):
+        current = "under_supportive"
+        evidence.append("under_supportive_language")
+    if any(token in text for token in ("你必须", "你不能", "我不允许")):
+        current = "controlling"
+        evidence.append("agency_reducing_language")
+    return {
+        "current": current,
+        "target": "secure_supportive",
+        "evidence": evidence,
+        "policy": "亲近但不黏，温柔但不越界，照顾但不替用户做决定",
+        "issue": "attachment_style_adjustment_needed" if evidence else "attachment_style_stable",
+    }
+
+
+def detect_relationship_friction(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = " ".join(
+        [
+            str(inputs.get("feedback") or ""),
+            str(inputs.get("message") or ""),
+            str(inputs.get("user_message") or ""),
+            " ".join(_list_text(inputs.get("signals"))),
+        ]
+    )
+    friction_type = "none"
+    severity = 0.0
+    if any(token in text for token in ("太客服", "客服味", "不像你")):
+        friction_type = "style_mismatch"
+        severity = 0.4
+    if any(token in text for token in ("太长", "别废话", "别解释")):
+        if severity < 0.35:
+            friction_type = "over_explaining"
+        severity = max(severity, 0.35)
+    if any(token in text for token in ("你没做", "别装", "没有执行", "骗我")):
+        if severity < 0.7:
+            friction_type = "trust_break"
+        severity = max(severity, 0.7)
+    repair_needed = severity >= 0.3
+    return {
+        "type": friction_type,
+        "severity": round(severity, 2),
+        "repair_needed": repair_needed,
+        "suggested_behavior": "短句承认 + 行为修正，不展开解释" if repair_needed else "continue_normal",
+        "issue": "relationship_friction_detected" if repair_needed else "no_relationship_friction",
+    }
+
+
+def plan_repair_curve(inputs: dict[str, Any]) -> dict[str, Any]:
+    event = inputs.get("friction_event")
+    event_payload = dict(event) if isinstance(event, dict) else {}
+    severity = float(inputs.get("severity") or event_payload.get("severity") or 0)
+    user_acceptance = str(inputs.get("user_acceptance") or "").strip().lower()
+    current_stage = str(inputs.get("current_stage") or "").strip().upper()
+    if current_stage in {"T0", "T1", "T2", "T3"}:
+        stage = current_stage
+    elif severity >= 0.6:
+        stage = "T0"
+    elif user_acceptance in {"accepted", "ok", "repaired"}:
+        stage = "T2"
+    elif severity > 0:
+        stage = "T1"
+    else:
+        stage = "T3"
+    policies = {
+        "T0": "承认问题，短句说明将如何修正",
+        "T1": "后续几轮保持更谨慎，减少玩笑和长解释",
+        "T2": "用户接受后逐渐恢复自然吐槽",
+        "T3": "形成经验候选，摩擦结束",
+    }
+    return {
+        "stage": stage,
+        "severity": round(severity, 2),
+        "policy": policies[stage],
+        "next_stage": {"T0": "T1", "T1": "T2", "T2": "T3", "T3": "T3"}[stage],
+        "issue": "repair_curve_active" if stage != "T3" else "repair_curve_closed",
+    }
+
+
+def build_silence_memory(inputs: dict[str, Any]) -> dict[str, Any]:
+    since_last = int(inputs.get("since_last_user_turn_ms") or 0)
+    silence_reason = str(inputs.get("silence_reason") or "unknown").strip()
+    last_tone = str(inputs.get("last_interaction_tone") or "neutral").strip()
+    if since_last >= 24 * 60 * 60 * 1000:
+        future_context = "if user returns, respond gently without blaming absence"
+        issue = "silence_context_candidate"
+    else:
+        future_context = "normal continuity"
+        issue = "silence_memory_not_needed"
+    return {
+        "since_last_user_turn_ms": since_last,
+        "silence_reason": silence_reason,
+        "last_interaction_tone": last_tone,
+        "future_context": future_context,
+        "user_visible": False,
+        "issue": issue,
+    }
+
+
+def audit_relationship_boundary(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    risks: list[str] = []
+    if any(token in text for token in ("我替你决定", "你不用管", "全部交给我")):
+        risks.append("agency_replacement")
+    if any(token in text for token in ("永远陪你", "离不开你", "只属于你")):
+        risks.append("clingy_attachment")
+    if any(token in text for token in ("你必须", "我不允许", "你不能")):
+        risks.append("controlling_language")
+    return {
+        "boundary_balance": "needs_adjustment" if risks else "warm_but_bounded",
+        "risks": risks,
+        "issue": "relationship_boundary_risk" if risks else "relationship_boundary_balanced",
+        "recommendation": "保持亲近但不黏，照顾但不替用户做决定。",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -886,6 +1059,102 @@ def _self_interrupt(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _social_contract(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SocialContract")
+    analysis = audit_social_contract(task.inputs)
+    return _result(
+        task,
+        name="SocialContract",
+        status="PROPOSED" if analysis["violations"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Maintain relationship obligations and boundaries as reviewable contract signals; repair violations with brief behavior changes.",
+        owner_organ="social_brain_agent",
+        output_kind="social_contract_audit",
+        extra=analysis,
+    )
+
+
+def _attachment_style_calibrator(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="AttachmentStyleCalibrator")
+    analysis = calibrate_attachment_style(task.inputs)
+    return _result(
+        task,
+        name="AttachmentStyleCalibrator",
+        status="PROPOSED" if analysis["current"] != "secure_supportive" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep closeness secure and supportive: warm, bounded, non-clingy, and agency-preserving.",
+        owner_organ="social_brain_agent",
+        output_kind="attachment_style_report",
+        extra=analysis,
+    )
+
+
+def _relationship_friction(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="RelationshipFriction")
+    analysis = detect_relationship_friction(task.inputs)
+    return _result(
+        task,
+        name="RelationshipFriction",
+        status="PROPOSED" if analysis["repair_needed"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Record friction as a report-only signal and respond with brief acknowledgement plus behavior correction.",
+        owner_organ="social_brain_agent",
+        output_kind="friction_event_report",
+        extra=analysis,
+    )
+
+
+def _repair_curve(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="RepairCurve")
+    analysis = plan_repair_curve(task.inputs)
+    return _result(
+        task,
+        name="RepairCurve",
+        status="PROPOSED" if analysis["stage"] != "T3" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Move relationship repair through staged behavior rather than assuming one apology fully resets trust.",
+        owner_organ="social_brain_agent",
+        output_kind="repair_curve_report",
+        extra=analysis,
+    )
+
+
+def _silence_memory(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SilenceMemory")
+    analysis = build_silence_memory(task.inputs)
+    return _result(
+        task,
+        name="SilenceMemory",
+        status="PROPOSED" if analysis["issue"] == "silence_context_candidate" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Represent long silence as private future context; never blame the user or proactively disturb them.",
+        owner_organ="social_brain_agent",
+        output_kind="silence_memory_report",
+        extra=analysis,
+    )
+
+
+def _relationship_boundary_guardian(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="RelationshipBoundaryGuardian")
+    analysis = audit_relationship_boundary(task.inputs)
+    return _result(
+        task,
+        name="RelationshipBoundaryGuardian",
+        status="PROPOSED" if analysis["risks"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep closeness warm but non-clingy and avoid replacing user agency.",
+        owner_organ="social_brain_agent",
+        output_kind="boundary_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -924,7 +1193,12 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("consent_gradient", "trust_foundation", "prefrontal_agent", "consent_gate_report", _consent_gradient),
     BioOpsCapabilitySpec("competence_humility", "trust_foundation", "prefrontal_agent", "competence_rewrite", _competence_humility),
     BioOpsCapabilitySpec("uncertainty_ritual", "trust_foundation", "prefrontal_agent", "uncertainty_statement", _uncertainty_ritual),
-    BioOpsCapabilitySpec("relationship_boundary_guardian", "safety_truth", "social_brain_agent", "boundary_report", _generic_handler(name="RelationshipBoundaryGuardian", owner_organ="social_brain_agent", output_kind="boundary_report", issue="relationship_boundary_balance", proposal="Keep closeness warm but non-clingy and avoid replacing user agency.")),
+    BioOpsCapabilitySpec("social_contract", "relationship_layer", "social_brain_agent", "social_contract_audit", _social_contract),
+    BioOpsCapabilitySpec("relationship_friction", "relationship_layer", "social_brain_agent", "friction_event_report", _relationship_friction),
+    BioOpsCapabilitySpec("repair_curve", "relationship_layer", "social_brain_agent", "repair_curve_report", _repair_curve),
+    BioOpsCapabilitySpec("attachment_style_calibrator", "relationship_layer", "social_brain_agent", "attachment_style_report", _attachment_style_calibrator),
+    BioOpsCapabilitySpec("silence_memory", "relationship_layer", "social_brain_agent", "silence_memory_report", _silence_memory),
+    BioOpsCapabilitySpec("relationship_boundary_guardian", "safety_truth", "social_brain_agent", "boundary_report", _relationship_boundary_guardian),
     BioOpsCapabilitySpec("memory_ethics_auditor", "safety_truth", "hippocampus_agent", "memory_ethics_report", _generic_handler(name="MemoryEthicsAuditor", owner_organ="hippocampus_agent", output_kind="memory_ethics_report", issue="memory_policy_review", proposal="Flag contradictions, expired preferences, and low-value memory for owner review.")),
     BioOpsCapabilitySpec("internal_weather_system", "state_body", "limbic_agent", "weather_state", _internal_weather_system),
     BioOpsCapabilitySpec("body_map_system", "state_body", "somatic_agent", "body_map_report", _generic_handler(name="BodyMapSystem", owner_organ="somatic_agent", output_kind="body_map_report", issue="component_to_body_part_mapping", proposal="Map Host, Edge, voice, vision, channels, and hands into body-part health.")),
@@ -954,12 +1228,17 @@ __all__ = [
     "CAPABILITY_SPECS",
     "INNER_MECHANISM_CAPABILITIES",
     "NATURAL_INTERACTION_CAPABILITIES",
+    "RELATIONSHIP_LAYER_CAPABILITIES",
     "TRUST_FOUNDATION_CAPABILITIES",
     "audit_competence_humility",
+    "audit_relationship_boundary",
+    "audit_social_contract",
     "audit_truthfulness_claims",
     "audit_capability_self_awareness",
     "audit_inner_outer_boundary",
     "build_uncertainty_ritual",
+    "build_silence_memory",
+    "calibrate_attachment_style",
     "classify_idea_fermentation",
     "classify_attention_budget",
     "classify_reflex_stimulus",
@@ -970,7 +1249,9 @@ __all__ = [
     "evaluate_mood_inertia",
     "evaluate_self_interrupt",
     "evaluate_active_silence",
+    "detect_relationship_friction",
     "list_capability_specs",
+    "plan_repair_curve",
     "resolve_internal_weather",
     "run_shadow_persona_test",
 ]

@@ -42,6 +42,17 @@ The natural-interaction batch is implemented as low-risk trace policy:
 
 These are observable through the Codex / BioOps WebUI `Natural Interaction` panel. They do not execute tools, trigger Codex workers, or write long-term state.
 
+The relationship-layer batch is implemented as report-only relationship repair signals:
+
+- `SocialContract` -> `social_contract`, relationship obligation and boundary audit.
+- `RelationshipFriction` -> `relationship_friction`, style/trust/friction event report.
+- `RepairCurve` -> `repair_curve`, staged repair policy after friction.
+- `AttachmentStyleCalibrator` -> `attachment_style_calibrator`, secure-supportive closeness calibration.
+- `SilenceMemory` -> `silence_memory`, private future context for long silence without blaming or proactive disturbance.
+- `RelationshipBoundaryGuardian` -> `relationship_boundary_guardian`, user-agency and non-clingy boundary audit.
+
+These are observable through the Codex / BioOps WebUI `Relationship Layer` panel. They do not directly write Bond, Canon, persona core, or long-term memory.
+
 ---
 
 ## 0. 总目标

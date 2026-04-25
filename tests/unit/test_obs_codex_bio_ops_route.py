@@ -193,6 +193,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "subjective_time",
         "self_interrupt",
     }
+    assert payload["bio_ops"]["relationship_layer"]["capability_count"] == 6
+    assert payload["bio_ops"]["relationship_layer"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["relationship_layer"]["capabilities"]} == {
+        "social_contract",
+        "relationship_friction",
+        "repair_curve",
+        "attachment_style_calibrator",
+        "silence_memory",
+        "relationship_boundary_guardian",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

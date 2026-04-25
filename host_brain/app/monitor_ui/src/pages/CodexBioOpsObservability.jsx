@@ -71,6 +71,12 @@ const EFFECT_LABELS = {
   mood_inertia_soft_concern: '情绪惯性',
   context_gravity_continue: '上下文重力',
   self_interrupt_over_explaining: '自我打断',
+  social_contract_violation: '关系契约',
+  relationship_friction_style: '关系摩擦',
+  repair_curve_active: '修复曲线',
+  attachment_style_over_service: '依恋校准',
+  silence_memory_return: '沉默记忆',
+  relationship_boundary_risk: '关系边界',
 }
 
 const TRACE_LABELS = {
@@ -104,6 +110,15 @@ const NATURAL_INTERACTION_LABELS = {
   context_gravity: '上下文重力',
   subjective_time: '主观时间',
   self_interrupt: '自我打断',
+}
+
+const RELATIONSHIP_LAYER_LABELS = {
+  social_contract: '关系契约',
+  relationship_friction: '关系摩擦',
+  repair_curve: '修复曲线',
+  attachment_style_calibrator: '依恋风格校准',
+  silence_memory: '沉默记忆',
+  relationship_boundary_guardian: '关系边界守护',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -468,6 +483,17 @@ function NaturalInteractionPanel({ summary }) {
   )
 }
 
+function RelationshipLayerPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={RELATIONSHIP_LAYER_LABELS}
+      emptyTitle="暂无 Relationship Layer 数据"
+      note="关系层只产审计和修复建议；不直接写 Bond、Canon、人格核心或长期记忆。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -543,6 +569,7 @@ export default function CodexBioOpsObservability() {
   const innerMechanisms = bioOps.inner_mechanisms || {}
   const trustFoundation = bioOps.trust_foundation || {}
   const naturalInteraction = bioOps.natural_interaction || {}
+  const relationshipLayer = bioOps.relationship_layer || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -608,7 +635,7 @@ export default function CodexBioOpsObservability() {
 
       {data?.artifact_available ? (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-8">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-9">
             <MetricTile
               icon={GitBranch}
               tone="green"
@@ -656,6 +683,14 @@ export default function CodexBioOpsObservability() {
               value={naturalInteraction.capability_count ?? '—'}
               status="TRACED"
               hint={`${naturalInteraction.status_counts?.PROPOSED || 0} policies · ${naturalInteraction.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
+              icon={ShieldCheck}
+              tone="amber"
+              label="关系层"
+              value={relationshipLayer.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${relationshipLayer.status_counts?.PROPOSED || 0} repairs · ${relationshipLayer.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
               icon={ShieldCheck}
@@ -710,6 +745,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Natural Interaction" subtitle="自然交互层：主观时间、情绪惯性、上下文重力和自我打断统一进入低风险 trace。">
             <NaturalInteractionPanel summary={naturalInteraction} />
+          </Section>
+
+          <Section title="Relationship Layer" subtitle="长期关系层：契约、摩擦、修复曲线、依恋风格、沉默记忆和边界守护保持可观测。">
+            <RelationshipLayerPanel summary={relationshipLayer} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">
