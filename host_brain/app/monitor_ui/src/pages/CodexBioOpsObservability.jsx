@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -18,6 +18,8 @@ import useAppStore from '../store/useAppStore.js'
 import {
   acceptCodexBioOpsAdoption,
   fetchCodexBioOpsAdoptionDetail,
+  fetchCodexBioOpsOwnerInbox,
+  materializeCodexBioOpsOwnerInbox,
   rejectCodexBioOpsAdoption,
 } from '../api/obs.js'
 import { useCodexBioOpsObservabilityQuery } from '../queries/codexBioOpsQueries.js'
@@ -670,6 +672,125 @@ function PendingAdoptions({ items, runId, onChanged }) {
   )
 }
 
+function OwnerInboxPanel({ runId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [materializing, setMaterializing] = useState(false)
+  const [error, setError] = useState(null)
+  const runParams = runId ? { run_id: runId } : {}
+
+  const loadInbox = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      setData(await fetchCodexBioOpsOwnerInbox(runParams))
+    } catch (err) {
+      setError(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (runId) {
+      loadInbox()
+    }
+  }, [runId])
+
+  const materializeReady = async () => {
+    setMaterializing(true)
+    setError(null)
+    try {
+      const payload = await materializeCodexBioOpsOwnerInbox({}, runParams)
+      setData({ ...data, materialized: payload })
+      await loadInbox()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setMaterializing(false)
+    }
+  }
+
+  const rows = Array.isArray(data?.items) ? data.items : []
+  const counts = data?.status_counts || {}
+
+  return (
+    <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-gray-900">Owner inbox</div>
+          <div className="mt-0.5 text-xs leading-5 text-gray-500">
+            accept/reject 之后再做 owner、证据、敏感目标校验；通过后只生成 import candidate artifact。
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={loading}
+            onClick={loadInbox}
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+            扫描
+          </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary-200 bg-primary-50 px-3 py-1.5 text-xs font-semibold text-primary shadow-sm transition-colors hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={materializing || !Number(counts.READY_FOR_OWNER_IMPORT || 0)}
+            onClick={materializeReady}
+          >
+            <FileText size={13} />
+            {materializing ? '生成中' : '生成 inbox artifacts'}
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600 sm:grid-cols-4">
+        {['READY_FOR_OWNER_IMPORT', 'PENDING_REVIEW', 'REJECTED_BY_OWNER', 'BLOCKED'].map((status) => (
+          <div key={status} className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
+            <StatusPill status={status} />
+            <div className="mt-2 text-xl font-bold text-gray-900">{counts[status] || 0}</div>
+          </div>
+        ))}
+      </div>
+
+      {rows.length ? (
+        <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-100">
+          {rows.slice(0, 6).map((item) => (
+            <div key={item.candidate_id} className="grid grid-cols-1 gap-2 bg-white px-3 py-2 text-xs sm:grid-cols-[1fr_0.8fr_0.8fr]">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-gray-800">{item.capability}</div>
+                <div className="truncate text-gray-500">{item.candidate_id}</div>
+              </div>
+              <div className="text-gray-500">{item.owner_organ || '—'}</div>
+              <div className="flex items-center justify-between gap-2">
+                <StatusPill status={item.status} />
+                <span className="font-semibold text-gray-500">{item.import_allowed ? 'import-ready' : item.reason_code || 'waiting'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+          {loading ? '正在扫描 owner inbox...' : '暂无 owner inbox 项。'}
+        </div>
+      )}
+
+      {data?.materialized ? (
+        <div className="mt-3 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-xs leading-5 text-green-700">
+          已生成 {data.materialized.materialized_count} 个 owner import candidate artifact；长期写入仍由 owner organ 自己执行。
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+          {error.message}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function CapabilitySetPanel({ summary, labels, note, emptyTitle }) {
   const rows = Array.isArray(summary?.capabilities) ? summary.capabilities : []
   const counts = summary?.status_counts || {}
@@ -1166,6 +1287,7 @@ export default function CodexBioOpsObservability() {
                 onChanged={() => query.refetch?.()}
               />
             </div>
+            <OwnerInboxPanel runId={data.run_id} />
             <FocusEffectList effects={bioOps.focused_effects} />
             <GroupTable groups={bioOps.groups} />
           </Section>
