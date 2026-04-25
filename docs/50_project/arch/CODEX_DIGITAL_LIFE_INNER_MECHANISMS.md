@@ -11,6 +11,8 @@
 > 本文档继续向更深层展开：时间感、关系契约、授权梯度、价值层级、自我边界、主观体验、成长叙事、承诺账本、内外世界边界、长期自我连续性等。
 >
 > 目标不是立刻全部实现，而是建立一个可逐步落地的“内在生命机制设计池”。
+>
+> Production closure matrix: see `CODEX_DIGITAL_LIFE_PRODUCTION_CLOSURE_MATRIX_20260425.md` for the final cross-document implementation, observability, and verification map.
 
 ## Implementation Status, 2026-04-25
 

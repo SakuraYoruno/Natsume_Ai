@@ -7,6 +7,8 @@
 > 目标不是让 Codex 只会多写代码，而是让 Codex 帮 Natsume 形成自我观察、自我修复、自我节制、自我成长的机制。
 >
 > Implementation closure: see `CODEX_PRODUCTION_CLOSURE_VALIDATION_20260424.md` for CI routing, full-suite classification, owner adoption, and runtime trace status.
+>
+> Production closure matrix: see `CODEX_DIGITAL_LIFE_PRODUCTION_CLOSURE_MATRIX_20260425.md` for the final cross-document implementation, observability, and verification map.
 
 ---
 

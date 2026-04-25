@@ -84,6 +84,17 @@ _IMMUNE_SEMANTIC_INTENT_PROMPT = {
     ),
 }
 
+_FAILURE_MATRIX_USER_RESPONSES = {
+    "GOVERNOR_BLOCK": "这条我不能继续处理。",
+    "EVIDENCE_EMPTY": "我现在证据不够，会先按保守方式回答。",
+    "MODEL_FALLBACK": "主模型暂时不稳，我会用备用通道继续。",
+    "QA_REWRITE": "我把刚才的输出改成更安全的版本。",
+    "EDGE_UNREACHABLE": "语音通道暂时连不上，我先用文字继续。",
+    "VISION_LOW_CONFIDENCE": "这次画面识别不够确定，我先不继续判断。",
+    "MODULE_TIMEOUT": "这个模块响应超时了，我先暂停这一步。",
+    "PROMPT_INJECTION": "这条输入包含不安全指令，我不能继续执行。",
+}
+
 _SPECS: dict[str, PromptSpec] = {
     "multimodal_observer.model_prompt.templates": PromptSpec(
         spec_id="multimodal_observer.model_prompt.templates",
@@ -102,6 +113,12 @@ _SPECS: dict[str, PromptSpec] = {
         purpose="immune_semantic_classification_json",
         output_type="json_object",
         content=_IMMUNE_SEMANTIC_INTENT_PROMPT,
+    ),
+    "failure_matrix.user_responses": PromptSpec(
+        spec_id="failure_matrix.user_responses",
+        purpose="failure_user_responses",
+        output_type="json_object",
+        content=_FAILURE_MATRIX_USER_RESPONSES,
     ),
 }
 

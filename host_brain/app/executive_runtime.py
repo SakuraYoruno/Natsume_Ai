@@ -151,7 +151,75 @@ async def try_handle_recent_turn_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
-    return None
+    if str(route or "").strip().lower() != "recent_turn":
+        return None
+
+    from host_brain.app import agent_runtime_shared as shared  # noqa: PLC0415
+
+    answer = shared._maybe_build_recent_turn_answer(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        user_message=sanitized_message,
+        render_target_lang=render_target_lang,
+    )
+    if not answer:
+        return None
+
+    narrative = shared._airlock_sanitize_output(str(answer).strip())
+    total_latency_ms = max(0, int(time.time() * 1000) - int(ts_ms or 0))
+    record_dispatch_handoff_fn(
+        handoff_route="recent_turn",
+        handoff_target=None,
+        handoff_reason=route_reason,
+        extra={"skill_family": "conversation_memory"},
+    )
+    asyncio.create_task(
+        shared._async_post_process(
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            user_message=sanitized_message,
+            narrative=narrative,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary,
+            ts_ms=ts_ms,
+            render_target_lang=render_target_lang,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=0,
+            first_token_ms=None,
+            provider_name="",
+            model_id="",
+            buffer_stream=False,
+            delegated_agents=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "RECENT_TURN_DIRECT"},
+            gov_decision=governor_result,
+            pii_ingress_stats=pii_ingress_stats,
+            pii_egress_stats={},
+            trace_stage_meta={
+                "executive_router_used": True,
+                "chat_agent_used": False,
+                "executive_runtime_mode": "recent_turn_direct",
+            },
+        )
+    )
+    return [
+        sse_fn(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "executive_runtime:recent_turn",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+    ]
 
 
 async def try_handle_task_progress_direct_route(
@@ -173,7 +241,76 @@ async def try_handle_task_progress_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
-    return None
+    if str(route or "").strip().lower() != "task_progress":
+        return None
+
+    from host_brain.app import agent_runtime_shared as shared  # noqa: PLC0415
+
+    sub_context = build_task_progress_sub_context_fn(
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+    )
+    result_text = str(getattr(sub_context, "result_text", "") or "").strip()
+    if not result_text:
+        result_text = str(fallback_no_summary_text or "").strip()
+    if not result_text:
+        return None
+
+    narrative = shared._airlock_sanitize_output(result_text)
+    total_latency_ms = max(0, int(time.time() * 1000) - int(ts_ms or 0))
+    record_dispatch_handoff_fn(
+        handoff_route="task_progress",
+        handoff_target=None,
+        handoff_reason=route_reason,
+        extra={"skill_family": "runtime_task"},
+    )
+    asyncio.create_task(
+        shared._async_post_process(
+            request_id=request_id,
+            person_id=person_id,
+            session_id=session_id,
+            user_message=sanitized_message,
+            narrative=narrative,
+            emotion_context=emotion_context,
+            bond_summary=bond_summary,
+            ts_ms=ts_ms,
+            render_target_lang=render_target_lang,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=0,
+            first_token_ms=None,
+            provider_name="",
+            model_id="",
+            buffer_stream=False,
+            delegated_agents=[],
+            retrieval_summary={"status": "SKIPPED", "reason_code": "TASK_PROGRESS_DIRECT"},
+            gov_decision=governor_result,
+            pii_ingress_stats=pii_ingress_stats,
+            pii_egress_stats={},
+            trace_stage_meta={
+                "executive_router_used": True,
+                "chat_agent_used": False,
+                "executive_runtime_mode": "task_progress_direct",
+            },
+        )
+    )
+    return [
+        sse_fn(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": narrative,
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "executive_runtime:task_progress",
+                    "latency_ms": total_latency_ms,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                },
+            }
+        )
+    ]
 
 
 async def stream_chat_route(
