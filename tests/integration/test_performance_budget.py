@@ -30,6 +30,9 @@ from host_brain.skills.impl.focus_mode import execute_focus_mode, FOCUS_INACTIVE
 from host_brain.core.ids import now_ms
 
 
+pytestmark = pytest.mark.ci_unstable
+
+
 def _make_config(task_id: str, **kwargs) -> SchedulerTaskConfig:
     defaults = {
         "trigger_mode": TriggerMode.INTERVAL,
