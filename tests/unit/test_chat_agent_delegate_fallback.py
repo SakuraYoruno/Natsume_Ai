@@ -6,9 +6,7 @@ from host_brain.app.chat_agent import (
 )
 from host_brain.app.chat_agent_preprocessor import (
     _build_deterministic_sub_agent_reply,
-    _resolve_minimal_fallback_text,
 )
-from tests.text_quality_assertions import assert_natsume_style
 
 
 def test_quality_fallback_preserves_successful_delegate_result() -> None:
@@ -93,14 +91,8 @@ def test_quality_fallback_hides_internal_react_error_text() -> None:
         render_target_lang="zh",
     )
 
-    assert reply == _resolve_minimal_fallback_text(kind="default", render_target_lang="zh")
-    assert_natsume_style(
-        user_message="翻译一下这句话",
-        reply=reply,
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-        required_markers=("我",),
-    )
+    assert "没接稳" in reply
+    assert "我知道了" not in reply
 
 
 def test_quality_fallback_presence_reply_stays_in_natsume_voice() -> None:
@@ -112,14 +104,8 @@ def test_quality_fallback_presence_reply_stays_in_natsume_voice() -> None:
         render_target_lang="zh",
     )
 
-    assert reply == _resolve_minimal_fallback_text(kind="presence", render_target_lang="zh")
-    assert_natsume_style(
-        user_message="在吗",
-        reply=reply,
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-        max_chars=12,
-    )
+    assert "没接稳" in reply
+    assert "在。怎么了" not in reply
 
 
 def test_quality_fallback_greeting_reply_stays_in_natsume_voice() -> None:
@@ -131,14 +117,8 @@ def test_quality_fallback_greeting_reply_stays_in_natsume_voice() -> None:
         render_target_lang="zh",
     )
 
-    assert reply == _resolve_minimal_fallback_text(kind="greeting", render_target_lang="zh")
-    assert_natsume_style(
-        user_message="你好",
-        reply=reply,
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-        max_chars=12,
-    )
+    assert "没接稳" in reply
+    assert "你好呀" not in reply
 
 
 def test_deterministic_reply_returns_codex_worker_result_directly() -> None:

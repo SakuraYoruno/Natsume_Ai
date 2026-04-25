@@ -686,6 +686,11 @@ def _apply_render_policy_hard_guard(
 # 降级回复构建
 # ---------------------------------------------------------------------------
 def _build_minimal_chat_fallback_reply(*, user_message: str, sub_agent_ctx: SubAgentContext | None, render_target_lang: str) -> str:
+    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
+        FallbackRequest,
+        build_fallback_reply,
+    )
+
     text = str(user_message or "").strip()
     if sub_agent_ctx is not None:
         agent_id = str(sub_agent_ctx.agent_id or "").strip()
@@ -695,14 +700,21 @@ def _build_minimal_chat_fallback_reply(*, user_message: str, sub_agent_ctx: SubA
             return _resolve_minimal_fallback_text(kind="recent_turn_direct", render_target_lang=render_target_lang)
     if _FALLBACK_STRENGTH_RE.search(text):
         return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-    if _FALLBACK_PRESENCE_RE.match(text):
-        return _resolve_minimal_fallback_text(kind="presence", render_target_lang=render_target_lang)
-    if _FALLBACK_GREETING_RE.match(text):
-        return _resolve_minimal_fallback_text(kind="greeting", render_target_lang=render_target_lang)
-    return _resolve_minimal_fallback_text(kind="default", render_target_lang=render_target_lang)
+    return build_fallback_reply(
+        FallbackRequest(
+            reason_code="chat_agent_preprocessor_minimal_degraded_fallback",
+            render_target_lang=render_target_lang,
+            user_message=text,
+        )
+    ).text
 
 
 def _build_chat_agent_quality_fallback_reply(*, user_message: str, sub_agent_ctx: SubAgentContext | None, bond_summary: Dict[str, Any] | None, emotion_context: Dict[str, Any] | None, render_target_lang: str, render_policy: Any = None, prompt_runtime_payload: Mapping[str, Any] | None = None) -> str:
+    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
+        FallbackRequest,
+        build_fallback_reply,
+    )
+
     delegated_fallback = _build_sub_agent_result_preserving_fallback_reply(
         sub_agent_ctx,
         render_target_lang=render_target_lang,
@@ -710,11 +722,24 @@ def _build_chat_agent_quality_fallback_reply(*, user_message: str, sub_agent_ctx
     )
     if delegated_fallback:
         return delegated_fallback
-    return _build_minimal_chat_fallback_reply(user_message=user_message, sub_agent_ctx=sub_agent_ctx, render_target_lang=render_target_lang)
+    _ = bond_summary, emotion_context, render_policy, prompt_runtime_payload
+    return build_fallback_reply(
+        FallbackRequest(
+            reason_code="chat_agent_preprocessor_degraded_fallback",
+            render_target_lang=render_target_lang,
+            user_message=user_message,
+        )
+    ).text
 
 
 def _build_chat_agent_fallback_reply(*, user_message: str, sub_agent_ctx: SubAgentContext | None, bond_summary: Dict[str, Any] | None, render_target_lang: str) -> str:
-    return _build_minimal_chat_fallback_reply(user_message=user_message, sub_agent_ctx=sub_agent_ctx, render_target_lang=render_target_lang)
+    return _build_chat_agent_quality_fallback_reply(
+        user_message=user_message,
+        sub_agent_ctx=sub_agent_ctx,
+        bond_summary=bond_summary,
+        emotion_context=None,
+        render_target_lang=render_target_lang,
+    )
 
 
 def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
@@ -759,6 +784,19 @@ def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
 
 
 def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, render_policy: Any = None) -> bool:
+    policy = _coerce_render_policy(render_policy)
+    primary_topic = str(policy.get("primary_topic") or "").strip()
+    if primary_topic in {
+        "assistant_reply_followup",
+        "emoji_social_reply",
+        "emoji_social_followup",
+        "greeting",
+        "presence_ping",
+        "light_ack",
+        "playful_ping",
+        "identity",
+    }:
+        return False
     explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
     if explicit_decision is not None:
         return explicit_decision
@@ -1159,6 +1197,12 @@ def _build_sub_agent_context_prompt(ctx: SubAgentContext, *, render_target_lang:
 # ---------------------------------------------------------------------------
 def _extract_visible_text(raw: str, *, render_target_lang: str = "zh") -> str:
     text = str(raw or "").strip()
+    if not text:
+        return ""
+    # Some upstream providers may leak chain-of-thought style blocks when they
+    # degrade or retry. Strip them at the final visible-text boundary too.
+    text = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", text).strip()
+    text = re.sub(r"(?is)^<think\b[^>]*>.*", "", text).strip()
     if not text:
         return ""
     if text.startswith("```"):

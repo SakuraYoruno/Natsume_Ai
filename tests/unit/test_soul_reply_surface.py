@@ -96,11 +96,11 @@ def test_build_phatic_fallback_text_covers_variants(monkeypatch) -> None:
 def test_build_image_social_fallback_text_covers_variants(monkeypatch) -> None:
     monkeypatch.setattr(surface, "get_soul_voice_profile", lambda: surface.SoulVoiceProfile(display_name="新海天", preferred_address="哥哥", playful=True))
 
-    assert "委屈" in surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="distress_image")
-    assert "多想" in surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="backoff_hold")
+    assert "乱猜" in surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="distress_image")
+    assert "收回去" in surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="backoff_hold")
     assert "可爱" in surface.build_image_social_fallback_text(family="cute_image_ack", variant="cute_ping")
-    assert "会错意" in surface.build_image_social_fallback_text(family="tease_image_ack", variant="deny_nudge")
-    assert "逗我" in surface.build_image_social_fallback_text(family="tease_image_ack", variant="")
+    assert "收回去" in surface.build_image_social_fallback_text(family="tease_image_ack", variant="deny_nudge")
+    assert "戳人" in surface.build_image_social_fallback_text(family="tease_image_ack", variant="")
 
 
 def test_build_boundary_and_help_fallback_texts_cover_specific_and_default(monkeypatch) -> None:
@@ -285,3 +285,100 @@ def test_build_deterministic_primary_reply_text_falls_back_to_turn_history(monke
 
     assert text == "哥哥，怎么又问起这个啦？我是新海天呀。"
     assert memory_store.remembered
+
+
+def test_reply_surface_sample_guard_rejects_polluted_assistant_followup_shapes() -> None:
+    assert surface.is_reply_surface_sample_disallowed(primary_topic="assistant_reply_followup", text="")
+    assert surface.is_reply_surface_sample_disallowed(primary_topic="assistant_reply_followup", text="唔。")
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，刚才那句我没接住，不是在敷衍你。你是在问前面那截吧？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，你是不是想知道我刚才那个唔是啥意思？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，你问这个是什么意思呀？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥你问哪个呀？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，你问刚才那个短回复呀？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，刚才那声有点短。",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，刚才那声“唔”是没什么事啦。",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥刚才那声不是卡了吗？你刚才想说什么来着？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥刚才只是卡了一下啦！",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="“唔”就是……嗯，那个意思啦！",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥你问那个呀，就是……嗯？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥你刚才那个“唔”是在思考什么呀？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="唔？哥哥你刚才是不是被什么吓到了呀？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="抱歉，我不太清楚。",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="assistant_reply_followup",
+        text="哥哥，是想说知道什么来着？",
+    )
+    assert surface.is_reply_surface_sample_disallowed(
+        primary_topic="greeting",
+        text="唔。",
+    )
+
+
+def test_assistant_followup_primary_reply_skips_semantic_fallback_when_disabled(monkeypatch) -> None:
+    monkeypatch.setattr("host_brain.app.dependencies.get_reply_surface_memory_store", lambda: _MemoryStoreStub(""))
+    monkeypatch.setattr("host_brain.app.dependencies.get_conversation_turn_store", lambda: object())
+    monkeypatch.setattr(
+        "host_brain.persona.reply_surface_memory.sample_reply_surface_from_turn_history",
+        lambda **kwargs: "",
+    )
+    plan = type(
+        "AssistantFollowupPlanStub",
+        (),
+        {
+            "primary_topic": "assistant_reply_followup",
+            "tactic_family": "explain_previous_reply",
+            "tactic_variant": "clarify_meaning",
+            "response_form_reason": "default_text",
+            "reply_contract": "上一条助手回复前接的用户话是“知道哪个秘密”。上一条助手回复是“唔。”。本轮必须围绕这段上下文补清楚。",
+        },
+    )()
+
+    text = surface.build_deterministic_primary_reply_text(
+        plan=plan,
+        render_target_lang="zh",
+        allow_semantic_fallback=False,
+    )
+
+    assert text == ""

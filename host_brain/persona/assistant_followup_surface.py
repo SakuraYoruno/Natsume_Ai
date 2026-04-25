@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from host_brain.persona.fallback_policy import FallbackRequest, build_fallback_reply
+
 
 _SURFACE_PUNCT_RE = re.compile(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+")
 _REPEAT_REQUEST_RE = re.compile(
@@ -9,10 +11,15 @@ _REPEAT_REQUEST_RE = re.compile(
 )
 _PRONOUN_SAY_WHAT_RE = re.compile(r"(你|我|她|他|它)?说什么")
 _SPECIFIC_REFERENCE_RE = re.compile(
-    r"(知道什么|什么事|什么东西|什么情况|哪个|哪一个|哪件|哪一件|哪种|哪类|指什么|啥)"
+    r"(知道什么|什么事|什么东西|什么情况|哪个|哪一个|哪件|哪一件|哪张|哪一张|哪种|哪类|指什么|啥)"
 )
 _MEANING_QUERY_RE = re.compile(r"(什么意思|啥意思|是什么意思|什么梗)")
 _CONTEXT_ECHO_RE = re.compile(r"(你问|你说)?(这个|这句|这句话|它)?(是什么意思|什么意思|啥意思)")
+_FILLER_MEANING_RESOLUTION_RE = re.compile(
+    r"(顺口|应了一声|应一声|唔了一下|嗯了一下|只是|没说|没有说|没讲|没有讲|不是在解释|没什么特别意思|没别的意思)"
+)
+_FILLER_RE = re.compile(r"^(?:嗯+|唔+|咦+|哼+|啊+|哦+|噢+|诶+|哈+)$")
+_VAGUE_MEANING_RE = re.compile(r"(问那个|那个呀|那个意思|就是嗯|就是那个|就那样)")
 _REFERENCE_RESOLUTION_RE = re.compile(
     r"(指|哪个|哪一个|哪件|哪一件|哪种|哪类|说的是|具体|哪边|哪回事|哪句|哪张)"
 )
@@ -40,11 +47,19 @@ def context_needs_specific_reference(raw_context: str) -> bool:
     return bool(_SPECIFIC_REFERENCE_RE.search(compact))
 
 
+def context_is_meaning_query(raw_context: str) -> bool:
+    return bool(_MEANING_QUERY_RE.search(compact_surface_text(raw_context)))
+
+
+def source_is_filler_reply(source_text: str) -> bool:
+    return bool(_FILLER_RE.fullmatch(compact_surface_text(source_text)))
+
+
 def extract_context_anchor_terms(raw_context: str) -> list[str]:
     compact = compact_surface_text(raw_context)
     terms: list[str] = []
     for pattern in (
-        r"(?:哪个|哪一个|哪件|哪一件|哪种|哪类)([\u4e00-\u9fff]{2,8})",
+        r"(?:哪个|哪一个|哪件|哪一件|哪张|哪一张|哪种|哪类)([\u4e00-\u9fff]{2,8})",
         r"(?:什么|啥)([\u4e00-\u9fff]{2,8})",
     ):
         for match in re.finditer(pattern, compact):
@@ -89,6 +104,15 @@ def candidate_repeats_context_without_progress(candidate_text: str, raw_context:
     return False
 
 
+def candidate_resolves_filler_meaning(candidate_text: str, raw_context: str, source_text: str) -> bool:
+    if not context_is_meaning_query(raw_context) or not source_is_filler_reply(source_text):
+        return True
+    candidate_compact = compact_surface_text(candidate_text)
+    if not candidate_compact or _VAGUE_MEANING_RE.search(candidate_compact):
+        return False
+    return bool(_FILLER_MEANING_RESOLUTION_RE.search(candidate_compact))
+
+
 def candidate_resolves_specific_reference(candidate_text: str, raw_context: str) -> bool:
     candidate_compact = compact_surface_text(candidate_text)
     if not candidate_compact:
@@ -99,12 +123,33 @@ def candidate_resolves_specific_reference(candidate_text: str, raw_context: str)
     return bool(_REFERENCE_RESOLUTION_RE.search(candidate_compact))
 
 
+def build_emergency_surface_reply(*, raw_context: str, source_text: str = "") -> str:
+    """Deprecated local authoring hook.
+
+    Emergency wording now goes through FallbackPolicy so it is explicitly
+    degraded, non-cacheable, and never tries to impersonate a natural reply.
+    """
+    result = build_fallback_reply(
+        FallbackRequest(
+            reason_code="assistant_followup_surface_unavailable",
+            primary_topic="assistant_reply_followup",
+            user_message=raw_context,
+            previous_assistant_text=source_text,
+        )
+    )
+    return result.text
+
+
 __all__ = [
     "candidate_repeats_context_without_progress",
+    "candidate_resolves_filler_meaning",
     "candidate_resolves_specific_reference",
+    "build_emergency_surface_reply",
     "compact_surface_text",
     "context_anchor_variants",
+    "context_is_meaning_query",
     "context_is_repeat_request",
     "context_needs_specific_reference",
     "extract_context_anchor_terms",
+    "source_is_filler_reply",
 ]

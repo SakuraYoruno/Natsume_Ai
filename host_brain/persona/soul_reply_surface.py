@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import re
 
 from host_brain.app.context.soul_runtime import CompiledSoul, get_compiled_soul
+from host_brain.persona.fallback_policy import is_forbidden_surface_text
 
 
 _ADDRESS_RE = re.compile(r"默认称呼[:：]\s*([^\s/／,，]+)")
@@ -50,6 +51,8 @@ def is_reply_surface_sample_disallowed(*, primary_topic: str, text: str) -> bool
     compact = _compact_surface_text(text)
     if not compact:
         return True
+    if is_forbidden_surface_text(text):
+        return True
     if topic != "assistant_reply_followup":
         return False
     if _FILLER_SOURCE_RE.match(compact):
@@ -73,7 +76,15 @@ def is_reply_surface_sample_disallowed(*, primary_topic: str, text: str) -> bool
         return True
     if any(marker in compact for marker in ("你问", "你说")) and any(marker in compact for marker in ("刚才那声", "刚才那个", "上一条", "短回复")):
         return True
-    if "刚才那声" in compact and any(marker in compact for marker in ("卡了一下", "太省了", "有点短")):
+    if "刚才那声" in compact:
+        return True
+    if "唔" in compact and any(marker in compact for marker in ("是在思考什么", "在思考什么", "在想什么", "是什么意思", "是啥意思", "什么意思")):
+        return True
+    if any(marker in compact for marker in ("卡了一下", "卡住了", "那个意思啦", "那个意思", "就这个意思", "就是这个意思")):
+        return True
+    if any(marker in compact for marker in ("问那个", "那个呀", "就是嗯", "就是那个", "就那样")):
+        return True
+    if any(marker in compact for marker in ("被什么吓到", "被吓到", "吓到了", "是不是被什么", "是不是被吓")):
         return True
     if any(marker in compact for marker in ("抱歉", "对不起", "不太清楚", "我确实不清楚", "我也不清楚", "我是想说")):
         return True
@@ -248,26 +259,8 @@ def _assistant_followup_primary_reply_text(
     )
     if cached:
         return cached
-    if not allow_semantic_fallback:
-        return ""
-
-    profile = get_soul_voice_profile()
-    address = _address_prefix(profile)
-    if _FILLER_SOURCE_RE.match(source_compact):
-        if re.search(r"(什么|啥|哪件|哪一件)", context):
-            candidate = f"{address}刚才那个“{source}”是我卡了一下啦。你问“{context}”，我得先知道你指哪件事呀。"
-        else:
-            candidate = f"{address}刚才那个“{source}”太省了，是在接你那句“{context}”，后面我该说清楚的。"
-    else:
-        candidate = f"{address}刚才那个“{source}”回得太短，是接你那句“{context}”，不是新开话题。"
-    excluded = {
-        re.sub(r"[\s\u3000。！？?!，,、~～…]+", "", str(item or ""))
-        for item in list(exclude_texts or [])
-        if str(item or "").strip()
-    }
-    if re.sub(r"[\s\u3000。！？?!，,、~～…]+", "", candidate) in excluded:
-        return ""
-    return candidate
+    _ = allow_semantic_fallback
+    return ""
 
 
 def build_phatic_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
@@ -294,28 +287,28 @@ def build_image_social_fallback_text(*, family: str, variant: str = "", render_t
     profile = get_soul_voice_profile()
     address = _address_prefix(profile)
     variant_map = {
-        ("soft_emotion_ack", "distress_image"): f"{address}怎么委屈成这样呀？" if address else "怎么委屈成这样呀？",
-        ("soft_emotion_ack", "soft_hold"): f"{address}怎么一下子软成这样呀？" if address else "怎么一下子软成这样呀？",
-        ("soft_emotion_ack", "steady_hold"): f"{address}怎么啦，这会儿情绪这么低呀？" if address else "怎么啦，这会儿情绪这么低呀？",
-        ("soft_emotion_ack", "image_social"): f"{address}怎么啦，突然发这个给我看呀？" if address else "怎么啦，突然发这个给我看呀？",
-        ("soft_emotion_ack", "backoff_hold"): f"{address}好嘛，那我就当自己刚才多想了一点。" if address else "好嘛，那我就当自己刚才多想了一点。",
-        ("soft_emotion_ack", "explain_read"): f"{address}你刚才那张图一丢过来，我当然会觉得你有点委屈呀。" if address else "你刚才那张图一丢过来，我当然会觉得你有点委屈呀。",
-        ("soft_emotion_ack", "let_it_pass"): f"{address}行吧，那我就当你只是拿来给我看一下。" if address else "行吧，那我就当你只是拿来给我看一下。",
-        ("cute_image_ack", "cute_ping"): f"{address}突然这么可爱，是想让我哄你吗？" if address else "突然这么可爱，是想让我哄你吗？",
-        ("cute_image_ack", "soft_hold"): f"{address}又拿这种软乎乎的表情来蹭我呀？" if address else "又拿这种软乎乎的表情来蹭我呀？",
-        ("tease_image_ack", "light_nudge"): f"{address}怎么，又拿这个小表情跟我闹别扭呀？" if address else "怎么，又拿这个小表情跟我闹别扭呀？",
-        ("tease_image_ack", "deny_nudge"): f"{address}好好好，那就当我刚才会错意啦。谁让你那张图看着那么委屈。" if address else "好好好，那就当我刚才会错意啦。谁让你那张图看着那么委屈。",
-        ("tease_image_ack", "light_explain"): f"{address}你刚才那个小表情一摆出来，我当然会往那边想嘛。" if address else "你刚才那个小表情一摆出来，我当然会往那边想嘛。",
-        ("tease_image_ack", "soft_slide"): f"{address}行吧，那我就当你是在故意蹭我一下。" if address else "行吧，那我就当你是在故意蹭我一下。",
+        ("soft_emotion_ack", "distress_image"): f"{address}这张看着有点蔫，我先不乱猜。" if address else "这张看着有点蔫，我先不乱猜。",
+        ("soft_emotion_ack", "soft_hold"): f"{address}这张软软的，有点让人想放轻声音。" if address else "这张软软的，有点让人想放轻声音。",
+        ("soft_emotion_ack", "steady_hold"): f"{address}这张情绪有点低，我先轻点接。" if address else "这张情绪有点低，我先轻点接。",
+        ("soft_emotion_ack", "image_social"): f"{address}这张我看到了，先不替你乱扣意思。" if address else "这张我看到了，先不替你乱扣意思。",
+        ("soft_emotion_ack", "backoff_hold"): f"{address}好嘛，那我先把刚才那层意思收回去。" if address else "好嘛，那我先把刚才那层意思收回去。",
+        ("soft_emotion_ack", "explain_read"): f"{address}我刚才是顺着那张图的情绪读过去了。" if address else "我刚才是顺着那张图的情绪读过去了。",
+        ("soft_emotion_ack", "let_it_pass"): f"{address}行吧，那这张我就先当你随手丢来的。" if address else "行吧，那这张我就先当你随手丢来的。",
+        ("cute_image_ack", "cute_ping"): f"{address}这张可爱得有点犯规。" if address else "这张可爱得有点犯规。",
+        ("cute_image_ack", "soft_hold"): f"{address}这张软萌得有点犯规。" if address else "这张软萌得有点犯规。",
+        ("tease_image_ack", "light_nudge"): f"{address}这张小表情有点会戳人。" if address else "这张小表情有点会戳人。",
+        ("tease_image_ack", "deny_nudge"): f"{address}好好好，那我把刚才那点解读收回去。" if address else "好好好，那我把刚才那点解读收回去。",
+        ("tease_image_ack", "light_explain"): f"{address}我刚才是被这张小表情带偏了一下。" if address else "我刚才是被这张小表情带偏了一下。",
+        ("tease_image_ack", "soft_slide"): f"{address}行吧，那这张就当轻轻戳我一下。" if address else "行吧，那这张就当轻轻戳我一下。",
     }
     if (family, variant) in variant_map:
         return variant_map[(family, variant)]
     family_map = {
-        "soft_emotion_ack": f"{address}怎么啦，突然这个样子呀？" if address else "怎么啦，突然这个样子呀？",
-        "cute_image_ack": f"{address}突然这么可爱，是想跟我撒娇吗？" if address else "突然这么可爱，是想跟我撒娇吗？",
-        "tease_image_ack": f"{address}怎么，又在拿这个表情逗我呀？" if address else "怎么，又在拿这个表情逗我呀？",
+        "soft_emotion_ack": f"{address}这张我看到了，先不乱猜。" if address else "这张我看到了，先不乱猜。",
+        "cute_image_ack": f"{address}这张可爱得有点犯规。" if address else "这张可爱得有点犯规。",
+        "tease_image_ack": f"{address}这张小表情有点会戳人。" if address else "这张小表情有点会戳人。",
     }
-    return family_map.get(family, f"{address}怎么啦，突然发这个给我看呀？" if address else "怎么啦，突然发这个给我看呀？")
+    return family_map.get(family, f"{address}这张我看到了，先不乱猜它的意思。" if address else "这张我看到了，先不乱猜它的意思。")
 
 
 def build_boundary_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:

@@ -5,19 +5,6 @@ import re
 from typing import Any
 
 from host_brain.app.context.soul_runtime import get_compiled_soul
-from host_brain.persona.soul_reply_surface import (
-    build_boundary_naturalization_hint,
-    build_boundary_fallback_text,
-    build_deterministic_primary_reply_text,
-    build_help_fallback_text,
-    build_help_naturalization_hint,
-    build_image_social_fallback_text,
-    build_image_social_naturalization_hint,
-    build_identity_fallback_text,
-    build_identity_naturalization_hint,
-    build_phatic_fallback_text,
-    build_repair_fallback_text,
-)
 from .reply_plan import ReplyPlan
 from .reply_tactics import canonical_tactic_signature, describe_tactic_signature, tactic_key
 
@@ -84,6 +71,41 @@ def _current_identity_aliases() -> tuple[str, ...]:
     display_name = _current_display_name()
     candidates = [display_name, display_name.replace(" ", "")]
     return tuple(dict.fromkeys(item for item in candidates if item))
+
+
+def _soul_naturalization_hint(plan: ReplyPlan) -> str:
+    """Return a compact Soul-derived hint without importing legacy surface templates."""
+    try:
+        soul = get_compiled_soul()
+    except Exception:
+        return "按当前 Soul 的说话方式自然接住，不要客服腔，也不要使用固定问句。"
+    parts: list[str] = []
+    speech_rules = getattr(soul, "speech_rules", ()) or ()
+    taboo_rules = getattr(soul, "taboo_rules", ()) or ()
+    relationship_defaults = getattr(soul, "relationship_defaults", ()) or ()
+    for label, value in (
+        ("语气", speech_rules),
+        ("禁忌", taboo_rules),
+        ("关系", relationship_defaults),
+    ):
+        if isinstance(value, str):
+            text = value.strip()
+        elif isinstance(value, dict):
+            text = "；".join(str(item).strip() for item in value.values() if str(item).strip())
+        else:
+            text = "；".join(str(item).strip() for item in value if str(item).strip())
+        if text:
+            parts.append(f"{label}：{text[:160]}")
+    topic = str(getattr(plan, "primary_topic", "") or "").strip()
+    if topic == "assistant_reply_followup":
+        parts.append("本轮是接上一句短回复的追问，必须沿着前文线程补清，不要另起话题。")
+    elif topic in {"emoji_social_reply", "emoji_social_followup"}:
+        parts.append("本轮是图片/表情社交承接，必须贴着可见内容，不要变成画面说明书。")
+    elif topic == "identity":
+        parts.append(f"身份只需自然认下自己是{_current_display_name()}，不要展开角色卡。")
+    if not parts:
+        return "按当前 Soul 的说话方式自然接住，不要客服腔，也不要使用固定问句。"
+    return "Soul 约束：" + "；".join(parts[:4]) + "。"
 
 
 def _identity_aliases_for_detection() -> tuple[str, ...]:
@@ -477,17 +499,19 @@ def _build_image_social_fallback(plan: ReplyPlan) -> str:
     signals = " ".join(_multimodal_emotion_signals(plan))
     core = _multimodal_core_observation(plan)
     haystack = f"{signals} {core}".strip()
+    if "猫耳" in haystack:
+        return "猫耳这张有点犯规，哥哥故意拿来晃我一下吧。"
     if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "呜", "泪", "可怜")):
-        return "怎么啦，委屈成这样呀？"
+        return "这张看着有点委屈巴巴的，我先不乱猜。"
     if any(token in haystack for token in ("可爱", "卖萌", "猫耳", "装乖", "软萌", "萌", "乖")):
-        return "怎么突然丢个这么可爱的表情过来呀？"
+        return "这张确实有点可爱，哥哥故意拿来晃我一下吧。"
     if any(token in haystack for token in ("生气", "怒", "炸毛", "不爽", "火大", "服了")):
-        return "喂喂，怎么一上来就这个表情呀。"
+        return "这张气鼓鼓的，哥哥是拿来戳我一下吧。"
     if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "沉默")):
-        return "怎么啦，这表情看着就很无语诶。"
+        return "这张表情有点无语，我先不替你乱翻译。"
     if any(token in haystack for token in ("笑", "开心", "乐", "打趣", "逗")):
-        return "怎么突然丢这么个表情过来呀。"
-    return "怎么啦，突然发这么一张图过来呀。"
+        return "这张看着挺会逗人，哥哥故意的吧。"
+    return "这张我看到了，先不乱猜它的意思。"
 
 
 def _validation_quality_score(reason_codes: tuple[str, ...], missing_actions: tuple[str, ...]) -> float:
@@ -830,40 +854,7 @@ def build_correction_prompt(
     recent_note = ""
     if recent_signatures:
         recent_note = f"最近已经用过的承接：{'；'.join(recent_signatures[:3])}。这次避开它们。"
-    soul_hint = ""
-    if plan.primary_topic == "identity":
-        hint = build_identity_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif plan.primary_topic in {"relationship_boundary", "motivation"}:
-        hint = build_boundary_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif plan.primary_topic == "help_commitment":
-        hint = build_help_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif (
-        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
-        and str(plan.response_form_reason or "").strip() in {"image_social_reply", "image_social_followup"}
-    ):
-        hint = build_image_social_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif plan.primary_topic == "assistant_reply_followup":
-        soul_hint = "语气像发现自己上一句说得太省后顺手补一句，不要变成道歉小作文，也不要重新开话题。"
+    soul_hint = _soul_naturalization_hint(plan)
     return (
         f"{plan.correction_directive} 当前问题：{reasons}。"
         f"{extra}{required}{steps}{forbidden}{recent_note}{previous_note}{soul_hint}严格遵守：{plan.reply_contract}"
@@ -885,38 +876,7 @@ def build_naturalization_prompt(
     recent_note = ""
     if recent_signatures:
         recent_note = f"别复用最近几轮已经用过的承接：{'；'.join(recent_signatures[:3])}。"
-    soul_hint = ""
-    if plan.primary_topic == "identity":
-        hint = build_identity_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif plan.primary_topic in {"relationship_boundary", "motivation"}:
-        hint = build_boundary_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif plan.primary_topic == "help_commitment":
-        hint = build_help_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
-    elif (
-        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
-        and str(plan.response_form_reason or "").strip() in {"image_social_reply", "image_social_followup"}
-    ):
-        hint = build_image_social_naturalization_hint(
-            family=str(plan.tactic_family or "").strip(),
-            render_target_lang="zh",
-        )
-        if hint:
-            soul_hint = hint
+    soul_hint = _soul_naturalization_hint(plan)
     return (
         "保持同样内容目标，但把回应说得更像自然对话。"
         "不要把内部动作要求直接说出来，不要用“前面答过了 / 这件事已经问过 / 你还是在意这个 / 你还是不安”这类元话带头。"
@@ -993,138 +953,20 @@ def build_soul_rescue_prompt(
 
 
 def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: str = "zh") -> str:
-    lang = str(render_target_lang or "").strip().lower()
-    family = str(plan.tactic_family or "").strip()
-    display_name = _current_display_name() or "她"
-    multimodal_focus = str(getattr(plan, "primary_topic", "") or "").strip()
-    core_observation = _multimodal_core_observation(plan)
-    cached_text = build_deterministic_primary_reply_text(
-        plan=plan,
-        render_target_lang=render_target_lang,
-        allow_semantic_fallback=(str(getattr(plan, "primary_topic", "") or "").strip() != "assistant_reply_followup"),
+    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
+        FallbackRequest,
+        build_fallback_reply,
     )
-    if cached_text:
-        return cached_text
-    if lang == "ja":
-        ja_family_map = {
-            "phatic_wave": "うん、いるよ。どうしたの？",
-            "playful_wave": "ふふ、どうしたの？",
-            "observe_then_answer": "画像は見えてる。気になるところを言ってくれたら先にそこを見る。",
-            "attachment_ack_then_wait": "添付は見えたよ。どこから見ればいい？",
-            "brief_name_only": f"{display_name}。",
-            "ack_name_then_wait": "さっきもう名乗った。",
-            "ack_repeat_then_light_probe": "さっき答えたけど、まだ何を確かめたいの？",
-            "hold_name_then_open_floor": "名前はもう分かっているはず。ほかに聞きたいことがあるなら言って。",
-            "name_only_then_pause": f"{display_name}。",
-            "soft_close_then_open_floor": "その確認は何度か来てる。ほんとうに聞きたいことは何？",
-            "short_boundary_then_reason": "親しくはない。ただ見て見ぬふりはしない。",
-            "ack_still_care_then_new_reason": "まだそこが気になる？ 親しくはないけど、見て見ぬふりはしない。",
-            "hold_boundary_then_shift_floor": "親しくはない。そのうえで、本当に聞きたいことがあるなら言って。",
-            "brief_reason_then_wait": "親しくはない。ただ、見て見ぬふりはしない。",
-            "soft_close_boundary": "その理由はもう何度か触れた。今はそこだけ置いておく。",
-            "short_conditional_commitment": "必要なら応じる。聞こえないふりはしない。",
-            "ack_anxiety_without_repromise": "まだ不安？ 必要ならちゃんと応じる。",
-            "steady_commitment_then_wait": "態度は変わらない。話したいなら言って。",
-            "soft_reassure_then_open_floor": "まだ落ち着かない？ 本当に必要なら言って。",
-            "hold_support_without_repromise": "応じる姿勢はある。ほかに聞きたいことがあるなら言って。",
-            "hold_repair_space": "分かった。少し引く。そこまででいい。",
-        }
-        if family in ja_family_map:
-            return ja_family_map[family]
-        if plan.response_goal == "identify":
-            return f"{display_name}。"
-        if plan.response_goal == "boundary_reason":
-            return "親しくはない。ただ見て見ぬふりはしない。"
-        if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:
-            return "必要なら応じる。"
-        if plan.response_goal == "repair_space":
-            return "……分かった。少し引く。"
-        return "分かった。短く返す。"
-    if plan.response_goal == "identify":
-        soul_text = build_identity_fallback_text(
-            family=family,
-            variant=str(plan.tactic_variant or "").strip(),
+
+    return build_fallback_reply(
+        FallbackRequest(
+            reason_code="reply_validator_degraded_fallback",
+            primary_topic=str(getattr(plan, "primary_topic", "") or "").strip(),
+            response_form_reason=str(getattr(plan, "response_form_reason", "") or "").strip(),
             render_target_lang=render_target_lang,
+            observation=_multimodal_core_observation(plan),
         )
-        if soul_text:
-            return soul_text
-    if (
-        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
-        and str(plan.response_form_reason or "").strip() in {"image_social_reply", "image_social_followup"}
-    ):
-        soul_text = build_image_social_fallback_text(
-            family=family,
-            variant=str(plan.tactic_variant or "").strip(),
-            render_target_lang=render_target_lang,
-        )
-        if soul_text:
-            return soul_text
-        return _build_image_social_fallback(plan)
-    if family in {"phatic_wave", "playful_wave"}:
-        soul_text = build_phatic_fallback_text(
-            family=family,
-            variant=str(plan.tactic_variant or "").strip(),
-            render_target_lang=render_target_lang,
-        )
-        if soul_text:
-            return soul_text
-    if plan.response_goal == "boundary_reason":
-        soul_text = build_boundary_fallback_text(
-            family=family,
-            variant=str(plan.tactic_variant or "").strip(),
-            render_target_lang=render_target_lang,
-        )
-        if soul_text:
-            return soul_text
-    if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:
-        soul_text = build_help_fallback_text(
-            family=family,
-            variant=str(plan.tactic_variant or "").strip(),
-            render_target_lang=render_target_lang,
-        )
-        if soul_text:
-            return soul_text
-    if plan.response_goal == "repair_space":
-        soul_text = build_repair_fallback_text(render_target_lang=render_target_lang)
-        if soul_text:
-            return soul_text
-    if plan.response_goal == "clarify_previous_reply" or family == "explain_previous_reply":
-        return _build_assistant_followup_fallback(plan)
-    if family == "observe_then_answer" and core_observation:
-        if multimodal_focus == "screenshot_analysis":
-            return f"我看到是一张截图，核心内容大概是：{core_observation}。"
-        if multimodal_focus == "meme_meaning":
-            return f"这张图更像是在传一种情绪，核心意思大概是：{core_observation}。"
-        if multimodal_focus == "capability_check":
-            return f"这张图我能看懂一些，先能确认到的内容是：{core_observation}。"
-        return f"我先看到的内容大概是：{core_observation}。"
-    if family == "attachment_ack_then_wait" and core_observation:
-        return f"我先看到的内容大概是：{core_observation}。你想让我先看哪一部分？"
-    zh_variant_map = {
-        ("observe_then_answer", "screenshot_analysis"): "我看到是一张截图。你要是想问上面的提示，我先帮你解释。",
-        ("observe_then_answer", "literal_description"): "我看到了这张图。你想让我先说图里有什么吗？",
-        ("observe_then_answer", "meme_meaning"): "这张图像是在传情绪。你是想让我猜你现在的意思吗？",
-        ("observe_then_answer", "capability_check"): "这张图我能先看看。你想让我先说内容，还是先判断能不能帮你？",
-        ("attachment_ack_then_wait", "attachment_ping"): "我看到了这个附件。你想让我先看哪一部分？",
-    }
-    variant_key = (family, str(plan.tactic_variant or "").strip())
-    if variant_key in zh_variant_map:
-        return zh_variant_map[variant_key]
-    zh_family_map = {
-        "observe_then_answer": "我看到了你发来的内容。你想让我先说我看见了什么吗？",
-        "attachment_ack_then_wait": "我看到了这个附件。你想让我先看哪一部分？",
-    }
-    if family in zh_family_map:
-        return zh_family_map[family]
-    if plan.response_goal == "identify":
-        return build_identity_fallback_text(family="brief_name_only", variant="plain_name", render_target_lang=render_target_lang)
-    if plan.response_goal == "boundary_reason":
-        return build_boundary_fallback_text(family=family or "short_boundary_then_reason", variant=str(plan.tactic_variant or "").strip(), render_target_lang=render_target_lang)
-    if plan.response_goal in {"commitment_shape", "soothe_anxiety"}:
-        return build_help_fallback_text(family=family or "short_conditional_commitment", variant=str(plan.tactic_variant or "").strip(), render_target_lang=render_target_lang)
-    if plan.response_goal == "repair_space":
-        return build_repair_fallback_text(render_target_lang=render_target_lang)
-    return "我知道了。"
+    ).text
 
 
 __all__ = [

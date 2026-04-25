@@ -354,7 +354,12 @@ def _build_trace_stage_node(
     input_data: Any = None,
     output_data: Any = None,
     error: str | None = None,
+    invoked: bool | None = None,
+    skipped_reason: str | None = None,
+    affected_output: bool | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
+    normalized_status = str(status or "OK").strip().upper() or "OK"
     node: dict[str, Any] = {
         "node_id": node_id,
         "node_type": node_type,
@@ -362,7 +367,15 @@ def _build_trace_stage_node(
         "side": side,
         "status": status,
         "ts_ms": ts_ms,
+        "invoked": bool(invoked) if invoked is not None else normalized_status != "SKIPPED",
+        "affected_output": bool(affected_output) if affected_output is not None else normalized_status not in {"SKIPPED", "FAILED"},
     }
+    if skipped_reason:
+        node["skipped_reason"] = skipped_reason
+    elif normalized_status == "SKIPPED":
+        node["skipped_reason"] = reason_code or "not_invoked"
+    if source:
+        node["source"] = source
     if reason_code:
         node["reason_code"] = reason_code
     if latency_ms is not None:
@@ -477,6 +490,12 @@ def _trace_node_sort_key(node: Mapping[str, Any]) -> tuple[int, int, str]:
         "recall_fusion": 32,
         "executive_router": 40,
         "chat_agent": 50,
+        "assistant_followup_surface_render": 51,
+        "image_social_surface_render": 51,
+        "identity_surface_render": 51,
+        "phatic_surface_render": 51,
+        "surface_render": 51,
+        "surface_renderer": 51,
         "prompt_builder": 60,
         "llm_stream": 70,
         "pii_filter": 80,
@@ -921,6 +940,34 @@ async def _persist_post_process_audit(
                 ts_ms=ts_ms,
                 status="OK" if narrative.strip() else "DEGRADED",
                 output_data=_chat_output,
+            )
+        )
+    for _surface_key, _surface_name in (
+        ("assistant_followup_surface_render", "Assistant Followup Surface"),
+        ("image_social_surface_render", "Image Social Surface"),
+        ("identity_surface_render", "Identity Surface"),
+        ("phatic_surface_render", "Phatic Surface"),
+        ("surface_render", "Surface Renderer"),
+        ("surface_renderer", "Surface Renderer"),
+    ):
+        _surface_meta = _coerce_trace_mapping(_trace_stage_meta.get(_surface_key))
+        if not _surface_meta:
+            continue
+        _trace_nodes_v2.append(
+            _build_trace_stage_node(
+                node_id=_surface_key,
+                node_type="surface",
+                display_name=_surface_name,
+                ts_ms=ts_ms,
+                status=str(_surface_meta.get("status") or "OK").strip().upper() or "OK",
+                reason_code=str(_surface_meta.get("reason_code") or "").strip() or None,
+                latency_ms=int(_surface_meta.get("latency_ms") or 0) if _surface_meta.get("latency_ms") is not None else None,
+                provider=str(_surface_meta.get("provider_name") or "").strip() or None,
+                model_id=str(_surface_meta.get("model_id") or "").strip() or None,
+                output_data=_surface_meta,
+                invoked=bool(_surface_meta.get("invoked")),
+                affected_output=bool(_surface_meta.get("affected_output")),
+                source=str(_surface_meta.get("source") or "").strip() or None,
             )
         )
     _trace_nodes_v2.extend(
@@ -2246,6 +2293,15 @@ async def _cortex_orchestrator_sse_generator_impl(
     relational_fastlane = False
     relational_topic = ""
     phatic_fastlane = False
+    multimodal_fastlane = False
+    if has_multimodal_input:
+        _multimodal_observations = dict(getattr(request_body, "multimodal_observations", None) or {})
+        _primary_modality = str(_multimodal_observations.get("primary_modality") or "").strip().lower()
+        multimodal_fastlane = bool(
+            route_reason == "THALAMUS_RULE_MULTIMODAL_CHAT"
+            or _primary_modality in {"image", "emoji", "sticker"}
+            or sanitized_message in {"[图片消息]", "[表情消息]", "[贴纸消息]", "[动画表情]"}
+        )
     if not has_multimodal_input:
         try:
             from host_brain.app.relational_chat_detector import detect_relational_chat_topic  # noqa: PLC0415
@@ -2363,6 +2419,11 @@ async def _cortex_orchestrator_sse_generator_impl(
             retrieval_summary = {
                 "status": "SKIPPED",
                 "reason_code": "PHATIC_RETRIEVAL_SKIPPED",
+            }
+        elif multimodal_fastlane:
+            retrieval_summary = {
+                "status": "SKIPPED",
+                "reason_code": "MULTIMODAL_FASTLANE_RETRIEVAL_SKIPPED",
             }
         else:
             retrieval_task = asyncio.create_task(
@@ -2628,6 +2689,9 @@ async def _async_post_process(
                 "provider_name": provider_name,
                 "model_id": model_id,
                 "fallback": fallback_used,
+                "message_kind": "final_reply",
+                "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ("fallback" if fallback_used else "full_model")).strip(),
+                "degraded": bool(fallback_used),
             },
         )
     except Exception as exc:

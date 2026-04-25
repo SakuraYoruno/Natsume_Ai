@@ -8,6 +8,7 @@ from host_brain.persona.reply_surface_memory import (
     DegradingReplySurfaceMemoryStore,
     InMemoryReplySurfaceMemoryStore,
     RedisReplySurfaceMemoryStore,
+    SURFACE_CACHE_POLICY_VERSION,
     build_assistant_followup_context_fingerprint,
     build_reply_surface_memory_key,
     create_reply_surface_memory_store,
@@ -29,11 +30,49 @@ def test_inmemory_reply_surface_memory_store_remember_and_sample() -> None:
         render_target_lang="zh",
     )
 
-    store.remember(key=key, text="哥哥，好嘛，那我就当自己刚才多想了一点。", ts_ms=now_ms)
+    store.remember(key=key, text="哥哥，猫耳那张我接住了。", ts_ms=now_ms)
 
     sampled = store.sample(key=key)
 
-    assert "多想" in sampled
+    assert sampled == "哥哥，猫耳那张我接住了。"
+
+
+def test_reply_surface_memory_key_is_policy_versioned() -> None:
+    key = build_reply_surface_memory_key(
+        soul_id="soul",
+        primary_topic="greeting",
+        tactic_family="phatic_wave",
+        tactic_variant="greeting",
+        response_form_reason="phatic_greeting",
+        render_target_lang="zh",
+    )
+
+    assert key.startswith(SURFACE_CACHE_POLICY_VERSION + "::")
+    assert build_reply_surface_memory_key(
+        soul_id="soul",
+        primary_topic="greeting",
+        tactic_family="phatic_wave",
+        tactic_variant="greeting",
+        response_form_reason="phatic_greeting",
+        render_target_lang="zh",
+        policy_version="surface-old",
+    ).startswith("surface-old::")
+
+
+def test_inmemory_reply_surface_memory_store_rejects_forbidden_text() -> None:
+    store = InMemoryReplySurfaceMemoryStore(ttl_ms=60_000, max_entries=8)
+    key = build_reply_surface_memory_key(
+        soul_id="soul",
+        primary_topic="greeting",
+        tactic_family="phatic_wave",
+        tactic_variant="greeting",
+        response_form_reason="phatic_greeting",
+        render_target_lang="zh",
+    )
+
+    store.remember(key=key, text="哥哥，你真正想问什么？", ts_ms=int(time.time() * 1000))
+
+    assert store.sample(key=key) == ""
 
 
 def test_assistant_followup_context_fingerprint_is_stable() -> None:
@@ -76,15 +115,15 @@ def test_inmemory_reply_surface_memory_store_exclude_prefers_other_candidate() -
         render_target_lang="zh",
     )
 
-    store.remember(key=key, text="哥哥，好好好，那就当我刚才会错意啦。", ts_ms=now_ms)
-    store.remember(key=key, text="哥哥，行吧，那我就当自己多想了一点。", ts_ms=now_ms + 1)
+    store.remember(key=key, text="哥哥，猫耳那张我接住了。", ts_ms=now_ms)
+    store.remember(key=key, text="哥哥，这张小表情我看见了。", ts_ms=now_ms + 1)
 
     sampled = store.sample(
         key=key,
-        exclude=["哥哥，行吧，那我就当自己多想了一点。"],
+        exclude=["哥哥，这张小表情我看见了。"],
     )
 
-    assert sampled == "哥哥，好好好，那就当我刚才会错意啦。"
+    assert sampled == "哥哥，猫耳那张我接住了。"
 
 
 def test_load_reply_surface_memory_config_reads_env(monkeypatch) -> None:

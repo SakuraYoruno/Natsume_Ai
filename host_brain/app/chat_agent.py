@@ -1,6 +1,6 @@
-﻿"""chat_agent.py — ChatAgent 人格渲染管线（Phase XV）。
+"""chat_agent.py — ChatAgent Soul 渲染管线（Phase XV）。
 
-夏目蓝本人的"说话"模块。
+当前 CompiledSoul 的"说话"模块。
 职责：拿到上下文→构建 prompt→流式生成→反思链→净化→COMMIT。
 调用者：Executive Runtime（通过 chat_agent_sse_generator 函数）。
 
@@ -36,7 +36,6 @@ from host_brain.app.prompt_template_store import (
 )
 from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch C：业务路径统一降级
-
 _logger = logging.getLogger("Natsume.chat_agent")
 
 _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈喽|早上好|中午好|晚上好)[!！。…~]*$")
@@ -347,6 +346,11 @@ def _build_minimal_chat_fallback_reply(
     sub_agent_ctx: SubAgentContext | None,
     render_target_lang: str,
 ) -> str:
+    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
+        FallbackRequest,
+        build_fallback_reply,
+    )
+
     text = str(user_message or "").strip()
 
     if sub_agent_ctx is not None:
@@ -358,11 +362,13 @@ def _build_minimal_chat_fallback_reply(
 
     if _FALLBACK_STRENGTH_RE.search(text):
         return _build_installed_capabilities_reply(render_target_lang=render_target_lang)
-    if _FALLBACK_PRESENCE_RE.match(text):
-        return _resolve_minimal_fallback_text(kind="presence", render_target_lang=render_target_lang)
-    if _FALLBACK_GREETING_RE.match(text):
-        return _resolve_minimal_fallback_text(kind="greeting", render_target_lang=render_target_lang)
-    return _resolve_minimal_fallback_text(kind="default", render_target_lang=render_target_lang)
+    return build_fallback_reply(
+        FallbackRequest(
+            reason_code="chat_agent_minimal_degraded_fallback",
+            render_target_lang=render_target_lang,
+            user_message=text,
+        )
+    ).text
 
 
 def _load_template_replacement_pairs(
@@ -963,6 +969,10 @@ def _extract_visible_text(raw: str, *, render_target_lang: str = "zh") -> str:
     text = str(raw or "").strip()
     if not text:
         return ""
+    text = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", text).strip()
+    text = re.sub(r"(?is)^<think\b[^>]*>.*", "", text).strip()
+    if not text:
+        return ""
     if text.startswith("```"):
         fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL | re.IGNORECASE)
         if fenced:
@@ -1003,7 +1013,6 @@ def _normalize_plan_step_description(description: str, *, render_target_lang: st
     text = str(description or "").strip()
     if not text:
         return ""
-    text = re.sub(r"^\s*(?:蓝蓝|夏目蓝|夏目藍|小蓝|阿蓝)[，,、:：\s]*", "", text)
     prefixes = ("先", "然后", "再", "接着", "顺便", "帮我", "给我", "请")
     if _normalize_template_lang(render_target_lang) == "ja":
         prefixes = ("まず", "それから", "次に", "続けて", "ついでに", "手伝って", "見て", "お願い")
@@ -1169,7 +1178,6 @@ def _infer_hub_skill_name_from_task(task: str, *, markers: tuple[str, ...], defa
         if marker in normalized:
             normalized = normalized.split(marker, 1)[-1].strip(" ：:")
             break
-    normalized = re.sub(r"^(?:蓝蓝|夏目蓝|夏目蓝蓝|natsume ai|natsume)[，,\s:：]*", "", normalized, flags=re.IGNORECASE).strip()
     normalized = re.sub(r"\s+(?:强制|覆盖|覆盖安装|立即激活|现在激活)$", "", normalized, flags=re.IGNORECASE).strip()
     normalized = normalized.strip("，。；！？,.!? ")
     return normalized or default_name
@@ -1356,7 +1364,9 @@ def _build_deterministic_sub_agent_reply(
     ctx: SubAgentContext | None,
     *,
     render_target_lang: str,
+    user_message: str = "",
 ) -> str | None:
+    _ = user_message
     if ctx is None:
         return None
     agent_id = str(ctx.agent_id or "").strip()
@@ -1381,11 +1391,27 @@ def _build_chat_agent_quality_fallback_reply(
     render_policy: Any = None,
     prompt_runtime_payload: Mapping[str, Any] | None = None,
 ) -> str:
-    return _build_minimal_chat_fallback_reply(
-        user_message=user_message,
-        sub_agent_ctx=sub_agent_ctx,
-        render_target_lang=render_target_lang,
+    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
+        FallbackRequest,
+        build_fallback_reply,
     )
+
+    _ = bond_summary, emotion_context, render_policy, prompt_runtime_payload
+    if sub_agent_ctx is not None:
+        delegated_fallback = _build_sub_agent_result_preserving_fallback_reply(
+            sub_agent_ctx,
+            render_target_lang=render_target_lang,
+            user_message=user_message,
+        )
+        if delegated_fallback:
+            return delegated_fallback
+    return build_fallback_reply(
+        FallbackRequest(
+            reason_code="chat_agent_generation_failed",
+            render_target_lang=render_target_lang,
+            user_message=user_message,
+        )
+    ).text
 
 
 def _build_chat_agent_fallback_reply(
@@ -1395,9 +1421,11 @@ def _build_chat_agent_fallback_reply(
     bond_summary: Dict[str, Any] | None,
     render_target_lang: str,
 ) -> str:
-    return _build_minimal_chat_fallback_reply(
+    return _build_chat_agent_quality_fallback_reply(
         user_message=user_message,
         sub_agent_ctx=sub_agent_ctx,
+        bond_summary=bond_summary,
+        emotion_context=None,
         render_target_lang=render_target_lang,
     )
 
@@ -1460,6 +1488,19 @@ def _should_buffer_stream_output(
     render_policy: Any = None,
 ) -> bool:
     """高风险对话缓冲判断。"""
+    policy = _coerce_render_policy(render_policy)
+    primary_topic = str(policy.get("primary_topic") or "").strip()
+    if primary_topic in {
+        "assistant_reply_followup",
+        "emoji_social_reply",
+        "emoji_social_followup",
+        "greeting",
+        "presence_ping",
+        "light_ack",
+        "playful_ping",
+        "identity",
+    }:
+        return False
     explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
     if explicit_decision is not None:
         return explicit_decision
@@ -1499,7 +1540,7 @@ def _build_sub_agent_context_prompt(ctx: SubAgentContext, *, render_target_lang:
     """将子 Agent 结果转换为注入 ChatAgent prompt 的上下文块。
 
     Phase XV 核心改造：子 Agent 结果不再直接输出给用户，
-    而是作为 context 注入 ChatAgent，由 ChatAgent 用夏目蓝语气重新组织。
+    而是作为 context 注入 ChatAgent，由当前 CompiledSoul 重新组织。
     """
     if not ctx:
         return ""
@@ -1570,8 +1611,8 @@ async def chat_agent_sse_generator(
 ) -> AsyncGenerator[str, None]:
     """ChatAgent SSE 生成器（Phase XV 核心）。
 
-    职责：接收 ChatAgentInput → 构建完整人格 prompt → LLM 流式生成
-          → SentenceSplitter → 反思链 → 净化 → COMMIT → 异步后处理。
+职责：接收 ChatAgentInput → 构建 Soul prompt → SurfaceRenderer 或 LLM 生成
+          → SentenceSplitter → 轻校验 → 净化 → COMMIT → 异步后处理。
 
     调用者：Executive Runtime（由 cortex_orchestrator 链路调用此函数）。
     """
@@ -1620,10 +1661,6 @@ async def chat_agent_sse_generator(
     precommit_log_ms = 0
     previous_assistant_text = ""
     from host_brain.persona.reply_plan import coerce_reply_plan  # noqa: PLC0415
-    from host_brain.persona.soul_reply_surface import (  # noqa: PLC0415
-        build_deterministic_primary_reply_text,
-        is_reply_surface_sample_disallowed,
-    )
     # 确定性子结果渲染不依赖 LLM，也不需要构建完整 prompt。
     if not deterministic_reply:
         # ── 1. 构建 prompt（复用完整 cortex_prompt_builder 管线）──────────────
@@ -1742,29 +1779,8 @@ async def chat_agent_sse_generator(
             ),
             "",
         )
-        deterministic_primary_reply = build_deterministic_primary_reply_text(
-            plan=reply_plan_decision,
-            render_target_lang=render_target_lang,
-            exclude_texts=(previous_assistant_text,) if previous_assistant_text else (),
-            allow_semantic_fallback=(
-                str(reply_plan_decision.primary_topic or "").strip() != "assistant_reply_followup"
-            ),
-        )
-        if deterministic_primary_reply:
-            deterministic_reply = deterministic_primary_reply
-            deterministic_reply_provider_name = "host"
-            if str(reply_plan_decision.primary_topic or "").strip() == "assistant_reply_followup":
-                deterministic_reply_model_id = "reply-surface-cache"
-            else:
-                deterministic_reply_model_id = "deterministic-plan-renderer"
-            trace_stage_meta["deterministic_primary_used"] = True
-            trace_stage_meta["deterministic_primary_reason"] = (
-                f"{str(reply_plan_decision.primary_topic or '').strip()}:{str(reply_plan_decision.tactic_family or '').strip()}:{str(reply_plan_decision.tactic_variant or '').strip()}"
-            )
-            if str(reply_plan_decision.primary_topic or "").strip() == "assistant_reply_followup":
-                trace_stage_meta["reply_surface_cache_hit"] = True
-            trace_stage_meta["reply_used_fallback"] = False
-            trace_stage_meta["fallback_used"] = False
+        trace_stage_meta["deterministic_primary_used"] = False
+        trace_stage_meta["deterministic_primary_reason"] = "disabled:surface_renderer_or_full_model_only"
 
     # ── 2. 解析 LLM 运行时（ChatAgent 专用配置）─────────────────────
     if deterministic_reply:
@@ -1998,18 +2014,22 @@ async def chat_agent_sse_generator(
 
     def _should_attempt_soul_rescue(plan: Any) -> bool:
         topic = str(getattr(plan, "primary_topic", "") or "").strip()
-        return topic in {
-            "identity",
-            "relationship_boundary",
-            "motivation",
-            "help_commitment",
-            "rejection",
+        if topic in {
+            "assistant_reply_followup",
+            "emoji_social_reply",
+            "emoji_social_followup",
             "greeting",
             "presence_ping",
             "light_ack",
             "playful_ping",
-            "emoji_social_reply",
-            "emoji_social_followup",
+            "identity",
+        }:
+            return False
+        return topic in {
+            "relationship_boundary",
+            "motivation",
+            "help_commitment",
+            "rejection",
         }
 
     def _build_rescue_messages(
@@ -2107,441 +2127,77 @@ async def chat_agent_sse_generator(
             return float(getattr(validation_candidate, "quality_score", 0.0) or 0.0) >= 0.9
         return False
 
-    def _is_surface_validation_acceptable(
-        validation_candidate: Any,
-        *,
-        candidate_text: str,
-        followup_context: str,
-        needs_specific_reference: bool,
-        is_repeat_request: bool,
-    ) -> bool:
-        if _is_validation_acceptable(validation_candidate):
-            return True
-        if validation_candidate is None or not bool(getattr(validation_candidate, "safe_to_emit", False)):
-            return False
-        missing_actions = {
-            str(item or "").strip()
-            for item in list(getattr(validation_candidate, "missing_actions", ()) or ())
-            if str(item or "").strip()
-        }
-        reason_codes = {
-            str(item or "").strip()
-            for item in list(getattr(validation_candidate, "reason_codes", ()) or ())
-            if str(item or "").strip()
-        }
-        if missing_actions - {"previous_reference"}:
-            return False
-        if reason_codes - {"previous_reference_missing", "contract_actions_missing"}:
-            return False
-        normalized = str(candidate_text or "").strip()
-        if needs_specific_reference:
-            return bool(re.search(r"(哪个|哪一个|哪件|哪一件|哪种|哪类|具体|指|秘密|小事|那件)", normalized))
-        if is_repeat_request:
-            return bool(re.search(r"(刚才|刚刚|之前|前面|唔|说什么|讲什么|没说|只|正事)", normalized))
-        return bool(normalized)
-
     def _trace_text_sample(raw: str, *, limit: int = 240) -> str:
         normalized = str(raw or "").strip()
         if len(normalized) <= limit:
             return normalized
         return normalized[:limit] + "..."
 
-    def _assistant_followup_contract_parts() -> tuple[str, str]:
-        contract_text = str(reply_plan_decision.reply_contract or "").strip()
-        source_match = re.search(r"上一条助手回复是“([^”]{1,160})”", contract_text)
-        context_match = re.search(r"上一条助手回复前接的用户话是“([^”]{1,160})”", contract_text)
-        source = str(source_match.group(1) if source_match else "").strip().strip("\"“”")
-        context = str(context_match.group(1) if context_match else "").strip().strip("\"“”")
-        return source, context
-
-    def _assistant_followup_semantic_seed() -> str:
-        """Return a non-emittable meaning seed for surface rendering.
-
-        This deliberately avoids dialogue-shaped fallback text. The surface
-        model may use it to understand the repair target, but it should never
-        pressure the output toward a canned explanation.
-        """
-        followup_source, followup_context = _assistant_followup_contract_parts()
-        source_compact = re.sub(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+", "", followup_source)
-        context_compact = re.sub(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+", "", followup_context)
-        is_repeat_request = bool(
-            re.search(r"(刚才|刚刚|刚|前面|上一句|上句|之前).{0,8}(说什么|说了什么|讲什么|讲了什么)", context_compact)
-            or re.search(r"(你|我|她|他|它)?说什么", context_compact)
+    if not deterministic_reply:
+        from host_brain.persona.surface_renderer import (  # noqa: PLC0415
+            SurfaceRenderer,
+            SurfaceRequest,
         )
-        needs_specific_reference = bool(
-            context_compact
-            and not is_repeat_request
-            and re.search(r"(知道什么|什么事|什么东西|什么情况|哪个|哪一个|哪件|哪一件|哪种|哪类|指什么|啥)", context_compact)
-        )
-        if needs_specific_reference:
-            return f"上一条只是短回复；这轮要自然确认对方指的是哪件事或哪个对象。前文线索：{followup_context}"
-        if is_repeat_request:
-            return "上一条只是短语气词，没有实质内容；这轮要自然说明刚才只卡了一下，再把话口还给对方。"
-        if re.match(r"^(?:嗯+|唔+|咦+|哼+|啊+|哦+|噢+|诶+|哈+)$", source_compact):
-            return f"上一条只是短语气词；这轮要把它自然接回前文，不要写成解释报告。前文线索：{followup_context}"
-        return f"这轮要自然补清上一条短回复接的是前文哪一层意思。前文线索：{followup_context}"
 
-    async def _attempt_assistant_followup_surface_render() -> tuple[str, str, str]:
-        if str(reply_plan_decision.primary_topic or "").strip() != "assistant_reply_followup":
-            return "", "", ""
-        if str(reply_plan_decision.tactic_family or "").strip() != "explain_previous_reply":
-            return "", "", ""
-        semantic_seed = _assistant_followup_semantic_seed()
-        if not semantic_seed:
-            return "", "", ""
-        followup_source, followup_context = _assistant_followup_contract_parts()
+        def _surface_finalize_text(raw_text: str) -> str:
+            finalized, _surface_ri_meta, _surface_pii = _finalize_candidate_text(
+                raw_text,
+                allow_rewrite=False,
+            )
+            return finalized
+
+        def _surface_validate_reply(candidate_text: str) -> Any:
+            return validate_reply(
+                text=candidate_text,
+                plan=reply_plan_decision,
+                user_message=user_message,
+                previous_assistant_text=previous_assistant_text,
+            )
+
         try:
-            from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: PLC0415
-
-            soul = get_compiled_soul()
-            soul_text = str(getattr(soul, "runtime_compact_text", "") or "").strip()
-        except Exception:
-            soul_text = "你是新海天，说话自然、活泼，不要客服腔。"
-        system_prompt = (
-            "你只负责把上一轮短回复后面的追问接成自然聊天。"
-            "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
-            "不要新增事实，不要解释规则，不要只回语气词，不要客服腔。"
-            "不要照抄语义种子的措辞，也不要逐字引用对方原句。回复要像普通聊天里的顺手接话。"
-            "不要道歉，不要说自己不清楚，不要用“我是想说”开头。"
-            "不要写说明文，不要用“你问……”复述问题。"
-            "如果必须问，只能像聊天一样具体接回去。"
-            "禁止使用这些模板骨架：没接住、不是在敷衍、你是在问前面、那截吧、不是突然换话题、是不是在问、想问的是、刚才那声、唔是什么意思。"
-            f"\n\n{soul_text}"
-        ).strip()
-
-        def _context_needs_specific_reference(raw_context: str) -> bool:
-            compact = re.sub(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+", "", raw_context)
-            if not compact:
-                return False
-            if re.search(r"(刚才|刚刚|刚|前面|上一句|上句|之前).{0,8}(说什么|说了什么|讲什么|讲了什么)", compact):
-                return False
-            if re.search(r"(你|我|她|他|它)?说什么", compact):
-                return False
-            return bool(re.search(r"(知道什么|什么事|什么东西|什么情况|哪个|哪一个|哪件|哪一件|哪种|哪类|指什么|啥)", compact))
-
-        def _compact_surface_text(raw_text: str) -> str:
-            compacted = re.sub(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+", "", str(raw_text or ""))
-            compacted = re.sub(r"^(哥哥|哥|お兄ちゃん)+", "", compacted)
-            compacted = re.sub(r"(呀|啊|呢|啦|嘛|吧)+$", "", compacted)
-            return compacted
-
-        def _extract_context_anchor_terms(raw_context: str) -> list[str]:
-            compact = _compact_surface_text(raw_context)
-            terms: list[str] = []
-            for pattern in (
-                r"(?:哪个|哪一个|哪件|哪一件|哪种|哪类)([\u4e00-\u9fff]{2,8})",
-                r"(?:什么|啥)([\u4e00-\u9fff]{2,8})",
-            ):
-                for match in re.finditer(pattern, compact):
-                    term = str(match.group(1) or "").strip()
-                    term = re.sub(r"(呀|啊|呢|啦|嘛|吧|吗)+$", "", term)
-                    if len(term) >= 2 and term not in terms:
-                        terms.append(term)
-            for marker in ("小秘密", "新秘密", "秘密", "小事", "事情", "图片", "表情", "这张图", "这句话", "上一句"):
-                if marker in compact and marker not in terms:
-                    terms.append(marker)
-            collapsed: list[str] = []
-            for term in terms:
-                if any(term != other and term in other for other in terms):
-                    continue
-                collapsed.append(term)
-            return collapsed[:3]
-
-        def _candidate_repeats_context_without_progress(candidate_text: str, raw_context: str) -> bool:
-            candidate_compact = _compact_surface_text(candidate_text)
-            context_compact = _compact_surface_text(raw_context)
-            if not candidate_compact or not context_compact:
-                return False
-            if context_compact in candidate_compact and len(candidate_compact) <= len(context_compact) + 8:
-                return True
-            if re.search(r"(什么意思|啥意思|是什么意思|什么梗)", context_compact):
-                if re.search(r"(你问|你说)?(这个|这句|这句话|它)?(是什么意思|什么意思|啥意思)", candidate_compact):
-                    return not re.search(r"(刚才|刚刚|之前|前面|唔|只|还没|哪句|哪张|哪件|指)", candidate_compact)
-            return False
-
-        def _candidate_resolves_specific_reference(candidate_text: str, raw_context: str) -> bool:
-            candidate_compact = _compact_surface_text(candidate_text)
-            if not candidate_compact:
-                return False
-            anchor_terms = _extract_context_anchor_terms(raw_context)
-            if anchor_terms:
-                term_variants: list[str] = []
-                for term in anchor_terms:
-                    candidates = [term, term[-2:]]
-                    for marker in ("秘密", "小事", "事情", "图片", "表情", "这张图", "这句话", "上一句"):
-                        if marker in term:
-                            candidates.append(marker)
-                    for item in candidates:
-                        item = str(item or "").strip()
-                        if len(item) >= 2 and item not in term_variants:
-                            term_variants.append(item)
-                if not any(term in candidate_compact for term in term_variants):
-                    return False
-            return bool(re.search(r"(指|哪个|哪一个|哪件|哪一件|哪种|哪类|说的是|具体|哪边|哪回事|哪句|哪张)", candidate_compact))
-
-        context_compact = re.sub(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+", "", followup_context)
-        is_repeat_request = bool(
-            re.search(r"(刚才|刚刚|刚|前面|上一句|上句|之前).{0,8}(说什么|说了什么|讲什么|讲了什么)", context_compact)
-            or re.search(r"(你|我|她|他|它)?说什么", context_compact)
-        )
-        needs_specific_reference = _context_needs_specific_reference(followup_context)
-        if is_repeat_request:
-            action_hint = (
-                "这轮像是在问刚才到底说了什么。上一条其实只是短语气词，不要假装已经说过内容；"
-                "可以顺手说刚才只是卡了一下/只唔了一声，然后自然让对方把要接的那句补回来。"
-            )
-        elif needs_specific_reference:
-            action_hint = (
-                "这轮缺少具体对象。不要整句复述对方原话；"
-                "自然追问是哪件事/哪边；如果前文有“秘密、小事、图片、这句话”等名词，必须顺手带回这个名词，别只说“哪个”。"
-            )
-        else:
-            action_hint = (
-                "这轮是在追问上一句是什么意思。用自然口语把上一句接回去，不要像解释报告；"
-                "不要把“这个是什么意思”换个语气复述一遍。"
-            )
-
-        user_prompt = (
-            f"上一条助手短回复：{followup_source or previous_assistant_text}\n"
-            f"上一条助手回复前接的用户话：{followup_context}\n"
-            f"语义种子（只供理解，不要照抄）：{semantic_seed}\n"
-            f"用户这轮消息：{user_message}\n"
-            f"接话动作：{action_hint}\n"
-            "改写要求：18-38个中文字符；不要带引号复述原句；不要用“你问/刚才那声”这种说明文；"
-            "可以自然叫哥哥，但不要过度亲密；给4个不同候选，只输出 JSON。"
-        )
-        surface_timeout_ms = int(
-            max(
-                1500,
-                min(
-                    12_000,
-                    int(str(os.environ.get("HOST_REPLY_SURFACE_RENDER_TIMEOUT_MS") or "6500").strip() or "6500"),
-                ),
-            )
-        )
-        surface_provider_name = str(os.environ.get("HOST_REPLY_SURFACE_RENDER_PROVIDER") or provider_name).strip()
-        surface_model_id = str(os.environ.get("HOST_REPLY_SURFACE_RENDER_MODEL_ID") or "").strip()
-        if not surface_model_id:
-            surface_model_id = "gemini-2.5-flash-lite" if surface_provider_name == "gemini" else model_id
-        retry_prompt = (
-            f"{user_prompt}\n"
-            "上一版如果变成道歉、绕话、模板解释或泛泛确认，就重写。"
-            f"正确语义：{action_hint}"
-        )
-        surface_prompts = [user_prompt]
-        if retry_prompt != user_prompt:
-            surface_prompts.append(retry_prompt)
-        rejected_attempts: list[dict[str, Any]] = []
-        accepted_result: Any = None
-        accepted_candidate = ""
-
-        def _extract_surface_candidates(payload: Any) -> list[str]:
-            if not isinstance(payload, Mapping):
-                return []
-            raw_candidates = payload.get("candidates")
-            candidates: list[str] = []
-            if isinstance(raw_candidates, list):
-                candidates.extend(str(item or "").strip() for item in raw_candidates)
-            legacy_reply = str(payload.get("reply") or "").strip()
-            if legacy_reply:
-                candidates.append(legacy_reply)
-            deduped: list[str] = []
-            seen: set[str] = set()
-            for item in candidates:
-                normalized = str(item or "").strip()
-                if not normalized or normalized in seen:
-                    continue
-                seen.add(normalized)
-                deduped.append(normalized)
-            return deduped[:4]
-
-        for attempt_index, prompt_for_attempt in enumerate(surface_prompts, start=1):
-            result = await acomplete_llm_with_pool(
-                request_id=request_id,
-                scene_type="CHAT_SURFACE",
-                cognitive_tier=str(os.environ.get("HOST_REPLY_SURFACE_RENDER_TIER") or "D").strip() or "D",
-                timeout_ms=surface_timeout_ms,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt_for_attempt},
-                ],
-                gen_params={
-                    "temperature": 0.82,
-                    "top_p": 0.92,
-                    "max_tokens": 120,
-                },
-                response_format={"type": "json_object"},
-                provider_name=surface_provider_name,
-                model_id=surface_model_id,
-                api_key=api_key,
-                base_url_override=base_url,
-            )
-            try:
-                payload = json.loads(str(result.content or "{}"))
-            except Exception as parse_exc:
-                rejected_attempts.append({
-                    "attempt_index": attempt_index,
-                    "reason_code": "SURFACE_JSON_INVALID",
-                    "detail": str(parse_exc)[:120],
-                    "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                })
-                continue
-            candidates = _extract_surface_candidates(payload)
-            if not candidates:
-                rejected_attempts.append({
-                    "attempt_index": attempt_index,
-                    "reason_code": "SURFACE_EMPTY",
-                    "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                })
-                continue
-            for candidate_index, raw_candidate in enumerate(candidates, start=1):
-                candidate, _surface_ri_meta, _surface_pii = _finalize_candidate_text(
-                    raw_candidate,
-                    allow_rewrite=False,
-                )
-                if is_reply_surface_sample_disallowed(primary_topic="assistant_reply_followup", text=candidate):
-                    rejected_attempts.append({
-                        "attempt_index": attempt_index,
-                        "candidate_index": candidate_index,
-                        "reason_code": "SURFACE_TEMPLATE_SHAPE",
-                        "model_id": str(result.final_model or "").strip(),
-                        "provider_name": str(result.final_provider or "").strip(),
-                        "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                        "text": _trace_text_sample(candidate),
-                    })
-                    continue
-                if _candidate_repeats_context_without_progress(candidate, followup_context):
-                    rejected_attempts.append({
-                        "attempt_index": attempt_index,
-                        "candidate_index": candidate_index,
-                        "reason_code": "SURFACE_CONTEXT_ECHO",
-                        "model_id": str(result.final_model or "").strip(),
-                        "provider_name": str(result.final_provider or "").strip(),
-                        "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                        "expected_context": followup_context,
-                        "text": _trace_text_sample(candidate),
-                    })
-                    continue
-                if _context_needs_specific_reference(followup_context) and not _candidate_resolves_specific_reference(
-                    candidate,
-                    followup_context,
-                ):
-                        rejected_attempts.append({
-                            "attempt_index": attempt_index,
-                            "candidate_index": candidate_index,
-                            "reason_code": "SURFACE_UNDERSPECIFIED_CONTEXT_NOT_RESOLVED",
-                            "model_id": str(result.final_model or "").strip(),
-                            "provider_name": str(result.final_provider or "").strip(),
-                            "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                            "expected_context": followup_context,
-                            "text": _trace_text_sample(candidate),
-                        })
-                        continue
-                validation = validate_reply(
-                    text=candidate,
-                    plan=reply_plan_decision,
-                    user_message=user_message,
-                    previous_assistant_text=previous_assistant_text,
-                )
-                if not _is_surface_validation_acceptable(
-                    validation,
-                    candidate_text=candidate,
-                    followup_context=followup_context,
-                    needs_specific_reference=needs_specific_reference,
-                    is_repeat_request=is_repeat_request,
-                ):
-                    rejected_attempts.append({
-                        "attempt_index": attempt_index,
-                        "candidate_index": candidate_index,
-                        "reason_code": "SURFACE_VALIDATION_FAILED",
-                        "model_id": str(result.final_model or "").strip(),
-                        "provider_name": str(result.final_provider or "").strip(),
-                        "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                        "validation": validation.as_dict(),
-                        "text": _trace_text_sample(candidate),
-                    })
-                    continue
-                accepted_result = result
-                accepted_candidate = candidate
-                trace_stage_meta["assistant_followup_surface_render"] = {
-                    "status": "OK",
-                    "attempt_index": attempt_index,
-                    "candidate_index": candidate_index,
-                    "candidate_count": len(candidates),
-                    "rejected_attempts": rejected_attempts,
-                    "model_id": str(result.final_model or "").strip(),
-                    "provider_name": str(result.final_provider or "").strip(),
-                    "latency_ms": int(getattr(result, "total_latency_ms", 0) or 0),
-                    "validation": validation.as_dict(),
-                    "text": _trace_text_sample(candidate),
-                }
-                break
-            if accepted_candidate:
-                break
-        if not accepted_candidate or accepted_result is None:
-            trace_stage_meta["assistant_followup_surface_render"] = {
-                "status": "REJECTED",
-                "attempts": rejected_attempts,
-            }
-            return "", "", ""
-        candidate = accepted_candidate
-        result = accepted_result
-        try:
-            from host_brain.app.dependencies import get_reply_surface_memory_store  # noqa: PLC0415
-            from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: PLC0415
-            from host_brain.persona.reply_surface_memory import (  # noqa: PLC0415
-                build_assistant_followup_context_fingerprint,
-                build_reply_surface_memory_key,
-            )
-
-            contract_text = str(reply_plan_decision.reply_contract or "").strip()
-            context_fingerprint = build_assistant_followup_context_fingerprint(reply_contract=contract_text)
-            if context_fingerprint:
-                cache_key = build_reply_surface_memory_key(
-                    soul_id=str(getattr(get_compiled_soul(), "soul_id", "") or "").strip(),
-                    primary_topic=str(reply_plan_decision.primary_topic or "").strip(),
-                    tactic_family=str(reply_plan_decision.tactic_family or "").strip(),
-                    tactic_variant=str(reply_plan_decision.tactic_variant or "").strip(),
-                    response_form_reason=str(reply_plan_decision.response_form_reason or "").strip(),
-                    render_target_lang=render_target_lang,
-                    context_fingerprint=context_fingerprint,
-                )
-                get_reply_surface_memory_store().remember(
-                    key=cache_key,
-                    text=candidate,
-                    ts_ms=int(time.time() * 1000),
+            surface_result = await SurfaceRenderer().render(
+                SurfaceRequest(
                     request_id=request_id,
                     session_id=session_id,
+                    user_message=user_message,
+                    plan=reply_plan_decision,
+                    previous_assistant_text=previous_assistant_text,
+                    render_target_lang=render_target_lang,
+                    provider_name=provider_name,
+                    model_id=model_id,
+                    api_key=api_key,
+                    base_url=base_url,
+                    finalize_text=_surface_finalize_text,
+                    validate_reply=_surface_validate_reply,
+                    trace_meta=trace_stage_meta,
                 )
-        except Exception as cache_exc:
-            _logger.debug("[%s] assistant followup surface cache remember skipped: %s", request_id, cache_exc)
-        return candidate, str(result.final_provider or "").strip(), str(result.final_model or "").strip()
-
-    if not deterministic_reply:
-        try:
-            _surface_reply, _surface_provider, _surface_model = await _attempt_assistant_followup_surface_render()
+            )
         except Exception as surface_exc:
-            trace_stage_meta["assistant_followup_surface_render"] = {
+            surface_result = None
+            trace_stage_meta["surface_renderer"] = {
                 "status": "FAILED",
-                "reason_code": "SURFACE_RENDER_FAILED",
+                "invoked": True,
+                "affected_output": False,
+                "source": "surface",
                 "detail": str(surface_exc)[:220],
             }
-            _surface_reply, _surface_provider, _surface_model = "", "", ""
-        if _surface_reply:
-            deterministic_reply = _surface_reply
-            deterministic_reply_provider_name = _surface_provider or provider_name
-            deterministic_reply_model_id = _surface_model or model_id
+        if surface_result is not None and str(surface_result.text or "").strip():
+            deterministic_reply = str(surface_result.text or "").strip()
+            deterministic_reply_provider_name = surface_result.provider_name or provider_name
+            deterministic_reply_model_id = surface_result.model_id or model_id
             provider_name = deterministic_reply_provider_name
             model_id = deterministic_reply_model_id
-            reply_used_fallback = False
+            reply_used_fallback = bool(surface_result.degraded)
             buffer_stream = False
             timeout_ms = 0
             api_key = ""
             base_url = None
             trace_stage_meta["deterministic_primary_used"] = True
-            trace_stage_meta["deterministic_primary_reason"] = "assistant_reply_followup:surface_render"
-            trace_stage_meta["reply_used_fallback"] = False
-            trace_stage_meta["fallback_used"] = False
+            trace_stage_meta["deterministic_primary_reason"] = f"{str(surface_result.source or 'surface')}:renderer"
+            trace_stage_meta["reply_used_fallback"] = bool(surface_result.degraded)
+            trace_stage_meta["fallback_used"] = bool(surface_result.degraded)
+            trace_stage_meta["reply_source"] = str(surface_result.source or "surface").strip()
+            trace_stage_meta["reply_cacheable"] = bool(surface_result.cacheable)
 
     try:
         if deterministic_reply:
@@ -3248,37 +2904,12 @@ async def chat_agent_sse_generator(
 # ---------------------------------------------------------------------------
 # 聚合导入（P2-12 拆分后向后兼容）
 # ---------------------------------------------------------------------------
-# 预处理函数/结构体已移至 chat_agent_preprocessor.py
+# chat_agent owns final reply rendering. Do not import fallback/render/buffering
+# functions from the preprocessor here, otherwise module globals are overwritten
+# after definition and the normal chat path becomes split-brain again.
 from host_brain.app.chat_agent_preprocessor import (  # noqa: F401, E402
-    SubAgentContext,
-    ChatAgentInput,
-    _sse,
-    _airlock_sanitize_output,
-    _strip_internal_delegate_markers,
-    _build_reply_preview,
-    _coerce_render_policy,
-    _split_text_into_sentences,
-    _truncate_text_to_sentence_limit,
-    _truncate_text_to_char_limit,
-    _extract_render_policy_limits,
-    _coerce_render_policy_score,
-    _apply_render_policy_stream_guard,
-    _render_policy_requires_buffering,
-    _apply_render_policy_hard_guard,
-    _build_minimal_chat_fallback_reply,
-    _build_chat_agent_quality_fallback_reply,
-    _build_chat_agent_fallback_reply,
-    _build_installed_capabilities_reply,
-    _should_buffer_stream_output,
+    _build_sub_agent_result_preserving_fallback_reply,
     _should_preserve_sub_agent_result_for_user,
-    _build_deterministic_sub_agent_reply,
-    _build_sub_agent_context_prompt,
-    _extract_visible_text,
-    _extract_tts_text,
-    _infer_emotion_tag_for_tts,
-    render_quick_gateway_ack_text,
-    render_quick_gateway_progress_text,
-    render_quick_gateway_realign_text,
 )
 
 # 后处理函数已移至 chat_agent_postprocessor.py

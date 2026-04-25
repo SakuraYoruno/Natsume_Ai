@@ -65,7 +65,7 @@ def test_record_assistant_turn_remembers_real_generated_reply(monkeypatch) -> No
         request_id="req-1",
         session_id="sess-1",
         person_id="user-1",
-        content="哥哥，好嘛，那我就当自己刚才多想了一点。",
+        content="哥哥，猫耳那张我接住了。",
         ts_ms=1,
         lang="zh",
         metadata={"provider_name": "gemini", "model_id": "gemini-2.5-pro", "fallback": False},
@@ -79,7 +79,7 @@ def test_record_assistant_turn_remembers_real_generated_reply(monkeypatch) -> No
     )
 
     assert len(capture.calls) == 1
-    assert "多想" in str(capture.calls[0]["text"])
+    assert "猫耳" in str(capture.calls[0]["text"])
     assert turn_store.calls[0]["metadata"]["soul_id"] == "test-soul"
     assert turn_store.calls[0]["metadata"]["primary_topic"] == "emoji_social_followup"
     assert turn_store.calls[0]["metadata"]["tactic_family"] == "soft_emotion_ack"

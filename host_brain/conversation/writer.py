@@ -16,6 +16,7 @@ from host_brain.persona.reply_surface_memory import (
     build_assistant_followup_context_fingerprint,
     build_reply_surface_memory_key,
 )
+from host_brain.persona.fallback_policy import is_surface_cacheable_reply
 from host_brain.core.soft_fail import soft_fail
 
 _logger = logging.getLogger("Natsume.conversation.writer")
@@ -160,6 +161,7 @@ def record_assistant_turn(
             provider_name = str(merged_metadata.get("provider_name") or "").strip()
             model_id = str(merged_metadata.get("model_id") or "").strip()
             fallback_used = bool(merged_metadata.get("fallback"))
+            message_kind = str(merged_metadata.get("message_kind") or "").strip().lower()
             allowed_topics = {
                 "greeting",
                 "presence_ping",
@@ -180,9 +182,11 @@ def record_assistant_turn(
                 and response_form in cacheable_response_forms
                 and (primary_topic != "assistant_reply_followup" or bool(followup_context_fingerprint))
                 and not fallback_used
+                and message_kind in {"", "final_reply"}
                 and model_id != "deterministic-plan-renderer"
                 and provider_name != "host"
                 and len(normalized_content.strip()) >= 4
+                and is_surface_cacheable_reply(text=normalized_content, metadata=merged_metadata)
             ):
                 cache_key = build_reply_surface_memory_key(
                     soul_id=str(merged_metadata.get("soul_id") or "").strip(),

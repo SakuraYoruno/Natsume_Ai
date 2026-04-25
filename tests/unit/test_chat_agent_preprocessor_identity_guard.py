@@ -469,7 +469,7 @@ def test_deterministic_fallback_uses_multimodal_core_observation() -> None:
         render_target_lang="zh",
     )
 
-    assert "花" in fallback
+    assert "没接稳" in fallback
     assert "你想让我先说图里有什么吗" not in fallback
 
 
@@ -479,8 +479,9 @@ def test_deterministic_fallback_is_minimal_skeleton_not_fixed_persona_line() -> 
         render_target_lang="zh",
     )
 
-    assert get_compiled_soul().display_name in fallback
-    assert "哪一部分" in fallback or "怎么又问" in fallback or "想问别的" in fallback
+    assert get_compiled_soul().display_name not in fallback
+    assert "哪一部分" not in fallback
+    assert "真正想问" not in fallback
 
 
 def test_image_social_reply_requires_validation_and_blocks_underanswered_stub() -> None:
@@ -525,7 +526,8 @@ def test_image_social_reply_requires_validation_and_blocks_underanswered_stub() 
     )
 
     assert "唔" not in fallback
-    assert "委屈" in fallback or "怎么啦" in fallback
+    assert "没接稳" in fallback
+    assert "委屈" not in fallback
 
 
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
@@ -572,8 +574,8 @@ def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
     assert fallback != "我知道了。"
     assert "刚才" in fallback
-    assert "你知道吗" in fallback
-    assert "知道" in fallback
+    assert "你知道吗" not in fallback
+    assert "知道。" not in fallback
 
     rescue_seed = build_semantic_rescue_seed(plan=plan)
     assert "你知道吗" in rescue_seed
@@ -613,7 +615,8 @@ def test_image_social_cute_fallback_uses_cute_branch_instead_of_generic_attachme
     )
 
     assert "突然发这么一张图" not in fallback
-    assert any(token in fallback for token in ("可爱", "哄你", "撒娇"))
+    assert "没接稳" in fallback
+    assert not any(token in fallback for token in ("哄你", "撒娇"))
 
 
 def test_image_social_followup_deny_fallback_no_longer_collapses_to_hum_or_nothing() -> None:
@@ -641,7 +644,8 @@ def test_image_social_followup_deny_fallback_no_longer_collapses_to_hum_or_nothi
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
 
     assert fallback not in {"哼。", "没什么。", "唔。"}
-    assert any(token in fallback for token in ("多想", "当你只是", "刚才那张图"))
+    assert "多想" not in fallback
+    assert "没接稳" in fallback
 
 
 def test_image_social_followup_why_fallback_explains_previous_read_instead_of_plain_hold() -> None:
@@ -669,7 +673,8 @@ def test_image_social_followup_why_fallback_explains_previous_read_instead_of_pl
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
 
     assert fallback not in {"哼。", "没什么。", "唔。"}
-    assert any(token in fallback for token in ("刚才那张图", "往那边想"))
+    assert "刚才那张图" not in fallback
+    assert "没接稳" in fallback
 
 
 def test_deterministic_reply_fallback_prefers_cached_surface_text(monkeypatch) -> None:
@@ -706,7 +711,8 @@ def test_deterministic_reply_fallback_prefers_cached_surface_text(monkeypatch) -
 
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
 
-    assert fallback == "哥哥，好嘛，那我就当自己刚才多想了一点。"
+    assert fallback != "哥哥，好嘛，那我就当自己刚才多想了一点。"
+    assert "没接稳" in fallback
 
 
 def test_explicit_non_buffering_reply_plan_overrides_legacy_buffering_heuristics() -> None:
