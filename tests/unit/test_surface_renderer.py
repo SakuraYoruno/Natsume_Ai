@@ -168,6 +168,8 @@ def test_surface_renderer_candidate_acceptance_guards() -> None:
     assert renderer._accept_image_candidate("哥哥今天怎么这么安静。", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_EMOTION_NOT_USED"
     assert renderer._accept_image_candidate("哥哥，你看我这小猫耳朵是不是超可爱呀！", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate("哥哥，你是不是觉得这张图里的猫猫很可爱呀？", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+    assert renderer._accept_image_candidate("哼，哥哥又在逗我了是不是！", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+    assert renderer._accept_image_candidate("哥哥又拿这股劲逗我，我有点招架不住。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEASE_OVERINFERRED"
     assert renderer._accept_image_candidate("被你这么一晃，我有点招架不住。", _validation(safe=False), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_VALIDATION_FAILED"
     assert renderer._accept_image_candidate(
         "被你这么一晃，我有点招架不住。",
@@ -332,7 +334,7 @@ async def test_surface_renderer_image_rejects_template_and_accepts_emotion_respo
     ("family", "expected_hint", "candidate"),
     [
         ("soft_emotion_ack", "有点蔫或委屈", "好啦，别用这种委屈劲晃我，我会心软的。"),
-        ("tease_image_ack", "小表情来戳你", "哥哥又拿这股劲逗我，我有点招架不住。"),
+        ("tease_image_ack", "小吐槽或小别扭", "哥哥，这股小别扭我接住啦。"),
     ],
 )
 async def test_surface_renderer_image_prompt_uses_emotion_action_hints(monkeypatch, family, expected_hint, candidate) -> None:

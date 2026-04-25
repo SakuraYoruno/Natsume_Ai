@@ -369,17 +369,32 @@ class SurfaceRenderer:
             }
             return SurfaceResult(source="surface", skipped_reason="image_social_observation_empty")
         family = str(getattr(plan, "tactic_family", "") or "").strip()
+        compact_observation = observation_text.replace(" ", "")
+        has_dry_or_awkward_signal = any(
+            token in compact_observation
+            for token in ("无语", "尴尬", "裂开", "社死", "不爽", "服了", "别扭")
+        )
+        has_explicit_tease_signal = any(
+            token in compact_observation
+            for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")
+        )
         if family == "soft_emotion_ack":
-            action_hint = "像看见对方发了有点蔫或委屈的图时顺手接一句，但不要替对方定性。"
+            if has_dry_or_awkward_signal:
+                action_hint = "像看见对方发了无语或小吐槽的图时顺手接一句；不要替对方加戏成在逗你。"
+            else:
+                action_hint = "像看见对方发了有点蔫或委屈的图时顺手接一句，但不要替对方定性。"
         elif family == "tease_image_ack":
-            action_hint = "像看见对方拿小表情来戳你时轻轻逗一句，别盘问，也别说教。"
+            if has_explicit_tease_signal:
+                action_hint = "像看见对方拿小表情来戳你时轻轻逗一句，别盘问，也别说教。"
+            else:
+                action_hint = "像看见对方小吐槽或小别扭时轻轻接一句；不要反问是不是在逗你。"
         else:
             action_hint = "顺着对方装乖/卖萌/求关注的动作接一句，像被轻轻晃了一下，不要用力卖萌。"
         system_prompt = (
             "你只负责把用户发来的图片/表情包接成一句自然聊天。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
             "把表情包当成对方发来的情绪动作，不要当图片鉴赏。"
-            "回复对方正在表达的情绪：撒娇、装乖、委屈、嘴硬、逗你、求关注等。"
+            "回复对方正在表达的情绪：撒娇、装乖、委屈、嘴硬、小吐槽、求关注等；只有观察明确是调侃/逗弄时，才按“逗你”处理。"
             "不要解释规则，不要写画面说明书，不要客服腔，不要只回语气词。"
             "禁止使用旧模板：突然这么可爱、想让我哄你吗、想跟我撒娇吗、怎么啦、闹别扭、会错意。"
             "用户发来的图不是你本人，不要说“我今天可爱吗/我可爱吗/看我可爱吗”。"
@@ -465,6 +480,15 @@ class SurfaceRenderer:
     ) -> tuple[bool, str]:
         if is_image_social_surface_sample_disallowed(candidate) or is_forbidden_surface_text(candidate):
             return False, "IMAGE_SURFACE_TEMPLATE_SHAPE"
+        observation = image_social_observation_text(multimodal)
+        compact_observation = observation.replace(" ", "")
+        compact_candidate = re.sub(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+", "", candidate)
+        has_explicit_tease_signal = any(
+            token in compact_observation
+            for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")
+        )
+        if not has_explicit_tease_signal and any(token in compact_candidate for token in ("逗我", "玩我", "新花样")):
+            return False, "IMAGE_SURFACE_TEASE_OVERINFERRED"
         if not candidate_responds_to_image_social_emotion(candidate):
             return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
         if not _validation_is_acceptable(validation):

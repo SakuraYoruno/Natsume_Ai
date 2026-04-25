@@ -50,6 +50,12 @@ def _multimodal_signal_haystack(multimodal: dict[str, Any] | None) -> str:
 
 def _image_social_candidates(multimodal: dict[str, Any] | None) -> list[tuple[str, str]]:
     haystack = _multimodal_signal_haystack(multimodal)
+    if any(token in haystack for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")):
+        return [
+            ("tease_image_ack", "light_nudge"),
+            ("soft_emotion_ack", "steady_hold"),
+            ("cute_image_ack", "cute_ping"),
+        ]
     if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "泪", "可怜", "呜")):
         return [
             ("soft_emotion_ack", "distress_image"),
@@ -64,8 +70,8 @@ def _image_social_candidates(multimodal: dict[str, Any] | None) -> list[tuple[st
         ]
     if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "别扭", "小脾气", "鼓脸", "气鼓鼓", "不爽", "服了")):
         return [
-            ("tease_image_ack", "light_nudge"),
             ("soft_emotion_ack", "steady_hold"),
+            ("tease_image_ack", "light_nudge"),
             ("cute_image_ack", "cute_ping"),
         ]
     return [
@@ -750,13 +756,20 @@ def _refine_multimodal_contract(
         if str(item).strip()
     )
     if topic == "emoji_social_reply" and primary_modality == "image":
+        signal_haystack = _multimodal_signal_haystack(payload)
+        if any(token in signal_haystack for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")):
+            action_options_text = "必须先判断它像是在撒娇、装乖、委屈、嘴硬、逗你还是求关注，再对这个动作回一句。"
+        elif any(token in signal_haystack for token in ("无语", "尴尬", "裂开", "社死", "别扭", "小脾气", "鼓脸", "气鼓鼓", "不爽", "服了")):
+            action_options_text = "必须先判断它像是在无语、小吐槽、尴尬、嘴硬还是别扭，再对这个情绪动作回一句。"
+        else:
+            action_options_text = "必须先判断它像是在撒娇、装乖、委屈、嘴硬、卖萌还是求关注，再对这个动作回一句。"
         extra_by_variant = {
             ("soft_emotion_ack", "distress_image"): "按表情包表达的情绪来接：像对方在委屈/蔫下来时顺手放轻一句。",
             ("soft_emotion_ack", "soft_hold"): "按表情包表达的情绪来接：像对方在软软地撒娇或求关注，轻轻接住。",
             ("soft_emotion_ack", "steady_hold"): "按表情包表达的情绪来接：先接住那层情绪，再稳稳回一句。",
             ("cute_image_ack", "cute_ping"): "按表情包表达的动作来接：像对方在装乖/卖萌/晃你，直接回这个动作。",
             ("cute_image_ack", "soft_hold"): "按表情包表达的动作来接：像对方在轻轻撒娇，顺手接住。",
-            ("tease_image_ack", "light_nudge"): "按表情包表达的动作来接：像对方在小别扭或逗你，轻一点逗回去。",
+            ("tease_image_ack", "light_nudge"): "按表情包表达的动作来接：像对方在小别扭或吐槽，轻一点接住，不要硬说对方在逗你。",
         }
         extra_text = extra_by_variant.get((family, variant), "按表情包表达的情绪动作来接，不要把它当成图片点评。")
         return ReplyContract(
@@ -765,7 +778,7 @@ def _refine_multimodal_contract(
                     base_text,
                     extra_text,
                     "只回一句短接话，别写成小剧场。",
-                    "必须先判断它像是在撒娇、装乖、委屈、嘴硬、逗你还是求关注，再对这个动作回一句。",
+                    action_options_text,
                     "不要评价这张图/图里/猫耳/这个表情怎么样，也不要解说画面。",
                     "不要把问题抛回给对方，不要问“是不是觉得这张图可爱”。",
                     "不要把自己写成图片主体，不要写我的猫耳/我比猫猫可爱/变成猫这类展开。",
