@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -132,6 +134,21 @@ def _resolve_uvicorn_access_log_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _configure_windows_event_loop_policy() -> None:
+    if platform.system().lower() != "windows":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    try:
+        asyncio.set_event_loop_policy(selector_policy())
+    except Exception:
+        logging.getLogger("Natsume.main").warning(
+            "Failed to set Windows selector event loop policy",
+            exc_info=True,
+        )
+
+
 def run_startup_check(db_path: str) -> bool:
     """运行启动健康检查"""
     logger = logging.getLogger("Natsume.startup")
@@ -185,6 +202,7 @@ def _env_int(value: object, *, default: int, min_value: int, max_value: int) -> 
 
 def main() -> int:
     """主函数入口"""
+    _configure_windows_event_loop_policy()
     args = parse_args()
 
     # 配置日志

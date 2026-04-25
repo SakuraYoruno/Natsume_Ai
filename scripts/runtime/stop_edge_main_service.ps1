@@ -15,6 +15,31 @@ function Get-ListeningPid {
   return [int]$conn.OwningProcess
 }
 
+function Is-EdgeMainProcess {
+  param([int]$ProcessId)
+  $procInfo = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+  if ($null -eq $procInfo) {
+    return $false
+  }
+  $cmd = [string]$procInfo.CommandLine
+  if (-not $cmd) {
+    return $false
+  }
+  return ($cmd -like "*-m edge_client*")
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+  }
+}
+
 function Read-TrimmedFileText {
   param(
     [Parameter(Mandatory = $true)]
@@ -57,7 +82,7 @@ if (Test-Path -Path $PidFile) {
       $edgePid = $parsedEdgePid
       $proc = Get-Process -Id $edgePid -ErrorAction SilentlyContinue
       if ($null -ne $proc) {
-        Stop-Process -Id $edgePid -Force -ErrorAction SilentlyContinue
+        Stop-ProcessTree -ProcessId $edgePid
         $stopped = $true
         $detail = "edge main process stopped"
       } else {
@@ -77,11 +102,30 @@ if (Test-Path -Path $PidFile) {
 if (-not $stopped) {
   $listeningPid = Get-ListeningPid -ProbePort $Port
   if ($null -ne $listeningPid) {
-    Stop-Process -Id $listeningPid -Force -ErrorAction SilentlyContinue
+    Stop-ProcessTree -ProcessId $listeningPid
     $stopped = $true
     $edgePid = $listeningPid
     $detail = "edge main process stopped by port probe"
   }
+}
+
+$residualEdgePids = @()
+foreach ($procInfo in @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)) {
+  $candidatePid = [int]$procInfo.ProcessId
+  if ($candidatePid -le 0) {
+    continue
+  }
+  if ($edgePid -ne $null -and [int]$candidatePid -eq [int]$edgePid) {
+    continue
+  }
+  if (Is-EdgeMainProcess -ProcessId $candidatePid) {
+    Stop-ProcessTree -ProcessId $candidatePid
+    $residualEdgePids += $candidatePid
+    $stopped = $true
+  }
+}
+if ($residualEdgePids.Count -gt 0) {
+  $detail = ("stopped residual edge main processes: {0}" -f (($residualEdgePids | Sort-Object -Unique) -join ","))
 }
 
 $qqOneBotStopResult = Stop-QQOneBotIfOwned -RuntimeRoot $runtimeEdge

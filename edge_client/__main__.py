@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
+import platform
 import sys
 
 import uvicorn
@@ -14,6 +16,18 @@ from edge_client.runtime import bootstrap, collect_health, shutdown, startup
 
 
 LOGGER = logging.getLogger("Natsume.edge.main")
+
+
+def _configure_windows_event_loop_policy() -> None:
+    if platform.system().lower() != "windows":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    try:
+        asyncio.set_event_loop_policy(selector_policy())
+    except Exception:
+        LOGGER.warning("Failed to set Windows selector event loop policy", exc_info=True)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -27,6 +41,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_windows_event_loop_policy()
     args = _build_parser().parse_args(list(argv) if argv is not None else [])
 
     logging.basicConfig(
