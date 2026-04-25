@@ -492,6 +492,7 @@ def _trace_node_sort_key(node: Mapping[str, Any]) -> tuple[int, int, str]:
         "chat_agent": 50,
         "assistant_followup_surface_render": 51,
         "image_social_surface_render": 51,
+        "image_social_surface_repair_render": 51,
         "identity_surface_render": 51,
         "phatic_surface_render": 51,
         "surface_render": 51,
@@ -945,6 +946,7 @@ async def _persist_post_process_audit(
     for _surface_key, _surface_name in (
         ("assistant_followup_surface_render", "Assistant Followup Surface"),
         ("image_social_surface_render", "Image Social Surface"),
+        ("image_social_surface_repair_render", "Image Social Surface Repair"),
         ("identity_surface_render", "Identity Surface"),
         ("phatic_surface_render", "Phatic Surface"),
         ("surface_render", "Surface Renderer"),
@@ -2984,4 +2986,3 @@ def _resolve_persisted_fallback_flag(
         degrade_code=str(normalized_trace_stage_meta.get("degrade_code") or ""),
         output_data={"narrative": narrative, "provider_name": provider_name, "model_id": model_id},
     )
-

@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Database,
+  Eye,
   FileText,
   GitBranch,
   Lock,
@@ -17,16 +18,19 @@ import NoticeBanner from '../components/NoticeBanner.jsx'
 import useAppStore from '../store/useAppStore.js'
 import {
   acceptCodexBioOpsAdoption,
+  acceptCodexBioOpsOwnerState,
   consumeCodexBioOpsOwnerQueues,
   fetchCodexBioOpsAdoptionDetail,
   fetchCodexBioOpsOwnerInbox,
   fetchCodexBioOpsOwnerImportCandidates,
   fetchCodexBioOpsOwnerQueues,
+  fetchCodexBioOpsOwnerRuntimeHints,
   fetchCodexBioOpsOwnerState,
   importCodexBioOpsOwnerState,
   materializeCodexBioOpsOwnerInbox,
   materializeCodexBioOpsOwnerIntakePackets,
   rejectCodexBioOpsAdoption,
+  rejectCodexBioOpsOwnerState,
   runCodexBioOpsDailyCycle,
 } from '../api/obs.js'
 import { useCodexBioOpsObservabilityQuery } from '../queries/codexBioOpsQueries.js'
@@ -43,6 +47,11 @@ const STATUS_STYLES = {
   QUEUED_FOR_OWNER: 'border-purple-200 bg-purple-50 text-purple-700',
   IMPORTED_FOR_OWNER_REVIEW: 'border-emerald-200 bg-emerald-50 text-emerald-700',
   ALREADY_IMPORTED: 'border-slate-200 bg-slate-50 text-slate-700',
+  PENDING_OWNER_STATE_REVIEW: 'border-amber-200 bg-amber-50 text-amber-700',
+  OWNER_STATE_ACCEPTED: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  OWNER_STATE_REJECTED: 'border-slate-200 bg-slate-50 text-slate-700',
+  ACTIVE: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  INACTIVE: 'border-slate-200 bg-slate-50 text-slate-700',
   PENDING_REVIEW: 'border-amber-200 bg-amber-50 text-amber-700',
   REJECTED_BY_OWNER: 'border-slate-200 bg-slate-50 text-slate-700',
   TRACED: 'border-indigo-200 bg-indigo-50 text-indigo-700',
@@ -68,6 +77,11 @@ const STATUS_LABELS = {
   QUEUED_FOR_OWNER: 'Owner 队列',
   IMPORTED_FOR_OWNER_REVIEW: 'Owner 状态候选',
   ALREADY_IMPORTED: '已导入',
+  PENDING_OWNER_STATE_REVIEW: '待 owner state 审核',
+  OWNER_STATE_ACCEPTED: 'State 已采纳',
+  OWNER_STATE_REJECTED: 'State 已拒绝',
+  ACTIVE: '活跃',
+  INACTIVE: '停用',
   PENDING_REVIEW: '待审核',
   REJECTED_BY_OWNER: 'Owner 拒绝',
   TRACED: '已 trace',
@@ -698,15 +712,18 @@ function OwnerInboxPanel({ runId }) {
   const [imports, setImports] = useState(null)
   const [queues, setQueues] = useState(null)
   const [ownerState, setOwnerState] = useState(null)
+  const [ownerRuntimeHints, setOwnerRuntimeHints] = useState(null)
   const [lastMaterialized, setLastMaterialized] = useState(null)
   const [lastPackets, setLastPackets] = useState(null)
   const [lastConsumed, setLastConsumed] = useState(null)
   const [lastImported, setLastImported] = useState(null)
+  const [lastStateReview, setLastStateReview] = useState(null)
   const [loading, setLoading] = useState(false)
   const [materializing, setMaterializing] = useState(false)
   const [packetizing, setPacketizing] = useState(false)
   const [consuming, setConsuming] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [reviewingCandidate, setReviewingCandidate] = useState('')
   const [error, setError] = useState(null)
   const runParams = runId ? { run_id: runId } : {}
 
@@ -714,16 +731,18 @@ function OwnerInboxPanel({ runId }) {
     setLoading(true)
     setError(null)
     try {
-      const [inboxPayload, importPayload, queuePayload, statePayload] = await Promise.all([
+      const [inboxPayload, importPayload, queuePayload, statePayload, hintPayload] = await Promise.all([
         fetchCodexBioOpsOwnerInbox(runParams),
         fetchCodexBioOpsOwnerImportCandidates(runParams),
         fetchCodexBioOpsOwnerQueues(runParams),
         fetchCodexBioOpsOwnerState(runParams),
+        fetchCodexBioOpsOwnerRuntimeHints(runParams),
       ])
       setData(inboxPayload)
       setImports(importPayload)
       setQueues(queuePayload)
       setOwnerState(statePayload)
+      setOwnerRuntimeHints(hintPayload)
     } catch (err) {
       setError(err)
     } finally {
@@ -793,13 +812,38 @@ function OwnerInboxPanel({ runId }) {
     }
   }
 
+  const reviewOwnerState = async (candidateId, ownerOrgan, decision) => {
+    const id = String(candidateId || '').trim()
+    if (!id) return
+    setReviewingCandidate(`${decision}:${id}`)
+    setError(null)
+    try {
+      const body = {
+        owner_organ: ownerOrgan,
+        operator: 'monitor_ui',
+        reason: decision === 'accept' ? 'owner accepted runtime hint' : 'owner rejected runtime hint',
+      }
+      const payload = decision === 'accept'
+        ? await acceptCodexBioOpsOwnerState(id, body, runParams)
+        : await rejectCodexBioOpsOwnerState(id, body, runParams)
+      setLastStateReview(payload)
+      await loadInbox()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setReviewingCandidate('')
+    }
+  }
+
   const rows = Array.isArray(data?.items) ? data.items : []
   const queueRows = Array.isArray(queues?.items) ? queues.items : []
   const stateRows = Array.isArray(ownerState?.items) ? ownerState.items : []
+  const hintRows = Array.isArray(ownerRuntimeHints?.items) ? ownerRuntimeHints.items : []
   const counts = data?.status_counts || {}
   const importCounts = imports?.status_counts || {}
   const queueCounts = queues?.status_counts || {}
   const stateCounts = ownerState?.status_counts || {}
+  const reviewCounts = ownerState?.review_status_counts || {}
 
   return (
     <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
@@ -889,6 +933,10 @@ function OwnerInboxPanel({ runId }) {
           <div className="font-semibold text-emerald-700">Owner state</div>
           <div className="mt-1 text-xl font-bold text-gray-900">{stateCounts.IMPORTED_FOR_OWNER_REVIEW || ownerState?.count || 0}</div>
         </div>
+        <div className="rounded-lg border border-cyan-100 bg-cyan-50 px-2 py-2">
+          <div className="font-semibold text-cyan-700">Runtime hints</div>
+          <div className="mt-1 text-xl font-bold text-gray-900">{ownerRuntimeHints?.count || 0}</div>
+        </div>
       </div>
 
       {rows.length ? (
@@ -937,6 +985,12 @@ function OwnerInboxPanel({ runId }) {
         </div>
       ) : null}
 
+      {lastStateReview ? (
+        <div className="mt-3 rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs leading-5 text-cyan-700">
+          Owner state review: {lastStateReview.status} · runtime hints {lastStateReview.runtime_hints?.count || 0} · 长期写入仍为 false。
+        </div>
+      ) : null}
+
       {queueRows.length ? (
         <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-purple-100">
           {queueRows.slice(0, 6).map((item) => (
@@ -958,15 +1012,64 @@ function OwnerInboxPanel({ runId }) {
       {stateRows.length ? (
         <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-emerald-100">
           {stateRows.slice(0, 6).map((item) => (
-            <div key={`${item.owner_organ}-${item.channel_id}-${item.candidate_id}`} className="grid grid-cols-1 gap-2 bg-white px-3 py-2 text-xs sm:grid-cols-[1fr_0.8fr_0.8fr]">
+            <div key={`${item.owner_organ}-${item.channel_id}-${item.candidate_id}`} className="grid grid-cols-1 gap-2 bg-white px-3 py-2 text-xs sm:grid-cols-[1fr_0.72fr_0.78fr_0.95fr]">
               <div className="min-w-0">
                 <div className="truncate font-semibold text-gray-800">{item.capability}</div>
                 <div className="truncate text-gray-500">{item.candidate_id}</div>
               </div>
               <div className="truncate text-gray-500">{item.channel_id || item.owner_organ || '—'}</div>
               <div className="flex items-center justify-between gap-2">
-                <StatusPill status={item.status} />
+                <StatusPill status={item.review_status || item.status} />
                 <span className="font-semibold text-gray-500">{item.durable_memory_write_performed ? 'memory-write' : 'candidate-only'}</span>
+              </div>
+              <div className="flex flex-wrap justify-start gap-1.5 sm:justify-end">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={reviewingCandidate === `accept:${item.candidate_id}` || item.review_status === 'OWNER_STATE_ACCEPTED'}
+                  onClick={() => reviewOwnerState(item.candidate_id, item.owner_organ, 'accept')}
+                >
+                  <CheckCircle2 size={12} />
+                  accept
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-semibold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={reviewingCandidate === `reject:${item.candidate_id}` || item.review_status === 'OWNER_STATE_REJECTED'}
+                  onClick={() => reviewOwnerState(item.candidate_id, item.owner_organ, 'reject')}
+                >
+                  <XCircle size={12} />
+                  reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {stateRows.length ? (
+        <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-3">
+          {['PENDING_OWNER_STATE_REVIEW', 'OWNER_STATE_ACCEPTED', 'OWNER_STATE_REJECTED'].map((status) => (
+            <div key={status} className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
+              <StatusPill status={status} />
+              <div className="mt-2 text-lg font-bold text-gray-900">{reviewCounts[status] || 0}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {hintRows.length ? (
+        <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-cyan-100">
+          {hintRows.slice(0, 6).map((item) => (
+            <div key={`${item.owner_organ}-${item.hint_id}`} className="grid grid-cols-1 gap-2 bg-white px-3 py-2 text-xs sm:grid-cols-[1fr_0.8fr_0.8fr]">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-gray-800">{item.guidance_type || item.capability}</div>
+                <div className="truncate text-gray-500">{item.guidance || item.summary}</div>
+              </div>
+              <div className="truncate text-gray-500">{item.owner_organ || '—'}</div>
+              <div className="flex items-center justify-between gap-2">
+                <StatusPill status={item.status} />
+                <span className="inline-flex items-center gap-1 font-semibold text-gray-500"><Eye size={12} /> trace-only</span>
               </div>
             </div>
           ))}

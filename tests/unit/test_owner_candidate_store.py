@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 
 from host_brain.organ_ops.owner_candidate_store import (
+    OWNER_BEHAVIOR_HINT_WRITE_POLICY,
+    OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED,
+    OWNER_CANDIDATE_REVIEW_STATUS_REJECTED,
     OWNER_CANDIDATE_STATUS_ALREADY_IMPORTED,
     OWNER_CANDIDATE_STATUS_BLOCKED,
     OWNER_CANDIDATE_STATUS_IMPORTED,
+    OWNER_CANDIDATE_STATE_DECISION_WRITE_POLICY,
     OWNER_DURABLE_CANDIDATE_WRITE_POLICY,
     OwnerCandidateStateStore,
     validate_owner_queue_item_for_durable_import,
@@ -120,3 +124,61 @@ def test_owner_candidate_store_is_idempotent_and_dry_run_safe(tmp_path) -> None:
     assert second["imported_count"] == 0
     assert second["already_imported_count"] == 1
     assert second["already_imported"][0]["status"] == OWNER_CANDIDATE_STATUS_ALREADY_IMPORTED
+
+
+def test_owner_candidate_store_accepts_state_into_runtime_hint(tmp_path) -> None:
+    queue_root = tmp_path / "owner_queues"
+    state_root = tmp_path / "owner_state"
+    queue_path = queue_root / "social_brain_agent" / "social_brain_candidate_queue" / "candidate-1" / "queue_item.json"
+    _write_json(queue_path, _queue_item())
+
+    store = OwnerCandidateStateStore(queue_root=queue_root, state_root=state_root)
+    store.import_all()
+    review = store.review_candidate_state(
+        "candidate-1",
+        owner_organ="social_brain_agent",
+        decision="OWNER_ACCEPTED",
+        operator="pytest",
+        reason="accept runtime hint",
+    )
+
+    hint_path = state_root / "social_brain_agent" / "social_brain_candidate_queue" / "candidate-1" / "owner_behavior_hint.json"
+    decision_path = state_root / "social_brain_agent" / "social_brain_candidate_queue" / "candidate-1" / "owner_candidate_decision.json"
+    state_path = state_root / "social_brain_agent" / "social_brain_candidate_queue" / "candidate-1" / "owner_candidate_state.json"
+    assert review["ok"] is True
+    assert review["status"] == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED
+    assert review["owner_runtime_hint_write_performed"] is True
+    assert review["direct_long_term_write"] is False
+    assert review["durable_memory_write_performed"] is False
+    assert hint_path.exists()
+    assert decision_path.exists()
+
+    hint = json.loads(hint_path.read_text(encoding="utf-8"))
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert hint["write_policy"] == OWNER_BEHAVIOR_HINT_WRITE_POLICY
+    assert hint["status"] == "ACTIVE"
+    assert hint["guidance_type"] == "habit_hint"
+    assert hint["direct_long_term_write"] is False
+    assert decision["write_policy"] == OWNER_CANDIDATE_STATE_DECISION_WRITE_POLICY
+    assert state["review_status"] == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED
+
+    hints = store.scan_runtime_hints()
+    assert hints["count"] == 1
+    assert hints["status_counts"]["ACTIVE"] == 1
+
+
+def test_owner_candidate_store_rejects_state_without_active_hint(tmp_path) -> None:
+    queue_root = tmp_path / "owner_queues"
+    state_root = tmp_path / "owner_state"
+    queue_path = queue_root / "social_brain_agent" / "social_brain_candidate_queue" / "candidate-1" / "queue_item.json"
+    _write_json(queue_path, _queue_item())
+
+    store = OwnerCandidateStateStore(queue_root=queue_root, state_root=state_root)
+    store.import_all()
+    review = store.review_candidate_state("candidate-1", owner_organ="social_brain_agent", decision="OWNER_REJECTED")
+
+    assert review["ok"] is True
+    assert review["status"] == OWNER_CANDIDATE_REVIEW_STATUS_REJECTED
+    assert review["owner_runtime_hint_write_performed"] is False
+    assert store.scan_runtime_hints()["count"] == 0

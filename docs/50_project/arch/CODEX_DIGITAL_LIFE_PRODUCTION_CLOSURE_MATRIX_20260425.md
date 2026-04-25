@@ -23,7 +23,7 @@ This report closes the three Codex digital-life roadmaps against implemented cod
 | ImmunePlane | Implemented as Runtime v2 immune API | `host_brain/codex_runtime/immune.py`, `/internal/codex/immune/*` | health/readiness immune proposal and internal Codex jobs | Codex runtime tests and default gate |
 | BioOps contracts / runner | Implemented | `host_brain/bio_ops/contracts.py`, `runner.py`, `registry.py`, `safety.py`, `artifact_store.py` | `bio_ops_daily_full.json`, WebUI capability panels | `tests/unit/test_bio_ops_*`, `tests/integration/test_bio_ops_daily_cycle.py` |
 | Advanced mechanisms | Implemented as report/proposal/candidate capabilities | `host_brain/bio_ops/capabilities.py` | WebUI panels: Inner, Trust, Natural Interaction, Relationship, Inner Life, Self Governance, Growth, Memory, Affect, Presence, Drive, Adaptive Repair | capability and OBS route tests |
-| Owner adoption | Implemented | `adoption.py`, `owner_inbox.py`, `owner_consumer.py`, `organ_ops/owner_candidate_store.py` | adoption review, owner inbox, owner queues, owner candidate state | owner adoption/inbox/consumer/state tests |
+| Owner adoption | Implemented | `adoption.py`, `owner_inbox.py`, `owner_consumer.py`, `organ_ops/owner_candidate_store.py` | adoption review, owner inbox, owner queues, owner candidate state, runtime hints | owner adoption/inbox/consumer/state/runtime trace tests |
 | Daily cycle | Implemented as sidecar-friendly artifact runner | `host_brain/bio_ops/daily_cycle.py`, `scripts/runtime/run_bio_ops_daily_cycle.py` | WebUI `运行 daily cycle` button and observable run artifacts | daily-cycle unit/integration tests |
 | BioOps workflow automation | Implemented as sidecar workflow | `host_brain/bio_ops/workflow.py`, `scripts/runtime/run_bio_ops_workflow.py`, `.github/workflows/bio-ops-automation.yml` | GitHub workflow artifacts plus WebUI run id | workflow automation unit tests |
 | Chat/Planner low-risk trace | Implemented | `bio_ops/runtime_trace.py`, `chat_routes.py`, `executive_runtime_core.py`, `proactive_talk.py` | SSE trace metadata, immune-block trace, proactive quiet-presence trace | runtime trace, chat route, proactive tests |
@@ -40,10 +40,12 @@ BioOpsResult(CANDIDATE)
   -> owner_intake_packet.json
   -> owner_queues/<owner>/<channel>/<candidate>/queue_item.json
   -> owner_state/<owner>/<channel>/<candidate>/owner_candidate_state.json
-  -> owner organ review before any real long-term state application
+  -> owner_candidate_decision.json
+  -> owner_behavior_hint.json
+  -> runtime trace reads owner_runtime_hint_only
 ```
 
-Current closure now reaches owner-owned durable candidate state. That is still not an applied memory, Bond, Canon, persona, secret, `.env`, or production configuration write; it is a persistent owner review record with `direct_long_term_write = false`, `durable_write_performed = false`, and `durable_memory_write_performed = false`.
+Current closure now reaches owner-owned durable candidate state and owner-accepted runtime hints. These hints are trace-only behavior guidance, not applied memory, Bond, Canon, persona, secret, `.env`, or production configuration writes; all records keep `direct_long_term_write = false`, `durable_write_performed = false`, and `durable_memory_write_performed = false`.
 
 ## WebUI / OBS Entry Points
 
@@ -60,6 +62,9 @@ Current closure now reaches owner-owned durable candidate state. That is still n
 - `POST /obs/codex-bio-ops/owner-queues/consume`
 - `GET /obs/codex-bio-ops/owner-state`
 - `POST /obs/codex-bio-ops/owner-state/import`
+- `GET /obs/codex-bio-ops/owner-state/runtime-hints`
+- `POST /obs/codex-bio-ops/owner-state/{candidate_id}/accept`
+- `POST /obs/codex-bio-ops/owner-state/{candidate_id}/reject`
 
 ## Local Observation Commands
 
@@ -107,4 +112,4 @@ Hard-cut legacy-term scan over runtime code, tests, scripts, and prompts: no mat
 - Full-suite service failures remain classified as service/environment planes, not default gate regressions.
 - Live probes, hardware, TTS/ASR, Edge, gateway, Docker, and runtime probes remain manual or specialized CI planes.
 - BioOps owner queues are not durable state. They are reviewable handoff artifacts for the owning organ.
-- Owner candidate state is durable candidate review state only. Applying it to long-term memory, Bond, Canon, persona, secrets, `.env`, or production configuration remains a separate owner-specific action.
+- Owner candidate state is durable candidate review state only. Accepted runtime hints can influence `bio_ops_runtime_trace`, but applying anything to long-term memory, Bond, Canon, persona, secrets, `.env`, or production configuration remains a separate owner-specific action.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Mapping
 
 from host_brain.bio_ops.capabilities import (
@@ -10,6 +12,10 @@ from host_brain.bio_ops.capabilities import (
     evaluate_active_silence,
     resolve_internal_weather,
 )
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_OWNER_CANDIDATE_STATE_ROOT = REPO_ROOT / "artifacts" / "organ_ops_owner_candidate_state"
 
 
 def _float_value(value: object, *, default: float = 0.0) -> float:
@@ -33,6 +39,57 @@ def _planned_path_for_route(*, route_type: str, target_id: str) -> list[str]:
     if route == "task_progress":
         return ["task_progress_lookup"]
     return ["chat_llm"]
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        return _as_dict(json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        return {}
+
+
+def _load_owner_behavior_overlay(runtime_signals: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    signals = dict(runtime_signals or {})
+    root = Path(str(signals.get("owner_candidate_state_root") or DEFAULT_OWNER_CANDIDATE_STATE_ROOT)).expanduser()
+    hints: list[dict[str, Any]] = []
+    if root.exists():
+        for path in sorted(root.rglob("owner_behavior_hint.json")):
+            hint = _read_json(path)
+            if str(hint.get("status") or "").strip().upper() != "ACTIVE":
+                continue
+            if bool(hint.get("direct_long_term_write")) or bool(hint.get("durable_write_performed")):
+                continue
+            if str(hint.get("write_policy") or "").strip() != "owner_runtime_hint_only":
+                continue
+            hints.append(
+                {
+                    "hint_id": hint.get("hint_id"),
+                    "candidate_id": hint.get("candidate_id"),
+                    "owner_organ": hint.get("owner_organ"),
+                    "capability": hint.get("capability"),
+                    "output_kind": hint.get("output_kind"),
+                    "behavior_scope": hint.get("behavior_scope"),
+                    "guidance_type": hint.get("guidance_type"),
+                    "guidance": hint.get("guidance"),
+                    "path": str(path),
+                }
+            )
+    return {
+        "applied": bool(hints),
+        "hint_count": len(hints),
+        "hints": hints[:8],
+        "source_state_root": str(root),
+        "direct_long_term_write": False,
+        "durable_write_performed": False,
+        "durable_memory_write_performed": False,
+        "write_policy": "owner_runtime_hint_only",
+    }
 
 
 def build_response_breathing_policy(
@@ -111,6 +168,15 @@ def build_bio_ops_runtime_trace(
         emotion_context=emotion_context,
         route_type=route_type,
     )
+    owner_behavior_overlay = _load_owner_behavior_overlay(signals)
+    if owner_behavior_overlay["applied"]:
+        breathing = {
+            **breathing,
+            "owner_behavior_overlay_applied": True,
+            "owner_hint_count": owner_behavior_overlay["hint_count"],
+        }
+        if str(breathing.get("reason_code") or "") == "DEFAULT_BREATHING":
+            breathing["reason_code"] = "OWNER_HINT_AWARE_BREATHING"
 
     return {
         "source": "bio_ops.runtime_trace",
@@ -120,6 +186,7 @@ def build_bio_ops_runtime_trace(
         "internal_weather": weather,
         "active_silence": silence,
         "response_breathing": breathing,
+        "owner_behavior_overlay": owner_behavior_overlay,
         "forbidden_actions": ["codex_worker", "long_reasoning", "skill_execution"]
         if bool(dict(reflex).get("matched"))
         else [],

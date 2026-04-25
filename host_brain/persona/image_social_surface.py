@@ -61,6 +61,7 @@ _IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
     r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
     r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
 )
+_GENERIC_QUESTION_BACK_RE = re.compile(r"(?:是不是|对吧|是吧|对不对)(?:呀|啊|啦|呢|嘛|吧)?$")
 _DESCRIPTOR_FOCUS_RE = re.compile(
     r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
     r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
@@ -146,6 +147,8 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
     if compact.startswith(("怎么啦", "怎么了")):
         return True
     if any(marker in compact for marker in _VAGUE_SHAPES) and compact.endswith("吗"):
+        return True
+    if _GENERIC_QUESTION_BACK_RE.search(compact):
         return True
     if _SELF_AS_IMAGE_RE.search(compact):
         return True

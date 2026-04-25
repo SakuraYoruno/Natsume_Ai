@@ -477,6 +477,34 @@ def test_reply_plan_social_image_prefers_text_only() -> None:
     assert plan.force_buffering is True
 
 
+def test_reply_plan_social_image_with_dry_signal_prefers_soft_ack_not_tease() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "STRANGER", "score": 0.0},
+        motive_state={"continuity_drive": 0.0},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "emotion_signals": ["无语"],
+            "social_signal": "无语",
+            "summary_for_chat": "无语；一个动漫女孩表情略显严肃。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form_reason == "image_social_reply"
+    assert plan.tactic_family == "soft_emotion_ack"
+    assert plan.tactic_variant == "steady_hold"
+    assert "逗你" not in plan.reply_contract
+    assert "先接住那层情绪" in plan.reply_contract
+
+
 def test_reply_plan_social_image_rotates_tactic_family_when_recent_family_was_used() -> None:
     tactic_ledger = TacticLedgerBlock(
         entries=(

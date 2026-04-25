@@ -192,6 +192,7 @@ def run_bio_ops_automation_workflow(
             "write_policy": OWNER_DURABLE_CANDIDATE_WRITE_POLICY,
         }
     owner_candidate_state = owner_state_store.scan_state()
+    owner_runtime_hints = owner_state_store.scan_runtime_hints()
 
     skipped = _as_list(materialized.get("skipped"))
     blocked = [
@@ -229,6 +230,7 @@ def run_bio_ops_automation_workflow(
             "queues": owner_queues,
             "durable_import": owner_durable_import,
             "owner_candidate_state": owner_candidate_state,
+            "runtime_hints": owner_runtime_hints,
         },
         "counts": {
             "capabilities": int(daily_manifest.get("bio_ops_capability_count") or 0),
@@ -238,6 +240,7 @@ def run_bio_ops_automation_workflow(
             "queued_owner_items": int(owner_queues.get("count") or 0),
             "imported_owner_candidates": int(owner_durable_import.get("imported_count") or 0),
             "owner_candidate_state_items": int(owner_candidate_state.get("count") or 0),
+            "owner_runtime_hints": int(owner_runtime_hints.get("count") or 0),
             "skipped_owner_items": len(skipped),
             "blocked_owner_items": blocked_count,
         },
@@ -248,6 +251,7 @@ def run_bio_ops_automation_workflow(
             f"/obs/codex-bio-ops/owner-inbox/import-candidates?run_id={safe_run_id}",
             f"/obs/codex-bio-ops/owner-queues?run_id={safe_run_id}",
             f"/obs/codex-bio-ops/owner-state?run_id={safe_run_id}",
+            f"/obs/codex-bio-ops/owner-state/runtime-hints?run_id={safe_run_id}",
         ],
         "next_actions": [
             "Review queued owner items in the Codex/BioOps WebUI.",
