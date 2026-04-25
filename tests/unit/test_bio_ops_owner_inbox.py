@@ -4,6 +4,7 @@ import json
 
 from host_brain.bio_ops.owner_inbox import (
     BioOpsOwnerInbox,
+    resolve_owner_import_channel,
     validate_owner_import_artifact,
     validate_owner_import_candidate,
 )
@@ -82,6 +83,7 @@ def test_owner_inbox_scans_decisions_and_materializes_ready_candidates(tmp_path)
     artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
     assert artifact["direct_long_term_write"] is False
     assert artifact["write_policy"] == "owner_import_candidate_only"
+    assert artifact["owner_channel"]["channel_id"] == "social_brain_candidate_queue"
 
     import_scan = inbox.scan_import_candidates()
     assert import_scan["status_counts"]["READY_FOR_ORGAN_CONSUMPTION"] == 1
@@ -95,6 +97,7 @@ def test_owner_inbox_scans_decisions_and_materializes_ready_candidates(tmp_path)
     assert packet["direct_long_term_write"] is False
     assert packet["write_policy"] == "owner_intake_packet_only"
     assert packet["import_candidates"][0]["candidate_id"] == "ready"
+    assert packet["import_candidates"][0]["owner_channel"]["state_owner"] == "social_brain_agent"
 
 
 def test_owner_import_candidate_validation_blocks_owner_mismatch_and_missing_evidence() -> None:
@@ -131,3 +134,21 @@ def test_owner_import_artifact_validation_blocks_direct_write() -> None:
     assert allowed is False
     assert reason == "BIO_OPS_DIRECT_WRITE_FORBIDDEN"
     assert "durable state" in str(detail)
+
+
+def test_owner_import_channel_blocks_unsupported_output_kind(tmp_path) -> None:
+    assert resolve_owner_import_channel("social_brain_agent", "habit_candidate")["channel_id"] == "social_brain_candidate_queue"
+    assert resolve_owner_import_channel("social_brain_agent", "scar_candidate") is None
+
+    source = tmp_path / "source"
+    inbox_root = tmp_path / "owner_inbox"
+    _write_json(
+        source / "habit" / "unsupported" / "adoption_candidate.json",
+        _candidate("unsupported", output_kind="scar_candidate"),
+    )
+    _write_json(source / "habit" / "unsupported" / "adoption_decision.json", _decision("unsupported"))
+
+    materialized = BioOpsOwnerInbox(source_root=source, inbox_root=inbox_root).materialize_ready()
+
+    assert materialized["materialized_count"] == 0
+    assert materialized["skipped"][0]["reason_code"] == "BIO_OPS_OWNER_CHANNEL_UNSUPPORTED"
