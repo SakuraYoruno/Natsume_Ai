@@ -112,6 +112,12 @@ const EFFECT_LABELS = {
   social_mask_wechat: '社交面具',
   ritual_nightly: '仪式系统',
   gentle_degradation_tts: '温柔降级',
+  trust_gradient_codex: '信任梯度',
+  trust_thermostat_cooldown: '信任恒温',
+  intention_metabolism_checkin: '意图代谢',
+  drive_conflict_risk: '驱动力冲突',
+  desire_lattice_blocked: '愿望格',
+  need_want_impulse_proactive: 'Need/Want/Impulse',
 }
 
 const TRACE_LABELS = {
@@ -209,6 +215,15 @@ const PRESENCE_CHANNEL_LABELS = {
   social_mask_system: '社交面具',
   ritual_system: '仪式系统',
   gentle_degradation: '温柔降级',
+}
+
+const DRIVE_TRUST_LABELS = {
+  trust_gradient: '信任梯度',
+  trust_thermostat: '信任恒温器',
+  intention_metabolism: '意图代谢',
+  drive_conflict_layer: '驱动力冲突',
+  desire_lattice: '愿望格',
+  need_want_impulse: 'Need / Want / Impulse',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -650,6 +665,17 @@ function PresenceChannelPanel({ summary }) {
   )
 }
 
+function DriveTrustPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={DRIVE_TRUST_LABELS}
+      emptyTitle="暂无 Drive & Trust 数据"
+      note="驱动力与信任层只做信任温度、意图代谢、驱动力仲裁和愿望格报告；不提升权限、不主动执行。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -732,6 +758,7 @@ export default function CodexBioOpsObservability() {
   const memoryNarrative = bioOps.memory_narrative || {}
   const affectLearning = bioOps.affect_learning || {}
   const presenceChannel = bioOps.presence_channel || {}
+  const driveTrust = bioOps.drive_trust || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -904,6 +931,14 @@ export default function CodexBioOpsObservability() {
             />
             <MetricTile
               icon={ShieldCheck}
+              tone="slate"
+              label="驱动信任"
+              value={driveTrust.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${driveTrust.status_counts?.PROPOSED || 0} gates · ${driveTrust.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
+              icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
               value={pendingAdoptions.length || statusCounts.CANDIDATE || 0}
@@ -983,6 +1018,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Presence & Channel" subtitle="通道与存在感层：通道灵魂、长任务陪伴、注意力地形、静默陪伴、社交面具、仪式和温柔降级保持可观测。">
             <PresenceChannelPanel summary={presenceChannel} />
+          </Section>
+
+          <Section title="Drive & Trust" subtitle="驱动力与信任层：信任梯度、信任恒温器、意图代谢、驱动力冲突、愿望格和 Need/Want/Impulse 保持报告模式。">
+            <DriveTrustPanel summary={driveTrust} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

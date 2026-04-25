@@ -120,6 +120,17 @@ The presence-channel batch is implemented as report-only channel and presence po
 
 These are observable through the Codex / BioOps WebUI `Presence & Channel` panel. They do not trigger Codex workers, proactively disturb users, write long-term state, or mutate persona core, Bond, Canon, secrets, `.env`, or production configuration.
 
+The drive-trust batch is implemented as report-only intention and trust regulation:
+
+- `TrustGradient` -> `trust_gradient`, target trust score and inspect/review policy.
+- `TrustThermostat` -> `trust_thermostat`, bounded trust temperature adjustment.
+- `IntentionMetabolism` -> `intention_metabolism`, impulse/want/need/duty/promise classification before action.
+- `DriveConflictLayer` -> `drive_conflict_layer`, drive arbitration without executing the winning drive.
+- `DesireLattice` -> `desire_lattice`, low-intensity desire reports with blocked actions under load or sleep pressure.
+- `NeedWantImpulse` -> `need_want_impulse`, Need / Want / Impulse separation for proactive tendencies.
+
+These are observable through the Codex / BioOps WebUI `Drive & Trust` panel. They do not raise autonomy, dispatch Codex workers, schedule proactive actions, or write long-term state.
+
 ---
 
 ## 0. 总目标

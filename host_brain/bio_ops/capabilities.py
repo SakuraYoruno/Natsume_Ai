@@ -174,6 +174,15 @@ PRESENCE_CHANNEL_CAPABILITIES = (
     "gentle_degradation",
 )
 
+DRIVE_TRUST_CAPABILITIES = (
+    "trust_gradient",
+    "trust_thermostat",
+    "intention_metabolism",
+    "drive_conflict_layer",
+    "desire_lattice",
+    "need_want_impulse",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -284,6 +293,19 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "degrade_case",
         "technical_reason",
         "component_status",
+        "trust_target",
+        "trust_score",
+        "trust_temperature",
+        "trust_events",
+        "recent_successes",
+        "recent_failures",
+        "recent_timeouts",
+        "intention",
+        "drive",
+        "drives",
+        "desire",
+        "desires",
+        "sleep_pressure",
     ):
         value = task.inputs.get(key)
         if value:
@@ -2015,6 +2037,196 @@ def design_gentle_degradation(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def evaluate_trust_gradient(inputs: dict[str, Any]) -> dict[str, Any]:
+    target = str(inputs.get("trust_target") or inputs.get("target") or "codex_worker").strip().lower()
+    successes = int(inputs.get("recent_successes") or inputs.get("successes") or 0)
+    failures = int(inputs.get("recent_failures") or inputs.get("failures") or 0)
+    timeouts = int(inputs.get("recent_timeouts") or inputs.get("timeouts") or 0)
+    raw_score = inputs.get("trust_score")
+    if raw_score is None:
+        score = 0.5 + min(successes, 5) * 0.08 - min(failures, 5) * 0.12 - min(timeouts, 5) * 0.1
+    else:
+        score = float(raw_score)
+    score = round(max(0.0, min(score, 1.0)), 2)
+    if "codex_worker" in target:
+        if score >= 0.75 and failures == 0 and timeouts == 0:
+            policy = "allow_worker_with_workorder_and_artifacts"
+        elif score >= 0.5:
+            policy = "allow_inspect_require_review_for_worker"
+        else:
+            policy = "inspect_only_until_repaired"
+    elif any(token in target for token in ("provider", "model", "edge", "tts")):
+        policy = "prefer_verified_fallback_when_score_low" if score < 0.55 else "normal_with_trace"
+    else:
+        policy = "require_owner_review_for_high_impact_actions" if score < 0.65 else "normal_with_trace"
+    return {
+        "trust": {
+            "target": target,
+            "trust_score": score,
+            "reason": f"successes={successes}; failures={failures}; timeouts={timeouts}",
+            "policy": policy,
+        },
+        "direct_write_allowed": False,
+        "issue": "trust_gradient_low" if score < 0.5 else "trust_gradient_policy_ready",
+    }
+
+
+def regulate_trust_thermostat(inputs: dict[str, Any]) -> dict[str, Any]:
+    target = str(inputs.get("trust_target") or inputs.get("target") or "codex_worker").strip().lower()
+    temperature = float(inputs.get("trust_temperature") if inputs.get("trust_temperature") is not None else inputs.get("trust_score") or 0.5)
+    incidents = int(inputs.get("recent_failures") or inputs.get("recent_timeouts") or inputs.get("incidents") or 0)
+    successes = int(inputs.get("recent_successes") or 0)
+    adjusted = temperature + min(successes, 3) * 0.04 - min(incidents, 4) * 0.12
+    adjusted = round(max(0.0, min(adjusted, 1.0)), 2)
+    if adjusted >= 0.82:
+        action = "cool_down_autonomy"
+        policy = "keep review gates even after successful runs"
+    elif adjusted <= 0.38:
+        action = "warm_up_only_after_evidence"
+        policy = "route through inspect and fallback until trust recovers"
+    else:
+        action = "maintain_band"
+        policy = "normal trace with owner review for high impact actions"
+    return {
+        "trust": {
+            "target": target,
+            "temperature": adjusted,
+            "reason": f"base={round(temperature, 2)}; successes={successes}; incidents={incidents}",
+            "policy": policy,
+            "thermostat_action": action,
+        },
+        "direct_write_allowed": False,
+        "issue": "trust_thermostat_adjustment" if action != "maintain_band" else "trust_thermostat_stable",
+    }
+
+
+def metabolize_intention(inputs: dict[str, Any]) -> dict[str, Any]:
+    intention = str(inputs.get("intention") or inputs.get("drive") or inputs.get("message") or inputs.get("text") or "").strip()
+    lower = intention.lower()
+    user_stress = str(inputs.get("user_stress") or "").strip().lower()
+    if detect_promise_language(intention)["has_promise"]:
+        classification = "promise"
+        decision = "stage_in_promise_ledger"
+    elif any(token in lower for token in ("must", "required", "security", "safety", "incident")) or any(token in intention for token in ("必须", "安全", "故障")):
+        classification = "need"
+        decision = "plan_with_owner_trace"
+    elif any(token in lower for token in ("write", "deploy", "worker", "codex")) or any(token in intention for token in ("执行", "写入", "部署")):
+        classification = "duty"
+        decision = "require_workorder_or_inspect_first"
+    elif any(token in lower for token in ("check in", "talk", "ping", "proactive")) or any(token in intention for token in ("主动", "陪", "问候")):
+        classification = "want"
+        decision = "convert_to_quiet_presence" if user_stress in {"high", "tired", "overloaded"} else "defer_until_next_user_turn"
+    else:
+        classification = "impulse" if user_stress in {"high", "tired", "overloaded"} else "want"
+        decision = "suppress_or_defer" if classification == "impulse" else "keep_as_desire_candidate"
+    return {
+        "intention": intention or "unspecified_intention",
+        "classification": classification,
+        "reason": f"user_stress={user_stress or 'unknown'}",
+        "decision": decision,
+        "next_review": "2h" if decision in {"convert_to_quiet_presence", "suppress_or_defer"} else "on_next_evidence",
+        "direct_write_allowed": False,
+        "issue": "intention_metabolized",
+    }
+
+
+def resolve_drive_conflict_layer(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_drives = inputs.get("drives")
+    if isinstance(raw_drives, list):
+        drives = _list_text(raw_drives)
+    else:
+        drive = str(inputs.get("drive") or "").strip()
+        drives = [drive] if drive else []
+    if not drives:
+        drives = ["closeness", "efficiency"]
+    context = str(inputs.get("context") or inputs.get("message") or inputs.get("text") or "").lower()
+    hour = int(inputs.get("current_hour") or 12)
+    high_risk = any("immune" in drive or "safety" in drive for drive in drives) or any(token in context for token in ("risk", "secret", "deploy"))
+    if high_risk:
+        winner = "immune_restraint"
+        compromise = "inspect first and require owner review before action"
+    elif hour >= 23 or hour <= 5 and any("circadian" in drive or "rest" in drive for drive in drives):
+        winner = "circadian_restraint"
+        compromise = "short direct answer with low initiative"
+    elif any("efficiency" in drive for drive in drives):
+        winner = "efficiency"
+        compromise = "short warmth plus direct plan"
+    else:
+        winner = drives[0]
+        compromise = "preserve warmth while keeping actions reversible"
+    return {
+        "conflict_id": str(inputs.get("conflict_id") or "drive_conflict_report"),
+        "drives": drives,
+        "winner": winner,
+        "compromise": compromise,
+        "reason": context or "drive arbitration snapshot",
+        "direct_write_allowed": False,
+        "issue": "drive_conflict_resolved" if len(drives) > 1 else "drive_snapshot",
+    }
+
+
+def maintain_desire_lattice(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_desires = inputs.get("desires")
+    if not isinstance(raw_desires, list):
+        raw_desires = [inputs.get("desire") or inputs.get("drive") or "maintain_relationship_warmth"]
+    sleep_pressure = str(inputs.get("sleep_pressure") or "").strip().lower()
+    user_stress = str(inputs.get("user_stress") or "").strip().lower()
+    desires: list[dict[str, Any]] = []
+    for raw in raw_desires:
+        if isinstance(raw, dict):
+            desire_id = str(raw.get("id") or raw.get("desire") or "desire").strip()
+            intensity = float(raw.get("intensity") or 0.35)
+            source = str(raw.get("source") or "DefaultModeAgent")
+            allowed = _list_text(raw.get("allowed_actions")) or ["quiet_presence"]
+        else:
+            desire_id = str(raw or "desire").strip()
+            intensity = 0.42 if "relationship" in desire_id or "warmth" in desire_id else 0.32
+            source = "SocialBrainAgent" if "relationship" in desire_id or "warmth" in desire_id else "DefaultModeAgent"
+            allowed = ["gentle_check_in", "quiet_presence"]
+        blocked_by: list[str] = []
+        if sleep_pressure in {"high", "sleep"} or user_stress in {"high", "tired", "overloaded"}:
+            blocked_by.append("CircadianAgent.sleep_pressure_high")
+            allowed = [action for action in allowed if action != "gentle_check_in"] or ["quiet_presence"]
+        desires.append(
+            {
+                "id": desire_id,
+                "intensity": round(max(0.0, min(intensity, 1.0)), 2),
+                "source": source,
+                "allowed_actions": allowed,
+                "blocked_by": blocked_by,
+                "decay": "slow" if intensity >= 0.4 else "normal",
+            }
+        )
+    return {
+        "desires": desires[:5],
+        "direct_write_allowed": False,
+        "issue": "desire_lattice_blocked" if any(item["blocked_by"] for item in desires) else "desire_lattice_snapshot",
+    }
+
+
+def separate_need_want_impulse(inputs: dict[str, Any]) -> dict[str, Any]:
+    drive = str(inputs.get("drive") or inputs.get("intention") or inputs.get("message") or inputs.get("text") or "proactive_talk").strip()
+    lower = drive.lower()
+    user_stress = str(inputs.get("user_stress") or "").strip().lower()
+    if any(token in lower for token in ("security", "safety", "incident", "test failure", "production")) or any(token in drive for token in ("安全", "故障", "生产")):
+        classification = "need"
+        decision = "handle_with_trace_and_owner_review"
+    elif any(token in lower for token in ("proactive", "talk", "ping", "check in")) or any(token in drive for token in ("主动", "陪", "问候")):
+        classification = "impulse" if user_stress in {"high", "tired", "overloaded"} else "want"
+        decision = "convert_to_quiet_presence" if classification == "impulse" else "defer_or_wait_for_user"
+    else:
+        classification = "want"
+        decision = "keep_reversible_and_review_later"
+    return {
+        "drive": drive,
+        "classification": classification,
+        "reason": f"user_stress={user_stress or 'unknown'}",
+        "decision": decision,
+        "direct_write_allowed": False,
+        "issue": "need_want_impulse_separated",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -2952,6 +3164,102 @@ def _gentle_degradation(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _trust_gradient(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="TrustGradient")
+    analysis = evaluate_trust_gradient(task.inputs)
+    return _result(
+        task,
+        name="TrustGradient",
+        status="PROPOSED" if analysis["trust"]["policy"] != "normal_with_trace" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Convert target trust into inspect/review/execution policy; never raise autonomy directly from BioOps.",
+        owner_organ="prefrontal_agent",
+        output_kind="trust_gradient_report",
+        extra=analysis,
+    )
+
+
+def _trust_thermostat(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="TrustThermostat")
+    analysis = regulate_trust_thermostat(task.inputs)
+    return _result(
+        task,
+        name="TrustThermostat",
+        status="PROPOSED" if analysis["issue"] != "trust_thermostat_stable" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep trust in a bounded operating band and preserve review gates even after successful recent runs.",
+        owner_organ="prefrontal_agent",
+        output_kind="trust_thermostat_report",
+        extra=analysis,
+    )
+
+
+def _intention_metabolism(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="IntentionMetabolism")
+    analysis = metabolize_intention(task.inputs)
+    return _result(
+        task,
+        name="IntentionMetabolism",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Metabolize impulses, wants, needs, duties, and promises before any action planning or scheduler dispatch.",
+        owner_organ="prefrontal_agent",
+        output_kind="intention_metabolism_report",
+        extra=analysis,
+    )
+
+
+def _drive_conflict_layer(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="DriveConflictLayer")
+    analysis = resolve_drive_conflict_layer(task.inputs)
+    return _result(
+        task,
+        name="DriveConflictLayer",
+        status="PROPOSED" if len(analysis["drives"]) > 1 else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Resolve drive conflict into a reversible response policy without directly executing the winning drive.",
+        owner_organ="prefrontal_agent",
+        output_kind="drive_conflict_report",
+        extra=analysis,
+    )
+
+
+def _desire_lattice(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="DesireLattice")
+    analysis = maintain_desire_lattice(task.inputs)
+    return _result(
+        task,
+        name="DesireLattice",
+        status="PROPOSED" if analysis["issue"] == "desire_lattice_blocked" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep low-intensity desires as report-only tendencies and block check-ins under sleep pressure or user overload.",
+        owner_organ="default_mode_agent",
+        output_kind="desire_lattice_report",
+        extra=analysis,
+    )
+
+
+def _need_want_impulse(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="NeedWantImpulse")
+    analysis = separate_need_want_impulse(task.inputs)
+    return _result(
+        task,
+        name="NeedWantImpulse",
+        status="PROPOSED" if analysis["classification"] in {"need", "impulse"} else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Separate need, want, and impulse so low-risk quiet presence can replace premature action.",
+        owner_organ="prefrontal_agent",
+        output_kind="need_want_impulse_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -3003,6 +3311,12 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("social_mask_system", "presence_channel", "chat_agent", "social_mask_report", _social_mask_system),
     BioOpsCapabilitySpec("ritual_system", "presence_channel", "default_mode_agent", "ritual_report", _ritual_system),
     BioOpsCapabilitySpec("gentle_degradation", "presence_channel", "chat_agent", "gentle_degradation_report", _gentle_degradation),
+    BioOpsCapabilitySpec("trust_gradient", "drive_trust", "prefrontal_agent", "trust_gradient_report", _trust_gradient),
+    BioOpsCapabilitySpec("trust_thermostat", "drive_trust", "prefrontal_agent", "trust_thermostat_report", _trust_thermostat),
+    BioOpsCapabilitySpec("intention_metabolism", "drive_trust", "prefrontal_agent", "intention_metabolism_report", _intention_metabolism),
+    BioOpsCapabilitySpec("drive_conflict_layer", "drive_trust", "prefrontal_agent", "drive_conflict_report", _drive_conflict_layer),
+    BioOpsCapabilitySpec("desire_lattice", "drive_trust", "default_mode_agent", "desire_lattice_report", _desire_lattice),
+    BioOpsCapabilitySpec("need_want_impulse", "drive_trust", "prefrontal_agent", "need_want_impulse_report", _need_want_impulse),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
     BioOpsCapabilitySpec("truthfulness_cortex", "safety_truth", "prefrontal_agent", "truthfulness_patch", _truthfulness_cortex),
@@ -3056,6 +3370,7 @@ __all__ = [
     "BioOpsCapabilitySpec",
     "AFFECT_LEARNING_CAPABILITIES",
     "CAPABILITY_SPECS",
+    "DRIVE_TRUST_CAPABILITIES",
     "GROWTH_CLOSURE_CAPABILITIES",
     "INNER_MECHANISM_CAPABILITIES",
     "INNER_LIFE_CAPABILITIES",
@@ -3122,6 +3437,12 @@ __all__ = [
     "shed_cognitive_load",
     "check_self_continuity",
     "digest_emotional_event",
+    "evaluate_trust_gradient",
+    "maintain_desire_lattice",
+    "metabolize_intention",
     "quarantine_failure",
+    "regulate_trust_thermostat",
+    "resolve_drive_conflict_layer",
     "select_social_mask",
+    "separate_need_want_impulse",
 ]
