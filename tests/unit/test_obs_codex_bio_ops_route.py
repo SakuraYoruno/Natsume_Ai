@@ -253,6 +253,17 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "joy_reinforcement",
         "failure_quarantine",
     }
+    assert payload["bio_ops"]["presence_channel"]["capability_count"] == 7
+    assert payload["bio_ops"]["presence_channel"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["presence_channel"]["capabilities"]} == {
+        "channel_soul",
+        "long_task_companion_mode",
+        "attention_topography",
+        "quiet_presence",
+        "social_mask_system",
+        "ritual_system",
+        "gentle_degradation",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

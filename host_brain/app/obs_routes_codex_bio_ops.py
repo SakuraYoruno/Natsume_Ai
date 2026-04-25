@@ -17,6 +17,7 @@ from host_brain.bio_ops.capabilities import (
     INNER_MECHANISM_CAPABILITIES,
     MEMORY_NARRATIVE_CAPABILITIES,
     NATURAL_INTERACTION_CAPABILITIES,
+    PRESENCE_CHANNEL_CAPABILITIES,
     RELATIONSHIP_LAYER_CAPABILITIES,
     SELF_GOVERNANCE_CAPABILITIES,
     TRUST_FOUNDATION_CAPABILITIES,
@@ -339,6 +340,14 @@ def _affect_learning_summary(capabilities: list[dict[str, Any]]) -> dict[str, An
     )
 
 
+def _presence_channel_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        PRESENCE_CHANNEL_CAPABILITIES,
+        activation_rule="report_only_presence_channel",
+    )
+
+
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for payload in payloads:
@@ -483,6 +492,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 "growth_closure": _growth_closure_summary(catalog["capabilities"]),
                 "memory_narrative": _memory_narrative_summary(catalog["capabilities"]),
                 "affect_learning": _affect_learning_summary(catalog["capabilities"]),
+                "presence_channel": _presence_channel_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -559,6 +569,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "growth_closure": _growth_closure_summary(catalog["capabilities"]),
             "memory_narrative": _memory_narrative_summary(catalog["capabilities"]),
             "affect_learning": _affect_learning_summary(catalog["capabilities"]),
+            "presence_channel": _presence_channel_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

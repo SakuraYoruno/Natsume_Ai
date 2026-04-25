@@ -105,6 +105,13 @@ const EFFECT_LABELS = {
   regret_signal_ready: '后悔信号',
   joy_reinforcement_ready: '喜悦强化',
   failure_quarantine_ready: '失败隔离',
+  channel_soul_wechat: '通道灵魂',
+  long_task_companion_milestone: '长任务陪伴',
+  attention_topography_peak: '注意力地形',
+  quiet_presence_active: '静默陪伴',
+  social_mask_wechat: '社交面具',
+  ritual_nightly: '仪式系统',
+  gentle_degradation_tts: '温柔降级',
 }
 
 const TRACE_LABELS = {
@@ -192,6 +199,16 @@ const AFFECT_LEARNING_LABELS = {
   regret_signal: '后悔信号',
   joy_reinforcement: '喜悦强化',
   failure_quarantine: '失败隔离',
+}
+
+const PRESENCE_CHANNEL_LABELS = {
+  channel_soul: '通道灵魂',
+  long_task_companion_mode: '长任务陪伴',
+  attention_topography: '注意力地形',
+  quiet_presence: '静默陪伴',
+  social_mask_system: '社交面具',
+  ritual_system: '仪式系统',
+  gentle_degradation: '温柔降级',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -622,6 +639,17 @@ function AffectLearningPanel({ summary }) {
   )
 }
 
+function PresenceChannelPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={PRESENCE_CHANNEL_LABELS}
+      emptyTitle="暂无 Presence & Channel 数据"
+      note="通道与存在感层只做通道表达、长任务陪伴、静默陪伴、仪式和降级报告；不主动打扰用户，也不直接写长期状态。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -703,6 +731,7 @@ export default function CodexBioOpsObservability() {
   const growthClosure = bioOps.growth_closure || {}
   const memoryNarrative = bioOps.memory_narrative || {}
   const affectLearning = bioOps.affect_learning || {}
+  const presenceChannel = bioOps.presence_channel || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -866,6 +895,14 @@ export default function CodexBioOpsObservability() {
               hint={`${affectLearning.status_counts?.PROPOSED || 0} signals · ${affectLearning.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
+              icon={Sparkles}
+              tone="blue"
+              label="通道存在"
+              value={presenceChannel.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${presenceChannel.status_counts?.PROPOSED || 0} reports · ${presenceChannel.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
               icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
@@ -942,6 +979,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Affect Learning" subtitle="情绪学习层：内在温度、免疫耐受、情绪消化、后悔信号、喜悦强化和失败隔离保持报告模式。">
             <AffectLearningPanel summary={affectLearning} />
+          </Section>
+
+          <Section title="Presence & Channel" subtitle="通道与存在感层：通道灵魂、长任务陪伴、注意力地形、静默陪伴、社交面具、仪式和温柔降级保持可观测。">
+            <PresenceChannelPanel summary={presenceChannel} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

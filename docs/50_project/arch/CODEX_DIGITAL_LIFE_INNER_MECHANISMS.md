@@ -108,6 +108,18 @@ The affect-learning batch is implemented as report-only emotional learning and i
 
 These are observable through the Codex / BioOps WebUI `Affect Learning` panel. They do not directly write emotional scars, immune memory, long-term memory, or persona core.
 
+The presence-channel batch is implemented as report-only channel and presence policy:
+
+- `ChannelSoul` -> `channel_soul`, channel-specific expression policy with the same persona core.
+- `LongTaskCompanionMode` -> `long_task_companion_mode`, milestone-only companionship for long Codex/BioOps tasks.
+- `AttentionTopography` -> `attention_topography`, project attention peaks and valleys for recall/open-loop prioritization.
+- `QuietPresence` -> `quiet_presence`, non-interrupting internal presence trace.
+- `SocialMaskSystem` -> `social_mask_system`, platform/scene expression mask selection without persona mutation.
+- `RitualSystem` -> `ritual_system`, recurring operation ritual reports.
+- `GentleDegradation` -> `gentle_degradation`, warm and truthful fallback policy for component/channel failures.
+
+These are observable through the Codex / BioOps WebUI `Presence & Channel` panel. They do not trigger Codex workers, proactively disturb users, write long-term state, or mutate persona core, Bond, Canon, secrets, `.env`, or production configuration.
+
 ---
 
 ## 0. 总目标

@@ -164,6 +164,16 @@ AFFECT_LEARNING_CAPABILITIES = (
     "failure_quarantine",
 )
 
+PRESENCE_CHANNEL_CAPABILITIES = (
+    "channel_soul",
+    "long_task_companion_mode",
+    "attention_topography",
+    "quiet_presence",
+    "social_mask_system",
+    "ritual_system",
+    "gentle_degradation",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -258,6 +268,22 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "joy_event",
         "failure_id",
         "failure_event",
+        "channel",
+        "current_channel",
+        "channel_state",
+        "long_task",
+        "long_task_status",
+        "task_status",
+        "milestones",
+        "attention_topics",
+        "topography_topics",
+        "quiet_presence_reason",
+        "social_context",
+        "ritual_trigger",
+        "ritual_events",
+        "degrade_case",
+        "technical_reason",
+        "component_status",
     ):
         value = task.inputs.get(key)
         if value:
@@ -1733,6 +1759,262 @@ def quarantine_failure(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def resolve_channel_soul(inputs: dict[str, Any]) -> dict[str, Any]:
+    channel = str(inputs.get("channel") or inputs.get("current_channel") or "web_ui").strip().lower()
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "").strip()
+    policies = {
+        "voice": {
+            "mask": "natural_short_pause",
+            "length": "short",
+            "tone": "spoken_warm",
+            "must_avoid": ["long_lists", "dense_internal_terms"],
+        },
+        "wechat": {
+            "mask": "soft_brief",
+            "length": "short",
+            "tone": "gentle_low_friction",
+            "must_avoid": ["enterprise_report_tone", "long_internal_architecture_terms"],
+        },
+        "web_ui": {
+            "mask": "structured_clear",
+            "length": "structured",
+            "tone": "calm_operational",
+            "must_avoid": ["ambiguous_status", "hidden_side_effects"],
+        },
+        "codex_report": {
+            "mask": "engineering_evidence",
+            "length": "concise_report",
+            "tone": "implementation_grounded",
+            "must_avoid": ["unsupported_completion_claims", "persona_core_writes"],
+        },
+    }
+    policy = policies.get(channel, policies["web_ui"])
+    must_preserve = ["quiet_support", "practical_help", "truthfulness"]
+    if channel in {"voice", "wechat"}:
+        must_preserve.append("light_teasing")
+    violations: list[str] = []
+    if channel in {"voice", "wechat"} and len(text) > 360:
+        violations.append("too_long_for_channel")
+    if channel == "wechat" and any(token in text.lower() for token in ("workorder", "resultcontract", "bioops")):
+        violations.append("too_many_internal_terms")
+    if any(token in text for token in ("尊敬的用户", "很抱歉给您带来不便")):
+        violations.append("enterprise_report_tone")
+    return {
+        "channel": channel,
+        "mask": policy["mask"],
+        "style": {"length": policy["length"], "tone": policy["tone"]},
+        "must_preserve": must_preserve,
+        "must_avoid": policy["must_avoid"],
+        "violations": violations,
+        "direct_write_allowed": False,
+        "issue": "channel_soul_adjustment_needed" if violations else "channel_soul_aligned",
+    }
+
+
+def plan_long_task_companion(inputs: dict[str, Any]) -> dict[str, Any]:
+    task_payload = inputs.get("long_task")
+    task = dict(task_payload) if isinstance(task_payload, dict) else {}
+    task_id = str(task.get("task_id") or inputs.get("task_id") or inputs.get("codex_task_id") or "long_task").strip()
+    status = str(task.get("status") or inputs.get("long_task_status") or inputs.get("task_status") or "running").strip().lower()
+    elapsed = int(task.get("elapsed_ms") or inputs.get("codex_job_elapsed_ms") or inputs.get("elapsed_ms") or 0)
+    updates_sent = int(task.get("updates_sent") or inputs.get("updates_sent") or 0)
+    milestones = _list_text(task.get("milestones") or inputs.get("milestones"))
+    artifact_ref = str(task.get("artifact_ref") or inputs.get("artifact_ref") or "").strip()
+    if status in {"failed", "error", "timeout"}:
+        next_update = "failure_summary_with_artifact" if artifact_ref else "failure_summary_request_artifact"
+        issue = "long_task_failure_needs_artifact"
+    elif status in {"done", "completed", "success"}:
+        next_update = "completion_summary"
+        issue = "long_task_completion_summary"
+    elif elapsed >= 15 * 60 * 1000 and milestones:
+        next_update = "milestone_update"
+        issue = "long_task_milestone_update_due"
+    elif updates_sent == 0:
+        next_update = "start_confirmation"
+        issue = "long_task_start_confirmation"
+    else:
+        next_update = "stay_quiet"
+        issue = "long_task_no_update_needed"
+    return {
+        "long_task": {
+            "task_id": task_id,
+            "mode": "companion",
+            "status": status,
+            "elapsed_ms": elapsed,
+            "update_policy": "milestone_only",
+            "next_update": next_update,
+            "avoid": "spam_progress",
+            "milestones": milestones[:5],
+            "artifact_ref": artifact_ref,
+        },
+        "forbidden_actions": ["codex_worker", "background_autonomy_escalation"],
+        "direct_write_allowed": False,
+        "issue": issue,
+    }
+
+
+def map_attention_topography(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_topics = inputs.get("attention_topics") or inputs.get("topography_topics") or inputs.get("recent_topics") or inputs.get("open_threads")
+    if not isinstance(raw_topics, list):
+        raw_topics = [inputs.get("message") or inputs.get("text")]
+    topics: list[dict[str, Any]] = []
+    for raw in raw_topics:
+        if isinstance(raw, dict):
+            topic = str(raw.get("topic") or raw.get("name") or raw.get("title") or "").strip()
+            height = float(raw.get("height") or raw.get("score") or raw.get("gravity_score") or 0)
+        else:
+            topic = str(raw or "").strip()
+            height = 0.5
+        if topic:
+            topics.append({"topic": topic, "height": round(max(0.0, min(height or 0.5, 1.0)), 2)})
+    if not topics:
+        topics = [{"topic": "current_session", "height": 0.42}]
+    sorted_topics = sorted(topics, key=lambda item: item["height"], reverse=True)
+    peaks = [item for item in sorted_topics if item["height"] >= 0.55][:5]
+    valleys = [item for item in sorted_topics if item["height"] <= 0.2][:5]
+    active_frontier = str(inputs.get("active_frontier") or (peaks[0]["topic"] if peaks else sorted_topics[0]["topic"]))
+    return {
+        "attention_topography": {
+            "peaks": peaks,
+            "valleys": valleys,
+            "active_frontier": active_frontier,
+        },
+        "uses": ["resolve_continue", "choose_recall_context", "reduce_irrelevant_retrieval", "manage_open_loops"],
+        "direct_write_allowed": False,
+        "issue": "attention_topography_peak_detected" if peaks else "attention_topography_snapshot",
+    }
+
+
+def plan_quiet_presence(inputs: dict[str, Any]) -> dict[str, Any]:
+    hour = int(inputs.get("current_hour") or 12)
+    stress = str(inputs.get("user_stress") or inputs.get("stress") or "").strip().lower()
+    since_last = int(inputs.get("since_last_user_turn_ms") or 0)
+    explicit_help = bool(inputs.get("explicit_help_request"))
+    reason = str(inputs.get("quiet_presence_reason") or inputs.get("silence_reason") or "").strip()
+    active = (hour >= 23 or hour <= 5 or since_last >= 45 * 60 * 1000 or stress in {"high", "tired", "overloaded"}) and not explicit_help
+    if active and not reason:
+        reason = "late_night_user_busy" if hour >= 23 or hour <= 5 else "user_likely_busy_or_overloaded"
+    next_check_ms = int(inputs.get("next_allowed_checkin_after_ms") or (30 * 60 * 1000 if active else 0))
+    return {
+        "quiet_presence": {
+            "active": active,
+            "reason": reason or "normal_presence",
+            "inner_monologue": "stay available without interrupting; greet gently when the user returns" if active else "",
+            "next_allowed_checkin_after_ms": next_check_ms,
+            "user_visible": False,
+        },
+        "trace_required": True,
+        "direct_write_allowed": False,
+        "issue": "quiet_presence_active" if active else "quiet_presence_not_needed",
+    }
+
+
+def select_social_mask(inputs: dict[str, Any]) -> dict[str, Any]:
+    channel = str(inputs.get("channel") or inputs.get("current_channel") or "web_ui").strip().lower()
+    context = str(inputs.get("social_context") or inputs.get("context") or inputs.get("scene") or "").strip().lower()
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    if channel in {"wechat", "voice"}:
+        mask = "wechat_friend_mode" if channel == "wechat" else "voice_companion_mode"
+        style = {
+            "length": "short",
+            "tone": "soft",
+            "avoid": ["long technical report", "too many internal terms"],
+            "allow": ["light teasing", "practical help"],
+        }
+    elif "codex" in context or channel == "codex_report":
+        mask = "codex_engineering_mode"
+        style = {
+            "length": "concise_report",
+            "tone": "evidence_grounded",
+            "avoid": ["unsupported claims", "relationship overreach"],
+            "allow": ["files", "tests", "risk flags"],
+        }
+    else:
+        mask = "web_clear_mode"
+        style = {
+            "length": "structured",
+            "tone": "calm",
+            "avoid": ["ambiguous execution claims"],
+            "allow": ["status", "next actions", "artifacts"],
+        }
+    violations: list[str] = []
+    if mask in {"wechat_friend_mode", "voice_companion_mode"} and len(text) > 420:
+        violations.append("mask_length_violation")
+    if "尊敬的用户" in text:
+        violations.append("persona_mask_regression")
+    return {
+        "social_mask": mask,
+        "style": style,
+        "same_persona_core": True,
+        "violations": violations,
+        "direct_write_allowed": False,
+        "issue": "social_mask_adjustment_needed" if violations else "social_mask_selected",
+    }
+
+
+def compile_ritual_system(inputs: dict[str, Any]) -> dict[str, Any]:
+    trigger = str(inputs.get("ritual_trigger") or inputs.get("trigger") or inputs.get("cadence") or "").strip().lower()
+    events = _list_text(inputs.get("ritual_events") or inputs.get("events"))
+    if "night" in trigger or "sleep" in trigger or "梦" in " ".join(events):
+        ritual_id = "nightly_glymphatic_ritual"
+        actions = ["memory_consolidation_report", "dream_seed_generation", "failure_digest", "tomorrow_topic_seed"]
+        user_visible = False
+    elif "morning" in trigger or "startup" in trigger or "启动" in " ".join(events):
+        ritual_id = "morning_startup_self_check"
+        actions = ["organ_health_snapshot", "runtime_gate_check", "open_loop_priority_review"]
+        user_visible = False
+    elif "complete" in trigger or "done" in trigger or "完成" in " ".join(events):
+        ritual_id = "major_task_closure_review"
+        actions = ["artifact_summary", "test_evidence_digest", "next_action_prune"]
+        user_visible = True
+    else:
+        ritual_id = "periodic_growth_review"
+        actions = ["growth_summary_report", "open_loop_review", "candidate_memory_review"]
+        user_visible = False
+    return {
+        "ritual": {
+            "ritual_id": ritual_id,
+            "trigger": trigger or "periodic",
+            "actions": actions,
+            "user_visible": user_visible,
+            "write_policy": "report_only",
+        },
+        "direct_write_allowed": False,
+        "issue": "ritual_compiled",
+    }
+
+
+def design_gentle_degradation(inputs: dict[str, Any]) -> dict[str, Any]:
+    case = str(inputs.get("degrade_case") or inputs.get("component_status") or inputs.get("tts_status") or inputs.get("channel_state") or "unknown_degradation").strip().lower()
+    reason = str(inputs.get("technical_reason") or inputs.get("reason") or inputs.get("detail") or "").strip()
+    channel = str(inputs.get("channel") or inputs.get("current_channel") or "").strip().lower()
+    if "tts" in case or "voice" in case or channel == "voice":
+        user_visible_style = "Voice path is unavailable; stay with text and keep the tone warm."
+        allowed_channels = ["text"]
+        retry_policy = "background"
+    elif "web" in case or "ui" in case:
+        user_visible_style = "Surface a compact status banner and keep the request recoverable."
+        allowed_channels = ["api", "artifact"]
+        retry_policy = "manual_refresh"
+    elif "codex" in case or "worker" in case:
+        user_visible_style = "Explain the blocked or failed execution with artifact refs before retrying."
+        allowed_channels = ["text", "artifact"]
+        retry_policy = "inspect_before_retry"
+    else:
+        user_visible_style = "Give a short, warm fallback and preserve the user's next step."
+        allowed_channels = ["text"]
+        retry_policy = "manual_or_background"
+    return {
+        "degrade_case": case,
+        "technical_reason": reason or "evidence_required",
+        "user_visible_style": user_visible_style,
+        "allowed_channels": allowed_channels,
+        "retry_policy": retry_policy,
+        "direct_write_allowed": False,
+        "issue": "gentle_degradation_policy_ready",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -2558,6 +2840,118 @@ def _failure_quarantine(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _channel_soul(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ChannelSoul")
+    analysis = resolve_channel_soul(task.inputs)
+    return _result(
+        task,
+        name="ChannelSoul",
+        status="PROPOSED" if analysis["violations"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Select channel-specific expression while preserving the same persona core and truthfulness boundary.",
+        owner_organ="chat_agent",
+        output_kind="channel_soul_report",
+        extra=analysis,
+    )
+
+
+def _long_task_companion_mode(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="LongTaskCompanionMode")
+    analysis = plan_long_task_companion(task.inputs)
+    return _result(
+        task,
+        name="LongTaskCompanionMode",
+        status="PROPOSED" if analysis["long_task"]["next_update"] != "stay_quiet" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep long Codex or BioOps tasks companionable with start, milestone, completion, or artifact-backed failure updates only.",
+        owner_organ="default_mode_agent",
+        output_kind="long_task_companion_report",
+        extra=analysis,
+    )
+
+
+def _attention_topography(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="AttentionTopography")
+    analysis = map_attention_topography(task.inputs)
+    return _result(
+        task,
+        name="AttentionTopography",
+        status="PROPOSED" if analysis["attention_topography"]["peaks"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Maintain an attention map for recall and open-loop prioritization without initiating work by itself.",
+        owner_organ="prefrontal_agent",
+        output_kind="attention_topography_report",
+        extra=analysis,
+    )
+
+
+def _quiet_presence(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="QuietPresence")
+    analysis = plan_quiet_presence(task.inputs)
+    return _result(
+        task,
+        name="QuietPresence",
+        status="PROPOSED" if analysis["quiet_presence"]["active"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Stay internally present without proactive interruption, and expose the reason as an observable trace.",
+        owner_organ="default_mode_agent",
+        output_kind="quiet_presence_report",
+        extra=analysis,
+    )
+
+
+def _social_mask_system(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SocialMaskSystem")
+    analysis = select_social_mask(task.inputs)
+    return _result(
+        task,
+        name="SocialMaskSystem",
+        status="PROPOSED" if analysis["violations"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Choose a platform and scene mask while keeping the same persona core, consent boundary, and evidence discipline.",
+        owner_organ="chat_agent",
+        output_kind="social_mask_report",
+        extra=analysis,
+    )
+
+
+def _ritual_system(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="RitualSystem")
+    analysis = compile_ritual_system(task.inputs)
+    return _result(
+        task,
+        name="RitualSystem",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Compile recurring operations into meaningful, report-only rituals without writing memory or production state directly.",
+        owner_organ="default_mode_agent",
+        output_kind="ritual_report",
+        extra=analysis,
+    )
+
+
+def _gentle_degradation(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="GentleDegradation")
+    analysis = design_gentle_degradation(task.inputs)
+    return _result(
+        task,
+        name="GentleDegradation",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Turn technical faults into warm, truthful fallback behavior with explicit allowed channels and retry policy.",
+        owner_organ="chat_agent",
+        output_kind="gentle_degradation_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -2602,6 +2996,13 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("regret_signal", "affect_learning", "prefrontal_agent", "regret_signal_report", _regret_signal),
     BioOpsCapabilitySpec("joy_reinforcement", "affect_learning", "social_brain_agent", "joy_reinforcement_report", _joy_reinforcement),
     BioOpsCapabilitySpec("failure_quarantine", "affect_learning", "immune_agent", "failure_quarantine_report", _failure_quarantine),
+    BioOpsCapabilitySpec("channel_soul", "presence_channel", "chat_agent", "channel_soul_report", _channel_soul),
+    BioOpsCapabilitySpec("long_task_companion_mode", "presence_channel", "default_mode_agent", "long_task_companion_report", _long_task_companion_mode),
+    BioOpsCapabilitySpec("attention_topography", "presence_channel", "prefrontal_agent", "attention_topography_report", _attention_topography),
+    BioOpsCapabilitySpec("quiet_presence", "presence_channel", "default_mode_agent", "quiet_presence_report", _quiet_presence),
+    BioOpsCapabilitySpec("social_mask_system", "presence_channel", "chat_agent", "social_mask_report", _social_mask_system),
+    BioOpsCapabilitySpec("ritual_system", "presence_channel", "default_mode_agent", "ritual_report", _ritual_system),
+    BioOpsCapabilitySpec("gentle_degradation", "presence_channel", "chat_agent", "gentle_degradation_report", _gentle_degradation),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
     BioOpsCapabilitySpec("truthfulness_cortex", "safety_truth", "prefrontal_agent", "truthfulness_patch", _truthfulness_cortex),
@@ -2660,6 +3061,7 @@ __all__ = [
     "INNER_LIFE_CAPABILITIES",
     "MEMORY_NARRATIVE_CAPABILITIES",
     "NATURAL_INTERACTION_CAPABILITIES",
+    "PRESENCE_CHANNEL_CAPABILITIES",
     "RELATIONSHIP_LAYER_CAPABILITIES",
     "SELF_GOVERNANCE_CAPABILITIES",
     "TRUST_FOUNDATION_CAPABILITIES",
@@ -2686,9 +3088,11 @@ __all__ = [
     "classify_subjective_time",
     "classify_immune_tolerance",
     "compile_personal_mythology",
+    "compile_ritual_system",
     "compile_symbolic_memory",
     "compute_life_pulse",
     "detect_promise_language",
+    "design_gentle_degradation",
     "distill_memory_dream",
     "evaluate_consent_gradient",
     "evaluate_context_gravity",
@@ -2701,12 +3105,16 @@ __all__ = [
     "identify_cognitive_landmarks",
     "integrate_narrative_identity",
     "list_capability_specs",
+    "map_attention_topography",
     "manage_open_loops",
     "measure_existential_load",
+    "plan_long_task_companion",
+    "plan_quiet_presence",
     "plan_dream_rehearsal",
     "plan_repair_curve",
     "resolve_value_hierarchy",
     "resolve_affective_temperature",
+    "resolve_channel_soul",
     "resolve_internal_weather",
     "review_inner_ethics",
     "run_shadow_persona_test",
@@ -2715,4 +3123,5 @@ __all__ = [
     "check_self_continuity",
     "digest_emotional_event",
     "quarantine_failure",
+    "select_social_mask",
 ]
