@@ -16,6 +16,7 @@ const HOT_GET_PREFIXES = [
   '/obs/capability-gaps/stats',
   '/obs/insights/summary-snapshot',
   '/obs/digital-life/overview-snapshot',
+  '/obs/codex-bio-ops',
   '/obs/life-body',
   '/obs/life-timeline',
   '/obs/pathologies',
@@ -241,6 +242,13 @@ export function fetchDigitalLifeOverviewSnapshot(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/obs/digital-life/overview-snapshot${qs ? '?' + qs : ''}`)
+}
+
+export function fetchCodexBioOpsObservability(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops${qs ? '?' + qs : ''}`)
 }
 
 export function fetchLifeBody(params = {}) {

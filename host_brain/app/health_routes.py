@@ -1,6 +1,6 @@
 """健康检查路由模块。
 
-从 fastapi_app.py 拆分，包含 /health, /ready, /health/mcp, /health/canon_sync, /startup, /observability/trace 路由。
+从 fastapi_app.py 拆分，包含 /health, /ready, /health/mcp, /health/canon_sync, /startup 路由。
 """
 
 from __future__ import annotations
@@ -10,15 +10,14 @@ import os
 import time
 from json import loads as json_loads
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Query, status
 
 from host_brain.codex_runtime.immune import build_immune_proposal_from_report
-from host_brain.app.dependencies import collect_dependency_probes, get_ledger, get_obs_metrics_collector
+from host_brain.app.dependencies import collect_dependency_probes, get_ledger
 from host_brain.app.main import (
     build_env_readiness_report,
-    build_request_observability_report,
     build_service_health_report,
     build_startup_report,
     emit_runtime_bootstrap_logs,
@@ -26,9 +25,6 @@ from host_brain.app.main import (
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
 from host_brain.app.schemas import (
     HealthResponse,
-    MetricsResponse,
-    ObservabilityRequest,
-    ObservabilityResponse,
     ReadinessResponse,
 )
 from host_brain.core.errors import (
@@ -38,7 +34,6 @@ from host_brain.core.errors import (
 from host_brain.core.ids import new_request_id
 from host_brain.mcp.tool_registry import MCPToolRegistry
 from host_brain.memory.canon_sync import detect_world_version_drift
-from host_brain.observability.routes import build_obs_metrics_response
 from edge_client.rpc.health import build_edge_transport_probe_statuses
 _logger = logging.getLogger("Natsume.health_routes")
 
@@ -232,19 +227,6 @@ async def environment_readiness(
         )
 
 
-@router.get("/obs/metrics")
-async def obs_metrics(request_id: Optional[str] = None) -> Dict[str, Any]:
-    """Metrics endpoint."""
-    ts_ms = int(time.time() * 1000)
-    payload = build_obs_metrics_response(
-        collector=get_obs_metrics_collector(),
-        request_id=request_id,
-        ts_ms=ts_ms,
-    )
-    payload["timestamp"] = ts_ms
-    return payload
-
-
 @router.get("/health/mcp", response_model=HealthResponse)
 async def mcp_health_check() -> HealthResponse:
     """MCP registry health endpoint."""
@@ -316,38 +298,6 @@ async def canon_sync_health_check() -> HealthResponse:
             "detail": detail,
         },
     )
-
-
-@router.post("/observability/trace", response_model=ObservabilityResponse)
-async def request_trace(request_body: ObservabilityRequest) -> ObservabilityResponse:
-    """Request trace endpoint."""
-    ts_ms = int(time.time() * 1000)
-
-    try:
-        trace_report = build_request_observability_report(
-            request_id=request_body.request_id,
-            ledger=get_ledger(),
-        )
-
-        return ObservabilityResponse(
-            request_id=request_body.request_id,
-            trace_status=trace_report.get("trace_status", "UNKNOWN"),
-            timeline_total=trace_report.get("timeline_total", 0),
-            sources=trace_report.get("sources", {}),
-            timeline=trace_report.get("timeline", []),
-            timestamp=ts_ms,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-    except Exception as exc:
-        _logger.error("Request trace failed", extra={"request_id": request_body.request_id, "error": str(exc)})
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve request trace",
-        )
 
 
 @router.get("/startup")

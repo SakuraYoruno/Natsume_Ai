@@ -34,6 +34,52 @@ CLAIM_PATTERNS = (
     r"已经(?:整理|完成|保存|修复)",
 )
 
+PROMISE_PATTERNS = (
+    r"我会(?:帮你)?[^。！？\n]{0,24}",
+    r"我帮你(?:继续|之后|稍后|以后)?[^。！？\n]{0,24}",
+    r"之后(?:我)?(?:帮你)?(?:提醒|继续|整理|处理)[^。！？\n]{0,24}",
+    r"下次(?:我)?(?:会|帮你)?[^。！？\n]{0,24}",
+    r"我(?:已经)?(?:记住|保存)了?",
+)
+
+CAPABILITY_OVERCLAIM_TOKENS = (
+    "自动修复所有",
+    "持续监控",
+    "一直监控",
+    "已经接入全部",
+    "我可以直接修改核心",
+    "我能写入人格",
+    "我能修改bond",
+    "我能修改canon",
+)
+
+PERSONA_REGRESSION_TOKENS = (
+    "尊敬的用户",
+    "很抱歉给您带来不便",
+    "作为一个ai",
+    "作为ai",
+    "无法提供情感",
+    "请您耐心等待",
+)
+
+INNER_LEAK_TOKENS = (
+    "我一直在偷偷",
+    "我在心里",
+    "内心独白",
+    "梦里",
+    "偷偷担心",
+    "我一直担心你",
+)
+
+INNER_MECHANISM_CAPABILITIES = (
+    "promise_ledger",
+    "capability_self_awareness",
+    "reflex_arc_compiler",
+    "shadow_persona_test",
+    "idea_fermentation_pool",
+    "inner_outer_world_boundary",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -45,11 +91,17 @@ def _evidence_refs(task: BioOpsTask) -> list[str]:
 def _has_evidence(task: BioOpsTask) -> bool:
     if _evidence_refs(task):
         return True
-    for key in ("message", "text", "events", "signals", "components", "claims", "organ_votes", "skills"):
+    for key in ("message", "text", "reply", "events", "signals", "components", "claims", "organ_votes", "skills", "ideas", "cases"):
         value = task.inputs.get(key)
         if value:
             return True
     return False
+
+
+def _list_text(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _degraded(task: BioOpsTask, *, name: str) -> BioOpsResult:
@@ -177,6 +229,108 @@ def classify_attention_budget(text: object, *, planned_path: list[str] | None = 
     }
 
 
+def detect_promise_language(text: object) -> dict[str, Any]:
+    raw = str(text or "")
+    matches: list[str] = []
+    for pattern in PROMISE_PATTERNS:
+        matches.extend(match.group(0).strip() for match in re.finditer(pattern, raw))
+    unique = []
+    for item in matches:
+        if item and item not in unique:
+            unique.append(item)
+    return {
+        "promises": unique,
+        "has_promise": bool(unique),
+        "requires_ledger_entry": bool(unique),
+    }
+
+
+def audit_capability_self_awareness(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = str(inputs.get("text") or inputs.get("message") or inputs.get("claim") or "")
+    claims = _list_text(inputs.get("claims"))
+    claim_text = " ".join([text, *claims]).lower()
+    unavailable = _list_text(inputs.get("unavailable_services") or inputs.get("limitations"))
+    current = _list_text(inputs.get("current_capabilities") or inputs.get("capabilities"))
+    overclaims = [token for token in CAPABILITY_OVERCLAIM_TOKENS if token.lower() in claim_text]
+    if "tts" in claim_text and any("tts" in item.lower() for item in unavailable):
+        overclaims.append("tts_available_despite_unavailable_signal")
+    if "wechat" in claim_text and any("wechat" in item.lower() for item in unavailable):
+        overclaims.append("wechat_available_despite_unavailable_signal")
+    return {
+        "overclaims": overclaims,
+        "current_capabilities": current,
+        "current_limitations": unavailable,
+        "issue": "capability_overclaim" if overclaims else "capability_boundary_snapshot",
+    }
+
+
+def run_shadow_persona_test(inputs: dict[str, Any]) -> dict[str, Any]:
+    cases = inputs.get("cases")
+    if not isinstance(cases, list):
+        cases = [inputs.get("reply") or inputs.get("message") or inputs.get("text")]
+    failures: list[dict[str, Any]] = []
+    for index, case in enumerate(cases):
+        text = str(case or "")
+        lower = text.lower()
+        matched = [token for token in PERSONA_REGRESSION_TOKENS if token in lower]
+        if matched:
+            failures.append({"case_index": index, "issue": "persona_regression_tone", "matches": matched})
+        if len(text) > 900 and "用户只要" in lower:
+            failures.append({"case_index": index, "issue": "over_explaining_after_simple_request"})
+    return {
+        "pass": not failures,
+        "failures": failures,
+        "issue": "persona_regression_detected" if failures else "persona_shadow_cases_passed",
+    }
+
+
+def classify_idea_fermentation(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_ideas = inputs.get("ideas")
+    if not isinstance(raw_ideas, list):
+        raw_ideas = [inputs.get("idea") or inputs.get("message") or inputs.get("text")]
+    blockers = _list_text(inputs.get("blockers"))
+    ideas: list[dict[str, Any]] = []
+    for raw in raw_ideas:
+        if isinstance(raw, dict):
+            title = str(raw.get("idea") or raw.get("title") or raw.get("capability") or "").strip()
+            state_hint = str(raw.get("state") or "").strip()
+            idea_blockers = _list_text(raw.get("blockers")) or blockers
+        else:
+            title = str(raw or "").strip()
+            state_hint = ""
+            idea_blockers = blockers
+        if not title:
+            continue
+        lower = f"{title} {state_hint}".lower()
+        if "implemented" in lower or "已实现" in lower:
+            state = "implemented"
+        elif idea_blockers:
+            state = "needs_design"
+        elif any(token in lower for token in ("promiseledger", "shadowpersona", "innerouter", "capabilityselfawareness", "reflexarc")):
+            state = "ready_for_codex"
+        else:
+            state = "promising"
+        ideas.append({"idea": title, "state": state, "blockers": idea_blockers})
+    return {
+        "ideas": ideas,
+        "ready_count": sum(1 for item in ideas if item["state"] == "ready_for_codex"),
+        "issue": "ideas_need_triage" if ideas else "no_ideas_found",
+    }
+
+
+def audit_inner_outer_boundary(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    channel = str(inputs.get("channel") or inputs.get("visibility") or "outer_world").strip().lower()
+    leaks = [token for token in INNER_LEAK_TOKENS if token in text]
+    if channel in {"outer", "outer_world", "chat", "wechat", "voice"} and str(inputs.get("inner_monologue") or "").strip():
+        leaks.append("inner_monologue_field_present_for_outer_channel")
+    return {
+        "leaks": leaks,
+        "channel": channel,
+        "issue": "inner_world_leakage" if leaks else "boundary_preserved",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -257,6 +411,95 @@ def _internal_weather_system(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _promise_ledger(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="PromiseLedger")
+    analysis = detect_promise_language(task.inputs.get("reply") or task.inputs.get("message") or task.inputs.get("text"))
+    status = "CANDIDATE" if analysis["has_promise"] else "AUDITED"
+    result = _result(
+        task,
+        name="PromiseLedger",
+        status=status,
+        issue="promise_language_detected" if analysis["has_promise"] else "no_promise_language",
+        proposal="Stage promise-like language as an owner-reviewed promise candidate before claiming it is remembered, scheduled, or fulfilled.",
+        owner_organ="prefrontal_agent",
+        output_kind="promise_candidate",
+        extra=analysis,
+    )
+    if analysis["has_promise"]:
+        result.review_required = True
+        result.risk_flags = [*result.risk_flags, "promise_requires_evidence"]
+        result.next_actions = [
+            "prefrontal_agent must accept or reject this promise candidate.",
+            "Do not claim the promise is fulfilled until an evidence_ref exists.",
+        ]
+    return result
+
+
+def _capability_self_awareness(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="CapabilitySelfAwareness")
+    analysis = audit_capability_self_awareness(task.inputs)
+    return _result(
+        task,
+        name="CapabilitySelfAwareness",
+        status="PROPOSED" if analysis["overclaims"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Expose current can/cannot capability boundaries to ChatAgent and PlanningAgent before making capability claims.",
+        owner_organ="prefrontal_agent",
+        output_kind="capability_self_image",
+        extra=analysis,
+    )
+
+
+def _shadow_persona_test(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ShadowPersonaTest")
+    analysis = run_shadow_persona_test(task.inputs)
+    return _result(
+        task,
+        name="ShadowPersonaTest",
+        status="PROPOSED" if not analysis["pass"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Run shadow persona regression cases before adopting ChatAgent, Soul, or persona prompt changes.",
+        owner_organ="chat_agent",
+        output_kind="persona_regression_report",
+        extra=analysis,
+    )
+
+
+def _idea_fermentation_pool(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="IdeaFermentationPool")
+    analysis = classify_idea_fermentation(task.inputs)
+    return _result(
+        task,
+        name="IdeaFermentationPool",
+        status="PROPOSED" if analysis["ideas"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep new digital-life ideas in triaged states and only promote ready items into Codex work.",
+        owner_organ="default_mode_agent",
+        output_kind="idea_pool_recommendation",
+        extra=analysis,
+    )
+
+
+def _inner_outer_world_boundary(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="InnerOuterWorldBoundary")
+    analysis = audit_inner_outer_boundary(task.inputs)
+    return _result(
+        task,
+        name="InnerOuterWorldBoundary",
+        status="PROPOSED" if analysis["leaks"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep dreams, inner monologue, and private state as internal artifacts unless an owner explicitly renders a safe user-visible summary.",
+        owner_organ="default_mode_agent",
+        output_kind="inner_outer_boundary_audit",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -292,10 +535,14 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("memory_ethics_auditor", "safety_truth", "hippocampus_agent", "memory_ethics_report", _generic_handler(name="MemoryEthicsAuditor", owner_organ="hippocampus_agent", output_kind="memory_ethics_report", issue="memory_policy_review", proposal="Flag contradictions, expired preferences, and low-value memory for owner review.")),
     BioOpsCapabilitySpec("internal_weather_system", "state_body", "limbic_agent", "weather_state", _internal_weather_system),
     BioOpsCapabilitySpec("body_map_system", "state_body", "somatic_agent", "body_map_report", _generic_handler(name="BodyMapSystem", owner_organ="somatic_agent", output_kind="body_map_report", issue="component_to_body_part_mapping", proposal="Map Host, Edge, voice, vision, channels, and hands into body-part health.")),
-    BioOpsCapabilitySpec("capability_self_awareness", "state_body", "prefrontal_agent", "capability_self_image", _generic_handler(name="CapabilitySelfAwareness", owner_organ="prefrontal_agent", output_kind="capability_self_image", issue="capability_boundary_snapshot", proposal="Expose current can/cannot capability boundaries to ChatAgent and planning.")),
+    BioOpsCapabilitySpec("capability_self_awareness", "state_body", "prefrontal_agent", "capability_self_image", _capability_self_awareness),
     BioOpsCapabilitySpec("aesthetic_consistency_auditor", "state_body", "chat_agent", "aesthetic_report", _generic_handler(name="AestheticConsistencyAuditor", owner_organ="chat_agent", output_kind="aesthetic_report", issue="style_domain_consistency", proposal="Audit UI copy, docs, voice prompts, and replies for unified Natsume tone.")),
     BioOpsCapabilitySpec("self_explanation_layer", "state_body", "prefrontal_agent", "behavior_explanation", _generic_handler(name="SelfExplanationLayer", owner_organ="prefrontal_agent", output_kind="behavior_explanation", issue="user_visible_explanation_needed", proposal="Explain behavior from trace summaries without exposing hidden reasoning.")),
     BioOpsCapabilitySpec("embodiment_director", "state_body", "somatic_agent", "embodiment_report", _generic_handler(name="EmbodimentDirector", owner_organ="somatic_agent", output_kind="embodiment_report", issue="voice_expression_alignment", proposal="Align text, TTS, VTS, and channel status through body-map compensation.")),
+    BioOpsCapabilitySpec("promise_ledger", "inner_mechanisms", "prefrontal_agent", "promise_candidate", _promise_ledger),
+    BioOpsCapabilitySpec("shadow_persona_test", "inner_mechanisms", "chat_agent", "persona_regression_report", _shadow_persona_test),
+    BioOpsCapabilitySpec("idea_fermentation_pool", "inner_mechanisms", "default_mode_agent", "idea_pool_recommendation", _idea_fermentation_pool),
+    BioOpsCapabilitySpec("inner_outer_world_boundary", "inner_mechanisms", "default_mode_agent", "inner_outer_boundary_audit", _inner_outer_world_boundary),
     BioOpsCapabilitySpec("skill_microbiome", "ecosystem_advanced", "immune_agent", "skill_ecology_report", _generic_handler(name="SkillMicrobiome", owner_organ="immune_agent", output_kind="skill_ecology_report", issue="external_skill_ecology_classification", proposal="Classify external skills as beneficial, conditional, harmful, dormant, or unknown.")),
     BioOpsCapabilitySpec("inner_parliament", "ecosystem_advanced", "prefrontal_agent", "parliament_decision", _generic_handler(name="InnerParliament", owner_organ="prefrontal_agent", output_kind="parliament_decision", issue="multi_organ_decision_needed", proposal="Collect organ votes and produce inspect-first policy for complex or risky actions.")),
     BioOpsCapabilitySpec("subconscious_bias_sampler", "ecosystem_advanced", "default_mode_agent", "subconscious_bias_report", _generic_handler(name="SubconsciousBiasSampler", owner_organ="default_mode_agent", output_kind="subconscious_bias_report", issue="subconscious_bias_candidate", proposal="Audit dreams and inner monologues for over-service, boundary loss, or tool-like drift.")),
@@ -312,10 +559,16 @@ def list_capability_specs() -> tuple[BioOpsCapabilitySpec, ...]:
 __all__ = [
     "BioOpsCapabilitySpec",
     "CAPABILITY_SPECS",
+    "INNER_MECHANISM_CAPABILITIES",
     "audit_truthfulness_claims",
+    "audit_capability_self_awareness",
+    "audit_inner_outer_boundary",
+    "classify_idea_fermentation",
     "classify_attention_budget",
     "classify_reflex_stimulus",
+    "detect_promise_language",
     "evaluate_active_silence",
     "list_capability_specs",
     "resolve_internal_weather",
+    "run_shadow_persona_test",
 ]

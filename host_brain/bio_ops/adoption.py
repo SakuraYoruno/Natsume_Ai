@@ -18,6 +18,7 @@ BIO_OPS_CANDIDATE_CAPABILITIES: dict[str, str] = {
     "forgetting_designer": "glymphatic_agent",
     "autobiography_compiler": "hippocampus_agent",
     "immune_memory_builder": "immune_agent",
+    "promise_ledger": "prefrontal_agent",
 }
 
 BIO_OPS_TRACE_ONLY_CAPABILITIES: frozenset[str] = frozenset(
@@ -49,6 +50,9 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "skill_microbiome",
         "subconscious_bias_sampler",
         "truthfulness_cortex",
+        "shadow_persona_test",
+        "idea_fermentation_pool",
+        "inner_outer_world_boundary",
     }
 )
 
@@ -168,7 +172,9 @@ def build_bio_ops_adoption_candidate(
     result_payload: Mapping[str, Any],
 ) -> BioOpsAdoptionCandidate | None:
     policy = resolve_bio_ops_adoption_policy(task.capability)
-    if policy["mode"] != "owner_candidate" and str(result_payload.get("status") or "") != "CANDIDATE":
+    if str(result_payload.get("status") or "") != "CANDIDATE":
+        return None
+    if policy["mode"] != "owner_candidate":
         return None
 
     allowed, reason_code, detail = validate_bio_ops_task_safety(task)

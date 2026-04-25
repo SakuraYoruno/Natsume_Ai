@@ -10,6 +10,7 @@ import {
   Bond,
   Canon,
   ChatDebug,
+  CodexBioOpsObservability,
   DigitalLifeOverview,
   EmotionDashboard,
   Gateway,
@@ -81,6 +82,7 @@ export default function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/digital-life" replace />} />
             <Route path="digital-life" element={withSuspense(<DigitalLifeOverview />)} />
+            <Route path="codex-bio-ops" element={withSuspense(<CodexBioOpsObservability />)} />
             <Route path="life-timeline" element={withSuspense(<LifeTimelinePage />)} />
             <Route path="pathologies" element={withSuspense(<PathologyCenterPage />)} />
             <Route path="pathologies/:pathologyId" element={withSuspense(<PathologyDetailPage />)} />
@@ -116,4 +118,3 @@ export default function App() {
     </ErrorBoundary>
   )
 }
-

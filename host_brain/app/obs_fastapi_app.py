@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from host_brain.app.web_ui import router as web_ui_router
@@ -46,6 +47,8 @@ from host_brain.app.obs_routes_trace import (
     stop_trace_feed_warm_cache,
 )
 from host_brain.app.dependencies import get_ledger as _get_ledger_dep, get_obs_metrics_collector
+from host_brain.app.main import build_request_observability_report
+from host_brain.app.schemas import ObservabilityRequest, ObservabilityResponse
 from host_brain.observability.routes import build_obs_metrics_response
 
 _logger = logging.getLogger("Natsume.obs_app")
@@ -156,6 +159,35 @@ async def obs_metrics(request_id: str | None = None) -> dict[str, Any]:
     )
     payload["timestamp"] = ts_ms
     return payload
+
+
+@app.post("/observability/trace", response_model=ObservabilityResponse)
+async def request_trace(request_body: ObservabilityRequest) -> ObservabilityResponse:
+    ts_ms = int(time.time() * 1000)
+    try:
+        trace_report = build_request_observability_report(
+            request_id=request_body.request_id,
+            ledger=_get_ledger_compat(),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        _logger.error("request trace failed", extra={"request_id": request_body.request_id, "error": str(exc)})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve request trace",
+        ) from exc
+    return ObservabilityResponse(
+        request_id=request_body.request_id,
+        trace_status=trace_report.get("trace_status", "UNKNOWN"),
+        timeline_total=trace_report.get("timeline_total", 0),
+        sources=trace_report.get("sources", {}),
+        timeline=trace_report.get("timeline", []),
+        timestamp=ts_ms,
+    )
 
 
 @app.get("/")

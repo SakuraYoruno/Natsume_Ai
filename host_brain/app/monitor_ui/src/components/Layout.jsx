@@ -69,6 +69,7 @@ const NAV_SECTIONS = [
       { to: '/overview', icon: LayoutDashboard, label: '生命体征' },
       { to: '/sessions', icon: MessageSquare, label: '神经会话' },
       { to: '/trace', icon: GitBranch, label: '神经链路' },
+      { to: '/codex-bio-ops', icon: GitBranch, label: 'Codex / BioOps' },
       { to: '/metrics', icon: BarChart2, label: '代谢指标' },
       { to: '/insights', icon: Lightbulb, label: '皮层洞察' },
       { to: '/chat-debug', icon: SendHorizontal, label: '神经调试' },
@@ -348,4 +349,3 @@ export default function Layout() {
     </div>
   )
 }
-

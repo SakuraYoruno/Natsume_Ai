@@ -1,9 +1,9 @@
-"""T-UI-01: 链路可视化面板可渲染与 API 联通契约测试
+"""T-UI-01: 独立 monitor bundle 与 obs-side API 联通契约测试
 
 TASK-0066: 验证 Web UI 面板端点可达、数据 API 联通、空/错误输入友好处理。
 
 断言点:
-- /panel 返回 200 且 content-type 包含 text/html
+- hostmain 不承载 /panel、/monitor 或 /obs；monitor 静态包由 nginx serve
 - /api/ui/timeline 返回 200 且结构包含 intervals/total_requests/success_rate
 - /api/ui/status-distribution 返回 200 且结构包含 status_counts/distribution_percentage
 - /api/ui/request/{id} 对不存在 ID 返回 404
@@ -23,7 +23,7 @@ import pytest
 
 try:
     from fastapi.testclient import TestClient
-    from host_brain.app.fastapi_app import app
+    from host_brain.app.obs_fastapi_app import app
 
     HAS_FASTAPI = True
 except Exception:
@@ -41,50 +41,17 @@ def client():
 # T-UI-01: 面板可渲染与 API 联通
 # ---------------------------------------------------------------------------
 
-class TestPanelRendering:
-    """面板 HTML 页面可达性测试"""
+class TestMonitorStaticBundle:
+    """Monitor 静态包由 nginx 直接 serve，测试只检查构建产物。"""
 
-    def test_panel_returns_html(self, client):
-        """GET /panel 返回 HTML 页面"""
-        resp = client.get("/panel")
-        # 若 static/panel.html 存在则 200，否则 404（仍是 HTML 响应）
-        assert resp.status_code in (200, 404)
-        assert "text/html" in resp.headers.get("content-type", "")
-
-    def test_panel_contains_key_elements(self, client):
-        """面板页面为 React SPA 架构（M17 升级后）：
-        /panel 重定向到 /static/monitor/index.html；
-        验证 SPA 特征：static/monitor/index.html 文件存在，或响应含 <title> 标签。
-        """
+    def test_monitor_bundle_contains_spa_mount(self):
+        """React SPA bundle 存在，hostmain 不负责 HTTP serve。"""
         from pathlib import Path
 
-        # 方式一：检测 SPA 静态文件是否存在（不依赖 HTTP 响应内容）
         project_root = Path(__file__).resolve().parents[2]
-        spa_index = project_root / "static" / "monitor" / "index.html"
-        if spa_index.exists():
-            body = spa_index.read_text(encoding="utf-8-sig")
-            # SPA index.html 应含 <title> 或 <div id="root">
-            assert "<title>" in body or '<div id="root">' in body, (
-                "static/monitor/index.html 不含 SPA 挂载点特征"
-            )
-            return
-
-        # 方式二：/panel 返回 301 重定向（React SPA 架构）
-        resp = client.get("/panel", follow_redirects=False)
-        if resp.status_code in (301, 302, 307, 308):
-            # 重定向到 SPA 入口，符合 M17 架构预期
-            assert "/static/monitor" in resp.headers.get("location", ""), (
-                "/panel 重定向目标不是 SPA 入口"
-            )
-            return
-
-        # 方式三：若跟随重定向后返回 HTML，检测 <title> 标签（不假设 SSR 内嵌内容）
-        resp = client.get("/panel")
-        if resp.status_code == 200:
-            body = resp.text
-            assert "<title>" in body or '<div id="root">' in body, (
-                "面板页面不含 SPA 特征（<title> 或 <div id='root'>）"
-            )
+        spa_index = project_root / "host_brain" / "app" / "static" / "monitor" / "index.html"
+        body = spa_index.read_text(encoding="utf-8-sig")
+        assert "<title>" in body or '<div id="root">' in body
 
 
 class TestObservabilityTraceAPI:
@@ -177,22 +144,20 @@ class TestWebUIDataAPIs:
 
 
 class TestMetricsForUI:
-    """指标端点对面板的适配性"""
+    """Obs-side 指标端点对面板的适配性"""
 
-    def test_metrics_contains_reason_code_distribution(self, client):
-        """GET /metrics 包含 reason_code_distribution"""
-        resp = client.get("/metrics")
+    def test_obs_metrics_contains_latency_baseline(self, client):
+        """GET /obs/metrics 由 obs side 提供。"""
+        resp = client.get("/obs/metrics")
         assert resp.status_code == 200
         data = resp.json()
-        assert "reason_code_distribution" in data
-        assert isinstance(data["reason_code_distribution"], dict)
+        assert "latency_baseline" in data
+        assert "recent_chains" in data
 
-    def test_metrics_chat_count_increments(self, client):
-        """chat 请求后 metrics.total_chat_requests 递增"""
-        m1 = client.get("/metrics").json()
-        client.post("/v1/chat", json={"message": "T-UI-01 test"})
-        m2 = client.get("/metrics").json()
-        assert m2["total_chat_requests"] >= m1["total_chat_requests"] + 1
+    def test_obs_app_does_not_expose_chat_endpoint(self, client):
+        """obs side 不能承载主聊天请求。"""
+        resp = client.post("/v1/chat", json={"message": "T-UI-01 test"})
+        assert resp.status_code == 404
 
 
 class TestPanelReadonlySafety:
@@ -211,8 +176,11 @@ class TestPanelReadonlySafety:
                 f"{path} should not accept POST (got {resp.status_code})"
 
     def test_panel_no_form_action(self, client):
-        """面板 HTML 无 form action 或提交按钮"""
-        resp = client.get("/panel")
-        if resp.status_code == 200:
-            body = resp.text.lower()
-            assert "<form" not in body or 'action="' not in body
+        """Monitor SPA shell 无 form action。"""
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parents[2]
+        body = (project_root / "host_brain" / "app" / "static" / "monitor" / "index.html").read_text(
+            encoding="utf-8-sig"
+        ).lower()
+        assert "<form" not in body or 'action="' not in body

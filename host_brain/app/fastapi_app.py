@@ -18,8 +18,7 @@ from typing import Any, AsyncGenerator, Callable, Dict, Mapping, Optional
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from host_brain.app.schemas import (
     ChatRequest,
@@ -27,7 +26,6 @@ from host_brain.app.schemas import (
     EdgeEventsResponse,
     MetricsResponse,
 )
-from host_brain.app.web_ui import router as web_ui_router
 from host_brain.app.canon_routes import router as canon_router, set_ledger_provider as _set_canon_ledger_provider
 from host_brain.scheduler.scheduler_routes import (
     router as scheduler_router,
@@ -36,7 +34,6 @@ from host_brain.scheduler.scheduler_routes import (
 from host_brain.app.automation.scheduler_routes import router as host_scheduler_router  # Ref #108: HostTaskScheduler 管理路由
 from host_brain.app.tool_routes import router as tool_router, tool_kits_alias_router, set_tool_providers as _set_tool_providers
 from host_brain.app.bond_routes import router as bond_router, set_bond_engine_provider as _set_bond_engine_provider
-from host_brain.app.obs_routes import router as obs_router, set_ledger_provider as _set_obs_ledger_provider
 from host_brain.app.health_routes import router as health_router
 from host_brain.app.agent_routes import router as agent_router
 from host_brain.app.input_routes import router as input_router
@@ -116,86 +113,11 @@ def _sse_immediate_events(events: list[dict[str, Any]]) -> Response:
     )
 
 
-def _env_flag(name: str, default: bool = False) -> bool:
-    raw = str(os.environ.get(name, "")).strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "on"}
-
-
 def _resolve_uvicorn_access_log_enabled() -> bool:
     raw = str(os.environ.get("HOST_FASTAPI_APP_UVICORN_ACCESS_LOG_ENABLED") or "").strip().lower()
     if not raw:
         return False
     return raw in {"1", "true", "yes", "on"}
-
-
-def _normalize_bind_host(raw: str, fallback: str = "127.0.0.1") -> str:
-    value = str(raw or "").strip()
-    if not value or value == "0.0.0.0":
-        return fallback
-    return value
-
-
-def _build_redirect_target(
-    *,
-    host: str,
-    port: int,
-    path: str,
-    query_string: bytes,
-) -> str:
-    target = f"http://{host}:{port}{path}"
-    if query_string:
-        target = f"{target}?{query_string.decode('utf-8', errors='ignore')}"
-    return target
-
-
-def _resolve_obs_redirect_target(request: Request) -> str | None:
-    if not _env_flag("HOST_MAIN_OBS_REDIRECT_ENABLED", default=False):
-        return None
-    path = str(request.url.path or "")
-    if not (path.startswith("/obs/") or path.startswith("/api/ui/")):
-        return None
-    host = _normalize_bind_host(
-        os.environ.get("HOST_OBS_APP_HOST", os.environ.get("HOST_APP_HOST", "127.0.0.1"))
-    )
-    try:
-        port = int(os.environ.get("HOST_OBS_APP_PORT", "18082"))
-    except Exception:
-        port = 18082
-    return _build_redirect_target(
-        host=host,
-        port=port,
-        path=path,
-        query_string=request.scope.get("query_string", b""),
-    )
-
-
-def _resolve_monitor_redirect_target(request: Request) -> str | None:
-    if not _env_flag("HOST_MAIN_MONITOR_REDIRECT_ENABLED", default=False):
-        return None
-    path = str(request.url.path or "")
-    if path == "/panel":
-        path = "/monitor/"
-    elif not (
-        path.startswith("/monitor")
-        or path.startswith("/static/monitor")
-    ):
-        return None
-    host = _normalize_bind_host(os.environ.get("HOST_MONITOR_PROXY_HOST", "127.0.0.1"))
-    try:
-        port = int(os.environ.get("HOST_MONITOR_PROXY_PORT", "18180"))
-    except Exception:
-        port = 18180
-    if path.startswith("/static/monitor"):
-        suffix = path[len("/static/monitor"):]
-        path = "/monitor" + suffix
-    return _build_redirect_target(
-        host=host,
-        port=port,
-        path=path,
-        query_string=request.scope.get("query_string", b""),
-    )
 
 
 def _evaluate_immune_gate_for_chat(request_body: ChatRequest) -> dict[str, Any]:
@@ -326,7 +248,6 @@ _metrics = _RuntimeMetrics()
 # 路由依赖注入（避免 provider 未配置导致假性 DEGRADED）
 # ---------------------------------------------------------------------------
 _set_canon_ledger_provider(_get_ledger_compat)
-_set_obs_ledger_provider(_get_ledger_compat)
 _set_tool_providers(
     broker_provider=get_tool_broker,
     catalog_provider=get_tool_catalog,
@@ -370,11 +291,6 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# 注册 Web UI API 路由（TASK-0066: 链路可视化面板后端）
-# ---------------------------------------------------------------------------
-app.include_router(web_ui_router, prefix="/api")
-
-# ---------------------------------------------------------------------------
 # 注册 Canon 处理 API 路由（M10-A TASK-0118: Canon 提案审核 REST API）
 # ---------------------------------------------------------------------------
 app.include_router(canon_router)
@@ -402,11 +318,6 @@ app.include_router(tool_kits_alias_router)  # GET /tool_kits 别名，兼容 UAT
 app.include_router(bond_router)
 
 # ---------------------------------------------------------------------------
-# 注册 Observability REST API 路由（M18: 监控面板后端数据接口）
-# ---------------------------------------------------------------------------
-app.include_router(obs_router)
-
-# ---------------------------------------------------------------------------
 # 注册 Agent Loop REST API 路由（ClawdBot 视觉自动化闭环）
 # ---------------------------------------------------------------------------
 app.include_router(agent_router)
@@ -426,18 +337,6 @@ app.include_router(input_router)
 # ---------------------------------------------------------------------------
 app.include_router(internal_tribe_router)
 app.include_router(internal_codex_router)
-
-# ---------------------------------------------------------------------------
-# 挂载静态文件目录（TASK-0066: 前端面板页面）
-# ---------------------------------------------------------------------------
-_static_dir = os.path.join(os.path.dirname(__file__), "static")
-if os.path.isdir(_static_dir):
-    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
-    # M17 monitor SPA build outputs absolute asset URLs under "/monitor/*".
-    # Keep an alias mount so /panel and /static/monitor/index.html both work.
-    _monitor_dir = os.path.join(_static_dir, "monitor")
-    if os.path.isdir(_monitor_dir):
-        app.mount("/monitor", StaticFiles(directory=_monitor_dir), name="monitor")
 
 # ---------------------------------------------------------------------------
 # CORS 中间件（可配置）
@@ -476,43 +375,10 @@ async def add_request_id_and_audit(request: Request, call_next: Callable) -> Res
     return await _add_request_id_fn(request=request, call_next=call_next, metrics=_metrics, logger=_logger)
 
 
-@app.middleware("http")
-async def redirect_obs_and_monitor_traffic(request: Request, call_next: Callable) -> Response:
-    """Optionally offload monitor/obs traffic away from host-main.
-
-    Runtime scripts can enable this redirect so accidental use of host-main
-    monitor URLs does not send heavy observability traffic back into the main
-    chat process.
-    """
-    monitor_target = _resolve_monitor_redirect_target(request)
-    if monitor_target:
-        return RedirectResponse(url=monitor_target, status_code=307)
-
-    obs_target = _resolve_obs_redirect_target(request)
-    if obs_target:
-        return RedirectResponse(url=obs_target, status_code=307)
-
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def tune_monitor_static_cache(request: Request, call_next: Callable) -> Response:
-    response = await call_next(request)
-    if request.method.upper() != "GET":
-        return response
-
-    path = (request.url.path or "").strip()
-    if path.startswith("/monitor/assets/") or path.startswith("/static/monitor/assets/"):
-        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
-    elif path in {"/monitor", "/monitor/", "/monitor/index.html", "/static/monitor/index.html"}:
-        response.headers["Cache-Control"] = "no-cache"
-    return response
-
-
 # ---------------------------------------------------------------------------
-# 注册 Health / Readiness / Observability 路由（health_routes.py 统一管理）
-# 注意：/health、/ready、/obs/metrics、/health/mcp、/health/canon_sync、
-#       /observability/trace、/startup 均由 health_router 注册，此处不重复注册。
+# 注册 Host Health / Readiness 路由（health_routes.py 统一管理）
+# 注意：hostmain 只保留 /health、/ready、/health/mcp、/health/canon_sync、
+#       /startup；/obs/*、/api/ui/*、/monitor/* 只能走 obs side + nginx。
 # ---------------------------------------------------------------------------
 app.include_router(health_router)
 
@@ -613,16 +479,6 @@ async def metrics() -> MetricsResponse:
         reason_code_distribution=dict(_metrics.reason_code_counts),
         timestamp=int(time.time() * 1000),
     )
-
-
-# ---------------------------------------------------------------------------
-# Web UI 面板入口（M17: 已升级为 React SPA，旧 panel.html 已移除）
-# ---------------------------------------------------------------------------
-@app.get("/panel")
-async def panel_page() -> Response:
-    """Monitoring panel redirect endpoint."""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/monitor/index.html", status_code=301)
 
 
 # ---------------------------------------------------------------------------

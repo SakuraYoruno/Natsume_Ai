@@ -2,6 +2,7 @@
 
 export const PAGE_LOADERS = Object.freeze({
   '/digital-life': () => import('../pages/DigitalLifeOverview.jsx'),
+  '/codex-bio-ops': () => import('../pages/CodexBioOpsObservability.jsx'),
   '/life-timeline': () => import('../pages/LifeTimelinePage.jsx'),
   '/pathologies': () => import('../pages/PathologyCenterPage.jsx'),
   '/pathology-detail': () => import('../pages/PathologyDetailPage.jsx'),
@@ -36,6 +37,7 @@ function lazyPage(path) {
 }
 
 export const DigitalLifeOverview = lazyPage('/digital-life')
+export const CodexBioOpsObservability = lazyPage('/codex-bio-ops')
 export const LifeTimelinePage = lazyPage('/life-timeline')
 export const PathologyCenterPage = lazyPage('/pathologies')
 export const PathologyDetailPage = lazyPage('/pathology-detail')
@@ -72,4 +74,3 @@ export function preloadRoute(path) {
   }
   return loader().catch(() => null)
 }
-
