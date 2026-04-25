@@ -42,6 +42,11 @@ _FALLBACK_GREETING_RE = re.compile(r"^(你好|你好啊|你好呀|您好|嗨|哈
 _FALLBACK_PRESENCE_RE = re.compile(r"^(在吗|在不在|还在吗|忙吗|在嘛)[?？!！。…~]*$")
 _FALLBACK_AFFECTION_RE = re.compile(r"(想你|好想你|我想你了|想你啦|惦记你)")
 _FALLBACK_STRENGTH_RE = re.compile(r"(特长|擅长|你会什么|你能做什么|你会做什么)")
+_OPEN_APP_VERB_RE = re.compile(r"(打开|启动|运行|开一下|帮我开|替我开|launch|open)", re.IGNORECASE)
+_OPEN_APP_HINT_RE = re.compile(
+    r"(本地|应用|软件|程序|app|酷狗|kugou|qq音乐|网易云|spotify|浏览器|微信|qq|音乐)",
+    re.IGNORECASE,
+)
 
 _DELEGATE_MARKER_RE = re.compile(r"\[DELEGATE:[^\]]+\]", re.IGNORECASE)
 _ACK_CLOSE_STAGES = {"COMPANION", "INTIMATE", "FAMILY"}
@@ -468,6 +473,17 @@ def _runtime_text(
     return _mapping_text(templates, key, render_target_lang=render_target_lang, **kwargs)
 
 
+def _looks_like_open_app_request(user_message: str) -> bool:
+    normalized = re.sub(r"\s+", "", str(user_message or "")).strip()
+    if not normalized:
+        return False
+    if _OPEN_APP_VERB_RE.search(normalized) and _OPEN_APP_HINT_RE.search(normalized):
+        return True
+    if normalized.startswith(("打开", "启动", "运行")) and not re.search(r"(网页|链接|网址|页面|文件|图片|文档)", normalized):
+        return True
+    return False
+
+
 def render_quick_gateway_ack_text(
     *,
     user_message: str = "",
@@ -482,7 +498,9 @@ def render_quick_gateway_ack_text(
     etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
     clean_sender = str(sender_name or "").strip()
 
-    if etag in _ACK_LOW_ENERGY_TAGS:
+    if _looks_like_open_app_request(user_message):
+        text = _mapping_text(templates, "quick_ack_open_app", sender_name=clean_sender)
+    elif etag in _ACK_LOW_ENERGY_TAGS:
         text = _mapping_text(templates, "quick_ack_low_energy", sender_name=clean_sender)
     elif stage in _ACK_CLOSE_STAGES:
         text = _mapping_text(templates, "quick_ack_close", sender_name=clean_sender)
