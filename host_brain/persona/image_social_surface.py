@@ -36,11 +36,13 @@ _VAGUE_SHAPES = (
     "是不是想",
     "是想",
 )
-_SELF_IMAGE_PREDICATE_RE = r"(?:可爱|萌|好看)(?:吗|吧|哦|啦|呀|啊|嘛|呢|了)?(?![\u4e00-\u9fff])"
+_SELF_IMAGE_PREDICATE_RE = (
+    r"(?:可爱|萌|好看)(?:的(?:样子|表情|感觉|模样|时候)|(?:吗|吧|哦|啦|呀|啊|嘛|呢|了)?(?![\u4e00-\u9fff]))"
+)
 _SELF_AS_IMAGE_RE = re.compile(
     rf"(看我.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
     rf"我是不是.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
-    rf"我可不可爱(?:吗|吧|哦|啦|呀|啊|嘛|呢|了)?(?![\u4e00-\u9fff])|"
+    rf"我可不{_SELF_IMAGE_PREDICATE_RE}|"
     rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_SELF_IMAGE_PREDICATE_RE})"
 )
 _WEAK_IMAGE_ANCHORS = {"可爱", "卖萌", "软萌", "萌", "表情"}
