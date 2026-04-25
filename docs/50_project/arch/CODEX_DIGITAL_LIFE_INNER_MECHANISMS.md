@@ -33,6 +33,15 @@ The trust-foundation follow-up batch is also implemented as BioOps report/propos
 
 These three are observable through the Codex / BioOps WebUI `Trust Foundation` panel and do not stage long-term write candidates.
 
+The natural-interaction batch is implemented as low-risk trace policy:
+
+- `SubjectiveTime` -> `subjective_time`, time-gap, burst, late-night, and long-task companion policy hints.
+- `MoodInertia` -> `mood_inertia`, affect carryover with decay and recovery windows.
+- `ContextGravity` -> `context_gravity`, dominant-topic trace for short continuation inputs.
+- `SelfInterrupt` -> `self_interrupt`, pre-send interruption for over-explaining, missing WorkOrder Codex paths, unsupported promises, or persona regression.
+
+These are observable through the Codex / BioOps WebUI `Natural Interaction` panel. They do not execute tools, trigger Codex workers, or write long-term state.
+
 ---
 
 ## 0. 总目标

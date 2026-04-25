@@ -10,7 +10,12 @@ from typing import Any
 from fastapi import Query
 
 from host_brain.app.obs_routes_core import router
-from host_brain.bio_ops.capabilities import INNER_MECHANISM_CAPABILITIES, TRUST_FOUNDATION_CAPABILITIES, list_capability_specs
+from host_brain.bio_ops.capabilities import (
+    INNER_MECHANISM_CAPABILITIES,
+    NATURAL_INTERACTION_CAPABILITIES,
+    TRUST_FOUNDATION_CAPABILITIES,
+    list_capability_specs,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -272,6 +277,14 @@ def _trust_foundation_summary(capabilities: list[dict[str, Any]]) -> dict[str, A
     )
 
 
+def _natural_interaction_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        NATURAL_INTERACTION_CAPABILITIES,
+        activation_rule="low_risk_trace_policy",
+    )
+
+
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for payload in payloads:
@@ -409,6 +422,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 **catalog,
                 "inner_mechanisms": _inner_mechanism_summary(catalog["capabilities"]),
                 "trust_foundation": _trust_foundation_summary(catalog["capabilities"]),
+                "natural_interaction": _natural_interaction_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -478,6 +492,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             **catalog,
             "inner_mechanisms": _inner_mechanism_summary(catalog["capabilities"]),
             "trust_foundation": _trust_foundation_summary(catalog["capabilities"]),
+            "natural_interaction": _natural_interaction_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

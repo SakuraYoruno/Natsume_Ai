@@ -67,6 +67,10 @@ const EFFECT_LABELS = {
   consent_gradient_gate: '授权梯度',
   competence_humility_rewrite: '能力谦逊',
   uncertainty_ritual_claim: '不确定性仪式',
+  subjective_time_reunion: '主观时间',
+  mood_inertia_soft_concern: '情绪惯性',
+  context_gravity_continue: '上下文重力',
+  self_interrupt_over_explaining: '自我打断',
 }
 
 const TRACE_LABELS = {
@@ -91,6 +95,15 @@ const TRUST_FOUNDATION_LABELS = {
   consent_gradient: '授权梯度',
   competence_humility: '能力谦逊',
   uncertainty_ritual: '不确定性仪式',
+}
+
+const NATURAL_INTERACTION_LABELS = {
+  reflex_arc_compiler: '反射弧编译',
+  response_breathing_policy: '呼吸式回复',
+  mood_inertia: '情绪惯性',
+  context_gravity: '上下文重力',
+  subjective_time: '主观时间',
+  self_interrupt: '自我打断',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -444,6 +457,17 @@ function TrustFoundationPanel({ summary }) {
   )
 }
 
+function NaturalInteractionPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={NATURAL_INTERACTION_LABELS}
+      emptyTitle="暂无 Natural Interaction 数据"
+      note="自然交互调节只提供 trace 和低风险策略提示；复杂任务仍走规划链和 WorkOrder。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -518,6 +542,7 @@ export default function CodexBioOpsObservability() {
   const bioOps = data?.bio_ops || {}
   const innerMechanisms = bioOps.inner_mechanisms || {}
   const trustFoundation = bioOps.trust_foundation || {}
+  const naturalInteraction = bioOps.natural_interaction || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -583,7 +608,7 @@ export default function CodexBioOpsObservability() {
 
       {data?.artifact_available ? (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-8">
             <MetricTile
               icon={GitBranch}
               tone="green"
@@ -623,6 +648,14 @@ export default function CodexBioOpsObservability() {
               value={trustFoundation.capability_count ?? '—'}
               status="TRACED"
               hint={`${trustFoundation.status_counts?.PROPOSED || 0} gates · ${trustFoundation.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
+              icon={Activity}
+              tone="indigo"
+              label="自然交互"
+              value={naturalInteraction.capability_count ?? '—'}
+              status="TRACED"
+              hint={`${naturalInteraction.status_counts?.PROPOSED || 0} policies · ${naturalInteraction.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
               icon={ShieldCheck}
@@ -673,6 +706,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Trust Foundation" subtitle="可信基础层：授权梯度、真实约束、能力谦逊和不确定性表达统一变成可观测 gate。">
             <TrustFoundationPanel summary={trustFoundation} />
+          </Section>
+
+          <Section title="Natural Interaction" subtitle="自然交互层：主观时间、情绪惯性、上下文重力和自我打断统一进入低风险 trace。">
+            <NaturalInteractionPanel summary={naturalInteraction} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

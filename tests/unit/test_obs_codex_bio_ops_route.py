@@ -183,6 +183,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "competence_humility",
         "uncertainty_ritual",
     }
+    assert payload["bio_ops"]["natural_interaction"]["capability_count"] == 6
+    assert payload["bio_ops"]["natural_interaction"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["natural_interaction"]["capabilities"]} == {
+        "reflex_arc_compiler",
+        "response_breathing_policy",
+        "mood_inertia",
+        "context_gravity",
+        "subjective_time",
+        "self_interrupt",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

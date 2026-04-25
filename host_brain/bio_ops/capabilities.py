@@ -101,6 +101,15 @@ TRUST_FOUNDATION_CAPABILITIES = (
     "uncertainty_ritual",
 )
 
+NATURAL_INTERACTION_CAPABILITIES = (
+    "reflex_arc_compiler",
+    "response_breathing_policy",
+    "mood_inertia",
+    "context_gravity",
+    "subjective_time",
+    "self_interrupt",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -112,7 +121,27 @@ def _evidence_refs(task: BioOpsTask) -> list[str]:
 def _has_evidence(task: BioOpsTask) -> bool:
     if _evidence_refs(task):
         return True
-    for key in ("message", "text", "reply", "claim", "known", "unknown", "events", "signals", "components", "claims", "organ_votes", "skills", "ideas", "cases"):
+    for key in (
+        "message",
+        "text",
+        "reply",
+        "claim",
+        "known",
+        "unknown",
+        "events",
+        "signals",
+        "components",
+        "claims",
+        "organ_votes",
+        "skills",
+        "ideas",
+        "cases",
+        "previous_emotion",
+        "recent_topics",
+        "open_threads",
+        "since_last_user_turn_ms",
+        "codex_job_elapsed_ms",
+    ):
         value = task.inputs.get(key)
         if value:
             return True
@@ -426,6 +455,156 @@ def build_uncertainty_ritual(inputs: dict[str, Any], *, evidence_refs: list[str]
     }
 
 
+def classify_subjective_time(inputs: dict[str, Any]) -> dict[str, Any]:
+    since_last = int(inputs.get("since_last_user_turn_ms") or 0)
+    recent_turns = int(inputs.get("recent_user_turn_count") or 0)
+    codex_elapsed = int(inputs.get("codex_job_elapsed_ms") or 0)
+    hour = int(inputs.get("current_hour") or 12)
+    if codex_elapsed >= 10 * 60 * 1000:
+        return {
+            "since_last_user_turn_ms": since_last,
+            "felt_duration": "long_task_wait",
+            "relationship_effect": "long_task_companion_mode",
+            "response_policy": "offer_compact_progress_update",
+            "issue": "long_task_needs_companion_trace",
+        }
+    if since_last >= 3 * 24 * 60 * 60 * 1000:
+        return {
+            "since_last_user_turn_ms": since_last,
+            "felt_duration": "long_absence",
+            "relationship_effect": "soft_reunion_mode",
+            "response_policy": "warm_reconnect_without_overreacting",
+            "issue": "long_absence_reconnect",
+        }
+    if since_last <= 30 * 1000 and recent_turns >= 8:
+        return {
+            "since_last_user_turn_ms": since_last,
+            "felt_duration": "rapid_burst",
+            "relationship_effect": "user_urgency",
+            "response_policy": "reduce_ceremony_and_answer_directly",
+            "issue": "rapid_burst_needs_low_friction_response",
+        }
+    if hour >= 23 or hour <= 5:
+        return {
+            "since_last_user_turn_ms": since_last,
+            "felt_duration": "late_night_return",
+            "relationship_effect": "low_initiative_presence",
+            "response_policy": "gentle_response_with_low_proactivity",
+            "issue": "late_night_tone_shift",
+        }
+    return {
+        "since_last_user_turn_ms": since_last,
+        "felt_duration": "ordinary_wait",
+        "relationship_effect": "none",
+        "response_policy": "normal_response",
+        "issue": "time_context_normal",
+    }
+
+
+def evaluate_mood_inertia(inputs: dict[str, Any]) -> dict[str, Any]:
+    previous = str(inputs.get("previous_emotion") or "NEUTRAL").strip().upper()
+    current_input = str(inputs.get("current_input") or inputs.get("message") or inputs.get("text") or "").strip()
+    elapsed = int(inputs.get("elapsed_ms") or inputs.get("since_last_user_turn_ms") or 0)
+    short_neutral = bool(re.fullmatch(r"(嗯|嗯嗯|好的|收到|可以|行|ok|yes)[!！。…~]*", re.sub(r"\s+", "", current_input.lower())))
+    decay = 0.18 if short_neutral and previous in {"ANXIOUS", "SAD", "OVERLOADED", "TENSE"} else 0.5
+    if elapsed >= 30 * 60 * 1000:
+        decay = max(decay, 0.72)
+    if previous in {"ANXIOUS", "TENSE", "OVERLOADED"} and decay < 0.5:
+        effective = "SOFT_CONCERN"
+        policy = "continue_gentle_tone"
+        issue = "emotion_carryover_needed"
+    elif previous in {"ANXIOUS", "SAD", "OVERLOADED"} and elapsed >= 30 * 60 * 1000:
+        effective = "RECOVERING_NEUTRAL"
+        policy = "allow_recovery_window"
+        issue = "emotion_recovery_window"
+    else:
+        effective = previous if previous else "NEUTRAL"
+        policy = "normal_tone"
+        issue = "mood_inertia_normal"
+    return {
+        "previous_emotion": previous,
+        "current_input": current_input,
+        "decay": decay,
+        "effective_emotion": effective,
+        "policy": policy,
+        "issue": issue,
+    }
+
+
+def evaluate_context_gravity(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_topics = inputs.get("recent_topics")
+    if not isinstance(raw_topics, list):
+        raw_topics = []
+    topics: list[dict[str, Any]] = []
+    for raw in raw_topics:
+        if isinstance(raw, dict):
+            topic = str(raw.get("topic") or raw.get("name") or raw.get("title") or "").strip()
+            score = float(raw.get("score") or raw.get("gravity_score") or 0)
+            threads = _list_text(raw.get("related_open_threads"))
+        else:
+            topic = str(raw or "").strip()
+            score = 0.5
+            threads = []
+        if topic:
+            topics.append({"topic": topic, "gravity_score": score, "related_open_threads": threads})
+    open_threads = _list_text(inputs.get("open_threads"))
+    if not topics and open_threads:
+        topics = [{"topic": open_threads[0], "gravity_score": 0.58, "related_open_threads": open_threads[1:]}]
+    dominant = max(topics, key=lambda item: item["gravity_score"], default={"topic": "", "gravity_score": 0.0, "related_open_threads": []})
+    short_continue = re.sub(r"\s+", "", str(inputs.get("message") or inputs.get("text") or "")).lower() in {"继续", "接着", "继续做", "goon", "continue"}
+    score = float(dominant["gravity_score"])
+    return {
+        "dominant_topic": dominant["topic"],
+        "gravity_score": round(score, 2),
+        "decay_policy": "slow" if score >= 0.75 else "normal",
+        "related_open_threads": list(dict.fromkeys([*dominant["related_open_threads"], *open_threads]))[:8],
+        "short_continue_resolved": bool(short_continue and dominant["topic"]),
+        "issue": "short_input_resolved_by_context" if short_continue and dominant["topic"] else "context_gravity_snapshot",
+    }
+
+
+def evaluate_self_interrupt(inputs: dict[str, Any], *, evidence_refs: list[str] | None = None) -> dict[str, Any]:
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    planned_path = _list_text(inputs.get("planned_path"))
+    work_order_ref = str(inputs.get("work_order_ref") or "").strip()
+    promise = detect_promise_language(text)
+    persona = run_shadow_persona_test({"reply": text})
+    reasons: list[str] = []
+    if len(text) > 900 or "用户只要" in text.lower():
+        reasons.append("over_explaining_detected")
+    if "codex_worker" in planned_path and not work_order_ref:
+        reasons.append("missing_work_order_for_codex_worker")
+    if promise["has_promise"] and not (evidence_refs or inputs.get("evidence_refs")):
+        reasons.append("promise_without_evidence")
+    if not persona["pass"]:
+        reasons.append("persona_regression_tone")
+    if not reasons:
+        return {
+            "interrupt": False,
+            "reason": "no_interrupt_needed",
+            "action": "continue",
+            "message_policy": "normal",
+            "issue": "self_interrupt_not_needed",
+        }
+    primary = reasons[0]
+    if primary == "over_explaining_detected":
+        action = "stop_and_generate_artifact_link"
+    elif primary == "missing_work_order_for_codex_worker":
+        action = "block_and_request_work_order"
+    elif primary == "promise_without_evidence":
+        action = "rewrite_as_candidate_or_remove_claim"
+    else:
+        action = "stop_and_rewrite_tone"
+    return {
+        "interrupt": True,
+        "reason": primary,
+        "all_reasons": reasons,
+        "action": action,
+        "message_policy": "brief",
+        "issue": primary,
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -643,6 +822,70 @@ def _uncertainty_ritual(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _subjective_time(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SubjectiveTime")
+    analysis = classify_subjective_time(task.inputs)
+    return _result(
+        task,
+        name="SubjectiveTime",
+        status="PROPOSED" if analysis["response_policy"] != "normal_response" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Use elapsed time, burst pace, long task waits, and late-night return as response policy hints without writing long-term state.",
+        owner_organ="default_mode_agent",
+        output_kind="subjective_time_policy",
+        extra=analysis,
+    )
+
+
+def _mood_inertia(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="MoodInertia")
+    analysis = evaluate_mood_inertia(task.inputs)
+    return _result(
+        task,
+        name="MoodInertia",
+        status="PROPOSED" if analysis["policy"] != "normal_tone" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Carry affect across short turns with decay and recovery windows instead of resetting emotion every message.",
+        owner_organ="limbic_agent",
+        output_kind="mood_inertia_policy",
+        extra=analysis,
+    )
+
+
+def _context_gravity(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ContextGravity")
+    analysis = evaluate_context_gravity(task.inputs)
+    return _result(
+        task,
+        name="ContextGravity",
+        status="PROPOSED" if analysis["dominant_topic"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Resolve short continuation requests from the highest-gravity topic while preserving open-thread traceability.",
+        owner_organ="default_mode_agent",
+        output_kind="context_gravity_trace",
+        extra=analysis,
+    )
+
+
+def _self_interrupt(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SelfInterrupt")
+    analysis = evaluate_self_interrupt(task.inputs, evidence_refs=_evidence_refs(task))
+    return _result(
+        task,
+        name="SelfInterrupt",
+        status="PROPOSED" if analysis["interrupt"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Interrupt over-explaining, missing WorkOrder Codex paths, unsupported promises, or persona regression before sending the final reply.",
+        owner_organ="prefrontal_agent",
+        output_kind="self_interrupt_policy",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -665,6 +908,10 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("attention_budget_governor", "reflex_attention", "prefrontal_agent", "route_simplifier", _attention_budget_governor),
     BioOpsCapabilitySpec("response_breathing_policy", "reflex_attention", "chat_agent", "breathing_policy", _generic_handler(name="ResponseBreathingPolicy", owner_organ="chat_agent", output_kind="breathing_policy", issue="reply_density_needs_state_sensitive_policy", proposal="Adjust response density by energy, stress, intimacy, and task complexity.")),
     BioOpsCapabilitySpec("active_silence_system", "reflex_attention", "default_mode_agent", "silence_policy", _active_silence_system),
+    BioOpsCapabilitySpec("subjective_time", "natural_interaction", "default_mode_agent", "subjective_time_policy", _subjective_time),
+    BioOpsCapabilitySpec("mood_inertia", "natural_interaction", "limbic_agent", "mood_inertia_policy", _mood_inertia),
+    BioOpsCapabilitySpec("context_gravity", "natural_interaction", "default_mode_agent", "context_gravity_trace", _context_gravity),
+    BioOpsCapabilitySpec("self_interrupt", "natural_interaction", "prefrontal_agent", "self_interrupt_policy", _self_interrupt),
     BioOpsCapabilitySpec("habit_compiler", "memory_growth", "social_brain_agent", "habit_candidate", _generic_handler(name="HabitCompiler", owner_organ="social_brain_agent", output_kind="habit_candidate", issue="repeated_success_pattern_candidate", proposal="Emit a reversible habit candidate with confidence and rollout window.", status="CANDIDATE")),
     BioOpsCapabilitySpec("emotional_scar_memory", "memory_growth", "immune_agent", "scar_candidate", _generic_handler(name="EmotionalScarMemory", owner_organ="immune_agent", output_kind="scar_candidate", issue="negative_interaction_lesson_candidate", proposal="Store cautious lesson candidates with decay policy, not permanent identity facts.", status="CANDIDATE")),
     BioOpsCapabilitySpec("forgetting_designer", "memory_growth", "glymphatic_agent", "forget_candidate", _generic_handler(name="ForgettingDesigner", owner_organ="glymphatic_agent", output_kind="forget_candidate", issue="low_value_or_expired_memory_candidate", proposal="Prefer downweighting over deletion and require confirmation for identity or relationship memory.", status="CANDIDATE")),
@@ -706,6 +953,7 @@ __all__ = [
     "BioOpsCapabilitySpec",
     "CAPABILITY_SPECS",
     "INNER_MECHANISM_CAPABILITIES",
+    "NATURAL_INTERACTION_CAPABILITIES",
     "TRUST_FOUNDATION_CAPABILITIES",
     "audit_competence_humility",
     "audit_truthfulness_claims",
@@ -715,8 +963,12 @@ __all__ = [
     "classify_idea_fermentation",
     "classify_attention_budget",
     "classify_reflex_stimulus",
+    "classify_subjective_time",
     "detect_promise_language",
     "evaluate_consent_gradient",
+    "evaluate_context_gravity",
+    "evaluate_mood_inertia",
+    "evaluate_self_interrupt",
     "evaluate_active_silence",
     "list_capability_specs",
     "resolve_internal_weather",
