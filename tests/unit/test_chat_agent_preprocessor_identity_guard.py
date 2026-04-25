@@ -530,6 +530,119 @@ def test_image_social_reply_requires_validation_and_blocks_underanswered_stub() 
     assert "委屈" not in fallback
 
 
+def test_image_social_reply_rejects_self_as_image_candidate() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_reply",
+        interaction_move="playful_ping",
+        trajectory=ResponseTrajectory(
+            response_goal="cute_image_reply",
+            tactic_family="cute_image_ack",
+            tactic_variant="cute_ping",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        response_form_reason="image_social_reply",
+        multimodal={
+            "primary_modality": "image",
+            "core_observation": "可爱、卖萌；猫耳女孩特写，蓝色眼睛。",
+        },
+        contract=ReplyContract(
+            text="先把这张图的可爱/卖萌感接住，再顺着这股语气回一句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=(),
+        ),
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    validation = validate_reply(
+        text="哥哥，人家今天也很可爱哦！",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert validation.is_valid is False
+    assert "image_self_reference" in validation.reason_codes
+
+    punctuated_validation = validate_reply(
+        text="哥哥，人家今天：也很可爱哦！",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert punctuated_validation.is_valid is False
+    assert "image_self_reference" in punctuated_validation.reason_codes
+
+    suffix_validation = validate_reply(
+        text="哥哥，上面看我是不是很可爱啊？",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert suffix_validation.is_valid is False
+    assert "image_self_reference" in suffix_validation.reason_codes
+
+    descriptive_suffix_validation = validate_reply(
+        text="这张看我可爱的样子，猫耳都竖起来了。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert descriptive_suffix_validation.is_valid is False
+    assert "image_self_reference" in descriptive_suffix_validation.reason_codes
+
+    degree_suffix_validation = validate_reply(
+        text="看我今天可爱死了吧。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert degree_suffix_validation.is_valid is False
+    assert "image_self_reference" in degree_suffix_validation.reason_codes
+
+
+def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_reply",
+        interaction_move="playful_ping",
+        trajectory=ResponseTrajectory(
+            response_goal="cute_image_reply",
+            tactic_family="cute_image_ack",
+            tactic_variant="cute_ping",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        response_form_reason="image_social_reply",
+        multimodal={
+            "primary_modality": "image",
+            "core_observation": "可爱、卖萌；猫耳女孩特写，蓝色眼睛。",
+        },
+        contract=ReplyContract(
+            text="先把这张图的可爱/卖萌感接住，再顺着这股语气回一句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=(),
+        ),
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    validation = validate_reply(
+        text="哥哥，我也觉得这张猫耳很可爱，轻轻戳到了。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert "image_self_reference" not in validation.reason_codes
+
+    pun_validation = validate_reply(
+        text="哥哥，我也萌生了想捏这张猫耳的冲动。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert "image_self_reference" not in pun_validation.reason_codes
+
+
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
     plan = ReplyPlan(
         primary_topic="assistant_reply_followup",

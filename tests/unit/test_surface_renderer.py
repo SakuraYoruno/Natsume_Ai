@@ -263,6 +263,52 @@ async def test_surface_renderer_image_rejects_template_and_accepts_observation(m
 
 
 @pytest.mark.asyncio
+async def test_surface_renderer_image_rejected_candidates_fall_through_to_full_model(monkeypatch) -> None:
+    async def _fake_call(self, request, **kwargs):  # noqa: ANN001, ANN003
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "candidates": [
+                        "哥哥，人家今天也很可爱哦！",
+                        "哥哥，今天我也想和你一起玩！",
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=222,
+        )
+
+    monkeypatch.setattr(SurfaceRenderer, "_call_surface_model", _fake_call)
+    trace: dict[str, object] = {}
+
+    result = await SurfaceRenderer().render(
+        _request(
+            _plan(
+                primary_topic="emoji_social_reply",
+                response_form_reason="image_social_reply",
+                tactic_family="cute_image_ack",
+                multimodal={"summary_for_chat": "可爱、卖萌；猫耳女孩特写。", "core_observation": "猫耳女孩。"},
+            ),
+            trace=trace,
+        )
+    )
+
+    assert result.text == ""
+    assert result.skipped_reason == "image_social_surface_unavailable"
+    assert result.degraded is False
+    meta = dict(trace["image_social_surface_render"])
+    assert meta["status"] == "REJECTED"
+    assert meta["affected_output"] is False
+    assert [item["reason_code"] for item in meta["rejected_attempts"]] == [
+        "IMAGE_SURFACE_TEMPLATE_SHAPE",
+        "IMAGE_SURFACE_OBSERVATION_NOT_USED",
+    ]
+    assert "image_social_surface_render_fallback" not in trace
+
+
+@pytest.mark.asyncio
 async def test_surface_renderer_json_invalid_and_empty_candidates_fallback(monkeypatch) -> None:
     calls = 0
 

@@ -393,6 +393,7 @@ class SurfaceRenderer:
             validator=lambda candidate, validation: self._accept_image_candidate(candidate, validation, multimodal=multimodal),
             fallback_reason="image_social_surface_unavailable",
             trace_key="image_social_surface_render",
+            fallback_on_all_rejected=False,
         )
 
     async def _render_short_social(self, request: SurfaceRequest) -> SurfaceResult:
@@ -472,6 +473,7 @@ class SurfaceRenderer:
         validator: Callable[[str, Any], tuple[bool, str]],
         fallback_reason: str,
         trace_key: str,
+        fallback_on_all_rejected: bool = True,
     ) -> SurfaceResult:
         started_ms = int(time.time() * 1000)
         rejected: list[Mapping[str, Any]] = []
@@ -585,6 +587,18 @@ class SurfaceRenderer:
             "latency_ms": latency_ms,
             "policy_version": SURFACE_CACHE_POLICY_VERSION,
         }
+        if not fallback_on_all_rejected:
+            return SurfaceResult(
+                text="",
+                source="surface",
+                provider_name=str(getattr(result, "final_provider", "") or "").strip(),
+                model_id=str(getattr(result, "final_model", "") or "").strip(),
+                latency_ms=latency_ms,
+                rejected_candidates=tuple(rejected),
+                cacheable=False,
+                degraded=False,
+                skipped_reason=fallback_reason,
+            )
         return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
 
     def _fallback_result(

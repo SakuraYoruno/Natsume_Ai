@@ -36,7 +36,36 @@ _VAGUE_SHAPES = (
     "是不是想",
     "是想",
 )
-_SELF_AS_IMAGE_RE = re.compile(r"(看我|我今天|我是不是|我可不可|我可爱|我萌|我好看).{0,8}(可爱|萌|好看)")
+_SELF_IMAGE_PARTICLE_RE = r"(?:吗|吧|哦|啦|呀|啊|嘛|呢)?"
+_SELF_IMAGE_SUFFIX_RE = (
+    rf"(?:的(?:样子|表情|感觉|模样|时候)|"
+    rf"(?:死|惨|爆|坏|疯)了{_SELF_IMAGE_PARTICLE_RE}|"
+    rf"(?:死|惨|爆|坏|疯){_SELF_IMAGE_PARTICLE_RE}(?![\u4e00-\u9fff])|"
+    r"得(?:不行|要命|很)|"
+    r"(?:吗|吧|哦|啦|呀|啊|嘛|呢|了)?(?![\u4e00-\u9fff]))"
+)
+_SELF_IMAGE_PREDICATE_RE = rf"(?:可爱|萌|好看){_SELF_IMAGE_SUFFIX_RE}"
+_SELF_AS_IMAGE_RE = re.compile(
+    rf"(看我.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"我是不是.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"我可不{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_SELF_IMAGE_PREDICATE_RE})"
+)
+_WEAK_IMAGE_ANCHORS = {"可爱", "卖萌", "软萌", "萌", "表情"}
+_VISUAL_REFERENCE_MARKERS = (
+    "这张",
+    "这图",
+    "图里",
+    "画面",
+    "上面",
+    "这里",
+    "这个表情",
+    "小表情",
+    "表情包",
+    "猫耳",
+    "脸",
+    "眼睛",
+)
 
 
 def compact_image_social_text(raw_text: str) -> str:
@@ -109,10 +138,13 @@ def candidate_uses_image_observation(candidate_text: str, multimodal: Mapping[st
     compact = compact_image_social_text(candidate_text)
     if not compact:
         return False
-    if any(marker in compact for marker in ("这张", "这图", "这个表情", "小表情", "表情包", "猫耳", "脸", "眼睛")):
+    if _SELF_AS_IMAGE_RE.search(compact):
+        return False
+    if any(marker in compact for marker in _VISUAL_REFERENCE_MARKERS):
         return True
     anchors = image_social_anchor_terms(multimodal)
-    if anchors and any(anchor in compact for anchor in anchors):
+    strong_anchors = [anchor for anchor in anchors if anchor not in _WEAK_IMAGE_ANCHORS]
+    if strong_anchors and any(anchor in compact for anchor in strong_anchors):
         return True
     return False
 
