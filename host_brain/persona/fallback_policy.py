@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
-SURFACE_CACHE_POLICY_VERSION = "surface-v3-soul-only-20260425"
+SURFACE_CACHE_POLICY_VERSION = "surface-v4-image-grounding-20260425"
 
 _COMPACT_RE = re.compile(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+")
 _HOST_MODEL_MARKERS = ("fallback", "emergency", "deterministic", "placeholder", "ack")

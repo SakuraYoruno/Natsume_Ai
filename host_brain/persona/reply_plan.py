@@ -764,7 +764,9 @@ def _refine_multimodal_contract(
                 part for part in (
                     base_text,
                     extra_text,
+                    "只回一句短接话，别写成小剧场。",
                     "不要解说画面，也不要挂固定开放问句。",
+                    "不要把自己写成图片主体，不要写我的猫耳/我比猫猫可爱/变成猫这类展开。",
                 )
                 if str(part).strip()
             ),
@@ -1610,6 +1612,21 @@ def _assemble_reply_plan(
         force_buffering = True
     if topic == "assistant_reply_followup":
         force_buffering = True
+    max_chars = int(affect_policy.max_chars or 320)
+    max_sentences = int(affect_policy.max_sentences or 4)
+    should_be_brief = bool(affect_policy.should_be_brief)
+    if topic == "emoji_social_reply" and response_form_reason == "image_social_reply":
+        max_chars = min(max_chars, 52)
+        max_sentences = 1
+        should_be_brief = True
+    elif topic == "emoji_social_followup":
+        max_chars = min(max_chars, 64)
+        max_sentences = 1
+        should_be_brief = True
+    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
+        max_chars = min(max_chars, 48)
+        max_sentences = min(max_sentences, 1)
+        should_be_brief = True
 
     return ReplyPlan(
         primary_topic=topic,
@@ -1629,8 +1646,8 @@ def _assemble_reply_plan(
         secondary_response_form=secondary_response_form,
         response_form_reason=response_form_reason,
         allow_form_only_reply=allow_form_only_reply,
-        max_chars=affect_policy.max_chars,
-        max_sentences=affect_policy.max_sentences,
+        max_chars=max_chars,
+        max_sentences=max_sentences,
         warmth_floor=affect_policy.warmth_floor,
         warmth_ceiling=affect_policy.warmth_ceiling,
         intimacy_ceiling=affect_policy.intimacy_ceiling,
@@ -1638,7 +1655,7 @@ def _assemble_reply_plan(
         allow_followup=affect_policy.allow_followup,
         allow_proactive_after_reply=affect_policy.allow_proactive_after_reply,
         withdrawal_guard=affect_policy.withdrawal_guard,
-        should_be_brief=affect_policy.should_be_brief,
+        should_be_brief=should_be_brief,
         should_be_withdrawn=affect_policy.should_be_withdrawn,
         affect_summary=_qualitative_affect_summary(affect=affect_state, render_target_lang=render_target_lang),
         relationship_summary=_qualitative_relationship_summary(

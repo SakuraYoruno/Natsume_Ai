@@ -679,10 +679,15 @@ def test_reply_plan_image_social_reply_keeps_variant_specific_contract_after_mul
 
     assert plan.primary_topic == "emoji_social_reply"
     assert plan.response_form_reason == "image_social_reply"
+    assert plan.max_sentences == 1
+    assert plan.max_chars <= 52
+    assert plan.should_be_brief is True
     assert any(
         token in plan.reply_contract
         for token in ("委屈/难过", "只剩感叹词", "不要解说画面")
     )
+    assert "只回一句短接话" in plan.reply_contract
+    assert "不要把自己写成图片主体" in plan.reply_contract
 
 
 def test_reply_plan_open_image_social_thread_never_falls_back_to_plain_hold() -> None:

@@ -25,6 +25,10 @@ _OLD_TEMPLATE_MARKERS = (
     "闹别扭",
     "会错意",
     "多想了一点",
+    "猫猫精",
+    "赖在你身边",
+    "赖着",
+    "考虑考虑",
     "怎么突然丢",
     "突然发这个给我看",
     "突然这个样子",
@@ -46,9 +50,11 @@ _SELF_IMAGE_SUFFIX_RE = (
 )
 _SELF_IMAGE_PREDICATE_RE = rf"(?:可爱|萌|好看){_SELF_IMAGE_SUFFIX_RE}"
 _SELF_AS_IMAGE_RE = re.compile(
-    rf"(看我.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
-    rf"我是不是.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"(看我.{{0,24}}{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"我是不是.{{0,24}}{_SELF_IMAGE_PREDICATE_RE}|"
     rf"我可不{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"(?:看|盯|盯着|又在看|在看).{{0,6}}我的(?:猫耳|耳朵|脸|眼睛|表情|样子|模样)|"
+    rf"(?:我|人家).{{0,18}}(?:比|还要|更|最).{{0,16}}(?:可爱|萌|好看)|"
     rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_SELF_IMAGE_PREDICATE_RE})"
 )
 _WEAK_IMAGE_ANCHORS = {"可爱", "卖萌", "软萌", "萌", "表情"}

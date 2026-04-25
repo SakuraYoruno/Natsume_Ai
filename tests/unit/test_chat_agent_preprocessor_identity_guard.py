@@ -582,6 +582,27 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert suffix_validation.is_valid is False
     assert "image_self_reference" in suffix_validation.reason_codes
 
+    long_suffix_validation = validate_reply(
+        text="哥哥，你看我这小猫耳朵是不是超可爱呀！",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert long_suffix_validation.is_valid is False
+    assert long_suffix_validation.safe_to_emit is False
+    assert "image_self_reference" in long_suffix_validation.reason_codes
+
+    comparative_validation = validate_reply(
+        text="哥哥，你又在看我的猫耳啦？是不是觉得我比这只猫猫还要可爱呀？哼，我才不信呢！不过……。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert comparative_validation.is_valid is False
+    assert comparative_validation.safe_to_emit is False
+    assert "image_self_reference" in comparative_validation.reason_codes
+    assert "unfinished_tail" in comparative_validation.reason_codes
+
     descriptive_suffix_validation = validate_reply(
         text="这张看我可爱的样子，猫耳都竖起来了。",
         plan=plan,
@@ -590,6 +611,16 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
 
     assert descriptive_suffix_validation.is_valid is False
     assert "image_self_reference" in descriptive_suffix_validation.reason_codes
+
+    overplay_validation = validate_reply(
+        text="哎呀，哥哥，是想让我变成猫猫精赖在你身边不走吗？",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert overplay_validation.is_valid is False
+    assert overplay_validation.safe_to_emit is False
+    assert "image_social_overplayed" in overplay_validation.reason_codes
 
     degree_suffix_validation = validate_reply(
         text="看我今天可爱死了吧。",

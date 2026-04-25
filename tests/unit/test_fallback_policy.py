@@ -57,7 +57,7 @@ def test_surface_cacheable_reply_requires_final_non_degraded_text() -> None:
 
 
 def test_fallback_reply_is_degraded_and_topic_aware() -> None:
-    assert SURFACE_CACHE_POLICY_VERSION.startswith("surface-v3")
+    assert SURFACE_CACHE_POLICY_VERSION.startswith("surface-v4")
 
     image = build_fallback_reply(FallbackRequest(primary_topic="emoji_social_reply", reason_code="x"))
     followup = build_fallback_reply(FallbackRequest(primary_topic="assistant_reply_followup", reason_code="y"))

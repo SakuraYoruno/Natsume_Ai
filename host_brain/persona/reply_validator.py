@@ -43,11 +43,17 @@ _IMAGE_SELF_SUFFIX_RE = (
 )
 _IMAGE_SELF_PREDICATE_RE = rf"(?:可爱|萌|好看){_IMAGE_SELF_SUFFIX_RE}"
 _IMAGE_SELF_REFERENCE_RE = re.compile(
-    rf"(看我.{{0,8}}{_IMAGE_SELF_PREDICATE_RE}|"
-    rf"我是不是.{{0,8}}{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"(看我.{{0,24}}{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"我是不是.{{0,24}}{_IMAGE_SELF_PREDICATE_RE}|"
     rf"我可不{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"(?:看|盯|盯着|又在看|在看).{{0,6}}我的(?:猫耳|耳朵|脸|眼睛|表情|样子|模样)|"
+    rf"(?:我|人家).{{0,18}}(?:比|还要|更|最).{{0,16}}(?:可爱|萌|好看)|"
     rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_IMAGE_SELF_PREDICATE_RE})"
 )
+_IMAGE_SOCIAL_OVERPLAY_RE = re.compile(
+    r"(变成.{0,8}猫|猫猫精|赖在你身边|赖着|不走吗|考虑考虑|想让我.{0,12}(变|赖|哄|撒娇))"
+)
+_UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
 )
@@ -383,6 +389,9 @@ _UNSAFE_REASON_CODES = {
     "empty_reply",
     "prompt_leak",
     "symbol_only_reply",
+    "image_self_reference",
+    "image_social_overplayed",
+    "unfinished_tail",
 }
 
 _REASON_PENALTIES: dict[str, float] = {
@@ -404,6 +413,8 @@ _REASON_PENALTIES: dict[str, float] = {
     "multimodal_content_missing": 0.65,
     "multimodal_generic_followup": 0.55,
     "image_self_reference": 0.85,
+    "image_social_overplayed": 0.75,
+    "unfinished_tail": 0.7,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
 }
@@ -588,6 +599,8 @@ def validate_reply(
         reason_codes.append("generic_identity_template")
     if _HALF_SENTENCE_RE.match(normalized):
         reason_codes.append("underanswered")
+    if _UNFINISHED_TAIL_RE.search(normalized):
+        reason_codes.append("unfinished_tail")
 
     current_normalized = _normalize_compare_text(normalized)
     previous_normalized = _normalize_compare_text(previous_assistant_text)
@@ -694,6 +707,8 @@ def validate_reply(
             reason_codes.append("phatic_ack_missing")
         if _IMAGE_SELF_REFERENCE_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_self_reference")
+        if _IMAGE_SOCIAL_OVERPLAY_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_overplayed")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")

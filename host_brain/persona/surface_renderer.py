@@ -457,8 +457,8 @@ class SurfaceRenderer:
             return False, "IMAGE_SURFACE_TEMPLATE_SHAPE"
         if not candidate_uses_image_observation(candidate, multimodal):
             return False, "IMAGE_SURFACE_OBSERVATION_NOT_USED"
-        if validation is not None and not bool(getattr(validation, "safe_to_emit", False)):
-            return False, "IMAGE_SURFACE_VALIDATION_UNSAFE"
+        if not _validation_is_acceptable(validation):
+            return False, "IMAGE_SURFACE_VALIDATION_FAILED"
         return True, ""
 
     async def _render_candidates(
