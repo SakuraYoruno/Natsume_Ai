@@ -114,7 +114,7 @@ def candidate_uses_image_observation(candidate_text: str, multimodal: Mapping[st
     anchors = image_social_anchor_terms(multimodal)
     if anchors and any(anchor in compact for anchor in anchors):
         return True
-    return not anchors
+    return False
 
 
 def build_emergency_image_social_reply(multimodal: Mapping[str, Any] | None) -> str:

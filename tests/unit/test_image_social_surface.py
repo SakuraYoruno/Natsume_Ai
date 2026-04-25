@@ -34,7 +34,8 @@ def test_image_social_surface_requires_visible_observation_anchor() -> None:
     assert candidate_uses_image_observation("蓝眼睛这下太犯规了。", multimodal)
     assert not candidate_uses_image_observation("哥哥今天怎么这么安静。", multimodal)
     assert not candidate_uses_image_observation("", multimodal)
-    assert candidate_uses_image_observation("哥哥故意的吧。", {"summary_for_chat": "一张图片。"})
+    assert candidate_uses_image_observation("这张有点犯规，哥哥故意的吧。", {"summary_for_chat": "一张图片。"})
+    assert not candidate_uses_image_observation("哥哥故意的吧。", {"summary_for_chat": "一张图片。"})
 
 
 def test_image_social_emergency_reply_is_observation_anchored() -> None:

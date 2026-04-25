@@ -328,11 +328,7 @@ def _looks_like_open_app_request(user_message: str) -> bool:
     normalized = re.sub(r"\s+", "", str(user_message or "")).strip()
     if not normalized:
         return False
-    if _OPEN_APP_VERB_RE.search(normalized) and _OPEN_APP_HINT_RE.search(normalized):
-        return True
-    if normalized.startswith(("打开", "启动", "运行")) and not re.search(r"(网页|链接|网址|页面|文件|图片|文档)", normalized):
-        return True
-    return False
+    return bool(_OPEN_APP_VERB_RE.search(normalized) and _OPEN_APP_HINT_RE.search(normalized))
 
 
 def _format_elapsed_compact(elapsed_ms: int) -> str:
@@ -786,6 +782,9 @@ def _build_installed_capabilities_reply(*, render_target_lang: str) -> str:
 def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, render_policy: Any = None) -> bool:
     policy = _coerce_render_policy(render_policy)
     primary_topic = str(policy.get("primary_topic") or "").strip()
+    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
+    if explicit_decision is not None:
+        return explicit_decision
     if primary_topic in {
         "assistant_reply_followup",
         "emoji_social_reply",
@@ -797,9 +796,6 @@ def _should_buffer_stream_output(*, emotion_context: Any, bond_summary: Any, ren
         "identity",
     }:
         return False
-    explicit_decision = _render_policy_explicit_buffering_decision(render_policy)
-    if explicit_decision is not None:
-        return explicit_decision
     if _render_policy_requires_buffering(render_policy):
         return True
     env_key = "HOST_STREAM_REFLECTION_BUFFER_ENABLED"

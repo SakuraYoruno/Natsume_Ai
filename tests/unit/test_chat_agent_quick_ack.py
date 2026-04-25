@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from host_brain.app.chat_agent import (
     _should_schedule_commit_tts_fallback,
+    _should_buffer_stream_output,
     render_quick_gateway_ack_text,
     render_quick_gateway_progress_text,
     render_quick_gateway_realign_text,
@@ -161,6 +162,23 @@ def test_render_quick_gateway_ack_actual_template_for_open_app_is_specialized() 
     )
 
     assert text == "好，我替你打开。"
+
+
+def test_render_quick_gateway_ack_does_not_overpromise_for_non_app_prefix() -> None:
+    assert render_quick_gateway_ack_text(user_message="运行测试") != "好，我替你打开。"
+    assert render_quick_gateway_ack_text(user_message="打开空调") != "好，我替你打开。"
+
+
+def test_should_buffer_stream_output_respects_social_validation_policy() -> None:
+    assert _should_buffer_stream_output(
+        emotion_context={"emotion_tag": "CALM", "turn_count": 1},
+        bond_summary={"stage": "FRIEND", "intent": "chat"},
+        render_policy={
+            "primary_topic": "assistant_reply_followup",
+            "requires_validation": True,
+            "force_buffering": False,
+        },
+    ) is True
 
 
 def test_render_quick_gateway_progress_failed_actual_template_stays_natural() -> None:

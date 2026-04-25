@@ -749,3 +749,19 @@ def test_explicit_buffering_reply_plan_still_forces_buffering() -> None:
         bond_summary={"stage": "STRANGER", "intent": "chat"},
         render_policy=reply_plan,
     ) is True
+
+
+def test_social_topic_requires_validation_still_buffers() -> None:
+    reply_plan = {
+        "primary_topic": "assistant_reply_followup",
+        "requires_validation": True,
+        "force_buffering": False,
+        "allow_followup": True,
+        "allow_topic_shift": True,
+    }
+
+    assert _should_buffer_stream_output(
+        emotion_context={"emotion_tag": "CALM", "turn_count": 1},
+        bond_summary={"stage": "FRIEND", "intent": "chat"},
+        render_policy=reply_plan,
+    ) is True
