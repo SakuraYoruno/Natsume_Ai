@@ -152,7 +152,7 @@ def _normalize_compare_text(raw: str) -> str:
     if not text:
         return ""
     text = re.sub(r"[\s\u3000]+", "", text)
-    text = re.sub(r"[。！？?!、，,~～…]+", "", text)
+    text = re.sub(r"[。！？?!、，,~～…；;：:\"“”'‘’（）()\[\]【】]+", "", text)
     return text
 
 

@@ -564,6 +564,15 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert validation.is_valid is False
     assert "image_self_reference" in validation.reason_codes
 
+    punctuated_validation = validate_reply(
+        text="哥哥，人家今天：也很可爱哦！",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert punctuated_validation.is_valid is False
+    assert "image_self_reference" in punctuated_validation.reason_codes
+
     suffix_validation = validate_reply(
         text="哥哥，上面看我是不是很可爱啊？",
         plan=plan,
