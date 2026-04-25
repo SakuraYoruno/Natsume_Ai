@@ -613,6 +613,24 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert question_back_validation.safe_to_emit is False
     assert "image_social_question_back" in question_back_validation.reason_codes
 
+    generic_validation = validate_reply(
+        text="哥哥，好可爱呀。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert generic_validation.is_valid is False
+    assert "image_social_reference_missing" in generic_validation.reason_codes
+
+    seen_only_validation = validate_reply(
+        text="哥哥，这张我看到了。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert seen_only_validation.is_valid is False
+    assert "image_social_reaction_missing" in seen_only_validation.reason_codes
+
     descriptive_suffix_validation = validate_reply(
         text="这张看我可爱的样子，猫耳都竖起来了。",
         plan=plan,
@@ -682,6 +700,7 @@ def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
     )
 
     assert "image_self_reference" not in pun_validation.reason_codes
+    assert pun_validation.is_valid is True
 
 
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:

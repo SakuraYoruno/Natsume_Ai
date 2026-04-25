@@ -751,29 +751,30 @@ def _refine_multimodal_contract(
     )
     if topic == "emoji_social_reply" and primary_modality == "image":
         extra_by_variant = {
-            ("soft_emotion_ack", "distress_image"): "把委屈/难过那层先接住，像顺手哄一句，不要只剩感叹词。",
-            ("soft_emotion_ack", "soft_hold"): "把软下来的感觉先接住，像顺手放轻一点，不要只剩语气词。",
-            ("soft_emotion_ack", "steady_hold"): "把低落/别扭那层先接住，像顺手问一句，不要说成看图报告。",
-            ("cute_image_ack", "cute_ping"): "把卖萌/可爱感接住，像被蹭了一下时顺手接话，不要过度卖萌。",
-            ("cute_image_ack", "soft_hold"): "把软萌感接住，顺手轻轻回一句，不要解说画面。",
-            ("tease_image_ack", "light_nudge"): "把小别扭/小吐槽接住，轻轻逗一下，不要上纲上线。",
+            ("soft_emotion_ack", "distress_image"): "按表情包来接：点到图里委屈/哭/低落的可见点，再顺手放轻一句。",
+            ("soft_emotion_ack", "soft_hold"): "按表情包来接：点到图里的软萌或表情，再顺手轻轻回一句。",
+            ("soft_emotion_ack", "steady_hold"): "按表情包来接：点到图里的情绪或表情，再稳稳接一句。",
+            ("cute_image_ack", "cute_ping"): "按表情包来接：点到这张图里的猫耳/表情/卖萌感，再直接给一句短反应。",
+            ("cute_image_ack", "soft_hold"): "按表情包来接：点到图里的软萌点，再顺手轻轻回一句。",
+            ("tease_image_ack", "light_nudge"): "按表情包来接：点到图里的小别扭/小吐槽点，再轻轻逗一句。",
         }
-        extra_text = extra_by_variant.get((family, variant), "先把图里的情绪接住，再顺着这层语气自然接一句。")
+        extra_text = extra_by_variant.get((family, variant), "按表情包来接：点到图里一个可见点，再顺着这层语气自然接一句。")
         return ReplyContract(
             text=" ".join(
                 part for part in (
                     base_text,
                     extra_text,
                     "只回一句短接话，别写成小剧场。",
+                    "必须像回复表情包：抓一个可见点，加一句直接反应。",
                     "不要解说画面，也不要挂固定开放问句。",
                     "不要把问题抛回给对方，不要问“是不是觉得这张图可爱”。",
                     "不要把自己写成图片主体，不要写我的猫耳/我比猫猫可爱/变成猫这类展开。",
                 )
                 if str(part).strip()
             ),
-            required_actions=contract.required_actions,
+            required_actions=tuple(dict.fromkeys([*contract.required_actions, "visual_reference", "image_social_reaction"])),
             forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
-            realization_steps=base_steps or ("先看出图里的情绪", "顺着这个情绪接一句"),
+            realization_steps=base_steps or ("点到图/表情包里的一个可见点", "像回表情包一样给一句短反应"),
         )
     if topic == "emoji_social_followup":
         extra_by_variant = {

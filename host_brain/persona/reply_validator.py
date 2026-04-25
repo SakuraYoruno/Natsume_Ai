@@ -30,7 +30,9 @@ _SUPPORT_RE = re.compile(r"(不会装作没听见|会回应|会理|会回|真开
 _CONDITIONAL_SUPPORT_RE = re.compile(r"(看情况|真开口的话|你真开口|你要是真开口)")
 _REPAIR_ACK_RE = re.compile(r"(好|知道了|明白了|我收一点|我会收一点|我往后一点)")
 _PHATIC_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么啦|怎么了|哥哥|呀|啦)")
-_VISUAL_REFERENCE_RE = re.compile(r"(图里|截图|画面|这张|上面|这里|这句|提示|意思|看起来|像是|看到|看见|应该是)")
+_VISUAL_REFERENCE_RE = re.compile(
+    r"(图里|截图|画面|这张|这图|上面|这里|这个表情|小表情|表情包|猫耳|猫猫|小猫|脸|眼睛|这句|提示|意思|看起来|像是|看到|看见|应该是)"
+)
 _ATTACHMENT_ACK_RE = re.compile(r"(看到了|我看到了|看见了|我看见了|这张图|这个附件|这个表情)")
 _MULTIMODAL_GENERIC_FOLLOWUP_RE = re.compile(r"(你想让我先说|你想让我先看|先帮你解释|还是先判断能不能帮你|你想让我先从哪)")
 _IMAGE_SELF_PARTICLE_RE = r"(?:吗|吧|哦|啦|呀|啊|嘛|呢)?"
@@ -56,6 +58,12 @@ _IMAGE_SOCIAL_OVERPLAY_RE = re.compile(
 _IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
     r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
     r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
+)
+_IMAGE_SOCIAL_REACTION_RE = re.compile(
+    r"(?:这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳|猫猫|小猫|眼神|脸|表情).{0,24}"
+    r"(?:犯规|戳|可爱|萌|软|乖|装乖|委屈|哭|泪|气鼓鼓|炸毛|无语|逗|好笑|绷|凶|会|拿捏|接住)|"
+    r"(?:犯规|戳|可爱|萌|软|乖|装乖|委屈|哭|泪|气鼓鼓|炸毛|无语|逗|好笑|绷|凶|会|拿捏|接住).{0,24}"
+    r"(?:这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳|猫猫|小猫|眼神|脸|表情)"
 )
 _UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
@@ -374,6 +382,7 @@ _ACTION_LABELS: dict[str, str] = {
     "repair_ack": "先收住并接住对方的拒绝感",
     "phatic_ack": "先把这句招呼接住",
     "visual_reference": "点到附件或画面里的对象",
+    "image_social_reaction": "像回表情包一样给出短反应",
     "content_clause": "补一句简短说明",
     "attachment_ack": "先承认已经看到了附件",
     "previous_reference": "先接住对方在追问上一句",
@@ -396,6 +405,8 @@ _UNSAFE_REASON_CODES = {
     "image_self_reference",
     "image_social_overplayed",
     "image_social_question_back",
+    "image_social_reference_missing",
+    "image_social_reaction_missing",
     "unfinished_tail",
 }
 
@@ -420,6 +431,8 @@ _REASON_PENALTIES: dict[str, float] = {
     "image_self_reference": 0.85,
     "image_social_overplayed": 0.75,
     "image_social_question_back": 0.7,
+    "image_social_reference_missing": 0.65,
+    "image_social_reaction_missing": 0.65,
     "unfinished_tail": 0.7,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
@@ -464,6 +477,8 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_PHATIC_ACK_RE.search(normalized))
     if action == "visual_reference":
         return bool(_VISUAL_REFERENCE_RE.search(normalized))
+    if action == "image_social_reaction":
+        return bool(_IMAGE_SOCIAL_REACTION_RE.search(_normalize_compare_text(normalized)))
     if action == "content_clause":
         return len(_normalize_compare_text(normalized)) >= 4
     if action == "attachment_ack":
@@ -717,6 +732,11 @@ def validate_reply(
             reason_codes.append("image_social_overplayed")
         if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_social_question_back")
+        if plan.primary_topic == "emoji_social_reply" and plan.response_form_reason == "image_social_reply":
+            if not _VISUAL_REFERENCE_RE.search(normalized):
+                reason_codes.append("image_social_reference_missing")
+            if not _IMAGE_SOCIAL_REACTION_RE.search(_normalize_compare_text(normalized)):
+                reason_codes.append("image_social_reaction_missing")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")
