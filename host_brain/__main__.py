@@ -10,6 +10,24 @@ import platform
 import sys
 from pathlib import Path
 
+
+def _configure_windows_event_loop_policy() -> None:
+    if platform.system().lower() != "windows":
+        return
+    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
+    if selector_policy is None:
+        return
+    try:
+        asyncio.set_event_loop_policy(selector_policy())
+    except Exception:
+        logging.getLogger("Natsume.main").warning(
+            "Failed to set Windows selector event loop policy",
+            exc_info=True,
+        )
+
+
+_configure_windows_event_loop_policy()
+
 # 在所有模块导入之前加载 .env 文件（不覆盖已有的系统环境变量）
 def _load_env_file(env_path: Path, *, override: bool = False) -> None:
     if not env_path.exists():
@@ -134,21 +152,6 @@ def _resolve_uvicorn_access_log_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-def _configure_windows_event_loop_policy() -> None:
-    if platform.system().lower() != "windows":
-        return
-    selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy", None)
-    if selector_policy is None:
-        return
-    try:
-        asyncio.set_event_loop_policy(selector_policy())
-    except Exception:
-        logging.getLogger("Natsume.main").warning(
-            "Failed to set Windows selector event loop policy",
-            exc_info=True,
-        )
-
-
 def run_startup_check(db_path: str) -> bool:
     """运行启动健康检查"""
     logger = logging.getLogger("Natsume.startup")
@@ -244,6 +247,7 @@ def main() -> int:
             port=args.port,
             reload=args.reload,
             log_level=args.log_level.lower(),
+            loop="asyncio",
             access_log=_resolve_uvicorn_access_log_enabled(),
         )
         return 0

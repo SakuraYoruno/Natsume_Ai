@@ -8,12 +8,6 @@ import logging
 import platform
 import sys
 
-import uvicorn
-
-from edge_client.app.fastapi_app import create_edge_fastapi_app
-from edge_client.config import load_edge_config
-from edge_client.runtime import bootstrap, collect_health, shutdown, startup
-
 
 LOGGER = logging.getLogger("Natsume.edge.main")
 
@@ -28,6 +22,15 @@ def _configure_windows_event_loop_policy() -> None:
         asyncio.set_event_loop_policy(selector_policy())
     except Exception:
         LOGGER.warning("Failed to set Windows selector event loop policy", exc_info=True)
+
+
+_configure_windows_event_loop_policy()
+
+import uvicorn
+
+from edge_client.app.fastapi_app import create_edge_fastapi_app
+from edge_client.config import load_edge_config
+from edge_client.runtime import bootstrap, collect_health, shutdown, startup
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -77,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         host=host,
         port=port,
         log_level="info",
+        loop="asyncio",
     )
     return 0
 
