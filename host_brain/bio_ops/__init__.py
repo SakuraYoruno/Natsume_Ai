@@ -12,6 +12,20 @@ from host_brain.bio_ops.adoption import (
     resolve_bio_ops_adoption_policy,
 )
 from host_brain.bio_ops.contracts import BioOpsArtifact, BioOpsResult, BioOpsSchedule, BioOpsTask
+from host_brain.bio_ops.owner_inbox import (
+    BIO_OPS_OWNER_IMPORT_CHANNELS,
+    OWNER_INBOX_STATUS_BLOCKED,
+    OWNER_INBOX_STATUS_PENDING_REVIEW,
+    OWNER_INBOX_STATUS_READY,
+    OWNER_INBOX_STATUS_REJECTED,
+    BioOpsOwnerInbox,
+    BioOpsOwnerInboxItem,
+    BioOpsOwnerImportItem,
+    BioOpsOwnerIntakePacket,
+    resolve_owner_import_channel,
+    validate_owner_import_candidate,
+    validate_owner_import_artifact,
+)
 from host_brain.bio_ops.registry import BioOpsRegistry, build_default_bio_ops_registry
 from host_brain.bio_ops.runner import BioOpsRunner, run_bio_ops_task
 from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace, build_response_breathing_policy
@@ -30,11 +44,20 @@ __all__ = [
     "ADOPTION_STATUS_NOT_APPLICABLE",
     "ADOPTION_STATUS_PENDING_REVIEW",
     "BIO_OPS_FORBIDDEN_TARGETS",
+    "BIO_OPS_OWNER_IMPORT_CHANNELS",
     "BIO_OPS_OWNER_ORGANS",
+    "OWNER_INBOX_STATUS_BLOCKED",
+    "OWNER_INBOX_STATUS_PENDING_REVIEW",
+    "OWNER_INBOX_STATUS_READY",
+    "OWNER_INBOX_STATUS_REJECTED",
     "BioOpsAdoptionCandidate",
     "BioOpsAdoptionDecision",
     "BioOpsAdoptionQueue",
     "BioOpsArtifact",
+    "BioOpsOwnerInbox",
+    "BioOpsOwnerInboxItem",
+    "BioOpsOwnerImportItem",
+    "BioOpsOwnerIntakePacket",
     "BioOpsRegistry",
     "BioOpsResult",
     "BioOpsRunner",
@@ -47,5 +70,8 @@ __all__ = [
     "is_bio_ops_sensitive_path",
     "resolve_bio_ops_adoption_policy",
     "run_bio_ops_task",
+    "resolve_owner_import_channel",
+    "validate_owner_import_candidate",
+    "validate_owner_import_artifact",
     "validate_bio_ops_task_safety",
 ]

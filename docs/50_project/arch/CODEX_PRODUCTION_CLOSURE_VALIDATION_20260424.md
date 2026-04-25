@@ -65,3 +65,13 @@ No default stable-gate regression was observed.
 - Habit, scar, forgetting, autobiography, and immune memory capabilities stage owner-reviewed candidates only.
 - Truthfulness, memory ethics, persona antibody, dream, parliament, subconscious, organ scan, and related advanced mechanisms remain audit/report/proposal only.
 - Reflex, attention, active silence, weather, and breathing policies are runtime traces unless an existing owner path consumes them.
+
+## Observable Owner Review
+
+- The Monitor WebUI reads BioOps adoption candidates through OBS routes, not HostMain request handlers.
+- Owner accept/reject actions write only `adoption_decision.json` artifacts beside the candidate evidence.
+- Decision artifacts carry owner, source run, source candidate path, risk flags, and `direct_long_term_write = false`; each owner organ must still perform any durable state import through its own state-owner path.
+- Accepted decisions can be scanned into an owner inbox. The inbox performs owner/evidence/sensitive-target validation and materializes only `owner_import_candidate.json`, never durable memory or configuration writes.
+- Owner inbox artifacts can be grouped into per-organ `owner_intake_packet.json` handoff files, so each organ consumes only its own queue and durable writes remain organ-owned.
+- Owner intake packets include an explicit owner/channel contract, and unsupported owner/output-kind combinations are blocked before any handoff packet is created.
+- Local observable demo: `python scripts/runtime/generate_bio_ops_owner_review_demo.py --run-id bio_ops_owner_review_demo` creates a complete artifact run for the Monitor WebUI without touching durable state.

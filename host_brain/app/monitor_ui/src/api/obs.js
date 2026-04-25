@@ -54,6 +54,12 @@ function setHotGetCached(url, data) {
   })
 }
 
+function invalidateHotGetPrefix(prefix) {
+  for (const key of hotGetCache.keys()) {
+    if (String(key).startsWith(prefix)) hotGetCache.delete(key)
+  }
+}
+
 async function executeRequest(url, options = {}) {
   const { timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = options
   const controller = new AbortController()
@@ -249,6 +255,98 @@ export function fetchCodexBioOpsObservability(params = {}) {
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
   ).toString()
   return request(`/obs/codex-bio-ops${qs ? '?' + qs : ''}`)
+}
+
+export function fetchCodexBioOpsAdoptions(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/adoptions${qs ? '?' + qs : ''}`)
+}
+
+export function fetchCodexBioOpsAdoptionDetail(candidateId, params = {}) {
+  const id = String(candidateId || '').trim()
+  if (!id) {
+    throw new Error('candidate_id is required')
+  }
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/adoptions/${encodeURIComponent(id)}${qs ? '?' + qs : ''}`)
+}
+
+export function acceptCodexBioOpsAdoption(candidateId, body = {}, params = {}) {
+  const id = String(candidateId || '').trim()
+  if (!id) {
+    throw new Error('candidate_id is required')
+  }
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/adoptions/${encodeURIComponent(id)}/accept${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
+export function rejectCodexBioOpsAdoption(candidateId, body = {}, params = {}) {
+  const id = String(candidateId || '').trim()
+  if (!id) {
+    throw new Error('candidate_id is required')
+  }
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/adoptions/${encodeURIComponent(id)}/reject${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
+export function fetchCodexBioOpsOwnerInbox(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-inbox${qs ? '?' + qs : ''}`)
+}
+
+export function materializeCodexBioOpsOwnerInbox(body = {}, params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-inbox/materialize${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
+export function fetchCodexBioOpsOwnerImportCandidates(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-inbox/import-candidates${qs ? '?' + qs : ''}`)
+}
+
+export function materializeCodexBioOpsOwnerIntakePackets(body = {}, params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-inbox/intake-packets${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
 }
 
 export function fetchLifeBody(params = {}) {

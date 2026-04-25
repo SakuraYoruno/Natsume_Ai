@@ -7,9 +7,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Query
+from fastapi import Body, HTTPException, Query
 
 from host_brain.app.obs_routes_core import router
+from host_brain.bio_ops.adoption import (
+    ADOPTION_DECISION_ACCEPTED,
+    ADOPTION_DECISION_REJECTED,
+    ADOPTION_STATUS_PENDING_REVIEW,
+)
+from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
 from host_brain.bio_ops.capabilities import (
     ADAPTIVE_REPAIR_CAPABILITIES,
     AFFECT_LEARNING_CAPABILITIES,
@@ -25,6 +31,8 @@ from host_brain.bio_ops.capabilities import (
     TRUST_FOUNDATION_CAPABILITIES,
     list_capability_specs,
 )
+from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
+from host_brain.codex_runtime.artifact_store import sanitize_segment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +53,8 @@ RESULT_CONTRACT_FIELDS = (
     "next_actions",
     "rollback_manifest_ref",
 )
+
+ADOPTION_LIST_STATUSES = {"pending", "decided", "all"}
 
 
 def _now_ms() -> int:
@@ -366,39 +376,198 @@ def _adaptive_repair_summary(capabilities: list[dict[str, Any]]) -> dict[str, An
     )
 
 
-def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
-    pending: list[dict[str, Any]] = []
-    for payload in payloads:
-        if not payload:
-            continue
-        for result in _as_list(payload.get("results")):
-            if isinstance(result, dict):
-                pending.extend(_pending_adoptions_from_result(result))
-        for result in _as_list(payload.get("sample_capabilities")):
-            if isinstance(result, dict):
-                pending.extend(_pending_adoptions_from_result(result))
-    return pending
-
-
-def _pending_adoptions_from_result(result: dict[str, Any]) -> list[dict[str, Any]]:
+def _adoption_from_result(result: dict[str, Any]) -> dict[str, Any]:
     adoption = _as_dict(result.get("adoption"))
     if not adoption:
         adoption = _as_dict(_as_dict(result.get("metadata")).get("bio_ops_adoption"))
-    candidate = _as_dict(adoption.get("candidate"))
-    if not candidate or str(adoption.get("status") or candidate.get("status") or "") != "PENDING_REVIEW":
-        return []
-    return [
-        {
-            "candidate_id": candidate.get("candidate_id"),
-            "capability": candidate.get("capability") or result.get("capability"),
-            "owner_organ": candidate.get("owner_organ"),
-            "output_kind": candidate.get("output_kind"),
-            "summary": candidate.get("summary") or result.get("summary"),
-            "evidence_refs": _text_list(candidate.get("evidence_refs"), limit=5),
-            "next_actions": _text_list(candidate.get("next_actions"), limit=4),
-            "review_required": bool(candidate.get("review_required", True)),
-        }
-    ]
+    return adoption
+
+
+def _candidate_id(candidate: dict[str, Any]) -> str:
+    return str(candidate.get("candidate_id") or "").strip()
+
+
+def _decision_path_for(run_dir: Path, candidate_id: str, source_path: Path | None = None) -> Path:
+    if source_path is not None:
+        return source_path.parent / "adoption_decision.json"
+    return run_dir / "adoption_decisions" / sanitize_segment(candidate_id, "candidate") / "adoption_decision.json"
+
+
+def _read_decision(path: Path) -> dict[str, Any]:
+    payload = _read_json_file(path)
+    if payload and not payload.get("_error"):
+        return payload
+    return {}
+
+
+def _compact_adoption_record(
+    *,
+    run_dir: Path,
+    candidate: dict[str, Any],
+    source_path: Path | None = None,
+    result: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    candidate = _as_dict(candidate)
+    candidate_id = _candidate_id(candidate)
+    if not candidate_id:
+        return None
+
+    result = _as_dict(result)
+    decision_path = _decision_path_for(run_dir, candidate_id, source_path)
+    decision = _read_decision(decision_path)
+    decided = bool(decision)
+    status = str(decision.get("decision") or candidate.get("status") or ADOPTION_STATUS_PENDING_REVIEW)
+    source = {
+        "run_id": run_dir.name,
+        "candidate_path": str(source_path) if source_path else None,
+        "result_work_order_id": result.get("work_order_id"),
+        "result_capability": result.get("capability"),
+    }
+    return {
+        "candidate_id": candidate_id,
+        "task_id": candidate.get("task_id"),
+        "capability": candidate.get("capability") or result.get("capability"),
+        "owner_organ": candidate.get("owner_organ"),
+        "output_kind": candidate.get("output_kind"),
+        "summary": candidate.get("summary") or result.get("summary"),
+        "payload": _as_dict(candidate.get("payload")),
+        "evidence_refs": _text_list(candidate.get("evidence_refs"), limit=20),
+        "artifacts": _as_list(candidate.get("artifacts")),
+        "risk_flags": _text_list(candidate.get("risk_flags"), limit=20),
+        "review_required": bool(candidate.get("review_required", True)),
+        "next_actions": _text_list(candidate.get("next_actions"), limit=10),
+        "created_at_ms": candidate.get("created_at_ms"),
+        "status": status,
+        "pending": (not decided) and status == ADOPTION_STATUS_PENDING_REVIEW,
+        "decision": decision or None,
+        "decision_artifact_path": str(decision_path),
+        "source": source,
+        "direct_long_term_write": False,
+        "write_policy": "owner_decision_artifact_only",
+    }
+
+
+def _collect_adoption_records(run_dir: Path, *payloads: dict[str, Any]) -> list[dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+
+    for path in sorted(run_dir.rglob("adoption_candidate.json")):
+        candidate = _read_json_file(path)
+        record = _compact_adoption_record(run_dir=run_dir, candidate=candidate, source_path=path)
+        if record:
+            records[record["candidate_id"]] = record
+
+    for payload in payloads:
+        if not payload:
+            continue
+        for collection_name in ("results", "sample_capabilities"):
+            for result in _as_list(payload.get(collection_name)):
+                if not isinstance(result, dict):
+                    continue
+                candidate = _as_dict(_adoption_from_result(result).get("candidate"))
+                record = _compact_adoption_record(run_dir=run_dir, candidate=candidate, result=result)
+                if not record:
+                    continue
+                existing = records.get(record["candidate_id"])
+                if not existing:
+                    records[record["candidate_id"]] = record
+                elif not existing["source"].get("result_capability"):
+                    existing["source"].update(record["source"])
+
+    return sorted(
+        records.values(),
+        key=lambda item: (int(item.get("created_at_ms") or 0), str(item.get("candidate_id") or "")),
+        reverse=True,
+    )
+
+
+def _filter_adoption_records(records: list[dict[str, Any]], status: str) -> list[dict[str, Any]]:
+    normalized = str(status or "pending").strip().lower()
+    if normalized not in ADOPTION_LIST_STATUSES:
+        raise HTTPException(status_code=400, detail="status must be pending, decided, or all")
+    if normalized == "all":
+        return records
+    if normalized == "decided":
+        return [record for record in records if bool(record.get("decision"))]
+    return [record for record in records if bool(record.get("pending"))]
+
+
+def _find_adoption_record(records: list[dict[str, Any]], candidate_id: str) -> dict[str, Any]:
+    normalized = str(candidate_id or "").strip()
+    for record in records:
+        if str(record.get("candidate_id") or "") == normalized:
+            return record
+    raise HTTPException(status_code=404, detail="BioOps adoption candidate not found")
+
+
+def _adoption_context(run_id: str | None) -> tuple[Path, list[dict[str, Any]]]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    daily_summary = _read_json_file(run_dir / "bio_ops_daily_summary.json")
+    daily_full = _read_json_file(run_dir / "bio_ops_daily_full.json")
+    return run_dir, _collect_adoption_records(run_dir, daily_full, daily_summary)
+
+
+def _record_adoption_decision(
+    *,
+    candidate_id: str,
+    decision: str,
+    run_id: str | None,
+    body: dict[str, Any] | None,
+) -> dict[str, Any]:
+    run_dir, records = _adoption_context(run_id)
+    record = _find_adoption_record(records, candidate_id)
+    if record.get("decision"):
+        raise HTTPException(status_code=409, detail="BioOps adoption candidate already has an owner decision")
+
+    payload = _as_dict(body)
+    owner_organ = str(payload.get("owner_organ") or payload.get("owner") or "").strip()
+    expected_owner = str(record.get("owner_organ") or "").strip()
+    if not owner_organ:
+        raise HTTPException(status_code=422, detail="owner_organ is required")
+    if owner_organ != expected_owner:
+        raise HTTPException(status_code=403, detail="Only the candidate owner organ can record this decision")
+
+    decision_payload = {
+        "candidate_id": record["candidate_id"],
+        "owner_organ": expected_owner,
+        "decision": decision,
+        "reason": str(payload.get("reason") or "").strip(),
+        "operator": str(payload.get("operator") or "monitor_ui").strip() or "monitor_ui",
+        "decided_at_ms": _now_ms(),
+        "direct_long_term_write": False,
+        "write_policy": "owner_decision_artifact_only",
+        "review_required": False,
+        "next_actions": [
+            "Owner organ may import this decision artifact through its own state owner path.",
+            "Do not apply long-term state changes from OBS routes.",
+        ],
+        "risk_flags": ["bio_ops_owner_decision_artifact_only"],
+        "metadata": {
+            "source_run_id": run_dir.name,
+            "source_candidate_path": record.get("source", {}).get("candidate_path"),
+            "capability": record.get("capability"),
+            "output_kind": record.get("output_kind"),
+        },
+    }
+    artifact = BioOpsArtifactStore(root=run_dir).write_json(
+        Path(record["decision_artifact_path"]),
+        decision_payload,
+        artifact_type="adoption_decision",
+    )
+    decision_payload["artifact"] = artifact.to_dict()
+
+    updated = dict(record)
+    updated["status"] = decision
+    updated["pending"] = False
+    updated["decision"] = decision_payload
+    return {
+        "ok": True,
+        "run_id": run_dir.name,
+        "candidate_id": record["candidate_id"],
+        "decision": decision_payload,
+        "adoption": updated,
+    }
 
 
 def _artifact_refs(run_dir: Path, summary: dict[str, Any]) -> list[dict[str, str]]:
@@ -545,6 +714,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
     ]
     codex_inspect = _compact_codex_result(codex_inspect_raw)
     codex_blocked = _compact_codex_result(codex_blocked_raw)
+    adoption_records = _collect_adoption_records(run_dir, daily_full, daily_summary)
 
     return {
         "ok": True,
@@ -593,8 +763,135 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "drive_trust": _drive_trust_summary(catalog["capabilities"]),
             "adaptive_repair": _adaptive_repair_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
-            "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
+            "pending_adoptions": _filter_adoption_records(adoption_records, "pending"),
         },
         "runtime_traces": traces,
         "artifacts": _artifact_refs(run_dir, summary),
     }
+
+
+@router.get("/codex-bio-ops/adoptions")
+def list_codex_bio_ops_adoptions(
+    run_id: str | None = Query(default=None),
+    status: str = Query(default="pending"),
+) -> dict[str, Any]:
+    run_dir, records = _adoption_context(run_id)
+    filtered = _filter_adoption_records(records, status)
+    return {
+        "ok": True,
+        "run_id": run_dir.name,
+        "artifact_dir": str(run_dir),
+        "status": status,
+        "count": len(filtered),
+        "adoptions": filtered,
+    }
+
+
+@router.get("/codex-bio-ops/adoptions/{candidate_id}")
+def get_codex_bio_ops_adoption(
+    candidate_id: str,
+    run_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    run_dir, records = _adoption_context(run_id)
+    record = _find_adoption_record(records, candidate_id)
+    return {
+        "ok": True,
+        "run_id": run_dir.name,
+        "artifact_dir": str(run_dir),
+        "adoption": record,
+    }
+
+
+@router.post("/codex-bio-ops/adoptions/{candidate_id}/accept")
+def accept_codex_bio_ops_adoption(
+    candidate_id: str,
+    run_id: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    return _record_adoption_decision(
+        candidate_id=candidate_id,
+        decision=ADOPTION_DECISION_ACCEPTED,
+        run_id=run_id,
+        body=body,
+    )
+
+
+@router.post("/codex-bio-ops/adoptions/{candidate_id}/reject")
+def reject_codex_bio_ops_adoption(
+    candidate_id: str,
+    run_id: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    return _record_adoption_decision(
+        candidate_id=candidate_id,
+        decision=ADOPTION_DECISION_REJECTED,
+        run_id=run_id,
+        body=body,
+    )
+
+
+@router.get("/codex-bio-ops/owner-inbox")
+def get_codex_bio_ops_owner_inbox(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    status: str = Query(default="all"),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    try:
+        payload = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").scan(
+            owner_organ=owner_organ,
+            status=status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+@router.post("/codex-bio-ops/owner-inbox/materialize")
+def materialize_codex_bio_ops_owner_inbox(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
+    result = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").materialize_ready(owner_organ=owner)
+    result["run_id"] = run_dir.name
+    return result
+
+
+@router.get("/codex-bio-ops/owner-inbox/import-candidates")
+def get_codex_bio_ops_owner_import_candidates(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").scan_import_candidates(
+        owner_organ=owner_organ,
+    )
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+@router.post("/codex-bio-ops/owner-inbox/intake-packets")
+def materialize_codex_bio_ops_owner_intake_packets(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
+    result = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").materialize_intake_packets(owner_organ=owner)
+    result["run_id"] = run_dir.name
+    return result
