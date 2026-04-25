@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,21 @@ RULE_ID = "T-SSOT-01"
 RULE_NAME = "BOND_SINGLE_WRITER"
 WRITE_METHOD = "write_bond_event"
 DEFAULT_ALLOWED_WRITER = "host_brain/bond/bond_dynamics.py"
+SKIP_DIR_NAMES = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "artifacts",
+    "node_modules",
+    "runtime_logs",
+    "tmp",
+    "venv",
+}
 
 
 def scan_file(
@@ -69,7 +85,7 @@ def scan_repo(
         return []
 
     violations: list[dict[str, Any]] = []
-    for path in repo_root.rglob("*.py"):
+    for path in _iter_python_files(repo_root, include_tests=include_tests):
         normalized = _normalize(path)
         if _skip_path(normalized, include_tests=include_tests):
             continue
@@ -97,8 +113,37 @@ def _normalize(path: str | Path) -> str:
     return str(Path(path)).replace("\\", "/")
 
 
+def _iter_python_files(repo_root: Path, *, include_tests: bool) -> list[Path]:
+    paths: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(repo_root, onerror=lambda _exc: None):
+        current = Path(dirpath)
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if not _skip_dir(current / dirname, include_tests=include_tests)
+        ]
+        for filename in filenames:
+            if filename.endswith(".py"):
+                paths.append(current / filename)
+    return paths
+
+
+def _skip_dir(path: Path, *, include_tests: bool) -> bool:
+    name = path.name
+    if name in SKIP_DIR_NAMES:
+        return True
+    normalized = _normalize(path)
+    if not include_tests and normalized.endswith("/tests"):
+        return True
+    if normalized.endswith("/tools/static_scan"):
+        return True
+    return False
+
+
 def _skip_path(path: str, *, include_tests: bool) -> bool:
     if "/.venv/" in path or "/venv/" in path or "/__pycache__/" in path:
+        return True
+    if "/artifacts/" in path or "/runtime_logs/" in path or "/node_modules/" in path:
         return True
     if not include_tests and "/tests/" in path:
         return True

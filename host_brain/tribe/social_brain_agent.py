@@ -1092,7 +1092,6 @@ class SocialBrainAgent:
             {"status": "OK", "new_milestones": list, "achieved_count": int}
         """
         try:
-            from host_brain.app.dependencies import get_milestone_tracker  # noqa: PLC0415
             from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
 
             tracker = get_milestone_tracker()
