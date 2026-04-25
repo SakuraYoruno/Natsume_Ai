@@ -1230,3 +1230,111 @@ async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_c
     assert surface_meta.get("reason_code") == "SURFACE_HARD_TIMEOUT"
     assert surface_meta.get("affected_output") is False
     assert "image_social_surface_render_fallback" not in trace_stage_meta
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_image_social_validation_failure_suppresses_fallback_text(monkeypatch) -> None:
+    from host_brain.persona.surface_renderer import SurfaceRenderer, SurfaceResult
+
+    stream_calls = 0
+
+    async def _bad_full_chat_stream_llm(**kwargs):  # noqa: ANN003
+        nonlocal stream_calls
+        assert kwargs["scene_type"] == "CHAT"
+        stream_calls += 1
+        if stream_calls == 1:
+            yield "哥哥，你是不是觉得这张图里的猫猫很可爱呀？"
+        else:
+            yield "哥哥，你是不是还想让我看这张图可不可爱？"
+
+    async def _skip_surface(self, request):  # noqa: ANN001, ANN003
+        request.trace_meta["image_social_surface_render"] = {
+            "status": "SKIPPED",
+            "invoked": False,
+            "affected_output": False,
+            "source": "surface",
+            "reason_code": "test_surface_skipped",
+        }
+        return SurfaceResult(source="surface", skipped_reason="test_surface_skipped")
+
+    captured_post_process: dict[str, object] = {}
+
+    async def _fake_post_process(**kwargs):  # noqa: ANN003
+        captured_post_process.update(kwargs)
+        return None
+
+    multimodal = {
+        "primary_modality": "image",
+        "summary_for_chat": "可爱、卖萌；一张动漫风格的猫耳女孩特写图。",
+        "core_observation": "猫耳女孩特写。",
+        "emotion_signals": ["可爱", "卖萌"],
+    }
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _bad_full_chat_stream_llm)
+    monkeypatch.setattr(SurfaceRenderer, "render", _skip_surface)
+    monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [{"role": "system", "content": "【人格核心】你是新海天。"}, {"role": "user", "content": kwargs["user_message"]}],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "emoji_social_reply",
+                    "interaction_move": "playful_ping",
+                    "response_goal": "cute_image_reply",
+                    "tactic_family": "cute_image_ack",
+                    "tactic_variant": "cute_ping",
+                    "trajectory_stage": "first_turn",
+                    "response_form": "text",
+                    "response_form_reason": "image_social_reply",
+                    "reply_contract": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
+                    "contract": {
+                        "text": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
+                        "required_actions": ["phatic_ack", "image_social_emotion_response"],
+                    },
+                    "multimodal": multimodal,
+                    "requires_validation": True,
+                    "force_buffering": True,
+                },
+            },
+        ),
+    )
+    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setattr("host_brain.app.dependencies.get_reply_surface_memory_store", lambda: _MemoryStoreStub(""))
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+
+    agent_input = ChatAgentInput(
+        request_id="req-image-social-invalid-suppressed",
+        session_id="sess-image-social-invalid-suppressed",
+        user_message="[图片消息]",
+        person_id="user_1",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        multimodal_observations=multimodal,
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-chat",
+            "timeout_ms": 5000,
+            "llm_api_key": "",
+            "base_url_override": "",
+        },
+    )
+
+    commit_event = {}
+    async for chunk in chat_agent_sse_generator(agent_input):
+        event = _parse_sse(chunk)
+        if event.get("phase") == "COMMIT":
+            commit_event = event
+
+    assert stream_calls == 2
+    assert commit_event["decision"] == "NO_REPLY"
+    assert commit_event["reason_code"] == "IMAGE_SOCIAL_NO_SAFE_REPLY"
+    assert str(commit_event.get("narrative") or "") == ""
+    assert "没接稳" not in json.dumps(commit_event, ensure_ascii=False)
+    await asyncio.sleep(0)
+    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
+    fallback_meta = dict(trace_stage_meta.get("fallback_suppressed") or {})
+    assert fallback_meta.get("reason_code") == "IMAGE_SOCIAL_NO_SAFE_REPLY"
+    assert trace_stage_meta.get("fallback_used") is False
+    assert trace_stage_meta.get("suppress_final_reply") is True

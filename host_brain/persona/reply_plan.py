@@ -1521,6 +1521,13 @@ def _assemble_reply_plan(
     forbidden_tactics = used_recent
     forbidden_tactic_keys = used_recent_keys
     forbidden_tactic_signatures = used_recent_signatures
+    if topic in {"emoji_social_reply", "emoji_social_followup"}:
+        # Image/sticker social replies only have a tiny tactic vocabulary.
+        # We still rotate during trajectory selection, but forbidding every
+        # recent family leaves the generator with no valid way to answer.
+        forbidden_tactics = ()
+        forbidden_tactic_keys = ()
+        forbidden_tactic_signatures = ()
     tone_band = "warm_neutral" if affect_state.warmth_bias >= 0.5 else "guarded_soft"
     if affect_policy.should_be_withdrawn:
         tone_band = "guarded_soft"
@@ -1536,8 +1543,11 @@ def _assemble_reply_plan(
             forbidden_patterns.append("identity_name_restate")
         if trajectory.trajectory_stage != "first_turn":
             plan_confidence = 0.83
-    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping", "emoji_social_reply", "emoji_social_followup"}:
+    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
         forbidden_patterns.extend(["same_as_previous_reply", "repeated_tactic"])
+        plan_confidence = 0.8
+    elif topic in {"emoji_social_reply", "emoji_social_followup"}:
+        forbidden_patterns.extend(["same_as_previous_reply"])
         plan_confidence = 0.8
     elif topic in {"attachment_only_no_question", "meme_meaning", "literal_description", "screenshot_analysis", "capability_check"}:
         forbidden_patterns.extend(["same_as_previous_reply"])

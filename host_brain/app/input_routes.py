@@ -2148,6 +2148,34 @@ async def _deliver_gateway_reply(
 ) -> dict[str, Any]:
     platform = str(payload.get("platform") or "").strip().lower()
     conversation_id = str(payload.get("conversation_id") or "").strip()
+    normalized_decision = str(decision or "").strip().upper()
+    normalized_reason = str(reason_code or "").strip().upper()
+    if (
+        normalized_decision in {"NO_REPLY", "SKIP_REPLY"}
+        or (normalized_reason == "IMAGE_SOCIAL_NO_SAFE_REPLY" and not str(narrative or "").strip())
+    ):
+        return {
+            "success": True,
+            "status": "SKIPPED",
+            "reason_code": normalized_reason or "NO_REPLY",
+            "detail": "gateway final reply suppressed: no safe final reply",
+            "latency_ms": 0,
+            "reply_text_len": 0,
+            "reply_preview": "",
+            "reply_form": str(response_form or "text").strip() or "text",
+            "reply_form_reason": str(response_form_reason or "suppressed_no_reply").strip() or "suppressed_no_reply",
+            "voice_sent": False,
+            "voice_waited": False,
+            "voice_success": None,
+            "voice_status": None,
+            "voice_reason_code": None,
+            "voice_detail": None,
+            "voice_latency_ms": None,
+            "voice_started": None,
+            "voice_vts_started": None,
+            "voice_vts_expression_success": None,
+            "voice_event": None,
+        }
 
     reply_text = _build_gateway_reply_text(
         decision=decision,

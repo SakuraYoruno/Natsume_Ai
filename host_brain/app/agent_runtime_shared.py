@@ -2624,6 +2624,7 @@ async def _async_post_process(
 ) -> None:
     normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
     voice_outputs_enabled = bool(normalized_trace_stage_meta.get("voice_outputs_enabled"))
+    suppress_final_reply = bool(normalized_trace_stage_meta.get("suppress_final_reply"))
     skip_heavy_persona_postprocess = bool(
         normalized_trace_stage_meta.get("skip_heavy_persona_postprocess")
     )
@@ -2670,30 +2671,33 @@ async def _async_post_process(
     try:
         from host_brain.conversation.writer import record_assistant_turn  # noqa: PLC0415
 
-        fallback_used = _resolve_persisted_fallback_flag(
-            trace_stage_meta=normalized_trace_stage_meta,
-            gov_decision=gov_decision,
-            narrative=narrative,
-            provider_name=provider_name,
-            model_id=model_id,
-        )
-        record_assistant_turn(
-            request_id=request_id,
-            session_id=session_id,
-            person_id=person_id,
-            content=narrative,
-            ts_ms=int(time.time() * 1000),
-            lang=render_target_lang,
-            reply_plan=reply_plan,
-            metadata={
-                "provider_name": provider_name,
-                "model_id": model_id,
-                "fallback": fallback_used,
-                "message_kind": "final_reply",
-                "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ("fallback" if fallback_used else "full_model")).strip(),
-                "degraded": bool(fallback_used),
-            },
-        )
+        if suppress_final_reply:
+            _logger.debug("[%s] cortex_orchestrator skipped assistant turn: suppressed final reply", request_id)
+        else:
+            fallback_used = _resolve_persisted_fallback_flag(
+                trace_stage_meta=normalized_trace_stage_meta,
+                gov_decision=gov_decision,
+                narrative=narrative,
+                provider_name=provider_name,
+                model_id=model_id,
+            )
+            record_assistant_turn(
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=narrative,
+                ts_ms=int(time.time() * 1000),
+                lang=render_target_lang,
+                reply_plan=reply_plan,
+                metadata={
+                    "provider_name": provider_name,
+                    "model_id": model_id,
+                    "fallback": fallback_used,
+                    "message_kind": "final_reply",
+                    "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ("fallback" if fallback_used else "full_model")).strip(),
+                    "degraded": bool(fallback_used),
+                },
+            )
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process conversation_turn failed: %s", request_id, exc)
 
@@ -2708,7 +2712,7 @@ async def _async_post_process(
         from host_brain.app.observability_persist import persist_chat_episodic_memory  # noqa: PLC0415
         from host_brain.app.dependencies import get_episodic_store  # noqa: PLC0415
 
-        store = get_episodic_store()
+        store = None if suppress_final_reply else get_episodic_store()
         if store is not None:
             mem_user = user_message
             mem_narrative = narrative
