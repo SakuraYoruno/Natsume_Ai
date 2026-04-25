@@ -361,7 +361,15 @@ class SurfaceRenderer:
         multimodal = dict(getattr(plan, "multimodal", {}) or {})
         observation_text = image_social_observation_text(multimodal)
         if not observation_text:
-            return self._fallback_result(request, reason_code="image_social_observation_empty")
+            request.trace_meta["image_social_surface_render"] = {
+                "status": "SKIPPED",
+                "invoked": False,
+                "affected_output": False,
+                "source": "surface",
+                "reason_code": "image_social_observation_empty",
+                "policy_version": SURFACE_CACHE_POLICY_VERSION,
+            }
+            return SurfaceResult(source="surface", skipped_reason="image_social_observation_empty")
         family = str(getattr(plan, "tactic_family", "") or "").strip()
         if family == "soft_emotion_ack":
             action_hint = "像看见对方发了有点蔫或委屈的图时顺手接一句，但不要替对方定性。"
@@ -503,6 +511,11 @@ class SurfaceRenderer:
                 "timeout_ms": timeout_ms,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         except Exception as exc:
             request.trace_meta[trace_key] = {
@@ -513,6 +526,11 @@ class SurfaceRenderer:
                 "detail": str(exc)[:220],
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         latency_ms = int(getattr(result, "total_latency_ms", 0) or (int(time.time() * 1000) - started_ms))
         try:
@@ -528,6 +546,14 @@ class SurfaceRenderer:
                 "latency_ms": latency_ms,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    provider_name=str(getattr(result, "final_provider", "") or "").strip(),
+                    model_id=str(getattr(result, "final_model", "") or "").strip(),
+                    latency_ms=latency_ms,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         candidates = _extract_candidates(payload)
         if not candidates:
@@ -540,6 +566,14 @@ class SurfaceRenderer:
                 "latency_ms": latency_ms,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    provider_name=str(getattr(result, "final_provider", "") or "").strip(),
+                    model_id=str(getattr(result, "final_model", "") or "").strip(),
+                    latency_ms=latency_ms,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         for candidate_index, raw_candidate in enumerate(candidates, start=1):
             candidate = str(raw_candidate or "").strip()
@@ -592,18 +626,35 @@ class SurfaceRenderer:
             "policy_version": SURFACE_CACHE_POLICY_VERSION,
         }
         if not fallback_on_all_rejected:
-            return SurfaceResult(
-                text="",
-                source="surface",
+            return self._unavailable_result(
+                fallback_reason=fallback_reason,
                 provider_name=str(getattr(result, "final_provider", "") or "").strip(),
                 model_id=str(getattr(result, "final_model", "") or "").strip(),
                 latency_ms=latency_ms,
-                rejected_candidates=tuple(rejected),
-                cacheable=False,
-                degraded=False,
-                skipped_reason=fallback_reason,
+                rejected=rejected,
             )
         return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
+
+    def _unavailable_result(
+        self,
+        *,
+        fallback_reason: str,
+        provider_name: str = "",
+        model_id: str = "",
+        latency_ms: int = 0,
+        rejected: list[Mapping[str, Any]] | None = None,
+    ) -> SurfaceResult:
+        return SurfaceResult(
+            text="",
+            source="surface",
+            provider_name=provider_name,
+            model_id=model_id,
+            latency_ms=latency_ms,
+            rejected_candidates=tuple(rejected or ()),
+            cacheable=False,
+            degraded=False,
+            skipped_reason=fallback_reason,
+        )
 
     def _fallback_result(
         self,

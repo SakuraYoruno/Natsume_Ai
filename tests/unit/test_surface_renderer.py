@@ -275,7 +275,7 @@ async def test_surface_renderer_identity_rejects_missing_name_then_accepts(monke
 
 
 @pytest.mark.asyncio
-async def test_surface_renderer_image_observation_empty_falls_back() -> None:
+async def test_surface_renderer_image_observation_empty_falls_through() -> None:
     trace: dict[str, object] = {}
 
     result = await SurfaceRenderer().render(
@@ -285,10 +285,13 @@ async def test_surface_renderer_image_observation_empty_falls_back() -> None:
         )
     )
 
-    assert result.degraded is True
-    assert result.model_id == "fallback-policy"
-    assert "没接稳" in result.text
-    assert dict(trace["surface_render_fallback"])["source"] == "fallback_policy"
+    assert result.text == ""
+    assert result.degraded is False
+    assert result.skipped_reason == "image_social_observation_empty"
+    meta = dict(trace["image_social_surface_render"])
+    assert meta["affected_output"] is False
+    assert meta["reason_code"] == "image_social_observation_empty"
+    assert "surface_render_fallback" not in trace
 
 
 @pytest.mark.asyncio
@@ -402,6 +405,35 @@ async def test_surface_renderer_image_rejected_candidates_fall_through_to_full_m
         "IMAGE_SURFACE_TEMPLATE_SHAPE",
         "IMAGE_SURFACE_EMOTION_NOT_USED",
     ]
+    assert "image_social_surface_render_fallback" not in trace
+
+
+@pytest.mark.asyncio
+async def test_surface_renderer_image_timeout_falls_through_without_fallback_text(monkeypatch) -> None:
+    async def _slow_call(self, request, **kwargs):  # noqa: ANN001, ANN003
+        await asyncio.sleep(2)
+        return SimpleNamespace(content='{"candidates":["迟到了"]}', final_provider="gemini", final_model="slow", total_latency_ms=2000)
+
+    monkeypatch.setenv("HOST_IMAGE_SOCIAL_SURFACE_TIMEOUT_MS", "1")
+    monkeypatch.setattr(SurfaceRenderer, "_call_surface_model", _slow_call)
+    trace: dict[str, object] = {}
+
+    result = await SurfaceRenderer().render(
+        _request(
+            _plan(
+                primary_topic="emoji_social_reply",
+                response_form_reason="image_social_reply",
+                tactic_family="cute_image_ack",
+                multimodal={"summary_for_chat": "可爱、卖萌；猫耳女孩特写。"},
+            ),
+            trace=trace,
+        )
+    )
+
+    assert result.text == ""
+    assert result.degraded is False
+    assert result.skipped_reason == "image_social_surface_unavailable"
+    assert dict(trace["image_social_surface_render"])["reason_code"] == "SURFACE_HARD_TIMEOUT"
     assert "image_social_surface_render_fallback" not in trace
 
 

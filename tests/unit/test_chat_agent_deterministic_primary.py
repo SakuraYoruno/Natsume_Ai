@@ -1143,10 +1143,10 @@ async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_fu
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_image_social_surface_hard_timeout_uses_local_emergency(monkeypatch) -> None:
-    async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
-        raise AssertionError("full chat LLM should not be called after image surface timeout")
-        yield ""  # pragma: no cover
+async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_chat(monkeypatch) -> None:
+    async def _full_chat_stream_llm(**kwargs):  # noqa: ANN003
+        assert kwargs["scene_type"] == "CHAT"
+        yield "哥哥又拿这股劲逗我，我有点招架不住。"
 
     async def _slow_surface_llm(**kwargs):  # noqa: ANN003
         await asyncio.sleep(10)
@@ -1164,7 +1164,7 @@ async def test_chat_agent_image_social_surface_hard_timeout_uses_local_emergency
         "core_observation": "猫耳女孩特写。",
         "emotion_signals": ["可爱", "卖萌"],
     }
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _forbidden_stream_llm)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _full_chat_stream_llm)
     monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _slow_surface_llm)
     monkeypatch.setattr(
         "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
@@ -1220,10 +1220,13 @@ async def test_chat_agent_image_social_surface_hard_timeout_uses_local_emergency
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert "没接稳" in str(commit_event.get("narrative") or "")
-    assert commit_event["audit_refs"]["model_id"] == "fallback-policy"
+    assert str(commit_event.get("narrative") or "") == "哥哥又拿这股劲逗我，我有点招架不住。"
+    assert commit_event["audit_refs"]["model_id"] == "mock-chat"
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
-    assert trace_stage_meta.get("deterministic_primary_reason") == "fallback_policy:renderer"
-    assert trace_stage_meta.get("fallback_used") is True
-    assert dict(trace_stage_meta.get("image_social_surface_render") or {}).get("reason_code") == "SURFACE_HARD_TIMEOUT"
+    assert trace_stage_meta.get("deterministic_primary_used") is not True
+    assert trace_stage_meta.get("fallback_used") is not True
+    surface_meta = dict(trace_stage_meta.get("image_social_surface_render") or {})
+    assert surface_meta.get("reason_code") == "SURFACE_HARD_TIMEOUT"
+    assert surface_meta.get("affected_output") is False
+    assert "image_social_surface_render_fallback" not in trace_stage_meta
