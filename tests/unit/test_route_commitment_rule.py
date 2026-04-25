@@ -1,6 +1,6 @@
 """Route Commitment Rule 完整落地专项测试（M35-G，T-RCR-01~10）。
 
-验证条件边基于 committed_route_token 的路由行为，以及 fastapi_app.py 的注入逻辑。
+验证条件边基于 committed_route_token 的路由行为，以及 chat runtime 的注入逻辑。
 """
 
 from __future__ import annotations
@@ -178,10 +178,10 @@ def test_rcr_07_initial_state_extracts_committed_token_from_payload():
 
 
 # ---------------------------------------------------------------------------
-# T-RCR-08：fastapi_app.py 注入 committed_route_token 到 payload
+# T-RCR-08：chat runtime 注入 committed_route_token 到 payload
 # ---------------------------------------------------------------------------
-def test_rcr_08_fastapi_injects_committed_token_to_payload():
-    """T-RCR-08：fastapi_app.py 在 run_graph 调用前注入 committed_route_token"""
+def test_rcr_08_chat_runtime_injects_committed_token_to_payload():
+    """T-RCR-08：chat runtime 在 run_graph 调用前注入 committed_route_token"""
     # 模拟 governor_result（APPROVE 路径）
     governor_result = {
         "decision": "APPROVE",
@@ -193,7 +193,7 @@ def test_rcr_08_fastapi_injects_committed_token_to_payload():
             "proposer_node_id": "governor",
         },
     }
-    # 模拟 fastapi_app.py 的注入逻辑
+    # 模拟 chat runtime 的注入逻辑
     llm_prompt_payload: dict = {"message": "hello"}
     injected_payload = {
         **llm_prompt_payload,

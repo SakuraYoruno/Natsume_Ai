@@ -1288,6 +1288,10 @@ def _maybe_build_recent_turn_answer(
     detect_recent_turn_query_role: Callable[[str], str | None] | None = None,
     load_continuity_turns: Callable[..., list[dict[str, str]]] | None = None,
 ) -> str | None:
+    # Normal chat replies must go through SurfaceRenderer or full chat model.
+    # Recent-turn direct rendering is retired because it could emit final text
+    # outside ReplyEnvelope validation/cache rules.
+    return None
     _detect_query_role = detect_recent_turn_query_role or _detect_recent_turn_query_role
     _load_turns = load_continuity_turns or _load_continuity_turns
     query_role = _detect_query_role(user_message)
@@ -1794,6 +1798,9 @@ def _maybe_build_previous_meaning_answer(
     user_message: str,
     render_target_lang: str,
 ) -> str | None:
+    # Clarification direct rendering is retired; let the chat main chain use
+    # InteractionThreadState + ReplyPlan instead of a side-door template answer.
+    return None
     normalized = str(user_message or "").strip()
     if not normalized or not _CLARIFICATION_DIRECT_QUERY_RE.match(normalized):
         return None

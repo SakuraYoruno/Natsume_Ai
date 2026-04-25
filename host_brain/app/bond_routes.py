@@ -44,7 +44,7 @@ _engine_provider: Optional[Callable[[], BondStageEngine]] = None
 
 
 def set_bond_engine_provider(provider: Optional[Callable[[], BondStageEngine]]) -> None:
-    """由 fastapi_app.py 注入 BondStageEngine 获取回调。"""
+    """由 router registry 注入 BondStageEngine 获取回调。"""
     global _engine_provider
     _engine_provider = provider
 

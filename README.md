@@ -35,7 +35,9 @@ Natsume_Ai/
 ## 主要代码入口
 
 - 聊天入口：`POST /v1/chat`
-  - `host_brain/app/fastapi_app.py`
+  - `host_brain/app/asgi.py`
+  - `host_brain/app/app_factory.py`
+  - `host_brain/app/chat_routes.py`
   - `host_brain/app/chat_handler.py`
   - `host_brain/app/cortex_orchestrator.py`
   - `host_brain/app/executive_router.py`

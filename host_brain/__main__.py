@@ -42,7 +42,6 @@ def _load_dotenv_file() -> None:
 
 _load_dotenv_file()
 
-from host_brain.app.fastapi_app import app
 from host_brain.app.dependencies import collect_dependency_probes_sync
 from host_brain.app.main import build_startup_report, emit_runtime_bootstrap_logs
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -222,7 +221,7 @@ def main() -> int:
 
     try:
         uvicorn.run(
-            "host_brain.app.fastapi_app:app",
+            "host_brain.app.asgi:app",
             host=args.host,
             port=args.port,
             reload=args.reload,

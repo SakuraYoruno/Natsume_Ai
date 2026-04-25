@@ -84,13 +84,24 @@ def compact_image_social_text(raw_text: str) -> str:
 def image_social_observation_text(multimodal: Mapping[str, Any] | None) -> str:
     payload = dict(multimodal or {})
     parts: list[str] = []
-    for key in ("summary_for_chat", "core_observation", "visible_text", "artifact_type"):
+    for key in ("social_signal",):
         value = str(payload.get(key) or "").strip()
         if value:
             parts.append(value)
     emotion = "、".join(str(item).strip() for item in list(payload.get("emotion_signals") or []) if str(item).strip())
     if emotion:
         parts.insert(0, emotion)
+    if not parts:
+        value = str(payload.get("summary_for_chat") or payload.get("core_observation") or "").strip()
+        extracted = [
+            marker
+            for marker in ("可爱", "卖萌", "软萌", "哭", "泪", "委屈", "生气", "无语", "笑", "开心", "装乖", "撒娇")
+            if marker in value
+        ]
+        if extracted:
+            parts.append("、".join(dict.fromkeys(extracted)))
+        elif value and not re.search(r"(猫耳|金发|黄头发|蓝眼|眼睛|脸|图里|画面|这张|这图)", value):
+            parts.append(value)
     return "；".join(dict.fromkeys(parts))
 
 
@@ -155,7 +166,9 @@ def candidate_responds_to_image_social_emotion(candidate_text: str) -> bool:
         return False
     if _DESCRIPTOR_FOCUS_RE.search(compact):
         return False
-    return bool(_EMOTION_RESPONSE_RE.search(compact))
+    if _EMOTION_RESPONSE_RE.search(compact):
+        return True
+    return bool(re.search(r"(装乖|撒娇|嘴硬|委屈|逗|晃|卖萌|耍赖|求关注|心软|招架|拿捏|别闹|过来|接住)", compact))
 
 
 def build_emergency_image_social_reply(multimodal: Mapping[str, Any] | None) -> str:

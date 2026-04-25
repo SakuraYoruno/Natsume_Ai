@@ -42,7 +42,6 @@ from host_brain.app.graph_config_builder import (
     SCENE_WORK_TRANSLATE,
 )
 from host_brain.tribe.thalamus_agent import get_thalamus_agent
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.app.schemas import ChatRequest
 from host_brain.core.ids import new_request_id
 
@@ -124,15 +123,11 @@ async def _evaluate_governor_with_timing(
 
 
 def _resolve_sys_mode_narrative(mode: str, *, render_target_lang: str = "zh") -> str:
-    templates = resolve_prompt_template_json_merged("chat_handler.sys_mode.narratives")
-    mapping = dict(templates) if isinstance(templates, dict) else {}
     mode_key = str(mode or "").strip().lower()
-    fallback_key = mode_key if mode_key in {"locked", "maintenance"} else "maintenance"
-    raw = mapping.get(fallback_key) or mapping.get("maintenance") or ""
-    if isinstance(raw, dict):
-        lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
-        return str(raw.get(lang_key) or raw.get("zh") or raw.get("ja") or "").strip()
-    return str(raw or "")
+    lang_key = "ja" if str(render_target_lang).strip().lower() == "ja" else "zh"
+    if mode_key == "locked":
+        return "当前 host 已锁定，暂时不处理聊天请求。" if lang_key == "zh" else "現在 host はロック中です。"
+    return "当前 host 处于维护状态，稍后再试。" if lang_key == "zh" else "現在 host はメンテナンス中です。"
 
 
 async def handle_chat(request_body: ChatRequest, request: Request, metrics: Any) -> StreamingResponse:

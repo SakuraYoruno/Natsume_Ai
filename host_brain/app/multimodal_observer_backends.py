@@ -17,7 +17,7 @@ from typing import Any, Mapping, Protocol
 from urllib.parse import urlparse
 
 from host_brain.app.prompt_builder import extract_langchain_content_text
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
+from host_brain.app.prompt_specs import resolve_prompt_spec_json
 from host_brain.integrations.llm_gateway import (
     PROVIDER_CODEX,
     PROVIDER_DEEPSEEK,
@@ -244,7 +244,7 @@ def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
 
 
 def _load_template_mapping(template_id: str) -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged(template_id)
+    raw = resolve_prompt_spec_json(template_id)
     return dict(raw) if isinstance(raw, Mapping) else {}
 
 

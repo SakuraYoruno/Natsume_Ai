@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from host_brain.app.fastapi_app import app
+from host_brain.app.asgi import app
 from fastapi.testclient import TestClient
 
 

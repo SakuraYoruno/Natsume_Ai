@@ -1,10 +1,10 @@
-"""测试 fastapi_app 导入和基本路由"""
+"""测试 ASGI app 导入和基本路由"""
 import sys
 sys.path.insert(0, ".")
 
-print("=== 测试 fastapi_app 导入 ===")
+print("=== 测试 asgi app 导入 ===")
 try:
-    from host_brain.app.fastapi_app import app
+    from host_brain.app.asgi import app
     print(f"[OK] app 导入成功: {app}")
     print(f"[OK] 路由数量: {len(app.routes)}")
     for r in app.routes:

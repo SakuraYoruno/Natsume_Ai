@@ -264,96 +264,23 @@ def _assistant_followup_primary_reply_text(
 
 
 def build_phatic_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return ""
-    profile = get_soul_voice_profile()
-    address = _address_prefix(profile)
-    variant_map = {
-        ("phatic_wave", "greeting"): f"{address}我在呀。" if address else "我在呀。",
-        ("phatic_wave", "presence"): f"{address}在呀在呀，怎么啦？" if address else "在呀在呀，怎么啦？",
-        ("phatic_wave", "light_ack"): f"{address}嗯，我在呢。" if address else "嗯，我在呢。",
-        ("playful_wave", "playful_ping"): f"{address}突然来戳我呀？" if address else "突然来戳我呀？",
-    }
-    if (family, variant) in variant_map:
-        return variant_map[(family, variant)]
-    if family == "playful_wave":
-        return f"{address}怎么啦，想找我呀？" if address else "怎么啦，想找我呀？"
-    return f"{address}我在呀。" if address else "我在呀。"
+    return ""
 
 
 def build_image_social_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return ""
-    profile = get_soul_voice_profile()
-    address = _address_prefix(profile)
-    variant_map = {
-        ("soft_emotion_ack", "distress_image"): f"{address}这张看着有点蔫，我先不乱猜。" if address else "这张看着有点蔫，我先不乱猜。",
-        ("soft_emotion_ack", "soft_hold"): f"{address}这张软软的，有点让人想放轻声音。" if address else "这张软软的，有点让人想放轻声音。",
-        ("soft_emotion_ack", "steady_hold"): f"{address}这张情绪有点低，我先轻点接。" if address else "这张情绪有点低，我先轻点接。",
-        ("soft_emotion_ack", "image_social"): f"{address}这张我看到了，先不替你乱扣意思。" if address else "这张我看到了，先不替你乱扣意思。",
-        ("soft_emotion_ack", "backoff_hold"): f"{address}好嘛，那我先把刚才那层意思收回去。" if address else "好嘛，那我先把刚才那层意思收回去。",
-        ("soft_emotion_ack", "explain_read"): f"{address}我刚才是顺着那张图的情绪读过去了。" if address else "我刚才是顺着那张图的情绪读过去了。",
-        ("soft_emotion_ack", "let_it_pass"): f"{address}行吧，那这张我就先当你随手丢来的。" if address else "行吧，那这张我就先当你随手丢来的。",
-        ("cute_image_ack", "cute_ping"): f"{address}这张可爱得有点犯规。" if address else "这张可爱得有点犯规。",
-        ("cute_image_ack", "soft_hold"): f"{address}这张软萌得有点犯规。" if address else "这张软萌得有点犯规。",
-        ("tease_image_ack", "light_nudge"): f"{address}这张小表情有点会戳人。" if address else "这张小表情有点会戳人。",
-        ("tease_image_ack", "deny_nudge"): f"{address}好好好，那我把刚才那点解读收回去。" if address else "好好好，那我把刚才那点解读收回去。",
-        ("tease_image_ack", "light_explain"): f"{address}我刚才是被这张小表情带偏了一下。" if address else "我刚才是被这张小表情带偏了一下。",
-        ("tease_image_ack", "soft_slide"): f"{address}行吧，那这张就当轻轻戳我一下。" if address else "行吧，那这张就当轻轻戳我一下。",
-    }
-    if (family, variant) in variant_map:
-        return variant_map[(family, variant)]
-    family_map = {
-        "soft_emotion_ack": f"{address}这张我看到了，先不乱猜。" if address else "这张我看到了，先不乱猜。",
-        "cute_image_ack": f"{address}这张可爱得有点犯规。" if address else "这张可爱得有点犯规。",
-        "tease_image_ack": f"{address}这张小表情有点会戳人。" if address else "这张小表情有点会戳人。",
-    }
-    return family_map.get(family, f"{address}这张我看到了，先不乱猜它的意思。" if address else "这张我看到了，先不乱猜它的意思。")
+    return ""
 
 
 def build_boundary_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return ""
-    profile = get_soul_voice_profile()
-    address = _address_prefix(profile)
-    variant_map = {
-        ("short_boundary_then_reason", "plain_reason"): f"{address}也没熟到那种地步啦，不过看见了我也不会装作没看到。" if address else "也没熟到那种地步啦，不过看见了我也不会装作没看到。",
-        ("ack_still_care_then_new_reason", "still_care_reason"): f"{address}你还惦记这个呀？也没熟到那种地步，不过我不会装作没看到。" if address else "你还惦记这个呀？也没熟到那种地步，不过我不会装作没看到。",
-        ("hold_boundary_then_shift_floor", "shift_real_question"): f"{address}也没熟到那种地步啦，不过这事我已经说过啦。你真正想问的是后面那层吧？" if address else "也没熟到那种地步啦，不过这事我已经说过啦。你真正想问的是后面那层吧？",
-        ("hold_boundary_then_shift_floor", "shift_other_question"): f"{address}也没熟到那种地步啦，不过这事我已经说过啦。你要问别的就直接问嘛。" if address else "也没熟到那种地步啦，不过这事我已经说过啦。你要问别的就直接问嘛。",
-        ("brief_reason_then_wait", "fresh_reason"): f"{address}也没熟到那种地步啦，就是看见了没法装作没看到。" if address else "也没熟到那种地步啦，就是看见了没法装作没看到。",
-        ("soft_close_boundary", "settle_repeat"): f"{address}这件事我已经说过啦，也没熟到那种地步，不过我不会装作没看到。" if address else "这件事我已经说过啦，也没熟到那种地步，不过我不会装作没看到。",
-        ("soft_close_boundary", "settle_hold"): f"{address}先停在这吧，反正我不会装作没看到。" if address else "先停在这吧，反正我不会装作没看到。",
-    }
-    if (family, variant) in variant_map:
-        return variant_map[(family, variant)]
-    return f"{address}也没熟到那种地步啦，不过看见了我也不会装作没看到。" if address else "也没熟到那种地步啦，不过看见了我也不会装作没看到。"
+    return ""
 
 
 def build_help_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return ""
-    profile = get_soul_voice_profile()
-    address = _address_prefix(profile)
-    variant_map = {
-        ("short_conditional_commitment", "plain_conditional"): f"{address}你真有事就说呀，我又不会装作没听见。" if address else "你真有事就说呀，我又不会装作没听见。",
-        ("ack_anxiety_without_repromise", "soothe_hold"): f"{address}你还在担心这个呀？真有事我会回应你的。" if address else "你还在担心这个呀？真有事我会回应你的。",
-        ("ack_anxiety_without_repromise", "steady_reassure"): f"{address}你真碰上事就叫我，我会回应的。" if address else "你真碰上事就叫我，我会回应的。",
-        ("soft_reassure_then_open_floor", "soothe_then_open"): f"{address}真有事你就直说嘛。" if address else "真有事你就直说嘛。",
-        ("hold_support_without_repromise", "steady_open_floor"): f"{address}我会搭把手的。你要说别的就接着说呀。" if address else "我会搭把手的。你要说别的就接着说呀。",
-        ("steady_commitment_then_wait", "quiet_hold"): f"{address}反正我不会装作没听见的。" if address else "反正我不会装作没听见的。",
-    }
-    if (family, variant) in variant_map:
-        return variant_map[(family, variant)]
-    return f"{address}真有事就说呀，我会回应的。" if address else "真有事就说呀，我会回应的。"
+    return ""
 
 
 def build_repair_fallback_text(*, render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return ""
-    profile = get_soul_voice_profile()
-    address = _address_prefix(profile)
-    return f"{address}好嘛，我收一点。你要是不想听这个，我们就先停在这。" if address else "好嘛，我收一点。你要是不想听这个，我们就先停在这。"
+    return ""
 
 
 def build_identity_reply_contract(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
@@ -374,7 +301,7 @@ def build_identity_reply_contract(*, family: str, variant: str = "", render_targ
     }
     variant_overrides = {
         ("ack_repeat_then_light_probe", "confirm_part"): f"先自然认下“我是{profile.display_name}”，{address_note}再顺手接一句，像在逗他又确认这个，不要固定成“哪一部分”。",
-        ("ack_repeat_then_light_probe", "confirm_real_question"): f"先自然认下“我是{profile.display_name}”，{address_note}再顺着接他怎么又问到这，不要落成“真正想问什么”。",
+        ("ack_repeat_then_light_probe", "confirm_real_question"): f"先自然认下“我是{profile.display_name}”，{address_note}再顺着接他怎么又问到这，不要落成固定追问句。",
         ("ack_repeat_then_light_probe", "confirm_motive"): f"先自然认下“我是{profile.display_name}”，{address_note}再轻轻接住他怎么又问这个，不要把名字展开成介绍。",
         ("hold_name_then_open_floor", "open_other_topic"): f"先自然认下“我是{profile.display_name}”，{address_note}再像熟人间顺手把别的话头递回去，不要固定成“是不是想问别的”。",
         ("hold_name_then_open_floor", "open_real_question"): f"先自然认下“我是{profile.display_name}”，{address_note}再用更松一点的方式把话头递回去，不要用盘问句。",
@@ -401,7 +328,7 @@ def build_boundary_reply_contract(*, family: str, variant: str = "", render_targ
     }
     variant_overrides = {
         ("ack_still_care_then_new_reason", "still_care_reason"): f"先接住“你还在意这个”，再换一个新一点、轻一点的理由。{address_note}{teasing_note}不要重复固定理由句。",
-        ("hold_boundary_then_shift_floor", "shift_real_question"): f"把“不算熟”轻轻放稳，再顺着把真正想问的口子让回去。{address_note}不要写成客服式追问。",
+        ("hold_boundary_then_shift_floor", "shift_real_question"): f"把“不算熟”轻轻放稳，再顺着把后面的话口让回去。{address_note}不要写成客服式追问。",
         ("hold_boundary_then_shift_floor", "shift_other_question"): f"把距离放稳，再很自然地把别的话头递回去。{address_note}{teasing_note}不要用固定句式。",
         ("soft_close_boundary", "settle_repeat"): f"轻轻收住重复追问，别再整句重复“不熟 + 理由”。{address_note}更像顺手按住这个话头。",
         ("soft_close_boundary", "settle_hold"): f"把这件事停在这，态度稳住就行。{address_note}{warm_note}不要再展开。",
@@ -433,35 +360,7 @@ def build_help_reply_contract(*, family: str, variant: str = "", render_target_l
 
 
 def build_identity_fallback_text(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:
-    if str(render_target_lang or "").strip().lower() == "ja":
-        return ""
-    profile = get_soul_voice_profile()
-    name_line = _name_claim(profile)
-    address = _address_prefix(profile)
-    variant_map = {
-        ("brief_name_only", "plain_name"): name_line,
-        ("ack_name_then_wait", "quiet_confirm"): f"{address}连我都认不出来啦？{name_line}" if address else f"连我都认不出来啦？{name_line}",
-        ("ack_repeat_then_light_probe", "confirm_part"): f"{address}怎么又问起这个啦？{name_line}",
-        ("ack_repeat_then_light_probe", "confirm_real_question"): f"{address}又问到这个呀？{name_line}",
-        ("ack_repeat_then_light_probe", "confirm_motive"): f"{address}{name_line}怎么又问起这个啦？",
-        ("hold_name_then_open_floor", "open_other_topic"): f"{address}{name_line}你要说什么就直接说嘛。",
-        ("hold_name_then_open_floor", "open_real_question"): f"{address}{name_line}你要是还有别的，就直接跟我说呀。",
-        ("soft_close_then_open_floor", "settle_real_question"): f"{address}都问我好几次啦。{name_line}你要是还有别的，就直接说呀。",
-        ("soft_close_then_open_floor", "settle_other_topic"): f"{address}都问我好几次啦。你要说什么就直接说嘛。",
-        ("soft_close_then_open_floor", "settle_then_open"): f"{address}都问我好几次啦。你就直接跟我说嘛。",
-        ("name_only_then_pause", "quiet_pause"): name_line,
-    }
-    if (family, variant) in variant_map:
-        return variant_map[(family, variant)]
-    family_map = {
-        "brief_name_only": name_line,
-        "ack_name_then_wait": f"{address}连我都认不出来啦？{name_line}" if address else f"连我都认不出来啦？{name_line}",
-        "ack_repeat_then_light_probe": f"{address}{name_line}怎么又问起这个啦？",
-        "hold_name_then_open_floor": f"{address}{name_line}你要说什么就直接说嘛。",
-        "name_only_then_pause": name_line,
-        "soft_close_then_open_floor": f"{address}都问我好几次啦。你就直接跟我说嘛。",
-    }
-    return family_map.get(family, name_line)
+    return ""
 
 
 def build_identity_naturalization_hint(*, family: str, render_target_lang: str = "zh") -> str:

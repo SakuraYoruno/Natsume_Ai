@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
-# ── 全局注册表与健康报告器（由 fastapi_app.py 注入） ──
+# ── 全局注册表与健康报告器（由 app factory 注入） ──
 _registry: SchedulerTaskRegistry | None = None
 _health_reporter: SchedulerHealthReporter | None = None
 
@@ -42,7 +42,7 @@ def set_scheduler_providers(
     registry: SchedulerTaskRegistry,
     health_reporter: SchedulerHealthReporter,
 ) -> None:
-    """由 fastapi_app.py 在启动时注入调度器依赖。"""
+    """由 app factory 在启动时注入调度器依赖。"""
     global _registry, _health_reporter
     _registry = registry
     _health_reporter = health_reporter

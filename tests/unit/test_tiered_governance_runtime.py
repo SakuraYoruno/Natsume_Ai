@@ -1,6 +1,6 @@
 """M44 分层治理运行时接入测试（T-TG-RT / T-TG-BUILTIN / T-TG-RESP）。
 
-验证 fastapi_app.py 的 get_intent_engine() 已正确注入 registry + policy_cache，
+验证 dependencies.get_intent_engine() 已正确注入 registry + policy_cache，
 以及内置 Skill 注册表和 ChatResponse.approval_tier 字段。
 """
 
@@ -94,11 +94,11 @@ class TestBuiltinSkillRegistryM44(unittest.TestCase):
 
 
 # ===========================================================================
-# T-TG-RT-01~04：fastapi_app.py 工厂函数注入验证
+# T-TG-RT-01~04：dependencies 工厂函数注入验证
 # ===========================================================================
 
-class TestFastapiIntentEngineInjectionM44(unittest.TestCase):
-    """T-TG-RT-01~04：验证 fastapi_app.py 的 get_intent_engine() 已注入 registry + policy_cache。"""
+class TestIntentEngineInjectionM44(unittest.TestCase):
+    """T-TG-RT-01~04：验证 dependencies.get_intent_engine() 已注入 registry + policy_cache。"""
 
     def setUp(self) -> None:
         # 重置全局单例，确保测试隔离

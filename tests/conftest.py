@@ -68,10 +68,10 @@ def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = Non
 
     try:
         bond_routes = sys.modules.get("host_brain.app.bond_routes")
-        fastapi_app = sys.modules.get("host_brain.app.fastapi_app")
+        asgi_app = sys.modules.get("host_brain.app.asgi")
         if bond_routes is not None:
-            if fastapi_app is not None and hasattr(fastapi_app, "_get_bond_engine_via_social_brain"):
-                bond_routes.set_bond_engine_provider(fastapi_app._get_bond_engine_via_social_brain)
+            if asgi_app is not None and hasattr(asgi_app, "resolve_bond_engine"):
+                bond_routes.set_bond_engine_provider(asgi_app.resolve_bond_engine)
             else:
                 bond_routes.set_bond_engine_provider(None)
     except Exception:

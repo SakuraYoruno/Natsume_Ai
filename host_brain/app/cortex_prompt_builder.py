@@ -338,9 +338,18 @@ def build_cortex_prompt(
         _parts.append(_relationship_summary)
     _multimodal_state = getattr(getattr(context_plane, "multimodal", None), "state", None)
     if hasattr(_multimodal_state, "summary_for_chat"):
-        _multimodal_summary = str(getattr(_multimodal_state, "summary_for_chat", "") or "").strip()
-        if _multimodal_summary:
-            _parts.append("【附件观察】\n" + _multimodal_summary)
+        _conversation_interpretation_for_mm = getattr(getattr(context_plane, "conversation_interpretation", None), "state", None)
+        _interaction_thread_for_mm = getattr(getattr(context_plane, "interaction_thread", None), "state", None)
+        _mm_topic = str(getattr(_conversation_interpretation_for_mm, "literal_topic", "") or "").strip()
+        _mm_thread = str(getattr(_interaction_thread_for_mm, "thread_kind", "") or "").strip()
+        if _mm_topic in {"emoji_social_reply", "emoji_social_followup"} or _mm_thread == "image_social":
+            _multimodal_summary = str(getattr(_multimodal_state, "social_signal", "") or "").strip()
+            if _multimodal_summary:
+                _parts.append("【表情包社交信号】\n" + _multimodal_summary)
+        else:
+            _multimodal_summary = str(getattr(_multimodal_state, "summary_for_chat", "") or "").strip()
+            if _multimodal_summary:
+                _parts.append("【附件观察】\n" + _multimodal_summary)
     _interaction_summary = _build_interaction_state_summary(context_plane)
     if _interaction_summary:
         _parts.append(_interaction_summary)

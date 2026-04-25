@@ -30,6 +30,9 @@ class PerceptionPacket:
     summary_for_chat: str = ""
     core_observation: str = ""
     visible_text: str = ""
+    visual_facts: str = ""
+    ocr_text: str = ""
+    social_signal: str = ""
     artifact_type: str = ""
     primary_modality: str = ""
     emotion_signals: tuple[str, ...] = ()
@@ -42,6 +45,9 @@ class PerceptionPacket:
             "summary_for_chat": self.summary_for_chat,
             "core_observation": self.core_observation,
             "visible_text": self.visible_text,
+            "visual_facts": self.visual_facts,
+            "ocr_text": self.ocr_text,
+            "social_signal": self.social_signal,
             "artifact_type": self.artifact_type,
             "primary_modality": self.primary_modality,
             "emotion_signals": list(self.emotion_signals),
@@ -68,11 +74,14 @@ def build_perception_packet(
         or (observed_types[0] if observed_types else "")
     ).lower()
     visible_text = _normalize_text(observations.get("visible_text"))
+    ocr_text = _normalize_text(observations.get("ocr_text")) or visible_text
+    visual_facts = _normalize_text(observations.get("visual_facts") or observations.get("visual_summary"))
+    social_signal = _normalize_text(observations.get("social_signal") or observations.get("meme_intent"))
     artifact_type = _normalize_text(observations.get("artifact_type")).lower()
     core_observation = _normalize_text(observations.get("core_observation"))
     summary_for_chat = _normalize_text(observations.get("summary_for_chat"))
     if not summary_for_chat:
-        summary_for_chat = core_observation or visible_text or _normalize_text(attachment_summary)
+        summary_for_chat = social_signal or core_observation or visual_facts or visible_text or _normalize_text(attachment_summary)
     emotion_signals = _normalize_types(observations.get("emotion_signals") or [])
 
     confidence_raw = observations.get("confidence")
@@ -86,6 +95,9 @@ def build_perception_packet(
         summary_for_chat=summary_for_chat,
         core_observation=core_observation,
         visible_text=visible_text,
+        visual_facts=visual_facts,
+        ocr_text=ocr_text,
+        social_signal=social_signal,
         artifact_type=artifact_type,
         primary_modality=primary_modality,
         emotion_signals=emotion_signals,

@@ -86,11 +86,12 @@ def test_graph_executor_compile_has_return_annotation() -> None:
     )
 
 
-def test_fastapi_root_has_return_annotation() -> None:
-    """F-15: fastapi_app.root 必须有返回类型标注。"""
-    from host_brain.app.fastapi_app import root
-    annotations = getattr(root, "__annotations__", {})
-    assert "return" in annotations, "root 缺少返回类型标注"
+def test_asgi_root_has_return_annotation() -> None:
+    """F-15: asgi.root_endpoint 必须有返回类型标注。"""
+    from host_brain.app.asgi import root_endpoint
+
+    annotations = getattr(root_endpoint, "__annotations__", {})
+    assert "return" in annotations, "root_endpoint 缺少返回类型标注"
 
 
 # ---------------------------------------------------------------------------

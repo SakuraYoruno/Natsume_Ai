@@ -1,6 +1,6 @@
 """健康检查路由模块。
 
-从 fastapi_app.py 拆分，包含 /health, /ready, /health/mcp, /health/canon_sync, /startup 路由。
+包含 /health, /ready, /health/mcp, /health/canon_sync, /startup 路由。
 """
 
 from __future__ import annotations

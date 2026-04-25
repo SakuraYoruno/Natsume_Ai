@@ -17,6 +17,7 @@ from host_brain.persona.reply_surface_memory import (
     build_reply_surface_memory_key,
 )
 from host_brain.persona.fallback_policy import is_surface_cacheable_reply
+from host_brain.app.reply_envelope import can_cache, can_persist
 from host_brain.core.soft_fail import soft_fail
 
 _logger = logging.getLogger("Natsume.conversation.writer")
@@ -32,10 +33,15 @@ def record_user_turn(
     lang: str,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    if not str(session_id or "").strip() or not str(content or "").strip():
+    merged_metadata = dict(metadata or {})
+    has_multimodal_metadata = bool(
+        merged_metadata.get("attachments")
+        or merged_metadata.get("multimodal_observations")
+        or merged_metadata.get("attachment_summary")
+    )
+    if not str(session_id or "").strip() or (not str(content or "").strip() and not has_multimodal_metadata):
         return
     normalized_content = str(content)
-    merged_metadata = dict(metadata or {})
     with soft_fail("conversation.record_user_turn.soul_metadata", fallback=None):
         merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
     with soft_fail("conversation.record_user_turn", fallback=None):
@@ -74,6 +80,14 @@ def record_assistant_turn(
     normalized_content = str(content)
     plan_payload = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
     merged_metadata = dict(metadata or {})
+    envelope_payload = dict(merged_metadata.get("reply_envelope") or {}) if isinstance(merged_metadata.get("reply_envelope"), Mapping) else {}
+    if envelope_payload and not can_persist(envelope_payload):
+        _logger.debug("[%s] skip assistant turn: non-final reply envelope kind=%s", request_id, envelope_payload.get("kind"))
+        return
+    message_kind = str(merged_metadata.get("message_kind") or "").strip().lower()
+    if message_kind and message_kind != "final_reply":
+        _logger.debug("[%s] skip assistant turn: message_kind=%s", request_id, message_kind)
+        return
     with soft_fail("conversation.record_assistant_turn.soul_metadata", fallback=None):
         merged_metadata.setdefault("soul_id", str(getattr(get_compiled_soul(), "soul_id", "") or "").strip())
     for metadata_key in (
@@ -183,6 +197,7 @@ def record_assistant_turn(
                 and (primary_topic != "assistant_reply_followup" or bool(followup_context_fingerprint))
                 and not fallback_used
                 and message_kind in {"", "final_reply"}
+                and (not envelope_payload or can_cache(envelope_payload))
                 and model_id != "deterministic-plan-renderer"
                 and provider_name != "host"
                 and len(normalized_content.strip()) >= 4

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import host_brain.app.bond_routes as bond_routes
-import host_brain.app.fastapi_app as fastapi_app
+import host_brain.app.asgi as asgi
 
 
-def test_fastapi_bond_provider_wired_to_social_brain() -> None:
-    assert bond_routes._engine_provider is fastapi_app._get_bond_engine_via_social_brain
+def test_asgi_bond_provider_wired_to_social_brain() -> None:
+    assert bond_routes._engine_provider is asgi.resolve_bond_engine
 
 
-def test_fastapi_bond_provider_resolves_stage_engine_from_social_brain(monkeypatch) -> None:
+def test_asgi_bond_provider_resolves_stage_engine_from_social_brain(monkeypatch) -> None:
     sentinel = object()
 
     class _SocialBrain:
@@ -20,4 +20,4 @@ def test_fastapi_bond_provider_resolves_stage_engine_from_social_brain(monkeypat
         lambda: _SocialBrain(),
     )
 
-    assert fastapi_app._get_bond_engine_via_social_brain() is sentinel
+    assert asgi.resolve_bond_engine() is sentinel

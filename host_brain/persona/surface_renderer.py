@@ -17,9 +17,7 @@ from host_brain.persona.assistant_followup_surface import (
     context_needs_specific_reference,
 )
 from host_brain.persona.fallback_policy import (
-    FallbackRequest,
     SURFACE_CACHE_POLICY_VERSION,
-    build_fallback_reply,
     is_forbidden_surface_text,
 )
 from host_brain.persona.image_social_surface import (
@@ -421,7 +419,7 @@ class SurfaceRenderer:
             "你只负责把一个低风险短聊天回成一句自然回复。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
             "不要解释规则，不要客服腔，不要只回“嗯/唔/哼”。"
-            "禁止使用固定模板：你真正想问什么、想问别的、哪一部分、在怎么了、我知道了。"
+            "禁止使用固定开放问句、客服式追问、单字空壳和确认式套话。"
             f"\n\n{_compiled_soul_text()}"
         ).strip()
         user_prompt = (
@@ -663,45 +661,36 @@ class SurfaceRenderer:
         reason_code: str,
         trace_key: str = "surface_render",
     ) -> SurfaceResult:
-        fallback = build_fallback_reply(
-            FallbackRequest(
-                reason_code=reason_code,
-                primary_topic=str(getattr(request.plan, "primary_topic", "") or "").strip(),
-                response_form_reason=str(getattr(request.plan, "response_form_reason", "") or "").strip(),
-                render_target_lang=request.render_target_lang,
-                user_message=request.user_message,
-                previous_assistant_text=request.previous_assistant_text,
-            )
-        )
         request.trace_meta.setdefault(
             trace_key,
             {
-                "status": "FALLBACK",
+                "status": "NO_REPLY",
                 "invoked": False,
-                "affected_output": True,
-                "source": "fallback",
+                "affected_output": False,
+                "source": "surface",
                 "reason_code": reason_code,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             },
         )
-        request.trace_meta[f"{trace_key}_fallback"] = {
-            "status": "FALLBACK",
+        request.trace_meta[f"{trace_key}_no_reply"] = {
+            "status": "NO_REPLY",
             "invoked": True,
-            "affected_output": True,
-            "source": fallback.source,
-            "reason_code": fallback.reason_code,
-            "cacheable": fallback.cacheable,
-            "degraded": fallback.degraded,
+            "affected_output": False,
+            "source": "fallback_policy",
+            "reason_code": reason_code,
+            "cacheable": False,
+            "degraded": True,
             "policy_version": SURFACE_CACHE_POLICY_VERSION,
         }
         return SurfaceResult(
-            text=fallback.text,
-            source=fallback.source,
-            provider_name="host",
-            model_id="fallback-policy",
-            fallback_reason=fallback.reason_code,
+            text="",
+            source="surface",
+            provider_name="",
+            model_id="",
+            fallback_reason=reason_code,
             cacheable=False,
-            degraded=True,
+            degraded=False,
+            skipped_reason=reason_code,
         )
 
 

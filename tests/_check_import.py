@@ -1,5 +1,5 @@
 try:
-    from host_brain.app.fastapi_app import app
+    from host_brain.app.asgi import app
     print("OK: import succeeded")
 except Exception as e:
     print(f"FAIL: {type(e).__name__}: {e}")

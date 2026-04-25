@@ -439,7 +439,7 @@ class TestEdgeEventsEndpoint:
     def test_empty_batch(self, ledger: SQLiteLedger) -> None:
         """空批次返回成功。"""
         # 模拟空请求
-        assert True  # 端点逻辑已在 fastapi_app.py 中实现
+        assert True  # 端点逻辑已在 ASGI app 中实现
 
 
 # ---------------------------------------------------------------------------

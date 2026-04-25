@@ -255,6 +255,9 @@ class MultimodalObserver:
             "emotion_signals": list(dict.fromkeys(emotion_signals)),
             "core_observation": core_observation or None,
             "visible_text": str(primary_item.get("visible_text") or primary_item.get("ocr_text") or "").strip() or None,
+            "ocr_text": str(primary_item.get("ocr_text") or primary_item.get("visible_text") or "").strip() or None,
+            "visual_facts": str(primary_item.get("visual_summary") or "").strip() or None,
+            "social_signal": str(primary_item.get("meme_intent") or primary_item.get("tone_hint") or "").strip() or None,
             "artifact_type": artifact_type or None,
         }
         return {
@@ -282,6 +285,9 @@ class MultimodalObserver:
         visual_summary = str(primary_item.get("visual_summary") or "").strip()
         visible_text = str(primary_item.get("visible_text") or primary_item.get("ocr_text") or "").strip()
         meme_intent = str(primary_item.get("meme_intent") or primary_item.get("tone_hint") or "").strip()
+        primary_type = str(observed_types[0] or "").strip().lower() if observed_types else ""
+        if primary_type in {"emoji", "sticker"}:
+            return meme_intent or "表情包社交输入"
         summary_bits = [bit for bit in [meme_intent, visual_summary, visible_text] if bit]
         concise_observation = "；".join(summary_bits[:2]).strip() or base_summary
         return concise_observation or base_summary
@@ -298,6 +304,8 @@ class MultimodalObserver:
         primary_type = str(observed_types[0] or "").strip().lower()
         if primary_type not in {"image", "emoji"}:
             return ""
+        if primary_type == "emoji":
+            return str(primary_item.get("meme_intent") or primary_item.get("tone_hint") or "").strip()
         bits = [
             str(primary_item.get("meme_intent") or primary_item.get("tone_hint") or "").strip(),
             str(primary_item.get("visual_summary") or "").strip(),

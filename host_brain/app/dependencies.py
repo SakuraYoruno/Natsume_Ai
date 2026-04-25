@@ -1,6 +1,6 @@
 """依赖注入工厂模块。
 
-从 fastapi_app.py 拆分，集中管理所有全局单例的延迟初始化工厂函数。
+集中管理 Host 运行时全局单例的延迟初始化工厂函数。
 """
 
 from __future__ import annotations
@@ -209,7 +209,7 @@ def get_activity_monitor(*, create_if_missing: bool = False, ledger: Any | None 
 def notify_user_interaction() -> None:
     """通知 ActivityMonitor 有用户互动（消息输入、语音输入等）。
 
-    由 input_routes / fastapi_app 在收到用户消息时调用，
+    由 input_routes / chat route 在收到用户消息时调用，
     触发 sleep→normal 唤醒 和 空闲计时器重置。
     安全降级：如果 ActivityMonitor 未初始化则静默跳过。
     """

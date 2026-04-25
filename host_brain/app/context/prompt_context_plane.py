@@ -183,6 +183,7 @@ class ContextAssembler:
                         "content": turn.content,
                         "turn_index": turn.turn_index,
                         "lang": turn.lang,
+                        "metadata": dict(turn.metadata or {}),
                     }
                     for turn in history_window.recent_turns
                 ],

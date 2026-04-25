@@ -1020,20 +1020,8 @@ def build_soul_rescue_prompt(
 
 
 def build_deterministic_reply_fallback(*, plan: ReplyPlan, render_target_lang: str = "zh") -> str:
-    from host_brain.persona.fallback_policy import (  # noqa: PLC0415
-        FallbackRequest,
-        build_fallback_reply,
-    )
-
-    return build_fallback_reply(
-        FallbackRequest(
-            reason_code="reply_validator_degraded_fallback",
-            primary_topic=str(getattr(plan, "primary_topic", "") or "").strip(),
-            response_form_reason=str(getattr(plan, "response_form_reason", "") or "").strip(),
-            render_target_lang=render_target_lang,
-            observation=_multimodal_core_observation(plan),
-        )
-    ).text
+    _ = plan, render_target_lang
+    return ""
 
 
 __all__ = [

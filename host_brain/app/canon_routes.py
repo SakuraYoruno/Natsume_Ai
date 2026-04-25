@@ -38,7 +38,7 @@ from host_brain.memory.canon_world_store import WorldCanonStore
 _logger = logging.getLogger("Natsume.canon_routes")
 
 # ---------------------------------------------------------------------------
-# 路由实例（prefix 由 fastapi_app.py 注册时指定）
+# 路由实例（prefix 由 router registry 注册时指定）
 # ---------------------------------------------------------------------------
 router = APIRouter(prefix="/canon", tags=["canon"])
 
@@ -47,11 +47,11 @@ router = APIRouter(prefix="/canon", tags=["canon"])
 # ---------------------------------------------------------------------------
 _canon_store: Optional[WorldCanonStore] = None
 _canon_store_lock = threading.Lock()  # F-28 修复：防止多线程竞态
-_ledger_provider: Optional[Any] = None  # Callable[[], SQLiteLedger]，由 fastapi_app 注册时注入
+_ledger_provider: Optional[Any] = None  # Callable[[], SQLiteLedger]，由 router registry 注册时注入
 
 
 def set_ledger_provider(provider: Any) -> None:
-    """由 fastapi_app.py 在注册路由后调用，注入 ledger 获取回调。
+    """由 router registry 在注册路由后调用，注入 ledger 获取回调。
 
     Args:
         provider: 无参可调用对象，返回 SQLiteLedger 实例。

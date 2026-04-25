@@ -71,7 +71,7 @@ def set_tool_providers(
     catalog_provider: Callable[[], ToolCatalog],
     ledger_provider: Callable[[], SQLiteLedger],
 ) -> None:
-    """由 fastapi_app.py 在注册路由后调用，注入依赖获取回调。"""
+    """由 router registry 在注册路由后调用，注入依赖获取回调。"""
     global _broker_provider, _catalog_provider, _ledger_provider
     _broker_provider = broker_provider
     _catalog_provider = catalog_provider

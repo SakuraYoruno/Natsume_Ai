@@ -86,43 +86,43 @@ def test_name_claim_and_address_prefix_cover_non_playful_profiles() -> None:
 def test_build_phatic_fallback_text_covers_variants(monkeypatch) -> None:
     monkeypatch.setattr(surface, "get_soul_voice_profile", lambda: surface.SoulVoiceProfile(display_name="新海天", preferred_address="哥哥", playful=True))
 
-    assert "我在呀" in surface.build_phatic_fallback_text(family="phatic_wave", variant="greeting")
-    assert "怎么啦" in surface.build_phatic_fallback_text(family="phatic_wave", variant="presence")
-    assert "想找我" in surface.build_phatic_fallback_text(family="playful_wave", variant="")
+    assert surface.build_phatic_fallback_text(family="phatic_wave", variant="greeting") == ""
+    assert surface.build_phatic_fallback_text(family="phatic_wave", variant="presence") == ""
+    assert surface.build_phatic_fallback_text(family="playful_wave", variant="") == ""
     monkeypatch.setattr(surface, "get_soul_voice_profile", lambda: surface.SoulVoiceProfile(display_name="新海天", preferred_address="", playful=False))
-    assert surface.build_phatic_fallback_text(family="other", variant="") == "我在呀。"
+    assert surface.build_phatic_fallback_text(family="other", variant="") == ""
 
 
 def test_build_image_social_fallback_text_covers_variants(monkeypatch) -> None:
     monkeypatch.setattr(surface, "get_soul_voice_profile", lambda: surface.SoulVoiceProfile(display_name="新海天", preferred_address="哥哥", playful=True))
 
-    assert "乱猜" in surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="distress_image")
-    assert "收回去" in surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="backoff_hold")
-    assert "可爱" in surface.build_image_social_fallback_text(family="cute_image_ack", variant="cute_ping")
-    assert "收回去" in surface.build_image_social_fallback_text(family="tease_image_ack", variant="deny_nudge")
-    assert "戳人" in surface.build_image_social_fallback_text(family="tease_image_ack", variant="")
+    assert surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="distress_image") == ""
+    assert surface.build_image_social_fallback_text(family="soft_emotion_ack", variant="backoff_hold") == ""
+    assert surface.build_image_social_fallback_text(family="cute_image_ack", variant="cute_ping") == ""
+    assert surface.build_image_social_fallback_text(family="tease_image_ack", variant="deny_nudge") == ""
+    assert surface.build_image_social_fallback_text(family="tease_image_ack", variant="") == ""
 
 
 def test_build_boundary_and_help_fallback_texts_cover_specific_and_default(monkeypatch) -> None:
     monkeypatch.setattr(surface, "get_soul_voice_profile", lambda: surface.SoulVoiceProfile(display_name="新海天", preferred_address="哥哥", playful=True))
 
-    assert "看见了" in surface.build_boundary_fallback_text(family="short_boundary_then_reason", variant="plain_reason")
-    assert "这件事我已经说过啦" in surface.build_boundary_fallback_text(family="soft_close_boundary", variant="settle_repeat")
-    assert "看见了" in surface.build_boundary_fallback_text(family="other", variant="")
-    assert "真有事就说呀" in surface.build_help_fallback_text(family="short_conditional_commitment", variant="plain_conditional")
-    assert "不会装作没听见" in surface.build_help_fallback_text(family="steady_commitment_then_wait", variant="quiet_hold")
-    assert "我会回应" in surface.build_help_fallback_text(family="other", variant="")
-    assert "我收一点" in surface.build_repair_fallback_text()
+    assert surface.build_boundary_fallback_text(family="short_boundary_then_reason", variant="plain_reason") == ""
+    assert surface.build_boundary_fallback_text(family="soft_close_boundary", variant="settle_repeat") == ""
+    assert surface.build_boundary_fallback_text(family="other", variant="") == ""
+    assert surface.build_help_fallback_text(family="short_conditional_commitment", variant="plain_conditional") == ""
+    assert surface.build_help_fallback_text(family="steady_commitment_then_wait", variant="quiet_hold") == ""
+    assert surface.build_help_fallback_text(family="other", variant="") == ""
+    assert surface.build_repair_fallback_text() == ""
 
 
 def test_build_identity_fallback_and_hints_cover_major_families(monkeypatch) -> None:
     monkeypatch.setattr(surface, "get_soul_voice_profile", lambda: surface.SoulVoiceProfile(display_name="新海天", preferred_address="哥哥", playful=True, teasing=True))
 
-    assert "我是新海天呀" in surface.build_identity_fallback_text(family="brief_name_only", variant="plain_name")
-    assert "又问到这个呀" in surface.build_identity_fallback_text(family="ack_repeat_then_light_probe", variant="confirm_real_question")
-    assert "连我都认不出来啦" in surface.build_identity_fallback_text(family="ack_name_then_wait", variant="")
-    assert "直接说嘛" in surface.build_identity_fallback_text(family="hold_name_then_open_floor", variant="open_other_topic")
-    assert "都问我好几次啦" in surface.build_identity_fallback_text(family="soft_close_then_open_floor", variant="settle_then_open")
+    assert surface.build_identity_fallback_text(family="brief_name_only", variant="plain_name") == ""
+    assert surface.build_identity_fallback_text(family="ack_repeat_then_light_probe", variant="confirm_real_question") == ""
+    assert surface.build_identity_fallback_text(family="ack_name_then_wait", variant="") == ""
+    assert surface.build_identity_fallback_text(family="hold_name_then_open_floor", variant="open_other_topic") == ""
+    assert surface.build_identity_fallback_text(family="soft_close_then_open_floor", variant="settle_then_open") == ""
     assert "熟人间撒娇" in surface.build_identity_naturalization_hint(family="soft_close_then_open_floor")
     assert "顺手认下自己" in surface.build_identity_naturalization_hint(family="brief_name_only")
     assert "顺嘴解释" in surface.build_boundary_reply_contract(family="short_boundary_then_reason")
