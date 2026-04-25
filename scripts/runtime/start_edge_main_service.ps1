@@ -130,7 +130,8 @@ function Stop-ResidualEdgeMainProcesses {
     if ($procId -le 0) {
       continue
     }
-    if (Is-EdgeMainProcess -ProcessId $procId) {
+    $cmd = [string]$procInfo.CommandLine
+    if ($cmd -and $cmd -like "*-m edge_client*") {
       Stop-ProcessTree -ProcessId $procId
     }
   }
@@ -358,7 +359,7 @@ $launcherLines = @(
   '@echo off',
   "cd /d `"$repoEscaped`"",
   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$ensureOneBotEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
-  'if errorlevel 1 echo [warn] ensure_qq_onebot failed; continuing edge startup anyway 1>> "' + $stdoutEscaped + '" 2>> "' + $stderrEscaped + '"',
+  "if errorlevel 1 echo [warn] ensure_qq_onebot failed; continuing edge startup anyway 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`"",
   "powershell -NoProfile -ExecutionPolicy Bypass -File `"$runnerEscaped`" -RepoRoot `"$repoEscaped`" -EnvFile `"$envEscaped`" -PythonPath `"$pythonEscaped`" -BindHost `"$bindEscaped`" -Port $Port 1>> `"$stdoutEscaped`" 2>> `"$stderrEscaped`""
 )
 Set-Content -Path $launcherScript -Value $launcherLines -Encoding ascii

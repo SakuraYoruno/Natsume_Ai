@@ -118,7 +118,8 @@ foreach ($procInfo in @(Get-CimInstance -ClassName Win32_Process -ErrorAction Si
   if ($edgePid -ne $null -and [int]$candidatePid -eq [int]$edgePid) {
     continue
   }
-  if (Is-EdgeMainProcess -ProcessId $candidatePid) {
+  $cmd = [string]$procInfo.CommandLine
+  if ($cmd -and $cmd -like "*-m edge_client*") {
     Stop-ProcessTree -ProcessId $candidatePid
     $residualEdgePids += $candidatePid
     $stopped = $true
