@@ -358,6 +358,19 @@ def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypa
     assert decided["count"] == 1
     assert decided["adoptions"][0]["decision"]["decision"] == "OWNER_ACCEPTED"
 
+    inbox = client.get("/obs/codex-bio-ops/owner-inbox").json()
+    assert inbox["ok"] is True
+    assert inbox["status_counts"]["READY_FOR_OWNER_IMPORT"] == 1
+    assert inbox["items"][0]["import_allowed"] is True
+
+    materialized = client.post("/obs/codex-bio-ops/owner-inbox/materialize").json()
+    assert materialized["materialized_count"] == 1
+    owner_import_path = run_dir / "owner_inbox" / "social_brain_agent" / "candidate-1" / "owner_import_candidate.json"
+    assert owner_import_path.exists()
+    owner_import = json.loads(owner_import_path.read_text(encoding="utf-8"))
+    assert owner_import["write_policy"] == "owner_import_candidate_only"
+    assert owner_import["direct_long_term_write"] is False
+
     duplicate = client.post(
         "/obs/codex-bio-ops/adoptions/candidate-1/reject",
         json={"owner_organ": "social_brain_agent"},

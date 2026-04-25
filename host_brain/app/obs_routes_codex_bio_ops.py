@@ -31,6 +31,7 @@ from host_brain.bio_ops.capabilities import (
     TRUST_FOUNDATION_CAPABILITIES,
     list_capability_specs,
 )
+from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.codex_runtime.artifact_store import sanitize_segment
 
 
@@ -827,3 +828,39 @@ def reject_codex_bio_ops_adoption(
         run_id=run_id,
         body=body,
     )
+
+
+@router.get("/codex-bio-ops/owner-inbox")
+def get_codex_bio_ops_owner_inbox(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    status: str = Query(default="all"),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    try:
+        payload = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").scan(
+            owner_organ=owner_organ,
+            status=status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+@router.post("/codex-bio-ops/owner-inbox/materialize")
+def materialize_codex_bio_ops_owner_inbox(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
+    result = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").materialize_ready(owner_organ=owner)
+    result["run_id"] = run_dir.name
+    return result
