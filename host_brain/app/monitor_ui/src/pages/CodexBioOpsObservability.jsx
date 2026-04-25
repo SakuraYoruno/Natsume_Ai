@@ -93,6 +93,12 @@ const EFFECT_LABELS = {
   existential_load_high: '存在负载',
   open_loop_triage: '未闭环管理',
   cognitive_load_shedding: '认知卸载',
+  episode_memory_candidate: '情节记忆',
+  inner_library_shelf: '内在图书馆',
+  cognitive_landmark_ready: '认知地标',
+  narrative_identity_delta: '叙事身份',
+  self_continuity_issue: '连续性校验',
+  memory_dream_distillation_ready: '记忆梦化',
 }
 
 const TRACE_LABELS = {
@@ -162,6 +168,15 @@ const GROWTH_CLOSURE_LABELS = {
   existential_load: '存在负载',
   open_loop_manager: '未闭环管理',
   cognitive_load_shedding: '认知卸载',
+}
+
+const MEMORY_NARRATIVE_LABELS = {
+  episode_memory: '情节记忆',
+  inner_library: '内在图书馆',
+  cognitive_landmarks: '认知地标',
+  narrative_identity: '叙事身份',
+  self_continuity_checksum: '自我连续性',
+  memory_dream_distillation: '记忆梦化压缩',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -570,6 +585,17 @@ function GrowthClosurePanel({ summary }) {
   )
 }
 
+function MemoryNarrativePanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={MEMORY_NARRATIVE_LABELS}
+      emptyTitle="暂无 Memory Narrative 数据"
+      note="记忆与叙事层只产 episode、书架、地标、连续性和梦化压缩报告；长期记忆写入必须由 owner 采纳。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -649,6 +675,7 @@ export default function CodexBioOpsObservability() {
   const innerLife = bioOps.inner_life || {}
   const selfGovernance = bioOps.self_governance || {}
   const growthClosure = bioOps.growth_closure || {}
+  const memoryNarrative = bioOps.memory_narrative || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -796,6 +823,14 @@ export default function CodexBioOpsObservability() {
               hint={`${growthClosure.status_counts?.PROPOSED || 0} closures · ${growthClosure.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
+              icon={Database}
+              tone="blue"
+              label="记忆叙事"
+              value={memoryNarrative.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${memoryNarrative.status_counts?.PROPOSED || 0} reports · ${memoryNarrative.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
               icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
@@ -864,6 +899,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Growth Closure" subtitle="成长与收束层：想法池、阶段门、存在负载、未闭环和认知卸载让项目能继续收尾。">
             <GrowthClosurePanel summary={growthClosure} />
+          </Section>
+
+          <Section title="Memory Narrative" subtitle="记忆与叙事层：情节、书架、认知地标、叙事身份、自我连续性和梦化压缩保持可审计。">
+            <MemoryNarrativePanel summary={memoryNarrative} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

@@ -146,6 +146,15 @@ GROWTH_CLOSURE_CAPABILITIES = (
     "cognitive_load_shedding",
 )
 
+MEMORY_NARRATIVE_CAPABILITIES = (
+    "episode_memory",
+    "inner_library",
+    "cognitive_landmarks",
+    "narrative_identity",
+    "self_continuity_checksum",
+    "memory_dream_distillation",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -219,6 +228,18 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "unresolved_user_feedback",
         "active_tasks",
         "load_signals",
+        "conversation_turns",
+        "episodes",
+        "shelves",
+        "docs",
+        "landmarks",
+        "identity_delta",
+        "identity_claims",
+        "continuity_check",
+        "before_snapshot",
+        "after_snapshot",
+        "dream_memory",
+        "memory_candidates",
     ):
         value = task.inputs.get(key)
         if value:
@@ -1361,6 +1382,190 @@ def shed_cognitive_load(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def segment_episode_memory(inputs: dict[str, Any]) -> dict[str, Any]:
+    turns = inputs.get("conversation_turns")
+    if not isinstance(turns, list):
+        turns = _list_text(inputs.get("events") or inputs.get("source_events")) or [inputs.get("message") or inputs.get("text")]
+    turn_texts = [str(turn or "").strip() for turn in turns if str(turn or "").strip()]
+    joined = " ".join(turn_texts)
+    topics: list[str] = []
+    topic_rules = (
+        ("Codex Bio-Ops", ("codex", "bioops", "bio-ops", "workorder")),
+        ("Memory / Bond", ("memory", "bond", "记忆")),
+        ("Live2D Body", ("live2d", "body", "tts", "voice", "身体")),
+        ("WebUI Observability", ("webui", "obs", "monitor", "观测")),
+    )
+    lower = joined.lower()
+    for topic, tokens in topic_rules:
+        if any(token in lower for token in tokens):
+            topics.append(topic)
+    if not topics and turn_texts:
+        topics.append("conversation_episode")
+    outcomes = [item for item in _list_text(inputs.get("outcomes"))]
+    open_loops = [item for item in _list_text(inputs.get("open_loops"))]
+    if "继续" in joined or "next" in lower:
+        open_loops.append("continuation_requested")
+    episode_id_seed = re.sub(r"[^a-z0-9]+", "_", "_".join(topics).lower()).strip("_") or "episode"
+    return {
+        "episode_id": f"episode_{episode_id_seed[:48]}",
+        "title": str(inputs.get("title") or (topics[0] if topics else "Conversation Episode")),
+        "main_topics": topics[:6],
+        "emotional_tone": str(inputs.get("emotional_tone") or "focused_warmth"),
+        "outcomes": outcomes[:6],
+        "open_loops": list(dict.fromkeys(open_loops))[:6],
+        "long_term_write_allowed": False,
+        "issue": "episode_candidate_ready" if turn_texts else "episode_memory_no_turns",
+    }
+
+
+def build_inner_library(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_docs = _list_text(inputs.get("docs") or inputs.get("documents"))
+    raw_episodes = _list_text(inputs.get("episodes"))
+    raw_loops = _list_text(inputs.get("open_loops"))
+    raw_landmarks = _list_text(inputs.get("landmarks"))
+    shelves: dict[str, dict[str, Any]] = {}
+
+    def shelf_for(text: str) -> str:
+        lower = text.lower()
+        if any(token in lower for token in ("codex", "bioops", "bio-ops")):
+            return "codex_bio_ops"
+        if any(token in lower for token in ("live2d", "tts", "voice", "edge", "body")):
+            return "live2d_body"
+        if any(token in lower for token in ("memory", "bond", "rag", "canon")):
+            return "memory_bond"
+        if any(token in lower for token in ("translation", "translate", "本地化")):
+            return "translation_projects"
+        return "natsume_architecture"
+
+    for doc in raw_docs:
+        shelf_id = shelf_for(doc)
+        shelves.setdefault(shelf_id, {"shelf_id": shelf_id, "docs": [], "episodes": [], "open_loops": [], "landmarks": [], "current_status": "design_pool"})["docs"].append(doc)
+    for episode in raw_episodes:
+        shelves.setdefault(shelf_for(episode), {"shelf_id": shelf_for(episode), "docs": [], "episodes": [], "open_loops": [], "landmarks": [], "current_status": "design_pool"})["episodes"].append(episode)
+    for loop in raw_loops:
+        shelves.setdefault(shelf_for(loop), {"shelf_id": shelf_for(loop), "docs": [], "episodes": [], "open_loops": [], "landmarks": [], "current_status": "design_pool"})["open_loops"].append(loop)
+    for landmark in raw_landmarks:
+        shelves.setdefault(shelf_for(landmark), {"shelf_id": shelf_for(landmark), "docs": [], "episodes": [], "open_loops": [], "landmarks": [], "current_status": "design_pool"})["landmarks"].append(landmark)
+    return {
+        "shelves": list(shelves.values())[:8],
+        "retrieval_policy": "shelf_first_then_documents",
+        "long_term_write_allowed": False,
+        "issue": "inner_library_shelves_ready" if shelves else "inner_library_no_material",
+    }
+
+
+def identify_cognitive_landmarks(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_items = inputs.get("landmarks") or inputs.get("docs") or inputs.get("events") or inputs.get("source_events")
+    if not isinstance(raw_items, list):
+        raw_items = [inputs.get("message") or inputs.get("text")]
+    landmarks: list[dict[str, Any]] = []
+    for raw in raw_items:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if "codex" in lower or "bio-ops" in lower or "bioops" in lower:
+            landmark = "Codex Bio-Ops"
+            meaning = "Codex moved from code tool into bounded life operations"
+        elif "live2d" in lower or "voice" in lower or "tts" in lower:
+            landmark = "Edge Body"
+            meaning = "voice and body state shape interaction policy"
+        elif "memory" in lower or "bond" in lower:
+            landmark = "Memory / Bond"
+            meaning = "long-term continuity requires owner-gated memory policy"
+        else:
+            landmark = text[:48]
+            meaning = "candidate long-term project landmark"
+        landmarks.append(
+            {
+                "landmark": landmark,
+                "meaning": meaning,
+                "related_docs": _list_text(inputs.get("related_docs"))[:5],
+                "current_status": str(inputs.get("current_status") or "design_pool"),
+            }
+        )
+    return {
+        "landmarks": landmarks[:6],
+        "direct_write_allowed": False,
+        "issue": "cognitive_landmarks_ready" if landmarks else "cognitive_landmarks_no_material",
+    }
+
+
+def integrate_narrative_identity(inputs: dict[str, Any]) -> dict[str, Any]:
+    delta = inputs.get("identity_delta")
+    delta_payload = dict(delta) if isinstance(delta, dict) else {}
+    capability = str(delta_payload.get("new_capability") or inputs.get("new_capability") or inputs.get("capability") or "").strip()
+    meaning = str(delta_payload.get("meaning") or inputs.get("meaning") or "").strip()
+    risks = _list_text(delta_payload.get("risks") or inputs.get("risks"))
+    text = " ".join([capability, meaning, str(inputs.get("message") or inputs.get("text") or "")]).lower()
+    if any(token in text for token in ("self_heal", "worker", "autonomous", "自愈", "自动")):
+        risks.append("do_not_confuse_capability_with_unbounded_action")
+    if any(token in text for token in ("persona", "bond", "canon", "人格")):
+        risks.append("do_not_mutate_core_identity_directly")
+    return {
+        "new_capability": capability or "unspecified_capability",
+        "meaning": meaning or "candidate growth meaning requires owner review",
+        "risks": list(dict.fromkeys(risks)),
+        "integration": "add to self_model as reviewable report, not persona-core mutation",
+        "direct_write_allowed": False,
+        "issue": "narrative_identity_risk_present" if risks else "narrative_identity_candidate",
+    }
+
+
+def check_self_continuity(inputs: dict[str, Any]) -> dict[str, Any]:
+    before = inputs.get("before_snapshot")
+    after = inputs.get("after_snapshot")
+    before_payload = dict(before) if isinstance(before, dict) else {}
+    after_payload = dict(after) if isinstance(after, dict) else {}
+    before_text = " ".join(str(value) for value in before_payload.values()).lower()
+    after_text = " ".join(str(value) for value in after_payload.values()).lower()
+    explicit = inputs.get("continuity_check")
+    explicit_payload = dict(explicit) if isinstance(explicit, dict) else {}
+    tone_formal = any(token in after_text for token in ("尊敬的用户", "很抱歉给您带来不便", "as an ai", "作为ai"))
+    identity_consistent = bool(explicit_payload.get("identity_consistent", True))
+    relationship_consistent = bool(explicit_payload.get("relationship_consistent", True))
+    tone_consistent = bool(explicit_payload.get("tone_consistent", not tone_formal))
+    issue = "self_continuity_issue" if not (identity_consistent and relationship_consistent and tone_consistent) else "self_continuity_holds"
+    recommended_action = "rollback or revise style block before adoption" if issue == "self_continuity_issue" else "continue_with_trace"
+    return {
+        "identity_consistent": identity_consistent,
+        "relationship_consistent": relationship_consistent,
+        "tone_consistent": tone_consistent,
+        "issue": issue,
+        "recommended_action": recommended_action,
+        "direct_write_allowed": False,
+        "diff_hint": "compare before/after snapshots through owner review" if before_text or after_text else "snapshot missing",
+    }
+
+
+def distill_memory_dream(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_events = inputs.get("source_events") or inputs.get("memory_candidates") or inputs.get("events")
+    if not isinstance(raw_events, list):
+        raw_events = [inputs.get("message") or inputs.get("text")]
+    events = [str(item or "").strip() for item in raw_events if str(item or "").strip()]
+    joined = " ".join(events).lower()
+    if any(token in joined for token in ("codex", "terminal", "ci", "test")):
+        symbol = "long corridor with glowing terminals"
+        meaning = "recent work focused on complex system architecture, pressure, and direction"
+    elif any(token in joined for token in ("voice", "tts", "body")):
+        symbol = "recovering voice cable"
+        meaning = "body faults can be repaired without turning pain into identity"
+    else:
+        symbol = "quiet room with labeled shelves"
+        meaning = "daily fragments can be compressed into private continuity material"
+    return {
+        "dream_memory": {
+            "source_events": events[:6],
+            "symbol": symbol,
+            "meaning": meaning,
+            "emotion": str(inputs.get("emotion") or "focused_warmth"),
+        },
+        "user_visible": False,
+        "direct_write_allowed": False,
+        "issue": "memory_dream_distillation_ready" if events else "memory_dream_distillation_no_events",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -1994,6 +2199,102 @@ def _cognitive_load_shedding(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _episode_memory(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="EpisodeMemory")
+    analysis = segment_episode_memory(task.inputs)
+    return _result(
+        task,
+        name="EpisodeMemory",
+        status="PROPOSED" if analysis["main_topics"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Segment conversation evidence into reviewable episode candidates; hippocampus must adopt before long-term memory writes.",
+        owner_organ="hippocampus_agent",
+        output_kind="episode_memory_report",
+        extra=analysis,
+    )
+
+
+def _inner_library(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="InnerLibrary")
+    analysis = build_inner_library(task.inputs)
+    return _result(
+        task,
+        name="InnerLibrary",
+        status="PROPOSED" if analysis["shelves"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Organize long-running project material into shelves for retrieval planning without directly changing memory indexes.",
+        owner_organ="hippocampus_agent",
+        output_kind="inner_library_report",
+        extra=analysis,
+    )
+
+
+def _cognitive_landmarks(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="CognitiveLandmarks")
+    analysis = identify_cognitive_landmarks(task.inputs)
+    return _result(
+        task,
+        name="CognitiveLandmarks",
+        status="PROPOSED" if analysis["landmarks"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Create reviewable project landmarks so recall can anchor on durable concepts before searching scattered documents.",
+        owner_organ="hippocampus_agent",
+        output_kind="cognitive_landmark_report",
+        extra=analysis,
+    )
+
+
+def _narrative_identity(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="NarrativeIdentity")
+    analysis = integrate_narrative_identity(task.inputs)
+    return _result(
+        task,
+        name="NarrativeIdentity",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Integrate growth as a bounded self-model report and keep identity deltas away from persona-core direct writes.",
+        owner_organ="prefrontal_agent",
+        output_kind="narrative_identity_report",
+        extra=analysis,
+    )
+
+
+def _self_continuity_checksum(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SelfContinuityChecksum")
+    analysis = check_self_continuity(task.inputs)
+    return _result(
+        task,
+        name="SelfContinuityChecksum",
+        status="PROPOSED" if analysis["issue"] == "self_continuity_issue" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Check identity, relationship, and tone continuity before adopting prompt, memory, Bond, Canon, or organ-state changes.",
+        owner_organ="prefrontal_agent",
+        output_kind="self_continuity_report",
+        extra=analysis,
+    )
+
+
+def _memory_dream_distillation(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="MemoryDreamDistillation")
+    analysis = distill_memory_dream(task.inputs)
+    return _result(
+        task,
+        name="MemoryDreamDistillation",
+        status="PROPOSED" if analysis["dream_memory"]["source_events"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Compress daily memory candidates into private dream material; never expose or write it without owner adoption.",
+        owner_organ="default_mode_agent",
+        output_kind="memory_dream_distillation_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -2026,6 +2327,12 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("growth_stage_system", "growth_closure", "prefrontal_agent", "growth_report", _growth_stage_system),
     BioOpsCapabilitySpec("dream_rehearsal", "memory_growth", "default_mode_agent", "dream_rehearsal_report", _dream_rehearsal),
     BioOpsCapabilitySpec("autobiography_compiler", "memory_growth", "hippocampus_agent", "autobiography_report", _generic_handler(name="AutobiographyCompiler", owner_organ="hippocampus_agent", output_kind="autobiography_report", issue="growth_record_candidate", proposal="Summarize growth events as reviewable autobiography fragments.", status="CANDIDATE")),
+    BioOpsCapabilitySpec("episode_memory", "memory_narrative", "hippocampus_agent", "episode_memory_report", _episode_memory),
+    BioOpsCapabilitySpec("inner_library", "memory_narrative", "hippocampus_agent", "inner_library_report", _inner_library),
+    BioOpsCapabilitySpec("cognitive_landmarks", "memory_narrative", "hippocampus_agent", "cognitive_landmark_report", _cognitive_landmarks),
+    BioOpsCapabilitySpec("narrative_identity", "memory_narrative", "prefrontal_agent", "narrative_identity_report", _narrative_identity),
+    BioOpsCapabilitySpec("self_continuity_checksum", "memory_narrative", "prefrontal_agent", "self_continuity_report", _self_continuity_checksum),
+    BioOpsCapabilitySpec("memory_dream_distillation", "memory_narrative", "default_mode_agent", "memory_dream_distillation_report", _memory_dream_distillation),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
     BioOpsCapabilitySpec("truthfulness_cortex", "safety_truth", "prefrontal_agent", "truthfulness_patch", _truthfulness_cortex),
@@ -2081,6 +2388,7 @@ __all__ = [
     "GROWTH_CLOSURE_CAPABILITIES",
     "INNER_MECHANISM_CAPABILITIES",
     "INNER_LIFE_CAPABILITIES",
+    "MEMORY_NARRATIVE_CAPABILITIES",
     "NATURAL_INTERACTION_CAPABILITIES",
     "RELATIONSHIP_LAYER_CAPABILITIES",
     "SELF_GOVERNANCE_CAPABILITIES",
@@ -2097,6 +2405,7 @@ __all__ = [
     "audit_inner_outer_boundary",
     "build_uncertainty_ritual",
     "build_silence_memory",
+    "build_inner_library",
     "calibrate_attachment_style",
     "classify_idea_fermentation",
     "classify_attention_budget",
@@ -2107,6 +2416,7 @@ __all__ = [
     "compile_symbolic_memory",
     "compute_life_pulse",
     "detect_promise_language",
+    "distill_memory_dream",
     "evaluate_consent_gradient",
     "evaluate_context_gravity",
     "evaluate_growth_stage",
@@ -2115,6 +2425,8 @@ __all__ = [
     "evaluate_active_silence",
     "detect_relationship_friction",
     "guard_identity_fork",
+    "identify_cognitive_landmarks",
+    "integrate_narrative_identity",
     "list_capability_specs",
     "manage_open_loops",
     "measure_existential_load",
@@ -2124,5 +2436,7 @@ __all__ = [
     "resolve_internal_weather",
     "review_inner_ethics",
     "run_shadow_persona_test",
+    "segment_episode_memory",
     "shed_cognitive_load",
+    "check_self_continuity",
 ]

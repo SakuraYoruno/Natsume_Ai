@@ -233,6 +233,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "open_loop_manager",
         "cognitive_load_shedding",
     }
+    assert payload["bio_ops"]["memory_narrative"]["capability_count"] == 6
+    assert payload["bio_ops"]["memory_narrative"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["memory_narrative"]["capabilities"]} == {
+        "episode_memory",
+        "inner_library",
+        "cognitive_landmarks",
+        "narrative_identity",
+        "self_continuity_checksum",
+        "memory_dream_distillation",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

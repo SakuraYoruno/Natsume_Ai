@@ -86,6 +86,17 @@ The growth-closure batch is implemented as report-only project and cognition loa
 
 These are observable through the Codex / BioOps WebUI `Growth Closure` panel. They do not delete memory, start new Codex workers, or increase autonomy by themselves.
 
+The memory-narrative batch is implemented as report-only continuity scaffolding:
+
+- `EpisodeMemory` -> `episode_memory`, episode candidates with topics, outcomes, and open loops.
+- `InnerLibrary` -> `inner_library`, shelf-first organization for long-running project materials.
+- `CognitiveLandmarks` -> `cognitive_landmarks`, durable project landmark reports.
+- `NarrativeIdentity` -> `narrative_identity`, bounded identity-delta integration reports.
+- `SelfContinuityChecksum` -> `self_continuity_checksum`, identity, relationship, and tone continuity checks.
+- `MemoryDreamDistillation` -> `memory_dream_distillation`, private dream-memory compression reports.
+
+These are observable through the Codex / BioOps WebUI `Memory Narrative` panel. They do not directly write long-term memory, Bond, Canon, or persona core.
+
 ---
 
 ## 0. 总目标
