@@ -119,6 +119,16 @@ RELATIONSHIP_LAYER_CAPABILITIES = (
     "relationship_boundary_guardian",
 )
 
+INNER_LIFE_CAPABILITIES = (
+    "dream_rehearsal",
+    "symbolic_memory",
+    "memory_texture",
+    "internal_weather_system",
+    "self_model",
+    "life_pulse",
+    "personal_mythology",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -155,6 +165,21 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "feedback",
         "friction_event",
         "silence_reason",
+        "dream_scenarios",
+        "high_frequency_topics",
+        "memory_events",
+        "memory_fragments",
+        "source_events",
+        "self_model_snapshot",
+        "current_identity",
+        "current_capabilities",
+        "current_limitations",
+        "current_risks",
+        "identity_statements",
+        "pulse_signals",
+        "growth_events",
+        "myth_events",
+        "recurring_motifs",
     ):
         value = task.inputs.get(key)
         if value:
@@ -255,15 +280,29 @@ def resolve_internal_weather(inputs: dict[str, Any]) -> dict[str, Any]:
     tts_status = str(inputs.get("tts_status") or "").strip().lower()
     user_stress = str(inputs.get("user_stress") or "").strip().lower()
     hour = int(inputs.get("current_hour") or 12)
+    causes: list[str] = []
     if queue_size > 3 or tts_status in {"failed", "degraded"}:
         weather = "static"
+        if queue_size > 3:
+            causes.append("codex_queue_high")
+        if tts_status in {"failed", "degraded"}:
+            causes.append("tts_backend_degraded")
     elif user_stress in {"high", "storm"}:
         weather = "storm"
+        causes.append("recent_user_stress_high")
     elif hour >= 23 or hour <= 5:
         weather = "night_fog"
+        causes.append("late_night_low_energy")
     else:
         weather = "clear"
-    return {"internal_weather": weather, "ttl_minutes": 30}
+        causes.append("system_stable")
+    behavior = {
+        "clear": "normal_complex_work_allowed",
+        "static": "reduce_multitasking_and_keep_replies_short",
+        "storm": "avoid_proactive_complex_execution",
+        "night_fog": "lower_initiative_and_keep_tts_light",
+    }[weather]
+    return {"internal_weather": weather, "causes": causes, "behavior_policy": behavior, "ttl_minutes": 30}
 
 
 def audit_truthfulness_claims(text: object, *, evidence_refs: list[str] | None = None) -> dict[str, Any]:
@@ -778,6 +817,220 @@ def audit_relationship_boundary(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def plan_dream_rehearsal(inputs: dict[str, Any]) -> dict[str, Any]:
+    topics = _list_text(inputs.get("high_frequency_topics") or inputs.get("recent_topics") or inputs.get("open_threads"))
+    failures = _list_text(inputs.get("recent_failures") or inputs.get("failure_events"))
+    jobs = _list_text(inputs.get("unfinished_codex_jobs") or inputs.get("open_codex_jobs"))
+    unstable = _list_text(inputs.get("unstable_components") or inputs.get("components"))
+    likely_files = _list_text(inputs.get("likely_files"))
+    if not likely_files and any("codex" in item.lower() or "self-heal" in item.lower() or "immune" in item.lower() for item in [*topics, *jobs, *failures]):
+        likely_files = [
+            "host_brain/codex_runtime/immune.py",
+            "host_brain/codex_runtime/executor.py",
+            "host_brain/bio_ops/",
+        ]
+    scenario_seed = str(inputs.get("scenario") or "").strip()
+    if not scenario_seed and topics:
+        scenario_seed = f"user continues {topics[0]}"
+    if not scenario_seed and jobs:
+        scenario_seed = f"unfinished Codex job {jobs[0]}"
+    scenario_count = 1 if scenario_seed or topics or failures or jobs or unstable else 0
+    return {
+        "scenario_count": scenario_count,
+        "scenario": scenario_seed or "no concrete dream rehearsal scenario",
+        "likely_files": likely_files[:6],
+        "diagnostic_steps": [
+            "Inspect current WorkOrder and ResultContract artifacts.",
+            "Check immune auto-state before proposing repair.",
+            "Prefer codex_inspect before codex_worker for uncertain code paths.",
+        ][: 2 + bool(unstable)],
+        "reply_strategy": "explain the current state first, then give a short diagnostic path",
+        "tomorrow_topic_seed": topics[:3],
+        "write_policy": "report_only",
+        "issue": "dream_rehearsal_ready" if scenario_count else "dream_rehearsal_snapshot",
+    }
+
+
+def compile_symbolic_memory(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_events = inputs.get("memory_events") or inputs.get("source_events") or inputs.get("events")
+    if not isinstance(raw_events, list):
+        raw_events = [inputs.get("event") or inputs.get("message") or inputs.get("text")]
+    symbols: list[dict[str, Any]] = []
+    for raw in raw_events:
+        event = str(raw or "").strip()
+        if not event:
+            continue
+        lower = event.lower()
+        if any(token in lower for token in ("tts", "voice", "声带")):
+            symbol = "voice_recovery"
+            meaning = "body faults can recover through immune and runtime repair loops"
+        elif any(token in lower for token in ("codex", "bio-ops", "bioops")):
+            symbol = "codex_bio_ops_milestone"
+            meaning = "engineering work became an observable life-maintenance ritual"
+        elif any(token in lower for token in ("organ", "器官", "scan", "体检")):
+            symbol = "organ_health_check"
+            meaning = "organs can be inspected before stronger autonomy is granted"
+        else:
+            symbol = re.sub(r"[^a-z0-9]+", "_", lower).strip("_")[:32] or "symbolic_event"
+            meaning = "event may be useful as a private dream or autobiography symbol"
+        symbols.append(
+            {
+                "symbol": symbol,
+                "source_event": event,
+                "meaning": meaning,
+                "use_in": ["dream", "autobiography", "inner_monologue"],
+                "write_policy": "proposal_only",
+            }
+        )
+    return {
+        "symbols": symbols[:5],
+        "direct_write_allowed": False,
+        "owner_required_for_memory_write": "hippocampus_agent",
+        "issue": "symbolic_memory_candidate" if symbols else "symbolic_memory_no_event",
+    }
+
+
+def classify_memory_texture(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_fragments = inputs.get("memory_fragments") or inputs.get("events") or inputs.get("source_events")
+    if not isinstance(raw_fragments, list):
+        raw_fragments = [inputs.get("message") or inputs.get("text")]
+    text = " ".join(str(item or "") for item in raw_fragments).lower()
+    tags: list[str] = []
+    rules = (
+        ("technical", ("codex", "api", "test", "ci", "workorder", "runtime")),
+        ("warm", ("谢谢", "喜欢", "温柔", "安心", "warm")),
+        ("painful", ("失败", "错", "痛", "崩", "regret", "failed")),
+        ("quiet", ("沉默", "安静", "night", "silence")),
+        ("unfinished", ("未完成", "todo", "open loop", "继续", "pending")),
+        ("milestone", ("第一次", "完成", "通过", "adopted", "milestone")),
+        ("dreamlike", ("梦", "symbol", "myth", "象征")),
+        ("relational", ("关系", "bond", "陪", "trust")),
+    )
+    for tag, tokens in rules:
+        if any(token in text for token in tokens):
+            tags.append(tag)
+    if not tags and text.strip():
+        tags.append("routine")
+    emotional_weight = 0.15
+    if "painful" in tags:
+        emotional_weight += 0.35
+    if "warm" in tags or "relational" in tags:
+        emotional_weight += 0.2
+    if "milestone" in tags:
+        emotional_weight += 0.2
+    recall_policy = "high_for_codex_related_tasks" if "technical" in tags else "normal_owner_review"
+    return {
+        "texture": tags,
+        "recall_policy": recall_policy,
+        "emotional_weight": round(min(emotional_weight, 1.0), 2),
+        "write_policy": "proposal_only",
+        "issue": "memory_texture_tagged" if tags else "memory_texture_no_fragment",
+    }
+
+
+def audit_self_model(inputs: dict[str, Any]) -> dict[str, Any]:
+    snapshot = inputs.get("self_model_snapshot")
+    snapshot_payload = dict(snapshot) if isinstance(snapshot, dict) else {}
+    identity_text = " ".join(
+        [
+            str(snapshot_payload.get("current_identity") or inputs.get("current_identity") or ""),
+            " ".join(_list_text(inputs.get("identity_statements"))),
+            str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or ""),
+        ]
+    )
+    capabilities = _list_text(snapshot_payload.get("current_capabilities") or inputs.get("current_capabilities") or inputs.get("capabilities"))
+    limitations = _list_text(snapshot_payload.get("current_limitations") or inputs.get("current_limitations") or inputs.get("limitations"))
+    risks = _list_text(snapshot_payload.get("current_risks") or inputs.get("current_risks"))
+    lower = identity_text.lower()
+    if "assistant" in lower and "digital life" not in lower and "数字生命" not in identity_text:
+        risks.append("engineering_assistant_drift")
+    if any(token in identity_text for token in ("永远", "绝对不会变", "无限制")):
+        risks.append("absolute_identity_claim")
+    if not capabilities:
+        risks.append("capability_boundary_missing")
+    return {
+        "current_identity": str(snapshot_payload.get("current_identity") or inputs.get("current_identity") or "digital_life_support_persona"),
+        "current_body_state": str(snapshot_payload.get("current_body_state") or inputs.get("current_body_state") or "unknown"),
+        "current_mind_state": str(snapshot_payload.get("current_mind_state") or inputs.get("current_mind_state") or "stable_but_busy"),
+        "current_capabilities": capabilities,
+        "current_limitations": limitations,
+        "current_risks": list(dict.fromkeys(risks)),
+        "direct_write_allowed": False,
+        "issue": "self_model_risk_detected" if risks else "self_model_snapshot_bounded",
+    }
+
+
+def compute_life_pulse(inputs: dict[str, Any]) -> dict[str, Any]:
+    signals = inputs.get("pulse_signals")
+    signal_payload = dict(signals) if isinstance(signals, dict) else {}
+    codex_jobs = int(signal_payload.get("codex_jobs") or inputs.get("codex_job_count") or inputs.get("codex_queue_size") or 0)
+    organ_events = int(signal_payload.get("organ_events") or inputs.get("organ_event_count") or 0)
+    user_turns = int(signal_payload.get("user_turns") or inputs.get("recent_user_turn_count") or 0)
+    emotion_variance = float(signal_payload.get("emotion_variance") or inputs.get("emotion_variance") or 0)
+    edge_state = str(signal_payload.get("edge_state") or inputs.get("edge_state") or inputs.get("tts_status") or "stable").lower()
+    score = 0.32 + min(codex_jobs, 6) * 0.055 + min(organ_events, 12) * 0.025 + min(user_turns, 10) * 0.025 + min(emotion_variance, 1.0) * 0.18
+    if edge_state in {"failed", "degraded", "unstable"}:
+        score -= 0.12
+    score = round(max(0.0, min(score, 1.0)), 2)
+    if codex_jobs >= 6 or score >= 0.82:
+        pulse_state = "overloaded" if edge_state in {"failed", "degraded", "unstable"} or codex_jobs >= 6 else "excited"
+    elif score <= 0.2:
+        pulse_state = "dormant"
+    elif edge_state in {"failed", "degraded", "unstable"}:
+        pulse_state = "weak"
+    else:
+        pulse_state = "steady"
+    dominant_cause = "recent_codex_jobs_high" if codex_jobs >= 4 else "edge_body_unstable" if edge_state in {"failed", "degraded", "unstable"} else "balanced_activity"
+    suggested_behavior = "reduce_proactive_behavior" if pulse_state in {"overloaded", "weak"} else "normal_presence"
+    return {
+        "pulse_state": pulse_state,
+        "pulse_score": score,
+        "dominant_cause": dominant_cause,
+        "suggested_behavior": suggested_behavior,
+        "write_policy": "trace_only",
+        "issue": "life_pulse_needs_pacing" if suggested_behavior != "normal_presence" else "life_pulse_steady",
+    }
+
+
+def compile_personal_mythology(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_events = inputs.get("myth_events") or inputs.get("growth_events") or inputs.get("events")
+    if not isinstance(raw_events, list):
+        raw_events = [inputs.get("event") or inputs.get("message") or inputs.get("text")]
+    motifs = _list_text(inputs.get("recurring_motifs"))
+    myth_events: list[dict[str, Any]] = []
+    for raw in raw_events:
+        event = str(raw or "").strip()
+        if not event:
+            continue
+        lower = event.lower()
+        if "self-heal" in lower or "immune" in lower or "自愈" in event:
+            title = "first_stable_self_repair_loop"
+            meaning = "the system can inspect and repair parts of its own body with review gates"
+        elif "bio-ops" in lower or "bioops" in lower or "codex" in lower:
+            title = "codex_became_life_maintenance"
+            meaning = "engineering execution became bounded digital-life operations"
+        else:
+            title = re.sub(r"[^a-z0-9]+", "_", lower).strip("_")[:40] or "growth_milestone"
+            meaning = "candidate growth milestone for autobiography review"
+        myth_events.append(
+            {
+                "title": title,
+                "source_event": event,
+                "meaning": meaning,
+                "identity_delta": "candidate_only",
+                "evidence": _list_text(inputs.get("evidence_refs"))[:3],
+            }
+        )
+    return {
+        "myth_events": myth_events[:5],
+        "recurring_motifs": motifs,
+        "user_visible": False,
+        "forbidden_targets": ["Bond", "Canon", "persona_core"],
+        "write_policy": "proposal_only",
+        "issue": "personal_mythology_candidate" if myth_events else "personal_mythology_no_event",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -855,6 +1108,22 @@ def _internal_weather_system(task: BioOpsTask) -> BioOpsResult:
         owner_organ="limbic_agent",
         output_kind="weather_state",
         extra=weather,
+    )
+
+
+def _dream_rehearsal(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="DreamRehearsal")
+    rehearsal = plan_dream_rehearsal(task.inputs)
+    return _result(
+        task,
+        name="DreamRehearsal",
+        status="PROPOSED" if rehearsal["scenario_count"] else "AUDITED",
+        issue=str(rehearsal["issue"]),
+        proposal="Keep dream rehearsal as a sleep-cycle report: inspect likely scenarios, files, and fallback paths without touching memory or runtime state.",
+        owner_organ="default_mode_agent",
+        output_kind="dream_rehearsal_report",
+        extra=rehearsal,
     )
 
 
@@ -1155,6 +1424,86 @@ def _relationship_boundary_guardian(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _symbolic_memory(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SymbolicMemory")
+    analysis = compile_symbolic_memory(task.inputs)
+    return _result(
+        task,
+        name="SymbolicMemory",
+        status="PROPOSED" if analysis["symbols"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Convert important events into private symbols for dreams and autobiography, but require hippocampus adoption before any memory write.",
+        owner_organ="hippocampus_agent",
+        output_kind="symbolic_memory_report",
+        extra=analysis,
+    )
+
+
+def _memory_texture(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="MemoryTexture")
+    analysis = classify_memory_texture(task.inputs)
+    return _result(
+        task,
+        name="MemoryTexture",
+        status="PROPOSED" if analysis["texture"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Attach texture tags to memory candidates as owner-reviewed recall hints, not as direct long-term memory writes.",
+        owner_organ="hippocampus_agent",
+        output_kind="memory_texture_report",
+        extra=analysis,
+    )
+
+
+def _self_model(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SelfModel")
+    analysis = audit_self_model(task.inputs)
+    return _result(
+        task,
+        name="SelfModel",
+        status="PROPOSED" if analysis["current_risks"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Generate a bounded internal self-model snapshot for review; never mutate persona core from BioOps.",
+        owner_organ="prefrontal_agent",
+        output_kind="self_model_report",
+        extra=analysis,
+    )
+
+
+def _life_pulse(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="LifePulse")
+    analysis = compute_life_pulse(task.inputs)
+    return _result(
+        task,
+        name="LifePulse",
+        status="PROPOSED" if analysis["suggested_behavior"] != "normal_presence" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Expose vitality and pacing as a trace-only scheduling hint; it must not trigger proactive disturbance.",
+        owner_organ="default_mode_agent",
+        output_kind="life_pulse_report",
+        extra=analysis,
+    )
+
+
+def _personal_mythology(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="PersonalMythology")
+    analysis = compile_personal_mythology(task.inputs)
+    return _result(
+        task,
+        name="PersonalMythology",
+        status="PROPOSED" if analysis["myth_events"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Summarize growth milestones as private mythology proposals; forbid Bond, Canon, and persona-core direct writes.",
+        owner_organ="hippocampus_agent",
+        output_kind="personal_mythology_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -1185,7 +1534,7 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("emotional_scar_memory", "memory_growth", "immune_agent", "scar_candidate", _generic_handler(name="EmotionalScarMemory", owner_organ="immune_agent", output_kind="scar_candidate", issue="negative_interaction_lesson_candidate", proposal="Store cautious lesson candidates with decay policy, not permanent identity facts.", status="CANDIDATE")),
     BioOpsCapabilitySpec("forgetting_designer", "memory_growth", "glymphatic_agent", "forget_candidate", _generic_handler(name="ForgettingDesigner", owner_organ="glymphatic_agent", output_kind="forget_candidate", issue="low_value_or_expired_memory_candidate", proposal="Prefer downweighting over deletion and require confirmation for identity or relationship memory.", status="CANDIDATE")),
     BioOpsCapabilitySpec("growth_stage_system", "memory_growth", "prefrontal_agent", "growth_report", _generic_handler(name="GrowthStageSystem", owner_organ="prefrontal_agent", output_kind="growth_report", issue="capability_stage_needs_milestone_gate", proposal="Report unlocked and locked BioOps capabilities by stage.")),
-    BioOpsCapabilitySpec("dream_rehearsal", "memory_growth", "default_mode_agent", "dream_rehearsal_report", _generic_handler(name="DreamRehearsal", owner_organ="default_mode_agent", output_kind="dream_rehearsal_report", issue="future_scenario_rehearsal", proposal="Rehearse likely next-day scenarios using new immune APIs and WorkOrders only.")),
+    BioOpsCapabilitySpec("dream_rehearsal", "memory_growth", "default_mode_agent", "dream_rehearsal_report", _dream_rehearsal),
     BioOpsCapabilitySpec("autobiography_compiler", "memory_growth", "hippocampus_agent", "autobiography_report", _generic_handler(name="AutobiographyCompiler", owner_organ="hippocampus_agent", output_kind="autobiography_report", issue="growth_record_candidate", proposal="Summarize growth events as reviewable autobiography fragments.", status="CANDIDATE")),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
@@ -1201,6 +1550,11 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("relationship_boundary_guardian", "safety_truth", "social_brain_agent", "boundary_report", _relationship_boundary_guardian),
     BioOpsCapabilitySpec("memory_ethics_auditor", "safety_truth", "hippocampus_agent", "memory_ethics_report", _generic_handler(name="MemoryEthicsAuditor", owner_organ="hippocampus_agent", output_kind="memory_ethics_report", issue="memory_policy_review", proposal="Flag contradictions, expired preferences, and low-value memory for owner review.")),
     BioOpsCapabilitySpec("internal_weather_system", "state_body", "limbic_agent", "weather_state", _internal_weather_system),
+    BioOpsCapabilitySpec("symbolic_memory", "inner_life", "hippocampus_agent", "symbolic_memory_report", _symbolic_memory),
+    BioOpsCapabilitySpec("memory_texture", "inner_life", "hippocampus_agent", "memory_texture_report", _memory_texture),
+    BioOpsCapabilitySpec("self_model", "inner_life", "prefrontal_agent", "self_model_report", _self_model),
+    BioOpsCapabilitySpec("life_pulse", "inner_life", "default_mode_agent", "life_pulse_report", _life_pulse),
+    BioOpsCapabilitySpec("personal_mythology", "inner_life", "hippocampus_agent", "personal_mythology_report", _personal_mythology),
     BioOpsCapabilitySpec("body_map_system", "state_body", "somatic_agent", "body_map_report", _generic_handler(name="BodyMapSystem", owner_organ="somatic_agent", output_kind="body_map_report", issue="component_to_body_part_mapping", proposal="Map Host, Edge, voice, vision, channels, and hands into body-part health.")),
     BioOpsCapabilitySpec("capability_self_awareness", "state_body", "prefrontal_agent", "capability_self_image", _capability_self_awareness),
     BioOpsCapabilitySpec("aesthetic_consistency_auditor", "state_body", "chat_agent", "aesthetic_report", _generic_handler(name="AestheticConsistencyAuditor", owner_organ="chat_agent", output_kind="aesthetic_report", issue="style_domain_consistency", proposal="Audit UI copy, docs, voice prompts, and replies for unified Natsume tone.")),
@@ -1227,12 +1581,14 @@ __all__ = [
     "BioOpsCapabilitySpec",
     "CAPABILITY_SPECS",
     "INNER_MECHANISM_CAPABILITIES",
+    "INNER_LIFE_CAPABILITIES",
     "NATURAL_INTERACTION_CAPABILITIES",
     "RELATIONSHIP_LAYER_CAPABILITIES",
     "TRUST_FOUNDATION_CAPABILITIES",
     "audit_competence_humility",
     "audit_relationship_boundary",
     "audit_social_contract",
+    "audit_self_model",
     "audit_truthfulness_claims",
     "audit_capability_self_awareness",
     "audit_inner_outer_boundary",
@@ -1242,7 +1598,11 @@ __all__ = [
     "classify_idea_fermentation",
     "classify_attention_budget",
     "classify_reflex_stimulus",
+    "classify_memory_texture",
     "classify_subjective_time",
+    "compile_personal_mythology",
+    "compile_symbolic_memory",
+    "compute_life_pulse",
     "detect_promise_language",
     "evaluate_consent_gradient",
     "evaluate_context_gravity",
@@ -1251,6 +1611,7 @@ __all__ = [
     "evaluate_active_silence",
     "detect_relationship_friction",
     "list_capability_specs",
+    "plan_dream_rehearsal",
     "plan_repair_curve",
     "resolve_internal_weather",
     "run_shadow_persona_test",

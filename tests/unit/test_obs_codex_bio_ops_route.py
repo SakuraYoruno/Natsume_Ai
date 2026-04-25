@@ -203,6 +203,17 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "silence_memory",
         "relationship_boundary_guardian",
     }
+    assert payload["bio_ops"]["inner_life"]["capability_count"] == 7
+    assert payload["bio_ops"]["inner_life"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["inner_life"]["capabilities"]} == {
+        "dream_rehearsal",
+        "symbolic_memory",
+        "memory_texture",
+        "internal_weather_system",
+        "self_model",
+        "life_pulse",
+        "personal_mythology",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

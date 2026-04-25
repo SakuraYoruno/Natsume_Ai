@@ -11,6 +11,7 @@ from fastapi import Query
 
 from host_brain.app.obs_routes_core import router
 from host_brain.bio_ops.capabilities import (
+    INNER_LIFE_CAPABILITIES,
     INNER_MECHANISM_CAPABILITIES,
     NATURAL_INTERACTION_CAPABILITIES,
     RELATIONSHIP_LAYER_CAPABILITIES,
@@ -294,6 +295,14 @@ def _relationship_layer_summary(capabilities: list[dict[str, Any]]) -> dict[str,
     )
 
 
+def _inner_life_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        INNER_LIFE_CAPABILITIES,
+        activation_rule="report_only_inner_life",
+    )
+
+
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for payload in payloads:
@@ -433,6 +442,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 "trust_foundation": _trust_foundation_summary(catalog["capabilities"]),
                 "natural_interaction": _natural_interaction_summary(catalog["capabilities"]),
                 "relationship_layer": _relationship_layer_summary(catalog["capabilities"]),
+                "inner_life": _inner_life_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -504,6 +514,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "trust_foundation": _trust_foundation_summary(catalog["capabilities"]),
             "natural_interaction": _natural_interaction_summary(catalog["capabilities"]),
             "relationship_layer": _relationship_layer_summary(catalog["capabilities"]),
+            "inner_life": _inner_life_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

@@ -53,6 +53,18 @@ The relationship-layer batch is implemented as report-only relationship repair s
 
 These are observable through the Codex / BioOps WebUI `Relationship Layer` panel. They do not directly write Bond, Canon, persona core, or long-term memory.
 
+The inner-life batch is implemented as report-only private-state synthesis:
+
+- `DreamRehearsal` -> `dream_rehearsal`, sleep-cycle scenario rehearsal with likely files and fallback steps.
+- `SymbolicMemory` -> `symbolic_memory`, private symbol proposals for dreams/autobiography.
+- `MemoryTexture` -> `memory_texture`, texture tags for owner-reviewed recall hints.
+- `InternalWeather` -> `internal_weather_system`, trace-only weather and pacing policy.
+- `SelfModel` -> `self_model`, bounded self-model snapshot and drift risk report.
+- `LifePulse` -> `life_pulse`, trace-only vitality and pacing report.
+- `PersonalMythology` -> `personal_mythology`, private growth-milestone proposals.
+
+These are observable through the Codex / BioOps WebUI `Inner Life` panel. They do not directly write persona core, Bond, Canon, long-term memory, or production configuration.
+
 ---
 
 ## 0. 总目标
