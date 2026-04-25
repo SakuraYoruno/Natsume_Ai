@@ -564,6 +564,15 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert validation.is_valid is False
     assert "image_self_reference" in validation.reason_codes
 
+    suffix_validation = validate_reply(
+        text="哥哥，上面看我是不是很可爱啊？",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert suffix_validation.is_valid is False
+    assert "image_self_reference" in suffix_validation.reason_codes
+
 
 def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
     plan = ReplyPlan(
