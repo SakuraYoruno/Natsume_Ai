@@ -52,6 +52,7 @@ from host_brain.bio_ops.safety import (
     is_bio_ops_sensitive_path,
     validate_bio_ops_task_safety,
 )
+from host_brain.bio_ops.workflow import BIO_OPS_WORKFLOW_WRITE_POLICY, run_bio_ops_automation_workflow
 
 __all__ = [
     "ADOPTION_DECISION_ACCEPTED",
@@ -64,6 +65,7 @@ __all__ = [
     "BIO_OPS_DAILY_WRITE_POLICY",
     "BIO_OPS_OWNER_IMPORT_CHANNELS",
     "BIO_OPS_OWNER_ORGANS",
+    "BIO_OPS_WORKFLOW_WRITE_POLICY",
     "DEFAULT_BIO_OPS_DAILY_OUTPUT_ROOT",
     "DEFAULT_OWNER_QUEUE_ROOT",
     "OWNER_INBOX_STATUS_BLOCKED",
@@ -97,6 +99,7 @@ __all__ = [
     "resolve_bio_ops_adoption_policy",
     "run_bio_ops_daily_cycle_artifact_run",
     "run_bio_ops_task",
+    "run_bio_ops_automation_workflow",
     "resolve_owner_import_channel",
     "validate_owner_import_candidate",
     "validate_owner_import_artifact",
