@@ -12,6 +12,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from host_brain.persona.fallback_policy import (
+    SURFACE_CACHE_POLICY_VERSION,
+    is_forbidden_surface_text,
+    is_surface_cacheable_reply,
+)
+
 
 _BACKEND_MEMORY = "memory"
 _BACKEND_REDIS = "redis"
@@ -87,8 +93,10 @@ def build_reply_surface_memory_key(
     render_target_lang: str,
     response_form_reason: str = "",
     context_fingerprint: str = "",
+    policy_version: str = SURFACE_CACHE_POLICY_VERSION,
 ) -> str:
     parts = [
+        str(policy_version or "").strip() or SURFACE_CACHE_POLICY_VERSION,
         str(soul_id or "").strip() or "default-soul",
         str(primary_topic or "").strip() or "default-topic",
         str(tactic_family or "").strip() or "default-family",
@@ -167,7 +175,7 @@ class InMemoryReplySurfaceMemoryStore(ReplySurfaceMemoryStore):
 
     def remember(self, *, key: str, text: str, ts_ms: int | None = None, request_id: str = "", session_id: str = "") -> None:
         normalized = str(text or "").strip()
-        if not key or not normalized:
+        if not key or not normalized or is_forbidden_surface_text(normalized):
             return
         now_ms = int(ts_ms or int(time.time() * 1000))
         entry = {
@@ -193,7 +201,12 @@ class InMemoryReplySurfaceMemoryStore(ReplySurfaceMemoryStore):
             if not bucket:
                 return ""
             self._prune_locked(bucket, now_ms=now_ms)
-            candidates = [str(item.get("text") or "").strip() for item in bucket if str(item.get("text") or "").strip()]
+            candidates = [
+                str(item.get("text") or "").strip()
+                for item in bucket
+                if str(item.get("text") or "").strip()
+                and not is_forbidden_surface_text(str(item.get("text") or "").strip())
+            ]
         if not candidates:
             return ""
         non_repeated = [item for item in candidates if item not in excluded]
@@ -232,7 +245,7 @@ class RedisReplySurfaceMemoryStore(ReplySurfaceMemoryStore):
 
     def remember(self, *, key: str, text: str, ts_ms: int | None = None, request_id: str = "", session_id: str = "") -> None:
         normalized = str(text or "").strip()
-        if not key or not normalized or self._client is None:
+        if not key or not normalized or is_forbidden_surface_text(normalized) or self._client is None:
             return
         payload = json.dumps(
             {
@@ -271,7 +284,7 @@ class RedisReplySurfaceMemoryStore(ReplySurfaceMemoryStore):
             except Exception:
                 continue
             text = str(parsed.get("text") or "").strip()
-            if text:
+            if text and not is_forbidden_surface_text(text):
                 candidates.append(text)
         if not candidates:
             return ""
@@ -347,6 +360,8 @@ def prime_reply_surface_memory_from_turn_history(
         model_id = _normalize_metadata_text(metadata.get("model_id"))
         fallback_used = bool(metadata.get("fallback"))
         content = str(getattr(turn, "content", "") or "").strip()
+        message_kind = _normalize_metadata_text(metadata.get("message_kind"))
+        source = _normalize_metadata_text(metadata.get("source") or metadata.get("reply_source"))
         if (
             not soul_id
             or not primary_topic
@@ -357,7 +372,10 @@ def prime_reply_surface_memory_from_turn_history(
             or provider_name == "host"
             or model_id == "deterministic-plan-renderer"
             or fallback_used
+            or message_kind not in {"", "final_reply"}
+            or source in {"transport_ack", "quick_ack", "gateway_ack", "fallback_policy"}
             or len(content) < 4
+            or not is_surface_cacheable_reply(text=content, metadata=metadata)
         ):
             continue
         memory_store.remember(
@@ -417,6 +435,8 @@ def sample_reply_surface_from_turn_history(
             or bool(metadata.get("fallback"))
             or _normalize_metadata_text(metadata.get("provider_name")) == "host"
             or _normalize_metadata_text(metadata.get("model_id")) == "deterministic-plan-renderer"
+            or _normalize_metadata_text(metadata.get("message_kind")) not in {"", "final_reply"}
+            or not is_surface_cacheable_reply(text=content, metadata=metadata)
         ):
             continue
         if (
@@ -478,4 +498,5 @@ __all__ = [
     "load_reply_surface_memory_config",
     "prime_reply_surface_memory_from_turn_history",
     "sample_reply_surface_from_turn_history",
+    "SURFACE_CACHE_POLICY_VERSION",
 ]

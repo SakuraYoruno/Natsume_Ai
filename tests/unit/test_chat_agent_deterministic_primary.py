@@ -185,9 +185,7 @@ def test_build_deterministic_primary_reply_text_for_filler_assistant_followup_us
 
     text = build_deterministic_primary_reply_text(plan=plan, render_target_lang="zh")
 
-    assert "唔" in text
-    assert "知道什么" in text
-    assert text not in {"唔。", "嗯。", "哼。", "咦。"}
+    assert text == ""
 
 
 def test_build_deterministic_primary_reply_text_for_filler_assistant_followup_can_disable_semantic_fallback(monkeypatch) -> None:
@@ -225,8 +223,17 @@ def test_build_deterministic_primary_reply_text_for_filler_assistant_followup_ca
 @pytest.mark.asyncio
 async def test_chat_agent_uses_deterministic_primary_phatic_reply_without_llm(monkeypatch) -> None:
     async def _forbidden_llm(**kwargs):  # noqa: ANN003
-        raise AssertionError("LLM should not be called for deterministic primary reply")
+        raise AssertionError("full chat LLM should not be called for short social surface reply")
         yield ""  # pragma: no cover
+
+    async def _fake_surface_llm(**kwargs):  # noqa: ANN003
+        assert kwargs["scene_type"] == "CHAT_SURFACE"
+        return SimpleNamespace(
+            content=json.dumps({"candidates": ["哥哥，来啦。"]}, ensure_ascii=False),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=111,
+        )
 
     captured_post_process: dict[str, object] = {}
 
@@ -237,6 +244,10 @@ async def test_chat_agent_uses_deterministic_primary_phatic_reply_without_llm(mo
     monkeypatch.setattr(
         "host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool",
         _forbidden_llm,
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_surface_llm,
     )
     monkeypatch.setattr(
         "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
@@ -305,18 +316,28 @@ async def test_chat_agent_uses_deterministic_primary_phatic_reply_without_llm(mo
 
     assert commit_event["decision"] == "APPROVE"
     assert "来啦" in str(commit_event.get("narrative") or "")
-    assert commit_event["audit_refs"]["model_id"] == "deterministic-plan-renderer"
+    assert commit_event["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
     assert trace_stage_meta.get("deterministic_primary_used") is True
+    assert trace_stage_meta.get("deterministic_primary_reason") == "surface:renderer"
     assert trace_stage_meta.get("reply_used_fallback") is False
 
 
 @pytest.mark.asyncio
 async def test_chat_agent_uses_deterministic_primary_identity_reply_without_llm(monkeypatch) -> None:
     async def _forbidden_llm(**kwargs):  # noqa: ANN003
-        raise AssertionError("LLM should not be called for deterministic primary reply")
+        raise AssertionError("full chat LLM should not be called for identity surface reply")
         yield ""  # pragma: no cover
+
+    async def _fake_surface_llm(**kwargs):  # noqa: ANN003
+        assert kwargs["scene_type"] == "CHAT_SURFACE"
+        return SimpleNamespace(
+            content=json.dumps({"candidates": ["哥哥，我是新海天呀。"]}, ensure_ascii=False),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=112,
+        )
 
     captured_post_process: dict[str, object] = {}
 
@@ -327,6 +348,10 @@ async def test_chat_agent_uses_deterministic_primary_identity_reply_without_llm(
     monkeypatch.setattr(
         "host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool",
         _forbidden_llm,
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_surface_llm,
     )
     monkeypatch.setattr(
         "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
@@ -395,10 +420,11 @@ async def test_chat_agent_uses_deterministic_primary_identity_reply_without_llm(
 
     assert commit_event["decision"] == "APPROVE"
     assert "新海天" in str(commit_event.get("narrative") or "")
-    assert commit_event["audit_refs"]["model_id"] == "deterministic-plan-renderer"
+    assert commit_event["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
     assert trace_stage_meta.get("deterministic_primary_used") is True
+    assert trace_stage_meta.get("deterministic_primary_reason") == "surface:renderer"
     assert trace_stage_meta.get("reply_used_fallback") is False
 
 
@@ -517,7 +543,7 @@ async def test_chat_agent_uses_surface_render_for_cold_assistant_followup(monkey
     assert commit_event["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
-    assert trace_stage_meta.get("deterministic_primary_reason") == "assistant_reply_followup:surface_render"
+    assert trace_stage_meta.get("deterministic_primary_reason") == "surface:renderer"
     assert trace_stage_meta.get("reply_used_fallback") is False
 
 
@@ -992,4 +1018,212 @@ async def test_chat_agent_rejects_circular_meaning_surface_candidate(monkeypatch
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
     surface_meta = dict(trace_stage_meta.get("assistant_followup_surface_render") or {})
     assert surface_meta.get("candidate_index") == 2
-    assert surface_meta.get("rejected_attempts")[0]["reason_code"] == "SURFACE_TEMPLATE_SHAPE"
+    assert surface_meta.get("rejected_attempts")[0]["reason_code"] == "SURFACE_CONTEXT_ECHO"
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_full_chat(monkeypatch) -> None:
+    async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("full chat LLM should not be called for image social surface reply")
+        yield ""  # pragma: no cover
+
+    async def _fake_surface_llm(**kwargs):  # noqa: ANN003
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "candidates": [
+                        "哥哥，突然这么可爱，是想让我哄你吗？",
+                        "猫耳这张有点犯规，哥哥故意的吧。",
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=456,
+        )
+
+    captured_post_process: dict[str, object] = {}
+
+    async def _fake_post_process(**kwargs):  # noqa: ANN003
+        captured_post_process.update(kwargs)
+        return None
+
+    multimodal = {
+        "primary_modality": "image",
+        "summary_for_chat": "可爱、卖萌；一张动漫风格的猫耳女孩特写图，灰色头发、蓝色眼睛。",
+        "core_observation": "猫耳女孩特写，蓝色眼睛。",
+        "emotion_signals": ["可爱", "卖萌"],
+        "confidence": 1.0,
+    }
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool",
+        _forbidden_stream_llm,
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_surface_llm,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [
+                {"role": "system", "content": "【人格核心】你是新海天。"},
+                {"role": "user", "content": kwargs["user_message"]},
+            ],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "emoji_social_reply",
+                    "interaction_move": "playful_ping",
+                    "response_goal": "cute_image_reply",
+                    "tactic_family": "cute_image_ack",
+                    "tactic_variant": "cute_ping",
+                    "trajectory_stage": "first_turn",
+                    "response_form": "text",
+                    "response_form_reason": "image_social_reply",
+                    "reply_contract": "先把这张图的可爱/卖萌感接住，再顺着这股语气回一句，不要解释画面。",
+                    "contract": {
+                        "text": "先把这张图的可爱/卖萌感接住，再顺着这股语气回一句，不要解释画面。",
+                        "required_actions": ["phatic_ack"],
+                        "forbidden_actions": ["multimodal_generic_followup"],
+                        "realization_steps": ["接住图里的可爱感"],
+                    },
+                    "multimodal": multimodal,
+                    "requires_validation": True,
+                    "force_buffering": True,
+                },
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.app.agent_runtime_shared._async_post_process",
+        _fake_post_process,
+    )
+    monkeypatch.setattr(
+        "host_brain.app.dependencies.get_reply_surface_memory_store",
+        lambda: _MemoryStoreStub(""),
+    )
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+
+    agent_input = ChatAgentInput(
+        request_id="req-image-social-surface",
+        session_id="sess-image-social-surface",
+        user_message="[图片消息]",
+        person_id="user_1",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        multimodal_observations=multimodal,
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-chat",
+            "timeout_ms": 5000,
+            "llm_api_key": "",
+            "base_url_override": "",
+        },
+    )
+
+    commit_event = {}
+    async for chunk in chat_agent_sse_generator(agent_input):
+        event = _parse_sse(chunk)
+        if event.get("phase") == "COMMIT":
+            commit_event = event
+
+    assert str(commit_event.get("narrative") or "") == "猫耳这张有点犯规，哥哥故意的吧。"
+    assert commit_event["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
+    await asyncio.sleep(0)
+    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
+    surface_meta = dict(trace_stage_meta.get("image_social_surface_render") or {})
+    assert trace_stage_meta.get("deterministic_primary_reason") == "surface:renderer"
+    assert trace_stage_meta.get("fallback_used") is False
+    assert surface_meta.get("candidate_index") == 2
+    assert surface_meta.get("rejected_attempts")[0]["reason_code"] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_image_social_surface_hard_timeout_uses_local_emergency(monkeypatch) -> None:
+    async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("full chat LLM should not be called after image surface timeout")
+        yield ""  # pragma: no cover
+
+    async def _slow_surface_llm(**kwargs):  # noqa: ANN003
+        await asyncio.sleep(10)
+        return SimpleNamespace(content='{"candidates":["迟到了"]}', final_provider="gemini", final_model="slow", total_latency_ms=10_000)
+
+    captured_post_process: dict[str, object] = {}
+
+    async def _fake_post_process(**kwargs):  # noqa: ANN003
+        captured_post_process.update(kwargs)
+        return None
+
+    multimodal = {
+        "primary_modality": "image",
+        "summary_for_chat": "可爱、卖萌；一张动漫风格的猫耳女孩特写图。",
+        "core_observation": "猫耳女孩特写。",
+        "emotion_signals": ["可爱", "卖萌"],
+    }
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _forbidden_stream_llm)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _slow_surface_llm)
+    monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [{"role": "system", "content": "【人格核心】你是新海天。"}, {"role": "user", "content": kwargs["user_message"]}],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "emoji_social_reply",
+                    "interaction_move": "playful_ping",
+                    "response_goal": "cute_image_reply",
+                    "tactic_family": "cute_image_ack",
+                    "tactic_variant": "cute_ping",
+                    "trajectory_stage": "first_turn",
+                    "response_form": "text",
+                    "response_form_reason": "image_social_reply",
+                    "reply_contract": "先把这张图的可爱/卖萌感接住。",
+                    "contract": {"text": "先把这张图的可爱/卖萌感接住。", "required_actions": ["phatic_ack"]},
+                    "multimodal": multimodal,
+                    "requires_validation": True,
+                    "force_buffering": True,
+                },
+            },
+        ),
+    )
+    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setattr("host_brain.app.dependencies.get_reply_surface_memory_store", lambda: _MemoryStoreStub(""))
+    monkeypatch.setenv("HOST_IMAGE_SOCIAL_SURFACE_TIMEOUT_MS", "1500")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+
+    agent_input = ChatAgentInput(
+        request_id="req-image-social-surface-timeout",
+        session_id="sess-image-social-surface-timeout",
+        user_message="[图片消息]",
+        person_id="user_1",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        multimodal_observations=multimodal,
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-chat",
+            "timeout_ms": 5000,
+            "llm_api_key": "",
+            "base_url_override": "",
+        },
+    )
+
+    commit_event = {}
+    async for chunk in chat_agent_sse_generator(agent_input):
+        event = _parse_sse(chunk)
+        if event.get("phase") == "COMMIT":
+            commit_event = event
+
+    assert "没接稳" in str(commit_event.get("narrative") or "")
+    assert commit_event["audit_refs"]["model_id"] == "fallback-policy"
+    await asyncio.sleep(0)
+    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
+    assert trace_stage_meta.get("deterministic_primary_reason") == "fallback_policy:renderer"
+    assert trace_stage_meta.get("fallback_used") is True
+    assert dict(trace_stage_meta.get("image_social_surface_render") or {}).get("reason_code") == "SURFACE_HARD_TIMEOUT"

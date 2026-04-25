@@ -199,8 +199,8 @@
   content_type: text
   description: ChatAgent 最小兜底：通用
   default_content:
-    zh: 嗯，我在。你慢慢说。
-    ja: ええ、います。ゆっくり話してください。
+    zh: 这条我没接稳，先别按刚才那版算。
+    ja: 今の返し、うまく接げなかった。
 - template_id: chat_agent.minimal_fallback.greeting
   category: fallback
   scope: chat_agent
@@ -208,8 +208,8 @@
   content_type: text
   description: ChatAgent 最小兜底：问候
   default_content:
-    zh: 早。
-    ja: おはようございます。
+    zh: 这条我没接稳，先别按刚才那版算。
+    ja: 今の返し、うまく接げなかった。
 - template_id: chat_agent.minimal_fallback.ja_default
   category: fallback
   scope: chat_agent
@@ -224,8 +224,8 @@
   content_type: text
   description: ChatAgent 最小兜底：寒暄快路由
   default_content:
-    zh: 嗯，我在。
-    ja: ええ、います。
+    zh: 这条我没接稳，先别按刚才那版算。
+    ja: 今の返し、うまく接げなかった。
 - template_id: chat_agent.minimal_fallback.presence
   category: fallback
   scope: chat_agent
@@ -233,8 +233,8 @@
   content_type: text
   description: ChatAgent 最小兜底：在线确认
   default_content:
-    zh: 在。怎么了。
-    ja: いますよ。どうしました。
+    zh: 这条我没接稳，先别按刚才那版算。
+    ja: 今の返し、うまく接げなかった。
 - template_id: chat_agent.minimal_fallback.prompt_build_failed
   category: fallback
   scope: chat_agent
@@ -242,8 +242,8 @@
   content_type: text
   description: ChatAgent prompt 构建失败时的最小兜底
   default_content:
-    zh: 抱歉，刚才那一下没接稳。我换个更稳一点的说法，再接你。
-    ja: すみません。今の返しが少し乱れました。言い直して返します。
+    zh: 这条我没接稳，先别按刚才那版算。
+    ja: 今の返し、うまく接げなかった。
 - template_id: chat_agent.minimal_fallback.recent_turn_direct
   category: fallback
   scope: chat_agent
@@ -251,8 +251,8 @@
   content_type: text
   description: ChatAgent 最小兜底：最近一轮直接回答重述
   default_content:
-    zh: 我在。刚才那句，我换个更准一点的说法。
-    ja: ええ、います。さっきの言い方を、もう少しだけ言い直します。
+    zh: 这条我没接稳，先别按刚才那版算。
+    ja: 今の返し、うまく接げなかった。
 - template_id: chat_agent.minimal_fallback.localized_texts
   category: fallback
   scope: chat_agent
@@ -261,23 +261,23 @@
   description: ChatAgent 最小兜底双语文案（JSON）
   default_content:
     default:
-      zh: 嗯，我在。你慢慢说。
-      ja: ええ、います。ゆっくり話してください。
+      zh: 这条我没接稳，先别按刚才那版算。
+      ja: 今の返し、うまく接げなかった。
     greeting:
-      zh: 嗯，早。
-      ja: おはようございます。
+      zh: 这条我没接稳，先别按刚才那版算。
+      ja: 今の返し、うまく接げなかった。
     presence:
-      zh: 在。怎么了。
-      ja: いますよ。どうしました。
+      zh: 这条我没接稳，先别按刚才那版算。
+      ja: 今の返し、うまく接げなかった。
     prompt_build_failed:
-      zh: 抱歉，刚才那一下没接稳。我换个更稳一点的说法，再接你。
-      ja: すみません。今の返しが少し乱れました。言い直して返します。
+      zh: 这条我没接稳，先别按刚才那版算。
+      ja: 今の返し、うまく接げなかった。
     phatic_fastpath:
-      zh: 嗯，我在。
-      ja: ええ、います。
+      zh: 这条我没接稳，先别按刚才那版算。
+      ja: 今の返し、うまく接げなかった。
     recent_turn_direct:
-      zh: 我在。刚才那句，我换个更准一点的说法。
-      ja: ええ、います。さっきの言い方を、もう少しだけ言い直します。
+      zh: 这条我没接稳，先别按刚才那版算。
+      ja: 今の返し、うまく接げなかった。
     codex_worker:
       zh: 代码这一步我先替你收住，再把能直接看的部分交给你。
       ja: コードのこの段は、いったんこちらで収めてから、そのまま見られる形で返します。

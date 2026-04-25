@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 from host_brain.codex_runtime import CodexRuntimeExecutor
 from host_brain.codex_runtime.artifact_store import CodexArtifactStore
+from host_brain.codex_runtime.executor import _build_codex_command
+from host_brain.codex_runtime.work_order import CodexWorkOrder
 
 
 def test_codex_runtime_executor_blocks_write_payload_without_work_order() -> None:
@@ -52,3 +55,74 @@ def test_codex_runtime_executor_blocks_unconfirmed_worker(tmp_path) -> None:
 
     assert result["status"] == "BLOCKED"
     assert result["review_required"] is True
+
+
+def test_codex_runtime_command_honors_model_override(tmp_path) -> None:
+    order = CodexWorkOrder.from_mapping(
+        {
+            "work_order_id": "wo-model",
+            "domain": "code",
+            "run_mode": "inspect",
+            "objective": "inspect",
+            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path)},
+            "metadata": {"codex_model": "gpt-5.4-mini", "codex_reasoning_effort": "low"},
+        }
+    )
+
+    command = _build_codex_command(
+        codex_cmd="codex",
+        order=order,
+        workspace=tmp_path,
+        last_message_path=tmp_path / "last.txt",
+        sandbox_mode="read-only",
+    )
+
+    assert command[:4] == ["codex", "exec", "-m", "gpt-5.4-mini"]
+    assert 'model_reasoning_effort="low"' in command
+
+
+def test_codex_runtime_timeout_persists_partial_logs(monkeypatch, tmp_path) -> None:
+    class FakePopen:
+        pid = 12345
+        returncode = None
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.calls = 0
+
+        def communicate(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(
+                    cmd="codex",
+                    timeout=15,
+                    output='{"type":"thread.started","thread_id":"thread-timeout"}\n',
+                    stderr="partial stderr",
+                )
+            self.returncode = -9
+            return "", "after kill stderr"
+
+    monkeypatch.setattr("host_brain.codex_runtime.executor.shutil.which", lambda _name: "codex")
+    monkeypatch.setattr("host_brain.codex_runtime.executor.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("host_brain.codex_runtime.executor._terminate_process_tree", lambda _proc: None)
+    monkeypatch.setattr("host_brain.codex_runtime.executor._collect_git_summary", lambda _workspace: {"changed_files": [], "status_map": {}})
+    monkeypatch.setattr("host_brain.codex_runtime.executor._diff_git_summary", lambda _before, _after: {"changed_files": []})
+
+    result = CodexRuntimeExecutor(artifact_store=CodexArtifactStore(tmp_path)).execute(
+        {
+            "work_order_id": "wo-timeout",
+            "domain": "code",
+            "run_mode": "inspect",
+            "objective": "inspect something",
+            "workspace": {"strategy": "temp_workspace", "runs_root": str(tmp_path)},
+            "allowed_actions": ["read_files", "generate_report"],
+            "forbidden_actions": ["write_files", "modify_secret_files"],
+            "metadata": {"timeout_seconds": 15, "codex_model": "gpt-5.4-mini"},
+        }
+    )
+
+    run_dir = Path(result["artifacts_dir"])
+    assert result["status"] == "DEGRADED"
+    assert result["reason_code"] == "CODEX_EXEC_TIMEOUT"
+    assert result["thread_id"] == "thread-timeout"
+    assert "partial stderr" in run_dir.joinpath("stderr.log").read_text(encoding="utf-8")
+    assert run_dir.joinpath("events.jsonl").read_text(encoding="utf-8").strip().startswith('{"type":"thread.started"')

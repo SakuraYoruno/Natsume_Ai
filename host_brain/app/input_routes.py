@@ -548,16 +548,18 @@ def _build_gateway_multimodal_placeholder_text(*, content: str, attachments: lis
         return normalized
     types = [str(item.get("type") or "").strip().lower() for item in attachments]
     if len(types) > 3:
-        return "我发了几个附件，帮我一起看看。"
+        return "[多附件消息]"
     if "video" in types:
-        return "你先看看这个视频。"
+        return "[视频消息]"
     if "voice" in types:
-        return "这段语音在说什么？"
+        return "[语音消息]"
     if "image" in types or "emoji" in types:
-        return "你看一下这张图。"
+        if "emoji" in types and "image" not in types:
+            return "[表情消息]"
+        return "[图片消息]"
     if "file" in types:
-        return "帮我看看这个文件。"
-    return "我发了一个附件，帮我看看。"
+        return "[文件消息]"
+    return "[附件消息]"
 
 
 def _build_gateway_multimodal_async_ack_text(*, attachments: list[dict[str, Any]], render_target_lang: str = "zh") -> str:
@@ -1271,6 +1273,7 @@ async def _try_handle_gateway_progress_fastpath(
         content=reply_text,
         msg_type="text",
         request_id=request_id,
+        raw_extra={"message_kind": "transport_ack", "reply_source": "progress_fastpath"},
         wait_result=wait_result,
         timeout_ms=timeout_ms,
     )
@@ -1384,6 +1387,7 @@ async def _run_gateway_multimodal_async_job(
                 content=ack_text,
                 msg_type="text",
                 request_id=request_id,
+                raw_extra={"message_kind": "transport_ack", "reply_source": "multimodal_async_ack"},
                 wait_result=True,
                 timeout_ms=6000,
             )
@@ -2344,6 +2348,7 @@ async def _deliver_gateway_reply(
                 content=effective_content,
                 msg_type=effective_msg_type.value,
                 request_id=secondary_request_id,
+                raw_extra={"message_kind": "final_reply", "reply_source": "gateway_secondary_form"},
                 wait_result=True,
                 timeout_ms=secondary_timeout_ms,
             )
@@ -2437,6 +2442,7 @@ async def _deliver_gateway_reply(
         content=primary_content,
         msg_type=primary_msg_type,
         request_id=request_id,
+        raw_extra={"message_kind": "final_reply", "reply_source": "gateway_primary_reply"},
         wait_result=wait_result,
         timeout_ms=timeout_ms,
     )
@@ -2496,6 +2502,7 @@ async def _deliver_gateway_reply(
         "reply_preview": preview,
         "reply_form": form_decision.primary.value,
         "reply_form_reason": form_decision.reason,
+        "message_kind": "final_reply",
         **voice_result,
     }
 

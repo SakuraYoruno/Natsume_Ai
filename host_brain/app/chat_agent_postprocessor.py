@@ -1,7 +1,6 @@
 ﻿"""chat_agent_postprocessor.py — ChatAgent 后处理（反思链、净化、PII、COMMIT、异步后处理）。
 
 拆分自 chat_agent.py（P2-12）：
-  - apply_response_intelligence 调用封装
   - PII 出口检查
   - INPUT_COMPLETED 同步写入
   - 异步后处理（fire-and-forget）
