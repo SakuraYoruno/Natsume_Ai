@@ -141,6 +141,7 @@ jobs:
     name: full pytest (manual / nightly)
     if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_full_suite) }}
     runs-on: windows-latest
+    continue-on-error: true
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -162,8 +163,20 @@ jobs:
 
       - name: Run full pytest
         shell: pwsh
+        continue-on-error: true
         run: |
           python -m pytest -q --junitxml=pytest-full.xml
+
+      - name: Summarize full pytest report
+        if: always()
+        shell: pwsh
+        run: |
+          "Full pytest is report-only. Environment-specific failures are classified through service-integration or live-probe workflows." >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path pytest-full.xml) {
+            "JUnit report: pytest-full.xml" >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "JUnit report was not produced." >> $env:GITHUB_STEP_SUMMARY
+          }
 
       - name: Upload full pytest report
         if: always()

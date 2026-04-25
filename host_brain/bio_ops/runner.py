@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from host_brain.bio_ops.adoption import BioOpsAdoptionQueue
 from host_brain.bio_ops.artifact_store import BioOpsArtifactStore
 from host_brain.bio_ops.contracts import BioOpsResult, BioOpsTask, blocked_bio_ops_result
 from host_brain.bio_ops.registry import BioOpsRegistry, build_default_bio_ops_registry
@@ -16,9 +17,11 @@ class BioOpsRunner:
         *,
         registry: BioOpsRegistry | None = None,
         artifact_store: BioOpsArtifactStore | None = None,
+        adoption_queue: BioOpsAdoptionQueue | None = None,
     ) -> None:
         self.registry = registry or build_default_bio_ops_registry()
         self.artifact_store = artifact_store or BioOpsArtifactStore()
+        self.adoption_queue = adoption_queue or BioOpsAdoptionQueue(artifact_store=self.artifact_store)
 
     def run(self, task: BioOpsTask | Mapping[str, Any]) -> dict[str, Any]:
         bio_task = task if isinstance(task, BioOpsTask) else BioOpsTask.from_mapping(task)
@@ -72,6 +75,18 @@ class BioOpsRunner:
         run_dir = self.artifact_store.prepare_task_dir(capability=task.capability or "unknown", task_id=task.task_id)
         task_artifact = self.artifact_store.write_json(run_dir / "task.json", task.to_dict(), artifact_type="task")
         result_payload = result.to_dict()
+        adoption = self.adoption_queue.stage(task=task, result_payload=result_payload, run_dir=run_dir)
+        if adoption.get("status") != "NOT_APPLICABLE":
+            metadata = dict(result_payload.get("metadata") or {})
+            metadata["bio_ops_adoption"] = {
+                key: value
+                for key, value in adoption.items()
+                if key != "artifact"
+            }
+            result_payload["metadata"] = metadata
+            artifact_payload = adoption.get("artifact")
+            if isinstance(artifact_payload, dict):
+                result_payload["artifacts"] = [*result_payload.get("artifacts", []), artifact_payload]
         result_artifact = self.artifact_store.write_json(run_dir / "result.json", result_payload, artifact_type="result")
         result_payload["artifacts"] = [*result_payload.get("artifacts", []), task_artifact.to_dict(), result_artifact.to_dict()]
         return result_payload

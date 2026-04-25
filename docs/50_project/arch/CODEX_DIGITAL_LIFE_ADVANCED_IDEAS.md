@@ -5,6 +5,8 @@
 > 本文档是 `CODEX_BIO_OPERATIONS_PLAN.md` 的扩展篇，聚焦更偏“数字生命体”的奇思妙想：反射、习惯、伤痕、内在天气、梦境排练、人格抗体、能力自知、主动沉默、内在议会等。
 >
 > 目标不是让 Codex 只会多写代码，而是让 Codex 帮 Natsume 形成自我观察、自我修复、自我节制、自我成长的机制。
+>
+> Implementation closure: see `CODEX_PRODUCTION_CLOSURE_VALIDATION_20260424.md` for CI routing, full-suite classification, owner adoption, and runtime trace status.
 
 ---
 

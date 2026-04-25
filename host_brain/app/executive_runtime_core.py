@@ -1757,6 +1757,36 @@ async def _executive_runtime_core_impl(
         llm_route_used=llm_route_used,
     ):
         route = _RouteSelection("plan", "skill_dag", "auto_plan:complex_task")
+
+    _bio_ops_runtime_trace: dict[str, Any] = {}
+    try:
+        from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace  # noqa: PLC0415
+
+        _bio_ops_runtime_trace = build_bio_ops_runtime_trace(
+            message=sanitized_message,
+            route_type=route.route_type,
+            target_id=route.target_id,
+            intent_draft=dict(intent_draft or {}),
+            emotion_context=dict(emotion_context or {}),
+            runtime_signals={
+                "current_hour": int(time.localtime().tm_hour),
+                "codex_queue_size": 0,
+                "tts_status": "ok",
+                "user_stress": str((emotion_context or {}).get("stress_level") or ""),
+                "explicit_help_request": route.route_type in {"skill", "delegate", "plan"},
+            },
+        )
+        if isinstance(intent_draft, dict):
+            intent_draft = dict(intent_draft)
+            intent_draft["_bio_ops_runtime_trace"] = _bio_ops_runtime_trace
+    except Exception as _bio_ops_exc:
+        _bio_ops_runtime_trace = {
+            "source": "bio_ops.runtime_trace",
+            "proposal_only": True,
+            "status": "DEGRADED",
+            "reason_code": "BIO_OPS_RUNTIME_TRACE_FAILED",
+            "detail": str(_bio_ops_exc)[:200],
+        }
     direct_recent = await try_handle_recent_turn_direct_route(
         route=route.route_type,
         request_id=request_id,
@@ -1916,6 +1946,7 @@ async def _executive_runtime_core_impl(
                 "skill_route_type": "chat",
                 "skill_family": "social",
                 "skill_route_reason": route.reason_code,
+                "bio_ops_runtime_trace": _bio_ops_runtime_trace,
             },
             sub_agent_context=None,
             runtime_capability_payload=runtime_capability_payload,
@@ -1966,7 +1997,8 @@ async def _executive_runtime_core_impl(
             # Phase B-4: 器官族路由影响可观测性字段
             "organ_route_override": _organ_route_override,
             "organ_route_reason": _organ_route_reason,
-                "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
+            "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
+            "bio_ops_runtime_trace": _bio_ops_runtime_trace,
         }
         if plan_outcome.success:
             runtime_task_registry.mark_completed(
@@ -2133,6 +2165,7 @@ async def _executive_runtime_core_impl(
         "organ_route_override": _organ_route_override,
         "organ_route_reason": _organ_route_reason,
         "organ_route_meta": _organ_route_meta if _organ_route_meta else None,
+        "bio_ops_runtime_trace": _bio_ops_runtime_trace,
     }
     async for event in _stream_chat_with_context(
         request_body=request_body,
@@ -2172,4 +2205,3 @@ __all__ = [
     "_build_failure_recovery_plan",
     "_executive_runtime_core_impl",
 ]
-

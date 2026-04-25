@@ -7,6 +7,8 @@
 > 本文档面向 Codex 实现，不是概念讨论。请按阶段落地，保持最小可验证改动，优先补协议、边界、审计和测试。
 >
 > Advanced roadmap: see `CODEX_DIGITAL_LIFE_ADVANCED_IDEAS.md` for the adopted BioOps extension plan covering reflexes, habits, scars, internal weather, truthfulness, body map, inner parliament, and related proposal-only digital-life mechanisms.
+>
+> Closure report: see `CODEX_PRODUCTION_CLOSURE_VALIDATION_20260424.md` for the productionization pass that split CI planes and added owner-gated BioOps adoption.
 
 ---
 

@@ -1,8 +1,20 @@
 """Bio-Ops helpers for proposal-only advanced Codex modes."""
 
+from host_brain.bio_ops.adoption import (
+    ADOPTION_DECISION_ACCEPTED,
+    ADOPTION_DECISION_REJECTED,
+    ADOPTION_STATUS_BLOCKED,
+    ADOPTION_STATUS_NOT_APPLICABLE,
+    ADOPTION_STATUS_PENDING_REVIEW,
+    BioOpsAdoptionCandidate,
+    BioOpsAdoptionDecision,
+    BioOpsAdoptionQueue,
+    resolve_bio_ops_adoption_policy,
+)
 from host_brain.bio_ops.contracts import BioOpsArtifact, BioOpsResult, BioOpsSchedule, BioOpsTask
 from host_brain.bio_ops.registry import BioOpsRegistry, build_default_bio_ops_registry
 from host_brain.bio_ops.runner import BioOpsRunner, run_bio_ops_task
+from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace, build_response_breathing_policy
 from host_brain.bio_ops.safety import (
     BIO_OPS_FORBIDDEN_TARGETS,
     BIO_OPS_OWNER_ORGANS,
@@ -12,8 +24,16 @@ from host_brain.bio_ops.safety import (
 )
 
 __all__ = [
+    "ADOPTION_DECISION_ACCEPTED",
+    "ADOPTION_DECISION_REJECTED",
+    "ADOPTION_STATUS_BLOCKED",
+    "ADOPTION_STATUS_NOT_APPLICABLE",
+    "ADOPTION_STATUS_PENDING_REVIEW",
     "BIO_OPS_FORBIDDEN_TARGETS",
     "BIO_OPS_OWNER_ORGANS",
+    "BioOpsAdoptionCandidate",
+    "BioOpsAdoptionDecision",
+    "BioOpsAdoptionQueue",
     "BioOpsArtifact",
     "BioOpsRegistry",
     "BioOpsResult",
@@ -21,8 +41,11 @@ __all__ = [
     "BioOpsSchedule",
     "BioOpsTask",
     "build_default_bio_ops_registry",
+    "build_bio_ops_runtime_trace",
     "build_proposal_only_policy",
+    "build_response_breathing_policy",
     "is_bio_ops_sensitive_path",
+    "resolve_bio_ops_adoption_policy",
     "run_bio_ops_task",
     "validate_bio_ops_task_safety",
 ]
