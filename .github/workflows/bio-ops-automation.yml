@@ -1,0 +1,140 @@
+name: bio-ops-automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Optional observable-effects run id. Defaults to bio_ops_workflow_<run_id>."
+        required: false
+        default: ""
+        type: string
+      seed_demo_owner_decision:
+        description: "Seed one accepted demo owner candidate for handoff smoke verification."
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Validate owner packets without writing owner queue items."
+        required: false
+        default: false
+        type: boolean
+      skip_owner_consume:
+        description: "Materialize owner packets but do not consume them into owner queues."
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: "41 20 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bio-ops-automation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  HOST_BACKGROUND_TASKS_ENABLED: "false"
+  HOST_CODEX_IMMUNE_AUTODISPATCH_ENABLED: "false"
+  HOST_CODEX_IMMUNE_SCHEDULER_ENABLED: "false"
+  HOST_CODEX_IMMUNE_MONITOR_ENABLED: "false"
+  HOST_BOND_BACKEND: memory
+  HOST_BOND_SQLITE_PATH: ""
+
+jobs:
+  artifact-workflow:
+    name: BioOps artifact workflow
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run BioOps workflow
+        id: bio_ops
+        shell: pwsh
+        env:
+          INPUT_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.run_id || '' }}
+          INPUT_SEED_DEMO: ${{ github.event_name == 'workflow_dispatch' && inputs.seed_demo_owner_decision || false }}
+          INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          INPUT_SKIP_CONSUME: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_owner_consume || false }}
+        run: |
+          $runId = $env:INPUT_RUN_ID
+          if ([string]::IsNullOrWhiteSpace($runId)) {
+            $runId = "bio_ops_workflow_${{ github.run_id }}"
+          }
+
+          $args = @(
+            "scripts/runtime/run_bio_ops_workflow.py",
+            "--run-id", $runId,
+            "--evidence", "github-actions:bio_ops_workflow",
+            "--message", "scheduled BioOps workflow",
+            "--planned-path", "bio_ops_daily_cycle,owner_handoff"
+          )
+          if ($env:INPUT_SEED_DEMO -eq "true") {
+            $args += "--seed-demo-owner-decision"
+          }
+          if ($env:INPUT_DRY_RUN -eq "true") {
+            $args += "--dry-run"
+          }
+          if ($env:INPUT_SKIP_CONSUME -eq "true") {
+            $args += "--skip-owner-consume"
+          }
+
+          python @args | Tee-Object -FilePath bio_ops_workflow_stdout.json
+          $exitCode = $LASTEXITCODE
+          if (Test-Path bio_ops_workflow_stdout.json) {
+            $manifest = Get-Content bio_ops_workflow_stdout.json -Raw | ConvertFrom-Json
+            if ($manifest.run_id) {
+              $runId = $manifest.run_id
+            }
+          }
+          "run_id=$runId" >> $env:GITHUB_OUTPUT
+          if ($exitCode -ne 0) {
+            exit $exitCode
+          }
+
+      - name: Summarize BioOps workflow
+        if: always()
+        shell: pwsh
+        run: |
+          $runId = "${{ steps.bio_ops.outputs.run_id }}"
+          $manifestPath = Join-Path "artifacts/observable_effects" (Join-Path $runId "bio_ops_workflow_manifest.json")
+          "## BioOps Automation" >> $env:GITHUB_STEP_SUMMARY
+          "Run id: $runId" >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path $manifestPath) {
+            $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+            "Status: $($manifest.status)" >> $env:GITHUB_STEP_SUMMARY
+            "Capabilities: $($manifest.counts.capabilities)" >> $env:GITHUB_STEP_SUMMARY
+            "Pending owner adoptions: $($manifest.counts.pending_owner_adoptions)" >> $env:GITHUB_STEP_SUMMARY
+            "Queued owner items: $($manifest.counts.queued_owner_items)" >> $env:GITHUB_STEP_SUMMARY
+            "Direct long-term write: $($manifest.direct_long_term_write)" >> $env:GITHUB_STEP_SUMMARY
+            "Durable write performed: $($manifest.durable_write_performed)" >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "Manifest was not produced." >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload BioOps workflow artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bio-ops-workflow-${{ steps.bio_ops.outputs.run_id || github.run_id }}
+          path: |
+            bio_ops_workflow_stdout.json
+            artifacts/observable_effects/${{ steps.bio_ops.outputs.run_id }}/

@@ -25,6 +25,7 @@ This report closes the three Codex digital-life roadmaps against implemented cod
 | Advanced mechanisms | Implemented as report/proposal/candidate capabilities | `host_brain/bio_ops/capabilities.py` | WebUI panels: Inner, Trust, Natural Interaction, Relationship, Inner Life, Self Governance, Growth, Memory, Affect, Presence, Drive, Adaptive Repair | capability and OBS route tests |
 | Owner adoption | Implemented | `adoption.py`, `owner_inbox.py`, `owner_consumer.py` | adoption review, owner inbox, owner queues | owner adoption/inbox/consumer tests |
 | Daily cycle | Implemented as sidecar-friendly artifact runner | `host_brain/bio_ops/daily_cycle.py`, `scripts/runtime/run_bio_ops_daily_cycle.py` | WebUI `运行 daily cycle` button and observable run artifacts | daily-cycle unit/integration tests |
+| BioOps workflow automation | Implemented as sidecar workflow | `host_brain/bio_ops/workflow.py`, `scripts/runtime/run_bio_ops_workflow.py`, `.github/workflows/bio-ops-automation.yml` | GitHub workflow artifacts plus WebUI run id | workflow automation unit tests |
 | Chat/Planner low-risk trace | Implemented | `bio_ops/runtime_trace.py`, `chat_routes.py`, `executive_runtime_core.py`, `proactive_talk.py` | SSE trace metadata, immune-block trace, proactive quiet-presence trace | runtime trace, chat route, proactive tests |
 | Inner mechanisms document set | Implemented as BioOps groups | capability groups listed in `CODEX_DIGITAL_LIFE_INNER_MECHANISMS.md` | WebUI grouped panels | capability group assertions in OBS tests |
 | Retired prompt/template compatibility tests | Removed from default gate | `tests/conftest.py` `ci_unstable` classification | Full suite still reports them for rewrite | default gate excludes `ci_unstable`; PromptSpec tests remain active |
@@ -61,6 +62,8 @@ Current closure stops at the owner queue artifact. That is deliberate: long-term
 
 ```text
 python scripts/runtime/run_bio_ops_daily_cycle.py --run-id bio_ops_daily_manual
+python scripts/runtime/run_bio_ops_workflow.py --run-id bio_ops_workflow_manual
+python scripts/runtime/run_bio_ops_workflow.py --run-id bio_ops_workflow_smoke --seed-demo-owner-decision
 python scripts/runtime/generate_bio_ops_owner_review_demo.py --run-id bio_ops_owner_review_demo
 ```
 

@@ -272,6 +272,7 @@ $envValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH'] = $cleanNapCatLauncher
 $envValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS'] = '{QQ_SELF_ID}'
 $envValues['EDGE_QQ_ONEBOT_HEALTH_URL'] = 'http://127.0.0.1:3000/get_status'
 $envValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START'] = 'true'
+$envValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START'] = 'true'
 $effectiveEnvFile = Join-Path $runtimeRoot 'edge.runtime.env'
 Write-EnvFile -Path $effectiveEnvFile -Values $envValues
 if ($Port -le 0) {

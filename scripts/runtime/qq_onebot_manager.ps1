@@ -449,19 +449,95 @@ function Resolve-QQOneBotStartSpec {
   }
 }
 
-function Stop-QQDesktopProcesses {
-  $processes = @(Get-Process -Name 'QQ' -ErrorAction SilentlyContinue)
-  if ($processes.Count -le 0) {
-    return 0
+function Stop-QQOneBotProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return $false
   }
-  foreach ($process in $processes) {
+
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $proc) {
+    return $false
+  }
+
+  $taskkill = Get-Command taskkill.exe -ErrorAction SilentlyContinue
+  if ($null -ne $taskkill) {
     try {
-      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      & $taskkill.Source /PID $ProcessId /T /F 2>$null | Out-Null
     } catch {
+      Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+  } else {
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  }
+  Start-Sleep -Milliseconds 250
+  return ($null -eq (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue))
+}
+
+function Stop-QQDesktopProcesses {
+  $currentPid = [int]$PID
+  $candidateRows = New-Object System.Collections.Generic.List[object]
+  foreach ($procInfo in @(Get-CimInstance -ClassName Win32_Process -ErrorAction SilentlyContinue)) {
+    $candidatePid = [int]$procInfo.ProcessId
+    if ($candidatePid -le 0 -or $candidatePid -eq $currentPid) {
+      continue
+    }
+
+    $name = [string]$procInfo.Name
+    $cmd = [string]$procInfo.CommandLine
+    $priority = 99
+    $matched = $false
+    if ($name -eq 'cmd.exe' -and $cmd -match '(?i)(launcher-user\.(bat|cmd)|launch_napcat_clean\.ps1|launch_qq_onebot\.ps1|NapCat\.Shell)') {
+      $matched = $true
+      $priority = 0
+    } elseif (($name -eq 'powershell.exe' -or $name -eq 'pwsh.exe') -and $cmd -match '(?i)(launch_napcat_clean\.ps1|launch_qq_onebot\.ps1|NapCat\.Shell)') {
+      $matched = $true
+      $priority = 1
+    } elseif ($name -eq 'NapCatWinBootMain.exe') {
+      $matched = $true
+      $priority = 2
+    } elseif ($name -eq 'QQ.exe') {
+      $matched = $true
+      $priority = 3
+    }
+
+    if ($matched) {
+      $candidateRows.Add([pscustomobject]@{
+        pid = $candidatePid
+        priority = $priority
+      }) | Out-Null
     }
   }
+
+  $stoppedPids = New-Object System.Collections.Generic.List[int]
+  foreach ($row in @($candidateRows | Sort-Object priority, pid)) {
+    $candidatePid = [int]$row.pid
+    if ($stoppedPids -contains $candidatePid) {
+      continue
+    }
+    if (Stop-QQOneBotProcessTree -ProcessId $candidatePid) {
+      $stoppedPids.Add($candidatePid) | Out-Null
+    }
+  }
+
   Start-Sleep -Seconds 2
-  return $processes.Count
+  return $stoppedPids.Count
+}
+
+function Wait-QQOneBotPortReleased {
+  param(
+    [string]$ApiBase,
+    [int]$TimeoutSeconds = 15
+  )
+  $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
+  while ((Get-Date) -lt $deadline) {
+    $portPid = Get-QQOneBotPortOwnerPid -ApiBase $ApiBase
+    if ($null -eq $portPid) {
+      return $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return ($null -eq (Get-QQOneBotPortOwnerPid -ApiBase $ApiBase))
 }
 
 function Ensure-QQOneBotRunning {
@@ -473,6 +549,7 @@ function Ensure-QQOneBotRunning {
   $selfId = [string]$EnvValues['QQ_SELF_ID']
   $autostart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_AUTOSTART']) -Default $false
   $killQQBeforeStart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_KILL_QQ_BEFORE_START']) -Default $false
+  $forceCleanStart = ConvertFrom-QQOneBotBoolText -Raw ([string]$EnvValues['EDGE_QQ_ONEBOT_FORCE_CLEAN_START']) -Default $false
   $sshSessionDetected = (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)) -or (-not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT))
   $launcherPath = [string]$EnvValues['EDGE_QQ_ONEBOT_LAUNCHER_PATH']
   $launcherArgs = [string]$EnvValues['EDGE_QQ_ONEBOT_LAUNCHER_ARGS']
@@ -495,6 +572,7 @@ function Ensure-QQOneBotRunning {
     health_url = $healthUrl
     autostart_enabled = $autostart
     kill_qq_before_start = $killQQBeforeStart
+    force_clean_start = $forceCleanStart
     ssh_session_detected = $sshSessionDetected
     breakaway_launch = $sshSessionDetected
     launcher_path = $launcherPath
@@ -513,19 +591,21 @@ function Ensure-QQOneBotRunning {
     return [pscustomobject]$result
   }
 
-  $health = Test-QQOneBotHealth -ApiBase $apiBase -HealthUrl $healthUrl -TimeoutSeconds 5
-  if ($health.success) {
-    $result.status = 'already_running'
-    $result.detail = [string]$health.detail
-    $result.pid = Get-QQOneBotPortOwnerPid -ApiBase $apiBase
-    Write-QQOneBotState -StateFile $stateFile -State @{
-      owned = $false
-      pid = $result.pid
-      api_base = $apiBase
-      health_url = $healthUrl
-      observed_at = (Get-Date).ToString('o')
+  if (-not ($forceCleanStart -and $autostart)) {
+    $health = Test-QQOneBotHealth -ApiBase $apiBase -HealthUrl $healthUrl -TimeoutSeconds 5
+    if ($health.success) {
+      $result.status = 'already_running'
+      $result.detail = [string]$health.detail
+      $result.pid = Get-QQOneBotPortOwnerPid -ApiBase $apiBase
+      Write-QQOneBotState -StateFile $stateFile -State @{
+        owned = $false
+        pid = $result.pid
+        api_base = $apiBase
+        health_url = $healthUrl
+        observed_at = (Get-Date).ToString('o')
+      }
+      return [pscustomobject]$result
     }
-    return [pscustomobject]$result
   }
 
   if (-not $autostart) {
@@ -536,7 +616,17 @@ function Ensure-QQOneBotRunning {
   }
 
   try {
-    if ($killQQBeforeStart) {
+    if ($forceCleanStart) {
+      $stoppedQQCount = Stop-QQDesktopProcesses
+      Remove-QQOneBotState -StateFile $stateFile
+      if (-not (Wait-QQOneBotPortReleased -ApiBase $apiBase -TimeoutSeconds 20)) {
+        $result.status = 'autostart_failed'
+        $result.detail = 'qq onebot force clean start failed because api port is still occupied'
+        $result.pid = Get-QQOneBotPortOwnerPid -ApiBase $apiBase
+        return [pscustomobject]$result
+      }
+      $result.detail = "force-cleaned $stoppedQQCount existing QQ/NapCat process(es) before onebot autostart"
+    } elseif ($killQQBeforeStart) {
       $stoppedQQCount = Stop-QQDesktopProcesses
       if ($stoppedQQCount -gt 0) {
         $result.detail = "stopped $stoppedQQCount existing QQ process(es) before onebot autostart"
