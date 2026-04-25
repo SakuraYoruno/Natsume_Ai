@@ -32,6 +32,7 @@ from host_brain.bio_ops.capabilities import (
     list_capability_specs,
 )
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
+from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.codex_runtime.artifact_store import sanitize_segment
 
 
@@ -893,5 +894,41 @@ def materialize_codex_bio_ops_owner_intake_packets(
     payload = _as_dict(body)
     owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
     result = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").materialize_intake_packets(owner_organ=owner)
+    result["run_id"] = run_dir.name
+    return result
+
+
+@router.get("/codex-bio-ops/owner-queues")
+def get_codex_bio_ops_owner_queues(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = BioOpsOwnerIntakeConsumer(
+        inbox_root=run_dir / "owner_inbox",
+        queue_root=run_dir / "owner_queues",
+    ).scan_queue(owner_organ=owner_organ)
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+@router.post("/codex-bio-ops/owner-queues/consume")
+def consume_codex_bio_ops_owner_queues(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
+    dry_run = bool(payload.get("dry_run"))
+    result = BioOpsOwnerIntakeConsumer(
+        inbox_root=run_dir / "owner_inbox",
+        queue_root=run_dir / "owner_queues",
+    ).consume_all(owner_organ=owner, dry_run=dry_run)
     result["run_id"] = run_dir.name
     return result

@@ -17,9 +17,11 @@ import NoticeBanner from '../components/NoticeBanner.jsx'
 import useAppStore from '../store/useAppStore.js'
 import {
   acceptCodexBioOpsAdoption,
+  consumeCodexBioOpsOwnerQueues,
   fetchCodexBioOpsAdoptionDetail,
   fetchCodexBioOpsOwnerInbox,
   fetchCodexBioOpsOwnerImportCandidates,
+  fetchCodexBioOpsOwnerQueues,
   materializeCodexBioOpsOwnerInbox,
   materializeCodexBioOpsOwnerIntakePackets,
   rejectCodexBioOpsAdoption,
@@ -33,6 +35,11 @@ const STATUS_STYLES = {
   PROPOSED: 'border-cyan-200 bg-cyan-50 text-cyan-700',
   CANDIDATE: 'border-amber-200 bg-amber-50 text-amber-700',
   OWNER_GATED: 'border-amber-200 bg-amber-50 text-amber-700',
+  READY_FOR_OWNER_IMPORT: 'border-green-200 bg-green-50 text-green-700',
+  READY_FOR_ORGAN_CONSUMPTION: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  QUEUED_FOR_OWNER: 'border-purple-200 bg-purple-50 text-purple-700',
+  PENDING_REVIEW: 'border-amber-200 bg-amber-50 text-amber-700',
+  REJECTED_BY_OWNER: 'border-slate-200 bg-slate-50 text-slate-700',
   TRACED: 'border-indigo-200 bg-indigo-50 text-indigo-700',
   REPORT_ONLY: 'border-slate-200 bg-slate-50 text-slate-700',
   BLOCKED: 'border-red-200 bg-red-50 text-red-700',
@@ -51,6 +58,11 @@ const STATUS_LABELS = {
   PROPOSED: '提案',
   CANDIDATE: '候选',
   OWNER_GATED: 'Owner 接管',
+  READY_FOR_OWNER_IMPORT: '待 owner 导入',
+  READY_FOR_ORGAN_CONSUMPTION: '待 organ 消费',
+  QUEUED_FOR_OWNER: 'Owner 队列',
+  PENDING_REVIEW: '待审核',
+  REJECTED_BY_OWNER: 'Owner 拒绝',
   TRACED: '已 trace',
   REPORT_ONLY: '报告模式',
   BLOCKED: '已阻断',
@@ -677,11 +689,14 @@ function PendingAdoptions({ items, runId, onChanged }) {
 function OwnerInboxPanel({ runId }) {
   const [data, setData] = useState(null)
   const [imports, setImports] = useState(null)
+  const [queues, setQueues] = useState(null)
   const [lastMaterialized, setLastMaterialized] = useState(null)
   const [lastPackets, setLastPackets] = useState(null)
+  const [lastConsumed, setLastConsumed] = useState(null)
   const [loading, setLoading] = useState(false)
   const [materializing, setMaterializing] = useState(false)
   const [packetizing, setPacketizing] = useState(false)
+  const [consuming, setConsuming] = useState(false)
   const [error, setError] = useState(null)
   const runParams = runId ? { run_id: runId } : {}
 
@@ -689,12 +704,14 @@ function OwnerInboxPanel({ runId }) {
     setLoading(true)
     setError(null)
     try {
-      const [inboxPayload, importPayload] = await Promise.all([
+      const [inboxPayload, importPayload, queuePayload] = await Promise.all([
         fetchCodexBioOpsOwnerInbox(runParams),
         fetchCodexBioOpsOwnerImportCandidates(runParams),
+        fetchCodexBioOpsOwnerQueues(runParams),
       ])
       setData(inboxPayload)
       setImports(importPayload)
+      setQueues(queuePayload)
     } catch (err) {
       setError(err)
     } finally {
@@ -736,9 +753,25 @@ function OwnerInboxPanel({ runId }) {
     }
   }
 
+  const consumePackets = async () => {
+    setConsuming(true)
+    setError(null)
+    try {
+      const payload = await consumeCodexBioOpsOwnerQueues({}, runParams)
+      setLastConsumed(payload)
+      await loadInbox()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setConsuming(false)
+    }
+  }
+
   const rows = Array.isArray(data?.items) ? data.items : []
+  const queueRows = Array.isArray(queues?.items) ? queues.items : []
   const counts = data?.status_counts || {}
   const importCounts = imports?.status_counts || {}
+  const queueCounts = queues?.status_counts || {}
 
   return (
     <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
@@ -777,6 +810,15 @@ function OwnerInboxPanel({ runId }) {
             <GitBranch size={13} />
             {packetizing ? '生成中' : '生成 organ packets'}
           </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-700 shadow-sm transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={consuming || !(Number(lastPackets?.packet_count || 0) || Number(importCounts.READY_FOR_ORGAN_CONSUMPTION || 0))}
+            onClick={consumePackets}
+          >
+            <Database size={13} />
+            {consuming ? '消费中' : '排入 owner queues'}
+          </button>
         </div>
       </div>
 
@@ -789,7 +831,7 @@ function OwnerInboxPanel({ runId }) {
         ))}
       </div>
 
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-4">
         <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-2 py-2">
           <div className="font-semibold text-indigo-700">Import-ready</div>
           <div className="mt-1 text-xl font-bold text-gray-900">{importCounts.READY_FOR_ORGAN_CONSUMPTION || 0}</div>
@@ -801,6 +843,10 @@ function OwnerInboxPanel({ runId }) {
         <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
           <div className="font-semibold text-gray-700">Organ packets</div>
           <div className="mt-1 text-xl font-bold text-gray-900">{lastPackets?.packet_count || 0}</div>
+        </div>
+        <div className="rounded-lg border border-purple-100 bg-purple-50 px-2 py-2">
+          <div className="font-semibold text-purple-700">Owner queues</div>
+          <div className="mt-1 text-xl font-bold text-gray-900">{queueCounts.QUEUED_FOR_OWNER || 0}</div>
         </div>
       </div>
 
@@ -835,6 +881,30 @@ function OwnerInboxPanel({ runId }) {
       {lastPackets ? (
         <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-700">
           已生成 {lastPackets.packet_count} 个 owner intake packet；每个器官只消费自己的 packet。
+        </div>
+      ) : null}
+
+      {lastConsumed ? (
+        <div className="mt-3 rounded-lg border border-purple-100 bg-purple-50 px-3 py-2 text-xs leading-5 text-purple-700">
+          已排入 {lastConsumed.queued_count} 个 owner queue item；这是候选队列 artifact，不代表长期状态已写入。
+        </div>
+      ) : null}
+
+      {queueRows.length ? (
+        <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-purple-100">
+          {queueRows.slice(0, 6).map((item) => (
+            <div key={`${item.owner_organ}-${item.channel_id}-${item.candidate_id}`} className="grid grid-cols-1 gap-2 bg-white px-3 py-2 text-xs sm:grid-cols-[1fr_0.8fr_0.8fr]">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-gray-800">{item.capability}</div>
+                <div className="truncate text-gray-500">{item.candidate_id}</div>
+              </div>
+              <div className="truncate text-gray-500">{item.channel_id || item.owner_organ || '—'}</div>
+              <div className="flex items-center justify-between gap-2">
+                <StatusPill status={item.status} />
+                <span className="font-semibold text-gray-500">{item.durable_write_performed ? 'wrote' : 'artifact-only'}</span>
+              </div>
+            </div>
+          ))}
         </div>
       ) : null}
 

@@ -26,6 +26,15 @@ from host_brain.bio_ops.owner_inbox import (
     validate_owner_import_candidate,
     validate_owner_import_artifact,
 )
+from host_brain.bio_ops.owner_consumer import (
+    DEFAULT_OWNER_QUEUE_ROOT,
+    OWNER_QUEUE_STATUS_BLOCKED,
+    OWNER_QUEUE_STATUS_QUEUED,
+    OWNER_QUEUE_WRITE_POLICY,
+    BioOpsOwnerIntakeConsumer,
+    BioOpsOwnerQueueItem,
+    validate_owner_intake_packet,
+)
 from host_brain.bio_ops.registry import BioOpsRegistry, build_default_bio_ops_registry
 from host_brain.bio_ops.runner import BioOpsRunner, run_bio_ops_task
 from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace, build_response_breathing_policy
@@ -46,10 +55,14 @@ __all__ = [
     "BIO_OPS_FORBIDDEN_TARGETS",
     "BIO_OPS_OWNER_IMPORT_CHANNELS",
     "BIO_OPS_OWNER_ORGANS",
+    "DEFAULT_OWNER_QUEUE_ROOT",
     "OWNER_INBOX_STATUS_BLOCKED",
     "OWNER_INBOX_STATUS_PENDING_REVIEW",
     "OWNER_INBOX_STATUS_READY",
     "OWNER_INBOX_STATUS_REJECTED",
+    "OWNER_QUEUE_STATUS_BLOCKED",
+    "OWNER_QUEUE_STATUS_QUEUED",
+    "OWNER_QUEUE_WRITE_POLICY",
     "BioOpsAdoptionCandidate",
     "BioOpsAdoptionDecision",
     "BioOpsAdoptionQueue",
@@ -57,7 +70,9 @@ __all__ = [
     "BioOpsOwnerInbox",
     "BioOpsOwnerInboxItem",
     "BioOpsOwnerImportItem",
+    "BioOpsOwnerIntakeConsumer",
     "BioOpsOwnerIntakePacket",
+    "BioOpsOwnerQueueItem",
     "BioOpsRegistry",
     "BioOpsResult",
     "BioOpsRunner",
@@ -73,5 +88,6 @@ __all__ = [
     "resolve_owner_import_channel",
     "validate_owner_import_candidate",
     "validate_owner_import_artifact",
+    "validate_owner_intake_packet",
     "validate_bio_ops_task_safety",
 ]

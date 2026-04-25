@@ -74,4 +74,5 @@ No default stable-gate regression was observed.
 - Accepted decisions can be scanned into an owner inbox. The inbox performs owner/evidence/sensitive-target validation and materializes only `owner_import_candidate.json`, never durable memory or configuration writes.
 - Owner inbox artifacts can be grouped into per-organ `owner_intake_packet.json` handoff files, so each organ consumes only its own queue and durable writes remain organ-owned.
 - Owner intake packets include an explicit owner/channel contract, and unsupported owner/output-kind combinations are blocked before any handoff packet is created.
+- Owner intake packets can now be consumed into per-organ `owner_queues/<owner>/<channel>/<candidate>/queue_item.json` artifacts. These queue items remain candidate-only and record `durable_write_performed = false`; actual long-term state import remains the owner organ's job.
 - Local observable demo: `python scripts/runtime/generate_bio_ops_owner_review_demo.py --run-id bio_ops_owner_review_demo` creates a complete artifact run for the Monitor WebUI without touching durable state.
