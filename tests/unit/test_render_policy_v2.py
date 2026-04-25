@@ -471,7 +471,7 @@ def test_reply_plan_social_image_prefers_text_only() -> None:
     assert plan.response_form == "text"
     assert plan.secondary_response_form == ""
     assert plan.response_form_reason == "image_social_reply"
-    assert "图里的情绪" in plan.reply_contract
+    assert "发图表达的情绪" in plan.reply_contract
     assert "不要解说画面" in plan.reply_contract
     assert plan.requires_validation is True
     assert plan.force_buffering is True

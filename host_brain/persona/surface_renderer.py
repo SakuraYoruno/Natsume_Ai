@@ -368,7 +368,7 @@ class SurfaceRenderer:
         elif family == "tease_image_ack":
             action_hint = "像看见对方拿小表情来戳你时轻轻逗一句，别盘问，也别说教。"
         else:
-            action_hint = "顺着图里的可爱/卖萌感接一句，像被轻轻晃了一下，不要用力卖萌。"
+            action_hint = "顺着对方装乖/卖萌/求关注的动作接一句，像被轻轻晃了一下，不要用力卖萌。"
         system_prompt = (
             "你只负责把用户发来的图片/表情包接成一句自然聊天。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"

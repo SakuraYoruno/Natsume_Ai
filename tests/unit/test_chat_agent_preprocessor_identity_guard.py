@@ -695,6 +695,16 @@ def test_image_social_reply_allows_emotion_response_not_image_opinion() -> None:
     assert image_opinion_validation.safe_to_emit is False
     assert "image_social_descriptor_focus" in image_opinion_validation.reason_codes
 
+    familiar_image_validation = validate_reply(
+        text="嗯？这张图......好像有点熟悉，又好像在哪儿见过似的。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert familiar_image_validation.is_valid is False
+    assert familiar_image_validation.safe_to_emit is False
+    assert "image_social_descriptor_focus" in familiar_image_validation.reason_codes
+
     pun_validation = validate_reply(
         text="哥哥，我也萌生了想捏这张猫耳的冲动。",
         plan=plan,

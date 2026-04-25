@@ -30,6 +30,7 @@ def test_image_social_surface_rejects_old_template_shapes() -> None:
     assert is_image_social_surface_sample_disallowed("猫耳这张有点犯规，哥哥故意的吧。")
     assert is_image_social_surface_sample_disallowed("哥哥，我也觉得这张猫耳很可爱，轻轻戳到了。")
     assert is_image_social_surface_sample_disallowed("这个表情一脸装乖，太会了。")
+    assert is_image_social_surface_sample_disallowed("嗯？这张图......好像有点熟悉，又好像在哪儿见过似的。")
 
 
 def test_image_social_surface_requires_emotion_response_not_image_commentary() -> None:
@@ -45,6 +46,7 @@ def test_image_social_surface_requires_emotion_response_not_image_commentary() -
     assert candidate_responds_to_image_social_emotion("被你这么一晃，我有点招架不住。")
     assert candidate_responds_to_image_social_emotion("撒娇这一套我接住了。")
     assert not candidate_responds_to_image_social_emotion("猫耳这张有点犯规，哥哥故意的吧。")
+    assert not candidate_responds_to_image_social_emotion("嗯？这张图......好像有点熟悉，又好像在哪儿见过似的。")
     assert not candidate_responds_to_image_social_emotion("哥哥，我也觉得这张猫耳很可爱。")
     assert not candidate_responds_to_image_social_emotion("哥哥，我也萌生了想捏这张猫耳的冲动。")
     assert not candidate_responds_to_image_social_emotion("哥哥，上面好可爱，轻轻戳到了。")
