@@ -33,6 +33,34 @@ OWNER_INBOX_STATUSES = {
     OWNER_INBOX_STATUS_BLOCKED,
 }
 
+BIO_OPS_OWNER_IMPORT_CHANNELS: dict[str, dict[str, Any]] = {
+    "social_brain_agent": {
+        "channel_id": "social_brain_candidate_queue",
+        "supported_output_kinds": ("habit_candidate", "preference_candidate"),
+        "state_owner": "social_brain_agent",
+    },
+    "immune_agent": {
+        "channel_id": "immune_memory_candidate_queue",
+        "supported_output_kinds": ("scar_candidate", "immune_memory_candidate", "repair_story_candidate"),
+        "state_owner": "immune_agent",
+    },
+    "glymphatic_agent": {
+        "channel_id": "memory_forgetting_candidate_queue",
+        "supported_output_kinds": ("forget_candidate",),
+        "state_owner": "glymphatic_agent",
+    },
+    "hippocampus_agent": {
+        "channel_id": "hippocampus_autobiography_candidate_queue",
+        "supported_output_kinds": ("autobiography_report",),
+        "state_owner": "hippocampus_agent",
+    },
+    "prefrontal_agent": {
+        "channel_id": "prefrontal_promise_candidate_queue",
+        "supported_output_kinds": ("promise_candidate",),
+        "state_owner": "prefrontal_agent",
+    },
+}
+
 
 @dataclass(slots=True)
 class BioOpsOwnerInboxItem:
@@ -67,6 +95,7 @@ class BioOpsOwnerImportItem:
     summary: str
     path: str
     import_allowed: bool = True
+    owner_channel: dict[str, Any] | None = None
     reason_code: str | None = None
     detail: str | None = None
 
@@ -172,6 +201,25 @@ def validate_owner_import_candidate(candidate: dict[str, Any], decision: dict[st
     return OWNER_INBOX_STATUS_READY, True, None, None
 
 
+def resolve_owner_import_channel(owner_organ: str, output_kind: str) -> dict[str, Any] | None:
+    owner = str(owner_organ or "").strip()
+    kind = str(output_kind or "").strip()
+    channel = BIO_OPS_OWNER_IMPORT_CHANNELS.get(owner)
+    if not channel:
+        return None
+    supported = tuple(str(item) for item in channel.get("supported_output_kinds") or ())
+    if kind not in supported:
+        return None
+    return {
+        "owner_organ": owner,
+        "output_kind": kind,
+        "channel_id": channel["channel_id"],
+        "state_owner": channel["state_owner"],
+        "direct_long_term_write": False,
+        "write_policy": "owner_import_candidate_only",
+    }
+
+
 def validate_owner_import_artifact(payload: dict[str, Any]) -> tuple[bool, str | None, str | None]:
     payload = _as_dict(payload)
     owner_organ = str(payload.get("owner_organ") or "").strip()
@@ -183,10 +231,14 @@ def validate_owner_import_artifact(payload: dict[str, Any]) -> tuple[bool, str |
         return False, "BIO_OPS_DIRECT_WRITE_FORBIDDEN", "Owner import artifacts must not write durable state directly."
     if str(payload.get("write_policy") or "").strip() != "owner_import_candidate_only":
         return False, "BIO_OPS_IMPORT_POLICY_INVALID", str(payload.get("write_policy") or "")
-    if not _as_dict(payload.get("candidate")):
+    candidate = _as_dict(payload.get("candidate"))
+    if not candidate:
         return False, "BIO_OPS_IMPORT_CANDIDATE_REQUIRED", "Owner import artifact must include the original candidate."
     if not _as_dict(payload.get("decision")):
         return False, "BIO_OPS_IMPORT_DECISION_REQUIRED", "Owner import artifact must include the owner decision."
+    output_kind = str(payload.get("output_kind") or candidate.get("output_kind") or "").strip()
+    if resolve_owner_import_channel(owner_organ, output_kind) is None:
+        return False, "BIO_OPS_OWNER_CHANNEL_UNSUPPORTED", f"owner={owner_organ} output_kind={output_kind}"
     return True, None, None
 
 
@@ -274,6 +326,17 @@ class BioOpsOwnerInbox:
             if item.status != OWNER_INBOX_STATUS_READY:
                 skipped.append({"candidate_id": item.candidate_id, "status": item.status, "reason_code": item.reason_code})
                 continue
+            owner_channel = resolve_owner_import_channel(item.owner_organ, item.output_kind)
+            if owner_channel is None:
+                skipped.append(
+                    {
+                        "candidate_id": item.candidate_id,
+                        "status": OWNER_INBOX_STATUS_BLOCKED,
+                        "reason_code": "BIO_OPS_OWNER_CHANNEL_UNSUPPORTED",
+                        "detail": f"owner={item.owner_organ} output_kind={item.output_kind}",
+                    }
+                )
+                continue
 
             target = (
                 self.inbox_root
@@ -293,6 +356,7 @@ class BioOpsOwnerInbox:
                     "decision": decision,
                     "source_candidate_path": item.source_candidate_path,
                     "decision_path": item.decision_path,
+                    "owner_channel": owner_channel,
                     "direct_long_term_write": False,
                     "write_policy": "owner_import_candidate_only",
                     "created_at_ms": now_ms(),
@@ -329,6 +393,7 @@ class BioOpsOwnerInbox:
                     continue
                 allowed, reason_code, detail = validate_owner_import_artifact(payload)
                 status = OWNER_IMPORT_STATUS_READY if allowed else OWNER_IMPORT_STATUS_BLOCKED
+                owner_channel = resolve_owner_import_channel(owner, str(payload.get("output_kind") or ""))
                 item = BioOpsOwnerImportItem(
                     candidate_id=str(payload.get("candidate_id") or "").strip() or sanitize_segment(path.parent.name, "candidate"),
                     capability=str(payload.get("capability") or "").strip(),
@@ -338,6 +403,7 @@ class BioOpsOwnerInbox:
                     summary=str(payload.get("summary") or "").strip(),
                     path=str(path),
                     import_allowed=allowed,
+                    owner_channel=owner_channel,
                     reason_code=reason_code,
                     detail=detail,
                 )
@@ -381,6 +447,7 @@ class BioOpsOwnerInbox:
                         "summary": item["summary"],
                         "path": item["path"],
                         "relative_ref": _relative_ref(Path(item["path"]), self.inbox_root),
+                        "owner_channel": resolve_owner_import_channel(str(item["owner_organ"]), str(item["output_kind"])),
                     }
                     for item in items
                 ],
@@ -418,6 +485,8 @@ __all__ = [
     "OWNER_INBOX_STATUS_REJECTED",
     "OWNER_IMPORT_STATUS_BLOCKED",
     "OWNER_IMPORT_STATUS_READY",
+    "BIO_OPS_OWNER_IMPORT_CHANNELS",
+    "resolve_owner_import_channel",
     "validate_owner_import_candidate",
     "validate_owner_import_artifact",
 ]

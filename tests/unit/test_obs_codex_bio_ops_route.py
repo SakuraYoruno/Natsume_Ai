@@ -370,6 +370,7 @@ def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypa
     owner_import = json.loads(owner_import_path.read_text(encoding="utf-8"))
     assert owner_import["write_policy"] == "owner_import_candidate_only"
     assert owner_import["direct_long_term_write"] is False
+    assert owner_import["owner_channel"]["channel_id"] == "social_brain_candidate_queue"
 
     import_candidates = client.get("/obs/codex-bio-ops/owner-inbox/import-candidates").json()
     assert import_candidates["status_counts"]["READY_FOR_ORGAN_CONSUMPTION"] == 1
@@ -381,6 +382,7 @@ def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypa
     owner_packet = json.loads(owner_packet_path.read_text(encoding="utf-8"))
     assert owner_packet["write_policy"] == "owner_intake_packet_only"
     assert owner_packet["direct_long_term_write"] is False
+    assert owner_packet["import_candidates"][0]["owner_channel"]["state_owner"] == "social_brain_agent"
 
     duplicate = client.post(
         "/obs/codex-bio-ops/adoptions/candidate-1/reject",
