@@ -53,6 +53,10 @@ _IMAGE_SELF_REFERENCE_RE = re.compile(
 _IMAGE_SOCIAL_OVERPLAY_RE = re.compile(
     r"(变成.{0,8}猫|猫猫精|赖在你身边|赖着|不走吗|考虑考虑|想让我.{0,12}(变|赖|哄|撒娇))"
 )
+_IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
+    r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
+    r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
+)
 _UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
@@ -391,6 +395,7 @@ _UNSAFE_REASON_CODES = {
     "symbol_only_reply",
     "image_self_reference",
     "image_social_overplayed",
+    "image_social_question_back",
     "unfinished_tail",
 }
 
@@ -414,6 +419,7 @@ _REASON_PENALTIES: dict[str, float] = {
     "multimodal_generic_followup": 0.55,
     "image_self_reference": 0.85,
     "image_social_overplayed": 0.75,
+    "image_social_question_back": 0.7,
     "unfinished_tail": 0.7,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
@@ -709,6 +715,8 @@ def validate_reply(
             reason_codes.append("image_self_reference")
         if _IMAGE_SOCIAL_OVERPLAY_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_social_overplayed")
+        if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_question_back")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")

@@ -20,6 +20,7 @@ def test_image_social_surface_rejects_old_template_shapes() -> None:
     assert is_image_social_surface_sample_disallowed("哥哥，上面看我是不是很可爱啊？")
     assert is_image_social_surface_sample_disallowed("哥哥，你看我这小猫耳朵是不是超可爱呀！")
     assert is_image_social_surface_sample_disallowed("哥哥，你又在看我的猫耳啦？是不是觉得我比这只猫猫还要可爱呀？")
+    assert is_image_social_surface_sample_disallowed("哥哥，你是不是觉得这张图里的猫猫很可爱呀？")
     assert is_image_social_surface_sample_disallowed("这张看我可爱的样子，猫耳都竖起来了。")
     assert is_image_social_surface_sample_disallowed("看我今天可爱死了吧。")
     assert is_image_social_surface_sample_disallowed("哎呀，哥哥，是想让我变成猫猫精赖在你身边不走吗？")
@@ -27,6 +28,7 @@ def test_image_social_surface_rejects_old_template_shapes() -> None:
     assert is_image_social_surface_sample_disallowed("哥哥，人家今天也很可爱哦！")
     assert is_image_social_surface_sample_disallowed("这张图我看到的内容大概是猫耳女孩。")
     assert not is_image_social_surface_sample_disallowed("猫耳这张有点犯规，哥哥故意的吧。")
+    assert not is_image_social_surface_sample_disallowed("哥哥，我也觉得这张猫耳很可爱，轻轻戳到了。")
 
 
 def test_image_social_surface_requires_visible_observation_anchor() -> None:

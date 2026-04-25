@@ -57,6 +57,10 @@ _SELF_AS_IMAGE_RE = re.compile(
     rf"(?:我|人家).{{0,18}}(?:比|还要|更|最).{{0,16}}(?:可爱|萌|好看)|"
     rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_SELF_IMAGE_PREDICATE_RE})"
 )
+_IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
+    r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
+    r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
+)
 _WEAK_IMAGE_ANCHORS = {"可爱", "卖萌", "软萌", "萌", "表情"}
 _VISUAL_REFERENCE_MARKERS = (
     "这张",
@@ -134,6 +138,8 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
     if any(marker in compact for marker in _VAGUE_SHAPES) and compact.endswith("吗"):
         return True
     if _SELF_AS_IMAGE_RE.search(compact):
+        return True
+    if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(compact):
         return True
     if "这张图" in compact and any(marker in compact for marker in ("内容大概是", "我看到的内容", "画面里")):
         return True

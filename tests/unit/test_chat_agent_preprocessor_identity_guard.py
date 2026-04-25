@@ -603,6 +603,16 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert "image_self_reference" in comparative_validation.reason_codes
     assert "unfinished_tail" in comparative_validation.reason_codes
 
+    question_back_validation = validate_reply(
+        text="哥哥，你是不是觉得这张图里的猫猫很可爱呀？",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert question_back_validation.is_valid is False
+    assert question_back_validation.safe_to_emit is False
+    assert "image_social_question_back" in question_back_validation.reason_codes
+
     descriptive_suffix_validation = validate_reply(
         text="这张看我可爱的样子，猫耳都竖起来了。",
         plan=plan,

@@ -688,6 +688,7 @@ def test_reply_plan_image_social_reply_keeps_variant_specific_contract_after_mul
     )
     assert "只回一句短接话" in plan.reply_contract
     assert "不要把自己写成图片主体" in plan.reply_contract
+    assert "不要把问题抛回给对方" in plan.reply_contract
 
 
 def test_reply_plan_open_image_social_thread_never_falls_back_to_plain_hold() -> None:
