@@ -598,6 +598,14 @@ def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
 
     assert "image_self_reference" not in validation.reason_codes
 
+    pun_validation = validate_reply(
+        text="哥哥，我也萌生了想捏这张猫耳的冲动。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert "image_self_reference" not in pun_validation.reason_codes
+
 
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
     plan = ReplyPlan(

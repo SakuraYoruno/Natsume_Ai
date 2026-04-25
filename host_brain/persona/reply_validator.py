@@ -33,11 +33,12 @@ _PHATIC_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么�
 _VISUAL_REFERENCE_RE = re.compile(r"(图里|截图|画面|这张|上面|这里|这句|提示|意思|看起来|像是|看到|看见|应该是)")
 _ATTACHMENT_ACK_RE = re.compile(r"(看到了|我看到了|看见了|我看见了|这张图|这个附件|这个表情)")
 _MULTIMODAL_GENERIC_FOLLOWUP_RE = re.compile(r"(你想让我先说|你想让我先看|先帮你解释|还是先判断能不能帮你|你想让我先从哪)")
+_IMAGE_SELF_PREDICATE_RE = r"(?:可爱|萌|好看)(?:吗|吧|哦|啦|呀|嘛|呢|了)?(?![\u4e00-\u9fff])"
 _IMAGE_SELF_REFERENCE_RE = re.compile(
-    r"(看我.{0,8}(可爱|萌|好看)|"
-    r"我是不是.{0,8}(可爱|萌|好看)|"
-    r"我可不可爱|"
-    r"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?(?:可爱|萌|好看)(?:吗|吧|哦|啦)?)"
+    rf"(看我.{{0,8}}{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"我是不是.{{0,8}}{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"我可不可爱(?:吗|吧|哦|啦|呀|嘛|呢|了)?(?![\u4e00-\u9fff])|"
+    rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_IMAGE_SELF_PREDICATE_RE})"
 )
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"

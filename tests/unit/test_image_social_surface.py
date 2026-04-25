@@ -34,6 +34,11 @@ def test_image_social_surface_requires_visible_observation_anchor() -> None:
     assert candidate_uses_image_observation("这张有点犯规，哥哥故意的吧。", multimodal)
     assert candidate_uses_image_observation("蓝眼睛这下太犯规了。", multimodal)
     assert candidate_uses_image_observation("哥哥，我也觉得这张猫耳很可爱。", multimodal)
+    assert candidate_uses_image_observation("哥哥，我也萌生了想捏这张猫耳的冲动。", multimodal)
+    assert candidate_uses_image_observation(
+        "哥哥，上面好可爱，轻轻戳到了。",
+        {"summary_for_chat": "可爱、卖萌。"},
+    )
     assert not candidate_uses_image_observation("哥哥，人家今天也很可爱哦！", multimodal)
     assert not candidate_uses_image_observation("哥哥今天怎么这么安静。", multimodal)
     assert not candidate_uses_image_observation("", multimodal)
