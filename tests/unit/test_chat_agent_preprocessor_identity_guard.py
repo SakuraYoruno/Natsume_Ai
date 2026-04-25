@@ -591,6 +591,15 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert descriptive_suffix_validation.is_valid is False
     assert "image_self_reference" in descriptive_suffix_validation.reason_codes
 
+    degree_suffix_validation = validate_reply(
+        text="看我今天可爱死了吧。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert degree_suffix_validation.is_valid is False
+    assert "image_self_reference" in degree_suffix_validation.reason_codes
+
 
 def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
     plan = ReplyPlan(
