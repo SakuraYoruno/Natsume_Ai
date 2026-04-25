@@ -24,6 +24,8 @@ OWNER_INBOX_STATUS_PENDING_REVIEW = "PENDING_REVIEW"
 OWNER_INBOX_STATUS_READY = "READY_FOR_OWNER_IMPORT"
 OWNER_INBOX_STATUS_REJECTED = "REJECTED_BY_OWNER"
 OWNER_INBOX_STATUS_BLOCKED = "BLOCKED"
+OWNER_IMPORT_STATUS_READY = "READY_FOR_ORGAN_CONSUMPTION"
+OWNER_IMPORT_STATUS_BLOCKED = "BLOCKED"
 OWNER_INBOX_STATUSES = {
     OWNER_INBOX_STATUS_PENDING_REVIEW,
     OWNER_INBOX_STATUS_READY,
@@ -55,6 +57,38 @@ class BioOpsOwnerInboxItem:
         return asdict(self)
 
 
+@dataclass(slots=True)
+class BioOpsOwnerImportItem:
+    candidate_id: str
+    capability: str
+    owner_organ: str
+    output_kind: str
+    status: str
+    summary: str
+    path: str
+    import_allowed: bool = True
+    reason_code: str | None = None
+    detail: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class BioOpsOwnerIntakePacket:
+    packet_id: str
+    owner_organ: str
+    item_count: int
+    import_candidates: list[dict[str, Any]]
+    direct_long_term_write: bool = False
+    write_policy: str = "owner_intake_packet_only"
+    created_at_ms: int = field(default_factory=now_ms)
+    next_actions: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
@@ -74,6 +108,13 @@ def _read_json(path: Path) -> dict[str, Any]:
         return _as_dict(json.loads(path.read_text(encoding="utf-8")))
     except Exception:
         return {}
+
+
+def _relative_ref(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def _candidate_id(candidate: dict[str, Any], source_path: Path) -> str:
@@ -129,6 +170,24 @@ def validate_owner_import_candidate(candidate: dict[str, Any], decision: dict[st
         return OWNER_INBOX_STATUS_BLOCKED, False, "BIO_OPS_SENSITIVE_TARGET_BLOCKED", ", ".join(sorted(set(hits)))
 
     return OWNER_INBOX_STATUS_READY, True, None, None
+
+
+def validate_owner_import_artifact(payload: dict[str, Any]) -> tuple[bool, str | None, str | None]:
+    payload = _as_dict(payload)
+    owner_organ = str(payload.get("owner_organ") or "").strip()
+    if not owner_organ:
+        return False, "BIO_OPS_OWNER_REQUIRED", "Owner import artifact has no owner organ."
+    if owner_organ not in BIO_OPS_OWNER_ORGANS:
+        return False, "BIO_OPS_OWNER_UNKNOWN", owner_organ
+    if bool(payload.get("direct_long_term_write")):
+        return False, "BIO_OPS_DIRECT_WRITE_FORBIDDEN", "Owner import artifacts must not write durable state directly."
+    if str(payload.get("write_policy") or "").strip() != "owner_import_candidate_only":
+        return False, "BIO_OPS_IMPORT_POLICY_INVALID", str(payload.get("write_policy") or "")
+    if not _as_dict(payload.get("candidate")):
+        return False, "BIO_OPS_IMPORT_CANDIDATE_REQUIRED", "Owner import artifact must include the original candidate."
+    if not _as_dict(payload.get("decision")):
+        return False, "BIO_OPS_IMPORT_DECISION_REQUIRED", "Owner import artifact must include the owner decision."
+    return True, None, None
 
 
 class BioOpsOwnerInbox:
@@ -257,14 +316,108 @@ class BioOpsOwnerInbox:
             "skipped": skipped,
         }
 
+    def scan_import_candidates(self, *, owner_organ: str | None = None) -> dict[str, Any]:
+        owner_filter = str(owner_organ or "").strip()
+        items: list[dict[str, Any]] = []
+        status_counts: dict[str, int] = {}
+
+        if self.inbox_root.exists():
+            for path in sorted(self.inbox_root.rglob("owner_import_candidate.json")):
+                payload = _read_json(path)
+                owner = str(payload.get("owner_organ") or "").strip()
+                if owner_filter and owner != owner_filter:
+                    continue
+                allowed, reason_code, detail = validate_owner_import_artifact(payload)
+                status = OWNER_IMPORT_STATUS_READY if allowed else OWNER_IMPORT_STATUS_BLOCKED
+                item = BioOpsOwnerImportItem(
+                    candidate_id=str(payload.get("candidate_id") or "").strip() or sanitize_segment(path.parent.name, "candidate"),
+                    capability=str(payload.get("capability") or "").strip(),
+                    owner_organ=owner,
+                    output_kind=str(payload.get("output_kind") or "").strip(),
+                    status=status,
+                    summary=str(payload.get("summary") or "").strip(),
+                    path=str(path),
+                    import_allowed=allowed,
+                    reason_code=reason_code,
+                    detail=detail,
+                )
+                items.append(item.to_dict())
+                status_counts[status] = int(status_counts.get(status, 0)) + 1
+
+        return {
+            "ok": True,
+            "inbox_root": str(self.inbox_root),
+            "owner_organ": owner_filter or None,
+            "count": len(items),
+            "status_counts": status_counts,
+            "items": items,
+        }
+
+    def materialize_intake_packets(self, *, owner_organ: str | None = None) -> dict[str, Any]:
+        scan = self.scan_import_candidates(owner_organ=owner_organ)
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        blocked: list[dict[str, Any]] = []
+        for item in scan["items"]:
+            if not item.get("import_allowed"):
+                blocked.append(item)
+                continue
+            grouped.setdefault(str(item.get("owner_organ") or ""), []).append(item)
+
+        artifacts: list[dict[str, Any]] = []
+        packets: list[dict[str, Any]] = []
+        for owner, items in sorted(grouped.items()):
+            if not owner:
+                blocked.extend([{**item, "reason_code": "BIO_OPS_OWNER_REQUIRED"} for item in items])
+                continue
+            packet = BioOpsOwnerIntakePacket(
+                packet_id=f"owner_intake_{sanitize_segment(owner)}",
+                owner_organ=owner,
+                item_count=len(items),
+                import_candidates=[
+                    {
+                        "candidate_id": item["candidate_id"],
+                        "capability": item["capability"],
+                        "output_kind": item["output_kind"],
+                        "summary": item["summary"],
+                        "path": item["path"],
+                        "relative_ref": _relative_ref(Path(item["path"]), self.inbox_root),
+                    }
+                    for item in items
+                ],
+                next_actions=[
+                    f"{owner} should load only its own packet.",
+                    "Owner import packets are handoff artifacts; durable writes remain owner-specific.",
+                ],
+            )
+            target = self.inbox_root / sanitize_segment(owner, "owner") / "owner_intake_packet.json"
+            artifact = self.artifact_store.write_json(target, packet.to_dict(), artifact_type="owner_intake_packet")
+            artifacts.append(artifact.to_dict())
+            packets.append(packet.to_dict())
+
+        return {
+            "ok": True,
+            "inbox_root": str(self.inbox_root),
+            "owner_organ": str(owner_organ or "").strip() or None,
+            "packet_count": len(packets),
+            "blocked_count": len(blocked),
+            "packets": packets,
+            "artifacts": artifacts,
+            "blocked": blocked,
+        }
+
 
 __all__ = [
     "BioOpsOwnerInbox",
     "BioOpsOwnerInboxItem",
+    "BioOpsOwnerImportItem",
+    "BioOpsOwnerIntakePacket",
     "DEFAULT_OWNER_INBOX_ROOT",
     "OWNER_INBOX_STATUS_BLOCKED",
     "OWNER_INBOX_STATUS_PENDING_REVIEW",
     "OWNER_INBOX_STATUS_READY",
     "OWNER_INBOX_STATUS_REJECTED",
+    "OWNER_IMPORT_STATUS_BLOCKED",
+    "OWNER_IMPORT_STATUS_READY",
     "validate_owner_import_candidate",
+    "validate_owner_import_artifact",
 ]

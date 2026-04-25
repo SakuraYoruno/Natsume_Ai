@@ -329,6 +329,26 @@ export function materializeCodexBioOpsOwnerInbox(body = {}, params = {}) {
   })
 }
 
+export function fetchCodexBioOpsOwnerImportCandidates(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-inbox/import-candidates${qs ? '?' + qs : ''}`)
+}
+
+export function materializeCodexBioOpsOwnerIntakePackets(body = {}, params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-inbox/intake-packets${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
 export function fetchLifeBody(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

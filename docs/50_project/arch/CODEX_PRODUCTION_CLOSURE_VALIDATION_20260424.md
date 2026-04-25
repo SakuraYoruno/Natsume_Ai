@@ -72,3 +72,4 @@ No default stable-gate regression was observed.
 - Owner accept/reject actions write only `adoption_decision.json` artifacts beside the candidate evidence.
 - Decision artifacts carry owner, source run, source candidate path, risk flags, and `direct_long_term_write = false`; each owner organ must still perform any durable state import through its own state-owner path.
 - Accepted decisions can be scanned into an owner inbox. The inbox performs owner/evidence/sensitive-target validation and materializes only `owner_import_candidate.json`, never durable memory or configuration writes.
+- Owner inbox artifacts can be grouped into per-organ `owner_intake_packet.json` handoff files, so each organ consumes only its own queue and durable writes remain organ-owned.

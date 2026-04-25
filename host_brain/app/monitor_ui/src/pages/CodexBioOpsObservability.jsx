@@ -19,7 +19,9 @@ import {
   acceptCodexBioOpsAdoption,
   fetchCodexBioOpsAdoptionDetail,
   fetchCodexBioOpsOwnerInbox,
+  fetchCodexBioOpsOwnerImportCandidates,
   materializeCodexBioOpsOwnerInbox,
+  materializeCodexBioOpsOwnerIntakePackets,
   rejectCodexBioOpsAdoption,
 } from '../api/obs.js'
 import { useCodexBioOpsObservabilityQuery } from '../queries/codexBioOpsQueries.js'
@@ -674,8 +676,12 @@ function PendingAdoptions({ items, runId, onChanged }) {
 
 function OwnerInboxPanel({ runId }) {
   const [data, setData] = useState(null)
+  const [imports, setImports] = useState(null)
+  const [lastMaterialized, setLastMaterialized] = useState(null)
+  const [lastPackets, setLastPackets] = useState(null)
   const [loading, setLoading] = useState(false)
   const [materializing, setMaterializing] = useState(false)
+  const [packetizing, setPacketizing] = useState(false)
   const [error, setError] = useState(null)
   const runParams = runId ? { run_id: runId } : {}
 
@@ -683,7 +689,12 @@ function OwnerInboxPanel({ runId }) {
     setLoading(true)
     setError(null)
     try {
-      setData(await fetchCodexBioOpsOwnerInbox(runParams))
+      const [inboxPayload, importPayload] = await Promise.all([
+        fetchCodexBioOpsOwnerInbox(runParams),
+        fetchCodexBioOpsOwnerImportCandidates(runParams),
+      ])
+      setData(inboxPayload)
+      setImports(importPayload)
     } catch (err) {
       setError(err)
     } finally {
@@ -702,7 +713,7 @@ function OwnerInboxPanel({ runId }) {
     setError(null)
     try {
       const payload = await materializeCodexBioOpsOwnerInbox({}, runParams)
-      setData({ ...data, materialized: payload })
+      setLastMaterialized(payload)
       await loadInbox()
     } catch (err) {
       setError(err)
@@ -711,8 +722,23 @@ function OwnerInboxPanel({ runId }) {
     }
   }
 
+  const materializePackets = async () => {
+    setPacketizing(true)
+    setError(null)
+    try {
+      const payload = await materializeCodexBioOpsOwnerIntakePackets({}, runParams)
+      setLastPackets(payload)
+      await loadInbox()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setPacketizing(false)
+    }
+  }
+
   const rows = Array.isArray(data?.items) ? data.items : []
   const counts = data?.status_counts || {}
+  const importCounts = imports?.status_counts || {}
 
   return (
     <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
@@ -742,6 +768,15 @@ function OwnerInboxPanel({ runId }) {
             <FileText size={13} />
             {materializing ? '生成中' : '生成 inbox artifacts'}
           </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={packetizing || !Number(importCounts.READY_FOR_ORGAN_CONSUMPTION || 0)}
+            onClick={materializePackets}
+          >
+            <GitBranch size={13} />
+            {packetizing ? '生成中' : '生成 organ packets'}
+          </button>
         </div>
       </div>
 
@@ -752,6 +787,21 @@ function OwnerInboxPanel({ runId }) {
             <div className="mt-2 text-xl font-bold text-gray-900">{counts[status] || 0}</div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-gray-600 sm:grid-cols-3">
+        <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-2 py-2">
+          <div className="font-semibold text-indigo-700">Import-ready</div>
+          <div className="mt-1 text-xl font-bold text-gray-900">{importCounts.READY_FOR_ORGAN_CONSUMPTION || 0}</div>
+        </div>
+        <div className="rounded-lg border border-red-100 bg-red-50 px-2 py-2">
+          <div className="font-semibold text-red-700">Import blocked</div>
+          <div className="mt-1 text-xl font-bold text-gray-900">{importCounts.BLOCKED || 0}</div>
+        </div>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 px-2 py-2">
+          <div className="font-semibold text-gray-700">Organ packets</div>
+          <div className="mt-1 text-xl font-bold text-gray-900">{lastPackets?.packet_count || 0}</div>
+        </div>
       </div>
 
       {rows.length ? (
@@ -776,9 +826,15 @@ function OwnerInboxPanel({ runId }) {
         </div>
       )}
 
-      {data?.materialized ? (
+      {lastMaterialized ? (
         <div className="mt-3 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-xs leading-5 text-green-700">
-          已生成 {data.materialized.materialized_count} 个 owner import candidate artifact；长期写入仍由 owner organ 自己执行。
+          已生成 {lastMaterialized.materialized_count} 个 owner import candidate artifact；长期写入仍由 owner organ 自己执行。
+        </div>
+      ) : null}
+
+      {lastPackets ? (
+        <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-700">
+          已生成 {lastPackets.packet_count} 个 owner intake packet；每个器官只消费自己的 packet。
         </div>
       ) : null}
 

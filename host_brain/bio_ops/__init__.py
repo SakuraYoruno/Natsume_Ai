@@ -19,7 +19,10 @@ from host_brain.bio_ops.owner_inbox import (
     OWNER_INBOX_STATUS_REJECTED,
     BioOpsOwnerInbox,
     BioOpsOwnerInboxItem,
+    BioOpsOwnerImportItem,
+    BioOpsOwnerIntakePacket,
     validate_owner_import_candidate,
+    validate_owner_import_artifact,
 )
 from host_brain.bio_ops.registry import BioOpsRegistry, build_default_bio_ops_registry
 from host_brain.bio_ops.runner import BioOpsRunner, run_bio_ops_task
@@ -50,6 +53,8 @@ __all__ = [
     "BioOpsArtifact",
     "BioOpsOwnerInbox",
     "BioOpsOwnerInboxItem",
+    "BioOpsOwnerImportItem",
+    "BioOpsOwnerIntakePacket",
     "BioOpsRegistry",
     "BioOpsResult",
     "BioOpsRunner",
@@ -63,5 +68,6 @@ __all__ = [
     "resolve_bio_ops_adoption_policy",
     "run_bio_ops_task",
     "validate_owner_import_candidate",
+    "validate_owner_import_artifact",
     "validate_bio_ops_task_safety",
 ]
