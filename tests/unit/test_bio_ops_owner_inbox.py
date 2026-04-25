@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox, validate_owner_import_candidate
+from host_brain.bio_ops.owner_inbox import (
+    BioOpsOwnerInbox,
+    validate_owner_import_artifact,
+    validate_owner_import_candidate,
+)
 
 
 def _write_json(path, payload) -> None:
@@ -79,6 +83,19 @@ def test_owner_inbox_scans_decisions_and_materializes_ready_candidates(tmp_path)
     assert artifact["direct_long_term_write"] is False
     assert artifact["write_policy"] == "owner_import_candidate_only"
 
+    import_scan = inbox.scan_import_candidates()
+    assert import_scan["status_counts"]["READY_FOR_ORGAN_CONSUMPTION"] == 1
+
+    packets = inbox.materialize_intake_packets()
+    assert packets["packet_count"] == 1
+    packet_path = inbox_root / "social_brain_agent" / "owner_intake_packet.json"
+    assert packet_path.exists()
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    assert packet["owner_organ"] == "social_brain_agent"
+    assert packet["direct_long_term_write"] is False
+    assert packet["write_policy"] == "owner_intake_packet_only"
+    assert packet["import_candidates"][0]["candidate_id"] == "ready"
+
 
 def test_owner_import_candidate_validation_blocks_owner_mismatch_and_missing_evidence() -> None:
     status, allowed, reason, detail = validate_owner_import_candidate(
@@ -97,3 +114,20 @@ def test_owner_import_candidate_validation_blocks_owner_mismatch_and_missing_evi
     assert status == "BLOCKED"
     assert allowed is False
     assert reason == "BIO_OPS_EVIDENCE_REQUIRED"
+
+
+def test_owner_import_artifact_validation_blocks_direct_write() -> None:
+    allowed, reason, detail = validate_owner_import_artifact(
+        {
+            "candidate_id": "direct",
+            "owner_organ": "social_brain_agent",
+            "candidate": _candidate("direct"),
+            "decision": _decision("direct"),
+            "direct_long_term_write": True,
+            "write_policy": "owner_import_candidate_only",
+        }
+    )
+
+    assert allowed is False
+    assert reason == "BIO_OPS_DIRECT_WRITE_FORBIDDEN"
+    assert "durable state" in str(detail)

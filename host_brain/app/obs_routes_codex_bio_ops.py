@@ -864,3 +864,34 @@ def materialize_codex_bio_ops_owner_inbox(
     result = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").materialize_ready(owner_organ=owner)
     result["run_id"] = run_dir.name
     return result
+
+
+@router.get("/codex-bio-ops/owner-inbox/import-candidates")
+def get_codex_bio_ops_owner_import_candidates(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").scan_import_candidates(
+        owner_organ=owner_organ,
+    )
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+@router.post("/codex-bio-ops/owner-inbox/intake-packets")
+def materialize_codex_bio_ops_owner_intake_packets(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
+    result = BioOpsOwnerInbox(source_root=run_dir, inbox_root=run_dir / "owner_inbox").materialize_intake_packets(owner_organ=owner)
+    result["run_id"] = run_dir.name
+    return result
