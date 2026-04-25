@@ -301,6 +301,10 @@ async def test_surface_renderer_image_rejected_candidates_fall_through_to_full_m
     meta = dict(trace["image_social_surface_render"])
     assert meta["status"] == "REJECTED"
     assert meta["affected_output"] is False
+    assert [item["reason_code"] for item in meta["rejected_attempts"]] == [
+        "IMAGE_SURFACE_TEMPLATE_SHAPE",
+        "IMAGE_SURFACE_OBSERVATION_NOT_USED",
+    ]
     assert "image_social_surface_render_fallback" not in trace
 
 

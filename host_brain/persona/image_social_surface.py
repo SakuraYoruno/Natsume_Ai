@@ -132,8 +132,6 @@ def candidate_uses_image_observation(candidate_text: str, multimodal: Mapping[st
     strong_anchors = [anchor for anchor in anchors if anchor not in _WEAK_IMAGE_ANCHORS]
     if strong_anchors and any(anchor in compact for anchor in strong_anchors):
         return True
-    if anchors and any(anchor in compact for anchor in anchors) and any(marker in compact for marker in _VISUAL_REFERENCE_MARKERS):
-        return True
     return False
 
 
