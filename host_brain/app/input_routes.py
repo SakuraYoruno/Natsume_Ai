@@ -1900,10 +1900,10 @@ async def _run_cortex_orchestrator_pipeline(
         # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
         # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
         render_target_lang=("zh" if source == "GATEWAY" else None),
+        attachments=list(attachments or []),
+        multimodal_observations=dict(multimodal_observations or {}),
+        attachment_summary=str(payload.get("attachment_summary") or "").strip(),
     )
-    setattr(request_body, "attachments", list(attachments or []))
-    setattr(request_body, "multimodal_observations", dict(multimodal_observations or {}))
-    setattr(request_body, "attachment_summary", str(payload.get("attachment_summary") or "").strip())
     emotion_context = resolve_chat_emotion_context(request_body=request_body)
     emotion_snapshot = build_chat_emotion_snapshot(
         emotion_context=emotion_context,
@@ -3136,4 +3136,3 @@ async def _dispatch_to_graph_worker(
             ts_ms=fail_ts,
         )
         _logger.error("input_routes: dispatch failed request_id=%s: %s", request_id, exc)
-

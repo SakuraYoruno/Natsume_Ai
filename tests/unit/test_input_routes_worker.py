@@ -15,6 +15,7 @@ from host_brain.app.input_routes import (
     _dispatch_to_graph,
     _dispatch_to_graph_worker,
     _maybe_realign_gateway_pipeline,
+    _run_cortex_orchestrator_pipeline,
     _run_gateway_proactive_progress_push,
     _run_cortex_pipeline,
     _should_start_gateway_progress_push,
@@ -22,6 +23,7 @@ from host_brain.app.input_routes import (
     _should_send_gateway_route_started_voice_ack,
     _try_handle_gateway_progress_fastpath,
 )
+from host_brain.app.schemas import ChatRequest
 from host_brain.app.prompt_template_store import PromptTemplateStore
 from host_brain.tribe.thalamus_agent import classify_task_intent
 from tests.text_quality_assertions import assert_natsume_style
@@ -29,6 +31,22 @@ from tests.text_quality_assertions import assert_natsume_style
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def test_chat_request_declares_gateway_multimodal_fields() -> None:
+    request = ChatRequest(
+        message="[表情消息]",
+        input_source="GATEWAY",
+        render_target_lang="zh",
+        attachments=[{"type": "emoji", "attachment_id": "att_emoji_1"}],
+        multimodal_observations={"primary_modality": "emoji"},
+        attachment_summary="用户发来一个偏撒娇的表情。",
+    )
+
+    assert request.render_target_lang == "zh"
+    assert request.attachments == [{"type": "emoji", "attachment_id": "att_emoji_1"}]
+    assert request.multimodal_observations == {"primary_modality": "emoji"}
+    assert request.attachment_summary == "用户发来一个偏撒娇的表情。"
 
 
 def test_dispatch_worker_gateway_completes_and_logs_completed() -> None:
@@ -570,6 +588,54 @@ def test_run_cortex_pipeline_forwards_to_cortex_orchestrator() -> None:
 
     mocked.assert_awaited_once()
     assert result == expected
+
+
+def test_run_cortex_orchestrator_pipeline_preserves_gateway_multimodal_fields() -> None:
+    captured_request_bodies: list[ChatRequest] = []
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        captured_request_bodies.append(kwargs["request_body"])
+        yield 'data: {"phase":"COMMIT","decision":"APPROVE","reason_code":null,"narrative":"收到啦。"}'
+
+    payload = {
+        "platform": "qq",
+        "conversation_id": "qq_dm_mm_contract_001",
+        "from_id": "3414578517",
+        "msg_type": "image",
+        "attachments": [{"type": "image", "attachment_id": "att_img_contract"}],
+        "multimodal_observations": {
+            "primary_modality": "image",
+            "social_signal": "轻轻撒娇",
+        },
+        "attachment_summary": "用户发来一张轻轻撒娇的图片。",
+    }
+
+    with patch(
+        "host_brain.app.cortex_orchestrator.cortex_orchestrator_sse_generator",
+        new=_fake_cortex_orchestrator_sse_generator,
+    ):
+        result = _run(
+            _run_cortex_orchestrator_pipeline(
+                request_id="req_mm_contract",
+                session_id="qq_dm_mm_contract_001",
+                source="GATEWAY",
+                text="[图片消息]",
+                payload=payload,
+                ts_ms=123456,
+                intent_draft_override={"route": "chat", "target_id": "chat_agent"},
+            )
+        )
+
+    assert result["decision"] == "APPROVE"
+    assert captured_request_bodies
+    request_body = captured_request_bodies[0]
+    assert request_body.input_source == "GATEWAY"
+    assert request_body.reply_channel == "qq"
+    assert request_body.reply_target == "qq_dm_mm_contract_001"
+    assert request_body.render_target_lang == "zh"
+    assert request_body.attachments == payload["attachments"]
+    assert request_body.multimodal_observations == payload["multimodal_observations"]
+    assert request_body.attachment_summary == "用户发来一张轻轻撒娇的图片。"
 
 
 def test_classify_task_intent_prefers_llm_route_when_rules_miss() -> None:
@@ -1810,4 +1876,3 @@ def test_maybe_realign_gateway_pipeline_skips_for_chat_route(monkeypatch) -> Non
         rerun_mock.assert_not_awaited()
     finally:
         ledger.close()
-
