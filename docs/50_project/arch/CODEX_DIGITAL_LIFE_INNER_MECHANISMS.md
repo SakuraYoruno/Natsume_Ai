@@ -97,6 +97,17 @@ The memory-narrative batch is implemented as report-only continuity scaffolding:
 
 These are observable through the Codex / BioOps WebUI `Memory Narrative` panel. They do not directly write long-term memory, Bond, Canon, or persona core.
 
+The affect-learning batch is implemented as report-only emotional learning and immune buffering:
+
+- `AffectiveTemperature` -> `affective_temperature`, tone temperature and pacing report.
+- `ImmuneTolerance` -> `immune_tolerance`, correction/frustration/hostility classification before immune escalation.
+- `EmotionalDigestion` -> `emotional_digestion`, emotional-event digestion report without long-term memory writes.
+- `RegretSignal` -> `regret_signal`, negative-feedback repair signal.
+- `JoyReinforcement` -> `joy_reinforcement`, positive-feedback reinforcement recommendation.
+- `FailureQuarantine` -> `failure_quarantine`, debug-only failure isolation before memory or identity adoption.
+
+These are observable through the Codex / BioOps WebUI `Affect Learning` panel. They do not directly write emotional scars, immune memory, long-term memory, or persona core.
+
 ---
 
 ## 0. 总目标

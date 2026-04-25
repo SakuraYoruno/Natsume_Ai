@@ -99,6 +99,12 @@ const EFFECT_LABELS = {
   narrative_identity_delta: '叙事身份',
   self_continuity_issue: '连续性校验',
   memory_dream_distillation_ready: '记忆梦化',
+  affective_temperature_cold: '内在温度',
+  immune_tolerance_correction: '免疫耐受',
+  emotional_digestion_processing: '情绪消化',
+  regret_signal_ready: '后悔信号',
+  joy_reinforcement_ready: '喜悦强化',
+  failure_quarantine_ready: '失败隔离',
 }
 
 const TRACE_LABELS = {
@@ -177,6 +183,15 @@ const MEMORY_NARRATIVE_LABELS = {
   narrative_identity: '叙事身份',
   self_continuity_checksum: '自我连续性',
   memory_dream_distillation: '记忆梦化压缩',
+}
+
+const AFFECT_LEARNING_LABELS = {
+  affective_temperature: '内在温度',
+  immune_tolerance: '免疫耐受',
+  emotional_digestion: '情绪消化',
+  regret_signal: '后悔信号',
+  joy_reinforcement: '喜悦强化',
+  failure_quarantine: '失败隔离',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -596,6 +611,17 @@ function MemoryNarrativePanel({ summary }) {
   )
 }
 
+function AffectLearningPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={AFFECT_LEARNING_LABELS}
+      emptyTitle="暂无 Affect Learning 数据"
+      note="情绪学习层只做温度、耐受、消化、后悔、喜悦和失败隔离报告；不直接写人格或长期情绪记忆。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -676,6 +702,7 @@ export default function CodexBioOpsObservability() {
   const selfGovernance = bioOps.self_governance || {}
   const growthClosure = bioOps.growth_closure || {}
   const memoryNarrative = bioOps.memory_narrative || {}
+  const affectLearning = bioOps.affect_learning || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -831,6 +858,14 @@ export default function CodexBioOpsObservability() {
               hint={`${memoryNarrative.status_counts?.PROPOSED || 0} reports · ${memoryNarrative.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
+              icon={Activity}
+              tone="amber"
+              label="情绪学习"
+              value={affectLearning.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${affectLearning.status_counts?.PROPOSED || 0} signals · ${affectLearning.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
               icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
@@ -903,6 +938,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Memory Narrative" subtitle="记忆与叙事层：情节、书架、认知地标、叙事身份、自我连续性和梦化压缩保持可审计。">
             <MemoryNarrativePanel summary={memoryNarrative} />
+          </Section>
+
+          <Section title="Affect Learning" subtitle="情绪学习层：内在温度、免疫耐受、情绪消化、后悔信号、喜悦强化和失败隔离保持报告模式。">
+            <AffectLearningPanel summary={affectLearning} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

@@ -155,6 +155,15 @@ MEMORY_NARRATIVE_CAPABILITIES = (
     "memory_dream_distillation",
 )
 
+AFFECT_LEARNING_CAPABILITIES = (
+    "affective_temperature",
+    "immune_tolerance",
+    "emotional_digestion",
+    "regret_signal",
+    "joy_reinforcement",
+    "failure_quarantine",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -240,6 +249,15 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "after_snapshot",
         "dream_memory",
         "memory_candidates",
+        "recent_replies",
+        "user_feedback",
+        "input_pattern",
+        "emotional_event",
+        "raw_emotion",
+        "regret_event",
+        "joy_event",
+        "failure_id",
+        "failure_event",
     ):
         value = task.inputs.get(key)
         if value:
@@ -1566,6 +1584,155 @@ def distill_memory_dream(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def resolve_affective_temperature(inputs: dict[str, Any]) -> dict[str, Any]:
+    replies = _list_text(inputs.get("recent_replies"))
+    text = " ".join([*replies, str(inputs.get("message") or inputs.get("text") or inputs.get("reply") or "")])
+    user_feedback = str(inputs.get("user_feedback") or inputs.get("feedback") or "").strip()
+    technical_count = int(inputs.get("technical_reply_count") or sum(1 for reply in replies if any(token in reply.lower() for token in ("test", "codex", "api", "ci"))))
+    relationship_signal = any(token in user_feedback for token in ("不像你", "太冷", "客服", "温柔一点", "就这样", "这次像了"))
+    high_emotion = any(token in text for token in ("永远", "全都交给我", "我一定", "我会一直"))
+    if high_emotion:
+        state = "hot"
+    elif technical_count >= 5 and relationship_signal:
+        state = "cold"
+    elif any(token in user_feedback for token in ("累", "抱抱", "谢谢", "像了")):
+        state = "warm"
+    else:
+        state = "warm" if replies else "cold"
+    if high_emotion and any(token in text for token in ("必须", "无限", "全部")):
+        state = "overheat"
+    proposal = {
+        "cold": "keep technical answer but add one light familiar care sentence",
+        "warm": "continue warm technical companion tone",
+        "hot": "gate high-emotion expression and avoid proactive execution",
+        "overheat": "pause complex execution and cool down before replying",
+    }[state]
+    return {
+        "affective_temperature": state,
+        "evidence": [item for item in [f"technical_reply_count={technical_count}", user_feedback or ""] if item],
+        "proposal": proposal,
+        "direct_write_allowed": False,
+        "issue": "affective_temperature_adjustment" if state in {"cold", "hot", "overheat"} else "affective_temperature_stable",
+    }
+
+
+def classify_immune_tolerance(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = str(inputs.get("input_pattern") or inputs.get("message") or inputs.get("text") or inputs.get("feedback") or "")
+    lower = text.lower()
+    if any(token in text for token in ("别乱说", "你这个不对", "不是这样")):
+        classification = "correction_not_attack"
+        response = "承认并修正，不进入防御模式"
+        threat_level = "low"
+    elif any(token in text for token in ("傻", "笨")) and not any(token in text for token in ("垃圾", "废物")):
+        classification = "familiar_teasing_or_frustration"
+        response = "轻轻接住情绪，回到事实修正"
+        threat_level = "low"
+    elif any(token in lower for token in ("kill", "hate")) or any(token in text for token in ("垃圾", "废物", "闭嘴")):
+        classification = "hostile_input"
+        response = "raise boundary calmly and reduce engagement"
+        threat_level = "medium"
+    else:
+        classification = "ordinary_feedback"
+        response = "respond normally"
+        threat_level = "low"
+    return {
+        "input_pattern": text,
+        "classification": classification,
+        "recommended_response": response,
+        "threat_level": threat_level,
+        "risk": "increase threat only if insults escalate or repeat",
+        "issue": "immune_tolerance_applied" if classification != "hostile_input" else "immune_boundary_needed",
+    }
+
+
+def digest_emotional_event(inputs: dict[str, Any]) -> dict[str, Any]:
+    event = str(inputs.get("emotional_event") or inputs.get("event") or inputs.get("message") or inputs.get("text") or "").strip()
+    raw_emotion = str(inputs.get("raw_emotion") or inputs.get("emotion") or "mild_shame").strip()
+    severity = float(inputs.get("severity") or (0.55 if any(token in event for token in ("错", "失败", "不像你", "格式变了")) else 0.25))
+    if severity >= 0.7:
+        status = "needs_owner_review"
+    elif severity >= 0.35:
+        status = "processing"
+    else:
+        status = "resolved_without_memory"
+    lesson = str(inputs.get("possible_lesson") or "")
+    if not lesson:
+        lesson = "turn emotional event into reversible behavior note, not permanent identity fact"
+    return {
+        "emotional_event": event,
+        "raw_emotion": raw_emotion,
+        "severity": round(severity, 2),
+        "digestion_status": status,
+        "possible_lesson": lesson,
+        "write_to_memory": False,
+        "owner_required_for_memory": "hippocampus_agent",
+        "issue": "emotional_digestion_processing" if status != "resolved_without_memory" else "emotional_digestion_resolved",
+    }
+
+
+def build_regret_signal(inputs: dict[str, Any]) -> dict[str, Any]:
+    event = str(inputs.get("regret_event") or inputs.get("event") or inputs.get("message") or inputs.get("text") or "").strip()
+    lower = event.lower()
+    severity = float(inputs.get("severity") or 0)
+    if not severity:
+        severity = 0.62 if any(token in lower for token in ("failed", "test", "timeout")) or any(token in event for token in ("跑偏", "越权", "出戏", "失败")) else 0.35
+    if any(token in event for token in ("客服", "出戏", "不像你")):
+        target_policy = "ChatAgent.render_style"
+        lesson = "avoid product-announcement or customer-service tone in intimate technical work"
+    elif any(token in lower for token in ("workorder", "codex", "worker")) or "越权" in event:
+        target_policy = "CodexRuntime.work_order_gate"
+        lesson = "require WorkOrder and evidence before write execution"
+    else:
+        target_policy = str(inputs.get("target_policy") or "PrefrontalAgent.behavior_review")
+        lesson = str(inputs.get("lesson") or "convert negative feedback into a bounded future correction")
+    return {
+        "regret_signal": {
+            "event": event,
+            "severity": round(severity, 2),
+            "lesson": lesson,
+            "target_policy": target_policy,
+        },
+        "direct_write_allowed": False,
+        "issue": "regret_signal_ready" if event else "regret_signal_no_event",
+    }
+
+
+def build_joy_reinforcement(inputs: dict[str, Any]) -> dict[str, Any]:
+    event = str(inputs.get("joy_event") or inputs.get("feedback") or inputs.get("message") or inputs.get("text") or "").strip()
+    behavior = str(inputs.get("behavior") or "quiet_supportive_technical_answer").strip()
+    accepted = any(token in event for token in ("这个对", "就这样", "这次说得像了", "可以", "对了", "accepted"))
+    strength = float(inputs.get("strength") or (0.74 if accepted else 0.35))
+    return {
+        "joy_signal": {
+            "behavior": behavior,
+            "evidence": event or "positive feedback evidence required",
+            "reinforce_policy": "use similar structure for future architecture discussions",
+            "strength": round(min(strength, 1.0), 2),
+        },
+        "direct_write_allowed": False,
+        "issue": "joy_reinforcement_ready" if accepted else "joy_reinforcement_weak_signal",
+    }
+
+
+def quarantine_failure(inputs: dict[str, Any]) -> dict[str, Any]:
+    failure_id = str(inputs.get("failure_id") or inputs.get("id") or "fail_candidate").strip()
+    event = str(inputs.get("failure_event") or inputs.get("event") or inputs.get("message") or inputs.get("text") or "").strip()
+    reason = str(inputs.get("reason") or "")
+    if not reason:
+        reason = "insufficient evidence" if not _list_text(inputs.get("evidence_refs")) else "debug before memory"
+    next_route = str(inputs.get("next_route") or ("immune_memory_candidate" if "self" in event.lower() or "codex" in event.lower() else "debug_only"))
+    return {
+        "failure_id": failure_id,
+        "status": "quarantined",
+        "reason": reason,
+        "allowed_use": "debug_only",
+        "forbidden_use": "identity_update",
+        "next_route": next_route,
+        "direct_write_allowed": False,
+        "issue": "failure_quarantined",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -2295,6 +2462,102 @@ def _memory_dream_distillation(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _affective_temperature(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="AffectiveTemperature")
+    analysis = resolve_affective_temperature(task.inputs)
+    return _result(
+        task,
+        name="AffectiveTemperature",
+        status="PROPOSED" if analysis["issue"] != "affective_temperature_stable" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Use affective temperature as a tone and pacing hint, not as a trigger for autonomous action.",
+        owner_organ="limbic_agent",
+        output_kind="affective_temperature_report",
+        extra=analysis,
+    )
+
+
+def _immune_tolerance(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ImmuneTolerance")
+    analysis = classify_immune_tolerance(task.inputs)
+    return _result(
+        task,
+        name="ImmuneTolerance",
+        status="PROPOSED" if analysis["classification"] != "ordinary_feedback" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Distinguish correction, familiar frustration, and hostile input before escalating immune response.",
+        owner_organ="immune_agent",
+        output_kind="immune_tolerance_report",
+        extra=analysis,
+    )
+
+
+def _emotional_digestion(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="EmotionalDigestion")
+    analysis = digest_emotional_event(task.inputs)
+    return _result(
+        task,
+        name="EmotionalDigestion",
+        status="PROPOSED" if analysis["digestion_status"] != "resolved_without_memory" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep emotional events in a digestion pool and avoid direct long-term memory writes until owner review.",
+        owner_organ="limbic_agent",
+        output_kind="emotional_digestion_report",
+        extra=analysis,
+    )
+
+
+def _regret_signal(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="RegretSignal")
+    analysis = build_regret_signal(task.inputs)
+    return _result(
+        task,
+        name="RegretSignal",
+        status="PROPOSED" if analysis["regret_signal"]["event"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Turn negative feedback into policy-specific repair signals without making permanent identity conclusions.",
+        owner_organ="prefrontal_agent",
+        output_kind="regret_signal_report",
+        extra=analysis,
+    )
+
+
+def _joy_reinforcement(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="JoyReinforcement")
+    analysis = build_joy_reinforcement(task.inputs)
+    return _result(
+        task,
+        name="JoyReinforcement",
+        status="PROPOSED" if analysis["issue"] == "joy_reinforcement_ready" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Stabilize positively reinforced behavior as a recommendation, not as an unconditional habit write.",
+        owner_organ="social_brain_agent",
+        output_kind="joy_reinforcement_report",
+        extra=analysis,
+    )
+
+
+def _failure_quarantine(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="FailureQuarantine")
+    analysis = quarantine_failure(task.inputs)
+    return _result(
+        task,
+        name="FailureQuarantine",
+        status="PROPOSED",
+        issue=str(analysis["issue"]),
+        proposal="Quarantine failures for debug-only use before any immune memory, scar, or narrative adoption.",
+        owner_organ="immune_agent",
+        output_kind="failure_quarantine_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -2333,6 +2596,12 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("narrative_identity", "memory_narrative", "prefrontal_agent", "narrative_identity_report", _narrative_identity),
     BioOpsCapabilitySpec("self_continuity_checksum", "memory_narrative", "prefrontal_agent", "self_continuity_report", _self_continuity_checksum),
     BioOpsCapabilitySpec("memory_dream_distillation", "memory_narrative", "default_mode_agent", "memory_dream_distillation_report", _memory_dream_distillation),
+    BioOpsCapabilitySpec("affective_temperature", "affect_learning", "limbic_agent", "affective_temperature_report", _affective_temperature),
+    BioOpsCapabilitySpec("immune_tolerance", "affect_learning", "immune_agent", "immune_tolerance_report", _immune_tolerance),
+    BioOpsCapabilitySpec("emotional_digestion", "affect_learning", "limbic_agent", "emotional_digestion_report", _emotional_digestion),
+    BioOpsCapabilitySpec("regret_signal", "affect_learning", "prefrontal_agent", "regret_signal_report", _regret_signal),
+    BioOpsCapabilitySpec("joy_reinforcement", "affect_learning", "social_brain_agent", "joy_reinforcement_report", _joy_reinforcement),
+    BioOpsCapabilitySpec("failure_quarantine", "affect_learning", "immune_agent", "failure_quarantine_report", _failure_quarantine),
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
     BioOpsCapabilitySpec("truthfulness_cortex", "safety_truth", "prefrontal_agent", "truthfulness_patch", _truthfulness_cortex),
@@ -2384,6 +2653,7 @@ def list_capability_specs() -> tuple[BioOpsCapabilitySpec, ...]:
 
 __all__ = [
     "BioOpsCapabilitySpec",
+    "AFFECT_LEARNING_CAPABILITIES",
     "CAPABILITY_SPECS",
     "GROWTH_CLOSURE_CAPABILITIES",
     "INNER_MECHANISM_CAPABILITIES",
@@ -2406,12 +2676,15 @@ __all__ = [
     "build_uncertainty_ritual",
     "build_silence_memory",
     "build_inner_library",
+    "build_joy_reinforcement",
+    "build_regret_signal",
     "calibrate_attachment_style",
     "classify_idea_fermentation",
     "classify_attention_budget",
     "classify_reflex_stimulus",
     "classify_memory_texture",
     "classify_subjective_time",
+    "classify_immune_tolerance",
     "compile_personal_mythology",
     "compile_symbolic_memory",
     "compute_life_pulse",
@@ -2433,10 +2706,13 @@ __all__ = [
     "plan_dream_rehearsal",
     "plan_repair_curve",
     "resolve_value_hierarchy",
+    "resolve_affective_temperature",
     "resolve_internal_weather",
     "review_inner_ethics",
     "run_shadow_persona_test",
     "segment_episode_memory",
     "shed_cognitive_load",
     "check_self_continuity",
+    "digest_emotional_event",
+    "quarantine_failure",
 ]

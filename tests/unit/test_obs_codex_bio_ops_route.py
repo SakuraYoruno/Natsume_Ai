@@ -243,6 +243,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "self_continuity_checksum",
         "memory_dream_distillation",
     }
+    assert payload["bio_ops"]["affect_learning"]["capability_count"] == 6
+    assert payload["bio_ops"]["affect_learning"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["affect_learning"]["capabilities"]} == {
+        "affective_temperature",
+        "immune_tolerance",
+        "emotional_digestion",
+        "regret_signal",
+        "joy_reinforcement",
+        "failure_quarantine",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

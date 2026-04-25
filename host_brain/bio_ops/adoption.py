@@ -33,6 +33,7 @@ BIO_OPS_TRACE_ONLY_CAPABILITIES: frozenset[str] = frozenset(
 
 BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
     {
+        "affective_temperature",
         "aesthetic_consistency_auditor",
         "body_map_system",
         "capability_self_awareness",
@@ -44,13 +45,17 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "dream_rehearsal",
         "dignity_guard",
         "embodiment_director",
+        "emotional_digestion",
         "existential_load",
+        "failure_quarantine",
         "growth_stage_system",
         "identity_fork_guard",
         "episode_memory",
         "inner_parliament",
         "inner_ethics_review",
         "inner_library",
+        "immune_tolerance",
+        "joy_reinforcement",
         "life_pulse",
         "memory_dream_distillation",
         "memory_ethics_auditor",
@@ -66,6 +71,7 @@ BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
         "relationship_friction",
         "relationship_boundary_guardian",
         "repair_curve",
+        "regret_signal",
         "self_explanation_layer",
         "self_model",
         "self_boundary_membrane",
