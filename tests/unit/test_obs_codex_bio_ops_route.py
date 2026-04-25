@@ -409,3 +409,34 @@ def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypa
         json={"owner_organ": "social_brain_agent"},
     )
     assert duplicate.status_code == 409
+
+
+def test_codex_bio_ops_daily_cycle_api_writes_observable_run(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(route_module, "OBSERVABLE_EFFECTS_ROOT", tmp_path)
+    app = FastAPI()
+    app.include_router(route_module.router)
+    client = TestClient(app)
+
+    response = client.post(
+        "/obs/codex-bio-ops/daily-cycle/run",
+        json={
+            "run_id": "daily-api-test",
+            "inputs": {
+                "evidence_refs": ["pytest:obs_daily"],
+                "message": "继续",
+                "planned_path": ["bio_ops_daily_cycle"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["run_id"] == "daily-api-test"
+    assert payload["direct_long_term_write"] is False
+    assert (tmp_path / "daily-api-test" / "bio_ops_daily_full.json").exists()
+
+    observed = client.get("/obs/codex-bio-ops?run_id=daily-api-test").json()
+    assert observed["ok"] is True
+    assert observed["bio_ops"]["capability_count"] == payload["bio_ops_capability_count"]
+    assert observed["bio_ops"]["pending_adoptions"]

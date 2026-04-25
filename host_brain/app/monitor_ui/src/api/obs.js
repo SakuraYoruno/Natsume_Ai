@@ -257,6 +257,16 @@ export function fetchCodexBioOpsObservability(params = {}) {
   return request(`/obs/codex-bio-ops${qs ? '?' + qs : ''}`)
 }
 
+export function runCodexBioOpsDailyCycle(body = {}) {
+  return request('/obs/codex-bio-ops/daily-cycle/run', {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
 export function fetchCodexBioOpsAdoptions(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

@@ -25,6 +25,7 @@ import {
   materializeCodexBioOpsOwnerInbox,
   materializeCodexBioOpsOwnerIntakePackets,
   rejectCodexBioOpsAdoption,
+  runCodexBioOpsDailyCycle,
 } from '../api/obs.js'
 import { useCodexBioOpsObservabilityQuery } from '../queries/codexBioOpsQueries.js'
 
@@ -1164,6 +1165,9 @@ export default function CodexBioOpsObservability() {
   const pollingInterval = useAppStore((state) => state.pollingInterval)
   const pollingTick = useAppStore((state) => state.pollingTick)
   const pageVisible = useAppStore((state) => state.pageVisible)
+  const [dailyRunning, setDailyRunning] = useState(false)
+  const [dailyRunResult, setDailyRunResult] = useState(null)
+  const [dailyRunError, setDailyRunError] = useState(null)
   const query = useCodexBioOpsObservabilityQuery({
     pollingEnabled: pollingEnabled && pageVisible,
     pollingInterval,
@@ -1192,6 +1196,25 @@ export default function CodexBioOpsObservability() {
     () => Object.values(statusCounts).reduce((sum, value) => sum + Number(value || 0), 0),
     [statusCounts]
   )
+  const runDailyCycle = async () => {
+    setDailyRunning(true)
+    setDailyRunError(null)
+    try {
+      const payload = await runCodexBioOpsDailyCycle({
+        inputs: {
+          evidence_refs: ['monitor_ui:manual_daily_cycle'],
+          message: 'monitor ui daily cycle',
+          planned_path: ['bio_ops_daily_cycle'],
+        },
+      })
+      setDailyRunResult(payload)
+      await query.refetch?.()
+    } catch (err) {
+      setDailyRunError(err)
+    } finally {
+      setDailyRunning(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -1221,9 +1244,30 @@ export default function CodexBioOpsObservability() {
               <RefreshCw size={13} className={query.refreshing ? 'animate-spin' : ''} />
               刷新
             </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={dailyRunning}
+              onClick={runDailyCycle}
+            >
+              <Activity size={13} className={dailyRunning ? 'animate-pulse' : ''} />
+              {dailyRunning ? '运行中' : '运行 daily cycle'}
+            </button>
           </div>
         </div>
       </div>
+
+      {dailyRunResult ? (
+        <NoticeBanner variant="success" title="BioOps daily cycle 已生成">
+          run {dailyRunResult.run_id} · {dailyRunResult.bio_ops_capability_count} 个能力 · owner pending {dailyRunResult.pending_owner_adoptions || 0}
+        </NoticeBanner>
+      ) : null}
+
+      {dailyRunError ? (
+        <NoticeBanner variant="error" title="BioOps daily cycle 运行失败">
+          {dailyRunError.message}
+        </NoticeBanner>
+      ) : null}
 
       {query.error ? (
         <NoticeBanner variant="error" title="Codex / BioOps 观测加载失败">

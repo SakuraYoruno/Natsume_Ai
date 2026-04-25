@@ -31,6 +31,7 @@ from host_brain.bio_ops.capabilities import (
     TRUST_FOUNDATION_CAPABILITIES,
     list_capability_specs,
 )
+from host_brain.bio_ops.daily_cycle import run_bio_ops_daily_cycle_artifact_run
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.codex_runtime.artifact_store import sanitize_segment
@@ -769,6 +770,22 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
         "runtime_traces": traces,
         "artifacts": _artifact_refs(run_dir, summary),
     }
+
+
+@router.post("/codex-bio-ops/daily-cycle/run")
+def run_codex_bio_ops_daily_cycle(
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    payload = _as_dict(body)
+    run_id = str(payload.get("run_id") or "").strip() or None
+    inputs = _as_dict(payload.get("inputs"))
+    result = run_bio_ops_daily_cycle_artifact_run(
+        output_root=OBSERVABLE_EFFECTS_ROOT,
+        run_id=run_id,
+        inputs=inputs,
+    )
+    result["route"] = "/obs/codex-bio-ops/daily-cycle/run"
+    return result
 
 
 @router.get("/codex-bio-ops/adoptions")
