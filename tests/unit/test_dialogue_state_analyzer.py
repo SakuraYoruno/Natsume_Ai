@@ -140,6 +140,39 @@ def test_conversation_interpretation_bare_name_counts_as_self_identify() -> None
     assert interpretation.recent_identity_answered is True
 
 
+def test_conversation_interpretation_image_only_without_question_is_social_reply() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[图片消息]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "core_observation": "一张动漫人物表情图。",
+        },
+    )
+
+    assert interpretation.literal_topic == "emoji_social_reply"
+    assert interpretation.interaction_move == "playful_ping"
+    assert interpretation.user_stance == "playful"
+
+
+def test_conversation_interpretation_screenshot_only_stays_attachment_ack() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[图片消息]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "artifact_type": "screenshot",
+            "observed_types": ["screenshot"],
+            "visible_text": "设置失败",
+        },
+    )
+
+    assert interpretation.literal_topic == "attachment_only_no_question"
+
+
 def test_conversation_interpretation_image_social_followup_deny_is_repair_needed() -> None:
     interpretation = interpret_conversation(
         recent_turns=[

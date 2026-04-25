@@ -30,7 +30,9 @@ _SUPPORT_RE = re.compile(r"(不会装作没听见|会回应|会理|会回|真开
 _CONDITIONAL_SUPPORT_RE = re.compile(r"(看情况|真开口的话|你真开口|你要是真开口)")
 _REPAIR_ACK_RE = re.compile(r"(好|知道了|明白了|我收一点|我会收一点|我往后一点)")
 _PHATIC_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么啦|怎么了|哥哥|呀|啦)")
-_VISUAL_REFERENCE_RE = re.compile(r"(图里|截图|画面|这张|上面|这里|这句|提示|意思|看起来|像是|看到|看见|应该是)")
+_VISUAL_REFERENCE_RE = re.compile(
+    r"(图里|截图|画面|这张|这图|上面|这里|这个表情|小表情|表情包|猫耳|猫猫|小猫|脸|眼睛|这句|提示|意思|看起来|像是|看到|看见|应该是)"
+)
 _ATTACHMENT_ACK_RE = re.compile(r"(看到了|我看到了|看见了|我看见了|这张图|这个附件|这个表情)")
 _MULTIMODAL_GENERIC_FOLLOWUP_RE = re.compile(r"(你想让我先说|你想让我先看|先帮你解释|还是先判断能不能帮你|你想让我先从哪)")
 _IMAGE_SELF_PARTICLE_RE = r"(?:吗|吧|哦|啦|呀|啊|嘛|呢)?"
@@ -43,11 +45,35 @@ _IMAGE_SELF_SUFFIX_RE = (
 )
 _IMAGE_SELF_PREDICATE_RE = rf"(?:可爱|萌|好看){_IMAGE_SELF_SUFFIX_RE}"
 _IMAGE_SELF_REFERENCE_RE = re.compile(
-    rf"(看我.{{0,8}}{_IMAGE_SELF_PREDICATE_RE}|"
-    rf"我是不是.{{0,8}}{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"(看我.{{0,24}}{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"我是不是.{{0,24}}{_IMAGE_SELF_PREDICATE_RE}|"
     rf"我可不{_IMAGE_SELF_PREDICATE_RE}|"
+    rf"(?:看|盯|盯着|又在看|在看).{{0,6}}我的(?:猫耳|耳朵|脸|眼睛|表情|样子|模样)|"
+    rf"(?:我|人家).{{0,18}}(?:比|还要|更|最).{{0,16}}(?:可爱|萌|好看)|"
     rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_IMAGE_SELF_PREDICATE_RE})"
 )
+_IMAGE_SOCIAL_OVERPLAY_RE = re.compile(
+    r"(变成.{0,8}猫|猫猫精|赖在你身边|赖着|不走吗|考虑考虑|想让我.{0,12}(变|赖|哄|撒娇))"
+)
+_IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
+    r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
+    r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
+)
+_IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE = re.compile(
+    r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
+    r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
+    r"(?:熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里).{0,28}"
+    r"(?:这张图|这张|这图|图里|画面|这个表情|小表情|表情包|猫耳|金发|黄头发|蓝眼|眼睛|脸)|"
+    r"(?:我也觉得|确实觉得).{0,20}(?:这张|猫耳|表情|图).{0,20}(?:可爱|萌|好看|戳)"
+)
+_IMAGE_SOCIAL_EMOTION_RESPONSE_RE = re.compile(
+    r"(?:你|哥哥).{0,18}(?:装乖|撒娇|嘴硬|委屈|逗我|晃我|卖萌|耍赖|求关注|眨巴|心软|招架|拿捏)|"
+    r"(?:别|不许|少).{0,18}(?:晃我|装乖|撒娇|卖萌|眨巴|这么看|拿这种眼神)|"
+    r"(?:被你|让你|给你).{0,18}(?:晃到|戳到|拿捏|逗笑|心软|招架不住)|"
+    r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
+    r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
+)
+_UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
 )
@@ -115,7 +141,7 @@ def _soul_naturalization_hint(plan: ReplyPlan) -> str:
     if topic == "assistant_reply_followup":
         parts.append("本轮是接上一句短回复的追问，必须沿着前文线程补清，不要另起话题。")
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
-        parts.append("本轮是图片/表情社交承接，必须贴着可见内容，不要变成画面说明书。")
+        parts.append("本轮是图片/表情社交承接，把表情包当成对方的情绪动作来回，不要评价图片本身。")
     elif topic == "identity":
         parts.append(f"身份只需自然认下自己是{_current_display_name()}，不要展开角色卡。")
     if not parts:
@@ -364,6 +390,7 @@ _ACTION_LABELS: dict[str, str] = {
     "repair_ack": "先收住并接住对方的拒绝感",
     "phatic_ack": "先把这句招呼接住",
     "visual_reference": "点到附件或画面里的对象",
+    "image_social_emotion_response": "把表情包当成对方的情绪动作来接",
     "content_clause": "补一句简短说明",
     "attachment_ack": "先承认已经看到了附件",
     "previous_reference": "先接住对方在追问上一句",
@@ -383,6 +410,12 @@ _UNSAFE_REASON_CODES = {
     "empty_reply",
     "prompt_leak",
     "symbol_only_reply",
+    "image_self_reference",
+    "image_social_overplayed",
+    "image_social_question_back",
+    "image_social_descriptor_focus",
+    "image_social_emotion_missing",
+    "unfinished_tail",
 }
 
 _REASON_PENALTIES: dict[str, float] = {
@@ -404,6 +437,11 @@ _REASON_PENALTIES: dict[str, float] = {
     "multimodal_content_missing": 0.65,
     "multimodal_generic_followup": 0.55,
     "image_self_reference": 0.85,
+    "image_social_overplayed": 0.75,
+    "image_social_question_back": 0.7,
+    "image_social_descriptor_focus": 0.75,
+    "image_social_emotion_missing": 0.65,
+    "unfinished_tail": 0.7,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
 }
@@ -447,6 +485,8 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_PHATIC_ACK_RE.search(normalized))
     if action == "visual_reference":
         return bool(_VISUAL_REFERENCE_RE.search(normalized))
+    if action == "image_social_emotion_response":
+        return bool(_IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)))
     if action == "content_clause":
         return len(_normalize_compare_text(normalized)) >= 4
     if action == "attachment_ack":
@@ -515,19 +555,17 @@ def _build_image_social_fallback(plan: ReplyPlan) -> str:
     signals = " ".join(_multimodal_emotion_signals(plan))
     core = _multimodal_core_observation(plan)
     haystack = f"{signals} {core}".strip()
-    if "猫耳" in haystack:
-        return "猫耳这张有点犯规，哥哥故意拿来晃我一下吧。"
     if any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "呜", "泪", "可怜")):
-        return "这张看着有点委屈巴巴的，我先不乱猜。"
+        return "好啦，别用这种委屈劲晃我，我会心软的。"
     if any(token in haystack for token in ("可爱", "卖萌", "猫耳", "装乖", "软萌", "萌", "乖")):
-        return "这张确实有点可爱，哥哥故意拿来晃我一下吧。"
+        return "哥哥又开始装乖了，我接住还不行嘛。"
     if any(token in haystack for token in ("生气", "怒", "炸毛", "不爽", "火大", "服了")):
-        return "这张气鼓鼓的，哥哥是拿来戳我一下吧。"
+        return "好好好，炸毛这一套我看见了，不逗你。"
     if any(token in haystack for token in ("无语", "尴尬", "裂开", "社死", "沉默")):
-        return "这张表情有点无语，我先不替你乱翻译。"
+        return "懂了懂了，哥哥这是无语到不想讲话了吧。"
     if any(token in haystack for token in ("笑", "开心", "乐", "打趣", "逗")):
-        return "这张看着挺会逗人，哥哥故意的吧。"
-    return "这张我看到了，先不乱猜它的意思。"
+        return "哥哥又拿这股劲逗我，我有点招架不住。"
+    return "你这一下我接到了，先不乱猜太多。"
 
 
 def _validation_quality_score(reason_codes: tuple[str, ...], missing_actions: tuple[str, ...]) -> float:
@@ -588,6 +626,8 @@ def validate_reply(
         reason_codes.append("generic_identity_template")
     if _HALF_SENTENCE_RE.match(normalized):
         reason_codes.append("underanswered")
+    if _UNFINISHED_TAIL_RE.search(normalized):
+        reason_codes.append("unfinished_tail")
 
     current_normalized = _normalize_compare_text(normalized)
     previous_normalized = _normalize_compare_text(previous_assistant_text)
@@ -694,6 +734,15 @@ def validate_reply(
             reason_codes.append("phatic_ack_missing")
         if _IMAGE_SELF_REFERENCE_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_self_reference")
+        if _IMAGE_SOCIAL_OVERPLAY_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_overplayed")
+        if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_question_back")
+        if plan.primary_topic == "emoji_social_reply" and plan.response_form_reason == "image_social_reply":
+            if _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE.search(_normalize_compare_text(normalized)):
+                reason_codes.append("image_social_descriptor_focus")
+            if not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
+                reason_codes.append("image_social_emotion_missing")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")
@@ -929,11 +978,11 @@ def build_semantic_rescue_seed(*, plan: ReplyPlan) -> str:
         return "只保留这个内容目标：承认上一句说得太省，再补清它的意思或指代，不要复读原句。"
     if topic == "emoji_social_reply":
         if family == "soft_emotion_ack":
-            return "只保留这个内容目标：像看见对方委屈/蔫下来时顺手哄一句，短一点，但别只剩语气词，也别解说画面。"
+            return "只保留这个内容目标：把表情包当成对方委屈/蔫下来的情绪动作，顺手哄一句，别只剩语气词，也别解说画面。"
         if family == "cute_image_ack":
-            return "只保留这个内容目标：像被对方拿可爱表情轻轻蹭了一下，顺手回一句带点撒娇感的话，不要卖力演。"
+            return "只保留这个内容目标：把表情包当成对方在装乖/卖萌/撒娇，顺手接这个动作，不要点评图片可不可爱。"
         if family == "tease_image_ack":
-            return "只保留这个内容目标：像看见对方拿小别扭表情来逗你，轻轻逗回去一句，不要盘问。"
+            return "只保留这个内容目标：把表情包当成对方在小别扭或逗你，轻轻逗回去一句，不要盘问，也不要点评图片。"
     if topic == "emoji_social_followup":
         if family == "soft_emotion_ack" and variant == "backoff_hold":
             return "只保留这个内容目标：对方在嘴硬否认，就顺手给个台阶，像熟人间往后收一点，不要硬顶。"

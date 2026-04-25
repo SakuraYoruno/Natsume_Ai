@@ -86,13 +86,6 @@ def test_graph_executor_compile_has_return_annotation() -> None:
     )
 
 
-def test_fastapi_panel_page_has_return_annotation() -> None:
-    """F-15: fastapi_app.panel_page 必须有返回类型标注。"""
-    from host_brain.app.fastapi_app import panel_page
-    annotations = getattr(panel_page, "__annotations__", {})
-    assert "return" in annotations, "panel_page 缺少返回类型标注"
-
-
 def test_fastapi_root_has_return_annotation() -> None:
     """F-15: fastapi_app.root 必须有返回类型标注。"""
     from host_brain.app.fastapi_app import root

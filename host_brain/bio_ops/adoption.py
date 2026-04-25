@@ -18,6 +18,9 @@ BIO_OPS_CANDIDATE_CAPABILITIES: dict[str, str] = {
     "forgetting_designer": "glymphatic_agent",
     "autobiography_compiler": "hippocampus_agent",
     "immune_memory_builder": "immune_agent",
+    "latent_preference_miner": "social_brain_agent",
+    "promise_ledger": "prefrontal_agent",
+    "self_repair_story": "immune_agent",
 }
 
 BIO_OPS_TRACE_ONLY_CAPABILITIES: frozenset[str] = frozenset(
@@ -32,23 +35,80 @@ BIO_OPS_TRACE_ONLY_CAPABILITIES: frozenset[str] = frozenset(
 
 BIO_OPS_REPORT_ONLY_CAPABILITIES: frozenset[str] = frozenset(
     {
+        "affective_temperature",
         "aesthetic_consistency_auditor",
+        "attention_topography",
+        "body_plasticity",
         "body_map_system",
         "capability_self_awareness",
+        "channel_soul",
+        "competence_humility",
+        "consent_gradient",
+        "context_gravity",
+        "cognitive_landmarks",
+        "cognitive_load_shedding",
         "dream_rehearsal",
+        "dignity_guard",
+        "desire_lattice",
+        "drive_conflict_layer",
         "embodiment_director",
+        "emotional_digestion",
+        "existential_load",
+        "failure_quarantine",
+        "gentle_degradation",
         "growth_stage_system",
+        "identity_fork_guard",
+        "episode_memory",
         "inner_parliament",
+        "inner_ethics_review",
+        "inner_library",
+        "immune_tolerance",
+        "joy_reinforcement",
+        "life_pulse",
+        "long_task_companion_mode",
+        "memory_dream_distillation",
         "memory_ethics_auditor",
+        "memory_texture",
+        "mood_inertia",
+        "narrative_identity",
+        "narrative_debugger",
         "organ_ct_scan",
         "organ_wiring_audit",
+        "open_loop_manager",
         "persona_antibody",
         "persona_drift_microscope",
+        "quiet_presence",
+        "attachment_style_calibrator",
+        "relationship_friction",
         "relationship_boundary_guardian",
+        "repair_curve",
+        "regret_signal",
         "self_explanation_layer",
+        "self_model",
+        "self_boundary_membrane",
+        "self_continuity_checksum",
+        "silence_memory",
         "skill_microbiome",
+        "social_recovery",
+        "social_contract",
+        "symbolic_memory",
+        "personal_mythology",
         "subconscious_bias_sampler",
+        "self_interrupt",
+        "subjective_time",
         "truthfulness_cortex",
+        "trust_gradient",
+        "trust_thermostat",
+        "uncertainty_ritual",
+        "user_mirror_model",
+        "value_hierarchy",
+        "intention_metabolism",
+        "need_want_impulse",
+        "shadow_persona_test",
+        "social_mask_system",
+        "idea_fermentation_pool",
+        "inner_outer_world_boundary",
+        "ritual_system",
     }
 )
 
@@ -168,7 +228,9 @@ def build_bio_ops_adoption_candidate(
     result_payload: Mapping[str, Any],
 ) -> BioOpsAdoptionCandidate | None:
     policy = resolve_bio_ops_adoption_policy(task.capability)
-    if policy["mode"] != "owner_candidate" and str(result_payload.get("status") or "") != "CANDIDATE":
+    if str(result_payload.get("status") or "") != "CANDIDATE":
+        return None
+    if policy["mode"] != "owner_candidate":
         return None
 
     allowed, reason_code, detail = validate_bio_ops_task_safety(task)

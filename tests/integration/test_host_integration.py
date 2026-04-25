@@ -316,34 +316,19 @@ class TestCanonSyncHealthEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# 6. GET /obs/metrics — 可观测性指标
+# 6. Obs endpoints are isolated from hostmain
 # ---------------------------------------------------------------------------
 
 class TestObsMetricsEndpoint:
-    """T-INT-OBS-METRICS: GET /obs/metrics 可观测性指标端点集成测试。"""
+    """Hostmain 不承载 /obs/*；观测指标由 obs side 提供。"""
 
-    def test_obs_metrics_returns_200(self, test_client):
-        """T-INT-OBS-METRICS-01: /obs/metrics 返回 200。"""
+    def test_obs_metrics_not_on_hostmain(self, test_client):
         resp = test_client.get("/obs/metrics")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
-    def test_obs_metrics_response_is_dict(self, test_client):
-        """T-INT-OBS-METRICS-02: /obs/metrics 响应为字典。"""
-        resp = test_client.get("/obs/metrics")
-        data = resp.json()
-        assert isinstance(data, dict)
-
-    def test_obs_metrics_has_timestamp(self, test_client):
-        """T-INT-OBS-METRICS-03: /obs/metrics 包含 timestamp。"""
-        resp = test_client.get("/obs/metrics")
-        data = resp.json()
-        assert "timestamp" in data
-        assert isinstance(data["timestamp"], int)
-
-    def test_obs_metrics_with_request_id(self, test_client):
-        """T-INT-OBS-METRICS-04: /obs/metrics 支持 request_id 参数。"""
+    def test_obs_metrics_query_not_on_hostmain(self, test_client):
         resp = test_client.get("/obs/metrics?request_id=test-req-001")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -374,38 +359,29 @@ class TestStartupEndpoint:
 
 
 # ---------------------------------------------------------------------------
-# 8. POST /observability/trace — 请求链路追踪
+# 8. Observability trace is isolated from hostmain
 # ---------------------------------------------------------------------------
 
 class TestObservabilityTraceEndpoint:
-    """T-INT-OBS-TRACE: POST /observability/trace 链路追踪端点集成测试。"""
+    """Hostmain 不承载观测 trace；该 API 由 obs side 提供。"""
 
-    def test_trace_unknown_request_id(self, test_client):
-        """T-INT-OBS-TRACE-01: 未知 request_id 返回 trace_status=NOT_FOUND 或 200。"""
+    def test_trace_unknown_request_id_not_on_hostmain(self, test_client):
         resp = test_client.post(
             "/observability/trace",
             json={"request_id": "req::nonexistent::001"},
         )
-        # 未知 request_id 可能返回 200（NOT_FOUND 状态）或 404
-        assert resp.status_code in {200, 404}
+        assert resp.status_code == 404
 
-    def test_trace_response_schema(self, test_client):
-        """T-INT-OBS-TRACE-02: /observability/trace 响应包含必要字段。"""
+    def test_trace_schema_request_not_on_hostmain(self, test_client):
         resp = test_client.post(
             "/observability/trace",
             json={"request_id": "req::schema::test::001"},
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            assert "request_id" in data
-            assert "trace_status" in data
-            assert "timeline_total" in data
-            assert "timestamp" in data
+        assert resp.status_code == 404
 
-    def test_trace_missing_request_id_422(self, test_client):
-        """T-INT-OBS-TRACE-03: 缺少 request_id → 422。"""
+    def test_trace_missing_request_id_not_on_hostmain(self, test_client):
         resp = test_client.post("/observability/trace", json={})
-        assert resp.status_code == 422
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -732,22 +708,22 @@ class TestToolAPIIntegration:
 # ---------------------------------------------------------------------------
 
 class TestObsAPIIntegration:
-    """T-INT-OBS: Obs API 路由集成测试。"""
+    """Hostmain 上 /obs/* 必须不可用。"""
 
     def test_obs_timeline_returns_200(self, test_client):
         """T-INT-OBS-01: GET /obs/timeline 返回 200。"""
         resp = test_client.get("/obs/timeline")
-        assert resp.status_code in {200, 404}  # 路由可能不存在
+        assert resp.status_code == 404
 
     def test_obs_sessions_returns_200(self, test_client):
         """T-INT-OBS-02: GET /obs/sessions 返回 200。"""
         resp = test_client.get("/obs/sessions")
-        assert resp.status_code in {200, 404}
+        assert resp.status_code == 404
 
     def test_obs_metrics_with_params(self, test_client):
-        """T-INT-OBS-03: GET /obs/metrics 支持查询参数。"""
+        """T-INT-OBS-03: GET /obs/metrics 不在 hostmain 提供。"""
         resp = test_client.get("/obs/metrics?request_id=req::obs::test::001")
-        assert resp.status_code == 200
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -879,7 +855,7 @@ class TestErrorHandlingAndEdgeCases:
         resp = test_client.get("/", follow_redirects=False)
         assert resp.status_code in {301, 302, 307, 308}
 
-    def test_panel_redirect(self, test_client):
-        """T-INT-ERR-07: GET /panel 重定向到监控面板。"""
+    def test_panel_not_on_hostmain(self, test_client):
+        """T-INT-ERR-07: GET /panel 不在 hostmain 提供。"""
         resp = test_client.get("/panel", follow_redirects=False)
-        assert resp.status_code in {301, 302, 307, 308}
+        assert resp.status_code == 404

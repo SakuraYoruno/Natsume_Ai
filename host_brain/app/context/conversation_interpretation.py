@@ -116,7 +116,7 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
     if text and _LITERAL_QUERY_RE.search(text):
         return "literal_description"
     if media_only:
-        if is_social_image:
+        if primary_modality in {"image", "emoji"} and not is_screenshot:
             return "emoji_social_reply"
         return "attachment_only_no_question"
     if is_social_image:
@@ -372,6 +372,8 @@ def interpret_conversation(
             user_stance = "playful"
         else:
             user_stance = "probing"
+    elif literal_topic == "emoji_social_reply":
+        user_stance = "playful"
     elif _LIGHT_TEASE_RE.search(text):
         user_stance = "playful"
     elif literal_topic and repeat_question_count > 0 and _CHALLENGING_RE.search(text):

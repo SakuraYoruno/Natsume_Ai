@@ -25,6 +25,10 @@ _OLD_TEMPLATE_MARKERS = (
     "闹别扭",
     "会错意",
     "多想了一点",
+    "猫猫精",
+    "赖在你身边",
+    "赖着",
+    "考虑考虑",
     "怎么突然丢",
     "突然发这个给我看",
     "突然这个样子",
@@ -46,25 +50,30 @@ _SELF_IMAGE_SUFFIX_RE = (
 )
 _SELF_IMAGE_PREDICATE_RE = rf"(?:可爱|萌|好看){_SELF_IMAGE_SUFFIX_RE}"
 _SELF_AS_IMAGE_RE = re.compile(
-    rf"(看我.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
-    rf"我是不是.{{0,8}}{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"(看我.{{0,24}}{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"我是不是.{{0,24}}{_SELF_IMAGE_PREDICATE_RE}|"
     rf"我可不{_SELF_IMAGE_PREDICATE_RE}|"
+    rf"(?:看|盯|盯着|又在看|在看).{{0,6}}我的(?:猫耳|耳朵|脸|眼睛|表情|样子|模样)|"
+    rf"(?:我|人家).{{0,18}}(?:比|还要|更|最).{{0,16}}(?:可爱|萌|好看)|"
     rf"(?:我|人家)(?:今天|现在)?(?:也)?(?:很|超|好|太)?{_SELF_IMAGE_PREDICATE_RE})"
 )
-_WEAK_IMAGE_ANCHORS = {"可爱", "卖萌", "软萌", "萌", "表情"}
-_VISUAL_REFERENCE_MARKERS = (
-    "这张",
-    "这图",
-    "图里",
-    "画面",
-    "上面",
-    "这里",
-    "这个表情",
-    "小表情",
-    "表情包",
-    "猫耳",
-    "脸",
-    "眼睛",
+_IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
+    r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
+    r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
+)
+_DESCRIPTOR_FOCUS_RE = re.compile(
+    r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
+    r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
+    r"(?:熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里).{0,28}"
+    r"(?:这张图|这张|这图|图里|画面|这个表情|小表情|表情包|猫耳|金发|黄头发|蓝眼|眼睛|脸)|"
+    r"(?:我也觉得|确实觉得).{0,20}(?:这张|猫耳|表情|图).{0,20}(?:可爱|萌|好看|戳)"
+)
+_EMOTION_RESPONSE_RE = re.compile(
+    r"(?:你|哥哥).{0,18}(?:装乖|撒娇|嘴硬|委屈|逗我|晃我|卖萌|耍赖|求关注|眨巴|心软|招架|拿捏)|"
+    r"(?:别|不许|少).{0,18}(?:晃我|装乖|撒娇|卖萌|眨巴|这么看|拿这种眼神)|"
+    r"(?:被你|让你|给你).{0,18}(?:晃到|戳到|拿捏|逗笑|心软|招架不住)|"
+    r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
+    r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
 )
 
 
@@ -129,24 +138,24 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
         return True
     if _SELF_AS_IMAGE_RE.search(compact):
         return True
+    if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(compact):
+        return True
+    if _DESCRIPTOR_FOCUS_RE.search(compact):
+        return True
     if "这张图" in compact and any(marker in compact for marker in ("内容大概是", "我看到的内容", "画面里")):
         return True
     return False
 
 
-def candidate_uses_image_observation(candidate_text: str, multimodal: Mapping[str, Any] | None) -> bool:
+def candidate_responds_to_image_social_emotion(candidate_text: str) -> bool:
     compact = compact_image_social_text(candidate_text)
     if not compact:
         return False
-    if _SELF_AS_IMAGE_RE.search(compact):
+    if is_image_social_surface_sample_disallowed(candidate_text):
         return False
-    if any(marker in compact for marker in _VISUAL_REFERENCE_MARKERS):
-        return True
-    anchors = image_social_anchor_terms(multimodal)
-    strong_anchors = [anchor for anchor in anchors if anchor not in _WEAK_IMAGE_ANCHORS]
-    if strong_anchors and any(anchor in compact for anchor in strong_anchors):
-        return True
-    return False
+    if _DESCRIPTOR_FOCUS_RE.search(compact):
+        return False
+    return bool(_EMOTION_RESPONSE_RE.search(compact))
 
 
 def build_emergency_image_social_reply(multimodal: Mapping[str, Any] | None) -> str:
@@ -163,7 +172,7 @@ def build_emergency_image_social_reply(multimodal: Mapping[str, Any] | None) -> 
 
 __all__ = [
     "build_emergency_image_social_reply",
-    "candidate_uses_image_observation",
+    "candidate_responds_to_image_social_emotion",
     "compact_image_social_text",
     "image_social_anchor_terms",
     "image_social_observation_text",

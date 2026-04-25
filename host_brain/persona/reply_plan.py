@@ -652,9 +652,9 @@ def _build_reply_contract(
     mapping = {
         "phatic_wave": "先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
         "playful_wave": "先把这句轻松招呼接住，再回一句自然短接话，不要只剩感叹词。",
-        "soft_emotion_ack": "先把图里的情绪接住，再顺着这个情绪回一句，不要只剩语气词。",
-        "cute_image_ack": "先把图里的可爱/卖萌感接住，再顺着这股语气回一句，不要只剩语气词。",
-        "tease_image_ack": "先把图里的小别扭/吐槽感接住，再轻轻回一句，不要只剩语气词。",
+        "soft_emotion_ack": "先把对方发图表达的情绪接住，再顺着这个情绪回一句，不要只剩语气词。",
+        "cute_image_ack": "先把对方装乖/卖萌的动作接住，再顺着这股语气回一句，不要只剩语气词。",
+        "tease_image_ack": "先把对方小别扭/吐槽的动作接住，再轻轻回一句，不要只剩语气词。",
         "observe_then_answer": "先点到附件/画面里的对象，再给一句简短说明，不要只回“嗯”。",
         "attachment_ack_then_wait": "先承认你已经看到了这个附件，再把话口轻轻让回去，不要只用感叹词。",
         "explain_previous_reply": "先接住对方是在追问上一句，再把上一句具体指代或意思补清楚，不要只剩语气词。",
@@ -681,16 +681,16 @@ def _build_reply_contract(
         ("phatic_wave", "presence"): "先让对方知道你在，再短短接一句，不要只剩空壳句。",
         ("phatic_wave", "light_ack"): "先接住这句轻招呼，再给一句短回应，不要只剩单个语气词。",
         ("playful_wave", "playful_ping"): "把这句轻松招呼接住，再自然回一句俏皮短接话，不要只剩语气词。",
-        ("soft_emotion_ack", "distress_image"): "先接住图里的委屈/难过，再顺着这个情绪回一句，不要解释画面。",
-        ("soft_emotion_ack", "soft_hold"): "先把图里的软软情绪接住，再轻轻回一句，不要解释画面。",
-        ("soft_emotion_ack", "steady_hold"): "先把图里的情绪稳稳接住，再顺着回一句，不要解释画面。",
-        ("soft_emotion_ack", "image_social"): "先把这张图里的情绪接住，再顺着回一句，不要解说画面。",
+        ("soft_emotion_ack", "distress_image"): "先接住表情包传来的委屈/难过，再顺着这个情绪回一句，不要解释画面。",
+        ("soft_emotion_ack", "soft_hold"): "先把对方软软的情绪动作接住，再轻轻回一句，不要解释画面。",
+        ("soft_emotion_ack", "steady_hold"): "先把表情包传来的情绪稳稳接住，再顺着回一句，不要解释画面。",
+        ("soft_emotion_ack", "image_social"): "先把对方发图表达的情绪动作接住，再顺着回一句，不要解说画面。",
         ("soft_emotion_ack", "backoff_hold"): "先接住对方是在回前一张图，再轻轻往后收一点，不要装作没接上上下文。",
         ("soft_emotion_ack", "explain_read"): "先承认自己是顺着刚才那张图理解到的，再用一句很自然的话把这个理解说清，不要重新解说画面。",
         ("soft_emotion_ack", "let_it_pass"): "先承认自己接住了上一张图的语气，再轻轻把这件事放过去，不要重新追问。",
-        ("cute_image_ack", "cute_ping"): "先把这张图的可爱/卖萌感接住，再顺着这股语气回一句，不要解释画面。",
-        ("cute_image_ack", "soft_hold"): "先把这张图里的软萌感觉接住，再轻轻回一句，不要解释画面。",
-        ("tease_image_ack", "light_nudge"): "先把这张图里的小别扭/小吐槽感接住，再轻一点顺手回一句，不要解释画面。",
+        ("cute_image_ack", "cute_ping"): "先把对方装乖/卖萌的动作接住，再顺着这股语气回一句，不要解释画面。",
+        ("cute_image_ack", "soft_hold"): "先把对方软软撒娇的动作接住，再轻轻回一句，不要解释画面。",
+        ("tease_image_ack", "light_nudge"): "先把对方小别扭/小吐槽的动作接住，再轻一点顺手回一句，不要解释画面。",
         ("tease_image_ack", "deny_nudge"): "先接住对方在嘴硬/否认，再顺着上一张图轻轻打趣一句，不要突然装作没上下文。",
         ("tease_image_ack", "light_explain"): "先顺着上一张图轻轻解释你为什么会那么说，再带一点熟人口吻，不要重新解说画面。",
         ("tease_image_ack", "soft_slide"): "先顺着上一张图轻轻带过去，像熟人间收一收这个小情绪，不要重新追问。",
@@ -751,26 +751,30 @@ def _refine_multimodal_contract(
     )
     if topic == "emoji_social_reply" and primary_modality == "image":
         extra_by_variant = {
-            ("soft_emotion_ack", "distress_image"): "把委屈/难过那层先接住，像顺手哄一句，不要只剩感叹词。",
-            ("soft_emotion_ack", "soft_hold"): "把软下来的感觉先接住，像顺手放轻一点，不要只剩语气词。",
-            ("soft_emotion_ack", "steady_hold"): "把低落/别扭那层先接住，像顺手问一句，不要说成看图报告。",
-            ("cute_image_ack", "cute_ping"): "把卖萌/可爱感接住，像被蹭了一下时顺手接话，不要过度卖萌。",
-            ("cute_image_ack", "soft_hold"): "把软萌感接住，顺手轻轻回一句，不要解说画面。",
-            ("tease_image_ack", "light_nudge"): "把小别扭/小吐槽接住，轻轻逗一下，不要上纲上线。",
+            ("soft_emotion_ack", "distress_image"): "按表情包表达的情绪来接：像对方在委屈/蔫下来时顺手放轻一句。",
+            ("soft_emotion_ack", "soft_hold"): "按表情包表达的情绪来接：像对方在软软地撒娇或求关注，轻轻接住。",
+            ("soft_emotion_ack", "steady_hold"): "按表情包表达的情绪来接：先接住那层情绪，再稳稳回一句。",
+            ("cute_image_ack", "cute_ping"): "按表情包表达的动作来接：像对方在装乖/卖萌/晃你，直接回这个动作。",
+            ("cute_image_ack", "soft_hold"): "按表情包表达的动作来接：像对方在轻轻撒娇，顺手接住。",
+            ("tease_image_ack", "light_nudge"): "按表情包表达的动作来接：像对方在小别扭或逗你，轻一点逗回去。",
         }
-        extra_text = extra_by_variant.get((family, variant), "先把图里的情绪接住，再顺着这层语气自然接一句。")
+        extra_text = extra_by_variant.get((family, variant), "按表情包表达的情绪动作来接，不要把它当成图片点评。")
         return ReplyContract(
             text=" ".join(
                 part for part in (
                     base_text,
                     extra_text,
-                    "不要解说画面，也不要挂固定开放问句。",
+                    "只回一句短接话，别写成小剧场。",
+                    "必须先判断它像是在撒娇、装乖、委屈、嘴硬、逗你还是求关注，再对这个动作回一句。",
+                    "不要评价这张图/图里/猫耳/这个表情怎么样，也不要解说画面。",
+                    "不要把问题抛回给对方，不要问“是不是觉得这张图可爱”。",
+                    "不要把自己写成图片主体，不要写我的猫耳/我比猫猫可爱/变成猫这类展开。",
                 )
                 if str(part).strip()
             ),
-            required_actions=contract.required_actions,
+            required_actions=tuple(dict.fromkeys([*contract.required_actions, "image_social_emotion_response"])),
             forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
-            realization_steps=base_steps or ("先看出图里的情绪", "顺着这个情绪接一句"),
+            realization_steps=base_steps or ("识别表情包表达的情绪动作", "对这个情绪动作回一句"),
         )
     if topic == "emoji_social_followup":
         extra_by_variant = {
@@ -1517,6 +1521,13 @@ def _assemble_reply_plan(
     forbidden_tactics = used_recent
     forbidden_tactic_keys = used_recent_keys
     forbidden_tactic_signatures = used_recent_signatures
+    if topic in {"emoji_social_reply", "emoji_social_followup"}:
+        # Image/sticker social replies only have a tiny tactic vocabulary.
+        # We still rotate during trajectory selection, but forbidding every
+        # recent family leaves the generator with no valid way to answer.
+        forbidden_tactics = ()
+        forbidden_tactic_keys = ()
+        forbidden_tactic_signatures = ()
     tone_band = "warm_neutral" if affect_state.warmth_bias >= 0.5 else "guarded_soft"
     if affect_policy.should_be_withdrawn:
         tone_band = "guarded_soft"
@@ -1532,8 +1543,11 @@ def _assemble_reply_plan(
             forbidden_patterns.append("identity_name_restate")
         if trajectory.trajectory_stage != "first_turn":
             plan_confidence = 0.83
-    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping", "emoji_social_reply", "emoji_social_followup"}:
+    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
         forbidden_patterns.extend(["same_as_previous_reply", "repeated_tactic"])
+        plan_confidence = 0.8
+    elif topic in {"emoji_social_reply", "emoji_social_followup"}:
+        forbidden_patterns.extend(["same_as_previous_reply"])
         plan_confidence = 0.8
     elif topic in {"attachment_only_no_question", "meme_meaning", "literal_description", "screenshot_analysis", "capability_check"}:
         forbidden_patterns.extend(["same_as_previous_reply"])
@@ -1610,6 +1624,21 @@ def _assemble_reply_plan(
         force_buffering = True
     if topic == "assistant_reply_followup":
         force_buffering = True
+    max_chars = int(affect_policy.max_chars or 320)
+    max_sentences = int(affect_policy.max_sentences or 4)
+    should_be_brief = bool(affect_policy.should_be_brief)
+    if topic == "emoji_social_reply" and response_form_reason == "image_social_reply":
+        max_chars = min(max_chars, 52)
+        max_sentences = 1
+        should_be_brief = True
+    elif topic == "emoji_social_followup":
+        max_chars = min(max_chars, 64)
+        max_sentences = 1
+        should_be_brief = True
+    elif topic in {"greeting", "presence_ping", "light_ack", "phatic_punct", "playful_ping"}:
+        max_chars = min(max_chars, 48)
+        max_sentences = min(max_sentences, 1)
+        should_be_brief = True
 
     return ReplyPlan(
         primary_topic=topic,
@@ -1629,8 +1658,8 @@ def _assemble_reply_plan(
         secondary_response_form=secondary_response_form,
         response_form_reason=response_form_reason,
         allow_form_only_reply=allow_form_only_reply,
-        max_chars=affect_policy.max_chars,
-        max_sentences=affect_policy.max_sentences,
+        max_chars=max_chars,
+        max_sentences=max_sentences,
         warmth_floor=affect_policy.warmth_floor,
         warmth_ceiling=affect_policy.warmth_ceiling,
         intimacy_ceiling=affect_policy.intimacy_ceiling,
@@ -1638,7 +1667,7 @@ def _assemble_reply_plan(
         allow_followup=affect_policy.allow_followup,
         allow_proactive_after_reply=affect_policy.allow_proactive_after_reply,
         withdrawal_guard=affect_policy.withdrawal_guard,
-        should_be_brief=affect_policy.should_be_brief,
+        should_be_brief=should_be_brief,
         should_be_withdrawn=affect_policy.should_be_withdrawn,
         affect_summary=_qualitative_affect_summary(affect=affect_state, render_target_lang=render_target_lang),
         relationship_summary=_qualitative_relationship_summary(

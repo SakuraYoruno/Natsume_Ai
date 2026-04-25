@@ -23,7 +23,7 @@ from host_brain.persona.fallback_policy import (
     is_forbidden_surface_text,
 )
 from host_brain.persona.image_social_surface import (
-    candidate_uses_image_observation,
+    candidate_responds_to_image_social_emotion,
     image_social_observation_text,
     is_image_social_surface_sample_disallowed,
 )
@@ -361,27 +361,39 @@ class SurfaceRenderer:
         multimodal = dict(getattr(plan, "multimodal", {}) or {})
         observation_text = image_social_observation_text(multimodal)
         if not observation_text:
-            return self._fallback_result(request, reason_code="image_social_observation_empty")
+            request.trace_meta["image_social_surface_render"] = {
+                "status": "SKIPPED",
+                "invoked": False,
+                "affected_output": False,
+                "source": "surface",
+                "reason_code": "image_social_observation_empty",
+                "policy_version": SURFACE_CACHE_POLICY_VERSION,
+            }
+            return SurfaceResult(source="surface", skipped_reason="image_social_observation_empty")
         family = str(getattr(plan, "tactic_family", "") or "").strip()
         if family == "soft_emotion_ack":
             action_hint = "像看见对方发了有点蔫或委屈的图时顺手接一句，但不要替对方定性。"
         elif family == "tease_image_ack":
             action_hint = "像看见对方拿小表情来戳你时轻轻逗一句，别盘问，也别说教。"
         else:
-            action_hint = "顺着图里的可爱/卖萌感接一句，像被轻轻晃了一下，不要用力卖萌。"
+            action_hint = "顺着对方装乖/卖萌/求关注的动作接一句，像被轻轻晃了一下，不要用力卖萌。"
         system_prompt = (
             "你只负责把用户发来的图片/表情包接成一句自然聊天。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
+            "把表情包当成对方发来的情绪动作，不要当图片鉴赏。"
+            "回复对方正在表达的情绪：撒娇、装乖、委屈、嘴硬、逗你、求关注等。"
             "不要解释规则，不要写画面说明书，不要客服腔，不要只回语气词。"
             "禁止使用旧模板：突然这么可爱、想让我哄你吗、想跟我撒娇吗、怎么啦、闹别扭、会错意。"
             "用户发来的图不是你本人，不要说“我今天可爱吗/我可爱吗/看我可爱吗”。"
+            "不要评价“这张图/图里/猫耳/这个表情”怎么样。"
+            "不要把问题抛回给对方，不要问“你是不是觉得这张图可爱”。"
             f"\n\n{_compiled_soul_text()}"
         ).strip()
         user_prompt = (
-            f"图片观察：{observation_text}\n"
+            f"表情包观察（只用于判断情绪，不要复述）：{observation_text}\n"
             f"回应动作：{action_hint}\n"
             f"回复契约：{str(getattr(plan, 'reply_contract', '') or '').strip()}\n"
-            "改写要求：12-34个中文字符；最多一句；不要照抄图片观察；给4个不同候选，只输出 JSON。"
+            "改写要求：12-34个中文字符；最多一句；必须回对方的情绪动作；不要描述图片本身；给4个不同候选，只输出 JSON。"
         )
         return await self._render_candidates(
             request,
@@ -455,10 +467,10 @@ class SurfaceRenderer:
     ) -> tuple[bool, str]:
         if is_image_social_surface_sample_disallowed(candidate) or is_forbidden_surface_text(candidate):
             return False, "IMAGE_SURFACE_TEMPLATE_SHAPE"
-        if not candidate_uses_image_observation(candidate, multimodal):
-            return False, "IMAGE_SURFACE_OBSERVATION_NOT_USED"
-        if validation is not None and not bool(getattr(validation, "safe_to_emit", False)):
-            return False, "IMAGE_SURFACE_VALIDATION_UNSAFE"
+        if not candidate_responds_to_image_social_emotion(candidate):
+            return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
+        if not _validation_is_acceptable(validation):
+            return False, "IMAGE_SURFACE_VALIDATION_FAILED"
         return True, ""
 
     async def _render_candidates(
@@ -499,6 +511,11 @@ class SurfaceRenderer:
                 "timeout_ms": timeout_ms,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         except Exception as exc:
             request.trace_meta[trace_key] = {
@@ -509,6 +526,11 @@ class SurfaceRenderer:
                 "detail": str(exc)[:220],
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         latency_ms = int(getattr(result, "total_latency_ms", 0) or (int(time.time() * 1000) - started_ms))
         try:
@@ -524,6 +546,14 @@ class SurfaceRenderer:
                 "latency_ms": latency_ms,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    provider_name=str(getattr(result, "final_provider", "") or "").strip(),
+                    model_id=str(getattr(result, "final_model", "") or "").strip(),
+                    latency_ms=latency_ms,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         candidates = _extract_candidates(payload)
         if not candidates:
@@ -536,6 +566,14 @@ class SurfaceRenderer:
                 "latency_ms": latency_ms,
                 "policy_version": SURFACE_CACHE_POLICY_VERSION,
             }
+            if not fallback_on_all_rejected:
+                return self._unavailable_result(
+                    fallback_reason=fallback_reason,
+                    provider_name=str(getattr(result, "final_provider", "") or "").strip(),
+                    model_id=str(getattr(result, "final_model", "") or "").strip(),
+                    latency_ms=latency_ms,
+                    rejected=rejected,
+                )
             return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
         for candidate_index, raw_candidate in enumerate(candidates, start=1):
             candidate = str(raw_candidate or "").strip()
@@ -588,18 +626,35 @@ class SurfaceRenderer:
             "policy_version": SURFACE_CACHE_POLICY_VERSION,
         }
         if not fallback_on_all_rejected:
-            return SurfaceResult(
-                text="",
-                source="surface",
+            return self._unavailable_result(
+                fallback_reason=fallback_reason,
                 provider_name=str(getattr(result, "final_provider", "") or "").strip(),
                 model_id=str(getattr(result, "final_model", "") or "").strip(),
                 latency_ms=latency_ms,
-                rejected_candidates=tuple(rejected),
-                cacheable=False,
-                degraded=False,
-                skipped_reason=fallback_reason,
+                rejected=rejected,
             )
         return self._fallback_result(request, reason_code=fallback_reason, trace_key=trace_key)
+
+    def _unavailable_result(
+        self,
+        *,
+        fallback_reason: str,
+        provider_name: str = "",
+        model_id: str = "",
+        latency_ms: int = 0,
+        rejected: list[Mapping[str, Any]] | None = None,
+    ) -> SurfaceResult:
+        return SurfaceResult(
+            text="",
+            source="surface",
+            provider_name=provider_name,
+            model_id=model_id,
+            latency_ms=latency_ms,
+            rejected_candidates=tuple(rejected or ()),
+            cacheable=False,
+            degraded=False,
+            skipped_reason=fallback_reason,
+        )
 
     def _fallback_result(
         self,

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
-SURFACE_CACHE_POLICY_VERSION = "surface-v3-soul-only-20260425"
+SURFACE_CACHE_POLICY_VERSION = "surface-v5-sticker-emotion-20260425"
 
 _COMPACT_RE = re.compile(r"[\s\u3000。！？?!，,、~～…；;：:\"“”'‘’（）()\[\]【】]+")
 _HOST_MODEL_MARKERS = ("fallback", "emergency", "deterministic", "placeholder", "ack")
@@ -47,6 +47,17 @@ _FORBIDDEN_SURFACE_MARKERS = (
     "会错意",
     "闹别扭",
     "故意拿来晃",
+    "猫耳这张",
+    "这张猫耳",
+    "这张图里的猫猫",
+    "这小猫耳朵",
+    "我也觉得这张",
+    "是不是觉得这张",
+    "好像有点熟悉",
+    "在哪儿见过",
+    "在哪里见过",
+    "见过似的",
+    "这张图",
     "委屈成这样",
     "软乎乎的表情",
     "拿这个小表情",
@@ -161,7 +172,7 @@ def build_fallback_reply(request: FallbackRequest) -> FallbackResult:
         else:
             text = "今の返し、うまく接げなかった。"
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
-        text = "图我看到了，但这次没接稳。"
+        text = "这下我没接稳，先别按刚才那句算。"
     elif topic == "assistant_reply_followup":
         text = "刚才那句太短了，这次没接稳。"
     elif topic in {"identity", "relationship_boundary", "motivation", "help_commitment"}:

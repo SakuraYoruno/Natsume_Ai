@@ -57,7 +57,7 @@ def test_surface_cacheable_reply_requires_final_non_degraded_text() -> None:
 
 
 def test_fallback_reply_is_degraded_and_topic_aware() -> None:
-    assert SURFACE_CACHE_POLICY_VERSION.startswith("surface-v3")
+    assert SURFACE_CACHE_POLICY_VERSION.startswith("surface-v5")
 
     image = build_fallback_reply(FallbackRequest(primary_topic="emoji_social_reply", reason_code="x"))
     followup = build_fallback_reply(FallbackRequest(primary_topic="assistant_reply_followup", reason_code="y"))
@@ -71,7 +71,7 @@ def test_fallback_reply_is_degraded_and_topic_aware() -> None:
     )
     ja_generic = build_fallback_reply(FallbackRequest(render_target_lang="ja", reason_code="ja"))
 
-    assert image.text == "图我看到了，但这次没接稳。"
+    assert image.text == "这下我没接稳，先别按刚才那句算。"
     assert followup.text == "刚才那句太短了，这次没接稳。"
     assert identity.text == "这句我没接稳，先别按刚才那版算。"
     assert generic.text == "这条我没接稳，先别按刚才那版算。"

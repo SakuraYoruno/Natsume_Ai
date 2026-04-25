@@ -8,6 +8,8 @@
 >
 > Advanced roadmap: see `CODEX_DIGITAL_LIFE_ADVANCED_IDEAS.md` for the adopted BioOps extension plan covering reflexes, habits, scars, internal weather, truthfulness, body map, inner parliament, and related proposal-only digital-life mechanisms.
 >
+> Inner mechanisms roadmap: see `CODEX_DIGITAL_LIFE_INNER_MECHANISMS.md` for the adopted third-stage plan covering promise ledger, consent/ability boundaries, shadow persona tests, idea fermentation, inner/outer world boundary, and long-term self-continuity mechanisms.
+>
 > Closure report: see `CODEX_PRODUCTION_CLOSURE_VALIDATION_20260424.md` for the productionization pass that split CI planes and added owner-gated BioOps adoption.
 
 ---

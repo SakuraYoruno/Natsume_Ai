@@ -2147,6 +2147,100 @@ async def chat_agent_sse_generator(
             return normalized
         return normalized[:limit] + "..."
 
+    suppress_final_reply = False
+    suppress_final_reply_reason_code: str | None = None
+
+    def _is_image_social_reply_plan(plan: Any) -> bool:
+        topic = str(getattr(plan, "primary_topic", "") or "").strip()
+        form_reason = str(getattr(plan, "response_form_reason", "") or "").strip()
+        return (
+            topic in {"emoji_social_reply", "emoji_social_followup"}
+            or form_reason in {"image_social_reply", "image_social_followup"}
+        )
+
+    def _apply_validation_fallback(
+        *,
+        reason_codes: Any,
+        source: str,
+    ) -> None:
+        nonlocal full_text
+        nonlocal narrative
+        nonlocal response_intelligence_meta
+        nonlocal _pii_egress_stats
+        nonlocal tts_text
+        nonlocal reply_used_fallback
+        nonlocal executed_tactic_family
+        nonlocal executed_tactic_variant
+        nonlocal executed_trajectory_stage
+        nonlocal suppress_final_reply
+        nonlocal suppress_final_reply_reason_code
+
+        normalized_reasons = [
+            str(item or "").strip()
+            for item in list(reason_codes or ())
+            if str(item or "").strip()
+        ]
+        trace_stage_meta.setdefault("reply_validation", {})
+        if _is_image_social_reply_plan(reply_plan_decision):
+            suppress_final_reply = True
+            suppress_final_reply_reason_code = "IMAGE_SOCIAL_NO_SAFE_REPLY"
+            reply_used_fallback = False
+            executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_suppressed"
+            executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "suppressed"
+            executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback_suppressed"
+            full_text = ""
+            narrative = ""
+            response_intelligence_meta = {
+                "reflection": {
+                    "status": "BYPASSED",
+                    "reason_code": "image_social_no_safe_reply",
+                    "allow_rewrite": False,
+                },
+                "suppressed_final_reply": {
+                    "reason_code": suppress_final_reply_reason_code,
+                    "source": source,
+                    "validation_reason_codes": list(normalized_reasons),
+                },
+            }
+            _pii_egress_stats = {}
+            tts_text = ""
+            trace_stage_meta["reply_validation"]["fallback"] = {
+                "used": False,
+                "suppressed": True,
+                "reason_code": suppress_final_reply_reason_code,
+                "source": source,
+                "reason_codes": list(normalized_reasons),
+            }
+            trace_stage_meta["fallback_suppressed"] = {
+                "reason_code": suppress_final_reply_reason_code,
+                "source": source,
+                "primary_topic": str(getattr(reply_plan_decision, "primary_topic", "") or "").strip(),
+                "response_form_reason": str(getattr(reply_plan_decision, "response_form_reason", "") or "").strip(),
+            }
+            trace_stage_meta["fallback_used"] = False
+            trace_stage_meta["reply_source"] = "suppressed_no_reply"
+            return
+
+        reply_used_fallback = True
+        executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
+        executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
+        executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
+        full_text = build_deterministic_reply_fallback(
+            plan=reply_plan_decision,
+            render_target_lang=render_target_lang,
+        )
+        narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
+            full_text,
+            allow_rewrite=False,
+        )
+        tts_text = _extract_tts_text(full_text)
+        trace_stage_meta["reply_validation"]["fallback"] = {
+            "used": True,
+            "source": source,
+            "reason_codes": list(normalized_reasons),
+        }
+        trace_stage_meta["fallback_used"] = True
+
     if not deterministic_reply:
         from host_brain.persona.surface_renderer import (  # noqa: PLC0415
             SurfaceRenderer,
@@ -2467,43 +2561,15 @@ async def chat_agent_sse_generator(
                                     "reason_codes": list(getattr(_rescue_validation, "reason_codes", ()) or ()),
                                 }
                         else:
-                            reply_used_fallback = True
-                            executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-                            executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-                            executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-                            full_text = build_deterministic_reply_fallback(
-                                plan=reply_plan_decision,
-                                render_target_lang=render_target_lang,
+                            _apply_validation_fallback(
+                                reason_codes=getattr(_rescue_validation, "reason_codes", ()) or (),
+                                source="retry_rescue_invalid",
                             )
-                            narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-                                full_text,
-                                allow_rewrite=False,
-                            )
-                            tts_text = _extract_tts_text(full_text)
-                            trace_stage_meta["reply_validation"]["fallback"] = {
-                                "used": True,
-                                "reason_codes": list(getattr(_rescue_validation, "reason_codes", ()) or ()),
-                            }
-                            trace_stage_meta["fallback_used"] = True
                     else:
-                        reply_used_fallback = True
-                        executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-                        executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-                        executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-                        full_text = build_deterministic_reply_fallback(
-                            plan=reply_plan_decision,
-                            render_target_lang=render_target_lang,
+                        _apply_validation_fallback(
+                            reason_codes=getattr(_retry_validation, "reason_codes", ()) or (),
+                            source="retry_rescue_empty",
                         )
-                        narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-                            full_text,
-                            allow_rewrite=False,
-                        )
-                        tts_text = _extract_tts_text(full_text)
-                        trace_stage_meta["reply_validation"]["fallback"] = {
-                            "used": True,
-                            "reason_codes": list(getattr(_retry_validation, "reason_codes", ()) or ()),
-                        }
-                        trace_stage_meta["fallback_used"] = True
             else:
                 _rescue_raw_text, _rescue_first_token_ms = await _attempt_soul_rescue(
                     previous_candidate_text=narrative,
@@ -2546,43 +2612,15 @@ async def chat_agent_sse_generator(
                                 "reason_codes": list(getattr(_rescue_validation, "reason_codes", ()) or ()),
                             }
                     else:
-                        reply_used_fallback = True
-                        executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-                        executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-                        executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-                        full_text = build_deterministic_reply_fallback(
-                            plan=reply_plan_decision,
-                            render_target_lang=render_target_lang,
+                        _apply_validation_fallback(
+                            reason_codes=getattr(_rescue_validation, "reason_codes", ()) or (),
+                            source="retry_empty_rescue_invalid",
                         )
-                        narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-                            full_text,
-                            allow_rewrite=False,
-                        )
-                        tts_text = _extract_tts_text(full_text)
-                        trace_stage_meta["reply_validation"]["fallback"] = {
-                            "used": True,
-                            "reason_codes": list(getattr(_rescue_validation, "reason_codes", ()) or ()),
-                        }
-                        trace_stage_meta["fallback_used"] = True
                 else:
-                    reply_used_fallback = True
-                    executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-                    executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-                    executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-                    full_text = build_deterministic_reply_fallback(
-                        plan=reply_plan_decision,
-                        render_target_lang=render_target_lang,
+                    _apply_validation_fallback(
+                        reason_codes=getattr(_validation, "reason_codes", ()) or (),
+                        source="retry_empty_rescue_empty",
                     )
-                    narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-                        full_text,
-                        allow_rewrite=False,
-                    )
-                    tts_text = _extract_tts_text(full_text)
-                    trace_stage_meta["reply_validation"]["fallback"] = {
-                        "used": True,
-                        "reason_codes": list(getattr(_validation, "reason_codes", ()) or ()),
-                    }
-                    trace_stage_meta["fallback_used"] = True
         else:
             _rescue_raw_text, _rescue_first_token_ms = await _attempt_soul_rescue(
                 previous_candidate_text=narrative,
@@ -2625,43 +2663,15 @@ async def chat_agent_sse_generator(
                             "reason_codes": list(getattr(_rescue_validation, "reason_codes", ()) or ()),
                         }
                 else:
-                    reply_used_fallback = True
-                    executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-                    executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-                    executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-                    full_text = build_deterministic_reply_fallback(
-                        plan=reply_plan_decision,
-                        render_target_lang=render_target_lang,
+                    _apply_validation_fallback(
+                        reason_codes=getattr(_rescue_validation, "reason_codes", ()) or (),
+                        source="initial_rescue_invalid",
                     )
-                    narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-                        full_text,
-                        allow_rewrite=False,
-                    )
-                    tts_text = _extract_tts_text(full_text)
-                    trace_stage_meta["reply_validation"]["fallback"] = {
-                        "used": True,
-                        "reason_codes": list(getattr(_rescue_validation, "reason_codes", ()) or ()),
-                    }
-                    trace_stage_meta["fallback_used"] = True
             else:
-                reply_used_fallback = True
-                executed_tactic_family = str(reply_plan_decision.tactic_family or "").strip() or "fallback_minimal"
-                executed_tactic_variant = str(reply_plan_decision.tactic_variant or "").strip() or "fallback"
-                executed_trajectory_stage = str(reply_plan_decision.trajectory_stage or "").strip() or "fallback"
-                full_text = build_deterministic_reply_fallback(
-                    plan=reply_plan_decision,
-                    render_target_lang=render_target_lang,
+                _apply_validation_fallback(
+                    reason_codes=getattr(_validation, "reason_codes", ()) or (),
+                    source="initial_rescue_empty",
                 )
-                narrative, response_intelligence_meta, _pii_egress_stats = _finalize_candidate_text(
-                    full_text,
-                    allow_rewrite=False,
-                )
-                tts_text = _extract_tts_text(full_text)
-                trace_stage_meta["reply_validation"]["fallback"] = {
-                    "used": True,
-                    "reason_codes": list(getattr(_validation, "reason_codes", ()) or ()),
-                }
-                trace_stage_meta["fallback_used"] = True
     with soft_fail(
         "chat_agent.response_intelligence_ms",
         fallback=0,
@@ -2771,10 +2781,12 @@ async def chat_agent_sse_generator(
     _logger.info("[%s] ChatAgent timings_ms=%s", request_id, timings_ms)
 
     # ── 8. COMMIT ────────────────────────────────────────────────────
+    commit_decision = "NO_REPLY" if suppress_final_reply else "APPROVE"
     yield _sse({
         "phase": "COMMIT",
         "done": True,
-        "decision": "APPROVE",
+        "decision": commit_decision,
+        "reason_code": suppress_final_reply_reason_code,
         "narrative": narrative,
         "request_id": request_id,
         "audit_refs": {
@@ -2793,6 +2805,8 @@ async def chat_agent_sse_generator(
             "timings_ms": timings_ms,
             "response_intelligence": response_intelligence_meta,
             "pii_stats": {"egress": _pii_egress_stats} if _pii_egress_stats else {},
+            "suppress_final_reply": bool(suppress_final_reply),
+            "suppress_final_reply_reason_code": suppress_final_reply_reason_code,
         },
     })
 
@@ -2860,6 +2874,9 @@ async def chat_agent_sse_generator(
             reply_plan_for_commit["trajectory_stage"] = executed_trajectory_stage
         if reply_used_fallback:
             reply_plan_for_commit["fallback_used"] = True
+        if suppress_final_reply:
+            reply_plan_for_commit["suppress_final_reply"] = True
+            reply_plan_for_commit["suppress_final_reply_reason_code"] = suppress_final_reply_reason_code
         from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
         asyncio.create_task(
             _async_post_process(
@@ -2907,6 +2924,8 @@ async def chat_agent_sse_generator(
                     "executed_tactic_variant": executed_tactic_variant,
                     "executed_tactic_signature": _actual_tactic_signature or None,
                     "reply_used_fallback": reply_used_fallback,
+                    "suppress_final_reply": bool(suppress_final_reply),
+                    "suppress_final_reply_reason_code": suppress_final_reply_reason_code,
                     "voice_outputs_enabled": _voice_outputs_enabled,
                 },
             )

@@ -850,6 +850,32 @@ def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> No
     assert result["reply_form_reason"] == "auto_reply_disabled"
 
 
+def test_deliver_gateway_reply_skips_no_reply_decision_without_edge_send(monkeypatch) -> None:
+    post_gateway_reply_mock = AsyncMock(return_value=SimpleNamespace(success=True))
+    monkeypatch.setattr(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        post_gateway_reply_mock,
+    )
+    result = _run(
+        _deliver_gateway_reply(
+            request_id="req_gateway_reply_no_reply_001",
+            payload={"platform": "qq", "conversation_id": "qq_dm_no_reply_001"},
+            decision="NO_REPLY",
+            reason_code="IMAGE_SOCIAL_NO_SAFE_REPLY",
+            narrative="",
+            user_msg_type="image",
+            response_form="text",
+            response_form_reason="image_social_reply",
+        )
+    )
+
+    assert result["success"] is True
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "IMAGE_SOCIAL_NO_SAFE_REPLY"
+    assert result["reply_text_len"] == 0
+    assert post_gateway_reply_mock.await_count == 0
+
+
 def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     with patch(

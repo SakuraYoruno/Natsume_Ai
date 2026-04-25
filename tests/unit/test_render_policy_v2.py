@@ -471,7 +471,7 @@ def test_reply_plan_social_image_prefers_text_only() -> None:
     assert plan.response_form == "text"
     assert plan.secondary_response_form == ""
     assert plan.response_form_reason == "image_social_reply"
-    assert "图里的情绪" in plan.reply_contract
+    assert "发图表达的情绪" in plan.reply_contract
     assert "不要解说画面" in plan.reply_contract
     assert plan.requires_validation is True
     assert plan.force_buffering is True
@@ -515,6 +515,69 @@ def test_reply_plan_social_image_rotates_tactic_family_when_recent_family_was_us
     assert plan.response_form_reason == "image_social_reply"
     assert plan.tactic_family != "cute_image_ack"
     assert plan.tactic_family in {"soft_emotion_ack", "tease_image_ack"}
+
+
+def test_reply_plan_social_image_does_not_forbid_entire_tactic_vocabulary() -> None:
+    tactic_ledger = TacticLedgerBlock(
+        entries=(
+            TacticLedgerEntry(
+                session_id="sess",
+                request_id="req-img-1",
+                topic_key="emoji_social_reply",
+                interaction_move="playful_ping",
+                tactic_family="soft_emotion_ack",
+                tactic_variant="image_social",
+                trajectory_stage="first_turn",
+                ts_ms=1000,
+            ),
+            TacticLedgerEntry(
+                session_id="sess",
+                request_id="req-img-2",
+                topic_key="emoji_social_reply",
+                interaction_move="playful_ping",
+                tactic_family="cute_image_ack",
+                tactic_variant="cute_ping",
+                trajectory_stage="first_turn",
+                ts_ms=2000,
+            ),
+            TacticLedgerEntry(
+                session_id="sess",
+                request_id="req-img-3",
+                topic_key="emoji_social_reply",
+                interaction_move="playful_ping",
+                tactic_family="tease_image_ack",
+                tactic_variant="light_nudge",
+                trajectory_stage="first_turn",
+                ts_ms=3000,
+            ),
+        )
+    )
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "PLAYFUL"},
+        bond_summary={"stage": "FRIEND", "score": 0.48},
+        motive_state={"continuity_drive": 0.38},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "emotion_signals": ["可爱", "卖萌"],
+            "core_observation": "可爱、卖萌；一张动漫风格的猫耳女孩表情图。",
+        },
+        tactic_ledger=tactic_ledger.as_dict(),
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form_reason == "image_social_reply"
+    assert plan.used_tactics_recent
+    assert plan.forbidden_tactics == ()
+    assert plan.forbidden_tactic_keys == ()
+    assert plan.forbidden_tactic_signatures == ()
+    assert "repeated_tactic" not in plan.forbidden_patterns
 
 
 def test_reply_plan_presence_ping_uses_phatic_form() -> None:
@@ -679,10 +742,20 @@ def test_reply_plan_image_social_reply_keeps_variant_specific_contract_after_mul
 
     assert plan.primary_topic == "emoji_social_reply"
     assert plan.response_form_reason == "image_social_reply"
+    assert plan.max_sentences == 1
+    assert plan.max_chars <= 52
+    assert plan.should_be_brief is True
+    assert "visual_reference" not in plan.contract.required_actions
+    assert "image_social_emotion_response" in plan.contract.required_actions
     assert any(
         token in plan.reply_contract
         for token in ("委屈/难过", "只剩感叹词", "不要解说画面")
     )
+    assert "只回一句短接话" in plan.reply_contract
+    assert "表情包表达的情绪" in plan.reply_contract
+    assert "不要评价这张图" in plan.reply_contract
+    assert "不要把自己写成图片主体" in plan.reply_contract
+    assert "不要把问题抛回给对方" in plan.reply_contract
 
 
 def test_reply_plan_open_image_social_thread_never_falls_back_to_plain_hold() -> None:
