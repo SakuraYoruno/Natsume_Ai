@@ -565,6 +565,40 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert "image_self_reference" in validation.reason_codes
 
 
+def test_image_social_reply_allows_grounded_opinion_candidate() -> None:
+    plan = ReplyPlan(
+        primary_topic="emoji_social_reply",
+        interaction_move="playful_ping",
+        trajectory=ResponseTrajectory(
+            response_goal="cute_image_reply",
+            tactic_family="cute_image_ack",
+            tactic_variant="cute_ping",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        response_form_reason="image_social_reply",
+        multimodal={
+            "primary_modality": "image",
+            "core_observation": "可爱、卖萌；猫耳女孩特写，蓝色眼睛。",
+        },
+        contract=ReplyContract(
+            text="先把这张图的可爱/卖萌感接住，再顺着这股语气回一句。",
+            required_actions=("phatic_ack",),
+            forbidden_actions=(),
+        ),
+        requires_validation=True,
+        force_buffering=True,
+    )
+
+    validation = validate_reply(
+        text="哥哥，我也觉得这张猫耳很可爱，轻轻戳到了。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert "image_self_reference" not in validation.reason_codes
+
+
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
     plan = ReplyPlan(
         primary_topic="assistant_reply_followup",
