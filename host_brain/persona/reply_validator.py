@@ -33,6 +33,9 @@ _PHATIC_ACK_RE = re.compile(r"(你好|嗨|hello|hi|我在|在呢|来了|怎么�
 _VISUAL_REFERENCE_RE = re.compile(r"(图里|截图|画面|这张|上面|这里|这句|提示|意思|看起来|像是|看到|看见|应该是)")
 _ATTACHMENT_ACK_RE = re.compile(r"(看到了|我看到了|看见了|我看见了|这张图|这个附件|这个表情)")
 _MULTIMODAL_GENERIC_FOLLOWUP_RE = re.compile(r"(你想让我先说|你想让我先看|先帮你解释|还是先判断能不能帮你|你想让我先从哪)")
+_IMAGE_SELF_REFERENCE_RE = re.compile(
+    r"(看我|我今天|我也|人家今天|人家也|人家现在|人家可爱|我是不是|我可不可|我可爱|我萌|我好看).{0,10}(可爱|萌|好看)"
+)
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
 )
@@ -388,6 +391,7 @@ _REASON_PENALTIES: dict[str, float] = {
     "generic_identity_template": 0.45,
     "multimodal_content_missing": 0.65,
     "multimodal_generic_followup": 0.55,
+    "image_self_reference": 0.85,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
 }
@@ -676,6 +680,8 @@ def validate_reply(
             reason_codes.append("underanswered")
         if not _PHATIC_ACK_RE.search(normalized):
             reason_codes.append("phatic_ack_missing")
+        if _IMAGE_SELF_REFERENCE_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_self_reference")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")

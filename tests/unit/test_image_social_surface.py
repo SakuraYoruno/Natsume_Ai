@@ -17,6 +17,7 @@ def test_image_social_surface_rejects_old_template_shapes() -> None:
     assert is_image_social_surface_sample_disallowed("怎么了，哥哥？")
     assert is_image_social_surface_sample_disallowed("哥哥是想让我看看吗？")
     assert is_image_social_surface_sample_disallowed("哥哥，你看我今天可爱吗？")
+    assert is_image_social_surface_sample_disallowed("哥哥，人家今天也很可爱哦！")
     assert is_image_social_surface_sample_disallowed("这张图我看到的内容大概是猫耳女孩。")
     assert not is_image_social_surface_sample_disallowed("猫耳这张有点犯规，哥哥故意的吧。")
 
@@ -32,6 +33,7 @@ def test_image_social_surface_requires_visible_observation_anchor() -> None:
     assert candidate_uses_image_observation("猫耳这张有点犯规，哥哥故意的吧。", multimodal)
     assert candidate_uses_image_observation("这张有点犯规，哥哥故意的吧。", multimodal)
     assert candidate_uses_image_observation("蓝眼睛这下太犯规了。", multimodal)
+    assert not candidate_uses_image_observation("哥哥，人家今天也很可爱哦！", multimodal)
     assert not candidate_uses_image_observation("哥哥今天怎么这么安静。", multimodal)
     assert not candidate_uses_image_observation("", multimodal)
     assert candidate_uses_image_observation("这张有点犯规，哥哥故意的吧。", {"summary_for_chat": "一张图片。"})

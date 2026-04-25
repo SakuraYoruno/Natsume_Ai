@@ -36,7 +36,22 @@ _VAGUE_SHAPES = (
     "是不是想",
     "是想",
 )
-_SELF_AS_IMAGE_RE = re.compile(r"(看我|我今天|我是不是|我可不可|我可爱|我萌|我好看).{0,8}(可爱|萌|好看)")
+_SELF_AS_IMAGE_RE = re.compile(
+    r"(看我|我今天|我也|人家今天|人家也|人家现在|人家可爱|我是不是|我可不可|我可爱|我萌|我好看).{0,10}(可爱|萌|好看)"
+)
+_WEAK_IMAGE_ANCHORS = {"可爱", "卖萌", "软萌", "萌", "表情"}
+_VISUAL_REFERENCE_MARKERS = (
+    "这张",
+    "这图",
+    "图里",
+    "画面",
+    "这个表情",
+    "小表情",
+    "表情包",
+    "猫耳",
+    "脸",
+    "眼睛",
+)
 
 
 def compact_image_social_text(raw_text: str) -> str:
@@ -109,10 +124,15 @@ def candidate_uses_image_observation(candidate_text: str, multimodal: Mapping[st
     compact = compact_image_social_text(candidate_text)
     if not compact:
         return False
-    if any(marker in compact for marker in ("这张", "这图", "这个表情", "小表情", "表情包", "猫耳", "脸", "眼睛")):
+    if _SELF_AS_IMAGE_RE.search(compact):
+        return False
+    if any(marker in compact for marker in _VISUAL_REFERENCE_MARKERS):
         return True
     anchors = image_social_anchor_terms(multimodal)
-    if anchors and any(anchor in compact for anchor in anchors):
+    strong_anchors = [anchor for anchor in anchors if anchor not in _WEAK_IMAGE_ANCHORS]
+    if strong_anchors and any(anchor in compact for anchor in strong_anchors):
+        return True
+    if anchors and any(anchor in compact for anchor in anchors) and any(marker in compact for marker in _VISUAL_REFERENCE_MARKERS):
         return True
     return False
 
