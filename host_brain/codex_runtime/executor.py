@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -109,6 +110,25 @@ def _extract_thread_id(stdout: str) -> str | None:
     return None
 
 
+def _process_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _merge_process_text(*values: Any) -> str:
+    parts = [_process_text(value) for value in values if _process_text(value)]
+    if not parts:
+        return ""
+    merged: list[str] = []
+    for part in parts:
+        if part not in merged:
+            merged.append(part)
+    return "".join(merged)
+
+
 def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
     try:
         if sys.platform == "win32":
@@ -120,6 +140,42 @@ def _terminate_process_tree(proc: subprocess.Popen[str]) -> None:
             proc.kill()
         except Exception:
             pass
+
+
+def _metadata_text(order: CodexWorkOrder, key: str, env_name: str) -> str:
+    value = str(order.metadata.get(key) or os.environ.get(env_name) or "").strip()
+    return value
+
+
+def _build_codex_command(
+    *,
+    codex_cmd: str,
+    order: CodexWorkOrder,
+    workspace: Path,
+    last_message_path: Path,
+    sandbox_mode: str,
+) -> list[str]:
+    command = [codex_cmd, "exec"]
+    model = _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL")
+    if model:
+        command.extend(["-m", model])
+    reasoning_effort = _metadata_text(order, "codex_reasoning_effort", "HOST_CODEX_RUNTIME_REASONING_EFFORT")
+    if reasoning_effort:
+        command.extend(["-c", f'model_reasoning_effort="{reasoning_effort}"'])
+    command.extend(
+        [
+            "--sandbox",
+            sandbox_mode,
+            "--skip-git-repo-check",
+            "--json",
+            "-C",
+            str(workspace),
+            "-o",
+            str(last_message_path),
+            "-",
+        ]
+    )
+    return command
 
 
 class CodexRuntimeExecutor:
@@ -209,19 +265,13 @@ class CodexRuntimeExecutor:
         stderr_path = run_dir / "stderr.log"
         events_path = run_dir / "events.jsonl"
         sandbox_mode = "read-only" if order.run_mode in {"inspect", "research", "audit", "translate"} else "workspace-write"
-        command = [
-            codex_cmd,
-            "exec",
-            "--sandbox",
-            sandbox_mode,
-            "--skip-git-repo-check",
-            "--json",
-            "-C",
-            str(resolution.path),
-            "-o",
-            str(last_message_path),
-            "-",
-        ]
+        command = _build_codex_command(
+            codex_cmd=codex_cmd,
+            order=order,
+            workspace=resolution.path,
+            last_message_path=last_message_path,
+            sandbox_mode=sandbox_mode,
+        )
 
         timeout_seconds = int(order.metadata.get("timeout_seconds") or order.verification_plan.get("timeout_seconds") or 300)
         before = _collect_git_summary(resolution.path)
@@ -254,6 +304,7 @@ class CodexRuntimeExecutor:
             self.artifact_store.write_json(run_dir / "verification.json", verification)
             status = "EXECUTED" if output_text and proc.returncode == 0 else "FAILED"
             summary = "Codex WorkOrder executed." if status == "EXECUTED" else "Codex WorkOrder failed."
+            failure_detail = (stderr or stdout or "codex exec failed")[:2048]
             result = CodexRuntimeResult(
                 status=status,
                 work_order_id=order.work_order_id,
@@ -266,31 +317,76 @@ class CodexRuntimeExecutor:
                 verification=verification,
                 risk_flags=[] if status == "EXECUTED" else ["codex_exec_failed"],
                 review_required=self.review_policy.review_required(order),
-                detail=(stderr or "codex exec failed")[:2048] if status == "FAILED" else "codex exec completed",
+                detail=failure_detail if status == "FAILED" else "codex exec completed",
                 reason_code=None if status == "EXECUTED" else "CODEX_EXEC_FAILED",
                 metadata={
                     "workspace": str(resolution.path),
                     "workspace_source": resolution.source,
                     "sandbox_mode": sandbox_mode,
                     "prompt_profile": prompt_profile_name(order),
+                    "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
+                    "codex_reasoning_effort": _metadata_text(
+                        order,
+                        "codex_reasoning_effort",
+                        "HOST_CODEX_RUNTIME_REASONING_EFFORT",
+                    )
+                    or None,
                     "returncode": proc.returncode,
                     "event_id": event_id,
                     "ts_ms": ts,
                 },
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            stdout = _process_text(getattr(exc, "output", ""))
+            stderr = _process_text(getattr(exc, "stderr", ""))
             if proc is not None:
                 _terminate_process_tree(proc)
+                try:
+                    extra_stdout, extra_stderr = proc.communicate(timeout=10)
+                    stdout = _merge_process_text(stdout, extra_stdout)
+                    stderr = _merge_process_text(stderr, extra_stderr)
+                except Exception:
+                    pass
+            self.artifact_store.write_text(stdout_path, stdout)
+            self.artifact_store.write_text(stderr_path, stderr)
+            events = [line for line in str(stdout or "").splitlines() if line.strip().startswith("{")]
+            self.artifact_store.write_text(events_path, "\n".join(events))
+            after = _collect_git_summary(resolution.path)
+            git_summary = _diff_git_summary(before, after)
+            verification = {"status": "NOT_RUN", "reason": "codex execution timed out"}
+            self.artifact_store.write_json(run_dir / "changed_files.json", git_summary)
+            self.artifact_store.write_json(run_dir / "verification.json", verification)
             result = CodexRuntimeResult(
                 status="DEGRADED",
                 work_order_id=order.work_order_id,
                 summary="Codex WorkOrder timed out.",
                 artifacts_dir=str(run_dir),
-                verification={"status": "NOT_RUN", "reason": "codex execution timed out"},
+                thread_id=_extract_thread_id(stdout),
+                verification=verification,
                 risk_flags=["codex_exec_timeout"],
                 review_required=self.review_policy.review_required(order),
                 reason_code="CODEX_EXEC_TIMEOUT",
-                detail=f"codex exec timed out after {timeout_seconds}s",
+                detail=(
+                    f"codex exec timed out after {timeout_seconds}s; "
+                    f"partial logs persisted to {stdout_path.name}/{stderr_path.name}"
+                ),
+                metadata={
+                    "workspace": str(resolution.path),
+                    "workspace_source": resolution.source,
+                    "sandbox_mode": sandbox_mode,
+                    "prompt_profile": prompt_profile_name(order),
+                    "codex_model": _metadata_text(order, "codex_model", "HOST_CODEX_RUNTIME_MODEL") or None,
+                    "codex_reasoning_effort": _metadata_text(
+                        order,
+                        "codex_reasoning_effort",
+                        "HOST_CODEX_RUNTIME_REASONING_EFFORT",
+                    )
+                    or None,
+                    "timeout_seconds": timeout_seconds,
+                    "returncode": getattr(proc, "returncode", None),
+                    "event_id": event_id,
+                    "ts_ms": ts,
+                },
             )
         except Exception as exc:
             logger.warning("Codex runtime execution failed: %s", exc)
