@@ -25,6 +25,14 @@ The section 62 minimum implementation set is now wired into BioOps and the exist
 
 All six are proposal-only or owner-gated. They must not directly write persona core, Bond, Canon, secrets, `.env`, production configuration, or long-term memory.
 
+The trust-foundation follow-up batch is also implemented as BioOps report/proposal-only gates:
+
+- `ConsentGradient` -> `consent_gradient`, consent-level audit for risky action plans.
+- `CompetenceHumility` -> `competence_humility`, overclaim detection and bounded rewrite proposal.
+- `UncertaintyRitual` -> `uncertainty_ritual`, known/unknown/verification-path response structure.
+
+These three are observable through the Codex / BioOps WebUI `Trust Foundation` panel and do not stage long-term write candidates.
+
 ---
 
 ## 0. 总目标

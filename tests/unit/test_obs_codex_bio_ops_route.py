@@ -173,6 +173,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "idea_fermentation_pool",
         "inner_outer_world_boundary",
     }
+    assert payload["bio_ops"]["trust_foundation"]["capability_count"] == 6
+    assert payload["bio_ops"]["trust_foundation"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["trust_foundation"]["capabilities"]} == {
+        "promise_ledger",
+        "truthfulness_cortex",
+        "capability_self_awareness",
+        "consent_gradient",
+        "competence_humility",
+        "uncertainty_ritual",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

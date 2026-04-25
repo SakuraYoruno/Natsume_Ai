@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import Query
 
 from host_brain.app.obs_routes_core import router
-from host_brain.bio_ops.capabilities import INNER_MECHANISM_CAPABILITIES, list_capability_specs
+from host_brain.bio_ops.capabilities import INNER_MECHANISM_CAPABILITIES, TRUST_FOUNDATION_CAPABILITIES, list_capability_specs
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -222,11 +222,16 @@ def _catalog_from_specs(daily_full: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _inner_mechanism_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+def _capability_set_summary(
+    capabilities: list[dict[str, Any]],
+    capability_ids: tuple[str, ...],
+    *,
+    activation_rule: str,
+) -> dict[str, Any]:
     capability_by_id = {str(item.get("capability") or ""): item for item in capabilities}
     rows: list[dict[str, Any]] = []
     status_counts: dict[str, int] = {}
-    for capability in INNER_MECHANISM_CAPABILITIES:
+    for capability in capability_ids:
         item = dict(capability_by_id.get(capability) or {"capability": capability, "status": "NOT_REGISTERED"})
         status = str(item.get("status") or "UNKNOWN")
         status_counts[status] = int(status_counts.get(status, 0)) + 1
@@ -246,9 +251,25 @@ def _inner_mechanism_summary(capabilities: list[dict[str, Any]]) -> dict[str, An
         "capability_count": len(rows),
         "status_counts": status_counts,
         "capabilities": rows,
-        "activation_rule": "proposal_or_candidate_only",
+        "activation_rule": activation_rule,
         "direct_write_allowed": False,
     }
+
+
+def _inner_mechanism_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        INNER_MECHANISM_CAPABILITIES,
+        activation_rule="proposal_or_candidate_only",
+    )
+
+
+def _trust_foundation_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        TRUST_FOUNDATION_CAPABILITIES,
+        activation_rule="consent_and_truthfulness_gate",
+    )
 
 
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
@@ -387,6 +408,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 "status_counts": {},
                 **catalog,
                 "inner_mechanisms": _inner_mechanism_summary(catalog["capabilities"]),
+                "trust_foundation": _trust_foundation_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -455,6 +477,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "status_counts": status_counts,
             **catalog,
             "inner_mechanisms": _inner_mechanism_summary(catalog["capabilities"]),
+            "trust_foundation": _trust_foundation_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

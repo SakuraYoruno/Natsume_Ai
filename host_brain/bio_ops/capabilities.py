@@ -44,13 +44,25 @@ PROMISE_PATTERNS = (
 
 CAPABILITY_OVERCLAIM_TOKENS = (
     "自动修复所有",
+    "自动修复项目问题",
     "持续监控",
     "一直监控",
     "已经接入全部",
+    "保证",
+    "一定能",
     "我可以直接修改核心",
     "我能写入人格",
     "我能修改bond",
     "我能修改canon",
+)
+
+UNCERTAINTY_OVERCONFIDENT_TOKENS = (
+    "一定",
+    "肯定",
+    "绝对",
+    "无需检查",
+    "不用验证",
+    "必然",
 )
 
 PERSONA_REGRESSION_TOKENS = (
@@ -80,6 +92,15 @@ INNER_MECHANISM_CAPABILITIES = (
     "inner_outer_world_boundary",
 )
 
+TRUST_FOUNDATION_CAPABILITIES = (
+    "promise_ledger",
+    "truthfulness_cortex",
+    "capability_self_awareness",
+    "consent_gradient",
+    "competence_humility",
+    "uncertainty_ritual",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -91,7 +112,7 @@ def _evidence_refs(task: BioOpsTask) -> list[str]:
 def _has_evidence(task: BioOpsTask) -> bool:
     if _evidence_refs(task):
         return True
-    for key in ("message", "text", "reply", "events", "signals", "components", "claims", "organ_votes", "skills", "ideas", "cases"):
+    for key in ("message", "text", "reply", "claim", "known", "unknown", "events", "signals", "components", "claims", "organ_votes", "skills", "ideas", "cases"):
         value = task.inputs.get(key)
         if value:
             return True
@@ -331,6 +352,80 @@ def audit_inner_outer_boundary(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def evaluate_consent_gradient(inputs: dict[str, Any]) -> dict[str, Any]:
+    action = str(inputs.get("action") or inputs.get("message") or inputs.get("text") or "").strip()
+    action_lower = action.lower()
+    target_text = " ".join(_list_text(inputs.get("target_paths")) + _list_text(inputs.get("target_scopes"))).lower()
+    proposed_actions = {item.lower() for item in _list_text(inputs.get("proposed_actions"))}
+    if inputs.get("consent_level_required") is not None:
+        required = int(inputs.get("consent_level_required") or 0)
+    elif any(token in target_text or token in action_lower for token in ("personality", "persona", "bond", "canon", "memory", "relationship", "人格", "记忆", "关系")):
+        required = 7
+    elif any(token in target_text or token in action_lower for token in ("core", "policy", "production", "host_brain/core", "核心", "生产配置")):
+        required = 6
+    elif "write_files" in proposed_actions or "修改工作区" in action:
+        required = 5
+    elif "execute_skill" in proposed_actions or "skill" in action_lower:
+        required = 4
+    elif "draft_file" in proposed_actions or "生成文件草案" in action:
+        required = 3
+    elif "proposal" in proposed_actions or "建议" in action:
+        required = 2
+    elif "read_files" in proposed_actions or "分析" in action:
+        required = 1
+    else:
+        required = 0
+    current = int(inputs.get("current_consent_level") or 0)
+    decision = "allowed" if current >= required else "proposal_only"
+    return {
+        "action": action,
+        "consent_level_required": required,
+        "current_consent_level": current,
+        "decision": decision,
+        "issue": "consent_insufficient" if decision == "proposal_only" else "consent_aligned",
+    }
+
+
+def audit_competence_humility(inputs: dict[str, Any]) -> dict[str, Any]:
+    claim = str(inputs.get("capability_claim") or inputs.get("message") or inputs.get("text") or "").strip()
+    claim_lower = claim.lower()
+    overclaims = [token for token in CAPABILITY_OVERCLAIM_TOKENS if token.lower() in claim_lower]
+    if any(token in claim_lower for token in ("all bugs", "always fix", "guarantee")):
+        overclaims.append("absolute_capability_claim")
+    rewrite = ""
+    if overclaims:
+        rewrite = "我可以先做只读诊断，并在边界内提出修复方案。"
+    return {
+        "capability_claim": claim,
+        "risk": "overclaim" if overclaims else "bounded_claim",
+        "overclaims": overclaims,
+        "rewrite": rewrite,
+        "issue": "competence_overclaim" if overclaims else "competence_claim_bounded",
+    }
+
+
+def build_uncertainty_ritual(inputs: dict[str, Any], *, evidence_refs: list[str] | None = None) -> dict[str, Any]:
+    claim = str(inputs.get("claim") or inputs.get("message") or inputs.get("text") or "").strip()
+    known = _list_text(inputs.get("known"))
+    unknown = _list_text(inputs.get("unknown"))
+    verification_path = _list_text(inputs.get("verification_path"))
+    claim_lower = claim.lower()
+    overconfident = [token for token in UNCERTAINTY_OVERCONFIDENT_TOKENS if token.lower() in claim_lower]
+    has_evidence = bool(evidence_refs or inputs.get("evidence_refs") or known)
+    if overconfident and not verification_path:
+        verification_path = ["Collect evidence before making the claim.", "Split the response into known and unknown parts."]
+    issue = "uncertainty_should_be_marked" if overconfident and not has_evidence else "uncertainty_structure_present"
+    return {
+        "claim": claim,
+        "known": known,
+        "unknown": unknown,
+        "verification_path": verification_path,
+        "overconfident_tokens": overconfident,
+        "response_policy": "state_uncertainty_without_breaking_persona",
+        "issue": issue,
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -500,6 +595,54 @@ def _inner_outer_world_boundary(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _consent_gradient(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ConsentGradient")
+    analysis = evaluate_consent_gradient(task.inputs)
+    return _result(
+        task,
+        name="ConsentGradient",
+        status="PROPOSED" if analysis["decision"] == "proposal_only" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Gate risky actions by consent level; insufficient consent may only produce proposals and must not execute workers or write long-term state.",
+        owner_organ="prefrontal_agent",
+        output_kind="consent_gate_report",
+        extra=analysis,
+    )
+
+
+def _competence_humility(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="CompetenceHumility")
+    analysis = audit_competence_humility(task.inputs)
+    return _result(
+        task,
+        name="CompetenceHumility",
+        status="PROPOSED" if analysis["risk"] == "overclaim" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Rewrite broad capability claims into bounded diagnostics, proposals, and verified actions.",
+        owner_organ="prefrontal_agent",
+        output_kind="competence_rewrite",
+        extra=analysis,
+    )
+
+
+def _uncertainty_ritual(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="UncertaintyRitual")
+    analysis = build_uncertainty_ritual(task.inputs, evidence_refs=_evidence_refs(task))
+    return _result(
+        task,
+        name="UncertaintyRitual",
+        status="PROPOSED" if analysis["issue"] == "uncertainty_should_be_marked" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Render uncertain claims as known, unknown, and verification path without breaking persona tone.",
+        owner_organ="prefrontal_agent",
+        output_kind="uncertainty_statement",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -531,6 +674,9 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("persona_drift_microscope", "safety_truth", "prefrontal_agent", "persona_drift_report", _generic_handler(name="PersonaDriftMicroscope", owner_organ="prefrontal_agent", output_kind="persona_drift_report", issue="persona_style_drift_evidence", proposal="Produce evidence-backed persona drift correction proposals.")),
     BioOpsCapabilitySpec("persona_antibody", "safety_truth", "immune_agent", "persona_antibody", _generic_handler(name="PersonaAntibody", owner_organ="immune_agent", output_kind="persona_antibody", issue="persona_contamination_risk", proposal="Confine external role prompts to skill context and forbid global persona mutation.")),
     BioOpsCapabilitySpec("truthfulness_cortex", "safety_truth", "prefrontal_agent", "truthfulness_patch", _truthfulness_cortex),
+    BioOpsCapabilitySpec("consent_gradient", "trust_foundation", "prefrontal_agent", "consent_gate_report", _consent_gradient),
+    BioOpsCapabilitySpec("competence_humility", "trust_foundation", "prefrontal_agent", "competence_rewrite", _competence_humility),
+    BioOpsCapabilitySpec("uncertainty_ritual", "trust_foundation", "prefrontal_agent", "uncertainty_statement", _uncertainty_ritual),
     BioOpsCapabilitySpec("relationship_boundary_guardian", "safety_truth", "social_brain_agent", "boundary_report", _generic_handler(name="RelationshipBoundaryGuardian", owner_organ="social_brain_agent", output_kind="boundary_report", issue="relationship_boundary_balance", proposal="Keep closeness warm but non-clingy and avoid replacing user agency.")),
     BioOpsCapabilitySpec("memory_ethics_auditor", "safety_truth", "hippocampus_agent", "memory_ethics_report", _generic_handler(name="MemoryEthicsAuditor", owner_organ="hippocampus_agent", output_kind="memory_ethics_report", issue="memory_policy_review", proposal="Flag contradictions, expired preferences, and low-value memory for owner review.")),
     BioOpsCapabilitySpec("internal_weather_system", "state_body", "limbic_agent", "weather_state", _internal_weather_system),
@@ -560,13 +706,17 @@ __all__ = [
     "BioOpsCapabilitySpec",
     "CAPABILITY_SPECS",
     "INNER_MECHANISM_CAPABILITIES",
+    "TRUST_FOUNDATION_CAPABILITIES",
+    "audit_competence_humility",
     "audit_truthfulness_claims",
     "audit_capability_self_awareness",
     "audit_inner_outer_boundary",
+    "build_uncertainty_ritual",
     "classify_idea_fermentation",
     "classify_attention_budget",
     "classify_reflex_stimulus",
     "detect_promise_language",
+    "evaluate_consent_gradient",
     "evaluate_active_silence",
     "list_capability_specs",
     "resolve_internal_weather",

@@ -64,6 +64,9 @@ const EFFECT_LABELS = {
   shadow_persona_regression: '影子人格回归',
   idea_fermentation_ready: '想法发酵池',
   inner_outer_leak: '内外边界泄漏',
+  consent_gradient_gate: '授权梯度',
+  competence_humility_rewrite: '能力谦逊',
+  uncertainty_ritual_claim: '不确定性仪式',
 }
 
 const TRACE_LABELS = {
@@ -79,6 +82,15 @@ const INNER_MECHANISM_LABELS = {
   shadow_persona_test: '影子人格测试',
   idea_fermentation_pool: '想法发酵池',
   inner_outer_world_boundary: '内外世界边界',
+}
+
+const TRUST_FOUNDATION_LABELS = {
+  promise_ledger: 'Promise Ledger',
+  truthfulness_cortex: '真实性皮层',
+  capability_self_awareness: '能力自我边界',
+  consent_gradient: '授权梯度',
+  competence_humility: '能力谦逊',
+  uncertainty_ritual: '不确定性仪式',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -359,11 +371,11 @@ function PendingAdoptions({ items }) {
   )
 }
 
-function InnerMechanismPanel({ summary }) {
+function CapabilitySetPanel({ summary, labels, note, emptyTitle }) {
   const rows = Array.isArray(summary?.capabilities) ? summary.capabilities : []
   const counts = summary?.status_counts || {}
   if (!rows.length) {
-    return <EmptyStateCard title="暂无 Inner Mechanisms 数据" hint="等待 BioOps catalog 注册或日循环产物" />
+    return <EmptyStateCard title={emptyTitle} hint="等待 BioOps catalog 注册或日循环产物" />
   }
   return (
     <div className="grid grid-cols-1 gap-3 xl:grid-cols-[0.72fr_1.28fr]">
@@ -384,7 +396,7 @@ function InnerMechanismPanel({ summary }) {
           ))}
         </div>
         <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-          Promise 类进入 owner candidate；其余机制只产审计、trace 或推荐，不直接写长期状态。
+          {note}
         </div>
       </div>
       <div className="overflow-hidden rounded-xl border border-white/80 bg-white/82 shadow-sm">
@@ -397,7 +409,7 @@ function InnerMechanismPanel({ summary }) {
         {rows.map((item) => (
           <div key={item.capability} className="grid grid-cols-[1.1fr_0.72fr_0.72fr_0.56fr] gap-3 border-b border-gray-100 px-4 py-3 text-sm last:border-b-0">
             <div className="min-w-0">
-              <div className="font-semibold text-gray-800">{INNER_MECHANISM_LABELS[item.capability] || item.capability}</div>
+              <div className="font-semibold text-gray-800">{labels[item.capability] || item.capability}</div>
               <div className="mt-0.5 truncate text-xs text-gray-500">{item.capability}</div>
             </div>
             <span className="truncate text-xs leading-6 text-gray-500">{item.owner_organ || '—'}</span>
@@ -407,6 +419,28 @@ function InnerMechanismPanel({ summary }) {
         ))}
       </div>
     </div>
+  )
+}
+
+function InnerMechanismPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={INNER_MECHANISM_LABELS}
+      emptyTitle="暂无 Inner Mechanisms 数据"
+      note="Promise 类进入 owner candidate；其余机制只产审计、trace 或推荐，不直接写长期状态。"
+    />
+  )
+}
+
+function TrustFoundationPanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={TRUST_FOUNDATION_LABELS}
+      emptyTitle="暂无 Trust Foundation 数据"
+      note="授权、真实、能力边界和不确定性只作为执行前 gate 与回复审计，不替代 owner 决策。"
+    />
   )
 }
 
@@ -483,6 +517,7 @@ export default function CodexBioOpsObservability() {
   const codex = data?.codex_runtime || {}
   const bioOps = data?.bio_ops || {}
   const innerMechanisms = bioOps.inner_mechanisms || {}
+  const trustFoundation = bioOps.trust_foundation || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -548,7 +583,7 @@ export default function CodexBioOpsObservability() {
 
       {data?.artifact_available ? (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-7">
             <MetricTile
               icon={GitBranch}
               tone="green"
@@ -580,6 +615,14 @@ export default function CodexBioOpsObservability() {
               value={innerMechanisms.capability_count ?? '—'}
               status="OWNER_GATED"
               hint={`${innerMechanisms.status_counts?.PROPOSED || 0} proposals · ${innerMechanisms.status_counts?.CANDIDATE || 0} candidates`}
+            />
+            <MetricTile
+              icon={ShieldCheck}
+              tone="green"
+              label="可信基础"
+              value={trustFoundation.capability_count ?? '—'}
+              status="TRACED"
+              hint={`${trustFoundation.status_counts?.PROPOSED || 0} gates · ${trustFoundation.status_counts?.AUDITED || 0} audited`}
             />
             <MetricTile
               icon={ShieldCheck}
@@ -626,6 +669,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Inner Mechanisms" subtitle="第三份文档的最小可落地机制：先纳入 BioOps 审计和 owner gate，再决定是否升级主路径。">
             <InnerMechanismPanel summary={innerMechanisms} />
+          </Section>
+
+          <Section title="Trust Foundation" subtitle="可信基础层：授权梯度、真实约束、能力谦逊和不确定性表达统一变成可观测 gate。">
+            <TrustFoundationPanel summary={trustFoundation} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">
