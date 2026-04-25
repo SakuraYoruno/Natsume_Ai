@@ -424,6 +424,19 @@ def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypa
     assert owner_state["status_counts"]["IMPORTED_FOR_OWNER_REVIEW"] == 1
     assert owner_state["items"][0]["state_owner"] == "social_brain_agent"
 
+    accepted_state = client.post(
+        "/obs/codex-bio-ops/owner-state/candidate-1/accept",
+        json={"owner_organ": "social_brain_agent", "operator": "pytest", "reason": "accept runtime hint"},
+    ).json()
+    assert accepted_state["status"] == "OWNER_STATE_ACCEPTED"
+    assert accepted_state["owner_runtime_hint_write_performed"] is True
+    assert accepted_state["direct_long_term_write"] is False
+
+    hints = client.get("/obs/codex-bio-ops/owner-state/runtime-hints").json()
+    assert hints["count"] == 1
+    assert hints["items"][0]["write_policy"] == "owner_runtime_hint_only"
+    assert hints["items"][0]["direct_long_term_write"] is False
+
     duplicate = client.post(
         "/obs/codex-bio-ops/adoptions/candidate-1/reject",
         json={"owner_organ": "social_brain_agent"},

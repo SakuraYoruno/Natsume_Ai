@@ -19,6 +19,7 @@ if str(SCRIPT_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_REPO_ROOT))
 
 from host_brain.bio_ops.adoption import ADOPTION_DECISION_ACCEPTED
+from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace
 from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.codex_runtime.artifact_store import REPO_ROOT
@@ -127,7 +128,23 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
     queues = consumer.scan_queue()
     owner_state_store = OwnerCandidateStateStore(queue_root=run_dir / "owner_queues", state_root=run_dir / "owner_state")
     owner_state_import = owner_state_store.import_all()
+    owner_state_review = owner_state_store.review_candidate_state(
+        candidate_id,
+        owner_organ="social_brain_agent",
+        decision="OWNER_ACCEPTED",
+        operator="generate_bio_ops_owner_review_demo",
+        reason="deterministic owner-state runtime hint demo",
+    )
     owner_state = owner_state_store.scan_state()
+    owner_runtime_hints = owner_state_store.scan_runtime_hints()
+    owner_hint_trace = build_bio_ops_runtime_trace(
+        message="好的",
+        route_type="chat",
+        runtime_signals={
+            "current_hour": 12,
+            "owner_candidate_state_root": str(run_dir / "owner_state"),
+        },
+    )
 
     manifest = {
         "ok": True,
@@ -141,7 +158,10 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
         "owner_consumer": consumed,
         "owner_queues": queues,
         "owner_state_import": owner_state_import,
+        "owner_state_review": owner_state_review,
         "owner_candidate_state": owner_state,
+        "owner_runtime_hints": owner_runtime_hints,
+        "owner_hint_runtime_trace": owner_hint_trace,
         "webui_routes": [
             f"/obs/codex-bio-ops?run_id={run_id}",
             f"/obs/codex-bio-ops/adoptions?run_id={run_id}&status=decided",
@@ -149,6 +169,7 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
             f"/obs/codex-bio-ops/owner-inbox/import-candidates?run_id={run_id}",
             f"/obs/codex-bio-ops/owner-queues?run_id={run_id}",
             f"/obs/codex-bio-ops/owner-state?run_id={run_id}",
+            f"/obs/codex-bio-ops/owner-state/runtime-hints?run_id={run_id}",
         ],
     }
     _write_json(run_dir / "owner_review_demo_manifest.json", manifest)

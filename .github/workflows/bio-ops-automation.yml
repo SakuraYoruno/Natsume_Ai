@@ -135,6 +135,7 @@ jobs:
             "Queued owner items: $($manifest.counts.queued_owner_items)" >> $env:GITHUB_STEP_SUMMARY
             "Imported owner candidates: $($manifest.counts.imported_owner_candidates)" >> $env:GITHUB_STEP_SUMMARY
             "Owner candidate state items: $($manifest.counts.owner_candidate_state_items)" >> $env:GITHUB_STEP_SUMMARY
+            "Owner runtime hints: $($manifest.counts.owner_runtime_hints)" >> $env:GITHUB_STEP_SUMMARY
             "Direct long-term write: $($manifest.direct_long_term_write)" >> $env:GITHUB_STEP_SUMMARY
             "Durable write performed: $($manifest.durable_write_performed)" >> $env:GITHUB_STEP_SUMMARY
             "Owner candidate state write: $($manifest.owner_candidate_state_write_performed)" >> $env:GITHUB_STEP_SUMMARY

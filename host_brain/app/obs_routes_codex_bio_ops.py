@@ -986,3 +986,77 @@ def import_codex_bio_ops_owner_state(
     ).import_all(owner_organ=owner, dry_run=dry_run)
     result["run_id"] = run_dir.name
     return result
+
+
+@router.get("/codex-bio-ops/owner-state/runtime-hints")
+def get_codex_bio_ops_owner_runtime_hints(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    active_only: bool = Query(default=True),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = OwnerCandidateStateStore(
+        queue_root=run_dir / "owner_queues",
+        state_root=run_dir / "owner_state",
+    ).scan_runtime_hints(owner_organ=owner_organ, active_only=active_only)
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+def _review_codex_bio_ops_owner_state(
+    *,
+    candidate_id: str,
+    decision: str,
+    run_id: str | None,
+    body: dict[str, Any] | None,
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or "").strip() or None
+    result = OwnerCandidateStateStore(
+        queue_root=run_dir / "owner_queues",
+        state_root=run_dir / "owner_state",
+    ).review_candidate_state(
+        candidate_id,
+        owner_organ=owner,
+        decision=decision,
+        operator=str(payload.get("operator") or "monitor_ui").strip(),
+        reason=str(payload.get("reason") or "").strip(),
+        dry_run=bool(payload.get("dry_run")),
+    )
+    result["run_id"] = run_dir.name
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+@router.post("/codex-bio-ops/owner-state/{candidate_id}/accept")
+def accept_codex_bio_ops_owner_state(
+    candidate_id: str,
+    run_id: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    return _review_codex_bio_ops_owner_state(
+        candidate_id=candidate_id,
+        decision="OWNER_ACCEPTED",
+        run_id=run_id,
+        body=body,
+    )
+
+
+@router.post("/codex-bio-ops/owner-state/{candidate_id}/reject")
+def reject_codex_bio_ops_owner_state(
+    candidate_id: str,
+    run_id: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    return _review_codex_bio_ops_owner_state(
+        candidate_id=candidate_id,
+        decision="OWNER_REJECTED",
+        run_id=run_id,
+        body=body,
+    )

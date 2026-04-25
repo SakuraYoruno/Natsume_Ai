@@ -25,6 +25,7 @@ def test_bio_ops_workflow_daily_only_keeps_owner_candidates_pending(tmp_path) ->
     assert manifest["counts"]["queued_owner_items"] == 0
     assert manifest["counts"]["imported_owner_candidates"] == 0
     assert manifest["counts"]["owner_candidate_state_items"] == 0
+    assert manifest["counts"]["owner_runtime_hints"] == 0
     assert manifest["demo_owner_decision_seed"]["enabled"] is False
     assert (run_dir / "bio_ops_workflow_manifest.json").exists()
     assert (run_dir / "bio_ops_daily_full.json").exists()
@@ -61,6 +62,7 @@ def test_bio_ops_workflow_smoke_seed_queues_owner_item_without_durable_write(tmp
     assert manifest["counts"]["queued_owner_items"] == 1
     assert manifest["counts"]["imported_owner_candidates"] == 1
     assert manifest["counts"]["owner_candidate_state_items"] == 1
+    assert manifest["counts"]["owner_runtime_hints"] == 0
     assert manifest["owner_handoff"]["consumer"]["queued_count"] == 1
     assert manifest["owner_handoff"]["durable_import"]["imported_count"] == 1
     assert manifest["owner_candidate_state_write_performed"] is True
@@ -98,4 +100,5 @@ def test_run_bio_ops_workflow_cli_writes_manifest(tmp_path, capsys) -> None:
     assert payload["run_id"] == "workflow-cli"
     assert payload["counts"]["queued_owner_items"] == 1
     assert payload["counts"]["imported_owner_candidates"] == 1
+    assert payload["counts"]["owner_runtime_hints"] == 0
     assert (tmp_path / "workflow-cli" / "bio_ops_workflow_manifest.json").exists()

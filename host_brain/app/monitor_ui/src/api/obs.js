@@ -399,6 +399,47 @@ export function importCodexBioOpsOwnerState(body = {}, params = {}) {
   })
 }
 
+export function fetchCodexBioOpsOwnerRuntimeHints(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-state/runtime-hints${qs ? '?' + qs : ''}`)
+}
+
+export function acceptCodexBioOpsOwnerState(candidateId, body = {}, params = {}) {
+  const id = String(candidateId || '').trim()
+  if (!id) {
+    throw new Error('candidate_id is required')
+  }
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-state/${encodeURIComponent(id)}/accept${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
+export function rejectCodexBioOpsOwnerState(candidateId, body = {}, params = {}) {
+  const id = String(candidateId || '').trim()
+  if (!id) {
+    throw new Error('candidate_id is required')
+  }
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-state/${encodeURIComponent(id)}/reject${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
 export function fetchLifeBody(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))

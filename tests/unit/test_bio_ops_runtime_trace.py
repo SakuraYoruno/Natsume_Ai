@@ -4,6 +4,8 @@ from host_brain.bio_ops.runtime_trace import build_bio_ops_runtime_trace
 from host_brain.app.chat_routes import build_chat_bio_ops_preflight_trace
 from host_brain.app.schemas import ChatRequest
 from host_brain.tribe.thalamus_agent import classify_task_intent_by_rules, classify_task_intent_fastpath
+from tests.unit.test_owner_candidate_store import _queue_item, _write_json
+from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
 
 
 def test_thalamus_short_ack_attaches_bio_ops_reflex_without_codex_worker() -> None:
@@ -68,3 +70,26 @@ def test_chat_preflight_trace_records_reflex_without_execution_actions() -> None
     assert trace["reflex"]["matched"] is True
     assert "codex_worker" in trace["forbidden_actions"]
     assert trace["response_breathing"]["reply_density"] in {"normal", "soft_brief", "grounded_brief"}
+
+
+def test_bio_ops_runtime_trace_loads_owner_runtime_hints(tmp_path) -> None:
+    queue_root = tmp_path / "owner_queues"
+    state_root = tmp_path / "owner_state"
+    queue_path = queue_root / "social_brain_agent" / "social_brain_candidate_queue" / "candidate-1" / "queue_item.json"
+    _write_json(queue_path, _queue_item(summary="Prefer short owner-reviewed confirmations."))
+    store = OwnerCandidateStateStore(queue_root=queue_root, state_root=state_root)
+    store.import_all()
+    store.review_candidate_state("candidate-1", owner_organ="social_brain_agent", decision="OWNER_ACCEPTED")
+
+    trace = build_bio_ops_runtime_trace(
+        message="谢谢",
+        route_type="chat",
+        runtime_signals={"owner_candidate_state_root": str(state_root)},
+    )
+
+    overlay = trace["owner_behavior_overlay"]
+    assert overlay["applied"] is True
+    assert overlay["hint_count"] == 1
+    assert overlay["direct_long_term_write"] is False
+    assert overlay["hints"][0]["guidance_type"] == "habit_hint"
+    assert trace["response_breathing"]["owner_behavior_overlay_applied"] is True

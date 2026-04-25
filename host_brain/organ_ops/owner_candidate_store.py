@@ -23,6 +23,11 @@ OWNER_CANDIDATE_STATUS_IMPORTED = "IMPORTED_FOR_OWNER_REVIEW"
 OWNER_CANDIDATE_STATUS_ALREADY_IMPORTED = "ALREADY_IMPORTED"
 OWNER_CANDIDATE_STATUS_BLOCKED = "BLOCKED"
 OWNER_DURABLE_CANDIDATE_WRITE_POLICY = "owner_durable_candidate_only"
+OWNER_CANDIDATE_REVIEW_STATUS_PENDING = "PENDING_OWNER_STATE_REVIEW"
+OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED = "OWNER_STATE_ACCEPTED"
+OWNER_CANDIDATE_REVIEW_STATUS_REJECTED = "OWNER_STATE_REJECTED"
+OWNER_CANDIDATE_STATE_DECISION_WRITE_POLICY = "owner_candidate_state_decision_only"
+OWNER_BEHAVIOR_HINT_WRITE_POLICY = "owner_runtime_hint_only"
 
 
 @dataclass(slots=True)
@@ -38,7 +43,8 @@ class OwnerCandidateState:
     source_packet_path: str
     source_import_candidate_path: str
     status: str = OWNER_CANDIDATE_STATUS_IMPORTED
-    review_status: str = "PENDING_OWNER_STATE_REVIEW"
+    review_status: str = OWNER_CANDIDATE_REVIEW_STATUS_PENDING
+    evidence_refs: list[str] = field(default_factory=list)
     direct_long_term_write: bool = False
     durable_write_performed: bool = False
     durable_memory_write_performed: bool = False
@@ -61,6 +67,10 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
 
 
+def _as_text_list(value: Any) -> list[str]:
+    return [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     if not path.exists() or not path.is_file():
         return {}
@@ -68,6 +78,59 @@ def _read_json(path: Path) -> dict[str, Any]:
         return _as_dict(json.loads(path.read_text(encoding="utf-8")))
     except Exception:
         return {}
+
+
+def _state_decision_path(state_path: Path) -> Path:
+    return state_path.parent / "owner_candidate_decision.json"
+
+
+def _behavior_hint_path(state_path: Path) -> Path:
+    return state_path.parent / "owner_behavior_hint.json"
+
+
+def _normalized_review_decision(decision: str) -> tuple[str | None, str | None]:
+    normalized = str(decision or "").strip().upper()
+    if normalized in {"ACCEPT", "ACCEPTED", "OWNER_ACCEPTED", OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED}:
+        return OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED, None
+    if normalized in {"REJECT", "REJECTED", "OWNER_REJECTED", OWNER_CANDIDATE_REVIEW_STATUS_REJECTED}:
+        return OWNER_CANDIDATE_REVIEW_STATUS_REJECTED, None
+    return None, normalized
+
+
+def _source_import_artifact(payload: dict[str, Any]) -> dict[str, Any]:
+    path = Path(str(payload.get("source_import_candidate_path") or "").strip()).expanduser()
+    if is_bio_ops_sensitive_path(str(path)):
+        return {}
+    return _read_json(path)
+
+
+def _runtime_guidance_from_state(state: dict[str, Any]) -> dict[str, Any]:
+    output_kind = str(state.get("output_kind") or "").strip()
+    owner = str(state.get("owner_organ") or "").strip()
+    summary = str(state.get("summary") or "").strip()
+    if owner == "social_brain_agent" and output_kind == "habit_candidate":
+        return {
+            "behavior_scope": "chat_runtime_trace",
+            "guidance_type": "habit_hint",
+            "guidance": summary or "Prefer owner-reviewed habit hints when composing low-risk replies.",
+        }
+    if owner == "social_brain_agent" and output_kind == "preference_candidate":
+        return {
+            "behavior_scope": "chat_runtime_trace",
+            "guidance_type": "preference_hint",
+            "guidance": summary or "Prefer owner-reviewed soft preference hints when composing low-risk replies.",
+        }
+    if owner == "prefrontal_agent" and output_kind == "promise_candidate":
+        return {
+            "behavior_scope": "planner_runtime_trace",
+            "guidance_type": "promise_hint",
+            "guidance": summary or "Keep owner-reviewed promise candidates visible in planning traces.",
+        }
+    return {
+        "behavior_scope": "owner_runtime_trace",
+        "guidance_type": "candidate_hint",
+        "guidance": summary or "Keep this owner-reviewed candidate visible as a trace-only hint.",
+    }
 
 
 def _owner_candidate_state_path(state_root: Path, *, owner_organ: str, channel_id: str, candidate_id: str) -> Path:
@@ -171,6 +234,7 @@ class OwnerCandidateStateStore:
                 "owner_candidate_state_write_performed": False,
             }
 
+        source_import = _source_import_artifact(item)
         record = OwnerCandidateState(
             candidate_id=candidate_id,
             owner_organ=owner,
@@ -182,6 +246,7 @@ class OwnerCandidateStateStore:
             source_queue_item_path=str(path),
             source_packet_path=str(item.get("source_packet_path") or "").strip(),
             source_import_candidate_path=str(item.get("source_import_candidate_path") or "").strip(),
+            evidence_refs=_as_text_list(source_import.get("evidence_refs")),
         ).to_dict()
         if dry_run:
             return {
@@ -271,31 +336,261 @@ class OwnerCandidateStateStore:
             manifest["artifact"] = artifact.to_dict()
         return manifest
 
-    def scan_state(self, *, owner_organ: str | None = None) -> dict[str, Any]:
+    def _state_records(self, *, owner_organ: str | None = None) -> list[tuple[Path, dict[str, Any]]]:
         owner_filter = str(owner_organ or "").strip()
-        items: list[dict[str, Any]] = []
-        status_counts: dict[str, int] = {}
+        records: list[tuple[Path, dict[str, Any]]] = []
         if self.state_root.exists():
             for path in sorted(self.state_root.rglob("owner_candidate_state.json")):
                 state = _read_json(path)
                 owner = str(state.get("owner_organ") or "").strip()
                 if owner_filter and owner != owner_filter:
                     continue
-                payload = {**state, "path": str(path)}
-                items.append(payload)
-                status = str(state.get("status") or "UNKNOWN")
-                status_counts[status] = int(status_counts.get(status, 0)) + 1
+                records.append((path, state))
+        return records
+
+    def scan_state(self, *, owner_organ: str | None = None) -> dict[str, Any]:
+        owner_filter = str(owner_organ or "").strip()
+        items: list[dict[str, Any]] = []
+        status_counts: dict[str, int] = {}
+        review_status_counts: dict[str, int] = {}
+        for path, state in self._state_records(owner_organ=owner_filter or None):
+            payload = {**state, "path": str(path)}
+            decision_path = _state_decision_path(path)
+            hint_path = _behavior_hint_path(path)
+            if decision_path.exists():
+                payload["decision_path"] = str(decision_path)
+            if hint_path.exists():
+                payload["behavior_hint_path"] = str(hint_path)
+            items.append(payload)
+            status = str(state.get("status") or "UNKNOWN")
+            review_status = str(state.get("review_status") or "UNKNOWN")
+            status_counts[status] = int(status_counts.get(status, 0)) + 1
+            review_status_counts[review_status] = int(review_status_counts.get(review_status, 0)) + 1
         return {
             "ok": True,
             "state_root": str(self.state_root),
             "owner_organ": owner_filter or None,
             "count": len(items),
             "status_counts": status_counts,
+            "review_status_counts": review_status_counts,
             "items": items,
             "direct_long_term_write": False,
             "durable_write_performed": False,
             "durable_memory_write_performed": False,
             "write_policy": OWNER_DURABLE_CANDIDATE_WRITE_POLICY,
+        }
+
+    def review_candidate_state(
+        self,
+        candidate_id: str,
+        *,
+        owner_organ: str | None = None,
+        decision: str,
+        operator: str = "owner_candidate_state_store",
+        reason: str = "",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        normalized_decision, invalid = _normalized_review_decision(decision)
+        candidate = str(candidate_id or "").strip()
+        if invalid is not None:
+            return {
+                "ok": False,
+                "status": OWNER_CANDIDATE_STATUS_BLOCKED,
+                "candidate_id": candidate,
+                "reason_code": "OWNER_CANDIDATE_REVIEW_DECISION_INVALID",
+                "detail": invalid,
+                "direct_long_term_write": False,
+                "durable_write_performed": False,
+            }
+
+        matches = [(path, state) for path, state in self._state_records(owner_organ=owner_organ) if str(state.get("candidate_id") or "").strip() == candidate]
+        if not matches:
+            return {
+                "ok": False,
+                "status": OWNER_CANDIDATE_STATUS_BLOCKED,
+                "candidate_id": candidate,
+                "owner_organ": str(owner_organ or "").strip() or None,
+                "reason_code": "OWNER_CANDIDATE_STATE_NOT_FOUND",
+                "detail": candidate,
+                "direct_long_term_write": False,
+                "durable_write_performed": False,
+            }
+        if len(matches) > 1:
+            return {
+                "ok": False,
+                "status": OWNER_CANDIDATE_STATUS_BLOCKED,
+                "candidate_id": candidate,
+                "reason_code": "OWNER_CANDIDATE_STATE_AMBIGUOUS",
+                "detail": str(len(matches)),
+                "direct_long_term_write": False,
+                "durable_write_performed": False,
+            }
+
+        state_path, state = matches[0]
+        if bool(state.get("direct_long_term_write")) or bool(state.get("durable_write_performed")):
+            return {
+                "ok": False,
+                "status": OWNER_CANDIDATE_STATUS_BLOCKED,
+                "candidate_id": candidate,
+                "reason_code": "OWNER_CANDIDATE_STATE_UNSAFE",
+                "detail": "candidate state claims direct or durable write",
+                "direct_long_term_write": False,
+                "durable_write_performed": False,
+            }
+        if str(state.get("write_policy") or "").strip() != OWNER_DURABLE_CANDIDATE_WRITE_POLICY:
+            return {
+                "ok": False,
+                "status": OWNER_CANDIDATE_STATUS_BLOCKED,
+                "candidate_id": candidate,
+                "reason_code": "OWNER_CANDIDATE_STATE_POLICY_INVALID",
+                "detail": str(state.get("write_policy") or ""),
+                "direct_long_term_write": False,
+                "durable_write_performed": False,
+            }
+
+        owner = str(state.get("owner_organ") or "").strip()
+        channel_id = str(state.get("channel_id") or "").strip()
+        reviewed_at = now_ms()
+        decision_payload = {
+            "candidate_id": candidate,
+            "owner_organ": owner,
+            "channel_id": channel_id,
+            "decision": normalized_decision,
+            "operator": str(operator or "owner_candidate_state_store").strip(),
+            "reason": str(reason or "").strip(),
+            "source_candidate_state_path": str(state_path),
+            "direct_long_term_write": False,
+            "durable_write_performed": False,
+            "durable_memory_write_performed": False,
+            "write_policy": OWNER_CANDIDATE_STATE_DECISION_WRITE_POLICY,
+            "reviewed_at_ms": reviewed_at,
+            "next_actions": [
+                "Accepted owner candidates may emit runtime hints only.",
+                "Applying long-term state remains a separate owner-specific action.",
+            ],
+        }
+        guidance = _runtime_guidance_from_state(state)
+        behavior_hint = {
+            "hint_id": f"owner_hint_{sanitize_segment(candidate)}",
+            "candidate_id": candidate,
+            "owner_organ": owner,
+            "channel_id": channel_id,
+            "capability": str(state.get("capability") or "").strip(),
+            "output_kind": str(state.get("output_kind") or "").strip(),
+            "status": "ACTIVE" if normalized_decision == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED else "INACTIVE",
+            **guidance,
+            "summary": str(state.get("summary") or "").strip(),
+            "evidence_refs": _as_text_list(state.get("evidence_refs")),
+            "source_candidate_state_path": str(state_path),
+            "source_decision_path": str(_state_decision_path(state_path)),
+            "direct_long_term_write": False,
+            "durable_write_performed": False,
+            "durable_memory_write_performed": False,
+            "write_policy": OWNER_BEHAVIOR_HINT_WRITE_POLICY,
+            "created_at_ms": reviewed_at,
+        }
+        updated_state = {
+            **state,
+            "review_status": normalized_decision,
+            "reviewed_at_ms": reviewed_at,
+            "review_operator": decision_payload["operator"],
+            "review_reason": decision_payload["reason"],
+            "owner_candidate_decision_path": str(_state_decision_path(state_path)),
+        }
+        if normalized_decision == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED:
+            updated_state["owner_behavior_hint_path"] = str(_behavior_hint_path(state_path))
+
+        if dry_run:
+            return {
+                "ok": True,
+                "status": normalized_decision,
+                "candidate_id": candidate,
+                "owner_organ": owner,
+                "dry_run": True,
+                "decision": decision_payload,
+                "behavior_hint": behavior_hint if normalized_decision == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED else None,
+                "direct_long_term_write": False,
+                "durable_write_performed": False,
+                "owner_runtime_hint_write_performed": False,
+            }
+
+        decision_artifact = self.artifact_store.write_json(
+            _state_decision_path(state_path),
+            decision_payload,
+            artifact_type="owner_candidate_state_decision",
+        )
+        hint_artifact = None
+        if normalized_decision == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED:
+            hint_artifact = self.artifact_store.write_json(
+                _behavior_hint_path(state_path),
+                behavior_hint,
+                artifact_type="owner_behavior_hint",
+            )
+        elif _behavior_hint_path(state_path).exists():
+            inactive_hint = {**_read_json(_behavior_hint_path(state_path)), "status": "INACTIVE", "deactivated_at_ms": reviewed_at}
+            hint_artifact = self.artifact_store.write_json(
+                _behavior_hint_path(state_path),
+                inactive_hint,
+                artifact_type="owner_behavior_hint",
+            )
+
+        state_artifact = self.artifact_store.write_json(
+            state_path,
+            updated_state,
+            artifact_type="owner_candidate_state",
+        )
+        hint_scan = self.scan_runtime_hints(owner_organ=owner)
+        return {
+            "ok": True,
+            "status": normalized_decision,
+            "candidate_id": candidate,
+            "owner_organ": owner,
+            "channel_id": channel_id,
+            "state_path": str(state_path),
+            "decision": decision_payload,
+            "behavior_hint": behavior_hint if normalized_decision == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED else None,
+            "artifacts": {
+                "decision": decision_artifact.to_dict(),
+                "state": state_artifact.to_dict(),
+                "behavior_hint": hint_artifact.to_dict() if hint_artifact else None,
+            },
+            "runtime_hints": hint_scan,
+            "direct_long_term_write": False,
+            "durable_write_performed": False,
+            "durable_memory_write_performed": False,
+            "owner_runtime_hint_write_performed": normalized_decision == OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED,
+            "write_policy": OWNER_CANDIDATE_STATE_DECISION_WRITE_POLICY,
+            "created_at_ms": reviewed_at,
+        }
+
+    def scan_runtime_hints(self, *, owner_organ: str | None = None, active_only: bool = True) -> dict[str, Any]:
+        owner_filter = str(owner_organ or "").strip()
+        hints: list[dict[str, Any]] = []
+        status_counts: dict[str, int] = {}
+        if self.state_root.exists():
+            for path in sorted(self.state_root.rglob("owner_behavior_hint.json")):
+                hint = _read_json(path)
+                owner = str(hint.get("owner_organ") or "").strip()
+                status = str(hint.get("status") or "UNKNOWN").strip().upper()
+                if owner_filter and owner != owner_filter:
+                    continue
+                if active_only and status != "ACTIVE":
+                    continue
+                payload = {**hint, "path": str(path)}
+                hints.append(payload)
+                status_counts[status] = int(status_counts.get(status, 0)) + 1
+        return {
+            "ok": True,
+            "state_root": str(self.state_root),
+            "owner_organ": owner_filter or None,
+            "active_only": bool(active_only),
+            "count": len(hints),
+            "status_counts": status_counts,
+            "items": hints,
+            "direct_long_term_write": False,
+            "durable_write_performed": False,
+            "durable_memory_write_performed": False,
+            "write_policy": OWNER_BEHAVIOR_HINT_WRITE_POLICY,
         }
 
 
@@ -304,6 +599,11 @@ __all__ = [
     "OWNER_CANDIDATE_STATUS_ALREADY_IMPORTED",
     "OWNER_CANDIDATE_STATUS_BLOCKED",
     "OWNER_CANDIDATE_STATUS_IMPORTED",
+    "OWNER_BEHAVIOR_HINT_WRITE_POLICY",
+    "OWNER_CANDIDATE_REVIEW_STATUS_ACCEPTED",
+    "OWNER_CANDIDATE_REVIEW_STATUS_PENDING",
+    "OWNER_CANDIDATE_REVIEW_STATUS_REJECTED",
+    "OWNER_CANDIDATE_STATE_DECISION_WRITE_POLICY",
     "OWNER_DURABLE_CANDIDATE_WRITE_POLICY",
     "OwnerCandidateState",
     "OwnerCandidateStateStore",

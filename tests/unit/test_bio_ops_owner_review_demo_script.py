@@ -55,3 +55,6 @@ def test_generate_bio_ops_owner_review_demo_run(tmp_path) -> None:
     assert manifest["owner_queues"]["status_counts"]["QUEUED_FOR_OWNER"] == 1
     assert manifest["owner_state_import"]["imported_count"] == 1
     assert manifest["owner_candidate_state"]["status_counts"]["IMPORTED_FOR_OWNER_REVIEW"] == 1
+    assert manifest["owner_state_review"]["status"] == "OWNER_STATE_ACCEPTED"
+    assert manifest["owner_runtime_hints"]["count"] == 1
+    assert manifest["owner_hint_runtime_trace"]["owner_behavior_overlay"]["applied"] is True
