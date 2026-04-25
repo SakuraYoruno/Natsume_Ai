@@ -53,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not consume owner intake packets into owner queues.",
     )
+    parser.add_argument(
+        "--skip-owner-durable-import",
+        action="store_true",
+        help="Do not import queued owner items into owner candidate state artifacts.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Validate owner packets without writing queue items.")
     args = parser.parse_args(argv)
 
@@ -63,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         seed_demo_owner_decision=bool(args.seed_demo_owner_decision),
         materialize_owner_handoff=not bool(args.skip_owner_handoff),
         consume_owner_queues=not bool(args.skip_owner_consume),
+        import_owner_durable_candidates=not bool(args.skip_owner_durable_import),
         dry_run=bool(args.dry_run),
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

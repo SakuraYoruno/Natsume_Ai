@@ -35,6 +35,7 @@ from host_brain.bio_ops.daily_cycle import run_bio_ops_daily_cycle_artifact_run
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.codex_runtime.artifact_store import sanitize_segment
+from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -947,5 +948,41 @@ def consume_codex_bio_ops_owner_queues(
         inbox_root=run_dir / "owner_inbox",
         queue_root=run_dir / "owner_queues",
     ).consume_all(owner_organ=owner, dry_run=dry_run)
+    result["run_id"] = run_dir.name
+    return result
+
+
+@router.get("/codex-bio-ops/owner-state")
+def get_codex_bio_ops_owner_state(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = OwnerCandidateStateStore(
+        queue_root=run_dir / "owner_queues",
+        state_root=run_dir / "owner_state",
+    ).scan_state(owner_organ=owner_organ)
+    payload["run_id"] = run_dir.name
+    return payload
+
+
+@router.post("/codex-bio-ops/owner-state/import")
+def import_codex_bio_ops_owner_state(
+    run_id: str | None = Query(default=None),
+    owner_organ: str | None = Query(default=None),
+    body: dict[str, Any] | None = Body(default=None),
+) -> dict[str, Any]:
+    run_dir = _find_run_dir(run_id)
+    if run_dir is None:
+        raise HTTPException(status_code=404, detail="No observable effects artifact run is available")
+    payload = _as_dict(body)
+    owner = str(payload.get("owner_organ") or owner_organ or "").strip() or None
+    dry_run = bool(payload.get("dry_run"))
+    result = OwnerCandidateStateStore(
+        queue_root=run_dir / "owner_queues",
+        state_root=run_dir / "owner_state",
+    ).import_all(owner_organ=owner, dry_run=dry_run)
     result["run_id"] = run_dir.name
     return result

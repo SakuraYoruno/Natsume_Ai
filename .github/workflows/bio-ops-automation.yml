@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_owner_durable_import:
+        description: "Consume queues but do not import owner candidate state artifacts."
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "41 20 * * *"
 
@@ -74,6 +79,7 @@ jobs:
           INPUT_SEED_DEMO: ${{ github.event_name == 'workflow_dispatch' && inputs.seed_demo_owner_decision || false }}
           INPUT_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
           INPUT_SKIP_CONSUME: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_owner_consume || false }}
+          INPUT_SKIP_DURABLE_IMPORT: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_owner_durable_import || false }}
         run: |
           $runId = $env:INPUT_RUN_ID
           if ([string]::IsNullOrWhiteSpace($runId)) {
@@ -95,6 +101,9 @@ jobs:
           }
           if ($env:INPUT_SKIP_CONSUME -eq "true") {
             $args += "--skip-owner-consume"
+          }
+          if ($env:INPUT_SKIP_DURABLE_IMPORT -eq "true") {
+            $args += "--skip-owner-durable-import"
           }
 
           python @args | Tee-Object -FilePath bio_ops_workflow_stdout.json
@@ -124,8 +133,11 @@ jobs:
             "Capabilities: $($manifest.counts.capabilities)" >> $env:GITHUB_STEP_SUMMARY
             "Pending owner adoptions: $($manifest.counts.pending_owner_adoptions)" >> $env:GITHUB_STEP_SUMMARY
             "Queued owner items: $($manifest.counts.queued_owner_items)" >> $env:GITHUB_STEP_SUMMARY
+            "Imported owner candidates: $($manifest.counts.imported_owner_candidates)" >> $env:GITHUB_STEP_SUMMARY
+            "Owner candidate state items: $($manifest.counts.owner_candidate_state_items)" >> $env:GITHUB_STEP_SUMMARY
             "Direct long-term write: $($manifest.direct_long_term_write)" >> $env:GITHUB_STEP_SUMMARY
             "Durable write performed: $($manifest.durable_write_performed)" >> $env:GITHUB_STEP_SUMMARY
+            "Owner candidate state write: $($manifest.owner_candidate_state_write_performed)" >> $env:GITHUB_STEP_SUMMARY
           } else {
             "Manifest was not produced." >> $env:GITHUB_STEP_SUMMARY
           }
