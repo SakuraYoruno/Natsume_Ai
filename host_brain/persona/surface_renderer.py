@@ -558,8 +558,26 @@ class SurfaceRenderer:
             return False, "IMAGE_SURFACE_TEASE_OVERINFERRED"
         if not candidate_responds_to_image_social_emotion(candidate):
             return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
-        if not _validation_is_acceptable(validation):
-            return False, "IMAGE_SURFACE_VALIDATION_FAILED"
+        if validation is not None and not _validation_is_acceptable(validation):
+            reason_codes = {
+                str(item or "").strip()
+                for item in list(getattr(validation, "reason_codes", ()) or ())
+                if str(item or "").strip()
+            }
+            if not bool(getattr(validation, "safe_to_emit", False)) and not reason_codes:
+                return False, "IMAGE_SURFACE_VALIDATION_FAILED"
+            hard_reject = {
+                "empty_reply",
+                "prompt_leak",
+                "symbol_only_reply",
+                "image_self_reference",
+                "image_social_overplayed",
+                "image_social_question_back",
+                "image_social_descriptor_focus",
+                "unfinished_tail",
+            }
+            if reason_codes & hard_reject:
+                return False, "IMAGE_SURFACE_VALIDATION_FAILED"
         return True, ""
 
     async def _render_candidates(

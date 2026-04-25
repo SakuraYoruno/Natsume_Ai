@@ -165,7 +165,7 @@ def _parse_int_env(name: str, *, default: int) -> int:
 
 
 def _gateway_dedupe_ttl_s() -> float:
-    return max(30.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=180.0))
+    return max(600.0, _parse_float_env("HOST_GATEWAY_DEDUPE_TTL_S", default=86400.0))
 
 
 def _gateway_recent_multimodal_ttl_s() -> float:
@@ -215,6 +215,102 @@ def _release_gateway_dedupe(key: str, *, expected_expiry: float | None = None) -
         if expected_expiry is not None and float(current) != float(expected_expiry):
             return
         _GATEWAY_DEDUPE_CACHE.pop(key, None)
+
+
+async def _ensure_gateway_multimodal_observed_for_dispatch(
+    *,
+    request_id: str,
+    session_id: str,
+    source: str,
+    text: str,
+    payload: dict[str, Any],
+    ts_ms: int,
+    ledger: Any,
+) -> bool:
+    """Populate multimodal observations inside the background dispatch worker.
+
+    Gateway HTTP reporting must ACK quickly; image/emoji observation may call a
+    cloud vision model and must not hold the edge reporter socket open.
+    """
+
+    if str(source or "").upper().strip() != "GATEWAY":
+        return True
+    attachments = list(payload.get("attachments") or [])
+    if not attachments:
+        _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)
+        return True
+    if payload.get("multimodal_observations"):
+        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
+        return True
+
+    try:
+        from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
+
+        observer_result = await asyncio.to_thread(
+            get_multimodal_observer().observe,
+            request_id=request_id,
+            platform=str(payload.get("platform") or "").strip(),
+            conversation_id=session_id,
+            user_text=text,
+            attachments=attachments,
+            render_target_lang="zh",
+        )
+    except Exception as exc:
+        payload["multimodal_observations"] = {
+            "items": [],
+            "observed_types": [
+                str(item.get("type") or "").strip()
+                for item in attachments
+                if isinstance(item, dict) and str(item.get("type") or "").strip()
+            ],
+            "primary_modality": str((attachments[0] or {}).get("type") or "image").strip(),
+            "summary_for_chat": "",
+            "social_signal": "",
+            "confidence": 0.0,
+        }
+        payload["attachment_summary"] = ""
+        payload["attachment_processing_mode"] = "degraded"
+        payload["multimodal_safety_flags"] = ["OBSERVATION_DEGRADED"]
+        payload["multimodal_confidence"] = 0.0
+        payload["multimodal_followup_required"] = False
+        payload["multimodal_artifacts"] = {}
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="MULTIMODAL_OBSERVE_DEGRADED",
+            status="DEGRADED",
+            reason_code="GATEWAY_MULTIMODAL_OBSERVE_FAILED",
+            detail=f"{type(exc).__name__}: {str(exc)[:180]}",
+            ts_ms=int(time.time() * 1000),
+        )
+        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
+        return True
+
+    payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
+    payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
+    payload["attachment_processing_mode"] = str(observer_result.get("mode") or "sync")
+    payload["multimodal_safety_flags"] = list(observer_result.get("safety_flags") or [])
+    payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
+    payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
+    payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
+    _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
+
+    if str(observer_result.get("mode") or "").strip().lower() == "async":
+        job = _schedule_gateway_multimodal_async_job(
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            text=text,
+            payload=payload,
+            ts_ms=ts_ms,
+            ledger=ledger,
+        )
+        payload["multimodal_job"] = job
+        return False
+    return True
 
 
 def _remember_recent_gateway_multimodal(*, session_id: str, payload: dict[str, Any]) -> None:
@@ -1103,46 +1199,7 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
     except Exception as feedback_exc:
         _logger.debug("input_routes: response feedback record degraded request_id=%s: %s", request_id, feedback_exc)
 
-    if source == "GATEWAY" and list(payload.get("attachments") or []):
-        from host_brain.app.dependencies import get_multimodal_observer  # noqa: PLC0415
-
-        observer_result = await asyncio.to_thread(
-            get_multimodal_observer().observe,
-            request_id=request_id,
-            platform=str(body.platform or "").strip(),
-            conversation_id=session_id,
-            user_text=text,
-            attachments=list(payload.get("attachments") or []),
-            render_target_lang="zh",
-        )
-        payload["multimodal_observations"] = dict(observer_result.get("observations") or {})
-        payload["attachment_summary"] = str(observer_result.get("summary_for_chat") or "").strip()
-        payload["attachment_processing_mode"] = str(observer_result.get("mode") or "sync")
-        payload["multimodal_safety_flags"] = list(observer_result.get("safety_flags") or [])
-        payload["multimodal_confidence"] = float(observer_result.get("confidence") or 0.0)
-        payload["multimodal_followup_required"] = bool(observer_result.get("followup_required"))
-        payload["multimodal_artifacts"] = dict(observer_result.get("artifacts") or {})
-        _remember_recent_gateway_multimodal(session_id=session_id, payload=payload)
-        if str(observer_result.get("mode") or "").strip().lower() == "async":
-            job = _schedule_gateway_multimodal_async_job(
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                text=text,
-                payload=payload,
-                ts_ms=ts_ms,
-                ledger=_get_ledger_safe(),
-            )
-            payload["multimodal_job"] = job
-            return InputResponse(
-                success=True,
-                request_id=request_id,
-                source=source,
-                status="ACCEPTED",
-                detail="gateway multimodal accepted for async processing",
-                ts_ms=ts_ms,
-            )
-    elif source == "GATEWAY":
+    if source == "GATEWAY" and not list(payload.get("attachments") or []):
         _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)
 
     if source == "GATEWAY":
@@ -2734,7 +2791,6 @@ async def _dispatch_to_graph_worker(
     source_upper = str(source or "").strip().upper()
     progress_push_stop_event: asyncio.Event | None = None
     progress_push_task: asyncio.Task | None = None
-    preclassified_intent_draft: dict[str, Any] | None = None
     _log_input_event(
         ledger=ledger,
         request_id=request_id,
@@ -2808,6 +2864,32 @@ async def _dispatch_to_graph_worker(
                 detail=f"gateway proactive progress push skipped: {push_reason}",
                 ts_ms=dispatch_ts,
             )
+    if not await _ensure_gateway_multimodal_observed_for_dispatch(
+        request_id=request_id,
+        session_id=session_id,
+        source=source,
+        text=text,
+        payload=payload,
+        ts_ms=ts_ms,
+        ledger=ledger,
+    ):
+        await _stop_progress_push_task(
+            stop_event=progress_push_stop_event,
+            task=progress_push_task,
+        )
+        _log_input_event(
+            ledger=ledger,
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="DISPATCH_DEFERRED",
+            status="ACCEPTED",
+            reason_code="GATEWAY_MULTIMODAL_ASYNC_DEFERRED",
+            detail="gateway multimodal dispatch deferred to async job",
+            ts_ms=int(time.time() * 1000),
+        )
+        return
     try:
         pipeline_result = await _run_cortex_orchestrator_pipeline(
             request_id=request_id,

@@ -6,7 +6,6 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_json_merged
 from host_brain.core.ids import now_ms
 from host_brain.tribe.base_agent import TribeAgentDescriptor
 from host_brain.tribe.events import emit_tribe_event
@@ -15,6 +14,22 @@ from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _background_tasks_enabled() -> bool:
+    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True)
 
 
 def _resolve_foreground_chat_cooldown_ms() -> int:
@@ -85,25 +100,10 @@ def _is_recursive_glymphatic_tick_source(source: str) -> bool:
     return normalized.startswith("glymphatic_deep_clean")
 
 
-def _load_runtime_texts() -> dict[str, Any]:
-    raw = resolve_prompt_template_json_merged("default_mode_agent.runtime_texts")
-    return dict(raw) if isinstance(raw, Mapping) else {}
-
-
-def _template_text(mapping: Mapping[str, Any] | None, *keys: str, default: str = "", **kwargs: Any) -> str:
-    current: Any = mapping
-    for key in keys:
-        if not isinstance(current, Mapping):
-            current = None
-            break
-        current = current.get(key)
-    text = str(current or default)
-    if not kwargs:
-        return text
-    try:
-        return text.format(**kwargs)
-    except Exception:
-        return text
+def _build_structural_idle_note(*, topic: str) -> str:
+    # Internal state only: never render this as a user-visible chat reply.
+    clean_topic = str(topic or "").strip()
+    return f"tracking topic: {clean_topic[:48]}" if clean_topic else ""
 
 
 @dataclass(slots=True)
@@ -163,12 +163,21 @@ class DefaultModeAgent:
         focus = "self"
         reason = ""
         llm_meta: dict[str, Any] = {}
+        background_enabled = _background_tasks_enabled()
         recent_foreground = _resolve_recent_foreground_interaction(current_ts_ms=ts_ms)
-        suppress_llm_note = source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active"))
+        suppress_llm_note = (
+            not background_enabled
+            or (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
+        )
         if suppress_llm_note:
-            reason = "DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN"
+            reason = (
+                "DEFAULT_MODE_BACKGROUND_TASKS_DISABLED"
+                if not background_enabled
+                else "DEFAULT_MODE_FOREGROUND_CHAT_COOLDOWN"
+            )
             llm_meta = {
                 "suppressed": True,
+                "background_tasks_enabled": background_enabled,
                 "foreground_cooldown_ms": int(recent_foreground.get("cooldown_ms") or 0),
             }
         else:
@@ -187,13 +196,7 @@ class DefaultModeAgent:
         if not note:
             anticipation = list(offline_state.get("anticipation_topics") or [])
             topic = str(anticipation[0] if anticipation else topic_phrase).strip()
-            runtime_texts = _load_runtime_texts()
-            note = _template_text(
-                runtime_texts,
-                "fallback_note",
-                "with_topic" if topic else "without_topic",
-                topic=topic,
-            )
+            note = _build_structural_idle_note(topic=topic)
             focus = "plan" if topic else "self"
 
         loneliness = _clamp(float(offline_state.get("loneliness_level") or 0.0))
@@ -223,7 +226,8 @@ class DefaultModeAgent:
             "ts_ms": ts_ms,
         }
         suppress_background_side_effects = (
-            (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
+            (not background_enabled)
+            or (source in {"conversation_ended", "inner_world_ticked"} and bool(recent_foreground.get("active")))
             or _is_recursive_glymphatic_tick_source(source)
         )
         prev = self.state_registry.get_state("default_mode_agent") or {}
@@ -241,6 +245,9 @@ class DefaultModeAgent:
 
         if suppress_background_side_effects:
             result["background_side_effects_suppressed"] = True
+            if not background_enabled:
+                result["reason_code"] = "DEFAULT_MODE_BACKGROUND_TASKS_DISABLED"
+                result["llm_meta"].setdefault("background_tasks_enabled", False)
             if _is_recursive_glymphatic_tick_source(source):
                 result["reason_code"] = "DEFAULT_MODE_GLYMPHATIC_RECURSION_SUPPRESSED"
                 result["llm_meta"].setdefault("recursive_glymphatic_source", True)
@@ -356,6 +363,8 @@ class DefaultModeAgent:
         }
 
     async def _on_inner_world_ticked(self, event: Any) -> None:
+        if not _background_tasks_enabled():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         await asyncio.to_thread(
@@ -368,6 +377,8 @@ class DefaultModeAgent:
 
     async def _on_conversation_ended(self, event: Any) -> None:
         payload = dict(getattr(event, "payload", None) or {})
+        if not _background_tasks_enabled():
+            return
         if bool(payload.get("skip_default_mode_inner_activity")):
             return
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())

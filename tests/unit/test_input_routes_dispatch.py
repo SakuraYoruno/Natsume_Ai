@@ -242,9 +242,23 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
     dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert "attachment_processing_mode" not in dispatched_payload
+    assert dispatched_payload["attachments"][0]["type"] == "image"
+    with patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer):
+        should_continue = _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_sync_test",
+                session_id="qq_dm_mm_sync_001",
+                source="GATEWAY",
+                text="",
+                payload=dispatched_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
+    assert should_continue is True
     assert dispatched_payload["attachment_processing_mode"] == "sync"
     assert dispatched_payload["attachment_summary"] == "收到一张图片。图片里写着你好。"
-    assert dispatched_payload["attachments"][0]["type"] == "image"
 
 
 def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> None:
@@ -287,9 +301,23 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
 
     assert response.status == "ACCEPTED"
     dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert "attachment_processing_mode" not in dispatched_payload
+    assert dispatched_payload["attachments"][0]["type"] == "voice"
+    with patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer):
+        should_continue = _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_voice_test",
+                session_id="qq_dm_mm_voice_001",
+                source="GATEWAY",
+                text="",
+                payload=dispatched_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
+    assert should_continue is True
     assert dispatched_payload["attachment_processing_mode"] == "sync"
     assert dispatched_payload["attachment_summary"].startswith("收到一段语音。")
-    assert dispatched_payload["attachments"][0]["type"] == "voice"
 
 
 def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> None:
@@ -329,11 +357,23 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
     ), patch("host_brain.app.input_routes._log_input_event"):
         schedule_mock.return_value = {"job_id": "mmjob_test"}
         response = _run(receive_input(body, SimpleNamespace()))
-
-    assert response.status == "ACCEPTED"
-    assert "async processing" in response.detail
-    assert dispatch_mock.await_count == 0
-    assert schedule_mock.call_count == 1
+        assert response.status == "ACCEPTED"
+        assert response.detail == "input accepted for processing"
+        assert dispatch_mock.await_count == 1
+        dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+        should_continue = _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_async_test",
+                session_id="qq_dm_mm_async_001",
+                source="GATEWAY",
+                text="",
+                payload=dispatched_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
+        assert should_continue is False
+        assert schedule_mock.call_count == 1
 
 
 def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> None:
@@ -381,6 +421,18 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
         return_value=None,
     ), patch("host_brain.app.input_routes._log_input_event"):
         first_response = _run(receive_input(first_body, SimpleNamespace()))
+        first_payload = dispatch_mock.await_args.kwargs["payload"]
+        _run(
+            input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
+                request_id="req_mm_followup_first",
+                session_id="qq_dm_mm_followup_001",
+                source="GATEWAY",
+                text="",
+                payload=first_payload,
+                ts_ms=1,
+                ledger=SimpleNamespace(),
+            )
+        )
         second_response = _run(receive_input(second_body, SimpleNamespace()))
 
     assert first_response.status == "ACCEPTED"

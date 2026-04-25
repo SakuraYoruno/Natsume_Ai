@@ -118,6 +118,27 @@ _INNER_WORLD_LLM_CACHE: dict[str, Any] = {
     "runtime": None,
 }
 
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _background_tasks_enabled() -> bool:
+    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True)
+
+
+def _inner_world_llm_enabled() -> bool:
+    return _background_tasks_enabled() and bool(_INNER_WORLD_LLM_ENABLED)
+
+
 def _load_runtime_texts() -> dict[str, Any]:
     raw = resolve_prompt_template_json_merged("inner_world.runtime_texts")
     return dict(raw) if isinstance(raw, Mapping) else {}
@@ -817,6 +838,9 @@ def _generate_inner_stream_note_from_llm(
     offline_hours: float,
     now_ms: int,
 ) -> tuple[str, str, str]:
+    if not _background_tasks_enabled():
+        return "", "", "INNER_WORLD_BACKGROUND_TASKS_DISABLED"
+
     agent_reason_code = ""
     try:
         from host_brain.tribe.default_mode_agent import resolve_recent_foreground_interaction_state  # noqa: PLC0415
@@ -844,7 +868,7 @@ def _generate_inner_stream_note_from_llm(
     except Exception as agent_exc:
         agent_reason_code = f"INNER_ACTIVITY_AGENT_ERROR:{str(agent_exc)[:96]}"
 
-    if not _INNER_WORLD_LLM_ENABLED:
+    if not _inner_world_llm_enabled():
         return "", "", "INNER_WORLD_LLM_DISABLED"
 
     runtime = _resolve_inner_world_llm_runtime(now_ms=now_ms)

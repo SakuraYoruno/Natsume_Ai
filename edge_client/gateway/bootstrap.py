@@ -53,6 +53,42 @@ def _resolve_input_report_timeout_s() -> float:
         return 15.0
 
 
+def _resolve_input_report_max_retry() -> int:
+    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_MAX_RETRY") or "").strip()
+    if not raw:
+        return 8640
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Gateway: invalid EDGE_GATEWAY_INPUT_REPORT_MAX_RETRY=%r, fallback to 8640",
+            raw,
+        )
+        return 8640
+
+
+def _resolve_input_report_retry_interval_s() -> float:
+    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_RETRY_INTERVAL_S") or "").strip()
+    if not raw:
+        return 10.0
+    try:
+        return max(1.0, float(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            "Gateway: invalid EDGE_GATEWAY_INPUT_REPORT_RETRY_INTERVAL_S=%r, fallback to 10s",
+            raw,
+        )
+        return 10.0
+
+
+def _resolve_input_report_cache_file() -> str:
+    raw = str(os.environ.get("EDGE_GATEWAY_INPUT_REPORT_CACHE_FILE") or "").strip()
+    if raw:
+        return raw
+    repo_root = Path(__file__).resolve().parents[2]
+    return str((repo_root / "runtime" / "edge" / "gateway_input_retry_queue.json").resolve())
+
+
 @dataclass
 class GatewayConfig:
     """Gateway 启动配置。"""
@@ -309,6 +345,9 @@ def start_gateway(config: GatewayConfig) -> GatewayInstance:
         host_url=config.host_url,
         hmac_key=config.hmac_key,
         timeout_s=_resolve_input_report_timeout_s(),
+        max_retry=_resolve_input_report_max_retry(),
+        retry_interval_s=_resolve_input_report_retry_interval_s(),
+        cache_file=_resolve_input_report_cache_file(),
     )
     reporter.start_retry_loop()
     instance.reporter = reporter

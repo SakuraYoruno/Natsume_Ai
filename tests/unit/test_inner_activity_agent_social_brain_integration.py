@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from host_brain.persona.inner_activity_agent import _collect_bond_context
+from host_brain.persona.inner_activity_agent import _collect_bond_context, generate_inner_activity_note
 
 
 def test_collect_bond_context_uses_social_brain_snapshot(monkeypatch) -> None:
@@ -40,3 +40,25 @@ def test_collect_bond_context_degrades_when_snapshot_fails(monkeypatch) -> None:
 
     assert summary == {}
     assert state is None
+
+
+def test_generate_inner_activity_note_respects_background_task_disable(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
+    monkeypatch.setattr(
+        "host_brain.persona.inner_activity_agent._resolve_inner_activity_llm_runtime",
+        lambda *, now_ms: (_ for _ in ()).throw(AssertionError("runtime should not resolve")),
+    )
+
+    note, focus, reason, meta = generate_inner_activity_note(
+        persona_user_id="user_42",
+        absence_band="recent",
+        offline_hours=0.0,
+        inner_state={},
+        now_ms=123456,
+        topic_phrase="",
+    )
+
+    assert note == ""
+    assert focus == ""
+    assert reason == "INNER_ACTIVITY_BACKGROUND_TASKS_DISABLED"
+    assert meta == {}

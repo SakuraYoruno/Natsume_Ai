@@ -14,6 +14,7 @@ param(
   [switch]$ForceRestart,
   [switch]$StartupCheck,
   [switch]$ShowConsoleWindow,
+  [bool]$BreakawayFromConsole = $true,
   [switch]$EnableMonitorProxy,
   [switch]$DisableMonitorProxy,
   [string]$MonitorProxyHost = "",
@@ -161,6 +162,65 @@ function Get-HostProcessIds {
     }
   }
   return @($result | Sort-Object -Unique)
+}
+
+function Stop-ProcessTree {
+  param([int]$ProcessId)
+  if ($ProcessId -le 0) {
+    return $false
+  }
+  $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $proc) {
+    return $true
+  }
+  Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 500
+  $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($left) {
+    cmd /c "taskkill /PID $ProcessId /T /F" | Out-Null
+    Start-Sleep -Milliseconds 500
+    $left = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  }
+  return ($null -eq $left)
+}
+
+function Start-HostCommand {
+  param(
+    [string]$CommandLine,
+    [string]$WorkingDirectory,
+    [bool]$ShowWindow,
+    [bool]$Breakaway
+  )
+  $fullCommandLine = "$env:ComSpec /d /c $CommandLine"
+  if (-not $Breakaway) {
+    $args = @{
+      FilePath = $env:ComSpec
+      ArgumentList = @('/d', '/c', $CommandLine)
+      WorkingDirectory = $WorkingDirectory
+      PassThru = $true
+    }
+    if (-not $ShowWindow) {
+      $args["WindowStyle"] = "Hidden"
+    }
+    $started = Start-Process @args
+    return [pscustomobject]@{
+      Id = [int]$started.Id
+      breakaway = $false
+      command_line = $fullCommandLine
+    }
+  }
+
+  $startup = ([wmiclass]"Win32_ProcessStartup").CreateInstance()
+  $startup.ShowWindow = if ($ShowWindow) { 1 } else { 0 }
+  $createResult = ([wmiclass]"Win32_Process").Create($fullCommandLine, $WorkingDirectory, $startup)
+  if ([int]$createResult.ReturnValue -ne 0) {
+    throw "failed to launch host process via Win32_Process.Create: return=$($createResult.ReturnValue)"
+  }
+  return [pscustomobject]@{
+    Id = [int]$createResult.ProcessId
+    breakaway = $true
+    command_line = $fullCommandLine
+  }
 }
 
 function Wait-Http {
@@ -619,16 +679,11 @@ $cmdLine = @(
   (ConvertTo-CmdArgument -Value $stderrLog)
 ) -join " "
 
-$startProcessArgs = @{
-  FilePath = $env:ComSpec
-  ArgumentList = @('/d', '/c', $cmdLine)
-  WorkingDirectory = $repoRoot
-  PassThru = $true
-}
-if (-not $ShowConsoleWindow.IsPresent) {
-  $startProcessArgs["WindowStyle"] = "Hidden"
-}
-$proc = Start-Process @startProcessArgs
+$proc = Start-HostCommand `
+  -CommandLine $cmdLine `
+  -WorkingDirectory $repoRoot `
+  -ShowWindow:$ShowConsoleWindow.IsPresent `
+  -Breakaway:$BreakawayFromConsole
 
 $healthUrl = "http://$probeHost`:$Port/health?skip_dependency_probes=1"
 $healthOk = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds
@@ -647,7 +702,7 @@ if (-not $healthOk) {
   }
 }
 if (-not $healthOk) {
-  Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+  Stop-ProcessTree -ProcessId ([int]$proc.Id) | Out-Null
   $stderrTail = ""
   if (Test-Path -Path $stderrLog) {
     $stderrTail = (Get-Content -Path $stderrLog -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
@@ -900,6 +955,8 @@ $result = [ordered]@{
   obs_process = $obsProcessResult
   monitor_proxy_status = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
   monitor_proxy = $monitorProxyResult
+  breakaway_from_console = $BreakawayFromConsole
+  launcher_pid = [int]$proc.Id
   startup_warnings = $startupWarnings
 }
 $result | ConvertTo-Json -Depth 10
