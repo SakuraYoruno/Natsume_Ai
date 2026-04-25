@@ -2078,8 +2078,12 @@ async def chat_agent_sse_generator(
     suppress_final_reply_reason_code: str | None = None
 
     def _is_image_social_reply_plan(plan: Any) -> bool:
-        topic = str(getattr(plan, "primary_topic", "") or "").strip()
-        form_reason = str(getattr(plan, "response_form_reason", "") or "").strip()
+        if isinstance(plan, dict):
+            topic = str(plan.get("primary_topic") or "").strip()
+            form_reason = str(plan.get("response_form_reason") or "").strip()
+        else:
+            topic = str(getattr(plan, "primary_topic", "") or "").strip()
+            form_reason = str(getattr(plan, "response_form_reason", "") or "").strip()
         return (
             topic in {"emoji_social_reply", "emoji_social_followup"}
             or form_reason in {"image_social_reply", "image_social_followup"}
@@ -2905,4 +2909,3 @@ from host_brain.app.chat_agent_postprocessor import (  # noqa: F401, E402
     log_input_completed,
     schedule_async_post_process,
 )
-
