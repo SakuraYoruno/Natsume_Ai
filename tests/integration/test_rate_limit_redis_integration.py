@@ -28,12 +28,14 @@ def _build_prefix() -> str:
 
 @pytest.fixture(scope="module")
 def redis_client():
-    redis_url = os.getenv("NASTUME_TEST_REDIS_URL", "").strip() or "redis://127.0.0.1:6379/0"
+    redis_url = os.getenv("NASTUME_TEST_REDIS_URL", "").strip()
+    if not redis_url:
+        pytest.skip("NASTUME_TEST_REDIS_URL is not set")
 
     try:
         import redis
     except Exception as exc:  # pragma: no cover - environment dependent
-        raise RuntimeError(f"redis package is required for Redis integration tests: {exc}") from exc
+        pytest.skip(f"redis package is required for Redis integration tests: {exc}")
     client = redis.from_url(
         redis_url,
         socket_timeout=1.0,
@@ -42,7 +44,7 @@ def redis_client():
     try:
         client.ping()
     except Exception as exc:  # pragma: no cover - environment dependent
-        raise RuntimeError(f"redis not reachable at {redis_url}: {exc}") from exc
+        pytest.skip(f"redis not reachable at {redis_url}: {exc}")
     prev_url = os.environ.get("NASTUME_TEST_REDIS_URL")
     os.environ["NASTUME_TEST_REDIS_URL"] = redis_url
     yield client

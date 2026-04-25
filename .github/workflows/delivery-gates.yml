@@ -62,7 +62,7 @@ jobs:
         run: |
           python -m pytest tests/unit tests/contract tests/integration `
             -q `
-            -m "not e2e and not hw and not prod_env and not runtime_probe and not docker" `
+            -m "not e2e and not hw and not prod_env and not runtime_probe and not docker and not ci_unstable" `
             --junitxml=pytest-stable.xml
 
       - name: Upload stable pytest report

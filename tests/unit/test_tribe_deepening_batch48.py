@@ -255,7 +255,8 @@ def test_t377_day_phase_ticks_idle_cycle():
         agent.state_registry.set_state = MM()
 
         profile = {"local_hour": 8, "phase": "day", "sleep_pressure": 0.20}
-        with patch("host_brain.tribe.circadian_agent.get_ans_agent", create=True) as mock_ans, \
+        with patch.object(CircadianAgent, "evaluate_profile", return_value=profile), \
+             patch("host_brain.tribe.circadian_agent.get_ans_agent", create=True) as mock_ans, \
              patch("host_brain.tribe.circadian_agent.get_pain_reward_agent", create=True) as mock_pr, \
              patch("host_brain.tribe.circadian_agent.get_limbic_agent", create=True) as mock_limbic:
             mock_ans.return_value = MM()

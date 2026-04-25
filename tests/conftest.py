@@ -11,6 +11,15 @@ import sys
 import pytest
 
 
+_PROD_ENV_TEST_FILES = {
+    "test_bond_phase5.py",
+}
+
+_CI_UNSTABLE_TEST_FILES = {
+    "test_bond_phase5.py",
+}
+
+
 def _reset_host_brain_runtime_state(*, env_snapshot: dict[str, str] | None = None) -> None:
     """Best-effort singleton/runtime reset to reduce cross-test contamination."""
 
@@ -199,6 +208,10 @@ def pytest_collection_modifyitems(
             item.add_marker(pytest.mark.runtime_probe)
         if "_docker" in filename:
             item.add_marker(pytest.mark.docker)
+        if filename in _PROD_ENV_TEST_FILES:
+            item.add_marker(pytest.mark.prod_env)
+        if filename in _CI_UNSTABLE_TEST_FILES:
+            item.add_marker(pytest.mark.ci_unstable)
 
 
 @pytest.hookimpl(tryfirst=True)

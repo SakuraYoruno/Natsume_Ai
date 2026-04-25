@@ -197,7 +197,8 @@ def test_generate_from_time_context_covers_reunion_weekend_hours_and_exception(
     assert engine._generate_from_time_context(ts=8 * one_day_ms, last_deep_talk_ts_ms=0, is_weekend=True) == list(
         templates["time_templates"]["周末"]
     )
-    assert engine._generate_from_time_context(ts=8 * one_day_ms, last_deep_talk_ts_ms=0, is_weekend=False) == list(
+    daytime_ts = int(datetime.datetime(2024, 1, 1, 12, 0, 0).timestamp() * 1000)
+    assert engine._generate_from_time_context(ts=daytime_ts, last_deep_talk_ts_ms=0, is_weekend=False) == list(
         templates["time_templates"]["白天"]
     )
 
