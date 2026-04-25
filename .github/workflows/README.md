@@ -9,6 +9,6 @@
 - `live-probes.yml` 只在带 `self-hosted`、`windows`、`natsume-live` 标签的 runner 上手动运行 `hw`、`runtime_probe`、`e2e`。
 - `bio-ops-automation.yml` 手动/定时运行 BioOps sidecar 工作流：daily cycle → owner inbox → owner intake packet → owner queue artifact。默认不自动接受真实 candidate，不写长期状态；手动触发时可启用 demo owner decision 做链路冒烟。
 - Python 依赖来自 `requirements.txt`，测试工具链在 workflow 中显式安装；仓库不再依赖不存在的 `requirements-dev.txt`。
-- 所有 workflow 顶层启用 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`，避免 GitHub Actions 的 Node 20 action runtime 退役影响默认门禁。
+- 所有 workflow 顶层启用 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`，并使用 Node 24-capable action majors：`actions/checkout@v6`、`actions/setup-python@v6`、`actions/upload-artifact@v7`，避免 GitHub Actions 的 Node 20 action runtime 退役影响默认门禁。
 - 静态交付门禁继续运行 `static_scan`；`doc_gate` 只检查当前 CI 工作流说明，历史 Markdown 归档不再阻断 PR。
 - CI 额外检查 Codex 硬切后旧链关键字不会回到运行代码、测试、脚本或 prompts。

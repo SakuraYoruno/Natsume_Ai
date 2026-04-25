@@ -58,7 +58,7 @@ No default stable-gate regression was observed.
 - `delivery-gates.yml` full-suite job: manual/nightly report-only run for broad visibility.
 - `service-integration.yml`: Redis, Chroma, and Neo4j dependency plane with CI-generated `.env` and local secret store.
 - `live-probes.yml`: self-hosted Windows live runner plane for hardware, Edge, TTS/ASR, gateway, runtime probes, and e2e.
-- All workflows opt into GitHub Actions Node 24 action runtime with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`, avoiding the Node 20 runtime deprecation window.
+- All workflows opt into GitHub Actions Node 24 action runtime with `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` and use Node 24-capable action majors (`actions/checkout@v6`, `actions/setup-python@v6`, `actions/upload-artifact@v7`), avoiding the Node 20 runtime deprecation window.
 
 ## BioOps Closure
 
