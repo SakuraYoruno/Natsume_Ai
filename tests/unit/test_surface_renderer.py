@@ -330,6 +330,64 @@ async def test_surface_renderer_image_rejects_template_and_accepts_emotion_respo
 
 
 @pytest.mark.asyncio
+async def test_surface_renderer_image_repair_recovers_rejected_first_pass(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def _fake_call(self, request, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(str(kwargs["user_prompt"]))
+        if len(calls) == 1:
+            return SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "candidates": [
+                            "哥哥你这样子是觉得我哪里做得不好吗？",
+                            "哼，哥哥又在无视我了是吧？",
+                            "哥哥怎么啦？",
+                            "哥哥是不是在生我的气呀？",
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                final_provider="gemini",
+                final_model="gemini-2.5-flash-lite",
+                total_latency_ms=111,
+            )
+        assert "上一轮被拒候选" in kwargs["user_prompt"]
+        assert "禁止反问和确认问句" in kwargs["system_prompt"]
+        return SimpleNamespace(
+            content=json.dumps({"candidates": ["哥哥，这股无语劲我接住啦。"]}, ensure_ascii=False),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=222,
+        )
+
+    monkeypatch.setattr(SurfaceRenderer, "_call_surface_model", _fake_call)
+    trace: dict[str, object] = {}
+
+    result = await SurfaceRenderer().render(
+        _request(
+            _plan(
+                primary_topic="emoji_social_reply",
+                response_form_reason="image_social_reply",
+                tactic_family="soft_emotion_ack",
+                multimodal={"social_signal": "无语"},
+            ),
+            trace=trace,
+        )
+    )
+
+    assert result.text == "哥哥，这股无语劲我接住啦。"
+    assert len(calls) == 2
+    first_meta = dict(trace["image_social_surface_render"])
+    repair_meta = dict(trace["image_social_surface_repair_render"])
+    assert first_meta["status"] == "REJECTED"
+    assert first_meta["repair_attempted"] is True
+    assert first_meta["repair_status"] == "OK"
+    assert repair_meta["status"] == "OK"
+    assert repair_meta["affected_output"] is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("family", "expected_hint", "candidate"),
     [
