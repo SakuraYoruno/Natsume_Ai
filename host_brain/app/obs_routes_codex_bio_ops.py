@@ -15,6 +15,7 @@ from host_brain.bio_ops.capabilities import (
     INNER_MECHANISM_CAPABILITIES,
     NATURAL_INTERACTION_CAPABILITIES,
     RELATIONSHIP_LAYER_CAPABILITIES,
+    SELF_GOVERNANCE_CAPABILITIES,
     TRUST_FOUNDATION_CAPABILITIES,
     list_capability_specs,
 )
@@ -303,6 +304,14 @@ def _inner_life_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
+def _self_governance_summary(capabilities: list[dict[str, Any]]) -> dict[str, Any]:
+    return _capability_set_summary(
+        capabilities,
+        SELF_GOVERNANCE_CAPABILITIES,
+        activation_rule="report_only_self_governance",
+    )
+
+
 def _pending_adoptions(*payloads: dict[str, Any]) -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for payload in payloads:
@@ -443,6 +452,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
                 "natural_interaction": _natural_interaction_summary(catalog["capabilities"]),
                 "relationship_layer": _relationship_layer_summary(catalog["capabilities"]),
                 "inner_life": _inner_life_summary(catalog["capabilities"]),
+                "self_governance": _self_governance_summary(catalog["capabilities"]),
                 "focused_effects": [],
                 "pending_adoptions": [],
             },
@@ -515,6 +525,7 @@ def get_codex_bio_ops_observability(run_id: str | None = Query(default=None)) ->
             "natural_interaction": _natural_interaction_summary(catalog["capabilities"]),
             "relationship_layer": _relationship_layer_summary(catalog["capabilities"]),
             "inner_life": _inner_life_summary(catalog["capabilities"]),
+            "self_governance": _self_governance_summary(catalog["capabilities"]),
             "focused_effects": focused_effects,
             "pending_adoptions": _pending_adoptions(daily_full, daily_summary),
         },

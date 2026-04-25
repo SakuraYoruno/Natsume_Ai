@@ -214,6 +214,16 @@ def test_codex_bio_ops_observability_compacts_latest_run(tmp_path, monkeypatch) 
         "life_pulse",
         "personal_mythology",
     }
+    assert payload["bio_ops"]["self_governance"]["capability_count"] == 6
+    assert payload["bio_ops"]["self_governance"]["direct_write_allowed"] is False
+    assert {item["capability"] for item in payload["bio_ops"]["self_governance"]["capabilities"]} == {
+        "inner_parliament",
+        "value_hierarchy",
+        "inner_ethics_review",
+        "self_boundary_membrane",
+        "dignity_guard",
+        "identity_fork_guard",
+    }
     assert payload["runtime_traces"][0]["id"] == "short_ack_chat"
     assert {item["id"] for item in payload["benefits"]} == {
         "codex_runtime_control",

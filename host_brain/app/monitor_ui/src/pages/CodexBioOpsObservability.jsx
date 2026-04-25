@@ -83,6 +83,12 @@ const EFFECT_LABELS = {
   self_model_risk: '自我模型',
   life_pulse_overload: '生命脉搏',
   personal_mythology_candidate: '个人神话',
+  value_hierarchy_conflict: '价值层级',
+  inner_ethics_issue: '内在伦理',
+  self_boundary_contamination: '自我边界膜',
+  dignity_guard_risk: '尊严守护',
+  identity_fork_channel: '身份分叉',
+  inner_parliament_dissent: '内在议会',
 }
 
 const TRACE_LABELS = {
@@ -135,6 +141,15 @@ const INNER_LIFE_LABELS = {
   self_model: '自我模型',
   life_pulse: '生命脉搏',
   personal_mythology: '个人神话',
+}
+
+const SELF_GOVERNANCE_LABELS = {
+  inner_parliament: '内在议会',
+  value_hierarchy: '价值层级',
+  inner_ethics_review: '内在伦理复盘',
+  self_boundary_membrane: '自我边界膜',
+  dignity_guard: '尊严守护',
+  identity_fork_guard: '身份分叉守护',
 }
 
 const STATUS_ORDER = ['PROPOSED', 'CANDIDATE', 'AUDITED', 'BLOCKED', 'DEGRADED', 'FAILED', 'NOT_RUN']
@@ -521,6 +536,17 @@ function InnerLifePanel({ summary }) {
   )
 }
 
+function SelfGovernancePanel({ summary }) {
+  return (
+    <CapabilitySetPanel
+      summary={summary}
+      labels={SELF_GOVERNANCE_LABELS}
+      emptyTitle="暂无 Self Governance 数据"
+      note="自我治理层只产价值、伦理、边界和身份连续性报告；复杂决策仍需 owner review 或 WorkOrder。"
+    />
+  )
+}
+
 function RuntimeTraceList({ traces }) {
   const rows = Array.isArray(traces) ? traces : []
   if (!rows.length) {
@@ -598,6 +624,7 @@ export default function CodexBioOpsObservability() {
   const naturalInteraction = bioOps.natural_interaction || {}
   const relationshipLayer = bioOps.relationship_layer || {}
   const innerLife = bioOps.inner_life || {}
+  const selfGovernance = bioOps.self_governance || {}
   const inspect = codex.inspect || {}
   const blockedWrite = codex.blocked_write || {}
   const pendingAdoptions = Array.isArray(bioOps.pending_adoptions) ? bioOps.pending_adoptions : []
@@ -663,7 +690,7 @@ export default function CodexBioOpsObservability() {
 
       {data?.artifact_available ? (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-10">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-11">
             <MetricTile
               icon={GitBranch}
               tone="green"
@@ -730,6 +757,14 @@ export default function CodexBioOpsObservability() {
             />
             <MetricTile
               icon={ShieldCheck}
+              tone="slate"
+              label="自我治理"
+              value={selfGovernance.capability_count ?? '—'}
+              status="REPORT_ONLY"
+              hint={`${selfGovernance.status_counts?.PROPOSED || 0} gates · ${selfGovernance.status_counts?.AUDITED || 0} audited`}
+            />
+            <MetricTile
+              icon={ShieldCheck}
               tone="amber"
               label="Owner 待审"
               value={pendingAdoptions.length || statusCounts.CANDIDATE || 0}
@@ -789,6 +824,10 @@ export default function CodexBioOpsObservability() {
 
           <Section title="Inner Life" subtitle="内在生命层：梦境排练、象征记忆、记忆质感、自我模型、生命脉搏和个人神话保持报告模式。">
             <InnerLifePanel summary={innerLife} />
+          </Section>
+
+          <Section title="Self Governance" subtitle="自我治理层：价值层级、伦理复盘、边界膜、尊严守护、身份连续性和内在议会保持可观测。">
+            <SelfGovernancePanel summary={selfGovernance} />
           </Section>
 
           <Section title="Chat / Planner 运行时 trace" subtitle="能看到短确认是否走反射、复杂请求是否保持规划链、主动沉默为什么触发。">

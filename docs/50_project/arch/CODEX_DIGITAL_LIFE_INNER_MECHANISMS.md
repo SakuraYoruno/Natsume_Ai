@@ -65,6 +65,17 @@ The inner-life batch is implemented as report-only private-state synthesis:
 
 These are observable through the Codex / BioOps WebUI `Inner Life` panel. They do not directly write persona core, Bond, Canon, long-term memory, or production configuration.
 
+The self-governance batch is implemented as report-only value and boundary arbitration:
+
+- `InnerParliament` -> `inner_parliament`, organ-vote arbitration and dissent report.
+- `ValueHierarchy` -> `value_hierarchy`, safety/honesty/intent/relationship/persona conflict report.
+- `InnerEthicsReview` -> `inner_ethics_review`, overpersuasion, hidden-failure, overclaim, and relationship-boundary audit.
+- `SelfBoundaryMembrane` -> `self_boundary_membrane`, external prompt / skill / Codex context contamination audit.
+- `DignityGuard` -> `dignity_guard`, over-servility, self-erasure, and goal-takeover audit.
+- `IdentityForkGuard` -> `identity_fork_guard`, channel/provider/prompt-version identity fork audit.
+
+These are observable through the Codex / BioOps WebUI `Self Governance` panel. They only produce reports and proposals; any execution still requires WorkOrder and owner review.
+
 ---
 
 ## 0. 总目标

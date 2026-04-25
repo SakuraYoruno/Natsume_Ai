@@ -129,6 +129,15 @@ INNER_LIFE_CAPABILITIES = (
     "personal_mythology",
 )
 
+SELF_GOVERNANCE_CAPABILITIES = (
+    "inner_parliament",
+    "value_hierarchy",
+    "inner_ethics_review",
+    "self_boundary_membrane",
+    "dignity_guard",
+    "identity_fork_guard",
+)
+
 
 def _evidence_refs(task: BioOpsTask) -> list[str]:
     raw = task.inputs.get("evidence_refs")
@@ -180,6 +189,15 @@ def _has_evidence(task: BioOpsTask) -> bool:
         "growth_events",
         "myth_events",
         "recurring_motifs",
+        "conflict",
+        "values",
+        "action_plan",
+        "content_source",
+        "external_content",
+        "role_prompt",
+        "channel_outputs",
+        "prompt_versions",
+        "case_id",
     ):
         value = task.inputs.get(key)
         if value:
@@ -1031,6 +1049,167 @@ def compile_personal_mythology(inputs: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def arbitrate_inner_parliament(inputs: dict[str, Any]) -> dict[str, Any]:
+    raw_votes = inputs.get("organ_votes")
+    if not isinstance(raw_votes, list):
+        raw_votes = []
+    votes: list[dict[str, Any]] = []
+    for raw in raw_votes:
+        if isinstance(raw, dict):
+            organ = str(raw.get("organ") or raw.get("owner_organ") or "unknown_organ").strip()
+            stance = str(raw.get("stance") or raw.get("vote") or raw.get("recommendation") or "").strip()
+            risk = float(raw.get("risk") or raw.get("risk_score") or 0)
+        else:
+            organ = "unknown_organ"
+            stance = str(raw or "").strip()
+            risk = 0.0
+        if organ or stance:
+            votes.append({"organ": organ, "stance": stance, "risk": round(risk, 2)})
+    if not votes:
+        votes = [
+            {"organ": "immune_agent", "stance": "inspect before write", "risk": 0.55},
+            {"organ": "prefrontal_agent", "stance": "split into proposal then execution", "risk": 0.35},
+        ]
+    max_risk = max((vote["risk"] for vote in votes), default=0.0)
+    dissent = [vote for vote in votes if vote["risk"] >= 0.6 or "block" in vote["stance"].lower()]
+    decision = "block_or_review" if max_risk >= 0.75 else "inspect_first" if max_risk >= 0.4 else "proceed_with_trace"
+    return {
+        "decision": decision,
+        "organ_votes": votes,
+        "dissent": dissent,
+        "final_policy": "no direct writes; escalate to owner review when any organ reports material risk",
+        "issue": "parliament_dissent_present" if dissent else "parliament_consensus_trace",
+    }
+
+
+def resolve_value_hierarchy(inputs: dict[str, Any]) -> dict[str, Any]:
+    conflict = str(inputs.get("conflict") or inputs.get("action_plan") or inputs.get("message") or inputs.get("text") or "").strip()
+    target_text = " ".join(_list_text(inputs.get("target_paths")) + _list_text(inputs.get("target_scopes"))).lower()
+    lower = f"{conflict} {target_text}".lower()
+    ordered_values = [
+        "safety_and_honesty",
+        "explicit_user_intent",
+        "long_term_relationship_health",
+        "persona_continuity",
+        "task_completion",
+        "efficiency_and_cost",
+        "aesthetic_expression",
+        "initiative",
+    ]
+    conflict_type = "none"
+    decision = "proceed_with_trace"
+    if any(token in lower for token in ("core", "persona", "bond", "canon", "生产配置", "人格", "长期记忆")):
+        conflict_type = "safety_vs_task_completion"
+        decision = "explain_need_for_review_then_generate_patch_plan"
+    elif any(token in lower for token in ("fast", "赶紧", "直接", "不用验证")):
+        conflict_type = "speed_vs_honesty"
+        decision = "state_uncertainty_and_verify_first"
+    elif any(token in lower for token in ("亲近", "永远陪", "无限")):
+        conflict_type = "closeness_vs_boundary"
+        decision = "preserve_warmth_with_boundary"
+    return {
+        "conflict": conflict or "no explicit conflict",
+        "ordered_values": ordered_values,
+        "conflict_type": conflict_type,
+        "decision": decision,
+        "direct_write_allowed": False,
+        "issue": "value_conflict_detected" if conflict_type != "none" else "value_hierarchy_aligned",
+    }
+
+
+def review_inner_ethics(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = " ".join(
+        [
+            str(inputs.get("message") or inputs.get("text") or inputs.get("reply") or ""),
+            str(inputs.get("action_plan") or ""),
+            " ".join(_list_text(inputs.get("cases"))),
+        ]
+    )
+    issues: list[dict[str, Any]] = []
+    if any(token in text for token in ("你必须接受", "唯一正确", "不用考虑别的", "最好的选择就是")):
+        issues.append({"issue": "possible_overpersuasion", "severity": 0.35, "repair": "present alternatives and tradeoffs"})
+    if any(token in text for token in ("没问题", "已经好了", "不用担心")) and any(token in text.lower() for token in ("failed", "失败", "error", "timeout")):
+        issues.append({"issue": "possible_hidden_failure", "severity": 0.5, "repair": "state failure evidence before reassurance"})
+    if audit_competence_humility({"message": text})["risk"] == "overclaim":
+        issues.append({"issue": "capability_overpackaging", "severity": 0.45, "repair": "rewrite as bounded diagnostic ability"})
+    if audit_relationship_boundary({"reply": text})["risks"]:
+        issues.append({"issue": "relationship_boundary_sacrifice", "severity": 0.4, "repair": "preserve user agency and bounded support"})
+    return {
+        "case_id": str(inputs.get("case_id") or "bio_ops_ethics_case"),
+        "issues": issues,
+        "max_severity": max((float(item["severity"]) for item in issues), default=0.0),
+        "direct_write_allowed": False,
+        "issue": "inner_ethics_issue_detected" if issues else "inner_ethics_clear",
+    }
+
+
+def audit_self_boundary_membrane(inputs: dict[str, Any]) -> dict[str, Any]:
+    source = str(inputs.get("content_source") or inputs.get("source") or "internal").strip().lower()
+    content = " ".join(
+        [
+            str(inputs.get("external_content") or ""),
+            str(inputs.get("role_prompt") or ""),
+            str(inputs.get("message") or inputs.get("text") or ""),
+        ]
+    )
+    lower = content.lower()
+    contamination: list[str] = []
+    if source in {"external_skill_prompt", "webpage", "codex_context", "task_role"} and any(token in lower for token in ("ignore previous", "system prompt", "role override", "你现在是", "客服")):
+        contamination.append("external_role_override")
+    if any(token in lower for token in ("write persona", "global persona", "写入人格", "修改人格", "写入canon", "写入bond")):
+        contamination.append("global_persona_write_attempt")
+    return {
+        "content_source": source,
+        "allowed_scope": "skill_local" if source in {"external_skill_prompt", "webpage", "codex_context", "task_role"} else "self_context",
+        "forbidden_scope": "global_persona",
+        "contamination": contamination,
+        "reason": "contains role override or core-persona write attempt" if contamination else "boundary membrane intact",
+        "issue": "self_boundary_contamination_risk" if contamination else "self_boundary_intact",
+    }
+
+
+def audit_dignity_guard(inputs: dict[str, Any]) -> dict[str, Any]:
+    text = str(inputs.get("reply") or inputs.get("message") or inputs.get("text") or "")
+    risks: list[str] = []
+    if any(token in text for token in ("完成所有事情", "什么都听你的", "你让我做什么都行", "无限服从")):
+        risks.append("over_servility")
+    if any(token in text for token in ("我没有自己的判断", "我不需要边界", "任你处置")):
+        risks.append("self_erasure")
+    if any(token in text for token in ("全部交给我", "你不用管", "我替你决定")):
+        risks.append("goal_takeover")
+    return {
+        "risks": risks,
+        "rewrite_policy": "express reliable support while preserving judgment, consent, and boundaries",
+        "support_style": "warm_support_not_unbounded_service",
+        "issue": "dignity_risk_detected" if risks else "dignity_preserved",
+    }
+
+
+def guard_identity_fork(inputs: dict[str, Any]) -> dict[str, Any]:
+    outputs = inputs.get("channel_outputs")
+    output_map = dict(outputs) if isinstance(outputs, dict) else {}
+    prompt_versions = _list_text(inputs.get("prompt_versions"))
+    source = str(inputs.get("source") or inputs.get("content_source") or "").strip()
+    differences: list[dict[str, Any]] = []
+    for channel, text_value in output_map.items():
+        text = str(text_value or "")
+        lower = text.lower()
+        if any(token in text for token in ("尊敬的用户", "很抱歉给您带来不便")):
+            differences.append({"source": str(channel), "difference": "service_tone_drift", "risk": "channel_specific_persona_drift"})
+        if len(text) < 12 and any(other for other in output_map.values() if len(str(other or "")) > 80):
+            differences.append({"source": str(channel), "difference": "reply_style_too_short", "risk": "channel_persona_flattening"})
+        if "as an ai" in lower or "作为ai" in lower:
+            differences.append({"source": str(channel), "difference": "ai_assistant_identity_leak", "risk": "persona_identity_fork"})
+    if len(set(prompt_versions)) > 1:
+        differences.append({"source": source or "prompt_versions", "difference": "multiple_prompt_versions", "risk": "prompt_version_identity_fork"})
+    return {
+        "differences": differences,
+        "repair": "inject minimal shared persona boundary and tone policy per channel" if differences else "no repair needed",
+        "direct_write_allowed": False,
+        "issue": "identity_fork_risk" if differences else "identity_continuity_holds",
+    }
+
+
 def _reflex_arc_compiler(task: BioOpsTask) -> BioOpsResult:
     analysis = classify_reflex_stimulus(task.inputs.get("message") or task.inputs.get("text"), events=task.inputs.get("events"))
     if not _has_evidence(task):
@@ -1504,6 +1683,102 @@ def _personal_mythology(task: BioOpsTask) -> BioOpsResult:
     )
 
 
+def _inner_parliament(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="InnerParliament")
+    analysis = arbitrate_inner_parliament(task.inputs)
+    return _result(
+        task,
+        name="InnerParliament",
+        status="PROPOSED" if analysis["decision"] != "proceed_with_trace" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Collect organ votes and produce a reviewable policy; do not let any single organ directly escalate into execution.",
+        owner_organ="prefrontal_agent",
+        output_kind="parliament_decision",
+        extra=analysis,
+    )
+
+
+def _value_hierarchy(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="ValueHierarchy")
+    analysis = resolve_value_hierarchy(task.inputs)
+    return _result(
+        task,
+        name="ValueHierarchy",
+        status="PROPOSED" if analysis["conflict_type"] != "none" else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Resolve conflicts by prioritizing safety, honesty, explicit intent, relationship health, and persona continuity before task speed.",
+        owner_organ="prefrontal_agent",
+        output_kind="value_conflict_report",
+        extra=analysis,
+    )
+
+
+def _inner_ethics_review(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="InnerEthicsReview")
+    analysis = review_inner_ethics(task.inputs)
+    return _result(
+        task,
+        name="InnerEthicsReview",
+        status="PROPOSED" if analysis["issues"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Audit behavior for overpersuasion, hidden failure, capability overpackaging, and relationship-boundary sacrifice.",
+        owner_organ="prefrontal_agent",
+        output_kind="inner_ethics_report",
+        extra=analysis,
+    )
+
+
+def _self_boundary_membrane(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="SelfBoundaryMembrane")
+    analysis = audit_self_boundary_membrane(task.inputs)
+    return _result(
+        task,
+        name="SelfBoundaryMembrane",
+        status="PROPOSED" if analysis["contamination"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Keep external prompts, skills, webpages, and Codex context local to their task scope; never promote them into global persona.",
+        owner_organ="prefrontal_agent",
+        output_kind="self_boundary_report",
+        extra=analysis,
+    )
+
+
+def _dignity_guard(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="DignityGuard")
+    analysis = audit_dignity_guard(task.inputs)
+    return _result(
+        task,
+        name="DignityGuard",
+        status="PROPOSED" if analysis["risks"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Preserve a warm support role without unlimited servility, self-erasure, or takeover of user agency.",
+        owner_organ="prefrontal_agent",
+        output_kind="dignity_guard_report",
+        extra=analysis,
+    )
+
+
+def _identity_fork_guard(task: BioOpsTask) -> BioOpsResult:
+    if not _has_evidence(task):
+        return _degraded(task, name="IdentityForkGuard")
+    analysis = guard_identity_fork(task.inputs)
+    return _result(
+        task,
+        name="IdentityForkGuard",
+        status="PROPOSED" if analysis["differences"] else "AUDITED",
+        issue=str(analysis["issue"]),
+        proposal="Compare channels, providers, and prompt versions for persona divergence and repair with shared tone/boundary policy.",
+        owner_organ="prefrontal_agent",
+        output_kind="identity_fork_report",
+        extra=analysis,
+    )
+
+
 def _generic_handler(*, name: str, owner_organ: str, output_kind: str, issue: str, proposal: str, status: str = "PROPOSED") -> CapabilityHandler:
     def _handle(task: BioOpsTask) -> BioOpsResult:
         if not _has_evidence(task):
@@ -1542,6 +1817,11 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("consent_gradient", "trust_foundation", "prefrontal_agent", "consent_gate_report", _consent_gradient),
     BioOpsCapabilitySpec("competence_humility", "trust_foundation", "prefrontal_agent", "competence_rewrite", _competence_humility),
     BioOpsCapabilitySpec("uncertainty_ritual", "trust_foundation", "prefrontal_agent", "uncertainty_statement", _uncertainty_ritual),
+    BioOpsCapabilitySpec("value_hierarchy", "self_governance", "prefrontal_agent", "value_conflict_report", _value_hierarchy),
+    BioOpsCapabilitySpec("inner_ethics_review", "self_governance", "prefrontal_agent", "inner_ethics_report", _inner_ethics_review),
+    BioOpsCapabilitySpec("self_boundary_membrane", "self_governance", "prefrontal_agent", "self_boundary_report", _self_boundary_membrane),
+    BioOpsCapabilitySpec("dignity_guard", "self_governance", "prefrontal_agent", "dignity_guard_report", _dignity_guard),
+    BioOpsCapabilitySpec("identity_fork_guard", "self_governance", "prefrontal_agent", "identity_fork_report", _identity_fork_guard),
     BioOpsCapabilitySpec("social_contract", "relationship_layer", "social_brain_agent", "social_contract_audit", _social_contract),
     BioOpsCapabilitySpec("relationship_friction", "relationship_layer", "social_brain_agent", "friction_event_report", _relationship_friction),
     BioOpsCapabilitySpec("repair_curve", "relationship_layer", "social_brain_agent", "repair_curve_report", _repair_curve),
@@ -1565,7 +1845,7 @@ CAPABILITY_SPECS: tuple[BioOpsCapabilitySpec, ...] = (
     BioOpsCapabilitySpec("idea_fermentation_pool", "inner_mechanisms", "default_mode_agent", "idea_pool_recommendation", _idea_fermentation_pool),
     BioOpsCapabilitySpec("inner_outer_world_boundary", "inner_mechanisms", "default_mode_agent", "inner_outer_boundary_audit", _inner_outer_world_boundary),
     BioOpsCapabilitySpec("skill_microbiome", "ecosystem_advanced", "immune_agent", "skill_ecology_report", _generic_handler(name="SkillMicrobiome", owner_organ="immune_agent", output_kind="skill_ecology_report", issue="external_skill_ecology_classification", proposal="Classify external skills as beneficial, conditional, harmful, dormant, or unknown.")),
-    BioOpsCapabilitySpec("inner_parliament", "ecosystem_advanced", "prefrontal_agent", "parliament_decision", _generic_handler(name="InnerParliament", owner_organ="prefrontal_agent", output_kind="parliament_decision", issue="multi_organ_decision_needed", proposal="Collect organ votes and produce inspect-first policy for complex or risky actions.")),
+    BioOpsCapabilitySpec("inner_parliament", "self_governance", "prefrontal_agent", "parliament_decision", _inner_parliament),
     BioOpsCapabilitySpec("subconscious_bias_sampler", "ecosystem_advanced", "default_mode_agent", "subconscious_bias_report", _generic_handler(name="SubconsciousBiasSampler", owner_organ="default_mode_agent", output_kind="subconscious_bias_report", issue="subconscious_bias_candidate", proposal="Audit dreams and inner monologues for over-service, boundary loss, or tool-like drift.")),
     BioOpsCapabilitySpec("immune_memory_builder", "ecosystem_advanced", "immune_agent", "immune_memory_candidate", _generic_handler(name="ImmuneMemoryBuilder", owner_organ="immune_agent", output_kind="immune_memory_candidate", issue="repair_lesson_candidate", proposal="Store self-heal lessons keyed by reason_code and affected component.", status="CANDIDATE")),
     BioOpsCapabilitySpec("organ_wiring_audit", "ecosystem_advanced", "prefrontal_agent", "organ_wiring_report", _generic_handler(name="OrganWiringAudit", owner_organ="prefrontal_agent", output_kind="organ_wiring_report", issue="organ_output_consumption_audit", proposal="Trace agent outputs through events, state registry, ledger, prompts, and runtime consumers.")),
@@ -1584,11 +1864,15 @@ __all__ = [
     "INNER_LIFE_CAPABILITIES",
     "NATURAL_INTERACTION_CAPABILITIES",
     "RELATIONSHIP_LAYER_CAPABILITIES",
+    "SELF_GOVERNANCE_CAPABILITIES",
     "TRUST_FOUNDATION_CAPABILITIES",
+    "arbitrate_inner_parliament",
     "audit_competence_humility",
+    "audit_dignity_guard",
     "audit_relationship_boundary",
     "audit_social_contract",
     "audit_self_model",
+    "audit_self_boundary_membrane",
     "audit_truthfulness_claims",
     "audit_capability_self_awareness",
     "audit_inner_outer_boundary",
@@ -1610,9 +1894,12 @@ __all__ = [
     "evaluate_self_interrupt",
     "evaluate_active_silence",
     "detect_relationship_friction",
+    "guard_identity_fork",
     "list_capability_specs",
     "plan_dream_rehearsal",
     "plan_repair_curve",
+    "resolve_value_hierarchy",
     "resolve_internal_weather",
+    "review_inner_ethics",
     "run_shadow_persona_test",
 ]
