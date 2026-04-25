@@ -269,6 +269,49 @@ class TestProactiveTalkSleepMode:
         assert "normal" in ALLOWED_MODES
 
 
+class TestProactiveTalkBioOpsActiveSilence:
+    def test_active_silence_blocks_high_stress_late_night_proactive_push(self) -> None:
+        pusher, pushed = _make_ui_pusher()
+
+        result = execute_proactive_talk(
+            args={"idle_threshold_ms": 1000},
+            context=_ctx(
+                last_interaction_ts=0,
+                current_hour=2,
+                user_stress="high",
+                explicit_help_request=False,
+                llm_generator=_make_llm_generator("我来看看你。"),
+                ui_pusher=pusher,
+            ),
+        )
+
+        assert result["status"] == STATUS_REJECTED
+        assert result["reason_code"] == SCHED_CONDITION_UNMET
+        assert "active_silence blocked proactive_talk" in result["detail"]
+        assert result["bio_ops_runtime_trace"]["active_silence"]["silence_policy"] == "quiet_presence"
+        assert "proactive_talk" in result["bio_ops_runtime_trace"]["forbidden_actions"]
+        assert pushed == []
+
+    def test_active_silence_trace_is_recorded_when_proactive_push_executes(self) -> None:
+        pusher, pushed = _make_ui_pusher()
+
+        result = execute_proactive_talk(
+            args={"idle_threshold_ms": 1000},
+            context=_ctx(
+                last_interaction_ts=0,
+                current_hour=14,
+                user_stress="low",
+                llm_generator=_make_llm_generator("问候"),
+                ui_pusher=pusher,
+            ),
+        )
+
+        assert result["status"] == STATUS_EXECUTED
+        assert result["bio_ops_runtime_trace"]["proposal_only"] is True
+        assert result["bio_ops_runtime_trace"]["active_silence"]["silence_policy"] == "normal_presence"
+        assert pushed
+
+
 class TestProactiveTalkMotiveState:
     def test_motive_pull_blocks_proactive_talk(self) -> None:
         pusher, pushed = _make_ui_pusher()
@@ -371,4 +414,3 @@ class TestProactiveTalkRenderPolicy:
         assert result["status"] == STATUS_EXECUTED
         assert result["render_policy"]["humor_ceiling"] == 0.1
         assert pushed[0]["content"] == "你先缓一缓。"
-

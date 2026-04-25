@@ -175,6 +175,9 @@ async def test_chat_route_allows_when_notify_and_immune_evaluate_degrade(monkeyp
 
     assert response.media_type == "text/event-stream"
     assert captured["request_body"].message == "hello"
+    trace = dict(getattr(captured["request"], "state").bio_ops_runtime_trace or {})
+    assert trace["proposal_only"] is True
+    assert trace["active_silence"]["silence_policy"] in {"normal_presence", "quiet_presence"}
     assert scheduled[-1]["immune_result"]["decision"] == "ALLOW"
     assert scheduled[-1]["immune_result"]["reason_codes"] == ["IMMUNE_EVALUATE_DEGRADED"]
 

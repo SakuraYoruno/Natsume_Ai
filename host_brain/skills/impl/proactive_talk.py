@@ -129,6 +129,9 @@ def _apply_render_policy_to_proactive_text(text: str, render_policy: Mapping[str
         from host_brain.app.chat_agent import _apply_render_policy_hard_guard  # noqa: PLC0415
 
         guarded = _apply_render_policy_hard_guard(normalized, policy)
+        intimacy_ceiling = float(policy.get("intimacy_ceiling", 1.0) or 1.0)
+        if intimacy_ceiling <= 0.35 and any(marker in str(guarded or "") for marker in ("亲爱的", "宝贝", "宝宝", "抱抱", "亲亲")):
+            return "你先缓一缓。"
         return str(guarded or "").strip()
     except Exception as exc:
         logger.debug("proactive render_policy hard guard failed: %s", exc)
@@ -435,6 +438,42 @@ def execute_proactive_talk(
             "scene_awareness": scene_awareness,
         }
 
+    try:
+        from host_brain.bio_ops.capabilities import evaluate_active_silence  # noqa: PLC0415
+
+        active_silence = evaluate_active_silence(
+            {
+                "current_hour": int(ctx.get("current_hour") or datetime.datetime.now().hour),
+                "user_stress": str(ctx.get("user_stress") or (emotion_context or {}).get("stress_level") or "").strip(),
+                "explicit_help_request": bool(ctx.get("explicit_help_request")),
+            }
+        )
+    except Exception as exc:
+        active_silence = {
+            "silence_policy": "normal_presence",
+            "reason_code": "BIO_OPS_ACTIVE_SILENCE_TRACE_DEGRADED",
+            "detail": str(exc)[:120],
+        }
+
+    if str(active_silence.get("silence_policy") or "") == "quiet_presence":
+        return {
+            "status": STATUS_REJECTED,
+            "event_id": event_id,
+            "reason_code": SCHED_CONDITION_UNMET,
+            "detail": "active_silence blocked proactive_talk: quiet_presence",
+            "request_id": request_id,
+            "ts_ms": ts,
+            "motive_state": motive_state,
+            "render_policy": render_policy,
+            "scene_awareness": scene_awareness,
+            "bio_ops_runtime_trace": {
+                "source": "bio_ops.active_silence",
+                "proposal_only": True,
+                "active_silence": active_silence,
+                "forbidden_actions": ["ui_push", "tts", "proactive_talk"],
+            },
+        }
+
     # LLM 生成主动问候
     llm_generator: LLMGenerator | None = ctx.get("llm_generator")
     greeting: str = ""
@@ -531,6 +570,11 @@ def execute_proactive_talk(
         "render_policy": render_policy,
         "scene_driven": bool(scene_hint),
         "scene_awareness": scene_awareness,
+        "bio_ops_runtime_trace": {
+            "source": "bio_ops.active_silence",
+            "proposal_only": True,
+            "active_silence": active_silence,
+            "forbidden_actions": [],
+        },
         "template_fallback_used": fallback_to_template,
     }
-

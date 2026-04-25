@@ -71,6 +71,8 @@ def test_chat_returns_immune_block_commit_and_skips_handle_chat() -> None:
     assert commit["decision"] == "REJECT"
     assert commit["reason_code"] == "IMMUNE_BLOCKED_HIGH_RISK"
     assert str(commit.get("narrative") or "") == ""
+    assert commit["bio_ops_runtime_trace"]["proposal_only"] is True
+    assert commit["bio_ops_runtime_trace"]["source"] == "bio_ops.runtime_trace"
 
 
 def test_chat_allows_and_delegates_to_handle_chat_when_immune_passes() -> None:
