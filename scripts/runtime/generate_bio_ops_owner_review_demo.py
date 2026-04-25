@@ -23,6 +23,7 @@ from host_brain.bio_ops.owner_consumer import BioOpsOwnerIntakeConsumer
 from host_brain.bio_ops.owner_inbox import BioOpsOwnerInbox
 from host_brain.codex_runtime.artifact_store import REPO_ROOT
 from host_brain.core.ids import now_ms
+from host_brain.organ_ops.owner_candidate_store import OwnerCandidateStateStore
 
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "observable_effects"
@@ -124,6 +125,9 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
     consumer = BioOpsOwnerIntakeConsumer(inbox_root=run_dir / "owner_inbox", queue_root=run_dir / "owner_queues")
     consumed = consumer.consume_all()
     queues = consumer.scan_queue()
+    owner_state_store = OwnerCandidateStateStore(queue_root=run_dir / "owner_queues", state_root=run_dir / "owner_state")
+    owner_state_import = owner_state_store.import_all()
+    owner_state = owner_state_store.scan_state()
 
     manifest = {
         "ok": True,
@@ -136,12 +140,15 @@ def generate_demo_run(*, output_root: str | Path = DEFAULT_OUTPUT_ROOT, run_id: 
         "intake_packets": packets,
         "owner_consumer": consumed,
         "owner_queues": queues,
+        "owner_state_import": owner_state_import,
+        "owner_candidate_state": owner_state,
         "webui_routes": [
             f"/obs/codex-bio-ops?run_id={run_id}",
             f"/obs/codex-bio-ops/adoptions?run_id={run_id}&status=decided",
             f"/obs/codex-bio-ops/owner-inbox?run_id={run_id}",
             f"/obs/codex-bio-ops/owner-inbox/import-candidates?run_id={run_id}",
             f"/obs/codex-bio-ops/owner-queues?run_id={run_id}",
+            f"/obs/codex-bio-ops/owner-state?run_id={run_id}",
         ],
     }
     _write_json(run_dir / "owner_review_demo_manifest.json", manifest)

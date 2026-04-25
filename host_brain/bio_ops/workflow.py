@@ -116,6 +116,8 @@ def run_bio_ops_automation_workflow(
     seed_demo_owner_decision: bool = False,
     materialize_owner_handoff: bool = True,
     consume_owner_queues: bool = True,
+    import_owner_durable_candidates: bool = True,
+    owner_candidate_state_root: str | Path | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Run the full artifact-only BioOps automation workflow."""
@@ -161,11 +163,41 @@ def run_bio_ops_automation_workflow(
             "durable_write_performed": False,
         }
     owner_queues = consumer.scan_queue()
+    from host_brain.organ_ops.owner_candidate_store import (
+        OWNER_DURABLE_CANDIDATE_WRITE_POLICY,
+        OwnerCandidateStateStore,
+    )
+
+    owner_state_store = OwnerCandidateStateStore(
+        queue_root=run_dir / "owner_queues",
+        state_root=owner_candidate_state_root or run_dir / "owner_state",
+    )
+    if import_owner_durable_candidates and consume_owner_queues:
+        owner_durable_import = owner_state_store.import_all(dry_run=dry_run)
+    else:
+        owner_durable_import = {
+            "ok": True,
+            "dry_run": bool(dry_run),
+            "source_queue_count": int(owner_queues.get("count") or 0),
+            "imported_count": 0,
+            "already_imported_count": 0,
+            "blocked_count": 0,
+            "imported": [],
+            "already_imported": [],
+            "blocked": [],
+            "direct_long_term_write": False,
+            "durable_write_performed": False,
+            "durable_memory_write_performed": False,
+            "owner_candidate_state_write_performed": False,
+            "write_policy": OWNER_DURABLE_CANDIDATE_WRITE_POLICY,
+        }
+    owner_candidate_state = owner_state_store.scan_state()
 
     skipped = _as_list(materialized.get("skipped"))
     blocked = [
         *_as_list(intake_packets.get("blocked")),
         *_as_list(owner_consumer.get("blocked")),
+        *_as_list(owner_durable_import.get("blocked")),
     ]
     blocked_count = len(blocked)
     status = _workflow_status(daily_manifest=daily_manifest, owner_queues=owner_queues, blocked_count=blocked_count)
@@ -177,10 +209,14 @@ def run_bio_ops_automation_workflow(
         "write_policy": BIO_OPS_WORKFLOW_WRITE_POLICY,
         "daily_write_policy": BIO_OPS_DAILY_WRITE_POLICY,
         "owner_queue_write_policy": OWNER_QUEUE_WRITE_POLICY,
+        "owner_durable_candidate_write_policy": OWNER_DURABLE_CANDIDATE_WRITE_POLICY,
         "direct_long_term_write": False,
         "durable_write_performed": False,
+        "durable_memory_write_performed": False,
+        "owner_candidate_state_write_performed": bool(owner_durable_import.get("owner_candidate_state_write_performed")),
         "materialize_owner_handoff": bool(materialize_owner_handoff),
         "consume_owner_queues": bool(consume_owner_queues),
+        "import_owner_durable_candidates": bool(import_owner_durable_candidates),
         "dry_run": bool(dry_run),
         "demo_owner_decision_seed": demo_seed,
         "daily_cycle": daily_manifest,
@@ -191,6 +227,8 @@ def run_bio_ops_automation_workflow(
             "intake_packets": intake_packets,
             "consumer": owner_consumer,
             "queues": owner_queues,
+            "durable_import": owner_durable_import,
+            "owner_candidate_state": owner_candidate_state,
         },
         "counts": {
             "capabilities": int(daily_manifest.get("bio_ops_capability_count") or 0),
@@ -198,6 +236,8 @@ def run_bio_ops_automation_workflow(
             "ready_owner_imports": int(import_candidates.get("status_counts", {}).get("READY_FOR_ORGAN_CONSUMPTION") or 0),
             "intake_packets": int(intake_packets.get("packet_count") or 0),
             "queued_owner_items": int(owner_queues.get("count") or 0),
+            "imported_owner_candidates": int(owner_durable_import.get("imported_count") or 0),
+            "owner_candidate_state_items": int(owner_candidate_state.get("count") or 0),
             "skipped_owner_items": len(skipped),
             "blocked_owner_items": blocked_count,
         },
@@ -207,10 +247,11 @@ def run_bio_ops_automation_workflow(
             f"/obs/codex-bio-ops/owner-inbox?run_id={safe_run_id}",
             f"/obs/codex-bio-ops/owner-inbox/import-candidates?run_id={safe_run_id}",
             f"/obs/codex-bio-ops/owner-queues?run_id={safe_run_id}",
+            f"/obs/codex-bio-ops/owner-state?run_id={safe_run_id}",
         ],
         "next_actions": [
             "Review queued owner items in the Codex/BioOps WebUI.",
-            "Owner organs must perform durable imports through their own state paths.",
+            "Owner organs may review owner_candidate_state artifacts before applying any real long-term state change.",
             "Do not treat workflow artifacts as completed long-term memory, Bond, Canon, or persona writes.",
         ],
         "created_at_ms": now_ms(),

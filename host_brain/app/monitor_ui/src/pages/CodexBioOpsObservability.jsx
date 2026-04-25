@@ -22,6 +22,8 @@ import {
   fetchCodexBioOpsOwnerInbox,
   fetchCodexBioOpsOwnerImportCandidates,
   fetchCodexBioOpsOwnerQueues,
+  fetchCodexBioOpsOwnerState,
+  importCodexBioOpsOwnerState,
   materializeCodexBioOpsOwnerInbox,
   materializeCodexBioOpsOwnerIntakePackets,
   rejectCodexBioOpsAdoption,
@@ -39,6 +41,8 @@ const STATUS_STYLES = {
   READY_FOR_OWNER_IMPORT: 'border-green-200 bg-green-50 text-green-700',
   READY_FOR_ORGAN_CONSUMPTION: 'border-indigo-200 bg-indigo-50 text-indigo-700',
   QUEUED_FOR_OWNER: 'border-purple-200 bg-purple-50 text-purple-700',
+  IMPORTED_FOR_OWNER_REVIEW: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  ALREADY_IMPORTED: 'border-slate-200 bg-slate-50 text-slate-700',
   PENDING_REVIEW: 'border-amber-200 bg-amber-50 text-amber-700',
   REJECTED_BY_OWNER: 'border-slate-200 bg-slate-50 text-slate-700',
   TRACED: 'border-indigo-200 bg-indigo-50 text-indigo-700',
@@ -62,6 +66,8 @@ const STATUS_LABELS = {
   READY_FOR_OWNER_IMPORT: '待 owner 导入',
   READY_FOR_ORGAN_CONSUMPTION: '待 organ 消费',
   QUEUED_FOR_OWNER: 'Owner 队列',
+  IMPORTED_FOR_OWNER_REVIEW: 'Owner 状态候选',
+  ALREADY_IMPORTED: '已导入',
   PENDING_REVIEW: '待审核',
   REJECTED_BY_OWNER: 'Owner 拒绝',
   TRACED: '已 trace',
@@ -691,13 +697,16 @@ function OwnerInboxPanel({ runId }) {
   const [data, setData] = useState(null)
   const [imports, setImports] = useState(null)
   const [queues, setQueues] = useState(null)
+  const [ownerState, setOwnerState] = useState(null)
   const [lastMaterialized, setLastMaterialized] = useState(null)
   const [lastPackets, setLastPackets] = useState(null)
   const [lastConsumed, setLastConsumed] = useState(null)
+  const [lastImported, setLastImported] = useState(null)
   const [loading, setLoading] = useState(false)
   const [materializing, setMaterializing] = useState(false)
   const [packetizing, setPacketizing] = useState(false)
   const [consuming, setConsuming] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [error, setError] = useState(null)
   const runParams = runId ? { run_id: runId } : {}
 
@@ -705,14 +714,16 @@ function OwnerInboxPanel({ runId }) {
     setLoading(true)
     setError(null)
     try {
-      const [inboxPayload, importPayload, queuePayload] = await Promise.all([
+      const [inboxPayload, importPayload, queuePayload, statePayload] = await Promise.all([
         fetchCodexBioOpsOwnerInbox(runParams),
         fetchCodexBioOpsOwnerImportCandidates(runParams),
         fetchCodexBioOpsOwnerQueues(runParams),
+        fetchCodexBioOpsOwnerState(runParams),
       ])
       setData(inboxPayload)
       setImports(importPayload)
       setQueues(queuePayload)
+      setOwnerState(statePayload)
     } catch (err) {
       setError(err)
     } finally {
@@ -768,11 +779,27 @@ function OwnerInboxPanel({ runId }) {
     }
   }
 
+  const importOwnerState = async () => {
+    setImporting(true)
+    setError(null)
+    try {
+      const payload = await importCodexBioOpsOwnerState({}, runParams)
+      setLastImported(payload)
+      await loadInbox()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const rows = Array.isArray(data?.items) ? data.items : []
   const queueRows = Array.isArray(queues?.items) ? queues.items : []
+  const stateRows = Array.isArray(ownerState?.items) ? ownerState.items : []
   const counts = data?.status_counts || {}
   const importCounts = imports?.status_counts || {}
   const queueCounts = queues?.status_counts || {}
+  const stateCounts = ownerState?.status_counts || {}
 
   return (
     <div className="rounded-xl border border-white/80 bg-white/82 p-4 shadow-sm">
@@ -820,6 +847,15 @@ function OwnerInboxPanel({ runId }) {
             <Database size={13} />
             {consuming ? '消费中' : '排入 owner queues'}
           </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={importing || !Number(queueCounts.QUEUED_FOR_OWNER || 0)}
+            onClick={importOwnerState}
+          >
+            <ShieldCheck size={13} />
+            {importing ? '导入中' : '导入 owner state'}
+          </button>
         </div>
       </div>
 
@@ -848,6 +884,10 @@ function OwnerInboxPanel({ runId }) {
         <div className="rounded-lg border border-purple-100 bg-purple-50 px-2 py-2">
           <div className="font-semibold text-purple-700">Owner queues</div>
           <div className="mt-1 text-xl font-bold text-gray-900">{queueCounts.QUEUED_FOR_OWNER || 0}</div>
+        </div>
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-2">
+          <div className="font-semibold text-emerald-700">Owner state</div>
+          <div className="mt-1 text-xl font-bold text-gray-900">{stateCounts.IMPORTED_FOR_OWNER_REVIEW || ownerState?.count || 0}</div>
         </div>
       </div>
 
@@ -891,6 +931,12 @@ function OwnerInboxPanel({ runId }) {
         </div>
       ) : null}
 
+      {lastImported ? (
+        <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700">
+          已导入 {lastImported.imported_count} 个 owner candidate state；它是 owner 的持久候选，不是已应用的长期记忆。
+        </div>
+      ) : null}
+
       {queueRows.length ? (
         <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-purple-100">
           {queueRows.slice(0, 6).map((item) => (
@@ -903,6 +949,24 @@ function OwnerInboxPanel({ runId }) {
               <div className="flex items-center justify-between gap-2">
                 <StatusPill status={item.status} />
                 <span className="font-semibold text-gray-500">{item.durable_write_performed ? 'wrote' : 'artifact-only'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {stateRows.length ? (
+        <div className="mt-3 divide-y divide-gray-100 overflow-hidden rounded-lg border border-emerald-100">
+          {stateRows.slice(0, 6).map((item) => (
+            <div key={`${item.owner_organ}-${item.channel_id}-${item.candidate_id}`} className="grid grid-cols-1 gap-2 bg-white px-3 py-2 text-xs sm:grid-cols-[1fr_0.8fr_0.8fr]">
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-gray-800">{item.capability}</div>
+                <div className="truncate text-gray-500">{item.candidate_id}</div>
+              </div>
+              <div className="truncate text-gray-500">{item.channel_id || item.owner_organ || '—'}</div>
+              <div className="flex items-center justify-between gap-2">
+                <StatusPill status={item.status} />
+                <span className="font-semibold text-gray-500">{item.durable_memory_write_performed ? 'memory-write' : 'candidate-only'}</span>
               </div>
             </div>
           ))}

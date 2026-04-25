@@ -23,7 +23,7 @@ This report closes the three Codex digital-life roadmaps against implemented cod
 | ImmunePlane | Implemented as Runtime v2 immune API | `host_brain/codex_runtime/immune.py`, `/internal/codex/immune/*` | health/readiness immune proposal and internal Codex jobs | Codex runtime tests and default gate |
 | BioOps contracts / runner | Implemented | `host_brain/bio_ops/contracts.py`, `runner.py`, `registry.py`, `safety.py`, `artifact_store.py` | `bio_ops_daily_full.json`, WebUI capability panels | `tests/unit/test_bio_ops_*`, `tests/integration/test_bio_ops_daily_cycle.py` |
 | Advanced mechanisms | Implemented as report/proposal/candidate capabilities | `host_brain/bio_ops/capabilities.py` | WebUI panels: Inner, Trust, Natural Interaction, Relationship, Inner Life, Self Governance, Growth, Memory, Affect, Presence, Drive, Adaptive Repair | capability and OBS route tests |
-| Owner adoption | Implemented | `adoption.py`, `owner_inbox.py`, `owner_consumer.py` | adoption review, owner inbox, owner queues | owner adoption/inbox/consumer tests |
+| Owner adoption | Implemented | `adoption.py`, `owner_inbox.py`, `owner_consumer.py`, `organ_ops/owner_candidate_store.py` | adoption review, owner inbox, owner queues, owner candidate state | owner adoption/inbox/consumer/state tests |
 | Daily cycle | Implemented as sidecar-friendly artifact runner | `host_brain/bio_ops/daily_cycle.py`, `scripts/runtime/run_bio_ops_daily_cycle.py` | WebUI `运行 daily cycle` button and observable run artifacts | daily-cycle unit/integration tests |
 | BioOps workflow automation | Implemented as sidecar workflow | `host_brain/bio_ops/workflow.py`, `scripts/runtime/run_bio_ops_workflow.py`, `.github/workflows/bio-ops-automation.yml` | GitHub workflow artifacts plus WebUI run id | workflow automation unit tests |
 | Chat/Planner low-risk trace | Implemented | `bio_ops/runtime_trace.py`, `chat_routes.py`, `executive_runtime_core.py`, `proactive_talk.py` | SSE trace metadata, immune-block trace, proactive quiet-presence trace | runtime trace, chat route, proactive tests |
@@ -39,10 +39,11 @@ BioOpsResult(CANDIDATE)
   -> owner_import_candidate.json
   -> owner_intake_packet.json
   -> owner_queues/<owner>/<channel>/<candidate>/queue_item.json
-  -> owner organ durable importer, outside BioOps direct write path
+  -> owner_state/<owner>/<channel>/<candidate>/owner_candidate_state.json
+  -> owner organ review before any real long-term state application
 ```
 
-Current closure stops at the owner queue artifact. That is deliberate: long-term state import must be implemented by each owner organ, not by Codex or BioOps.
+Current closure now reaches owner-owned durable candidate state. That is still not an applied memory, Bond, Canon, persona, secret, `.env`, or production configuration write; it is a persistent owner review record with `direct_long_term_write = false`, `durable_write_performed = false`, and `durable_memory_write_performed = false`.
 
 ## WebUI / OBS Entry Points
 
@@ -57,6 +58,8 @@ Current closure stops at the owner queue artifact. That is deliberate: long-term
 - `POST /obs/codex-bio-ops/owner-inbox/intake-packets`
 - `GET /obs/codex-bio-ops/owner-queues`
 - `POST /obs/codex-bio-ops/owner-queues/consume`
+- `GET /obs/codex-bio-ops/owner-state`
+- `POST /obs/codex-bio-ops/owner-state/import`
 
 ## Local Observation Commands
 
@@ -74,7 +77,7 @@ Then open the Monitor WebUI Codex / BioOps page and select the generated run.
 Focused BioOps gates run during closure:
 
 ```text
-python -m pytest -q tests/unit/test_bio_ops_runtime_trace.py tests/unit/test_bio_ops_daily_cycle_runner.py tests/unit/test_bio_ops_adoption.py tests/unit/test_bio_ops_owner_consumer.py tests/unit/test_bio_ops_owner_inbox.py tests/unit/test_bio_ops_owner_review_demo_script.py tests/unit/test_bio_ops_runner_capabilities.py tests/unit/test_bio_ops_adaptive_repair.py tests/unit/test_obs_codex_bio_ops_route.py tests/unit/test_fastapi_app_refactor_modules.py tests/unit/test_fastapi_app_immune_gate.py tests/unit/test_proactive_skill.py tests/unit/test_executive_runtime_core_complex_planning.py tests/integration/test_bio_ops_daily_cycle.py
+python -m pytest -q tests/unit/test_bio_ops_runtime_trace.py tests/unit/test_bio_ops_daily_cycle_runner.py tests/unit/test_bio_ops_adoption.py tests/unit/test_bio_ops_owner_consumer.py tests/unit/test_bio_ops_owner_inbox.py tests/unit/test_owner_candidate_store.py tests/unit/test_bio_ops_owner_review_demo_script.py tests/unit/test_bio_ops_runner_capabilities.py tests/unit/test_bio_ops_adaptive_repair.py tests/unit/test_obs_codex_bio_ops_route.py tests/unit/test_fastapi_app_refactor_modules.py tests/unit/test_fastapi_app_immune_gate.py tests/unit/test_proactive_skill.py tests/unit/test_executive_runtime_core_complex_planning.py tests/integration/test_bio_ops_daily_cycle.py
 ```
 
 Result:
@@ -104,3 +107,4 @@ Hard-cut legacy-term scan over runtime code, tests, scripts, and prompts: no mat
 - Full-suite service failures remain classified as service/environment planes, not default gate regressions.
 - Live probes, hardware, TTS/ASR, Edge, gateway, Docker, and runtime probes remain manual or specialized CI planes.
 - BioOps owner queues are not durable state. They are reviewable handoff artifacts for the owning organ.
+- Owner candidate state is durable candidate review state only. Applying it to long-term memory, Bond, Canon, persona, secrets, `.env`, or production configuration remains a separate owner-specific action.

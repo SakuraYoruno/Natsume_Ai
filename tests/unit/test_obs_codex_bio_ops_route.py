@@ -404,6 +404,26 @@ def test_codex_bio_ops_adoption_decision_api_records_artifact(tmp_path, monkeypa
     assert queues["status_counts"]["QUEUED_FOR_OWNER"] == 1
     assert queues["items"][0]["channel_id"] == "social_brain_candidate_queue"
 
+    owner_state_import = client.post("/obs/codex-bio-ops/owner-state/import").json()
+    assert owner_state_import["imported_count"] == 1
+    owner_state_path = (
+        run_dir
+        / "owner_state"
+        / "social_brain_agent"
+        / "social_brain_candidate_queue"
+        / "candidate-1"
+        / "owner_candidate_state.json"
+    )
+    assert owner_state_path.exists()
+    owner_state_payload = json.loads(owner_state_path.read_text(encoding="utf-8"))
+    assert owner_state_payload["write_policy"] == "owner_durable_candidate_only"
+    assert owner_state_payload["direct_long_term_write"] is False
+    assert owner_state_payload["durable_memory_write_performed"] is False
+
+    owner_state = client.get("/obs/codex-bio-ops/owner-state").json()
+    assert owner_state["status_counts"]["IMPORTED_FOR_OWNER_REVIEW"] == 1
+    assert owner_state["items"][0]["state_owner"] == "social_brain_agent"
+
     duplicate = client.post(
         "/obs/codex-bio-ops/adoptions/candidate-1/reject",
         json={"owner_organ": "social_brain_agent"},

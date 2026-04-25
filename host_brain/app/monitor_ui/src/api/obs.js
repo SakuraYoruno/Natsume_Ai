@@ -379,6 +379,26 @@ export function consumeCodexBioOpsOwnerQueues(body = {}, params = {}) {
   })
 }
 
+export function fetchCodexBioOpsOwnerState(params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-state${qs ? '?' + qs : ''}`)
+}
+
+export function importCodexBioOpsOwnerState(body = {}, params = {}) {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+  ).toString()
+  return request(`/obs/codex-bio-ops/owner-state/import${qs ? '?' + qs : ''}`, {
+    method: 'POST',
+    body: JSON.stringify(body || {}),
+  }).then((data) => {
+    invalidateHotGetPrefix('/obs/codex-bio-ops')
+    return data
+  })
+}
+
 export function fetchLifeBody(params = {}) {
   const qs = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
