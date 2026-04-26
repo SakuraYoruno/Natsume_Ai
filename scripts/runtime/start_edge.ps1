@@ -337,7 +337,10 @@ function Start-EdgeProcess {
     $pythonEscaped = ([string]$PythonPath).Replace("'", "''")
     $stdoutEscaped = ([string]$StdoutLog).Replace("'", "''")
     $stderrEscaped = ([string]$StderrLog).Replace("'", "''")
-    $pythonCmd = "start `"`" /B powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"& '$pythonEscaped' -m edge_client 1>> '$stdoutEscaped' 2>> '$stderrEscaped'`""
+    # Do not use `start /B` here. Under SSH/scheduled-task launch it can keep the
+    # edge process attached to the launching job, so the RPC/gateway process exits
+    # as soon as the launcher task finishes.
+    $pythonCmd = "start `"`" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"& '$pythonEscaped' -m edge_client 1>> '$stdoutEscaped' 2>> '$stderrEscaped'`""
     $launcherLines += $pythonCmd
     $launcherLines += "endlocal"
     Set-Content -Path $LauncherScriptPath -Value $launcherLines -Encoding ascii
