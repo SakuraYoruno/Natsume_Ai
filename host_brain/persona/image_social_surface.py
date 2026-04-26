@@ -67,6 +67,9 @@ _ACTION_QUESTION_BACK_RE = re.compile(
 _GENERIC_QUESTION_BACK_RE = re.compile(r"(?:是不是|对吧|是吧|对不对)(?:呀|啊|啦|呢|嘛|吧)?$")
 _IMAGE_AS_SELF_RE = re.compile(r"(?:偷看|偷偷看|看|盯|观察).{0,6}(?:我|人家)")
 _USER_MIND_RE = re.compile(r"(?:在)?想什么|想啥|什么奇怪")
+_UNSUPPORTED_USER_ACTION_RE = re.compile(
+    r"(?:你|哥哥).{0,10}(?:说什么|在说什么|讲什么|干嘛|在干嘛|做什么|搞什么|闹什么|又怎么了|怎么又|到底在)"
+)
 _EMOTION_LABEL_WORDS_RE = r"(?:无语|委屈|生气|不爽|尴尬|别扭|难过|伤心|哭|小吐槽|炸毛|服了)"
 _EMOTION_QUESTION_WORDS_RE = r"(?:什么|啥|怎么|干嘛|为什么|为啥|哪门子)"
 _EMOTION_LABEL_QUESTION_BACK_RE = re.compile(
@@ -170,6 +173,8 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
     if _ACTION_QUESTION_BACK_RE.search(compact):
         return True
     if _USER_MIND_RE.search(compact):
+        return True
+    if _UNSUPPORTED_USER_ACTION_RE.search(compact):
         return True
     if _EMOTION_LABEL_QUESTION_BACK_RE.search(compact):
         return True
