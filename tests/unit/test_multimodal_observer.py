@@ -290,7 +290,9 @@ def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() 
     )
 
     assert result["observations"]["primary_modality"] == "emoji"
-    assert "轻松打趣" in str(result["summary_for_chat"])
+    assert str(result["summary_for_chat"]) == "表情包社交输入"
+    assert result["observations"]["items"][0]["backend"] == "rule_fallback"
+    assert len(model_backend.calls) == 0
 
 
 def test_multimodal_observer_emotive_image_without_question_prefers_social_reply() -> None:

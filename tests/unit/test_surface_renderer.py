@@ -167,6 +167,7 @@ def test_surface_renderer_candidate_acceptance_guards() -> None:
     assert renderer._accept_short_social_candidate("哥哥，来啦。", _validation(safe=False), topic="greeting")[1] == "SHORT_SURFACE_VALIDATION_UNSAFE"
     assert renderer._accept_image_candidate("哥哥今天怎么这么安静。", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_EMOTION_NOT_USED"
     assert renderer._accept_image_candidate("哥哥你又在想什么呀。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+    assert renderer._accept_image_candidate("哥哥你又在无语什么啦？", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate("哥哥又在偷偷看我啦。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate(
         "哼，哥哥真是的。",
@@ -190,6 +191,7 @@ def test_image_social_surface_helper_accepts_safe_social_without_image_descripti
     assert sr.candidate_is_safe_image_social_reply("哼，哥哥真是的。")
     assert sr.candidate_is_safe_image_social_reply("哥哥，收到了哈。")
     assert not sr.candidate_is_safe_image_social_reply("哥哥你又在想什么呀。")
+    assert not sr.candidate_is_safe_image_social_reply("哥哥你又在无语什么啦？")
     assert not sr.candidate_is_safe_image_social_reply("哥哥又在偷偷看我啦。")
     assert not sr.candidate_is_safe_image_social_reply("你看这张图里的猫耳是不是很可爱？")
 

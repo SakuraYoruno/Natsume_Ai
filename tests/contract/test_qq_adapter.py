@@ -232,6 +232,45 @@ class TestQQAdapterInbound(unittest.TestCase):
             self.assertTrue(msg.media_url.startswith("data:image/png;base64,"))
             self.assertEqual(msg.attachments[0].remote_url, msg.media_url)
 
+    def test_image_segment_with_animation_summary_is_emoji_message(self) -> None:
+        """NapCat 会把 QQ 动画表情上报成 image+summary；应按 emoji 社交输入处理。"""
+        adapter = _adapter()
+        payload = _make_ob_message(
+            user_id=789012,
+            raw_message="[CQ:image,summary=&#91;动画表情&#93;,url=http://example.com/sticker.gif]",
+            message=[
+                {
+                    "type": "image",
+                    "data": {
+                        "summary": "[动画表情]",
+                        "url": "http://example.com/sticker.gif",
+                    },
+                },
+            ],
+        )
+        msg = adapter.parse_inbound(payload)
+        assert msg is not None
+        self.assertEqual(msg.msg_type, MsgType.EMOJI)
+        self.assertEqual(msg.content, "[表情消息]")
+        self.assertEqual(msg.media_url, "http://example.com/sticker.gif")
+        self.assertEqual(len(msg.attachments), 1)
+        self.assertEqual(msg.attachments[0].type, "emoji")
+        self.assertEqual(msg.attachments[0].remote_url, "http://example.com/sticker.gif")
+        self.assertEqual(msg.attachments[0].extra.get("qq_summary"), "[动画表情]")
+        self.assertTrue(msg.attachments[0].extra.get("qq_is_expression"))
+
+        payload_without_segment_summary = _make_ob_message(
+            user_id=789012,
+            raw_message="[CQ:image,summary=&#91;动画表情&#93;,url=http://example.com/sticker2.gif]",
+            message=[
+                {"type": "image", "data": {"url": "http://example.com/sticker2.gif"}},
+            ],
+        )
+        msg_without_segment_summary = adapter.parse_inbound(payload_without_segment_summary)
+        assert msg_without_segment_summary is not None
+        self.assertEqual(msg_without_segment_summary.msg_type, MsgType.EMOJI)
+        self.assertEqual(msg_without_segment_summary.attachments[0].type, "emoji")
+
     def test_mface_message_type(self) -> None:
         """QQ 自定义表情应识别为 emoji 附件。"""
         adapter = _adapter()

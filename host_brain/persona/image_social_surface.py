@@ -64,6 +64,13 @@ _IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
 _GENERIC_QUESTION_BACK_RE = re.compile(r"(?:是不是|对吧|是吧|对不对)(?:呀|啊|啦|呢|嘛|吧)?$")
 _IMAGE_AS_SELF_RE = re.compile(r"(?:偷看|偷偷看|看|盯|观察).{0,6}(?:我|人家)")
 _USER_MIND_RE = re.compile(r"(?:在)?想什么|想啥|什么奇怪")
+_EMOTION_LABEL_WORDS_RE = r"(?:无语|委屈|生气|不爽|尴尬|别扭|难过|伤心|哭|小吐槽|炸毛|服了)"
+_EMOTION_QUESTION_WORDS_RE = r"(?:什么|啥|怎么|干嘛|为什么|为啥|哪门子)"
+_EMOTION_LABEL_QUESTION_BACK_RE = re.compile(
+    rf"(?:{_EMOTION_LABEL_WORDS_RE}.{{0,6}}{_EMOTION_QUESTION_WORDS_RE}|"
+    rf"{_EMOTION_QUESTION_WORDS_RE}.{{0,6}}{_EMOTION_LABEL_WORDS_RE}|"
+    rf"{_EMOTION_LABEL_WORDS_RE}(?:吗|嘛)$)"
+)
 _DESCRIPTOR_FOCUS_RE = re.compile(
     r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
     r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
@@ -81,7 +88,7 @@ _EMOTION_RESPONSE_RE = re.compile(
 _SAFE_SOCIAL_REPLY_RE = re.compile(
     r"(?:真是的|拿(?:你|哥哥)没办法|别闹|别这样|少来|又来|我接住|接住了|"
     r"收到|收到了|收到啦|看到了|看到啦|"
-    r"装乖|撒娇|嘴硬|委屈|卖萌|耍赖|求关注|无语|小吐槽|小别扭|心软|招架|晃)"
+    r"装乖|撒娇|嘴硬|委屈|卖萌|耍赖|求关注|小吐槽|小别扭|心软|招架|晃)"
 )
 
 
@@ -158,6 +165,8 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
     if _GENERIC_QUESTION_BACK_RE.search(compact):
         return True
     if _USER_MIND_RE.search(compact):
+        return True
+    if _EMOTION_LABEL_QUESTION_BACK_RE.search(compact):
         return True
     if _IMAGE_AS_SELF_RE.search(compact):
         return True

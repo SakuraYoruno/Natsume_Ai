@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
+import html
 import logging
 import mimetypes
 import os
@@ -43,6 +44,13 @@ _OB_POST_TYPE_NOTICE = "notice"
 _OB_POST_TYPE_REQUEST = "request"
 _OB_MSG_TYPE_PRIVATE = "private"
 _OB_MSG_TYPE_GROUP = "group"
+
+_QQ_IMAGE_EMOJI_SUMMARY_MARKERS = (
+    "动画表情",
+    "表情包",
+    "sticker",
+    "emoji",
+)
 
 # 支持发送的消息类型
 _SENDABLE_MSG_TYPES = frozenset({MsgType.TEXT, MsgType.IMAGE, MsgType.VOICE, MsgType.EMOJI})
@@ -660,8 +668,14 @@ class QQAdapter(AbstractPlatformAdapter):
         """从 OneBot v11 message 数组检测消息类型。"""
         message_arr = raw_payload.get("message")
         if isinstance(message_arr, list):
-            types = {seg.get("type") for seg in message_arr if isinstance(seg, dict)}
-            if "image" in types:
+            types = {str(seg.get("type") or "").strip().lower() for seg in message_arr if isinstance(seg, dict)}
+            image_segments = [
+                seg for seg in message_arr
+                if isinstance(seg, dict) and str(seg.get("type") or "").strip().lower() == "image"
+            ]
+            if image_segments:
+                if all(QQAdapter._is_qq_image_segment_emoji(seg) for seg in image_segments) or QQAdapter._raw_image_cq_is_emoji(raw_payload):
+                    return MsgType.EMOJI
                 return MsgType.IMAGE
             if "mface" in types or "face" in types:
                 return MsgType.EMOJI
@@ -674,6 +688,8 @@ class QQAdapter(AbstractPlatformAdapter):
         raw_message = str(raw_payload.get("raw_message") or "").lower()
         if "[cq:record" in raw_message or "[cq:voice" in raw_message:
             return MsgType.VOICE
+        if "[cq:image" in raw_message and QQAdapter._raw_image_cq_is_emoji(raw_payload):
+            return MsgType.EMOJI
         if "[cq:image" in raw_message:
             return MsgType.IMAGE
         if "[cq:mface" in raw_message or "[cq:face" in raw_message:
@@ -685,6 +701,28 @@ class QQAdapter(AbstractPlatformAdapter):
         return MsgType.TEXT
 
     @staticmethod
+    def _is_qq_image_segment_emoji(segment: dict[str, Any]) -> bool:
+        data = segment.get("data")
+        if not isinstance(data, dict):
+            return False
+        summary = QQAdapter._normalize_qq_summary(data.get("summary") or data.get("brief"))
+        if any(marker in summary for marker in _QQ_IMAGE_EMOJI_SUMMARY_MARKERS):
+            return True
+        sub_type = str(data.get("sub_type") or data.get("type") or "").strip().lower()
+        return sub_type in {"emoji", "sticker", "mface"}
+
+    @staticmethod
+    def _raw_image_cq_is_emoji(raw_payload: dict[str, Any]) -> bool:
+        raw = QQAdapter._normalize_qq_summary(raw_payload.get("raw_message"))
+        if "[cq:image" not in raw:
+            return False
+        return any(marker in raw for marker in _QQ_IMAGE_EMOJI_SUMMARY_MARKERS)
+
+    @staticmethod
+    def _normalize_qq_summary(value: Any) -> str:
+        return html.unescape(str(value or "")).strip().lower()
+
+    @staticmethod
     def _extract_media_url(raw_payload: dict[str, Any], *, msg_type: MsgType) -> str | None:
         message_arr = raw_payload.get("message")
         if not isinstance(message_arr, list):
@@ -692,7 +730,7 @@ class QQAdapter(AbstractPlatformAdapter):
         target_types: dict[MsgType, set[str]] = {
             MsgType.VOICE: {"record", "voice"},
             MsgType.IMAGE: {"image"},
-            MsgType.EMOJI: {"mface", "face"},
+            MsgType.EMOJI: {"mface", "face", "image"},
             MsgType.VIDEO: {"video"},
             MsgType.FILE: {"file"},
         }
@@ -855,7 +893,7 @@ class QQAdapter(AbstractPlatformAdapter):
         mapping: dict[MsgType, tuple[str, str]] = {
             MsgType.VOICE: ("qq_adapter", "voice_content"),
             MsgType.IMAGE: ("qq_adapter", "image_content"),
-            MsgType.EMOJI: ("qq_adapter", "image_content"),
+            MsgType.EMOJI: ("qq_adapter", "emoji_content"),
             MsgType.VIDEO: ("qq_adapter", "video_content"),
             MsgType.FILE: ("qq_adapter", "file_content"),
         }
@@ -888,6 +926,12 @@ class QQAdapter(AbstractPlatformAdapter):
         if not media_ref and msg_type == MsgType.EMOJI:
             media_ref = QQAdapter._extract_media_url(raw_payload, msg_type=MsgType.IMAGE) or ""
         is_remote = media_ref.startswith(("http://", "https://", "data:"))
+        extra: dict[str, Any] = {"platform": "qq"}
+        summary = QQAdapter._extract_qq_media_summary(raw_payload)
+        if summary:
+            extra["qq_summary"] = summary
+        if msg_type == MsgType.EMOJI:
+            extra["qq_is_expression"] = True
         return [
             GatewayAttachment(
                 attachment_id=f"{msg_id}:0",
@@ -895,6 +939,23 @@ class QQAdapter(AbstractPlatformAdapter):
                 local_path=(None if is_remote or not media_ref else media_ref),
                 remote_url=(media_ref if is_remote else None),
                 caption=str(content or "").strip() or None,
-                extra={"platform": "qq"},
+                extra=extra,
             )
         ]
+
+    @staticmethod
+    def _extract_qq_media_summary(raw_payload: dict[str, Any]) -> str:
+        message_arr = raw_payload.get("message")
+        if isinstance(message_arr, list):
+            for seg in message_arr:
+                if not isinstance(seg, dict):
+                    continue
+                data = seg.get("data")
+                if not isinstance(data, dict):
+                    continue
+                summary = html.unescape(str(data.get("summary") or data.get("brief") or "")).strip()
+                if summary:
+                    return summary
+        raw = html.unescape(str(raw_payload.get("raw_message") or "")).strip()
+        match = re.search(r"(?:^|,)summary=([^,\]]+)", raw, flags=re.IGNORECASE)
+        return str(match.group(1) or "").strip() if match else ""

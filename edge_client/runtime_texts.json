@@ -32,6 +32,7 @@
   "qq_adapter": {
     "voice_content": "[语音消息]",
     "image_content": "[图片消息]",
+    "emoji_content": "[表情消息]",
     "video_content": "[视频消息]",
     "file_content": "[文件消息]"
   },
