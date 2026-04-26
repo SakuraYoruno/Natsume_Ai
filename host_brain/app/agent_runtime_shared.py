@@ -1581,6 +1581,21 @@ def _resolve_retrieval_timeout_seconds() -> float:
     return timeout_ms / 1000.0
 
 
+def _is_low_risk_short_chat_route_reason(route_reason: str) -> bool:
+    reason = str(route_reason or "").strip()
+    if not reason:
+        return False
+    return bool(
+        reason.startswith("RELATIONAL_CHAT:")
+        or reason.startswith("THALAMUS_RULE_PHATIC")
+        or reason
+        in {
+            "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP",
+            "THALAMUS_RULE_CONNECTIVITY_CHECK",
+        }
+    )
+
+
 def _maybe_build_task_progress_fastpath(
     *,
     request_id: str,
@@ -2319,13 +2334,14 @@ async def _cortex_orchestrator_sse_generator_impl(
         except Exception as relational_detector_exc:
             _logger.debug("[%s] cortex_orchestrator relational detector degraded: %s", request_id, relational_detector_exc)
         relational_fastlane = bool(
-            route_reason.startswith("RELATIONAL_CHAT:")
-            or route_reason == "THALAMUS_RULE_ASSISTANT_REPLY_FOLLOWUP"
+            _is_low_risk_short_chat_route_reason(route_reason)
             or relational_topic
             or assistant_followup_fastlane
-            or route_reason.startswith("THALAMUS_RULE_PHATIC")
         )
-        phatic_fastlane = bool(route_reason.startswith("THALAMUS_RULE_PHATIC"))
+        phatic_fastlane = bool(
+            route_reason.startswith("THALAMUS_RULE_PHATIC")
+            or route_reason == "THALAMUS_RULE_CONNECTIVITY_CHECK"
+        )
 
     try:
         from host_brain.app.dependencies import get_runtime_task_registry  # noqa: PLC0415

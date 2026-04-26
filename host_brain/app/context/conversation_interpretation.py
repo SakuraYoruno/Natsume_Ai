@@ -20,6 +20,15 @@ _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我
 _REJECTION_RE = re.compile(r"(我不喜欢这样|我不喜欢你这样|别这么说|别这样说|别这么热心|别这样)")
 _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早安|早上好|中午好|晚上好|晚安)[!！。…~\s]*$", re.IGNORECASE)
 _PRESENCE_PING_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
+_CONNECTIVITY_CHECK_RE = re.compile(
+    r"^(?:测试(?:一下|下)?|test|ping|"
+    r"(?:测试(?:一下|下)?(?:现在)?(?:能不能|能|会不会|会|可以)?(?:回|回复|收到)(?:吗|么)?)|"
+    r"(?:你)?(?:能不能|能|会不会|会|可以)(?:回|回复)(?:我)?(?:吗|么)?|"
+    r"(?:你)?(?:能不能|能|可以)?收到(?:吗|么)?|"
+    r"有反应(?:吗|么)?|回我一下|回复一下|在线(?:吗|么)?)"
+    r"[?？!！。…~\s]*$",
+    re.IGNORECASE,
+)
 _LIGHT_ACK_RE = re.compile(r"^(?:嗯|嗯嗯|哦|哦哦|好的?|行|行吧|收到|ok|okay|好哦|好呀)[!！。…~\s]*$", re.IGNORECASE)
 _PLAYFUL_PING_RE = re.compile(r"^(?:戳戳|喂喂|嘿嘿|冒泡|路过|ping|戳一戳)[!！。…~\s]*$", re.IGNORECASE)
 _PHATIC_PUNCT_RE = re.compile(r"^[?？!！。…~、,.，]{1,4}$")
@@ -146,6 +155,8 @@ def classify_literal_topic(message: str, multimodal_payload: Mapping[str, Any] |
     if _GREETING_RE.match(text):
         return "greeting"
     if _PRESENCE_PING_RE.match(text):
+        return "presence_ping"
+    if _CONNECTIVITY_CHECK_RE.match(text):
         return "presence_ping"
     if _LIGHT_ACK_RE.match(text):
         return "light_ack"

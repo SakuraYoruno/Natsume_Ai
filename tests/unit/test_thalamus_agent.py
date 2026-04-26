@@ -435,6 +435,34 @@ def test_classify_task_intent_by_rules_routes_relational_followup_to_chat() -> N
     assert str(decision["reason_code"]).startswith("RELATIONAL_CHAT:")
 
 
+def test_classify_task_intent_routes_connectivity_check_to_chat() -> None:
+    decision = classify_task_intent_by_rules("测试一下现在能回吗")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "thalamus.rule"
+    assert decision["reason_code"] == "THALAMUS_RULE_CONNECTIVITY_CHECK"
+
+
+def test_classify_task_intent_fastpath_routes_connectivity_check_to_chat() -> None:
+    decision = classify_task_intent_fastpath("测试下能不能回复")
+
+    assert decision is not None
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["route_source"] == "rule.fastpath"
+    assert decision["reason_code"] == "THALAMUS_RULE_CONNECTIVITY_CHECK"
+
+
+def test_classify_task_intent_keeps_real_test_work_on_codex() -> None:
+    decision = classify_task_intent_by_rules("帮我跑一下测试，看看失败的用例")
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] == "codex_worker"
+
+
 def test_classify_task_intent_fastpath_routes_english_greeting_to_chat() -> None:
     decision = classify_task_intent_fastpath("hello")
 
@@ -613,4 +641,3 @@ def test_classify_and_compile_intent_draft_defaults_to_chat_when_no_rule_or_llm(
     assert compiled["route"] == "chat"
     assert compiled["route_reason"] == "THALAMUS_RULE_CONTEXT_CHAT"
     assert compiled["route_source"] == "thalamus.rule"
-

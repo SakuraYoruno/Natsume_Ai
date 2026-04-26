@@ -197,6 +197,28 @@ _PHATIC_COMFORT_RE = re.compile(
 _PHATIC_SOCIAL_FOLLOWUP_RE = re.compile(
     r"(我不委屈|不委屈|我没委屈|我不难过|我没难过|才没有|哪有|(?:没有|没|不是|不).{0,4}(?:闹别扭|委屈|难过|生气|不高兴|撒娇|伤心|emo|哭)|怎么了啊|怎么啦啊|怎么了呀|怎么啦呀|怎么了嘛|怎么啦嘛|没什么是怎么了|没什么啦|没什么呀|没什么啊|没事啊|没事啦)"
 )
+_PHATIC_CONNECTIVITY_EXACT: frozenset[str] = frozenset(
+    {
+        "测试",
+        "测试一下",
+        "测试下",
+        "test",
+        "ping",
+    }
+)
+_PHATIC_CONNECTIVITY_RE = re.compile(
+    r"(测试(?:一下|下)?(?:现在)?(?:能不能|能|会不会|会|可以)?(?:回|回复|收到)"
+    r"|(?:你)?(?:能不能|能|会不会|会|可以)(?:回|回复)(?:我)?"
+    r"|(?:你)?(?:能不能|能|可以)?收到(?:吗|么)?"
+    r"|有反应(?:吗|么)?|回我一下|回复一下|在线(?:吗|么)?)",
+    re.IGNORECASE,
+)
+_PHATIC_CONNECTIVITY_BLOCKING_RE = re.compile(
+    r"(单测|测试用例|用例|pytest|unittest|跑.*测试|测试.*(?:接口|函数|代码|脚本|服务|模块|功能|api|API)"
+    r"|(?:接口|函数|代码|脚本|服务|模块|功能|api|API).{0,8}测试"
+    r"|报错|错误|异常|失败|修复|排查|验证|仓库|文件|host|edge|gateway|onebot|build|compile)",
+    re.IGNORECASE,
+)
 _PHATIC_FASTPATH_MAX_CHARS = 24
 _PHATIC_COMFORT_BLOCKING_TOKENS: tuple[str, ...] = (
     "翻译",
@@ -332,6 +354,11 @@ def _detect_short_companion_chat_reason(text: str) -> str | None:
     compact = _normalize_phatic_match_text(cleaned)
     if not compact or len(compact) > _PHATIC_FASTPATH_MAX_CHARS:
         return None
+
+    if (
+        compact in _PHATIC_CONNECTIVITY_EXACT or _PHATIC_CONNECTIVITY_RE.search(compact)
+    ) and not _PHATIC_CONNECTIVITY_BLOCKING_RE.search(cleaned):
+        return "THALAMUS_RULE_CONNECTIVITY_CHECK"
 
     if _PHATIC_GREETING_RE.match(cleaned):
         return "THALAMUS_RULE_PHATIC_GREETING"
@@ -1612,4 +1639,3 @@ __all__ = [
     "get_thalamus_agent",
     "set_thalamus_agent",
 ]
-

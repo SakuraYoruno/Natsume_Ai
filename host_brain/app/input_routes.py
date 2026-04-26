@@ -2021,9 +2021,13 @@ async def _run_cortex_orchestrator_pipeline(
             "route": str(intent_draft.get("route") or "chat").strip().lower() or "chat",
             "target_id": str(intent_draft.get("target_id") or "").strip(),
             "task": str(intent_draft.get("task") or "").strip(),
-            "reason_code": str(intent_draft.get("route_reason") or "").strip() or None,
+            "reason_code": str(intent_draft.get("reason_code") or intent_draft.get("route_reason") or "").strip() or None,
             "source": str(intent_draft.get("route_source") or "").strip() or None,
-            "confidence": _normalize_route_confidence(intent_draft.get("route_confidence")),
+            "confidence": _normalize_route_confidence(
+                intent_draft.get("route_confidence")
+                if intent_draft.get("route_confidence") is not None
+                else intent_draft.get("confidence")
+            ),
             "override_reason": str(intent_draft.get("route_override_reason") or "").strip() or None,
             "llm_route_used": bool(intent_draft.get("llm_route_used")),
         },

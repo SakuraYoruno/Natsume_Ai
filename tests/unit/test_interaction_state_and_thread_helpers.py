@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from host_brain.app.context.interaction_state import coerce_interaction_state, build_interaction_state
-from host_brain.app.context.conversation_interpretation import interpret_conversation
+from host_brain.app.context.conversation_interpretation import classify_literal_topic, interpret_conversation
 from host_brain.app.context.interaction_thread import (
     InteractionThreadState,
     _classify_assistant_topic,
@@ -33,6 +33,19 @@ def test_classify_user_and_assistant_topic_cover_major_regex_branches() -> None:
     assert _classify_assistant_topic("我是新海天。") == "identity"
     assert _classify_assistant_topic("虽然不算熟，但是顺路嘛。") == "relationship_boundary"
     assert _classify_assistant_topic("你真开口的话，我不会装作没听见。") == "help_commitment"
+
+
+def test_connectivity_check_is_presence_ping_not_plain_hold() -> None:
+    assert classify_literal_topic("测试一下现在能回吗") == "presence_ping"
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="测试一下现在能回吗",
+        topic_ledger=TopicLedgerBlock(),
+    )
+
+    assert interpretation.literal_topic == "presence_ping"
+    assert interpretation.ongoing_thread == "phatic"
 
 
 def test_coerce_interaction_thread_state_and_default_empty() -> None:
