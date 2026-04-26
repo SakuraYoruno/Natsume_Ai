@@ -168,6 +168,7 @@ def test_surface_renderer_candidate_acceptance_guards() -> None:
     assert renderer._accept_image_candidate("哥哥今天怎么这么安静。", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_EMOTION_NOT_USED"
     assert renderer._accept_image_candidate("哥哥你又在想什么呀。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate("哥哥你又在无语什么啦？", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+    assert renderer._accept_image_candidate("哥哥你这是在晃我吗？", _validation(), multimodal={"summary_for_chat": "表情包社交输入"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate("哥哥又在偷偷看我啦。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate(
         "哼，哥哥真是的。",

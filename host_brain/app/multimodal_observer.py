@@ -461,6 +461,8 @@ class MultimodalObserver:
     def _should_keep_emoji_observation_rule_only(*, item: dict[str, Any], user_text: str) -> bool:
         if str(item.get("type") or "").strip().lower() != "emoji":
             return False
+        if str(item.get("local_path") or "").strip() or str(item.get("remote_url") or "").strip():
+            return False
         text = str(user_text or "").strip()
         if text in _SOCIAL_EMOJI_PLACEHOLDERS:
             return True

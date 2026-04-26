@@ -281,9 +281,36 @@ def test_multimodal_observer_emoji_only_without_question_prefers_social_reply() 
             {
                 "attachment_id": "att_emoji_only",
                 "type": "emoji",
-                "local_path": str(Path(__file__)),
+                "remote_url": "https://example.com/sticker.png",
                 "ocr_text": "hello",
                 "caption": "动漫女孩在挥手",
+            }
+        ],
+        render_target_lang="zh",
+    )
+
+    assert result["observations"]["primary_modality"] == "emoji"
+    assert "轻松打趣" in str(result["summary_for_chat"])
+    assert result["observations"]["social_signal"] == "轻松打趣"
+    assert result["observations"]["items"][0]["backend"] == "multimodal_model"
+    assert len(model_backend.calls) == 1
+
+
+def test_multimodal_observer_emoji_placeholder_without_media_uses_rule_fallback() -> None:
+    model_backend = _StaticBackend(supported_types={"emoji"}, result_factory=_model_result)
+    fallback_backend = _StaticBackend(supported_types={"image", "file", "voice", "video", "emoji"}, result_factory=_fallback_result)
+    observer = MultimodalObserver(model_backend=model_backend, fallback_backend=fallback_backend)
+
+    result = observer.observe(
+        request_id="req_mm_emoji_no_media",
+        platform="qq",
+        conversation_id="qq_dm_mm_emoji_no_media",
+        user_text="[表情消息]",
+        attachments=[
+            {
+                "attachment_id": "att_emoji_no_media",
+                "type": "emoji",
+                "caption": "[表情消息]",
             }
         ],
         render_target_lang="zh",
