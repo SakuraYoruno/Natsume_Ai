@@ -306,6 +306,92 @@ $qqOneBotStateFile = Join-Path $runtimeRoot 'qq_onebot.state.json'
 $qqOneBotApiBase = [string]$envValues['QQ_ONEBOT_API_BASE']
 $qqOneBotHealthUrl = Get-QQOneBotHealthUrl -ApiBase $qqOneBotApiBase -Override ([string]$envValues['EDGE_QQ_ONEBOT_HEALTH_URL'])
 
+$runnerContent = @'
+[CmdletBinding()]
+param(
+  [string]$RepoRoot = "",
+  [string]$EnvFile = "",
+  [string]$PythonPath = "",
+  [string]$BindHost = "0.0.0.0",
+  [int]$Port = 17800
+)
+
+$ErrorActionPreference = 'Stop'
+
+function Resolve-DefaultRepoRoot {
+  return (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
+
+function Resolve-PythonInterpreter {
+  param(
+    [string]$RepoRootPath,
+    [string]$PreferredPath
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($PreferredPath)) {
+    return $PreferredPath
+  }
+
+  $venvPython = Join-Path $RepoRootPath '.venv\Scripts\python.exe'
+  if (Test-Path $venvPython) {
+    return $venvPython
+  }
+
+  $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+  if ($null -ne $pythonCmd) {
+    return $pythonCmd.Source
+  }
+
+  throw 'python executable not found; set -PythonPath explicitly'
+}
+
+function Import-EnvFile {
+  param([string]$Path)
+
+  if (-not (Test-Path $Path)) {
+    return
+  }
+
+  Get-Content $Path | ForEach-Object {
+    if ([string]::IsNullOrWhiteSpace($_)) { return }
+    $line = $_.Trim()
+    if ($line.StartsWith('#')) { return }
+    $ix = $line.IndexOf('=')
+    if ($ix -lt 1) { return }
+    $k = $line.Substring(0, $ix).Trim()
+    $v = $line.Substring($ix + 1).Trim()
+    [Environment]::SetEnvironmentVariable($k, $v, 'Process')
+  }
+}
+
+if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
+  $RepoRoot = Resolve-DefaultRepoRoot
+}
+if ([string]::IsNullOrWhiteSpace($EnvFile)) {
+  $EnvFile = Join-Path $RepoRoot '.env'
+}
+$PythonPath = Resolve-PythonInterpreter -RepoRootPath $RepoRoot -PreferredPath $PythonPath
+
+Import-EnvFile -Path $EnvFile
+
+if (-not [string]::IsNullOrWhiteSpace($BindHost)) {
+  $env:EDGE_RPC_HOST = $BindHost
+}
+if ($Port -gt 0) {
+  $env:EDGE_RPC_PORT = [string]$Port
+}
+
+Set-Location $RepoRoot
+
+# Python logging writes warnings to stderr during normal startup. In Windows
+# PowerShell 5.1, native stderr can be surfaced as NativeCommandError and obey
+# ErrorActionPreference, so keep setup strict but treat edge_client stderr as log.
+$ErrorActionPreference = 'Continue'
+& $PythonPath -m edge_client
+exit $LASTEXITCODE
+'@
+Set-Content -Path $runnerScript -Value $runnerContent -Encoding ascii
+
 if (-not (Test-Path -Path $runnerScript)) {
   throw "run_edge_task.ps1 not found: $runnerScript"
 }
