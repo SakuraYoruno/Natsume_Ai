@@ -427,7 +427,7 @@ def test_reply_plan_summaries_are_qualitative_chinese_only() -> None:
     assert "0." not in plan.relationship_summary
 
 
-def test_reply_plan_emoji_social_reply_prefers_text_plus_emoji() -> None:
+def test_reply_plan_emoji_social_reply_uses_image_social_text_path() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "PLAYFUL"},
         bond_summary={"stage": "FRIEND", "score": 0.48},
@@ -445,9 +445,11 @@ def test_reply_plan_emoji_social_reply_prefers_text_plus_emoji() -> None:
         render_target_lang="zh",
     )
 
-    assert plan.response_form == "text_plus_emoji"
-    assert plan.secondary_response_form == "emoji"
-    assert plan.response_form_reason == "emoji_social_reply"
+    assert plan.response_form == "text"
+    assert plan.secondary_response_form == ""
+    assert plan.response_form_reason == "image_social_reply"
+    assert plan.tactic_family in {"soft_emotion_ack", "cute_image_ack", "tease_image_ack"}
+    assert "image_social_light_ack" in plan.contract.required_actions
 
 
 def test_reply_plan_social_image_prefers_text_only() -> None:

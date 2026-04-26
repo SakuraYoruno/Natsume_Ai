@@ -387,7 +387,7 @@ def _decide_response_form(
     if literal_topic == "emoji_social_followup":
         return "text", "", "image_social_followup", False
     if literal_topic == "emoji_social_reply":
-        if primary_modality in {"image", "sticker"}:
+        if primary_modality in {"image", "emoji", "sticker"}:
             return "text", "", "image_social_reply", False
         return "text_plus_emoji", "emoji", "emoji_social_reply", False
     if literal_topic in {"greeting", "presence_ping"}:
@@ -755,7 +755,7 @@ def _refine_multimodal_contract(
         for item in getattr(contract, "realization_steps", ()) or ()
         if str(item).strip()
     )
-    if topic == "emoji_social_reply" and primary_modality in {"image", "sticker"}:
+    if topic == "emoji_social_reply" and primary_modality in {"image", "emoji", "sticker"}:
         signal_haystack = _multimodal_signal_haystack(payload)
         has_specific_signal = any(
             token in signal_haystack
@@ -1215,7 +1215,7 @@ def _build_topic_trajectory_options(
         )]
     if topic == "emoji_social_reply":
         primary_modality = str((multimodal or {}).get("primary_modality") or "").strip().lower()
-        if primary_modality == "image":
+        if primary_modality in {"image", "emoji", "sticker"}:
             ranked = _prioritize_trajectory_options(
                 topic=topic,
                 candidates=_image_social_candidates(multimodal),

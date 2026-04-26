@@ -153,7 +153,7 @@ def test_decide_response_form_covers_social_and_default_modes() -> None:
         interpretation=ConversationInterpretation(literal_topic="emoji_social_reply"),
         relationship_state=stranger,
         multimodal={"primary_modality": "emoji"},
-    ) == ("text_plus_emoji", "emoji", "emoji_social_reply", False)
+    ) == ("text", "", "image_social_reply", False)
     assert _decide_response_form(
         interpretation=ConversationInterpretation(literal_topic="attachment_only_no_question"),
         relationship_state=stranger,
