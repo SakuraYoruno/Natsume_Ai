@@ -852,11 +852,35 @@ def _refine_multimodal_contract(
             realization_steps=base_steps or ("先接住这是上一张图后的跟话", "顺着刚才那层情绪自然接一句"),
         )
     if topic == "attachment_only_no_question" and primary_modality == "image":
+        artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+        observed_core = _join_nonempty(
+            [
+                str(payload.get("core_observation") or "").strip(),
+                str(payload.get("visual_facts") or "").strip(),
+                str(payload.get("summary_for_chat") or "").strip(),
+            ]
+        )
+        generic_only = not observed_core or observed_core in {"收到一张图片。", "收到一张图片", "图片", "image"}
+        if artifact_type != "screenshot" and not generic_only:
+            return ReplyContract(
+                text=" ".join(
+                    part for part in (
+                        base_text,
+                        "这是对方主动分享的普通图片，不是表情包问答。",
+                        "必须已经利用视觉观察：自然点到画面里的一个核心对象或氛围，再顺着聊天接一句。",
+                        "不要输出扫描报告、清单式描述，也不要只说“看到了”。",
+                    )
+                    if str(part).strip()
+                ),
+                required_actions=tuple(dict.fromkeys([*contract.required_actions, "ack_visual_share"])),
+                forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
+                realization_steps=base_steps or ("点到图片核心内容", "像接住分享一样自然回应"),
+            )
         return ReplyContract(
             text=" ".join(
                 part for part in (
                     base_text,
-                    "先承认已经看到了这张图，再轻轻接住，不要主动开始描述画面，也不要立刻追问。",
+                    "先承认已经看到了这张图，再轻轻接住；如果只是截图或观察不足，不要主动开始分析画面，也不要立刻追问。",
                 )
                 if str(part).strip()
             ),

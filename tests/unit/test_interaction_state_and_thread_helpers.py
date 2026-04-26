@@ -166,7 +166,7 @@ def test_interpret_conversation_promotes_image_social_followup_from_gateway_like
     assert "image_social_followup:deny" in final.reason_tags
 
 
-def test_interpret_conversation_routes_gateway_image_placeholders_as_social_image() -> None:
+def test_interpret_conversation_routes_generic_image_placeholders_as_visual_share() -> None:
     generic_image_observation = {
         "primary_modality": "image",
         "observed_types": ["image"],
@@ -180,6 +180,30 @@ def test_interpret_conversation_routes_gateway_image_placeholders_as_social_imag
         user_message="[????]",
         topic_ledger=TopicLedgerBlock(),
         multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "attachment_only_no_question"
+    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.ongoing_thread == ""
+    assert "literal_topic:attachment_only_no_question" in interpretation.reason_tags
+
+
+def test_interpret_conversation_routes_emotive_image_placeholder_as_social_image() -> None:
+    emotive_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "无语；一张动漫反应图。",
+        "core_observation": "无语；一张动漫反应图。",
+        "social_signal": "无语",
+        "emotion_signals": ["无语"],
+        "confidence": 0.72,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[????]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=emotive_image_observation,
     )
 
     assert interpretation.literal_topic == "emoji_social_reply"
@@ -207,6 +231,45 @@ def test_interpret_conversation_keeps_explicit_image_question_as_description() -
     assert interpretation.literal_topic == "literal_description"
     assert interpretation.interaction_move == "probe"
     assert interpretation.ongoing_thread == ""
+
+
+def test_interpret_conversation_treats_look_request_as_image_content() -> None:
+    generic_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "一只放在桌上的白色马克杯",
+        "core_observation": "一只放在桌上的白色马克杯",
+        "confidence": 0.76,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="你看这张图",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "literal_description"
+    assert interpretation.interaction_move == "probe"
+
+
+def test_interpret_conversation_keeps_look_request_social_when_image_is_reaction_meme() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="你看这个",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "summary_for_chat": "像是在无语、尴尬，想让人顺着接一句",
+            "core_observation": "像是在无语、尴尬，想让人顺着接一句",
+            "social_signal": "无语",
+            "emotion_signals": ["无语"],
+        },
+    )
+
+    assert interpretation.literal_topic == "emoji_social_reply"
+    assert interpretation.interaction_move == "playful_ping"
 
 
 def test_interpret_conversation_promotes_assistant_reply_followup() -> None:

@@ -299,7 +299,7 @@ def test_refine_multimodal_contract_covers_image_reply_followup_attachment_and_j
 
     assert "不要解说画面" in image_reply.text
     assert "为什么会那样想" in followup.text
-    assert "不要主动开始描述画面" in attachment.text
+    assert "不要主动开始分析画面" in attachment.text
     assert ja_passthrough == base
 
 
@@ -495,7 +495,7 @@ def test_build_reply_plan_from_inputs_refines_multimodal_contracts_and_japanese_
         render_target_lang="ja",
     )
 
-    assert "不要主动开始描述画面" in image_plan.reply_contract
+    assert "不要主动开始分析画面" in image_plan.reply_contract
     assert image_plan.contract.realization_steps
     assert "距離感は保ちつつ" in ja_plan.relationship_summary or "距離感は保ちつつ" in _qualitative_relationship_summary(
         relationship=RelationshipStateBlock(bond_stage="FRIEND", boundary_softness=0.2),

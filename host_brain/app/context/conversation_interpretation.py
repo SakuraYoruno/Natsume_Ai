@@ -38,6 +38,40 @@ _CAPABILITY_CHECK_RE = re.compile(r"(能|可以|可不可以|是否).{0,8}(看�
 _MEANING_QUERY_RE = re.compile(r"(什么意思|啥意思|什么梗|表达什么|想表达什么|在说什么|什么语气|什么感觉)", re.IGNORECASE)
 _SCREENSHOT_QUERY_RE = re.compile(r"(报错|错误|怎么|哪里|哪儿|按钮|界面|问题|啥情况|什么意思|怎么操作|点哪里)", re.IGNORECASE)
 _LITERAL_QUERY_RE = re.compile(r"(图里有什么|图片里有什么|画的什么|是什么|写了什么|看到什么|内容是什么)", re.IGNORECASE)
+_IMAGE_LOOK_REQUEST_RE = re.compile(
+    r"(?:帮我)?(?:看一下|看下|看看|看一眼|你看)(?:这|这个|下)?(?:张)?(?:图|图片|照片|截图)?|"
+    r"(?:这|这个)(?:张)?(?:图|图片|照片|截图)(?:你)?(?:看|看看|看一下|看下)",
+    re.IGNORECASE,
+)
+_IMAGE_SOCIAL_SIGNAL_TOKENS = (
+    "表情包",
+    "表情图",
+    "贴纸",
+    "贴图",
+    "反应图",
+    "meme",
+    "委屈",
+    "哭",
+    "难过",
+    "伤心",
+    "可怜",
+    "可爱",
+    "卖萌",
+    "猫耳",
+    "装乖",
+    "乖",
+    "萌",
+    "无语",
+    "尴尬",
+    "炸毛",
+    "抱抱",
+    "撒娇",
+    "吐槽",
+    "不爽",
+    "气鼓鼓",
+    "打趣",
+    "逗",
+)
 _MEDIA_ONLY_PLACEHOLDER_RE = re.compile(
     r"^\[(?:图片|图像|表情|表情包|贴图|贴纸|截图|文件|语音|视频)(?:消息)?\]$|"
     r"^\[(?:image|emoji|sticker|photo|picture|screenshot|file|voice|video)(?: message)?\]$|"
@@ -104,23 +138,28 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
     artifact_type = str(payload.get("artifact_type") or "").strip().lower()
     core_observation = _normalize_text(payload.get("core_observation"))
     visible_text = _normalize_text(payload.get("visible_text"))
+    social_signal = _normalize_text(payload.get("social_signal"))
     emotion_signals = [
         str(item).strip()
         for item in list(payload.get("emotion_signals") or [])
         if str(item).strip()
     ]
-    haystack = " ".join([core_observation, visible_text, *emotion_signals]).lower()
+    haystack = " ".join([core_observation, visible_text, social_signal, *emotion_signals]).lower()
     has_visual_payload = bool(primary_modality or observed_types or core_observation or visible_text or emotion_signals)
     if not has_visual_payload:
         return ""
 
-    visual_social_modalities = {"image", "emoji", "sticker"}
+    visual_modalities = {"image", "emoji", "sticker"}
     is_screenshot = artifact_type == "screenshot" or "screenshot" in observed_types
-    is_visual_social_payload = primary_modality in visual_social_modalities or bool(observed_types.intersection(visual_social_modalities))
-    is_social_image = is_visual_social_payload and (
-        primary_modality in {"emoji", "sticker"}
-        or bool(emotion_signals)
-        or any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "可爱", "卖萌", "猫耳", "无语", "尴尬", "炸毛", "抱抱", "撒娇"))
+    is_visual_payload = primary_modality in visual_modalities or bool(observed_types.intersection(visual_modalities))
+    is_emoji_payload = primary_modality in {"emoji", "sticker"} or bool(observed_types.intersection({"emoji", "sticker"}))
+    is_plain_image_payload = primary_modality == "image" or "image" in observed_types
+    has_specific_social_signal = bool(social_signal or emotion_signals) or any(
+        token in haystack for token in _IMAGE_SOCIAL_SIGNAL_TOKENS
+    )
+    is_social_image = is_visual_payload and not is_screenshot and (
+        is_emoji_payload
+        or (is_plain_image_payload and has_specific_social_signal)
     )
     media_only = not normalized or bool(_MEDIA_ONLY_PLACEHOLDER_RE.match(normalized))
 
@@ -132,12 +171,14 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
         return "screenshot_analysis"
     if text and _LITERAL_QUERY_RE.search(text):
         return "literal_description"
+    if text and _IMAGE_LOOK_REQUEST_RE.search(text):
+        return "emoji_social_reply" if is_social_image else "literal_description"
     if media_only:
-        if is_visual_social_payload and not is_screenshot:
+        if is_social_image:
             return "emoji_social_reply"
+        if is_plain_image_payload or is_screenshot:
+            return "attachment_only_no_question"
         return "attachment_only_no_question"
-    if is_visual_social_payload and not is_screenshot:
-        return "emoji_social_reply"
     if is_social_image:
         return "emoji_social_reply"
     if is_screenshot:

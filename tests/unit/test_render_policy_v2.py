@@ -703,6 +703,34 @@ def test_reply_plan_screenshot_analysis_uses_multimodal_tactic() -> None:
     assert plan.response_form == "text"
 
 
+def test_reply_plan_plain_image_share_uses_visual_observation_without_scan_report() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "CALM"},
+        bond_summary={"stage": "STRANGER", "score": 0.05},
+        motive_state={"continuity_drive": 0.22},
+        conversation_interpretation={
+            "literal_topic": "attachment_only_no_question",
+            "interaction_move": "light_ack",
+            "freshness": "new",
+            "user_stance": "probing",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "core_observation": "一只白色马克杯放在桌上。",
+            "visual_facts": "一只白色马克杯放在桌上。",
+            "summary_for_chat": "一只白色马克杯放在桌上。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.primary_topic == "attachment_only_no_question"
+    assert "普通图片" in plan.reply_contract
+    assert "自然点到画面里的一个核心对象" in plan.reply_contract
+    assert "扫描报告" in plan.reply_contract
+    assert "ack_visual_share" in plan.contract.required_actions
+
+
 def test_reply_plan_preserves_multimodal_payload_for_runtime_and_coercion() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "CALM"},

@@ -157,6 +157,39 @@ def test_conversation_interpretation_image_only_without_question_is_social_reply
     assert interpretation.user_stance == "playful"
 
 
+def test_conversation_interpretation_plain_photo_without_question_is_visual_share() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[图片消息]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "core_observation": "一只白色马克杯放在桌上。",
+        },
+    )
+
+    assert interpretation.literal_topic == "attachment_only_no_question"
+    assert interpretation.interaction_move == "light_ack"
+    assert interpretation.user_stance == "probing"
+
+
+def test_conversation_interpretation_look_at_photo_without_question_uses_content_path() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="你看这张照片",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "core_observation": "一只白色马克杯放在桌上。",
+        },
+    )
+
+    assert interpretation.literal_topic == "literal_description"
+    assert interpretation.interaction_move == "probe"
+
+
 def test_conversation_interpretation_screenshot_only_stays_attachment_ack() -> None:
     interpretation = interpret_conversation(
         recent_turns=[],
