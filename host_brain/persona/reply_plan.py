@@ -387,7 +387,7 @@ def _decide_response_form(
     if literal_topic == "emoji_social_followup":
         return "text", "", "image_social_followup", False
     if literal_topic == "emoji_social_reply":
-        if primary_modality == "image":
+        if primary_modality in {"image", "sticker"}:
             return "text", "", "image_social_reply", False
         return "text_plus_emoji", "emoji", "emoji_social_reply", False
     if literal_topic in {"greeting", "presence_ping"}:
@@ -755,9 +755,48 @@ def _refine_multimodal_contract(
         for item in getattr(contract, "realization_steps", ()) or ()
         if str(item).strip()
     )
-    if topic == "emoji_social_reply" and primary_modality == "image":
+    if topic == "emoji_social_reply" and primary_modality in {"image", "sticker"}:
         signal_haystack = _multimodal_signal_haystack(payload)
-        if any(token in signal_haystack for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")):
+        has_specific_signal = any(
+            token in signal_haystack
+            for token in (
+                "逗",
+                "调侃",
+                "搞怪",
+                "捉弄",
+                "坏笑",
+                "挑衅",
+                "无语",
+                "尴尬",
+                "裂开",
+                "社死",
+                "别扭",
+                "小脾气",
+                "鼓脸",
+                "气鼓鼓",
+                "不爽",
+                "服了",
+                "委屈",
+                "哭",
+                "难过",
+                "伤心",
+                "泪",
+                "可怜",
+                "呜",
+                "可爱",
+                "卖萌",
+                "猫耳",
+                "装乖",
+                "软萌",
+                "乖",
+                "萌",
+            )
+        )
+        required_image_action = "image_social_emotion_response"
+        if not has_specific_signal:
+            required_image_action = "image_social_light_ack"
+            action_options_text = "观察没有明确情绪时，不要硬猜成撒娇、委屈、可爱或逗你；只把它当成对方递来一张图/表情的轻社交动作接一句。"
+        elif any(token in signal_haystack for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")):
             action_options_text = "必须先判断它像是在撒娇、装乖、委屈、嘴硬、逗你还是求关注，再对这个动作回一句。"
         elif any(token in signal_haystack for token in ("无语", "尴尬", "裂开", "社死", "别扭", "小脾气", "鼓脸", "气鼓鼓", "不爽", "服了")):
             action_options_text = "必须先判断它像是在无语、小吐槽、尴尬、嘴硬还是别扭，再对这个情绪动作回一句。"
@@ -785,7 +824,7 @@ def _refine_multimodal_contract(
                 )
                 if str(part).strip()
             ),
-            required_actions=tuple(dict.fromkeys([*contract.required_actions, "image_social_emotion_response"])),
+            required_actions=tuple(dict.fromkeys([*contract.required_actions, required_image_action])),
             forbidden_actions=tuple(dict.fromkeys([*contract.forbidden_actions, "multimodal_generic_followup"])),
             realization_steps=base_steps or ("识别表情包表达的情绪动作", "对这个情绪动作回一句"),
         )

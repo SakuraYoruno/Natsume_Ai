@@ -477,6 +477,57 @@ def test_reply_plan_social_image_prefers_text_only() -> None:
     assert plan.force_buffering is True
 
 
+def test_reply_plan_generic_social_image_does_not_force_emotion_guess() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "STRANGER", "score": 0.0},
+        motive_state={"continuity_drive": 0.0},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "image",
+            "observed_types": ["image"],
+            "summary_for_chat": "收到一张图片。",
+            "core_observation": "收到一张图片。",
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form_reason == "image_social_reply"
+    assert "观察没有明确情绪" in plan.reply_contract
+    assert "不要硬猜成撒娇、委屈、可爱或逗你" in plan.reply_contract
+    assert "必须先判断它像是在撒娇" not in plan.reply_contract
+    assert "image_social_light_ack" in plan.contract.required_actions
+    assert "image_social_emotion_response" not in plan.contract.required_actions
+
+
+def test_reply_plan_social_sticker_prefers_image_social_text_path() -> None:
+    plan = build_reply_plan_from_inputs(
+        emotion_context={"emotion_tag": "PLAYFUL"},
+        bond_summary={"stage": "FRIEND", "score": 0.48},
+        motive_state={"continuity_drive": 0.38},
+        conversation_interpretation={
+            "literal_topic": "emoji_social_reply",
+            "interaction_move": "playful_ping",
+            "freshness": "new",
+            "user_stance": "playful",
+        },
+        multimodal={
+            "primary_modality": "sticker",
+            "observed_types": ["sticker"],
+        },
+        render_target_lang="zh",
+    )
+
+    assert plan.response_form == "text"
+    assert plan.secondary_response_form == ""
+    assert plan.response_form_reason == "image_social_reply"
+
+
 def test_reply_plan_social_image_with_dry_signal_prefers_soft_ack_not_tease() -> None:
     plan = build_reply_plan_from_inputs(
         emotion_context={"emotion_tag": "NEUTRAL"},

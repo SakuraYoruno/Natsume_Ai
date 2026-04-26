@@ -2219,16 +2219,18 @@ async def chat_agent_sse_generator(
             trace_stage_meta["reply_source"] = str(surface_result.source or "surface").strip()
             trace_stage_meta["reply_cacheable"] = bool(surface_result.cacheable)
         elif _is_image_social_reply_plan(reply_plan_decision):
-            suppress_final_reply = True
-            suppress_final_reply_reason_code = str(
+            surface_no_candidate_reason = str(
                 getattr(surface_result, "skipped_reason", "") if surface_result is not None else ""
-            ).strip() or "IMAGE_SOCIAL_NO_SAFE_REPLY"
-            buffer_stream = False
-            first_token_ms = 0
+            ).strip() or "image_social_surface_no_candidate"
             trace_stage_meta["deterministic_primary_used"] = False
-            trace_stage_meta["deterministic_primary_reason"] = "image_social_surface_no_safe_reply"
-            trace_stage_meta["reply_source"] = "suppressed_no_reply"
-            trace_stage_meta["fallback_used"] = False
+            trace_stage_meta["deterministic_primary_reason"] = "image_social_surface_no_candidate"
+            trace_stage_meta["image_social_surface_continue_full_model"] = {
+                "status": "CONTINUE",
+                "invoked": True,
+                "affected_output": False,
+                "source": "surface",
+                "reason_code": surface_no_candidate_reason,
+            }
 
     try:
         if deterministic_reply:
@@ -2396,6 +2398,11 @@ async def chat_agent_sse_generator(
         trace_stage_meta["reply_validation"]["initial_text"] = _trace_text_sample(narrative)
         if _is_validation_acceptable(_validation):
             trace_stage_meta["reply_validation"]["accepted_initial"] = True
+        elif _is_image_social_reply_plan(reply_plan_decision):
+            _apply_validation_fallback(
+                reason_codes=getattr(_validation, "reason_codes", ()) or (),
+                source="image_social_initial_invalid",
+            )
         elif _validation.should_retry:
             _correction_prompt = build_correction_prompt(
                 plan=reply_plan_decision,

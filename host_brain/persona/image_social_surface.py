@@ -62,6 +62,8 @@ _IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
     r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
 )
 _GENERIC_QUESTION_BACK_RE = re.compile(r"(?:是不是|对吧|是吧|对不对)(?:呀|啊|啦|呢|嘛|吧)?$")
+_IMAGE_AS_SELF_RE = re.compile(r"(?:偷看|偷偷看|看|盯|观察).{0,6}(?:我|人家)")
+_USER_MIND_RE = re.compile(r"(?:在)?想什么|想啥|什么奇怪")
 _DESCRIPTOR_FOCUS_RE = re.compile(
     r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
     r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
@@ -75,6 +77,11 @@ _EMOTION_RESPONSE_RE = re.compile(
     r"(?:被你|让你|给你).{0,18}(?:晃到|戳到|拿捏|逗笑|心软|招架不住)|"
     r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
     r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
+)
+_SAFE_SOCIAL_REPLY_RE = re.compile(
+    r"(?:真是的|拿(?:你|哥哥)没办法|别闹|别这样|少来|又来|我接住|接住了|"
+    r"收到|收到了|收到啦|看到了|看到啦|"
+    r"装乖|撒娇|嘴硬|委屈|卖萌|耍赖|求关注|无语|小吐槽|小别扭|心软|招架|晃)"
 )
 
 
@@ -150,6 +157,10 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
         return True
     if _GENERIC_QUESTION_BACK_RE.search(compact):
         return True
+    if _USER_MIND_RE.search(compact):
+        return True
+    if _IMAGE_AS_SELF_RE.search(compact):
+        return True
     if _SELF_AS_IMAGE_RE.search(compact):
         return True
     if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(compact):
@@ -174,6 +185,17 @@ def candidate_responds_to_image_social_emotion(candidate_text: str) -> bool:
     return bool(re.search(r"(装乖|撒娇|嘴硬|委屈|逗|晃|卖萌|耍赖|求关注|心软|招架|拿捏|别闹|过来|接住)", compact))
 
 
+def candidate_is_safe_image_social_reply(candidate_text: str) -> bool:
+    compact = compact_image_social_text(candidate_text)
+    if not compact:
+        return False
+    if is_image_social_surface_sample_disallowed(candidate_text):
+        return False
+    if _DESCRIPTOR_FOCUS_RE.search(compact):
+        return False
+    return bool(_SAFE_SOCIAL_REPLY_RE.search(compact))
+
+
 def build_emergency_image_social_reply(multimodal: Mapping[str, Any] | None) -> str:
     result = build_fallback_reply(
         FallbackRequest(
@@ -188,6 +210,7 @@ def build_emergency_image_social_reply(multimodal: Mapping[str, Any] | None) -> 
 
 __all__ = [
     "build_emergency_image_social_reply",
+    "candidate_is_safe_image_social_reply",
     "candidate_responds_to_image_social_emotion",
     "compact_image_social_text",
     "image_social_anchor_terms",

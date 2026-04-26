@@ -1057,6 +1057,15 @@ async def receive_input(body: InputPayload, request: Request) -> InputResponse:
         gateway_attachments = _normalize_gateway_attachments(payload)
         if gateway_attachments:
             payload["attachments"] = gateway_attachments
+            placeholder_text = _build_gateway_multimodal_placeholder_text(
+                content=text,
+                attachments=gateway_attachments,
+            )
+            if placeholder_text and placeholder_text != text:
+                payload["raw_content"] = str(body.content or "")
+                payload["content"] = placeholder_text
+                payload["content_is_multimodal_placeholder"] = True
+                text = placeholder_text
     if source == "GATEWAY":
         gateway_dedupe_key = _build_gateway_dedupe_key(payload=body, text=text)
         gateway_dedupe_expiry = _mark_gateway_dedupe(gateway_dedupe_key)

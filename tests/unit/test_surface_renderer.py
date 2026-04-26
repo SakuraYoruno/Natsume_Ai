@@ -166,6 +166,13 @@ def test_surface_renderer_candidate_acceptance_guards() -> None:
     assert renderer._accept_short_social_candidate("哥哥，你真正想问什么？", _validation(), topic="greeting")[1] == "SHORT_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_short_social_candidate("哥哥，来啦。", _validation(safe=False), topic="greeting")[1] == "SHORT_SURFACE_VALIDATION_UNSAFE"
     assert renderer._accept_image_candidate("哥哥今天怎么这么安静。", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_EMOTION_NOT_USED"
+    assert renderer._accept_image_candidate("哥哥你又在想什么呀。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+    assert renderer._accept_image_candidate("哥哥又在偷偷看我啦。", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
+    assert renderer._accept_image_candidate(
+        "哼，哥哥真是的。",
+        _validation(valid=False, missing=("image_social_emotion_response",), reasons=("image_social_emotion_missing", "contract_actions_missing"), quality=0.05),
+        multimodal={"social_signal": "无语"},
+    )[0] is True
     assert renderer._accept_image_candidate("哥哥，你看我这小猫耳朵是不是超可爱呀！", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate("哥哥，你是不是觉得这张图里的猫猫很可爱呀？", _validation(), multimodal={"summary_for_chat": "猫耳女孩"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
     assert renderer._accept_image_candidate("哼，哥哥又在逗我了是不是！", _validation(), multimodal={"social_signal": "无语"})[1] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
@@ -176,6 +183,15 @@ def test_surface_renderer_candidate_acceptance_guards() -> None:
         _validation(valid=False, reasons=("image_social_overplayed",), quality=0.25),
         multimodal={"summary_for_chat": "猫耳女孩"},
     )[1] == "IMAGE_SURFACE_VALIDATION_FAILED"
+
+
+def test_image_social_surface_helper_accepts_safe_social_without_image_description() -> None:
+    assert sr.candidate_is_safe_image_social_reply("真是拿哥哥没办法。")
+    assert sr.candidate_is_safe_image_social_reply("哼，哥哥真是的。")
+    assert sr.candidate_is_safe_image_social_reply("哥哥，收到了哈。")
+    assert not sr.candidate_is_safe_image_social_reply("哥哥你又在想什么呀。")
+    assert not sr.candidate_is_safe_image_social_reply("哥哥又在偷偷看我啦。")
+    assert not sr.candidate_is_safe_image_social_reply("你看这张图里的猫耳是不是很可爱？")
 
 
 @pytest.mark.asyncio
@@ -389,13 +405,23 @@ async def test_surface_renderer_image_repair_recovers_rejected_first_pass(monkey
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("family", "expected_hint", "candidate"),
+    ("family", "expected_hint", "candidate", "multimodal"),
     [
-        ("soft_emotion_ack", "有点蔫或委屈", "好啦，别用这种委屈劲晃我，我会心软的。"),
-        ("tease_image_ack", "小吐槽或小别扭", "哥哥，这股小别扭我接住啦。"),
+        (
+            "soft_emotion_ack",
+            "有点蔫或委屈",
+            "好啦，别用这种委屈劲晃我，我会心软的。",
+            {"summary_for_chat": "委屈；表情包表达情绪。", "emotion_signals": ["委屈"]},
+        ),
+        (
+            "tease_image_ack",
+            "小吐槽或小别扭",
+            "哥哥，这股小别扭我接住啦。",
+            {"summary_for_chat": "小别扭；表情包表达情绪。", "emotion_signals": ["小别扭"]},
+        ),
     ],
 )
-async def test_surface_renderer_image_prompt_uses_emotion_action_hints(monkeypatch, family, expected_hint, candidate) -> None:
+async def test_surface_renderer_image_prompt_uses_emotion_action_hints(monkeypatch, family, expected_hint, candidate, multimodal) -> None:
     async def _fake_call(self, request, **kwargs):  # noqa: ANN001, ANN003
         assert expected_hint in kwargs["user_prompt"]
         assert "不要描述图片本身" in kwargs["user_prompt"]
@@ -414,12 +440,40 @@ async def test_surface_renderer_image_prompt_uses_emotion_action_hints(monkeypat
                 primary_topic="emoji_social_reply",
                 response_form_reason="image_social_reply",
                 tactic_family=family,
-                multimodal={"summary_for_chat": "表情包表达情绪。", "core_observation": "表情特写。"},
+                multimodal=multimodal,
             )
         )
     )
 
     assert result.text == candidate
+
+
+@pytest.mark.asyncio
+async def test_surface_renderer_image_prompt_does_not_guess_generic_observation(monkeypatch) -> None:
+    async def _fake_call(self, request, **kwargs):  # noqa: ANN001, ANN003
+        assert "具体情绪不明" in kwargs["user_prompt"]
+        assert "不要硬猜" in kwargs["system_prompt"]
+        return SimpleNamespace(
+            content=json.dumps({"candidates": ["哥哥，收到了哈。"]}, ensure_ascii=False),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=222,
+        )
+
+    monkeypatch.setattr(SurfaceRenderer, "_call_surface_model", _fake_call)
+
+    result = await SurfaceRenderer().render(
+        _request(
+            _plan(
+                primary_topic="emoji_social_reply",
+                response_form_reason="image_social_reply",
+                tactic_family="soft_emotion_ack",
+                multimodal={"summary_for_chat": "收到一张图片。", "core_observation": "收到一张图片。"},
+            )
+        )
+    )
+
+    assert result.text == "哥哥，收到了哈。"
 
 
 @pytest.mark.asyncio

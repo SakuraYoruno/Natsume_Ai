@@ -82,6 +82,8 @@ def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:
 
 
 def test_prefrontal_resolve_self_reflection_context(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
+
     class _Snapshot:
         def as_dict(self) -> dict:
             return {"recent_mood_trend": "steady", "dominant_recent_emotion": "CALM"}
@@ -119,6 +121,41 @@ def test_prefrontal_resolve_self_reflection_context(monkeypatch) -> None:
     assert result["self_model_snapshot"]["recent_mood_trend"] == "steady"
     assert result["self_reflection_pulse"]["self_awareness"] == "trend=steady"
     assert result["self_reflection_pulse"]["trigger_reason"] == "runtime_snapshot"
+
+
+def test_prefrontal_resolve_self_reflection_context_skips_llm_when_background_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
+
+    class _Snapshot:
+        def as_dict(self) -> dict:
+            return {"recent_mood_trend": "steady", "dominant_recent_emotion": "CALM"}
+
+    class _Engine:
+        def get_self_model_snapshot(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+            return _Snapshot()
+
+    monkeypatch.setattr(
+        "host_brain.persona.persona_engine.PersonaEngine.get_instance",
+        classmethod(lambda cls: _Engine()),
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.build_pool_prompt_llm_fn",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("self reflection llm should not resolve")),
+    )
+
+    result = PrefrontalAgent().resolve_self_reflection_context(
+        persona_user_id="user-sr",
+        timeline_summary={"dominant_emotion": "CALM"},
+        timeline_diary={"entry_count": 3},
+        bond_state_obj=SimpleNamespace(last_event_ts_ms=123),
+        bond_summary={"stage": "FRIEND"},
+        now_ms=999,
+        trigger_reason="runtime_snapshot",
+    )
+
+    assert result["self_model_snapshot"]["recent_mood_trend"] == "steady"
+    assert result["self_reflection_pulse"] == {}
+    assert result["reason_code"] == "SELF_REFLECTION_BACKGROUND_TASKS_DISABLED"
 
 
 def test_prefrontal_resolve_style_evolution_summary(monkeypatch) -> None:

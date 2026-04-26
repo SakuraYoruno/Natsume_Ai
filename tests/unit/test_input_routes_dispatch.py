@@ -241,7 +241,10 @@ def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> Non
 
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
+    assert dispatch_mock.await_args.kwargs["text"] == "[图片消息]"
     dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert dispatched_payload["content"] == "[图片消息]"
+    assert dispatched_payload["content_is_multimodal_placeholder"] is True
     assert "attachment_processing_mode" not in dispatched_payload
     assert dispatched_payload["attachments"][0]["type"] == "image"
     with patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer):
@@ -300,7 +303,10 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
         response = _run(receive_input(body, SimpleNamespace()))
 
     assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_args.kwargs["text"] == "[语音消息]"
     dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+    assert dispatched_payload["content"] == "[语音消息]"
+    assert dispatched_payload["content_is_multimodal_placeholder"] is True
     assert "attachment_processing_mode" not in dispatched_payload
     assert dispatched_payload["attachments"][0]["type"] == "voice"
     with patch("host_brain.app.dependencies.get_multimodal_observer", return_value=observer):
@@ -360,7 +366,10 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
         assert response.status == "ACCEPTED"
         assert response.detail == "input accepted for processing"
         assert dispatch_mock.await_count == 1
+        assert dispatch_mock.await_args.kwargs["text"] == "[视频消息]"
         dispatched_payload = dispatch_mock.await_args.kwargs["payload"]
+        assert dispatched_payload["content"] == "[视频消息]"
+        assert dispatched_payload["content_is_multimodal_placeholder"] is True
         should_continue = _run(
             input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
                 request_id="req_mm_async_test",

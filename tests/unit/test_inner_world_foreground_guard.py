@@ -4,6 +4,7 @@ from host_brain.persona.inner_world import InnerWorldState, _generate_inner_stre
 
 
 def test_inner_world_llm_note_suppressed_during_recent_foreground_chat(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
     monkeypatch.setattr(
         "host_brain.tribe.default_mode_agent.resolve_recent_foreground_interaction_state",
         lambda **_kwargs: {"active": True},

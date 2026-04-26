@@ -2,6 +2,7 @@
 
 import datetime as _dt
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -11,6 +12,22 @@ from host_brain.tribe.events import emit_tribe_event
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 _logger = logging.getLogger("Natsume.prefrontal_agent")
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    normalized = str(raw).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _background_tasks_enabled() -> bool:
+    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
 
 
 @dataclass(slots=True)
@@ -66,6 +83,12 @@ class PrefrontalAgent:
             snapshot = dict(snapshot_obj)
         else:
             snapshot = {}
+        if not _background_tasks_enabled():
+            return {
+                "self_model_snapshot": snapshot,
+                "self_reflection_pulse": {},
+                "reason_code": "SELF_REFLECTION_BACKGROUND_TASKS_DISABLED",
+            }
         if snapshot:
             try:
                 llm_fn = build_pool_prompt_llm_fn(

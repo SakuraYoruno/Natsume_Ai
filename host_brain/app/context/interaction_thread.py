@@ -13,7 +13,12 @@ _GREETING_RE = re.compile(r"^(?:你好|您好|嗨|哈喽|hello|hi|hey|早安|早
 _PRESENCE_PING_RE = re.compile(r"^(?:在吗|在不在|还在吗|忙吗|在嘛|有人吗)[?？!！。…~\s]*$")
 _LIGHT_ACK_RE = re.compile(r"^(?:嗯|嗯嗯|哦|哦哦|好的?|行|行吧|收到|ok|okay|好哦|好呀)[!！。…~\s]*$", re.IGNORECASE)
 _PLAYFUL_PING_RE = re.compile(r"^(?:戳戳|喂喂|嘿嘿|冒泡|路过|ping|戳一戳)[!！。…~\s]*$")
-_IMAGE_MESSAGE_RE = re.compile(r"^\[(图片|图片消息|表情包|贴图|截图)消息?\]$|^\[(图片|表情包|贴图|截图)\]$", re.IGNORECASE)
+_IMAGE_MESSAGE_RE = re.compile(
+    r"^\[(?:图片|图像|表情|表情包|贴图|贴纸|截图)(?:消息)?\]$|"
+    r"^\[(?:image|emoji|sticker|photo|picture|screenshot)(?: message)?\]$|"
+    r"^\[[?\uff1f]{2,}\]$",
+    re.IGNORECASE,
+)
 _IMAGE_SOCIAL_ASSISTANT_RE = re.compile(
     r"(委屈成这样|突然这么可爱|想让我哄你|软乎乎的表情|小表情|拿这个表情|拿这种|撒娇吗|闹别扭呀|情绪这么低呀|一下子软成这样|可爱成这样|突然这么乖|想让我抱抱你吗|丢这个给我看呀|丢这个给我看|发这个给我看呀|发这个给我看|拿来给我看一下|看错啦|当我看错啦|多想了一点|会错意)"
 )
@@ -272,7 +277,7 @@ def resolve_interaction_thread(
 
     if multimodal:
         primary_modality = _normalize_text(multimodal.get("primary_modality")).lower()
-        if current_topic == "emoji_social_reply" and primary_modality in {"image", "emoji"}:
+        if current_topic == "emoji_social_reply" and primary_modality in {"image", "emoji", "sticker"}:
             return InteractionThreadState(
                 thread_kind="image_social",
                 source_topic="emoji_social_reply",

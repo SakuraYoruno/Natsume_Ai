@@ -210,7 +210,8 @@ class TestSocialBrainRepairLimbicLink:
 class TestDefaultModeANSLink:
     """T-281：DefaultModeAgent 高连续性时将 ANSAgent._recovery_mode 设为 False。"""
 
-    def test_high_continuity_resets_ans_recovery_mode(self, registry):
+    def test_high_continuity_resets_ans_recovery_mode(self, registry, monkeypatch):
+        monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
         from host_brain.tribe.default_mode_agent import DefaultModeAgent
         agent = DefaultModeAgent(state_registry=registry)
         mock_ans = MagicMock()

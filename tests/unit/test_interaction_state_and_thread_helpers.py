@@ -153,6 +153,49 @@ def test_interpret_conversation_promotes_image_social_followup_from_gateway_like
     assert "image_social_followup:deny" in final.reason_tags
 
 
+def test_interpret_conversation_routes_gateway_image_placeholders_as_social_image() -> None:
+    generic_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "收到一张图片。",
+        "core_observation": "收到一张图片。",
+        "confidence": 0.2,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="[????]",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "emoji_social_reply"
+    assert interpretation.interaction_move == "playful_ping"
+    assert interpretation.ongoing_thread == "image_social"
+    assert "literal_topic:emoji_social_reply" in interpretation.reason_tags
+
+
+def test_interpret_conversation_keeps_explicit_image_question_as_description() -> None:
+    generic_image_observation = {
+        "primary_modality": "image",
+        "observed_types": ["image"],
+        "summary_for_chat": "收到一张图片。",
+        "core_observation": "收到一张图片。",
+        "confidence": 0.2,
+    }
+
+    interpretation = interpret_conversation(
+        recent_turns=[],
+        user_message="这是什么",
+        topic_ledger=TopicLedgerBlock(),
+        multimodal_observations=generic_image_observation,
+    )
+
+    assert interpretation.literal_topic == "literal_description"
+    assert interpretation.interaction_move == "probe"
+    assert interpretation.ongoing_thread == ""
+
+
 def test_interpret_conversation_promotes_assistant_reply_followup() -> None:
     interpretation = interpret_conversation(
         recent_turns=[

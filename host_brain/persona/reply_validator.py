@@ -73,6 +73,11 @@ _IMAGE_SOCIAL_EMOTION_RESPONSE_RE = re.compile(
     r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
     r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
 )
+_IMAGE_SOCIAL_LIGHT_ACK_RE = re.compile(
+    r"(?:收到|收到了|收到啦|看到了?|看到啦|接住了?|我接住|"
+    r"(?:你|哥哥).{0,8}(?:发来|发了|发给|发过来|丢|递|拿).{0,10}(?:图|图片|表情|贴图|这个|东西|过来)|"
+    r"(?:图|图片|表情|贴图|这个|东西).{0,8}(?:收到|看到了?|接住))"
+)
 _UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
@@ -391,6 +396,7 @@ _ACTION_LABELS: dict[str, str] = {
     "phatic_ack": "先把这句招呼接住",
     "visual_reference": "点到附件或画面里的对象",
     "image_social_emotion_response": "把表情包当成对方的情绪动作来接",
+    "image_social_light_ack": "把图片/表情包当成轻社交动作接住",
     "content_clause": "补一句简短说明",
     "attachment_ack": "先承认已经看到了附件",
     "previous_reference": "先接住对方在追问上一句",
@@ -487,6 +493,8 @@ def _has_required_action(action: str, text: str) -> bool:
         return bool(_VISUAL_REFERENCE_RE.search(normalized))
     if action == "image_social_emotion_response":
         return bool(_IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)))
+    if action == "image_social_light_ack":
+        return bool(_IMAGE_SOCIAL_LIGHT_ACK_RE.search(_normalize_compare_text(normalized)))
     if action == "content_clause":
         return len(_normalize_compare_text(normalized)) >= 4
     if action == "attachment_ack":
@@ -741,7 +749,7 @@ def validate_reply(
         if plan.primary_topic == "emoji_social_reply" and plan.response_form_reason == "image_social_reply":
             if _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE.search(_normalize_compare_text(normalized)):
                 reason_codes.append("image_social_descriptor_focus")
-            if not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
+            if "image_social_emotion_response" in required_actions and not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
                 reason_codes.append("image_social_emotion_missing")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:

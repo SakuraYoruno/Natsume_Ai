@@ -1225,10 +1225,14 @@ async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_c
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
     assert trace_stage_meta.get("deterministic_primary_used") is not True
+    assert trace_stage_meta.get("deterministic_primary_reason") == "image_social_surface_no_candidate"
     assert trace_stage_meta.get("fallback_used") is not True
     surface_meta = dict(trace_stage_meta.get("image_social_surface_render") or {})
+    continue_meta = dict(trace_stage_meta.get("image_social_surface_continue_full_model") or {})
     assert surface_meta.get("reason_code") == "SURFACE_HARD_TIMEOUT"
     assert surface_meta.get("affected_output") is False
+    assert continue_meta.get("reason_code") == "image_social_surface_unavailable"
+    assert continue_meta.get("status") == "CONTINUE"
     assert "image_social_surface_render_fallback" not in trace_stage_meta
 
 

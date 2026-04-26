@@ -59,7 +59,7 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 
 def _inner_activity_llm_disabled_reason() -> str:
-    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True):
+    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False):
         return "INNER_ACTIVITY_BACKGROUND_TASKS_DISABLED"
     if os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED") is not None:
         return "INNER_ACTIVITY_LLM_DISABLED"
@@ -67,7 +67,7 @@ def _inner_activity_llm_disabled_reason() -> str:
 
 
 def _inner_activity_llm_enabled() -> bool:
-    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True):
+    if not _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False):
         return False
     explicit = os.environ.get("HOST_INNER_ACTIVITY_LLM_ENABLED")
     if explicit is not None:

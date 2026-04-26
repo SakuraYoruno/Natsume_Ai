@@ -29,7 +29,13 @@ _CAPABILITY_CHECK_RE = re.compile(r"(能|可以|可不可以|是否).{0,8}(看�
 _MEANING_QUERY_RE = re.compile(r"(什么意思|啥意思|什么梗|表达什么|想表达什么|在说什么|什么语气|什么感觉)", re.IGNORECASE)
 _SCREENSHOT_QUERY_RE = re.compile(r"(报错|错误|怎么|哪里|哪儿|按钮|界面|问题|啥情况|什么意思|怎么操作|点哪里)", re.IGNORECASE)
 _LITERAL_QUERY_RE = re.compile(r"(图里有什么|图片里有什么|画的什么|是什么|写了什么|看到什么|内容是什么)", re.IGNORECASE)
-_MEDIA_ONLY_PLACEHOLDER_RE = re.compile(r"^\[(图片|图片消息|表情包|贴图|截图|文件|语音|视频)消息?\]$|^\[(图片|表情包|贴图|截图)\]$", re.IGNORECASE)
+_MEDIA_ONLY_PLACEHOLDER_RE = re.compile(
+    r"^\[(?:图片|图像|表情|表情包|贴图|贴纸|截图|文件|语音|视频)(?:消息)?\]$|"
+    r"^\[(?:image|emoji|sticker|photo|picture|screenshot|file|voice|video)(?: message)?\]$|"
+    r"^\[[?\uff1f]{2,}\]$|"
+    r"^<\s*(?:image|emoji|sticker|photo|picture)\s*>$",
+    re.IGNORECASE,
+)
 _IMAGE_SOCIAL_ASSISTANT_RE = re.compile(
     r"(委屈成这样|突然这么可爱|想让我哄你|软乎乎的表情|小表情|拿这个表情|拿这种|撒娇吗|闹别扭呀|情绪这么低呀|一下子软成这样)"
 )
@@ -99,9 +105,11 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
     if not has_visual_payload:
         return ""
 
+    visual_social_modalities = {"image", "emoji", "sticker"}
     is_screenshot = artifact_type == "screenshot" or "screenshot" in observed_types
-    is_social_image = primary_modality in {"image", "emoji"} and (
-        primary_modality == "emoji"
+    is_visual_social_payload = primary_modality in visual_social_modalities or bool(observed_types.intersection(visual_social_modalities))
+    is_social_image = is_visual_social_payload and (
+        primary_modality in {"emoji", "sticker"}
         or bool(emotion_signals)
         or any(token in haystack for token in ("委屈", "哭", "难过", "伤心", "可爱", "卖萌", "猫耳", "无语", "尴尬", "炸毛", "抱抱", "撒娇"))
     )
@@ -116,9 +124,11 @@ def _infer_literal_topic_from_perception(message: str, multimodal_payload: Mappi
     if text and _LITERAL_QUERY_RE.search(text):
         return "literal_description"
     if media_only:
-        if primary_modality in {"image", "emoji"} and not is_screenshot:
+        if is_visual_social_payload and not is_screenshot:
             return "emoji_social_reply"
         return "attachment_only_no_question"
+    if is_visual_social_payload and not is_screenshot:
+        return "emoji_social_reply"
     if is_social_image:
         return "emoji_social_reply"
     if is_screenshot:

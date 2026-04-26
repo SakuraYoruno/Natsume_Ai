@@ -96,6 +96,12 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
     ).strip()
 
     if ongoing_thread == "image_social":
+        if current_topic == "emoji_social_reply":
+            return (
+                "【当前对话线程】\n"
+                "对方这轮发来的是社交图片/表情包，不是让你做图片鉴赏。"
+                "先把它当成一个轻社交情绪动作接住；如果观察没有明确情绪，就不要硬猜成委屈、可爱或逗你。"
+            )
         if current_topic == "emoji_social_followup":
             if interaction_move == "repair_needed":
                 return (

@@ -134,7 +134,8 @@ class TestMirrorNeuronLimbicFeedback:
 class TestDefaultModeGlymphaticTrigger:
     """T-218：DefaultModeAgent continuity_score>=0.55 时触发 GlymphaticAgent。"""
 
-    def test_high_continuity_triggers_glymphatic(self, registry):
+    def test_high_continuity_triggers_glymphatic(self, registry, monkeypatch):
+        monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
         agent = DefaultModeAgent(state_registry=registry)
         mock_glymphatic = MagicMock()
         mock_glymphatic.run_recovery_cycle = MagicMock(return_value={"executed": True})

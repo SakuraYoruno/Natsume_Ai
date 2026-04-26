@@ -21,6 +21,7 @@ from host_brain.persona.fallback_policy import (
     is_forbidden_surface_text,
 )
 from host_brain.persona.image_social_surface import (
+    candidate_is_safe_image_social_reply,
     candidate_responds_to_image_social_emotion,
     image_social_observation_text,
     is_image_social_surface_sample_disallowed,
@@ -370,6 +371,34 @@ class SurfaceRenderer:
             return SurfaceResult(source="surface", skipped_reason="image_social_observation_empty")
         family = str(getattr(plan, "tactic_family", "") or "").strip()
         compact_observation = observation_text.replace(" ", "")
+        has_specific_social_signal = any(
+            token in compact_observation
+            for token in (
+                "无语",
+                "尴尬",
+                "裂开",
+                "社死",
+                "不爽",
+                "服了",
+                "别扭",
+                "逗",
+                "调侃",
+                "搞怪",
+                "捉弄",
+                "坏笑",
+                "挑衅",
+                "委屈",
+                "哭",
+                "难过",
+                "伤心",
+                "泪",
+                "可爱",
+                "卖萌",
+                "装乖",
+                "撒娇",
+                "求关注",
+            )
+        )
         has_dry_or_awkward_signal = any(
             token in compact_observation
             for token in ("无语", "尴尬", "裂开", "社死", "不爽", "服了", "别扭")
@@ -378,7 +407,9 @@ class SurfaceRenderer:
             token in compact_observation
             for token in ("逗", "调侃", "搞怪", "捉弄", "坏笑", "挑衅")
         )
-        if family == "soft_emotion_ack":
+        if not has_specific_social_signal:
+            action_hint = "对方只是递来一张图片/表情，具体情绪不明；当成轻社交动作接一句，不要硬猜成委屈、可爱或逗你。"
+        elif family == "soft_emotion_ack":
             if has_dry_or_awkward_signal:
                 action_hint = "像看见对方发了无语或小吐槽的图时顺手接一句；不要替对方加戏成在逗你。"
             else:
@@ -395,6 +426,7 @@ class SurfaceRenderer:
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
             "把表情包当成对方发来的情绪动作，不要当图片鉴赏。"
             "回复对方正在表达的情绪：撒娇、装乖、委屈、嘴硬、小吐槽、求关注等；只有观察明确是调侃/逗弄时，才按“逗你”处理。"
+            "如果观察没有明确情绪，只接住发图这个轻社交动作，不要硬猜成委屈、可爱、逗你或求关注。"
             "不要解释规则，不要写画面说明书，不要客服腔，不要只回语气词。"
             "禁止使用旧模板：突然这么可爱、想让我哄你吗、想跟我撒娇吗、怎么啦、闹别扭、会错意。"
             "用户发来的图不是你本人，不要说“我今天可爱吗/我可爱吗/看我可爱吗”。"
@@ -408,11 +440,13 @@ class SurfaceRenderer:
             f"回复契约：{str(getattr(plan, 'reply_contract', '') or '').strip()}\n"
             "改写要求：12-34个中文字符；最多一句；必须回对方的情绪动作；不要描述图片本身；给4个不同候选，只输出 JSON。"
         )
+        image_timeout_env = str(os.environ.get("HOST_IMAGE_SOCIAL_SURFACE_TIMEOUT_MS") or "").strip()
+        image_timeout_ms = int(max(1, min(12_000, int(image_timeout_env)))) if image_timeout_env else 9_000
         first_result = await self._render_candidates(
             request,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            timeout_ms=int(max(800, min(5_000, int(os.environ.get("HOST_IMAGE_SOCIAL_SURFACE_TIMEOUT_MS") or "2200")))),
+            timeout_ms=image_timeout_ms,
             tier=str(os.environ.get("HOST_IMAGE_SOCIAL_SURFACE_TIER") or "D").strip() or "D",
             temperature=0.78,
             validator=lambda candidate, validation: self._accept_image_candidate(candidate, validation, multimodal=multimodal),
@@ -463,6 +497,7 @@ class SurfaceRenderer:
             "表情包是对方的情绪动作，不是图片鉴赏，也不是让你描述角色外貌。"
             "只接住对方的情绪，不要猜对方在考你、逗你、生气、无视你，除非观察文本明确写了这些。"
             "生成短句陈述，禁止反问和确认问句；禁止结尾使用“是不是/是吧/对吧/吗”。"
+            "不要问对方在想什么，也不要把图片当成你本人。"
             "禁止使用：怎么啦、怎么了、生我的气、无视我、哪里做得不好、逗我、想让我、这张图、图里、猫耳、可爱。"
             "如果观察是无语/尴尬/别扭/小吐槽，就像把这个情绪接住，不要撒娇过度。"
             f"\n\n{_compiled_soul_text()}"
@@ -474,7 +509,8 @@ class SurfaceRenderer:
             f"回复契约：{str(getattr(request.plan, 'reply_contract', '') or '').strip()}\n"
             "改写要求：10-26个中文字符；最多一句；必须是自然陈述；不要描述图片本身；给4个不同候选，只输出 JSON。"
         )
-        timeout_ms = int(max(800, min(4_000, int(os.environ.get("HOST_IMAGE_SOCIAL_REPAIR_TIMEOUT_MS") or "2200"))))
+        repair_timeout_env = str(os.environ.get("HOST_IMAGE_SOCIAL_REPAIR_TIMEOUT_MS") or "").strip()
+        timeout_ms = int(max(1, min(6_000, int(repair_timeout_env)))) if repair_timeout_env else 3_500
         return await self._render_candidates(
             request,
             system_prompt=system_prompt,
@@ -556,7 +592,10 @@ class SurfaceRenderer:
         )
         if not has_explicit_tease_signal and any(token in compact_candidate for token in ("逗我", "玩我", "新花样")):
             return False, "IMAGE_SURFACE_TEASE_OVERINFERRED"
-        if not candidate_responds_to_image_social_emotion(candidate):
+        if not (
+            candidate_responds_to_image_social_emotion(candidate)
+            or candidate_is_safe_image_social_reply(candidate)
+        ):
             return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
         if validation is not None and not _validation_is_acceptable(validation):
             reason_codes = {

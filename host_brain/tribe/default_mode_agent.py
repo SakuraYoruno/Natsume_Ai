@@ -29,7 +29,7 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 
 def _background_tasks_enabled() -> bool:
-    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=True)
+    return _env_bool("HOST_BACKGROUND_TASKS_ENABLED", default=False)
 
 
 def _resolve_foreground_chat_cooldown_ms() -> int:
