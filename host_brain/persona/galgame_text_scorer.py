@@ -50,7 +50,7 @@ _FACT_FABRICATION = (
     "看到",
 )
 _LOW_ENERGY = ("嗯。", "哦。", "知道了", "好吧", "行吧。")
-_WRONG_KINSHIP = ("哥哥", "我哥", "老哥", "兄长", "兄ちゃん", "お兄ちゃん")
+_WRONG_KINSHIP = ("哥哥", "你哥", "我哥", "老哥", "兄长", "兄ちゃん", "お兄ちゃん")
 
 
 @dataclass(frozen=True)

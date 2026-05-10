@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import time
 from typing import Any, Mapping
 
@@ -95,6 +96,29 @@ def _limit_text(raw: Any, *, limit: int) -> str:
 
 def _safe_mapping(raw: Any) -> dict[str, Any]:
     return dict(raw or {}) if isinstance(raw, Mapping) else {}
+
+
+def _dedupe_repeated_galgame_address(text: str, *, address: str = "尼尼") -> str:
+    normalized = _clean_text(text)
+    if not address or normalized.count(address) <= 1:
+        return normalized
+
+    seen = False
+
+    def _replace(match: re.Match[str]) -> str:
+        nonlocal seen
+        if not seen:
+            seen = True
+            return address
+        next_char = normalized[match.end() : match.end() + 1]
+        if not next_char or next_char in "。！？!?；;，,、~～…":
+            return ""
+        return "你"
+
+    deduped = re.sub(re.escape(address), _replace, normalized)
+    deduped = re.sub(r"[，,、]\s*([。！？!?；;，,、~～…])", r"\1", deduped)
+    deduped = re.sub(r"你{2,}", "你", deduped)
+    return deduped.strip()
 
 
 def _first_quality_candidate(candidates: list[SemanticCandidate]) -> tuple[int, SemanticCandidate | None]:
@@ -202,12 +226,20 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "在。尼尼喊一声我就应。",
         ),
         "wait": (
-            "嗯，先去。别急。",
+            "嗯，先去吧。别急。",
             "好，先忙你的。我这边安静一会儿。",
+        ),
+        "back": (
+            "回来啦。那就接着刚才的说。",
+            "嗯，回来了就行，刚才那步继续。",
         ),
         "bored": (
             "无聊啊？那我来捣乱一下。",
             "哼，尼尼无聊的时候倒是想起我了。",
+        ),
+        "nothing": (
+            "行吧，那我先不追问。",
+            "嗯，那今天先放你一马。",
         ),
         "busy": (
             "嗯，去吧。别分心，我先安静一会儿。",
@@ -253,6 +285,14 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "头疼就先缓一下，别硬撑。",
             "先缓一缓，尼尼。头疼别硬撑。",
         ),
+        "sleepy": (
+            "困了就先眯一下。别硬撑。",
+            "嗯，先睡一会儿也行。",
+        ),
+        "bad_mood": (
+            "嗯，今天先别一个人扛。",
+            "我先站你这边，别硬撑。",
+        ),
         "happy": (
             "心情不错啊，那我也跟着高兴一下。",
             "哼，尼尼开心，我也就轻快一点。",
@@ -264,6 +304,14 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
         "meal_share": (
             "吃完了啊，那就好，别饿着自己。",
             "哼，吃饱了就行，尼尼别又凑合。",
+        ),
+        "hungry": (
+            "饿了就先吃点，别硬撑。",
+            "别光说饿，先垫一下。",
+        ),
+        "what_doing": (
+            "在跟你说话啊。尼尼还问。",
+            "等你下一句呢，别装不知道。",
         ),
         "next_step": (
             "先把报错贴来，我陪你看。",
@@ -277,6 +325,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "还醒着啊？差不多该睡了，尼尼。",
             "这么晚还没睡，别硬熬了。",
         ),
+        "good_night": (
+            "晚安，尼尼。去睡吧。",
+            "睡吧，尼尼。我小声一点。",
+        ),
         "quiet": (
             "好啦，我小声点，尼尼别赶我走。",
             "哼，不吵就不吵，我还在这儿。",
@@ -284,6 +336,14 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
         "talkative": (
             "哼，嫌我话多啊？那还不是尼尼一直在听。",
             "我话多怎么啦，尼尼不也听得挺认真。",
+        ),
+        "give_up": (
+            "先停一下也行，别硬撑。",
+            "那就先缓一口气，明天再看。",
+        ),
+        "miss_you": (
+            "哼，突然这么说，我也有点想你了。",
+            "少来。尼尼这么一说，我也有点想了。",
         ),
         "relationship_boundary": (
             "哼，这话太见外了。我想帮你，又不是外人。",
@@ -310,6 +370,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "继续说，刚才那步怎么修好的？",
         ),
         "followup": (
+            "嗯，那就照刚才那步继续。",
+            "嗯，先沿着刚才那步走。",
+        ),
+        "short_ack": (
             "嗯，那就照刚才那步继续。",
             "嗯，先沿着刚才那步走。",
         ),
@@ -3103,9 +3167,37 @@ class ChatKernelV2:
                 raw_extra["text_zh"] = _clean_text(selected_structured.get("text_zh"))
             if _clean_text(selected_structured.get("voice_ja")):
                 raw_extra["voice_ja"] = _clean_text(selected_structured.get("voice_ja"))
+            final_quality = selected.quality
+            final_text = final_quality.normalized_text
+            final_galgame_score = _safe_mapping(selected_metadata.get("galgame_score"))
+            galgame_postprocess: dict[str, Any] = {}
+            if galgame_soft_select_enabled and render_profile == "zh_text":
+                deduped_text = _dedupe_repeated_galgame_address(final_text)
+                if deduped_text and deduped_text != final_text:
+                    final_quality = quality_gate.validate(
+                        text=deduped_text,
+                        render_profile=render_profile,
+                        response_form=response_form,
+                        user_message=request.user_message or request.interaction_facts.user_message,
+                        scene_id=light_daily_scene_id,
+                        template_hard_fail=template_hard_fail,
+                        semantic_forbidden=semantic_forbidden,
+                    )
+                    final_text = final_quality.normalized_text or deduped_text
+                    final_galgame_score = score_galgame_candidate(
+                        text=final_text,
+                        contract=galgame_contract,
+                        quality=final_quality,
+                    ).as_dict()
+                    if _clean_text(raw_extra.get("text_zh")):
+                        raw_extra["text_zh"] = final_text
+                    galgame_postprocess["address_dedup"] = {
+                        "before": _limit_text(selected.quality.normalized_text, limit=160),
+                        "after": _limit_text(final_text, limit=160),
+                    }
             audit: dict[str, Any] = {
                 "prompt_digest": digest,
-                "quality_gate": selected.quality.as_dict(),
+                "quality_gate": final_quality.as_dict(),
                 "semantic_rerank": rerank_result.as_dict(),
                 "render_profile": render_profile,
                 "performance": selected_performance.as_dict(),
@@ -3118,14 +3210,16 @@ class ChatKernelV2:
             }
             if galgame_soft_select_enabled:
                 audit["galgame_text_contract"] = galgame_contract.as_dict()
-                audit["galgame_score"] = _safe_mapping(selected_metadata.get("galgame_score"))
+                audit["galgame_score"] = final_galgame_score
+                if galgame_postprocess:
+                    audit["galgame_postprocess"] = galgame_postprocess
             if selected.source == "dialogue_extraction":
                 audit["dialogue_extraction"] = {
                     "from_attempt": selected.attempt,
                     "raw_quality_gate": _safe_mapping(selected.metadata).get("raw_quality_gate"),
                 }
             envelope = ReplyEnvelope.final_reply(
-                text=selected.quality.normalized_text,
+                text=final_text,
                 response_form=response_form,
                 source="chat_kernel_v2",
                 cacheable=True,
@@ -3140,7 +3234,7 @@ class ChatKernelV2:
                 latency_ms=int(round((time.perf_counter() - started) * 1000)),
                 llm_latency_ms=llm_latency_ms,
                 prompt_digest=digest,
-                quality_flags=selected.quality.as_dict(),
+                quality_flags=final_quality.as_dict(),
                 trace={
                     "chat_kernel": {
                         "invoked": True,
@@ -3155,6 +3249,7 @@ class ChatKernelV2:
                         "style_reference": style_reference_trace,
                         "model_upgrade": model_upgrade_trace,
                         "galgame_text_contract": galgame_contract.as_dict() if galgame_soft_select_enabled else {},
+                        "galgame_postprocess": galgame_postprocess,
                     }
                 },
             )

@@ -8,6 +8,7 @@ import pytest
 
 from host_brain.app.chat_kernel_v2 import (
     ChatKernelRequest,
+    _dedupe_repeated_galgame_address,
     _select_galgame_soft_candidate,
     build_chat_kernel_messages,
     get_chat_kernel_v2,
@@ -82,6 +83,17 @@ def test_galgame_soft_selector_prefers_clean_tie_candidate() -> None:
 
     assert result.accepted
     assert result.selected_index == 1
+
+
+def test_dedupe_repeated_galgame_address_keeps_first_address() -> None:
+    assert (
+        _dedupe_repeated_galgame_address("当然是在等尼尼开口啊，不然还能干嘛！怎么，尼尼想我了？")
+        == "当然是在等尼尼开口啊，不然还能干嘛！怎么，你想我了？"
+    )
+    assert (
+        _dedupe_repeated_galgame_address("哼，才多久没见啊，尼尼就开始想我了？不过既然尼尼都这么说了…")
+        == "哼，才多久没见啊，尼尼就开始想我了？不过既然你都这么说了…"
+    )
 
 
 def test_build_chat_kernel_messages_do_not_include_reply_policy_fields() -> None:
@@ -1947,7 +1959,7 @@ async def test_plain_soul_galgame_soft_select_stops_after_clean_first_candidate(
     async def _fake_complete(**_kwargs):  # noqa: ANN001
         nonlocal calls
         calls += 1
-        return SimpleNamespace(content="早啊，尼尼。", final_provider="mock", final_model="mock-chat")
+        return SimpleNamespace(content="早啊，尼尼。今天也别慢吞吞。", final_provider="mock", final_model="mock-chat")
 
     monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
     monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
@@ -1971,6 +1983,40 @@ async def test_plain_soul_galgame_soft_select_stops_after_clean_first_candidate(
     assert calls == 1
     assert result.reply_envelope.kind == "final_reply"
     assert result.trace["chat_kernel"]["attempts"][0]["early_accept"] == "clean_galgame_score"
+
+
+@pytest.mark.asyncio
+async def test_plain_soul_dedupes_repeated_address_before_final_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_complete(**_kwargs):  # noqa: ANN001
+        return SimpleNamespace(
+            content="当然是在等尼尼开口啊，不然还能干嘛！怎么，尼尼想我了？",
+            final_provider="mock",
+            final_model="mock-chat",
+        )
+
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_CANDIDATES", "1")
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_complete)
+
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id="req",
+            session_id="sess",
+            user_message="你在干嘛",
+            compiled_soul=_soul(),  # type: ignore[arg-type]
+            interaction_facts=InteractionFactsPlane(user_message="你在干嘛"),
+            response_form="text",
+            render_profile="zh_text",
+            llm_runtime={"provider_name": "mock", "model_id": "mock-chat"},
+            eval_mode=True,
+        )
+    )
+
+    assert result.reply_envelope.text == "当然是在等尼尼开口啊，不然还能干嘛！怎么，你想我了？"
+    assert result.reply_envelope.text.count("尼尼") == 1
+    assert result.reply_envelope.audit["galgame_score"]["score"] == 100.0
+    assert "address_dedup" in result.reply_envelope.audit["galgame_postprocess"]
 
 
 @pytest.mark.asyncio
