@@ -6,10 +6,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.chat_kernel_v2 import ChatKernelRequest, build_chat_kernel_messages, get_chat_kernel_v2
+from host_brain.app.chat_kernel_v2 import (
+    ChatKernelRequest,
+    _select_galgame_soft_candidate,
+    build_chat_kernel_messages,
+    get_chat_kernel_v2,
+)
 import host_brain.app.context.interaction_facts_plane as interaction_facts_plane_module
 from host_brain.app.context.interaction_facts_plane import InteractionFactsPlane
+from host_brain.persona.semantic_reranker import SemanticCandidate
 from host_brain.persona.text_quality_gate import extract_sendable_dialogue, get_text_quality_gate
+from host_brain.persona.text_quality_gate import TextQualityGateResult
 from host_brain.persona.style_reference_bank import clear_style_reference_bank_cache, style_reference_from_raw_row
 
 
@@ -38,6 +45,43 @@ def _facts() -> InteractionFactsPlane:
         drive_state={"playfulness_drive": 0.3, "care_drive": 0.2},
         conversation_interpretation={"literal_topic": "presence_ping", "interaction_move": "phatic", "user_stance": "neutral"},
     )
+
+
+def test_galgame_soft_selector_prefers_clean_tie_candidate() -> None:
+    quality = TextQualityGateResult(accepted=True, normalized_text="ok", quality_score=1.0)
+    result = _select_galgame_soft_candidate(
+        [
+            SemanticCandidate(
+                text="一上来就嫌我烦？哼，那谁先找谁说话的？",
+                quality=quality,
+                attempt=0,
+                metadata={
+                    "galgame_score": {
+                        "score": 100.0,
+                        "hard_fail": False,
+                        "reason_codes": ["TOO_MANY_QUESTIONS"],
+                        "penalties": ["questions:2>1"],
+                    }
+                },
+            ),
+            SemanticCandidate(
+                text="哼，烦就烦吧，反正尼尼也没真赶我走。",
+                quality=quality,
+                attempt=1,
+                metadata={
+                    "galgame_score": {
+                        "score": 100.0,
+                        "hard_fail": False,
+                        "reason_codes": [],
+                        "penalties": [],
+                    }
+                },
+            ),
+        ]
+    )
+
+    assert result.accepted
+    assert result.selected_index == 1
 
 
 def test_build_chat_kernel_messages_do_not_include_reply_policy_fields() -> None:

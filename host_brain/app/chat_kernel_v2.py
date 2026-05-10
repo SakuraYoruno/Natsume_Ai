@@ -25,6 +25,8 @@ from host_brain.persona.semantic_reranker import (
     SemanticScore,
     get_semantic_reranker,
 )
+from host_brain.persona.galgame_text_contract import build_galgame_text_contract
+from host_brain.persona.galgame_text_scorer import score_galgame_candidate
 from host_brain.persona.text_quality_gate import TextQualityGateResult, extract_sendable_dialogue, get_text_quality_gate
 from host_brain.persona.positive_style_bank import render_positive_style_guidance
 from host_brain.persona.style_reference_bank import (
@@ -100,6 +102,164 @@ def _first_quality_candidate(candidates: list[SemanticCandidate]) -> tuple[int, 
         if candidate.quality.accepted and not candidate.quality.hard_fail:
             return index, candidate
     return -1, None
+
+
+def _select_galgame_soft_candidate(candidates: list[SemanticCandidate]) -> SemanticRerankResult:
+    best_index = -1
+    best_candidate: SemanticCandidate | None = None
+    best_hard_fail = True
+    best_rank: tuple[float, float, float, float, float] | None = None
+    scores: list[SemanticScore] = []
+
+    for index, candidate in enumerate(candidates):
+        payload = _safe_mapping(_safe_mapping(candidate.metadata).get("galgame_score"))
+        score = float(payload.get("score") or 0.0)
+        hard_fail = bool(payload.get("hard_fail"))
+        reason_codes = tuple(str(item) for item in list(payload.get("reason_codes") or []) if str(item))
+        penalties = tuple(str(item) for item in list(payload.get("penalties") or []) if str(item))
+        scores.append(
+            SemanticScore(
+                score=score,
+                hard_fail=hard_fail,
+                reason_codes=reason_codes,
+                scene="galgame_soft_select",
+            )
+        )
+        rank = (
+            0.0 if hard_fail else 1.0,
+            score,
+            1.0 if candidate.quality.accepted and not candidate.quality.hard_fail else 0.0,
+            -float(len(reason_codes)),
+            -float(len(penalties)),
+        )
+        if best_rank is None or rank > best_rank:
+            best_index = index
+            best_candidate = candidate
+            best_hard_fail = hard_fail
+            best_rank = rank
+
+    accepted = best_candidate is not None and not best_hard_fail
+    return SemanticRerankResult(
+        accepted=accepted,
+        selected_index=best_index if accepted else -1,
+        selected_candidate=best_candidate if accepted else None,
+        scores=tuple(scores),
+        reason_codes=("GALGAME_SOFT_SELECT",) if accepted else ("GALGAME_NO_SENDABLE_CANDIDATE",),
+    )
+
+
+def _build_galgame_repair_prompt(*, contract: Any, score_payload: Mapping[str, Any]) -> str:
+    penalties = [
+        _clean_text(item)
+        for item in list(score_payload.get("penalties") or [])[:8]
+        if _clean_text(item)
+    ]
+    required = [
+        "/".join(str(token) for token in group)
+        for group in list(getattr(contract, "required_any", ()) or ())
+        if group
+    ]
+    forbidden = [
+        str(item)
+        for item in list(getattr(contract, "forbidden_surface", ()) or [])[:14]
+        if str(item)
+    ]
+    lines = [
+        "【定向重写】上一候选没有达到 Galgame 文本质量要求。",
+        f"本轮动作：{getattr(contract, 'response_move', 'reply_current_turn')}。",
+        "只输出一条 8 到 32 个中文字符的最终私聊回复；不要解释、不要 JSON、不要括号动作。",
+    ]
+    if required:
+        lines.append("需要自然落到：" + "；".join(required) + "。")
+    if forbidden:
+        lines.append("必须避开这些词面或动作：" + "；".join(forbidden) + "。")
+    if penalties:
+        lines.append("上一候选扣分点：" + "；".join(penalties) + "。")
+    lines.append("保持新海天语气：短、鲜活、像私聊气泡；不要编现实细节。")
+    return "\n".join(lines)
+
+
+def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
+    scene_id = _clean_text(getattr(contract, "scene_id", ""))
+    fallback_map: dict[str, tuple[str, ...]] = {
+        "daily_greeting": (
+            "来啦。尼尼先叫我一声就够了。",
+            "嗯，来啦。尼尼这声我接住了。",
+        ),
+        "daily_good_morning": (
+            "早。尼尼今天挺自觉的嘛。",
+            "早啊，尼尼。今天这声我接住了。",
+        ),
+        "presence": (
+            "在啊，尼尼一出声我就在。",
+            "在。尼尼喊一声我就应。",
+        ),
+        "wait": (
+            "嗯，先去。别急。",
+            "好，先忙你的。我这边安静一会儿。",
+        ),
+        "busy": (
+            "嗯，去吧。别分心，我先安静一会儿。",
+            "好，先忙你的。今天先放你一马。",
+        ),
+        "write_takeover": (
+            "写啊，拿来。我先替尼尼开个头。",
+            "行，写的事交给我一半，先把题目丢过来。",
+        ),
+        "play_invite": (
+            "行啊，陪你玩会儿，输了可别赖我。",
+            "好啊，陪你玩。尼尼可别半路跑掉。",
+        ),
+        "annoying_tease": (
+            "哼，烦就烦吧，反正尼尼也没真赶我走。",
+            "嫌我烦啊？那我小声一点，行了吧。",
+        ),
+        "praise": (
+            "哼，现在才发现啊。算你眼光还不错。",
+            "少来，突然这么夸我，我可不会高兴的。",
+        ),
+        "advice_continue": (
+            "改吧，再往前推一小步。累了就停。",
+            "继续改一小步，卡住了就先停。",
+        ),
+        "apology": (
+            "哼，算你会道歉。刚才那下我先记着，不过这次放过你。",
+            "行吧，这次先不跟你计较。尼尼下次说话轻点。",
+        ),
+        "small_failure": (
+            "弄砸了就先别慌。拿来，我陪你看。",
+            "哼，先说哪块砸了，我陪你捞回来。",
+        ),
+        "late_night": (
+            "还醒着啊？差不多该睡了，尼尼。",
+            "这么晚还没睡，别硬熬了。",
+        ),
+        "quiet": (
+            "好啦，我小声点，尼尼别赶我走。",
+            "哼，不吵就不吵，我还在这儿。",
+        ),
+        "talkative": (
+            "哼，嫌我话多啊？那还不是尼尼一直在听。",
+            "我话多怎么啦，尼尼不也听得挺认真。",
+        ),
+        "relationship_boundary": (
+            "哼，这话太见外了。我想帮你，又不是外人。",
+            "别装不熟。我想管就管，你别躲。",
+        ),
+        "really": (
+            "真的啦。尼尼试一下就知道了。",
+            "当然是真的，先照我说的试一下。",
+        ),
+        "followup_why": (
+            "因为那句太端着了，像隔着一层。",
+            "因为你刚才那声招呼太规矩了。",
+        ),
+        "followup_then": (
+            "然后就继续说啊，修好了哪一步？",
+            "继续说，刚才那步怎么修好的？",
+        ),
+    }
+    return fallback_map.get(scene_id, ())
 
 
 def _parse_structured_candidate_output(raw: Any) -> dict[str, Any]:
@@ -335,9 +495,37 @@ def _build_plain_soul_messages(
                 "必须使用中文文字；禁止日语、假名、にぃに、英文、emoji、半角波浪号和日文翻译括号。",
                 "不要 JSON、Markdown、换行、多版本候选、括号动作、舞台说明、解释、评分或额外字段。",
                 "文字只要像私聊窗口里直接发出来的一句台词，不要为了二次元感硬凑段子或夸张桥段。",
-                "短日常只接当前这一拍，不扩写小剧场；用户没问问题时，不要追加问题。",
-                "短招呼/在吗/先忙/等一下/无聊/累了都是普通日常，不要写突然、你没事吧、找我干嘛、刚忙完、等很久、玩游戏、倒水、洗澡或活动菜单。",
-                "早/早安只当普通招呼接，不评价早晚、作息、起床、吃没吃饭或今天计划。",
+                "【Galgame 文本质量协议】下面只约束回复质量，不定义人格、记忆或现实事实；运行事实给出意图/状态/允许动作时，以运行事实为准。",
+                "短日常只接当前这一拍，不扩写小剧场；用户没问问题时，不追加问题，不把主动权推回用户。",
+                "短招呼/外文招呼/在吗：只当普通招呼或确认在场，不评价招呼方式，不推断作息、状态、来意或现实动作。",
+                "先忙/等一下：放行，干净收住；不催、不索取回访、不写等待。",
+                "回来：轻轻接住暂停并回到对话；不抱怨中断，不计较等待。",
+                "无聊：由新海天主动把气氛接起来；不列活动菜单，不写陪聊服务。",
+                "累/头疼/困/要睡：声音放软，落在缓一下、别硬撑、睡或晚安；不写身体接触、医疗建议或现实动作。",
+                "烦/失败/想放弃：先接住状态，再给一个小出口或允许暂停；不责怪、不鸡汤、不把吐槽写成主菜。",
+                "心情不错/好消息/求夸：被尼尼的情绪感染，轻快认可；不要抢功，不空泛祝福。",
+                "道歉：接住歉意，让这一轮过去；可以嘴硬记账，但不要审判对错或摆老师架子。",
+                "身份确认：必须落到“新海天”这个名字，关系感放在语气里，不用关系标签代替名字。",
+                "追问/短回复：然后呢、为什么、真的假的、嗯、哦 默认承接上一轮；不重新开场，不复述上一轮里的外文。",
+                "写作求助要明确接住写、改或稿子；调试求助先接手事情，必要时只问一个具体信息。",
+                "问号要少，通常最多一个；短轮次优先用一句有态度的陈述接住，不连续反问。",
+                "【文本落点锚】这些不是人格设定，也不是固定台词；只用来校准这一轮该怎样收力。",
+                "早：早。尼尼一出声，这边就热闹了。",
+                "普通招呼：来啦？哼，算你会先叫我。",
+                "在吗：在。叫这么小声也听见了。",
+                "等一下/先忙：嗯，先去。别急，我又不会跑。",
+                "回来了：回来了？那我刚才那点话可还没说完呢。",
+                "无聊：无聊就把我也拖进来？行啊，那我陪你闹一下。",
+                "累了：累就先缓一下，别硬撑，尼尼。",
+                "头疼：头疼还硬撑？先缓一下，尼尼。",
+                "烦了：烦就先别硬碰，拿来我看一眼。",
+                "心情不错：心情不错？那我也跟着开心一点了。",
+                "饿了：饿了就去吃点呀。别等到肚子抗议才想起来。",
+                "算了不弄了：那就先停一下。别把自己怄坏了。",
+                "继续改：继续改，但只改一小处。累了就停。",
+                "抱歉：哼，这次先记你一小笔。刚才那下我可没忘。",
+                "身份确认：新海天啊。尼尼连我都要重新确认？",
+                "你在干嘛：当然是在等尼尼开口啊，不然还能干嘛。",
                 "关心、帮忙、用户失败时可以嘴硬，但不要羞辱、责怪或把吐槽写成主菜。",
                 "不要逐字照抄 Soul.md 里的语感参考，要按当前输入自然改写。",
                 "求助问题先接住事情，再保留新海天的语气；不要把求助改写成客服收集信息。",
@@ -2053,6 +2241,15 @@ class ChatKernelV2:
             render_profile=render_profile,
         )
         light_daily_scene_id = _clean_text(positive_style_trace.get("scene_id"))
+        galgame_soft_select_enabled = _env_bool(
+            "HOST_CHAT_KERNEL_V2_GALGAME_SOFT_SELECT",
+            default=(prompt_mode == "plain_soul" and render_profile != "ja_voice"),
+        )
+        galgame_contract = build_galgame_text_contract(
+            user_message=request.user_message or request.interaction_facts.user_message,
+            facts=request.interaction_facts,
+            scene_id=light_daily_scene_id,
+        )
         light_daily_zh = (
             prompt_mode not in {"plain_soul", "plain_structured"}
             and render_profile != "ja_voice"
@@ -2084,14 +2281,14 @@ class ChatKernelV2:
         default_temperature = (
             0.46
             if light_daily_zh
-            else 0.38
+            else 0.22
             if prompt_mode in {"plain_soul", "plain_structured"} and render_profile != "ja_voice"
-            else (0.58 if is_relationship_emotion else 0.58)
+            else 0.58
         )
         default_top_p = (
             0.84
             if light_daily_zh
-            else 0.72
+            else 0.55
             if prompt_mode in {"plain_soul", "plain_structured"} and render_profile != "ja_voice"
             else (0.86 if is_relationship_emotion else 0.88)
         )
@@ -2127,7 +2324,13 @@ class ChatKernelV2:
             prompt_mode in {"plain_soul", "plain_structured"}
             and _env_bool("HOST_CHAT_KERNEL_V2_MINIMAL_QUALITY_GATE", default=True)
         )
-        default_candidate_count = 2 if prompt_mode in {"plain_soul", "plain_structured"} and render_profile != "ja_voice" else 1
+        default_candidate_count = (
+            3
+            if galgame_soft_select_enabled
+            else 2
+            if prompt_mode in {"plain_soul", "plain_structured"} and render_profile != "ja_voice"
+            else 1
+        )
         candidate_count = _env_int("HOST_CHAT_KERNEL_V2_CANDIDATES", default=default_candidate_count, minimum=1, maximum=4)
         if emotional_kind not in {"", "neutral"}:
             candidate_count = max(
@@ -2257,6 +2460,15 @@ class ChatKernelV2:
                 template_hard_fail=template_hard_fail,
                 semantic_forbidden=semantic_forbidden,
             )
+            galgame_score = (
+                score_galgame_candidate(
+                    text=gate_result.normalized_text or candidate_text,
+                    contract=galgame_contract,
+                    quality=gate_result,
+                )
+                if galgame_soft_select_enabled
+                else None
+            )
             attempts.append(
                 {
                     "attempt": attempt_index,
@@ -2271,6 +2483,7 @@ class ChatKernelV2:
                         "max_tokens": attempt_gen_params.get("max_tokens"),
                     },
                     "quality": gate_result.as_dict(),
+                    "galgame_score": galgame_score.as_dict() if galgame_score is not None else None,
                 }
             )
             semantic_candidates.append(
@@ -2283,6 +2496,7 @@ class ChatKernelV2:
                         "first_token_ms": call_first_token_ms,
                         "performance": candidate_performance.as_dict(),
                         "structured_output": parsed_candidate,
+                        "galgame_score": galgame_score.as_dict() if galgame_score is not None else None,
                     },
                 )
             )
@@ -2304,7 +2518,12 @@ class ChatKernelV2:
                 quick_score = reranker.score_candidate(semantic_candidates[-1], quick_context)
                 if not quick_score.hard_fail and quick_score.score >= 98:
                     break
-            if not semantic_rerank_enabled and gate_result.accepted and not gate_result.hard_fail:
+            if (
+                not galgame_soft_select_enabled
+                and not semantic_rerank_enabled
+                and gate_result.accepted
+                and not gate_result.hard_fail
+            ):
                 break
 
             extracted = extract_sendable_dialogue(candidate_text if not parsed_candidate else candidate)
@@ -2318,9 +2537,19 @@ class ChatKernelV2:
                     template_hard_fail=template_hard_fail,
                     semantic_forbidden=semantic_forbidden,
                 )
+                extracted_galgame_score = (
+                    score_galgame_candidate(
+                        text=extracted_gate.normalized_text or extracted,
+                        contract=galgame_contract,
+                        quality=extracted_gate,
+                    )
+                    if galgame_soft_select_enabled
+                    else None
+                )
                 attempts[-1]["dialogue_extraction"] = {
                     "text_preview": _limit_text(extracted, limit=160),
                     "quality": extracted_gate.as_dict(),
+                    "galgame_score": extracted_galgame_score.as_dict() if extracted_galgame_score is not None else None,
                 }
                 if extracted_gate.accepted:
                     semantic_candidates.append(
@@ -2334,10 +2563,11 @@ class ChatKernelV2:
                                 "performance": candidate_performance.as_dict(),
                                 "structured_output": parsed_candidate,
                                 "raw_quality_gate": gate_result.as_dict(),
+                                "galgame_score": extracted_galgame_score.as_dict() if extracted_galgame_score is not None else None,
                             },
                         )
                     )
-                    if not semantic_rerank_enabled:
+                    if not galgame_soft_select_enabled and not semantic_rerank_enabled:
                         break
 
         rerank_context = SemanticRerankContext(
@@ -2535,6 +2765,8 @@ class ChatKernelV2:
                                     )
                                 )
                     rerank_result = get_semantic_reranker().select(semantic_candidates, rerank_context)
+        elif galgame_soft_select_enabled:
+            rerank_result = _select_galgame_soft_candidate(semantic_candidates)
         else:
             selected_index, selected_candidate = _first_quality_candidate(semantic_candidates)
             rerank_result = SemanticRerankResult(
@@ -2552,6 +2784,221 @@ class ChatKernelV2:
                 ),
                 reason_codes=() if selected_candidate is not None else ("NO_QUALITY_ACCEPTED_CANDIDATE",),
             )
+        if (
+            galgame_soft_select_enabled
+            and rerank_result.accepted
+            and rerank_result.selected_candidate is not None
+            and _env_bool("HOST_CHAT_KERNEL_V2_GALGAME_REPAIR_ENABLED", default=True)
+        ):
+            selected_payload = _safe_mapping(_safe_mapping(rerank_result.selected_candidate.metadata).get("galgame_score"))
+            selected_score = float(selected_payload.get("score") or 0.0)
+            selected_reason_codes = {str(item) for item in list(selected_payload.get("reason_codes") or [])}
+            repair_threshold = _env_float(
+                "HOST_CHAT_KERNEL_V2_GALGAME_REPAIR_THRESHOLD",
+                default=86.0,
+                minimum=0.0,
+                maximum=100.0,
+            )
+            needs_repair = bool(
+                selected_score < repair_threshold
+                or selected_reason_codes.intersection(
+                    {
+                        "CONTRACT_FORBIDDEN_SURFACE",
+                        "CONTRACT_MISSING_REQUIRED_MOVE",
+                        "TOO_MANY_QUESTIONS",
+                        "TOO_LONG",
+                        "TOO_SHORT",
+                    }
+                )
+            )
+            if needs_repair:
+                repair_messages = [
+                    *messages[:-1],
+                    {
+                        "role": "system",
+                        "content": _build_galgame_repair_prompt(
+                            contract=galgame_contract,
+                            score_payload=selected_payload,
+                        ),
+                    },
+                    messages[-1],
+                ]
+                attempt_index = len(attempts)
+                call_started = time.perf_counter()
+                repair_gen_params = {
+                    **gen_params,
+                    "temperature": min(float(gen_params.get("temperature") or 0.22), 0.18),
+                    "top_p": min(float(gen_params.get("top_p") or 0.55), 0.5),
+                    "max_tokens": min(int(gen_params.get("max_tokens") or 96), 96),
+                }
+                try:
+                    candidate, call_provider, call_model, call_first_token_ms = await self._invoke_model_text(
+                        request_id=f"{request.request_id or 'chat_kernel'}_k2_galgame_repair",
+                        provider_name=provider_name,
+                        model_id=model_id,
+                        api_key=api_key,
+                        timeout_ms=timeout_ms,
+                        messages=repair_messages,
+                        gen_params=repair_gen_params,
+                        base_url=base_url,
+                        streaming=use_streaming,
+                    )
+                    llm_latency_ms += int(round((time.perf_counter() - call_started) * 1000))
+                    final_provider = _clean_text(call_provider or provider_name)
+                    final_model = _clean_text(call_model or model_id)
+                    if first_token_ms is None and call_first_token_ms is not None:
+                        first_token_ms = int(call_first_token_ms)
+                    candidate_text, parsed_candidate = _candidate_visible_text(candidate, render_profile=render_profile)
+                    candidate_performance = _performance_from_candidate(
+                        parsed_candidate,
+                        facts=request.interaction_facts,
+                        source="chat_kernel_v2",
+                    )
+                    gate_result = quality_gate.validate(
+                        text=candidate_text,
+                        render_profile=render_profile,
+                        response_form=response_form,
+                        user_message=request.user_message or request.interaction_facts.user_message,
+                        scene_id=light_daily_scene_id,
+                        template_hard_fail=template_hard_fail,
+                        semantic_forbidden=semantic_forbidden,
+                    )
+                    galgame_score = score_galgame_candidate(
+                        text=gate_result.normalized_text or candidate_text,
+                        contract=galgame_contract,
+                        quality=gate_result,
+                    )
+                    attempts.append(
+                        {
+                            "attempt": attempt_index,
+                            "repair": True,
+                            "text_preview": _limit_text(candidate_text, limit=160),
+                            "raw_preview": _limit_text(candidate, limit=160),
+                            "structured_output": bool(parsed_candidate),
+                            "performance": candidate_performance.as_dict(),
+                            "first_token_ms": call_first_token_ms,
+                            "gen_params": {
+                                "temperature": repair_gen_params.get("temperature"),
+                                "top_p": repair_gen_params.get("top_p"),
+                                "max_tokens": repair_gen_params.get("max_tokens"),
+                            },
+                            "quality": gate_result.as_dict(),
+                            "galgame_score": galgame_score.as_dict(),
+                        }
+                    )
+                    repair_candidate = SemanticCandidate(
+                        text=gate_result.normalized_text or candidate_text,
+                        quality=gate_result,
+                        attempt=attempt_index,
+                        source="galgame_repair",
+                        metadata={
+                            "first_token_ms": call_first_token_ms,
+                            "performance": candidate_performance.as_dict(),
+                            "structured_output": parsed_candidate,
+                            "galgame_score": galgame_score.as_dict(),
+                        },
+                    )
+                    semantic_candidates.append(repair_candidate)
+                    repair_result = _select_galgame_soft_candidate(semantic_candidates)
+                    if repair_result.accepted and repair_result.selected_candidate is not None:
+                        rerank_result = repair_result
+                except Exception as exc:
+                    attempts.append(
+                        {
+                            "attempt": attempt_index,
+                            "repair": True,
+                            "error": repr(exc),
+                            "latency_ms": int(round((time.perf_counter() - call_started) * 1000)),
+                            "gen_params": {
+                                "temperature": repair_gen_params.get("temperature"),
+                                "top_p": repair_gen_params.get("top_p"),
+                                "max_tokens": repair_gen_params.get("max_tokens"),
+                            },
+                            "quality": {
+                                "accepted": False,
+                                "hard_fail": True,
+                                "reason_codes": ["GALGAME_REPAIR_FAILED"],
+                                "error": repr(exc),
+                            },
+                        }
+                    )
+        if (
+            galgame_soft_select_enabled
+            and rerank_result.accepted
+            and rerank_result.selected_candidate is not None
+        ):
+            selected_payload = _safe_mapping(_safe_mapping(rerank_result.selected_candidate.metadata).get("galgame_score"))
+            selected_score = float(selected_payload.get("score") or 0.0)
+            selected_reason_codes = {str(item) for item in list(selected_payload.get("reason_codes") or [])}
+            fallback_threshold = _env_float(
+                "HOST_CHAT_KERNEL_V2_GALGAME_FALLBACK_THRESHOLD",
+                default=86.0,
+                minimum=0.0,
+                maximum=100.0,
+            )
+            needs_contract_fallback = bool(
+                selected_score < fallback_threshold
+                or selected_reason_codes.intersection(
+                    {
+                        "CONTRACT_FORBIDDEN_SURFACE",
+                        "CONTRACT_MISSING_REQUIRED_MOVE",
+                        "TOO_MANY_QUESTIONS",
+                        "TOO_LONG",
+                        "TOO_SHORT",
+                        "WRONG_KINSHIP_TERM",
+                    }
+                )
+            )
+            if needs_contract_fallback:
+                for fallback_text in _galgame_contract_fallback_texts(galgame_contract):
+                    attempt_index = len(attempts)
+                    fallback_performance = _performance_from_candidate(
+                        {},
+                        facts=request.interaction_facts,
+                        source="chat_kernel_v2",
+                    )
+                    gate_result = quality_gate.validate(
+                        text=fallback_text,
+                        render_profile=render_profile,
+                        response_form=response_form,
+                        user_message=request.user_message or request.interaction_facts.user_message,
+                        scene_id=light_daily_scene_id,
+                        template_hard_fail=template_hard_fail,
+                        semantic_forbidden=semantic_forbidden,
+                    )
+                    galgame_score = score_galgame_candidate(
+                        text=gate_result.normalized_text or fallback_text,
+                        contract=galgame_contract,
+                        quality=gate_result,
+                    )
+                    attempts.append(
+                        {
+                            "attempt": attempt_index,
+                            "fallback": "galgame_contract",
+                            "text_preview": _limit_text(fallback_text, limit=160),
+                            "raw_preview": _limit_text(fallback_text, limit=160),
+                            "structured_output": False,
+                            "performance": fallback_performance.as_dict(),
+                            "quality": gate_result.as_dict(),
+                            "galgame_score": galgame_score.as_dict(),
+                        }
+                    )
+                    semantic_candidates.append(
+                        SemanticCandidate(
+                            text=gate_result.normalized_text or fallback_text,
+                            quality=gate_result,
+                            attempt=attempt_index,
+                            source="galgame_contract_fallback",
+                            metadata={
+                                "performance": fallback_performance.as_dict(),
+                                "structured_output": {},
+                                "galgame_score": galgame_score.as_dict(),
+                            },
+                        )
+                    )
+                fallback_result = _select_galgame_soft_candidate(semantic_candidates)
+                if fallback_result.accepted and fallback_result.selected_candidate is not None:
+                    rerank_result = fallback_result
         if rerank_result.accepted and rerank_result.selected_candidate is not None:
             selected = rerank_result.selected_candidate
             selected_metadata = _safe_mapping(selected.metadata)
@@ -2582,6 +3029,9 @@ class ChatKernelV2:
                 "model_call_mode": "streaming" if use_streaming else "completion",
                 "prompt_mode": prompt_mode,
             }
+            if galgame_soft_select_enabled:
+                audit["galgame_text_contract"] = galgame_contract.as_dict()
+                audit["galgame_score"] = _safe_mapping(selected_metadata.get("galgame_score"))
             if selected.source == "dialogue_extraction":
                 audit["dialogue_extraction"] = {
                     "from_attempt": selected.attempt,
@@ -2617,6 +3067,7 @@ class ChatKernelV2:
                         "positive_style": positive_style_trace,
                         "style_reference": style_reference_trace,
                         "model_upgrade": model_upgrade_trace,
+                        "galgame_text_contract": galgame_contract.as_dict() if galgame_soft_select_enabled else {},
                     }
                 },
             )
@@ -2635,6 +3086,7 @@ class ChatKernelV2:
                 "style_reference": style_reference_trace,
                 "model_upgrade": model_upgrade_trace,
                 "prompt_mode": prompt_mode,
+                "galgame_text_contract": galgame_contract.as_dict() if galgame_soft_select_enabled else {},
             },
         )
         return ChatKernelResult(
@@ -2658,6 +3110,7 @@ class ChatKernelV2:
                     "positive_style": positive_style_trace,
                     "style_reference": style_reference_trace,
                     "model_upgrade": model_upgrade_trace,
+                    "galgame_text_contract": galgame_contract.as_dict() if galgame_soft_select_enabled else {},
                     "reason_code": "QUALITY_REJECTED",
                 }
             },
