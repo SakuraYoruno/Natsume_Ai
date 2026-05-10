@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from host_brain.persona.galgame_text_contract import GalgameTextContract
+from host_brain.persona.galgame_taste_guard import find_galgame_taste_hits
 from host_brain.persona.text_quality_gate import TextQualityGateResult
 
 
@@ -197,6 +198,12 @@ def score_galgame_candidate(
         score -= 12
         reasons.append("LOW_INFORMATION_REPLY")
         penalties.append("low energy")
+    taste_hits = find_galgame_taste_hits(normalized)
+    if taste_hits:
+        score -= min(44, sum(hit.penalty for hit in taste_hits))
+        for hit in taste_hits:
+            reasons.append(hit.reason_code)
+            penalties.append(f"taste:{hit.category}:{hit.token}")
 
     if any(marker in normalized for marker in ("哼", "诶", "欸", "喂", "尼尼", "行啦", "真是")):
         score += 4

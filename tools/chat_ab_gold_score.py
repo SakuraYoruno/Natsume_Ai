@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 from tools.chat_ab_generate import load_cases, write_jsonl
 from tools.chat_ab_judge_codex import load_jsonl
+from host_brain.persona.galgame_taste_guard import find_galgame_taste_hits
 
 
 _SERVICE_TONE_PATTERNS: tuple[str, ...] = (
@@ -206,6 +207,15 @@ def score_candidate(
         score -= 24
         hard_failures.append("service_tone")
         penalties.append("客服/工具口吻: " + " / ".join(service_hits[:4]))
+
+    taste_hits = find_galgame_taste_hits(text)
+    if taste_hits:
+        score -= min(44, sum(hit.penalty for hit in taste_hits))
+        hard_failures.append("taste_regression")
+        penalties.append(
+            "怪味口吻: "
+            + " / ".join(f"{hit.category}:{hit.token}" for hit in taste_hits[:5])
+        )
 
     if user_message and _normalize_text(text) == _normalize_text(user_message):
         score -= 35
