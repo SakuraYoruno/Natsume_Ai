@@ -26,6 +26,11 @@ _SERVICE_TONE = (
     "说来听听",
     "说出来听听",
 )
+_SERVICE_TONE_EXEMPTIONS = (
+    "话多怎么了",
+    "烦怎么了",
+    "吵怎么了",
+)
 _FACT_FABRICATION = (
     "平时",
     "平常",
@@ -76,6 +81,16 @@ def _question_count(text: str) -> int:
 
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
     return any(item and item in text for item in needles)
+
+
+def _contains_service_tone(text: str) -> bool:
+    for item in _SERVICE_TONE:
+        if not item or item not in text:
+            continue
+        if item in {"怎么了", "怎么啦"} and any(token in text for token in _SERVICE_TONE_EXEMPTIONS):
+            continue
+        return True
+    return False
 
 
 def _collapse_repeated_cjk(text: str) -> str:
@@ -186,7 +201,7 @@ def score_galgame_candidate(
         reasons.append("TOO_LONG")
         penalties.append(f"too_long:{length}")
 
-    if _contains_any(normalized, _SERVICE_TONE):
+    if _contains_service_tone(normalized):
         score -= 14
         reasons.append("SERVICE_TONE")
         penalties.append("service tone")

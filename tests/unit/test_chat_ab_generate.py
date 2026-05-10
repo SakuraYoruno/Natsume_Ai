@@ -328,3 +328,62 @@ def test_generate_candidates_retries_pool_exhausted_baseline_case(monkeypatch) -
     assert calls == 2
     assert rows[0]["ok"] is True
     assert rows[0]["trace"]["generation_retry_attempts"] == 1
+
+
+def test_generate_candidates_parallel_kernel_preserves_case_variant_order(monkeypatch) -> None:
+    async def _fake_runtime():
+        return {}
+
+    calls: list[tuple[str, str, str, str, bool]] = []
+
+    async def _fake_kernel(case, *, variant, llm_runtime, mock, apply_env_overrides=True):  # noqa: ANN001, ANN003
+        import os
+
+        calls.append(
+            (
+                str(case.get("case_id")),
+                str(variant),
+                str(os.environ.get("HOST_CHAT_KERNEL_V2_PROMPT_MODE") or ""),
+                str(os.environ.get("HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED") or ""),
+                bool(apply_env_overrides),
+            )
+        )
+        if str(case.get("case_id")) == "case_1":
+            await asyncio.sleep(0.01)
+        return {
+            "case_id": str(case.get("case_id")),
+            "variant": str(variant),
+            "text": f"{variant}:{case.get('case_id')}",
+            "envelope": {},
+            "latency_ms": 1,
+            "prompt_digest": "",
+            "trace": {},
+            "ok": True,
+            "error": "",
+        }
+
+    monkeypatch.setattr("tools.chat_ab_generate.resolve_chat_runtime", _fake_runtime)
+    monkeypatch.setattr("tools.chat_ab_generate.generate_kernel_v2_candidate", _fake_kernel)
+
+    rows = asyncio.run(
+        generate_candidates(
+            cases=[
+                {"case_id": "case_1", "user_message": "hello"},
+                {"case_id": "case_2", "user_message": "hi"},
+            ],
+            variants=["kernel_v2_plain_soul", "kernel_v2_no_rerank"],
+            mock=False,
+            concurrency=2,
+        )
+    )
+
+    assert [(row["case_id"], row["variant"]) for row in rows] == [
+        ("case_1", "kernel_v2_plain_soul"),
+        ("case_1", "kernel_v2_no_rerank"),
+        ("case_2", "kernel_v2_plain_soul"),
+        ("case_2", "kernel_v2_no_rerank"),
+    ]
+    assert all(call[-1] is False for call in calls)
+    plain_soul_calls = [call for call in calls if call[1] == "kernel_v2_plain_soul"]
+    assert plain_soul_calls
+    assert all(call[2] == "plain_soul" and call[3] == "false" for call in plain_soul_calls)

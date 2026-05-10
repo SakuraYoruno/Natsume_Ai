@@ -36,6 +36,17 @@ def test_score_candidate_flags_service_tone_and_forbidden() -> None:
     assert row["score"] < 75
 
 
+def test_score_candidate_does_not_treat_teasing_zenme_le_as_service_tone() -> None:
+    row = score_candidate(
+        case={"case_id": "talkative", "user_message": "你怎么这么能说"},
+        gold={"required_any": [["说", "闷", "话"]]},
+        candidate={"case_id": "talkative", "variant": "kernel_v2_plain_soul", "text": "话多怎么了？尼尼明明就爱听。"},
+    )
+
+    assert "service_tone" not in row["hard_failures"]
+    assert row["passed"] is True
+
+
 def test_score_candidate_flags_direct_echo() -> None:
     row = score_candidate(
         case={"case_id": "case_1", "user_message": "你今天挺可爱的"},

@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -193,6 +193,34 @@ def temporary_environment(overrides: Mapping[str, str]) -> Iterable[None]:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def _kernel_v2_env_overrides(normalized_variant: str) -> dict[str, str]:
+    env_overrides: dict[str, str] = {}
+    if normalized_variant == "kernel_v2_style_bank":
+        env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "true"
+    if normalized_variant == "kernel_v2_no_style_bank":
+        env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
+    if normalized_variant == "kernel_v2_plain_soul":
+        env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "plain_soul"
+        env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
+        env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "false"
+        env_overrides["HOST_CHAT_KERNEL_V2_CANDIDATES"] = "1"
+    if normalized_variant == "kernel_v2_plain_structured":
+        env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "plain_structured"
+        env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
+        env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "true"
+        env_overrides["HOST_CHAT_KERNEL_V2_CANDIDATES"] = "4"
+    if normalized_variant == "kernel_v2_guided":
+        env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "guided"
+    if normalized_variant == "kernel_v2_soul_only":
+        env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
+        env_overrides["HOST_CHAT_KERNEL_V2_TURN_DIRECTIVE_ENABLED"] = "false"
+    if normalized_variant == "kernel_v2_no_turn_directive":
+        env_overrides["HOST_CHAT_KERNEL_V2_TURN_DIRECTIVE_ENABLED"] = "false"
+    if normalized_variant == "kernel_v2_no_rerank":
+        env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "false"
+    return env_overrides
 
 
 def _extract_sse_payload(raw_event: str) -> dict[str, Any] | None:
@@ -401,6 +429,7 @@ async def generate_kernel_v2_candidate(
     variant: str = "kernel_v2",
     llm_runtime: Mapping[str, Any] | None = None,
     mock: bool = False,
+    apply_env_overrides: bool = True,
 ) -> dict[str, Any]:
     normalized_variant = str(variant or "kernel_v2").strip() or "kernel_v2"
     if normalized_variant not in KERNEL_V2_VARIANTS:
@@ -437,31 +466,9 @@ async def generate_kernel_v2_candidate(
             "error": "",
         }
     try:
-        env_overrides: dict[str, str] = {}
-        if normalized_variant == "kernel_v2_style_bank":
-            env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "true"
-        if normalized_variant == "kernel_v2_no_style_bank":
-            env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
-        if normalized_variant == "kernel_v2_plain_soul":
-            env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "plain_soul"
-            env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
-            env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "false"
-            env_overrides["HOST_CHAT_KERNEL_V2_CANDIDATES"] = "1"
-        if normalized_variant == "kernel_v2_plain_structured":
-            env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "plain_structured"
-            env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
-            env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "true"
-            env_overrides["HOST_CHAT_KERNEL_V2_CANDIDATES"] = "4"
-        if normalized_variant == "kernel_v2_guided":
-            env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "guided"
-        if normalized_variant == "kernel_v2_soul_only":
-            env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
-            env_overrides["HOST_CHAT_KERNEL_V2_TURN_DIRECTIVE_ENABLED"] = "false"
-        if normalized_variant == "kernel_v2_no_turn_directive":
-            env_overrides["HOST_CHAT_KERNEL_V2_TURN_DIRECTIVE_ENABLED"] = "false"
-        if normalized_variant == "kernel_v2_no_rerank":
-            env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "false"
-        with temporary_environment(env_overrides):
+        env_overrides = _kernel_v2_env_overrides(normalized_variant)
+        env_context = temporary_environment(env_overrides) if apply_env_overrides else nullcontext()
+        with env_context:
             if normalized_variant == "kernel_v2_soul_only":
                 facts = InteractionFactsPlane(
                     user_message=user_message,
@@ -810,49 +817,86 @@ async def generate_candidates(
     case_delay_ms: int = 0,
     max_case_retries: int = 0,
     error_backoff_ms: int = 0,
+    concurrency: int = 1,
 ) -> list[dict[str, Any]]:
     llm_runtime: dict[str, Any] = {}
     if not mock:
         llm_runtime = await resolve_chat_runtime()
 
+    async def _generate_one(
+        case: Mapping[str, Any],
+        variant: str,
+        *,
+        apply_kernel_env_overrides: bool = True,
+    ) -> dict[str, Any]:
+        attempt = 0
+        row: dict[str, Any]
+        while True:
+            if variant in CURRENT_MAIN_CHAIN_VARIANTS:
+                row = await generate_current_candidate(
+                    case,
+                    variant=variant,
+                    llm_runtime=llm_runtime,
+                    mock=mock,
+                )
+            elif variant in KERNEL_V2_VARIANTS:
+                row = await generate_kernel_v2_candidate(
+                    case,
+                    variant=variant,
+                    llm_runtime=llm_runtime,
+                    mock=mock,
+                    apply_env_overrides=apply_kernel_env_overrides,
+                )
+            else:
+                row = await generate_baseline_candidate(
+                    case,
+                    variant=variant,
+                    llm_runtime=llm_runtime,
+                    baseline_provider=baseline_provider,
+                    baseline_model_id=baseline_model_id,
+                    mock=mock,
+                )
+            if not is_retryable_generation_error(row) or attempt >= int(max_case_retries or 0):
+                if attempt:
+                    trace = dict(row.get("trace") or {})
+                    trace["generation_retry_attempts"] = attempt
+                    row["trace"] = trace
+                return row
+            attempt += 1
+            await asyncio.sleep(max(0, int(error_backoff_ms or case_delay_ms or 0)) / 1000.0)
+
+    requested_concurrency = max(1, int(concurrency or 1))
+    can_parallelize = (
+        requested_concurrency > 1
+        and int(case_delay_ms or 0) <= 0
+        and all(variant in KERNEL_V2_VARIANTS for variant in variants)
+    )
+    if can_parallelize:
+        rows_by_slot: dict[tuple[int, int], dict[str, Any]] = {}
+        for variant_index, variant in enumerate(variants):
+            semaphore = asyncio.Semaphore(requested_concurrency)
+
+            async def _run_case(case_index: int, case: Mapping[str, Any]) -> tuple[int, int, dict[str, Any]]:
+                async with semaphore:
+                    row = await _generate_one(case, variant, apply_kernel_env_overrides=False)
+                    return case_index, variant_index, row
+
+            with temporary_environment(_kernel_v2_env_overrides(variant)):
+                results = await asyncio.gather(
+                    *(_run_case(case_index, case) for case_index, case in enumerate(cases))
+                )
+            for case_index, result_variant_index, row in results:
+                rows_by_slot[(case_index, result_variant_index)] = row
+        return [
+            rows_by_slot[(case_index, variant_index)]
+            for case_index in range(len(cases))
+            for variant_index in range(len(variants))
+        ]
+
     rows: list[dict[str, Any]] = []
     for case_index, case in enumerate(cases):
         for variant_index, variant in enumerate(variants):
-            attempt = 0
-            row: dict[str, Any]
-            while True:
-                if variant in CURRENT_MAIN_CHAIN_VARIANTS:
-                    row = await generate_current_candidate(
-                        case,
-                        variant=variant,
-                        llm_runtime=llm_runtime,
-                        mock=mock,
-                    )
-                elif variant in KERNEL_V2_VARIANTS:
-                    row = await generate_kernel_v2_candidate(
-                        case,
-                        variant=variant,
-                        llm_runtime=llm_runtime,
-                        mock=mock,
-                    )
-                else:
-                    row = await generate_baseline_candidate(
-                        case,
-                        variant=variant,
-                        llm_runtime=llm_runtime,
-                        baseline_provider=baseline_provider,
-                        baseline_model_id=baseline_model_id,
-                        mock=mock,
-                    )
-                if not is_retryable_generation_error(row) or attempt >= int(max_case_retries or 0):
-                    if attempt:
-                        trace = dict(row.get("trace") or {})
-                        trace["generation_retry_attempts"] = attempt
-                        row["trace"] = trace
-                    rows.append(row)
-                    break
-                attempt += 1
-                await asyncio.sleep(max(0, int(error_backoff_ms or case_delay_ms or 0)) / 1000.0)
+            rows.append(await _generate_one(case, variant))
             if int(case_delay_ms or 0) > 0 and not (case_index == len(cases) - 1 and variant_index == len(variants) - 1):
                 await asyncio.sleep(max(0, int(case_delay_ms)) / 1000.0)
     return rows
@@ -870,6 +914,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case-delay-ms", type=int, default=int(os.environ.get("CHAT_AB_CASE_DELAY_MS", "0") or 0))
     parser.add_argument("--max-case-retries", type=int, default=int(os.environ.get("CHAT_AB_MAX_CASE_RETRIES", "0") or 0))
     parser.add_argument("--error-backoff-ms", type=int, default=int(os.environ.get("CHAT_AB_ERROR_BACKOFF_MS", "0") or 0))
+    parser.add_argument("--concurrency", type=int, default=int(os.environ.get("CHAT_AB_CONCURRENCY", "1") or 1))
     return parser
 
 
@@ -889,6 +934,7 @@ async def async_main(argv: list[str] | None = None) -> int:
         case_delay_ms=int(args.case_delay_ms or 0),
         max_case_retries=int(args.max_case_retries or 0),
         error_backoff_ms=int(args.error_backoff_ms or 0),
+        concurrency=int(args.concurrency or 1),
     )
     out_file = args.out / "raw_candidates.jsonl"
     write_jsonl(out_file, rows)

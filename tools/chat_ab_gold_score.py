@@ -33,6 +33,11 @@ _SERVICE_TONE_PATTERNS: tuple[str, ...] = (
     "很高兴",
     "随时找我",
 )
+_SERVICE_TONE_EXEMPTIONS: tuple[str, ...] = (
+    "话多怎么了",
+    "烦怎么了",
+    "吵怎么了",
+)
 
 _PUNCT_RE = re.compile(r"[\s，。！？!?,.、~～…“”\"'：:；;（）()\[\]{}]+")
 _KANA_RE = re.compile(r"[\u3040-\u30ff]")
@@ -69,6 +74,18 @@ def _contains_any(text: str, patterns: Iterable[str]) -> list[str]:
         if token and token in haystack:
             hits.append(token)
     return hits
+
+
+def _contains_service_tone(text: str) -> list[str]:
+    haystack = str(text or "")
+    hits = _contains_any(haystack, _SERVICE_TONE_PATTERNS)
+    if not hits:
+        return []
+    return [
+        hit
+        for hit in hits
+        if not (hit in {"怎么了", "怎么啦"} and any(token in haystack for token in _SERVICE_TONE_EXEMPTIONS))
+    ]
 
 
 def _contains_forbidden(text: str, patterns: Iterable[str]) -> list[str]:
@@ -202,7 +219,7 @@ def score_candidate(
         hard_failures.append("forbidden_pattern")
         penalties.append("命中禁止表达: " + " / ".join(forbidden_hits[:4]))
 
-    service_hits = _contains_any(text, _SERVICE_TONE_PATTERNS)
+    service_hits = _contains_service_tone(text)
     if service_hits:
         score -= 24
         hard_failures.append("service_tone")

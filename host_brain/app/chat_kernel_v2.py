@@ -253,6 +253,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "头疼就先缓一下，别硬撑。",
             "先缓一缓，尼尼。头疼别硬撑。",
         ),
+        "happy": (
+            "心情不错啊，那我也跟着高兴一下。",
+            "哼，尼尼开心，我也就轻快一点。",
+        ),
         "good_news": (
             "跑通了？哼，尼尼挺能干的嘛。",
             "总算跑通了啊。不错嘛，尼尼。",
@@ -264,6 +268,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
         "next_step": (
             "先把报错贴来，我陪你看。",
             "先从最小那一步看，别乱改。",
+        ),
+        "small_complaint": (
+            "烦就先拆一小块，拿来我看。",
+            "先别硬扛，哪块最烦我陪你拆。",
         ),
         "late_night": (
             "还醒着啊？差不多该睡了，尼尼。",

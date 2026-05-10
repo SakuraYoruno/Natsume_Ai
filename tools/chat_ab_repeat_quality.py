@@ -143,6 +143,7 @@ async def run_repeat_quality(
     case_delay_ms: int = 0,
     max_case_retries: int = 0,
     error_backoff_ms: int = 0,
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     if runs <= 0:
         raise ValueError("runs must be positive")
@@ -167,6 +168,7 @@ async def run_repeat_quality(
             case_delay_ms=case_delay_ms,
             max_case_retries=max_case_retries,
             error_backoff_ms=error_backoff_ms,
+            concurrency=concurrency,
         )
         candidates_path = run_dir / "raw_candidates.jsonl"
         write_jsonl(candidates_path, candidate_rows)
@@ -200,6 +202,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case-delay-ms", type=int, default=0)
     parser.add_argument("--max-case-retries", type=int, default=0)
     parser.add_argument("--error-backoff-ms", type=int, default=0)
+    parser.add_argument("--concurrency", type=int, default=1)
     return parser
 
 
@@ -217,6 +220,7 @@ async def async_main(argv: list[str] | None = None) -> int:
         case_delay_ms=int(args.case_delay_ms or 0),
         max_case_retries=int(args.max_case_retries or 0),
         error_backoff_ms=int(args.error_backoff_ms or 0),
+        concurrency=int(args.concurrency or 1),
     )
     print(f"wrote repeat quality report -> {args.out / 'repeat_report.md'}")
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
