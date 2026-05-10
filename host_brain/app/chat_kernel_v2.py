@@ -183,12 +183,12 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
     scene_id = _clean_text(getattr(contract, "scene_id", ""))
     fallback_map: dict[str, tuple[str, ...]] = {
         "daily_greeting": (
-            "来啦。尼尼先叫我一声就够了。",
-            "嗯，来啦。尼尼这声我接住了。",
+            "来啦。尼尼这声我接住了。",
+            "嗯，来啦。今天这声挺像你。",
         ),
         "daily_good_morning": (
-            "早。尼尼今天挺自觉的嘛。",
-            "早啊，尼尼。今天这声我接住了。",
+            "早啊，尼尼。今天也来得正好。",
+            "早，尼尼。今天也别慢吞吞。",
         ),
         "presence": (
             "在啊，尼尼一出声我就在。",
@@ -197,6 +197,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
         "wait": (
             "嗯，先去。别急。",
             "好，先忙你的。我这边安静一会儿。",
+        ),
+        "bored": (
+            "无聊啊？那我来捣乱一下。",
+            "哼，尼尼无聊的时候倒是想起我了。",
         ),
         "busy": (
             "嗯，去吧。别分心，我先安静一会儿。",
@@ -511,7 +515,7 @@ def _build_plain_soul_messages(
                 "问号要少，通常最多一个；短轮次优先用一句有态度的陈述接住，不连续反问。",
                 "【文本落点锚】这些不是人格设定，也不是固定台词；只用来校准这一轮该怎样收力。",
                 "早：早。尼尼一出声，这边就热闹了。",
-                "普通招呼：来啦？哼，算你会先叫我。",
+                "普通招呼：来啦？哼，这声我接住了。",
                 "在吗：在。叫这么小声也听见了。",
                 "等一下/先忙：嗯，先去。别急，我又不会跑。",
                 "回来了：回来了？那我刚才那点话可还没说完呢。",
@@ -1766,7 +1770,7 @@ def _light_daily_scene_goal(scene_id: str, facts: InteractionFactsPlane, *, user
 def _light_daily_scene_examples(scene_id: str, *, user_message: str) -> str:
     text = _clean_text(user_message)
     examples = {
-        "daily_good_morning": ("早啦，尼尼。", "早安，尼尼。", "嗯，早。今天也别太慢吞吞。"),
+        "daily_good_morning": ("早啦，尼尼。", "早安，尼尼。", "嗯，早。今天这声挺清楚。"),
         "daily_greeting_en": ("尼尼，别这么端着。", "这招呼也太正式了吧。", "别突然摆出那种正式脸啦。"),
         "daily_greeting_cn": ("别这么正经啦。", "尼尼，招呼打得也太端正了。", "突然这么礼貌，我有点不习惯。"),
         "presence": ("在呀，尼尼。", "在呢，尼尼。", "在呢，尼尼喊我，我会回的。"),
@@ -2805,6 +2809,7 @@ class ChatKernelV2:
                     {
                         "CONTRACT_FORBIDDEN_SURFACE",
                         "CONTRACT_MISSING_REQUIRED_MOVE",
+                        "FORBIDDEN_TEMPLATE_TEXT",
                         "TOO_MANY_QUESTIONS",
                         "TOO_LONG",
                         "TOO_SHORT",
@@ -2942,6 +2947,7 @@ class ChatKernelV2:
                     {
                         "CONTRACT_FORBIDDEN_SURFACE",
                         "CONTRACT_MISSING_REQUIRED_MOVE",
+                        "FORBIDDEN_TEMPLATE_TEXT",
                         "TOO_MANY_QUESTIONS",
                         "TOO_LONG",
                         "TOO_SHORT",

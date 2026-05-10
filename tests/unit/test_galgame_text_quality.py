@@ -111,6 +111,30 @@ def test_good_morning_contract_rejects_early_wakeup_guess() -> None:
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
 
 
+def test_good_morning_contract_rejects_parental_calling_tone() -> None:
+    contract = build_galgame_text_contract(user_message="早", scene_id="")
+
+    scored = score_galgame_candidate(text="早啊。算你记得叫人。", contract=contract)
+
+    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+
+
+def test_good_morning_contract_rejects_conscience_tone() -> None:
+    contract = build_galgame_text_contract(user_message="早", scene_id="")
+
+    scored = score_galgame_candidate(text="早啊，尼尼。这么早就来找我，还算你有点良心。", contract=contract)
+
+    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+
+
+def test_good_morning_contract_rejects_ignored_me_guess() -> None:
+    contract = build_galgame_text_contract(user_message="早", scene_id="")
+
+    scored = score_galgame_candidate(text="早啊尼尼。我正想说你再不理我，我就不说话了。", contract=contract)
+
+    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+
+
 def test_write_takeover_contract_requires_writing_move() -> None:
     contract = build_galgame_text_contract(user_message="帮我写一下这个", scene_id="")
 
@@ -141,6 +165,15 @@ def test_play_invite_contract_rejects_thin_question() -> None:
 
     assert contract.scene_id == "play_invite"
     assert "TOO_SHORT" in scored.reason_codes
+
+
+def test_bored_contract_rejects_tool_chat_framing() -> None:
+    contract = build_galgame_text_contract(user_message="好无聊", scene_id="")
+
+    scored = score_galgame_candidate(text="本天才在这儿呢。陪你说说话就不无聊了吧。", contract=contract)
+
+    assert contract.scene_id == "bored"
+    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
 
 
 def test_quiet_contract_rejects_too_thin_line() -> None:
