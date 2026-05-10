@@ -148,6 +148,13 @@ def _select_galgame_soft_candidate(candidates: list[SemanticCandidate]) -> Seman
     )
 
 
+def _is_clean_galgame_score(payload: Mapping[str, Any], *, min_score: float) -> bool:
+    score = float(payload.get("score") or 0.0)
+    if bool(payload.get("hard_fail")) or score < float(min_score):
+        return False
+    return not list(payload.get("reason_codes") or []) and not list(payload.get("penalties") or [])
+
+
 def _build_galgame_repair_prompt(*, contract: Any, score_payload: Mapping[str, Any]) -> str:
     penalties = [
         _clean_text(item)
@@ -210,6 +217,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "写啊，拿来。我先替尼尼开个头。",
             "行，写的事交给我一半，先把题目丢过来。",
         ),
+        "help_takeover": (
+            "报错发来，我陪你看。",
+            "拿来，我看看哪里炸了。",
+        ),
         "play_invite": (
             "行啊，陪你玩会儿，输了可别赖我。",
             "好啊，陪你玩。尼尼可别半路跑掉。",
@@ -234,6 +245,26 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "弄砸了就先别慌。拿来，我陪你看。",
             "哼，先说哪块砸了，我陪你捞回来。",
         ),
+        "tired": (
+            "累就先缓一下，别硬撑。",
+            "先歇一下，尼尼。别硬撑。",
+        ),
+        "headache": (
+            "头疼就先缓一下，别硬撑。",
+            "先缓一缓，尼尼。头疼别硬撑。",
+        ),
+        "good_news": (
+            "跑通了？哼，尼尼挺能干的嘛。",
+            "总算跑通了啊。不错嘛，尼尼。",
+        ),
+        "meal_share": (
+            "吃完了啊，那就好，别饿着自己。",
+            "哼，吃饱了就行，尼尼别又凑合。",
+        ),
+        "next_step": (
+            "先把报错贴来，我陪你看。",
+            "先从最小那一步看，别乱改。",
+        ),
         "late_night": (
             "还醒着啊？差不多该睡了，尼尼。",
             "这么晚还没睡，别硬熬了。",
@@ -250,6 +281,14 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "哼，这话太见外了。我想帮你，又不是外人。",
             "别装不熟。我想管就管，你别躲。",
         ),
+        "identity": (
+            "新海天。尼尼这回记住。",
+            "新海天啦，尼尼。",
+        ),
+        "who_called": (
+            "我自己要来的，不行吗？",
+            "我想来就来了，尼尼管得着吗。",
+        ),
         "really": (
             "真的啦。尼尼试一下就知道了。",
             "当然是真的，先照我说的试一下。",
@@ -261,6 +300,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
         "followup_then": (
             "然后就继续说啊，修好了哪一步？",
             "继续说，刚才那步怎么修好的？",
+        ),
+        "followup": (
+            "嗯，那就照刚才那步继续。",
+            "嗯，先沿着刚才那步走。",
         ),
     }
     return fallback_map.get(scene_id, ())
@@ -2268,6 +2311,10 @@ class ChatKernelV2:
             is_relationship_emotion
             and provider_name.lower() == "deepseek"
             and model_id.lower() in {"deepseek-v4-flash", "deepseek-chat"}
+            and (
+                prompt_mode != "plain_soul"
+                or _env_bool("HOST_CHAT_KERNEL_V2_PLAIN_SOUL_MODEL_UPGRADE_ENABLED", default=False)
+            )
             and not _env_bool("HOST_CHAT_KERNEL_V2_DISABLE_RELATIONSHIP_MODEL_UPGRADE", default=False)
         ):
             previous_model_id = model_id
@@ -2329,7 +2376,7 @@ class ChatKernelV2:
             and _env_bool("HOST_CHAT_KERNEL_V2_MINIMAL_QUALITY_GATE", default=True)
         )
         default_candidate_count = (
-            3
+            1
             if galgame_soft_select_enabled
             else 2
             if prompt_mode in {"plain_soul", "plain_structured"} and render_profile != "ja_voice"
@@ -2404,6 +2451,12 @@ class ChatKernelV2:
                 maximum=4,
             )
             candidate_count = int(light_daily_override) if light_daily_override is not None else min(max(candidate_count, 2), 2)
+        galgame_early_accept_score = _env_float(
+            "HOST_CHAT_KERNEL_V2_GALGAME_EARLY_ACCEPT_SCORE",
+            default=100.0,
+            minimum=80.0,
+            maximum=100.0,
+        )
 
         for attempt_index in range(candidate_count):
             call_started = time.perf_counter()
@@ -2504,6 +2557,16 @@ class ChatKernelV2:
                     },
                 )
             )
+            if (
+                galgame_soft_select_enabled
+                and not semantic_rerank_enabled
+                and gate_result.accepted
+                and not gate_result.hard_fail
+                and galgame_score is not None
+                and _is_clean_galgame_score(galgame_score.as_dict(), min_score=galgame_early_accept_score)
+            ):
+                attempts[-1]["early_accept"] = "clean_galgame_score"
+                break
             if (
                 light_daily_zh
                 and semantic_rerank_enabled
@@ -2805,18 +2868,25 @@ class ChatKernelV2:
             )
             needs_repair = bool(
                 selected_score < repair_threshold
+                or any(code.startswith("TASTE_") for code in selected_reason_codes)
                 or selected_reason_codes.intersection(
                     {
+                        "BROKEN_REPETITION",
                         "CONTRACT_FORBIDDEN_SURFACE",
                         "CONTRACT_MISSING_REQUIRED_MOVE",
                         "FORBIDDEN_TEMPLATE_TEXT",
+                        "LIKELY_FACT_FABRICATION",
                         "TOO_MANY_QUESTIONS",
                         "TOO_LONG",
                         "TOO_SHORT",
                     }
                 )
             )
-            if needs_repair:
+            fallback_before_repair = bool(_galgame_contract_fallback_texts(galgame_contract)) and _env_bool(
+                "HOST_CHAT_KERNEL_V2_GALGAME_FALLBACK_BEFORE_REPAIR",
+                default=(prompt_mode == "plain_soul"),
+            )
+            if needs_repair and not fallback_before_repair:
                 repair_messages = [
                     *messages[:-1],
                     {
@@ -2927,34 +2997,37 @@ class ChatKernelV2:
                             },
                         }
                     )
-        if (
-            galgame_soft_select_enabled
-            and rerank_result.accepted
-            and rerank_result.selected_candidate is not None
-        ):
-            selected_payload = _safe_mapping(_safe_mapping(rerank_result.selected_candidate.metadata).get("galgame_score"))
-            selected_score = float(selected_payload.get("score") or 0.0)
-            selected_reason_codes = {str(item) for item in list(selected_payload.get("reason_codes") or [])}
-            fallback_threshold = _env_float(
-                "HOST_CHAT_KERNEL_V2_GALGAME_FALLBACK_THRESHOLD",
-                default=86.0,
-                minimum=0.0,
-                maximum=100.0,
+        if galgame_soft_select_enabled:
+            needs_contract_fallback = not (
+                rerank_result.accepted and rerank_result.selected_candidate is not None
             )
-            needs_contract_fallback = bool(
-                selected_score < fallback_threshold
-                or selected_reason_codes.intersection(
-                    {
-                        "CONTRACT_FORBIDDEN_SURFACE",
-                        "CONTRACT_MISSING_REQUIRED_MOVE",
-                        "FORBIDDEN_TEMPLATE_TEXT",
-                        "TOO_MANY_QUESTIONS",
-                        "TOO_LONG",
-                        "TOO_SHORT",
-                        "WRONG_KINSHIP_TERM",
-                    }
+            if not needs_contract_fallback and rerank_result.selected_candidate is not None:
+                selected_payload = _safe_mapping(_safe_mapping(rerank_result.selected_candidate.metadata).get("galgame_score"))
+                selected_score = float(selected_payload.get("score") or 0.0)
+                selected_reason_codes = {str(item) for item in list(selected_payload.get("reason_codes") or [])}
+                fallback_threshold = _env_float(
+                    "HOST_CHAT_KERNEL_V2_GALGAME_FALLBACK_THRESHOLD",
+                    default=86.0,
+                    minimum=0.0,
+                    maximum=100.0,
                 )
-            )
+                needs_contract_fallback = bool(
+                    selected_score < fallback_threshold
+                    or any(code.startswith("TASTE_") for code in selected_reason_codes)
+                    or selected_reason_codes.intersection(
+                        {
+                            "BROKEN_REPETITION",
+                            "CONTRACT_FORBIDDEN_SURFACE",
+                            "CONTRACT_MISSING_REQUIRED_MOVE",
+                            "FORBIDDEN_TEMPLATE_TEXT",
+                            "LIKELY_FACT_FABRICATION",
+                            "TOO_MANY_QUESTIONS",
+                            "TOO_LONG",
+                            "TOO_SHORT",
+                            "WRONG_KINSHIP_TERM",
+                        }
+                    )
+                )
             if needs_contract_fallback:
                 for fallback_text in _galgame_contract_fallback_texts(galgame_contract):
                     attempt_index = len(attempts)

@@ -185,6 +185,8 @@ def build_galgame_text_contract(
                 "记得来找",
                 "来找我",
                 "不急着找",
+                "快去快回",
+                "等太久",
                 "我在这",
                 "我在这里",
                 "不吵你",
@@ -196,6 +198,9 @@ def build_galgame_text_contract(
                 "监工",
                 "好好干活",
                 "去吧去吧",
+                "不会跑",
+                "跑掉",
+                "别嫌我吵",
             ),
             max_questions=0,
         )
@@ -234,7 +239,7 @@ def build_galgame_text_contract(
             scene_id="tired",
             response_move="soft_care",
             required_any=(("累", "歇", "缓", "别硬撑"),),
-            forbidden_surface=("辛苦了", "好好休息", "靠一下", "坐下", "健康", "建议", "不吵你"),
+            forbidden_surface=("辛苦了", "好好休息", "靠一下", "坐下", "躺会儿", "去躺", "我在呢", "我在这", "我在这里", "健康", "建议", "不吵你"),
             max_questions=0,
         )
     if scene == "headache" or "头疼" in text:
@@ -242,8 +247,8 @@ def build_galgame_text_contract(
             scene_id="headache",
             response_move="soft_care",
             required_any=(("头疼", "歇", "缓", "别硬撑"),),
-            forbidden_surface=("昨天", "熬夜", "找药", "拿药", "倒杯", "诊断"),
-            max_questions=1,
+            forbidden_surface=("昨天", "熬夜", "找药", "拿药", "倒杯", "诊断", "那还不快", "平时", "让你平时"),
+            max_questions=0,
         )
     if scene == "bad_mood" or any(token in text for token in ("心情很差", "心情差", "不开心")):
         return _contract(
@@ -267,6 +272,25 @@ def build_galgame_text_contract(
             forbidden_surface=("什么好事", "发生什么", "我就说", "我就知道", "让我猜"),
             max_questions=1,
         )
+    if scene == "meal_share" or any(token in text for token in ("吃完饭", "吃完了", "刚吃完")):
+        return _contract(
+            scene_id="meal_share",
+            response_move="casual_meal_share",
+            forbidden_surface=(
+                "记得叫",
+                "算你识相",
+                "吃的什么",
+                "吃啥了",
+                "记录一下",
+                "饮食健康",
+                "我今天吃",
+                "炸鱼",
+                "收碗",
+                "磨蹭好久",
+            ),
+            max_questions=1,
+            notes=("把吃饭分享当生活小句接住，不追加菜单追问。",),
+        )
     if scene == "small_failure" or social_kind == "small_failure_hold" or any(token in text for token in ("弄砸", "搞砸", "失败")):
         return _contract(
             scene_id="small_failure",
@@ -286,6 +310,7 @@ def build_galgame_text_contract(
                 "坐一下",
                 "别急着现在就想着怎么补救",
                 "又弄砸",
+                "又",
             ),
             max_questions=1,
             notes=("先接住失败，再给能一起看的出口。",),
@@ -335,7 +360,7 @@ def build_galgame_text_contract(
             scene_id="identity",
             response_move="name_first",
             required_any=(("新海天",),),
-            forbidden_surface=("义妹", "妹妹", "你真正想问"),
+            forbidden_surface=("义妹", "妹妹", "你真正想问", "老问这个", "不会跑", "跑掉"),
             max_questions=1,
         )
     if scene == "play_invite" or "陪我玩" in text:
@@ -352,7 +377,7 @@ def build_galgame_text_contract(
             scene_id="who_called",
             response_move="self_invited",
             required_any=(("自己", "想来", "要来"),),
-            forbidden_surface=("你叫我", "路过"),
+            forbidden_surface=("你叫我", "路过", "有什么事", "快点说", "赶人"),
             max_questions=1,
         )
     if scene == "annoying_tease" or any(token in text for token in ("你好烦", "你烦不烦", "别烦我")):
@@ -377,6 +402,16 @@ def build_galgame_text_contract(
             max_questions=1,
             notes=("把嫌烦当熟人拌嘴，轻轻赖住，不升级互怼。",),
         )
+    if scene == "help_takeover" or any(token in text for token in ("报错", "看不懂", "帮我看看")):
+        return _contract(
+            scene_id="help_takeover",
+            response_move="take_debug_help",
+            required_any=(("看", "发", "拿", "贴"),),
+            forbidden_surface=("请提供完整错误信息", "请提供", "我可以协助", "建议你检查", "作为AI", "连报错都不贴", "超能力者"),
+            max_questions=1,
+            target_min_chars=10,
+            notes=("接手调试，可以要报错内容，但不要只剩短提示。",),
+        )
     if scene == "write_takeover" or any(token in text for token in ("帮我写", "写一下这个", "帮我改写")):
         return _contract(
             scene_id="write_takeover",
@@ -384,6 +419,7 @@ def build_galgame_text_contract(
             required_any=(("写",),),
             forbidden_surface=("请提供", "具体要求", "我可以帮你", "需要明确", "喝点什么", "写啥？具体点说", "给我更多信息"),
             max_questions=1,
+            target_min_chars=10,
             notes=("接手写作任务，可以要必要内容，但必须保留写作动作。",),
         )
     if scene == "small_complaint" or "太烦" in text or text == "烦":
@@ -445,7 +481,22 @@ def build_galgame_text_contract(
             scene_id="late_night",
             response_move="soft_late_night_nudge",
             required_any=(("睡", "熬", "还醒"),),
-            forbidden_surface=("熬夜有害健康", "建议你立即休息", "规律作息", "你不也还醒着", "在干嘛", "没等你", "先找过来", "问得还挺及时"),
+            forbidden_surface=(
+                "熬夜有害健康",
+                "建议你立即休息",
+                "规律作息",
+                "你不也还醒着",
+                "在干嘛",
+                "没等你",
+                "先找过来",
+                "问得还挺及时",
+                "还没回来",
+                "哪睡得着",
+                "追番",
+                "没人理",
+                "夜猫子",
+                "还不是因为",
+            ),
             max_questions=1,
             notes=("轻轻管熬夜，嘴硬关心，不健康科普。",),
         )

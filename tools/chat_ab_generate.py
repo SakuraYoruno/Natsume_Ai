@@ -446,7 +446,7 @@ async def generate_kernel_v2_candidate(
             env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "plain_soul"
             env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"
             env_overrides["HOST_CHAT_KERNEL_V2_SEMANTIC_RERANK_ENABLED"] = "false"
-            env_overrides["HOST_CHAT_KERNEL_V2_CANDIDATES"] = "3"
+            env_overrides["HOST_CHAT_KERNEL_V2_CANDIDATES"] = "1"
         if normalized_variant == "kernel_v2_plain_structured":
             env_overrides["HOST_CHAT_KERNEL_V2_PROMPT_MODE"] = "plain_structured"
             env_overrides["HOST_STYLE_REFERENCE_BANK_ENABLED"] = "false"

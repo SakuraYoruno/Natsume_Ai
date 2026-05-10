@@ -1941,6 +1941,183 @@ async def test_chat_kernel_v2_defaults_to_deepseek_when_runtime_missing(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_plain_soul_galgame_soft_select_stops_after_clean_first_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN001
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(content="早啊，尼尼。", final_provider="mock", final_model="mock-chat")
+
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_CANDIDATES", "3")
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_complete)
+
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id="req",
+            session_id="sess",
+            user_message="早",
+            compiled_soul=_soul(),  # type: ignore[arg-type]
+            interaction_facts=InteractionFactsPlane(user_message="早"),
+            response_form="text",
+            render_profile="zh_text",
+            llm_runtime={"provider_name": "mock", "model_id": "mock-chat"},
+            eval_mode=True,
+        )
+    )
+
+    assert calls == 1
+    assert result.reply_envelope.kind == "final_reply"
+    assert result.trace["chat_kernel"]["attempts"][0]["early_accept"] == "clean_galgame_score"
+
+
+@pytest.mark.asyncio
+async def test_plain_soul_uses_contract_fallback_before_llm_repair(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN001
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(content="哼，尼尼今天怎么这么正式啊，跟我还用得着这样？", final_provider="mock", final_model="mock-chat")
+
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_CANDIDATES", "1")
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_complete)
+
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id="req",
+            session_id="sess",
+            user_message="hello",
+            compiled_soul=_soul(),  # type: ignore[arg-type]
+            interaction_facts=InteractionFactsPlane(user_message="hello"),
+            response_form="text",
+            render_profile="zh_text",
+            llm_runtime={"provider_name": "mock", "model_id": "mock-chat"},
+            eval_mode=True,
+        )
+    )
+
+    attempts = result.trace["chat_kernel"]["attempts"]
+    assert calls == 1
+    assert result.reply_envelope.text == "来啦。尼尼这声我接住了。"
+    assert any(attempt.get("fallback") == "galgame_contract" for attempt in attempts)
+    assert not any(attempt.get("repair") for attempt in attempts)
+
+
+@pytest.mark.asyncio
+async def test_plain_soul_contract_fallback_recovers_all_hard_fail_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    async def _fake_complete(**_kwargs):  # noqa: ANN001
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(content="谁让你是我哥嘛。我乐意，你管我？听见了吧，这就是我的态度。", final_provider="mock", final_model="mock-chat")
+
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_CANDIDATES", "1")
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_complete)
+
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id="req",
+            session_id="sess",
+            user_message="你好烦啊",
+            compiled_soul=_soul(),  # type: ignore[arg-type]
+            interaction_facts=InteractionFactsPlane(user_message="你好烦啊"),
+            response_form="text",
+            render_profile="zh_text",
+            llm_runtime={"provider_name": "mock", "model_id": "mock-chat"},
+            eval_mode=True,
+        )
+    )
+
+    attempts = result.trace["chat_kernel"]["attempts"]
+    assert calls == 1
+    assert result.reply_envelope.kind == "final_reply"
+    assert result.reply_envelope.text == "哼，烦就烦吧，反正尼尼也没真赶我走。"
+    assert attempts[0]["galgame_score"]["hard_fail"] is True
+    assert any(attempt.get("fallback") == "galgame_contract" for attempt in attempts)
+
+
+@pytest.mark.asyncio
+async def test_plain_soul_contract_fallback_replaces_taste_regression(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_complete(**_kwargs):  # noqa: ANN001
+        return SimpleNamespace(content="就嗯一下啊？饿了记得叫我。", final_provider="mock", final_model="mock-chat")
+
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_CANDIDATES", "1")
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_complete)
+
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id="req",
+            session_id="sess",
+            user_message="嗯",
+            compiled_soul=_soul(),  # type: ignore[arg-type]
+            interaction_facts=InteractionFactsPlane(user_message="嗯"),
+            response_form="text",
+            render_profile="zh_text",
+            llm_runtime={"provider_name": "mock", "model_id": "mock-chat"},
+            eval_mode=True,
+        )
+    )
+
+    attempts = result.trace["chat_kernel"]["attempts"]
+    assert result.reply_envelope.text == "嗯，那就照刚才那步继续。"
+    assert "TASTE_PARENTAL_SCOLD_TONE" in attempts[0]["galgame_score"]["reason_codes"]
+    assert any(attempt.get("fallback") == "galgame_contract" for attempt in attempts)
+
+
+@pytest.mark.asyncio
+async def test_plain_soul_relationship_emotion_stays_on_flash_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_complete(**kwargs):  # noqa: ANN001
+        captured.update(kwargs)
+        return SimpleNamespace(
+            content="这话有点扎人。但我还是会管。",
+            final_provider=kwargs.get("provider_name"),
+            final_model=kwargs.get("model_id"),
+        )
+
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.delenv("HOST_CHAT_KERNEL_V2_DISABLE_RELATIONSHIP_MODEL_UPGRADE", raising=False)
+    monkeypatch.delenv("HOST_CHAT_KERNEL_V2_PLAIN_SOUL_MODEL_UPGRADE_ENABLED", raising=False)
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_CANDIDATES", "1")
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_complete)
+
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id="req",
+            session_id="sess",
+            user_message="你为什么要帮我，我们很熟吗",
+            compiled_soul=_soul(),  # type: ignore[arg-type]
+            interaction_facts=InteractionFactsPlane(
+                user_message="你为什么要帮我，我们很熟吗",
+                emotional_act={"act_kind": "boundary_hurt", "intensity": 0.7},
+            ),
+            response_form="text",
+            render_profile="zh_text",
+            llm_runtime={},
+            eval_mode=True,
+        )
+    )
+
+    assert captured["model_id"] == "deepseek-v4-flash"
+    assert result.model_id == "deepseek-v4-flash"
+    assert result.reply_envelope.audit["model_upgrade"]["upgraded"] is False
+
+
+@pytest.mark.asyncio
 async def test_chat_kernel_v2_upgrades_relationship_emotion_to_pro(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
