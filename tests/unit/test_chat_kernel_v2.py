@@ -1986,7 +1986,7 @@ async def test_plain_soul_galgame_soft_select_stops_after_clean_first_candidate(
 
 
 @pytest.mark.asyncio
-async def test_plain_soul_dedupes_repeated_address_before_final_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_plain_soul_fallback_replaces_overwritten_what_doing_reply(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_complete(**_kwargs):  # noqa: ANN001
         return SimpleNamespace(
             content="当然是在等尼尼开口啊，不然还能干嘛！怎么，尼尼想我了？",
@@ -2013,10 +2013,12 @@ async def test_plain_soul_dedupes_repeated_address_before_final_reply(monkeypatc
         )
     )
 
-    assert result.reply_envelope.text == "当然是在等尼尼开口啊，不然还能干嘛！怎么，你想我了？"
+    attempts = result.trace["chat_kernel"]["attempts"]
+    assert result.reply_envelope.text == "在跟你说话啊。尼尼还问。"
     assert result.reply_envelope.text.count("尼尼") == 1
     assert result.reply_envelope.audit["galgame_score"]["score"] == 100.0
-    assert "address_dedup" in result.reply_envelope.audit["galgame_postprocess"]
+    assert "CONTRACT_FORBIDDEN_SURFACE" in attempts[0]["galgame_score"]["reason_codes"]
+    assert any(attempt.get("fallback") == "galgame_contract" for attempt in attempts)
 
 
 @pytest.mark.asyncio
