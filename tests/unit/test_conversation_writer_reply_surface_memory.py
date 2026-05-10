@@ -86,7 +86,7 @@ def test_record_assistant_turn_remembers_real_generated_reply(monkeypatch) -> No
     assert turn_store.calls[0]["metadata"]["response_form_reason"] == "image_social_followup"
 
 
-def test_record_assistant_turn_remembers_text_plus_emoji_reply(monkeypatch) -> None:
+def test_record_assistant_turn_remembers_text_plus_sticker_reply(monkeypatch) -> None:
     capture = _CaptureMemoryStore()
 
     monkeypatch.setattr(writer, "get_conversation_turn_store", lambda: _FakeTurnStore())
@@ -111,7 +111,7 @@ def test_record_assistant_turn_remembers_text_plus_emoji_reply(monkeypatch) -> N
             "primary_topic": "greeting",
             "tactic_family": "phatic_wave",
             "tactic_variant": "greeting",
-            "response_form": "text_plus_emoji",
+            "response_form": "text_plus_sticker",
             "response_form_reason": "phatic_greeting",
         },
     )

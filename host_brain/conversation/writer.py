@@ -75,12 +75,17 @@ def record_assistant_turn(
     metadata: dict[str, Any] | None = None,
     reply_plan: Mapping[str, Any] | None = None,
 ) -> None:
-    if not str(session_id or "").strip() or not str(content or "").strip():
-        return
-    normalized_content = str(content)
     plan_payload = dict(reply_plan or {}) if isinstance(reply_plan, Mapping) else {}
     merged_metadata = dict(metadata or {})
     envelope_payload = dict(merged_metadata.get("reply_envelope") or {}) if isinstance(merged_metadata.get("reply_envelope"), Mapping) else {}
+    content_text = str(content or "").strip()
+    if not content_text and envelope_payload and can_persist(envelope_payload):
+        response_form = str(envelope_payload.get("response_form") or plan_payload.get("response_form") or "media").strip()
+        reaction_id = str(envelope_payload.get("reaction_id") or "").strip()
+        content_text = f"[{response_form or 'media'}:{reaction_id or 'final_reply'}]"
+    if not str(session_id or "").strip() or not content_text:
+        return
+    normalized_content = content_text
     if envelope_payload and not can_persist(envelope_payload):
         _logger.debug("[%s] skip assistant turn: non-final reply envelope kind=%s", request_id, envelope_payload.get("kind"))
         return
@@ -190,7 +195,7 @@ def record_assistant_turn(
                 "emoji_social_followup",
                 "assistant_reply_followup",
             }
-            cacheable_response_forms = {"text", "text_plus_emoji", "text_plus_sticker"}
+            cacheable_response_forms = {"text", "text_plus_sticker", "text_plus_image", "text_plus_gif"}
             if (
                 primary_topic in allowed_topics
                 and response_form in cacheable_response_forms

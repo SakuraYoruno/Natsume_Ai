@@ -5,6 +5,9 @@ DevSpec §25：Bond 阶段自动晋级。
 阶段定义（从低到高）：
   STRANGER → ACQUAINTANCE → FRIEND → CLOSE_FRIEND → CONFIDANT → SOULMATE
 
+注意：这些英文枚举是历史数据码。对新海天运行时而言，它们表示
+重组家庭义妹关系内部的成长阶段，而不是通用社交距离。
+
 积分规则：
   - 每次 Bond 事件按 update_kind 贡献积分（可配置）
   - 积分累积到阈值时触发晋级
@@ -83,11 +86,11 @@ STATUS_SUCCESS = "SUCCESS"
 
 # M28-H：阶段名称中文映射（OPT-21）
 _STAGE_CN_MAP: dict[str, str] = {
-    STAGE_STRANGER: "陌生人",
-    STAGE_ACQUAINTANCE: "相识",
-    STAGE_FRIEND: "朋友",
-    STAGE_CLOSE_FRIEND: "挚友",
-    STAGE_CONFIDANT: "知己",
+    STAGE_STRANGER: "初次见面的义妹",
+    STAGE_ACQUAINTANCE: "相处中的义妹",
+    STAGE_FRIEND: "关系好的兄妹",
+    STAGE_CLOSE_FRIEND: "亲近兄妹",
+    STAGE_CONFIDANT: "亲密恋人",
     STAGE_SOULMATE: "灵魂伴侣",
 }
 
@@ -187,7 +190,7 @@ class BondEmotionalTexture:
             return "温暖亲密，可以更主动表达情感"
         if self.intimacy_temperature >= 0.4:
             return "关系融洽，保持自然互动"
-        return "关系较疏远，保持礼貌距离"
+        return "义妹关系刚开始，收一点但不要当外人"
 
 
 # M29-G：BondRiftState 裂痕-修复双轨机制（OPT-11）
@@ -265,11 +268,11 @@ class BondScoreState:
     def capability_hint(self) -> str:
         """根据阶段返回能力提示（降采样，不含数值）。"""
         hints = {
-            STAGE_STRANGER: "初识，保持礼貌距离",
-            STAGE_ACQUAINTANCE: "相识，可分享日常",
-            STAGE_FRIEND: "朋友，可深入交流",
-            STAGE_CLOSE_FRIEND: "挚友，可倾诉心事",
-            STAGE_CONFIDANT: "知己，深度信任",
+            STAGE_STRANGER: "初次见面的义妹，收着但不当外人",
+            STAGE_ACQUAINTANCE: "相处中的义妹，可自然分享日常",
+            STAGE_FRIEND: "关系好的兄妹，可轻松拌嘴",
+            STAGE_CLOSE_FRIEND: "亲近兄妹，可倾诉心事",
+            STAGE_CONFIDANT: "亲密恋人，深度信任",
             STAGE_SOULMATE: "灵魂伴侣，无话不谈",
         }
         return hints.get(self.current_stage, "UNKNOWN")

@@ -36,7 +36,7 @@ def _base_runtime_payload() -> dict:
         'prompt_context': {
             'payload': {
                 'hard_snapshot': {'session_id': 'session-prompt-prod-001'},
-                'bond_summary': {'stage': '朋友', 'trend': '上升', 'capability_hint': '朋友，可深入交流'},
+                'bond_summary': {'stage': '关系好的兄妹', 'trend': '上升', 'capability_hint': '关系好的兄妹，可轻松拌嘴'},
                 'authoritative': [{'citation': 'world_canon:prod', 'content': 'Never claim finished execution falsely.'}],
                 'retrieval': [{'evidence_ref': 'evd://memory/1', 'content': '用户偏好简洁回复'}],
                 'style_pack': {'node_bindings': {}, 'style_canon': [{'instruction': '保持自然，不要自我重复'}]},
@@ -197,7 +197,7 @@ def test_prompt_builder_prod_renders_render_policy_constraints() -> None:
         'withdrawal_guard': True,
         'should_be_brief': True,
         'should_be_withdrawn': True,
-        'policy_reason_tags': ['willingness:LOW', 'confession_guard:shallow_bond'],
+        'policy_reason_tags': ['willingness:LOW', 'confession_guard:early_stepsibling_boundary'],
     }
     runtime_payload['self_reflection_pulse'] = {
         'narrative_guardrails': {
@@ -221,7 +221,7 @@ def test_prompt_builder_prod_renders_render_policy_constraints() -> None:
     assert '不要擅自换题，把眼前这句说完。' in prompt
     assert '避免表白式、依赖式或越界亲密表达。' in prompt
     assert '自我叙事约束：若时间线证据不足，只能说最近/这段时间，不要声称具体多久。' in prompt
-    assert 'render_policy_reasons: willingness:LOW, confession_guard:shallow_bond' in prompt
+    assert 'render_policy_reasons: willingness:LOW, confession_guard:early_stepsibling_boundary' in prompt
 
 
 

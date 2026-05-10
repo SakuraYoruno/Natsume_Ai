@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
+
+from .multimodal_act import MultimodalAct, derive_multimodal_act
 
 
 def _normalize_text(raw: Any) -> str:
@@ -38,6 +40,7 @@ class PerceptionPacket:
     emotion_signals: tuple[str, ...] = ()
     confidence: float = 0.0
     followup_required: bool = False
+    multimodal_act: MultimodalAct = field(default_factory=MultimodalAct)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +56,10 @@ class PerceptionPacket:
             "emotion_signals": list(self.emotion_signals),
             "confidence": float(self.confidence or 0.0),
             "followup_required": bool(self.followup_required),
+            "multimodal_act": self.multimodal_act.as_dict(),
+            "user_intent": self.multimodal_act.user_intent,
+            "requires_text_answer": bool(self.multimodal_act.requires_text_answer),
+            "social_emotion": self.multimodal_act.emotion,
         }
 
 
@@ -61,6 +68,7 @@ def build_perception_packet(
     multimodal_observations: Mapping[str, Any] | None = None,
     multimodal_payload: Mapping[str, Any] | None = None,
     attachment_summary: str | None = None,
+    user_text: str | None = "",
 ) -> PerceptionPacket:
     observations = dict(multimodal_observations or {})
     payload = dict(multimodal_payload or {})
@@ -83,6 +91,20 @@ def build_perception_packet(
     if not summary_for_chat:
         summary_for_chat = social_signal or core_observation or visual_facts or visible_text or _normalize_text(attachment_summary)
     emotion_signals = _normalize_types(observations.get("emotion_signals") or [])
+    multimodal_act = derive_multimodal_act(
+        user_text=user_text,
+        observations={
+            **observations,
+            "observed_types": list(observed_types),
+            "primary_modality": primary_modality,
+            "visual_facts": visual_facts,
+            "ocr_text": ocr_text,
+            "social_signal": social_signal,
+            "artifact_type": artifact_type,
+            "emotion_signals": list(emotion_signals),
+            "summary_for_chat": summary_for_chat,
+        },
+    )
 
     confidence_raw = observations.get("confidence")
     try:
@@ -103,6 +125,7 @@ def build_perception_packet(
         emotion_signals=emotion_signals,
         confidence=max(0.0, min(confidence, 1.0)),
         followup_required=bool(observations.get("followup_required") or False),
+        multimodal_act=multimodal_act,
     )
 
 
@@ -112,6 +135,7 @@ def coerce_perception_packet(raw: Mapping[str, Any] | None) -> PerceptionPacket:
 
 
 __all__ = [
+    "MultimodalAct",
     "PerceptionPacket",
     "build_perception_packet",
     "coerce_perception_packet",

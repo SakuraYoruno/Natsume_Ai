@@ -6,7 +6,6 @@ import os
 import re
 from typing import Any, Mapping
 
-from host_brain.app.prompt_template_store import resolve_prompt_template_text
 from host_brain.skills.skill_composer import SkillComposer, SkillSpec
 
 logger = logging.getLogger("Natsume.app.intelligent_runtime")
@@ -628,9 +627,7 @@ def _sanitize_narrative(*, text: str, bond_stage: str, render_lang: str) -> str:
     )
     for pattern, replacement in replacements:
         sanitized = re.sub(pattern, replacement, sanitized, flags=re.IGNORECASE)
-    sanitized = re.sub(r"\s+", " ", sanitized).strip()
-    if not sanitized:
-        sanitized = resolve_prompt_template_text("intelligent_runtime.sanitize.empty_narrative")
+    sanitized = re.sub(r"\s+", " ", sanitized).strip().lstrip(" ，,、;；:：").strip()
     if bond_stage == "STRANGER" and render_lang == "zh":
         sanitized = sanitized.replace("呢。", "。").replace("呀。", "。")
     return sanitized
@@ -688,9 +685,6 @@ def _apply_multimodal_suffix(text: str, multimodal_output: Any) -> str:
     if not final_text:
         return final_text
     suffixes: list[str] = []
-    suggested_emoji = str(getattr(multimodal_output, "suggested_emoji", "") or "").strip()
-    if suggested_emoji and not _EMOJI_PATTERN.search(final_text):
-        suffixes.append(suggested_emoji)
     for item in list(getattr(multimodal_output, "items", []) or []):
         content = str(getattr(item, "content", "") or "").strip()
         if content and content not in final_text:

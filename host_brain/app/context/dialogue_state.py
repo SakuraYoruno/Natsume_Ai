@@ -12,9 +12,14 @@ _HELP_CONTINUITY_RE = re.compile(r"(还会帮我吗|还会理我吗|还会管我
 _REJECTION_RE = re.compile(r"(我不喜欢这样|我不喜欢你这样|别这么说|别这样说|别这么热心|别这样)")
 _CHALLENGING_MARKER_RE = re.compile(r"(吧|吗|？|\?|就|还|又|不是|没)")
 
-_SELF_IDENTIFY_RE = re.compile(r"(我是夏目蓝|我叫夏目蓝|我的名字是夏目蓝|我？我的名字是夏目蓝)")
-_BOUNDARY_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟)")
-_MOTIVATION_ANSWER_RE = re.compile(r"(我只是觉得|因为你问了|看见了，也没有装作没看见|装作没看见|既然你遇到了麻烦)")
+_SELF_IDENTIFY_RE = re.compile(r"(我是新海天|我叫新海天|我的名字是新海天|我是夏目蓝|我叫夏目蓝|我的名字是夏目蓝|我？我的名字是夏目蓝)")
+_BOUNDARY_DISTANCE_ANSWER_RE = re.compile(r"(我们并?不熟|我们不熟|不熟|不算熟|没熟到那种地步|慢慢熟|非要多熟|搭把手|顺路嘛|正好路过)")
+_STEPSISTER_BOUNDARY_ANSWER_RE = re.compile(
+    r"(义妹|妹妹|一家人|家里人|外人|见外|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|划清界限|往外推|不当外人)"
+)
+_MOTIVATION_ANSWER_RE = re.compile(
+    r"(会管|我管|要管|会帮|我帮|帮你|插手|接手|放着不管|不可能不管|不能不管|不当外人|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|见外)"
+)
 _HELP_COMMITMENT_ANSWER_RE = re.compile(r"(会帮|会理|会回|会答|不会不理|多半不会不理)")
 _GENERIC_ASSISTIVE_RE = re.compile(r"(有什么事吗|有什么事|需要什么帮助|需要我|我可以帮)")
 
@@ -77,7 +82,7 @@ def extract_answered_topics(message: str) -> set[str]:
         return topics
     if _SELF_IDENTIFY_RE.search(text):
         topics.add("identity")
-    if _BOUNDARY_ANSWER_RE.search(text):
+    if _STEPSISTER_BOUNDARY_ANSWER_RE.search(text):
         topics.add("relationship_boundary")
     if _MOTIVATION_ANSWER_RE.search(text):
         topics.add("motivation")
@@ -92,7 +97,9 @@ def classify_assistant_act(message: str) -> str:
         return ""
     if _SELF_IDENTIFY_RE.search(text):
         return "self_identify"
-    if _BOUNDARY_ANSWER_RE.search(text):
+    if _BOUNDARY_DISTANCE_ANSWER_RE.search(text):
+        return "boundary_distance_answer"
+    if _STEPSISTER_BOUNDARY_ANSWER_RE.search(text):
         return "boundary_answer"
     if _MOTIVATION_ANSWER_RE.search(text):
         return "motivation_answer"

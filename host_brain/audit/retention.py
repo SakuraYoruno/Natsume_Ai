@@ -32,6 +32,8 @@ DEFAULT_KEEP_MS_BY_TABLE: dict[str, int] = {
     "voice_event_log": 7 * MS_DAY,
     "retrieval_event_log": 7 * MS_DAY,
     "vision_event_log": 7 * MS_DAY,
+    "llm_node_call_log": 7 * MS_DAY,
+    "llm_pool_call_log": 7 * MS_DAY,
     "bond_update_log": 30 * MS_DAY,
 }
 
@@ -211,4 +213,3 @@ def _log_retention(
         reason_code=reason_code,
         detail=detail,
     )
-

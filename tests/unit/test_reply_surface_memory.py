@@ -222,7 +222,7 @@ def test_prime_reply_surface_memory_from_turn_history_seeds_store() -> None:
             "primary_topic": "greeting",
             "tactic_family": "phatic_wave",
             "tactic_variant": "greeting",
-            "response_form": "text_plus_emoji",
+            "response_form": "text_plus_sticker",
             "response_form_reason": "phatic_greeting",
             "provider_name": "gemini",
             "model_id": "gemini-2.5-pro",

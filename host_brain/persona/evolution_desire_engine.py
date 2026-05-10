@@ -377,9 +377,9 @@ class EvolutionDesireEngine:
                         trait_hints.append(f"{cn}{level}（{val:.2f}）")
 
             _STAGE_CN = {
-                "STRANGER": "陌生人", "ACQUAINTANCE": "相识",
-                "FRIEND": "朋友", "CLOSE_FRIEND": "挚友",
-                "CONFIDANT": "知己", "SOULMATE": "灵魂伴侣",
+                "STRANGER": "初次见面的义妹", "ACQUAINTANCE": "相处中的义妹",
+                "FRIEND": "关系好的兄妹", "CLOSE_FRIEND": "亲近兄妹",
+                "CONFIDANT": "亲密恋人", "SOULMATE": "灵魂伴侣",
             }
             stage_cn = _STAGE_CN.get(str(bond_stage).upper(), str(bond_stage))
             trait_hint_str = f"，特质：{' / '.join(trait_hints)}" if trait_hints else ""

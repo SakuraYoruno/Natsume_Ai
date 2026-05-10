@@ -14,6 +14,20 @@
 - 数据流补充：`docs/50_project/arch/dataflow_report.md`
 - 前端主体化方案：`docs/50_project/arch/DIGITAL_LIFE_BODY_FRONTEND_ARCHITECTURE_20260419.md`
 
+## 0.1 2026-05-08 Normal Chat 主线记忆（高优先级）
+
+这条记录是后续 normal chat 重构的主线约束。若历史方案、旧链文档或局部测试与本节冲突，以本节为准。
+
+- 旧链是“完整能力库”，不是当前 normal chat 文本质量阶段的 live 主链。
+- 当前新主链是“文本质量基线内核”，目标是先把中文文本质量拉到合格，再逐步迁回旧链能力。
+- 当前阶段的 normal chat 文本主链固定为：`input -> facts -> ChatKernelV2 -> TextQualityGate -> ReplyEnvelope`。
+- 文本质量未过关前，不继续把旧链功能模块塞回 normal chat live path。
+- 后续每次只迁移一个旧链能力模块，并且必须通过 A/B 证明没有降低文本质量。
+- 被迁移的旧链模块只能提供 `facts / state / memory / perception / performance / media action`，不能写最终人格回复。
+- `reply_plan`、`validator`、fallback、fastpath、transport ack、thread resolver、cache、memory 都不得成为第二作者。
+- normal chat 最终文本作者只能是 `ChatKernelV2`；媒体场景的最终作者只能是结构化 reaction/media selector。
+- 如果某个模块导致文本质量下降，它只保留在实验链或非聊天任务链，不进入 normal chat 主线。
+
 ## 1. 代码证据入口
 
 以下文件构成当前代码架构的直接证据入口：

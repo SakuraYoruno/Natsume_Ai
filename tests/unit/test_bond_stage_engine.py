@@ -317,7 +317,7 @@ class TestBondSummary:
     def test_summary_stage_is_valid(self, engine):
         summary = engine.get_summary("user_016")
         # M28-H：to_summary() 已中文化，stage 可能是中文或英文枚举
-        CHINESE_STAGES = ["陌生人", "相识", "朋友", "好友", "挚友", "灵魂伴侣"]
+        CHINESE_STAGES = ["初次见面的义妹", "相处中的义妹", "关系好的兄妹", "亲近兄妹", "亲密恋人", "灵魂伴侣"]
         assert summary["stage"] in STAGE_ORDER or summary["stage"] in CHINESE_STAGES
 
     def test_summary_trend_is_valid(self, engine):

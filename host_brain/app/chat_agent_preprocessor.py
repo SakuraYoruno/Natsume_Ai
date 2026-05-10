@@ -71,9 +71,10 @@ class ChatAgentInput:
     sub_agent_context: Optional[SubAgentContext] = None
     render_target_lang: str = "zh"
     reply_channel: Optional[str] = None
+    response_form: str = ""
     suppress_edge_tts: Optional[bool] = None
     suppress_edge_vts: Optional[bool] = None
-    reply_depth_policy: str = "normal"
+    reply_depth_policy: str = "normal"  # legacy metadata only; transport source must not alter text generation
     thread_id: Optional[str] = None
     ts_ms: int = 0
     intent_draft: Dict[str, Any] = field(default_factory=dict)
@@ -83,6 +84,7 @@ class ChatAgentInput:
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
     attachment_summary: str = ""
+    eval_history_turns: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -1228,4 +1230,3 @@ def _infer_emotion_tag_for_tts(narrative: str, current_tag: str) -> str:
         if _re.search(pattern, text, _re.IGNORECASE):
             return tag
     return "NEUTRAL"
-

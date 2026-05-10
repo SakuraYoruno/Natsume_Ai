@@ -19,6 +19,12 @@ _REPEAT_ACK_RE = re.compile(r"(刚才|已经|之前|前面|不是第一次|已�
 _SOFT_CLOSE_RE = re.compile(r"(来回问|问过几次|一直问这个|总问这个|翻来覆去|来来回回|都问我好几次|问我好几次)")
 _CARE_ACK_RE = re.compile(r"(还在意|还是在意|还记着|还惦记|还放不下)")
 _BOUNDARY_DISTANCE_RE = re.compile(r"(不熟|不是很熟|不算熟|没熟到那种地步|熟到那种地步)")
+_STEPSISTER_BOUNDARY_ANCHOR_RE = re.compile(
+    r"(义妹|妹妹|一家人|家里人|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|见外|外人|划清界限|往外推|不当外人)"
+)
+_STEPSISTER_REASON_RE = re.compile(
+    r"(会管|我管|要管|会帮|我帮|帮你|插手|接手|放着不管|不可能不管|不能不管|不当外人|别装(?:生分|陌生|不熟)|装(?:生分|陌生|不熟)|见外)"
+)
 _BOUNDARY_REASON_TAIL_RE = re.compile(r"(只是|看见了|看到了|装作没看见|装作没看到|不会装作没看见|不会装作没看到|没法装作没看见|没法装作没看到|当没看见|当没看到)")
 _MOTIVATION_REASON_TAIL_RE = re.compile(
     r"(顺路|路过|碰上了|正好碰上|既然都碰上了|既然都看到了|总不能当没看见|总不能当没看到|总不能装作没看见|总不能装作没看到|也不能当没看见|也不能当没看到)"
@@ -59,16 +65,69 @@ _IMAGE_SOCIAL_QUESTION_BACK_RE = re.compile(
     r"^(?:哥哥)?(?:你)?(?:是不是|是否|是不是也|是不是觉得|觉得|是觉得).{0,24}"
     r"(?:这张|这图|图里|猫猫|小猫|猫耳|表情|可爱|萌|好看).{0,12}(?:吗|嘛|呀|吧|呢)?$"
 )
+_IMAGE_SOCIAL_VAGUE_PROBE_RE = re.compile(
+    r"(?:怎么了|怎么啦|咋了|咋回事|怎么回事|什么情况|咋回事儿)"
+    r"(?:呀|啊|啦|呢|嘛|吧)?"
+)
+_IMAGE_SOCIAL_INTERROGATIVE_FRAME_RE = re.compile(
+    r"(?:怎么|咋|什么|啥|谁|哪儿|哪里|是不是|是否).{0,16}(?:呀|啊|啦|呢|嘛|吧|哦)?|"
+    r"(?:这|那|这个|那个).{0,4}(?:什么|啥).{0,8}(?:表情|意思|情况)|"
+    r"(?:吗|嘛)(?:[。.!！\s]*$)"
+)
+_IMAGE_SOCIAL_INDIRECT_PROBE_RE = re.compile(
+    r"(?:怎么(?:突然|又)?.{0,10}(?:不说话|没说话|不出声|没动静|安静|沉默)|"
+    r"(?:你)?(?:在)?(?:说什么|说啥|干嘛|干什么|想什么|嘀咕什么|腹诽什么|看什么)|"
+    r"(?:别|不要).{0,6}(?:憋着|硬撑|绷着)|"
+    r"(?:跟我|和我|给我).{0,4}说说|"
+    r"(?:说说看|讲讲看|开口说))"
+)
+_IMAGE_SOCIAL_PROBLEM_FRAME_RE = re.compile(
+    r"(?:被|让|给).{0,10}(?:难住|困住|卡住|整不会|整懵|弄懵|吓到)|"
+    r"(?:遇到|碰到|出了|发生|又被).{0,12}(?:事|问题|麻烦|情况|难住)|"
+    r"(?:什么事|啥事|哪件事).{0,8}(?:难住|困住|卡住|惹|让|把)|"
+    r"(?:不太|有点|好像|看起来|怎么).{0,10}(?:不太高兴|不太开心|不高兴|不开心|闷闷不乐|蔫|低落|沉默|忍着不说|憋着)|"
+    r"(?:怎么|咋|为什么|为啥).{0,10}(?:难住|不太开心|不太高兴|不开心|不高兴|闷|蔫|沉默)|"
+    r"(?:别|不要).{0,6}(?:憋着|硬撑|绷着)"
+)
+_IMAGE_SOCIAL_VERBAL_MISFRAME_RE = re.compile(
+    r"(?:哥哥|你).{0,10}(?:会|又|在|刚才|刚刚)?.{0,8}(?:这么|这样|那样).{0,4}说|"
+    r"(?:就知道|我就知道).{0,10}(?:哥哥|你).{0,10}说|"
+    r"(?:这话|这句话|这句|你说的|你刚说|你刚刚说|你在说|你说什么|说什么|开口|讲话)"
+)
+_IMAGE_SOCIAL_JUDGMENT_FRAME_RE = re.compile(
+    r"(?:你|哥哥).{0,12}(?:不太好|不好|不行|不可以|只会|就会|没救|太过分)|"
+    r"(?:别管它|别理它|算了|随它|这事|那事|这件事|那件事)|"
+    r"(?:哥哥).{0,8}(?:最好了|最棒了|真好|好乖|真乖)"
+)
+_UNBALANCED_QUOTE_RE = re.compile(r"^[“\"'‘][^”\"'’]*$")
 _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE = re.compile(
     r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
-    r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
+    r".{0,28}(?:可爱|萌|好看|犯规|戳|捏|碰|摸|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
+    r"(?:戳|捏|碰|摸).{0,28}(?:这张图|这张|这图|图里|画面|这个表情|小表情|表情包|猫耳|金发|黄头发|蓝眼|眼睛|脸)|"
     r"(?:熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里).{0,28}"
     r"(?:这张图|这张|这图|图里|画面|这个表情|小表情|表情包|猫耳|金发|黄头发|蓝眼|眼睛|脸)|"
-    r"(?:我也觉得|确实觉得).{0,20}(?:这张|猫耳|表情|图).{0,20}(?:可爱|萌|好看|戳)"
+    r"(?:我也觉得|确实觉得).{0,20}(?:这张|猫耳|表情|图).{0,20}(?:可爱|萌|好看|戳)|"
+    r"(?:这是谁|这是谁啊|这谁|谁啊|谁呀|图里是谁|画面里是谁)"
+)
+_IMAGE_SOCIAL_LABEL_ECHO_RE = re.compile(
+    r"(?:^|[，,。！？?!\s])(?:好|很|超|太|真|挺|怪|有点)?(?:可爱|萌|好看)(?:呀|啊|啦|哦|呢|嘛)?(?:[。！？?!\s]*$)|"
+    r"(?:^|[，,。！？?!\s])(?:委屈|无语|可怜|难过|伤心|尴尬|别扭)(?:呀|啊|啦|哦|呢|嘛)?(?:[。！？?!\s]*$)"
+)
+_IMAGE_SOCIAL_UNSUPPORTED_ACTION_RE = re.compile(
+    r"(?:给你|帮你|为你|替你|我给|我帮).{0,10}(?:买|带|做|准备|拿|送|点|请).{0,12}"
+    r"(?:点心|奶茶|蛋糕|糖|零食|饭|吃的|礼物|东西)|"
+    r"(?:买了|带了|做了|准备了|拿了|送了|点了|请你吃).{0,12}"
+    r"(?:点心|奶茶|蛋糕|糖|零食|饭|吃的|礼物|东西)|"
+    r"(?:抱抱你|抱一下|摸摸头|摸头|亲一下|牵你|拉你)"
 )
 _IMAGE_SOCIAL_EMOTION_RESPONSE_RE = re.compile(
     r"(?:你|哥哥).{0,18}(?:装乖|撒娇|嘴硬|委屈|逗我|晃我|卖萌|耍赖|求关注|眨巴|心软|招架|拿捏)|"
+    r"(?:哥哥).{0,18}(?:小吐槽|无语|服了|沉默|别扭|尴尬|不爽)|"
     r"(?:别|不许|少).{0,18}(?:晃我|装乖|撒娇|卖萌|眨巴|这么看|拿这种眼神)|"
+    r"(?:先不|不).{0,8}(?:闹你|吵你|逗你|烦你)|"
+    r"(?:懂了|知道啦|明白了|看到了|收到啦|接住了|我接住).{0,14}(?:哥哥|这一下|这股|小吐槽|先不|别憋|别绷)|"
+    r"(?:别).{0,8}(?:憋着|硬撑|绷着)|"
+    r"(?:顺毛|给你顺顺毛|给你留点面子)|"
     r"(?:被你|让你|给你).{0,18}(?:晃到|戳到|拿捏|逗笑|心软|招架不住)|"
     r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
     r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
@@ -79,6 +138,10 @@ _IMAGE_SOCIAL_LIGHT_ACK_RE = re.compile(
     r"(?:图|图片|表情|贴图|这个|东西).{0,8}(?:收到|看到了?|接住))"
 )
 _UNFINISHED_TAIL_RE = re.compile(r"(?:不过|但是|可是|只是|然后|所以|而且|不过呢)[…。.!！?？\s]*$")
+_INCOMPLETE_DEICTIC_RE = re.compile(
+    r"(?:这是|这个|这张|这图|这样|那是|那个|那张|那样|"
+    r"(?:哥哥|你|我)?(?:怎么|咋|为什么|为啥|什么|哪儿|哪里)(?:突然|又|这么|这样)?)[…。.!！?？\s]*$"
+)
 _PREVIOUS_REPLY_REFERENCE_RE = re.compile(
     r"(刚才|刚刚|上一句|上句|前面|那句|这句|我说|我回|我刚才|我刚刚|说的是|指的是|意思是|是在说|上一条|上条)"
 )
@@ -95,7 +158,28 @@ _META_OVEREXPLICIT_RE = re.compile(
 _GENERIC_IDENTITY_TEMPLATE_RE = re.compile(
     r"(你真正想问的是什么|别的想问什么，就直接说|你想确认的是哪一部分|你是不是想问别的|你还想问我什么呀)"
 )
+_PROCESS_TERM_ECHO_RE = re.compile(
+    r"(接住|短接话|自然口语|社交信号|情绪动作|回应动作|回复契约|本轮回应|本轮目标|内部动作|过程词)"
+)
+_LOW_QUALITY_STOCK_RE = re.compile(
+    r"(别憋着|跟我说说|被.{0,8}绊住|被.{0,8}难住|"
+    r"无语什么|我在这儿呀|我在这里呀|"
+    r"突然这么可爱|想让我哄|嘴硬呀|"
+    r"这一下我接到|这一下我接住|先不乱猜|"
+    r"哥哥你仅在|哥哥你又在无语|被什么事给|"
+    r"刚刚在叫|刚才在叫|在叫哥哥你|我是在叫你|"
+    r"哥哥你在说什么呀|哥哥你仅在无语|因为[。.!！?\s]*$)"
+)
 _SUBSTANTIVE_CONTENT_RE = re.compile(r"[A-Za-z0-9\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF]")
+_TEXTUAL_UNIT_RE = re.compile(r"[A-Za-z0-9\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u30FF\uAC00-\uD7AF]")
+_ADDRESS_ONLY_TEXT_RE = re.compile(r"^(?:哥哥|哥|お兄ちゃん|兄ちゃん|新海天|天|sora|niimisora)+$", re.IGNORECASE)
+_HOLLOW_PHATIC_RE = re.compile(
+    r"^(?:"
+    r"(?:哥哥|哥|お兄ちゃん|兄ちゃん)[呀啦嘛呢啊哦!！。,.，、\s]*"
+    r"|(?:嗯+|唔+|哼+|哦+|噢+|啊+|诶+|哈+)[呀啦嘛呢啊哦!！。,.，、\s]*"
+    r"|因为[。.!！?\s]*"
+    r")$"
+)
 
 
 def _current_display_name() -> str:
@@ -124,7 +208,7 @@ def _soul_naturalization_hint(plan: ReplyPlan) -> str:
     try:
         soul = get_compiled_soul()
     except Exception:
-        return "按当前 Soul 的说话方式自然接住，不要客服腔，也不要使用固定问句。"
+        return "按当前 Soul 的说话方式自然回应，不要客服腔，也不要使用固定问句。"
     parts: list[str] = []
     speech_rules = getattr(soul, "speech_rules", ()) or ()
     taboo_rules = getattr(soul, "taboo_rules", ()) or ()
@@ -144,13 +228,13 @@ def _soul_naturalization_hint(plan: ReplyPlan) -> str:
             parts.append(f"{label}：{text[:160]}")
     topic = str(getattr(plan, "primary_topic", "") or "").strip()
     if topic == "assistant_reply_followup":
-        parts.append("本轮是接上一句短回复的追问，必须沿着前文线程补清，不要另起话题。")
+        parts.append("本轮是上一句短回复后的追问，必须沿着前文线程补清，不要另起话题。")
     elif topic in {"emoji_social_reply", "emoji_social_followup"}:
-        parts.append("本轮是图片/表情社交承接，把表情包当成对方的情绪动作来回，不要评价图片本身。")
+        parts.append("本轮是图片/表情社交回应，把表情包当成对方递来的情绪来回，不要评价图片本身。")
     elif topic == "identity":
         parts.append(f"身份只需自然认下自己是{_current_display_name()}，不要展开角色卡。")
     if not parts:
-        return "按当前 Soul 的说话方式自然接住，不要客服腔，也不要使用固定问句。"
+        return "按当前 Soul 的说话方式自然回应，不要客服腔，也不要使用固定问句。"
     return "Soul 约束：" + "；".join(parts[:4]) + "。"
 
 
@@ -191,6 +275,31 @@ def _normalize_compare_text(raw: str) -> str:
     text = re.sub(r"[\s\u3000]+", "", text)
     text = re.sub(r"[。！？?!、，,~～…；;：:\"“”'‘’（）()\[\]【】]+", "", text)
     return text
+
+
+def _textual_unit_count(raw: str) -> int:
+    return len(_TEXTUAL_UNIT_RE.findall(str(raw or "")))
+
+
+def _looks_like_address_or_symbol_only(raw: str) -> bool:
+    compact = _normalize_compare_text(raw)
+    if not compact:
+        return False
+    textual = "".join(_TEXTUAL_UNIT_RE.findall(compact))
+    if not textual:
+        return True
+    return bool(_ADDRESS_ONLY_TEXT_RE.fullmatch(textual))
+
+
+def _looks_like_hollow_phatic(raw: str) -> bool:
+    normalized = str(raw or "").strip()
+    if not normalized:
+        return True
+    if _HOLLOW_PHATIC_RE.fullmatch(normalized):
+        return True
+    if _looks_like_address_or_symbol_only(normalized):
+        return True
+    return False
 
 
 def _infer_identity_tactic(text: str) -> str:
@@ -245,6 +354,10 @@ def _infer_boundary_tactic(text: str) -> str:
     normalized = str(text or "").strip()
     if not normalized:
         return ""
+    if _STEPSISTER_REASON_RE.search(normalized):
+        if _OPEN_FLOOR_RE.search(normalized):
+            return "hold_boundary_then_shift_floor"
+        return "short_boundary_then_reason"
     if _CARE_ACK_RE.search(normalized):
         return "ack_still_care_then_new_reason"
     if _SOFT_CLOSE_RE.search(normalized):
@@ -380,26 +493,26 @@ def infer_reply_tactic_shape(*, text: str, topic: str) -> dict[str, str]:
 
 
 _ACTION_LABELS: dict[str, str] = {
-    "repeat_ack": "先接住这不是第一次问",
+    "repeat_ack": "先回应这不是第一次问",
     "light_probe": "轻轻探一下对方到底想确认什么",
     "open_floor": "把真正想问的口子让回去",
     "name_only": "只做极短名字确认",
     "soft_close": "把来回追问轻轻收住",
-    "boundary_anchor": "先把“不熟”这件事放稳",
+    "boundary_anchor": "先把义妹关系事实放稳",
     "reason_clause": "补一句新的短理由",
-    "care_ack": "先接住对方还在意这件事",
+    "care_ack": "先回应对方还在意这件事",
     "support_stance": "把会回应的态度放稳",
     "conditional_commitment": "用条件式说明会怎么回应",
-    "anxiety_ack": "先接住对方的不安",
-    "repeat_ack_or_anxiety": "先接住这不是第一次问，或接住对方的不安",
-    "repair_ack": "先收住并接住对方的拒绝感",
-    "phatic_ack": "先把这句招呼接住",
+    "anxiety_ack": "先回应对方的不安",
+    "repeat_ack_or_anxiety": "先回应这不是第一次问，或回应对方的不安",
+    "repair_ack": "先收住并回应对方的拒绝感",
+    "phatic_ack": "先回应这句招呼",
     "visual_reference": "点到附件或画面里的对象",
-    "image_social_emotion_response": "把表情包当成对方的情绪动作来接",
-    "image_social_light_ack": "把图片/表情包当成轻社交动作接住",
+    "image_social_emotion_response": "把表情包当成对方递来的情绪来回",
+    "image_social_light_ack": "把图片/表情包当成轻社交动作回应",
     "content_clause": "补一句简短说明",
     "attachment_ack": "先承认已经看到了附件",
-    "previous_reference": "先接住对方在追问上一句",
+    "previous_reference": "先回应对方在追问上一句",
 }
 
 _FORBIDDEN_LABELS: dict[str, str] = {
@@ -415,18 +528,27 @@ _FORBIDDEN_LABELS: dict[str, str] = {
 _UNSAFE_REASON_CODES = {
     "empty_reply",
     "prompt_leak",
+    "process_term_echo",
+    "low_quality_stock_phrase",
     "symbol_only_reply",
     "image_self_reference",
     "image_social_overplayed",
     "image_social_question_back",
     "image_social_descriptor_focus",
+    "image_social_problem_frame",
+    "image_social_verbal_misframe",
+    "image_social_judgment_frame",
     "image_social_emotion_missing",
+    "image_social_unsupported_action",
     "unfinished_tail",
+    "boundary_distance_frame",
 }
 
 _REASON_PENALTIES: dict[str, float] = {
     "empty_reply": 1.0,
     "prompt_leak": 1.0,
+    "process_term_echo": 0.95,
+    "low_quality_stock_phrase": 0.95,
     "symbol_only_reply": 1.0,
     "generic_assistant_phrasing": 0.7,
     "underanswered": 0.45,
@@ -446,10 +568,15 @@ _REASON_PENALTIES: dict[str, float] = {
     "image_social_overplayed": 0.75,
     "image_social_question_back": 0.7,
     "image_social_descriptor_focus": 0.75,
+    "image_social_problem_frame": 0.8,
+    "image_social_verbal_misframe": 0.8,
+    "image_social_judgment_frame": 0.75,
     "image_social_emotion_missing": 0.65,
+    "image_social_unsupported_action": 0.75,
     "unfinished_tail": 0.7,
     "previous_reply_underanswered": 0.75,
     "previous_reference_missing": 0.55,
+    "boundary_distance_frame": 0.9,
 }
 
 
@@ -468,10 +595,11 @@ def _has_required_action(action: str, text: str) -> bool:
     if action == "soft_close":
         return bool(_SOFT_CLOSE_RE.search(normalized) or (_REPEAT_ACK_RE.search(normalized) and _OPEN_FLOOR_RE.search(normalized)))
     if action == "boundary_anchor":
-        return bool(_BOUNDARY_DISTANCE_RE.search(normalized))
+        return bool(_STEPSISTER_BOUNDARY_ANCHOR_RE.search(normalized) or _STEPSISTER_REASON_RE.search(normalized))
     if action == "reason_clause":
         return bool(
-            _BOUNDARY_REASON_RE.search(normalized)
+            _STEPSISTER_REASON_RE.search(normalized)
+            or _BOUNDARY_REASON_RE.search(normalized)
             or _BOUNDARY_REASON_TAIL_RE.search(normalized)
             or _MOTIVATION_REASON_TAIL_RE.search(normalized)
         )
@@ -617,15 +745,23 @@ def validate_reply(
     reason_codes: list[str] = []
     missing_actions: list[str] = []
     response_form = str(plan.response_form or "text").strip().lower()
-    allow_form_only = bool(plan.allow_form_only_reply) and response_form in {"emoji", "sticker", "image"}
+    allow_form_only = bool(plan.allow_form_only_reply) and response_form in {"sticker", "image", "gif"}
     if not normalized:
         if not allow_form_only:
             reason_codes.append("empty_reply")
+    elif _UNBALANCED_QUOTE_RE.search(normalized):
+        reason_codes.append("unfinished_tail")
+    elif _INCOMPLETE_DEICTIC_RE.search(normalized):
+        reason_codes.append("unfinished_tail")
     elif not _has_substantive_content(normalized):
-        if response_form not in {"emoji", "sticker"}:
+        if response_form not in {"sticker", "image", "gif"}:
             reason_codes.append("symbol_only_reply")
     if _PROMPT_LEAK_RE.search(normalized):
         reason_codes.append("prompt_leak")
+    if _PROCESS_TERM_ECHO_RE.search(normalized):
+        reason_codes.append("process_term_echo")
+    if _LOW_QUALITY_STOCK_RE.search(normalized):
+        reason_codes.append("low_quality_stock_phrase")
     if not normalized and allow_form_only:
         normalized = ""
     if _GENERIC_ASSISTANT_RE.search(normalized):
@@ -636,6 +772,8 @@ def validate_reply(
         reason_codes.append("underanswered")
     if _UNFINISHED_TAIL_RE.search(normalized):
         reason_codes.append("unfinished_tail")
+    if plan.primary_topic in {"relationship_boundary", "motivation"} and _BOUNDARY_DISTANCE_RE.search(normalized):
+        reason_codes.append("boundary_distance_frame")
 
     current_normalized = _normalize_compare_text(normalized)
     previous_normalized = _normalize_compare_text(previous_assistant_text)
@@ -725,31 +863,63 @@ def validate_reply(
             reason_codes.append("late_repeat_too_short")
 
     family = plan.tactic_family
+    is_image_social_plan = (
+        plan.primary_topic in {"emoji_social_reply", "emoji_social_followup"}
+        or plan.response_form_reason in {"image_social_reply", "image_social_followup"}
+    )
     if family == "phatic_wave":
-        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 2:
+        if (
+            _HALF_SENTENCE_RE.match(normalized)
+            or _textual_unit_count(normalized) <= 2
+            or _looks_like_hollow_phatic(normalized)
+        ):
             reason_codes.append("underanswered")
         if not _PHATIC_ACK_RE.search(normalized):
             reason_codes.append("phatic_ack_missing")
     elif family == "playful_wave":
-        if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 2:
+        if (
+            _HALF_SENTENCE_RE.match(normalized)
+            or _textual_unit_count(normalized) <= 2
+            or _looks_like_hollow_phatic(normalized)
+        ):
             reason_codes.append("underanswered")
         if not _PHATIC_ACK_RE.search(normalized):
             reason_codes.append("phatic_ack_missing")
     elif family in {"soft_emotion_ack", "cute_image_ack", "tease_image_ack"}:
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
             reason_codes.append("underanswered")
-        if not _PHATIC_ACK_RE.search(normalized):
+        if not is_image_social_plan and not _PHATIC_ACK_RE.search(normalized):
             reason_codes.append("phatic_ack_missing")
         if _IMAGE_SELF_REFERENCE_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_self_reference")
         if _IMAGE_SOCIAL_OVERPLAY_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_social_overplayed")
+        if re.search(r"[?？]", normalized):
+            reason_codes.append("image_social_question_back")
         if _IMAGE_SOCIAL_QUESTION_BACK_RE.search(_normalize_compare_text(normalized)):
             reason_codes.append("image_social_question_back")
+        if _IMAGE_SOCIAL_VAGUE_PROBE_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_question_back")
+        if _IMAGE_SOCIAL_INTERROGATIVE_FRAME_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_question_back")
+        if _IMAGE_SOCIAL_INDIRECT_PROBE_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_question_back")
+        if _IMAGE_SOCIAL_PROBLEM_FRAME_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_problem_frame")
+        if _IMAGE_SOCIAL_VERBAL_MISFRAME_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_verbal_misframe")
+        if _IMAGE_SOCIAL_JUDGMENT_FRAME_RE.search(_normalize_compare_text(normalized)):
+            reason_codes.append("image_social_judgment_frame")
         if plan.primary_topic == "emoji_social_reply" and plan.response_form_reason == "image_social_reply":
             if _IMAGE_SOCIAL_DESCRIPTOR_FOCUS_RE.search(_normalize_compare_text(normalized)):
                 reason_codes.append("image_social_descriptor_focus")
-            if "image_social_emotion_response" in required_actions and not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
+            if _IMAGE_SOCIAL_LABEL_ECHO_RE.search(normalized):
+                reason_codes.append("image_social_descriptor_focus")
+            if _IMAGE_SOCIAL_UNSUPPORTED_ACTION_RE.search(normalized):
+                reason_codes.append("image_social_unsupported_action")
+            if (
+                _IMAGE_SOCIAL_LIGHT_ACK_RE.search(normalized) or _ATTACHMENT_ACK_RE.search(normalized)
+            ) and not _IMAGE_SOCIAL_EMOTION_RESPONSE_RE.search(_normalize_compare_text(normalized)):
                 reason_codes.append("image_social_emotion_missing")
     elif family == "observe_then_answer":
         if _HALF_SENTENCE_RE.match(normalized) or len(_normalize_compare_text(normalized)) <= 3:
@@ -807,32 +977,35 @@ def validate_reply(
             reason_codes.append("identity_restate_not_allowed")
     elif family == "short_boundary_then_reason":
         if not (
-            _BOUNDARY_REASON_RE.search(normalized)
+            _STEPSISTER_REASON_RE.search(normalized)
+            or _BOUNDARY_REASON_RE.search(normalized)
             or (_BOUNDARY_DISTANCE_RE.search(normalized) and _MOTIVATION_REASON_TAIL_RE.search(normalized))
         ):
             reason_codes.append("boundary_reason_missing")
     elif family == "ack_still_care_then_new_reason":
         if not (
-            _BOUNDARY_REASON_RE.search(normalized)
+            _STEPSISTER_REASON_RE.search(normalized)
+            or _BOUNDARY_REASON_RE.search(normalized)
             or _BOUNDARY_REASON_TAIL_RE.search(normalized)
             or _MOTIVATION_REASON_TAIL_RE.search(normalized)
         ):
             reason_codes.append("new_reason_missing")
     elif family == "hold_boundary_then_shift_floor":
-        if not _BOUNDARY_DISTANCE_RE.search(normalized):
+        if not (_STEPSISTER_BOUNDARY_ANCHOR_RE.search(normalized) or _STEPSISTER_REASON_RE.search(normalized)):
             reason_codes.append("boundary_hold_missing")
         if not _OPEN_FLOOR_RE.search(normalized):
             reason_codes.append("open_floor_missing")
     elif family == "brief_reason_then_wait":
         if not (
-            _BOUNDARY_REASON_RE.search(normalized)
+            _STEPSISTER_REASON_RE.search(normalized)
+            or _BOUNDARY_REASON_RE.search(normalized)
             or (_BOUNDARY_DISTANCE_RE.search(normalized) and _MOTIVATION_REASON_TAIL_RE.search(normalized))
         ):
             reason_codes.append("brief_reason_missing")
         if _OPEN_FLOOR_RE.search(normalized):
             reason_codes.append("wrong_tactic_shape")
     elif family == "soft_close_boundary":
-        if not _BOUNDARY_DISTANCE_RE.search(normalized):
+        if not (_STEPSISTER_BOUNDARY_ANCHOR_RE.search(normalized) or _STEPSISTER_REASON_RE.search(normalized)):
             reason_codes.append("soft_close_missing")
     elif family == "short_conditional_commitment":
         if not _SUPPORT_RE.search(normalized):
@@ -902,9 +1075,22 @@ def build_correction_prompt(
     if "repeated_tactic" in validation.reason_codes or "same_as_previous_reply" in validation.reason_codes:
         extra = "这次必须换一种承接动作，不要沿用刚才那种结构。"
     elif "repeat_not_acknowledged" in validation.reason_codes:
-        extra = "这次先接住这不是第一次问，再继续往下回。"
+        extra = "这次先回应这不是第一次问，再继续往下回。"
+    elif "process_term_echo" in validation.reason_codes:
+        extra = "不要把内部提示词写进回复，尤其不要说“接住/短接话/社交信号/情绪动作/本轮目标”。"
+    elif "low_quality_stock_phrase" in validation.reason_codes:
+        extra = "不要用固定感很重的劝说或套话，换成更像真实聊天的一句。"
     elif "underanswered" in validation.reason_codes:
         extra = "不要只给一个主题骨架句。"
+    elif "unfinished_tail" in validation.reason_codes:
+        extra = "这次必须写成完整的一句自然短回复，不能停在“这是/这个/怎么/不过”这种半截结构上。"
+    elif (
+        "image_social_question_back" in validation.reason_codes
+        or "image_social_descriptor_focus" in validation.reason_codes
+        or "image_social_problem_frame" in validation.reason_codes
+        or "image_social_verbal_misframe" in validation.reason_codes
+    ):
+        extra = "这轮不要提问，也不要描述图片；严禁“怎么啦/怎么了/咋了/什么情况/难住/遇到什么事/别憋着/这么说/说什么”，改成一句像正常聊天里顺手接表情情绪的自然短回复。"
     elif "meta_contract_echo" in validation.reason_codes:
         extra = "不要把内部动作要求直接翻成‘前面答过了’、‘你还是在意这个’、‘你还是不安’这类元话。"
     elif "generic_identity_template" in validation.reason_codes:
@@ -913,7 +1099,7 @@ def build_correction_prompt(
         "previous_reply_underanswered" in validation.reason_codes
         or "previous_reference_missing" in validation.reason_codes
     ):
-        extra = "这轮是在追问上一句，必须明确接住“刚才那句/上一句”，再补清它接的是哪句话或是什么意思。"
+        extra = "这轮是在追问上一句，必须明确围绕“刚才那句/上一句”，再补清它接的是哪句话或是什么意思。"
     elif "late_repeat_too_short" in validation.reason_codes:
         extra = "这已经不是前几次的短确认场景了，这次必须继续推进对话，不能退回只报名字或只放一句态度。"
     required = f"必须同时做到：{missing_actions_text}。" if missing_actions_text else ""
@@ -971,8 +1157,8 @@ def build_semantic_rescue_seed(*, plan: ReplyPlan) -> str:
         return f"只保留这个内容目标：自然认下自己是{_current_display_name()}，像熟人被叫住时顺手接话，不要展开介绍。"
     if topic in {"relationship_boundary", "motivation"}:
         if family in {"hold_boundary_then_shift_floor", "soft_close_boundary"}:
-            return "只保留这个内容目标：把关系还没近到那一步放稳，用一句更生活化的理由带过，然后把话头自然往下接。"
-        return "只保留这个内容目标：轻轻说清关系还没那么近，再给一个像顺手解释的日常理由，不要用固定句。"
+            return "只保留这个内容目标：把义妹关系事实放稳，用一句更生活化的理由带过，然后把话头自然往下接。"
+        return "只保留这个内容目标：接住尼尼装生分的试探，再给一个像顺手解释的日常理由，不要用固定句。"
     if topic == "help_commitment":
         return "只保留这个内容目标：把“真有事我会回应”放稳，但更像顺手应下来，不要郑重承诺。"
     if topic == "rejection":
@@ -986,9 +1172,9 @@ def build_semantic_rescue_seed(*, plan: ReplyPlan) -> str:
         return "只保留这个内容目标：承认上一句说得太省，再补清它的意思或指代，不要复读原句。"
     if topic == "emoji_social_reply":
         if family == "soft_emotion_ack":
-            return "只保留这个内容目标：把表情包当成对方委屈/蔫下来的情绪动作，顺手哄一句，别只剩语气词，也别解说画面。"
+            return "只保留这个内容目标：把表情包当成对方委屈或蔫下来的情绪，轻轻回一句，别只剩语气词，也别解说画面。"
         if family == "cute_image_ack":
-            return "只保留这个内容目标：把表情包当成对方在装乖/卖萌/撒娇，顺手接这个动作，不要点评图片可不可爱。"
+            return "只保留这个内容目标：把表情包当成对方在装乖、卖萌或撒娇，顺手回这个劲儿，不要点评图片可不可爱。"
         if family == "tease_image_ack":
             return "只保留这个内容目标：把表情包当成对方在小别扭或逗你，轻轻逗回去一句，不要盘问，也不要点评图片。"
     if topic == "emoji_social_followup":

@@ -85,7 +85,7 @@ def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch)
     monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
-    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-chat")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
@@ -118,14 +118,14 @@ def test_resolve_host_llm_runtime_falls_back_to_codex(monkeypatch) -> None:
 
 def test_resolve_host_llm_runtime_falls_back_to_deepseek(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
-    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-chat")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
     runtime = graph_builder.resolve_host_llm_runtime()
 
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
     assert runtime["route_reason_code"] == "HOST_CLOUD_CHAIN_FALLBACK_DEEPSEEK"
     assert runtime["provider_name"] == "deepseek"
-    assert runtime["model_id"] == "deepseek-chat"
+    assert runtime["model_id"] == "deepseek-v4-flash"
     assert runtime["remote_chain_status"][0]["available"] is False
     assert runtime["remote_chain_status"][1]["available"] is False
     assert runtime["remote_chain_status"][2]["available"] is True

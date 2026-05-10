@@ -411,9 +411,9 @@ class SurfaceRenderer:
             action_hint = "对方只是递来一张图片/表情，具体情绪不明；当成轻社交动作接一句，不要硬猜成委屈、可爱或逗你。"
         elif family == "soft_emotion_ack":
             if has_dry_or_awkward_signal:
-                action_hint = "像对方递来一个小吐槽/无语的表情时顺手接住；不要复述“无语”，也不要反问原因。"
+                action_hint = "对方只是用表情包表达小吐槽/无语/尴尬；接住这层情绪，收住一点，不追问、不诊断、不猜他遇到什么事。"
             else:
-                action_hint = "像看见对方发了有点蔫或委屈的图时顺手接一句，但不要替对方定性。"
+                action_hint = "像看见对方发了有点蔫或委屈的图时顺手接一句，但不要替对方定性，也不要追问原因。"
         elif family == "tease_image_ack":
             if has_explicit_tease_signal:
                 action_hint = "像看见对方拿小表情来戳你时轻轻逗一句，别盘问，也别说教。"
@@ -422,26 +422,24 @@ class SurfaceRenderer:
         else:
             action_hint = "顺着对方装乖/卖萌/求关注的动作接一句，像被轻轻晃了一下，不要用力卖萌。"
         system_prompt = (
-            "你只负责把用户发来的图片/表情包接成一句自然聊天。"
+            "你只负责把用户发来的图片/表情包转成一句自然聊天回复。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
-            "把表情包当成对方发来的情绪动作，不要当图片鉴赏。"
-            "回复对方正在表达的情绪：撒娇、装乖、委屈、嘴硬、小吐槽、求关注等；只有观察明确是调侃/逗弄时，才按“逗你”处理。"
-            "如果观察没有明确情绪，只接住发图这个轻社交动作，不要硬猜成委屈、可爱、逗你或求关注。"
-            "不要解释规则，不要写画面说明书，不要客服腔，不要只回语气词。"
-            "禁止只回“哼/嗯/唔/哦”这类空壳语气词，也不要靠补一个 emoji 当回复。"
-            "禁止使用旧模板：突然这么可爱、想让我哄你吗、想跟我撒娇吗、怎么啦、闹别扭、会错意。"
-            "用户发来的图不是你本人，不要说“我今天可爱吗/我可爱吗/看我可爱吗”。"
-            "不要评价“这张图/图里/猫耳/这个表情”怎么样。"
-            "不要把问题抛回给对方，不要问“你是不是觉得这张图可爱”。"
-            "不要臆造对方在说话或做动作，禁止写“你在说什么/你干嘛/你又怎么了/你这是在晃我吗”。"
-            "不要复述观察词本身，比如“无语/委屈/可爱/猫耳”，更不要问“在无语什么/怎么委屈”。"
+            "这里的图片/表情包等同于对方发来一个情绪动作，不是图片问答。"
+            "回复要像正常聊天里顺手回应情绪，不要猜图里是谁，不要分析外貌，不要问原因。"
+            "不要把它理解成对方遇到问题、需要求助或需要你追问发生了什么。"
+            "候选必须是完整陈述句；不能停在“这是/怎么/什么/不过”。"
+            "不要复述观察词本身，不要写成模板、客服安慰、小剧场或图片点评。"
+            "不要把表情包改写成对方说过一句话。"
+            "不要评价对方好坏，不要说教，不要补出外部事件。"
+            "不要新增现实动作或物品，比如买点心、送礼物、抱人、摸头。"
             f"\n\n{_compiled_soul_text()}"
         ).strip()
         user_prompt = (
-            f"表情包观察（只用于判断情绪，不要复述）：{observation_text}\n"
-            f"回应动作：{action_hint}\n"
+            f"社交信号（只用于理解，不要照抄）：{observation_text}\n"
+            f"回应方向：{action_hint}\n"
             f"回复契约：{str(getattr(plan, 'reply_contract', '') or '').strip()}\n"
-            "改写要求：12-34个中文字符；最多一句；必须回对方的情绪动作；不要描述图片本身；给4个不同候选，只输出 JSON。"
+            "硬性通过条件：8-24个中文字符；最多一句陈述句；自然口语；不要反问；不要描述图片本身；不要照抄社交信号；"
+            "禁用词：难住、遇到什么事、不高兴、不开心、忍着不说、别憋着、跟我说说、暗示什么、这么说、说什么、不太好、只会、别管它、哥哥最好了；给6个不同候选，只输出 JSON。"
         )
         image_timeout_env = str(os.environ.get("HOST_IMAGE_SOCIAL_SURFACE_TIMEOUT_MS") or "").strip()
         image_timeout_ms = int(max(1, min(12_000, int(image_timeout_env)))) if image_timeout_env else 9_000
@@ -497,23 +495,25 @@ class SurfaceRenderer:
         system_prompt = (
             "上一轮图片/表情包社交候选被质量门拒绝了，你只做一次修复重生成。"
             "必须返回 JSON：{\"candidates\":[\"...\",\"...\",\"...\"]}。"
-            "表情包是对方的情绪动作，不是图片鉴赏，也不是让你描述角色外貌。"
-            "只接住对方的情绪，不要猜对方在考你、逗你、生气、无视你，除非观察文本明确写了这些。"
-            "生成短句陈述，禁止反问和确认问句；禁止结尾使用“是不是/是吧/对吧/吗”。"
-            "不要问对方在想什么，也不要把图片当成你本人。"
-            "禁止使用：怎么啦、怎么了、生我的气、无视我、哪里做得不好、逗我、想让我、你在说什么、你干嘛、你又怎么了、这张图、图里、猫耳、可爱。"
-            "如果观察是无语/尴尬/别扭/小吐槽，就像把这个情绪接住，不要撒娇过度；不要直接复述这些观察词。"
+            "表情包是对方的情绪动作，不是图片鉴赏。"
+            "这次只写完整陈述句，直接回应情绪；不要猜人物、不要问原因、不要描述画面。"
+            "不要把它理解成对方遇到问题、需要求助或需要你追问发生了什么。"
+            "不要把表情包改写成对方说过一句话。"
+            "不要评价对方好坏，不要说教，不要补出外部事件。"
+            "不能用“怎么/什么/谁/是不是/吗”组织句子，不能停在半截。"
+            "不要新增现实动作或物品，比如买点心、送礼物、抱人、摸头。"
             f"\n\n{_compiled_soul_text()}"
         ).strip()
         user_prompt = (
-            f"表情包观察（只用于判断情绪，不要复述）：{observation_text}\n"
-            f"回应动作：{action_hint}\n"
+            f"社交信号（只用于理解，不要照抄）：{observation_text}\n"
+            f"回应方向：{action_hint}\n"
             f"上一轮被拒候选：{rejected_samples or '无'}\n"
             f"回复契约：{str(getattr(request.plan, 'reply_contract', '') or '').strip()}\n"
-            "改写要求：10-26个中文字符；最多一句；必须是自然陈述；不要描述图片本身；给4个不同候选，只输出 JSON。"
+            "硬性通过条件：8-24个中文字符；最多一句自然陈述；不要描述图片本身；不要反问；"
+            "禁用词：难住、遇到什么事、不高兴、不开心、忍着不说、别憋着、跟我说说、暗示什么、这么说、说什么、不太好、只会、别管它、哥哥最好了；给6个不同候选，只输出 JSON。"
         )
         repair_timeout_env = str(os.environ.get("HOST_IMAGE_SOCIAL_REPAIR_TIMEOUT_MS") or "").strip()
-        timeout_ms = int(max(1, min(6_000, int(repair_timeout_env)))) if repair_timeout_env else 3_500
+        timeout_ms = int(max(1, min(9_000, int(repair_timeout_env)))) if repair_timeout_env else 6_500
         return await self._render_candidates(
             request,
             system_prompt=system_prompt,
@@ -595,11 +595,6 @@ class SurfaceRenderer:
         )
         if not has_explicit_tease_signal and any(token in compact_candidate for token in ("逗我", "玩我", "新花样")):
             return False, "IMAGE_SURFACE_TEASE_OVERINFERRED"
-        if not (
-            candidate_responds_to_image_social_emotion(candidate)
-            or candidate_is_safe_image_social_reply(candidate)
-        ):
-            return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
         if validation is not None and not _validation_is_acceptable(validation):
             reason_codes = {
                 str(item or "").strip()
@@ -616,10 +611,19 @@ class SurfaceRenderer:
                 "image_social_overplayed",
                 "image_social_question_back",
                 "image_social_descriptor_focus",
+                "image_social_problem_frame",
+                "image_social_verbal_misframe",
+                "image_social_judgment_frame",
+                "image_social_unsupported_action",
                 "unfinished_tail",
             }
             if reason_codes & hard_reject:
                 return False, "IMAGE_SURFACE_VALIDATION_FAILED"
+        elif validation is None and not (
+            candidate_responds_to_image_social_emotion(candidate)
+            or candidate_is_safe_image_social_reply(candidate)
+        ):
+            return False, "IMAGE_SURFACE_EMOTION_NOT_USED"
         return True, ""
 
     async def _render_candidates(

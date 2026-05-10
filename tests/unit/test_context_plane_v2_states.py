@@ -69,7 +69,12 @@ def test_relationship_and_drive_state_resolvers_produce_structured_vectors() -> 
 
     summary = build_relationship_summary(relationship=relationship, render_target_lang="zh")
     assert relationship.bond_stage == "FRIEND"
+    assert relationship.relationship_phase == "stepsibling"
+    assert relationship.relationship_substage in {"playful_sibling", "protective_sibling"}
+    assert relationship.playfulness > 0.0
+    assert relationship.attachment_depth > 0.0
     assert relationship.trust >= 0.4
+    assert "义兄妹" in summary
     assert "0." not in summary
     assert drive.continuity_drive >= 0.48
     assert drive.care_drive >= 0.20

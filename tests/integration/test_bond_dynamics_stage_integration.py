@@ -311,8 +311,8 @@ class TestBondSummaryEndToEnd:
     def test_summary_stage_matches_state(self, writer_with_engine, stage_engine):
         _apply(writer_with_engine, user_id="user_sum", update_kind="INTERACTION", n=10)
         summary = stage_engine.get_summary("user_sum")
-        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相识”
-        assert summary["stage"] == "相识"
+        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相处中的义妹”
+        assert summary["stage"] == "相处中的义妹"
         assert "trend" in summary
         assert "capability_hint" in summary
 

@@ -387,7 +387,11 @@ def _summarize_relationship_state_for_trace(relationship_state: Mapping[str, Any
     stage = str(raw.get("bond_stage") or "").strip()
     if stage:
         summary["bond_stage"] = stage
-    for key in ("familiarity", "trust", "comfort", "openness", "dependency_tolerance", "protectiveness", "boundary_softness", "affection_signal"):
+    for key in ("stage_label", "relationship_phase", "relationship_substage"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            summary[key] = value
+    for key in ("familiarity", "trust", "comfort", "openness", "dependency_tolerance", "protectiveness", "boundary_softness", "affection_signal", "playfulness", "romantic_tension", "attachment_depth", "conflict_rift"):
         value = _coerce_trace_score(raw.get(key))
         if value is not None:
             summary[key] = value

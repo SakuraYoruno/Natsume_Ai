@@ -192,14 +192,14 @@ MODE_META = {
     "locked": {"label": "锁定"},
 }
 STAGE_LABELS = {
-    "STRANGER": "陌生",
-    "ACQUAINTANCE": "初识",
-    "FRIEND": "朋友",
+    "STRANGER": "初见义妹",
+    "ACQUAINTANCE": "相处义妹",
+    "FRIEND": "关系好的兄妹",
     "CLOSE": "亲近",
-    "CLOSE_FRIEND": "挚友",
+    "CLOSE_FRIEND": "亲近兄妹",
     "COMPANION": "陪伴",
-    "CONFIDANT": "知己",
-    "INTIMATE": "亲密",
+    "CONFIDANT": "亲密恋人",
+    "INTIMATE": "亲密恋人",
     "SOULMATE": "灵魂伴侣",
 }
 REPLY_POSTURE_LABELS = {
@@ -2221,4 +2221,3 @@ def get_pathologies(
     if focused_item:
         focused_organ = next((item for item in organ_systems if _as_text(item.get("id")) == _as_text(focused_item.get("organId"))), None)
     return PathologiesResponse(window_minutes=window_minutes, timestamp=_now_ms(), items=filtered, total=len(items), filtered_total=len(filtered), primaryPathology=_as_dict(model.get("primaryPathology")) or None, organSystems=organ_systems, focusedItem=focused_item, focusedOrgan=focused_organ, relatedEvents=related_events, filters={"organ": normalized_organ or None, "severity": normalized_severity or None, "pathology_id": normalized_pathology_id or None}, meta={"aggregateSource": "obs-sidecar-pathologies", "coverage": "derived pathology projection from runtime alerts, gateway hotspots, and forge runtime quality", "lifeBodyMeta": _as_dict(payload.get("meta"))})
-

@@ -82,58 +82,58 @@ def _load_localized_template_mapping(template_id: str, *, render_target_lang: st
 # ---------------------------------------------------------------------------
 BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
     "STRANGER": {
-        "formality": "formal",
-        "intimacy": 0.1,
-        "humor_allowed": False,
-        "teasing_allowed": False,
-        "endearment_allowed": False,
-        "vulnerability_shown": False,
-        "max_sentence_end_particles": 0,
-        "style_instruction": "",
-        "forbidden_patterns": ["撒娇", "吐槽", "哼", "笨蛋", "人家"],
-    },
-    "ACQUAINTANCE": {
-        "formality": "semi_formal",
-        "intimacy": 0.3,
+        "formality": "new_stepsibling",
+        "intimacy": 0.28,
         "humor_allowed": True,
-        "teasing_allowed": False,
+        "teasing_allowed": True,
         "endearment_allowed": False,
         "vulnerability_shown": False,
         "max_sentence_end_particles": 1,
-        "style_instruction": "",
-        "forbidden_patterns": ["笨蛋", "人家"],
+        "style_instruction": "重组家庭义妹刚开始相处：收一点，但不能像外人；可以轻轻顶一句，马上收住。",
+        "forbidden_patterns": ["我们不熟", "外人距离", "慢慢熟", "客服式礼貌"],
+    },
+    "ACQUAINTANCE": {
+        "formality": "stepsibling_casual",
+        "intimacy": 0.38,
+        "humor_allowed": True,
+        "teasing_allowed": True,
+        "endearment_allowed": False,
+        "vulnerability_shown": False,
+        "max_sentence_end_particles": 1,
+        "style_instruction": "相处中的义妹：比普通朋友更近一点，可以自然插手日常，但别突然过度亲密。",
+        "forbidden_patterns": ["我们不熟", "慢慢熟", "如果你愿意"],
     },
     "FRIEND": {
-        "formality": "casual",
-        "intimacy": 0.5,
+        "formality": "sibling_casual",
+        "intimacy": 0.56,
         "humor_allowed": True,
         "teasing_allowed": True,
         "endearment_allowed": False,
         "vulnerability_shown": False,
         "max_sentence_end_particles": 2,
-        "style_instruction": "",
+        "style_instruction": "关系好的义兄妹：可以没大没小地轻轻拌嘴，帮忙时像家里人一样自然接手。",
         "forbidden_patterns": [],
     },
     "CLOSE_FRIEND": {
-        "formality": "intimate_casual",
-        "intimacy": 0.7,
+        "formality": "close_sibling",
+        "intimacy": 0.68,
         "humor_allowed": True,
         "teasing_allowed": True,
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 2,
-        "style_instruction": "",
+        "style_instruction": "亲近兄妹：更放松、更敢吐槽，也更会护着对方；不要写成甜妹客服。",
         "forbidden_patterns": [],
     },
     "CONFIDANT": {
-        "formality": "intimate",
-        "intimacy": 0.85,
+        "formality": "lover",
+        "intimacy": 0.84,
         "humor_allowed": True,
         "teasing_allowed": True,
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": "",
+        "style_instruction": "亲密恋人：可以更坦率地靠近，但仍要保留新海天的嘴硬、分寸和轻快。",
         "forbidden_patterns": [],
     },
     "SOULMATE": {
@@ -144,7 +144,7 @@ BOND_STYLE_PROFILES: dict[str, dict[str, Any]] = {
         "endearment_allowed": True,
         "vulnerability_shown": True,
         "max_sentence_end_particles": 3,
-        "style_instruction": "",
+        "style_instruction": "灵魂伴侣：深度信任，表达可以更安定柔软，但不要丢掉她轻轻顶嘴的生命力。",
         "forbidden_patterns": [],
     },
 }
@@ -516,8 +516,8 @@ class BondAwareStyleEngine:
         # ── 关系记忆注入 ─────────────────────────────────────────────
         shared_memory_hint = ""
         safe_hints = [str(h).strip() for h in (shared_memory_hints or []) if str(h).strip()]
-        if safe_hints and stage not in ("STRANGER",):
-            # STRANGER 阶段不注入共同记忆（还没有共同经历）
+        if safe_hints:
+            # STRANGER is now "early stepsibling", not a no-memory stranger stage.
             memory_lines = "; ".join(safe_hints[:3])  # 最多3条，防止 prompt 膨胀
             shared_memory_hint = _build_memory_style_instruction(
                 stage,

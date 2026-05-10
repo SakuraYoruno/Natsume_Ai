@@ -368,7 +368,7 @@ def prime_reply_surface_memory_from_turn_history(
             or primary_topic not in _FINAL_REPLY_CACHEABLE_TOPICS
             or (primary_topic == "assistant_reply_followup" and not context_fingerprint)
             or not tactic_family
-            or response_form not in {"text", "text_plus_emoji", "text_plus_sticker"}
+            or response_form not in {"text", "text_plus_sticker", "text_plus_image", "text_plus_gif"}
             or provider_name == "host"
             or model_id == "deterministic-plan-renderer"
             or fallback_used

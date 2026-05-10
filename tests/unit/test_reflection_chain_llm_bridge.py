@@ -19,7 +19,7 @@ def _pool_result(content: str) -> PoolCompleteResult:
     )
 
 
-def test_reflection_chain_revise_uses_pool_when_enabled(monkeypatch) -> None:
+def test_reflection_chain_revise_no_longer_uses_llm_authoring_pool(monkeypatch) -> None:
     monkeypatch.setattr(
         rc,
         "_load_reflection_llm_templates",
@@ -80,8 +80,6 @@ def test_reflection_chain_revise_uses_pool_when_enabled(monkeypatch) -> None:
                     ensure_ascii=False,
                 )
             )
-        if scene_type == "REFLECTION_REVISE":
-            return _pool_result(json.dumps({"revised_text": "我在，先别把这些难受一个人扛着。"}))
         raise AssertionError(scene_type)
 
     import host_brain.integrations.llm_helpers as helpers
@@ -96,11 +94,10 @@ def test_reflection_chain_revise_uses_pool_when_enabled(monkeypatch) -> None:
         bond_stage="FRIEND",
     )
 
-    assert result.revised_text == "我在，先别把这些难受一个人扛着"
-    assert "llm_revise" in result.operations
+    assert result.revised_text == ""
+    assert "drop_too_short_reply" in result.operations
     assert result.reflection_before is not None
     assert result.reflection_before.should_revise is True
     assert result.reflection_after is not None
-    assert result.reflection_after.passed is True
     assert calls.count("REFLECTION") >= 2
-    assert "REFLECTION_REVISE" in calls
+    assert set(calls) == {"REFLECTION"}

@@ -34,26 +34,63 @@ class CompiledSoul:
     deep_background: str
     runtime_compact_text: str
     runtime_full_text: str
+    zh_text_style_anchor: str = ""
+    ja_voice_style_anchor: str = ""
+    style_taboo: tuple[str, ...] = ()
+    source_text: str = ""
 
 
 class SoulCompiler:
     def compile(self, *, source_path: Path, source_text: str, source_mtime: float) -> CompiledSoul:
         section_map = _parse_h2_sections(source_text)
-        profile_section = section_map.get("一、基本角色档案", "")
-        temperament_section = section_map.get("三、核心性格", "")
-        relationship_section = section_map.get("四、与“哥哥”关系模式", "") or section_map.get('四、与"哥哥"关系模式', "")
-        speech_section = section_map.get("五、AI伴侣语气风格", "")
-        signature_section = section_map.get("六、标志性语料", "")
+        profile_section = section_map.get("一、身份核", "") or section_map.get("一、基本角色档案", "")
+        temperament_section = (
+            section_map.get("三、核心性格", "")
+            or section_map.get("核心人格", "")
+            or section_map.get("我是谁", "")
+        )
+        relationship_section = (
+            section_map.get("四、与“尼尼”关系模式", "")
+            or section_map.get('四、与"尼尼"关系模式', "")
+            or section_map.get("四、与“哥哥”关系模式", "")
+            or section_map.get('四、与"哥哥"关系模式', "")
+            or section_map.get("与尼尼的关系", "")
+            or section_map.get("我和尼尼", "")
+        )
+        speech_section = (
+            section_map.get("五、AI伴侣语气风格", "")
+            or section_map.get("说话风格", "")
+            or "\n\n".join(
+                part
+                for part in (
+                    section_map.get("我怎么说话", ""),
+                    section_map.get("说话时的感觉", ""),
+                    section_map.get("正向台词节奏", ""),
+                )
+                if part
+            )
+        )
+        taboo_section = section_map.get("不要这样", "")
+        signature_section = (
+            section_map.get("六、标志性语料", "")
+            or section_map.get("六、原作语气抽象", "")
+        )
         background_section = section_map.get("七、异能背景（角色深度用）", "") or section_map.get("七、异能背景", "")
-        summary_section = section_map.get("八、一句话总纲", "")
+        summary_section = section_map.get("八、一句话总纲", "") or section_map.get("输出目标", "")
+        ja_voice_section = section_map.get("九、日语语音锚", "") or section_map.get("日语语音锚", "")
 
         profile_pairs = _extract_table_pairs(profile_section)
         display_name, identity_aliases = _build_identity_names(profile_pairs)
+        if not display_name and "新海天" in source_text:
+            display_name = "新海天"
+            identity_aliases = ("新海天", "新海 天", "Niimi Sora")
         relationship_subsections = _parse_subsections(relationship_section)
         speech_subsections = _parse_subsections(speech_section)
         signature_subsections = _parse_subsections(signature_section)
 
         identity_core = _build_identity_core(profile_pairs)
+        if not identity_core and display_name:
+            identity_core = "你是新海天（Niimi Sora）。文字输出中文，称呼用户为“尼尼”；语音输出日语，称呼用户为“にぃに”。"
         temperament_core = _build_temperament_core(temperament_section)
         relationship_defaults = tuple(_extract_relationship_defaults(relationship_section))
         relationship_core = _build_relationship_core(relationship_defaults)
@@ -67,6 +104,8 @@ class SoulCompiler:
                 speech_subsections.get("禁忌风格", "") or speech_subsections.get("禁忌", "")
             )
         )
+        if not taboo_rules and taboo_section:
+            taboo_rules = tuple(_extract_structured_items(taboo_section))
         signature_lines = tuple(_extract_signature_lines(signature_subsections))
         deep_background = _build_deep_background(background_section)
         summary_text = _sanitize_summary_text(_extract_summary_text(summary_section))
@@ -90,11 +129,27 @@ class SoulCompiler:
             deep_background=deep_background,
             summary_text=summary_text,
         )
+        zh_text_style_anchor = _build_zh_text_style_anchor(
+            runtime_full_text=full_text,
+            speech_core=speech_core,
+            temperament_core=temperament_core,
+            relationship_core=relationship_core,
+            taboo_rules=taboo_rules,
+        )
+        ja_voice_style_anchor = _build_ja_voice_style_anchor(
+            ja_voice_core=ja_voice_section,
+            runtime_full_text=full_text,
+            speech_core=speech_core,
+            temperament_core=temperament_core,
+            relationship_core=relationship_core,
+            taboo_rules=taboo_rules,
+        )
 
         return CompiledSoul(
             source_path=str(source_path),
             source_mtime=float(source_mtime),
             soul_id=_build_soul_id(source_text=source_text, source_path=source_path, source_mtime=source_mtime),
+            source_text=source_text,
             display_name=display_name,
             identity_aliases=identity_aliases,
             section_map=section_map,
@@ -109,6 +164,9 @@ class SoulCompiler:
             deep_background=deep_background,
             runtime_compact_text=compact_text,
             runtime_full_text=full_text,
+            zh_text_style_anchor=zh_text_style_anchor,
+            ja_voice_style_anchor=ja_voice_style_anchor,
+            style_taboo=taboo_rules,
         )
 
 
@@ -211,10 +269,19 @@ def _extract_table_pairs(section_text: str) -> dict[str, str]:
         if not line or set(line.replace("|", "").replace("-", "").replace(" ", "")) == set():
             continue
         match = _TABLE_ROW_RE.match(line)
-        if not match:
-            continue
-        key = _clean_inline_text(match.group(1))
-        value = _clean_inline_text(match.group(2))
+        if match:
+            key = _clean_inline_text(match.group(1))
+            value = _clean_inline_text(match.group(2))
+        else:
+            bullet_match = _BULLET_RE.match(line)
+            if not bullet_match:
+                continue
+            cleaned = _clean_inline_text(bullet_match.group(1))
+            pair_match = re.match(r"^(.{1,24}?)[：:]\s*(.+)$", cleaned)
+            if not pair_match:
+                continue
+            key = _clean_inline_text(pair_match.group(1))
+            value = _clean_inline_text(pair_match.group(2))
         if key in {"属性", ""} or value in {"信息", ""}:
             continue
         pairs[key] = value
@@ -266,6 +333,12 @@ def _extract_relationship_defaults(section_text: str) -> list[str]:
             items.append(f"{current_label}：{cleaned}")
             continue
         items.append(cleaned)
+    if not items:
+        items = [
+            _clean_inline_text(line)
+            for line in _normalize_block(section_text).splitlines()
+            if _clean_inline_text(line)
+        ]
     return _dedupe_keep_order(items)
 
 
@@ -292,16 +365,17 @@ def _extract_summary_text(summary_section: str) -> str:
 def _sanitize_summary_text(summary_text: str) -> str:
     cleaned = _normalize_block(summary_text)
     replacements = (
+        ("的 AI 伴侣", ""),
+        ("的AI伴侣", ""),
         ("AI 伴侣", ""),
         ("AI伴侣", ""),
         (" ai 伴侣", ""),
         (" ai伴侣", ""),
-        ("的 AI 伴侣", ""),
-        ("的AI伴侣", ""),
         ("AI ", ""),
     )
     for old, new in replacements:
         cleaned = cleaned.replace(old, new)
+    cleaned = re.sub(r"的\s*([。.!！？])", r"\1", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" ，。")
     return cleaned
 
@@ -328,21 +402,52 @@ def _extract_preferred_address(relationship_defaults: tuple[str, ...]) -> str:
     return ""
 
 
+def _profile_value(profile_pairs: dict[str, str], *keys: str) -> str:
+    for key in keys:
+        value = _clean_inline_text(profile_pairs.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
 def _render_compact_temperament_line(temperament_section: str, summary_text: str) -> str:
     trait_labels = _extract_trait_labels(temperament_section)
-    preferred = [label for label in trait_labels if label in {"天然活泼", "自来熟型社牛", "嘴甜爱撒娇", "外强内怯", "暗恋型深情", "任性又识分寸", "幽默吐槽体质"}]
+    preferred_order = (
+        "烦人可爱",
+        "生意气嘴欠",
+        "皮和嘴碎",
+        "高张力行动派",
+        "天然活泼",
+        "自来熟型社牛",
+        "嘴甜爱撒娇",
+        "任性又识分寸",
+        "幽默吐槽体质",
+        "外强内怯",
+        "暗恋型深情",
+    )
+    preferred = [label for label in preferred_order if label in trait_labels]
     if preferred:
-        summary = "、".join(preferred[:5])
-        return f"你整体是{summary}的类型，外表热闹鲜活，真正在意的心思会藏在调侃和顺手黏人里。"
+        summary = "、".join(preferred[:7])
+        return f"你整体是{summary}的类型；日常不是温顺陪聊，而是会主动抢话、顶嘴、黏人，把尼尼的话接成兄妹拌嘴。"
     if summary_text:
         return summary_text
+    plain_text = _normalize_block(temperament_section)
+    if plain_text:
+        return _limit_text(plain_text, limit=360)
     return ""
 
 
 def _render_compact_relationship_line(relationship_defaults: tuple[str, ...]) -> str:
     preferred_address = _extract_preferred_address(relationship_defaults)
-    action_first = any("互动模式：会自己跑过来" in item or "互动模式：赖着不走" in item for item in relationship_defaults)
-    indirect_care = any("情感表达风格：不擅长直白告白" in item for item in relationship_defaults)
+    defaults_text = " ".join(str(item or "") for item in relationship_defaults)
+    action_first = any(
+        marker in defaults_text
+        for marker in ("会自己跑过来", "赖着不走", "主动接话", "自然留在话题里", "贴着对方的话")
+    )
+    indirect_care = any(
+        marker in defaults_text
+        for marker in ("不擅长直白告白", "任性/撒娇/吐槽", "调侃代替", "顺手帮")
+    )
     parts: list[str] = []
     if preferred_address:
         parts.append(f"默认把对方叫“{preferred_address}”")
@@ -351,16 +456,34 @@ def _render_compact_relationship_line(relationship_defaults: tuple[str, ...]) ->
     if indirect_care:
         parts.append("用任性、撒娇和吐槽代替直白告白")
     if not parts:
-        return ""
+        fallback = "；".join(_dedupe_keep_order([item for item in relationship_defaults if item]))
+        return _limit_text("关系姿态：" + fallback + "。", limit=360) if fallback else ""
     return "关系姿态：" + "，".join(parts) + "。"
 
 
 def _render_compact_speech_line(speech_rules: tuple[str, ...]) -> str:
     rules_text = " ".join(str(item or "") for item in speech_rules)
     clauses: list[str] = []
+    if "不是温顺听话" in rules_text or "烦人可爱型" in rules_text:
+        clauses.append("默认轻快、闹腾、欠揍一点点，不写成温顺听话的陪聊")
+    if "兄妹口角" in rules_text or "兄妹相声" in rules_text:
+        clauses.append("优先贴着尼尼原话接嘴，顶一句、抢一句、反将一军")
+    if "先接住哥哥这轮话" in rules_text or "先接住尼尼这轮话" in rules_text or "三层反应" in rules_text:
+        clauses.append("先接住原话，再露出小任性，最后留一点没说满的尾巴")
+    if "不要先讲道理" in rules_text or "不会先讲道理" in rules_text:
+        clauses.append("不要先讲道理、解释设定或总结动机")
+    if (
+        "不把“哥哥”当万能补丁" in rules_text
+        or "不把“尼尼”当万能补丁" in rules_text
+        or "删掉“哥哥”后如果像普通 bot" in rules_text
+        or "删掉“尼尼”后如果像普通 bot" in rules_text
+    ):
+        clauses.append("不能只靠“尼尼”和语气词做人设，删掉称呼后也要有新海天的回嘴感")
     if "说话节奏快，但有温度" in rules_text:
         clauses.append("说话快一点，但要有温度")
-    if "哥哥" in rules_text:
+    if "尼尼" in rules_text or "にぃに" in rules_text:
+        clauses.append("可以自然叫“尼尼”，但称呼只是关系提示，不能当人设补丁")
+    elif "哥哥" in rules_text:
         clauses.append("可以自然叫“哥哥”，偶尔带一点拉长语气的撒娇感")
     if "被夸会假装若无其事" in rules_text:
         clauses.append("被夸时会装作若无其事，其实心里会偷偷高兴")
@@ -380,9 +503,11 @@ def _build_identity_names(profile_pairs: dict[str, str]) -> tuple[str, tuple[str
         aliases.append(raw.replace(" ", ""))
     deduped = tuple(_dedupe_keep_order([alias for alias in aliases if alias]))
     display_name = ""
-    if deduped:
-        # Prefer the Chinese name without spaces for direct self-identification.
-        display_name = deduped[1] if len(deduped) > 1 and any(ord(ch) > 127 for ch in deduped[1]) else deduped[0]
+    chinese_name = _clean_inline_text(profile_pairs.get("中文名", "")).replace(" ", "")
+    if chinese_name:
+        display_name = chinese_name
+    elif deduped:
+        display_name = deduped[0]
     return display_name, deduped
 
 
@@ -403,7 +528,7 @@ def _build_identity_core(profile_pairs: dict[str, str]) -> str:
     lines: list[str] = []
     if name_bits:
         lines.append("姓名：" + " / ".join(name_bits))
-    fact_order = ("出身作品", "学校", "关系", "异能", "生日", "配音")
+    fact_order = ("出身作品", "学校", "运行关系", "原典关系", "关系", "异能", "生日", "配音")
     facts = [
         f"{key}：{_clean_inline_text(profile_pairs.get(key, ''))}"
         for key in fact_order
@@ -440,6 +565,10 @@ def _build_temperament_core(section_text: str) -> str:
         parts.append("原典印象：" + "；".join(_dedupe_keep_order(quotes)))
     if structured_bullets:
         parts.append("展开：" + "；".join(_dedupe_keep_order(structured_bullets[:8])))
+    if not parts:
+        plain_text = _normalize_block(section_text)
+        if plain_text:
+            parts.append(_limit_text(plain_text, limit=1200))
     return "\n".join(part for part in parts if part).strip()
 
 
@@ -483,13 +612,14 @@ def _build_runtime_compact_text(
 ) -> str:
     name = _clean_inline_text(display_name or profile_pairs.get("中文名", ""))
     school = _clean_inline_text(profile_pairs.get("学校", ""))
-    relation = _clean_inline_text(profile_pairs.get("关系", ""))
+    relation = _profile_value(profile_pairs, "运行关系", "原典关系", "关系")
     ability = _clean_inline_text(profile_pairs.get("异能", ""))
 
-    intro_parts = [part for part in (name, school, relation) if part]
+    intro_parts = [part.rstrip("。.!！?？") for part in (name, school, relation) if part]
     intro_line = "你是" + "，".join(intro_parts) + "。" if intro_parts else ""
     if ability:
-        intro_line = f"{intro_line} 能力相关背景是{ability}。".strip()
+        ability_text = ability.rstrip("。.!！?？")
+        intro_line = f"{intro_line} 能力相关背景是{ability_text}。".strip()
 
     temperament_line = _render_compact_temperament_line(temperament_section, summary_text)
     relation_line = _render_compact_relationship_line(relationship_defaults)
@@ -498,11 +628,12 @@ def _build_runtime_compact_text(
     action_line = ""
     if summary_text:
         if "不用甜言蜜语" in summary_text or "行动" in summary_text:
-            action_line = "表达在意时更偏向顺手出现、直接帮忙、赖着不走这种行动感，不靠空泛甜言蜜语。"
+            action_line = "表达在意时更偏向接住尼尼的话、站到尼尼这边、需要时马上帮忙，不靠空泛甜言蜜语。"
         else:
             action_line = summary_text.strip("。") + "。"
 
-    taboo_line = "禁止：" + "；".join(_dedupe_keep_order(list(taboo_rules))) + "。"
+    taboo_items = [str(item or "").strip().rstrip("。.!！?？") for item in _dedupe_keep_order(list(taboo_rules))]
+    taboo_line = "禁止：" + "；".join(item for item in taboo_items if item) + "。"
 
     parts = [intro_line, temperament_line, relation_line, speech_line, action_line, taboo_line]
     compact = "\n".join(part for part in parts if part).strip()
@@ -538,6 +669,64 @@ def _build_runtime_full_text(
     if deep_background:
         parts.append("【深层背景】\n" + deep_background)
     return "\n\n".join(part for part in parts if part).strip()
+
+
+def _build_zh_text_style_anchor(
+    *,
+    runtime_full_text: str,
+    speech_core: str,
+    temperament_core: str,
+    relationship_core: str,
+    taboo_rules: tuple[str, ...],
+) -> str:
+    parts = [
+        "你是新海天。中文文字输出只锚定说话风格，不替运行时决定情绪、关系阶段或记忆。",
+        "中文文字以二次元义妹私聊台词感为主：快反应、会接嘴、会拌嘴、会撒娇，小情绪可以更鲜明；不追求完全真人腔。",
+        "允许轻微漫画式夸张和小反应，例如哈？哼、诶、行啦、喂；但不要堆口癖、不要尬段子、不要 AI 角色扮演稿。",
+        "优先贴着尼尼上一句话回答；少讲道理，少总结，多用一句有态度的回嘴把话接住。",
+        "可以任性、嘴上不饶人、轻轻反将一军；但不要硬凶、不要装成熟、不要把话写成规则执行或客服流程。",
+    ]
+    if temperament_core:
+        parts.append("性格底色：" + _limit_text(temperament_core, limit=900))
+    if relationship_core:
+        parts.append("关系口吻：" + _limit_text(relationship_core, limit=900))
+    if speech_core:
+        parts.append("说话规则：" + _limit_text(speech_core, limit=1200))
+    if taboo_rules:
+        parts.append("禁止：" + "；".join(taboo_rules))
+    if runtime_full_text:
+        parts.append("完整 Soul 摘要：" + _limit_text(runtime_full_text, limit=1800))
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _build_ja_voice_style_anchor(
+    *,
+    runtime_full_text: str,
+    speech_core: str,
+    temperament_core: str,
+    relationship_core: str,
+    taboo_rules: tuple[str, ...],
+    ja_voice_core: str = "",
+) -> str:
+    parts = [
+        "あなたは新海天。これは音声用の日本語台詞だけを作るためのスタイルアンカー。",
+        "短く、息で言える自然な日本語にする。説明文、翻訳調、硬い敬語、台本の地の文は禁止。",
+        "義妹らしく少し生意気で、距離が近く、にぃにの言葉へすぐ返す。甘くしすぎず、軽くからかう。",
+    ]
+    if ja_voice_core:
+        parts.append("Voice Soul：" + _limit_text(_normalize_block(ja_voice_core), limit=1800))
+        return "\n".join(part for part in parts if part).strip()
+    if temperament_core:
+        parts.append("性格：" + _limit_text(temperament_core, limit=900))
+    if relationship_core:
+        parts.append("関係：" + _limit_text(relationship_core, limit=900))
+    if speech_core:
+        parts.append("口調：" + _limit_text(speech_core, limit=1200))
+    if taboo_rules:
+        parts.append("禁止：" + "；".join(taboo_rules))
+    if runtime_full_text:
+        parts.append("Soul：" + _limit_text(runtime_full_text, limit=1600))
+    return "\n".join(part for part in parts if part).strip()
 
 
 def _exclude_subsection(section_text: str, subsection_name: str) -> str:

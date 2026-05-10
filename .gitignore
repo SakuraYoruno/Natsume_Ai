@@ -72,6 +72,7 @@ temp/
 !.env.experimental.example
 
 # --- data/ runtime artifacts (never commit) ---
+/data~.xp3/
 # JDK / Neo4j 安装包及解压目录
 data/install/
 data/jdk*/
@@ -150,5 +151,6 @@ flows/exports/
 
 # --- Repository noise / generated evidence ---
 /artifacts/
+/tools/external/
 test_output.txt
 tools/_*.png

@@ -44,7 +44,8 @@ def test_image_social_surface_requires_emotion_response_not_image_commentary() -
     assert "猫耳" not in anchors
     assert {"可爱", "卖萌"}.issubset(set(anchors))
     assert candidate_responds_to_image_social_emotion("好啦好啦，别拿这种眼神晃我，我会心软的。")
-    assert candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住还不行嘛。")
+    assert not candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住还不行嘛。")
+    assert candidate_responds_to_image_social_emotion("哥哥又开始装乖了，我接住啦。")
     assert candidate_responds_to_image_social_emotion("被你这么一晃，我有点招架不住。")
     assert candidate_responds_to_image_social_emotion("撒娇这一套我接住了。")
     assert not candidate_responds_to_image_social_emotion("猫耳这张有点犯规，哥哥故意的吧。")

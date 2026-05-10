@@ -230,8 +230,8 @@ class PersonaEngine:
         # ── Bond 阶段开放度系数 ───────────────────────────────────────────
         # 越亲密，特质和情感对表达的影响越大
         _BOND_OPENNESS: dict[str, float] = {
-            "STRANGER": 0.3,
-            "ACQUAINTANCE": 0.5,
+            "STRANGER": 0.45,
+            "ACQUAINTANCE": 0.55,
             "FRIEND": 0.7,
             "CLOSE_FRIEND": 0.85,
             "CONFIDANT": 0.95,

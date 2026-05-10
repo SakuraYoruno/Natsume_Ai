@@ -3,7 +3,7 @@ from __future__ import annotations
 from host_brain.app.reply_form_decider import MsgType, ReplyFormDecider, ResponseFormDecider
 
 
-def test_reply_form_decider_honors_planned_text_plus_emoji() -> None:
+def test_reply_form_decider_honors_planned_text_plus_sticker() -> None:
     decider = ReplyFormDecider(voice_enabled=False)
 
     decision = decider.decide(
@@ -13,13 +13,13 @@ def test_reply_form_decider_honors_planned_text_plus_emoji() -> None:
         emotion_tag="PLAYFUL",
         bond_stage="FRIEND",
         planned_primary=MsgType.TEXT,
-        planned_secondary=MsgType.EMOJI,
-        planned_reason="emoji_social_reply",
+        planned_secondary=MsgType.IMAGE,
+        planned_reason="sticker_social_reply",
     )
 
     assert decision.primary == MsgType.TEXT
-    assert decision.secondary == MsgType.EMOJI
-    assert decision.reason == "emoji_social_reply"
+    assert decision.secondary == MsgType.IMAGE
+    assert decision.reason == "sticker_social_reply"
 
 
 def test_response_form_decider_honors_planned_sticker_primary() -> None:
@@ -41,7 +41,7 @@ def test_response_form_decider_honors_planned_sticker_primary() -> None:
     assert decision.reason == "text_plus_sticker"
 
 
-def test_response_form_decider_keeps_voice_fallback_when_unplanned() -> None:
+def test_response_form_decider_does_not_invent_voice_when_unplanned() -> None:
     decider = ResponseFormDecider(voice_enabled=True, probability_scale=1.0)
 
     decision = decider.decide(
@@ -53,4 +53,5 @@ def test_response_form_decider_keeps_voice_fallback_when_unplanned() -> None:
     )
 
     assert decision.primary == MsgType.TEXT
-    assert decision.secondary in {None, MsgType.VOICE}
+    assert decision.secondary is None
+    assert decision.reason == "unplanned_default_text"

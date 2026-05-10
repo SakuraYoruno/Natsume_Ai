@@ -117,11 +117,13 @@ class ChatAgentInput:
     sub_agent_context: Optional[SubAgentContext] = None
 
     # ── 通道参数 ──
-    render_target_lang: str = "zh"   # Phase XV: 双轨，文字通道永远 zh
+    render_target_lang: str = "zh"   # legacy language hint；真实渲染由 render_profile/response_form 决定
+    render_profile: str = ""         # zh_text=中文文字；ja_voice=日语语音
+    response_form: str = ""          # canonical output form; render_profile is derived from this
     reply_channel: Optional[str] = None   # GATEWAY / ASR / WEB 等
     suppress_edge_tts: Optional[bool] = None
     suppress_edge_vts: Optional[bool] = None
-    reply_depth_policy: str = "normal"    # "normal" / "gateway"（QQ 要求更短）
+    reply_depth_policy: str = "normal"    # legacy metadata only; transport source must not alter text generation
 
     # ── 链路追踪 ──
     thread_id: Optional[str] = None
@@ -137,6 +139,220 @@ class ChatAgentInput:
     attachments: List[Dict[str, Any]] = field(default_factory=list)
     multimodal_observations: Dict[str, Any] = field(default_factory=dict)
     attachment_summary: str = ""
+    eval_history_turns: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def _chat_kernel_v2_enabled() -> bool:
+    raw = str(os.environ.get("HOST_CHAT_KERNEL_V2_ENABLED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _response_form_from_agent_input(agent_input: ChatAgentInput) -> str:
+    runtime = dict(agent_input.llm_runtime or {}) if isinstance(agent_input.llm_runtime, Mapping) else {}
+    render_policy = dict(agent_input.render_policy or {}) if isinstance(agent_input.render_policy, Mapping) else {}
+    response_form = str(
+        agent_input.response_form
+        or runtime.get("response_form")
+        or runtime.get("planned_response_form")
+        or render_policy.get("response_form")
+        or ""
+    ).strip().lower()
+    if response_form:
+        return response_form
+    return "text"
+
+
+def _should_use_chat_kernel_v2(agent_input: ChatAgentInput, sub_agent_ctx: SubAgentContext | None) -> bool:
+    if not _chat_kernel_v2_enabled():
+        return False
+    if sub_agent_ctx is not None:
+        return False
+    multimodal = dict(agent_input.multimodal_observations or {})
+    multimodal_act = dict(multimodal.get("multimodal_act") or {}) if isinstance(multimodal.get("multimodal_act"), Mapping) else {}
+    primary_modality = str(multimodal.get("primary_modality") or multimodal_act.get("input_kind") or "").strip().lower()
+    user_intent = str(multimodal_act.get("user_intent") or "").strip().lower()
+    if (
+        primary_modality in {"emoji", "sticker", "gif"}
+        and user_intent in {"social_reaction", "image_social", "emoji_social"}
+        and not bool(multimodal_act.get("requires_text_answer"))
+    ):
+        return False
+    intent = dict(agent_input.intent_draft or {})
+    route = str(intent.get("route") or "").strip().lower()
+    target = str(intent.get("target_id") or intent.get("action") or "").strip().lower()
+    if route in {"skill", "delegate", "plan"} or target.endswith("_agent"):
+        return False
+    return True
+
+
+def _build_chat_kernel_runtime_payload(agent_input: ChatAgentInput, *, response_form: str, render_profile: str) -> dict[str, Any]:
+    if render_profile == "ja_voice":
+        render_target_lang = "ja"
+    elif render_profile == "media_action":
+        render_target_lang = "media"
+    else:
+        render_target_lang = "zh"
+    return {
+        "request": {
+            "request_id": agent_input.request_id,
+            "session_id": agent_input.session_id,
+            "person_id": agent_input.person_id,
+            "user_message": agent_input.user_message,
+            "render_target_lang": render_target_lang,
+            "render_profile": render_profile,
+            "response_form": response_form,
+            "attachment_summary": agent_input.attachment_summary,
+            "multimodal_observations": dict(agent_input.multimodal_observations or {}),
+        },
+        "render_target_lang": render_target_lang,
+        "response_form": response_form,
+        "render_profile": render_profile,
+        "intent_draft": dict(agent_input.intent_draft or {}),
+        "emotion_context": dict(agent_input.emotion_context or {}),
+        "emotion": {"state": dict(agent_input.emotion_snapshot or {})},
+        "bond_summary": dict(agent_input.bond_summary or {}),
+        "prompt_context": {"bond_summary": dict(agent_input.bond_summary or {})},
+        "retrieval": {
+            **dict(agent_input.retrieval_summary or {}),
+            "evidence_items": list(agent_input.retrieval_evidence_items or []),
+        },
+        "multimodal_input": {
+            "attachments": list(agent_input.attachments or []),
+            "observations": dict(agent_input.multimodal_observations or {}),
+        },
+        "ab_eval": {
+            "history_turns": list(agent_input.eval_history_turns or []),
+        },
+    }
+
+
+async def _chat_kernel_v2_sse_generator(
+    agent_input: ChatAgentInput,
+    *,
+    trace_stage_meta: dict[str, Any],
+) -> AsyncGenerator[str, None]:
+    from host_brain.app.chat_kernel_v2 import ChatKernelRequest, get_chat_kernel_v2  # noqa: PLC0415
+    from host_brain.app.context.interaction_facts_plane import assemble_interaction_facts_plane  # noqa: PLC0415
+    from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: PLC0415
+    from host_brain.app.response_form_contract import derive_render_profile_for_response_form, normalize_response_form  # noqa: PLC0415
+
+    started_ms = int(time.time() * 1000)
+    response_form = normalize_response_form(_response_form_from_agent_input(agent_input))
+    render_profile = derive_render_profile_for_response_form(response_form)
+    runtime_payload = _build_chat_kernel_runtime_payload(
+        agent_input,
+        response_form=response_form,
+        render_profile=render_profile,
+    )
+    facts = assemble_interaction_facts_plane(runtime_payload=runtime_payload)
+    result = await get_chat_kernel_v2().generate(
+        ChatKernelRequest(
+            request_id=agent_input.request_id,
+            session_id=agent_input.session_id,
+            person_id=agent_input.person_id,
+            user_message=agent_input.user_message,
+            history_turns=facts.history_turns,
+            compiled_soul=get_compiled_soul(),
+            interaction_facts=facts,
+            response_form=response_form,
+            render_profile=render_profile,
+            llm_runtime=dict(agent_input.llm_runtime or {}) if isinstance(agent_input.llm_runtime, Mapping) else {},
+            eval_mode=bool(trace_stage_meta.get("ab_eval")),
+        )
+    )
+    envelope = result.reply_envelope
+    narrative = str(envelope.text or "").strip()
+    performance = envelope.performance
+    total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    kernel_trace = {
+        **dict(trace_stage_meta or {}),
+        "chat_agent_used": True,
+        "chat_kernel_v2_used": True,
+        "reply_source": "chat_kernel_v2",
+        "reply_envelope": envelope.as_dict(),
+        "performance": performance.as_dict(),
+        "text_quality_gate": dict(result.quality_flags or {}),
+        "skip_heavy_persona_postprocess": True,
+    }
+    if narrative:
+        yield _sse({"phase": "RENDER", "chunk": narrative})
+        yield _sse({"phase": "SENTENCE", "sentence": narrative, "sentence_index": 0})
+    commit_decision = "APPROVE" if envelope.sendable else "NO_REPLY"
+    yield _sse(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": commit_decision,
+            "reason_code": envelope.reason_code,
+            "narrative": narrative,
+            "request_id": agent_input.request_id,
+            "reply_envelope": envelope.as_dict(),
+            "audit_refs": {
+                "request_id": agent_input.request_id,
+                "path": "chat_agent:chat_kernel_v2",
+                "latency_ms": total_latency_ms,
+                "llm_latency_ms": result.llm_latency_ms,
+                "first_token_ms": result.llm_latency_ms if narrative else None,
+                "model_id": result.model_id,
+                "provider_name": result.provider_name,
+                "response_form": response_form,
+                "render_profile": render_profile,
+                "emotion_tag": performance.emotion_tag,
+                "emotion_intensity": performance.emotion_intensity,
+                "performance": performance.as_dict(),
+                "prompt_digest": result.prompt_digest,
+                "reply_envelope": envelope.as_dict(),
+                "trace": result.trace,
+            },
+        }
+    )
+    ab_eval_mode = str(os.environ.get("AB_EVAL_MODE") or "").strip().lower() in {"1", "true", "yes", "on"} or bool(trace_stage_meta.get("ab_eval"))
+    if not ab_eval_mode and envelope.persistable:
+        try:
+            from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
+
+            asyncio.create_task(
+                _async_post_process(
+                    request_id=agent_input.request_id,
+                    person_id=agent_input.person_id,
+                    session_id=agent_input.session_id,
+                    user_message=agent_input.user_message,
+                    narrative=narrative,
+                    emotion_context={
+                        **dict(agent_input.emotion_context or {}),
+                        "emotion_tag": performance.emotion_tag,
+                        "emotion_intensity": performance.emotion_intensity,
+                        "performance": performance.as_dict(),
+                    },
+                    bond_summary=dict(agent_input.bond_summary or {}),
+                    ts_ms=agent_input.ts_ms or int(time.time() * 1000),
+                    render_target_lang="ja" if render_profile == "ja_voice" else "zh",
+                    total_latency_ms=total_latency_ms,
+                    llm_latency_ms=result.llm_latency_ms,
+                    first_token_ms=result.llm_latency_ms if narrative else None,
+                    provider_name=result.provider_name,
+                    model_id=result.model_id,
+                    buffer_stream=True,
+                    delegated_agents=[],
+                    retrieval_summary=dict(agent_input.retrieval_summary or {}),
+                    gov_decision={"decision": commit_decision},
+                    pii_ingress_stats={},
+                    pii_egress_stats={},
+                    llm_input_digest=result.prompt_digest,
+                    retrieval_evidence_items=list(agent_input.retrieval_evidence_items or []),
+                    motive_state=None,
+                    reply_plan={
+                        "primary_topic": str(facts.conversation_interpretation.get("literal_topic") or "").strip(),
+                        "response_goal": "chat_kernel_v2",
+                        "response_form": response_form,
+                        "response_form_reason": "chat_kernel_v2",
+                        "plan_confidence": 1.0,
+                    },
+                    trace_stage_meta=kernel_trace,
+                )
+            )
+        except Exception as exc:
+            _logger.debug("[%s] chat_kernel_v2 post_process schedule failed: %s", agent_input.request_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +361,13 @@ class ChatAgentInput:
 
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = str(os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _should_cut_stream_after_policy_cap(
@@ -1564,7 +1787,7 @@ async def chat_agent_sse_generator(
 ) -> AsyncGenerator[str, None]:
     """ChatAgent SSE 生成器（Phase XV 核心）。
 
-职责：接收 ChatAgentInput → 构建 Soul prompt → SurfaceRenderer 或 LLM 生成
+职责：接收 ChatAgentInput → 构建 Soul prompt → LLM 生成
           → SentenceSplitter → 轻校验 → 净化 → COMMIT → 异步后处理。
 
     调用者：Executive Runtime（由 cortex_orchestrator 链路调用此函数）。
@@ -1578,7 +1801,7 @@ async def chat_agent_sse_generator(
     bond_summary = agent_input.bond_summary
     retrieval_evidence_items = agent_input.retrieval_evidence_items
     retrieval_summary = agent_input.retrieval_summary
-    render_target_lang = agent_input.render_target_lang  # Phase XV: 固定 "zh"
+    render_target_lang = agent_input.render_target_lang
     thread_id = agent_input.thread_id
     ts_ms = agent_input.ts_ms or int(time.time() * 1000)
     intent_draft = agent_input.intent_draft or {}
@@ -1597,12 +1820,18 @@ async def chat_agent_sse_generator(
     ):
         trace_stage_meta["chat_sub_agent_suppressed"] = sub_agent_ctx.agent_id
         sub_agent_ctx = None
+    if _should_use_chat_kernel_v2(agent_input, sub_agent_ctx):
+        async for event in _chat_kernel_v2_sse_generator(
+            agent_input,
+            trace_stage_meta=trace_stage_meta,
+        ):
+            yield event
+        return
     deterministic_reply = _build_deterministic_sub_agent_reply(
         sub_agent_ctx,
         render_target_lang=render_target_lang,
         user_message=user_message,
     )
-
     prompt_messages: list[dict[str, str]] = []
     gen_params: Dict[str, Any] = {}
     prompt_runtime_payload: Dict[str, Any] = {}
@@ -1652,16 +1881,9 @@ async def chat_agent_sse_generator(
         # 合并 turn-local context（子 Agent 结果 + prefrontal 规划）
         _turn_context_sections = [p for p in [sub_agent_context_prompt, _prefrontal_context_block] if p]
 
-        # 回复深度策略：Gateway 通道使用更短的回复
-        reply_depth_hint = ""
-        if agent_input.reply_depth_policy == "gateway":
-            reply_depth_hint = _runtime_text(
-                "gateway_reply_depth_hint",
-            )
-
         try:
             prompt_result = build_cortex_prompt(
-                user_message=effective_user_message + reply_depth_hint,
+                user_message=effective_user_message,
                 render_target_lang=render_target_lang,
                 emotion_context=emotion_context,
                 emotion_snapshot=emotion_snapshot,
@@ -1675,6 +1897,7 @@ async def chat_agent_sse_generator(
                 attachments=list(agent_input.attachments or []),
                 multimodal_observations=dict(agent_input.multimodal_observations or {}),
                 attachment_summary=str(agent_input.attachment_summary or "").strip(),
+                eval_history_turns=list(agent_input.eval_history_turns or []),
                 turn_context_sections=_turn_context_sections,
                 include_runtime_payload=True,
             )
@@ -1728,6 +1951,25 @@ async def chat_agent_sse_generator(
             })
             return
     reply_plan_decision = coerce_reply_plan(reply_plan)
+
+    def _is_image_social_reply_plan(plan: Any) -> bool:
+        if isinstance(plan, dict):
+            topic = str(plan.get("primary_topic") or "").strip()
+            form_reason = str(plan.get("response_form_reason") or "").strip()
+        else:
+            topic = str(getattr(plan, "primary_topic", "") or "").strip()
+            form_reason = str(getattr(plan, "response_form_reason", "") or "").strip()
+        return (
+            topic in {"emoji_social_reply", "emoji_social_followup"}
+            or form_reason in {"image_social_reply", "image_social_followup"}
+        )
+
+    image_social_reply_plan = _is_image_social_reply_plan(reply_plan_decision)
+    social_reaction_form_only_plan = (
+        str(getattr(reply_plan_decision, "primary_topic", "") or "").strip() == "emoji_social_reply"
+        and str(getattr(reply_plan_decision, "response_form_reason", "") or "").strip() == "social_reaction"
+        and bool(getattr(reply_plan_decision, "allow_form_only_reply", False))
+    )
     if not deterministic_reply:
         previous_assistant_text = next(
             (
@@ -1739,6 +1981,159 @@ async def chat_agent_sse_generator(
         )
         trace_stage_meta["deterministic_primary_used"] = False
         trace_stage_meta["deterministic_primary_reason"] = "disabled:surface_renderer_or_full_model_only"
+
+    if social_reaction_form_only_plan and not deterministic_reply:
+        social_reaction_started_ms = int(time.time() * 1000)
+        from host_brain.app.context.multimodal_act import coerce_multimodal_act  # noqa: PLC0415
+        from host_brain.app.context.soul_runtime import get_compiled_soul  # noqa: PLC0415
+        from host_brain.app.reaction_catalog import get_reaction_catalog  # noqa: PLC0415
+        from host_brain.app.reply_envelope import ReplyEnvelope  # noqa: PLC0415
+
+        multimodal_act = coerce_multimodal_act(
+            dict(getattr(reply_plan_decision, "multimodal", {}) or {}).get("multimodal_act")
+            or getattr(reply_plan_decision, "multimodal", {})
+        )
+        platform = str(getattr(agent_input, "reply_channel", "") or "").strip().lower() or "qq"
+        soul_id = str(getattr(get_compiled_soul(), "soul_id", "") or "").strip()
+        reaction_asset = get_reaction_catalog().select(
+            platform=platform,
+            emotion=str(multimodal_act.emotion or "unknown").strip().lower() or "unknown",
+            intensity=float(multimodal_act.intensity or 0.0),
+            soul_id=soul_id,
+        )
+        social_reaction_ms = max(0, int(time.time() * 1000) - social_reaction_started_ms)
+        trace_stage_meta["social_reaction_decider"] = {
+            "invoked": True,
+            "latency_ms": social_reaction_ms,
+            "affected_output": bool(reaction_asset),
+            "source": "reaction_catalog",
+            "emotion": multimodal_act.emotion,
+            "intensity": multimodal_act.intensity,
+            "platform": platform,
+            "reason_code": "REACTION_ASSET_SELECTED" if reaction_asset else "SOCIAL_REACTION_ASSET_MISSING",
+        }
+        trace_stage_meta["image_social_full_chat_lane"] = {
+            "status": "SKIPPED",
+            "invoked": False,
+            "affected_output": False,
+            "source": "social_reaction_decider",
+            "reason_code": "social_reaction_form_only",
+        }
+        trace_stage_meta["surface_renderer"] = {
+            "status": "SKIPPED",
+            "invoked": False,
+            "affected_output": False,
+            "source": "social_reaction_decider",
+            "reason_code": "social_reaction_form_only",
+        }
+        timings_ms = {
+            "prompt_build_ms": prompt_build_ms,
+            "social_reaction_decider_ms": social_reaction_ms,
+            "llm_runtime_resolve_ms": 0,
+            "llm_latency_ms": 0,
+            "first_token_ms": 0,
+        }
+        if reaction_asset is None:
+            reply_envelope = ReplyEnvelope.no_reply(
+                reason_code="SOCIAL_REACTION_ASSET_MISSING",
+                source="reaction_catalog",
+                audit={
+                    "request_id": request_id,
+                    "emotion": multimodal_act.emotion,
+                    "platform": platform,
+                    "response_form_reason": reply_plan_decision.response_form_reason,
+                },
+            )
+            yield _sse({
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "SOCIAL_REACTION_ASSET_MISSING",
+                "narrative": "",
+                "request_id": request_id,
+                "reply_envelope": reply_envelope.as_dict(),
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "chat_agent:social_reaction",
+                    "latency_ms": social_reaction_ms,
+                    "first_token_ms": 0,
+                    "llm_latency_ms": 0,
+                    "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                    "stream_buffered": False,
+                    "model_id": "reaction-catalog",
+                    "render_target_lang": render_target_lang,
+                    "tts_text_ja": None,
+                    "response_form": str(reply_plan_decision.response_form or "sticker").strip() or "sticker",
+                    "response_form_reason": str(reply_plan_decision.response_form_reason or "social_reaction").strip(),
+                    "timings_ms": timings_ms,
+                    "response_intelligence": {"reflection": {"status": "BYPASSED", "reason_code": "social_reaction_form_only"}},
+                    "suppress_final_reply": True,
+                    "suppress_final_reply_reason_code": "SOCIAL_REACTION_ASSET_MISSING",
+                    "reply_envelope": reply_envelope.as_dict(),
+                    "trace_stage_meta": trace_stage_meta,
+                },
+            })
+            return
+
+        response_form = str(reaction_asset.response_form or reply_plan_decision.response_form or "sticker").strip().lower() or "sticker"
+        if response_form not in {"sticker", "image", "gif"}:
+            response_form = "sticker"
+        raw_extra = {
+            **dict(reaction_asset.raw_extra or {}),
+            "media_ref": reaction_asset.media_ref,
+            "reaction_id": reaction_asset.reaction_id,
+            "content": reaction_asset.content,
+            "multimodal_act": multimodal_act.as_dict(),
+        }
+        reply_envelope = ReplyEnvelope.final_reply(
+            text="",
+            response_form=response_form,
+            source="reaction_catalog",
+            cacheable=False,
+            media_ref=str(reaction_asset.media_ref or "").strip(),
+            reaction_id=str(reaction_asset.reaction_id or "").strip(),
+            raw_extra=raw_extra,
+            audit={
+                "request_id": request_id,
+                "emotion": multimodal_act.emotion,
+                "platform": platform,
+                "response_form_reason": reply_plan_decision.response_form_reason,
+            },
+        )
+        yield _sse({
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": None,
+            "narrative": reply_envelope.text,
+            "request_id": request_id,
+            "reply_envelope": reply_envelope.as_dict(),
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "chat_agent:social_reaction",
+                "latency_ms": social_reaction_ms,
+                "first_token_ms": 0,
+                "llm_latency_ms": 0,
+                "emotion_tag": str(emotion_context.get("emotion_tag") or "NEUTRAL"),
+                "stream_buffered": False,
+                "model_id": "reaction-catalog",
+                "render_target_lang": render_target_lang,
+                "tts_text_ja": None,
+                "response_form": response_form,
+                "response_form_reason": str(reply_plan_decision.response_form_reason or "social_reaction").strip(),
+                "timings_ms": timings_ms,
+                "response_intelligence": {"reflection": {"status": "BYPASSED", "reason_code": "social_reaction_form_only"}},
+                "pii_stats": {},
+                "suppress_final_reply": False,
+                "suppress_final_reply_reason_code": None,
+                "media_ref": reply_envelope.media_ref,
+                "reaction_id": reply_envelope.reaction_id,
+                "raw_extra": raw_extra,
+                "reply_envelope": reply_envelope.as_dict(),
+                "trace_stage_meta": trace_stage_meta,
+            },
+        })
+        return
 
     # ── 2. 解析 LLM 运行时（ChatAgent 专用配置）─────────────────────
     if deterministic_reply:
@@ -1846,13 +2241,51 @@ async def chat_agent_sse_generator(
     api_key = str(llm_runtime.get("llm_api_key") or "").strip()
     base_url = str(llm_runtime.get("base_url_override") or "").strip() or None
 
-    # ChatAgent 专属 gen_params（高温度，自然流畅）
-    agent_gen_params = dict(gen_params or {})
+    # Runtime defaults provide the broad model personality; prompt builders can
+    # still override per-lane budgets/temperature for stricter chat contracts.
+    agent_gen_params = {}
     agent_overrides = llm_runtime.get("agent_gen_params") or {}
     agent_gen_params.update({
         k: v for k, v in agent_overrides.items()
         if v is not None
     })
+    agent_gen_params.update({
+        k: v for k, v in dict(gen_params or {}).items()
+        if v is not None
+    })
+    if bool(agent_gen_params.pop("disable_token_limit", False)):
+        for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+            agent_gen_params.pop(token_key, None)
+    response_form_for_completion = str(
+        getattr(reply_plan_decision, "response_form", "") or reply_plan.get("response_form") or "text"
+    ).strip().lower()
+    provider_model_fingerprint = f"{provider_name}:{model_id}".lower()
+    use_nonstream_completion = (
+        response_form_for_completion in {"", "text"}
+        and (
+            str(provider_name or "").strip().lower() == "gemini"
+            or "gemini-" in provider_model_fingerprint
+        )
+        and str(os.environ.get("HOST_CHAT_GEMINI_NONSTREAM_TEXT") or "true").strip().lower()
+        not in {"0", "false", "no", "off"}
+    )
+    if use_nonstream_completion:
+        for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+            agent_gen_params.pop(token_key, None)
+        trace_stage_meta["completion_mode"] = {
+            "mode": "non_stream",
+            "reason_code": "gemini_stream_first_chunk_truncation_guard",
+            "provider": provider_name,
+            "model": model_id,
+        }
+    if image_social_reply_plan and not deterministic_reply and not social_reaction_form_only_plan:
+        trace_stage_meta["image_social_full_chat_lane"] = {
+            "status": "ENABLED",
+            "invoked": True,
+            "affected_output": True,
+            "source": "full_model",
+            "reason_code": "image_social_text_uses_full_chat",
+        }
 
     # ── 3. 流式生成 + SentenceSplitter ──────────────────────────────
     from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
@@ -1897,6 +2330,8 @@ async def chat_agent_sse_generator(
         render_policy=reply_plan,
     )
     if bool(reply_plan.get("force_buffering")):
+        buffer_stream = True
+    if use_nonstream_completion:
         buffer_stream = True
     if deterministic_reply:
         buffer_stream = False
@@ -2031,42 +2466,31 @@ async def chat_agent_sse_generator(
                 "allow_rewrite": bool(allow_rewrite),
             }
         }
-        candidate = _apply_render_policy_hard_guard(
-            candidate,
-            reply_plan,
-            user_message=user_message,
-            bond_stage=str((bond_summary or {}).get("stage") or ""),
-            render_target_lang=render_target_lang,
-        )
         candidate = _strip_internal_delegate_markers(candidate)
         candidate = _airlock_sanitize_output(candidate)
         candidate, _pii_stats = scrub_pii_egress(candidate)
-        candidate = _apply_render_policy_hard_guard(
-            candidate,
-            reply_plan,
-            user_message=user_message,
-            bond_stage=str((bond_summary or {}).get("stage") or ""),
-            render_target_lang=render_target_lang,
-        )
         return candidate, _ri_meta, _pii_stats
 
     def _is_validation_acceptable(validation_candidate: Any) -> bool:
         if validation_candidate is None:
             return False
-        if not bool(getattr(validation_candidate, "safe_to_emit", False)):
-            return False
-        if bool(getattr(validation_candidate, "missing_actions", ())):
-            return False
-        if bool(getattr(validation_candidate, "is_valid", False)):
-            return True
         reason_codes = {
             str(item or "").strip()
             for item in list(getattr(validation_candidate, "reason_codes", ()) or ())
             if str(item or "").strip()
         }
-        if reason_codes == {"meta_contract_echo"}:
-            return float(getattr(validation_candidate, "quality_score", 0.0) or 0.0) >= 0.9
-        return False
+        blocking_reasons = {
+            "empty_reply",
+            "symbol_only_reply",
+            "unfinished_tail",
+            "prompt_leak",
+            "process_term_echo",
+            "unsafe_content",
+            "wrong_form",
+        }
+        if reason_codes & blocking_reasons:
+            return False
+        return True
 
     def _trace_text_sample(raw: str, *, limit: int = 240) -> str:
         normalized = str(raw or "").strip()
@@ -2076,18 +2500,6 @@ async def chat_agent_sse_generator(
 
     suppress_final_reply = False
     suppress_final_reply_reason_code: str | None = None
-
-    def _is_image_social_reply_plan(plan: Any) -> bool:
-        if isinstance(plan, dict):
-            topic = str(plan.get("primary_topic") or "").strip()
-            form_reason = str(plan.get("response_form_reason") or "").strip()
-        else:
-            topic = str(getattr(plan, "primary_topic", "") or "").strip()
-            form_reason = str(getattr(plan, "response_form_reason", "") or "").strip()
-        return (
-            topic in {"emoji_social_reply", "emoji_social_followup"}
-            or form_reason in {"image_social_reply", "image_social_followup"}
-        )
 
     def _apply_validation_fallback(
         *,
@@ -2113,7 +2525,7 @@ async def chat_agent_sse_generator(
         ]
         trace_stage_meta.setdefault("reply_validation", {})
         suppress_final_reply = True
-        if _is_image_social_reply_plan(reply_plan_decision):
+        if image_social_reply_plan:
             suppress_final_reply_reason_code = "IMAGE_SOCIAL_NO_SAFE_REPLY"
         else:
             suppress_final_reply_reason_code = "VALIDATION_NO_SAFE_REPLY"
@@ -2154,109 +2566,93 @@ async def chat_agent_sse_generator(
         trace_stage_meta["reply_source"] = "suppressed_no_reply"
 
     if not deterministic_reply:
-        from host_brain.persona.surface_renderer import (  # noqa: PLC0415
-            SurfaceRenderer,
-            SurfaceRequest,
-        )
-
-        def _surface_finalize_text(raw_text: str) -> str:
-            finalized, _surface_ri_meta, _surface_pii = _finalize_candidate_text(
-                raw_text,
-                allow_rewrite=False,
-            )
-            return finalized
-
-        def _surface_validate_reply(candidate_text: str) -> Any:
-            return validate_reply(
-                text=candidate_text,
-                plan=reply_plan_decision,
-                user_message=user_message,
-                previous_assistant_text=previous_assistant_text,
-            )
-
-        try:
-            surface_result = await SurfaceRenderer().render(
-                SurfaceRequest(
-                    request_id=request_id,
-                    session_id=session_id,
-                    user_message=user_message,
-                    plan=reply_plan_decision,
-                    previous_assistant_text=previous_assistant_text,
-                    render_target_lang=render_target_lang,
-                    provider_name=provider_name,
-                    model_id=model_id,
-                    api_key=api_key,
-                    base_url=base_url,
-                    finalize_text=_surface_finalize_text,
-                    validate_reply=_surface_validate_reply,
-                    trace_meta=trace_stage_meta,
-                )
-            )
-        except Exception as surface_exc:
-            surface_result = None
-            trace_stage_meta["surface_renderer"] = {
-                "status": "FAILED",
-                "invoked": True,
-                "affected_output": False,
-                "source": "surface",
-                "detail": str(surface_exc)[:220],
-            }
-        if surface_result is not None and str(surface_result.text or "").strip():
-            deterministic_reply = str(surface_result.text or "").strip()
-            deterministic_reply_provider_name = surface_result.provider_name or provider_name
-            deterministic_reply_model_id = surface_result.model_id or model_id
-            provider_name = deterministic_reply_provider_name
-            model_id = deterministic_reply_model_id
-            reply_used_fallback = bool(surface_result.degraded)
-            buffer_stream = False
-            timeout_ms = 0
-            api_key = ""
-            base_url = None
-            trace_stage_meta["deterministic_primary_used"] = True
-            trace_stage_meta["deterministic_primary_reason"] = f"{str(surface_result.source or 'surface')}:renderer"
-            trace_stage_meta["reply_used_fallback"] = bool(surface_result.degraded)
-            trace_stage_meta["fallback_used"] = bool(surface_result.degraded)
-            trace_stage_meta["reply_source"] = str(surface_result.source or "surface").strip()
-            trace_stage_meta["reply_cacheable"] = bool(surface_result.cacheable)
-        elif _is_image_social_reply_plan(reply_plan_decision):
-            surface_no_candidate_reason = str(
-                getattr(surface_result, "skipped_reason", "") if surface_result is not None else ""
-            ).strip() or "image_social_surface_no_candidate"
-            trace_stage_meta["deterministic_primary_used"] = False
-            trace_stage_meta["deterministic_primary_reason"] = "image_social_surface_no_candidate"
-            trace_stage_meta["image_social_surface_continue_full_model"] = {
-                "status": "CONTINUE",
-                "invoked": True,
-                "affected_output": False,
-                "source": "surface",
-                "reason_code": surface_no_candidate_reason,
-            }
+        trace_stage_meta["surface_renderer"] = {
+            "status": "SKIPPED",
+            "invoked": False,
+            "affected_output": False,
+            "source": "full_model",
+            "reason_code": "retired_from_normal_text_final_reply",
+        }
 
     try:
         if deterministic_reply:
             full_text = str(deterministic_reply).strip()
-            visible = _apply_render_policy_stream_guard(
-                full_text,
-                reply_plan,
-                render_target_lang=render_target_lang,
-            )
-            rendered_text = visible
-            first_token_ms = 0
-            if visible:
-                yield _sse({"phase": "RENDER", "chunk": visible})
-                await asyncio.sleep(0)
-                for sentence in splitter.feed(visible):
-                    yield _sse({
-                        "phase": "SENTENCE",
-                        "sentence": sentence,
-                        "sentence_index": sentence_index,
-                    })
-                    sentence_index += 1
-                await asyncio.sleep(0)
+            if image_social_reply_plan:
+                _pre_render_narrative, _pre_render_ri_meta, _pre_render_pii = _finalize_candidate_text(
+                    full_text,
+                    allow_rewrite=False,
+                )
+                _pre_render_validation = validate_reply(
+                    text=_pre_render_narrative,
+                    plan=reply_plan_decision,
+                    user_message=user_message,
+                    previous_assistant_text=previous_assistant_text,
+                )
+                trace_stage_meta["image_social_pre_render_validation"] = (
+                    _pre_render_validation.as_dict() if hasattr(_pre_render_validation, "as_dict") else {}
+                )
+                if not _is_validation_acceptable(_pre_render_validation):
+                    _apply_validation_fallback(
+                        reason_codes=getattr(_pre_render_validation, "reason_codes", ()) or (),
+                        source="image_social_deterministic_pre_render_invalid",
+                    )
+            if suppress_final_reply:
+                full_text = ""
+                rendered_text = ""
+                first_token_ms = 0 if first_token_ms is None else first_token_ms
+            else:
+                visible = _apply_render_policy_stream_guard(
+                    full_text,
+                    reply_plan,
+                    render_target_lang=render_target_lang,
+                )
+                rendered_text = visible
+                first_token_ms = 0
+                if visible:
+                    yield _sse({"phase": "RENDER", "chunk": visible})
+                    await asyncio.sleep(0)
+                    for sentence in splitter.feed(visible):
+                        yield _sse({
+                            "phase": "SENTENCE",
+                            "sentence": sentence,
+                            "sentence_index": sentence_index,
+                        })
+                        sentence_index += 1
+                    await asyncio.sleep(0)
         elif suppress_final_reply:
             full_text = ""
             rendered_text = ""
             first_token_ms = 0 if first_token_ms is None else first_token_ms
+        elif use_nonstream_completion:
+            _complete_started_ms = int(time.time() * 1000)
+            _complete_result = await acomplete_llm_with_pool(
+                request_id=request_id,
+                scene_type="CHAT",
+                cognitive_tier="A",
+                provider_name=provider_name,
+                model_id=model_id,
+                api_key=api_key,
+                timeout_ms=timeout_ms,
+                messages=prompt_messages,
+                gen_params=agent_gen_params,
+                base_url_override=base_url,
+            )
+            full_text = str(getattr(_complete_result, "content", "") or "").strip()
+            first_token_ms = max(0, int(time.time() * 1000) - _complete_started_ms)
+            final_provider = str(getattr(_complete_result, "final_provider", "") or "").strip()
+            final_model = str(getattr(_complete_result, "final_model", "") or "").strip()
+            if final_provider:
+                provider_name = final_provider
+            if final_model:
+                model_id = final_model
+            trace_stage_meta["completion_mode"] = {
+                **dict(trace_stage_meta.get("completion_mode") or {}),
+                "latency_ms": first_token_ms,
+                "final_provider": provider_name,
+                "final_model": model_id,
+                "pool_exhausted": bool(getattr(_complete_result, "pool_exhausted", False)),
+                "raw_text_sample": _trace_text_sample(full_text),
+            }
         else:
             async for chunk in astream_llm_chunks_with_pool(
                 request_id=request_id,
@@ -2385,7 +2781,7 @@ async def chat_agent_sse_generator(
         allow_rewrite=buffer_stream,
     )
     tts_text = _extract_tts_text(full_text)
-    if not deterministic_reply and reply_plan_decision.requires_validation:
+    if not deterministic_reply:
         _validation = validate_reply(
             text=narrative,
             plan=reply_plan_decision,
@@ -2398,12 +2794,14 @@ async def chat_agent_sse_generator(
         trace_stage_meta["reply_validation"]["initial_text"] = _trace_text_sample(narrative)
         if _is_validation_acceptable(_validation):
             trace_stage_meta["reply_validation"]["accepted_initial"] = True
-        elif _is_image_social_reply_plan(reply_plan_decision):
+        elif image_social_reply_plan:
             _apply_validation_fallback(
                 reason_codes=getattr(_validation, "reason_codes", ()) or (),
                 source="image_social_initial_invalid",
             )
         elif _validation.should_retry:
+            if image_social_reply_plan:
+                trace_stage_meta["reply_validation"]["image_social_retry_reason"] = "safe_initial_invalid"
             _correction_prompt = build_correction_prompt(
                 plan=reply_plan_decision,
                 validation=_validation,
@@ -2453,6 +2851,11 @@ async def chat_agent_sse_generator(
                             "quality_score": float(getattr(_retry_validation, "quality_score", 0.0) or 0.0),
                             "reason_codes": list(getattr(_retry_validation, "reason_codes", ()) or ()),
                         }
+                elif image_social_reply_plan:
+                    _apply_validation_fallback(
+                        reason_codes=getattr(_retry_validation, "reason_codes", ()) or (),
+                        source="image_social_retry_invalid",
+                    )
                 else:
                     _rescue_raw_text, _rescue_first_token_ms = await _attempt_soul_rescue(
                         previous_candidate_text=_retry_narrative,
@@ -2504,6 +2907,11 @@ async def chat_agent_sse_generator(
                             reason_codes=getattr(_retry_validation, "reason_codes", ()) or (),
                             source="retry_rescue_empty",
                         )
+            elif image_social_reply_plan:
+                _apply_validation_fallback(
+                    reason_codes=getattr(_validation, "reason_codes", ()) or (),
+                    source="image_social_retry_empty",
+                )
             else:
                 _rescue_raw_text, _rescue_first_token_ms = await _attempt_soul_rescue(
                     previous_candidate_text=narrative,
@@ -2840,9 +3248,18 @@ async def chat_agent_sse_generator(
         if suppress_final_reply:
             reply_plan_for_commit["suppress_final_reply"] = True
             reply_plan_for_commit["suppress_final_reply_reason_code"] = suppress_final_reply_reason_code
-        from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
-        asyncio.create_task(
-            _async_post_process(
+        _ab_eval_mode = str(os.environ.get("AB_EVAL_MODE") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        } or bool(trace_stage_meta.get("ab_eval"))
+        if _ab_eval_mode:
+            trace_stage_meta["post_process_skipped"] = "AB_EVAL_MODE"
+        else:
+            from host_brain.app.agent_runtime_shared import _async_post_process  # noqa: PLC0415
+            asyncio.create_task(
+                _async_post_process(
                 request_id=request_id,
                 person_id=person_id,
                 session_id=session_id,
@@ -2893,7 +3310,7 @@ async def chat_agent_sse_generator(
                     "voice_outputs_enabled": _voice_outputs_enabled,
                 },
             )
-        )
+            )
     except Exception as _pp_exc:
         _logger.debug("[%s] ChatAgent post_process task failed: %s", request_id, _pp_exc)
 

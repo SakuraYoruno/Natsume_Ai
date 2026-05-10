@@ -26,13 +26,13 @@ class TestBondToSummaryCN:
         assert "stage" in summary
         # 验证 stage 包含中文字符
         assert any('\u4e00' <= c <= '\u9fff' for c in str(summary["stage"]))
-        assert summary["stage"] == "朋友"
+        assert summary["stage"] == "关系好的兄妹"
 
     def test_to_summary_stranger_stage_is_chinese(self):
-        """STRANGER 阶段的 stage 字段为 "陌生人" """
+        """STRANGER 阶段的 stage 字段为初次见面的义妹。"""
         state = BondScoreState(user_id="user1", current_stage=STAGE_STRANGER)
         summary = state.to_summary()
-        assert summary["stage"] == "陌生人"
+        assert summary["stage"] == "初次见面的义妹"
 
     def test_to_summary_trend_is_chinese(self):
         """to_summary() 的 trend 字段为中文"""

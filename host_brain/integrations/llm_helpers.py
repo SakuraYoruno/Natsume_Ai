@@ -30,10 +30,10 @@ ProviderFn = Callable[[dict[str, Any]], Any]
 
 _logger = logging.getLogger("Natsume.integrations.llm_helpers")
 _POOL_DEFAULT_SPECS: dict[str, str] = {
-    "A": "gemini:gemini-2.5-pro,gemini:gemini-2.5-flash-lite,minimax:MiniMax-M2.7-Pro,minimax:MiniMax-M2.7,minimax:MiniMax-M2.6",
-    "B": "minimax:M2-her,gemini:gemini-2.5-pro,gemini:gemini-2.5-flash-lite,minimax:MiniMax-M2.7-Pro,minimax:MiniMax-M2.7",
-    "C": "gemini:gemini-2.5-flash-lite,minimax:MiniMax-abab6.5s,minimax:MiniMax-M2.7,gemini:gemini-2.5-pro",
-    "D": "minimax:MiniMax-M2.7,minimax:MiniMax-abab6.5s,gemini:gemini-2.5-flash-lite,gemini:gemini-2.5-pro",
+    "A": "deepseek:deepseek-v4-pro,deepseek:deepseek-v4-flash,gemini:gemini-2.5-pro,gemini:gemini-2.5-flash-lite,minimax:M2-her",
+    "B": "deepseek:deepseek-v4-flash,deepseek:deepseek-v4-pro,gemini:gemini-2.5-pro,gemini:gemini-2.5-flash-lite,minimax:M2-her",
+    "C": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite,deepseek:deepseek-v4-pro,gemini:gemini-2.5-pro,minimax:M2-her",
+    "D": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite,minimax:M2-her,deepseek:deepseek-v4-pro",
 }
 _POOL_COOLDOWN_LOCK = Lock()
 _POOL_COOLDOWN_UNTIL_MS: dict[str, int] = {}
@@ -237,6 +237,9 @@ def _make_pool_cache_key(
     *,
     scene_type: str,
     cognitive_tier: str,
+    provider_name: str | None,
+    model_id: str | None,
+    base_url_override: str | None,
     messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None,
     response_format: Any,
@@ -244,6 +247,9 @@ def _make_pool_cache_key(
     payload = {
         "scene_type": str(scene_type or "").strip().upper(),
         "cognitive_tier": str(cognitive_tier or "").strip().upper(),
+        "provider_name": str(provider_name or "").strip().lower(),
+        "model_id": str(model_id or "").strip(),
+        "base_url_override": str(base_url_override or "").strip(),
         "messages": [dict(item) for item in list(messages or []) if isinstance(item, Mapping)],
         "gen_params": dict(gen_params or {}),
         "response_format": response_format,
@@ -391,7 +397,7 @@ def _resolve_provider_base_url(provider_name: str, *, base_url_override: str | N
 
 
 def _is_minimax_standard_model(model_id: str | None) -> bool:
-    return str(model_id or "").strip().lower() == "m2-her"
+    return str(model_id or "").strip().lower() in {"m2-her", "minimax-m2-her"}
 
 
 def _resolve_minimax_base_url(base_url_override: str | None = None) -> str:
@@ -461,8 +467,11 @@ def _build_minimax_standard_payload(
         if name:
             row["name"] = name
         normalized_messages.append(row)
+    outbound_model_id = str(model_id or "").strip() or "M2-her"
+    if outbound_model_id.lower() == "minimax-m2-her":
+        outbound_model_id = "M2-her"
     return {
-        "model": str(model_id or "").strip() or "M2-her",
+        "model": outbound_model_id,
         "messages": normalized_messages,
         "stream": bool(stream),
         "temperature": temperature,
@@ -757,6 +766,70 @@ def _build_chat_openai_kwargs(
     return llm_kwargs
 
 
+def _build_chat_google_genai_kwargs(
+    *,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    gen_params: dict[str, Any] | None = None,
+    streaming: bool,
+) -> dict[str, Any]:
+    params = dict(gen_params or {})
+    temperature = float(params.get("temperature", 0.4))
+    top_p = float(params.get("top_p", 0.9))
+    normalized_model_id = str(model_id or "").strip().lower()
+    max_tokens = None
+    for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
+        raw_value = params.get(token_key)
+        try:
+            parsed = int(raw_value) if raw_value is not None else 0
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            # Native Gemini Pro models can spend a tiny output cap before visible
+            # text appears (signed content blocks / thinking overhead), which
+            # looks like a false empty response to the pool validator.
+            minimum_cap = 1024 if "pro" in normalized_model_id else 64
+            max_tokens = max(parsed, minimum_cap)
+            break
+
+    llm_kwargs: dict[str, Any] = {
+        "model": str(model_id or "").strip() or "gemini-2.5-flash-lite",
+        "api_key": api_key,
+        "request_timeout": max(1.0, float(timeout_ms) / 1000.0),
+        "retries": 0,
+        "temperature": temperature,
+        "top_p": top_p,
+        "streaming": streaming,
+    }
+    if max_tokens is not None:
+        llm_kwargs["max_tokens"] = max_tokens
+    return llm_kwargs
+
+
+def _invoke_gemini_native_text(
+    *,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+) -> str:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    llm = ChatGoogleGenerativeAI(
+        **_build_chat_google_genai_kwargs(
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            gen_params=gen_params,
+            streaming=False,
+        )
+    )
+    response = llm.invoke(_build_langchain_messages(messages))
+    return _extract_text_from_response_content(getattr(response, "content", ""))
+
+
 def invoke_llm_text(
     *,
     provider_name: str,
@@ -781,6 +854,14 @@ def invoke_llm_text(
             messages=messages,
             gen_params=gen_params,
             base_url_override=base_url_override,
+        )
+    if str(provider_name or "").strip().lower() == PROVIDER_GEMINI:
+        return _invoke_gemini_native_text(
+            model_id=model_id,
+            api_key=api_key,
+            timeout_ms=timeout_ms,
+            messages=messages,
+            gen_params=gen_params,
         )
 
     from langchain_openai import ChatOpenAI
@@ -959,6 +1040,9 @@ def complete_llm_with_pool_sync(
     cache_key = _make_pool_cache_key(
         scene_type=normalized_scene,
         cognitive_tier=normalized_tier,
+        provider_name=provider_name,
+        model_id=model_id,
+        base_url_override=base_url_override,
         messages=messages,
         gen_params=gen_params,
         response_format=response_format,
@@ -1211,6 +1295,24 @@ def stream_llm_chunks(
             gen_params=gen_params,
             base_url_override=base_url_override,
         )
+        return
+
+    if provider == PROVIDER_GEMINI:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        llm = ChatGoogleGenerativeAI(
+            **_build_chat_google_genai_kwargs(
+                model_id=model_id,
+                api_key=api_key,
+                timeout_ms=timeout_ms,
+                gen_params=gen_params,
+                streaming=True,
+            )
+        )
+        for chunk in llm.stream(_build_langchain_messages(messages)):
+            text = _extract_text_from_response_content(getattr(chunk, "content", "")) or ""
+            if text:
+                yield text
         return
 
     from langchain_openai import ChatOpenAI

@@ -51,7 +51,7 @@ class TestBondDynamicsEmotionFields:
             seq=1,
             user_id="user1",
             topic_id="topic-001",
-            capability_hint="朋友",
+            capability_hint="关系好的兄妹",
             evidence_refs=["ev-001"],
             emotion_tag="SAD",
             emotion_intensity=0.6,

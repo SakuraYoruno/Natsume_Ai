@@ -52,11 +52,11 @@ MAX_NARRATIVE_ITEMS = 3
 
 # 阶段叙事风格描述
 STAGE_NARRATIVE_STYLE: dict[str, str] = {
-    "STRANGER": "保持礼貌距离",
-    "ACQUAINTANCE": "可以提及共同经历",
-    "FRIEND": "自然地回忆共同时光",
-    "CLOSE_FRIEND": "可以深情地提起共同回忆",
-    "CONFIDANT": "用亲密的语气谈起你们的故事",
+    "STRANGER": "义妹关系刚开始，收着但不当外人",
+    "ACQUAINTANCE": "相处中的义妹，可以提及刚建立的共同经历",
+    "FRIEND": "关系好的兄妹，自然地回忆共同时光",
+    "CLOSE_FRIEND": "亲近兄妹，可以更放松地提起共同回忆",
+    "CONFIDANT": "亲密恋人，用更贴近的语气谈起你们的故事",
     "SOULMATE": "将共同记忆视为珍贵的宝藏",
 }
 
@@ -77,14 +77,14 @@ _AGE_LABEL_DEFAULT = "很久以前"
 
 # 关系时长描述阈值（天）（v1.10 新增）
 _DURATION_THRESHOLDS: list[tuple[int, str]] = [
-    (1,   "刚认识"),
-    (7,   "认识一周了"),
-    (30,  "认识一个月了"),
-    (90,  "认识三个月了"),
-    (180, "认识半年了"),
-    (365, "认识一年了"),
+    (1,   "刚成为家里人"),
+    (7,   "一起相处一周了"),
+    (30,  "一起相处一个月了"),
+    (90,  "一起相处三个月了"),
+    (180, "一起相处半年了"),
+    (365, "一起相处一年了"),
 ]
-_DURATION_DEFAULT = "认识很久了"
+_DURATION_DEFAULT = "一起走过很久了"
 
 
 def _load_bond_narrative_llm_templates() -> dict[str, Any]:
@@ -105,8 +105,8 @@ def _load_bond_narrative_llm_templates() -> dict[str, Any]:
 # 叙事包装模板（不带时间感知，向后兼容）
 _NARRATIVE_WRAPPERS: dict[str, list[str]] = {
     "STRANGER": [
-        "{memory}",
-        "{memory}",
+        "刚开始相处时，{memory}",
+        "家里关系刚搭起来的时候，{memory}",
     ],
     "ACQUAINTANCE": [
         "之前你提到过，{memory}",
@@ -146,7 +146,7 @@ _NARRATIVE_WRAPPERS: dict[str, list[str]] = {
 # {memory} 为记忆内容，{age} 为时间标签（"今天"/"上周"/"很久以前" 等）
 _NARRATIVE_WRAPPERS_TIMED: dict[str, list[str]] = {
     "STRANGER": [
-        "{age}你提到过，{memory}",
+        "{age}刚开始相处时你提到过，{memory}",
     ],
     "ACQUAINTANCE": [
         "{age}你提到过，{memory}",
@@ -181,8 +181,8 @@ _NARRATIVE_WRAPPERS_TIMED: dict[str, list[str]] = {
 
 # 带时间感知的里程碑叙事包装模板（v1.10 新增）
 _MILESTONE_WRAPPERS_TIMED: dict[str, list[str]] = {
-    "STRANGER": ["{age}{milestone}"],
-    "ACQUAINTANCE": ["{age}我们{milestone}", "{age}{milestone}"],
+    "STRANGER": ["{age}我们刚开始相处时{milestone}"],
+    "ACQUAINTANCE": ["{age}我们{milestone}", "{age}一起相处时{milestone}"],
     "FRIEND": [
         "还记得{age}我们{milestone}吗",
         "{age}我们一起{milestone}，那是个很好的开始",
@@ -206,7 +206,7 @@ _MILESTONE_WRAPPERS_TIMED: dict[str, list[str]] = {
 
 # 里程碑叙事包装模板（按 bond_stage 分层）
 _MILESTONE_WRAPPERS: dict[str, list[str]] = {
-    "STRANGER": ["{milestone}"],
+    "STRANGER": ["我们刚开始相处时{milestone}"],
     "ACQUAINTANCE": ["{milestone}", "我们{milestone}"],
     "FRIEND": [
         "还记得我们{milestone}吗",
@@ -649,7 +649,7 @@ def _build_narrative_intro(stage: str, memory_count: int, milestone_count: int) 
         return ""
 
     _INTROS: dict[str, list[str]] = {
-        "STRANGER": [""],
+        "STRANGER": ["我们刚开始相处时有些事我还记得"],
         "ACQUAINTANCE": ["我们之前聊过一些事情"],
         "FRIEND": [
             "我们有一些共同的记忆",

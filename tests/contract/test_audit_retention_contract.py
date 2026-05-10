@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from host_brain.audit.retention import RetentionPolicy, run_retention_policy
+from host_brain.audit.retention import MS_DAY, RetentionPolicy, run_retention_policy
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.governor.tokens import TokenService
 from host_brain.lsp.vault import ArtifactVault
@@ -118,6 +118,72 @@ class TestAuditRetentionContract(unittest.TestCase):
 
         trace = ledger.trace_request(request_id)
         self.assertEqual("COMPLETE", trace["status"])
+        ledger.close()
+
+    def test_default_policy_prunes_high_volume_llm_call_logs(self) -> None:
+        ledger = SQLiteLedger(db_path=":memory:")
+        now_ts_ms = 20 * MS_DAY
+        old_ts_ms = 1 * MS_DAY
+        recent_ts_ms = 19 * MS_DAY
+
+        ledger.log_llm_node_call(
+            {
+                "request_id": "req_llm_old",
+                "node_id": "planner",
+                "provider": "test",
+                "model_id": "old-node",
+                "status": "OK",
+                "ts_ms": old_ts_ms,
+            }
+        )
+        ledger.log_llm_node_call(
+            {
+                "request_id": "req_llm_recent",
+                "node_id": "planner",
+                "provider": "test",
+                "model_id": "recent-node",
+                "status": "OK",
+                "ts_ms": recent_ts_ms,
+            }
+        )
+        ledger.log_llm_pool_call(
+            {
+                "request_id": "req_pool_old",
+                "scene_type": "chat",
+                "cognitive_tier": "fast",
+                "attempts_json": "[]",
+                "attempt_count": 1,
+                "final_model": "old-pool",
+                "final_provider": "test",
+                "ts_ms": old_ts_ms,
+            }
+        )
+        ledger.log_llm_pool_call(
+            {
+                "request_id": "req_pool_recent",
+                "scene_type": "chat",
+                "cognitive_tier": "fast",
+                "attempts_json": "[]",
+                "attempt_count": 1,
+                "final_model": "recent-pool",
+                "final_provider": "test",
+                "ts_ms": recent_ts_ms,
+            }
+        )
+
+        result = run_retention_policy(
+            ledger=ledger,
+            policy=RetentionPolicy(),
+            request_id="req_retention_exec_llm",
+            now_ts_ms=now_ts_ms,
+        )
+
+        self.assertEqual(1, result.deleted_counts.get("llm_node_call_log"))
+        self.assertEqual(1, result.deleted_counts.get("llm_pool_call_log"))
+        node_rows = ledger.fetch_by_time_range("llm_node_call_log", limit=10)
+        pool_rows = ledger.fetch_by_time_range("llm_pool_call_log", limit=10)
+        self.assertEqual(["req_llm_recent"], [row["request_id"] for row in node_rows])
+        self.assertEqual(["req_pool_recent"], [row["request_id"] for row in pool_rows])
         ledger.close()
 
     def test_t_audit_ret_01_vault_gc_respects_active_undo_window(self) -> None:

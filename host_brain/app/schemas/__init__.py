@@ -79,7 +79,15 @@ class ChatRequest(BaseModel):
     reply_target: Optional[str] = Field(None, description="Optional reply target id for channel delivery")
     render_target_lang: Optional[str] = Field(
         None,
-        description="Optional text render language override, e.g. zh/ja",
+        description="Legacy language hint, e.g. zh/ja. Output modality should prefer render_profile.",
+    )
+    render_profile: Optional[str] = Field(
+        None,
+        description="Optional output render profile, e.g. zh_text for text or ja_voice for Japanese voice.",
+    )
+    response_form: Optional[str] = Field(
+        None,
+        description="Optional desired response form, e.g. text or voice.",
     )
     attachments: Optional[List[Dict[str, Any]]] = Field(None, description="Optional structured inbound attachments")
     multimodal_observations: Optional[Dict[str, Any]] = Field(

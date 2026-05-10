@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import datetime
 import os
-import random
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -21,7 +20,6 @@ class MsgType(str, Enum):
     IMAGE = "image"
     VIDEO = "video"
     FILE = "file"
-    EMOJI = "emoji"
     STICKER = "image"
 
 
@@ -68,8 +66,8 @@ class ResponseFormDecider:
     """Canonical host-side response-form decider.
 
     Planned primary/secondary forms from the reply plan are authoritative.
-    When the plan does not specify a form, we fall back to a conservative
-    voice heuristic; emoji/sticker/image are never invented here.
+    When the plan does not specify a form, we send text. Voice/media selection
+    belongs to ReplyModalityRouter and the reply plan, not transport heuristics.
     """
 
     def __init__(
@@ -117,46 +115,8 @@ class ResponseFormDecider:
                 reason=str(planned_reason or "planned_form").strip() or "planned_form",
             )
 
-        if not self._voice_enabled:
-            return ResponseFormDecision(MsgType.TEXT, None, "voice_disabled")
-
-        text = str(narrative_zh or "").strip()
-        length = len(text)
-        etag = str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-        stage = str(bond_stage or "STRANGER").strip().upper() or "STRANGER"
-        uid = str(user_id or "default").strip() or "default"
-        now_ts = _now_ms()
-
-        if length > 80:
-            return ResponseFormDecision(MsgType.TEXT, None, "long_reply")
-        if stage in {"STRANGER", "ACQUAINTANCE"}:
-            return ResponseFormDecision(MsgType.TEXT, None, "low_intimacy")
-
-        effective_scale = self._prob_scale
-        if self._is_late_night(now_ts):
-            effective_scale *= _LATE_NIGHT_PROB_SCALE
-
-        if any(kw in text for kw in _WARMTH_KEYWORDS):
-            if self._can_send_voice(uid, now_ts):
-                self._record_voice(uid, now_ts)
-                return ResponseFormDecision(MsgType.TEXT, MsgType.VOICE, "warmth_scenario")
-            return ResponseFormDecision(MsgType.TEXT, None, "warmth_scenario_voice_limited")
-
-        if etag in _VOICE_EMOTION_TAGS and length <= 40:
-            base_prob = _VOICE_PROBABILITY_BY_BOND.get(stage, 0.0)
-            prob = min(1.0, base_prob * effective_scale)
-            if prob > 0 and random.random() < prob and self._can_send_voice(uid, now_ts):
-                self._record_voice(uid, now_ts)
-                return ResponseFormDecision(MsgType.TEXT, MsgType.VOICE, "intimate_emotional")
-
-        if user_msg_type == MsgType.VOICE and length <= 30:
-            base_prob = _VOICE_PROBABILITY_BY_BOND.get(stage, 0.0)
-            echo_prob = min(1.0, 0.20 * effective_scale) if base_prob > 0 else 0.0
-            if echo_prob > 0 and random.random() < echo_prob and self._can_send_voice(uid, now_ts):
-                self._record_voice(uid, now_ts)
-                return ResponseFormDecision(MsgType.VOICE, None, "voice_echo")
-
-        return ResponseFormDecision(MsgType.TEXT, None, "default_text")
+        _ = user_id, user_msg_type, narrative_zh, emotion_tag, bond_stage
+        return ResponseFormDecision(MsgType.TEXT, None, "unplanned_default_text")
 
     def _can_send_voice(self, user_id: str, now_ts: int) -> bool:
         today = _today_str(now_ts)

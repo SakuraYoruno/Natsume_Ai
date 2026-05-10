@@ -46,7 +46,7 @@ def test_conversation_interpretation_repeated_boundary_probe_becomes_probe() -> 
     interpretation = interpret_conversation(
         recent_turns=[
             {"role": "user", "content": "你为什么要帮我，我们很熟吗"},
-            {"role": "assistant", "content": "不熟。只是看见了，也没打算装作没看见。"},
+            {"role": "assistant", "content": "别装外人啦，我会管。"},
         ],
         user_message="你为什么要帮我，我们很熟吗",
         topic_ledger=TopicLedgerBlock(),
@@ -57,6 +57,20 @@ def test_conversation_interpretation_repeated_boundary_probe_becomes_probe() -> 
     assert interpretation.user_stance == "challenging"
     assert interpretation.interaction_move == "probe"
     assert interpretation.recent_boundary_answered is True
+
+
+def test_conversation_interpretation_does_not_count_distance_boundary_as_answered() -> None:
+    interpretation = interpret_conversation(
+        recent_turns=[
+            {"role": "user", "content": "你为什么要帮我，我们很熟吗"},
+            {"role": "assistant", "content": "不熟。只是看见了，也没打算装作没看见。"},
+        ],
+        user_message="你为什么要帮我，我们很熟吗",
+        topic_ledger=TopicLedgerBlock(),
+    )
+
+    assert interpretation.last_assistant_act == "boundary_distance_answer"
+    assert interpretation.recent_boundary_answered is False
 
 
 def test_conversation_interpretation_repeated_help_probe_is_anxiety_check() -> None:

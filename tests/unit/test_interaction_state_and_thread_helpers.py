@@ -31,7 +31,8 @@ def test_classify_user_and_assistant_topic_cover_major_regex_branches() -> None:
     assert _classify_user_topic("戳戳") == "playful_ping"
     assert _classify_assistant_topic("哥哥，怎么委屈成这样呀？") == "image_social"
     assert _classify_assistant_topic("我是新海天。") == "identity"
-    assert _classify_assistant_topic("虽然不算熟，但是顺路嘛。") == "relationship_boundary"
+    assert _classify_assistant_topic("虽然不算熟，但是顺路嘛。") == ""
+    assert _classify_assistant_topic("别装外人啦，我会管。") == "relationship_boundary"
     assert _classify_assistant_topic("你真开口的话，我不会装作没听见。") == "help_commitment"
 
 

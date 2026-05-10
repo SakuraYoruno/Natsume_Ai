@@ -320,20 +320,20 @@ def build_boundary_reply_contract(*, family: str, variant: str = "", render_targ
     teasing_note = "可以带一点轻轻的吐槽或撒娇感，" if (profile.playful or profile.teasing) else ""
     warm_note = "语气别冷，也不要像在划清界限。" if profile.warm else "语气自然一点，不要太硬。"
     base = {
-        "short_boundary_then_reason": f"像新海天顺嘴解释那样，先轻轻把“不算熟”说清，再给一句很日常的理由。{address_note}{teasing_note}{warm_note}不要落成固定句。",
-        "ack_still_care_then_new_reason": f"先接住对方还在惦记这件事，再把距离放稳，补一句新的短理由。{address_note}{teasing_note}不要重复上一轮结构。",
-        "hold_boundary_then_shift_floor": f"先把距离放稳，但别说得像拒人千里。{address_note}{teasing_note}把理由收短，再自然把话口递回去，不要用固定开放问句。",
+        "short_boundary_then_reason": f"像新海天顺嘴解释那样，先接住尼尼装生分这件事，再给一句很日常的理由。{address_note}{teasing_note}{warm_note}不要落成固定句。",
+        "ack_still_care_then_new_reason": f"先接住对方还在惦记这件事，再把义妹关系事实放稳，补一句新的短理由。{address_note}{teasing_note}不要重复上一轮结构。",
+        "hold_boundary_then_shift_floor": f"先把义妹关系事实放稳，但别说得像拒人千里。{address_note}{teasing_note}把理由收短，再自然把话口递回去，不要用固定开放问句。",
         "brief_reason_then_wait": f"只给一句很生活化的短理由，把态度放稳。{address_note}{warm_note}不要重讲，也不要解释成长段。",
         "soft_close_boundary": f"把这类重复追问轻轻收住，像熟人间说“这件事差不多就到这”。{address_note}{teasing_note}不要再用原句复述理由。",
     }
     variant_overrides = {
         ("ack_still_care_then_new_reason", "still_care_reason"): f"先接住“你还在意这个”，再换一个新一点、轻一点的理由。{address_note}{teasing_note}不要重复固定理由句。",
-        ("hold_boundary_then_shift_floor", "shift_real_question"): f"把“不算熟”轻轻放稳，再顺着把后面的话口让回去。{address_note}不要写成客服式追问。",
-        ("hold_boundary_then_shift_floor", "shift_other_question"): f"把距离放稳，再很自然地把别的话头递回去。{address_note}{teasing_note}不要用固定句式。",
-        ("soft_close_boundary", "settle_repeat"): f"轻轻收住重复追问，别再整句重复“不熟 + 理由”。{address_note}更像顺手按住这个话头。",
+        ("hold_boundary_then_shift_floor", "shift_real_question"): f"把义妹关系事实轻轻放稳，再顺着把后面的话口让回去。{address_note}不要写成客服式追问。",
+        ("hold_boundary_then_shift_floor", "shift_other_question"): f"把义妹关系事实放稳，再很自然地把别的话头递回去。{address_note}{teasing_note}不要用固定句式。",
+        ("soft_close_boundary", "settle_repeat"): f"轻轻收住重复追问，别再整句重复“装生分 + 理由”。{address_note}更像顺手按住这个话头。",
         ("soft_close_boundary", "settle_hold"): f"把这件事停在这，态度稳住就行。{address_note}{warm_note}不要再展开。",
     }
-    return variant_overrides.get((family, variant), base.get(family, "先把距离放稳，再自然回应。"))
+    return variant_overrides.get((family, variant), base.get(family, "先把义妹关系事实放稳，再自然回应。"))
 
 
 def build_help_reply_contract(*, family: str, variant: str = "", render_target_lang: str = "zh") -> str:

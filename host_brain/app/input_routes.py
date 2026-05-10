@@ -23,7 +23,15 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from host_brain.core.ids import new_request_id
-from host_brain.app.reply_envelope import can_send, envelope_from_commit
+from host_brain.app.outbound_orchestrator import trigger_reply_performance
+from host_brain.app.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
+from host_brain.app.reply_performance import coerce_reply_performance
+from host_brain.app.response_form_contract import (
+    derive_render_profile_for_response_form,
+    is_media_response_form,
+    is_pure_media_response_form,
+    normalize_response_form,
+)
 from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 
 # ── service 层 import ──────────────────────────────────────────────────────
@@ -1503,6 +1511,8 @@ async def _run_gateway_multimodal_async_job(
         )
         commit_event = dict(pipeline_result.get("commit_event") or {})
         audit_refs = dict(commit_event.get("audit_refs") or {})
+        _response_form = str(audit_refs.get("response_form") or "").strip() or None
+        _response_form_reason = str(audit_refs.get("response_form_reason") or "").strip() or None
         gateway_delivery = await _deliver_gateway_reply(
             request_id=request_id,
             payload=payload,
@@ -1513,6 +1523,9 @@ async def _run_gateway_multimodal_async_job(
             emotion_tag=str(audit_refs.get("emotion_tag") or "NEUTRAL").strip().upper(),
             bond_stage=str((payload.get("bond_summary") or {}).get("stage") or "STRANGER").strip().upper(),
             user_msg_type=str(payload.get("msg_type") or "text").strip().lower(),
+            response_form=_response_form,
+            response_form_reason=_response_form_reason,
+            reply_envelope_payload=dict(audit_refs.get("reply_envelope") or commit_event.get("reply_envelope") or {}),
         )
         update_multimodal_job(job_id, status="COMPLETED", result={"gateway_delivery": gateway_delivery})
         _log_input_event(
@@ -1953,6 +1966,15 @@ async def _run_cortex_orchestrator_pipeline(
         from_id=str(payload.get("from_id") or "").strip() or None,
         conversation_id=reply_target,
     )
+    response_form = str(payload.get("response_form") or payload.get("planned_response_form") or "").strip() or None
+    resolved_render_profile = derive_render_profile_for_response_form(response_form)
+    if resolved_render_profile == "ja_voice":
+        render_target_lang = "ja"
+    elif resolved_render_profile == "media_action":
+        render_target_lang = "media"
+    else:
+        render_target_lang = "zh"
+
     request_body = ChatRequest(
         message=message_text,
         person_id=person_id,
@@ -1962,10 +1984,11 @@ async def _run_cortex_orchestrator_pipeline(
         reply_target=reply_target,
         # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 ChatAgent 在 COMMIT 后重复补播。
         suppress_edge_tts=(source == "GATEWAY"),
-        suppress_edge_vts=(source == "GATEWAY"),
-        # Phase XV P4：Gateway 通道文字永远中文，注入 render_target_lang
-        # ASR/Web 通道保持 None，由 infer_render_target_lang() 推断（向后兼容）
-        render_target_lang=("zh" if source == "GATEWAY" else None),
+        suppress_edge_vts=False,
+        # 语言只由 response_form/render_profile 决定；Gateway/QQ/Web/API 只是传输来源。
+        render_target_lang=render_target_lang,
+        render_profile=resolved_render_profile,
+        response_form=response_form,
         attachments=list(attachments or []),
         multimodal_observations=dict(multimodal_observations or {}),
         attachment_summary=str(payload.get("attachment_summary") or "").strip(),
@@ -2201,6 +2224,7 @@ async def _deliver_gateway_reply(
     user_msg_type: str = "text",
     response_form: str | None = None,
     response_form_reason: str | None = None,
+    reply_envelope_payload: dict[str, Any] | None = None,
     # Gateway 双轨语言约定：
     # - 文字回复：中文
     # - 语音回复：日语（当前 TTS 模型是日语训练）
@@ -2211,14 +2235,18 @@ async def _deliver_gateway_reply(
     conversation_id = str(payload.get("conversation_id") or "").strip()
     normalized_decision = str(decision or "").strip().upper()
     normalized_reason = str(reason_code or "").strip().upper()
-    reply_envelope = envelope_from_commit(
-        decision=decision,
-        narrative=narrative,
-        reason_code=reason_code,
-        response_form=str(response_form or "text").strip() or "text",
-        source="gateway_primary_reply",
-        degraded=(normalized_decision in {"NO_REPLY", "SKIP_REPLY"} or not str(narrative or "").strip()),
-        cacheable=False,
+    reply_envelope = (
+        coerce_reply_envelope(reply_envelope_payload)
+        if reply_envelope_payload
+        else envelope_from_commit(
+            decision=decision,
+            narrative=narrative,
+            reason_code=reason_code,
+            response_form=str(response_form or "text").strip() or "text",
+            source="gateway_primary_reply",
+            degraded=(normalized_decision in {"NO_REPLY", "SKIP_REPLY"} or not str(narrative or "").strip()),
+            cacheable=False,
+        )
     )
     if not can_send(reply_envelope):
         return {
@@ -2244,6 +2272,34 @@ async def _deliver_gateway_reply(
             "voice_vts_expression_success": None,
             "voice_event": None,
         }
+
+    performance = coerce_reply_performance(reply_envelope.performance)
+    emotion_tag = performance.emotion_tag or str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
+    emotion_intensity = performance.emotion_intensity
+
+    def _schedule_reply_performance() -> None:
+        task = asyncio.create_task(
+            trigger_reply_performance(
+                request_id=request_id,
+                reply_envelope=reply_envelope,
+                enable_vts=True,
+            )
+        )
+
+        def _on_performance_done(done_task: Any) -> None:
+            try:
+                perf_result = done_task.result()
+                _logger.info(
+                    "gateway reply performance completed request_id=%s invoked=%s success=%s emotion=%s",
+                    request_id,
+                    perf_result.get("invoked"),
+                    perf_result.get("success"),
+                    perf_result.get("emotion_tag"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive callback
+                _logger.debug("gateway reply performance task failed request_id=%s err=%s", request_id, exc)
+
+        task.add_done_callback(_on_performance_done)
 
     reply_text = reply_envelope.text or _build_gateway_reply_text(
         decision=decision,
@@ -2283,6 +2339,7 @@ async def _deliver_gateway_reply(
                         tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
+                        emotion_intensity=emotion_intensity,
                     )
                 )
             else:
@@ -2295,6 +2352,7 @@ async def _deliver_gateway_reply(
                         tts_text=voice_text,
                         request_id=request_id,
                         emotion_tag=emotion_tag,
+                        emotion_intensity=emotion_intensity,
                     )
                 )
 
@@ -2342,6 +2400,8 @@ async def _deliver_gateway_reply(
             "voice_sent": False,
         }
 
+    _schedule_reply_performance()
+
     from host_brain.channels.edge_rpc_client import post_gateway_reply  # noqa: PLC0415
     from host_brain.app.reply_form_decider import (  # noqa: PLC0415
         ReplyFormDecision,
@@ -2350,48 +2410,147 @@ async def _deliver_gateway_reply(
     )
     from host_brain.app.dependencies import get_multimodal_processor  # noqa: PLC0415
 
+    envelope_raw_extra = (
+        dict(reply_envelope.raw_extra or {})
+        if hasattr(reply_envelope, "raw_extra")
+        else dict((reply_envelope.as_dict() if hasattr(reply_envelope, "as_dict") else {}).get("raw_extra") or {})
+    )
+    envelope_media_ref = str(
+        getattr(reply_envelope, "media_ref", "")
+        or envelope_raw_extra.get("media_ref")
+        or envelope_raw_extra.get("media_path")
+        or envelope_raw_extra.get("sticker")
+        or envelope_raw_extra.get("gif")
+        or envelope_raw_extra.get("image")
+        or ""
+    ).strip()
+    envelope_response_form = normalize_response_form(str(
+        getattr(reply_envelope, "response_form", "")
+        or response_form
+        or "text"
+    ))
+    if is_pure_media_response_form(envelope_response_form) and envelope_media_ref:
+        primary_msg_type = MsgType.IMAGE.value
+        media_is_remote = envelope_media_ref.startswith(("http://", "https://", "data:"))
+        primary_content = reply_text or (envelope_media_ref if media_is_remote else "")
+        primary_media_path = None if media_is_remote else envelope_media_ref
+        wait_result = _parse_bool_env("HOST_INPUT_GATEWAY_MEDIA_REPLY_WAIT_RESULT", default=True)
+        timeout_ms = max(1000, _parse_int_env("HOST_INPUT_GATEWAY_REPLY_TIMEOUT_MS", default=12000))
+        result = await post_gateway_reply(
+            platform=platform,
+            conversation_id=conversation_id,
+            content=primary_content,
+            msg_type=primary_msg_type,
+            request_id=request_id,
+            media_path=primary_media_path,
+            raw_extra={
+                **envelope_raw_extra,
+                "message_kind": "final_reply",
+                "reply_source": str(reply_envelope.source or "reaction_catalog").strip() or "reaction_catalog",
+                "performance": performance.as_dict(),
+                "reply_envelope": reply_envelope.as_dict(),
+            },
+            wait_result=wait_result,
+            timeout_ms=timeout_ms,
+        )
+        preview = _build_reply_preview(
+            reply_text or f"[{envelope_response_form}:{str(reply_envelope.reaction_id or '').strip() or 'media'}]",
+            limit=120,
+        )
+        if not bool(getattr(result, "success", False)):
+            return {
+                "success": False,
+                "status": str(getattr(result, "status", "FAILED")),
+                "reason_code": str(getattr(result, "reason_code", "") or "") or "GATEWAY_MEDIA_REPLY_FAILED",
+                "detail": str(getattr(result, "detail", "") or ""),
+                "latency_ms": int(getattr(result, "latency_ms", 0)),
+                "reply_text_len": len(reply_text),
+                "reply_preview": preview,
+                "reply_form": envelope_response_form,
+                "reply_form_reason": str(response_form_reason or "social_reaction").strip() or "social_reaction",
+                "reply_envelope": reply_envelope.as_dict(),
+                "message_kind": "final_reply",
+                "voice_sent": False,
+            }
+        return {
+            "success": True,
+            "status": str(getattr(result, "status", "OK")),
+            "reason_code": None,
+            "detail": str(getattr(result, "detail", "") or ""),
+            "latency_ms": int(getattr(result, "latency_ms", 0)),
+            "reply_text_len": len(reply_text),
+            "reply_preview": preview,
+            "reply_form": envelope_response_form,
+            "reply_form_reason": str(response_form_reason or "social_reaction").strip() or "social_reaction",
+            "reply_envelope": reply_envelope.as_dict(),
+            "message_kind": "final_reply",
+            "voice_sent": False,
+            "voice_waited": False,
+            "voice_success": None,
+            "voice_status": None,
+            "voice_reason_code": None,
+            "voice_detail": None,
+            "voice_latency_ms": None,
+            "voice_started": None,
+            "voice_vts_started": None,
+            "voice_vts_expression_success": None,
+            "voice_event": None,
+        }
+    if is_media_response_form(envelope_response_form) and not reply_text:
+        return {
+            "success": True,
+            "status": "SKIPPED",
+            "reason_code": "MEDIA_REPLY_PAYLOAD_MISSING",
+            "detail": "gateway media reply suppressed: structured media payload missing",
+            "latency_ms": 0,
+            "reply_text_len": 0,
+            "reply_preview": "",
+            "reply_form": envelope_response_form,
+            "reply_form_reason": str(response_form_reason or "media_payload_missing").strip() or "media_payload_missing",
+            "reply_envelope": reply_envelope.as_dict(),
+            "message_kind": "no_reply",
+            "voice_sent": False,
+            "voice_waited": False,
+            "voice_success": None,
+            "voice_status": None,
+            "voice_reason_code": None,
+            "voice_detail": None,
+            "voice_latency_ms": None,
+            "voice_started": None,
+            "voice_vts_started": None,
+            "voice_vts_expression_success": None,
+            "voice_event": None,
+        }
+
     mm_output = get_multimodal_processor().enhance_output(
         text=reply_text,
         emotion_tag=emotion_tag,
         bond_stage=bond_stage,
         render_lang="zh",
     )
-    suggested_emoji = str(getattr(mm_output, "suggested_emoji", "") or "").strip()
-    suggested_sticker = str(getattr(mm_output, "suggested_sticker", "") or "").strip()
+    explicit_sticker = str(
+        envelope_raw_extra.get("sticker")
+        or envelope_raw_extra.get("gif")
+        or envelope_raw_extra.get("image")
+        or envelope_media_ref
+        or ""
+    ).strip()
+    suggested_sticker = explicit_sticker or str(getattr(mm_output, "suggested_sticker", "") or "").strip()
     normalized_platform = str(platform or "").strip().lower()
 
     def _normalize_form_for_platform(msg_type: MsgType, content: str) -> tuple[MsgType, str]:
         normalized_content = str(content or "").strip()
-        if normalized_platform == "qq" and msg_type == MsgType.EMOJI:
-            return MsgType.TEXT, normalized_content
         return msg_type, normalized_content
 
-    normalized_response_form = str(response_form or "").strip().lower()
+    normalized_response_form = normalize_response_form(str(response_form or ""))
     planned_primary: MsgType | None = None
     planned_secondary: MsgType | None = None
     planned_reason = str(response_form_reason or "").strip()
-    if not suggested_emoji:
-        emoji_defaults = {
-            "phatic_greeting": "👋",
-            "light_social_ping": "😊",
-            "emoji_social_reply": "😄",
-            "emoji_attachment_no_question": "😊",
-        }
-        suggested_emoji = str(emoji_defaults.get(planned_reason) or "").strip()
-    if normalized_response_form in {"emoji", "text_plus_emoji"} and not suggested_emoji:
-        suggested_emoji = "😊"
-    if normalized_response_form == "emoji" and suggested_emoji:
-        planned_primary = MsgType.EMOJI
-    elif normalized_response_form == "text_plus_emoji":
-        planned_primary = MsgType.TEXT
-        planned_secondary = MsgType.EMOJI
-    elif normalized_response_form == "sticker" and suggested_sticker:
+    if normalized_response_form in {"sticker", "image", "gif"} and suggested_sticker:
         planned_primary = MsgType.IMAGE
-    elif normalized_response_form == "text_plus_sticker" and suggested_sticker:
+    elif normalized_response_form in {"text_plus_sticker", "text_plus_image", "text_plus_gif"} and suggested_sticker:
         planned_primary = MsgType.TEXT
         planned_secondary = MsgType.IMAGE
-    elif normalized_response_form == "image" and suggested_sticker:
-        planned_primary = MsgType.IMAGE
 
     # ── Phase XV P4：ReplyFormDecider ──────────────────────────────────
     # 将用户消息类型字符串转换为 MsgType
@@ -2414,13 +2573,12 @@ async def _deliver_gateway_reply(
             planned_reason=planned_reason,
         )
     _logger.info(
-        "gateway reply form request_id=%s normalized=%s planned_reason=%s primary=%s secondary=%s suggested_emoji=%s suggested_sticker=%s",
+        "gateway reply form request_id=%s normalized=%s planned_reason=%s primary=%s secondary=%s suggested_sticker=%s",
         request_id,
         normalized_response_form or "-",
         planned_reason or "-",
         getattr(form_decision.primary, "value", str(form_decision.primary)),
         getattr(form_decision.secondary, "value", "") or "-",
-        suggested_emoji or "-",
         suggested_sticker or "-",
     )
 
@@ -2447,6 +2605,7 @@ async def _deliver_gateway_reply(
                 raw_extra={
                     "message_kind": "final_reply",
                     "reply_source": "gateway_secondary_form",
+                    "performance": performance.as_dict(),
                     "reply_envelope": reply_envelope.as_dict(),
                 },
                 wait_result=True,
@@ -2458,9 +2617,6 @@ async def _deliver_gateway_reply(
     async def _trigger_secondary_reply() -> dict[str, Any]:
         nonlocal voice_result
         if form_decision.secondary is None:
-            return dict(voice_result)
-        if form_decision.secondary == MsgType.EMOJI:
-            await _send_secondary_form(msg_type=MsgType.EMOJI, content=suggested_emoji)
             return dict(voice_result)
         if form_decision.secondary == MsgType.IMAGE:
             await _send_secondary_form(msg_type=MsgType.IMAGE, content=suggested_sticker)
@@ -2478,6 +2634,7 @@ async def _deliver_gateway_reply(
                     tts_text=voice_text,
                     request_id=request_id,
                     emotion_tag=emotion_tag,
+                    emotion_intensity=emotion_intensity,
                 )
             )
             return dict(voice_result)
@@ -2491,6 +2648,7 @@ async def _deliver_gateway_reply(
                 tts_text=voice_text,
                 request_id=request_id,
                 emotion_tag=emotion_tag,
+                emotion_intensity=emotion_intensity,
             )
         )
 
@@ -2512,22 +2670,10 @@ async def _deliver_gateway_reply(
 
     # ── 主回复（文字/语音）─────────────────────────────────────────────
     collapse_secondary_into_primary = False
-    if form_decision.primary == MsgType.EMOJI:
-        primary_content = suggested_emoji or reply_text
-    elif form_decision.primary == MsgType.IMAGE:
+    if form_decision.primary == MsgType.IMAGE:
         primary_content = suggested_sticker or reply_text
     else:
         primary_content = reply_text
-    if (
-        normalized_platform == "qq"
-        and form_decision.primary == MsgType.TEXT
-        and form_decision.secondary == MsgType.EMOJI
-        and suggested_emoji
-    ):
-        suffix = f" {suggested_emoji}".rstrip()
-        if suggested_emoji not in str(primary_content or ""):
-            primary_content = f"{str(primary_content or '').rstrip()}{suffix}"
-        collapse_secondary_into_primary = True
     primary_msg_type_enum, primary_content = _normalize_form_for_platform(form_decision.primary, primary_content)
     primary_msg_type = primary_msg_type_enum.value
 
@@ -2545,6 +2691,7 @@ async def _deliver_gateway_reply(
         raw_extra={
             "message_kind": "final_reply",
             "reply_source": "gateway_primary_reply",
+            "performance": performance.as_dict(),
             "reply_envelope": reply_envelope.as_dict(),
         },
         wait_result=wait_result,
@@ -2589,6 +2736,7 @@ async def _deliver_gateway_reply(
                     tts_text=_voice_text,
                     request_id=request_id,
                     emotion_tag=emotion_tag,
+                    emotion_intensity=emotion_intensity,
                 ))
                 voice_sent = True
             except Exception:
@@ -2620,6 +2768,7 @@ async def _send_gateway_voice_reply(
     tts_text: str,
     request_id: str,
     emotion_tag: str = "NEUTRAL",
+    emotion_intensity: float | None = None,
 ) -> None:
     """向 Gateway 发送语音消息（异步，fire-and-forget）。
 
@@ -2659,6 +2808,7 @@ async def _send_gateway_voice_reply(
             request_id=request_id,
             lang_hint="ja",  # Gateway 语音输出固定走日语 TTS
             emotion_tag=emotion_tag,
+            emotion_intensity=emotion_intensity,
         )
         voice_result = _extract_gateway_voice_result(result)
         _vlogger.debug(
@@ -3009,6 +3159,7 @@ async def _dispatch_to_graph_worker(
                     user_msg_type=_user_msg_type,
                     response_form=_response_form,
                     response_form_reason=_response_form_reason,
+                    reply_envelope_payload=dict(audit_refs.get("reply_envelope") or commit_event.get("reply_envelope") or {}),
                 )
             except Exception as exc:
                 gateway_delivery = {

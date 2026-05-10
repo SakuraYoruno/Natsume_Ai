@@ -106,7 +106,7 @@ def test_reply_validator_flags_underanswered_first_boundary_reason() -> None:
         ),
         restate_level="brief_reason",
         forbidden_patterns=("generic_assistant_phrasing",),
-        contract=ReplyContract(text="先明确不熟，再给一句短理由，不要滑成泛化陪聊句。"),
+        contract=ReplyContract(text="先接住尼尼装生分的试探，再给一句短理由，不要滑成泛化陪聊句。"),
         correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
         requires_validation=True,
     )
@@ -133,13 +133,13 @@ def test_reply_validator_accepts_natural_boundary_reason_surface() -> None:
         restate_level="brief_reason",
         forbidden_patterns=("generic_assistant_phrasing",),
         contract=ReplyContract(
-            text="像新海天顺嘴解释那样，先轻轻把“不算熟”说清，再给一句很日常的理由。"
+            text="像新海天顺嘴解释那样，先接住尼尼装生分这件事，再给一句很日常的理由。"
         ),
         correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
         requires_validation=True,
     )
     validation = validate_reply(
-        text="哥哥，也没熟到那种地步啦，不过看见了我也不会装作没看到。",
+        text="别装生分了，尼尼。你把麻烦丢到我面前，我当然会管。",
         plan=plan,
         user_message="你为什么要帮我，我们很熟吗",
     )
@@ -161,13 +161,13 @@ def test_reply_validator_accepts_daily_reason_boundary_surface() -> None:
         restate_level="brief_reason",
         forbidden_patterns=("generic_assistant_phrasing",),
         contract=ReplyContract(
-            text="像新海天顺嘴解释那样，先轻轻把“不算熟”说清，再给一句很日常的理由。"
+            text="像新海天顺嘴解释那样，先接住尼尼装生分这件事，再给一句很日常的理由。"
         ),
         correction_directive="上一条没有按本轮回应动作完成，请保持同样内容目标重新生成。",
         requires_validation=True,
     )
     validation = validate_reply(
-        text="嗯……虽然不算熟，但是顺路嘛。",
+        text="别见外啦，尼尼。你都开口了，我当然会帮。",
         plan=plan,
         user_message="你为什么要帮我，我们很熟吗",
     )
@@ -191,7 +191,7 @@ def test_semantic_rescue_seed_for_boundary_uses_goal_not_fixed_sentence() -> Non
     seed = build_semantic_rescue_seed(plan=plan)
 
     assert "不会装作没看到" not in seed
-    assert "关系还没那么近" in seed or "不算熟" in seed
+    assert "义妹关系事实" in seed or "装生分" in seed
 
 
 def test_semantic_rescue_seed_for_image_social_followup_deny_is_thread_specific() -> None:
@@ -323,8 +323,8 @@ def test_reply_validator_rejects_underanswered_phatic_wave() -> None:
             tactic_variant="greeting",
             trajectory_stage="first_turn",
         ),
-        response_form="text_plus_emoji",
-        secondary_response_form="emoji",
+        response_form="text",
+        secondary_response_form="",
         contract=ReplyContract(
             text="先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
             required_actions=("phatic_ack",),
@@ -354,8 +354,8 @@ def test_reply_validator_rejects_single_particle_phatic_wave() -> None:
             tactic_variant="greeting",
             trajectory_stage="first_turn",
         ),
-        response_form="text_plus_emoji",
-        secondary_response_form="emoji",
+        response_form="text",
+        secondary_response_form="",
         contract=ReplyContract(
             text="先把这句招呼自然接住，再给一句有实质内容的短回应，不要只剩符号或空壳句。",
             required_actions=("phatic_ack",),
@@ -373,6 +373,60 @@ def test_reply_validator_rejects_single_particle_phatic_wave() -> None:
 
     assert validation.is_valid is False
     assert "underanswered" in validation.reason_codes
+
+
+def test_reply_validator_rejects_hollow_phatic_even_with_emoji() -> None:
+    plan = ReplyPlan(
+        primary_topic="greeting",
+        interaction_move="light_ack",
+        trajectory=ResponseTrajectory(
+            response_goal="phatic_reply",
+            tactic_family="phatic_wave",
+            tactic_variant="greeting",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        contract=ReplyContract(
+            text="把招呼自然回应，再回一句短短的在场回应，不要只剩感叹词或符号。",
+        ),
+        requires_validation=True,
+    )
+
+    validation = validate_reply(
+        text="哥哥! 👋",
+        plan=plan,
+        user_message="hello",
+    )
+
+    assert validation.is_valid is False
+    assert "underanswered" in validation.reason_codes
+
+
+def test_reply_validator_rejects_meta_phatic_stock_phrase() -> None:
+    plan = ReplyPlan(
+        primary_topic="greeting",
+        interaction_move="light_ack",
+        trajectory=ResponseTrajectory(
+            response_goal="phatic_reply",
+            tactic_family="phatic_wave",
+            tactic_variant="greeting",
+            trajectory_stage="first_turn",
+        ),
+        response_form="text",
+        contract=ReplyContract(
+            text="把招呼自然回应，再回一句短短的在场回应，不要只剩感叹词或符号。",
+        ),
+        requires_validation=True,
+    )
+
+    validation = validate_reply(
+        text="我刚刚在叫哥哥你呀！",
+        plan=plan,
+        user_message="嗯?",
+    )
+
+    assert validation.is_valid is False
+    assert "low_quality_stock_phrase" in validation.reason_codes
 
 
 def test_reply_validator_rejects_underanswered_multimodal_answer() -> None:
@@ -469,7 +523,7 @@ def test_deterministic_fallback_uses_multimodal_core_observation() -> None:
         render_target_lang="zh",
     )
 
-    assert "没接稳" in fallback
+    assert fallback == ""
     assert "你想让我先说图里有什么吗" not in fallback
 
 
@@ -526,7 +580,7 @@ def test_image_social_reply_requires_validation_and_blocks_underanswered_stub() 
     )
 
     assert "唔" not in fallback
-    assert "没接稳" in fallback
+    assert fallback == ""
     assert "委屈" not in fallback
 
 
@@ -613,6 +667,127 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     assert question_back_validation.safe_to_emit is False
     assert "image_social_question_back" in question_back_validation.reason_codes
 
+    indirect_probe_validation = validate_reply(
+        text="哥哥，怎么突然不说话了。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert indirect_probe_validation.is_valid is False
+    assert indirect_probe_validation.safe_to_emit is False
+    assert "image_social_question_back" in indirect_probe_validation.reason_codes
+
+    mid_sentence_probe_validation = validate_reply(
+        text="哎呀，怎么啦，感觉怪怪的。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert mid_sentence_probe_validation.is_valid is False
+    assert mid_sentence_probe_validation.safe_to_emit is False
+    assert "image_social_question_back" in mid_sentence_probe_validation.reason_codes
+
+    interrogative_frame_validation = validate_reply(
+        text="哥哥这是什么表情呀。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert interrogative_frame_validation.is_valid is False
+    assert interrogative_frame_validation.safe_to_emit is False
+    assert "image_social_question_back" in interrogative_frame_validation.reason_codes
+
+    coaxing_probe_validation = validate_reply(
+        text="接住哥哥，别憋着嘛，跟我说说。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert coaxing_probe_validation.is_valid is False
+    assert coaxing_probe_validation.safe_to_emit is False
+    assert "image_social_question_back" in coaxing_probe_validation.reason_codes
+    assert "image_social_problem_frame" in coaxing_probe_validation.reason_codes
+
+    problem_frame_validation = validate_reply(
+        text="哥哥这是又被什么事给难住了呀。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert problem_frame_validation.is_valid is False
+    assert problem_frame_validation.safe_to_emit is False
+    assert "image_social_problem_frame" in problem_frame_validation.reason_codes
+
+    verbal_misframe_validation = validate_reply(
+        text="就知道哥哥会这么说。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert verbal_misframe_validation.is_valid is False
+    assert verbal_misframe_validation.safe_to_emit is False
+    assert "image_social_verbal_misframe" in verbal_misframe_validation.reason_codes
+
+    judgment_frame_validation = validate_reply(
+        text="哥哥，你这样子可不太好哦。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert judgment_frame_validation.is_valid is False
+    assert judgment_frame_validation.safe_to_emit is False
+    assert "image_social_judgment_frame" in judgment_frame_validation.reason_codes
+
+    incomplete_deictic_validation = validate_reply(
+        text="哎呀，这是。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert incomplete_deictic_validation.is_valid is False
+    assert incomplete_deictic_validation.safe_to_emit is False
+    assert "unfinished_tail" in incomplete_deictic_validation.reason_codes
+
+    incomplete_question_validation = validate_reply(
+        text="哎呀，哥哥怎么。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert incomplete_question_validation.is_valid is False
+    assert incomplete_question_validation.safe_to_emit is False
+    assert "unfinished_tail" in incomplete_question_validation.reason_codes
+
+    incomplete_sudden_validation = validate_reply(
+        text="哎呀，怎么突然。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert incomplete_sudden_validation.is_valid is False
+    assert incomplete_sudden_validation.safe_to_emit is False
+    assert "unfinished_tail" in incomplete_sudden_validation.reason_codes
+
+    who_is_this_validation = validate_reply(
+        text="哎呀，这是谁。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert who_is_this_validation.is_valid is False
+    assert who_is_this_validation.safe_to_emit is False
+    assert "image_social_descriptor_focus" in who_is_this_validation.reason_codes
+
+    unsupported_action_validation = validate_reply(
+        text="哥哥，我给你买了你爱吃的点心哦。",
+        plan=plan,
+        user_message="[表情消息]",
+    )
+
+    assert unsupported_action_validation.is_valid is False
+    assert unsupported_action_validation.safe_to_emit is False
+    assert "image_social_unsupported_action" in unsupported_action_validation.reason_codes
+
     generic_validation = validate_reply(
         text="哥哥，好可爱呀。",
         plan=plan,
@@ -620,7 +795,7 @@ def test_image_social_reply_rejects_self_as_image_candidate() -> None:
     )
 
     assert generic_validation.is_valid is False
-    assert "image_social_emotion_missing" in generic_validation.reason_codes
+    assert "image_social_descriptor_focus" in generic_validation.reason_codes
 
     seen_only_validation = validate_reply(
         text="哥哥，这张我看到了。",
@@ -712,7 +887,7 @@ def test_image_social_reply_allows_emotion_response_not_image_opinion() -> None:
     )
 
     assert pun_validation.is_valid is False
-    assert "image_social_emotion_missing" in pun_validation.reason_codes
+    assert "image_social_descriptor_focus" in pun_validation.reason_codes
 
     emotion_validation = validate_reply(
         text="哥哥又开始装乖了，我接住还不行嘛。",
@@ -720,8 +895,16 @@ def test_image_social_reply_allows_emotion_response_not_image_opinion() -> None:
         user_message="[图片消息]",
     )
 
-    assert emotion_validation.reason_codes == ()
-    assert emotion_validation.is_valid is True
+    assert "image_social_question_back" in emotion_validation.reason_codes
+
+    safe_emotion_validation = validate_reply(
+        text="哥哥又开始装乖了，这招太会了。",
+        plan=plan,
+        user_message="[图片消息]",
+    )
+
+    assert safe_emotion_validation.reason_codes == ()
+    assert safe_emotion_validation.is_valid is True
 
 
 def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
@@ -767,7 +950,7 @@ def test_assistant_reply_followup_blocks_underanswered_stub() -> None:
 
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
     assert fallback != "我知道了。"
-    assert "刚才" in fallback
+    assert fallback == ""
     assert "你知道吗" not in fallback
     assert "知道。" not in fallback
 
@@ -809,7 +992,7 @@ def test_image_social_cute_fallback_uses_cute_branch_instead_of_generic_attachme
     )
 
     assert "突然发这么一张图" not in fallback
-    assert "没接稳" in fallback
+    assert fallback == ""
     assert not any(token in fallback for token in ("哄你", "撒娇"))
 
 
@@ -839,7 +1022,7 @@ def test_image_social_followup_deny_fallback_no_longer_collapses_to_hum_or_nothi
 
     assert fallback not in {"哼。", "没什么。", "唔。"}
     assert "多想" not in fallback
-    assert "没接稳" in fallback
+    assert fallback == ""
 
 
 def test_image_social_followup_why_fallback_explains_previous_read_instead_of_plain_hold() -> None:
@@ -868,7 +1051,7 @@ def test_image_social_followup_why_fallback_explains_previous_read_instead_of_pl
 
     assert fallback not in {"哼。", "没什么。", "唔。"}
     assert "刚才那张图" not in fallback
-    assert "没接稳" in fallback
+    assert fallback == ""
 
 
 def test_deterministic_reply_fallback_prefers_cached_surface_text(monkeypatch) -> None:
@@ -906,7 +1089,7 @@ def test_deterministic_reply_fallback_prefers_cached_surface_text(monkeypatch) -
     fallback = build_deterministic_reply_fallback(plan=plan, render_target_lang="zh")
 
     assert fallback != "哥哥，好嘛，那我就当自己刚才多想了一点。"
-    assert "没接稳" in fallback
+    assert fallback == ""
 
 
 def test_explicit_non_buffering_reply_plan_overrides_legacy_buffering_heuristics() -> None:

@@ -41,8 +41,8 @@ def test_bond_stage_engine_prod_promotes_and_summarizes() -> None:
     assert last_result is not None
     assert last_result.to_stage == 'FRIEND'
     summary = engine.get_summary(user_id)
-    assert summary['stage'] == '朋友'
-    assert summary['capability_hint'] == '朋友，可深入交流'
+    assert summary['stage'] == '关系好的兄妹'
+    assert summary['capability_hint'] == '关系好的兄妹，可轻松拌嘴'
     assert summary['trend'] in {'上升', '快速上升'}
 
     state = engine._get_or_create_state(user_id)
@@ -111,7 +111,7 @@ def test_prompt_builder_prod_renders_growth_awareness_and_bond_narrative() -> No
         'prompt_context': {
             'payload': {
                 'hard_snapshot': {'session_id': 'session-prod-prompt-001'},
-                'bond_summary': {'stage': '朋友', 'trend': '上升', 'capability_hint': '朋友，可深入交流'},
+                'bond_summary': {'stage': '关系好的兄妹', 'trend': '上升', 'capability_hint': '关系好的兄妹，可轻松拌嘴'},
                 'authoritative': [],
                 'retrieval': [],
                 'style_pack': {'node_bindings': {}},

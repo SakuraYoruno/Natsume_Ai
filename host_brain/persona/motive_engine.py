@@ -53,10 +53,12 @@ _OFFLINE_REACH_OUT_TABLE: list[tuple[float, float]] = [
 _BOND_CARE_BONUS: dict[str, float] = {
     "SOULMATE": 0.30,
     "INTIMATE": 0.25,
-    "CLOSE": 0.18,
-    "FRIEND": 0.10,
-    "ACQUAINTANCE": 0.04,
-    "STRANGER": 0.0,
+    "CONFIDANT": 0.25,
+    "CLOSE": 0.20,
+    "CLOSE_FRIEND": 0.20,
+    "FRIEND": 0.16,
+    "ACQUAINTANCE": 0.12,
+    "STRANGER": 0.08,
 }
 
 # willingness 低值对应 withdraw 增益
@@ -338,10 +340,11 @@ class MotiveEngine:
             protect += 0.20
             reasons.append("protect:topic_resistance")
 
-        # 浅关系
+        # Early stepsibling phase: keep a little restraint, but never treat it
+        # as stranger distance.
         if bond_stage in {"STRANGER", "ACQUAINTANCE"}:
-            protect += 0.15
-            reasons.append("protect:shallow_bond")
+            protect += 0.06
+            reasons.append("protect:early_stepsibling_boundary")
 
         # 反思保护
         if withdraw_hint:
@@ -447,4 +450,3 @@ def compute_motive_state(inp: MotiveInput) -> MotiveState:
         ))
     """
     return get_motive_engine().compute(inp)
-

@@ -8,12 +8,14 @@ from .conversation_interpretation import (
     normalize_surface_group,
 )
 from .drive_state import DriveStateBlock, resolve_drive_state
+from .emotional_act import EmotionalAct, resolve_emotional_act
 from .interaction_state import InteractionState, build_interaction_state, coerce_interaction_state
 from .interaction_thread import (
     InteractionThreadState,
     coerce_interaction_thread_state,
     resolve_interaction_thread,
 )
+from .interaction_facts_plane import InteractionFactsPlane, assemble_interaction_facts_plane
 from .perception_packet import PerceptionPacket, build_perception_packet, coerce_perception_packet
 from .prompt_context_plane import (
     AffectBlock,
@@ -35,7 +37,13 @@ from .prompt_context_plane import (
     assemble_prompt_context_plane,
     assemble_prompt_context_plane_v5,
 )
-from .relationship_state import RelationshipStateBlock, build_relationship_summary, resolve_relationship_state
+from .relationship_state import (
+    RelationshipStateBlock,
+    build_relationship_summary,
+    derive_relationship_substage,
+    resolve_relationship_state,
+)
+from .social_act import SocialAct, resolve_social_act
 from .soul_runtime import CompiledSoul, SoulCompiler, get_compiled_soul, load_compiled_soul
 from .tactic_ledger import SessionTacticLedgerStore, TacticLedgerBlock, TacticLedgerEntry, coerce_tactic_ledger_block
 from .topic_ledger import SessionTopicLedgerStore, TopicLedgerBlock, TopicLedgerEntry, coerce_topic_ledger_block
@@ -50,9 +58,11 @@ __all__ = [
     "ConversationInterpretationBlock",
     "DriveBlock",
     "DriveStateBlock",
+    "EmotionalAct",
     "IntentBlock",
     "InteractionState",
     "InteractionStateBlock",
+    "InteractionFactsPlane",
     "InteractionThreadBlock",
     "InteractionThreadState",
     "MemoryBlock",
@@ -64,6 +74,7 @@ __all__ = [
     "ReplyPlanBlock",
     "SessionTacticLedgerStore",
     "SessionTopicLedgerStore",
+    "SocialAct",
     "CompiledSoul",
     "SoulCompiler",
     "TacticLedgerBlock",
@@ -74,6 +85,7 @@ __all__ = [
     "TopicLedgerEntry",
     "assemble_prompt_context_plane",
     "assemble_prompt_context_plane_v5",
+    "assemble_interaction_facts_plane",
     "build_affect_summary",
     "build_interaction_state",
     "build_perception_packet",
@@ -86,6 +98,7 @@ __all__ = [
     "coerce_perception_packet",
     "coerce_tactic_ledger_block",
     "coerce_topic_ledger_block",
+    "derive_relationship_substage",
     "get_compiled_soul",
     "interpret_conversation",
     "load_compiled_soul",
@@ -93,5 +106,7 @@ __all__ = [
     "resolve_interaction_thread",
     "resolve_affect_state",
     "resolve_drive_state",
+    "resolve_emotional_act",
     "resolve_relationship_state",
+    "resolve_social_act",
 ]

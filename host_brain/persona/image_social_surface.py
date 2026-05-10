@@ -65,10 +65,34 @@ _ACTION_QUESTION_BACK_RE = re.compile(
     r"(?:晃我|逗我|撩我|撒娇|卖萌|装乖|求关注|考我|试探我|调戏我).{0,4}(?:吗|嘛|呀|吧|呢|\?)$"
 )
 _GENERIC_QUESTION_BACK_RE = re.compile(r"(?:是不是|对吧|是吧|对不对)(?:呀|啊|啦|呢|嘛|吧)?$")
+_VAGUE_EMOTION_PROBE_RE = re.compile(r"(?:怎么了|怎么啦|咋了|咋回事|怎么回事|什么情况|咋回事儿)(?:呀|啊|啦|呢|嘛|吧)?")
+_INTERROGATIVE_FRAME_RE = re.compile(
+    r"(?:怎么|咋|什么|啥|谁|哪儿|哪里|是不是|是否).{0,16}(?:呀|啊|啦|呢|嘛|吧|哦)?|"
+    r"(?:这|那|这个|那个).{0,4}(?:什么|啥).{0,8}(?:表情|意思|情况)|"
+    r"(?:吗|嘛)$"
+)
 _IMAGE_AS_SELF_RE = re.compile(r"(?:偷看|偷偷看|看|盯|观察).{0,6}(?:我|人家)")
 _USER_MIND_RE = re.compile(r"(?:在)?想什么|想啥|什么奇怪")
 _UNSUPPORTED_USER_ACTION_RE = re.compile(
     r"(?:你|哥哥).{0,10}(?:说什么|在说什么|讲什么|干嘛|在干嘛|做什么|搞什么|闹什么|又怎么了|怎么又|到底在)"
+)
+_PROBLEM_FRAME_RE = re.compile(
+    r"(?:被|让|给).{0,10}(?:难住|困住|卡住|整不会|整懵|弄懵|吓到)|"
+    r"(?:遇到|碰到|出了|发生|又被).{0,12}(?:事|问题|麻烦|情况|难住)|"
+    r"(?:什么事|啥事|哪件事).{0,8}(?:难住|困住|卡住|惹|让|把)|"
+    r"(?:不太|有点|好像|看起来|怎么).{0,10}(?:不太高兴|不太开心|不高兴|不开心|闷闷不乐|蔫|低落|沉默|忍着不说|憋着)|"
+    r"(?:怎么|咋|为什么|为啥).{0,10}(?:难住|不太开心|不太高兴|不开心|不高兴|闷|蔫|沉默)|"
+    r"(?:别|不要).{0,6}(?:憋着|硬撑|绷着)"
+)
+_VERBAL_MISFRAME_RE = re.compile(
+    r"(?:哥哥|你).{0,10}(?:会|又|在|刚才|刚刚)?.{0,8}(?:这么|这样|那样).{0,4}说|"
+    r"(?:就知道|我就知道).{0,10}(?:哥哥|你).{0,10}说|"
+    r"(?:这话|这句话|这句|你说的|你刚说|你刚刚说|你在说|你说什么|说什么|开口|讲话)"
+)
+_JUDGMENT_FRAME_RE = re.compile(
+    r"(?:你|哥哥).{0,12}(?:不太好|不好|不行|不可以|只会|就会|没救|太过分)|"
+    r"(?:别管它|别理它|算了|随它|这事|那事|这件事|那件事)|"
+    r"(?:哥哥).{0,8}(?:最好了|最棒了|真好|好乖|真乖)"
 )
 _EMOTION_LABEL_WORDS_RE = r"(?:无语|委屈|生气|不爽|尴尬|别扭|难过|伤心|哭|小吐槽|炸毛|服了)"
 _EMOTION_QUESTION_WORDS_RE = r"(?:什么|啥|怎么|干嘛|为什么|为啥|哪门子)"
@@ -77,16 +101,24 @@ _EMOTION_LABEL_QUESTION_BACK_RE = re.compile(
     rf"{_EMOTION_QUESTION_WORDS_RE}.{{0,6}}{_EMOTION_LABEL_WORDS_RE}|"
     rf"{_EMOTION_LABEL_WORDS_RE}(?:吗|嘛)$)"
 )
+_NEGATED_EMOTION_RE = re.compile(
+    rf"(?:才没有|没有|没|不是).{{0,6}}{_EMOTION_LABEL_WORDS_RE}"
+)
 _DESCRIPTOR_FOCUS_RE = re.compile(
     r"(?:这张图|这张|这图|图里|画面|上面|这个表情|小表情|表情包|猫耳这张|这张猫耳|猫耳|金发|黄头发|蓝眼|眼睛|脸)"
-    r".{0,28}(?:可爱|萌|好看|犯规|戳|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
+    r".{0,28}(?:可爱|萌|好看|犯规|戳|捏|碰|摸|装乖|委屈|会|厉害|不错|好乖|好软|熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里)|"
+    r"(?:戳|捏|碰|摸).{0,28}(?:这张图|这张|这图|图里|画面|这个表情|小表情|表情包|猫耳|金发|黄头发|蓝眼|眼睛|脸)|"
     r"(?:熟悉|眼熟|见过|见过似的|像|类似|认得|认识|在哪|哪里).{0,28}"
     r"(?:这张图|这张|这图|图里|画面|这个表情|小表情|表情包|猫耳|金发|黄头发|蓝眼|眼睛|脸)|"
     r"(?:我也觉得|确实觉得).{0,20}(?:这张|猫耳|表情|图).{0,20}(?:可爱|萌|好看|戳)"
 )
 _EMOTION_RESPONSE_RE = re.compile(
     r"(?:你|哥哥).{0,18}(?:装乖|撒娇|嘴硬|委屈|逗我|晃我|卖萌|耍赖|求关注|眨巴|心软|招架|拿捏)|"
+    r"(?:哥哥).{0,18}(?:小吐槽|无语|服了|沉默|别扭|尴尬|不爽)|"
     r"(?:别|不许|少).{0,18}(?:晃我|装乖|撒娇|卖萌|眨巴|这么看|拿这种眼神)|"
+    r"(?:先不|不).{0,8}(?:闹你|吵你|逗你|烦你)|"
+    r"(?:懂了|知道啦|明白了|看到了|收到啦|接住了|我接住).{0,14}(?:哥哥|这一下|这股|小吐槽|先不)|"
+    r"(?:顺毛|给你顺顺毛|给你留点面子)|"
     r"(?:被你|让你|给你).{0,18}(?:晃到|戳到|拿捏|逗笑|心软|招架不住)|"
     r"(?:我).{0,18}(?:心软|招架不住|接住|被晃到|被戳到|有点顶不住)|"
     r"(?:撒娇|装乖|嘴硬|委屈|卖萌|耍赖|求关注).{0,18}(?:接住|有用|犯规|太会|过关)"
@@ -94,6 +126,7 @@ _EMOTION_RESPONSE_RE = re.compile(
 _SAFE_SOCIAL_REPLY_RE = re.compile(
     r"(?:真是的|拿(?:你|哥哥)没办法|别闹|别这样|少来|又来|我接住|接住了|"
     r"收到|收到了|收到啦|看到了|看到啦|"
+    r"懂了|知道啦|明白了|先不闹|先不吵|先不逗|顺毛|"
     r"装乖|撒娇|嘴硬|委屈|卖萌|耍赖|求关注|小吐槽|小别扭|心软|招架|晃)"
 )
 
@@ -155,8 +188,11 @@ def image_social_anchor_terms(multimodal: Mapping[str, Any] | None) -> list[str]
 
 
 def is_image_social_surface_sample_disallowed(text: str) -> bool:
+    raw = str(text or "").strip()
     compact = compact_image_social_text(text)
     if not compact:
+        return True
+    if re.search(r"[?？]", raw):
         return True
     if is_forbidden_surface_text(text):
         return True
@@ -170,13 +206,25 @@ def is_image_social_surface_sample_disallowed(text: str) -> bool:
         return True
     if _GENERIC_QUESTION_BACK_RE.search(compact):
         return True
+    if _VAGUE_EMOTION_PROBE_RE.search(compact):
+        return True
+    if _INTERROGATIVE_FRAME_RE.search(compact):
+        return True
     if _ACTION_QUESTION_BACK_RE.search(compact):
         return True
     if _USER_MIND_RE.search(compact):
         return True
     if _UNSUPPORTED_USER_ACTION_RE.search(compact):
         return True
+    if _PROBLEM_FRAME_RE.search(compact):
+        return True
+    if _VERBAL_MISFRAME_RE.search(compact):
+        return True
+    if _JUDGMENT_FRAME_RE.search(compact):
+        return True
     if _EMOTION_LABEL_QUESTION_BACK_RE.search(compact):
+        return True
+    if _NEGATED_EMOTION_RE.search(compact):
         return True
     if _IMAGE_AS_SELF_RE.search(compact):
         return True

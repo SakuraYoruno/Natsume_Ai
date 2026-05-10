@@ -100,7 +100,7 @@ def _normalize_openai_compat_base_url(value: str | None) -> str | None:
 
 def _is_minimax_standard_model(model_id: str | None) -> bool:
     normalized = str(model_id or "").strip().lower()
-    return normalized == "m2-her"
+    return normalized in {"m2-her", "minimax-m2-her"}
 
 
 def _resolve_minimax_base_url(base_url_override: str | None = None) -> str:
@@ -138,8 +138,11 @@ def _build_minimax_standard_provider_fn(
         else:
             prompt_text = render_host_generation_prompt(runtime_payload)
 
+        outbound_model_id = str(model_id or "").strip() or "M2-her"
+        if outbound_model_id.lower() == "minimax-m2-her":
+            outbound_model_id = "M2-her"
         payload = {
-            "model": str(model_id or "").strip() or "M2-her",
+            "model": outbound_model_id,
             "messages": [
                 {"role": "system", "name": "NatsumeHost", "content": system_prompt},
                 {"role": "user", "name": "User", "content": prompt_text},
@@ -342,7 +345,7 @@ def resolve_host_llm_model_id(provider_name: str) -> str:
     if provider == PROVIDER_OPENAI:
         return str(os.environ.get("HOST_OPENAI_MODEL_ID") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     if provider == PROVIDER_DEEPSEEK:
-        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-chat").strip() or "deepseek-chat"
+        return str(os.environ.get("HOST_DEEPSEEK_MODEL_ID") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
     if provider == PROVIDER_MINIMAX:
         return str(os.environ.get("HOST_MINIMAX_MODEL_ID") or "M2-her").strip() or "M2-her"
     return "mock-default"
@@ -490,7 +493,6 @@ def build_langchain_chat_provider_fn(
     node_id: str | None = None,
     base_url_override: str | None = None,
 ) -> Callable[[dict[str, Any]], Any]:
-    from langchain_openai import ChatOpenAI  # noqa: PLC0415
     from langchain_core.messages import HumanMessage, SystemMessage  # noqa: PLC0415
 
     provider = str(provider_name or "").strip().lower()
@@ -523,14 +525,27 @@ def build_langchain_chat_provider_fn(
         else:
             base_url = str(os.environ.get("HOST_OPENAI_BASE_URL") or "").strip() or None
 
-    llm = ChatOpenAI(
-        model=model_name,
-        api_key=api_key,
-        base_url=base_url,
-        timeout=max(1.0, float(timeout_ms) / 1000.0),
-        max_retries=1,
-        temperature=0.4,
-    )
+    if provider == PROVIDER_GEMINI:
+        from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: PLC0415
+
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+            api_key=api_key,
+            request_timeout=max(1.0, float(timeout_ms) / 1000.0),
+            retries=0,
+            temperature=0.4,
+        )
+    else:
+        from langchain_openai import ChatOpenAI  # noqa: PLC0415
+
+        llm = ChatOpenAI(
+            model=model_name,
+            api_key=api_key,
+            base_url=base_url,
+            timeout=max(1.0, float(timeout_ms) / 1000.0),
+            max_retries=1,
+            temperature=0.4,
+        )
     resolved_node_id = str(node_id or "").strip()
     system_prompt = _build_host_openai_system_prompt(resolved_node_id)
 

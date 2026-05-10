@@ -56,7 +56,7 @@ class TestLogLlmRouteFallback:
         ledger = _make_ledger()
         ledger.log_llm_route({
             "request_id": "req-002",
-            "model_id": "deepseek-chat",
+            "model_id": "deepseek-v4-flash",
             "reason": "fallback_1_ok (primary=gpt-4o failed: SERVICE_UNAVAILABLE_DEPENDENCY)",
             "latency_ms": 350,
             "fallback_used": True,
@@ -65,7 +65,7 @@ class TestLogLlmRouteFallback:
         rows = ledger.query_llm_route_log()
         assert len(rows) == 1
         assert rows[0]["fallback_used"] is True
-        assert rows[0]["model_id"] == "deepseek-chat"
+        assert rows[0]["model_id"] == "deepseek-v4-flash"
 
     def test_fallback_used_false(self) -> None:
         ledger = _make_ledger()

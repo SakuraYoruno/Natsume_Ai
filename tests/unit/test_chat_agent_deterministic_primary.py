@@ -9,6 +9,7 @@ import pytest
 from host_brain.app.chat_agent import chat_agent_sse_generator
 from host_brain.app.chat_agent_preprocessor import ChatAgentInput
 from host_brain.persona.reply_plan import ReplyContract, ReplyPlan, ResponseTrajectory
+from host_brain.persona.reply_validator import validate_reply
 from host_brain.persona.soul_reply_surface import build_deterministic_primary_reply_text
 
 
@@ -221,6 +222,120 @@ def test_build_deterministic_primary_reply_text_for_filler_assistant_followup_ca
 
 
 @pytest.mark.asyncio
+async def test_chat_agent_text_reply_uses_full_chat_not_surface_renderer(monkeypatch) -> None:
+    kernel_calls = 0
+
+    async def _fake_kernel_complete(**kwargs):  # noqa: ANN003
+        nonlocal kernel_calls
+        kernel_calls += 1
+        assert kwargs["scene_type"] == "CHAT_KERNEL_V2"
+        return SimpleNamespace(
+            content=json.dumps(
+                {"text_zh": "来啦，今天怎么这么正经。", "emotion": "playful_tease", "action": "head_tilt", "intensity": 0.5},
+                ensure_ascii=False,
+            ),
+            final_provider="mock",
+            final_model="mock-chat",
+        )
+
+    async def _blocked_surface_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("normal text final reply must not call CHAT_SURFACE")
+
+    captured_post_process: dict[str, object] = {}
+
+    async def _fake_post_process(**kwargs):  # noqa: ANN003
+        captured_post_process.update(kwargs)
+        return None
+
+    monkeypatch.setattr("host_brain.app.chat_kernel_v2.acomplete_llm_with_pool", _fake_kernel_complete)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _blocked_surface_llm)
+    monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [
+                {"role": "system", "content": "【人格核心】你是新海天。"},
+                {"role": "user", "content": kwargs["user_message"]},
+            ],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "greeting",
+                    "interaction_move": "greeting",
+                    "response_goal": "phatic_response",
+                    "tactic_family": "phatic_wave",
+                    "tactic_variant": "greeting",
+                    "trajectory_stage": "first_turn",
+                    "response_form": "text",
+                    "response_form_reason": "phatic_greeting",
+                    "reply_contract": "自然回应这句招呼。",
+                    "contract": {"text": "自然回应这句招呼。"},
+                    "requires_validation": False,
+                    "force_buffering": False,
+                },
+            },
+        ),
+    )
+    monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")
+    monkeypatch.setenv("HOST_CHAT_KERNEL_V2_LIGHT_DAILY_CANDIDATES", "1")
+    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
+    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
+
+    agent_input = ChatAgentInput(
+        request_id="req-text-full-chat-no-surface",
+        session_id="sess-text-full-chat-no-surface",
+        user_message="hello",
+        person_id="user_1",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-chat",
+            "timeout_ms": 5000,
+            "llm_api_key": "",
+            "base_url_override": "",
+        },
+    )
+
+    commit_event = {}
+    async for chunk in chat_agent_sse_generator(agent_input):
+        event = _parse_sse(chunk)
+        if event.get("phase") == "COMMIT":
+            commit_event = event
+
+    assert kernel_calls == 1
+    assert commit_event["decision"] == "APPROVE"
+    assert str(commit_event.get("narrative") or "") == "来啦，今天怎么这么正经。"
+    assert commit_event["audit_refs"]["model_id"] == "mock-chat"
+    assert commit_event["audit_refs"]["performance"]["emotion_tag"] == "HAPPY"
+    await asyncio.sleep(0)
+    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
+    assert trace_stage_meta.get("chat_kernel_v2_used") is True
+    assert trace_stage_meta["performance"]["emotion_tag"] == "HAPPY"
+
+
+def test_reply_validator_rejects_process_terms_and_stock_text() -> None:
+    plan = ReplyPlan(
+        primary_topic="greeting",
+        trajectory=ResponseTrajectory(
+            response_goal="phatic_response",
+            tactic_family="phatic_wave",
+            tactic_variant="greeting",
+            trajectory_stage="first_turn",
+        ),
+        contract=ReplyContract(text="自然回应这句招呼。"),
+    )
+
+    validation = validate_reply(text="接住哥哥，别憋着嘛，跟我说说。", plan=plan)
+
+    assert "process_term_echo" in validation.reason_codes
+    assert "low_quality_stock_phrase" in validation.reason_codes
+    assert validation.safe_to_emit is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_uses_deterministic_primary_phatic_reply_without_llm(monkeypatch) -> None:
     async def _forbidden_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("full chat LLM should not be called for short social surface reply")
@@ -325,6 +440,7 @@ async def test_chat_agent_uses_deterministic_primary_phatic_reply_without_llm(mo
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_uses_deterministic_primary_identity_reply_without_llm(monkeypatch) -> None:
     async def _forbidden_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("full chat LLM should not be called for identity surface reply")
@@ -429,6 +545,7 @@ async def test_chat_agent_uses_deterministic_primary_identity_reply_without_llm(
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_uses_surface_render_for_cold_assistant_followup(monkeypatch) -> None:
     async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("stream LLM should not be called after surface render")
@@ -548,6 +665,7 @@ async def test_chat_agent_uses_surface_render_for_cold_assistant_followup(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_selects_valid_surface_candidate_before_fallback(monkeypatch) -> None:
     async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("stream LLM should not be called when candidate pool has a valid surface reply")
@@ -672,6 +790,7 @@ async def test_chat_agent_selects_valid_surface_candidate_before_fallback(monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_accepts_natural_surface_candidate_without_forced_previous_reference(monkeypatch) -> None:
     async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("stream LLM should not be called when natural surface candidate is acceptable")
@@ -789,6 +908,7 @@ async def test_chat_agent_accepts_natural_surface_candidate_without_forced_previ
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_rejects_vague_surface_candidate_when_context_has_anchor(monkeypatch) -> None:
     async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("stream LLM should not be called when anchored surface candidate is available")
@@ -907,6 +1027,7 @@ async def test_chat_agent_rejects_vague_surface_candidate_when_context_has_ancho
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_rejects_circular_meaning_surface_candidate(monkeypatch) -> None:
     async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
         raise AssertionError("stream LLM should not be called when non-circular surface candidate is available")
@@ -1022,25 +1143,22 @@ async def test_chat_agent_rejects_circular_meaning_surface_candidate(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_full_chat(monkeypatch) -> None:
-    async def _forbidden_stream_llm(**kwargs):  # noqa: ANN003
-        raise AssertionError("full chat LLM should not be called for image social surface reply")
-        yield ""  # pragma: no cover
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
+async def test_chat_agent_image_social_prefers_surface_renderer(monkeypatch) -> None:
+    stream_called = False
+
+    async def _full_chat_stream_llm(**kwargs):  # noqa: ANN003
+        nonlocal stream_called
+        stream_called = True
+        raise AssertionError("full chat LLM should not be called when image social surface succeeds")
 
     async def _fake_surface_llm(**kwargs):  # noqa: ANN003
+        assert kwargs["scene_type"] == "CHAT_SURFACE"
         return SimpleNamespace(
-            content=json.dumps(
-                {
-                    "candidates": [
-                        "哥哥，突然这么可爱，是想让我哄你吗？",
-                        "好啦好啦，别拿这种眼神晃我，我会心软的。",
-                    ]
-                },
-                ensure_ascii=False,
-            ),
+            content=json.dumps({"candidates": ["哥哥，怎么了呀？", "哥哥，先不闹你了。"]}, ensure_ascii=False),
             final_provider="gemini",
             final_model="gemini-2.5-flash-lite",
-            total_latency_ms=456,
+            total_latency_ms=123,
         )
 
     captured_post_process: dict[str, object] = {}
@@ -1051,121 +1169,12 @@ async def test_chat_agent_image_social_surface_rejects_old_template_and_skips_fu
 
     multimodal = {
         "primary_modality": "image",
-        "summary_for_chat": "可爱、卖萌；一张动漫风格的猫耳女孩特写图，灰色头发、蓝色眼睛。",
-        "core_observation": "猫耳女孩特写，蓝色眼睛。",
-        "emotion_signals": ["可爱", "卖萌"],
-        "confidence": 1.0,
-    }
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool",
-        _forbidden_stream_llm,
-    )
-    monkeypatch.setattr(
-        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
-        _fake_surface_llm,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
-        lambda **kwargs: (
-            [
-                {"role": "system", "content": "【人格核心】你是新海天。"},
-                {"role": "user", "content": kwargs["user_message"]},
-            ],
-            {},
-            {
-                "reply_plan": {
-                    "primary_topic": "emoji_social_reply",
-                    "interaction_move": "playful_ping",
-                    "response_goal": "cute_image_reply",
-                    "tactic_family": "cute_image_ack",
-                    "tactic_variant": "cute_ping",
-                    "trajectory_stage": "first_turn",
-                    "response_form": "text",
-                    "response_form_reason": "image_social_reply",
-                    "reply_contract": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
-                    "contract": {
-                        "text": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
-                        "required_actions": ["phatic_ack", "image_social_emotion_response"],
-                        "forbidden_actions": ["multimodal_generic_followup"],
-                        "realization_steps": ["接住对方的装乖或撒娇感"],
-                    },
-                    "multimodal": multimodal,
-                    "requires_validation": True,
-                    "force_buffering": True,
-                },
-            },
-        ),
-    )
-    monkeypatch.setattr(
-        "host_brain.app.agent_runtime_shared._async_post_process",
-        _fake_post_process,
-    )
-    monkeypatch.setattr(
-        "host_brain.app.dependencies.get_reply_surface_memory_store",
-        lambda: _MemoryStoreStub(""),
-    )
-    monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
-    monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
-
-    agent_input = ChatAgentInput(
-        request_id="req-image-social-surface",
-        session_id="sess-image-social-surface",
-        user_message="[图片消息]",
-        person_id="user_1",
-        emotion_context={"emotion_tag": "NEUTRAL"},
-        bond_summary={"stage": "FRIEND"},
-        multimodal_observations=multimodal,
-        llm_runtime={
-            "available": True,
-            "provider_name": "mock",
-            "model_id": "mock-chat",
-            "timeout_ms": 5000,
-            "llm_api_key": "",
-            "base_url_override": "",
-        },
-    )
-
-    commit_event = {}
-    async for chunk in chat_agent_sse_generator(agent_input):
-        event = _parse_sse(chunk)
-        if event.get("phase") == "COMMIT":
-            commit_event = event
-
-    assert str(commit_event.get("narrative") or "") == "好啦好啦，别拿这种眼神晃我，我会心软的。"
-    assert commit_event["audit_refs"]["model_id"] == "gemini-2.5-flash-lite"
-    await asyncio.sleep(0)
-    trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
-    surface_meta = dict(trace_stage_meta.get("image_social_surface_render") or {})
-    assert trace_stage_meta.get("deterministic_primary_reason") == "surface:renderer"
-    assert trace_stage_meta.get("fallback_used") is False
-    assert surface_meta.get("candidate_index") == 2
-    assert surface_meta.get("rejected_attempts")[0]["reason_code"] == "IMAGE_SURFACE_TEMPLATE_SHAPE"
-
-
-@pytest.mark.asyncio
-async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_chat(monkeypatch) -> None:
-    async def _full_chat_stream_llm(**kwargs):  # noqa: ANN003
-        assert kwargs["scene_type"] == "CHAT"
-        yield "哥哥又拿这股劲逗我，我有点招架不住。"
-
-    async def _slow_surface_llm(**kwargs):  # noqa: ANN003
-        await asyncio.sleep(10)
-        return SimpleNamespace(content='{"candidates":["迟到了"]}', final_provider="gemini", final_model="slow", total_latency_ms=10_000)
-
-    captured_post_process: dict[str, object] = {}
-
-    async def _fake_post_process(**kwargs):  # noqa: ANN003
-        captured_post_process.update(kwargs)
-        return None
-
-    multimodal = {
-        "primary_modality": "image",
-        "summary_for_chat": "可爱、卖萌；一张动漫风格的猫耳女孩特写图。",
-        "core_observation": "猫耳女孩特写。",
-        "emotion_signals": ["可爱", "卖萌"],
+        "summary_for_chat": "委屈；一张动漫风格的猫耳女孩特写图。",
+        "social_signal": "委屈",
+        "emotion_signals": ["委屈"],
     }
     monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _full_chat_stream_llm)
-    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _slow_surface_llm)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _fake_surface_llm)
     monkeypatch.setattr(
         "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
         lambda **kwargs: (
@@ -1175,14 +1184,17 @@ async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_c
                 "reply_plan": {
                     "primary_topic": "emoji_social_reply",
                     "interaction_move": "playful_ping",
-                    "response_goal": "cute_image_reply",
-                    "tactic_family": "cute_image_ack",
-                    "tactic_variant": "cute_ping",
+                    "response_goal": "gentle_image_reply",
+                    "tactic_family": "soft_emotion_ack",
+                    "tactic_variant": "distress_image",
                     "trajectory_stage": "first_turn",
                     "response_form": "text",
                     "response_form_reason": "image_social_reply",
-                    "reply_contract": "把表情包当成对方在装乖或卖萌，回这个情绪动作。",
-                    "contract": {"text": "把表情包当成对方在装乖或卖萌，回这个情绪动作。", "required_actions": ["phatic_ack", "image_social_emotion_response"]},
+                    "reply_contract": "把表情包当成情绪输入，不要点评图片。",
+                    "contract": {
+                        "text": "把表情包当成情绪输入，不要点评图片。",
+                        "required_actions": [],
+                    },
                     "multimodal": multimodal,
                     "requires_validation": True,
                     "force_buffering": True,
@@ -1192,13 +1204,12 @@ async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_c
     )
     monkeypatch.setattr("host_brain.app.agent_runtime_shared._async_post_process", _fake_post_process)
     monkeypatch.setattr("host_brain.app.dependencies.get_reply_surface_memory_store", lambda: _MemoryStoreStub(""))
-    monkeypatch.setenv("HOST_IMAGE_SOCIAL_SURFACE_TIMEOUT_MS", "1500")
     monkeypatch.setenv("HOST_STREAM_TTS_ENABLED", "false")
     monkeypatch.setenv("HOST_TTS_SENTENCE_STREAM_ENABLED", "false")
 
     agent_input = ChatAgentInput(
-        request_id="req-image-social-surface-timeout",
-        session_id="sess-image-social-surface-timeout",
+        request_id="req-image-social-full-chat",
+        session_id="sess-image-social-full-chat",
         user_message="[图片消息]",
         person_id="user_1",
         emotion_context={"emotion_tag": "NEUTRAL"},
@@ -1220,46 +1231,38 @@ async def test_chat_agent_image_social_surface_hard_timeout_falls_back_to_full_c
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert str(commit_event.get("narrative") or "") == "哥哥又拿这股劲逗我，我有点招架不住。"
-    assert commit_event["audit_refs"]["model_id"] == "mock-chat"
+    assert str(commit_event.get("narrative") or "") == "哥哥，先不闹你了。"
+    assert stream_called is False
     await asyncio.sleep(0)
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
-    assert trace_stage_meta.get("deterministic_primary_used") is not True
-    assert trace_stage_meta.get("deterministic_primary_reason") == "image_social_surface_no_candidate"
-    assert trace_stage_meta.get("fallback_used") is not True
+    assert trace_stage_meta.get("deterministic_primary_used") is True
     surface_meta = dict(trace_stage_meta.get("image_social_surface_render") or {})
-    continue_meta = dict(trace_stage_meta.get("image_social_surface_continue_full_model") or {})
-    assert surface_meta.get("reason_code") == "SURFACE_HARD_TIMEOUT"
-    assert surface_meta.get("affected_output") is False
-    assert continue_meta.get("reason_code") == "image_social_surface_unavailable"
-    assert continue_meta.get("status") == "CONTINUE"
-    assert "image_social_surface_render_fallback" not in trace_stage_meta
+    assert surface_meta.get("status") == "OK"
+    assert trace_stage_meta.get("reply_source") == "surface"
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="SurfaceRenderer retired from normal text final reply path")
 async def test_chat_agent_image_social_validation_failure_suppresses_fallback_text(monkeypatch) -> None:
-    from host_brain.persona.surface_renderer import SurfaceRenderer, SurfaceResult
-
     stream_calls = 0
 
     async def _bad_full_chat_stream_llm(**kwargs):  # noqa: ANN003
         nonlocal stream_calls
-        assert kwargs["scene_type"] == "CHAT"
         stream_calls += 1
-        if stream_calls == 1:
-            yield "哥哥，你是不是觉得这张图里的猫猫很可爱呀？"
-        else:
-            yield "哥哥，你是不是还想让我看这张图可不可爱？"
+        raise AssertionError("image social surface rejection must not fall through to full chat")
+        yield "哥哥，你是不是觉得这张图里的猫猫很可爱呀？"
 
-    async def _skip_surface(self, request):  # noqa: ANN001, ANN003
-        request.trace_meta["image_social_surface_render"] = {
-            "status": "SKIPPED",
-            "invoked": False,
-            "affected_output": False,
-            "source": "surface",
-            "reason_code": "test_surface_skipped",
-        }
-        return SurfaceResult(source="surface", skipped_reason="test_surface_skipped")
+    surface_calls = 0
+
+    async def _bad_surface_llm(**kwargs):  # noqa: ANN003
+        nonlocal surface_calls
+        surface_calls += 1
+        return SimpleNamespace(
+            content=json.dumps({"candidates": ["哥哥，你是不是觉得这张图里的猫猫很可爱呀？"]}, ensure_ascii=False),
+            final_provider="gemini",
+            final_model="gemini-2.5-flash-lite",
+            total_latency_ms=123,
+        )
 
     captured_post_process: dict[str, object] = {}
 
@@ -1270,11 +1273,11 @@ async def test_chat_agent_image_social_validation_failure_suppresses_fallback_te
     multimodal = {
         "primary_modality": "image",
         "summary_for_chat": "可爱、卖萌；一张动漫风格的猫耳女孩特写图。",
-        "core_observation": "猫耳女孩特写。",
+        "social_signal": "可爱",
         "emotion_signals": ["可爱", "卖萌"],
     }
     monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _bad_full_chat_stream_llm)
-    monkeypatch.setattr(SurfaceRenderer, "render", _skip_surface)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _bad_surface_llm)
     monkeypatch.setattr(
         "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
         lambda **kwargs: (
@@ -1290,10 +1293,10 @@ async def test_chat_agent_image_social_validation_failure_suppresses_fallback_te
                     "trajectory_stage": "first_turn",
                     "response_form": "text",
                     "response_form_reason": "image_social_reply",
-                    "reply_contract": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
+                    "reply_contract": "把表情包当成情绪输入，不要点评图片。",
                     "contract": {
-                        "text": "把表情包当成对方在装乖或卖萌，回这个情绪动作，不要点评图片。",
-                        "required_actions": ["phatic_ack", "image_social_emotion_response"],
+                        "text": "把表情包当成情绪输入，不要点评图片。",
+                        "required_actions": [],
                     },
                     "multimodal": multimodal,
                     "requires_validation": True,
@@ -1331,7 +1334,8 @@ async def test_chat_agent_image_social_validation_failure_suppresses_fallback_te
         if event.get("phase") == "COMMIT":
             commit_event = event
 
-    assert stream_calls == 1
+    assert surface_calls >= 1
+    assert stream_calls == 0
     assert commit_event["decision"] == "NO_REPLY"
     assert commit_event["reason_code"] == "IMAGE_SOCIAL_NO_SAFE_REPLY"
     assert str(commit_event.get("narrative") or "") == ""
@@ -1342,5 +1346,198 @@ async def test_chat_agent_image_social_validation_failure_suppresses_fallback_te
     trace_stage_meta = dict(captured_post_process.get("trace_stage_meta") or {})
     fallback_meta = dict(trace_stage_meta.get("fallback_suppressed") or {})
     assert fallback_meta.get("reason_code") == "IMAGE_SOCIAL_NO_SAFE_REPLY"
+    assert fallback_meta.get("source") in {
+        "image_social_surface_no_safe_candidate",
+        "image_social_surface_candidate_invalid",
+        "image_social_deterministic_pre_render_invalid",
+        "image_social_initial_invalid",
+    }
     assert trace_stage_meta.get("fallback_used") is False
     assert trace_stage_meta.get("suppress_final_reply") is True
+    assert dict(trace_stage_meta.get("image_social_surface_suppressed_full_chat") or {}).get("status") == "SUPPRESSED"
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_pure_social_reaction_without_asset_does_not_call_text_surface_or_chat(monkeypatch) -> None:
+    async def _blocked_stream_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("pure social reaction must not call full chat")
+        yield ""
+
+    async def _blocked_surface_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("pure social reaction must not call CHAT_SURFACE")
+
+    class _EmptyCatalog:
+        def select(self, **kwargs):  # noqa: ANN003
+            return None
+
+    multimodal = {
+        "primary_modality": "emoji",
+        "observed_types": ["emoji"],
+        "multimodal_act": {
+            "input_kind": "emoji",
+            "user_intent": "social_reaction",
+            "emotion": "awkward",
+            "intensity": 0.6,
+            "requires_text_answer": False,
+        },
+    }
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _blocked_stream_llm)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _blocked_surface_llm)
+    monkeypatch.setattr("host_brain.app.reaction_catalog.get_reaction_catalog", lambda: _EmptyCatalog())
+    monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [{"role": "system", "content": "【人格核心】你是新海天。"}, {"role": "user", "content": kwargs["user_message"]}],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "emoji_social_reply",
+                    "interaction_move": "playful_ping",
+                    "response_goal": "gentle_image_reply",
+                    "tactic_family": "soft_emotion_ack",
+                    "tactic_variant": "steady_hold",
+                    "trajectory_stage": "first_turn",
+                    "response_form": "sticker",
+                    "response_form_reason": "social_reaction",
+                    "allow_form_only_reply": True,
+                    "reply_contract": "纯表情包按社交反应处理。",
+                    "contract": {"text": "纯表情包按社交反应处理。"},
+                    "multimodal": multimodal,
+                    "requires_validation": False,
+                    "force_buffering": False,
+                },
+            },
+        ),
+    )
+
+    agent_input = ChatAgentInput(
+        request_id="req-social-reaction-no-asset",
+        session_id="sess-social-reaction-no-asset",
+        user_message="[表情消息]",
+        person_id="user_1",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        multimodal_observations=multimodal,
+        reply_channel="qq",
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-chat",
+            "timeout_ms": 5000,
+            "llm_api_key": "",
+            "base_url_override": "",
+        },
+    )
+
+    commit_event = {}
+    async for chunk in chat_agent_sse_generator(agent_input):
+        event = _parse_sse(chunk)
+        if event.get("phase") == "COMMIT":
+            commit_event = event
+
+    assert commit_event["decision"] == "NO_REPLY"
+    assert commit_event["reason_code"] == "SOCIAL_REACTION_ASSET_MISSING"
+    assert commit_event["reply_envelope"]["kind"] == "no_reply"
+    assert commit_event["reply_envelope"]["sendable"] is False
+    trace = dict(commit_event["audit_refs"].get("trace_stage_meta") or {})
+    assert dict(trace.get("social_reaction_decider") or {}).get("invoked") is True
+    assert dict(trace.get("surface_renderer") or {}).get("status") == "SKIPPED"
+
+
+@pytest.mark.asyncio
+async def test_chat_agent_pure_social_reaction_with_asset_returns_media_envelope(monkeypatch, tmp_path) -> None:
+    from host_brain.app.reaction_catalog import ReactionAsset
+
+    async def _blocked_stream_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("pure social reaction must not call full chat")
+        yield ""
+
+    async def _blocked_surface_llm(**kwargs):  # noqa: ANN003
+        raise AssertionError("pure social reaction must not call CHAT_SURFACE")
+
+    media_path = tmp_path / "awkward.webp"
+    media_path.write_bytes(b"fake")
+
+    class _Catalog:
+        def select(self, **kwargs):  # noqa: ANN003
+            return ReactionAsset(
+                reaction_id="awkward-1",
+                emotion="awkward",
+                response_form="sticker",
+                media_ref=str(media_path),
+            )
+
+    multimodal = {
+        "primary_modality": "emoji",
+        "observed_types": ["emoji"],
+        "multimodal_act": {
+            "input_kind": "emoji",
+            "user_intent": "social_reaction",
+            "emotion": "awkward",
+            "intensity": 0.6,
+            "requires_text_answer": False,
+        },
+    }
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.astream_llm_chunks_with_pool", _blocked_stream_llm)
+    monkeypatch.setattr("host_brain.integrations.llm_helpers.acomplete_llm_with_pool", _blocked_surface_llm)
+    monkeypatch.setattr("host_brain.app.reaction_catalog.get_reaction_catalog", lambda: _Catalog())
+    monkeypatch.setattr(
+        "host_brain.app.cortex_prompt_builder.build_cortex_prompt",
+        lambda **kwargs: (
+            [{"role": "system", "content": "【人格核心】你是新海天。"}, {"role": "user", "content": kwargs["user_message"]}],
+            {},
+            {
+                "reply_plan": {
+                    "primary_topic": "emoji_social_reply",
+                    "interaction_move": "playful_ping",
+                    "response_goal": "gentle_image_reply",
+                    "tactic_family": "soft_emotion_ack",
+                    "tactic_variant": "steady_hold",
+                    "trajectory_stage": "first_turn",
+                    "response_form": "sticker",
+                    "response_form_reason": "social_reaction",
+                    "allow_form_only_reply": True,
+                    "reply_contract": "纯表情包按社交反应处理。",
+                    "contract": {"text": "纯表情包按社交反应处理。"},
+                    "multimodal": multimodal,
+                    "requires_validation": False,
+                    "force_buffering": False,
+                },
+            },
+        ),
+    )
+
+    agent_input = ChatAgentInput(
+        request_id="req-social-reaction-asset",
+        session_id="sess-social-reaction-asset",
+        user_message="[表情消息]",
+        person_id="user_1",
+        emotion_context={"emotion_tag": "NEUTRAL"},
+        bond_summary={"stage": "FRIEND"},
+        multimodal_observations=multimodal,
+        reply_channel="qq",
+        llm_runtime={
+            "available": True,
+            "provider_name": "mock",
+            "model_id": "mock-chat",
+            "timeout_ms": 5000,
+            "llm_api_key": "",
+            "base_url_override": "",
+        },
+    )
+
+    commit_event = {}
+    async for chunk in chat_agent_sse_generator(agent_input):
+        event = _parse_sse(chunk)
+        if event.get("phase") == "COMMIT":
+            commit_event = event
+
+    envelope = dict(commit_event["reply_envelope"])
+    assert commit_event["decision"] == "APPROVE"
+    assert str(commit_event.get("narrative") or "") == ""
+    assert envelope["kind"] == "final_reply"
+    assert envelope["sendable"] is True
+    assert envelope["cacheable"] is False
+    assert envelope["response_form"] == "sticker"
+    assert envelope["media_ref"] == str(media_path)
+    assert envelope["reaction_id"] == "awkward-1"

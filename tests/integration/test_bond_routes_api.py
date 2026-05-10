@@ -84,7 +84,7 @@ class TestGetBondSummary:
         resp = client.get("/bond/summary/dave")
         data = resp.json()
         # M28-H：to_summary() 返回中文阶段名
-        _VALID_STAGES_CN = {"陌生人", "相识", "朋友", "挚友", "知己", "灵魂伴侣"}
+        _VALID_STAGES_CN = {"初次见面的义妹", "相处中的义妹", "关系好的兄妹", "亲近兄妹", "亲密恋人", "灵魂伴侣"}
         assert data["stage"] in _VALID_STAGES_CN
 
     def test_summary_trend_is_valid(self, client):
@@ -211,8 +211,8 @@ class TestSummaryAfterPromotion:
             })
         resp = client.get("/bond/summary/frank")
         data = resp.json()
-        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相识”
-        assert data["stage"] == "相识"
+        # M28-H：to_summary() 返回中文阶段名，ACQUAINTANCE 对应“相处中的义妹”
+        assert data["stage"] == "相处中的义妹"
 
     def test_summary_still_no_numeric_after_promotion(self, client):
         for i in range(2):

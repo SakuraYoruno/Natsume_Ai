@@ -277,6 +277,10 @@ def _looks_like_task_progress_query(user_message: str) -> bool:
     return bool(message) and any(marker in message for marker in _TASK_PROGRESS_PATTERNS)
 
 
+def _chat_kernel_v2_enabled() -> bool:
+    return _parse_bool_env("HOST_CHAT_KERNEL_V2_ENABLED", default=True)
+
+
 def _looks_multi_step_request(user_message: str, intent_draft: dict[str, Any]) -> bool:
     if isinstance(intent_draft.get("planned_steps"), list) and len(intent_draft.get("planned_steps") or []) > 1:
         return True
@@ -344,6 +348,8 @@ def _hard_rule_route(
 
     if _looks_like_task_progress_query(sanitized_message):
         return _RouteSelection("task_progress", "", "hard_rule:task_progress")
+    if _looks_like_recent_turn_query(sanitized_message) and _chat_kernel_v2_enabled():
+        return _RouteSelection("chat", "", "chat_kernel_v2:recent_turn_fact")
     if _looks_like_recent_turn_query(sanitized_message):
         return _RouteSelection("recent_turn", "", "hard_rule:recent_turn")
 
@@ -1005,6 +1011,8 @@ def _build_chat_input(
         retrieval_summary=dict(retrieval_summary or {}),
         sub_agent_context=sub_agent_context,
         render_target_lang=render_target_lang,
+        render_profile=str(getattr(request_body, "render_profile", "") or "").strip(),
+        response_form=str(getattr(request_body, "response_form", "") or "").strip(),
         reply_channel=getattr(request_body, "reply_channel", None),
         suppress_edge_tts=getattr(request_body, "suppress_edge_tts", None),
         suppress_edge_vts=getattr(request_body, "suppress_edge_vts", None),

@@ -58,14 +58,14 @@ export const MODE_META = {
 }
 
 export const STAGE_LABELS = {
-  STRANGER: '陌生',
-  ACQUAINTANCE: '初识',
-  FRIEND: '朋友',
+  STRANGER: '初见义妹',
+  ACQUAINTANCE: '相处义妹',
+  FRIEND: '关系好的兄妹',
   CLOSE: '亲近',
-  CLOSE_FRIEND: '挚友',
+  CLOSE_FRIEND: '亲近兄妹',
   COMPANION: '陪伴',
-  CONFIDANT: '知己',
-  INTIMATE: '亲密',
+  CONFIDANT: '亲密恋人',
+  INTIMATE: '亲密恋人',
   SOULMATE: '灵魂伴侣',
 }
 
@@ -547,4 +547,3 @@ export function formatNonLiveSlotList(nonLiveSlots) {
 
   return items.length > 0 ? items.join('、') : DASH
 }
-

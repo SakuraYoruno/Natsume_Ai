@@ -764,117 +764,38 @@ def test_build_gateway_reply_text_fallback_for_empty_reject() -> None:
         narrative="",
         reason_code="RATE_LIMIT",
     )
-    assert "重试" in text
-    assert_natsume_style(
-        user_message="先继续处理这件事",
-        reply=text,
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-    )
+    assert text == ""
 
 
 def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
-    store.upsert_template(
-        "input_routes.fallback_texts",
-        content=json.dumps(
-            {
-                "reject_default": "先等等我，我马上回来。",
-                "approve_empty": "已经收到啦。",
-            },
-            ensure_ascii=False,
-        ),
-        enabled=True,
-    )
-
-    import host_brain.app.dependencies as deps
-
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
-
+    _ = monkeypatch
     assert _build_gateway_reply_text(
         decision="REJECT",
         narrative="",
         reason_code="RATE_LIMIT",
-    ) == "先等等我，我马上回来。"
+    ) == ""
     assert _build_gateway_reply_text(
         decision="APPROVE",
         narrative="",
         reason_code=None,
-    ) == "已经收到啦。"
-    assert_natsume_style(
-        user_message="先帮我继续处理",
-        reply="先等等我，我马上回来。",
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-    )
-    assert_natsume_style(
-        user_message="先帮我继续处理",
-        reply="已经收到啦。",
-        emotion_tag="neutral",
-        bond_stage="STRANGER",
-    )
+    ) == ""
 
 
 def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_override(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
-    store.upsert_template(
-        "input_routes.fallback_texts",
-        content=json.dumps(
-            {
-                "route_started_voice_ack": {
-                    "translate_agent": "自定义翻译等待中。",
-                    "intent_agent": "自定义整理等待中。",
-                    "codex_worker": "自定义代码处理中。",
-                    "plan": "自定义计划处理中。",
-                    "default": "自定义默认等待中。",
-                }
-            },
-            ensure_ascii=False,
-        ),
-        enabled=True,
-    )
-
-    import host_brain.app.dependencies as deps
-
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
-
-    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == "自定义翻译等待中。"
-    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == "自定义整理等待中。"
-    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="codex_worker") == "自定义代码处理中。"
-    assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == "自定义计划处理中。"
-    assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == "自定义默认等待中。"
+    _ = monkeypatch
+    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == ""
+    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == ""
+    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="codex_worker") == ""
+    assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == ""
+    assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == ""
 
 
 def test_build_gateway_voice_text_uses_prompt_template_override(monkeypatch) -> None:
-    ledger = SQLiteLedger(":memory:", check_same_thread=False)
-    store = PromptTemplateStore(ledger=ledger, cache_ttl_ms=0)
-    store.upsert_template(
-        "input_routes.fallback_texts",
-        content=json.dumps(
-            {
-                "voice_summary": {
-                    "code_or_latin": "自定义代码朗读摘要。",
-                    "reply_present": "自定义结果朗读摘要。",
-                }
-            },
-            ensure_ascii=False,
-        ),
-        enabled=True,
-    )
-
-    import host_brain.app.dependencies as deps
-
-    monkeypatch.setattr(deps, "_ledger", ledger, raising=False)
-    monkeypatch.setattr(deps, "_prompt_template_store", store, raising=False)
-
-    assert _build_gateway_voice_text(reply_text="```python\nprint('hi')\n```", tts_text_ja=None) == "自定义代码朗读摘要。"
-    assert _build_gateway_voice_text(reply_text="这是中文结果。", tts_text_ja=None) == "自定义结果朗读摘要。"
-    assert _build_gateway_voice_text(reply_text="Result ready", tts_text_ja=None) == "自定义代码朗读摘要。"
-    assert _build_gateway_voice_text(reply_text="有结果但没有日语", tts_text_ja="") == "自定义结果朗读摘要。"
+    _ = monkeypatch
+    assert _build_gateway_voice_text(reply_text="```python\nprint('hi')\n```", tts_text_ja=None) == ""
+    assert _build_gateway_voice_text(reply_text="这是中文结果。", tts_text_ja=None) == ""
+    assert _build_gateway_voice_text(reply_text="Result ready", tts_text_ja=None) == ""
+    assert _build_gateway_voice_text(reply_text="有结果但没有日语", tts_text_ja="") == ""
 
 
 def test_build_gateway_voice_text_prefers_tts_text_ja_when_available() -> None:
@@ -892,9 +813,7 @@ def test_build_gateway_voice_text_falls_back_to_safe_japanese_summary_for_latin_
         reply_text="可以直接这样写：```python\\nfrom collections import Counter\\n```",
         tts_text_ja=None,
     )
-    assert "画面" in voice_text
-    assert "読み上げる" in voice_text
-    assert "python" not in voice_text.lower()
+    assert voice_text == ""
 
 
 def test_deliver_gateway_reply_skips_when_auto_reply_disabled(monkeypatch) -> None:
@@ -942,6 +861,52 @@ def test_deliver_gateway_reply_skips_no_reply_decision_without_edge_send(monkeyp
     assert post_gateway_reply_mock.await_count == 0
 
 
+def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkeypatch, tmp_path) -> None:
+    media_path = tmp_path / "awkward.webp"
+    media_path.write_bytes(b"fake")
+    post_gateway_reply_mock = AsyncMock(return_value=SimpleNamespace(success=True, status="OK", detail="", latency_ms=31))
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    monkeypatch.setattr(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        post_gateway_reply_mock,
+    )
+
+    result = _run(
+        _deliver_gateway_reply(
+            request_id="req_gateway_reply_media_001",
+            payload={"platform": "qq", "conversation_id": "qq_dm_media_001"},
+            decision="APPROVE",
+            reason_code=None,
+            narrative="",
+            user_msg_type="emoji",
+            response_form="sticker",
+            response_form_reason="social_reaction",
+            reply_envelope_payload={
+                "kind": "final_reply",
+                "text": "",
+                "response_form": "sticker",
+                "source": "reaction_catalog",
+                "sendable": True,
+                "persistable": True,
+                "cacheable": False,
+                "degraded": False,
+                "media_ref": str(media_path),
+                "reaction_id": "awkward-1",
+            },
+        )
+    )
+
+    assert result["success"] is True
+    assert result["reply_form"] == "sticker"
+    assert result["reply_text_len"] == 0
+    assert post_gateway_reply_mock.await_count == 1
+    call = post_gateway_reply_mock.await_args.kwargs
+    assert call["msg_type"] == "image"
+    assert call["content"] == ""
+    assert call["media_path"] == str(media_path)
+    assert call["raw_extra"]["reply_envelope"]["reaction_id"] == "awkward-1"
+
+
 def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     with patch(
@@ -978,13 +943,13 @@ def test_deliver_gateway_reply_can_still_emit_local_voice_when_auto_reply_disabl
                 narrative="我先直接在你这边把结果念出来。",
                 emotion_tag="GENTLE",
                 user_msg_type="text",
+                tts_text_ja="こっちで先に読んであげる。",
             )
         )
 
     speak_mock.assert_awaited_once()
     voiced_text = speak_mock.await_args.kwargs["text"]
-    assert "画面" in voiced_text
-    assert "python" not in voiced_text.lower()
+    assert voiced_text == "こっちで先に読んであげる。"
     assert result["success"] is True
     assert result["status"] == "SKIPPED"
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
@@ -1043,6 +1008,7 @@ def test_deliver_gateway_reply_force_dual_voice_waits_for_edge_voice_result(monk
                 narrative="今天我会直接把结果说给你听。",
                 emotion_tag="HAPPY",
                 user_msg_type="text",
+                tts_text_ja="今日はそのまま声で伝えるね。",
             )
         )
 
@@ -1105,6 +1071,7 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
                 narrative="就算文字发不出去，我也先把声音链路跑起来。",
                 emotion_tag="HAPPY",
                 user_msg_type="text",
+                tts_text_ja="文字が届かなくても、先に声でつなぐね。",
             )
         )
 
@@ -1117,7 +1084,7 @@ def test_deliver_gateway_reply_can_still_trigger_local_voice_when_primary_delive
     assert result["voice_vts_started"] is True
 
 
-def test_deliver_gateway_reply_collapses_qq_text_plus_emoji_into_single_text_send(monkeypatch) -> None:
+def test_deliver_gateway_reply_qq_text_plus_sticker_sends_structured_image(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     post_gateway_reply_mock = AsyncMock(
         return_value=SimpleNamespace(
@@ -1130,7 +1097,6 @@ def test_deliver_gateway_reply_collapses_qq_text_plus_emoji_into_single_text_sen
     )
     fake_mm = SimpleNamespace(
         enhance_output=lambda **_: SimpleNamespace(
-            suggested_emoji="👋",
             suggested_sticker="",
         )
     )
@@ -1153,19 +1119,32 @@ def test_deliver_gateway_reply_collapses_qq_text_plus_emoji_into_single_text_sen
                 reason_code=None,
                 narrative="你好呀！有什么事吗？",
                 user_msg_type="text",
-                response_form="text_plus_emoji",
+                response_form="text_plus_sticker",
                 response_form_reason="phatic_greeting",
+                reply_envelope_payload={
+                    "kind": "final_reply",
+                    "text": "你好呀！有什么事吗？",
+                    "response_form": "text_plus_sticker",
+                    "source": "test",
+                    "sendable": True,
+                    "persistable": True,
+                    "cacheable": False,
+                    "raw_extra": {"sticker": "https://example.invalid/sora-wave.webp"},
+                },
             )
         )
 
     assert result["success"] is True
-    assert post_gateway_reply_mock.await_count == 1
+    assert post_gateway_reply_mock.await_count == 2
     primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
+    secondary_call = post_gateway_reply_mock.await_args_list[1].kwargs
     assert primary_call["msg_type"] == "text"
-    assert primary_call["content"].endswith("👋")
+    assert primary_call["content"] == "你好呀！有什么事吗？"
+    assert secondary_call["msg_type"] == "image"
+    assert secondary_call["content"] == "https://example.invalid/sora-wave.webp"
 
 
-def test_deliver_gateway_reply_qq_text_plus_emoji_uses_default_emoji_when_processor_has_no_suggestion(monkeypatch) -> None:
+def test_deliver_gateway_reply_text_plus_sticker_without_structured_payload_is_suppressed(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     post_gateway_reply_mock = AsyncMock(
         return_value=SimpleNamespace(
@@ -1178,7 +1157,6 @@ def test_deliver_gateway_reply_qq_text_plus_emoji_uses_default_emoji_when_proces
     )
     fake_mm = SimpleNamespace(
         enhance_output=lambda **_: SimpleNamespace(
-            suggested_emoji="",
             suggested_sticker="",
         )
     )
@@ -1201,19 +1179,18 @@ def test_deliver_gateway_reply_qq_text_plus_emoji_uses_default_emoji_when_proces
                 reason_code=None,
                 narrative="我在呀。你想跟我说什么？",
                 user_msg_type="text",
-                response_form="text_plus_emoji",
+                response_form="text_plus_sticker",
                 response_form_reason="phatic_greeting",
             )
         )
 
     assert result["success"] is True
-    assert post_gateway_reply_mock.await_count == 1
-    primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
-    assert primary_call["msg_type"] == "text"
-    assert primary_call["content"].endswith("👋")
+    assert result["status"] == "SKIPPED"
+    assert result["reason_code"] == "INVALID_REPLY_ENVELOPE"
+    assert post_gateway_reply_mock.await_count == 0
 
 
-def test_deliver_gateway_reply_non_qq_text_plus_emoji_keeps_secondary_send(monkeypatch) -> None:
+def test_deliver_gateway_reply_plain_text_phatic_does_not_append_default_emoji(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     post_gateway_reply_mock = AsyncMock(
         return_value=SimpleNamespace(
@@ -1226,7 +1203,53 @@ def test_deliver_gateway_reply_non_qq_text_plus_emoji_keeps_secondary_send(monke
     )
     fake_mm = SimpleNamespace(
         enhance_output=lambda **_: SimpleNamespace(
-            suggested_emoji="👋",
+            suggested_sticker="",
+        )
+    )
+
+    with patch(
+        "host_brain.channels.edge_rpc_client.post_gateway_reply",
+        new=post_gateway_reply_mock,
+    ), patch(
+        "host_brain.app.dependencies.get_multimodal_processor",
+        return_value=fake_mm,
+    ):
+        result = _run(
+            _deliver_gateway_reply(
+                request_id="req_gateway_reply_plain_phatic_no_emoji",
+                payload={
+                    "platform": "qq",
+                    "conversation_id": "qq_dm_plain_phatic_no_emoji",
+                },
+                decision="APPROVE",
+                reason_code=None,
+                narrative="哥哥，我在呀，刚刚还想着你是不是又来晃一圈呢。",
+                user_msg_type="text",
+                response_form="text",
+                response_form_reason="phatic_greeting",
+            )
+        )
+
+    assert result["success"] is True
+    assert post_gateway_reply_mock.await_count == 1
+    primary_call = post_gateway_reply_mock.await_args_list[0].kwargs
+    assert primary_call["msg_type"] == "text"
+    assert primary_call["content"] == "哥哥，我在呀，刚刚还想着你是不是又来晃一圈呢。"
+
+
+def test_deliver_gateway_reply_non_qq_text_plus_sticker_keeps_secondary_send(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
+    post_gateway_reply_mock = AsyncMock(
+        return_value=SimpleNamespace(
+            success=True,
+            status="SENT",
+            reason_code=None,
+            detail="ok",
+            latency_ms=12,
+        )
+    )
+    fake_mm = SimpleNamespace(
+        enhance_output=lambda **_: SimpleNamespace(
             suggested_sticker="",
         )
     )
@@ -1249,8 +1272,18 @@ def test_deliver_gateway_reply_non_qq_text_plus_emoji_keeps_secondary_send(monke
                 reason_code=None,
                 narrative="你好呀！有什么事吗？",
                 user_msg_type="text",
-                response_form="text_plus_emoji",
+                response_form="text_plus_sticker",
                 response_form_reason="phatic_greeting",
+                reply_envelope_payload={
+                    "kind": "final_reply",
+                    "text": "你好呀！有什么事吗？",
+                    "response_form": "text_plus_sticker",
+                    "source": "test",
+                    "sendable": True,
+                    "persistable": True,
+                    "cacheable": False,
+                    "raw_extra": {"sticker": "https://example.invalid/sora-wave.webp"},
+                },
             )
         )
 
@@ -1260,9 +1293,9 @@ def test_deliver_gateway_reply_non_qq_text_plus_emoji_keeps_secondary_send(monke
     secondary_call = post_gateway_reply_mock.await_args_list[1].kwargs
     assert primary_call["msg_type"] == "text"
     assert primary_call["content"] == "你好呀！有什么事吗？"
-    assert secondary_call["msg_type"] == "emoji"
-    assert secondary_call["content"] == "👋"
-    assert secondary_call["request_id"].endswith("::secondary::emoji")
+    assert secondary_call["msg_type"] == "image"
+    assert secondary_call["content"] == "https://example.invalid/sora-wave.webp"
+    assert secondary_call["request_id"].endswith("::secondary::image")
     assert secondary_call["wait_result"] is True
 
 
@@ -1316,8 +1349,8 @@ def test_should_send_gateway_immediate_ack_for_action_intent() -> None:
         intent_draft={"route": "skill", "target_id": "session_summary"},
     )
 
-    assert should_send is True
-    assert reason == "ACK_ACTION_INTENT"
+    assert should_send is False
+    assert reason == "ACK_RETIRED_REPLY_ENVELOPE_ONLY"
 
 
 def test_should_skip_gateway_immediate_ack_when_route_unresolved() -> None:
@@ -1506,18 +1539,8 @@ def test_gateway_progress_fastpath_replies_from_runtime_registry(monkeypatch) ->
                 )
             )
 
-        assert handled is True
-        post_mock.assert_awaited_once()
-        kwargs = post_mock.await_args.kwargs
-        assert kwargs["platform"] == "qq"
-        assert kwargs["conversation_id"] == "qq_dm_3001"
-        assert "session_summary" in kwargs["content"]
-        assert_natsume_style(
-            user_message="现在进度怎么样了？",
-            reply=str(kwargs["content"]),
-            emotion_tag="neutral",
-            bond_stage="STRANGER",
-        )
+        assert handled is False
+        post_mock.assert_not_awaited()
     finally:
         ledger.close()
 
@@ -1572,8 +1595,8 @@ def test_should_start_gateway_progress_push_for_gateway_action() -> None:
         intent_draft={"route": "skill", "target_id": "codex_worker"},
     )
 
-    assert should_start is True
-    assert reason == "PROGRESS_PUSH_ENABLED"
+    assert should_start is False
+    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
 
 
 def test_should_skip_gateway_progress_push_when_route_unresolved() -> None:
@@ -1584,7 +1607,7 @@ def test_should_skip_gateway_progress_push_when_route_unresolved() -> None:
     )
 
     assert should_start is False
-    assert reason == "PROGRESS_PUSH_ROUTE_UNRESOLVED"
+    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
 
 
 def test_should_skip_gateway_progress_push_for_progress_query() -> None:
@@ -1595,7 +1618,7 @@ def test_should_skip_gateway_progress_push_for_progress_query() -> None:
     )
 
     assert should_start is False
-    assert reason == "PROGRESS_PUSH_PROGRESS_QUERY"
+    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
 
 
 def test_should_skip_gateway_progress_push_for_chat_route_even_if_help_words_present() -> None:
@@ -1607,7 +1630,7 @@ def test_should_skip_gateway_progress_push_for_chat_route_even_if_help_words_pre
     )
 
     assert should_start is False
-    assert reason == "PROGRESS_PUSH_NON_EXECUTION_ROUTE"
+    assert reason == "PROGRESS_PUSH_RETIRED_REPLY_ENVELOPE_ONLY"
 
 
 def test_run_gateway_proactive_progress_push_sends_update(monkeypatch) -> None:

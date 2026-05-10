@@ -7,17 +7,17 @@ import host_brain.integrations.llm_helpers as llm_helpers
 from host_brain.integrations.llm_helpers import stream_llm_chunks
 
 
-def test_stream_llm_chunks_passes_max_tokens_to_chat_openai(monkeypatch) -> None:
+def test_stream_llm_chunks_passes_max_tokens_to_native_gemini(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeChatOpenAI:
+    class _FakeChatGoogleGenerativeAI:
         def __init__(self, **kwargs):  # noqa: ANN003
             captured.update(kwargs)
 
         def stream(self, _messages):  # noqa: ANN001
             yield SimpleNamespace(content="你好。")
 
-    monkeypatch.setattr("langchain_openai.ChatOpenAI", _FakeChatOpenAI)
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
 
     chunks = list(
         stream_llm_chunks(
@@ -35,19 +35,21 @@ def test_stream_llm_chunks_passes_max_tokens_to_chat_openai(monkeypatch) -> None
 
     assert chunks == ["你好。"]
     assert captured["max_tokens"] == 96
+    assert captured["model"] == "gemini-2.5-flash-lite"
+    assert captured["api_key"] == "test-key"
 
 
 def test_stream_llm_chunks_accepts_max_output_tokens_alias(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeChatOpenAI:
+    class _FakeChatGoogleGenerativeAI:
         def __init__(self, **kwargs):  # noqa: ANN003
             captured.update(kwargs)
 
         def stream(self, _messages):  # noqa: ANN001
             yield SimpleNamespace(content="在。")
 
-    monkeypatch.setattr("langchain_openai.ChatOpenAI", _FakeChatOpenAI)
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
 
     chunks = list(
         stream_llm_chunks(
@@ -65,6 +67,33 @@ def test_stream_llm_chunks_accepts_max_output_tokens_alias(monkeypatch) -> None:
 
     assert chunks == ["在。"]
     assert captured["max_tokens"] == 128
+
+
+def test_stream_llm_chunks_raises_tiny_cap_for_native_gemini_pro(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def stream(self, _messages):  # noqa: ANN001
+            yield SimpleNamespace(content=[{"type": "text", "text": "你好"}])
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    chunks = list(
+        stream_llm_chunks(
+            provider_name="gemini",
+            model_id="gemini-3.1-pro-preview",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[{"role": "user", "content": "hello"}],
+            gen_params={"max_output_tokens": 16},
+        )
+    )
+
+    assert chunks == ["你好"]
+    assert captured["max_tokens"] == 1024
 
 
 class _FakeStreamingHTTPResponse:

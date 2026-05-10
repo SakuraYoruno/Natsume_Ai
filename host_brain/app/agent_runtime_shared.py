@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from host_brain.app.sub_agent_governor import chat_lite_governor
 from host_brain.app.sub_agent_protocol import ALL_AGENT_IDS
+from host_brain.app.response_form_contract import derive_render_profile_for_response_form
 from host_brain.bond.user_identity import resolve_person_id
 from host_brain.codex_runtime.skill_ids import is_codex_runtime_skill
 
@@ -57,6 +58,11 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch B：业务路径统一降级
 
 _logger = logging.getLogger("Natsume.agent_runtime_shared")
+
+
+def _chat_kernel_v2_enabled() -> bool:
+    raw = str(os.environ.get("HOST_CHAT_KERNEL_V2_ENABLED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _resolve_post_process_executor_workers() -> int:
@@ -119,26 +125,19 @@ def _resolve_text_render_target_lang(
     request_body: Any,
     sanitized_message: str,
 ) -> str:
-    """Resolve text output language for the active chat runtime.
+    """Resolve language for the active output profile.
 
-    Gateway text replies are always Chinese, regardless of user input language.
-    Voice output remains handled separately by the TTS path.
+    Platform is not the language boundary: text renders as Chinese, voice renders
+    as Japanese, media uses a structured action envelope. Gateway/QQ is only a
+    transport layer.
     """
-    input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
-    if input_source == "GATEWAY":
-        return "zh"
-
-    injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
-    if injected_lang in {"zh", "ja"}:
-        return injected_lang
-
-    try:
-        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
-
-        return infer_render_target_lang(user_message=sanitized_message)
-    except Exception as lang_exc:
-        _logger.debug("cortex_orchestrator infer_render_target_lang failed: %s", lang_exc)
-        return "zh"
+    _ = sanitized_message
+    profile = derive_render_profile_for_response_form(str(getattr(request_body, "response_form", None) or ""))
+    if profile == "ja_voice":
+        return "ja"
+    if profile == "media_action":
+        return "media"
+    return "zh"
 
 
 _RECENT_TURN_USER_QUERY_RE = re.compile(r"(我刚才|我上一句|我上句|我前一句|我前面).*?(说了什么|发了什么|是什么)")
@@ -2123,19 +2122,21 @@ async def _cortex_orchestrator_sse_generator_impl(
             request_id=str(request_id or ""),
         )
 
-    _input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = _resolve_text_render_target_lang(
         request_body=request_body,
         sanitized_message=sanitized_message,
     )
-    _injected_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower()
 
-    task_progress_answer = _task_progress_fastpath(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
+    task_progress_answer = (
+        None
+        if _chat_kernel_v2_enabled()
+        else _task_progress_fastpath(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            render_target_lang=render_target_lang,
+        )
     )
     if task_progress_answer:
         narrative = _sanitize_output(str(task_progress_answer).strip())
@@ -2187,12 +2188,16 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    recent_turn_answer = _recent_turn_answer(
-        request_id=request_id,
-        session_id=session_id,
-        person_id=person_id,
-        user_message=sanitized_message,
-        render_target_lang=render_target_lang,
+    recent_turn_answer = (
+        None
+        if _chat_kernel_v2_enabled()
+        else _recent_turn_answer(
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            user_message=sanitized_message,
+            render_target_lang=render_target_lang,
+        )
     )
     if recent_turn_answer:
         narrative = _sanitize_output(str(recent_turn_answer).strip())
@@ -2252,7 +2257,7 @@ async def _cortex_orchestrator_sse_generator_impl(
             user_message=sanitized_message,
             render_target_lang=render_target_lang,
         )
-        if _parse_bool_env("HOST_CLARIFICATION_DIRECT_ENABLED", default=False)
+        if (not _chat_kernel_v2_enabled()) and _parse_bool_env("HOST_CLARIFICATION_DIRECT_ENABLED", default=False)
         else None
     )
     if clarification_direct_answer:
@@ -2431,10 +2436,7 @@ async def _cortex_orchestrator_sse_generator_impl(
 
     try:
         from host_brain.app.chat_retrieval_helpers import _run_retrieval  # noqa: PLC0415
-        from host_brain.app.prompt_builder import infer_render_target_lang  # noqa: PLC0415
 
-        if not _injected_lang and _input_source != "GATEWAY":
-            render_target_lang = infer_render_target_lang(user_message=sanitized_message)
         if assistant_followup_fastlane:
             retrieval_summary = {
                 "status": "SKIPPED",
@@ -2721,6 +2723,7 @@ async def _async_post_process(
                     "message_kind": "final_reply",
                     "reply_source": str(normalized_trace_stage_meta.get("reply_source") or ("fallback" if fallback_used else "full_model")).strip(),
                     "degraded": bool(fallback_used),
+                    "reply_envelope": dict(normalized_trace_stage_meta.get("reply_envelope") or {}),
                 },
             )
     except Exception as exc:

@@ -141,17 +141,17 @@ def test_inject_bond_summary_and_build_world_canon_slot() -> None:
         _FakeStore,
     ), patch(
         "host_brain.bond.summarizer.normalize_bond_summary",
-        return_value={"stage": "朋友"},
+        return_value={"stage": "关系好的兄妹"},
     ) as normalize_mock, patch(
         "host_brain.bond.summarizer.derive_bond_summary",
-        return_value={"stage": "好友"},
+        return_value={"stage": "亲近兄妹"},
     ) as derive_mock:
         entries = pc.build_world_canon_slot(world_root="tmp/world", top_k=2, status_filter="active")
-        explicit = pc.inject_bond_summary(_valid_context(), bond_summary={"stage": "朋友"})
+        explicit = pc.inject_bond_summary(_valid_context(), bond_summary={"stage": "关系好的兄妹"})
         derived = pc.inject_bond_summary(_valid_context(), bond_event={"type": "chat"})
 
     assert [item["doc_id"] for item in entries] == ["wc-3", "wc-1"]
-    assert explicit["bond_summary"] == {"stage": "朋友"}
-    assert derived["bond_summary"] == {"stage": "好友"}
+    assert explicit["bond_summary"] == {"stage": "关系好的兄妹"}
+    assert derived["bond_summary"] == {"stage": "亲近兄妹"}
     normalize_mock.assert_called_once()
     derive_mock.assert_called_once()

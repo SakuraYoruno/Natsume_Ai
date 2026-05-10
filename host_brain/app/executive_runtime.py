@@ -8,11 +8,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, AsyncGenerator
 
 _logger = logging.getLogger("Natsume.executive_runtime")
+
+
+def _chat_kernel_v2_enabled() -> bool:
+    raw = str(os.environ.get("HOST_CHAT_KERNEL_V2_ENABLED") or "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 def _extract_result_code(error_text: str | None) -> str | None:
@@ -151,6 +157,8 @@ async def try_handle_recent_turn_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
+    if _chat_kernel_v2_enabled():
+        return None
     if str(route or "").strip().lower() != "recent_turn":
         return None
 
@@ -241,6 +249,8 @@ async def try_handle_task_progress_direct_route(
     sse_fn,
     record_dispatch_handoff_fn,
 ) -> list[str] | None:
+    if _chat_kernel_v2_enabled():
+        return None
     if str(route or "").strip().lower() != "task_progress":
         return None
 
