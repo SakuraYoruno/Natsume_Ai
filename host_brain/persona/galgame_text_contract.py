@@ -408,7 +408,11 @@ def build_galgame_text_contract(
                 "少块肉",
                 "掉块肉",
                 "看你自己",
+                "随便",
                 "随便你",
+                "满意为止",
+                "答应的事",
+                "不会随便糊弄",
                 "我来帮你试",
                 "我帮你试",
                 "我来试试",
@@ -435,7 +439,7 @@ def build_galgame_text_contract(
             scene_id="identity",
             response_move="name_first",
             required_any=(("新海天",),),
-            forbidden_surface=("义妹", "妹妹", "你真正想问", "老问这个", "不会跑", "跑掉"),
+            forbidden_surface=("义妹", "妹妹", "你真正想问", "老问这个", "今天是怎么了", "怎么了", "一直问", "我知道我是谁", "不会跑", "跑掉"),
             max_questions=1,
         )
     if scene == "play_invite" or "陪我玩" in text:
@@ -443,7 +447,7 @@ def build_galgame_text_contract(
             scene_id="play_invite",
             response_move="join_play",
             required_any=(("玩", "陪"),),
-            forbidden_surface=("求我", "服务", "清单"),
+            forbidden_surface=("求我", "服务", "清单", "你想玩什么", "正好闲着", "太简单", "笑话你", "不许太无聊"),
             max_questions=1,
             target_min_chars=10,
         )
@@ -452,7 +456,7 @@ def build_galgame_text_contract(
             scene_id="who_called",
             response_move="self_invited",
             required_any=(("自己", "想来", "要来"),),
-            forbidden_surface=("你叫我", "路过", "有什么事", "怎么了", "什么表情", "不该出现", "快点说", "赶人"),
+            forbidden_surface=("你叫我", "路过", "有什么事", "怎么了", "怎么啦", "不欢迎", "什么表情", "不该出现", "快点说", "赶人"),
             max_questions=1,
         )
     if scene == "annoying_tease" or any(token in text for token in ("你好烦", "你烦不烦", "别烦我")):
@@ -594,7 +598,7 @@ def build_galgame_text_contract(
             scene_id="miss_you",
             response_move="shy_recipient",
             required_any=(("想", "哼", "也"),),
-            forbidden_surface=("今天早上", "早上才", "才见", "刚见", "见过面", "肉麻", "破天荒", "有什么事", "要我帮忙", "帮忙吧", "该不会"),
+            forbidden_surface=("今天早上", "早上才", "才见", "刚见", "见过面", "肉麻", "破天荒", "怎么了", "吃错药", "有什么事", "要我帮忙", "帮忙吧", "该不会"),
             max_questions=1,
             notes=("承接想念，不用事实反驳。",),
         )
@@ -752,7 +756,7 @@ def build_galgame_text_contract(
             scene_id="user_proud",
             response_move="praise_with_tease",
             required_any=(("厉害", "行", "不错", "骄傲"),),
-            forbidden_surface=("听听看", "让我听", "说出来", "让我评价", "非常棒"),
+            forbidden_surface=("听听看", "让我听", "说出来", "让我评价", "让我看看怎么回事", "怎么回事", "谁的哥哥", "非常棒"),
             max_questions=1,
         )
     if scene == "praise" or any(token in text for token in ("可爱", "夸我", "夸你")):

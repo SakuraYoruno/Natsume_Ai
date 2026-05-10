@@ -22,9 +22,11 @@ def test_identity_contract_requires_full_name() -> None:
 
     good = score_galgame_candidate(text="新海天啊。尼尼连我都要重新确认？", contract=contract)
     vague = score_galgame_candidate(text="是天啊，尼尼又忘了？", contract=contract)
+    probe = score_galgame_candidate(text="新海天。尼尼今天是怎么了？一直问。", contract=contract)
 
     assert good.score > vague.score
     assert "CONTRACT_MISSING_REQUIRED_MOVE" in vague.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in probe.reason_codes
 
 
 def test_quality_gate_forbidden_is_soft_penalty_not_catastrophic() -> None:
@@ -145,9 +147,11 @@ def test_who_called_contract_rejects_servicey_face_read() -> None:
         text="我自己要来的，怎么了？尼尼那是什么表情啊，好像我不该出现在这儿似的。",
         contract=contract,
     )
+    unwelcome = score_galgame_candidate(text="我自己来的啊，怎么啦，尼尼不欢迎我？", contract=contract)
 
     assert contract.scene_id == "who_called"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in unwelcome.reason_codes
 
 
 def test_good_morning_contract_rejects_early_wakeup_guess() -> None:
@@ -234,9 +238,14 @@ def test_play_invite_contract_rejects_thin_question() -> None:
     contract = build_galgame_text_contract(user_message="陪我玩会儿", scene_id="")
 
     scored = score_galgame_candidate(text="想带我玩什么？", contract=contract)
+    over_prompt = score_galgame_candidate(
+        text="来了来了，正好闲着。你想玩什么？我可提醒你，别太简单，不然我可要笑话你了。",
+        contract=contract,
+    )
 
     assert contract.scene_id == "play_invite"
     assert "TOO_SHORT" in scored.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in over_prompt.reason_codes
 
 
 def test_bored_contract_rejects_tool_chat_framing() -> None:
@@ -315,9 +324,14 @@ def test_miss_you_contract_rejects_help_guess() -> None:
         text="突、突然这么肉麻...我才不会说我也想你了呢。不过尼尼破天荒说这种话，该不会是有什么事要我帮忙吧？",
         contract=contract,
     )
+    odd_probe = score_galgame_candidate(
+        text="哼，突然说这种话……尼尼今天怎么了，吃错药啦？不过……我也稍微、那么一点点想你啦。",
+        contract=contract,
+    )
 
     assert contract.scene_id == "miss_you"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in odd_probe.reason_codes
 
 
 def test_late_night_contract_requires_sleep_nudge() -> None:
@@ -394,9 +408,14 @@ def test_continue_edit_contract_rejects_last_time_loop() -> None:
     contract = build_galgame_text_contract(user_message="还要不要继续改", scene_id="")
 
     scored = score_galgame_candidate(text="再改最后一次哦，然后别没完没了。", contract=contract)
+    overcommit = score_galgame_candidate(
+        text="改，当然改。我说过的话当然算数，尼尼的事我可不会随便糊弄过去。答应的事，就要改到满意为止。",
+        contract=contract,
+    )
 
     assert contract.scene_id == "advice_continue"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in overcommit.reason_codes
 
 
 def test_give_up_contract_accepts_later_revisit_word() -> None:
@@ -414,9 +433,15 @@ def test_user_proud_contract_rejects_tell_me_prompt() -> None:
     contract = build_galgame_text_contract(user_message="我厉害吧", scene_id="")
 
     scored = score_galgame_candidate(text="哦？这么得意啊。还行吧，不过要是真这么厉害，说出来让我听听看？", contract=contract)
+    wrong_address = score_galgame_candidate(
+        text="哼，这么得意？让我看看怎么回事……哦，是挺行的嘛。不过也不看看是谁的哥哥！勉强给你鼓个掌好了。",
+        contract=contract,
+    )
 
     assert contract.scene_id == "user_proud"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+    assert wrong_address.hard_fail
+    assert "WRONG_KINSHIP_TERM" in wrong_address.reason_codes
 
 
 def test_followup_contracts_split_why_and_then() -> None:

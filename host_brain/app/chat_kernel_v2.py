@@ -301,6 +301,10 @@ def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
             "跑通了？哼，尼尼挺能干的嘛。",
             "总算跑通了啊。不错嘛，尼尼。",
         ),
+        "user_proud": (
+            "厉害厉害，尼尼这次确实挺行。",
+            "哼，这次算尼尼厉害一点。",
+        ),
         "meal_share": (
             "吃完了啊，那就好，别饿着自己。",
             "哼，吃饱了就行，尼尼别又凑合。",
