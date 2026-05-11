@@ -9,6 +9,8 @@ from host_brain.persona.isolated_surface_harness import (
     ReplyControlPacket,
     build_isolated_surface_input,
     build_isolated_surface_messages,
+    build_style_reference_query,
+    derive_style_reference_anchor,
     find_forbidden_input_paths,
     merged_facts,
     merged_must_not_do,
@@ -17,6 +19,7 @@ from host_brain.persona.isolated_surface_harness import (
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
 )
+from host_brain.persona.style_reference_bank import clear_style_reference_bank_cache, style_reference_from_raw_row
 from tools.isolated_surface_harness import run_cases
 
 
@@ -81,6 +84,52 @@ def test_build_messages_only_uses_allowed_request_surface() -> None:
     assert "当前只允许读取 ReplyControlPacket" in rendered
     assert "history_turns" not in rendered
     assert "旧消息" not in rendered
+
+
+def test_build_messages_enriches_style_anchor_from_derived_reference_bank(tmp_path, monkeypatch) -> None:
+    ref = style_reference_from_raw_row(
+        {
+            "file": "data~.xp3\\scn\\b01.txt.scn",
+            "index": 868,
+            "kind": "dialogue",
+            "sora_candidate_score": 7,
+            "daily_style_safe": True,
+            "text": "「なんでっ！？ なんでにぃににはあたしが見えてんの！？」",
+        }
+    )
+    assert ref is not None
+    bank_path = tmp_path / "style_bank.jsonl"
+    bank_path.write_text(json.dumps(ref.as_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
+    monkeypatch.setenv("HOST_STYLE_REFERENCE_BANK_PATH", str(bank_path))
+    clear_style_reference_bank_cache()
+
+    request = build_isolated_surface_input(
+        {
+            "case_id": "presence",
+            "soul_md": SOUL,
+            "user_message": "在吗",
+            "reply_control_packet": {
+                "response_move": "presence",
+                "task_mode": "presence",
+                "question_budget": 0,
+                "style_anchor": ["短句"],
+            },
+        }
+    )
+
+    query = build_style_reference_query(request)
+    assert query.intent_tags == ("presence",)
+    derived = derive_style_reference_anchor(request)
+    assert any("原作台词派生风格特征" in item for item in derived.anchors)
+    assert any("clingy_presence" in item for item in derived.anchors)
+
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+    assert "原作台词派生风格特征" in rendered
+    assert "clingy_presence" in rendered
+    assert "source_refs=" not in rendered
+    assert "なんでっ" not in rendered
+    assert "にぃににはあたしが見えてんの" not in rendered
+    clear_style_reference_bank_cache()
 
 
 def test_facts_and_must_not_do_are_merged_and_deduplicated() -> None:

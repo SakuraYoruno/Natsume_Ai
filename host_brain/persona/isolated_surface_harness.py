@@ -16,6 +16,11 @@ except ImportError:  # pragma: no cover - pydantic v1 compatibility
 
 from host_brain.persona.galgame_text_contract import build_galgame_text_contract
 from host_brain.persona.sample_guided_text_scorer import score_sample_guided_text
+from host_brain.persona.style_reference_bank import (
+    StyleReferenceQuery,
+    get_style_reference_bank,
+    render_style_guidance,
+)
 from host_brain.persona.text_quality_gate import get_text_quality_gate
 
 
@@ -93,6 +98,18 @@ class IsolatedSurfaceRunResult:
         }
 
 
+@dataclass(frozen=True)
+class DerivedStyleAnchor:
+    anchors: tuple[str, ...] = ()
+    trace: Mapping[str, Any] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "anchors": list(self.anchors),
+            "trace": dict(self.trace or {}),
+        }
+
+
 GenerateSurface = Callable[[list[dict[str, str]]], str | Awaitable[str]]
 
 _PUNCT_RE = re.compile(r"[\s，。！？!?,.、~～…“”\"'：:；;（）()\[\]{}]+")
@@ -145,6 +162,49 @@ _ALLOWED_TOP_LEVEL_KEYS = {
     "soul_md",
     "user_message",
 }
+_SCENE_STYLE_QUERY: dict[str, dict[str, tuple[str, ...] | str]] = {
+    "daily_good_morning": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "daily_greeting_en": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "daily_greeting_cn": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "presence": {"intent_tags": ("presence",), "style_moves": ("clingy_presence", "pull_attention")},
+    "wait": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
+    "back": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
+    "busy": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
+    "bored": {"intent_tags": ("bored",), "style_moves": ("action_first", "food_motive")},
+    "tired": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "nothing": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "boundary_hurt": {"intent_tags": ("boundary",), "emotion_tags": ("hurt", "wounded"), "style_moves": ("wounded_pushback", "soft_after_sting")},
+    "relationship_boundary": {"intent_tags": ("boundary",), "emotion_tags": ("hurt", "wounded"), "style_moves": ("wounded_pushback", "soft_after_sting")},
+    "good_news": {"intent_tags": ("daily",), "emotion_tags": ("playful",), "style_moves": ("quick_reaction",)},
+    "happy": {"intent_tags": ("daily",), "emotion_tags": ("playful",), "style_moves": ("quick_reaction", "smug_tease")},
+    "annoying_tease": {"intent_tags": ("annoyed",), "emotion_tags": ("annoyed", "angry_light"), "style_moves": ("quick_rebuttal", "familiar_pushback")},
+    "praise": {"intent_tags": ("praise",), "emotion_tags": ("shy",), "style_moves": ("shy_deflection",)},
+    "apology": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "help_takeover": {"intent_tags": ("help",), "emotion_tags": ("care",), "style_moves": ("take_charge", "care_behind_tease")},
+    "write_takeover": {"intent_tags": ("help",), "emotion_tags": ("care",), "style_moves": ("take_charge", "care_behind_tease")},
+    "advice_continue": {"intent_tags": ("help",), "emotion_tags": ("care",), "style_moves": ("take_charge", "care_behind_tease")},
+    "next_step": {"intent_tags": ("help",), "emotion_tags": ("care",), "style_moves": ("take_charge", "care_behind_tease")},
+    "small_failure": {"intent_tags": ("help", "reassurance"), "emotion_tags": ("care", "soft"), "style_moves": ("take_charge", "care_behind_tease", "soft_reassurance")},
+    "good_night": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "meal_share": {"intent_tags": ("bored", "daily"), "style_moves": ("food_motive", "quick_reaction")},
+    "hungry": {"intent_tags": ("bored", "daily"), "style_moves": ("food_motive", "quick_reaction")},
+    "sleepy": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "headache": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "bad_mood": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "what_doing": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "play_invite": {"intent_tags": ("bored",), "style_moves": ("action_first", "food_motive")},
+    "quiet": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "talkative": {"intent_tags": ("annoyed",), "emotion_tags": ("annoyed", "playful"), "style_moves": ("familiar_pushback", "quick_rebuttal")},
+    "who_called": {"intent_tags": ("presence", "annoyed"), "emotion_tags": ("playful",), "style_moves": ("pull_attention", "quick_rebuttal")},
+    "miss_you": {"intent_tags": ("intimacy",), "emotion_tags": ("deep_affection",), "style_moves": ("direct_affection",)},
+    "short_ack": {"intent_tags": ("daily",), "style_moves": ("quick_reaction", "question_chain")},
+    "followup": {"intent_tags": ("daily",), "style_moves": ("question_chain", "quick_reaction")},
+    "give_up": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "complaint": {"intent_tags": ("help", "reassurance"), "emotion_tags": ("care",), "style_moves": ("take_charge", "care_behind_tease")},
+    "late_night": {"intent_tags": ("reassurance",), "emotion_tags": ("soft",), "style_moves": ("soft_reassurance",)},
+    "daily_chat": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
+    "default": {"intent_tags": ("daily",), "style_moves": ("quick_reaction",)},
+}
 
 
 def _clean_text(raw: Any) -> str:
@@ -179,6 +239,12 @@ def _validate_model(model_type: type[BaseModel], payload: Mapping[str, Any]) -> 
     if hasattr(model_type, "model_validate"):
         return model_type.model_validate(payload)  # type: ignore[attr-defined]
     return model_type.parse_obj(payload)  # pragma: no cover - pydantic v1
+
+
+def _rebuild_control(control: ReplyControlPacket, updates: Mapping[str, Any]) -> ReplyControlPacket:
+    payload = _model_dump(control)
+    payload.update(dict(updates))
+    return _validate_model(ReplyControlPacket, payload)  # type: ignore[return-value]
 
 
 def _is_forbidden_key(key: Any) -> bool:
@@ -242,7 +308,74 @@ def merged_must_not_do(request: IsolatedSurfaceInput) -> list[str]:
     return _clean_list([*request.control.must_not_do, *request.must_not_do])
 
 
-def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
+def build_style_reference_query(request: IsolatedSurfaceInput, *, limit: int = 5) -> StyleReferenceQuery:
+    scene = _clean_text(request.control.task_mode or request.control.response_move) or "default"
+    mapped = _SCENE_STYLE_QUERY.get(scene) or _SCENE_STYLE_QUERY.get(request.control.response_move) or _SCENE_STYLE_QUERY["default"]
+    return StyleReferenceQuery(
+        lang="zh",
+        intent_tags=tuple(str(item) for item in mapped.get("intent_tags", ()) or ()),
+        emotion_tags=tuple(str(item) for item in mapped.get("emotion_tags", ()) or ()),
+        style_moves=tuple(str(item) for item in mapped.get("style_moves", ()) or ()),
+        relationship_stage="sibling_good",
+        limit=max(1, min(int(limit or 5), 8)),
+    )
+
+
+def derive_style_reference_anchor(request: IsolatedSurfaceInput, *, limit: int = 5) -> DerivedStyleAnchor:
+    query = build_style_reference_query(request, limit=limit)
+    selection = get_style_reference_bank().select(query)
+    guidance = render_style_guidance(selection, render_profile="zh_text")
+    anchors = _clean_list(
+        line
+        for line in guidance.splitlines()
+        if not _clean_text(line).startswith("source_refs=")
+    )
+    trace = {
+        "query": {
+            "lang": query.lang,
+            "intent_tags": list(query.intent_tags),
+            "emotion_tags": list(query.emotion_tags),
+            "style_moves": list(query.style_moves),
+            "relationship_stage": query.relationship_stage,
+            "limit": query.limit,
+        },
+        "degraded": bool(selection.degraded),
+        "reason": selection.reason,
+        "ref_ids": [ref.ref_id for ref in selection.references],
+        "source_refs": selection.source_refs(),
+    }
+    return DerivedStyleAnchor(anchors=tuple(anchors), trace=trace)
+
+
+def enrich_request_style_anchor(request: IsolatedSurfaceInput, *, use_style_reference_bank: bool = True) -> IsolatedSurfaceInput:
+    if not use_style_reference_bank:
+        return request
+    derived = derive_style_reference_anchor(request)
+    if not derived.anchors:
+        return request
+    control = _rebuild_control(
+        request.control,
+        {"style_anchor": _clean_list([*request.control.style_anchor, *derived.anchors])},
+    )
+    return _validate_model(
+        IsolatedSurfaceInput,
+        {
+            "soul_md": request.soul_md,
+            "user_message": request.user_message,
+            "control": control,
+            "facts": request.facts,
+            "must_not_do": request.must_not_do,
+            "case_id": request.case_id,
+        },
+    )  # type: ignore[return-value]
+
+
+def build_isolated_surface_messages(
+    request: IsolatedSurfaceInput,
+    *,
+    use_style_reference_bank: bool = True,
+) -> list[dict[str, str]]:
+    request = enrich_request_style_anchor(request, use_style_reference_bank=use_style_reference_bank)
     control = request.control
     control_payload = _model_dump(control)
     control_payload["facts"] = merged_facts(request)
@@ -401,12 +534,16 @@ async def run_isolated_surface_generation(
 
 
 __all__ = [
+    "DerivedStyleAnchor",
     "IsolatedCandidateScore",
     "IsolatedSurfaceInput",
     "IsolatedSurfaceRunResult",
     "ReplyControlPacket",
     "build_isolated_surface_input",
     "build_isolated_surface_messages",
+    "build_style_reference_query",
+    "derive_style_reference_anchor",
+    "enrich_request_style_anchor",
     "find_forbidden_input_paths",
     "merged_facts",
     "merged_must_not_do",

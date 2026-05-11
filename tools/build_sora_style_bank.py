@@ -20,9 +20,9 @@ from host_brain.persona.style_reference_bank import (  # noqa: E402
 
 
 DEFAULT_INPUTS = (
-    ROOT / "artifacts" / "vn_sora" / "sora_daily_candidates.jsonl",
-    ROOT / "artifacts" / "vn_sora" / "sora_chinese_daily_candidates.jsonl",
-    ROOT / "artifacts" / "vn_text" / "nine_newEP_20260502_145821" / "sora_daily_candidates.jsonl",
+    ROOT / "artifacts" / "vn_sora_refresh" / "sora_daily_candidates.jsonl",
+    ROOT / "artifacts" / "vn_sora" / "skycity_ep2_20260509_161713" / "sora_daily_candidates.jsonl",
+    ROOT / "artifacts" / "vn_sora" / "nine_newEP_20260509_161027" / "sora_daily_candidates.jsonl",
 )
 
 

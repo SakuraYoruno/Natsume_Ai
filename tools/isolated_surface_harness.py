@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from host_brain.persona.isolated_surface_harness import (
     build_isolated_surface_input,
     build_isolated_surface_messages,
+    derive_style_reference_anchor,
     parse_surface_candidates,
     score_isolated_surface_candidates,
     select_best_isolated_candidate,
@@ -103,7 +104,13 @@ def run_cases(cases: list[dict[str, Any]], *, soul_md: str, out_dir: Path) -> di
         try:
             request = build_isolated_surface_input(_case_request_payload(case, soul_md))
             messages = build_isolated_surface_messages(request)
-            prompt_rows.append({"case_id": case_id, "messages": messages})
+            prompt_rows.append(
+                {
+                    "case_id": case_id,
+                    "messages": messages,
+                    "style_reference": derive_style_reference_anchor(request).as_dict(),
+                }
+            )
 
             candidates = _candidate_texts(case)
             if not candidates:

@@ -48,21 +48,45 @@ class ReplyControlPacket(BaseModel):
 1. `build_isolated_surface_input(...)`
    - 只接受允许字段。
    - 发现 `history`、`memory`、`organ`、`rag`、`tool_candidates`、`module_advice` 等 raw context key 时直接报错。
-2. `build_isolated_surface_messages(...)`
+2. `derive_style_reference_anchor(...)`
+   - 从 `data/style_bank/sora_style_bank.jsonl` 选择原作台词派生风格特征。
+   - 只注入 `intent_tags`、`emotion_tags`、`style_moves`、`rhythm_tags`、`lexical_cues`、`source_refs` 等派生特征。
+   - 不把原作 raw 台词、解包文本或自然语言建议放入 prompt。
+3. `build_isolated_surface_messages(...)`
    - 生成固定双消息 prompt。
    - system 中放隔离边界、输出 JSON 要求和 `Soul.md`。
-   - user 中放当前输入、`ReplyControlPacket`、facts、must_not_do。
-3. `run_isolated_surface_generation(...)`
+   - user 中放当前输入、增强后的 `ReplyControlPacket`、facts、must_not_do。
+   - `ReplyControlPacket.style_anchor` 会自动合并原作派生风格锚点。
+4. `run_isolated_surface_generation(...)`
    - 只接收一个注入的 `generate(messages)` 函数。
    - harness 不知道 runtime state，也不从全局状态取上下文。
-4. `parse_surface_candidates(...)`
+5. `parse_surface_candidates(...)`
    - 解析 `{"candidates":[...]}`，最多取 5 个。
-5. `score_isolated_surface_candidates(...)`
+6. `score_isolated_surface_candidates(...)`
    - 使用现有 hard gate 拦截绝对错误。
    - 使用 sample-guided scorer 做 soft scoring。
    - 对 `must_include`、`must_not_do`、`question_budget` 做控制面扣分。
-6. `select_best_isolated_candidate(...)`
+7. `select_best_isolated_candidate(...)`
    - 在 hard gate 通过后，优先选无控制面违约且分数最高的候选。
+
+## Original-Derived Style Anchors
+
+仓库已有解包台词候选与派生风格库：
+
+- `artifacts/vn_sora_refresh/sora_daily_candidates.jsonl`：原作台词候选。
+- `data/style_bank/sora_style_bank.jsonl`：不含 raw 台词的派生风格特征。
+
+隔离 harness 使用后者，而不是把原文塞给模型。生成层看到的是类似：
+
+```text
+来源：原作台词派生风格特征；禁止照抄或复述原台词。
+可用动作：clingy_presence / pull_attention / question_chain
+情绪倾向：neutral
+节奏线索：rapid_followup / question / 反问/追问
+```
+
+这让 `Soul.md` 继续只做语言风格锚定，同时让常见 scene 的 good reference 从人工短片段逐步迁移到原作派生特征。
+`source_refs` 只写入 harness trace，不进入生成 prompt。
 
 ## CLI
 
