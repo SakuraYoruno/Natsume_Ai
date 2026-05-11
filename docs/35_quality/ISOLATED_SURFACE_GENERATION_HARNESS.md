@@ -162,6 +162,16 @@ live 输出：
 - `live_scores.jsonl`：每个 turn 的 scorer/rerank 明细。
 - `summary.json`：turn pass rate、dialogue pass rate、低分数、hard fail、control violation 和延迟统计。
 
+少量失败、低分或尾部超时可以只补跑对应 turn，再合并：
+
+```powershell
+python tools/merge_continuity_live_scores.py `
+  --scores artifacts/isolated_surface_harness/continuity_eval_72_live_20260511/live_scores.jsonl `
+           artifacts/isolated_surface_harness/continuity_eval_72_retry_tail_20260511/live/live_scores.jsonl `
+  --expected-cases artifacts/isolated_surface_harness/continuity_eval_72_20260511/cases.jsonl `
+  --out artifacts/isolated_surface_harness/continuity_eval_72_live_merged_20260511
+```
+
 生成“通过但不好听”的人工观察报告：
 
 ```powershell
@@ -187,6 +197,19 @@ python tools/continuity_quality_report.py `
 - control violation: `0`
 - avg selected score: `87.332`
 - quality report watch rows: `8`
+
+当前 72-turn eval live baseline：
+
+- source run: `artifacts/isolated_surface_harness/continuity_eval_72_live_20260511`
+- retry tail: `artifacts/isolated_surface_harness/continuity_eval_72_retry_tail_20260511/live`
+- merged run: `artifacts/isolated_surface_harness/continuity_eval_72_live_merged_20260511`
+- result: `72/72` turn pass，`24/24` dialogue pass
+- missing turns: `0`
+- low score: `0`
+- hard fail: `0`
+- control violation: `0`
+- avg selected score: `87.963`
+- quality report watch rows: `7`
 
 这个 harness 不是 runtime 集成。它只回答一个问题：在没有原始历史、没有状态树、没有器官族自然语言建议的情况下，压缩后的连续性事实能不能让最终表层生成自然接住上一轮。
 
