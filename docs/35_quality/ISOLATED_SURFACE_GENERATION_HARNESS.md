@@ -159,7 +159,9 @@ case 示例：
 python tools/retry_isolated_surface_failures.py `
   --cases artifacts/isolated_surface_harness/daily_goal_100_20260511/cases.jsonl `
   --source-run artifacts/isolated_surface_harness/daily_goal_100_contract_live_20260511_152900 `
-  --out artifacts/isolated_surface_harness/daily_goal_100_retry_live
+  --out artifacts/isolated_surface_harness/daily_goal_100_retry_live `
+  --challenge-threshold 83 `
+  --attempts-per-case 2
 ```
 
 常用检查模式：
@@ -178,6 +180,12 @@ python tools/retry_isolated_surface_failures.py `
 - `retry_raw_generations.jsonl` / `retry_scores.jsonl`：只包含被重试的 case。
 - `merged_scores.jsonl`：逐 case 在 source 和 retry 中选更好的 selected。
 - `summary.json`：记录 `retry_case_ids`、`retry_case_count`、merged pass rate 和节省后的局部耗时。
+
+参数语义：
+
+- `--threshold`：正式通过线，默认 `80`；失败或低于该线的 case 必须重试。
+- `--challenge-threshold`：弱通过挑战线；已通过但低于该分数的 case 也会进入 retry，例如 `80-83`。
+- `--attempts-per-case`：每个 retry case 独立生成几次；merge 时只在 retry 的 pass/hard/control/score 真正更好时替换 source，不靠更短文本覆盖。
 
 ## Migration Rule
 

@@ -6,6 +6,7 @@ from tools.retry_isolated_surface_failures import (
     merge_source_and_retry_scores,
     rescore_source_outputs,
     retry_case_indexes,
+    retry_case_reasons,
     summarize_merged,
 )
 
@@ -52,6 +53,33 @@ def test_rescore_source_outputs_finds_only_low_quality_retry_cases(tmp_path) -> 
     assert not rescored[1]["selected"]["passed"]
 
 
+def test_retry_case_indexes_can_challenge_weak_passes() -> None:
+    cases = [
+        _case("strong", "在吗", "presence"),
+        _case("weak", "别吵", "quiet"),
+        _case("failed", "弄砸了", "small_failure"),
+    ]
+    rescored = [
+        {"case_id": "strong", "selected": {"score": 88, "passed": True, "hard_fail": False}},
+        {"case_id": "weak", "selected": {"score": 81.5, "passed": True, "hard_fail": False}},
+        {"case_id": "failed", "selected": {"score": 78, "passed": False, "hard_fail": False}},
+    ]
+
+    assert retry_case_indexes(cases=cases, rescored_rows=rescored, threshold=80.0) == [3]
+    assert retry_case_indexes(
+        cases=cases,
+        rescored_rows=rescored,
+        threshold=80.0,
+        challenge_threshold=83.0,
+    ) == [2, 3]
+    assert retry_case_reasons(
+        cases=cases,
+        rescored_rows=rescored,
+        threshold=80.0,
+        challenge_threshold=83.0,
+    ) == {2: "weak_pass_challenge", 3: "fail_or_below_threshold"}
+
+
 def test_merge_source_and_retry_scores_uses_retry_only_when_better() -> None:
     source_rows = [
         {
@@ -64,6 +92,11 @@ def test_merge_source_and_retry_scores_uses_retry_only_when_better() -> None:
             "case_id": "good",
             "selected": {"text": "在呢，这一句我看见了。", "score": 88, "passed": True, "hard_fail": False, "control_violations": []},
         },
+        {
+            "index": 3,
+            "case_id": "tie",
+            "selected": {"text": "其实就是突然想闹你一下啦，别太在意。", "score": 81.063, "passed": True, "hard_fail": False, "control_violations": []},
+        },
     ]
     retry_rows = [
         {
@@ -71,8 +104,16 @@ def test_merge_source_and_retry_scores_uses_retry_only_when_better() -> None:
             "selected": {"text": "先别急，我陪你看哪里坏了。", "score": 89, "passed": True, "hard_fail": False, "control_violations": []},
         },
         {
+            "case_id": "bad",
+            "selected": {"text": "好啦，先别慌。", "score": 82, "passed": True, "hard_fail": False, "control_violations": []},
+        },
+        {
             "case_id": "good",
             "selected": {"text": "在。", "score": 70, "passed": False, "hard_fail": False, "control_violations": []},
+        },
+        {
+            "case_id": "tie",
+            "selected": {"text": "那你别听啊。", "score": 81.063, "passed": True, "hard_fail": False, "control_violations": []},
         },
     ]
 
@@ -84,6 +125,9 @@ def test_merge_source_and_retry_scores_uses_retry_only_when_better() -> None:
     assert merged[1]["selected_from"] == "source"
     assert not merged[1]["improved"]
     assert merged[1]["selected"]["text"] == "在呢，这一句我看见了。"
+    assert merged[2]["selected_from"] == "source"
+    assert not merged[2]["improved"]
+    assert merged[2]["selected"]["text"] == "其实就是突然想闹你一下啦，别太在意。"
 
 
 def test_summarize_merged_reports_retry_savings(tmp_path) -> None:
@@ -94,16 +138,21 @@ def test_summarize_merged_reports_retry_savings(tmp_path) -> None:
     summary = summarize_merged(
         cases_count=2,
         source_rows=[{}, {}],
-        retry_indexes=[1],
-        retry_results=[{"ok": True, "latency_ms": 1234}],
+        retry_indexes=[1, 2],
+        retry_results=[{"ok": True, "latency_ms": 1234}, {"ok": True, "latency_ms": 4321}],
         merged_rows=merged,
         started=0.0,
         threshold=80.0,
+        challenge_threshold=83.0,
+        retry_reasons={1: "fail_or_below_threshold", 2: "weak_pass_challenge"},
         out_dir=tmp_path,
     )
 
-    assert summary["retry_case_count"] == 1
-    assert summary["retry_generated_count"] == 1
+    assert summary["retry_case_count"] == 2
+    assert summary["retry_generated_count"] == 2
     assert summary["retry_selected_count"] == 1
     assert summary["retry_improved_count"] == 1
     assert summary["pass_rate"] == 1.0
+    assert summary["retry_fail_or_below_threshold_count"] == 1
+    assert summary["retry_weak_pass_challenge_count"] == 1
+    assert summary["weak_pass_remaining_count"] == 0

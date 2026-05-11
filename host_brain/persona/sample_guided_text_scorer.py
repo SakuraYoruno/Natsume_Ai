@@ -255,6 +255,7 @@ _IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("offscreen_current_action", re.compile(r"(?:刚|刚才|刚好|正|正在).{0,8}(?:想|等|看|玩|吃|睡|醒|忙|刷|听|路过|发呆)")),
     ("attention_prediction", re.compile(r"(?:感觉|觉得|以为).{0,12}(?:会找我|要找我|来找我|找你|理我)")),
     ("unprovided_busy_duration", re.compile(r"(?:忙到|忙完到|忙着忙着).{0,8}(?:明天|晚上|半夜|现在)")),
+    ("prior_attention_claim", re.compile(r"(?:刚才|刚刚|之前).{0,12}(?:不理我|没理我|不回我|没回我)")),
     ("habit_or_history_claim", re.compile(r"(?:平时|每次|总是|又).{0,12}(?:找|叫|问|弄|搞|卡|忘|迟到|闯祸)")),
     ("calendar_claim", re.compile(r"(?:昨晚|昨天|明天|中午|早上|晚上).{0,12}(?:睡|起|叫|吃|忙|工作|熬)")),
     ("sensory_claim", re.compile(r"(?:声音|屏幕|手机|表情|脸|眼神).{0,8}(?:软|累|困|看|亮|暗|慢)")),

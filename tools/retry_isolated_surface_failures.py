@@ -26,6 +26,19 @@ from tools.isolated_surface_harness import _case_request_payload, _read_json_or_
 from tools.run_isolated_surface_live import _run_one  # noqa: E402
 
 
+async def _run_retry_attempt(
+    *,
+    attempt: int,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    result = await _run_one(**kwargs)
+    result["retry_attempt"] = int(attempt)
+    for key in ("raw", "score"):
+        if isinstance(result.get(key), dict):
+            result[key]["retry_attempt"] = int(attempt)
+    return result
+
+
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -66,16 +79,32 @@ def _selected_needs_retry(selected: Mapping[str, Any] | None, *, threshold: floa
     return bool(not selected.get("passed") or float(selected.get("score") or 0.0) < float(threshold))
 
 
-def _selected_rank(selected: Mapping[str, Any] | None) -> tuple[int, int, int, float, int]:
+def _retry_reason(
+    selected: Mapping[str, Any] | None,
+    *,
+    threshold: float,
+    challenge_threshold: float | None = None,
+) -> str:
+    if _selected_needs_retry(selected, threshold=threshold):
+        return "fail_or_below_threshold"
+    if challenge_threshold is None:
+        return ""
+    if not selected or not selected.get("passed"):
+        return ""
+    score = float(selected.get("score") or 0.0)
+    if float(threshold) <= score < float(challenge_threshold):
+        return "weak_pass_challenge"
+    return ""
+
+
+def _selected_rank(selected: Mapping[str, Any] | None) -> tuple[int, int, int, float]:
     if not selected:
-        return (0, 0, -999, 0.0, -999)
-    text = str(selected.get("text") or "")
+        return (0, 0, -999, 0.0)
     return (
         1 if selected.get("passed") else 0,
         0 if selected.get("hard_fail") else 1,
         -len(selected.get("control_violations") or ()),
         float(selected.get("score") or 0.0),
-        -len(text),
     )
 
 
@@ -118,6 +147,7 @@ def retry_case_indexes(
     cases: Sequence[Mapping[str, Any]],
     rescored_rows: Sequence[Mapping[str, Any]],
     threshold: float,
+    challenge_threshold: float | None = None,
     retry_limit: int | None = None,
 ) -> list[int]:
     by_case = {str(row.get("case_id") or ""): row for row in rescored_rows}
@@ -125,11 +155,47 @@ def retry_case_indexes(
     for index, case in enumerate(cases, start=1):
         row = by_case.get(_case_id(index, case))
         selected = row.get("selected") if isinstance(row, Mapping) else None
-        if _selected_needs_retry(selected if isinstance(selected, Mapping) else None, threshold=threshold):
+        reason = _retry_reason(
+            selected if isinstance(selected, Mapping) else None,
+            threshold=threshold,
+            challenge_threshold=challenge_threshold,
+        )
+        if reason:
             indexes.append(index)
     if retry_limit is not None and retry_limit >= 0:
         indexes = indexes[:retry_limit]
     return indexes
+
+
+def retry_case_reasons(
+    *,
+    cases: Sequence[Mapping[str, Any]],
+    rescored_rows: Sequence[Mapping[str, Any]],
+    threshold: float,
+    challenge_threshold: float | None = None,
+    retry_limit: int | None = None,
+) -> dict[int, str]:
+    indexes = retry_case_indexes(
+        cases=cases,
+        rescored_rows=rescored_rows,
+        threshold=threshold,
+        challenge_threshold=challenge_threshold,
+        retry_limit=retry_limit,
+    )
+    retry_index_set = set(indexes)
+    by_case = {str(row.get("case_id") or ""): row for row in rescored_rows}
+    reasons: dict[int, str] = {}
+    for index, case in enumerate(cases, start=1):
+        if index not in retry_index_set:
+            continue
+        row = by_case.get(_case_id(index, case))
+        selected = row.get("selected") if isinstance(row, Mapping) else None
+        reasons[index] = _retry_reason(
+            selected if isinstance(selected, Mapping) else None,
+            threshold=threshold,
+            challenge_threshold=challenge_threshold,
+        )
+    return reasons
 
 
 def merge_source_and_retry_scores(
@@ -184,30 +250,45 @@ def summarize_merged(
     started: float,
     threshold: float,
     out_dir: Path,
+    challenge_threshold: float | None = None,
+    retry_reasons: Mapping[int, str] | None = None,
 ) -> dict[str, Any]:
     selected = [row.get("selected") for row in merged_rows if isinstance(row.get("selected"), Mapping)]
     scores = [float(row.get("score") or 0.0) for row in selected]
     pass_count = sum(1 for row in selected if row.get("passed"))
     low_score_count = sum(1 for row in selected if _selected_needs_retry(row, threshold=threshold))
+    weak_pass_remaining_count = 0
+    if challenge_threshold is not None:
+        weak_pass_remaining_count = sum(
+            1
+            for row in selected
+            if row.get("passed") and float(threshold) <= float(row.get("score") or 0.0) < float(challenge_threshold)
+        )
     retry_latencies = [int(row.get("latency_ms") or 0) for row in retry_results if int(row.get("latency_ms") or 0) > 0]
+    retry_reason_values = list(dict(retry_reasons or {}).values())
     return {
         "cases": int(cases_count),
         "source_scored_count": len(source_rows),
         "retry_case_count": len(retry_indexes),
         "retry_completed_count": len(retry_results),
+        "retry_attempt_completed_count": len(retry_results),
         "retry_generated_count": sum(1 for row in retry_results if row.get("ok")),
         "retry_case_indexes": list(retry_indexes),
+        "retry_fail_or_below_threshold_count": retry_reason_values.count("fail_or_below_threshold"),
+        "retry_weak_pass_challenge_count": retry_reason_values.count("weak_pass_challenge"),
         "selected_count": len(selected),
         "pass_count": pass_count,
         "pass_rate": round(pass_count / len(selected), 4) if selected else None,
         "avg_selected_score": round(statistics.fmean(scores), 3) if scores else None,
         "low_score_count": low_score_count,
+        "weak_pass_remaining_count": weak_pass_remaining_count,
         "hard_fail_count": sum(1 for row in selected if row.get("hard_fail")),
         "retry_improved_count": sum(1 for row in merged_rows if row.get("improved")),
         "retry_selected_count": sum(1 for row in merged_rows if row.get("selected_from") == "retry"),
         "retry_latency_ms_total": sum(retry_latencies),
         "total_elapsed_ms": int((time.perf_counter() - started) * 1000),
         "threshold": float(threshold),
+        "challenge_threshold": float(challenge_threshold) if challenge_threshold is not None else None,
         "output_dir": str(out_dir),
     }
 
@@ -221,10 +302,19 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     source_rows = rescore_source_outputs(cases=cases, raw_rows=raw_rows, soul_md=soul)
+    challenge_threshold = args.challenge_threshold
     retry_indexes = retry_case_indexes(
         cases=cases,
         rescored_rows=source_rows,
         threshold=float(args.threshold),
+        challenge_threshold=float(challenge_threshold) if challenge_threshold is not None else None,
+        retry_limit=args.retry_limit,
+    )
+    retry_reasons = retry_case_reasons(
+        cases=cases,
+        rescored_rows=source_rows,
+        threshold=float(args.threshold),
+        challenge_threshold=float(challenge_threshold) if challenge_threshold is not None else None,
         retry_limit=args.retry_limit,
     )
     retry_score_rows: list[dict[str, Any]] = []
@@ -245,9 +335,11 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
         raw_path.write_text("", encoding="utf-8")
         score_path.write_text("", encoding="utf-8")
         semaphore = asyncio.Semaphore(max(1, int(args.concurrency)))
+        attempts_per_case = max(1, int(args.attempts_per_case))
         tasks = [
             asyncio.create_task(
-                _run_one(
+                _run_retry_attempt(
+                    attempt=attempt,
                     index=index,
                     case=cases[index - 1],
                     soul=soul,
@@ -261,6 +353,7 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
                 )
             )
             for index in retry_indexes
+            for attempt in range(1, attempts_per_case + 1)
         ]
         for task in asyncio.as_completed(tasks):
             result = await task
@@ -274,6 +367,7 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
                         {
                             "retry_completed_count": len(retry_results),
                             "retry_case_count": len(retry_indexes),
+                            "retry_attempt_count": len(tasks),
                             "elapsed_ms": int((time.perf_counter() - started) * 1000),
                         },
                         ensure_ascii=False,
@@ -293,11 +387,20 @@ async def run_retry(args: argparse.Namespace) -> dict[str, Any]:
         started=started,
         threshold=float(args.threshold),
         out_dir=out_dir,
+        challenge_threshold=float(challenge_threshold) if challenge_threshold is not None else None,
+        retry_reasons=retry_reasons,
     )
     if args.dry_run:
         summary["dry_run"] = True
     summary["source_run"] = str(args.source_run)
+    summary["attempts_per_case"] = max(1, int(args.attempts_per_case))
+    summary["retry_attempt_count"] = len(retry_indexes) * max(1, int(args.attempts_per_case))
     summary["retry_case_ids"] = [_case_id(index, cases[index - 1]) for index in retry_indexes]
+    summary["retry_case_reasons"] = {
+        _case_id(index, cases[index - 1]): retry_reasons[index]
+        for index in retry_indexes
+        if index in retry_reasons
+    }
     _write_json(out_dir / "summary.json", summary)
     return summary
 
@@ -309,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--soul", default=ROOT / "Soul.md", type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--threshold", type=float, default=80.0)
+    parser.add_argument("--challenge-threshold", type=float, default=None, help="Also retry passed cases below this score.")
+    parser.add_argument("--attempts-per-case", type=int, default=1, help="Number of independent retry generations per selected case.")
     parser.add_argument("--retry-limit", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true", help="Only rescore source raw outputs and list retry cases.")
     parser.add_argument("--provider", default="deepseek")

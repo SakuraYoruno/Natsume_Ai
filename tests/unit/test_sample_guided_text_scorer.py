@@ -114,3 +114,15 @@ def test_success_fact_takes_priority_over_generic_happy_scene() -> None:
 
     assert scored.score >= 80
     assert "CONTEXT_MISSING_REQUIRED_MOVE" not in scored.reason_codes
+
+
+def test_prior_attention_claim_is_soft_implied_fact_risk() -> None:
+    contract = build_galgame_text_contract(user_message="为什么", scene_id="followup")
+
+    risky = score_sample_guided_text(text="因为刚才你都不理我，我不高兴了。", contract=contract)
+    grounded = score_sample_guided_text(text="因为上一句我想接回来。", contract=contract)
+
+    assert not risky.hard_fail
+    assert "IMPLIED_FACT_RISK" in risky.reason_codes
+    assert risky.dimensions["implied_fact_risk"] < grounded.dimensions["implied_fact_risk"]
+    assert grounded.score > risky.score
