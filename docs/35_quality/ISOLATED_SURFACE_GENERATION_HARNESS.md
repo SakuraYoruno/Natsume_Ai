@@ -190,6 +190,34 @@ python tools/retry_isolated_surface_failures.py `
 - `--challenge-threshold`：弱通过挑战线；已通过但低于该分数的 case 也会进入 retry，例如 `80-83`。
 - `--attempts-per-case`：每个 retry case 独立生成几次；merge 时只在 retry 的 pass/hard/control/score 真正更好时替换 source，不靠更短文本覆盖。
 
+## Quality Cluster Report
+
+文本质量不再按单个坏句补规则；每轮先对 scored artifacts 做聚类，只处理达到阈值的 failure class。
+
+```powershell
+python tools/quality_cluster_report.py `
+  --scores artifacts/isolated_surface_harness/daily_goal_100_retry_charm_live_20260511/merged_scores.jsonl `
+  --out artifacts/isolated_surface_harness/daily_goal_100_retry_charm_live_20260511/quality_clusters `
+  --min-cluster-count 3
+```
+
+输出：
+
+- `quality_cluster_summary.json`：程序可读的 cluster 汇总、最低分尾部、issue/watch/diagnostic 分组。
+- `quality_cluster_report.md`：人工扫描报告。
+
+分组口径：
+
+- `Large Issue Clusters`：达到阈值且应优先判断是否优化的坏味道类别，例如 `surface:cheap_wave_punctuation`、`low_dimension:catchiness`。
+- `Diagnostic Overlap`：和 issue cluster 重叠的 reason 解释，只辅助定位，不作为新的独立修复目标。
+- `Watch Clusters`：只观察，不默认修，例如“短但干净”或正常问句。
+
+处理原则：
+
+- 只处理 cluster，不处理孤例。
+- 单个输出不能直接变成 hard forbidden 或专用 regex。
+- cluster 修复必须说明它泛化到哪些场景，并保留 soft scoring 优先。
+
 ## Migration Rule
 
 现有运行时链路要迁移到这个 harness 时，先新增一个上游压缩步骤：
