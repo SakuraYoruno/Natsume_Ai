@@ -65,6 +65,7 @@ _DAILY_SCENES = {
     "wait",
     "back",
     "busy",
+    "busy_done",
     "bored",
     "nothing",
     "meal_share",
@@ -269,6 +270,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "wait": ("等", "去", "慢慢", "处理", "忙"),
     "back": ("回", "回来", "继续"),
     "busy": ("忙", "去", "累", "活"),
+    "busy_done": ("忙完", "辛苦", "歇", "缓", "休息"),
     "bored": ("无聊", "闹", "说", "拉", "热闹"),
     "tired": ("累", "歇", "缓", "撑"),
     "nothing": ("没事", "追问", "放", "待"),
@@ -295,7 +297,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "complaint": ("烦", "先", "拆", "看"),
     "late_night": ("睡", "熬", "醒"),
     "short_ack": ("说", "听", "继续", "接着"),
-    "followup": ("因为", "然后", "继续", "上一句", "接着"),
+    "followup": ("因为", "就是", "觉得", "想", "然后", "继续", "上一句", "接着"),
 }
 _SOFT_REASON_SCORE_PENALTIES = {
     "STYLE_TEMPLATE_DENSITY": 3.5,

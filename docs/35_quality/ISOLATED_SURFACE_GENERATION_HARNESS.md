@@ -58,6 +58,7 @@ class ReplyControlPacket(BaseModel):
    - user 中放当前输入、增强后的 `ReplyControlPacket`、facts、must_not_do。
    - `ReplyControlPacket.style_anchor` 会自动合并原作派生风格锚点。
    - 同步放入由当前用户输入 + `ReplyControlPacket.task_mode` 派生的 `TurnSurfaceContract`，只包含 response_move、required_any、问句预算、长度和 notes；不放 forbidden_surface 或 raw 上下文。
+   - `TurnSurfaceContract` 允许当前用户文本纠正过粗或错误的 `task_mode`，例如 `你烦不烦` 优先落到 `annoying_tease`，`我刚忙完` 优先落到 `busy_done`。
 4. `run_isolated_surface_generation(...)`
    - 只接收一个注入的 `generate(messages)` 函数。
    - harness 不知道 runtime state，也不从全局状态取上下文。

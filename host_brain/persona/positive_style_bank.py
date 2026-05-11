@@ -152,6 +152,20 @@ _ZH_SAMPLES: dict[str, PositiveStyleSample] = {
         safe_fragments=("先去吧", "回来再说", "别太累", "继续说也行", "先去，别累着"),
         avoid=("忙你的", "不吵你", "不闹你", "安静一点", "忙完找我", "我先忙自己的事", "再来找我", "有事叫你", "丢下我", "我先在这边"),
     ),
+    "busy_done": PositiveStyleSample(
+        scene_id="busy_done",
+        title="忙完回来",
+        scene_markers=("用户说刚忙完/忙完了", "要接住结束后的疲惫，不写等待怨气"),
+        emotional_color=("松一点", "轻关心", "熟人小声贴近"),
+        response_shape=(
+            "回应忙完这个事实",
+            "给一点歇一下/缓一下的出口",
+            "不要抱怨被冷落或等太久",
+            "不要要求立刻陪你",
+        ),
+        safe_fragments=("忙完啦", "先歇一下", "辛苦啦", "缓口气", "别急着继续撑"),
+        avoid=("总算", "终于", "不理我", "等你", "忙到明天", "欠我的时间", "现在有空理我"),
+    ),
     "bored": PositiveStyleSample(
         scene_id="bored",
         title="好无聊",
@@ -681,6 +695,8 @@ def _infer_scene_id(user_message: str, facts: InteractionFactsPlane) -> str:
         return "daily_greeting_cn"
     if social_kind == "wait_hold" or _contains_any(text, ("等我一下", "等下", "稍等")):
         return "wait"
+    if _contains_any(text, ("刚忙完", "忙完了", "忙完啦")):
+        return "busy_done"
     if social_kind == "back_return" or _contains_any(text, ("我回来了", "回来了")):
         return "back"
     if social_kind == "busy_space" or _contains_any(text, ("我先忙", "忙会儿", "忙一会", "开始干活", "开始工作", "开工")):

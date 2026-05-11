@@ -126,3 +126,36 @@ def test_prior_attention_claim_is_soft_implied_fact_risk() -> None:
     assert "IMPLIED_FACT_RISK" in risky.reason_codes
     assert risky.dimensions["implied_fact_risk"] < grounded.dimensions["implied_fact_risk"]
     assert grounded.score > risky.score
+
+
+def test_user_text_can_override_wrong_back_scene_for_annoyance() -> None:
+    contract = build_galgame_text_contract(user_message="你烦不烦", scene_id="back")
+
+    assert contract.scene_id == "annoying_tease"
+    assert "烦" in contract.required_any[0]
+    scored = score_sample_guided_text(text="哼，烦也在这儿。", contract=contract)
+
+    assert scored.score >= 80
+    assert "WEAK_SCENE_GROUNDING" not in scored.reason_codes
+
+
+def test_busy_done_has_own_grounding_instead_of_back_scene() -> None:
+    contract = build_galgame_text_contract(user_message="我刚忙完", scene_id="back")
+
+    assert contract.scene_id == "busy_done"
+    grounded = score_sample_guided_text(text="忙完啦，先歇一下。", contract=contract)
+    weak = score_sample_guided_text(text="可算回来了。", contract=contract)
+
+    assert grounded.score > weak.score
+    assert grounded.score >= 83
+    assert "WEAK_SCENE_GROUNDING" not in grounded.reason_codes
+
+
+def test_followup_grounding_accepts_natural_explanation_markers() -> None:
+    contract = build_galgame_text_contract(user_message="为什么", scene_id="daily_chat")
+
+    natural = score_sample_guided_text(text="其实就是突然想闹你一下啦，别太在意。", contract=contract)
+    flat = score_sample_guided_text(text="没有为什么，你别再问啦。", contract=contract)
+
+    assert natural.score > flat.score
+    assert "WEAK_SCENE_GROUNDING" not in natural.reason_codes

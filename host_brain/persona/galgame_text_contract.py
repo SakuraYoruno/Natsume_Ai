@@ -175,6 +175,51 @@ def build_galgame_text_contract(
             max_questions=0,
             target_min_chars=8,
         )
+    if any(token in text for token in ("你好烦", "你烦不烦", "别烦我")):
+        return _contract(
+            scene_id="annoying_tease",
+            response_move="tease_without_escalation",
+            required_any=(("烦", "哼", "哈"),),
+            forbidden_surface=(
+                "对不起",
+                "不打扰",
+                "那我走",
+                "我可走了",
+                "走了啊",
+                "你才烦",
+                "我哪里烦",
+                "偏要更烦",
+                "更烦你",
+                "再烦你一下",
+                "烦你一下怎么了",
+                "没少烦过我",
+                "赶不走我",
+                "尼尼才烦",
+                "算什么",
+                "还没开始烦",
+                "心情正好",
+                "自己才麻烦",
+                "能拿我怎么样",
+                "别理我",
+                "不理你",
+                "你又凑过来",
+                "找我干嘛",
+                "还找我",
+                "还叫我干嘛",
+                "搭理我",
+                "嘴硬的样子",
+                "早就看透",
+                "看透了",
+                "老爱找话",
+                "惹我",
+                "在这儿待",
+                "不在这儿",
+                "才怪",
+                "说清楚",
+            ),
+            max_questions=1,
+            notes=("用户文本里的嫌烦优先于上游 task_mode；当熟人拌嘴，轻轻赖住，不升级互怼。",),
+        )
     if scene == "wait" or any(token in text for token in ("等我一下", "等下", "稍等", "等会")):
         return _contract(
             scene_id="wait",
@@ -198,6 +243,27 @@ def build_galgame_text_contract(
             ),
             max_questions=0,
             target_min_chars=8,
+        )
+    if any(token in text for token in ("刚忙完", "忙完了", "忙完啦")):
+        return _contract(
+            scene_id="busy_done",
+            response_move="ack_busy_done_with_light_care",
+            required_any=(("忙完", "辛苦", "歇", "缓"),),
+            forbidden_surface=(
+                "总算",
+                "终于",
+                "不理我",
+                "没理我",
+                "等你",
+                "忙到明天",
+                "现在有空理我",
+                "欠我的时间",
+                "赶紧陪我",
+                "我还以为",
+            ),
+            max_questions=0,
+            target_max_chars=36,
+            notes=("接住忙完这件事，轻关心，不抱怨被冷落。",),
         )
     if scene == "back" or any(token in text for token in ("我回来了", "回来了")):
         return _contract(
@@ -745,6 +811,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="what_doing",
             response_move="answer_current_chat_presence",
+            required_any=(("聊天", "说话", "听", "回你", "跟你"),),
             forbidden_surface=(
                 "刚在整理",
                 "刚好有空",
