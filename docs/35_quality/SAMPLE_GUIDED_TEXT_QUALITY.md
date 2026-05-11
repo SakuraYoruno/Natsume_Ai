@@ -83,6 +83,19 @@ Hard gate 只处理绝对不可发送的问题：
 7. failure-only retry 只重跑失败或弱通过 case；merge 时必须证明 retry 候选在通过状态、hard gate、control violations 或分数上更好。
 8. 最终只做 minimal repair，不用整段重写或 canned fallback 伪装质量提升。
 
+## Current Batch Baseline
+
+日常 goal 已从 100 条 seed 扩充到 500 条稳定 case：
+
+- builder: `tools/build_isolated_surface_daily_goal_cases.py`
+- generated cases: `artifacts/isolated_surface_harness/daily_goal_500_20260511/cases.jsonl`
+- prompt build: `500/500`，errors `0`
+- raw live: `483/500` pass，`17` low score，`1` hard fail，avg `86.628`
+- failure-only retry: `41` cases / `82` attempts
+- merged result: `497/500` pass，`3` low score，`0` hard fail，avg `87.217`
+
+剩余低分继续按 cluster 优化，不把单句变成新 regex，也不扩大 scene-specific hard forbidden surface。
+
 ## Test Migration
 
 保留并改写的测试：

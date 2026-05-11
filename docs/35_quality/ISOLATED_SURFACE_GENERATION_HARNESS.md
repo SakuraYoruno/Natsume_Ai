@@ -156,6 +156,31 @@ case 示例：
 
 注意：`candidates` 只用于离线评分，不会被放进生成 prompt。真实生成链路必须由 harness 调用模型后再解析候选。
 
+## Daily Goal Case Expansion
+
+500 条日常 goal case 由 100 条 seed 稳定扩充生成，不手写 artifact：
+
+```powershell
+python tools/build_isolated_surface_daily_goal_cases.py `
+  --seed artifacts/isolated_surface_harness/daily_goal_100_20260511/cases.jsonl `
+  --out artifacts/isolated_surface_harness/daily_goal_500_20260511 `
+  --force
+```
+
+扩充原则：
+
+- 每条 seed 保留原 `ReplyControlPacket`、facts 和 `must_not_do`。
+- 每条 seed 生成 5 个同 scene 用户输入变体，case id 使用 `__v02` 到 `__v05` 后缀。
+- 只改当前 `user_message`，不接入历史、状态、器官族输出或自然语言建议。
+- 生成后必须先跑 prompt 构建校验：
+
+```powershell
+python tools/isolated_surface_harness.py `
+  --cases artifacts/isolated_surface_harness/daily_goal_500_20260511/cases.jsonl `
+  --out artifacts/isolated_surface_harness/daily_goal_500_20260511/prompt_build `
+  --strict
+```
+
 ## Failure-Only Retry
 
 完整 live 批测耗时较长时，不要为了少量坏 case 重跑 100 条。先用当前 parser/scorer 重放上次 raw output，再只重试低分 case：
@@ -230,6 +255,26 @@ python tools/quality_cluster_report.py `
 - weak pass: `0`
 - hard fail: `0`
 - avg selected score: `87.487`
+
+最新 500 条日常 goal 扩容基线：
+
+- cases: `artifacts/isolated_surface_harness/daily_goal_500_20260511/cases.jsonl`
+- prompt build: `500/500`，errors `0`
+- raw live run: `artifacts/isolated_surface_harness/daily_goal_500_live_20260511`
+- raw live pass: `483/500`
+- raw live low score: `17`
+- raw live hard fail: `1`
+- raw live avg selected score: `86.628`
+- retry run: `artifacts/isolated_surface_harness/daily_goal_500_retry_20260511`
+- retry cases: `41`
+- retry attempts: `82`
+- merged pass: `497/500`
+- merged low score: `3`
+- merged hard fail: `0`
+- merged avg selected score: `87.217`
+- cluster report: `artifacts/isolated_surface_harness/daily_goal_500_retry_20260511/cluster_report`
+
+剩余 3 个低分不是新增 hard forbidden 的理由：主要是 `advice_continue` 的帮助性不足和 `proud` 场景缺少更明确的接住动作，应继续按 cluster 调整 prompt/scorer 权重或样本参考。
 
 本轮修复的 cluster：
 
