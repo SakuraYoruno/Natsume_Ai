@@ -73,7 +73,8 @@ class ReplyControlPacket(BaseModel):
 
 仓库已有解包台词候选与派生风格库：
 
-- `artifacts/vn_sora_refresh/sora_daily_candidates.jsonl`：原作台词候选。
+- 中文优先：`C:\Natsume_Work\vn_text\skycity_chs_strings_20260502_230811\sora_chinese_daily_candidates.jsonl`、`C:\Natsume_Work\vn_text\newep_chs_strings_20260502_230811\sora_chinese_daily_candidates.jsonl`。
+- 日文兜底：`artifacts/vn_sora_refresh/sora_daily_candidates.jsonl`。
 - `data/style_bank/sora_style_bank.jsonl`：不含 raw 台词的派生风格特征。
 
 隔离 harness 使用后者，而不是把原文塞给模型。生成层看到的是类似：

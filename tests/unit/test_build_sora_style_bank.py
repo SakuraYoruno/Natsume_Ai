@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from tools.build_sora_style_bank import build_style_references, write_jsonl, write_summary
+from tools.build_sora_style_bank import _lang_hint_from_path, build_style_references, write_jsonl, write_summary
 
 
 def test_build_sora_style_bank_writes_derived_features_without_raw_text(tmp_path) -> None:
@@ -50,3 +50,29 @@ def test_build_sora_style_bank_writes_derived_features_without_raw_text(tmp_path
     assert "boundary" in payload
     assert "别偷偷说" not in payload
     assert "does not duplicate raw VN dialogue text" in summary.read_text(encoding="utf-8")
+
+
+def test_build_sora_style_bank_treats_chs_sources_as_zh(tmp_path) -> None:
+    source = tmp_path / "skycity_chs_strings_20260502_230811" / "sora_daily_candidates.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        json.dumps(
+            {
+                "file": "evb_skycity_extract/Project/b01.txt.scn",
+                "index": 10,
+                "kind": "dialogue",
+                "sora_candidate_score": 3,
+                "daily_style_safe": True,
+                "text": "「才不白痴呢。人家这是一片真心」",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    refs = build_style_references([source])
+
+    assert _lang_hint_from_path(source) == "zh"
+    assert len(refs) == 1
+    assert refs[0].lang == "zh"

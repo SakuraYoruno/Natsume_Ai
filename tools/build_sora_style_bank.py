@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Iterable, Mapping
@@ -19,11 +20,20 @@ from host_brain.persona.style_reference_bank import (  # noqa: E402
 )
 
 
-DEFAULT_INPUTS = (
+LOCAL_VN_TEXT_ROOT = Path(os.environ.get("SORA_STYLE_VN_TEXT_ROOT", r"C:\Natsume_Work\vn_text"))
+
+CHINESE_DEFAULT_INPUTS = (
+    ROOT / "artifacts" / "vn_sora_chs" / "skycity_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
+    ROOT / "artifacts" / "vn_sora_chs" / "newep_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
+    LOCAL_VN_TEXT_ROOT / "skycity_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
+    LOCAL_VN_TEXT_ROOT / "newep_chs_strings_20260502_230811" / "sora_chinese_daily_candidates.jsonl",
+)
+JAPANESE_DEFAULT_INPUTS = (
     ROOT / "artifacts" / "vn_sora_refresh" / "sora_daily_candidates.jsonl",
     ROOT / "artifacts" / "vn_sora" / "skycity_ep2_20260509_161713" / "sora_daily_candidates.jsonl",
     ROOT / "artifacts" / "vn_sora" / "nine_newEP_20260509_161027" / "sora_daily_candidates.jsonl",
 )
+DEFAULT_INPUTS = CHINESE_DEFAULT_INPUTS + JAPANESE_DEFAULT_INPUTS
 
 
 def _display_input_path(path: Path) -> str:
@@ -32,6 +42,18 @@ def _display_input_path(path: Path) -> str:
     if normalized.lower().startswith(root_prefix.lower()):
         return normalized[len(root_prefix) :]
     return normalized
+
+
+def _default_inputs() -> list[Path]:
+    existing = [path for path in DEFAULT_INPUTS if path.exists()]
+    return existing if existing else list(DEFAULT_INPUTS)
+
+
+def _lang_hint_from_path(path: Path) -> str:
+    normalized = path.as_posix().lower()
+    if any(marker in normalized for marker in ("chinese", "chs", "evb_", "translated_cn", "中文", "汉化")):
+        return "zh"
+    return ""
 
 
 def _read_jsonl(path: Path) -> Iterable[Mapping[str, Any]]:
@@ -53,7 +75,7 @@ def build_style_references(paths: Iterable[Path]) -> list[StyleReference]:
     for path in paths:
         if not path.exists():
             continue
-        lang_hint = "zh" if "chinese" in path.name.lower() else ""
+        lang_hint = _lang_hint_from_path(path)
         for row in _read_jsonl(path):
             ref = style_reference_from_raw_row(row, lang_hint=lang_hint)
             if ref is None:
@@ -115,7 +137,7 @@ def main() -> int:
     parser.add_argument("--summary", default="", help="Optional markdown summary path.")
     args = parser.parse_args()
 
-    inputs = [Path(item) for item in args.input] if args.input else list(DEFAULT_INPUTS)
+    inputs = [Path(item) for item in args.input] if args.input else _default_inputs()
     refs = build_style_references(inputs)
     out_path = Path(args.out)
     write_jsonl(out_path, refs)
