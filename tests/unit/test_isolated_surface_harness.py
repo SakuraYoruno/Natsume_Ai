@@ -79,6 +79,7 @@ def test_build_messages_only_uses_allowed_request_surface() -> None:
 
     assert "Soul.md" in rendered
     assert "ReplyControlPacket" in rendered
+    assert "must_include 是逐候选字面约束" in rendered
     assert "TurnSurfaceContract" in rendered
     assert "response_move" in rendered
     assert "本轮 question_budget=0" in rendered

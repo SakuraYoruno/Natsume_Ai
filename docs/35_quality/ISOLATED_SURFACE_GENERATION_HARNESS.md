@@ -57,6 +57,7 @@ class ReplyControlPacket(BaseModel):
 3. `build_isolated_surface_messages(...)`
    - 生成固定双消息 prompt。
    - system 中放隔离边界、输出 JSON 要求和 `Soul.md`。
+   - system 中明确 `must_include` / `must_not_do` 是逐候选字面约束，不允许候选池里只有一条满足。
    - user 中放当前输入、增强后的 `ReplyControlPacket`、facts、must_not_do。
    - `ReplyControlPacket.style_anchor` 会自动合并原作派生风格锚点。
    - 同步放入由当前用户输入 + `ReplyControlPacket.task_mode` 派生的 `TurnSurfaceContract`，只包含 response_move、required_any、问句预算、长度和 notes；不放 forbidden_surface 或 raw 上下文。
@@ -128,6 +129,31 @@ python tools/isolated_surface_continuity_harness.py `
   --out artifacts/isolated_surface_harness/continuity_smoke_20260511/prompt_build `
   --strict
 ```
+
+运行 live 连续对话生成：
+
+```powershell
+python tools/run_isolated_surface_continuity_live.py `
+  --cases artifacts/isolated_surface_harness/continuity_smoke_20260511/cases.jsonl `
+  --out artifacts/isolated_surface_harness/continuity_smoke_live_20260511 `
+  --concurrency 3 `
+  --progress-every 3
+```
+
+live 输出：
+
+- `live_raw_generations.jsonl`：每个 turn 的模型原始输出、候选和选中项。
+- `live_scores.jsonl`：每个 turn 的 scorer/rerank 明细。
+- `summary.json`：turn pass rate、dialogue pass rate、低分数、hard fail、control violation 和延迟统计。
+
+当前 live baseline：
+
+- run: `artifacts/isolated_surface_harness/continuity_smoke_live_after_control_prompt_20260511`
+- result: `18/18` turn pass，`6/6` dialogue pass
+- low score: `0`
+- hard fail: `0`
+- control violation: `0`
+- avg selected score: `87.332`
 
 这个 harness 不是 runtime 集成。它只回答一个问题：在没有原始历史、没有状态树、没有器官族自然语言建议的情况下，压缩后的连续性事实能不能让最终表层生成自然接住上一轮。
 

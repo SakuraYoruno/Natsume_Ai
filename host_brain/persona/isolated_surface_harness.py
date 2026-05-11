@@ -413,6 +413,7 @@ def build_isolated_surface_messages(
             "ReplyControlPacket 是最终生成层的唯一运行控制面；不得要求更多 runtime state。",
             "输出必须是 JSON 对象：{\"candidates\":[\"候选1\",\"候选2\",\"候选3\"]}。",
             "给 3 到 5 个候选。每个候选必须是用户可见文本，不要 Markdown、括号动作、字段名或解释。",
+            "ReplyControlPacket.must_include 是逐候选字面约束；每个候选都必须包含全部 must_include 词。must_not_do 也是逐候选约束；每个候选都不能包含其中任何词。",
             no_question_line,
             "避免用 ~ 或 ～ 当可爱语气；角色感靠用词、转折和节奏，不靠廉价符号。",
             "每个候选都必须完成 TurnSurfaceContract.response_move；不要只写空泛支持、空泛安慰或单纯撒娇。",
