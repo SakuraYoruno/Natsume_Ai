@@ -181,6 +181,31 @@ python tools/isolated_surface_harness.py `
   --strict
 ```
 
+## Held-Out and Challenge Suites
+
+500 条日常 goal 已经成为回归集，不再继续无限扩同一批 case。新增泛化评估由独立 builder 生成：
+
+```powershell
+python tools/build_isolated_surface_eval_suites.py `
+  --out artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511 `
+  --force
+```
+
+输出结构：
+
+- `heldout_200/cases.jsonl`：200 条未参与调参的日常泛化集，覆盖问候、在场、累、饿、夸奖、道歉、坏心情、想你等常见 surface。
+- `challenge_300/cases.jsonl`：300 条挑战集，集中压 `advice_continue`、`short_ack`、`good_news_proud`、`identity`、`presence`、`greeting`、`annoying_tease`、`bad_mood`。
+- `new_500/cases.jsonl`：上面 200 + 300 的合并集。
+- `summary.json`：记录 regression、heldout、challenge 的总量、scene counts 和 group counts。
+
+这三批的职责不同：
+
+- `daily_goal_500_20260511` 是回归集，要求稳定全绿。
+- `heldout_200` 是泛化观察集，低分用于判断方法是否外推，不直接按孤例改规则。
+- `challenge_300` 是压力集，低分先聚类成 failure class；只有反复出现的 cluster 才进入 scorer 或 scene contract 优化。
+
+所有新增 case 仍然只包含当前用户输入、`ReplyControlPacket`、facts、`must_not_do` 和 style anchor。不得把历史、器官族输出、工具候选或自然语言建议混入 case。
+
 ## Failure-Only Retry
 
 完整 live 批测耗时较长时，不要为了少量坏 case 重跑 100 条。先用当前 parser/scorer 重放上次 raw output，再只重试低分 case：
@@ -276,6 +301,23 @@ python tools/quality_cluster_report.py `
 - cluster report: `artifacts/isolated_surface_harness/daily_goal_500_after_identity_contract_retry_20260511/cluster_report`
 
 本轮 500 条低分清零不是通过扩大 hard forbidden 获得的：`advice_continue`、`good_news`、`short_ack`、`identity` 都只补了 scene-level contract notes、good/bad sample 与 soft penalty。
+
+最新 1000 评估结构：
+
+- regression cases: `artifacts/isolated_surface_harness/daily_goal_500_20260511/cases.jsonl`
+- eval suite builder: `tools/build_isolated_surface_eval_suites.py`
+- eval suite root: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511`
+- heldout cases: `200`
+- challenge cases: `300`
+- regression + heldout + challenge total: `1000`
+- prompt build: heldout `200/200` errors `0`，challenge `300/300` errors `0`，new_500 `500/500` errors `0`
+- raw new_500 live: `485/500` pass，`15` low score，`0` hard fail，avg `87.135`
+- raw split: heldout `192/200` pass，challenge `293/300` pass
+- failure-only retry: `31` cases / `62` attempts
+- merged new_500 retry: `499/500` pass，`1` low score，`0` hard fail，avg `87.515`
+- remaining weak case: `challenge_good_news_proud_user_proud_030`，表现为“接住用户自夸但没有足够 good_news/proud scene grounding”
+
+这 1 条残留不能立即变成专用 hard rule。下一步应先看 `good_news_proud` 是否继续在后续 held-out/challenge 或真实聊天样本中成簇出现，再决定补 sample bank、soft scorer 还是 contract notes。
 
 本轮修复的 cluster：
 

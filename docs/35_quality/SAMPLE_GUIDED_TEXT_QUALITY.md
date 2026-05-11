@@ -97,6 +97,31 @@ Hard gate 只处理绝对不可发送的问题：
 
 本轮继续按 cluster 优化，没有把单句变成 hard regex，也没有扩大 scene-specific hard forbidden surface。新增/强化的是 soft cluster：`ADVICE_VAGUE_PUSH`、`GOOD_NEWS_PROBING`、`SHORT_ACK_OBEDIENCE`，以及 `identity` 的 name-first contract。
 
+## Eval Suite Expansion
+
+500 条 daily goal 现在作为 regression suite 保存，新增泛化评估不再继续从同一批 seed 无限复制：
+
+- builder: `tools/build_isolated_surface_eval_suites.py`
+- held-out suite: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511/heldout_200/cases.jsonl`
+- challenge suite: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511/challenge_300/cases.jsonl`
+- combined new suite: `artifacts/isolated_surface_harness/daily_goal_eval_1000_20260511/new_500/cases.jsonl`
+- total eval if combined with regression: `1000`
+
+用途边界：
+
+- `regression_500`：防止已修好的文本质量退化，要求稳定全绿。
+- `heldout_200`：观察最简文本链是否能外推到未调过的日常输入。
+- `challenge_300`：专门压易漂移场景，用于发现 cluster，不用于按单个 case 补 regex。
+
+最新 live 结果：
+
+- raw new_500: `485/500` pass，`15` low score，`0` hard fail，avg `87.135`
+- raw heldout: `192/200` pass，avg `86.665`
+- raw challenge: `293/300` pass，avg `87.449`
+- retry merged: `499/500` pass，`1` low score，`0` hard fail，avg `87.515`
+
+剩余低分集中在 `good_news_proud` 的一个自夸 case：回复能接住“我厉害”，但没有足够落到“成就/进展被看见”的 scene grounding。这里先作为 cluster 观察点保留，不把某一句坏回复变成新的 hard forbidden。
+
 ## Test Migration
 
 保留并改写的测试：
