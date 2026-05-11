@@ -28,7 +28,6 @@ _RETIRED_PROMPT_SURFACE_COMPAT_TEST_FILES = {
     "test_emotion_agent_handler.py",
     "test_emotion_context_profile_templates.py",
     "test_emotion_llm_inference.py",
-    "test_emotion_utterance_index_templates.py",
     "test_evolution_desire_engine_helpers.py",
     "test_evolution_orchestrator_helpers.py",
     "test_expression_adapter_helpers.py",

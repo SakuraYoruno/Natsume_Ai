@@ -166,7 +166,6 @@
 - `emotion_context.inner_monologue_texts`：EmotionContext VAD 映射到内心独白的文案模板（JSON）
 - `emotion_context.user_profile_hints`：EmotionContext 用户情感画像提示模板（JSON）
 - `emotion_llm_inference.prompt_templates`：Emotion LLM 推理 prompt 模板（JSON）
-- `emotion_utterance_index.prompt_render_texts`：EmotionUtteranceIndex 风格参考渲染模板（JSON）
 - `emotional_silence.runtime_hints`：EmotionalSilence 沉默/抗拒提示模板（JSON）
 - `evolution_desire_engine.desire_templates`：EvolutionDesireEngine 成长意愿模板（JSON）
 - `evolution_orchestrator.awareness_templates`：EvolutionOrchestrator 成长感知文案模板（JSON）

@@ -16,7 +16,7 @@ _logger = logging.getLogger("Natsume.retrieval.query_planner")
 # ---------------------------------------------------------------------------
 # 5 路 Store ID 常量（Phase XIII 精简：剔除 style_canon + persona_utterance）
 # style_canon → StyleCanon v5 常驻注入（不走检索）
-# persona_utterance → EmotionTaggedUtteranceIndex 独立通道（不走检索）
+# persona_utterance → 已从当前主链移除；表层风格参考走 style_reference_bank。
 # ---------------------------------------------------------------------------
 ALL_STORE_IDS: tuple[str, ...] = (
     "episodic_vector",

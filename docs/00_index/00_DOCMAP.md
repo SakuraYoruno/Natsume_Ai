@@ -138,7 +138,7 @@
   读者：MASTER、Project（文档代理）。
 
 - docs/50_project/arch/PHASE_XIII_STYLE_SYSTEM_OVERHAUL.md
-  用途：Phase XIII 风格系统重构方案留痕（2026-03-30，2026-04-19 已加校准说明）。记录 `StyleDistiller / EmotionTaggedUtteranceIndex / persona_examples 独立注入 / style_canon 脱离 reranker` 的设计缘起；相关模块现已落库，现行接线请以 `prompt_builder_node.py`、`chat_context_builder.py`、`query_planner.py`、`reranker.py` 与实际运行产物为准。
+  用途：Phase XIII 风格系统重构方案留痕（2026-03-30，2026-04-19 已加校准说明）。记录 `StyleDistiller / EmotionTaggedUtteranceIndex / persona_examples 独立注入 / style_canon 脱离 reranker` 的设计缘起；`EmotionTaggedUtteranceIndex` 已在 2026-05-12 旧召回清理中删除，当前最小主链风格参考以 `style_reference_bank` 与样本引导评分为准。
   读者：MASTER、Project（文档代理）、实现层（历史对照）。
 
 - docs/50_project/arch/DIGITAL_LIFE_FUSION_V2_20260408.md

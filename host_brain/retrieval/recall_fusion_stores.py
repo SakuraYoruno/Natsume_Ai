@@ -9,7 +9,7 @@
 
 Phase XIII 已废弃的路由（已彻底删除，不再保留向后兼容代码）：
   - style_canon → StyleCanon v5 常驻注入，不走路由
-  - persona_utterance → EmotionTaggedUtteranceIndex 独立通道，不走路由
+  - persona_utterance → 已从当前主链移除；表层风格参考走 style_reference_bank
 """
 
 from __future__ import annotations
@@ -577,5 +577,4 @@ def search_artifact_vault(self: Any, *, query: str, top_k: int) -> list[dict[str
             },
         })
     return sorted(candidates, key=lambda c: -float(c["score"]))[: max(1, int(top_k))]
-
 
