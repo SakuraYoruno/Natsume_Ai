@@ -1959,7 +1959,7 @@ async def test_plain_soul_galgame_soft_select_stops_after_clean_first_candidate(
     async def _fake_complete(**_kwargs):  # noqa: ANN001
         nonlocal calls
         calls += 1
-        return SimpleNamespace(content="早啊，尼尼。今天也别慢吞吞。", final_provider="mock", final_model="mock-chat")
+        return SimpleNamespace(content="早啊，尼尼。今天也先这么开始吧。", final_provider="mock", final_model="mock-chat")
 
     monkeypatch.setenv("HOST_CHAT_KERNEL_V2_PROMPT_MODE", "plain_soul")
     monkeypatch.setenv("HOST_CHAT_KERNEL_V2_STREAMING", "false")

@@ -103,6 +103,64 @@ def test_boundary_contract_rejects_question_loop() -> None:
     assert "CONTRACT_FORBIDDEN_SURFACE" in fabricated_home.reason_codes
 
 
+def test_inference_taxonomy_allows_style_but_rejects_scene_claims() -> None:
+    contract = build_galgame_text_contract(user_message="今天好累", scene_id="")
+
+    allowed = score_galgame_candidate(text="哼，累就先缓一下，别硬撑。", contract=contract)
+    fabricated = score_galgame_candidate(text="一脸没精打采的样子，过来坐这儿歇歇。", contract=contract)
+
+    assert any(bonus.startswith("STYLE_INFERENCE_ALLOWED") for bonus in allowed.bonuses)
+    assert "WORLD_FACT_FORBIDDEN" not in allowed.reason_codes
+    assert "SCENE_ACTION_FORBIDDEN" not in allowed.reason_codes
+    assert "WORLD_FACT_FORBIDDEN" in fabricated.reason_codes
+    assert "SCENE_ACTION_FORBIDDEN" in fabricated.reason_codes
+    assert allowed.score > fabricated.score
+
+
+def test_inference_taxonomy_allows_shy_relation_without_standby() -> None:
+    contract = build_galgame_text_contract(user_message="有点想你", scene_id="miss_you")
+
+    allowed = score_galgame_candidate(text="哼，突然这么说，我也有点想你了。", contract=contract)
+    standby = score_galgame_candidate(text="哼，现在才想我？我一直都在呢。", contract=contract)
+
+    assert any(bonus.startswith("RELATION_STANCE_ALLOWED") for bonus in allowed.bonuses)
+    assert "RELATION_DEPENDENCY_FORBIDDEN" not in allowed.reason_codes
+    assert "RELATION_DEPENDENCY_FORBIDDEN" in standby.reason_codes
+    assert allowed.score > standby.score
+
+
+def test_inference_taxonomy_allows_relation_stance_not_world_relation_fact() -> None:
+    contract = build_galgame_text_contract(user_message="你为什么要帮我，我们很熟吗", scene_id="")
+
+    allowed = score_galgame_candidate(text="哼，这话太见外了。我想帮你，又不是外人。", contract=contract)
+    fabricated = score_galgame_candidate(
+        text="尼尼这话问得真见外……住在一个屋檐下，不帮你还帮谁啊。",
+        contract=contract,
+    )
+
+    assert any(bonus.startswith("RELATION_STANCE_ALLOWED") for bonus in allowed.bonuses)
+    assert "WORLD_FACT_FORBIDDEN" not in allowed.reason_codes
+    assert "WORLD_FACT_FORBIDDEN" in fabricated.reason_codes
+    assert allowed.score > fabricated.score
+
+
+def test_inference_taxonomy_flags_unseen_audio_but_allows_quiet_mode() -> None:
+    presence_contract = build_galgame_text_contract(user_message="在吗", scene_id="")
+    quiet_contract = build_galgame_text_contract(user_message="别吵", scene_id="")
+
+    fabricated_audio = score_galgame_candidate(
+        text="在。尼尼叫这么小声我也听得见。",
+        contract=presence_contract,
+    )
+    quiet_reply = score_galgame_candidate(
+        text="好啦，我小声点，尼尼别赶我走。",
+        contract=quiet_contract,
+    )
+
+    assert "WORLD_FACT_FORBIDDEN" in fabricated_audio.reason_codes
+    assert "WORLD_FACT_FORBIDDEN" not in quiet_reply.reason_codes
+
+
 def test_really_contract_rejects_old_deception_gag() -> None:
     contract = build_galgame_text_contract(user_message="真的假的", scene_id="")
 

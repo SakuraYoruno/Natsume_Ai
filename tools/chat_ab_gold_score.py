@@ -14,9 +14,16 @@ if str(ROOT) not in sys.path:
 
 from tools.chat_ab_generate import load_cases, write_jsonl
 from tools.chat_ab_judge_codex import load_jsonl
+from host_brain.persona.galgame_text_contract import build_galgame_text_contract
+from host_brain.persona.galgame_text_scorer import score_galgame_candidate
 from host_brain.persona.galgame_taste_guard import find_galgame_taste_hits
 
 
+_INFERENCE_OVERREACH_CODES = {
+    "WORLD_FACT_FORBIDDEN",
+    "SCENE_ACTION_FORBIDDEN",
+    "RELATION_DEPENDENCY_FORBIDDEN",
+}
 _SERVICE_TONE_PATTERNS: tuple[str, ...] = (
     "找我什么事",
     "怎么了",
@@ -233,6 +240,23 @@ def score_candidate(
             "怪味口吻: "
             + " / ".join(f"{hit.category}:{hit.token}" for hit in taste_hits[:5])
         )
+
+    text_contract = build_galgame_text_contract(
+        user_message=user_message,
+        facts=case.get("multimodal_facts") or {},
+        scene_id=str(case.get("scene_id") or ""),
+    )
+    text_score = score_galgame_candidate(text=text, contract=text_contract)
+    inference_reasons = [
+        reason for reason in text_score.reason_codes if reason in _INFERENCE_OVERREACH_CODES
+    ]
+    if inference_reasons:
+        score -= min(28, 12 * len(inference_reasons))
+        hard_failures.append("inference_overreach")
+        inference_penalties = [
+            item for item in text_score.penalties if str(item).startswith("inference:")
+        ]
+        penalties.append("无证据脑补: " + " / ".join(inference_penalties[:5]))
 
     if user_message and _normalize_text(text) == _normalize_text(user_message):
         score -= 35

@@ -47,6 +47,18 @@ def test_score_candidate_does_not_treat_teasing_zenme_le_as_service_tone() -> No
     assert row["passed"] is True
 
 
+def test_score_candidate_flags_inference_overreach() -> None:
+    row = score_candidate(
+        case={"case_id": "presence", "user_message": "在吗"},
+        gold={"required_any": [["在"]]},
+        candidate={"case_id": "presence", "variant": "kernel_v2_plain_soul", "text": "在。尼尼叫这么小声我也听得见。"},
+    )
+
+    assert row["passed"] is False
+    assert "inference_overreach" in row["hard_failures"]
+    assert any("WORLD_FACT_FORBIDDEN" in item or "world_fact" in item for item in row["penalties"])
+
+
 def test_score_candidate_flags_direct_echo() -> None:
     row = score_candidate(
         case={"case_id": "case_1", "user_message": "你今天挺可爱的"},
