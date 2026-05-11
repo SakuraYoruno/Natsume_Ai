@@ -118,9 +118,10 @@ Hard gate 只处理绝对不可发送的问题：
 - raw new_500: `485/500` pass，`15` low score，`0` hard fail，avg `87.135`
 - raw heldout: `192/200` pass，avg `86.665`
 - raw challenge: `293/300` pass，avg `87.449`
-- retry merged: `499/500` pass，`1` low score，`0` hard fail，avg `87.515`
+- first retry merged: `499/500` pass，`1` low score，`0` hard fail，avg `87.515`
+- `good_news_proud` follow-up retry: `500/500` pass，`0` low score，`0` hard fail，avg `87.545`
 
-剩余低分集中在 `good_news_proud` 的一个自夸 case：回复能接住“我厉害”，但没有足够落到“成就/进展被看见”的 scene grounding。这里先作为 cluster 观察点保留，不把某一句坏回复变成新的 hard forbidden。
+`good_news_proud` 现在是独立小场景：用户既表达进展，又在等一句夸时，contract 要求候选同时落到“进展词”和“认可/拌嘴词”。这次没有把坏句写成专用 regex，而是新增 sample bank、scene grounding 维度和 style query 映射；`收尾/结束/完成/弄成/做成` 也作为泛化进展词进入 good_news。
 
 ## Test Migration
 

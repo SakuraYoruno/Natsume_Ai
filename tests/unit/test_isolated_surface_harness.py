@@ -352,6 +352,34 @@ def test_rerank_prefers_clean_good_news_over_wave_cheer() -> None:
     assert any("CHEAP_WAVE_PUNCTUATION" in row.reason_codes for row in rows if "~" in row.text)
 
 
+def test_rerank_prefers_grounded_good_news_proud_over_generic_competition() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "good_news_proud",
+            "soul_md": SOUL,
+            "user_message": "我刚把它收掉了，厉害吧",
+            "reply_control_packet": {
+                "response_move": "daily_chat",
+                "task_mode": "daily_chat",
+                "question_budget": 1,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "好啦知道你很厉害了，下回我也要露一手。",
+            "收掉了啊，行吧，这次真挺厉害。",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text == "收掉了啊，行吧，这次真挺厉害。"
+    assert any("CONTEXT_MISSING_REQUIRED_MOVE" in row.reason_codes for row in rows if "露一手" in row.text)
+
+
 def test_rerank_prefers_stuffed_meal_care_over_scolding_wave() -> None:
     request = build_isolated_surface_input(
         {

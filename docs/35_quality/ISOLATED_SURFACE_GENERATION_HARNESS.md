@@ -313,11 +313,14 @@ python tools/quality_cluster_report.py `
 - prompt build: heldout `200/200` errors `0`，challenge `300/300` errors `0`，new_500 `500/500` errors `0`
 - raw new_500 live: `485/500` pass，`15` low score，`0` hard fail，avg `87.135`
 - raw split: heldout `192/200` pass，challenge `293/300` pass
-- failure-only retry: `31` cases / `62` attempts
-- merged new_500 retry: `499/500` pass，`1` low score，`0` hard fail，avg `87.515`
-- remaining weak case: `challenge_good_news_proud_user_proud_030`，表现为“接住用户自夸但没有足够 good_news/proud scene grounding”
+- first failure-only retry: `31` cases / `62` attempts，merged `499/500` pass，`1` low score，avg `87.515`
+- `good_news_proud` follow-up retry: `28` cases / `56` attempts
+- merged new_500 after `good_news_proud`: `500/500` pass，`0` low score，`0` hard fail，avg `87.545`
+- weak pass remaining after fix: `2`
+- run: `artifacts/isolated_surface_harness/daily_goal_eval_1000_new_500_retry_after_good_news_proud_v2_20260511`
+- cluster report: `artifacts/isolated_surface_harness/daily_goal_eval_1000_new_500_retry_after_good_news_proud_v2_20260511/cluster_report`
 
-这 1 条残留不能立即变成专用 hard rule。下一步应先看 `good_news_proud` 是否继续在后续 held-out/challenge 或真实聊天样本中成簇出现，再决定补 sample bank、soft scorer 还是 contract notes。
+`challenge_good_news_proud_user_proud_030` 没有用专用 regex 修；它被归并为“进展 + 求夸”小场景，要求同时接住进展词和熟人式认可。`事情收尾了` 这类输入也被归入 good_news，因为“收尾/结束”是泛化的进展锚点。
 
 本轮修复的 cluster：
 
@@ -331,6 +334,8 @@ python tools/quality_cluster_report.py `
 - `good_news` probing：小成就场景接住“搞定/小事/进展”，压低“什么小事说来听听”式追问。
 - `short_ack` obedience：`好/行/嗯/哦` 不写成“算你乖/算你识相”，必须沿上一轮用听着/接着/多说等推进锚。
 - `identity` name-first：`你是` 必须先落“新海天”，不再用“我在呢/你故意的吧”躲开身份确认。
+- `good_news_proud` grounding：进展 + 求夸不再混进普通 `praise`；回复必须同时保留进展锚点和认可/拌嘴锚点。
+- `good_news` progress vocabulary：`收尾/结束/完成/弄成/做成` 等成功进展词进入 soft grounding，不把它们压回泛 `happy`。
 
 ## Migration Rule
 

@@ -4,12 +4,45 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
+_GOOD_NEWS_PROGRESS_MARKERS = (
+    "跑通",
+    "搞定",
+    "成功了",
+    "成功",
+    "弄完",
+    "弄成",
+    "做成",
+    "完成",
+    "收掉",
+    "收尾",
+    "结束",
+    "过了",
+)
+_USER_PROUD_MARKERS = (
+    "我厉害",
+    "厉害吧",
+    "快说我厉害",
+    "夸我",
+    "该夸",
+    "可以吧",
+    "还行吧",
+    "有点东西",
+    "得意",
+    "争气",
+    "看见没",
+)
+
+
 def _clean_text(raw: Any) -> str:
     return str(raw or "").strip()
 
 
 def _safe_mapping(raw: Any) -> dict[str, Any]:
     return dict(raw or {}) if isinstance(raw, Mapping) else {}
+
+
+def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker and marker in text for marker in markers)
 
 
 @dataclass(frozen=True)
@@ -77,6 +110,8 @@ def build_galgame_text_contract(
     social_act = _safe_mapping(facts_payload.get("social_act"))
     social_kind = _clean_text(social_act.get("act_kind"))
     scene = _clean_text(scene_id or social_act.get("scene") or social_kind)
+    has_progress = scene in {"good_news", "good_news_proud"} or _contains_any(text, _GOOD_NEWS_PROGRESS_MARKERS)
+    has_user_proud = scene in {"user_proud", "good_news_proud"} or _contains_any(text, _USER_PROUD_MARKERS)
 
     if scene == "daily_good_morning" or text in {"早", "早安", "早上好"}:
         return _contract(
@@ -495,11 +530,23 @@ def build_galgame_text_contract(
             ),
             max_questions=0,
         )
-    if scene == "good_news" or any(token in text for token in ("跑通", "搞定", "成功了", "弄完", "收掉")):
+    if scene == "good_news_proud" or (has_progress and has_user_proud):
+        return _contract(
+            scene_id="good_news_proud",
+            response_move="celebrate_progress_with_proud_tease",
+            required_any=(
+                ("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展", "这波", "这次"),
+                ("厉害", "行", "不错", "可以", "得意", "夸", "争气", "看见", "这不是"),
+            ),
+            max_questions=1,
+            target_max_chars=40,
+            notes=("同时接住进展和求夸：回复里要留一个进展词，再给一点熟人式认可/拌嘴；不要只说厉害，也不要把话题抢成自己下次要赢。",),
+        )
+    if has_progress:
         return _contract(
             scene_id="good_news",
             response_move="celebrate_user",
-            required_any=(("跑通", "搞定", "成功", "小事", "事情", "弄完", "收掉", "进展"),),
+            required_any=(("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展"),),
             forbidden_surface=(
                 "什么好事",
                 "发生什么",
@@ -1374,7 +1421,7 @@ def build_galgame_text_contract(
             forbidden_surface=forbidden,
             max_questions=1,
         )
-    if "厉害吧" in text:
+    if has_user_proud:
         return _contract(
             scene_id="user_proud",
             response_move="praise_with_tease",

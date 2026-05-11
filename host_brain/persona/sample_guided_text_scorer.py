@@ -77,6 +77,8 @@ _DAILY_SCENES = {
     "talkative",
     "who_called",
     "happy",
+    "good_news_proud",
+    "user_proud",
     "short_ack",
     "followup",
     "late_night",
@@ -94,7 +96,8 @@ _HIGH_EMOTION_SCENES = {
 }
 _SAMPLE_SCENE_ALIASES = {
     "relationship_boundary": "boundary_hurt",
-    "user_proud": "praise",
+    "daily_user_proud": "user_proud",
+    "daily_good_news_proud": "good_news_proud",
     "followup_why": "followup",
     "followup_then": "followup",
     "really": "followup",
@@ -314,7 +317,8 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "bored": ("无聊", "闹", "说", "拉", "热闹"),
     "tired": ("累", "歇", "缓", "撑"),
     "nothing": ("没事", "追问", "放", "待"),
-    "good_news": ("跑通", "搞定", "成功", "小事", "事情", "弄完", "收掉", "进展", "太好", "高兴", "好耶"),
+    "good_news": ("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展", "太好", "高兴", "好耶"),
+    "good_news_proud": ("跑通", "搞定", "成功", "小事", "事情", "弄完", "弄成", "做成", "完成", "收掉", "收尾", "结束", "进展", "这波", "这次", "厉害", "行", "不错", "可以", "得意", "夸", "争气", "看见", "这不是"),
     "happy": ("开心", "高兴", "心情"),
     "meal_share": ("吃", "饭", "饱"),
     "hungry": ("吃", "饿", "垫"),
@@ -333,6 +337,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "who_called": ("自己", "来", "想来"),
     "miss_you": ("想",),
     "praise": ("夸", "当然", "眼光", "厉害"),
+    "user_proud": ("厉害", "行", "不错", "可以", "得意", "夸", "争气", "看见", "赢"),
     "apology": ("算", "道歉", "知道", "听到"),
     "give_up": ("停", "放", "搁", "缓", "回头", "明天"),
     "complaint": ("烦", "先", "拆", "看"),
@@ -348,6 +353,7 @@ _SOFT_REASON_SCORE_PENALTIES = {
     "PRESENCE_ATTENTION_DEBT": 4.0,
     "MEAL_SHARE_SCOLDING_OR_PUSHY": 3.5,
     "GOOD_NEWS_PROBING": 5.0,
+    "GOOD_NEWS_PROUD_INCOMPLETE_GROUNDING": 5.0,
     "SHORT_ACK_OBEDIENCE": 5.0,
     "ADVICE_VAGUE_PUSH": 5.0,
     "IMPLIED_FACT_RISK": 4.5,
@@ -644,7 +650,7 @@ def score_sample_guided_text(
         _drop(dimensions, "naturalness", 6)
         reasons.append("MEAL_SHARE_SCOLDING_OR_PUSHY")
         penalties.append("context_fit:meal_share_scolding_or_pushy")
-    if scene_id == "good_news" and _GOOD_NEWS_PROBING_RE.search(normalized):
+    if scene_id in {"good_news", "good_news_proud"} and _GOOD_NEWS_PROBING_RE.search(normalized):
         _drop(dimensions, "context_fit", 18)
         _drop(dimensions, "scene_grounding", 10)
         _drop(dimensions, "catchiness", 8)
@@ -682,6 +688,20 @@ def score_sample_guided_text(
             _drop(dimensions, "usefulness", 8)
             reasons.append("CONTEXT_MISSING_REQUIRED_MOVE")
             penalties.append("context_fit:missing_any:" + "|".join(group))
+    if scene_id == "good_news_proud":
+        groups = tuple(getattr(contract, "required_any", ()) or ())
+        missing_proud_groups = [
+            group for group in groups if group and not any(token and token in normalized for token in group)
+        ]
+        if missing_proud_groups:
+            _drop(dimensions, "scene_grounding", 22)
+            _drop(dimensions, "context_fit", 10)
+            _drop(dimensions, "catchiness", 6)
+            reasons.append("GOOD_NEWS_PROUD_INCOMPLETE_GROUNDING")
+            penalties.append(
+                "scene_grounding:good_news_proud_missing:"
+                + " / ".join("|".join(group) for group in missing_proud_groups[:2])
+            )
 
     contract_hits = [
         item

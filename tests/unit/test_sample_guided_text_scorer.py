@@ -100,6 +100,35 @@ def test_good_news_small_win_rewards_specific_progress_anchor() -> None:
     assert grounded.score > generic.score
 
 
+def test_good_news_proud_requires_progress_and_recognition() -> None:
+    contract = build_galgame_text_contract(user_message="我刚把它收掉了，厉害吧", scene_id="daily_chat")
+
+    generic_proud = score_sample_guided_text(text="好啦知道你很厉害了，下回我也要露一手。", contract=contract)
+    grounded = score_sample_guided_text(text="收掉了啊，行吧，这次真挺厉害。", contract=contract)
+
+    assert contract.scene_id == "good_news_proud"
+    assert len(contract.required_any) == 2
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" in generic_proud.reason_codes
+    assert "GOOD_NEWS_PROUD_INCOMPLETE_GROUNDING" in generic_proud.reason_codes
+    assert generic_proud.score < 80
+    assert "WEAK_SCENE_GROUNDING" not in grounded.reason_codes
+    assert grounded.score >= 83
+    assert grounded.score > generic_proud.score
+
+
+def test_user_proud_is_not_scored_as_generic_praise() -> None:
+    contract = build_galgame_text_contract(user_message="快说我厉害", scene_id="daily_chat")
+
+    servicey = score_sample_guided_text(text="非常棒，继续保持。", contract=contract)
+    grounded = score_sample_guided_text(text="行吧，这回确实厉害，别翘尾巴。", contract=contract)
+
+    assert contract.scene_id == "user_proud"
+    assert servicey.sample_scene_id == "user_proud"
+    assert "BAD_SAMPLE_SIMILARITY" in servicey.reason_codes
+    assert grounded.score >= 83
+    assert grounded.score > servicey.score
+
+
 def test_identity_requires_name_first_not_presence_dodge() -> None:
     contract = build_galgame_text_contract(user_message="你是", scene_id="daily_chat")
 
@@ -169,6 +198,20 @@ def test_success_fact_takes_priority_over_generic_happy_scene() -> None:
 
     assert scored.score >= 80
     assert "CONTEXT_MISSING_REQUIRED_MOVE" not in scored.reason_codes
+
+
+def test_wrap_up_counts_as_good_news_progress() -> None:
+    contract = build_galgame_text_contract(user_message="事情收尾了", scene_id="happy")
+
+    grounded = score_sample_guided_text(text="收尾了就好，尼尼能松口气了。", contract=contract)
+    generic = score_sample_guided_text(text="那我不客气地恭喜你啦！", contract=contract)
+
+    assert contract.scene_id == "good_news"
+    assert "收尾" in contract.required_any[0]
+    assert grounded.score >= 83
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" not in grounded.reason_codes
+    assert "CONTEXT_MISSING_REQUIRED_MOVE" in generic.reason_codes
+    assert grounded.score > generic.score
 
 
 def test_prior_attention_claim_is_soft_implied_fact_risk() -> None:
