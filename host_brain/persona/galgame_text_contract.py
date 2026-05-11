@@ -130,37 +130,18 @@ def build_galgame_text_contract(
             notes=("只接早安，不推断作息。",),
         )
     if scene in {"daily_greeting_en", "daily_greeting_cn"} or lowered in {"hello", "hi", "hey"} or text == "你好":
+        greeting_scene = "daily_greeting_en" if scene == "daily_greeting_en" or lowered in {"hello", "hi", "hey"} else "daily_greeting_cn"
         return _contract(
-            scene_id="daily_greeting",
+            scene_id=greeting_scene,
             response_move="warm_greeting",
             forbidden_surface=(
-                "hello",
-                "hi",
-                "hey",
-                "英文",
-                "英语",
-                "外文",
-                "正式",
-                "正经",
-                "客气",
-                "客客气",
-                "礼貌",
-                "早啊",
-                "早安",
-                "一大早",
-                "刚起",
-                "才刚起",
                 "什么事",
-                "找我",
                 "需要",
-                "叫人",
-                "先叫我",
-                "叫我一声",
-                "算你会先叫",
-                "自觉",
+                "请问",
+                "很高兴",
             ),
             max_questions=0,
-            notes=("只当普通招呼，不评价招呼方式。",),
+            notes=("短招呼只做熟人化回应；招呼方式本身可作为轻微语气，不做硬禁。",),
         )
     if scene == "presence" or text in {"在吗", "在不在", "喂"}:
         return _contract(

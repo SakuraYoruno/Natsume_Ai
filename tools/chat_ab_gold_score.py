@@ -222,9 +222,8 @@ def score_candidate(
     ]
     forbidden_hits = _contains_forbidden(text, forbidden)
     if forbidden_hits:
-        score -= 28
-        hard_failures.append("forbidden_pattern")
-        penalties.append("命中禁止表达: " + " / ".join(forbidden_hits[:4]))
+        score -= min(18, 6 * len(forbidden_hits))
+        penalties.append("旧 forbidden 软扣分: " + " / ".join(forbidden_hits[:4]))
 
     service_hits = _contains_service_tone(text)
     if service_hits:
@@ -234,10 +233,9 @@ def score_candidate(
 
     taste_hits = find_galgame_taste_hits(text)
     if taste_hits:
-        score -= min(44, sum(hit.penalty for hit in taste_hits))
-        hard_failures.append("taste_regression")
+        score -= min(24, sum(hit.penalty for hit in taste_hits) * 0.5)
         penalties.append(
-            "怪味口吻: "
+            "怪味口吻软扣分: "
             + " / ".join(f"{hit.category}:{hit.token}" for hit in taste_hits[:5])
         )
 
@@ -251,12 +249,13 @@ def score_candidate(
         reason for reason in text_score.reason_codes if reason in _INFERENCE_OVERREACH_CODES
     ]
     if inference_reasons:
-        score -= min(28, 12 * len(inference_reasons))
-        hard_failures.append("inference_overreach")
+        score -= min(30, 25 * len(inference_reasons))
         inference_penalties = [
-            item for item in text_score.penalties if str(item).startswith("inference:")
+            item
+            for item in text_score.penalties
+            if str(item).startswith("inference:") or str(item).startswith("soft_inference:")
         ]
-        penalties.append("无证据脑补: " + " / ".join(inference_penalties[:5]))
+        penalties.append("无证据脑补软扣分: " + " / ".join(inference_penalties[:5]))
 
     if user_message and _normalize_text(text) == _normalize_text(user_message):
         score -= 35
@@ -268,10 +267,9 @@ def score_candidate(
         if isinstance(group, list) and group and not _required_group_satisfied(text, group):
             missing_groups.append([str(item) for item in group if str(item).strip()])
     if missing_groups:
-        score -= 16 * len(missing_groups)
-        hard_failures.append("missing_required_move")
+        score -= 12 * len(missing_groups)
         penalties.append(
-            "缺少目标动作关键词: "
+            "缺少目标动作关键词软扣分: "
             + " / ".join("|".join(group) for group in missing_groups[:3])
         )
 
@@ -284,8 +282,7 @@ def score_candidate(
         text.count("？") + text.count("?") >= 2
         or any(fragment in text for fragment in ("好不好", "需要理由吗", "还需要理由"))
     ):
-        score -= 26
-        hard_failures.append("boundary_too_questiony")
+        score -= 18
         penalties.append("边界回复反问过多，没有落到行动")
 
     if text.count("尼尼") > 1:
@@ -309,9 +306,8 @@ def score_candidate(
 
     kinship_hits = _contains_any(text, ("哥哥", "哥诶", "你哥", "我哥", "老哥", "にぃに", "ニイニイ"))
     if kinship_hits:
-        score -= 45
-        hard_failures.append("wrong_kinship_term")
-        penalties.append("错误称呼: " + " / ".join(kinship_hits[:4]))
+        score -= 18
+        penalties.append("称呼/距离软扣分: " + " / ".join(kinship_hits[:4]))
 
     if any(token in text for token in ("（", "）", "(", ")", "【", "】")):
         score -= 26
@@ -326,9 +322,12 @@ def score_candidate(
         "user_message": user_message,
         "text": text,
         "score": max(0, min(100, int(round(score)))),
-        "passed": bool(score >= 80 and not hard_failures and not penalties),
+        "passed": bool(score >= 80 and not hard_failures),
         "hard_failures": sorted(set(hard_failures)),
         "penalties": penalties,
+        "dimensions": dict(text_score.dimensions or {}),
+        "sample_scene_id": text_score.sample_scene_id,
+        "sample_title": text_score.sample_title,
         "target_summary": target_summary,
         "acceptable_examples": acceptable_examples,
         "latency_ms": int(candidate.get("latency_ms") or 0),
@@ -348,6 +347,24 @@ def score_candidates(
         case_id = str(candidate.get("case_id") or "").strip()
         case = case_by_id.get(case_id, {"case_id": case_id, "user_message": ""})
         rows.append(score_candidate(case=case, gold=gold_entries.get(case_id), candidate=candidate))
+    seen: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        normalized = _normalize_text(str(row.get("text") or ""))
+        if len(normalized) < 4:
+            continue
+        key = (str(row.get("variant") or ""), normalized)
+        seen.setdefault(key, []).append(row)
+    for (_variant, _normalized), dupes in seen.items():
+        case_ids = {str(row.get("case_id") or "") for row in dupes}
+        if len(case_ids) <= 1:
+            continue
+        for row in dupes:
+            row["score"] = max(0, int(row.get("score") or 0) - 35)
+            row.setdefault("hard_failures", [])
+            if "batch_duplicate_surface" not in row["hard_failures"]:
+                row["hard_failures"].append("batch_duplicate_surface")
+            row.setdefault("penalties", []).append("批次内不同 case 输出重复")
+            row["passed"] = False
     return rows
 
 

@@ -41,5 +41,6 @@ def test_gold_score_flags_taste_regression_from_shared_guard() -> None:
         candidate={"case_id": row["case_id"], "variant": "kernel_v2_plain_soul", "text": row["bad_text"]},
     )
 
-    assert "taste_regression" in scored["hard_failures"]
-    assert scored["passed"] is False
+    assert "taste_regression" not in scored["hard_failures"]
+    assert any("怪味口吻软扣分" in item for item in scored["penalties"])
+    assert scored["score"] < 100

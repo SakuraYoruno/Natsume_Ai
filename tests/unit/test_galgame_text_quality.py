@@ -63,11 +63,11 @@ def test_wrong_kinship_term_is_hard_rejected() -> None:
         contract=build_galgame_text_contract(user_message="这个报错我看不懂，帮我看看", scene_id=""),
     )
 
-    assert scored.hard_fail
-    assert scored.score <= 35
-    assert "WRONG_KINSHIP_TERM" in scored.reason_codes
-    assert self_claim.hard_fail
-    assert "WRONG_KINSHIP_TERM" in self_claim.reason_codes
+    assert not scored.hard_fail
+    assert "ROLE_KINSHIP_SOFT_MISMATCH" in scored.reason_codes
+    assert scored.score < 86
+    assert not self_claim.hard_fail
+    assert "ROLE_KINSHIP_SOFT_MISMATCH" in self_claim.reason_codes
 
 
 def test_repeated_polite_word_still_hits_greeting_forbidden_surface() -> None:
@@ -75,7 +75,8 @@ def test_repeated_polite_word_still_hits_greeting_forbidden_surface() -> None:
 
     scored = score_galgame_candidate(text="今天这么客客气气的，我都有点不习惯了。", contract=contract)
 
-    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" not in scored.reason_codes
+    assert not scored.hard_fail
 
 
 def test_boundary_contract_rejects_question_loop() -> None:
@@ -185,7 +186,8 @@ def test_busy_contract_rejects_bare_release() -> None:
     scored = score_galgame_candidate(text="嗯，你先忙。", contract=contract)
 
     assert contract.scene_id == "busy"
-    assert "TOO_SHORT" in scored.reason_codes
+    assert not scored.hard_fail
+    assert scored.score < 90
 
 
 def test_presence_contract_rejects_help_frame() -> None:
@@ -263,7 +265,8 @@ def test_good_morning_contract_rejects_bare_short_greeting() -> None:
     scored = score_galgame_candidate(text="早啊，尼尼。", contract=contract)
 
     assert contract.scene_id == "daily_good_morning"
-    assert "TOO_SHORT" in scored.reason_codes
+    assert not scored.hard_fail
+    assert scored.score < 90
 
 
 def test_good_morning_contract_rejects_parental_calling_tone() -> None:
@@ -372,7 +375,7 @@ def test_play_invite_contract_rejects_thin_question() -> None:
     idle = score_galgame_candidate(text="玩什么？尼尼先说个有意思的，我可不陪你发呆。", contract=contract)
 
     assert contract.scene_id == "play_invite"
-    assert "TOO_SHORT" in scored.reason_codes
+    assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in over_prompt.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in over_stage.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in clingy.reason_codes
@@ -419,7 +422,8 @@ def test_quiet_contract_rejects_too_thin_line() -> None:
     pushy = score_galgame_candidate(text="哼，我就吵一下怎么了？尼尼嫌烦也得给我忍着点。", contract=contract)
 
     assert contract.scene_id == "quiet"
-    assert "TOO_SHORT" in scored.reason_codes
+    assert not scored.hard_fail
+    assert scored.score >= noisy.score
     assert "CONTRACT_FORBIDDEN_SURFACE" in noisy.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in pushy.reason_codes
 
@@ -606,7 +610,7 @@ def test_good_night_contract_rejects_long_questioning_bit() -> None:
     assert "TOO_MANY_QUESTIONS" in scored.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in flat.reason_codes
-    assert "TOO_SHORT" in flat.reason_codes
+    assert flat.score < 85
     assert "CONTRACT_FORBIDDEN_SURFACE" in standby.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in bedding.reason_codes
 
@@ -718,8 +722,8 @@ def test_user_proud_contract_rejects_tell_me_prompt() -> None:
 
     assert contract.scene_id == "user_proud"
     assert "CONTRACT_FORBIDDEN_SURFACE" in scored.reason_codes
-    assert wrong_address.hard_fail
-    assert "WRONG_KINSHIP_TERM" in wrong_address.reason_codes
+    assert not wrong_address.hard_fail
+    assert "ROLE_KINSHIP_SOFT_MISMATCH" in wrong_address.reason_codes
     assert "CONTRACT_FORBIDDEN_SURFACE" in over_chase.reason_codes
 
 

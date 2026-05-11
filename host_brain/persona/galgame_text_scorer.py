@@ -6,6 +6,7 @@ from typing import Any
 
 from host_brain.persona.galgame_text_contract import GalgameTextContract
 from host_brain.persona.galgame_taste_guard import find_galgame_taste_hits
+from host_brain.persona.sample_guided_text_scorer import score_sample_guided_text
 from host_brain.persona.text_quality_gate import TextQualityGateResult
 
 
@@ -225,17 +226,27 @@ _STANDBY_EXEMPT_SCENES = {"presence"}
 class GalgameTextScore:
     score: float = 0.0
     hard_fail: bool = False
+    hard_gate_codes: tuple[str, ...] = ()
     reason_codes: tuple[str, ...] = ()
     penalties: tuple[str, ...] = ()
     bonuses: tuple[str, ...] = ()
+    dimensions: dict[str, float] | None = None
+    weights: dict[str, float] | None = None
+    sample_scene_id: str = ""
+    sample_title: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "score": round(float(self.score or 0.0), 3),
             "hard_fail": bool(self.hard_fail),
+            "hard_gate_codes": list(self.hard_gate_codes),
             "reason_codes": list(self.reason_codes),
             "penalties": list(self.penalties),
             "bonuses": list(self.bonuses),
+            "dimensions": dict(self.dimensions or {}),
+            "weights": dict(self.weights or {}),
+            "sample_scene_id": self.sample_scene_id,
+            "sample_title": self.sample_title,
         }
 
 
@@ -300,144 +311,72 @@ def score_galgame_candidate(
     quality: TextQualityGateResult | None = None,
 ) -> GalgameTextScore:
     normalized = _clean_text(text)
-    score = 100.0
-    hard_fail = False
-    reasons: list[str] = []
-    penalties: list[str] = []
-    bonuses: list[str] = []
+    sample_score = score_sample_guided_text(text=normalized, contract=contract, quality=quality)
+    score = float(sample_score.score)
+    hard_fail = bool(sample_score.hard_fail)
+    hard_gate_codes = list(sample_score.hard_gate_codes)
+    reasons: list[str] = list(sample_score.reason_codes)
+    penalties: list[str] = list(sample_score.penalties)
+    bonuses: list[str] = list(sample_score.bonuses)
 
-    if not normalized:
-        return GalgameTextScore(
-            score=0.0,
-            hard_fail=True,
-            reason_codes=("EMPTY_TEXT",),
-            penalties=("empty text",),
-        )
+    # Legacy contract surface and inference taxonomy are now evidence for soft
+    # scoring only. They remain visible in traces so old failure analysis can
+    # be migrated, but they no longer turn a candidate into an automatic reject.
+    collapsed = _collapse_repeated_cjk(normalized)
+    contract_hits = [
+        forbidden
+        for forbidden in contract.forbidden_surface
+        if forbidden and (forbidden in normalized or forbidden in collapsed)
+    ]
+    if contract_hits:
+        score -= min(18.0, 3.0 * len(contract_hits))
+        reasons.append("CONTRACT_FORBIDDEN_SURFACE")
+        penalties.append("soft_contract_surface:" + " / ".join(contract_hits[:5]))
 
-    if _JSONISH_RE.match(normalized):
-        score -= 80
-        hard_fail = True
-        reasons.append("JSON_OR_STRUCTURED_OUTPUT")
-        penalties.append("json output")
-    if _STAGE_DIRECTION_RE.search(normalized):
-        score -= 65
-        hard_fail = True
-        reasons.append("STAGE_DIRECTION_OUTPUT")
-        penalties.append("stage direction")
-    if _KANA_RE.search(normalized):
-        score -= 70
-        hard_fail = True
-        reasons.append("EXPECTED_ZH_TEXT")
-        penalties.append("kana in zh text")
-    if not _CJK_RE.search(normalized):
-        score -= 70
-        hard_fail = True
-        reasons.append("NO_ZH_TEXT")
-        penalties.append("no chinese text")
-    if _ASCII_WORD_RE.search(normalized):
-        score -= 25
-        reasons.append("ASCII_WORD_IN_ZH_TEXT")
-        penalties.append("ascii word in zh text")
-    if _contains_any(normalized, _WRONG_KINSHIP):
-        score -= 85
-        hard_fail = True
-        reasons.append("WRONG_KINSHIP_TERM")
-        penalties.append("wrong kinship term")
+    missing_groups = [
+        group
+        for group in contract.required_any
+        if group and not any(token and token in normalized for token in group)
+    ]
+    if missing_groups:
+        score -= min(18.0, 6.0 * len(missing_groups))
+        reasons.append("CONTRACT_MISSING_REQUIRED_MOVE")
+        penalties.append("soft_missing_any:" + " / ".join("|".join(group) for group in missing_groups[:3]))
+
+    inference_hits = _find_forbidden_inference_hits(normalized, contract)
+    if inference_hits:
+        score -= min(22.0, sum(hit.penalty for hit in inference_hits) * 0.45)
+        for hit in inference_hits:
+            reasons.append(hit.reason_code)
+            penalties.append(f"soft_inference:{hit.category}:{hit.token}")
+
+    taste_hits = find_galgame_taste_hits(normalized)
+    if taste_hits:
+        score -= min(22.0, sum(hit.penalty for hit in taste_hits) * 0.45)
+        for hit in taste_hits:
+            reasons.append(hit.reason_code)
+            penalties.append(f"soft_taste:{hit.category}:{hit.token}")
 
     if quality is not None:
         for code in quality.reason_codes or ():
-            if code in {
-                "INTERNAL_FIELD_LEAK",
-                "MOJIBAKE",
-                "JSON_OR_STRUCTURED_OUTPUT",
-                "STAGE_DIRECTION_OUTPUT",
-                "EXPECTED_JAPANESE_VOICE_TEXT",
-                "EXPECTED_ZH_TEXT",
-            }:
-                score -= 55
-                hard_fail = True
+            if code and code not in reasons:
                 reasons.append(code)
-                penalties.append(code.lower())
-            elif code == "FORBIDDEN_TEMPLATE_TEXT":
-                score -= 18
-                reasons.append(code)
-                penalties.append("quality gate forbidden template")
-            elif code:
-                score -= 8
-                reasons.append(code)
-                penalties.append(code.lower())
 
-    collapsed = _collapse_repeated_cjk(normalized)
-    for forbidden in contract.forbidden_surface:
-        if forbidden and (forbidden in normalized or forbidden in collapsed):
-            score -= 24
-            reasons.append("CONTRACT_FORBIDDEN_SURFACE")
-            penalties.append(f"forbidden:{forbidden}")
-
-    for group in contract.required_any:
-        if group and not any(token and token in normalized for token in group):
-            score -= 18
-            reasons.append("CONTRACT_MISSING_REQUIRED_MOVE")
-            penalties.append("missing_any:" + "|".join(group))
-
-    questions = _question_count(normalized)
-    if questions > contract.max_questions:
-        extra = questions - contract.max_questions
-        score -= min(24, 8 * extra)
-        reasons.append("TOO_MANY_QUESTIONS")
-        penalties.append(f"questions:{questions}>{contract.max_questions}")
-
-    length = len(normalized)
-    if length < contract.target_min_chars:
-        score -= 14
-        reasons.append("TOO_SHORT")
-        penalties.append(f"too_short:{length}")
-    if length > contract.target_max_chars:
-        score -= min(24, 4 + (length - contract.target_max_chars) * 0.5)
-        reasons.append("TOO_LONG")
-        penalties.append(f"too_long:{length}")
-
-    if _contains_service_tone(normalized):
-        score -= 14
-        reasons.append("SERVICE_TONE")
-        penalties.append("service tone")
-    inference_hits = _find_forbidden_inference_hits(normalized, contract)
-    if inference_hits:
-        score -= min(42, sum(hit.penalty for hit in inference_hits))
-        for hit in inference_hits:
-            reasons.append(hit.reason_code)
-            penalties.append(f"inference:{hit.category}:{hit.token}")
-    if normalized in _LOW_ENERGY:
-        score -= 12
-        reasons.append("LOW_INFORMATION_REPLY")
-        penalties.append("low energy")
-    taste_hits = find_galgame_taste_hits(normalized)
-    if taste_hits:
-        score -= min(44, sum(hit.penalty for hit in taste_hits))
-        for hit in taste_hits:
-            reasons.append(hit.reason_code)
-            penalties.append(f"taste:{hit.category}:{hit.token}")
-
-    if any(marker in normalized for marker in ("哼", "诶", "欸", "喂", "尼尼", "行啦", "真是")):
-        score += 4
-        bonuses.append("galgame marker")
-    if 6 <= length <= 36:
-        score += 3
-        bonuses.append("compact length")
-    if contract.response_move != "reply_current_turn":
-        score += 1
-        bonuses.append("scene contract")
     bonuses.extend(_find_allowed_inference_markers(normalized))
-
     score = max(0.0, min(100.0, score))
     if hard_fail:
         score = min(score, 35.0)
     return GalgameTextScore(
         score=score,
         hard_fail=hard_fail,
+        hard_gate_codes=tuple(dict.fromkeys(hard_gate_codes)),
         reason_codes=tuple(dict.fromkeys(reasons)),
         penalties=tuple(penalties),
         bonuses=tuple(bonuses),
+        dimensions={key: round(float(value), 3) for key, value in dict(sample_score.dimensions).items()},
+        weights={key: round(float(value), 3) for key, value in dict(sample_score.weights).items()},
+        sample_scene_id=sample_score.sample_scene_id,
+        sample_title=sample_score.sample_title,
     )
 
 

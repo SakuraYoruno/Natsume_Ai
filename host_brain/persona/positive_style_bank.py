@@ -29,6 +29,9 @@ class PositiveStyleSample:
     emotional_color: tuple[str, ...] = field(default_factory=tuple)
     safe_fragments: tuple[str, ...] = field(default_factory=tuple)
     avoid: tuple[str, ...] = field(default_factory=tuple)
+    good_examples: tuple[str, ...] = field(default_factory=tuple)
+    bad_examples: tuple[str, ...] = field(default_factory=tuple)
+    quality_priorities: tuple[str, ...] = field(default_factory=tuple)
 
     def render(self) -> str:
         lines = [f"场景：{self.title}"]
@@ -38,8 +41,14 @@ class PositiveStyleSample:
             lines.append("情绪颜色：" + "；".join(self.emotional_color[:4]))
         if self.response_shape:
             lines.append("发话构型：" + "；".join(self.response_shape[:5]))
+        examples = self.good_examples or self.safe_fragments
+        if examples:
+            lines.append("好样本抓手：" + "；".join(examples[:5]))
         if self.avoid:
             lines.append("不要走向：" + "；".join(self.avoid[:8]))
+        bad = self.bad_examples
+        if bad:
+            lines.append("坏样本参照：" + "；".join(bad[:5]))
         return "\n".join(lines)
 
 
@@ -749,6 +758,11 @@ def select_positive_style_sample(
     return _ZH_SAMPLES.get(_infer_scene_id(user_message, facts), _ZH_SAMPLES["default"])
 
 
+def get_positive_style_sample(scene_id: str) -> PositiveStyleSample:
+    scene = _clean_text(scene_id)
+    return _ZH_SAMPLES.get(scene, _ZH_SAMPLES["default"])
+
+
 def render_positive_style_guidance(
     *,
     user_message: str,
@@ -779,6 +793,7 @@ def render_positive_style_guidance(
 
 __all__ = [
     "PositiveStyleSample",
+    "get_positive_style_sample",
     "render_positive_style_guidance",
     "select_positive_style_sample",
 ]

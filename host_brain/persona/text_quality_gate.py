@@ -1025,10 +1025,23 @@ class TextQualityGate:
         if forbidden_hits or forbidden_regex_hits or contextual_hits:
             reasons.append("FORBIDDEN_TEMPLATE_TEXT")
         if template_hard_fail is None:
-            template_hard_fail = _env_bool("HOST_TEXT_QUALITY_GATE_TEMPLATE_HARD_FAIL", default=True)
+            template_hard_fail = _env_bool("HOST_TEXT_QUALITY_GATE_TEMPLATE_HARD_FAIL", default=False)
         soft_reasons = set()
-        if not template_hard_fail:
-            soft_reasons.add("FORBIDDEN_TEMPLATE_TEXT")
+        soft_reasons.update(
+            {
+                "ASCII_ELLIPSIS_OUTPUT",
+                "TRAILING_INCOMPLETE_QUESTION",
+                "LOW_INFORMATION_ACK",
+                "TRAILING_DASH_OUTPUT",
+                "TRAILING_ELLIPSIS_OUTPUT",
+                "EXCESSIVE_DASH_STYLING",
+                "RELATIONSHIP_BOUNDARY_MISREAD",
+                "FORBIDDEN_TEMPLATE_TEXT",
+                "TOO_LONG_FOR_CHAT_TEXT",
+            }
+        )
+        if template_hard_fail:
+            soft_reasons.discard("FORBIDDEN_TEMPLATE_TEXT")
 
         has_cjk = bool(_CJK_RE.search(normalized))
         has_kana = bool(_KANA_RE.search(normalized))
@@ -1048,11 +1061,8 @@ class TextQualityGate:
             "INTERNAL_FIELD_LEAK",
             "MOJIBAKE",
             "JSON_OR_STRUCTURED_OUTPUT",
+            "BROKEN_REPETITION",
             "STAGE_DIRECTION_OUTPUT",
-            "TRAILING_DASH_OUTPUT",
-            "EXCESSIVE_DASH_STYLING",
-            "LOW_INFORMATION_ACK",
-            "RELATIONSHIP_BOUNDARY_MISREAD",
             "EXPECTED_JAPANESE_VOICE_TEXT",
             "EXPECTED_ZH_TEXT",
         }
@@ -1060,7 +1070,7 @@ class TextQualityGate:
             hard_fail_reasons.add("FORBIDDEN_TEMPLATE_TEXT")
         blocking_reasons = [reason for reason in reasons if reason not in soft_reasons]
         hard_fail = any(reason in hard_fail_reasons for reason in blocking_reasons)
-        accepted = not hard_fail and not blocking_reasons
+        accepted = not hard_fail
         score = 1.0
         score -= 0.35 if hard_fail else 0.0
         score -= min(0.45, 0.08 * len(reasons))

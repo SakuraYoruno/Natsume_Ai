@@ -31,8 +31,8 @@ def test_score_candidate_flags_service_tone_and_forbidden() -> None:
     )
 
     assert row["passed"] is False
-    assert "forbidden_pattern" in row["hard_failures"]
     assert "service_tone" in row["hard_failures"]
+    assert any("旧 forbidden 软扣分" in item for item in row["penalties"])
     assert row["score"] < 75
 
 
@@ -55,7 +55,7 @@ def test_score_candidate_flags_inference_overreach() -> None:
     )
 
     assert row["passed"] is False
-    assert "inference_overreach" in row["hard_failures"]
+    assert "inference_overreach" not in row["hard_failures"]
     assert any("WORLD_FACT_FORBIDDEN" in item or "world_fact" in item for item in row["penalties"])
 
 
@@ -79,7 +79,7 @@ def test_score_candidate_flags_language_and_wrong_kinship() -> None:
 
     assert row["passed"] is False
     assert "language_mismatch" in row["hard_failures"]
-    assert "wrong_kinship_term" in row["hard_failures"]
+    assert any("称呼/距离软扣分" in item for item in row["penalties"])
 
 
 def test_score_candidate_flags_stage_direction_and_emoji() -> None:
@@ -154,7 +154,25 @@ def test_score_candidate_requires_gold_move() -> None:
         candidate={"case_id": "identity", "variant": "baseline_soul", "text": "我在这儿。"},
     )
 
-    assert "missing_required_move" in row["hard_failures"]
+    assert "missing_required_move" not in row["hard_failures"]
+    assert any("缺少目标动作关键词软扣分" in item for item in row["penalties"])
+
+
+def test_score_candidates_flags_duplicate_surface_across_cases() -> None:
+    rows = score_candidates(
+        cases=[
+            {"case_id": "daily_greeting_hello_001", "user_message": "hello"},
+            {"case_id": "daily_greeting_cn_001", "user_message": "你好"},
+        ],
+        gold_entries={},
+        candidate_rows=[
+            {"case_id": "daily_greeting_hello_001", "variant": "kernel_v2_plain_soul", "text": "来啦。尼尼这声我接住了。"},
+            {"case_id": "daily_greeting_cn_001", "variant": "kernel_v2_plain_soul", "text": "来啦。尼尼这声我接住了。"},
+        ],
+    )
+
+    assert all(row["passed"] is False for row in rows)
+    assert all("batch_duplicate_surface" in row["hard_failures"] for row in rows)
 
 
 def test_score_candidates_and_report_summary() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 import re
 from typing import Any, Mapping, Sequence
 
@@ -264,6 +265,13 @@ def _lower(text: str) -> str:
 
 def _plain_text(text: str) -> str:
     return _PUNCT_SPACE_RE.sub("", str(text or "")).strip().lower()
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _zh_galgame_line_delta(text: str, *, scene: str) -> tuple[float, tuple[str, ...], bool]:
@@ -674,6 +682,22 @@ class SemanticReranker:
             reasons.append(language_reason)
 
         reasons.extend(f"QUALITY_{code}" for code in candidate.quality.reason_codes)
+        sample_payload = _safe_mapping(_safe_mapping(candidate.metadata).get("galgame_score"))
+        if sample_payload and _env_bool("HOST_SEMANTIC_RERANK_SAMPLE_GUIDED", default=True):
+            sample_reasons = tuple(
+                dict.fromkeys(
+                    (
+                        *reasons,
+                        *(str(item) for item in list(sample_payload.get("reason_codes") or []) if str(item)),
+                    )
+                )
+            )
+            return SemanticScore(
+                score=float(sample_payload.get("score") or score),
+                hard_fail=bool(hard_fail or sample_payload.get("hard_fail")),
+                reason_codes=sample_reasons,
+                scene=f"sample_guided:{scene}",
+            )
         if scene in _LIGHT_DAILY_SCENES:
             user_plain = _clean_text(context.user_message)
             daily_fabrications = [

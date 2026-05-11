@@ -190,20 +190,14 @@ def _build_galgame_repair_prompt(*, contract: Any, score_payload: Mapping[str, A
         for group in list(getattr(contract, "required_any", ()) or ())
         if group
     ]
-    forbidden = [
-        str(item)
-        for item in list(getattr(contract, "forbidden_surface", ()) or [])[:14]
-        if str(item)
-    ]
     lines = [
-        "【定向重写】上一候选没有达到 Galgame 文本质量要求。",
+        "【最小修补】上一候选只有局部质量问题，不要整段重写。",
         f"本轮动作：{getattr(contract, 'response_move', 'reply_current_turn')}。",
-        "只输出一条 8 到 32 个中文字符的最终私聊回复；不要解释、不要 JSON、不要括号动作。",
+        "只在必要处改一两个词、删掉多余问句或压短节奏；保持原候选的核心意思。",
+        "只输出修补后的最终私聊回复；不要解释、不要 JSON、不要括号动作。",
     ]
     if required:
         lines.append("需要自然落到：" + "；".join(required) + "。")
-    if forbidden:
-        lines.append("必须避开这些词面或动作：" + "；".join(forbidden) + "。")
     if penalties:
         lines.append("上一候选扣分点：" + "；".join(penalties) + "。")
     lines.append("保持新海天语气：短、鲜活、像私聊气泡；不要编现实细节。")
@@ -213,9 +207,13 @@ def _build_galgame_repair_prompt(*, contract: Any, score_payload: Mapping[str, A
 def _galgame_contract_fallback_texts(contract: Any) -> tuple[str, ...]:
     scene_id = _clean_text(getattr(contract, "scene_id", ""))
     fallback_map: dict[str, tuple[str, ...]] = {
-        "daily_greeting": (
-            "来啦。尼尼这声我接住了。",
-            "嗯，来啦。今天这声挺像你。",
+        "daily_greeting_en": (
+            "尼尼，别突然这么端着。",
+            "这招呼太正式啦，换回平时那种就行。",
+        ),
+        "daily_greeting_cn": (
+            "尼尼，别这么客气。",
+            "突然这么端正，我都有点不习惯。",
         ),
         "daily_good_morning": (
             "早啊，尼尼。今天也先这么开始吧。",
@@ -1970,37 +1968,26 @@ def _light_daily_scene_micro_beat(scene_id: str, *, user_message: str) -> str:
 
 def _light_daily_scene_lexical_guard(scene_id: str, *, user_message: str) -> str:
     text = _clean_text(user_message)
-    guards: list[str] = []
-    if scene_id == "daily_good_morning" or text in {"早", "早安", "早上好"}:
-        guards.append("本轮词面边界：不要评价尼尼起得早、主动、难得、报到或有空。")
-        guards.append("合格形态：可以有半拍困意或停顿，但只接早安本身。")
-    elif scene_id == "daily_greeting_en" or text.lower() in {"hello", "hi", "hey"}:
-        guards.append("本轮词面边界：不要引用用户原词，不分析语言种类，不编工作/商务/开会/发错人/走错聊天框/附身/几秒没见/跟谁打招呼；只接这句招呼有点正式或端着。")
-    elif scene_id == "presence" or text in {"在吗", "在不在", "喂"}:
-        guards.append("本轮词面边界：回复里不出现“催、查岗、审问、盘问、突然找、突然叫、别喊第二遍、又没跑”。")
-    elif scene_id == "wait" or any(token in text for token in ("等我一下", "等下", "稍等")):
-        guards.append("本轮词面边界：回复里不出现“计时、太久、别太久、不许太久、等到睡着、刚好没事、没啥事”。")
-    elif scene_id == "back" or any(token in text for token in ("我回来了", "回来了")):
-        guards.append("本轮词面边界：回复里不出现“晾、丢下、忘了我、不管了、不回来了、数到、最后一秒”。")
-    elif scene_id == "bored" or "无聊" in text:
-        guards.append("本轮词面边界：回复里不出现“陪你闹、一起无聊、我也无聊、找点事、活动菜单”。")
-    elif scene_id == "followup" and text == "为什么":
-        guards.append("本轮词面边界：回复里不出现“平时、每次、通常、群发、工作群、走错群”。")
-        guards.append("合格形态：解释上一句为什么觉得正式，只说这一句的感觉，不扩写尼尼习惯。")
-    elif scene_id == "followup" and text in {"然后", "然后呢"}:
-        guards.append("本轮词面边界：回复里不出现“代码、括号、参数、接口、那行、我早看到、下回、念叨”。")
-        guards.append("合格形态：让尼尼说刚才怎么修好的，或接下一步，不替他编过程。")
-    elif scene_id == "small_failure" or any(token in text for token in ("弄砸", "搞砸", "失败")):
-        guards.append("本轮词面边界：回复里不出现“奶茶、口渴、出去、吃点、喝点、走啦走啦”。")
-    elif scene_id == "busy" or any(token in text for token in ("开始干活", "先忙", "忙会")):
-        guards.append("本轮词面边界：回复里不出现“监督、摸鱼、好好干活、不吵你、不闹你、安静一点、只说你先去吧、回头聊、找我玩、忙完找我、忙完记得叫我、我这边、在这边安静待着、别太久”。")
-    elif scene_id == "good_news" or any(token in text for token in ("跑通", "搞定", "成功了")):
-        guards.append("本轮词面边界：最多一个问号；优先用“卡点待会儿说给我听”这种陈述句，不写“怎么做到的/卡在哪/快说”。")
-    elif scene_id == "nothing" or text in {"没事", "没什么"}:
-        guards.append("本轮词面边界：回复里不出现“没事就好、没事也是尼尼、待着、等着、一直在、不说话也行、待在这儿可以吧、我这边、在这边、有事再叫我、可疑、懒得理我、游戏、打瞌睡”。")
-    elif scene_id == "tired" or "累" in text:
-        guards.append("本轮词面边界：回复里不出现“不吵你/小声点/安静点/我在这/在旁边/打字慢/洗澡/臭/放松一下”；只接住累了，给先歇一下或别硬撑。")
-    return "\n".join(guards).strip()
+    scene = _clean_text(scene_id)
+    lines = [
+        "本轮边界不是禁词表：只根据当前上下文判断词是否合适。",
+        "不要为了绕词改写成生硬说法；优先自然、贴当前句、别编现实画面。",
+    ]
+    if scene == "daily_good_morning" or text in {"早", "早安", "早上好"}:
+        lines.append("早安只接招呼本身，不推断作息、刚醒、时间早晚。")
+    elif scene in {"daily_greeting_en", "daily_greeting_cn"} or text.lower() in {"hello", "hi", "hey"} or text == "你好":
+        lines.append("短招呼要熟人化，可以轻轻觉得见外或端着，但别变成需求询问。")
+    elif scene == "presence" or text in {"在吗", "在不在", "喂"}:
+        lines.append("在场确认要短而明确，不把用户写成催促、查岗或有隐藏请求。")
+    elif scene in {"wait", "back", "busy"}:
+        lines.append("等待/回来/先忙只处理对话节奏，不追加计时、索取回访或被抛下剧情。")
+    elif scene in {"followup", "short_ack"}:
+        lines.append("短追问或短确认必须贴着最近一轮继续，不重开话题，也不补未知过程。")
+    elif scene in {"help_takeover", "write_takeover", "next_step", "advice_continue"}:
+        lines.append("技术或写作场景优先有用：给一个小步或索要关键材料，角色味排在事实之后。")
+    elif scene in {"bad_mood", "give_up", "headache", "annoying_tease", "apology", "miss_you"}:
+        lines.append("高情绪场景优先接住情绪并收住强度，嘴硬也不能升级伤害。")
+    return "\n".join(lines).strip()
 
 
 def _format_light_daily_fact_lines(facts: InteractionFactsPlane, *, render_profile: str) -> str:
@@ -2059,14 +2046,12 @@ def _build_light_daily_messages(
             "text_zh 是唯一用户可见文本，8 到 32 个中文字优先；最多两句，总长不超过 48 字。",
             "emotion/action/intensity 只给 VTS/Live2D 使用，绝对不要写进 text_zh；action 用小写英文 snake_case，不写中文舞台描述。",
             "硬边界：不编现实动作、历史习惯或长期相处细节；不把轻日常收成需求询问；text_zh 不写旁白、括号、引号、emoji、波浪号、列表。",
-            "内部 action 只能是表演提示，不代表真实世界动作；不要在 text_zh 里写“揉眼睛、坐下、调声音、拿药、在玩游戏”等现实动作。",
-            "文字聊天里不要制造现实空间感：text_zh 不写“过来、旁边、在这边、我刚在做什么、刚把手机怎样”。",
-            "用户只发文字时，不要假装看见或听见对方状态：不写“听见、听到、喊得轻、板着脸、坐直、戴耳机、发呆、刷到消息、找点别的事做、刚才想找我、我在这儿”。",
-            "内部编排词不得外泄：text_zh 不写“接住、收声、线接、窗口、挂着、刚才那句继续”。",
-            "等待/回来/先忙这类场景不要反向离场或记账：不写“先撤、再不来、不等、先记着、加倍还”。",
-            "无聊场景不要把陪伴写成添乱或找麻烦：不写“添乱、加点麻烦、找麻烦”。",
-            "轻日常只接当前这一拍，不要新加道具/食物/游戏/比赛/语音/工作场景；不要写布丁、游戏、那局、商务邮件、发错人、刚好看到。",
-            "已经答应等待或陪住时，不要反口傲娇成“我可没说要等你/那我走咯/不管你了”。",
+            "内部 action 只能是表演提示，不代表真实世界动作；可见文本不要把表演提示写成她真实做了什么。",
+            "文字聊天不要制造无证据的空间感、听觉感、屏幕观察或刚才正在做的事。",
+            "内部编排词不得外泄；不要把评分、接线、窗口、候选、动作字段写进 text_zh。",
+            "等待/回来/先忙这类场景只处理对话节奏，不反向离场、催促或记账。",
+            "轻日常只接当前这一拍，不新加道具、食物、游戏、工作场景或隐藏动机。",
+            "已经答应等待或陪住时，不要用傲娇反口破坏刚建立的关系动作。",
             "普通招呼、在吗、早安、先忙这类轻触碰默认是日常接话；除非事实明确被刺到，否则别升级成关系审判、等待抱怨或被抛弃感。",
             "如果拿不准，就短一点、贴着用户原话接；宁可少说，也别发明熟人梗。",
         )
@@ -2144,8 +2129,8 @@ def build_chat_kernel_messages(request: ChatKernelRequest) -> list[dict[str, str
             "日常短回复最多一个问号；不要连续追问。",
             "称呼不是补丁，不必每句都叫尼尼；删掉称呼后也要像新海天。",
             "只能使用历史、记忆、运行事实里已有的信息；不要编造刚才在做什么、去过哪里、以前发生过什么，也不要凭空编药、食物、桌上物品、冰箱、现实照顾动作。",
-            "不要用“平时/以前/每次/总是/又”替用户编长期习惯；除非历史里已经明确写出来。",
-            "不要用廉价熟人梗填空：有良心、救场、解救无聊、打发我、算你、记你一笔、装没看见、哪敢不在。",
+            "不要替用户编长期习惯、隐藏动机、关系债或刚才发生的事；除非历史里已经明确写出来。",
+            "不要用廉价熟人梗填空；角色味要来自当前反应，不来自固定口头禅。",
             "不要家长式生活照顾：好好吃菜、盖好被子、别着凉、晒太阳、多喝水；除非用户明确在聊健康照护。",
             "对早/hello/你好/在吗/嗯/哦这类轻触碰，只接当前这一拍，不扩写隐藏动机、长期习惯或现实画面。",
             "攻击性只能是拌嘴和嘴硬，不允许暴力威胁或恐吓。",
@@ -2154,7 +2139,7 @@ def build_chat_kernel_messages(request: ChatKernelRequest) -> list[dict[str, str
     )
     if _is_light_daily_scene(_positive_trace.get("scene_id")) and render_profile != "ja_voice":
         output_rules += "\n本轮是轻日常短句模式：只写一个当前反应，8 到 32 个中文字优先；不要铺剧情、不要补前史、不要把一句寒暄扩成关系审判。"
-        output_rules += "\n轻日常禁用关系梗：总算、终于、平时、每次、又、才想起、有良心、抢我台词、装没看见、解救、救场、哪敢、打发。"
+        output_rules += "\n轻日常采用样本引导评分：自然、距离和上下文贴合优先，不靠禁词绕行。"
     if render_profile == "ja_voice":
         output_rules += "\n这次是语音台词，只写日语，适合 TTS，短而自然。"
     else:
@@ -2366,7 +2351,7 @@ class ChatKernelV2:
         light_daily_scene_id = _clean_text(positive_style_trace.get("scene_id"))
         galgame_soft_select_enabled = _env_bool(
             "HOST_CHAT_KERNEL_V2_GALGAME_SOFT_SELECT",
-            default=(prompt_mode == "plain_soul" and render_profile != "ja_voice"),
+            default=(render_profile != "ja_voice"),
         )
         galgame_contract = build_galgame_text_contract(
             user_message=request.user_message or request.interaction_facts.user_message,
@@ -2445,28 +2430,28 @@ class ChatKernelV2:
         )
         template_hard_fail = _env_bool(
             "HOST_CHAT_KERNEL_V2_TEMPLATE_HARD_FAIL",
-            default=(prompt_mode in {"plain_soul", "plain_structured"}),
+            default=False,
         )
-        semantic_forbidden = not (
-            prompt_mode in {"plain_soul", "plain_structured"}
-            and _env_bool("HOST_CHAT_KERNEL_V2_MINIMAL_QUALITY_GATE", default=True)
+        semantic_forbidden = _env_bool(
+            "HOST_CHAT_KERNEL_V2_LEGACY_SEMANTIC_FORBIDDEN",
+            default=False,
         )
         default_candidate_count = (
-            1
+            3
             if galgame_soft_select_enabled
             else 2
             if prompt_mode in {"plain_soul", "plain_structured"} and render_profile != "ja_voice"
             else 1
         )
-        candidate_count = _env_int("HOST_CHAT_KERNEL_V2_CANDIDATES", default=default_candidate_count, minimum=1, maximum=4)
+        candidate_count = _env_int("HOST_CHAT_KERNEL_V2_CANDIDATES", default=default_candidate_count, minimum=1, maximum=5)
         if emotional_kind not in {"", "neutral"}:
             candidate_count = max(
                 candidate_count,
                 _env_int(
                     "HOST_CHAT_KERNEL_V2_RELATIONSHIP_CANDIDATES",
-                    default=2,
+                    default=3,
                     minimum=1,
-                    maximum=4,
+                    maximum=5,
                 ),
             )
         social_act = _safe_mapping(getattr(request.interaction_facts, "social_act", {}) or {})
@@ -2524,15 +2509,16 @@ class ChatKernelV2:
             light_daily_override = _env_int_optional(
                 "HOST_CHAT_KERNEL_V2_LIGHT_DAILY_CANDIDATES",
                 minimum=1,
-                maximum=4,
+                maximum=5,
             )
-            candidate_count = int(light_daily_override) if light_daily_override is not None else min(max(candidate_count, 2), 2)
+            candidate_count = int(light_daily_override) if light_daily_override is not None else min(max(candidate_count, 3), 5)
         galgame_early_accept_score = _env_float(
             "HOST_CHAT_KERNEL_V2_GALGAME_EARLY_ACCEPT_SCORE",
             default=100.0,
             minimum=80.0,
             maximum=100.0,
         )
+        min_rerank_candidates = min(candidate_count, _env_int("HOST_CHAT_KERNEL_V2_MIN_RERANK_CANDIDATES", default=3, minimum=1, maximum=5))
 
         for attempt_index in range(candidate_count):
             call_started = time.perf_counter()
@@ -2640,6 +2626,7 @@ class ChatKernelV2:
                 and not gate_result.hard_fail
                 and galgame_score is not None
                 and _is_clean_galgame_score(galgame_score.as_dict(), min_score=galgame_early_accept_score)
+                and len(semantic_candidates) >= min_rerank_candidates
             ):
                 attempts[-1]["early_accept"] = "clean_galgame_score"
                 break
@@ -2659,7 +2646,7 @@ class ChatKernelV2:
                     facts=request.interaction_facts.as_dict(),
                 )
                 quick_score = reranker.score_candidate(semantic_candidates[-1], quick_context)
-                if not quick_score.hard_fail and quick_score.score >= 98:
+                if len(semantic_candidates) >= min_rerank_candidates and not quick_score.hard_fail and quick_score.score >= 98:
                     break
             if (
                 not galgame_soft_select_enabled
@@ -2931,7 +2918,7 @@ class ChatKernelV2:
             galgame_soft_select_enabled
             and rerank_result.accepted
             and rerank_result.selected_candidate is not None
-            and _env_bool("HOST_CHAT_KERNEL_V2_GALGAME_REPAIR_ENABLED", default=True)
+            and _env_bool("HOST_CHAT_KERNEL_V2_GALGAME_REPAIR_ENABLED", default=False)
         ):
             selected_payload = _safe_mapping(_safe_mapping(rerank_result.selected_candidate.metadata).get("galgame_score"))
             selected_score = float(selected_payload.get("score") or 0.0)
@@ -3077,33 +3064,14 @@ class ChatKernelV2:
             needs_contract_fallback = not (
                 rerank_result.accepted and rerank_result.selected_candidate is not None
             )
-            if not needs_contract_fallback and rerank_result.selected_candidate is not None:
-                selected_payload = _safe_mapping(_safe_mapping(rerank_result.selected_candidate.metadata).get("galgame_score"))
-                selected_score = float(selected_payload.get("score") or 0.0)
-                selected_reason_codes = {str(item) for item in list(selected_payload.get("reason_codes") or [])}
-                fallback_threshold = _env_float(
-                    "HOST_CHAT_KERNEL_V2_GALGAME_FALLBACK_THRESHOLD",
-                    default=86.0,
-                    minimum=0.0,
-                    maximum=100.0,
-                )
-                needs_contract_fallback = bool(
-                    selected_score < fallback_threshold
-                    or any(code.startswith("TASTE_") for code in selected_reason_codes)
-                    or selected_reason_codes.intersection(
-                        {
-                            "BROKEN_REPETITION",
-                            "CONTRACT_FORBIDDEN_SURFACE",
-                            "CONTRACT_MISSING_REQUIRED_MOVE",
-                            "FORBIDDEN_TEMPLATE_TEXT",
-                            "LIKELY_FACT_FABRICATION",
-                            "TOO_MANY_QUESTIONS",
-                            "TOO_LONG",
-                            "TOO_SHORT",
-                            "WRONG_KINSHIP_TERM",
-                        }
-                    )
-                )
+            if needs_contract_fallback:
+                absolute_failures = {
+                    code
+                    for candidate in semantic_candidates
+                    for code in list(_safe_mapping(_safe_mapping(candidate.metadata).get("galgame_score")).get("hard_gate_codes") or [])
+                }
+                if absolute_failures:
+                    needs_contract_fallback = False
             if needs_contract_fallback:
                 for fallback_text in _galgame_contract_fallback_texts(galgame_contract):
                     attempt_index = len(attempts)
