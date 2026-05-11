@@ -17,7 +17,6 @@ if str(ROOT) not in sys.path:
 
 from host_brain.integrations.llm_helpers import invoke_llm_text  # noqa: E402
 from host_brain.persona.isolated_surface_harness import (  # noqa: E402
-    build_isolated_surface_input,
     build_isolated_surface_messages,
     derive_style_reference_anchor,
     parse_surface_candidates,
@@ -25,7 +24,13 @@ from host_brain.persona.isolated_surface_harness import (  # noqa: E402
     select_best_isolated_candidate,
 )
 from tools.chat_ab_generate import _load_secret_store_provider_key, load_dotenv  # noqa: E402
-from tools.isolated_surface_harness import _case_request_payload, _read_json_or_jsonl  # noqa: E402
+from tools.isolated_surface_harness import (  # noqa: E402
+    _build_memory_ab_comparison,
+    _read_json_or_jsonl,
+    _request_variants,
+    _summarize_score_rows,
+    _write_memory_ab_report,
+)
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -56,6 +61,8 @@ def _summarize(
     concurrency: int,
     gen_params: Mapping[str, Any],
     out_dir: Path,
+    with_memory: bool = False,
+    case_expectations: Mapping[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     selected = [row.get("selected") for row in results if isinstance(row.get("selected"), dict)]
     scores = [float(row.get("score") or 0.0) for row in selected]
@@ -70,7 +77,9 @@ def _summarize(
         for row in results
         if ((row.get("style_reference") or {}).get("trace") or {}).get("degraded")
     )
-    return {
+    score_rows = [dict(row.get("score") or {}) for row in results if isinstance(row.get("score"), Mapping)]
+    variant_summary = _summarize_score_rows(score_rows)
+    summary = {
         "cases": cases_count,
         "completed": completed,
         "generated_count": generated_count,
@@ -91,14 +100,24 @@ def _summarize(
         "concurrency": concurrency,
         "gen_params": dict(gen_params),
         "output_dir": str(out_dir),
+        "variant_summary": variant_summary,
+        "with_memory": bool(with_memory),
     }
+    if with_memory:
+        summary["memory_ab"] = _build_memory_ab_comparison(
+            score_rows,
+            case_expectations=case_expectations or {},
+        )
+    return summary
 
 
 async def _run_one(
     *,
     index: int,
-    case: Mapping[str, Any],
-    soul: str,
+    case_id: str,
+    variant: str,
+    request: Any,
+    memory_expected_terms: list[str],
     semaphore: asyncio.Semaphore,
     provider: str,
     model: str,
@@ -107,11 +126,9 @@ async def _run_one(
     gen_params: Mapping[str, Any],
     base_url_override: str | None,
 ) -> dict[str, Any]:
-    case_id = str(case.get("case_id") or f"case_{index:03d}")
     async with semaphore:
         started = time.perf_counter()
         try:
-            request = build_isolated_surface_input(_case_request_payload(case, soul))
             style_reference = derive_style_reference_anchor(request).as_dict()
             messages = build_isolated_surface_messages(request)
             raw_output = await asyncio.to_thread(
@@ -131,6 +148,7 @@ async def _run_one(
             raw_row = {
                 "index": index,
                 "case_id": case_id,
+                "variant": variant,
                 "ok": True,
                 "provider": provider,
                 "model": model,
@@ -145,7 +163,9 @@ async def _run_one(
             score_row = {
                 "index": index,
                 "case_id": case_id,
+                "variant": variant,
                 "candidates": [score.as_dict() for score in scores],
+                "memory_expected_terms": memory_expected_terms,
                 "selected": selected.as_dict() if selected else None,
                 "style_reference": style_reference,
             }
@@ -162,13 +182,14 @@ async def _run_one(
             raw_row = {
                 "index": index,
                 "case_id": case_id,
+                "variant": variant,
                 "ok": False,
                 "provider": provider,
                 "model": model,
                 "latency_ms": latency_ms,
                 "error": repr(exc),
             }
-            score_row = {"index": index, "case_id": case_id, "error": repr(exc), "selected": None}
+            score_row = {"index": index, "case_id": case_id, "variant": variant, "error": repr(exc), "selected": None}
             return {
                 "raw": raw_row,
                 "score": score_row,
@@ -190,6 +211,21 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
     gen_params = {"temperature": args.temperature, "top_p": args.top_p, "max_tokens": args.max_tokens}
     cases = _read_json_or_jsonl(args.cases)
     soul = args.soul.read_text(encoding="utf-8-sig")
+    expanded_cases: list[dict[str, Any]] = []
+    case_expectations: dict[str, list[str]] = {}
+    for source_index, case in enumerate(cases, start=1):
+        case_id = str(case.get("case_id") or f"case_{source_index:03d}")
+        expected_terms = [str(term) for term in list(case.get("memory_expected_terms") or [])]
+        case_expectations[case_id] = expected_terms
+        for variant, request in _request_variants(case, soul_md=soul, with_memory=bool(args.with_memory)):
+            expanded_cases.append(
+                {
+                    "case_id": case_id,
+                    "variant": variant,
+                    "request": request,
+                    "memory_expected_terms": expected_terms,
+                }
+            )
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_path = out_dir / "live_raw_generations.jsonl"
@@ -207,8 +243,10 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         asyncio.create_task(
             _run_one(
                 index=index,
-                case=case,
-                soul=soul,
+                case_id=str(item["case_id"]),
+                variant=str(item["variant"]),
+                request=item["request"],
+                memory_expected_terms=list(item["memory_expected_terms"]),
                 semaphore=semaphore,
                 provider=provider,
                 model=model,
@@ -218,12 +256,12 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
                 base_url_override=base_url_override,
             )
         )
-        for index, case in enumerate(cases, start=1)
+        for index, item in enumerate(expanded_cases, start=1)
     ]
     _write_json(
         progress_path,
         _summarize(
-            cases_count=len(cases),
+            cases_count=len(expanded_cases),
             completed=completed,
             results=results,
             started=started,
@@ -232,6 +270,8 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
             concurrency=int(args.concurrency),
             gen_params=gen_params,
             out_dir=out_dir,
+            with_memory=bool(args.with_memory),
+            case_expectations=case_expectations,
         ),
     )
     for task in asyncio.as_completed(tasks):
@@ -241,7 +281,7 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         _append_jsonl(raw_path, row["raw"])
         _append_jsonl(score_path, row["score"])
         summary = _summarize(
-            cases_count=len(cases),
+            cases_count=len(expanded_cases),
             completed=completed,
             results=results,
             started=started,
@@ -250,13 +290,15 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
             concurrency=int(args.concurrency),
             gen_params=gen_params,
             out_dir=out_dir,
+            with_memory=bool(args.with_memory),
+            case_expectations=case_expectations,
         )
         _write_json(progress_path, summary)
-        if completed % int(args.progress_every) == 0 or completed == len(cases):
+        if completed % int(args.progress_every) == 0 or completed == len(expanded_cases):
             print(json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)
 
     final_summary = _summarize(
-        cases_count=len(cases),
+        cases_count=len(expanded_cases),
         completed=completed,
         results=results,
         started=started,
@@ -265,8 +307,17 @@ async def run_live(args: argparse.Namespace) -> dict[str, Any]:
         concurrency=int(args.concurrency),
         gen_params=gen_params,
         out_dir=out_dir,
+        with_memory=bool(args.with_memory),
+        case_expectations=case_expectations,
     )
     _write_json(summary_path, final_summary)
+    if args.with_memory:
+        _write_json(out_dir / "memory_ab_summary.json", final_summary.get("memory_ab") or {})
+        _write_memory_ab_report(
+            out_dir / "memory_ab_report.md",
+            final_summary.get("memory_ab") or {},
+            final_summary.get("variant_summary") or {},
+        )
     return final_summary
 
 
@@ -284,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--top-p", type=float, default=0.8)
     parser.add_argument("--max-tokens", type=int, default=256)
     parser.add_argument("--progress-every", type=int, default=5)
+    parser.add_argument("--with-memory", action="store_true", help="Run baseline and with_memory prompt variants from compressed memory_recall_packet fields.")
     args = parser.parse_args(argv)
     summary = asyncio.run(run_live(args))
     print("FINAL " + json.dumps(summary, ensure_ascii=False, sort_keys=True), flush=True)

@@ -529,7 +529,12 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
             "evidence_refs": ["evd://episodic/mem-1"],
             "source_refs": ["memory://episodic/mem-1"],
         },
+        "memory_expected_terms": ["周末", "看展"],
         "candidates": ["记得啊，周末看展这事我没忘。", "别急，先把这个展的事接上。"],
+        "candidates_by_variant": {
+            "baseline": ["记得一点，你接着说就行。"],
+            "with_memory": ["记得啊，周末看展这事我没忘。"],
+        },
     }
 
     summary = run_cases([case], soul_md=SOUL, out_dir=tmp_path, with_memory=True)
@@ -538,6 +543,12 @@ def test_cli_run_cases_with_memory_writes_baseline_and_memory_variant(tmp_path) 
     assert summary["memory_cases"] == 1
     assert summary["prompt_variants"] == 2
     assert summary["scored_cases"] == 2
+    assert summary["variant_summary"]["baseline"]["selected_count"] == 1
+    assert summary["variant_summary"]["with_memory"]["selected_count"] == 1
+    assert summary["memory_ab"]["compared_cases"] == 1
+    assert summary["memory_ab"]["memory_expected_hit_gain_count"] == 1
+    assert (tmp_path / "memory_ab_summary.json").exists()
+    assert (tmp_path / "memory_ab_report.md").exists()
     prompt_rows = [
         json.loads(line)
         for line in (tmp_path / "prompts.jsonl").read_text(encoding="utf-8").splitlines()
