@@ -216,6 +216,35 @@ def test_score_and_select_prefers_control_compliant_candidate() -> None:
     assert selected.text == "继续，先把入口锁在 ReplyControlPacket 上。"
 
 
+def test_short_ack_rerank_does_not_select_bland_pass() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "short_ack",
+            "soul_md": SOUL,
+            "user_message": "嗯",
+            "reply_control_packet": {
+                "response_move": "continue_previous_turn",
+                "task_mode": "short_ack",
+                "question_budget": 1,
+            },
+        }
+    )
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "嗯嗯，你说了算。",
+            "嗯，在呢，接着说。",
+            "嗯哼，就这一个字呀？",
+        ],
+    )
+
+    selected = select_best_isolated_candidate(rows)
+
+    assert selected is not None
+    assert selected.text != "嗯嗯，你说了算。"
+    assert any("BLAND_PASS_LINE" in row.reason_codes for row in rows if row.text == "嗯嗯，你说了算。")
+
+
 def test_run_isolated_surface_generation_with_injected_generator() -> None:
     request = _request()
 

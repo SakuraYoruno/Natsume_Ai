@@ -243,11 +243,34 @@ _CATCHY_TURN_MARKERS = (
     "一点",
     "一小步",
     "一处",
+    "接着",
+    "听着",
+    "多说",
+    "说点",
+    "就这一个",
+    "就这一下",
 )
 _FLAT_GENERIC_RE = re.compile(
     r"^(?:好啦|行啦|知道啦|好哦|行吧|嗯|哦|哼)?[，,、\s]*"
     r"(?:我在呢|我在|不吵你|不烦你|听到啦|替你开心|真早呀|回来啦|知道啦|没事)"
     r"[。.!！?？…～~]*$"
+)
+_BLAND_PASS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("compliant_defer", re.compile(r"(?:你说了算|听你的|都听你|随便你|你决定|你安排)")),
+    ("flat_close", re.compile(r"(?:那就这样|就这样吧|这样也行|都行吧|都可以)")),
+    ("generic_ack", re.compile(r"^(?:嗯嗯|嗯|哦|好|好的|知道了|行吧)[。.!！?？…～~]*$")),
+    ("flat_companion", re.compile(r"(?:知道了.{0,4}陪你待着|那我陪你待着|你自己待会|自己待会)")),
+)
+_SHORT_ACK_CHARM_MARKERS = (
+    "接着说",
+    "继续说",
+    "听着呢",
+    "我在听",
+    "多说",
+    "说点",
+    "就这一个",
+    "就这一下",
+    "别停",
 )
 _STOCK_OPENING_RE = re.compile(r"^(?:哼[，,、]?|好啦[，,、]?|行啦[，,、]?|那当然|当然|嗯[，,、]?|哦[～~，,、]?)")
 _IMPLIED_FACT_REGEXES: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -296,7 +319,7 @@ _SCENE_GROUNDING_ANCHORS: dict[str, tuple[str, ...]] = {
     "give_up": ("停", "放", "搁", "缓", "回头", "明天"),
     "complaint": ("烦", "先", "拆", "看"),
     "late_night": ("睡", "熬", "醒"),
-    "short_ack": ("说", "听", "继续", "接着"),
+    "short_ack": ("接着", "继续", "听着", "在听", "多说", "说点", "就这一个", "就这一下"),
     "followup": ("因为", "就是", "觉得", "想", "然后", "继续", "上一句", "接着"),
 }
 _SOFT_REASON_SCORE_PENALTIES = {
@@ -305,6 +328,7 @@ _SOFT_REASON_SCORE_PENALTIES = {
     "IMPLIED_FACT_RISK": 4.5,
     "WEAK_SCENE_GROUNDING": 4.0,
     "FLAT_GENERIC_LINE": 4.0,
+    "BLAND_PASS_LINE": 6.0,
     "LOW_CATCHINESS": 2.0,
     "LINE_RHYTHM_FLAT": 2.5,
 }
@@ -473,6 +497,16 @@ def _has_turn_or_texture(text: str) -> bool:
     return bool(_contains_any(text, _CATCHY_TURN_MARKERS) or re.search(r"(.)\1|[！？…～~]", text))
 
 
+def _bland_pass_hits(text: str, *, scene_id: str) -> list[str]:
+    if scene_id not in _DAILY_SCENES and scene_id not in {"soft_care"}:
+        return []
+    if len(text) > 24:
+        return []
+    if _contains_any(text, _SHORT_ACK_CHARM_MARKERS):
+        return []
+    return [label for label, pattern in _BLAND_PASS_PATTERNS if pattern.search(text)]
+
+
 def score_sample_guided_text(
     *,
     text: Any,
@@ -557,6 +591,14 @@ def score_sample_guided_text(
     elif 6 <= length <= 34 and line_breaks <= 3:
         _raise(dimensions, "line_rhythm", 5)
         bonuses.append("line_rhythm:compact")
+    bland_hits = _bland_pass_hits(normalized, scene_id=scene_id)
+    if bland_hits:
+        _drop(dimensions, "catchiness", 26)
+        _drop(dimensions, "character_freshness", 18)
+        _drop(dimensions, "context_fit", 10)
+        _drop(dimensions, "line_rhythm", 6)
+        reasons.append("BLAND_PASS_LINE")
+        penalties.append("catchiness:bland_pass:" + " / ".join(bland_hits[:4]))
     if _FLAT_GENERIC_RE.match(normalized):
         _drop(dimensions, "catchiness", 24)
         _drop(dimensions, "character_freshness", 12)
@@ -651,6 +693,12 @@ def score_sample_guided_text(
         _raise(dimensions, "role_fit", 4)
         _raise(dimensions, "naturalness", 3)
         bonuses.append("galgame_marker")
+    short_ack_charm_hits = _contains_any(normalized, _SHORT_ACK_CHARM_MARKERS)
+    if scene_id == "short_ack" and short_ack_charm_hits:
+        _raise(dimensions, "catchiness", min(12, 4 * len(short_ack_charm_hits)))
+        _raise(dimensions, "character_freshness", min(8, 3 * len(short_ack_charm_hits)))
+        _raise(dimensions, "context_fit", min(6, 2 * len(short_ack_charm_hits)))
+        bonuses.append("short_ack_charm:" + " / ".join(short_ack_charm_hits[:4]))
     if 6 <= length <= 42:
         _raise(dimensions, "naturalness", 5)
         bonuses.append("compact_chat_length")

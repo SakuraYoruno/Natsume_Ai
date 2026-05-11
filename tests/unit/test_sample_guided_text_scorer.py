@@ -159,3 +159,17 @@ def test_followup_grounding_accepts_natural_explanation_markers() -> None:
 
     assert natural.score > flat.score
     assert "WEAK_SCENE_GROUNDING" not in natural.reason_codes
+
+
+def test_short_ack_bland_pass_loses_to_charm_floor() -> None:
+    contract = build_galgame_text_contract(user_message="嗯", scene_id="short_ack")
+
+    bland = score_sample_guided_text(text="嗯嗯，你说了算。", contract=contract)
+    grounded = score_sample_guided_text(text="嗯，在呢，接着说。", contract=contract)
+    teasing = score_sample_guided_text(text="嗯哼，就这一个字呀？", contract=contract)
+
+    assert "BLAND_PASS_LINE" in bland.reason_codes
+    assert bland.score < 83
+    assert grounded.score > bland.score
+    assert teasing.score > bland.score
+    assert "CONTEXT_SURFACE_PENALTY" not in teasing.reason_codes

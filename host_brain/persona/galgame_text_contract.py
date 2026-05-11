@@ -1277,6 +1277,7 @@ def build_galgame_text_contract(
         return _contract(
             scene_id="short_ack",
             response_move="continue_previous_turn",
+            required_any=(("听", "接着", "继续", "说点", "多说", "就这一个", "就这一下"),),
             forbidden_surface=(
                 "嗯。",
                 "哦。",
@@ -1299,8 +1300,6 @@ def build_galgame_text_contract(
                 "不闹你",
                 "忙完记得",
                 "理我一下",
-                "就一个",
-                "一个字",
                 "打发我",
                 "认真在跟你说话",
                 "记下了",

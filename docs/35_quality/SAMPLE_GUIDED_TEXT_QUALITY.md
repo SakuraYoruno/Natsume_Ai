@@ -38,6 +38,17 @@ Hard gate 只处理绝对不可发送的问题：
 - 日常短触碰场景：优先 `naturalness`、`distance_control`、`context_fit`。
 - 高情绪场景：优先 `context_fit` 与 `emotional_containment`。
 
+### Bland Pass / Charm Floor
+
+`BLAND_PASS_LINE` 是 soft penalty，不是 hard gate。它用于拉低“可以发但没有角色反应”的候选，例如短确认场景里的 `嗯嗯，你说了算。`、`听你的。`、`那就这样呗。`
+
+处理原则：
+
+- 不全局禁用 `嗯嗯`、`你说了算`、`听你的` 这类词。
+- 只在日常/短确认等容易滑平的场景里扣 `catchiness`、`character_freshness`、`context_fit` 和 `line_rhythm`。
+- `接着说`、`听着呢`、`多说几个字`、`说点好听的`、`就这一个...` 这类有推进或轻吐槽的短句获得 `short_ack_charm` 加成。
+- rerank 应让 bland pass 输给有推进、有反应、有一点角色味的候选。
+
 ## Sample Bank
 
 `PositiveStyleSample` 新增样本字段：
