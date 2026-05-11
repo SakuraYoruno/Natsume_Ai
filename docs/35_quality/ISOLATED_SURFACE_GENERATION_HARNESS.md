@@ -128,6 +128,30 @@ class ReplyControlPacket(BaseModel):
 
 36 轮长链专门验证这个机制：从第 1 轮到第 36 轮，每个 turn 进入最终表层生成层的输入仍然只有 `Soul.md + 当前用户输入 + ReplyControlPacket + facts + must_not_do`。
 
+### 三层上下文怎么接
+
+三层上下文可以进入压缩器，但不能直接进入最终表层生成层：
+
+```text
+最近几轮原始对话
++ 中期摘要
++ 长期事实
+        ↓
+ThreeLayerContinuityContext
+        ↓
+ReplyControlPacket
+        ↓
+isolated surface generator
+```
+
+实现入口：
+
+- `ThreeLayerContinuityContext`
+- `build_reply_control_packet_from_context(...)`
+- `build_surface_input_from_three_layer_context(...)`
+
+这里的 `recent_turns` 是上游压缩器输入，只用于生成 `上一轮摘要`、`当前主题`、`未完成话口` 等短 facts。`build_surface_input_from_three_layer_context(...)` 构造最终请求时只传 `current_user_message` 和压缩后的 `ReplyControlPacket`，不会把 `recent_turns`、`mid_term_summary` 字段名或原始历史文本传给 `build_isolated_surface_messages()`。
+
 构建 smoke case：
 
 ```powershell

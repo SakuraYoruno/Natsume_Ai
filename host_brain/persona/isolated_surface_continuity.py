@@ -6,6 +6,7 @@ from typing import Any
 
 from host_brain.persona.isolated_surface_harness import (
     IsolatedSurfaceInput,
+    ReplyControlPacket,
     build_isolated_surface_input,
     find_forbidden_input_paths,
 )
@@ -116,6 +117,205 @@ class ContinuitySummaryCompressor:
             distance_note=_clean_text(distance_note if distance_note is not None else self._snapshot.distance_note),
         )
         return self._snapshot
+
+
+@dataclass(frozen=True)
+class RecentDialogueTurn:
+    role: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ThreeLayerContinuityContext:
+    """Raw context allowed only before the surface boundary.
+
+    The compressor may inspect recent raw turns and longer summaries here, but
+    the final surface prompt must receive only the resulting ReplyControlPacket.
+    """
+
+    current_user_message: str
+    recent_turns: Sequence[RecentDialogueTurn | Mapping[str, Any]] = ()
+    mid_term_summary: str = ""
+    long_term_facts: Sequence[str] = ()
+    task_mode_hint: str = "daily_chat"
+    response_move_hint: str = ""
+    emotional_tone_hint: str = "light"
+    relationship_distance: str = "familiar"
+    information_budget: str = "short"
+    question_budget: int = 0
+    must_include: Sequence[str] = ()
+    must_not_do: Sequence[str] = ()
+    necessary_facts: Sequence[str] = ()
+    style_anchor: Sequence[str] = ()
+
+
+def _coerce_recent_turn(raw: RecentDialogueTurn | Mapping[str, Any]) -> RecentDialogueTurn | None:
+    if isinstance(raw, RecentDialogueTurn):
+        role = _clean_text(raw.role).lower()
+        text = _clean_text(raw.text)
+    elif isinstance(raw, Mapping):
+        role = _clean_text(raw.get("role") or raw.get("speaker")).lower()
+        text = _clean_text(raw.get("text") or raw.get("content"))
+    else:
+        return None
+    if not role or not text:
+        return None
+    return RecentDialogueTurn(role=role, text=text)
+
+
+def _recent_turns(raw_turns: Sequence[RecentDialogueTurn | Mapping[str, Any]], *, max_recent_turns: int) -> tuple[RecentDialogueTurn, ...]:
+    turns = [turn for item in raw_turns for turn in [_coerce_recent_turn(item)] if turn is not None]
+    return tuple(turns[-max(0, int(max_recent_turns or 0)) :])
+
+
+def _last_turn_with_role(turns: Sequence[RecentDialogueTurn], roles: set[str]) -> RecentDialogueTurn | None:
+    for turn in reversed(turns):
+        if turn.role in roles:
+            return turn
+    return None
+
+
+def _summarize_user_intent(text: str) -> str:
+    normalized = _clean_text(text)
+    if not normalized:
+        return ""
+    if normalized in {"嗯", "嗯嗯", "好", "继续", "然后呢"}:
+        return "用户用短确认延续当前话题。"
+    if any(token in normalized for token in ("报错", "红字", "错误", "Traceback", "traceback")):
+        return "用户在继续技术求助。"
+    if any(token in normalized for token in ("身份", "名字", "新海天", "设定")):
+        return "用户在追问身份锚点。"
+    if any(token in normalized for token in ("累", "困", "头疼", "难受")):
+        return "用户表达低能量状态。"
+    if any(token in normalized for token in ("怎么", "多少", "为什么", "哪", "吗")):
+        return "用户在追问做法或判断。"
+    return "用户继续当前话题。"
+
+
+def _summarize_assistant_move(text: str) -> str:
+    normalized = _clean_text(text)
+    if not normalized:
+        return ""
+    if any(token in normalized for token in ("先", "一步", "一处", "看", "贴", "红字")):
+        return "助手已给出最小下一步。"
+    if any(token in normalized for token in ("新海天", "名字", "设定")):
+        return "助手已收束身份锚点。"
+    if any(token in normalized for token in ("压缩", "摘要", "事实", "历史")):
+        return "助手已说明压缩边界。"
+    if any(token in normalized for token in ("别硬撑", "缓", "歇")):
+        return "助手已轻接情绪和体力状态。"
+    if any(token in normalized for token in ("继续", "接着", "在听")):
+        return "助手已短确认并延续话题。"
+    return "助手已回应上一轮。"
+
+
+def _infer_topic_state(current_user_message: str, task_mode: str, long_term_facts: Sequence[str]) -> str:
+    text = _clean_text(current_user_message)
+    task = _clean_text(task_mode)
+    if any(token in text for token in ("摘要", "压缩", "历史", "facts")):
+        return "连续性摘要压缩。"
+    if any(token in text for token in ("身份", "名字", "新海天", "设定")) or task == "identity":
+        return "身份锚点压缩。"
+    if any(token in text for token in ("报错", "红字", "错误")) or task in {"help_takeover", "write_takeover"}:
+        return "技术求助最小入口。"
+    facts = _clean_list(long_term_facts)
+    if facts:
+        return facts[0]
+    return "当前话题延续。"
+
+
+def _infer_open_loop(current_user_message: str, task_mode: str) -> str:
+    text = _clean_text(current_user_message)
+    task = _clean_text(task_mode)
+    if any(token in text for token in ("怎么", "多少", "哪", "为什么")) or task in {"next_step", "advice_continue"}:
+        return "下一轮继续围绕当前问题给最小可执行回应。"
+    if task == "identity":
+        return "后续追问只保留名字和边界，不新增关系设定。"
+    if task in {"help_takeover", "write_takeover"}:
+        return "等待用户给关键材料，不展开客服话术。"
+    return "下一轮继续承接当前话题。"
+
+
+def compress_three_layer_continuity_context(
+    context: ThreeLayerContinuityContext,
+    *,
+    max_recent_turns: int = 6,
+) -> CompressedContinuitySnapshot:
+    """Compress recent raw turns plus summaries into a surface-safe snapshot."""
+
+    turns = _recent_turns(context.recent_turns, max_recent_turns=max_recent_turns)
+    last_user = _last_turn_with_role(turns, {"user", "human", "尼尼"})
+    last_assistant = _last_turn_with_role(turns, {"assistant", "ai", "新海天"})
+    thread_summary = _clean_text(context.mid_term_summary) or "围绕当前对话继续。"
+    last_turn_summary = "；".join(
+        _clean_list(
+            [
+                _summarize_user_intent(last_user.text if last_user else ""),
+                _summarize_assistant_move(last_assistant.text if last_assistant else ""),
+            ]
+        )
+    )
+    return CompressedContinuitySnapshot(
+        turn_count=len(turns),
+        thread_summary=thread_summary,
+        topic_state=_infer_topic_state(context.current_user_message, context.task_mode_hint, context.long_term_facts),
+        last_turn_summary=last_turn_summary,
+        open_loop=_infer_open_loop(context.current_user_message, context.task_mode_hint),
+        emotional_state=_clean_text(context.emotional_tone_hint) or "light",
+        distance_note="熟人私聊，不升级亲密。",
+    )
+
+
+def build_reply_control_packet_from_context(
+    context: ThreeLayerContinuityContext,
+    *,
+    max_facts: int = 6,
+    max_recent_turns: int = 6,
+) -> ReplyControlPacket:
+    """Build the only object allowed to cross into the surface generator."""
+
+    snapshot = compress_three_layer_continuity_context(context, max_recent_turns=max_recent_turns)
+    long_facts = [f"长期事实：{fact}" for fact in _clean_list(context.long_term_facts)[:2]]
+    facts = snapshot.facts(
+        extra=[*long_facts, *_clean_list(context.necessary_facts)],
+        max_facts=max_facts,
+    )
+    task_mode = _clean_text(context.task_mode_hint) or "daily_chat"
+    return ReplyControlPacket(
+        response_move=_clean_text(context.response_move_hint) or task_mode,
+        task_mode=task_mode,
+        emotional_tone=_clean_text(context.emotional_tone_hint) or "light",
+        relationship_distance=_clean_text(context.relationship_distance) or "familiar",
+        information_budget=_clean_text(context.information_budget) or "short",
+        question_budget=max(0, int(context.question_budget or 0)),
+        must_include=_clean_list(context.must_include),
+        must_not_do=_clean_list(context.must_not_do),
+        facts=list(facts),
+        style_anchor=_clean_list([*context.style_anchor, "压缩连续性"]),
+    )
+
+
+def build_surface_input_from_three_layer_context(
+    context: ThreeLayerContinuityContext,
+    *,
+    soul_md: str,
+    case_id: str = "",
+    max_facts: int = 6,
+    max_recent_turns: int = 6,
+) -> IsolatedSurfaceInput:
+    control = build_reply_control_packet_from_context(
+        context,
+        max_facts=max_facts,
+        max_recent_turns=max_recent_turns,
+    )
+    return build_isolated_surface_input(
+        {
+            "case_id": case_id,
+            "soul_md": soul_md,
+            "user_message": context.current_user_message,
+            "reply_control_packet": control,
+        }
+    )
 
 
 _CASE_KEYS = {
@@ -234,6 +434,11 @@ __all__ = [
     "CompressedContinuitySnapshot",
     "ContinuitySummaryCompressor",
     "ContinuityTurnSurfaceInput",
+    "RecentDialogueTurn",
+    "ThreeLayerContinuityContext",
     "build_continuity_surface_inputs",
+    "build_reply_control_packet_from_context",
+    "build_surface_input_from_three_layer_context",
+    "compress_three_layer_continuity_context",
     "find_forbidden_continuity_input_paths",
 ]

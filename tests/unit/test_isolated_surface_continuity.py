@@ -6,7 +6,9 @@ import pytest
 
 from host_brain.persona.isolated_surface_continuity import (
     ContinuitySummaryCompressor,
+    ThreeLayerContinuityContext,
     build_continuity_surface_inputs,
+    build_surface_input_from_three_layer_context,
     find_forbidden_continuity_input_paths,
 )
 from host_brain.persona.isolated_surface_harness import (
@@ -118,6 +120,39 @@ def test_continuity_summary_compressor_emits_bounded_rolling_facts() -> None:
     assert "连续摘要：尼尼和新海天在调最小文本链。" in second_facts
     assert "上一轮摘要：尼尼问摘要压缩怎么做；回复说明只传事实列表" in second_facts
     assert not any("messages" in fact or "conversation_history" in fact for fact in second_facts)
+
+
+def test_three_layer_context_is_compressed_before_surface_prompt() -> None:
+    raw_user_line = "上一轮完整原文不要泄露：我把三层压缩问得很啰嗦"
+    raw_assistant_line = "上一轮助手原文不要泄露：那就先把最近轮次塞进来看看"
+    context = ThreeLayerContinuityContext(
+        current_user_message="那最近 N 轮怎么处理",
+        recent_turns=[
+            {"role": "user", "content": raw_user_line},
+            {"role": "assistant", "content": raw_assistant_line},
+        ],
+        mid_term_summary="尼尼和新海天在验证三层上下文只能先被压缩。",
+        long_term_facts=["最终生成层不能读取原始历史。"],
+        task_mode_hint="next_step",
+        must_include=["压缩"],
+        necessary_facts=["必要事实：最近 N 轮只给压缩器看。"],
+        style_anchor=["三层压缩"],
+    )
+
+    request = build_surface_input_from_three_layer_context(context, soul_md=SOUL, case_id="three_layer_boundary")
+    rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
+    facts = "\n".join(request.control.facts)
+
+    assert request.case_id == "three_layer_boundary"
+    assert len(request.control.facts) <= 6
+    assert "连续摘要：尼尼和新海天在验证三层上下文只能先被压缩。" in facts
+    assert "上一轮摘要：用户继续当前话题。；助手已给出最小下一步。" in facts
+    assert "长期事实：最终生成层不能读取原始历史。" in facts
+    assert "必要事实：最近 N 轮只给压缩器看。" in facts
+    assert raw_user_line not in rendered
+    assert raw_assistant_line not in rendered
+    assert "recent_turns" not in rendered
+    assert "mid_term_summary" not in rendered
 
 
 def test_continuity_short_ack_rerank_uses_compressed_previous_turn_fact() -> None:
