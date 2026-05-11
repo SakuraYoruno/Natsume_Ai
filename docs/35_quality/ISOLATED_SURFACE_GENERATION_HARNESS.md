@@ -151,6 +151,34 @@ case 示例：
 
 注意：`candidates` 只用于离线评分，不会被放进生成 prompt。真实生成链路必须由 harness 调用模型后再解析候选。
 
+## Failure-Only Retry
+
+完整 live 批测耗时较长时，不要为了少量坏 case 重跑 100 条。先用当前 parser/scorer 重放上次 raw output，再只重试低分 case：
+
+```powershell
+python tools/retry_isolated_surface_failures.py `
+  --cases artifacts/isolated_surface_harness/daily_goal_100_20260511/cases.jsonl `
+  --source-run artifacts/isolated_surface_harness/daily_goal_100_contract_live_20260511_152900 `
+  --out artifacts/isolated_surface_harness/daily_goal_100_retry_live
+```
+
+常用检查模式：
+
+```powershell
+python tools/retry_isolated_surface_failures.py `
+  --cases <cases.jsonl> `
+  --source-run <previous-live-run-dir> `
+  --out <retry-out-dir> `
+  --dry-run
+```
+
+产物：
+
+- `source_rescored_scores.jsonl`：用当前 scorer 重放旧 raw output。
+- `retry_raw_generations.jsonl` / `retry_scores.jsonl`：只包含被重试的 case。
+- `merged_scores.jsonl`：逐 case 在 source 和 retry 中选更好的 selected。
+- `summary.json`：记录 `retry_case_ids`、`retry_case_count`、merged pass rate 和节省后的局部耗时。
+
 ## Migration Rule
 
 现有运行时链路要迁移到这个 harness 时，先新增一个上游压缩步骤：
