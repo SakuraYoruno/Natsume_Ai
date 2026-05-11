@@ -121,6 +121,22 @@ python tools/build_isolated_surface_continuity_cases.py `
   --force
 ```
 
+构建更大的 eval case：
+
+```powershell
+python tools/build_isolated_surface_continuity_cases.py `
+  --suite eval `
+  --out artifacts/isolated_surface_harness/continuity_eval_72_20260511 `
+  --force
+```
+
+当前 eval baseline：
+
+- `24` 段压缩连续对话
+- `72` 个 turn
+- prompt/scorer strict: `72/72`
+- errors: `0`
+
 校验 prompt 和离线候选 rerank：
 
 ```powershell
@@ -146,6 +162,22 @@ live 输出：
 - `live_scores.jsonl`：每个 turn 的 scorer/rerank 明细。
 - `summary.json`：turn pass rate、dialogue pass rate、低分数、hard fail、control violation 和延迟统计。
 
+生成“通过但不好听”的人工观察报告：
+
+```powershell
+python tools/continuity_quality_report.py `
+  --scores artifacts/isolated_surface_harness/continuity_smoke_live_after_control_prompt_20260511/live_scores.jsonl `
+  --out artifacts/isolated_surface_harness/continuity_smoke_live_after_control_prompt_20260511/quality_report `
+  --weak-threshold 83
+```
+
+报告会保留已通过但需要人工盯的行，例如：
+
+- `constraint_language_leak`：暴露 prompt/规则/问句预算等约束语言。
+- `stiff_or_toolish_surface`：过硬、像工具接单。
+- `clingy_distance_risk`：日常场景里距离过黏。
+- `scorer_soft_warning`：scorer 已给出 soft warning，但还没低到失败线。
+
 当前 live baseline：
 
 - run: `artifacts/isolated_surface_harness/continuity_smoke_live_after_control_prompt_20260511`
@@ -154,6 +186,7 @@ live 输出：
 - hard fail: `0`
 - control violation: `0`
 - avg selected score: `87.332`
+- quality report watch rows: `8`
 
 这个 harness 不是 runtime 集成。它只回答一个问题：在没有原始历史、没有状态树、没有器官族自然语言建议的情况下，压缩后的连续性事实能不能让最终表层生成自然接住上一轮。
 
