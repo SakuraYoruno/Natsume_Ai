@@ -59,9 +59,10 @@ Codex judge 和人工看报告时，不再问：
 ## 运行时约束
 
 - `Soul.md` 是风格人工真源，但只负责语言风格锚定，不负责生成运行时关系、情绪、记忆和生命状态。
-- `ChatKernelV2` 的 system prompt 必须使用本标准，不得退回“自然真人私聊”目标。
-- `TextQualityGate` 必须拒绝旧模板、伪当前状态、伪历史、客服腔、机翻腔和低质二次元尬句。
-- `SemanticReranker` 必须优先选择更像 Galgame 私聊台词且更贴合输入的候选，而不是更安全、更平、更像普通助手的候选。
+- 当前文本质量主链是隔离表层生成链：`Soul.md + 当前用户输入 + ReplyControlPacket + facts + must_not_do -> 多候选 -> hard gate -> sample-guided soft scorer -> rerank -> minimal repair`。
+- `ChatKernelV2` 是旧运行链路/历史参考，不再作为当前文本质量验收、调参或主链定义对象。
+- `TextQualityGate` 只拦截绝对不可发送内容；旧模板、伪当前状态、伪历史、客服腔、机翻腔和低质二次元尬句优先进入 soft scoring 降权，除非达到 hard gate 级别。
+- 表层 rerank 必须优先选择更像 Galgame 私聊台词且更贴合输入的候选，而不是更安全、更平、更像普通助手的候选。
 - A/B 评测报告必须展示每条 case 的最终输出，人工裁决以本标准为准。
 
 ## 架构主线记忆
@@ -69,9 +70,9 @@ Codex judge 和人工看报告时，不再问：
 当前 normal chat 的阶段目标是“先把文本质量做成基线”，不是立刻恢复旧链全部能力。
 
 - 旧链是完整能力库，用来逐步迁回能力；它不是当前文本质量阶段的 live 文本作者。
-- 新主链是文本质量基线内核：`input -> facts -> ChatKernelV2 -> TextQualityGate -> ReplyEnvelope`。
+- 新主链是文本质量基线内核：`input -> ReplyControlPacket -> isolated surface generation -> scorer/rerank -> ReplyEnvelope`。
 - 任何旧链模块回迁前，都必须证明它只提供事实、状态、记忆、多模态、表演态或媒体动作，不直接写最终人格回复。
-- `reply_plan`、fallback、fastpath、validator、transport ack、cache、memory 都不能绕过 `ChatKernelV2` 生成 normal chat 文本。
+- `reply_plan`、fallback、fastpath、validator、transport ack、cache、memory 都不能绕过隔离表层生成链直接生成 normal chat 文本。
 - 每迁回一个能力模块，都要跑 A/B；如果文本质量下降，该模块不上 normal chat 主线。
 
 ## 当前工程含义

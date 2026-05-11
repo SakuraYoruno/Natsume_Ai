@@ -50,15 +50,15 @@ Hard gate 只处理绝对不可发送的问题：
 
 ## Runtime Chain
 
-`ChatKernelV2.generate()` 当前链路：
+当前主链是隔离表层文本链，不再以 `ChatKernelV2` 作为文本质量验收对象：
 
-1. 生成 3 个候选，环境变量可用 `HOST_CHAT_KERNEL_V2_CANDIDATES` 调到 1-5。
-2. `TextQualityGate` 只做最小 hard gate，legacy forbidden 默认软标记。
-3. 每个候选进入 `score_galgame_candidate()`，内部调用样本引导 scorer。
-4. `_select_galgame_soft_candidate()` 按 hard gate、总分、维度结果 rerank。
-5. 默认不做 LLM repair，不因低分用 canned fallback 替换候选。
-6. 只有没有可发送候选且不是绝对 hard gate 泄露时，才允许 contract fallback。
-7. 最终只做最小后处理，例如重复称呼去重。
+1. `build_isolated_surface_messages()` 只接收 `Soul.md`、当前用户输入、`ReplyControlPacket`、必要事实和 `must_not_do`。
+2. 模型一次输出 3 到 5 个候选，真实生成层不能读取原始历史、原始记忆、器官族原文、工具候选或未压缩 RAG。
+3. `parse_surface_candidates()` 最多解析 5 个候选。
+4. 每个候选进入 `score_isolated_surface_candidates()`，内部执行 minimal hard gate 与样本引导 soft scorer。
+5. `select_best_isolated_candidate()` 按 passed、hard gate、control violations、总分和长度 rerank。
+6. failure-only retry 只重跑失败或弱通过 case；merge 时必须证明 retry 候选在通过状态、hard gate、control violations 或分数上更好。
+7. 最终只做 minimal repair，不用整段重写或 canned fallback 伪装质量提升。
 
 ## Test Migration
 
@@ -67,7 +67,9 @@ Hard gate 只处理绝对不可发送的问题：
 - `test_sample_guided_text_scorer.py` 覆盖维度、样本场景、上下文词软扣分、技术场景权重。
 - `test_chat_ab_gold_score.py` 覆盖跨 case 重复输出 hard fail。
 - `test_galgame_text_quality.py` 保留 contract/taste/inference 可观测性，但断言迁到 soft penalty。
-- `test_chat_kernel_v2.py` 更新为多候选、soft select、非 fallback-first 的运行链路。
+- `test_isolated_surface_harness.py` 覆盖输入边界、多候选解析、候选评分和最终选择。
+- `test_retry_isolated_surface_failures.py` 覆盖失败/弱通过重试和 source/retry merge 规则。
+- `test_chat_kernel_v2.py` 仅保留旧链路兼容性测试，不作为当前主链文本质量验收入口。
 
 应删除或重写的旧测试：
 
